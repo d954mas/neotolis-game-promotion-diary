@@ -58,7 +58,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   7. *Phase 2 smoke extension (per Phase 1 DEPLOY-05 scope deferral, 2026-04-27):* CI self-host smoke test additionally exercises "user A creates a game" via the new GAMES endpoints; cross-tenant matrix expands from /api/me sentinel to /api/games (read/write/delete returns 404 for cross-tenant access).
 **Plans**: 11 plans
 **Plan list**:
-- [ ] 02-01-traceability-and-test-scaffolds-PLAN.md — Wave 0: REQUIREMENTS / ROADMAP / AGENTS.md traceability uplift + 12 placeholder test files
+- [x] 02-01-traceability-and-test-scaffolds-PLAN.md — Wave 0: REQUIREMENTS / ROADMAP / AGENTS.md traceability uplift + 12 placeholder test files
 - [ ] 02-02-eslint-tenant-scope-rule-PLAN.md — Wave 0: custom ESLint AST rule no-unfiltered-tenant-query (D-38) + RuleTester suite
 - [ ] 02-03-schema-and-migration-PLAN.md — Wave 0: 7 new tables + audit-log enum + user.theme_preference + RETENTION_DAYS env + one Drizzle migration
 - [ ] 02-04-games-services-PLAN.md — Wave 1: games + game-steam-listings + youtube-channels services with soft-cascade transactional restore

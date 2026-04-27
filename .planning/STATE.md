@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: PhaseComplete
-stopped_at: Phase 02 context gathered
-last_updated: "2026-04-27T18:14:58.847Z"
-last_activity: "Phase 01-foundation closed out — UAT 10/10 pass (CI evidence on master 6af09c80, PR #6 merged). All six D-15 smoke assertions ratified. Ready to advance to Phase 02."
+status: Ready to execute
+stopped_at: Completed 02-01-traceability-and-test-scaffolds-PLAN.md
+last_updated: "2026-04-27T20:09:03.508Z"
+last_activity: 2026-04-27
 progress:
   total_phases: 6
   completed_phases: 1
-  total_plans: 10
-  completed_plans: 10
+  total_plans: 21
+  completed_plans: 11
 ---
 
 # Project State
@@ -20,12 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Replace messy Google Sheets / markdown files with a structured, secure, query-friendly diary so an indie developer can see — at a glance — which promotion actions actually moved the needle on wishlists and engagement.
-**Current focus:** Phase 02 — Ingest, Secrets, and Audit (discussion)
+**Current focus:** Phase 02 — ingest-secrets-and-audit
 
 ## Current Position
 
-Phase: 02 (ingest-secrets-audit) — READY FOR DISCUSSION
-Plan: TBD (Phase 01 complete: 10/10 plans, UAT 10/10 pass, CI green on master 6af09c80)
+Phase: 02 (ingest-secrets-and-audit) — EXECUTING
+Plan: 2 of 11
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Plan: TBD (Phase 01 complete: 10/10 plans, UAT 10/10 pass, CI green on master 6a
 | Phase 01-foundation P08 | ~2min | 1 tasks | 3 files |
 | Phase 01-foundation P09 | 3min | 2 tasks | 7 files |
 | Phase 01-foundation P07 | ~6min | 2 tasks | 11 files |
+| Phase 02-ingest-secrets-and-audit P01 | 5min | 2 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -96,6 +97,9 @@ Recent decisions affecting current work:
 - [Phase 01-foundation]: Plan 01-07: Anonymous-401 sweep is COMPLEMENT to (not REPLACEMENT for) explicit per-route assertions — MUST_BE_PROTECTED=['/api/me'] toContain guard + protectedRoutes.length>=1 non-empty guard + explicit per-route /api/me 401/200 tests, all three layers shipped (BLOCKER 2 fix). Phase 2 must extend MUST_BE_PROTECTED when adding /api/games etc.
 - [Phase 01-foundation]: Plan 01-07: Cross-tenant 404 sentinel via audit_log (Phase 1 has no /api/games yet); double-eq(userId) WHERE clause encodes Pattern 3 by construction. VALIDATION 8/9 (write/delete cross-tenant) explicit it.skip with EXACT W1 annotations 'deferred to Phase 2: no writable/deletable resource in Phase 1' — Phase 2 GAMES-01 turns them on
 - [Phase 01-foundation]: Plan 01-07: PITFALL P3 DTO discipline is BEHAVIORAL tripwire at runtime (not just schema-as-types) — tests/unit/dto.test.ts asserts toUserDto STRIPS googleSub/refreshToken/accessToken/idToken/password/emailVerified even when input rows carry them. TypeScript erases at runtime; the projection function is the runtime guard
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-01: GAMES-04 split into GAMES-04a (P2: YouTube channels — typed example for social-handle pattern) + GAMES-04b/c/d (Backlog: Telegram/Twitter/Discord, trigger-gated by real user request); avoids speculative 4-channel ship
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-01: KEYS-01 (YouTube key) + KEYS-02 (Reddit OAuth) + INGEST-01 (Reddit URL) deferred Phase 2 → Phase 3; each secret/ingest path lands alongside its consuming poll adapter (poll.youtube / poll.reddit) so no orphan UI ships
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-01: AGENTS.md gained ## Privacy & multi-tenancy section (8 invariants + 6 P0-block anti-patterns) as the load-bearing contract downstream planners/executors/checkers cite by invariant number (D-36 / DV-6)
 
 ### Pending Todos
 
@@ -109,7 +113,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T18:14:58.843Z
-Last Activity: Phase 01-foundation closed out — UAT 10/10 pass (CI evidence on master 6af09c80, PR #6 merged). All six D-15 smoke assertions ratified. Ready to advance to Phase 02.
-Stopped at: Phase 02 context gathered
-Resume file: .planning/phases/02-ingest-secrets-and-audit/02-CONTEXT.md
+Last session: 2026-04-27T20:09:03.504Z
+Last Activity: 2026-04-27
+Stopped at: Completed 02-01-traceability-and-test-scaffolds-PLAN.md
+Resume file: None
