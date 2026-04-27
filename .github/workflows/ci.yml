@@ -16,11 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
@@ -58,11 +60,13 @@ jobs:
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:unit
       - run: pnpm test:integration
@@ -93,11 +97,13 @@ jobs:
       CI: 'true'
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       # Build SvelteKit + node-adapter output BEFORE docker build so the
       # Dockerfile's COPY of /app/build sees real artifacts. Plan 02's
