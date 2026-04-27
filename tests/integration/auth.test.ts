@@ -28,7 +28,11 @@ describe("Better Auth — DB session lifecycle (AUTH-01/02/03)", () => {
   });
 
   it("AUTH-02: invalidateSession removes the row; subsequent getSession returns null", async () => {
-    const { sessionToken, signedSessionCookieValue, id: userId } = await seedUserDirectly({
+    const {
+      sessionToken,
+      signedSessionCookieValue,
+      id: userId,
+    } = await seedUserDirectly({
       email: "bob@test.local",
     });
 
