@@ -16,6 +16,7 @@ import type {
   trackedYoutubeVideos,
   events,
 } from "./db/schema/index.js";
+import type { auditLog } from "./db/schema/audit-log.js";
 
 type User = typeof user.$inferSelect;
 type Session = typeof session.$inferSelect;
@@ -25,6 +26,7 @@ type YoutubeChannelRow = typeof youtubeChannels.$inferSelect;
 type ApiKeySteamRow = typeof apiKeysSteam.$inferSelect;
 type YoutubeVideoRow = typeof trackedYoutubeVideos.$inferSelect;
 type EventRow = typeof events.$inferSelect;
+type AuditEntryRow = typeof auditLog.$inferSelect;
 
 /**
  * UserDto — what we send to authenticated clients.
@@ -326,5 +328,41 @@ export function toEventDto(r: EventRow): EventDto {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     deletedAt: r.deletedAt,
+  };
+}
+
+/**
+ * AuditEntryDto — DTO for `audit_log` rows (PRIV-02 — Plan 02-07).
+ *
+ * INTENTIONALLY OMITTED:
+ *   - `userId` — P3 discipline (caller knows their own id; the listing is
+ *     scoped to the caller by listAuditPage's WHERE clause).
+ *
+ * INTENTIONALLY KEPT:
+ *   - `metadata` — jsonb column. For `key.*` actions D-34 specifies
+ *     `{kind, key_id, label, last4}`; the consumer renders the chip. The
+ *     metadata is sanitized at the writer layer (see audit.ts file header) —
+ *     callers pass only their own tenant's data, so the projection just
+ *     forwards the column.
+ *   - `ipAddress` — surfaced in the user-visible audit log so the user can
+ *     spot a sign-in from an unfamiliar IP.
+ */
+export interface AuditEntryDto {
+  id: string;
+  action: string;
+  ipAddress: string;
+  userAgent: string | null;
+  metadata: unknown;
+  createdAt: Date;
+}
+
+export function toAuditEntryDto(r: AuditEntryRow): AuditEntryDto {
+  return {
+    id: r.id,
+    action: r.action,
+    ipAddress: r.ipAddress,
+    userAgent: r.userAgent,
+    metadata: r.metadata,
+    createdAt: r.createdAt,
   };
 }
