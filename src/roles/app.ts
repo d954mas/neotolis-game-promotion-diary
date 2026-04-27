@@ -14,7 +14,7 @@
 
 import { serve } from "@hono/node-server";
 import { createApp } from "../lib/server/http/app.js";
-import { env } from "../lib/server/config/env.js";
+import { env, scrubKekFromEnv } from "../lib/server/config/env.js";
 import { logger } from "../lib/server/logger.js";
 import { pool } from "../lib/server/db/client.js";
 
@@ -44,6 +44,9 @@ export async function start(): Promise<void> {
     };
     svelteHandler = built.handler;
     logger.info({ handlerPath }, "SvelteKit handler loaded");
+    // P2 scrub: run NOW that every bundle that needs APP_KEK_BASE64 has
+    // already parsed it into its own kekVersions Map. See env.ts header.
+    scrubKekFromEnv();
   } catch (err) {
     logger.error(
       { err, handlerPath },

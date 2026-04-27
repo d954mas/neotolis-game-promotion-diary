@@ -74,12 +74,27 @@ if (!kekVersions.has(raw.KEK_CURRENT_VERSION)) {
   );
 }
 
-// PITFALL P2 mitigation #4: scrub the original env vars after consumption so
-// the raw KEK material cannot leak via accidental console.log(process.env) or
-// debug dumps. The decoded buffers live in `kekVersions` Map only.
-delete process.env.APP_KEK_BASE64;
-for (let v = 2; v <= 9; v++) {
-  delete process.env[`APP_KEK_V${v}_BASE64`];
+// PITFALL P2 mitigation #4: scrub the original env vars from process.env so
+// the raw KEK material cannot leak via accidental console.log(process.env)
+// or debug dumps. The decoded buffers live in `kekVersions` Map only.
+//
+// IMPORTANT — call this AFTER all bundles that depend on env have loaded.
+// SvelteKit's vite build produces its own bundled copy of this module
+// (inside build/server/chunks/...). When build/handler.js is dynamically
+// imported, SvelteKit's bundled env.ts re-parses process.env. If we scrub
+// before that import resolves, the bundled parse sees APP_KEK_BASE64=undefined
+// and throws — the smoke gate caught this on 2026-04-27 (issue #5).
+//
+// Boot sequence is therefore:
+//   1. import env (this module) → kekVersions populated, process.env still
+//      carries the raw values
+//   2. import handler.js → bundled env.ts parses process.env successfully
+//   3. server.ts calls scrubKekFromEnv() once startup is complete
+export function scrubKekFromEnv(): void {
+  delete process.env.APP_KEK_BASE64;
+  for (let v = 2; v <= 9; v++) {
+    delete process.env[`APP_KEK_V${v}_BASE64`];
+  }
 }
 
 const TRUSTED_ORIGINS = raw.TRUSTED_ORIGINS.split(",")
