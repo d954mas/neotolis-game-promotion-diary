@@ -1,0 +1,40 @@
+# Build artifacts (rebuilt inside the image)
+node_modules
+.svelte-kit
+build
+dist
+.vite
+coverage
+
+# Source control
+.git
+.gitignore
+.gitattributes
+
+# Planning + docs (not needed in image)
+.planning
+*.md
+
+# Tests / dev-only directories
+tests/smoke
+
+# Editor / OS noise
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Env files (always pass via docker-run -e or compose; never bake into the image)
+.env
+.env.*
+!.env.example
+
+# CI artifacts
+.github

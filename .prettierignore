@@ -1,0 +1,25 @@
+node_modules/
+build/
+.svelte-kit/
+src/lib/paraglide/
+drizzle/
+pnpm-lock.yaml
+
+# Generated / vendored
+*.lock
+*.lockfile
+
+# Documentation and planning — managed manually
+.planning/
+docs/
+*.md
+
+# Workflows and config — keep authored formatting
+.github/
+.dockerignore
+.gitignore
+.env.example
+
+# Project metadata
+messages/
+project.inlang/

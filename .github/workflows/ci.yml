@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+# Cancel old runs of the same ref on new pushes; keeps CI minutes honest on rebase-heavy
+# branches.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+
+  unit-integration:
+    runs-on: ubuntu-latest
+    services:
+      # D-16: Postgres in CI = service container. Fresh DB per run, no docker-in-docker.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: neotolis_test
+        ports:
+          - '5432:5432'
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/neotolis_test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/neotolis_test
+      # Better Auth requires a stable secret >= 32 chars. CI uses a deterministic value
+      # (override via repo secret CI_BETTER_AUTH_SECRET if you want a unique one per repo).
+      BETTER_AUTH_SECRET: ${{ secrets.CI_BETTER_AUTH_SECRET || 'ci-secret-must-be-32-chars-long-or-more' }}
+      BETTER_AUTH_URL: http://localhost:3000
+      GOOGLE_CLIENT_ID: ci-mock-client-id
+      GOOGLE_CLIENT_SECRET: ci-mock-client-secret
+      # Better Auth's genericOAuth plugin fetches OIDC discovery from this URL
+      # at boot. Integration tests don't actually drive the OAuth dance (they
+      # use seedUserDirectly), but env.ts validates this at module load so a
+      # syntactically-valid URL is required.
+      GOOGLE_DISCOVERY_URL: http://localhost:9090/.well-known/openid-configuration
+      # Test KEK is a base64-encoded 32-byte string ("test-kek-" repeated to fill 32 bytes
+      # then base64-encoded). Plan 01-04's envelope module verifies this passes the
+      # length / base64 / fail-fast guards.
+      APP_KEK_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:unit
+      - run: pnpm test:integration
+
+  smoke:
+    runs-on: ubuntu-latest
+    needs: [lint-typecheck, unit-integration]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: neotolis
+        ports:
+          - '5432:5432'
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-retries 10
+    env:
+      BETTER_AUTH_SECRET: ci-smoke-better-auth-secret-32-chars-min
+      BETTER_AUTH_URL: http://localhost:3000
+      GOOGLE_CLIENT_ID: mock-client-id
+      GOOGLE_CLIENT_SECRET: mock-client-secret
+      # genericOAuth plugin discovery URL; smoke runs the mock on localhost:9090.
+      GOOGLE_DISCOVERY_URL: http://localhost:9090/.well-known/openid-configuration
+      APP_KEK_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/neotolis
+      # Smoke runs the production image over plain HTTP; Better Auth would
+      # refuse to set __Secure- cookies over HTTP. This override matches what
+      # a self-host operator does behind a TLS-terminating reverse proxy that
+      # speaks plain HTTP to the app container.
+      BETTER_AUTH_SECURE_COOKIES: 'false'
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Build SvelteKit + node-adapter output BEFORE docker build so the
+      # Dockerfile's COPY of /app/build sees real artifacts. Plan 02's
+      # original CI workflow assumed `pnpm build` ran inside the Dockerfile
+      # build stage (it does — see Dockerfile `RUN pnpm run build`), but
+      # the smoke test also invokes `pnpm tsx tests/smoke/lib/oauth-mock-driver.ts`
+      # outside Docker, which needs the workspace's compiled SvelteKit
+      # artifacts to be coherent (Paraglide compiled messages, server
+      # build). Running pnpm build here makes the host workspace match.
+      - run: pnpm build
+      - run: docker build -t neotolis:ci .
+
+      # D-14: SaaS-leak detection. FAIL the PR if known SaaS-only strings or unguarded
+      # Cloudflare-only header references appear in src/. The two patterns below are the
+      # initial guardrails; future plans extend the list (e.g. analytics beacons, admin
+      # email allowlists). Files under .planning/, docs/, and .git/ are not scanned.
+      - name: SaaS-leak grep (D-14)
+        run: |
+          set -euo pipefail
+          # 1) Hard-coded SaaS-only strings must never appear in src/.
+          if grep -rn --include='*.ts' --include='*.svelte' \
+              -e 'analytics\.neotolis' \
+              -e 'admin@neotolis' \
+              src/ 2>/dev/null; then
+            echo "::error::SaaS-only string found in src/"
+            exit 1
+          fi
+          # 2) CF-Connecting-IP is allowed ONLY inside the trusted-proxy module.
+          # Anywhere else risks a self-host operator accidentally trusting a header that
+          # nothing has set. The grep is best-effort; the proxy-trust unit tests are
+          # the authoritative defense.
+          if grep -rn --include='*.ts' \
+              -e 'CF-Connecting-IP' \
+              src/ 2>/dev/null | grep -v 'proxy-trust'; then
+            echo "::error::CF-Connecting-IP referenced outside trusted-proxy module"
+            exit 1
+          fi
+
+      - name: Run self-host smoke test
+        run: bash tests/smoke/self-host.sh
