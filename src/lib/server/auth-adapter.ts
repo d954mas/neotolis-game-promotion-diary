@@ -43,13 +43,8 @@ type DrizzleAdapterFactory = ReturnType<typeof drizzleAdapter>;
 // `transformInput` / `transformOutput` and the create/update hooks below all see
 // the framework-side keys.
 const ENCRYPTED_FIELDS = ["accessToken", "refreshToken", "idToken"] as const;
-type EncryptedField = (typeof ENCRYPTED_FIELDS)[number];
 
 const ENVELOPE_PREFIX = "ev1:";
-
-function isEncryptedField(field: string): field is EncryptedField {
-  return (ENCRYPTED_FIELDS as readonly string[]).includes(field);
-}
 
 interface SerializedEnvelope {
   v: 1;
