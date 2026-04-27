@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 01-foundation/01-05-PLAN.md
-last_updated: "2026-04-27T11:44:53.921Z"
+stopped_at: Completed 01-foundation/01-06-PLAN.md
+last_updated: "2026-04-27T11:46:51.552Z"
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 10
-  completed_plans: 5
+  completed_plans: 6
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 01 (foundation) — EXECUTING
-Plan: 6 of 10
+Plan: 7 of 10
 
 ## Performance Metrics
 
@@ -51,6 +51,7 @@ Plan: 6 of 10
 | Phase 01-foundation P04 | 4min | 2 tasks | 2 files |
 | Phase 01-foundation P03 | 4min | 2 tasks | 12 files |
 | Phase 01-foundation P05 | 4min | 2 tasks | 8 files |
+| Phase 01-foundation P06 | ~5min 30s | 2 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,11 @@ Recent decisions affecting current work:
 - [Phase 01-foundation]: Plan 01-05: INFO I2 Path 3 (mock-side iss override to https://accounts.google.com) chosen because Better Auth 1.6.x's google provider has no exposed issuer/discoveryUrl knob; oauth2-mock-server beforeTokenSigning hook coerces iss so test path === prod path on the Better Auth side
 - [Phase 01-foundation]: Plan 01-05: P3 (DTO discipline) tripwire enforced via structural grep — dto.ts cannot contain the literal strings googleSub/refreshToken/accessToken anywhere (including comments); future contributors who paste those names back hit the tripwire
 - [Phase 01-foundation]: Plan 01-05: D-13 mechanism = oauth2-mock-server confirmed working; seedUserDirectly bypasses Better Auth signin path for DB-level integration tests; full HTTP redirect dance lands in Plan 01-10 smoke test
+- [Phase 01-foundation]: Plan 01-06: trusted-proxy middleware (D-19/D-20) implements CVE-2026-27700 mitigation — XFF/CF/XFP headers honored only when socket peer is in TRUSTED_PROXY_CIDR; right-to-left walk drops trusted hops; PT1-PT6 covered in-plan via Hono app.request synthetic-socket override (BLOCKER 3/6 fix, NOT deferred to Plan 07)
+- [Phase 01-foundation]: Plan 01-06: SvelteKit-under-Hono via manual catch-all (Pattern 1 ambiguity resolved). Hono owns auth/health/middleware on the outer port; SvelteKit's adapter-node handler is invoked as Node middleware for catch-all; one process / one image / one port; dev-mode falls back to 404 when build/handler.js missing
+- [Phase 01-foundation]: Plan 01-06: secureHeaders config (Q5) ships HSTS max-age=63072000+includeSubDomains, X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy strict-origin-when-cross-origin; CSP intentionally undefined so SvelteKit's adapter owns the page CSP (single source of truth)
+- [Phase 01-foundation]: Plan 01-06: worker/scheduler stubs at D-01-locked paths (src/worker/index.ts, src/scheduler/index.ts) print 'worker stub ready' / 'scheduler stub ready' to stdout for Plan 10 smoke-test grep contract; Plan 08 OVERWRITES these files with real pg-boss implementations and switches strings to 'worker ready' / 'scheduler ready'
+- [Phase 01-foundation]: Plan 01-06: APP_ROLE dispatcher (Pattern 1) in src/server.ts runs runMigrations() BEFORE any role entrypoint so worker/scheduler containers also fail fast on schema drift; idempotent + advisory-locked per Plan 03; D-22 graceful shutdown drains pg.Pool on SIGTERM with 60s force-exit fallback
 
 ### Pending Todos
 
@@ -91,6 +97,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T11:44:43.810Z
-Stopped at: Completed 01-foundation/01-05-PLAN.md
+Last session: 2026-04-27T11:46:51.549Z
+Stopped at: Completed 01-foundation/01-06-PLAN.md
 Resume file: None
