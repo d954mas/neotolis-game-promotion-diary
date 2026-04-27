@@ -4,28 +4,92 @@ import { db } from "../../src/lib/server/db/client.js";
 import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
 import * as SteamApi from "../../src/lib/server/integrations/steam-api.js";
 import { createSteamKey } from "../../src/lib/server/services/api-keys-steam.js";
+import { writeAudit } from "../../src/lib/server/audit.js";
+import {
+  listAuditPage,
+  encodeCursor,
+} from "../../src/lib/server/services/audit-read.js";
 import { seedUserDirectly } from "./helpers.js";
 
 /**
- * Wave 0 placeholder test file (Plan 02-01 — Phase 2 Wave 0).
+ * Plan 02-07 — audit-read PRIV-02 integration tests.
  *
- * Per Phase 1 Wave 0 invariant: every later task ships into a test that
- * already exists. The it.skip stubs below are EXACT names — implementing
- * plans (02-NN) replace `it.skip` with `it` and add the assertions.
- *
- * If you are an executor on a later plan and the test you need is NOT in
- * the it.skip list below, the gap is in this Wave 0 plan — fix it here,
- * NOT by silently adding a new it() in your plan's commit.
+ * Wave 0 placeholder names PRESERVED — the three `02-07: PRIV-02 ...` it.skip
+ * stubs from Plan 02-01 are flipped to live tests below. Plan 02-05 already
+ * lit up `02-05: KEYS-06 ip resolved via proxy-trust` in its own describe
+ * block; that one is left untouched.
  */
 describe("audit log read endpoint (PRIV-02 + KEYS-06 metadata)", () => {
-  it.skip("02-07: PRIV-02 page size 50 + cursor", () => {
-    /* placeholder — implementing plan: 02-07 */
+  it("02-07: PRIV-02 page size 50 + cursor", async () => {
+    const u = await seedUserDirectly({ email: "ap1@test.local" });
+    // Seed 60 audit rows — one above PAGE_SIZE so the cursor is exercised.
+    for (let i = 0; i < 60; i++) {
+      await writeAudit({
+        userId: u.id,
+        action: "session.signin",
+        ipAddress: `10.0.0.${(i % 250) + 1}`,
+      });
+    }
+    const page1 = await listAuditPage(u.id, null, "all");
+    expect(page1.rows.length).toBe(50);
+    expect(page1.nextCursor).toBeTruthy();
+
+    const page2 = await listAuditPage(u.id, page1.nextCursor!, "all");
+    expect(page2.rows.length).toBe(10);
+    expect(page2.nextCursor).toBeNull();
+
+    // Disjoint pages — no row appears in both. Catches any off-by-one in the
+    // `(created_at, id) < ($1, $2)` strict-less-than tuple comparison.
+    const ids1 = new Set(page1.rows.map((r) => r.id));
+    for (const r of page2.rows) expect(ids1.has(r.id)).toBe(false);
   });
-  it.skip("02-07: PRIV-02 action filter", () => {
-    /* placeholder — implementing plan: 02-07 */
+
+  it("02-07: PRIV-02 action filter", async () => {
+    const u = await seedUserDirectly({ email: "ap2@test.local" });
+    await writeAudit({ userId: u.id, action: "session.signin", ipAddress: "10.0.0.1" });
+    await writeAudit({ userId: u.id, action: "key.add", ipAddress: "10.0.0.1" });
+    await writeAudit({ userId: u.id, action: "key.rotate", ipAddress: "10.0.0.1" });
+
+    const all = await listAuditPage(u.id, null, "all");
+    expect(all.rows.length).toBe(3);
+
+    const keyAdds = await listAuditPage(u.id, null, "key.add");
+    expect(keyAdds.rows.length).toBe(1);
+    expect(keyAdds.rows[0]!.action).toBe("key.add");
   });
-  it.skip("02-07: PRIV-02 tenant-relative cursor (cross-tenant rejection)", () => {
-    /* placeholder — implementing plan: 02-07 */
+
+  it("02-07: PRIV-02 tenant-relative cursor (cross-tenant rejection)", async () => {
+    // P19 mitigation by construction. Seed rows for user A; capture a cursor
+    // from one of A's rows; present that cursor as user B; assert zero of
+    // A's rows leak. The userId WHERE clause is independent of the cursor —
+    // even a forged cursor encoding A's (created_at, id) cannot return A's
+    // rows because the tenant filter has already pruned them.
+    const userA = await seedUserDirectly({ email: "tcA@test.local" });
+    const userB = await seedUserDirectly({ email: "tcB@test.local" });
+    for (let i = 0; i < 5; i++) {
+      await writeAudit({
+        userId: userA.id,
+        action: "session.signin",
+        ipAddress: "10.0.0.1",
+      });
+    }
+    const aPage = await listAuditPage(userA.id, null, "all");
+    expect(aPage.rows.length).toBe(5);
+
+    // Forge a cursor pointing at the middle of A's page.
+    const aCursor = encodeCursor(aPage.rows[2]!.createdAt, aPage.rows[2]!.id);
+
+    // Query as user B with A's cursor — must return 0 rows. This is the
+    // load-bearing PRIV-02 / P19 assertion.
+    const bPage = await listAuditPage(userB.id, aCursor, "all");
+    expect(bPage.rows.length).toBe(0);
+    expect(bPage.nextCursor).toBeNull();
+
+    // Belt-and-suspenders: B with no cursor also sees zero (B has no seeded
+    // rows). Confirms the previous assertion is not vacuous on a degenerate
+    // cursor — B genuinely has nothing.
+    const bAll = await listAuditPage(userB.id, null, "all");
+    expect(bAll.rows.length).toBe(0);
   });
 });
 
