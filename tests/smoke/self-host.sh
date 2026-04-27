@@ -193,16 +193,39 @@ log "(3) PASS — scheduler prints 'scheduler ready' (image ENTRYPOINT exercised
 #   configures claims, and replays the redirect dance manually with cookie
 #   jar accumulation. INFO I2 Path 3 is inherited from Plan 05.
 log "(4) running OAuth dance via oauth-mock-driver (D-13 = oauth2-mock-server)"
+set +e
 SESSION_COOKIE_A=$(pnpm -s tsx tests/smoke/lib/oauth-mock-driver.ts \
   --app-url "http://localhost:$APP_PORT" \
   --mock-port "$MOCK_PORT" \
   --sub "user-a-sub" \
   --email "alice@smoke.test" \
-  --name "Alice")
-[[ -n "$SESSION_COOKIE_A" ]] || fail "(4) no session cookie from OAuth dance"
+  --name "Alice" 2>&1)
+driver_status=$?
+set -e
+if [ $driver_status -ne 0 ] || [[ -z "$SESSION_COOKIE_A" ]]; then
+  log "----- oauth-mock-driver output (status=$driver_status) -----"
+  echo "$SESSION_COOKIE_A"
+  log "----- recent app logs -----"
+  docker logs smoke-app 2>&1 | tail -50 || true
+  log "---------------------------"
+  fail "(4) OAuth dance failed (driver exit=$driver_status, cookie=${SESSION_COOKIE_A:0:80})"
+fi
 
 # Hit /api/me with the cookie — proves Plan 07's tenantScope + getMe pipeline.
-ME_RESPONSE=$(curl -fsS -H "cookie: $SESSION_COOKIE_A" "http://localhost:$APP_PORT/api/me")
+log "(4) /api/me with session cookie (first 60 chars): ${SESSION_COOKIE_A:0:60}..."
+set +e
+ME_RESPONSE=$(curl -sS -w '\nHTTP_STATUS:%{http_code}\n' -H "cookie: $SESSION_COOKIE_A" "http://localhost:$APP_PORT/api/me")
+me_status=$?
+set -e
+if [ $me_status -ne 0 ] || ! echo "$ME_RESPONSE" | grep -q 'HTTP_STATUS:200'; then
+  log "----- /api/me response (curl exit=$me_status) -----"
+  echo "$ME_RESPONSE"
+  log "----- recent app logs -----"
+  docker logs smoke-app 2>&1 | tail -60 || true
+  log "---------------------------"
+  fail "(4) /api/me did not return 200"
+fi
+ME_RESPONSE=$(echo "$ME_RESPONSE" | sed '/^HTTP_STATUS:/d')
 echo "$ME_RESPONSE" | grep -q '"email":"alice@smoke.test"' \
   || fail "(4) /api/me did not return Alice. Got: $ME_RESPONSE"
 
