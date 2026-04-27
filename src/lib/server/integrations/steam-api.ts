@@ -1,6 +1,7 @@
-// Steam Web API integration — store.steampowered.com appdetails fetch.
+// Steam Web API integration — store.steampowered.com appdetails fetch +
+// api.steampowered.com IWishlistService key probe.
 //
-// Plan 02-04 lands `fetchSteamAppDetails` (no API key required); Plan 02-05
+// Plan 02-04 landed `fetchSteamAppDetails` (no API key required); Plan 02-05
 // extends this same file with `validateSteamKey` (api.steampowered.com/IWishlistService).
 // We keep both calls in one file so future Steam endpoints (price polling,
 // review counts, ...) have an obvious home.
@@ -83,6 +84,48 @@ export async function fetchSteamAppDetails(appId: number): Promise<SteamAppDetai
   } catch (err) {
     logger.warn({ appId, err: (err as Error).message }, "steam appdetails fetch failed");
     return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * D-17 Steam Web API key paste-time validation (KEYS-03).
+ *
+ * One probe call to `IWishlistService/GetWishlistItemCount/v1/?key=...&steamid=0`.
+ * `steamid=0` is a sentinel — Valve accepts the call shape and returns 4xx if
+ * the key is invalid (auth error). 2xx means the key works regardless of the
+ * count returned (we don't care about the body, only the status class).
+ *
+ * Distinguishes 4xx (invalid key — caller maps to AppError 422) vs 5xx
+ * (transient — caller maps to AppError 502 with retry hint per RESEARCH.md
+ * Pitfall 9). Throws an `Error('steam_api_5xx')` on 5xx so the service-layer
+ * try/catch can map cleanly; returns boolean for 2xx (true) vs 4xx (false).
+ *
+ * Network errors (DNS / abort / TLS) escape; the service layer either
+ * propagates them (becomes 500 at the route boundary) OR could choose to
+ * map them to 502 in a future refinement. Phase 2 keeps the contract
+ * narrow: only 5xx is the "Steam unavailable" signal.
+ *
+ * 5s AbortController timeout matches `fetchSteamAppDetails` so a stuck
+ * Steam endpoint never blocks a paste-time validation longer than the
+ * user can wait.
+ */
+export async function validateSteamKey(plaintext: string): Promise<boolean> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    const res = await fetch(
+      `https://api.steampowered.com/IWishlistService/GetWishlistItemCount/v1/?key=${encodeURIComponent(plaintext)}&steamid=0`,
+      {
+        signal: ctrl.signal,
+        headers: { "user-agent": "neotolis-game-promotion-diary/0.1" },
+      },
+    );
+    if (res.status >= 500) {
+      throw new Error("steam_api_5xx");
+    }
+    return res.ok; // 2xx → true; 4xx → false
   } finally {
     clearTimeout(timer);
   }

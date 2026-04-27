@@ -8,13 +8,19 @@
 // Phase 1 establishes this pattern; every later phase inherits it.
 
 import type { user, session } from "./db/schema/auth.js";
-import type { games, gameSteamListings, youtubeChannels } from "./db/schema/index.js";
+import type {
+  games,
+  gameSteamListings,
+  youtubeChannels,
+  apiKeysSteam,
+} from "./db/schema/index.js";
 
 type User = typeof user.$inferSelect;
 type Session = typeof session.$inferSelect;
 type GameRow = typeof games.$inferSelect;
 type SteamListingRow = typeof gameSteamListings.$inferSelect;
 type YoutubeChannelRow = typeof youtubeChannels.$inferSelect;
+type ApiKeySteamRow = typeof apiKeysSteam.$inferSelect;
 
 /**
  * UserDto — what we send to authenticated clients.
@@ -182,5 +188,57 @@ export function toYoutubeChannelDto(r: YoutubeChannelRow): YoutubeChannelDto {
     isOwn: r.isOwn,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
+  };
+}
+
+/**
+ * ApiKeySteamDto — DTO for `api_keys_steam` rows. The cornerstone of D-39 /
+ * PITFALL P3 ciphertext discipline.
+ *
+ * INTENTIONALLY OMITTED (every column listed below is a secret-shaped field
+ * that MUST NEVER cross the HTTP boundary):
+ *   - `userId` — P3 discipline (caller knows their own id).
+ *   - `secretCt`, `secretIv`, `secretTag` — AES-256-GCM ciphertext + nonce +
+ *     tag for the user's plaintext API key. Returning any of these would
+ *     leak the wrapping that envelope encryption is built to hide.
+ *   - `wrappedDek`, `dekIv`, `dekTag` — KEK-wrapped DEK + nonce + tag.
+ *     Leaking these turns a stolen DB into a stolen-DB-plus-DEK; with the
+ *     KEK still in env, the plaintext key would decrypt offline.
+ *   - `kekVersion` — operational metadata; the client has no use for the
+ *     KEK rotation version and exposing it would aid a planning-phase
+ *     attacker.
+ *
+ * INTENTIONALLY KEPT:
+ *   - `last4` — D-34 last-4-of-key forensics aid. Already shown in masked UI;
+ *     including it here makes the response self-documenting (the user can
+ *     match the masked label visually).
+ *   - `label` — the user's own free-text name for the key. Not a secret.
+ *   - `createdAt` / `updatedAt` / `rotatedAt` — operational timestamps;
+ *     `rotatedAt = null` until the user rotates.
+ *
+ * The projection function is the load-bearing runtime guard (not the
+ * TypeScript interface). TypeScript erases types at runtime; only this
+ * function decides what crosses the wire. tests/unit/dto.test.ts asserts
+ * the strip happens behaviourally — even when a row literal carries
+ * ciphertext-shaped Buffers, they MUST NOT appear in the projected
+ * output (P3 / D-39).
+ */
+export interface ApiKeySteamDto {
+  id: string;
+  label: string;
+  last4: string;
+  createdAt: Date;
+  updatedAt: Date;
+  rotatedAt: Date | null;
+}
+
+export function toApiKeySteamDto(r: ApiKeySteamRow): ApiKeySteamDto {
+  return {
+    id: r.id,
+    label: r.label,
+    last4: r.last4,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+    rotatedAt: r.rotatedAt,
   };
 }
