@@ -213,19 +213,17 @@ fi
 
 # Hit /api/me with the cookie — proves Plan 07's tenantScope + getMe pipeline.
 log "(4) /api/me with session cookie (first 60 chars): ${SESSION_COOKIE_A:0:60}..."
-set +e
-ME_RESPONSE=$(curl -sS -w '\nHTTP_STATUS:%{http_code}\n' -H "cookie: $SESSION_COOKIE_A" "http://localhost:$APP_PORT/api/me")
-me_status=$?
-set -e
-if [ $me_status -ne 0 ] || ! echo "$ME_RESPONSE" | grep -q 'HTTP_STATUS:200'; then
-  log "----- /api/me response (curl exit=$me_status) -----"
+ME_HTTP=$(curl -s -o /tmp/me-body.txt -w '%{http_code}' -H "cookie: $SESSION_COOKIE_A" "http://localhost:$APP_PORT/api/me" || echo "curl-failed")
+ME_RESPONSE=$(cat /tmp/me-body.txt 2>/dev/null || echo "")
+log "(4) /api/me HTTP status=$ME_HTTP"
+if [[ "$ME_HTTP" != "200" ]]; then
+  log "----- /api/me response body -----"
   echo "$ME_RESPONSE"
   log "----- recent app logs -----"
-  docker logs smoke-app 2>&1 | tail -60 || true
+  docker logs smoke-app 2>&1 | tail -80 || true
   log "---------------------------"
-  fail "(4) /api/me did not return 200"
+  fail "(4) /api/me did not return 200 (got $ME_HTTP)"
 fi
-ME_RESPONSE=$(echo "$ME_RESPONSE" | sed '/^HTTP_STATUS:/d')
 echo "$ME_RESPONSE" | grep -q '"email":"alice@smoke.test"' \
   || fail "(4) /api/me did not return Alice. Got: $ME_RESPONSE"
 
