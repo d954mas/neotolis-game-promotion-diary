@@ -13,6 +13,8 @@ import type {
   gameSteamListings,
   youtubeChannels,
   apiKeysSteam,
+  trackedYoutubeVideos,
+  events,
 } from "./db/schema/index.js";
 
 type User = typeof user.$inferSelect;
@@ -21,6 +23,8 @@ type GameRow = typeof games.$inferSelect;
 type SteamListingRow = typeof gameSteamListings.$inferSelect;
 type YoutubeChannelRow = typeof youtubeChannels.$inferSelect;
 type ApiKeySteamRow = typeof apiKeysSteam.$inferSelect;
+type YoutubeVideoRow = typeof trackedYoutubeVideos.$inferSelect;
+type EventRow = typeof events.$inferSelect;
 
 /**
  * UserDto — what we send to authenticated clients.
@@ -240,5 +244,87 @@ export function toApiKeySteamDto(r: ApiKeySteamRow): ApiKeySteamDto {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     rotatedAt: r.rotatedAt,
+  };
+}
+
+/**
+ * YoutubeVideoDto — DTO for `tracked_youtube_videos` rows. Mirrors the
+ * underlying table minus `userId` (P3 discipline — caller knows their own id).
+ *
+ * Phase 2 fills `lastPolledAt` / `lastPollStatus` with NULL on every row;
+ * Phase 3's polling worker is the first writer of those columns.
+ */
+export interface YoutubeVideoDto {
+  id: string;
+  gameId: string;
+  videoId: string;
+  url: string;
+  title: string | null;
+  channelId: string | null;
+  authorUrl: string | null;
+  isOwn: boolean;
+  addedAt: Date;
+  lastPolledAt: Date | null;
+  lastPollStatus: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+}
+
+export function toYoutubeVideoDto(r: YoutubeVideoRow): YoutubeVideoDto {
+  return {
+    id: r.id,
+    gameId: r.gameId,
+    videoId: r.videoId,
+    url: r.url,
+    title: r.title,
+    channelId: r.channelId,
+    authorUrl: r.authorUrl,
+    isOwn: r.isOwn,
+    addedAt: r.addedAt,
+    lastPolledAt: r.lastPolledAt,
+    lastPollStatus: r.lastPollStatus,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+    deletedAt: r.deletedAt,
+  };
+}
+
+/**
+ * EventDto — DTO for `events` rows. Kind is the closed picklist from the
+ * eventKindEnum (D-28). `userId` omitted per P3 discipline.
+ */
+export interface EventDto {
+  id: string;
+  gameId: string;
+  kind:
+    | "conference"
+    | "talk"
+    | "twitter_post"
+    | "telegram_post"
+    | "discord_drop"
+    | "press"
+    | "other";
+  occurredAt: Date;
+  title: string;
+  url: string | null;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+}
+
+export function toEventDto(r: EventRow): EventDto {
+  return {
+    id: r.id,
+    gameId: r.gameId,
+    kind: r.kind,
+    occurredAt: r.occurredAt,
+    title: r.title,
+    url: r.url,
+    notes: r.notes,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+    deletedAt: r.deletedAt,
   };
 }
