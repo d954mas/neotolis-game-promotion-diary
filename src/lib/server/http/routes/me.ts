@@ -29,10 +29,7 @@ meRoutes.get("/me", async (c) => {
       return c.json({ error: "not_found" }, 404);
     }
     if (err instanceof AppError) {
-      return c.json(
-        { error: err.code },
-        err.status as 400 | 401 | 403 | 404 | 500,
-      );
+      return c.json({ error: err.code }, err.status as 400 | 401 | 403 | 404 | 500);
     }
     logger.error({ err, userId }, "/api/me unhandled error");
     return c.json({ error: "internal_server_error" }, 500);

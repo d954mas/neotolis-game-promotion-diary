@@ -1,5 +1,5 @@
-import { afterEach, beforeAll } from 'vitest';
-import pg from 'pg';
+import { afterEach, beforeAll } from "vitest";
+import pg from "pg";
 
 // Vitest setup file imported by the `integration` project (see vitest.config.ts).
 //
@@ -11,23 +11,17 @@ import pg from 'pg';
 // Until then, the dynamic import below throws and we print a warn so contributors understand
 // why integration tests skip-with-context. Once Plan 03 lands, the warn disappears.
 const dbUrl =
-  process.env.TEST_DATABASE_URL ??
-  'postgres://postgres:postgres@localhost:5432/neotolis_test';
+  process.env.TEST_DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/neotolis_test";
 
 export const pool = new pg.Pool({ connectionString: dbUrl, max: 5 });
 
 beforeAll(async () => {
   try {
     // @ts-expect-error — module lands in Plan 01-03; until then this throws and we warn.
-    const { runMigrations } = await import('../src/lib/server/db/migrate.js');
+    const { runMigrations } = await import("../src/lib/server/db/migrate.js");
     await runMigrations();
   } catch (err) {
-    // Plan 03 lands runMigrations; until then, integration tests will skip-with-context.
-    // eslint-disable-next-line no-console
-    console.warn(
-      '[tests/setup] migrations not yet wired (Plan 01-03):',
-      (err as Error).message,
-    );
+    console.warn("[tests/setup] migrations not yet wired (Plan 01-03):", (err as Error).message);
   }
 });
 
@@ -39,7 +33,7 @@ afterEach(async () => {
       `select tablename from pg_tables where schemaname = 'public'`,
     );
     if (rows.length === 0) return;
-    const names = rows.map((r) => `"${r.tablename}"`).join(', ');
+    const names = rows.map((r) => `"${r.tablename}"`).join(", ");
     await pool.query(`TRUNCATE ${names} RESTART IDENTITY CASCADE`);
   } catch {
     // Pre-migration: nothing to truncate. Swallow — integration tests will skip-with-context.

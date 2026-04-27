@@ -33,10 +33,7 @@ describe("Better Auth — DB session lifecycle (AUTH-01/02/03)", () => {
     });
 
     // Find the session id from the token.
-    const rows = await db
-      .select()
-      .from(session)
-      .where(eq(session.token, sessionToken));
+    const rows = await db.select().from(session).where(eq(session.token, sessionToken));
     expect(rows.length).toBe(1);
 
     await invalidateSession(rows[0]!.id);
@@ -63,19 +60,13 @@ describe("Better Auth — DB session lifecycle (AUTH-01/02/03)", () => {
       expiresAt: new Date(Date.now() + 86_400_000),
     });
 
-    const before = await db
-      .select()
-      .from(session)
-      .where(eq(session.userId, userId));
+    const before = await db.select().from(session).where(eq(session.userId, userId));
     expect(before.length).toBeGreaterThanOrEqual(2);
 
     const result = await signOutAllDevices(userId);
     expect(result.deletedCount).toBeGreaterThanOrEqual(2);
 
-    const after = await db
-      .select()
-      .from(session)
-      .where(eq(session.userId, userId));
+    const after = await db.select().from(session).where(eq(session.userId, userId));
     expect(after.length).toBe(0);
   });
 
@@ -87,10 +78,7 @@ describe("Better Auth — DB session lifecycle (AUTH-01/02/03)", () => {
     // resolve the same row on a returning sign-in instead of inserting a duplicate.
     await expect(seedUserDirectly({ email: "dave@test.local" })).rejects.toThrow();
 
-    const all = await db
-      .select()
-      .from(user)
-      .where(eq(user.email, "dave@test.local"));
+    const all = await db.select().from(user).where(eq(user.email, "dave@test.local"));
     expect(all.length).toBe(1);
   });
 });

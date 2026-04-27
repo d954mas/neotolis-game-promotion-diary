@@ -15,8 +15,7 @@ const noProcessEnv = {
     {
       object: "process",
       property: "env",
-      message:
-        "Read env via src/lib/server/config/env.ts (PITFALL P2 mitigation)",
+      message: "Read env via src/lib/server/config/env.ts (PITFALL P2 mitigation)",
     },
   ],
 };
@@ -85,12 +84,7 @@ export default [
   },
   // Tests legitimately read/manipulate process.env to drive env-config behavior.
   {
-    files: [
-      "tests/**/*.ts",
-      "tests/**/*.js",
-      "vitest.config.ts",
-      "tests/setup.ts",
-    ],
+    files: ["tests/**/*.ts", "tests/**/*.js", "vitest.config.ts", "tests/setup.ts"],
     rules: { "no-restricted-properties": "off" },
   },
   prettier,

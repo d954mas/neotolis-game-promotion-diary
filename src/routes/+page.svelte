@@ -5,8 +5,8 @@
   // Phase 2 lands real game cards in this slot.
   // Plan 01-09: every user-facing string flows through Paraglide's compiled m.*
   // exports (UX-04, D-17 baseLocale only, D-18 single messages file at root).
-  import { m } from '$lib/paraglide/messages.js';
-  import { signIn, signOut } from '$lib/auth-client';
+  import { m } from "$lib/paraglide/messages.js";
+  import { signIn, signOut } from "$lib/auth-client";
   let { data } = $props();
 </script>
 
@@ -17,9 +17,7 @@
 {:else}
   <h1>{m.dashboard_title()}</h1>
   <p>{m.dashboard_unauth_intro()}</p>
-  <button
-    onclick={() => signIn.social({ provider: 'google', callbackURL: '/' })}
-  >
+  <button onclick={() => signIn.social({ provider: "google", callbackURL: "/" })}>
     {m.login_button()}
   </button>
 {/if}

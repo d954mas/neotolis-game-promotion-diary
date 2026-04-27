@@ -37,9 +37,7 @@ export async function seedUserDirectly(opts: {
 }): Promise<CreatedUser> {
   // Lazy-import the Drizzle layer so unit tests don't pull pg.Pool when not needed.
   const { db } = await import("../../src/lib/server/db/client.js");
-  const { user, session } = await import(
-    "../../src/lib/server/db/schema/auth.js"
-  );
+  const { user, session } = await import("../../src/lib/server/db/schema/auth.js");
   const { uuidv7 } = await import("../../src/lib/server/ids.js");
 
   const userId = uuidv7();
@@ -82,10 +80,7 @@ export async function createUser(email: string): Promise<CreatedUser> {
 
 // Phase 2 lands the games table; this stub stays so Plan 10's smoke test imports
 // the same module shape that Phase 2 will fill in.
-export async function createGame(
-  _userId: string,
-  _title: string,
-): Promise<{ id: string }> {
+export async function createGame(_userId: string, _title: string): Promise<{ id: string }> {
   throw new Error("games table arrives in Phase 2");
 }
 

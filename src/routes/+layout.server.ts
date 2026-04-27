@@ -20,9 +20,7 @@ const PROTECTED_PATHS: string[] = [
 ];
 
 export const load: LayoutServerLoad = ({ locals, url }) => {
-  const isProtected = PROTECTED_PATHS.some((p) =>
-    url.pathname.startsWith(p),
-  );
+  const isProtected = PROTECTED_PATHS.some((p) => url.pathname.startsWith(p));
   if (isProtected && !locals.user) {
     throw redirect(303, `/login?next=${encodeURIComponent(url.pathname)}`);
   }

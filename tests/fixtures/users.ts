@@ -1,4 +1,4 @@
-import { pool } from '../setup.js';
+import { pool } from "../setup.js";
 
 // User seed fixture. Plan 01-03 lands the `users` table; Plan 01-05 lands Better Auth
 // session-cookie creation. Until Plan 03 lands the schema, the function throws a loud,
@@ -32,8 +32,8 @@ export async function seedUser(_input: SeedUserInput): Promise<SeededUser> {
     .catch(() => ({ rows: [{ exists: false }] }));
 
   if (!rows[0]?.exists) {
-    throw new Error('users table not yet created (Plan 01-03)');
+    throw new Error("users table not yet created (Plan 01-03)");
   }
   // Will be filled in by Plan 01-05 — direct insert + Better Auth session row.
-  throw new Error('seedUser implementation lands in Plan 01-05');
+  throw new Error("seedUser implementation lands in Plan 01-05");
 }

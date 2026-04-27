@@ -17,26 +17,26 @@
 // PT6: trusted source + X-Forwarded-Proto → respected (HSTS-relevant);
 //      untrusted source falls back to socket scheme.
 
-import { parse, parseCIDR, type IPv4, type IPv6 } from 'ipaddr.js';
-import type { MiddlewareHandler } from 'hono';
-import { env } from '../../config/env.js';
+import { parse, parseCIDR, type IPv4, type IPv6 } from "ipaddr.js";
+import type { MiddlewareHandler } from "hono";
+import { env } from "../../config/env.js";
 
 export interface CidrEntry {
   network: IPv4 | IPv6;
   bits: number;
-  kind: 'ipv4' | 'ipv6';
+  kind: "ipv4" | "ipv6";
 }
 
 export function parseCidrList(csv: string): CidrEntry[] {
   if (!csv.trim()) return [];
   const result: CidrEntry[] = [];
   for (const raw of csv
-    .split(',')
+    .split(",")
     .map((s) => s.trim())
     .filter(Boolean)) {
     try {
       const [network, bits] = parseCIDR(raw);
-      result.push({ network, bits, kind: network.kind() as 'ipv4' | 'ipv6' });
+      result.push({ network, bits, kind: network.kind() as "ipv4" | "ipv6" });
     } catch {
       throw new Error(`TRUSTED_PROXY_CIDR contains invalid CIDR: ${raw}`);
     }
@@ -53,10 +53,7 @@ export function isTrusted(ip: string): boolean {
     parsed = parse(ip);
     // Normalize IPv6 IPv4-mapped (::ffff:1.2.3.4) → IPv4 so a connection from
     // an IPv6-stack TCP socket carrying an IPv4 client still matches IPv4 CIDRs.
-    if (
-      parsed.kind() === 'ipv6' &&
-      (parsed as IPv6).isIPv4MappedAddress()
-    ) {
+    if (parsed.kind() === "ipv6" && (parsed as IPv6).isIPv4MappedAddress()) {
       parsed = (parsed as IPv6).toIPv4Address();
     }
   } catch {
@@ -65,34 +62,32 @@ export function isTrusted(ip: string): boolean {
   const kind = parsed.kind();
   return TRUSTED.some((entry) => {
     if (entry.kind !== kind) return false;
-    return parsed.match([entry.network, entry.bits] as Parameters<
-      typeof parsed.match
-    >[0]);
+    return parsed.match([entry.network, entry.bits] as Parameters<typeof parsed.match>[0]);
   });
 }
 
 export const proxyTrust: MiddlewareHandler<{
-  Variables: { clientIp: string; clientProto: 'http' | 'https' };
+  Variables: { clientIp: string; clientProto: "http" | "https" };
 }> = async (c, next) => {
   // Hono's Node adapter exposes the underlying IncomingMessage on c.env.incoming.
   // For tests using app.request(...), tests pass a synthetic socket via the
   // third argument's `incoming.socket` field.
-  const incoming = (c.env as { incoming?: { socket?: { remoteAddress?: string; encrypted?: boolean } } } | undefined)?.incoming;
-  const socketIp = incoming?.socket?.remoteAddress ?? '';
+  const incoming = (
+    c.env as { incoming?: { socket?: { remoteAddress?: string; encrypted?: boolean } } } | undefined
+  )?.incoming;
+  const socketIp = incoming?.socket?.remoteAddress ?? "";
   let clientIp = socketIp;
-  let clientProto: 'http' | 'https' = incoming?.socket?.encrypted
-    ? 'https'
-    : 'http';
+  let clientProto: "http" | "https" = incoming?.socket?.encrypted ? "https" : "http";
 
   if (TRUSTED.length > 0 && isTrusted(socketIp)) {
     // CF-Connecting-IP takes precedence if proxy is Cloudflare (PT4).
-    const cf = c.req.header('cf-connecting-ip');
+    const cf = c.req.header("cf-connecting-ip");
     if (cf) {
       clientIp = cf;
     } else {
-      const xff = c.req.header('x-forwarded-for') ?? '';
+      const xff = c.req.header("x-forwarded-for") ?? "";
       const hops = xff
-        .split(',')
+        .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
       // Walk from right: drop trusted hops, first untrusted is the real client (PT2).
@@ -104,8 +99,8 @@ export const proxyTrust: MiddlewareHandler<{
       }
     }
     // PT6: respect X-Forwarded-Proto from trusted source (HSTS-relevant).
-    const xfp = c.req.header('x-forwarded-proto');
-    if (xfp === 'https' || xfp === 'http') {
+    const xfp = c.req.header("x-forwarded-proto");
+    if (xfp === "https" || xfp === "http") {
       clientProto = xfp;
     }
   }
@@ -113,7 +108,7 @@ export const proxyTrust: MiddlewareHandler<{
   // X-Forwarded-Proto entirely (CVE-2026-27700; PT3, PT5 reject XFF/CF; PT6
   // falls back to socket scheme).
 
-  c.set('clientIp', clientIp);
-  c.set('clientProto', clientProto);
+  c.set("clientIp", clientIp);
+  c.set("clientProto", clientProto);
   return next();
 };

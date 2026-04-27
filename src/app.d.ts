@@ -6,7 +6,7 @@
 // global App namespace so every +page.server.ts and +layout.server.ts can
 // reference `locals.user` with full type safety.
 
-import type { UserDto, SessionDto } from '$lib/server/dto.js';
+import type { UserDto, SessionDto } from "$lib/server/dto.js";
 
 declare global {
   namespace App {

@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { defineConfig } from "vitest/config";
 
 // Vitest 4 supports test.projects to split unit (no DB) from integration (with DB).
 // Plan 01-02 (Phase 1 Wave 0) lands the structural split; later plans wire real assertions.
@@ -15,25 +15,25 @@ export default defineConfig({
     projects: [
       {
         test: {
-          name: 'unit',
-          include: ['tests/unit/**/*.test.ts'],
-          environment: 'node',
+          name: "unit",
+          include: ["tests/unit/**/*.test.ts"],
+          environment: "node",
         },
       },
       {
         test: {
-          name: 'integration',
-          include: ['tests/integration/**/*.test.ts'],
-          environment: 'node',
-          setupFiles: ['./tests/setup.ts'],
+          name: "integration",
+          include: ["tests/integration/**/*.test.ts"],
+          environment: "node",
+          setupFiles: ["./tests/setup.ts"],
           testTimeout: 30_000,
           // Each spec file runs in its own forked worker; avoids global pg.Pool state leak
           // between specs while keeping parallelism for unrelated files.
-          pool: 'forks',
+          pool: "forks",
           poolOptions: { forks: { singleFork: false } },
         },
       },
     ],
-    reporters: ['default'],
+    reporters: ["default"],
   },
 });

@@ -18,10 +18,10 @@
 //     hard-stops. We pair it with `pool.end()` in the role entrypoints so
 //     both pg-boss' own pool AND Drizzle's app pool drain on SIGTERM.
 
-import PgBoss from 'pg-boss';
-import { env } from './config/env.js';
-import { logger } from './logger.js';
-import { declareAllQueues } from './queues.js';
+import PgBoss from "pg-boss";
+import { env } from "./config/env.js";
+import { logger } from "./logger.js";
+import { declareAllQueues } from "./queues.js";
 
 /**
  * Create + start a pg-boss instance with all Phase 1 queues declared.
@@ -50,8 +50,8 @@ export async function createBoss(): Promise<PgBoss> {
     // (Plan 03's runMigrations()), which target the public schema.
   });
 
-  boss.on('error', (err) => {
-    logger.error({ err }, 'pg-boss error');
+  boss.on("error", (err) => {
+    logger.error({ err }, "pg-boss error");
   });
 
   await boss.start();
@@ -77,7 +77,7 @@ export async function createBoss(): Promise<PgBoss> {
  *                       expect SIGTERM→exit within their own grace period.
  */
 export async function stopBoss(boss: PgBoss): Promise<void> {
-  logger.info('pg-boss draining');
+  logger.info("pg-boss draining");
   await boss.stop({ wait: true, graceful: true, timeout: 60_000 });
-  logger.info('pg-boss stopped');
+  logger.info("pg-boss stopped");
 }
