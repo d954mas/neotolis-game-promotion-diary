@@ -24,6 +24,14 @@ import { user } from "./auth.js";
 import { auditActionEnum } from "../../audit/actions.js";
 import { uuidv7 } from "../../ids.js";
 
+// Re-export so drizzle-kit's schema scan (glob: ./src/lib/server/db/schema/*.ts)
+// picks up the audit_action pgEnum even though its source of truth lives in
+// src/lib/server/audit/actions.ts (D-32). Without this re-export drizzle-kit
+// silently drops the CREATE TYPE statement (drizzle-team/drizzle-orm#5174)
+// and the generated migration's ALTER COLUMN ... TYPE audit_action fails
+// because the enum doesn't exist yet.
+export { auditActionEnum };
+
 export const auditLog = pgTable(
   "audit_log",
   {

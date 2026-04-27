@@ -88,6 +88,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   7. *(Deferred from Phase 2)* User saves a YouTube Data API v3 key (envelope-encrypted at rest); the key is consumed by `poll.youtube` worker. User authorizes Reddit via OAuth (per-user, BYO Reddit app credentials) and rotates / revokes at any time; the credentials are consumed by `poll.reddit` worker.
   8. *(Deferred from Phase 2)* User pastes a Reddit post URL on a game and a tracked Reddit post is created; ingest validates against Reddit API; on success the row enters the polling pipeline alongside YouTube videos.
   9. *Phase 3 smoke extension (per Phase 1 DEPLOY-05 scope deferral, 2026-04-27):* CI self-host smoke test additionally enqueues and processes a poll-stub job end-to-end, asserting `metric_snapshots` records an immutable row and the worker drains on SIGTERM.
+
+**Phase 3 deferred items (filed by Plan 02-03 W-4):**
+  - TODO: add partial index `idx_tracked_yt_videos_last_polled_at` `WHERE last_polled_at IS NOT NULL` on `tracked_youtube_videos`. Deferred from Phase 2 because P2 inserts NULL on every row (no polling worker yet) — the index would be bloat over an all-NULL column. Add it in the migration that lands the `poll.youtube` worker. Use raw SQL in a companion migration if Drizzle 0.45's `.where(sql\`...\`)` on `index()` does not emit cleanly for the locked version.
+
 **Plans**: TBD
 
 ### Phase 4: Visualization
