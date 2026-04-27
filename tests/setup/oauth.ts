@@ -8,14 +8,15 @@
 //   - Failures point at our integration code, not at a mocked-too-deep abstraction.
 //   - Same code path runs in CI smoke (image talks to mock over HTTP) and integration tests.
 //   - oauth2-mock-server mints valid id_tokens with configurable claims (iss, sub, email, etc.)
-//     so we exercise Better Auth's real Google-provider verification path.
+//     so we exercise Better Auth's real OAuth verification path via the genericOAuth plugin.
 //
-// INFO I2 (issuer URL handling): Better Auth 1.6.x's `socialProviders.google` does NOT
-// expose an `issuer` or `discoveryUrl` field — the Google endpoints are hardcoded inside
-// the provider. The Path 3 fallback from plan 01-05 <execution_notes> applies: this module
-// configures the mock to mint id_tokens with `iss: 'https://accounts.google.com'` so
-// Better Auth's strict-issuer validation accepts the mock-issued tokens. See
-// `setNextUserClaims` below — the `beforeTokenSigning` hook coerces the `iss` claim.
+// INFO I2 (issuer URL handling) — RESOLVED via the genericOAuth plugin (review blocker
+// P0-2 fix). Better Auth 1.6.x's `socialProviders.google` hardcodes the Google endpoints,
+// so we switched to the genericOAuth plugin (providerId: "google") which exposes
+// `discoveryUrl`. The mock's iss is whatever discovery returns (the mock's own issuer URL),
+// so the previous mock-side `iss` coercion to https://accounts.google.com is no longer
+// needed. We keep the mock's natural issuer claim so Better Auth's strict-issuer
+// validation matches the discovery document the plugin fetched at boot.
 
 // @ts-expect-error — oauth2-mock-server (CJS) types may lag in this TS config.
 import { OAuth2Server } from "oauth2-mock-server";
@@ -83,10 +84,11 @@ export interface MockUserClaims {
 /**
  * Configure the mock server's NEXT issued id_token + userinfo response.
  *
- * INFO I2 (Path 3): the `beforeTokenSigning` hook below ALSO overrides
- * `token.payload.iss = 'https://accounts.google.com'` so Better Auth 1.6's
- * google provider (which has hardcoded `iss` validation) accepts the
- * mock-issued token. The mock allows arbitrary issuer claims by design.
+ * INFO I2 (resolved): the `beforeTokenSigning` hook lets the mock's natural
+ * issuer claim flow through — Better Auth's genericOAuth plugin learned the
+ * issuer from the discovery document the plugin fetched at boot, so the
+ * mock-issued token's iss already matches. We only override claims the test
+ * needs to control (sub / email / etc).
  */
 export function setNextUserClaims(claims: MockUserClaims): void {
   if (!server) {
@@ -115,9 +117,8 @@ export function setNextUserClaims(claims: MockUserClaims): void {
     const token = args[0] as { payload: Record<string, unknown> };
     token.payload = {
       ...token.payload,
-      // INFO I2 Path 3: coerce the issuer to Google's so Better Auth 1.6's
-      // google provider (which has hardcoded `iss` validation) accepts.
-      iss: "https://accounts.google.com",
+      // Mock's natural iss flows through (matches the discovery document
+      // Better Auth's genericOAuth plugin fetched at boot).
       sub: claims.sub,
       email: claims.email,
       email_verified: true,
@@ -149,7 +150,8 @@ export async function mintIdToken(userClaims: {
     );
   }
   const { id_token } = await server.service.buildResponse({
-    iss: "https://accounts.google.com", // INFO I2 Path 3
+    // Mock's natural issuer flows through; Better Auth's genericOAuth plugin
+    // learned the issuer from the discovery document it fetched at boot.
     aud: process.env.GOOGLE_CLIENT_ID ?? "ci-mock-client-id",
     email_verified: true,
     ...userClaims,

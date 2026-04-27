@@ -9,7 +9,9 @@
  *   1. Start oauth2-mock-server on the requested port (default 9090).
  *   2. Configure the mock to mint an id_token + userinfo for the requested
  *      user (`sub` / `email` / `name`).
- *   3. Hit Better Auth's social-signin URL on the running app container.
+ *   3. Hit Better Auth's genericOAuth signin URL on the running app
+ *      container (POST /api/auth/sign-in/oauth2 with body
+ *      { providerId: "google" }).
  *   4. Follow redirects manually with `redirect: 'manual'`, accumulating a
  *      cookie jar across hops. Better Auth stores `state` / `code-verifier`
  *      in HTTP-only cookies during the OAuth dance — the jar must replay
@@ -18,20 +20,17 @@
  *      trailing newline) so bash can `$()`-capture and replay the cookie
  *      against `/api/me` and `/`.
  *
- * INFO I2 (issuer URL handling) — Plan 01-05 chose Path 3: the mock-side
- * `beforeTokenSigning` hook coerces `iss: 'https://accounts.google.com'`
- * because Better Auth 1.6.x's google provider hardcodes that issuer and
- * exposes no override knob (no `issuer:` / `discoveryUrl:` field). Path 3
- * is documented in `tests/setup/oauth.ts` and inherited verbatim here so
- * test-path === prod-path on the Better Auth side.
+ * INFO I2 (issuer URL handling) — RESOLVED via the genericOAuth plugin
+ * (review blocker P0-2 fix). Better Auth's genericOAuth plugin reads the
+ * issuer from the discovery document at boot, so the mock's natural issuer
+ * URL (http://localhost:9090) flows through unchanged. The previous mock-
+ * side `iss` coercion to https://accounts.google.com is no longer needed.
  *
- * Better Auth route shape:
- *   GET  /api/auth/sign-in/social?provider=google&callbackURL=/
- *     -> 200 with JSON `{ url: '<mock-authorize-url>?...' }` for fetch
- *     callers, OR 302 to the mock authorize URL for redirect callers.
- *     This driver POSTs to /api/auth/sign-in/social (the form-style entry
- *     point) which returns a 302 → mock authorize.
- *   GET  /api/auth/callback/google?code=...&state=...
+ * Better Auth route shape (genericOAuth plugin):
+ *   POST /api/auth/sign-in/oauth2
+ *     body: { providerId: "google", callbackURL: "/" }
+ *     -> 200 JSON `{ url: '<mock-authorize-url>?...', redirect: true }`
+ *   GET  /api/auth/oauth2/callback/google?code=...&state=...
  *     -> 302 to `/` (or the original callbackURL) with
  *        Set-Cookie: neotolis.session_token=...; Path=/; HttpOnly; ...
  *
@@ -162,9 +161,8 @@ async function main(): Promise<void> {
       const token = handlerArgs[0] as { payload: Record<string, unknown> };
       token.payload = {
         ...token.payload,
-        // INFO I2 Path 3 (locked by Plan 01-05): coerce iss so Better Auth
-        // 1.6.x's hardcoded google-provider issuer check accepts the token.
-        iss: "https://accounts.google.com",
+        // Mock's natural iss flows through (matches the discovery document
+        // Better Auth's genericOAuth plugin fetched at boot).
         sub: args.sub,
         email: args.email,
         email_verified: true,
@@ -173,20 +171,19 @@ async function main(): Promise<void> {
       };
     });
 
-    // Drive Better Auth's social signin entry point. Better Auth 1.6
-    // exposes:
-    //   POST /api/auth/sign-in/social
-    //     body: { provider: 'google', callbackURL: '/' }
-    //   -> 302 Location: <mock authorize URL>
+    // Drive Better Auth's genericOAuth signin entry point:
+    //   POST /api/auth/sign-in/oauth2
+    //     body: { providerId: 'google', callbackURL: '/' }
+    //   -> 200 JSON { url: '<mock authorize URL>', redirect: true }
     //
     // We then follow redirects manually, accumulating cookies. Better
     // Auth sets `neotolis.state` + `neotolis.pkce` (or similar) HTTP-only
     // cookies during the dance; on the callback hop those cookies are
     // verified — the jar must replay them.
     const jar = new Map<string, string>();
-    const initialUrl = `${args.appUrl}/api/auth/sign-in/social`;
+    const initialUrl = `${args.appUrl}/api/auth/sign-in/oauth2`;
     const initialBody = JSON.stringify({
-      provider: "google",
+      providerId: "google",
       callbackURL: "/",
     });
 

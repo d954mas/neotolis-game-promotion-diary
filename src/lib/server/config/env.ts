@@ -20,6 +20,13 @@ const RawSchema = z.object({
   BETTER_AUTH_SECRET: z.string().min(32),
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
+  // Better Auth's genericOAuth plugin reads OIDC discovery from this URL so
+  // CI / smoke / self-host can point at oauth2-mock-server while production
+  // points at Google. Default = real Google's discovery document.
+  GOOGLE_DISCOVERY_URL: z
+    .string()
+    .url()
+    .default("https://accounts.google.com/.well-known/openid-configuration"),
   TRUSTED_ORIGINS: z.string().default(""),
   TRUSTED_PROXY_CIDR: z.string().default(""),
   COOKIE_DOMAIN: z.string().optional(),
@@ -79,6 +86,7 @@ export const env = {
   BETTER_AUTH_SECRET: raw.BETTER_AUTH_SECRET,
   GOOGLE_CLIENT_ID: raw.GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET: raw.GOOGLE_CLIENT_SECRET,
+  GOOGLE_DISCOVERY_URL: raw.GOOGLE_DISCOVERY_URL,
   TRUSTED_ORIGINS,
   TRUSTED_PROXY_CIDR: raw.TRUSTED_PROXY_CIDR,
   COOKIE_DOMAIN: raw.COOKIE_DOMAIN,

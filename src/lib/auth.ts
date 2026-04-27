@@ -16,17 +16,20 @@
 //   - CLAUDE.md project constraint: Google OAuth ONLY — `emailAndPassword`
 //           is explicitly disabled. No password-reset flow, no breach surface.
 //
-// INFO I2 (issuer URL) — Better Auth 1.6.x's `socialProviders.google` does NOT
-// expose an `issuer` or `discoveryUrl` field; the Google endpoints are
-// hardcoded inside the provider. Test/CI compatibility with `oauth2-mock-server`
-// (D-13 mechanism) is achieved via the mock minting tokens with
-// `iss: 'https://accounts.google.com'` (mock-side coercion — see
-// tests/setup/oauth.ts and Plan 01-10's smoke test). No code change is needed
-// here; we only document the constraint so future readers understand why the
-// google block has no `issuer:` field.
+// INFO I2 (issuer URL) — RESOLVED via genericOAuth plugin (review blocker
+// P0-2). Better Auth 1.6.x's `socialProviders.google` hardcodes the Google
+// authorize/token endpoints, which means the initial /api/auth/sign-in/...
+// redirect always points at real Google — incompatible with CI/smoke runs
+// that need to talk to oauth2-mock-server. The genericOAuth plugin exposes
+// `discoveryUrl` (and explicit endpoint overrides), so the same code works
+// against real Google in production and the mock IdP in CI/smoke. The
+// account row's `providerId` stays "google" by construction
+// (genericOAuth uses the configured providerId verbatim — see
+// node_modules/better-auth/dist/plugins/generic-oauth/routes.mjs:246,266).
 
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import { db } from "./server/db/client.js";
 import * as authSchema from "./server/db/schema/auth.js";
 import { env } from "./server/config/env.js";
@@ -44,18 +47,25 @@ export const auth = betterAuth({
   baseURL: env.BETTER_AUTH_URL,
   secret: env.BETTER_AUTH_SECRET,
   trustedOrigins: env.TRUSTED_ORIGINS,
-  socialProviders: {
-    google: {
-      clientId: env.GOOGLE_CLIENT_ID,
-      clientSecret: env.GOOGLE_CLIENT_SECRET,
-      // INFO I2 (issuer URL): Better Auth 1.6.x's google provider hardcodes
-      // https://accounts.google.com — there is no `issuer` / `discoveryUrl`
-      // override. CI/integration tests use `oauth2-mock-server` and configure
-      // the mock to mint id_tokens with `iss: 'https://accounts.google.com'`
-      // (Path 3 of plan 01-05 <execution_notes>). See tests/setup/oauth.ts.
-      // No `prompt: "consent"` — the default UX is best.
-    },
-  },
+  plugins: [
+    // genericOAuth plugin used so discoveryUrl is env-driven; CI/smoke point
+    // at oauth2-mock-server, prod points at
+    // https://accounts.google.com/.well-known/openid-configuration.
+    // account.providerId='google' preserved (the plugin uses the configured
+    // providerId verbatim for the account row).
+    genericOAuth({
+      config: [
+        {
+          providerId: "google",
+          clientId: env.GOOGLE_CLIENT_ID,
+          clientSecret: env.GOOGLE_CLIENT_SECRET,
+          discoveryUrl: env.GOOGLE_DISCOVERY_URL,
+          scopes: ["openid", "email", "profile"],
+          pkce: true,
+        },
+      ],
+    }),
+  ],
   session: {
     // D-05: database-backed sessions. cookieCache disabled so every request
     // hits the session table — that's the entire point. Sign-out is instant.

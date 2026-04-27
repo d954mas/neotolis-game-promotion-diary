@@ -42,13 +42,12 @@ BETTER_AUTH_SECRET_VAL="${BETTER_AUTH_SECRET:-ci-smoke-better-auth-secret-32-cha
 KEK_BASE64="${APP_KEK_BASE64:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}"
 GOOGLE_CLIENT_ID_VAL="${GOOGLE_CLIENT_ID:-mock-client-id}"
 GOOGLE_CLIENT_SECRET_VAL="${GOOGLE_CLIENT_SECRET:-mock-client-secret}"
-# INFO I2 inheritance: Plan 05 chose Path 3 (mock-side iss override). No
-# GOOGLE_ISSUER_URL knob is honored by Better Auth 1.6.x's google provider —
-# the mock takes care of issuing tokens with `iss: 'https://accounts.google.com'`
-# (see tests/smoke/lib/oauth-mock-driver.ts and tests/setup/oauth.ts). We
-# still pass the env var to all containers because env.ts may read it for
-# diagnostic logging; Better Auth does not consume it.
-GOOGLE_ISSUER_URL_VAL="${GOOGLE_ISSUER_URL:-http://localhost:$MOCK_PORT}"
+# genericOAuth plugin (review blocker P0-2 fix) reads OIDC discovery from
+# this URL at boot. Smoke runs the mock IdP on localhost:$MOCK_PORT, so the
+# discovery document is at http://localhost:$MOCK_PORT/.well-known/openid-configuration.
+# Production self-host points at https://accounts.google.com/.well-known/openid-configuration
+# (the env.ts default).
+GOOGLE_DISCOVERY_URL_VAL="${GOOGLE_DISCOVERY_URL:-http://localhost:$MOCK_PORT/.well-known/openid-configuration}"
 
 # ============================================================
 # Helpers
@@ -74,7 +73,7 @@ common_env_args() {
 -e BETTER_AUTH_SECRET=$BETTER_AUTH_SECRET_VAL
 -e GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID_VAL
 -e GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET_VAL
--e GOOGLE_ISSUER_URL=$GOOGLE_ISSUER_URL_VAL
+-e GOOGLE_DISCOVERY_URL=$GOOGLE_DISCOVERY_URL_VAL
 -e APP_KEK_BASE64=$KEK_BASE64
 -e TRUSTED_PROXY_CIDR=
 EOF
