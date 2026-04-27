@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 01-foundation/01-06-PLAN.md
-last_updated: "2026-04-27T11:46:51.552Z"
+stopped_at: Completed 01-foundation/01-08-PLAN.md
+last_updated: "2026-04-27T11:54:01.012Z"
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 10
-  completed_plans: 6
+  completed_plans: 7
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 01 (foundation) — EXECUTING
-Plan: 7 of 10
+Plan: 8 of 10
 
 ## Performance Metrics
 
@@ -52,6 +52,7 @@ Plan: 7 of 10
 | Phase 01-foundation P03 | 4min | 2 tasks | 12 files |
 | Phase 01-foundation P05 | 4min | 2 tasks | 8 files |
 | Phase 01-foundation P06 | ~5min 30s | 2 tasks | 14 files |
+| Phase 01-foundation P08 | ~2min | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -84,6 +85,7 @@ Recent decisions affecting current work:
 - [Phase 01-foundation]: Plan 01-06: secureHeaders config (Q5) ships HSTS max-age=63072000+includeSubDomains, X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy strict-origin-when-cross-origin; CSP intentionally undefined so SvelteKit's adapter owns the page CSP (single source of truth)
 - [Phase 01-foundation]: Plan 01-06: worker/scheduler stubs at D-01-locked paths (src/worker/index.ts, src/scheduler/index.ts) print 'worker stub ready' / 'scheduler stub ready' to stdout for Plan 10 smoke-test grep contract; Plan 08 OVERWRITES these files with real pg-boss implementations and switches strings to 'worker ready' / 'scheduler ready'
 - [Phase 01-foundation]: Plan 01-06: APP_ROLE dispatcher (Pattern 1) in src/server.ts runs runMigrations() BEFORE any role entrypoint so worker/scheduler containers also fail fast on schema drift; idempotent + advisory-locked per Plan 03; D-22 graceful shutdown drains pg.Pool on SIGTERM with 60s force-exit fallback
+- [Phase 01-foundation]: Plan 01-08: pg-boss worker/scheduler entrypoints replace Plan 06 stubs at D-01 paths; createBoss uses connectionString (own pool) + declareAllQueues on every boot; both roles emit dual ready signal (logger.info + console.log) for Plan 10 grep contract; D-22 graceful shutdown via boss.stop({ wait, graceful, timeout: 60_000 }) → pool.end()
 
 ### Pending Todos
 
@@ -97,6 +99,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T11:46:51.549Z
-Stopped at: Completed 01-foundation/01-06-PLAN.md
+Last session: 2026-04-27T11:54:01.009Z
+Stopped at: Completed 01-foundation/01-08-PLAN.md
 Resume file: None
