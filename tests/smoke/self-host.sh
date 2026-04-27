@@ -145,7 +145,14 @@ docker run -d --name smoke-worker --network host \
 # Stream logs and wait up to 30s for the ready signal. Plan 08 guarantees
 # the literal `worker ready` appears on stdout (dual-emit: console.log +
 # logger.info).
-if ! timeout 30 docker logs -f smoke-worker 2>&1 | grep -m1 "worker ready"; then
+# pipefail trap: when `grep -m1` matches and exits, it closes the pipe and
+# `docker logs -f` dies with SIGPIPE (nonzero); pipefail then propagates that
+# failure even though grep succeeded. Disable pipefail just for this pipeline.
+set +o pipefail
+timeout 30 docker logs -f smoke-worker 2>&1 | grep -q -m1 "worker ready"
+worker_ready=$?
+set -o pipefail
+if [ $worker_ready -ne 0 ]; then
   log "----- worker logs -----"
   docker logs smoke-worker 2>&1 | tail -50 || true
   log "-----------------------"
@@ -163,7 +170,11 @@ docker run -d --name smoke-scheduler --network host \
   -e APP_ROLE=scheduler \
   $(common_env_args) \
   neotolis:ci
-if ! timeout 30 docker logs -f smoke-scheduler 2>&1 | grep -m1 "scheduler ready"; then
+set +o pipefail
+timeout 30 docker logs -f smoke-scheduler 2>&1 | grep -q -m1 "scheduler ready"
+scheduler_ready=$?
+set -o pipefail
+if [ $scheduler_ready -ne 0 ]; then
   log "----- scheduler logs -----"
   docker logs smoke-scheduler 2>&1 | tail -50 || true
   log "--------------------------"
