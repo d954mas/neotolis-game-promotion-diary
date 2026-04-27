@@ -153,7 +153,7 @@ async function main(): Promise<void> {
         email: args.email,
         email_verified: true,
         name: args.name,
-        aud: process.env.GOOGLE_CLIENT_ID ?? "mock-client-id",
+        aud: process.env.OAUTH_CLIENT_ID ?? "mock-client-id",
       };
     });
 

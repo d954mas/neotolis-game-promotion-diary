@@ -20,6 +20,7 @@ import { createBoss, stopBoss } from "../lib/server/queue-client.js";
 import { pool } from "../lib/server/db/client.js";
 import { logger } from "../lib/server/logger.js";
 import { QUEUES } from "../lib/server/queues.js";
+import { scrubKekFromEnv } from "../lib/server/config/env.js";
 
 /**
  * Boot the pg-boss worker, declare queues, subscribe to internal.healthcheck,
@@ -29,6 +30,10 @@ import { QUEUES } from "../lib/server/queues.js";
  */
 export async function startWorker(): Promise<void> {
   const boss = await createBoss();
+  // P2 KEK scrub: worker has no bundled second copy of env.ts (no SvelteKit
+  // handler.js import), so it's safe to scrub immediately after createBoss
+  // resolves. See env.ts header for the rationale.
+  scrubKekFromEnv();
 
   // Phase 1 no-op handler on `internal.healthcheck`. Phase 3 replaces with
   // real work + adds `poll.*` subscriptions.

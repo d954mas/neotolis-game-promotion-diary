@@ -5,6 +5,13 @@ import { env } from "./config/env.js";
 // `logger.info({ user })` cannot leak an api_key, refresh_token, KEK material,
 // or an Authorization/Cookie header. Add new paths here whenever a new
 // secret-shaped field is introduced anywhere in the codebase.
+//
+// Pino's fast-redact only supports `*` as a full-segment wildcard (e.g.
+// `*.password` or `req.headers.*`); fragment-globs like `encrypted_*` are
+// silently ignored, so each `encrypted_<thing>` field is enumerated explicitly.
+// tests/unit/logger.test.ts exercises every path here against a sentinel value
+// — a typo here will fail that test loudly instead of silently disabling the
+// protection (PITFALL P2 mitigation).
 const REDACT_PATHS = [
   "*.password",
   "*.api_key",
@@ -13,8 +20,11 @@ const REDACT_PATHS = [
   "*.accessToken",
   "*.refresh_token",
   "*.refreshToken",
+  "*.id_token",
+  "*.idToken",
   "*.secret",
-  "*.encrypted_*",
+  "*.encrypted_secret",
+  "*.encrypted_dek",
   "*.wrapped_dek",
   "*.wrappedDek",
   "*.dek",

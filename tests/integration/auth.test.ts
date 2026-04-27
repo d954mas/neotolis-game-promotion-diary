@@ -6,6 +6,7 @@ import { session, user } from "../../src/lib/server/db/schema/auth.js";
 import { uuidv7 } from "../../src/lib/server/ids.js";
 import { signOutAllDevices } from "../../src/lib/server/services/users.js";
 import { invalidateSession } from "../../src/lib/server/services/sessions.js";
+import { createApp } from "../../src/lib/server/http/app.js";
 import { seedUserDirectly } from "./helpers.js";
 
 // VALIDATION 1/2/3/4 (Better Auth Google OAuth happy path) — the full HTTP redirect
@@ -84,5 +85,49 @@ describe("Better Auth — DB session lifecycle (AUTH-01/02/03)", () => {
 
     const all = await db.select().from(user).where(eq(user.email, "dave@test.local"));
     expect(all.length).toBe(1);
+  });
+
+  it("D-08: POST /api/me/sessions/all deletes every session row for the caller", async () => {
+    const { id: userId, signedSessionCookieValue } = await seedUserDirectly({
+      email: "erin@test.local",
+    });
+
+    // Add a second session row directly so we can verify both go.
+    await db.insert(session).values({
+      id: uuidv7(),
+      userId,
+      token: "second-device-token",
+      expiresAt: new Date(Date.now() + 86_400_000),
+    });
+
+    const before = await db.select().from(session).where(eq(session.userId, userId));
+    expect(before.length).toBeGreaterThanOrEqual(2);
+
+    // Drive the route via Hono's testClient — exercises the real
+    // tenantScope middleware + sessionRoutes mount.
+    const app = createApp();
+    const res = await app.fetch(
+      new Request("http://localhost/api/me/sessions/all", {
+        method: "POST",
+        headers: { cookie: `neotolis.session_token=${signedSessionCookieValue}` },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { deletedCount: number };
+    expect(body.deletedCount).toBeGreaterThanOrEqual(2);
+
+    const after = await db.select().from(session).where(eq(session.userId, userId));
+    expect(after.length).toBe(0);
+
+    // Anonymous probe with the now-stale cookie must 401, proving the caller's
+    // own session is also invalidated (the whole point of "from all devices").
+    const probe = await app.fetch(
+      new Request("http://localhost/api/me", {
+        headers: { cookie: `neotolis.session_token=${signedSessionCookieValue}` },
+      }),
+    );
+    expect(probe.status).toBe(401);
+
+    await db.delete(user).where(eq(user.id, userId));
   });
 });

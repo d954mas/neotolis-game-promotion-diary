@@ -49,13 +49,13 @@ jobs:
       # (override via repo secret CI_BETTER_AUTH_SECRET if you want a unique one per repo).
       BETTER_AUTH_SECRET: ${{ secrets.CI_BETTER_AUTH_SECRET || 'ci-secret-must-be-32-chars-long-or-more' }}
       BETTER_AUTH_URL: http://localhost:3000
-      GOOGLE_CLIENT_ID: ci-mock-client-id
-      GOOGLE_CLIENT_SECRET: ci-mock-client-secret
+      OAUTH_CLIENT_ID: ci-mock-client-id
+      OAUTH_CLIENT_SECRET: ci-mock-client-secret
       # Better Auth's genericOAuth plugin fetches OIDC discovery from this URL
       # at boot. Integration tests don't actually drive the OAuth dance (they
       # use seedUserDirectly), but env.ts validates this at module load so a
       # syntactically-valid URL is required.
-      GOOGLE_DISCOVERY_URL: http://localhost:9090/.well-known/openid-configuration
+      OAUTH_DISCOVERY_URL: http://localhost:9090/.well-known/openid-configuration
       # Test KEK is a base64-encoded 32-byte string ("test-kek-" repeated to fill 32 bytes
       # then base64-encoded). Plan 01-04's envelope module verifies this passes the
       # length / base64 / fail-fast guards.
@@ -91,10 +91,10 @@ jobs:
     env:
       BETTER_AUTH_SECRET: ci-smoke-better-auth-secret-32-chars-min
       BETTER_AUTH_URL: http://localhost:3000
-      GOOGLE_CLIENT_ID: mock-client-id
-      GOOGLE_CLIENT_SECRET: mock-client-secret
+      OAUTH_CLIENT_ID: mock-client-id
+      OAUTH_CLIENT_SECRET: mock-client-secret
       # genericOAuth plugin discovery URL; smoke runs the mock on localhost:9090.
-      GOOGLE_DISCOVERY_URL: http://localhost:9090/.well-known/openid-configuration
+      OAUTH_DISCOVERY_URL: http://localhost:9090/.well-known/openid-configuration
       APP_KEK_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/neotolis
       # Smoke runs the production image over plain HTTP; Better Auth would

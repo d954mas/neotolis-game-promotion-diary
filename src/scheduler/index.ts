@@ -19,6 +19,7 @@ import { createBoss, stopBoss } from "../lib/server/queue-client.js";
 import { pool } from "../lib/server/db/client.js";
 import { logger } from "../lib/server/logger.js";
 import { QUEUES } from "../lib/server/queues.js";
+import { scrubKekFromEnv } from "../lib/server/config/env.js";
 
 /**
  * Boot the pg-boss scheduler, declare queues, register the healthcheck cron,
@@ -28,6 +29,9 @@ import { QUEUES } from "../lib/server/queues.js";
  */
 export async function startScheduler(): Promise<void> {
   const boss = await createBoss();
+  // P2 KEK scrub: same as worker — scheduler has no bundled second copy of
+  // env.ts, so it's safe to scrub immediately. See env.ts header.
+  scrubKekFromEnv();
 
   // pg-boss 10.x `schedule(queueName, cronExpression, data?, options?)`
   // registers a recurring enqueue against the named queue. The schedule
