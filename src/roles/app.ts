@@ -22,16 +22,26 @@ export async function start(): Promise<void> {
   const app = createApp();
 
   // SvelteKit adapter-node handler is built into ./build/handler.js by
-  // `pnpm build`. In dev (vite dev), SvelteKit serves itself — this server
-  // is for production. We import dynamically so dev-mode does not require
-  // build/handler.js to exist.
+  // `pnpm build` (vite build, before tsup). In dev (vite dev), SvelteKit
+  // serves itself — this server is for production. We import dynamically so
+  // dev-mode does not require build/handler.js to exist.
+  //
+  // `__SVELTEKIT_HANDLER__` is a tsup-injected constant (see tsup.config.ts
+  // `define`). In the bundled build/server.js it is the string "./handler.js"
+  // (a sibling of build/server.js). In dev (no tsup pass) the constant is
+  // undefined and we fall back to the source-relative path. The `typeof`
+  // guard makes both code paths typecheck with strict TS.
   let svelteHandler: (
     req: import("node:http").IncomingMessage,
     res: import("node:http").ServerResponse,
     next?: () => void,
   ) => void;
   try {
-    const built = (await import(/* @vite-ignore */ "../../build/handler.js" as string)) as {
+    const handlerPath =
+      typeof __SVELTEKIT_HANDLER__ !== "undefined"
+        ? __SVELTEKIT_HANDLER__
+        : "../../build/handler.js";
+    const built = (await import(/* @vite-ignore */ handlerPath)) as {
       handler: typeof svelteHandler;
     };
     svelteHandler = built.handler;
