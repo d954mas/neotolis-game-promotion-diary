@@ -18,12 +18,23 @@ const RawSchema = z.object({
   DATABASE_URL: z.string().url(),
   BETTER_AUTH_URL: z.string().url(),
   BETTER_AUTH_SECRET: z.string().min(32),
-  GOOGLE_CLIENT_ID: z.string().min(1),
-  GOOGLE_CLIENT_SECRET: z.string().min(1),
-  // Better Auth's genericOAuth plugin reads OIDC discovery from this URL so
-  // CI / smoke / self-host can point at oauth2-mock-server while production
-  // points at Google. Default = real Google's discovery document.
-  GOOGLE_DISCOVERY_URL: z
+  // OAuth identity provider — Google by default in both SaaS and self-host.
+  // Self-host operators MAY override OAUTH_DISCOVERY_URL + OAUTH_PROVIDER_ID
+  // to point at any OIDC-compatible IdP (Keycloak, Authentik, Auth0, ...).
+  // This is unsupported / advanced for self-host: SaaS only ships Google,
+  // and the project's auth UX, message strings, and audit semantics are
+  // written assuming Google. SaaS env never overrides any of these.
+  //
+  // OAUTH_PROVIDER_ID is the value written to `account.providerId` in the
+  // Better Auth schema and the value passed to genericOAuth's `providerId`.
+  // If you switch IdP, switch this too — otherwise rows are mislabelled
+  // ("google" against a Keycloak realm) and Better Auth treats them as the
+  // same logical provider (which can be intentional for migrations, but is
+  // a foot-gun by default).
+  OAUTH_PROVIDER_ID: z.string().min(1).default("google"),
+  OAUTH_CLIENT_ID: z.string().min(1),
+  OAUTH_CLIENT_SECRET: z.string().min(1),
+  OAUTH_DISCOVERY_URL: z
     .string()
     .url()
     .default("https://accounts.google.com/.well-known/openid-configuration"),
@@ -109,9 +120,10 @@ export const env = {
   DATABASE_URL: raw.DATABASE_URL,
   BETTER_AUTH_URL: raw.BETTER_AUTH_URL,
   BETTER_AUTH_SECRET: raw.BETTER_AUTH_SECRET,
-  GOOGLE_CLIENT_ID: raw.GOOGLE_CLIENT_ID,
-  GOOGLE_CLIENT_SECRET: raw.GOOGLE_CLIENT_SECRET,
-  GOOGLE_DISCOVERY_URL: raw.GOOGLE_DISCOVERY_URL,
+  OAUTH_PROVIDER_ID: raw.OAUTH_PROVIDER_ID,
+  OAUTH_CLIENT_ID: raw.OAUTH_CLIENT_ID,
+  OAUTH_CLIENT_SECRET: raw.OAUTH_CLIENT_SECRET,
+  OAUTH_DISCOVERY_URL: raw.OAUTH_DISCOVERY_URL,
   TRUSTED_ORIGINS,
   TRUSTED_PROXY_CIDR: raw.TRUSTED_PROXY_CIDR,
   COOKIE_DOMAIN: raw.COOKIE_DOMAIN,

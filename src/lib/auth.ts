@@ -22,10 +22,15 @@
 // redirect always points at real Google — incompatible with CI/smoke runs
 // that need to talk to oauth2-mock-server. The genericOAuth plugin exposes
 // `discoveryUrl` (and explicit endpoint overrides), so the same code works
-// against real Google in production and the mock IdP in CI/smoke. The
-// account row's `providerId` stays "google" by construction
-// (genericOAuth uses the configured providerId verbatim — see
-// node_modules/better-auth/dist/plugins/generic-oauth/routes.mjs:246,266).
+// against real Google in production and the mock IdP in CI/smoke.
+//
+// The account row's `providerId` is env-driven via OAUTH_PROVIDER_ID
+// (default "google" — SaaS never overrides). Self-host operators who
+// override OAUTH_DISCOVERY_URL to point at a non-Google IdP MUST also
+// override OAUTH_PROVIDER_ID, otherwise rows are mislabelled (a Keycloak
+// account stored as `providerId="google"`). See env.ts for the full
+// rationale on the OAUTH_* family of env vars and the SaaS-vs-self-host
+// support contract.
 
 import { betterAuth } from "better-auth";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
@@ -54,18 +59,17 @@ export const auth = betterAuth({
   secret: env.BETTER_AUTH_SECRET,
   trustedOrigins: env.TRUSTED_ORIGINS,
   plugins: [
-    // genericOAuth plugin used so discoveryUrl is env-driven; CI/smoke point
-    // at oauth2-mock-server, prod points at
-    // https://accounts.google.com/.well-known/openid-configuration.
-    // account.providerId='google' preserved (the plugin uses the configured
-    // providerId verbatim for the account row).
+    // genericOAuth plugin — discoveryUrl + providerId are env-driven via
+    // the OAUTH_* family. SaaS uses defaults (Google). Self-host can override
+    // to any OIDC-compatible IdP at their own risk; see env.ts for the
+    // support contract.
     genericOAuth({
       config: [
         {
-          providerId: "google",
-          clientId: env.GOOGLE_CLIENT_ID,
-          clientSecret: env.GOOGLE_CLIENT_SECRET,
-          discoveryUrl: env.GOOGLE_DISCOVERY_URL,
+          providerId: env.OAUTH_PROVIDER_ID,
+          clientId: env.OAUTH_CLIENT_ID,
+          clientSecret: env.OAUTH_CLIENT_SECRET,
+          discoveryUrl: env.OAUTH_DISCOVERY_URL,
           scopes: ["openid", "email", "profile"],
           pkce: true,
         },

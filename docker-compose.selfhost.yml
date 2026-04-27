@@ -6,7 +6,7 @@
 # Use:
 #   APP_KEK_BASE64=$(openssl rand -base64 32) \
 #   BETTER_AUTH_SECRET=$(openssl rand -hex 32) \
-#   GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
+#   OAUTH_CLIENT_ID=... OAUTH_CLIENT_SECRET=... \
 #   docker compose -f docker-compose.selfhost.yml up -d --build
 
 services:
@@ -32,8 +32,8 @@ services:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/neotolis
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID}
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
       APP_KEK_BASE64: ${APP_KEK_BASE64}
       # D-20: empty default = trust nothing (use socket peer). Override for self-host
       # behind nginx/Caddy: TRUSTED_PROXY_CIDR=127.0.0.1/32
@@ -56,8 +56,8 @@ services:
       # though the worker process never serves auth requests. Future-proofs against
       # accidental top-level env reads in shared modules.
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID}
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -70,8 +70,8 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
       APP_KEK_BASE64: ${APP_KEK_BASE64}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID}
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
     depends_on:
       postgres: { condition: service_healthy }
 

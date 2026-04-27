@@ -6,8 +6,8 @@ import { randomBytes } from "node:crypto";
 process.env.DATABASE_URL ??= "postgres://test:test@localhost:5432/test";
 process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
 process.env.BETTER_AUTH_SECRET ??= "x".repeat(40);
-process.env.GOOGLE_CLIENT_ID ??= "test";
-process.env.GOOGLE_CLIENT_SECRET ??= "test";
+process.env.OAUTH_CLIENT_ID ??= "test";
+process.env.OAUTH_CLIENT_SECRET ??= "test";
 process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
 // Trusted CIDRs for these tests: private LAN, loopback, IPv6 loopback,
 // and a real Cloudflare IPv6 prefix (PT4).

@@ -40,14 +40,14 @@ DB_URL="${DATABASE_URL:-postgres://postgres:postgres@localhost:5432/neotolis}"
 BETTER_AUTH_URL_VAL="${BETTER_AUTH_URL:-http://localhost:$APP_PORT}"
 BETTER_AUTH_SECRET_VAL="${BETTER_AUTH_SECRET:-ci-smoke-better-auth-secret-32-chars-min}"
 KEK_BASE64="${APP_KEK_BASE64:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}"
-GOOGLE_CLIENT_ID_VAL="${GOOGLE_CLIENT_ID:-mock-client-id}"
-GOOGLE_CLIENT_SECRET_VAL="${GOOGLE_CLIENT_SECRET:-mock-client-secret}"
+OAUTH_CLIENT_ID_VAL="${OAUTH_CLIENT_ID:-mock-client-id}"
+OAUTH_CLIENT_SECRET_VAL="${OAUTH_CLIENT_SECRET:-mock-client-secret}"
 # genericOAuth plugin (review blocker P0-2 fix) reads OIDC discovery from
 # this URL at boot. Smoke runs the mock IdP on localhost:$MOCK_PORT, so the
 # discovery document is at http://localhost:$MOCK_PORT/.well-known/openid-configuration.
 # Production self-host points at https://accounts.google.com/.well-known/openid-configuration
 # (the env.ts default).
-GOOGLE_DISCOVERY_URL_VAL="${GOOGLE_DISCOVERY_URL:-http://localhost:$MOCK_PORT/.well-known/openid-configuration}"
+OAUTH_DISCOVERY_URL_VAL="${OAUTH_DISCOVERY_URL:-http://localhost:$MOCK_PORT/.well-known/openid-configuration}"
 
 # ============================================================
 # Helpers
@@ -79,9 +79,9 @@ common_env_args() {
 -e DATABASE_URL=$DB_URL
 -e BETTER_AUTH_URL=$BETTER_AUTH_URL_VAL
 -e BETTER_AUTH_SECRET=$BETTER_AUTH_SECRET_VAL
--e GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID_VAL
--e GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET_VAL
--e GOOGLE_DISCOVERY_URL=$GOOGLE_DISCOVERY_URL_VAL
+-e OAUTH_CLIENT_ID=$OAUTH_CLIENT_ID_VAL
+-e OAUTH_CLIENT_SECRET=$OAUTH_CLIENT_SECRET_VAL
+-e OAUTH_DISCOVERY_URL=$OAUTH_DISCOVERY_URL_VAL
 -e APP_KEK_BASE64=$KEK_BASE64
 -e TRUSTED_PROXY_CIDR=
 -e BETTER_AUTH_SECURE_COOKIES=false
