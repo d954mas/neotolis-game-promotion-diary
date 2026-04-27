@@ -67,7 +67,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 02-07-audit-read-service-PLAN.md — Wave 1: audit-read with cursor pagination + audit append-only behavioural test
 - [x] 02-08-routes-and-sweeps-PLAN.md — Wave 2: 8 Hono sub-routers + theme route + anonymous-401 + cross-tenant matrix extensions
 - [x] 02-09-theme-components-paraglide-PLAN.md — Wave 3: theme cookie SSR + design tokens + 18 reusable Svelte components + ~30 Paraglide keys
-- [ ] 02-10-svelte-pages-PLAN.md — Wave 3: 7 SvelteKit pages composing Plan 09 components + cookie-DB theme reconciliation
+- [x] 02-10-svelte-pages-PLAN.md — Wave 3: 7 SvelteKit pages composing Plan 09 components + cookie-DB theme reconciliation
 - [ ] 02-11-smoke-360-validation-PLAN.md — Wave 4: smoke gate Phase 2 GAMES-01 extension + Vitest browser 360px + VALIDATION.md sign-off + checkpoint:human-verify
 **UI hint**: yes
 
@@ -140,7 +140,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 10/10 | Complete | 2026-04-27 |
-| 2. Ingest, Secrets, and Audit | 0/11 | Ready for execution | - |
+| 2. Ingest, Secrets, and Audit | 10/11 | In Progress|  |
 | 3. Polling Pipeline | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
 | 5. Reddit Rules Cockpit | 0/TBD | Not started | - |

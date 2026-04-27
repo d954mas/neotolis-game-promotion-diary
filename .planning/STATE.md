@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02-09-theme-components-paraglide-PLAN.md
-last_updated: "2026-04-27T21:56:49.002Z"
+stopped_at: Completed 02-10-svelte-pages-PLAN.md
+last_updated: "2026-04-27T22:21:17.127Z"
 last_activity: 2026-04-27
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 21
-  completed_plans: 19
+  completed_plans: 20
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02 (ingest-secrets-and-audit) — EXECUTING
-Plan: 10 of 11
+Plan: 11 of 11
 
 ## Performance Metrics
 
@@ -65,6 +65,7 @@ Plan: 10 of 11
 | Phase 02-ingest-secrets-and-audit P07 | 5m 7s | 2 tasks | 6 files |
 | Phase 02-ingest-secrets-and-audit P08 | 6m 41s | 2 tasks | 14 files |
 | Phase 02-ingest-secrets-and-audit P09 | 17m 55s | 3 tasks | 29 files |
+| Phase 02-ingest-secrets-and-audit P10 | 19m 50s | 2 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -147,6 +148,11 @@ Recent decisions affecting current work:
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-09: eslint.config.js .svelte block now includes the same TS-aware no-unused-vars rule (argsIgnorePattern: ^_) as the .ts block — Svelte 5 component callback prop types like onChange: (v: T) => void no longer false-positive
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-09: cookie-wins reconciliation NOT wired here — the third theme test stub stays it.skip with annotation '02-10: cookie wins on signin (deferred to Plan 10 +layout.server.ts wire)'; the reconciliation logic belongs in +layout.server.ts which Plan 10 amends
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-09: TagChip component INTENTIONALLY NOT shipped — UI-SPEC inventory listed it but tag chips render inline as <span class='chip'> in GameCard; promoting to a standalone abstraction now is premature for one consumer (Phase 4 may earn it when chip interactivity arrives)
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-10: RETENTION_DAYS routed via +layout.server.ts (NOT a dedicated GET /api/me/retention route) — preserves env-discipline invariant (src/lib/server/config/env.ts is SOLE env reader); pages consume via await parent(); unit-test grep enforces it
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-10: /events ships per-game-fetch + JS merge (not a global GET /api/events) per UI-SPEC; Phase 6 polish adds the single endpoint when math hurts; indie-scale lists make the JS merge fine in P2
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-10: Plan 09's third theme test stub (cookie-wins reconciliation) flipped from it.skip → live it() exercising +layout.server.ts directly via synthetic event (not via app.request — SvelteKit handler is build-time-only); asserts both result.theme matches cookie AND DB row was updated
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-10: env-discipline grep (tests/unit/logger.test.ts) does not distinguish code from comments — initial Plan 10 comments mentioning literal 'process.env' to explain WHY the value is routed through layout tripped the test; rewrote to 'the Node env' / 'env vars via the Node global' (Rule 3 — blocking — fixes preserve educational intent without weakening the cross-cutting invariant)
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-10: /accounts/youtube intentionally omits channel-level remove (consistent with Plan 02-08 not shipping DELETE /api/youtube-channels/:id — service layer has no removeChannel); per-game detach flow (DELETE /api/games/:gameId/youtube-channels/:channelId) shipped on game-detail page covers the user-facing 'remove' need
 
 ### Pending Todos
 
@@ -160,7 +166,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T21:56:23.190Z
+Last session: 2026-04-27T22:21:17.123Z
 Last Activity: 2026-04-27
-Stopped at: Completed 02-09-theme-components-paraglide-PLAN.md
+Stopped at: Completed 02-10-svelte-pages-PLAN.md
 Resume file: None
