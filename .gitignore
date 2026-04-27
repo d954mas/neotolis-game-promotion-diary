@@ -1,0 +1,11 @@
+node_modules/
+build/
+dist/
+.svelte-kit/
+src/lib/paraglide/
+drizzle/meta/
+*.log
+.env
+.env.local
+coverage/
+.DS_Store

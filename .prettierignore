@@ -1,0 +1,6 @@
+node_modules/
+build/
+.svelte-kit/
+src/lib/paraglide/
+drizzle/
+pnpm-lock.yaml
