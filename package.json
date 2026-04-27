@@ -10,7 +10,7 @@
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build && tsup",
+    "build": "pnpm paraglide:compile && svelte-kit sync && vite build && tsup",
     "preview": "vite preview",
     "paraglide:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide",
     "typecheck": "pnpm paraglide:compile && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",

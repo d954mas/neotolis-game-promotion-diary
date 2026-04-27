@@ -55,34 +55,45 @@ export async function start(): Promise<void> {
   }
 
   // SvelteKit pass-through: anything not matched above goes to SvelteKit.
+  //
+  // adapter-node writes directly to `outgoing` (Node's http.ServerResponse),
+  // so we cannot return a normal Hono Response — @hono/node-server would try
+  // to writeHead again and trip ERR_HTTP_HEADERS_SENT. Instead we return a
+  // sentinel Response and rely on @hono/node-server's outgoing.writableEnded
+  // check to bail before writing. The `next` callback is the explicit
+  // "SvelteKit didn't match this route" path — we serve a 404 in that case.
   app.all("*", async (c) => {
+    const ctx = c.env as
+      | {
+          incoming?: import("node:http").IncomingMessage;
+          outgoing?: import("node:http").ServerResponse;
+        }
+      | undefined;
+    const incoming = ctx?.incoming;
+    const outgoing = ctx?.outgoing;
+    if (!incoming || !outgoing) {
+      return c.text("node adapter context missing", 500);
+    }
     return new Promise<Response>((resolve) => {
-      const ctx = c.env as
-        | {
-            incoming?: import("node:http").IncomingMessage;
-            outgoing?: import("node:http").ServerResponse;
-          }
-        | undefined;
-      const incoming = ctx?.incoming;
-      const outgoing = ctx?.outgoing;
-      if (!incoming || !outgoing) {
-        resolve(c.text("node adapter context missing", 500));
-        return;
-      }
       let resolved = false;
+      const settle = (resp: Response): void => {
+        if (resolved) return;
+        resolved = true;
+        resolve(resp);
+      };
       svelteHandler(incoming, outgoing, () => {
-        if (!resolved) {
-          resolved = true;
-          resolve(c.text("not found", 404));
-        }
+        // SvelteKit decided this request is not its responsibility.
+        // outgoing has not been written; we can safely return a Hono 404.
+        settle(c.text("not found", 404));
       });
-      // adapter-node writes directly to outgoing; we resolve a sentinel
-      // Response once the response has been finished so Hono can settle.
+      // SvelteKit handled the request and wrote directly to outgoing.
+      // Return an empty Response — @hono/node-server checks
+      // outgoing.writableEnded before writing, so this is a no-op.
+      outgoing.on("close", () => {
+        settle(new Response(null, { status: outgoing.statusCode || 200 }));
+      });
       outgoing.on("finish", () => {
-        if (!resolved) {
-          resolved = true;
-          resolve(new Response(null, { status: outgoing.statusCode }));
-        }
+        settle(new Response(null, { status: outgoing.statusCode || 200 }));
       });
     });
   });

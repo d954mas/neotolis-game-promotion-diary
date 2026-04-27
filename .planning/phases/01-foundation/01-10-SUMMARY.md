@@ -88,4 +88,21 @@ The smoke gate is the load-bearing trust signal for the open-source angle (PROJE
 
 ## Task Commits
 
-The original Plan-10 work landed in commits c1eaca7..eed82c3 on `master` (Wave 5). The post-Phase-1 review re-fataling and root-cause fix landed on `fix/post-phase-1-review` (this branch).
+The original Plan-10 work landed in commit `b69eb81` ("#4 Phase 1: foundation") on `master` — the squashed root commit that captures all 10 plans of Phase 1 in one revision. The post-Phase-1 review's re-fataling of the dashboard-render assertion and the underlying zod-version root-cause fix landed on `fix/post-phase-1-review` (this branch, closing issue #5).
+
+## Self-Check: PASSED
+
+- [x] Smoke script + driver written and committed
+- [x] Smoke job wired into `.github/workflows/ci.yml`
+- [x] All six numbered D-15 assertions present and active in `tests/smoke/self-host.sh` (Phase 1 scope)
+- [x] Image ENTRYPOINT exercised — no `sh -c` wrapper, no entrypoint override (BLOCKER 7 mitigation)
+- [x] D-13 mechanism deviation captured in `01-CONTEXT.md` `<deviations>` block
+- [x] INFO I2 path resolved via genericOAuth `discoveryUrl` env knob (post-Phase-1 review fix)
+- [x] Dashboard-render assertion fatal at merge time (no PARTIAL fall-through)
+- [x] VALIDATION.md frontmatter ratified
+
+---
+
+*Phase: 01-foundation*
+*Plan: 10*
+*Completed: 2026-04-27 (re-fataled in #5 / post-Phase-1 review)*
