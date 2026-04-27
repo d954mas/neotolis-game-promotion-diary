@@ -1,10 +1,13 @@
 ---
 phase: 2
 slug: ingest-secrets-and-audit
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-04-27
+reviewed_at: 2026-04-27
+checker_verdict: APPROVED
+checker_flags: 2
 ---
 
 # Phase 2 — UI Design Contract
