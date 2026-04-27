@@ -38,7 +38,7 @@ This phase delivers no end-user features beyond "sign in, see an empty dashboard
 
 ### Self-Host CI Gate
 
-- **D-13 — Better Auth test mode for OAuth in CI.** Use Better Auth's built-in dev / test provider configured via env flag. No external mock OIDC server. Less moving parts in CI; failures point at our code, not at a mock infrastructure issue.
+- **D-13 — Better Auth test mode for OAuth in CI.** Use Better Auth's built-in dev / test provider configured via env flag. No external mock OIDC server. Less moving parts in CI; failures point at our code, not at a mock infrastructure issue. **(See `<deviations>` block below — D-13 mechanism updated 2026-04-27 to use `oauth2-mock-server` because Better Auth 1.6.x does not expose a built-in test provider; intent is preserved.)**
 - **D-14 — SaaS-leak detection: grep + runtime checks.** (1) CI grep for hardcoded admin emails, telemetry beacon URLs, Cloudflare-only headers without graceful fallback (`CF-*` referenced outside trusted-proxy module). (2) Smoke test boots the image with a minimal env (no `CF_*`, no `ANALYTICS_*`) and asserts startup succeeds. Both gates fail the PR.
 - **D-15 — Smoke test asserts: boot in 3 roles + login → dashboard + cross-tenant 404 + anonymous 401.** Concretely:
   1. `docker run -e APP_ROLE=app …` boots, `/healthz` returns 200, `/readyz` returns 200 once migrations finish.
@@ -86,6 +86,17 @@ The following are intentionally not locked — planner picks during plan-phase:
 None — no pending todos matched Phase 1.
 
 </decisions>
+
+<deviations>
+## Decision Deviations Recorded During Planning
+
+Mechanism updates accepted by the user that adjust HOW a locked decision is implemented while preserving the original INTENT. Future agents reading CONTEXT.md should treat these as authoritative refinements of the corresponding D-NN.
+
+- **D-13 mechanism update (2026-04-27).** D-13's INTENT was "mocked OAuth in CI, no external SaaS dependency, failures point at our code" — that is preserved. The LITERAL mechanism ("Better Auth's built-in dev / test provider") does not exist in Better Auth 1.6.x. Substitute mechanism: **`oauth2-mock-server` (npm package)**, run as a sidecar on `localhost:9090` during the CI smoke job and during integration tests. Better Auth's Google provider is pointed at the mock issuer URL via env (`GOOGLE_ISSUER_URL` if Better Auth exposes the knob, otherwise the mock server is configured to mint id_tokens with `iss: 'https://accounts.google.com'`). User accepted this substitution on 2026-04-27 (no checkpoint required). Plans 05 and 10 reference D-13 = `oauth2-mock-server`.
+
+- **Phase 1 DEPLOY-05 scope (2026-04-27).** D-15 success criterion #4 originally read "Self-host CI smoke test passes on every PR: boots the image with minimal env, signs in via OAuth mock, **creates a game, runs a poll stub**, and asserts no SaaS-only assumption leaked." The "creates a game" and "runs a poll stub" clauses are deferred: Phase 1 has no game model (Phase 2 lands GAMES-01) and no poll worker handlers (Phase 3 lands POLL-01..06). Phase 1 smoke covers boot + auth happy path + tenant scope hold + all three roles dispatch + i18n message resolution + no SaaS-only assumption. Phase 2 extends smoke to "create a game"; Phase 3 to "run a poll stub". User accepted this scope on 2026-04-27. ROADMAP Phase 1 SC#4 has been updated to match.
+
+</deviations>
 
 <canonical_refs>
 ## Canonical References
@@ -168,3 +179,4 @@ None.
 
 *Phase: 01-foundation*
 *Context gathered: 2026-04-27*
+*Revision 1: 2026-04-27 — appended `<deviations>` block (D-13 mechanism, DEPLOY-05 scope) per checker iteration 1.*
