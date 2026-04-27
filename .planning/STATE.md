@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02-01-traceability-and-test-scaffolds-PLAN.md
-last_updated: "2026-04-27T20:09:03.508Z"
+stopped_at: Completed 02-02-eslint-tenant-scope-rule-PLAN.md
+last_updated: "2026-04-27T20:19:47.757Z"
 last_activity: 2026-04-27
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 21
-  completed_plans: 11
+  completed_plans: 12
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02 (ingest-secrets-and-audit) — EXECUTING
-Plan: 2 of 11
+Plan: 3 of 11
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Plan: 2 of 11
 | Phase 01-foundation P09 | 3min | 2 tasks | 7 files |
 | Phase 01-foundation P07 | ~6min | 2 tasks | 11 files |
 | Phase 02-ingest-secrets-and-audit P01 | 5min | 2 tasks | 15 files |
+| Phase 02-ingest-secrets-and-audit P02 | 7min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -100,6 +101,10 @@ Recent decisions affecting current work:
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-01: GAMES-04 split into GAMES-04a (P2: YouTube channels — typed example for social-handle pattern) + GAMES-04b/c/d (Backlog: Telegram/Twitter/Discord, trigger-gated by real user request); avoids speculative 4-channel ship
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-01: KEYS-01 (YouTube key) + KEYS-02 (Reddit OAuth) + INGEST-01 (Reddit URL) deferred Phase 2 → Phase 3; each secret/ingest path lands alongside its consuming poll adapter (poll.youtube / poll.reddit) so no orphan UI ships
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-01: AGENTS.md gained ## Privacy & multi-tenancy section (8 invariants + 6 P0-block anti-patterns) as the load-bearing contract downstream planners/executors/checkers cite by invariant number (D-36 / DV-6)
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-02: TENANT_TABLES = 8 Phase-2 tables (games, gameSteamListings, youtubeChannels, gameYoutubeChannels, apiKeysSteam, trackedYoutubeVideos, events, auditLog); ALLOWLIST = 4 Better Auth tables (user/session/account/verification) + Phase-5 subredditRules; Phase 3 will classify any new worker-internal tables it lands
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-02: RuleTester import path = @typescript-eslint/utils/ts-eslint (deprecated transitive re-export, plan-authorised fallback) — the standalone @typescript-eslint/rule-tester package is not in the dep graph. Wrapped class IS ESLint 9's own RuleTester via inheritance, so flat-config languageOptions.parser works as intended
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-02 deviation (Rule 1): single-loop chain walker (over MemberExpression / CallExpression / AwaitExpression) replaces two-loop walk that exited too early on tx.update(<T>).set({...}).where(...). Without the fix the rule was a vacuous-pass on the update form. RuleTester case 3 caught it before any Phase 2 service shipped
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-02: tenant-scope rule severity = error (not warn) for src/lib/server/services/**; disable comments require -- justification per AGENTS.md Pitfall 7. Two-layer Pattern 1 enforcement: this rule (STRUCTURAL, lint-time) + tests/integration/tenant-scope.test.ts (BEHAVIORAL, runtime — assertions land in plan 02-08)
 
 ### Pending Todos
 
@@ -113,7 +118,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T20:09:03.504Z
+Last session: 2026-04-27T20:19:47.754Z
 Last Activity: 2026-04-27
-Stopped at: Completed 02-01-traceability-and-test-scaffolds-PLAN.md
+Stopped at: Completed 02-02-eslint-tenant-scope-rule-PLAN.md
 Resume file: None

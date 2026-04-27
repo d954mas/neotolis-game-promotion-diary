@@ -59,7 +59,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 11 plans
 **Plan list**:
 - [x] 02-01-traceability-and-test-scaffolds-PLAN.md — Wave 0: REQUIREMENTS / ROADMAP / AGENTS.md traceability uplift + 12 placeholder test files
-- [ ] 02-02-eslint-tenant-scope-rule-PLAN.md — Wave 0: custom ESLint AST rule no-unfiltered-tenant-query (D-38) + RuleTester suite
+- [x] 02-02-eslint-tenant-scope-rule-PLAN.md — Wave 0: custom ESLint AST rule no-unfiltered-tenant-query (D-38) + RuleTester suite
 - [ ] 02-03-schema-and-migration-PLAN.md — Wave 0: 7 new tables + audit-log enum + user.theme_preference + RETENTION_DAYS env + one Drizzle migration
 - [ ] 02-04-games-services-PLAN.md — Wave 1: games + game-steam-listings + youtube-channels services with soft-cascade transactional restore
 - [ ] 02-05-api-keys-steam-service-PLAN.md — Wave 1: api_keys_steam service with envelope encryption + Steam validateKey + DTO ciphertext-strip
