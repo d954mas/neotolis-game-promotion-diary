@@ -99,6 +99,9 @@ importers:
       eslint-plugin-svelte:
         specifier: ^2.46.0
         version: 2.46.1(eslint@9.39.4(jiti@2.6.1))(svelte@5.55.5(@typescript-eslint/types@8.59.0))
+      eslint-plugin-tenant-scope:
+        specifier: link:./eslint-plugin-tenant-scope
+        version: link:eslint-plugin-tenant-scope
       globals:
         specifier: ^15.0.0
         version: 15.15.0

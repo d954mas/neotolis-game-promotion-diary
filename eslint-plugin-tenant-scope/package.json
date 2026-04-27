@@ -1,0 +1,7 @@
+{
+  "name": "eslint-plugin-tenant-scope",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./index.js",
+  "private": true
+}

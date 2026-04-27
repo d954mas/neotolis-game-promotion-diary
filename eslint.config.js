@@ -8,6 +8,7 @@ import sveltePlugin from "eslint-plugin-svelte";
 import svelteParser from "svelte-eslint-parser";
 import prettier from "eslint-config-prettier";
 import globals from "globals";
+import tenantScope from "./eslint-plugin-tenant-scope/index.js";
 
 const noProcessEnv = {
   "no-restricted-properties": [
@@ -75,6 +76,20 @@ export default [
     rules: {
       "no-undef": "off",
       ...noProcessEnv,
+    },
+  },
+  // Plan 02-02 (Phase 2 Wave 0): structural Pattern 1 enforcement.
+  // The tenant-scope rule fires on Drizzle queries against tenant-owned
+  // tables that omit the mandatory `userId` filter. It is the lint-time
+  // half of the two-layer Pattern 1 defense (the integration test
+  // `tests/integration/tenant-scope.test.ts` is the runtime half).
+  {
+    files: ["src/lib/server/services/**/*.ts", "src/lib/server/services/**/*.tsx"],
+    plugins: {
+      "tenant-scope": tenantScope,
+    },
+    rules: {
+      "tenant-scope/no-unfiltered-tenant-query": "error",
     },
   },
   // Carve-out: env config is the ONE place process.env is allowed.

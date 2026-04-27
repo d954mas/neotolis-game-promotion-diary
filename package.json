@@ -57,6 +57,7 @@
     "eslint": "^9.13.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-svelte": "^2.46.0",
+    "eslint-plugin-tenant-scope": "link:./eslint-plugin-tenant-scope",
     "globals": "^15.0.0",
     "oauth2-mock-server": "^7.2.0",
     "pino-pretty": "^11.3.0",
