@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02-04-games-services-PLAN.md
-last_updated: "2026-04-27T20:45:28.273Z"
+stopped_at: Completed 02-05-api-keys-steam-service-PLAN.md
+last_updated: "2026-04-27T20:55:46.721Z"
 last_activity: 2026-04-27
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 21
-  completed_plans: 14
+  completed_plans: 15
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02 (ingest-secrets-and-audit) — EXECUTING
-Plan: 5 of 11
+Plan: 6 of 11
 
 ## Performance Metrics
 
@@ -60,6 +60,7 @@ Plan: 5 of 11
 | Phase 02-ingest-secrets-and-audit P02 | 7min | 2 tasks | 9 files |
 | Phase 02-ingest-secrets-and-audit P03 | 8min 30s | 2 tasks | 18 files |
 | Phase 02-ingest-secrets-and-audit P04 | 7min 38s | 2 tasks | 7 files |
+| Phase 02-ingest-secrets-and-audit P05 | 5m 33s | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -116,6 +117,11 @@ Recent decisions affecting current work:
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-04: fetchSteamAppDetails wraps full fetch in try/catch (deviation Rule 1 from RESEARCH.md verbatim shape which had try/finally only) — addSteamListing always succeeds on Steam-down; AbortError no longer bubbles out as 500
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-04: softDeleteGame + updateGame + removeSteamListing add isNull(deletedAt) to WHERE so a second call on already-deleted row throws NotFoundError (idempotency made explicit; Plan 02-08 routes expect 404 on double-delete) — minor refinement to RESEARCH.md soft-cascade pattern
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-04: Phase 1 deferred VALIDATION 9 (cross-tenant DELETE 404) closed at the service layer in games.test.ts — softDeleteGame(userB.id, aGame.id) throws NotFoundError; Plan 02-08 will additionally cover the HTTP boundary
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-05: probeSteamKey private helper centralizes 4xx→422 / 5xx→502 mapping; both createSteamKey and rotateSteamKey call it so error semantics stay consistent and a future audit/retry refinement happens in one location
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-05: rotateSteamKey calls getSteamKeyById BEFORE the Steam probe (Rule 2 fix) — cross-tenant rotation attempts throw NotFoundError without ever calling Steam, closing existence-leak side-channel via response timing and saving Valve quota
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-05: removeSteamKey audits BEFORE the DELETE (D-32 forensics) — even if DELETE fails the security signal is captured. Reverse order would let a transient DB error swallow the audit row
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-05: decryptSteamKeyForOperator exported but documented internal-only — Phase 2 only uses it in tests (envelope round-trip proof); Phase 3 worker is the only future production caller. The 'forOperator' suffix is the reviewer signal that any PR adding a Hono route fails review under D-39
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-05: toApiKeySteamDto behavioural test in tests/unit/dto.test.ts is the runtime guard for D-39 — TypeScript erases at runtime; the projection function is the only barrier. Test asserts strip happens against a row literal carrying every ciphertext column
 
 ### Pending Todos
 
@@ -129,7 +135,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T20:45:28.270Z
+Last session: 2026-04-27T20:55:46.718Z
 Last Activity: 2026-04-27
-Stopped at: Completed 02-04-games-services-PLAN.md
+Stopped at: Completed 02-05-api-keys-steam-service-PLAN.md
 Resume file: None
