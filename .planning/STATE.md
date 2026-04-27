@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 01-foundation/01-03-PLAN.md
-last_updated: "2026-04-27T11:33:28.815Z"
+stopped_at: Completed 01-foundation/01-05-PLAN.md
+last_updated: "2026-04-27T11:44:53.921Z"
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 10
-  completed_plans: 4
+  completed_plans: 5
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 01 (foundation) — EXECUTING
-Plan: 5 of 10
+Plan: 6 of 10
 
 ## Performance Metrics
 
@@ -50,6 +50,7 @@ Plan: 5 of 10
 | Phase 01-foundation P02 | 14min | 2 tasks | 22 files |
 | Phase 01-foundation P04 | 4min | 2 tasks | 2 files |
 | Phase 01-foundation P03 | 4min | 2 tasks | 12 files |
+| Phase 01-foundation P05 | 4min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,9 @@ Recent decisions affecting current work:
 - [Phase 01-foundation]: Plan 01-03: audit_log INSERT-only with tenant-relative (user_id, created_at) cursor index — PITFALL P19 cannot fire because the only efficient lookup is tenant-scoped; writeAudit never throws to caller
 - [Phase 01-foundation]: Plan 01-03: queue registry declares 4 poll queues + internal.healthcheck from Phase 1 even though Phase 1 runs no jobs (Open Question Q1); MinimalBoss interface insulates from pg-boss 10.x→12.x type drift
 - [Phase 01-foundation]: Plan 01-03 deviation (Rule 1): un-ignored drizzle/meta/ from .gitignore — Drizzle migrator requires _journal.json on disk to discover migrations; without it, runMigrations() is a silent no-op on fresh clones
+- [Phase 01-foundation]: Plan 01-05: INFO I2 Path 3 (mock-side iss override to https://accounts.google.com) chosen because Better Auth 1.6.x's google provider has no exposed issuer/discoveryUrl knob; oauth2-mock-server beforeTokenSigning hook coerces iss so test path === prod path on the Better Auth side
+- [Phase 01-foundation]: Plan 01-05: P3 (DTO discipline) tripwire enforced via structural grep — dto.ts cannot contain the literal strings googleSub/refreshToken/accessToken anywhere (including comments); future contributors who paste those names back hit the tripwire
+- [Phase 01-foundation]: Plan 01-05: D-13 mechanism = oauth2-mock-server confirmed working; seedUserDirectly bypasses Better Auth signin path for DB-level integration tests; full HTTP redirect dance lands in Plan 01-10 smoke test
 
 ### Pending Todos
 
@@ -87,6 +91,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T11:33:28.812Z
-Stopped at: Completed 01-foundation/01-03-PLAN.md
+Last session: 2026-04-27T11:44:43.810Z
+Stopped at: Completed 01-foundation/01-05-PLAN.md
 Resume file: None

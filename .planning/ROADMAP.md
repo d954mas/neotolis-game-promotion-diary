@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 01-02-PLAN.md — Wave 0 test scaffolding (vitest split, Wave 0 placeholder tests) + Dockerfile + GitHub Actions CI skeleton
 - [x] 01-03-PLAN.md — Drizzle pg client + advisory-locked migrate runner + Better Auth schema + audit_log table + pg-boss queue registry
 - [x] 01-04-PLAN.md — TDD envelope encryption module (AES-256-GCM, KEK→DEK, kek_version, rotation)
-- [ ] 01-05-PLAN.md — Better Auth instance (Google OAuth, DB sessions, sign-out-all-devices) + UserDto/SessionDto + oauth2-mock-server lifecycle helpers
+- [x] 01-05-PLAN.md — Better Auth instance (Google OAuth, DB sessions, sign-out-all-devices) + UserDto/SessionDto + oauth2-mock-server lifecycle helpers
 - [ ] 01-06-PLAN.md — Hono app + trusted-proxy middleware (D-19/D-20 + CVE-2026-27700 mitigation) + /healthz + /readyz + APP_ROLE=app entrypoint + SvelteKit pass-through + minimal pages
 - [ ] 01-07-PLAN.md — Tenant-scope middleware (404 not 403) + /api/me + anonymous-401 sweep + cross-tenant integration test
 - [ ] 01-08-PLAN.md — APP_ROLE=worker + APP_ROLE=scheduler entrypoints + pg-boss createBoss/stopBoss with graceful drain

@@ -62,10 +62,10 @@ revision_note: "Iteration 1 — applied checker fixes (BLOCKERS 1-7, W1-W4, INFO
 | 1-04-01-B1 | 04 | 2 | AUTH-03 | unit | `pnpm vitest run tests/unit/encryption.test.ts -t "B1"` — missing KEK version → "KEK v<n>" error (VALIDATION 13, P2 fail-fast) | ✅ | ✅ active |
 | 1-04-01-R1 | 04 | 2 | AUTH-03 | unit | `pnpm vitest run tests/unit/encryption.test.ts -t "R1"` — rotateDek re-wraps DEK only, ciphertext byte-identical (D-10) | ✅ | ✅ active |
 | 1-04-01-R2 | 04 | 2 | AUTH-03 | unit | `pnpm vitest run tests/unit/encryption.test.ts -t "R2"` — rotated row decrypts to original plaintext (D-10) | ✅ | ✅ active |
-| 1-05-01 | 05 | 3 | AUTH-01/02/03 | structural | node -e (auth.ts + dto.ts grep — BLOCKER 1 / D-13 = oauth2-mock-server reference; INFO I2 issuer-URL knob comment) | ✅ W0 | ⬜ pending |
-| 1-05-02 | 05 | 3 | AUTH-02 | integration | `pnpm vitest run tests/integration/auth.test.ts -t "invalidateSession"` (D-13 = oauth2-mock-server per CONTEXT.md `<deviations>`) | ✅ W0 | ⬜ pending |
-| 1-05-02b | 05 | 3 | AUTH-02 | integration | `pnpm vitest run tests/integration/auth.test.ts -t "all devices"` | ✅ W0 | ⬜ pending |
-| 1-05-02c | 05 | 3 | AUTH-03 | integration | `pnpm vitest run tests/integration/auth.test.ts -t "returning user resumes"` | ✅ W0 | ⬜ pending |
+| 1-05-01 | 05 | 3 | AUTH-01/02/03 | structural | node -e (auth.ts + dto.ts grep — BLOCKER 1 / D-13 = oauth2-mock-server reference; INFO I2 issuer-URL knob comment) | ✅ W0 | ✅ active |
+| 1-05-02 | 05 | 3 | AUTH-02 | integration | `pnpm vitest run tests/integration/auth.test.ts -t "invalidateSession"` (D-13 = oauth2-mock-server per CONTEXT.md `<deviations>`) | ✅ W0 | ✅ active |
+| 1-05-02b | 05 | 3 | AUTH-02 | integration | `pnpm vitest run tests/integration/auth.test.ts -t "all devices"` | ✅ W0 | ✅ active |
+| 1-05-02c | 05 | 3 | AUTH-03 | integration | `pnpm vitest run tests/integration/auth.test.ts -t "returning user resumes"` | ✅ W0 | ✅ active |
 | 1-06-01-PT1 | 06 | 3 | DEPLOY-05 | unit (middleware) | `pnpm vitest run tests/unit/proxy-trust.test.ts -t "PT1"` — BLOCKER 3 fix: PT1-PT6 owned by Plan 06, NOT deferred | ✅ W0 | ⬜ pending |
 | 1-06-01-PT2 | 06 | 3 | DEPLOY-05 | unit (middleware) | `pnpm vitest run tests/unit/proxy-trust.test.ts -t "PT2"` — multi-hop XFF right-to-left walk | ✅ W0 | ⬜ pending |
 | 1-06-01-PT3 | 06 | 3 | DEPLOY-05 | unit (middleware) | `pnpm vitest run tests/unit/proxy-trust.test.ts -t "PT3"` — XFF spoofing rejected (CVE-2026-27700) | ✅ W0 | ⬜ pending |
