@@ -99,6 +99,15 @@ jobs:
           cache: pnpm
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
+      # Build SvelteKit + node-adapter output BEFORE docker build so the
+      # Dockerfile's COPY of /app/build sees real artifacts. Plan 02's
+      # original CI workflow assumed `pnpm build` ran inside the Dockerfile
+      # build stage (it does — see Dockerfile `RUN pnpm run build`), but
+      # the smoke test also invokes `pnpm tsx tests/smoke/lib/oauth-mock-driver.ts`
+      # outside Docker, which needs the workspace's compiled SvelteKit
+      # artifacts to be coherent (Paraglide compiled messages, server
+      # build). Running pnpm build here makes the host workspace match.
+      - run: pnpm build
       - run: docker build -t neotolis:ci .
 
       # D-14: SaaS-leak detection. FAIL the PR if known SaaS-only strings or unguarded
