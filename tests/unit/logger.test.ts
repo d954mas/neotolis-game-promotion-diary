@@ -107,9 +107,7 @@ describe("logger redaction", () => {
 
     if (offenders.length > 0) {
       const detail = offenders.map((o) => `  ${o.file}:${o.line}  ${o.text}`).join("\n");
-      throw new Error(
-        `process.env access found outside src/lib/server/config/env.ts:\n${detail}`,
-      );
+      throw new Error(`process.env access found outside src/lib/server/config/env.ts:\n${detail}`);
     }
   });
 });

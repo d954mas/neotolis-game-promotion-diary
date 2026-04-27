@@ -23,9 +23,6 @@ export const sessionRoutes = new Hono<{
 sessionRoutes.post("/me/sessions/all", async (c) => {
   const userId = c.var.userId;
   const result = await signOutAllDevices(userId);
-  logger.info(
-    { userId, deletedCount: result.deletedCount },
-    "user signed out of all devices",
-  );
+  logger.info({ userId, deletedCount: result.deletedCount }, "user signed out of all devices");
   return c.json(result);
 });

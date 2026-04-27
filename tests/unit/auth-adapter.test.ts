@@ -32,13 +32,7 @@ vi.mock("better-auth/adapters/drizzle", () => ({
       storage.row = { ...storage.row, ...update };
       return storage.row;
     },
-    updateMany: async ({
-      model,
-      update,
-    }: {
-      model: string;
-      update: Record<string, unknown>;
-    }) => {
+    updateMany: async ({ model, update }: { model: string; update: Record<string, unknown> }) => {
       calls.push({ op: "updateMany", model, payload: update });
       storage.row = { ...storage.row, ...update };
       return 1;
