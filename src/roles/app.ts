@@ -37,9 +37,7 @@ export async function start(): Promise<void> {
     next?: () => void,
   ) => void;
   const handlerPath =
-    typeof __SVELTEKIT_HANDLER__ !== "undefined"
-      ? __SVELTEKIT_HANDLER__
-      : "../../build/handler.js";
+    typeof __SVELTEKIT_HANDLER__ !== "undefined" ? __SVELTEKIT_HANDLER__ : "../../build/handler.js";
   try {
     const built = (await import(/* @vite-ignore */ handlerPath)) as {
       handler: typeof svelteHandler;
