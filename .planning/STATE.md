@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 01-foundation/01-09-PLAN.md
-last_updated: "2026-04-27T11:55:19.532Z"
+stopped_at: Completed 01-foundation/01-07-PLAN.md
+last_updated: "2026-04-27T11:58:42.016Z"
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 10
-  completed_plans: 8
+  completed_plans: 9
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 01 (foundation) — EXECUTING
-Plan: 9 of 10
+Plan: 10 of 10
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Plan: 9 of 10
 | Phase 01-foundation P06 | ~5min 30s | 2 tasks | 14 files |
 | Phase 01-foundation P08 | ~2min | 1 tasks | 3 files |
 | Phase 01-foundation P09 | 3min | 2 tasks | 7 files |
+| Phase 01-foundation P07 | ~6min | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -90,6 +91,10 @@ Recent decisions affecting current work:
 - [Phase 01-foundation]: Plan 01-09: project.inlang/settings.json wires baseLocale=en + locales=[en] (D-17) with @inlang/plugin-message-format@4 reading messages/{locale}.json — locale-add is content-only
 - [Phase 01-foundation]: Plan 01-09: messages/en.json holds 9 Phase 1 UI strings (D-18 single-file dictionary at repo root); every src/routes/*.svelte uses m.* exclusively, no hard-coded English literals
 - [Phase 01-foundation]: Plan 01-09: VALIDATION 19 (locale-add invariant) asserted via explicit keyset toEqual on Object.keys(messages/en.json).sort() — more durable than toMatchSnapshot across renames; integration test greps m.<key>(...) over .svelte files and asserts each key exists in en.json
+- [Phase 01-foundation]: Plan 01-07: Pattern 3 enforcement is TWO LAYERS — tenantScope middleware enforces 'must be SOMEONE' (401 anon); service functions enforce 'must be the OWNER' (NotFoundError on cross-tenant). NotFoundError → 404+'not_found' at HTTP boundary; ForbiddenError exists in taxonomy but is RESERVED for Phase 6+ admin endpoints (tenant-owned resources MUST throw NotFoundError, not ForbiddenError)
+- [Phase 01-foundation]: Plan 01-07: Anonymous-401 sweep is COMPLEMENT to (not REPLACEMENT for) explicit per-route assertions — MUST_BE_PROTECTED=['/api/me'] toContain guard + protectedRoutes.length>=1 non-empty guard + explicit per-route /api/me 401/200 tests, all three layers shipped (BLOCKER 2 fix). Phase 2 must extend MUST_BE_PROTECTED when adding /api/games etc.
+- [Phase 01-foundation]: Plan 01-07: Cross-tenant 404 sentinel via audit_log (Phase 1 has no /api/games yet); double-eq(userId) WHERE clause encodes Pattern 3 by construction. VALIDATION 8/9 (write/delete cross-tenant) explicit it.skip with EXACT W1 annotations 'deferred to Phase 2: no writable/deletable resource in Phase 1' — Phase 2 GAMES-01 turns them on
+- [Phase 01-foundation]: Plan 01-07: PITFALL P3 DTO discipline is BEHAVIORAL tripwire at runtime (not just schema-as-types) — tests/unit/dto.test.ts asserts toUserDto STRIPS googleSub/refreshToken/accessToken/idToken/password/emailVerified even when input rows carry them. TypeScript erases at runtime; the projection function is the runtime guard
 
 ### Pending Todos
 
@@ -103,6 +108,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T11:55:19.529Z
-Stopped at: Completed 01-foundation/01-09-PLAN.md
+Last session: 2026-04-27T11:58:24.203Z
+Stopped at: Completed 01-foundation/01-07-PLAN.md
 Resume file: None

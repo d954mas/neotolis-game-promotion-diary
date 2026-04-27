@@ -78,7 +78,7 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 
 ### Privacy, Audit, Export (PRIV)
 
-- [ ] **PRIV-01**: All data is private to the user_id that owns it; there is no public dashboard, share link, or read-only viewer in v1
+- [x] **PRIV-01**: All data is private to the user_id that owns it; there is no public dashboard, share link, or read-only viewer in v1
 - [ ] **PRIV-02**: User can view an audit log in the UI showing logins (timestamp + IP + user-agent), key add/rotate/remove, exports, and bulk deletes — paginated, owner-only
 - [ ] **PRIV-03**: User can export all of their data as a single JSON file and as CSV-per-table; export is audit-logged
 - [ ] **PRIV-04**: User can request account + data deletion; deletion runs as a documented procedure (soft-delete → purge) with audit-log retention only of the deletion event

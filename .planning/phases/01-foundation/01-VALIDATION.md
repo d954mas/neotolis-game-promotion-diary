@@ -73,10 +73,10 @@ revision_note: "Iteration 1 — applied checker fixes (BLOCKERS 1-7, W1-W4, INFO
 | 1-06-01-PT5 | 06 | 3 | DEPLOY-05 | unit (middleware) | `pnpm vitest run tests/unit/proxy-trust.test.ts -t "PT5"` — CF header ignored from untrusted source | ✅ W0 | ⬜ pending |
 | 1-06-01-PT6 | 06 | 3 | DEPLOY-05 | unit (middleware) | `pnpm vitest run tests/unit/proxy-trust.test.ts -t "PT6"` — X-Forwarded-Proto trust gate (HSTS-relevant) | ✅ W0 | ⬜ pending |
 | 1-06-02 | 06 | 3 | DEPLOY-05 | integration | `pnpm vitest run tests/integration/health.test.ts` (also: BLOCKER 4 fix — worker/scheduler stubs at D-01 paths boot cleanly) | ✅ W0 | ⬜ pending |
-| 1-07-01 | 07 | 4 | PRIV-01 | structural | node -e (tenant + me + errors grep) | ✅ W0 | ⬜ pending |
-| 1-07-02 | 07 | 4 | PRIV-01 | integration | `pnpm vitest run tests/integration/anonymous-401.test.ts` — BLOCKER 2 fix: vacuous-pass guard (MUST_BE_PROTECTED allowlist + non-empty assertion) | ✅ W0 | ⬜ pending |
-| 1-07-02b | 07 | 4 | PRIV-01 | integration | `pnpm vitest run tests/integration/tenant-scope.test.ts` (VALIDATION 7 active; 8/9 explicitly deferred per W1) | ✅ W0 | ⬜ pending |
-| 1-07-02c | 07 | 4 | PRIV-01 | unit | `pnpm vitest run tests/unit/dto.test.ts` | ✅ W0 | ⬜ pending |
+| 1-07-01 | 07 | 4 | PRIV-01 | structural | node -e (tenant + me + errors grep) | ✅ | ✅ active |
+| 1-07-02 | 07 | 4 | PRIV-01 | integration | `pnpm vitest run tests/integration/anonymous-401.test.ts` — BLOCKER 2 fix: vacuous-pass guard (MUST_BE_PROTECTED allowlist + non-empty assertion) | ✅ | ✅ active |
+| 1-07-02b | 07 | 4 | PRIV-01 | integration | `pnpm vitest run tests/integration/tenant-scope.test.ts` (VALIDATION 7 active; 8/9 explicitly deferred per W1) | ✅ | ✅ active |
+| 1-07-02c | 07 | 4 | PRIV-01 | unit | `pnpm vitest run tests/unit/dto.test.ts` | ✅ | ✅ active |
 | 1-07-02d | 07 | 4 | PRIV-01 | integration (deferred) | VALIDATION 8 — cross-tenant WRITE — deferred to Phase 2 (no writable resource in Phase 1) per W1 | n/a | ⬜ deferred |
 | 1-07-02e | 07 | 4 | PRIV-01 | integration (deferred) | VALIDATION 9 — cross-tenant DELETE — deferred to Phase 2 (no deletable resource in Phase 1) per W1 | n/a | ⬜ deferred |
 | 1-08-01 | 08 | 4 | DEPLOY-05 | structural | node -e (queue-client + worker + scheduler grep) — W4 fix: paths are src/worker/index.ts and src/scheduler/index.ts (D-01) | ✅ W0 | ⬜ pending |
