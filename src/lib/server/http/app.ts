@@ -18,6 +18,16 @@ import { proxyTrust } from "./middleware/proxy-trust.js";
 import { tenantScope } from "./middleware/tenant.js";
 import { meRoutes } from "./routes/me.js";
 import { sessionRoutes } from "./routes/sessions.js";
+// Phase 2 (Plan 02-08) sub-routers — every Phase 2 service surface gets
+// a Hono sub-router mounted under /api/* so it inherits tenantScope.
+import { gamesRoutes } from "./routes/games.js";
+import { gameListingsRoutes } from "./routes/game-listings.js";
+import { youtubeChannelsRoutes } from "./routes/youtube-channels.js";
+import { apiKeysSteamRoutes } from "./routes/api-keys-steam.js";
+import { itemsYoutubeRoutes } from "./routes/items-youtube.js";
+import { eventsRoutes } from "./routes/events.js";
+import { auditRoutes } from "./routes/audit.js";
+import { meThemeRoutes } from "./routes/me-theme.js";
 import { auth } from "../../auth.js";
 import { migrationsApplied } from "../db/migrate.js";
 import { pool } from "../db/client.js";
@@ -83,9 +93,21 @@ export function createApp(): Hono<AppContext> {
   // by service functions (see src/lib/server/services/errors.ts).
   app.use("/api/*", tenantScope);
 
-  // /api routes (Phase 1: /api/me + /api/me/sessions/all; Phase 2 adds /api/games, etc.).
+  // /api routes — Phase 1 + Phase 2 (Plan 02-08).
   app.route("/api", meRoutes);
   app.route("/api", sessionRoutes);
+  // Phase 2: order matters minimally — `/api/games/*` parameterized routes
+  // (game-listings, youtube-channels-for-game) are registered AFTER the bare
+  // gamesRoutes so Hono's path-matching does not shadow `/api/games/:id`
+  // with `/api/games/:gameId/listings`.
+  app.route("/api", gamesRoutes);
+  app.route("/api", gameListingsRoutes);
+  app.route("/api", youtubeChannelsRoutes);
+  app.route("/api", apiKeysSteamRoutes);
+  app.route("/api", itemsYoutubeRoutes);
+  app.route("/api", eventsRoutes);
+  app.route("/api", auditRoutes);
+  app.route("/api", meThemeRoutes);
 
   return app;
 }
