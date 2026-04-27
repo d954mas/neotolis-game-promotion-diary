@@ -1,0 +1,12 @@
+{
+  "$schema": "https://inlang.com/schema/inlang-message-format",
+  "app_title": "Promotion diary",
+  "dashboard_title": "Promotion diary",
+  "dashboard_welcome_intro": "Hello {name}. Your dashboard is empty — Phase 2 lands games.",
+  "dashboard_unauth_intro": "Sign in with Google to begin.",
+  "login_page_title": "Sign in",
+  "login_button": "Sign in with Google",
+  "login_continue": "Continue with Google",
+  "sign_out": "Sign out",
+  "sign_out_all_devices": "Sign out from all devices"
+}
