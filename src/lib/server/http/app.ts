@@ -15,6 +15,8 @@
 import { Hono } from 'hono';
 import { secureHeaders } from 'hono/secure-headers';
 import { proxyTrust } from './middleware/proxy-trust.js';
+import { tenantScope } from './middleware/tenant.js';
+import { meRoutes } from './routes/me.js';
 import { auth } from '../../auth.js';
 import { migrationsApplied } from '../db/migrate.js';
 import { pool } from '../db/client.js';
@@ -72,13 +74,19 @@ export function createApp(): Hono<AppContext> {
   });
 
   // Better Auth mount (Plan 05). Handles login / callback / signout / getSession.
+  // MUST be mounted BEFORE the /api/* tenant-scope guard so OAuth callbacks
+  // (which arrive anonymously by definition) are not blocked.
   app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw));
 
-  // /api/* (non-auth) is the surface Plan 07 protects with tenantScope. For
-  // Phase 1 Plan 06, expose ONLY /api/me as a sample protected route so
-  // Plan 07's anonymous-401 sweep has at least one route to enumerate.
-  // Plan 07 replaces this stub with the real handler behind tenantScope.
-  app.get('/api/me', (c) => c.json({ error: 'unauthorized' }, 401));
+  // Tenant scope (Plan 07): every /api/* (except /api/auth/* above) requires
+  // a valid Better Auth session. Anonymous requests get 401 + {error:'unauthorized'};
+  // authenticated requests land on the route handler with c.var.userId and
+  // c.var.sessionId set. Pattern 3 (404 not 403) is enforced one layer deeper
+  // by service functions (see src/lib/server/services/errors.ts).
+  app.use('/api/*', tenantScope);
+
+  // /api routes (Phase 1: just /api/me; Phase 2 adds /api/games, etc.).
+  app.route('/api', meRoutes);
 
   return app;
 }
