@@ -83,13 +83,18 @@ export default ESLintUtils.RuleCreator.withoutDocs({
         if (ALLOWLIST_TABLES.has(arg.name)) return;
         if (!TENANT_TABLES.has(arg.name)) return;
 
-        // Walk up to find the surrounding chained expression (statement scope).
+        // Walk up the surrounding chained expression to the outermost call so
+        // `.where(...)` (which sits OUTSIDE this `.from(...)` / `.update(...)`
+        // node) is captured in the chain text. Drizzle chains alternate
+        // CallExpression -> MemberExpression -> CallExpression... so a single
+        // loop that consumes all three node kinds is the only correct walk.
         let chain = node.parent;
-        while (chain && chain.type === "MemberExpression") {
-          chain = chain.parent;
-        }
-        // Walk further if the chain ends inside a CallExpression / await.
-        while (chain && (chain.type === "CallExpression" || chain.type === "AwaitExpression")) {
+        while (
+          chain &&
+          (chain.type === "MemberExpression" ||
+            chain.type === "CallExpression" ||
+            chain.type === "AwaitExpression")
+        ) {
           chain = chain.parent;
         }
 
@@ -118,11 +123,14 @@ export default ESLintUtils.RuleCreator.withoutDocs({
         if (ALLOWLIST_TABLES.has(arg.name)) return;
         if (!TENANT_TABLES.has(arg.name)) return;
 
+        // See update/delete branch comment above — single ping-pong walk.
         let chain = node.parent;
-        while (chain && chain.type === "MemberExpression") {
-          chain = chain.parent;
-        }
-        while (chain && (chain.type === "CallExpression" || chain.type === "AwaitExpression")) {
+        while (
+          chain &&
+          (chain.type === "MemberExpression" ||
+            chain.type === "CallExpression" ||
+            chain.type === "AwaitExpression")
+        ) {
           chain = chain.parent;
         }
 
