@@ -59,31 +59,38 @@ describe("envelope encryption — round-trip (VALIDATION behaviors 10/11)", () =
 });
 
 describe("envelope encryption — tamper detection (VALIDATION behavior 12)", () => {
+  // tsconfig sets `noUncheckedIndexedAccess: true`, so `Buffer[0]` types as
+  // `number | undefined`. The Buffers we tamper with are always non-empty
+  // (AES-256-GCM tags are 16 bytes, ciphertexts are at least the plaintext
+  // length, IVs are 12 bytes), so a non-null assertion at the read site is
+  // the correct narrowing. We use `Buffer.writeUInt8` to flip a byte instead
+  // of compound assignment, since `buf[i] = expr` would still trip the same
+  // check on the right-hand-side load.
   it("T1: tampered secretCt throws on decrypt (AES-256-GCM auth-tag mismatch)", () => {
     const enc = encryptSecret("confidential");
     const tampered = { ...enc, secretCt: Buffer.from(enc.secretCt) };
-    tampered.secretCt[0] ^= 0xff;
+    tampered.secretCt.writeUInt8(tampered.secretCt[0]! ^ 0xff, 0);
     expect(() => decryptSecret(tampered)).toThrow();
   });
 
   it("T2: tampered secretTag throws on decrypt (auth-tag mismatch)", () => {
     const enc = encryptSecret("confidential");
     const tampered = { ...enc, secretTag: Buffer.from(enc.secretTag) };
-    tampered.secretTag[0] ^= 0x01;
+    tampered.secretTag.writeUInt8(tampered.secretTag[0]! ^ 0x01, 0);
     expect(() => decryptSecret(tampered)).toThrow();
   });
 
   it("T3: tampered wrappedDek throws on decrypt (KEK->DEK auth-tag fails first)", () => {
     const enc = encryptSecret("confidential");
     const tampered = { ...enc, wrappedDek: Buffer.from(enc.wrappedDek) };
-    tampered.wrappedDek[0] ^= 0x01;
+    tampered.wrappedDek.writeUInt8(tampered.wrappedDek[0]! ^ 0x01, 0);
     expect(() => decryptSecret(tampered)).toThrow();
   });
 
   it("T4: tampered dekTag throws on decrypt", () => {
     const enc = encryptSecret("confidential");
     const tampered = { ...enc, dekTag: Buffer.from(enc.dekTag) };
-    tampered.dekTag[0] ^= 0x01;
+    tampered.dekTag.writeUInt8(tampered.dekTag[0]! ^ 0x01, 0);
     expect(() => decryptSecret(tampered)).toThrow();
   });
 });
