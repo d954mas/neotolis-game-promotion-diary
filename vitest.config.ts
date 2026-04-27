@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { playwright } from "@vitest/browser-playwright";
 
 // Vitest 4 supports test.projects to split unit (no DB) from integration (with DB).
 // Plan 01-02 (Phase 1 Wave 0) lands the structural split; later plans wire real assertions.
@@ -14,10 +15,20 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 // SvelteKit runtime (handler.js, $app/* aliases) into every test process;
 // the plain svelte() plugin is enough for component SSR rendering.
 //
+// Plan 02-11: third 'browser' project for the UX-02 360px viewport contract
+// (D-42 — every Phase 2 page renders without horizontal scroll at 360px AND
+// the primary CTA is reachable). Browser project uses Vitest 4's built-in
+// browser mode with the Playwright provider — Chromium is the only instance
+// (Firefox / WebKit deferred to Phase 6 if cross-engine layout differences
+// surface). Tests assume a SvelteKit preview server is already running on
+// http://localhost:5173 — CI provisions it before invoking pnpm test:browser
+// (.github/workflows/ci.yml browser-tests job).
+//
 // Run via:
 //   pnpm test:unit         (vitest --project=unit)
 //   pnpm test:integration  (vitest --project=integration)
-//   pnpm test              (both)
+//   pnpm test:browser      (vitest --project=browser; needs vite preview running)
+//   pnpm test              (all three)
 export default defineConfig({
   plugins: [svelte()],
   test: {
@@ -47,6 +58,60 @@ export default defineConfig({
           pool: "forks",
           isolate: true,
           fileParallelism: false,
+        },
+      },
+      {
+        plugins: [svelte()],
+        test: {
+          name: "browser",
+          include: ["tests/browser/**/*.test.ts"],
+          // 30s default timeout — page.goto + viewport assertion + a CTA
+          // visibility check under Chromium is well under that.
+          testTimeout: 30_000,
+          // Vitest 4.1+ requires the `browser.provider` to be a factory
+          // import — the legacy "playwright" string was removed in favor of
+          // an explicit `playwright()` call from `@vitest/browser-playwright`.
+          // See https://vitest.dev/config/browser/provider.
+          browser: {
+            enabled: true,
+            provider: playwright(),
+            headless: true,
+            instances: [{ browser: "chromium" }],
+            // Custom commands that delegate to the underlying Playwright
+            // page. Vitest 4's `BrowserPage` (from @vitest/browser/context)
+            // is a locator surface — it doesn't expose `goto` / `evaluate`
+            // natively because the default test surface is component-mode.
+            // These commands run server-side (in the vitest node process,
+            // where the Playwright provider holds the real Page object) and
+            // let a test drive the live SvelteKit preview server end-to-end
+            // (UX-02 D-42 needs real navigation against a real server).
+            //
+            // Access pattern: the Playwright provider attaches the per-
+            // session Playwright Page object to the BrowserCommandContext.
+            // The `provider.name === "playwright"` narrowing matches the
+            // pattern used by Vitest's own builtin commands (see
+            // @vitest/browser/dist/index.js _markTrace etc.).
+            commands: {
+              async goto(context, url) {
+                const ctx = context.provider.getCommandsContext(context.sessionId) as {
+                  page: { goto: (u: string, o?: unknown) => Promise<unknown> };
+                };
+                await ctx.page.goto(url, { waitUntil: "load" });
+              },
+              async measureScrollWidth(context) {
+                const ctx = context.provider.getCommandsContext(context.sessionId) as {
+                  page: { evaluate: <T>(fn: () => T) => Promise<T> };
+                };
+                return ctx.page.evaluate(() => document.documentElement.scrollWidth);
+              },
+              async measureClientWidth(context) {
+                const ctx = context.provider.getCommandsContext(context.sessionId) as {
+                  page: { evaluate: <T>(fn: () => T) => Promise<T> };
+                };
+                return ctx.page.evaluate(() => document.documentElement.clientWidth);
+              },
+            },
+          },
         },
       },
     ],
