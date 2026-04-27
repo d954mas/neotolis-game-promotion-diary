@@ -1,18 +1,67 @@
-import { describe, it } from 'vitest';
+import { describe, it, expect } from 'vitest';
+import pg from 'pg';
+import {
+  runMigrations,
+  migrationsApplied,
+} from '../../src/lib/server/db/migrate.js';
 
-// Wave 0 placeholder for VALIDATION 14/15 (migrations).
-// Plan 01-03 (Wave 2) lands the programmatic migrator with a Postgres advisory lock.
-// VALIDATION revision 1 W2 fix locked the BIGINT-safe decimal: 5_494_251_782_888_259_377.
+// VALIDATION 14 + 15 (Plan 01-03):
+//   14. migrations idempotent on second boot
+//   15. advisory lock prevents concurrent races (BIGINT 5_494_251_782_888_259_377)
+//
+// Both tests run against the integration Postgres service container that
+// tests/setup.ts boots. TEST_DATABASE_URL is the same connection string the
+// global setup uses; we open a small read-only pool here only to assert the
+// final schema shape.
+
+const TEST_URL =
+  process.env.TEST_DATABASE_URL ??
+  'postgres://postgres:postgres@localhost:5432/neotolis_test';
+
 describe('migrations', () => {
-  it.skip('idempotent on second boot (re-running migrate() is a no-op)', () => {
-    /* Plan 01-03 */
+  it('idempotent on second boot (re-running migrate() is a no-op)', async () => {
+    // First call (may have already run via tests/setup.ts beforeAll, but
+    // runMigrations is idempotent — second invocation must complete cleanly).
+    await runMigrations();
+    expect(migrationsApplied.current).toBe(true);
+
+    // Re-run; should not throw and must leave schema intact.
+    await runMigrations();
+
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const { rows } = await pool.query<{ tablename: string }>(
+        `select tablename from pg_tables where schemaname = 'public' order by tablename`,
+      );
+      const names = rows.map((r) => r.tablename);
+      expect(names).toContain('user');
+      expect(names).toContain('session');
+      expect(names).toContain('account');
+      expect(names).toContain('verification');
+      expect(names).toContain('audit_log');
+    } finally {
+      await pool.end();
+    }
   });
 
-  it.skip('advisory lock prevents concurrent races (BIGINT 5_494_251_782_888_259_377)', () => {
-    /* Plan 01-03 — spawn two app processes, assert only one runs migrate, both see final schema */
-  });
+  it('advisory lock prevents concurrent races (BIGINT 5_494_251_782_888_259_377)', async () => {
+    // Spawn two concurrent runMigrations calls. The advisory lock means one
+    // waits while the other runs migrate(); both must resolve without error
+    // and the final schema must be consistent.
+    await Promise.all([runMigrations(), runMigrations()]);
+    expect(migrationsApplied.current).toBe(true);
 
-  it.skip('migrations run before HTTP server binds (VALIDATION 14)', () => {
-    /* Plan 01-06 (readyz wiring) verifies this end-to-end */
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const { rows } = await pool.query<{ tablename: string }>(
+        `select tablename from pg_tables where schemaname = 'public'`,
+      );
+      const names = rows.map((r) => r.tablename);
+      // Schema is consistent (no half-applied state from a race).
+      expect(names).toContain('user');
+      expect(names).toContain('audit_log');
+    } finally {
+      await pool.end();
+    }
   });
 });

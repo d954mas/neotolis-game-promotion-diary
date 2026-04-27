@@ -3,7 +3,6 @@ build/
 dist/
 .svelte-kit/
 src/lib/paraglide/
-drizzle/meta/
 *.log
 .env
 .env.local
