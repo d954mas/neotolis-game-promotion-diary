@@ -19,7 +19,17 @@ The polling worker, all wishlist auto-fetch (WISH-03), the YouTube key UI, and t
 
 **Phase 2 smoke extension (per ROADMAP, 2026-04-27):** CI self-host smoke test additionally exercises "user A creates a game" via `/api/games`; cross-tenant matrix expands from `/api/me` sentinel to every new `/api/*` route added in this phase, asserting 404 (never 403, never 200).
 
-**Coverage update:** REQUIREMENTS.md traceability moves `KEYS-01` (YouTube API key UI) and `KEYS-02` (Reddit OAuth flow) from Phase 2 to Phase 3 — both naturally land beside their poll adapter. Phase 2 covers **19 of 21 originally listed REQs** (GAMES-01..04, KEYS-03..06, INGEST-01..04, EVENTS-01..03, PRIV-02, UX-01, UX-02, UX-03). The traceability table in REQUIREMENTS.md is updated in the first Wave 0 commit of Phase 2.
+**Coverage update — "example + pattern" rule (2026-04-27 refinement):** Phase 2 ships **one concrete example of every pattern** and defers the rest until trigger. This shrinks the phase to ~10–11 plans (down from a hypothetical ~13–14) and keeps each pattern provable in isolation.
+
+REQUIREMENTS.md traceability moves the following REQ-IDs out of Phase 2:
+- `KEYS-01` (YouTube API key UI) → **Phase 3** (lands beside `poll.youtube` adapter; INGEST-02 in P2 uses oEmbed instead, no key needed)
+- `KEYS-02` (Reddit OAuth flow) → **Phase 3** (lands beside `poll.reddit` adapter; full redirect dance + 3-credential storage belongs there)
+- `INGEST-01` (Reddit URL ingest) → **Phase 3** (lands beside `poll.reddit`; ingest and polling for Reddit are co-dependent and ship together)
+- `GAMES-04` is **split** into `GAMES-04a` (multiple YouTube channels per game, **Phase 2**) and `GAMES-04b/c/d` (Telegram channels / Twitter handles / Discord — **backlog by trigger**, lands when a user actually requests it). The single-table-per-kind pattern is proven by `youtube_channels`; adding more kinds is decorative migration work.
+
+Phase 2 covers **16 of 21 originally listed REQs**: GAMES-01, GAMES-02, GAMES-03, GAMES-04a, KEYS-03, KEYS-04, KEYS-05, KEYS-06, INGEST-02, INGEST-03, INGEST-04, EVENTS-01, EVENTS-02, EVENTS-03, PRIV-02, UX-01, UX-02, UX-03. (UX-01..03 are three REQs counted; total 18 line-items, 16 distinct REQ-IDs.)
+
+The traceability table in REQUIREMENTS.md and the success criteria in ROADMAP.md Phase 2 / Phase 3 are updated in the **first Wave 0 commit** of Phase 2.
 
 </domain>
 
@@ -28,29 +38,64 @@ The polling worker, all wishlist auto-fetch (WISH-03), the YouTube key UI, and t
 
 ### Phase Scope (zone 8)
 
-- **D-01 — P2 ships as a monolith on 19 REQs.** No 2.x split. Estimated ~13–14 plans organised in waves (test scaffolding → schema migrations → services → HTTP routes → UI pages → smoke extensions). The two "easy outs" (decimal phase for events / audit UI) are explicitly rejected because every shipped surface piggy-backs on the same `audit_log` and tenant-scope plumbing — splitting would just duplicate Wave 0.
+- **D-01 — P2 ships as a monolith on 16 REQs (post-refinement).** No 2.x split. Estimated ~10–11 plans organised in waves (Wave 0: test scaffolding + AGENTS.md uplift + REQUIREMENTS / ROADMAP traceability update + ESLint rule + 7 schema migrations; Wave 1: services + DTO projections; Wave 2: HTTP routes; Wave 3: SvelteKit pages; Wave 4: smoke extension + final validation). The two "easy outs" (decimal phase for events / audit UI) are explicitly rejected because every shipped surface piggy-backs on the same `audit_log` and tenant-scope plumbing — splitting would just duplicate Wave 0. The "пример + паттерн" rule (final 2026-04-27 refinement) is what keeps the phase to ~10–11 plans instead of ~13–14.
 - **D-02 — KEYS-01 (YouTube API key UI) moves from Phase 2 → Phase 3.** The key only matters when `videos.list` runs; INGEST-02 in P2 does metadata validation through public **oEmbed** (`youtube.com/oembed?url=…&format=json`) which needs no key and no quota. View-count tracking and the paste UI land together in Phase 3 beside `poll.youtube`. Saves ~2 plans in P2 and avoids "user pasted a key but nothing exercises it for weeks".
 - **D-03 — KEYS-02 (Reddit OAuth flow) moves from Phase 2 → Phase 3.** Reddit credentials are three values (`client_id`, `client_secret`, `refresh_token`), require a full redirect dance through `https://www.reddit.com/api/v1/authorize`, and live behind Better Auth's `genericOAuth` plugin or a hand-rolled callback. Without a Reddit polling worker the credentials sit unused, so they land beside `poll.reddit` adapter. Saves ~3 plans in P2.
-- **D-04 — REQUIREMENTS.md traceability is updated in Wave 0 of Phase 2.** First commit of the phase moves `KEYS-01 | Phase 2` → `KEYS-01 | Phase 3` and `KEYS-02 | Phase 2` → `KEYS-02 | Phase 3`. Phase 2 row in the coverage-by-phase table changes from 21 to 19. Phase 3 row changes from 9 to 11.
+- **D-04 — REQUIREMENTS.md and ROADMAP.md traceability are updated in Wave 0 of Phase 2.** First commit of the phase performs:
+  - `KEYS-01 | Phase 2` → `KEYS-01 | Phase 3`
+  - `KEYS-02 | Phase 2` → `KEYS-02 | Phase 3`
+  - `INGEST-01 | Phase 2` → `INGEST-01 | Phase 3`
+  - `GAMES-04 | Phase 2` → split into `GAMES-04a | Phase 2` (YouTube channels only) + new backlog REQs `GAMES-04b` (Telegram), `GAMES-04c` (Twitter), `GAMES-04d` (Discord) — each marked "by trigger"
+  - Phase 2 row in the coverage-by-phase table changes from 21 to **16** distinct REQ-IDs (18 line-items)
+  - Phase 3 row changes from 9 to **12** distinct REQ-IDs (adds KEYS-01, KEYS-02, INGEST-01)
+  - ROADMAP Phase 2 success criterion #1 is amended: "attach multiple YouTube channels per game" (Telegram / Twitter / Discord deferred to backlog)
+  - ROADMAP Phase 2 success criterion #2 is amended: "User pastes a YouTube video URL on a game and a tracked item is created" (Reddit URL ingest moves to Phase 3 SC list)
+  - ROADMAP Phase 2 success criterion #3 is amended: "User saves a Steam Web API key" (YouTube key + Reddit OAuth move to Phase 3 SC list)
+  - ROADMAP Phase 3 success criteria expand to cover the moved REQs + Reddit ingest + the two key UIs.
 
 ### Schema Model — three-list typed-per-kind (zones 1 + 3)
 
 - **D-05 — User has three independent top-level lists.** This is the developer's mental model: an indie dev keeps a list of *games*, a list of *social handles* (own and blogger), and a list of *API keys*. They are linked by explicit join tables, not implicit "credentials embedded in game".
 - **D-06 — Store platforms are typed-per-kind, not generic.** Different stores carry different fields (Steam: app_id + community tags + Steam categories; future Itch: slug + jam_id + price tiers; future Epic: namespace + product_id). Phase 2 lands one typed table — `game_steam_listings` — and future stores arrive as new typed tables (`game_itch_listings`, `game_epic_listings`) without an enum overload or jsonb blob. This is the explicit drift from `ARCHITECTURE.md` §"Storage Shape" which sketched a single `tracked_items.platform` enum; that drift was the user's call (2026-04-27 discussion: "разные платформы хранят разные данные").
-- **D-07 — Social-handle tables are typed-per-kind.** `youtube_channels`, `telegram_channels`, `twitter_handles`, `discord_invites` — four tables, four typed schemas. Channel-name caches, follower / subscriber counts, custom URLs — these differ by platform and are columns, not jsonb. M:N to games via four `game_<kind>_channels` tables (each with its own `is_own boolean` where applicable; Discord drops the flag because Discord servers are always "ours" in this model).
+- **D-07 — Social-handle tables are typed-per-kind, but Phase 2 ships ONE example.** Only `youtube_channels` lands in P2 with its M:N link table `game_youtube_channels`. The pattern (typed table per kind + dedicated M:N link table + `is_own boolean` + cached count column) is established by `youtube_channels`; the remaining kinds (`telegram_channels`, `twitter_handles`, `discord_invites` and their respective `game_<kind>_channels` link tables) are **deferred to backlog by trigger** — added when a real user requests tracking that channel type. This is the user's "пример + паттерн, остальное позже" rule (2026-04-27 final refinement). GAMES-04 is split: GAMES-04a covers YouTube in P2; GAMES-04b/c/d cover Telegram / Twitter / Discord on demand.
 - **D-08 — API-key tables are typed-per-kind.** `api_keys_steam` ships in P2; `api_keys_youtube` and `api_keys_reddit` ship in P3. Reddit's table carries **three** ciphertext column-sets (one each for `client_id` / `client_secret` / `refresh_token`) — no JSON-blob inside one ciphertext. This isolates rotation semantics per credential and keeps `last4` honest.
-- **D-09 — Tracked items are also typed-per-kind for consistency.** `tracked_reddit_posts` and `tracked_youtube_videos` ship in P2 (schema only — polling lands in P3). Generic `tracked_items` would still work since polling fields *are* uniform, but typed-per-kind is consistent with everything else in the model and lets per-platform indexes (e.g. `tracked_reddit_posts(subreddit)`) live naturally. `metric_snapshots` (Phase 3) stays generic because the time-series row shape genuinely is uniform.
+- **D-09 — Tracked items are typed-per-kind; Phase 2 ships ONE example (`tracked_youtube_videos`).** `tracked_reddit_posts` is **deferred to Phase 3** (lands beside `poll.reddit` adapter — Reddit ingest and Reddit polling are co-dependent and ship together). `metric_snapshots` (Phase 3) stays generic because the time-series row shape genuinely is uniform across platforms. **Schema for `tracked_youtube_videos`:**
+    ```
+    tracked_youtube_videos (
+      id text PRIMARY KEY,                      -- UUIDv7
+      user_id text NOT NULL,                    -- tenant scope (Pattern 1)
+      game_id text NOT NULL REFERENCES games,
+      video_id text NOT NULL,                   -- YT video id 'abc123'
+      url text NOT NULL,                        -- canonical https://youtube.com/watch?v=...
+      title text,                               -- from oEmbed at ingest
+      channel_id text,                          -- UC... from oEmbed (drives D-21 own/blogger lookup)
+      is_own boolean NOT NULL DEFAULT false,    -- INGEST-03 toggleable later
+      added_at, last_polled_at, last_poll_status text,  -- last_poll_status: 'ok' | 'auth_error' | 'rate_limited' | 'not_found' | NULL
+      deleted_at,                               -- soft-cascade from games
+      created_at, updated_at
+    )
+    UNIQUE (user_id, video_id)                  -- one user cannot register the same video twice
+    INDEX (user_id, game_id)                    -- "all videos of this game"
+    INDEX (last_polled_at) WHERE last_polled_at IS NOT NULL  -- P3 scheduler scan
+    ```
+    Two users registering the same `video_id` produce two independent rows (different `user_id`); each accumulates its own snapshot history in P3. This is Pattern 1 working as designed — there is no "primary owner" of a public YouTube video in our model.
 - **D-10 — Multi-listing per game.** `game_steam_listings UNIQUE(game_id, app_id)` (multiple Steam apps per logical game: Demo + Full + DLC + Soundtrack); `UNIQUE(user_id, app_id)` defends against accidental dupes within one user's account. Wishlist polling in P3 keys on the listing row, so each app gets its own snapshot stream.
-- **D-11 — Phase 2 lands 14 new tables.** Final list:
+- **D-11 — Phase 2 lands 7 new tables (post-refinement).** Final list:
   1. `games`
-  2. `game_steam_listings`
-  3. `youtube_channels` 4. `telegram_channels` 5. `twitter_handles` 6. `discord_invites`
-  7. `game_youtube_channels` 8. `game_telegram_channels` 9. `game_twitter_handles` 10. `game_discord_invites`
-  11. `api_keys_steam`
-  12. `tracked_reddit_posts` 13. `tracked_youtube_videos`
-  14. `events`
+  2. `game_steam_listings` (typed example for store-listings pattern)
+  3. `youtube_channels` (typed example for social-handles pattern)
+  4. `game_youtube_channels` (M:N example for game ↔ social linkage)
+  5. `api_keys_steam` (typed example for credential pattern; envelope-encrypted)
+  6. `tracked_youtube_videos` (typed example for ingest / per-platform tracking pattern)
+  7. `events` (free-form timeline; closed-enum `kind`)
 
-  Plus: `audit_log.action` enum extends with `key.*`, `game.*`, `item.*`, `event.*`, `theme.*`. A new column `user.theme_preference text` (default `'system'`) lands on Better Auth's `user` table.
+  Plus: `audit_log.action` enum extends with `key.*`, `game.*`, `item.*`, `event.*`, `theme.*` (only the verbs actually used in P2 — see D-32 for the full list). A new column `user.theme_preference text` (default `'system'`) lands on Better Auth's `user` table.
+
+  **Tables explicitly NOT in P2 (deferred per "example + pattern" rule):**
+  - `telegram_channels`, `twitter_handles`, `discord_invites` + their `game_<kind>_channels` link tables — backlog, added by trigger when a real user requests
+  - `tracked_reddit_posts` — Phase 3 (with `poll.reddit`)
+  - `api_keys_youtube`, `api_keys_reddit` — Phase 3 (with their respective poll adapters)
+  - Future store-listing tables (`game_itch_listings`, `game_epic_listings`, `game_gog_listings`) — when concrete demand surfaces
 
 ### Secrets — Steam only in P2 (zone 1)
 
@@ -64,11 +109,11 @@ The polling worker, all wishlist auto-fetch (WISH-03), the YouTube key UI, and t
 ### URL Ingestion (zone 2)
 
 - **D-18 — Single global paste-box on each game page.** One input labelled "Paste a URL". The URL parser (`src/lib/server/services/url-parser.ts`) inspects the host:
-  - `reddit.com` / `redd.it` → resolve to canonical `https://reddit.com/r/<sub>/comments/<id>/...` → create `tracked_reddit_posts` row
   - `youtube.com` / `youtu.be` → resolve to canonical `https://youtube.com/watch?v=<id>` → fetch oEmbed → create `tracked_youtube_videos` row
   - `twitter.com` / `x.com` → create `events` row (`kind='twitter_post'`); use `https://publish.twitter.com/oembed` for preview text/handle
   - `t.me` → create `events` row (`kind='telegram_post'`)
-  - any other host → reject inline with "URL not yet supported — try Reddit, YouTube, Twitter, or Telegram. Add as a free-form event."
+  - `reddit.com` / `redd.it` → friendly inline message: "Reddit support arrives in Phase 3" (parser detects host but does not create a row; user can add the link as a free-form event manually if needed)
+  - any other host → reject inline with "URL not yet supported. Add as a free-form event from the Events page."
 - **D-19 — INGEST-04 invariant: malformed → reject inline + never half-write.** All `tracked_*_*` and `events` services run validation FIRST and return early with an `AppError` (typed); the INSERT happens only after validation passes. No `try/catch` after `insert(...)` that "cleans up". Tested in `tests/integration/ingest.test.ts` via fault-injection (parser throws after partial state populated → assert no row exists in any table).
 - **D-20 — Tracked-item rows carry user_id (denormalised).** Same rationale as `metric_snapshots.user_id` from `ARCHITECTURE.md`: workers in P3 read tracked-item rows by id and re-assert ownership without joining `games`. PITFALL P1 (cross-tenant via job-payload tampering).
 - **D-21 — own/blogger auto-decision via `youtube_channels.is_own`.** When ingesting a YouTube video, the parser pulls `author_url` from oEmbed → resolves to `channel_id` → looks up `youtube_channels WHERE user_id=? AND channel_id=?`. If row exists with `is_own=true` → set `tracked_youtube_videos.is_own=true`. Otherwise default `is_own=false` (blogger). User can toggle later on the item page (INGEST-03 "toggle later").
@@ -99,9 +144,9 @@ The polling worker, all wishlist auto-fetch (WISH-03), the YouTube key UI, and t
 ### Privacy & Multi-Tenancy (zone 6 fold + AGENTS.md uplift)
 
 - **D-36 — AGENTS.md gets an extended "Privacy & multi-tenancy" block in Wave 0 of Phase 2.** Replaces the current single line "Privacy: private by default. No public dashboards. All data scoped to user_id." with the full block reproduced below. The block is non-negotiable for every future phase.
-- **D-37 — Each new P2 table carries `user_id text NOT NULL` indexed.** Cross-tenant integration test (`tests/integration/tenant-scope.test.ts`) extends to every new endpoint: `/api/games`, `/api/games/:id`, `/api/games/:gameId/listings`, `/api/games/:gameId/listings/:listingId`, `/api/social-accounts/<kind>`, `/api/social-accounts/<kind>/:id`, `/api/games/:gameId/social-links/<kind>`, `/api/api-keys/steam`, `/api/api-keys/steam/:id`, `/api/items/reddit`, `/api/items/reddit/:id`, `/api/items/youtube`, `/api/items/youtube/:id`, `/api/events`, `/api/events/:id`, `/api/audit`. Cross-tenant access returns 404 (NotFoundError), never 403.
+- **D-37 — Each new P2 table carries `user_id text NOT NULL` indexed.** Cross-tenant integration test (`tests/integration/tenant-scope.test.ts`) extends to every new endpoint that ships in P2: `/api/games`, `/api/games/:id`, `/api/games/:gameId/listings`, `/api/games/:gameId/listings/:listingId`, `/api/youtube-channels`, `/api/youtube-channels/:id`, `/api/games/:gameId/youtube-channels`, `/api/api-keys/steam`, `/api/api-keys/steam/:id`, `/api/items/youtube`, `/api/items/youtube/:id`, `/api/events`, `/api/events/:id`, `/api/audit`. Cross-tenant access returns 404 (NotFoundError), never 403. (P3 will extend the matrix with `/api/api-keys/youtube`, `/api/api-keys/reddit`, `/api/items/reddit`; P2 does not pre-stub them.)
 - **D-38 — ESLint rule `no-unfiltered-tenant-query`** lands as a Wave 0 task (alongside the AGENTS.md uplift). AST-walks Drizzle calls; rejects `db.select().from(<TENANT_TABLE>)` / `db.update(<TENANT_TABLE>)` / `db.delete(<TENANT_TABLE>)` without a `.where(...)` clause that references `userId`. Allowlist of shared tables: `subreddit_rules` (Phase 5), `pgboss.*` (Phase 3), and Better Auth core (`user`, `session`, `account`, `verification`). Each allowlist entry has a one-line comment explaining why.
-- **D-39 — DTO discipline extends with new tables.** `src/lib/server/dto.ts` projection functions for every new tenant-owned entity (`toGameDto`, `toGameSteamListingDto`, `toYoutubeChannelDto`, …, `toApiKeySteamDto`, `toRedditPostDto`, `toYoutubeVideoDto`, `toEventDto`, `toAuditEntryDto`). `toApiKeySteamDto` strips every ciphertext column AND `kek_version` — only `{id, label, last4, created_at, updated_at, rotated_at}` survives. Behavioural test in `tests/unit/dto.test.ts` asserts the strip happens at runtime.
+- **D-39 — DTO discipline extends with new tables.** `src/lib/server/dto.ts` projection functions for every new tenant-owned entity that ships in P2: `toGameDto`, `toGameSteamListingDto`, `toYoutubeChannelDto`, `toApiKeySteamDto`, `toYoutubeVideoDto`, `toEventDto`, `toAuditEntryDto`. `toApiKeySteamDto` strips every ciphertext column AND `kek_version` — only `{id, label, last4, created_at, updated_at, rotated_at}` survives. Behavioural test in `tests/unit/dto.test.ts` asserts the strip happens at runtime.
 
 ### UX Baseline (zone 7)
 
@@ -140,6 +185,10 @@ These are explicit drifts from earlier locked context (`PROJECT.md`, `REQUIREMEN
 - **DV-4: ARCHITECTURE.md ER schema drift — game-attached "channels" are typed.** `youtube_channels`, `telegram_channels`, `twitter_handles`, `discord_invites` plus four `game_<kind>_channels` link tables. Originally implied as a single `game_subreddits`-style table with `kind`. Same rationale.
 - **DV-5: ROADMAP Phase 2 success criterion #3 narrows to Steam-only secrets in P2.** The original text "User saves a YouTube API key, authorizes Reddit OAuth, and optionally saves a Steam Web API key" is split: P2 covers Steam; P3 covers YouTube + Reddit. Phase 2 acceptance check verifies write-once + rotate + audit for `kind='steam'` only. Phase 3 acceptance extends to the other two.
 - **DV-6: AGENTS.md gets a strengthened "Privacy & multi-tenancy" block in Wave 0 of Phase 2.** This is an uplift, not a behavioural change — every constraint named in the new block is already enforced by Phase 1 code. The block makes the constraints visible and reviewable for future phases.
+
+- **DV-7: INGEST-01 (Reddit URL ingest) moves Phase 2 → Phase 3.** Originally listed in Phase 2's REQ set. The user's "пример + паттерн" rule (2026-04-27 final refinement) and the realisation that Reddit ingest and Reddit polling are co-dependent (no point shipping ingest without polling) drove the move. P3 lands `tracked_reddit_posts` schema + ingest UI alongside `poll.reddit` adapter. The URL parser in P2 detects `reddit.com` / `redd.it` hosts but renders a friendly "Reddit support arrives in Phase 3" message instead of creating a row. Phase 5 (Reddit Rules Cockpit) keeps its current scope: rules cockpit on top of the Reddit ingest + polling stack landed in P3.
+
+- **DV-8: GAMES-04 splits into GAMES-04a (Phase 2, YouTube only) and GAMES-04b/c/d (backlog by trigger).** Original GAMES-04 required tracking multiple YouTube channels, multiple Telegram channels, multiple Twitter handles, and an optional Discord per game. The "пример + паттерн" rule (2026-04-27) reduces P2 to GAMES-04a (YouTube). The Telegram / Twitter / Discord channels become backlog REQ-IDs (GAMES-04b, GAMES-04c, GAMES-04d) added when a real user requests that channel type. The pattern is proven by `youtube_channels` + `game_youtube_channels`; adding additional kinds is decorative migration work (one new typed table + one new link table + one new service per kind). Twitter and Telegram URLs pasted into the global ingest box still create `events` rows in P2 (D-29) — the deferral is only about *managing handles as social accounts attached to a game*, not about ingesting individual posts.
 
 </deviations>
 
@@ -192,7 +241,7 @@ These are explicit drifts from earlier locked context (`PROJECT.md`, `REQUIREMEN
 ### Reusable Assets
 
 - **Envelope encryption module** — `src/lib/server/crypto/envelope.ts` is fully tested (Phase 1 plan 01-04). Phase 2's `api_keys_steam` service calls `encryptSecret(plaintext)` on write, `decryptSecret(s)` on read (only path: D-17 validation), `rotateDek(s, newVersion)` on KEK rotation. Plaintext lives only inside the function scope; never logged (Pino redact at D-24).
-- **Audit writer** — `src/lib/server/audit.ts` `writeAudit()` is INSERT-only and never throws. Phase 2 callers: `services/games.ts` (game.created/deleted/restored), `services/api-keys-steam.ts` (key.add/rotate/remove), `services/items-reddit.ts` and `services/items-youtube.ts` (item.created/deleted), `services/events.ts` (event.created/edited/deleted), `services/me.ts` (theme.changed via PATCH /api/me/theme).
+- **Audit writer** — `src/lib/server/audit.ts` `writeAudit()` is INSERT-only and never throws. Phase 2 callers: `services/games.ts` (game.created/deleted/restored), `services/api-keys-steam.ts` (key.add/rotate/remove), `services/items-youtube.ts` (item.created/deleted — **YouTube only in P2**; `services/items-reddit.ts` lands in P3), `services/events.ts` (event.created/edited/deleted), `services/me.ts` (theme.changed via PATCH /api/me/theme).
 - **Tenant scope middleware** — `src/lib/server/http/middleware/tenant.ts` already attaches `c.var.userId` and `c.var.sessionId`. Every new `/api/*` route in Phase 2 mounts under it.
 - **NotFoundError** — `src/lib/server/services/errors.ts` is the cross-tenant carrier. Every Phase 2 service that fetches a tenant-owned row by id MUST throw this when the row is missing OR owned by another user. The HTTP boundary translates to 404 + `{error:'not_found'}`. Body never contains "forbidden" / "permission".
 - **DTO projection** — `src/lib/server/dto.ts` `toUserDto()` is the template for new projections. Phase 2 adds one per entity (D-39); each strips ciphertext and `kek_version` columns.
@@ -203,8 +252,8 @@ These are explicit drifts from earlier locked context (`PROJECT.md`, `REQUIREMEN
 
 ### Established Patterns (Phase 1 → Phase 2 inheritance)
 
-- **`userId` first-arg in services.** Every new Phase 2 service file (`services/games.ts`, `services/api-keys-steam.ts`, `services/items-reddit.ts`, `services/items-youtube.ts`, `services/events.ts`, `services/youtube-channels.ts` etc.) starts every function signature with `userId: string`. Type system + ESLint rule (D-38) enforce.
-- **`eq(table.userId, userId)` on every query.** Drizzle queries on the 14 new tables. ESLint rule rejects calls without it.
+- **`userId` first-arg in services.** Every new Phase 2 service file (`services/games.ts`, `services/game-steam-listings.ts`, `services/youtube-channels.ts`, `services/api-keys-steam.ts`, `services/items-youtube.ts`, `services/events.ts`, `services/audit.ts`) starts every function signature with `userId: string`. Type system + ESLint rule (D-38) enforce. Phase 3 will add `services/items-reddit.ts`, `services/api-keys-youtube.ts`, `services/api-keys-reddit.ts` under the same convention.
+- **`eq(table.userId, userId)` on every query.** Drizzle queries on the 7 new tables. ESLint rule rejects calls without it.
 - **Cross-tenant 404, never 403.** Tested per route in `tenant-scope.test.ts`; bodies asserted not to contain "forbidden" / "permission".
 - **Anonymous-401 sweep.** `MUST_BE_PROTECTED` array extends with every new `/api/*` route (D-37); CI fails the PR if a new route is missing.
 - **Append-only audit log + tenant-relative cursor.** New `/api/audit` endpoint reads via `(user_id, created_at desc)` cursor; never observes another tenant's IDs by construction (PITFALL P19).
@@ -214,9 +263,9 @@ These are explicit drifts from earlier locked context (`PROJECT.md`, `REQUIREMEN
 ### Integration Points
 
 - **Hono app composition** — `src/lib/server/http/app.ts` extends `app.route('/api', ...)` with new sub-routers per entity. The order matters: `app.use('/api/*', tenantScope)` must remain BEFORE these new mounts (already in place from Phase 1).
-- **SvelteKit pages** — `src/routes/` adds new directories: `games/`, `games/[gameId]/`, `games/[gameId]/listings/`, `accounts/`, `keys/`, `audit/`, `events/`. Each has `+page.svelte` (UI) and `+page.server.ts` (data loader calling `/api/*`).
+- **SvelteKit pages** — `src/routes/` adds new directories in P2: `games/`, `games/[gameId]/`, `games/[gameId]/listings/`, `accounts/youtube/`, `keys/steam/`, `audit/`, `events/`. Each has `+page.svelte` (UI) and `+page.server.ts` (data loader calling `/api/*`). P3 will add `accounts/reddit/`, `keys/youtube/`, `keys/reddit/`; P3+ adds Telegram / Twitter / Discord under `accounts/<kind>/` when those kinds land.
 - **`+layout.server.ts`** — extended to read `__theme` cookie and pass `event.locals.theme` into the layout (D-40).
-- **Drizzle migrations** — `src/lib/server/db/schema/*.ts` files generate one `drizzle/<NN>_phase02_*.sql` migration (or several — planner picks; D-Discretion). Migration runs at boot under advisory lock from Phase 1.
+- **Drizzle migrations** — `src/lib/server/db/schema/*.ts` files generate one `drizzle/<NN>_phase02_*.sql` migration (or several — planner picks; D-Discretion). Migration runs at boot under advisory lock from Phase 1. P2 lands 7 schema files: `games.ts`, `game-steam-listings.ts`, `youtube-channels.ts`, `game-youtube-channels.ts`, `api-keys-steam.ts`, `tracked-youtube-videos.ts`, `events.ts`. Plus `audit-log.ts` is amended to extend `action` enum, and `auth.ts` is amended to add `theme_preference` column on `user`.
 - **CI workflow extension** — `.github/workflows/ci.yml` smoke job extends to: boot image with minimal env → sign in via oauth2-mock-server → POST `/api/games` (create) → GET `/api/games` (list) → assert cross-tenant 404 → assert anonymous 401 on every new route.
 
 </code_context>
@@ -230,6 +279,8 @@ These are explicit drifts from earlier locked context (`PROJECT.md`, `REQUIREMEN
 - **"Make privacy visible in AGENTS.md, not implicit."** The user's request that the privacy / multi-tenant invariants be lifted into AGENTS.md as a named, reviewable section is captured in D-36 / DV-6. This is uplift, not change — the rules already hold in code; this just makes them load-bearing for future agents.
 - **"oEmbed is the free path."** YouTube and Twitter both expose oEmbed without a key. P2 uses YouTube oEmbed for D-16 (INGEST-02 validation + title) and D-21 (own/blogger via `author_url`). P2 uses Twitter oEmbed for D-29 (events preview). This keeps the indie-budget constraint honest — no quota burn until P3 actually needs `videos.list`.
 
+- **"Пример + паттерн, остальное позже."** The user's final scope-shaping rule (2026-04-27 refinement). For every typed-per-kind list — store platforms, social handles, API keys, tracked items — Phase 2 ships exactly **one concrete example** (Steam, YouTube channels, Steam key, YouTube videos respectively). Adding more kinds later is migration-only work (one new typed table + one service + one route + one page per kind). This caps Phase 2 at 7 tables / ~10–11 plans and lets the team validate each pattern in isolation before paying the cost of N implementations.
+
 </specifics>
 
 <deferred>
@@ -237,16 +288,32 @@ These are explicit drifts from earlier locked context (`PROJECT.md`, `REQUIREMEN
 
 These came up during discussion but are explicitly out of scope for Phase 2:
 
-- **Shared Steam appdetails cache (`steam_app_metadata_cache`)** — Phase 6 storage optimisation. Avoids N copies of `raw_appdetails` when many users register the same `app_id`. Not needed at indie scale; deferred until storage actually hurts.
+### Deferred to Phase 3 (with poll-* adapters)
+
+- **`tracked_reddit_posts` table + Reddit URL ingest UI** — Phase 3 (alongside `poll.reddit`). Reddit ingest and polling ship co-dependently. The URL parser in P2 detects `reddit.com` / `redd.it` hosts and renders "Reddit support arrives in Phase 3".
+- **`api_keys_youtube` table + paste UI** — Phase 3 (alongside `poll.youtube`). P2 uses oEmbed for YouTube ingest validation, no key needed.
+- **`api_keys_reddit` table + Reddit OAuth flow (BYO client_id/secret + full redirect dance)** — Phase 3 (alongside `poll.reddit`). Three ciphertext column-sets per row (one each for client_id / client_secret / refresh_token).
+- **Purge worker (hard-delete after retention)** — Phase 3, runs as a recurring pg-boss job once the queue lands. Phase 2 ships only `deleted_at` + restore UI + scheduled-purge badge.
+
+### Deferred to backlog by trigger ("пример + паттерн" rule)
+
+- **`telegram_channels` table + `game_telegram_channels` link** — added when a real user requests Telegram channel tracking on their game. GAMES-04b in REQUIREMENTS.md backlog.
+- **`twitter_handles` table + `game_twitter_handles` link** — added when a real user requests Twitter handle tracking. GAMES-04c.
+- **`discord_invites` table + `game_discord_invites` link** — added when a real user requests Discord server tracking. GAMES-04d.
+- **Future store-listing tables (`game_itch_listings`, `game_epic_listings`, `game_gog_listings`)** — added when concrete demand surfaces. The Steam example proves the per-store typed-table pattern.
+
+### Deferred to Phase 6 (Trust & Self-Host Polish)
+
+- **Shared Steam appdetails cache (`steam_app_metadata_cache`)** — storage optimisation. Avoids N copies of `raw_appdetails` when many users register the same `app_id`. Not needed at indie scale; deferred until storage actually hurts.
 - **Date-range filter in audit-log UI** — Phase 6 polish phase. Page-size selector and search-by-metadata.last4 also Phase 6.
-- **`api_keys_youtube` and `api_keys_reddit` tables + UI** — Phase 3, beside `poll.youtube` and `poll.reddit` adapters. Reddit OAuth flow (full redirect dance + 3-credential storage) particularly belongs there.
-- **Purge worker (hard-delete after retention)** — Phase 3, runs as a recurring pg-boss job. Phase 2 ships only `deleted_at` + restore UI + scheduled-purge badge.
-- **User-private "campaign" tags on `games`** — out of scope for P2; if needed later, lands as a separate phase or post-MVP backlog. Current model says all tags come from store platforms.
-- **Cover image upload (file storage, R2 / S3 / volume)** — out of scope, indie-budget-constrained. Cover always comes from public Steam appdetails URL or future per-platform fetcher.
-- **Per-game custom domains / white-label** — already excluded by PROJECT.md. Not revived.
-- **Itch / Epic / GOG store listings** — out of scope for P2. Will arrive as new typed tables (`game_itch_listings`, etc.) when there is concrete demand.
-- **Twitter / Telegram channel auto-tracking via API** — already excluded by PROJECT.md (Twitter API paid; Telegram Bot API privacy-invasive). Both stay manual via `events`.
-- **Real-time wishlist counter / public dashboards / share links** — already excluded by PROJECT.md. Not revived.
+
+### Out of scope (not deferred — not coming back)
+
+- **User-private "campaign" tags on `games`** — current model says all tags come from store platforms. If a real need surfaces, lands as a separate phase or post-MVP backlog.
+- **Cover image upload (file storage, R2 / S3 / volume)** — indie-budget-constrained. Cover always comes from public Steam appdetails URL or future per-platform fetcher.
+- **Per-game custom domains / white-label** — already excluded by PROJECT.md.
+- **Twitter / Telegram channel auto-tracking via API** — already excluded by PROJECT.md (Twitter API paid; Telegram Bot API privacy-invasive). Both stay manual via `events` (D-29). Pasted Twitter / Telegram URLs in the ingest box still create event rows in P2.
+- **Real-time wishlist counter / public dashboards / share links** — already excluded by PROJECT.md.
 
 ### Reviewed Todos (not folded)
 

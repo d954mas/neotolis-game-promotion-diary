@@ -281,3 +281,68 @@ The planner picks during plan-phase:
 - Cover image upload — out of scope
 - Itch / Epic / GOG store listings — Phase 3+
 - Twitter / Telegram auto-tracking via API — already excluded by PROJECT.md
+
+---
+
+## Post-creation refinement (2026-04-27, after initial CONTEXT.md commit)
+
+After 02-CONTEXT.md was first written and committed (835a8a7), the user proposed shrinking Phase 2 further with a "пример + паттерн, остальное позже" rule. Two follow-up exchanges:
+
+### Exchange 1 — social handles
+
+User: *"Так а вот про social давай создадим ютуб для примера сейчас. А остальное будем создавать когда будем добавлять новое."*
+
+Question asked: "Telegram / Twitter / Discord соц-хэндлы — что с ними?"
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Полностью вынести (recommended) | Remove all three from P2; GAMES-04 splits into 04a (YT, P2) + 04b/c/d (backlog) | ✓ |
+| Phase 2.1 | Decimal phase to add the missing kinds soon | |
+| Phase 3+ by trigger | Distribute across phases | |
+
+### Exchange 2 — extend rule to all lists
+
+User: *"Да и про остальное тоже. Делаем пример, чтобы было понимание и паттер. Остальное позже."*
+
+This generalised the rule. Affected decisions:
+
+- **D-07 — Social handles:** P2 ships only `youtube_channels` + `game_youtube_channels`. `telegram_channels`, `twitter_handles`, `discord_invites` deferred to backlog by trigger (DV-8: GAMES-04 split).
+- **D-09 — Tracked items:** P2 ships only `tracked_youtube_videos`. `tracked_reddit_posts` deferred to Phase 3 alongside `poll.reddit` (DV-7: INGEST-01 → P3).
+- **D-11 — Schema scope:** 14 tables → **7 tables**.
+
+Question asked: "Фиксируем «пример + паттерн» финал: 7 таблиц (Steam-only, YouTube-only social, YouTube-only ingest)? Reddit ingest + Reddit OAuth уезжают в Phase 3."
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Да, фиксируем (recommended) | Rewrite CONTEXT.md with shrunk scope; REQUIREMENTS / ROADMAP updated in Wave 0 | ✓ |
+| Keep Reddit ingest in P2 | INGEST-01 stays | |
+| Question | | |
+
+### Exchange 3 — terminology check (mid-edit)
+
+User: *"Tracked items │ tracked_youtube_videos │ tracked_reddit_posts → P3 (рядом с poll-reddit; ingest и polling вместе) вот это что? что за tracked таблица? это то что мы потом проверяем? получаем данные? это тоже на каждого пользователя свое?"*
+
+Confirmed in the assistant's reply and folded into D-09:
+- `tracked_*` tables are per-user (Pattern 1: tenant-scoping with `user_id NOT NULL`).
+- Two users registering the same `video_id` produce two independent rows.
+- Polling in Phase 3 reads each row separately and writes to `metric_snapshots` (also per-user).
+- The `tracked_` naming follows `ARCHITECTURE.md` "Pattern 2: Snapshot-and-Forward" — these are the entities we periodically poll for time-series metrics.
+
+### Final question — naming check
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Да, продолжай (recommended) | Keep `tracked_youtube_videos` naming | ✓ |
+| Rename to monitored_* / watched_* / game_youtube_videos | | |
+| More questions on schema | | |
+
+### New deviations recorded after refinement
+
+- **DV-7:** INGEST-01 (Reddit URL ingest) Phase 2 → Phase 3.
+- **DV-8:** GAMES-04 splits into GAMES-04a (P2, YouTube) + GAMES-04b/c/d (backlog by trigger).
+
+### Final P2 shape (post-refinement)
+
+- 7 tables (was 14)
+- 16 distinct REQ-IDs (was 19)
+- ~10–11 plans (was ~13–14)
