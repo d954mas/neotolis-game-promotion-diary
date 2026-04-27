@@ -72,9 +72,16 @@ export default [
       parserOptions: { parser: tsParser },
       globals: { ...globals.browser },
     },
-    plugins: { svelte: sveltePlugin },
+    plugins: { svelte: sveltePlugin, "@typescript-eslint": tsPlugin },
     rules: {
       "no-undef": "off",
+      // Plan 02-09: Svelte 5 components declare callback prop types like
+      // `onChange: (v: T) => void`. The bare `no-unused-vars` rule from
+      // js.configs.recommended fires on `v` because the parser sees a
+      // function-type signature; the TS-aware rule with the underscore
+      // ignore pattern is the right tool. Apply the same shape here that
+      // the .ts block uses.
+      ...tsUnusedVarsRule,
       ...noProcessEnv,
     },
   },

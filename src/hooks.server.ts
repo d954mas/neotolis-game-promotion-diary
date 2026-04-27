@@ -26,12 +26,17 @@
 
 import { sequence } from "@sveltejs/kit/hooks";
 import type { Handle } from "@sveltejs/kit";
-import { auth } from "$lib/auth.js";
-import { toUserDto, toSessionDto } from "$lib/server/dto.js";
+import { auth } from "./lib/auth.js";
+import { toUserDto, toSessionDto } from "./lib/server/dto.js";
 
 const VALID_THEMES = new Set(["light", "dark", "system"]);
 
-const authHandle: Handle = async ({ event, resolve }) => {
+// Exported for the Plan 02-09 theme integration test (tests/integration/theme.test.ts)
+// — the SSR no-flash assertion calls themeHandle directly with a synthetic
+// event so it can inspect transformPageChunk's replacement without booting
+// the full SvelteKit handler. Production code path always composes via
+// `handle = sequence(authHandle, themeHandle)`.
+export const authHandle: Handle = async ({ event, resolve }) => {
   const result = await auth.api.getSession({ headers: event.request.headers });
   if (result) {
     // toUserDto / toSessionDto strip secret-shaped fields and apply the
@@ -42,7 +47,7 @@ const authHandle: Handle = async ({ event, resolve }) => {
   return resolve(event);
 };
 
-const themeHandle: Handle = async ({ event, resolve }) => {
+export const themeHandle: Handle = async ({ event, resolve }) => {
   const cookieValue = event.cookies.get("__theme");
   const theme: "light" | "dark" | "system" =
     cookieValue && VALID_THEMES.has(cookieValue)

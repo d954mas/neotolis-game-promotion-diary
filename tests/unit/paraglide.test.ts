@@ -37,21 +37,105 @@ describe("paraglide i18n (UX-04)", () => {
     // the snapshot must be updated AND every other locale file extended.
     // Adding a brand new locale is purely "drop a JSON file matching this keyset"
     // — no source change required.
+    //
+    // Phase 2 (Plan 02-09, D-41) adds the P2 keyset: 8 primary CTAs + 12
+    // empty-state keys + 16 audit-action chip labels + 10 ingest/keys error
+    // states + 7 destructive confirmations + 6 status/toast keys + paste-box
+    // (label + placeholder) + theme-toggle (4 labels) + 7 common verbs.
+    // Updating this snapshot in lock-step with messages/en.json is the
+    // forcing function: a Phase 2 PR that ADDS a key without expanding this
+    // list trips the test loudly. (i18n.test.ts asserts the P2 keyset
+    // SUPERSET; this test asserts EXACT equality, so the two together
+    // catch both "added too few" and "added too many" drift.)
     const raw = JSON.parse(fs.readFileSync(path.resolve("messages/en.json"), "utf8"));
     const keys = Object.keys(raw)
       .filter((k) => !k.startsWith("$"))
       .sort();
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable across renames.
+    // List is alphabetically sorted to match the .sort() above (Object.keys order is
+    // not stable; sort() is the deterministic source).
     expect(keys).toEqual([
       "app_title",
+      "audit_action_all",
+      "audit_action_event_created",
+      "audit_action_event_deleted",
+      "audit_action_event_edited",
+      "audit_action_game_created",
+      "audit_action_game_deleted",
+      "audit_action_game_restored",
+      "audit_action_item_created",
+      "audit_action_item_deleted",
+      "audit_action_key_add",
+      "audit_action_key_remove",
+      "audit_action_key_rotate",
+      "audit_action_session_signin",
+      "audit_action_session_signout",
+      "audit_action_session_signout_all",
+      "audit_action_theme_changed",
+      "badge_purge_in_days",
+      "badge_purge_in_days_warning",
+      "badge_release_tba",
+      "common_cancel",
+      "common_close",
+      "common_confirm",
+      "common_delete",
+      "common_edit",
+      "common_remove",
+      "common_restore",
+      "confirm_event_delete",
+      "confirm_game_delete",
+      "confirm_item_delete",
+      "confirm_key_remove",
+      "confirm_key_replace",
+      "confirm_signout_all",
+      "confirm_speedbump_acknowledge",
       "dashboard_title",
       "dashboard_unauth_intro",
       "dashboard_welcome_intro",
+      "empty_audit_body",
+      "empty_audit_heading",
+      "empty_events_body",
+      "empty_events_heading",
+      "empty_games_body",
+      "empty_games_heading",
+      "empty_items_example_youtube_url",
+      "empty_items_heading",
+      "empty_keys_steam_body",
+      "empty_keys_steam_heading",
+      "empty_youtube_channels_body",
+      "empty_youtube_channels_heading",
+      "error_network",
+      "error_server_generic",
+      "events_cta_new_event",
+      "games_cta_new_game",
+      "ingest_cta_add",
+      "ingest_error_malformed_url",
+      "ingest_error_oembed_unreachable",
+      "ingest_error_unsupported_host",
+      "ingest_error_youtube_duplicate",
+      "ingest_error_youtube_unavailable",
+      "ingest_info_reddit_phase3",
+      "keys_steam_cta_add_another",
+      "keys_steam_cta_replace",
+      "keys_steam_cta_save",
+      "keys_steam_error_invalid",
+      "keys_steam_error_label_exists",
       "login_button",
       "login_continue",
       "login_page_title",
+      "paste_box_label",
+      "paste_box_placeholder",
+      "settings_cta_save",
       "sign_out",
       "sign_out_all_devices",
+      "theme_label_dark",
+      "theme_label_light",
+      "theme_label_system",
+      "theme_toggle_aria_label",
+      "toast_deleted",
+      "toast_restored",
+      "toast_saved",
+      "youtube_channels_cta_add",
     ]);
   });
 

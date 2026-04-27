@@ -41,8 +41,7 @@
 
   --font-family-sans:
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-family-mono:
-    ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-family-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
   /* Breakpoints — declared as custom properties for documentation; @media
    * queries below reference the literal pixel values (CSS spec doesn't allow
