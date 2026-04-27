@@ -17,7 +17,9 @@
 // PT6: trusted source + X-Forwarded-Proto → respected (HSTS-relevant);
 //      untrusted source falls back to socket scheme.
 
-import { parse, parseCIDR, type IPv4, type IPv6 } from "ipaddr.js";
+import ipaddr, { type IPv4, type IPv6 } from "ipaddr.js";
+
+const { parse, parseCIDR } = ipaddr;
 import type { MiddlewareHandler } from "hono";
 import { env } from "../../config/env.js";
 
