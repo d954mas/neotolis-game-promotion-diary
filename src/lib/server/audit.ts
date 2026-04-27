@@ -50,9 +50,6 @@ export async function writeAudit(entry: AuditEntry): Promise<void> {
   } catch (err) {
     // Never let an audit failure break the user-facing request.
     // But log loudly — silent audit drops are a P19/P20 risk.
-    logger.error(
-      { err, action: entry.action, userId: entry.userId },
-      "audit write failed",
-    );
+    logger.error({ err, action: entry.action, userId: entry.userId }, "audit write failed");
   }
 }

@@ -19,10 +19,10 @@
 // on every call. The KEK is never cached at module scope — that would defeat
 // the env-scrub mitigation in env.ts and prevent rotation hot-swaps.
 
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { env } from '../config/env.js';
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { env } from "../config/env.js";
 
-const ALG = 'aes-256-gcm';
+const ALG = "aes-256-gcm";
 const NONCE_BYTES = 12;
 const TAG_BYTES = 16;
 const KEK_BYTES = 32;
@@ -58,9 +58,7 @@ function loadKek(version: number): Buffer {
     throw new Error(`KEK v${version} not loaded (env.KEK_VERSIONS missing)`);
   }
   if (kek.length !== KEK_BYTES) {
-    throw new Error(
-      `KEK v${version} must be ${KEK_BYTES} bytes (got ${kek.length})`,
-    );
+    throw new Error(`KEK v${version} must be ${KEK_BYTES} bytes (got ${kek.length})`);
   }
   return kek;
 }
@@ -83,10 +81,7 @@ export function encryptSecret(plaintext: string): EncryptedSecret {
     // 1. Encrypt the user secret with the DEK.
     const secretIv = randomBytes(NONCE_BYTES);
     const c1 = createCipheriv(ALG, dek, secretIv);
-    const secretCt = Buffer.concat([
-      c1.update(plaintext, 'utf8'),
-      c1.final(),
-    ]);
+    const secretCt = Buffer.concat([c1.update(plaintext, "utf8"), c1.final()]);
     const secretTag = c1.getAuthTag();
     if (secretTag.length !== TAG_BYTES) {
       throw new Error(`unexpected GCM tag length ${secretTag.length}`);
@@ -140,7 +135,7 @@ export function decryptSecret(s: EncryptedSecret): string {
     // 2. Decrypt the secret with the DEK.
     const d2 = createDecipheriv(ALG, dek, s.secretIv);
     d2.setAuthTag(s.secretTag);
-    return Buffer.concat([d2.update(s.secretCt), d2.final()]).toString('utf8');
+    return Buffer.concat([d2.update(s.secretCt), d2.final()]).toString("utf8");
   } finally {
     dek.fill(0);
   }
@@ -158,10 +153,7 @@ export function decryptSecret(s: EncryptedSecret): string {
  * Throws on auth-tag mismatch during unwrap (corrupted row) or unknown KEK
  * version (rotation rehearsal will surface the operator drill defect early).
  */
-export function rotateDek(
-  s: EncryptedSecret,
-  newKekVersion: number,
-): EncryptedSecret {
+export function rotateDek(s: EncryptedSecret, newKekVersion: number): EncryptedSecret {
   // Step 1: unwrap with old KEK.
   const oldKek = loadKek(s.kekVersion);
   const d = createDecipheriv(ALG, oldKek, s.dekIv);

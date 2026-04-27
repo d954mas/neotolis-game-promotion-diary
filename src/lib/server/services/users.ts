@@ -27,9 +27,7 @@ export async function getUserById(userId: string) {
  * Phase 2 KEYS-06) can record "user signed out N devices" without an extra
  * read. The count is also useful in tests.
  */
-export async function signOutAllDevices(
-  userId: string,
-): Promise<{ deletedCount: number }> {
+export async function signOutAllDevices(userId: string): Promise<{ deletedCount: number }> {
   const result = await db
     .delete(session)
     .where(eq(session.userId, userId))

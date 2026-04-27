@@ -37,18 +37,13 @@ export const auditLog = pgTable(
     // Sanitized; never includes other tenants' identifiers (P19). See file
     // header for the convention contract.
     metadata: jsonb("metadata"),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     // Tenant-relative cursor: `(user_id, created_at)` covers list-my-audit
     // pagination without ever needing a global index that could leak cross-
     // tenant ordering (PITFALL P19).
     userIdx: index("audit_log_user_id_idx").on(t.userId),
-    userCreatedIdx: index("audit_log_user_id_created_at_idx").on(
-      t.userId,
-      t.createdAt,
-    ),
+    userCreatedIdx: index("audit_log_user_id_created_at_idx").on(t.userId, t.createdAt),
   }),
 );

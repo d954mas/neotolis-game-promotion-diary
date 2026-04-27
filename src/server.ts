@@ -10,35 +10,35 @@
 // containers also fail fast on schema drift, and so /readyz semantics hold
 // for the app role (D-21).
 
-import { env } from './lib/server/config/env.js';
-import { logger } from './lib/server/logger.js';
-import { runMigrations } from './lib/server/db/migrate.js';
+import { env } from "./lib/server/config/env.js";
+import { logger } from "./lib/server/logger.js";
+import { runMigrations } from "./lib/server/db/migrate.js";
 
 async function main(): Promise<void> {
   // Every role runs migrations (idempotent, advisory-locked per Plan 03).
   await runMigrations();
 
   switch (env.APP_ROLE) {
-    case 'app': {
-      const { start } = await import('./roles/app.js');
+    case "app": {
+      const { start } = await import("./roles/app.js");
       return start();
     }
-    case 'worker': {
-      const { startWorker } = await import('./worker/index.js');
+    case "worker": {
+      const { startWorker } = await import("./worker/index.js");
       return startWorker();
     }
-    case 'scheduler': {
-      const { startScheduler } = await import('./scheduler/index.js');
+    case "scheduler": {
+      const { startScheduler } = await import("./scheduler/index.js");
       return startScheduler();
     }
     default: {
-      logger.fatal({ role: env.APP_ROLE }, 'unknown APP_ROLE');
+      logger.fatal({ role: env.APP_ROLE }, "unknown APP_ROLE");
       process.exit(1);
     }
   }
 }
 
 main().catch((err) => {
-  logger.fatal({ err }, 'boot failed');
+  logger.fatal({ err }, "boot failed");
   process.exit(1);
 });

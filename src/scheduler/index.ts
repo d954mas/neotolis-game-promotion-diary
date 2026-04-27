@@ -15,10 +15,10 @@
 //   - print `scheduler ready` to stdout for Plan 10's grep-based assertion
 //   - honor SIGTERM with pg-boss graceful drain + pg.Pool drain (D-22)
 
-import { createBoss, stopBoss } from '../lib/server/queue-client.js';
-import { pool } from '../lib/server/db/client.js';
-import { logger } from '../lib/server/logger.js';
-import { QUEUES } from '../lib/server/queues.js';
+import { createBoss, stopBoss } from "../lib/server/queue-client.js";
+import { pool } from "../lib/server/db/client.js";
+import { logger } from "../lib/server/logger.js";
+import { QUEUES } from "../lib/server/queues.js";
 
 /**
  * Boot the pg-boss scheduler, declare queues, register the healthcheck cron,
@@ -41,40 +41,39 @@ export async function startScheduler(): Promise<void> {
   // so the container exits non-zero (faster failure than a silent never-
   // scheduled cron).
   try {
-    await boss.schedule(QUEUES.INTERNAL_HEALTHCHECK, '*/5 * * * *');
+    await boss.schedule(QUEUES.INTERNAL_HEALTHCHECK, "*/5 * * * *");
   } catch (err) {
-    logger.error({ err }, 'failed to register internal.healthcheck schedule');
+    logger.error({ err }, "failed to register internal.healthcheck schedule");
     throw err;
   }
 
   // D-15 smoke assertion #3 — exact string `scheduler ready` on stdout.
   // Mirror the worker's dual emission: structured log for production
   // observability, raw console.log for Plan 10's grep contract.
-  logger.info({ role: 'scheduler' }, 'scheduler ready');
-  // eslint-disable-next-line no-console
-  console.log('scheduler ready');
+  logger.info({ role: "scheduler" }, "scheduler ready");
+  console.log("scheduler ready");
 
   // D-22 graceful shutdown. Same shape as the worker — drain pg-boss first
   // (which stops emitting new scheduled enqueues), then drain the pg.Pool.
   const shutdown = async (signal: string): Promise<void> => {
-    logger.info({ signal }, 'scheduler received shutdown signal');
+    logger.info({ signal }, "scheduler received shutdown signal");
     try {
       await stopBoss(boss);
     } catch (err) {
-      logger.warn({ err }, 'pg-boss stop failed');
+      logger.warn({ err }, "pg-boss stop failed");
     }
     try {
       await pool.end();
     } catch (err) {
-      logger.warn({ err }, 'pool.end failed');
+      logger.warn({ err }, "pool.end failed");
     }
     process.exit(0);
   };
-  process.on('SIGTERM', () => {
-    void shutdown('SIGTERM');
+  process.on("SIGTERM", () => {
+    void shutdown("SIGTERM");
   });
-  process.on('SIGINT', () => {
-    void shutdown('SIGINT');
+  process.on("SIGINT", () => {
+    void shutdown("SIGINT");
   });
 
   // Scheduler idles forever — pg-boss owns the cron loop. Block on a

@@ -32,9 +32,7 @@ type MockServer = {
   service: {
     on: (event: string, handler: (...args: unknown[]) => void) => void;
     removeAllListeners: (event?: string) => void;
-    buildResponse?: (
-      claims: Record<string, unknown>,
-    ) => Promise<{ id_token: string }>;
+    buildResponse?: (claims: Record<string, unknown>) => Promise<{ id_token: string }>;
   };
 };
 

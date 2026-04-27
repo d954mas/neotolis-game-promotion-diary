@@ -19,22 +19,19 @@
 // established here by convention (every service function takes `userId` first;
 // the row is filtered by it; missing or other-tenant rows throw NotFoundError).
 
-import type { MiddlewareHandler } from 'hono';
-import { auth } from '../../../auth.js';
-import { logger } from '../../logger.js';
+import type { MiddlewareHandler } from "hono";
+import { auth } from "../../../auth.js";
+import { logger } from "../../logger.js";
 
 export const tenantScope: MiddlewareHandler<{
   Variables: { userId: string; sessionId: string };
 }> = async (c, next) => {
   const result = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!result) {
-    return c.json({ error: 'unauthorized' }, 401);
+    return c.json({ error: "unauthorized" }, 401);
   }
-  c.set('userId', result.user.id);
-  c.set('sessionId', result.session.id);
-  logger.debug(
-    { userId: result.user.id, route: c.req.path },
-    'tenant-scope: authed',
-  );
+  c.set("userId", result.user.id);
+  c.set("sessionId", result.session.id);
+  logger.debug({ userId: result.user.id, route: c.req.path }, "tenant-scope: authed");
   return next();
 };

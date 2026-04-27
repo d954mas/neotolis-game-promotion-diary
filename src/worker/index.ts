@@ -16,10 +16,10 @@
 //   - print `worker ready` to stdout for Plan 10's grep-based assertion
 //   - honor SIGTERM with pg-boss graceful drain + pg.Pool drain (D-22)
 
-import { createBoss, stopBoss } from '../lib/server/queue-client.js';
-import { pool } from '../lib/server/db/client.js';
-import { logger } from '../lib/server/logger.js';
-import { QUEUES } from '../lib/server/queues.js';
+import { createBoss, stopBoss } from "../lib/server/queue-client.js";
+import { pool } from "../lib/server/db/client.js";
+import { logger } from "../lib/server/logger.js";
+import { QUEUES } from "../lib/server/queues.js";
 
 /**
  * Boot the pg-boss worker, declare queues, subscribe to internal.healthcheck,
@@ -41,7 +41,7 @@ export async function startWorker(): Promise<void> {
     for (const job of jobs) {
       logger.debug(
         { jobId: job.id, queue: QUEUES.INTERNAL_HEALTHCHECK },
-        'healthcheck job processed',
+        "healthcheck job processed",
       );
     }
   });
@@ -51,33 +51,32 @@ export async function startWorker(): Promise<void> {
   // raw console.log line. Plan 10's smoke test greps for `worker ready`
   // and does not parse JSON; the raw line is the grep target. The
   // structured line preserves observability for production deploys.
-  logger.info({ role: 'worker' }, 'worker ready');
-  // eslint-disable-next-line no-console
-  console.log('worker ready');
+  logger.info({ role: "worker" }, "worker ready");
+  console.log("worker ready");
 
   // D-22 graceful shutdown. SIGTERM/SIGINT drain pg-boss first (so in-flight
   // handlers complete), THEN pool.end() (so any handler that took a Drizzle
   // connection releases cleanly). Either drain failure logs and continues —
   // we still want process.exit(0) so the orchestrator sees a clean stop.
   const shutdown = async (signal: string): Promise<void> => {
-    logger.info({ signal }, 'worker received shutdown signal');
+    logger.info({ signal }, "worker received shutdown signal");
     try {
       await stopBoss(boss);
     } catch (err) {
-      logger.warn({ err }, 'pg-boss stop failed');
+      logger.warn({ err }, "pg-boss stop failed");
     }
     try {
       await pool.end();
     } catch (err) {
-      logger.warn({ err }, 'pool.end failed');
+      logger.warn({ err }, "pool.end failed");
     }
     process.exit(0);
   };
-  process.on('SIGTERM', () => {
-    void shutdown('SIGTERM');
+  process.on("SIGTERM", () => {
+    void shutdown("SIGTERM");
   });
-  process.on('SIGINT', () => {
-    void shutdown('SIGINT');
+  process.on("SIGINT", () => {
+    void shutdown("SIGINT");
   });
 
   // Worker idles forever — pg-boss owns the polling loop. Block on a

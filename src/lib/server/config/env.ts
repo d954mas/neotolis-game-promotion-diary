@@ -7,7 +7,6 @@
 // The `eslint-disable-next-line no-restricted-properties` comments below are
 // the ONLY approved exceptions to the project-wide ban on `process.env` access.
 
-// eslint-disable-next-line no-restricted-properties -- this module is the sole reader of process.env (D-24)
 import "dotenv/config";
 import { z } from "zod";
 
@@ -29,7 +28,6 @@ const RawSchema = z.object({
   KEK_CURRENT_VERSION: z.coerce.number().int().min(1).default(1),
 });
 
-// eslint-disable-next-line no-restricted-properties -- sole reader of process.env (D-24)
 const raw = RawSchema.parse(process.env);
 
 // Decode and length-validate every KEK version present in env.
@@ -40,9 +38,7 @@ const kekVersions = new Map<number, Buffer>();
 function decodeKek(b64: string, version: number): Buffer {
   const buf = Buffer.from(b64, "base64");
   if (buf.length !== 32) {
-    throw new Error(
-      `KEK v${version} must decode to 32 bytes (got ${buf.length})`,
-    );
+    throw new Error(`KEK v${version} must decode to 32 bytes (got ${buf.length})`);
   }
   return buf;
 }
@@ -51,7 +47,6 @@ kekVersions.set(1, decodeKek(raw.APP_KEK_BASE64, 1));
 
 // Optional rotation versions: APP_KEK_V2_BASE64 .. APP_KEK_V9_BASE64.
 for (let v = 2; v <= 9; v++) {
-  // eslint-disable-next-line no-restricted-properties -- sole reader of process.env (D-24)
   const b64 = process.env[`APP_KEK_V${v}_BASE64`];
   if (b64) kekVersions.set(v, decodeKek(b64, v));
 }
@@ -65,15 +60,12 @@ if (!kekVersions.has(raw.KEK_CURRENT_VERSION)) {
 // PITFALL P2 mitigation #4: scrub the original env vars after consumption so
 // the raw KEK material cannot leak via accidental console.log(process.env) or
 // debug dumps. The decoded buffers live in `kekVersions` Map only.
-// eslint-disable-next-line no-restricted-properties -- sole reader of process.env (D-24)
 delete process.env.APP_KEK_BASE64;
 for (let v = 2; v <= 9; v++) {
-  // eslint-disable-next-line no-restricted-properties -- sole reader of process.env (D-24)
   delete process.env[`APP_KEK_V${v}_BASE64`];
 }
 
-const TRUSTED_ORIGINS = raw.TRUSTED_ORIGINS
-  .split(",")
+const TRUSTED_ORIGINS = raw.TRUSTED_ORIGINS.split(",")
   .map((s) => s.trim())
   .filter(Boolean);
 

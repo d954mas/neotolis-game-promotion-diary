@@ -45,7 +45,7 @@
  */
 
 // @ts-expect-error — oauth2-mock-server (CJS) types may lag in this TS config.
-import { OAuth2Server } from 'oauth2-mock-server';
+import { OAuth2Server } from "oauth2-mock-server";
 
 interface Args {
   appUrl: string;
@@ -78,11 +78,11 @@ function parseArgs(): Args {
     return argv[i + 1]!;
   };
   return {
-    appUrl: get('--app-url'),
-    mockPort: parseInt(get('--mock-port'), 10),
-    sub: get('--sub'),
-    email: get('--email'),
-    name: get('--name'),
+    appUrl: get("--app-url"),
+    mockPort: parseInt(get("--mock-port"), 10),
+    sub: get("--sub"),
+    email: get("--email"),
+    name: get("--name"),
   };
 }
 
@@ -103,9 +103,9 @@ function resolveLocation(location: string, base: string): string {
  * `name=value` on subsequent requests; that's what every browser does.
  */
 function parseSetCookie(setCookie: string): [string, string] | null {
-  const firstSemi = setCookie.indexOf(';');
+  const firstSemi = setCookie.indexOf(";");
   const pair = firstSemi === -1 ? setCookie : setCookie.slice(0, firstSemi);
-  const eq = pair.indexOf('=');
+  const eq = pair.indexOf("=");
   if (eq === -1) return null;
   const name = pair.slice(0, eq).trim();
   const value = pair.slice(eq + 1).trim();
@@ -121,13 +121,13 @@ function readSetCookies(res: Response): string[] {
   const headers = res.headers as Headers & {
     getSetCookie?: () => string[];
   };
-  if (typeof headers.getSetCookie === 'function') {
+  if (typeof headers.getSetCookie === "function") {
     return headers.getSetCookie();
   }
   // Fallback: comma-split a single Set-Cookie header. Imperfect (cookies
   // with `Expires=...` contain commas) but Node 22's fetch always exposes
   // getSetCookie() so this branch is mostly defensive.
-  const single = res.headers.get('set-cookie');
+  const single = res.headers.get("set-cookie");
   return single ? [single] : [];
 }
 
@@ -135,16 +135,16 @@ async function main(): Promise<void> {
   const args = parseArgs();
 
   const server = new OAuth2Server() as MockServer;
-  await server.issuer.keys.generate('RS256');
-  await server.start(args.mockPort, '127.0.0.1');
+  await server.issuer.keys.generate("RS256");
+  await server.start(args.mockPort, "127.0.0.1");
 
   try {
     // Reset previous handlers so successive driver invocations from the
     // same bash process see only the current claims.
-    server.service.removeAllListeners('beforeUserinfo');
-    server.service.removeAllListeners('beforeTokenSigning');
+    server.service.removeAllListeners("beforeUserinfo");
+    server.service.removeAllListeners("beforeTokenSigning");
 
-    server.service.on('beforeUserinfo', (...handlerArgs: unknown[]) => {
+    server.service.on("beforeUserinfo", (...handlerArgs: unknown[]) => {
       const userInfo = handlerArgs[0] as {
         body: Record<string, unknown>;
         statusCode: number;
@@ -158,18 +158,18 @@ async function main(): Promise<void> {
       userInfo.statusCode = 200;
     });
 
-    server.service.on('beforeTokenSigning', (...handlerArgs: unknown[]) => {
+    server.service.on("beforeTokenSigning", (...handlerArgs: unknown[]) => {
       const token = handlerArgs[0] as { payload: Record<string, unknown> };
       token.payload = {
         ...token.payload,
         // INFO I2 Path 3 (locked by Plan 01-05): coerce iss so Better Auth
         // 1.6.x's hardcoded google-provider issuer check accepts the token.
-        iss: 'https://accounts.google.com',
+        iss: "https://accounts.google.com",
         sub: args.sub,
         email: args.email,
         email_verified: true,
         name: args.name,
-        aud: process.env.GOOGLE_CLIENT_ID ?? 'mock-client-id',
+        aud: process.env.GOOGLE_CLIENT_ID ?? "mock-client-id",
       };
     });
 
@@ -186,16 +186,16 @@ async function main(): Promise<void> {
     const jar = new Map<string, string>();
     const initialUrl = `${args.appUrl}/api/auth/sign-in/social`;
     const initialBody = JSON.stringify({
-      provider: 'google',
-      callbackURL: '/',
+      provider: "google",
+      callbackURL: "/",
     });
 
     const initial = await fetch(initialUrl, {
-      method: 'POST',
-      redirect: 'manual',
+      method: "POST",
+      redirect: "manual",
       headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
+        "content-type": "application/json",
+        accept: "application/json",
       },
       body: initialBody,
     });
@@ -211,19 +211,19 @@ async function main(): Promise<void> {
     //   - 200 with JSON { url: '<authorize URL>', redirect: true } (fetch-style)
     let nextUrl: string | null = null;
     if (initial.status >= 300 && initial.status < 400) {
-      const loc = initial.headers.get('location');
+      const loc = initial.headers.get("location");
       if (loc) nextUrl = resolveLocation(loc, initialUrl);
     } else if (initial.status === 200) {
       const json = (await initial.json()) as { url?: string };
-      if (json && typeof json.url === 'string') {
+      if (json && typeof json.url === "string") {
         nextUrl = json.url;
       }
     }
 
     if (!nextUrl) {
       console.error(
-        '[oauth-mock-driver] sign-in did not return a redirect URL',
-        'status=',
+        "[oauth-mock-driver] sign-in did not return a redirect URL",
+        "status=",
         initial.status,
       );
       process.exit(1);
@@ -236,12 +236,10 @@ async function main(): Promise<void> {
     let hops = 0;
     while (currentUrl && hops < 10) {
       hops++;
-      const cookieHeader = [...jar.entries()]
-        .map(([k, v]) => `${k}=${v}`)
-        .join('; ');
+      const cookieHeader = [...jar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
       const res: Response = await fetch(currentUrl, {
-        method: 'GET',
-        redirect: 'manual',
+        method: "GET",
+        redirect: "manual",
         headers: cookieHeader ? { cookie: cookieHeader } : {},
       });
 
@@ -251,7 +249,7 @@ async function main(): Promise<void> {
       }
 
       if (res.status >= 300 && res.status < 400) {
-        const loc = res.headers.get('location');
+        const loc = res.headers.get("location");
         currentUrl = loc ? resolveLocation(loc, currentUrl) : null;
       } else {
         currentUrl = null;
@@ -262,12 +260,12 @@ async function main(): Promise<void> {
     // locked the prefix to `neotolis`. In production with `useSecureCookies`
     // the name is prefixed with `__Secure-`; the smoke test runs over plain
     // HTTP (NODE_ENV=test or unset), so the unprefixed name applies.
-    const sessionTokenValue = jar.get('neotolis.session_token');
+    const sessionTokenValue = jar.get("neotolis.session_token");
     if (!sessionTokenValue) {
       console.error(
-        '[oauth-mock-driver] no session cookie set after',
+        "[oauth-mock-driver] no session cookie set after",
         hops,
-        'hops. Captured jar:',
+        "hops. Captured jar:",
         JSON.stringify([...jar.entries()]),
       );
       process.exit(1);
@@ -289,6 +287,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error('[oauth-mock-driver] failed:', err);
+  console.error("[oauth-mock-driver] failed:", err);
   process.exit(2);
 });
