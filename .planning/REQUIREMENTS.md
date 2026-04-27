@@ -93,7 +93,7 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 - [ ] **UX-01**: UI supports dark mode and light mode; honors `prefers-color-scheme` and lets the user override
 - [ ] **UX-02**: UI is responsive — every screen is usable on a phone viewport (≥360px wide); charts reflow legibly
 - [ ] **UX-03**: Every empty state shows a copy-paste example of what the user can do next (e.g., "Paste a Reddit post URL like `https://reddit.com/r/IndieDev/...`")
-- [ ] **UX-04**: All user-facing copy is in English; the codebase carries an i18n structure (locale-aware key lookups) so adding locales later is a content-only change
+- [x] **UX-04**: All user-facing copy is in English; the codebase carries an i18n structure (locale-aware key lookups) so adding locales later is a content-only change
 
 ### Deployment & Self-Host Parity (DEPLOY)
 

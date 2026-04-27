@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 01-foundation/01-08-PLAN.md
-last_updated: "2026-04-27T11:54:01.012Z"
+stopped_at: Completed 01-foundation/01-09-PLAN.md
+last_updated: "2026-04-27T11:55:19.532Z"
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 10
-  completed_plans: 7
+  completed_plans: 8
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 01 (foundation) — EXECUTING
-Plan: 8 of 10
+Plan: 9 of 10
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Plan: 8 of 10
 | Phase 01-foundation P05 | 4min | 2 tasks | 8 files |
 | Phase 01-foundation P06 | ~5min 30s | 2 tasks | 14 files |
 | Phase 01-foundation P08 | ~2min | 1 tasks | 3 files |
+| Phase 01-foundation P09 | 3min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -86,6 +87,9 @@ Recent decisions affecting current work:
 - [Phase 01-foundation]: Plan 01-06: worker/scheduler stubs at D-01-locked paths (src/worker/index.ts, src/scheduler/index.ts) print 'worker stub ready' / 'scheduler stub ready' to stdout for Plan 10 smoke-test grep contract; Plan 08 OVERWRITES these files with real pg-boss implementations and switches strings to 'worker ready' / 'scheduler ready'
 - [Phase 01-foundation]: Plan 01-06: APP_ROLE dispatcher (Pattern 1) in src/server.ts runs runMigrations() BEFORE any role entrypoint so worker/scheduler containers also fail fast on schema drift; idempotent + advisory-locked per Plan 03; D-22 graceful shutdown drains pg.Pool on SIGTERM with 60s force-exit fallback
 - [Phase 01-foundation]: Plan 01-08: pg-boss worker/scheduler entrypoints replace Plan 06 stubs at D-01 paths; createBoss uses connectionString (own pool) + declareAllQueues on every boot; both roles emit dual ready signal (logger.info + console.log) for Plan 10 grep contract; D-22 graceful shutdown via boss.stop({ wait, graceful, timeout: 60_000 }) → pool.end()
+- [Phase 01-foundation]: Plan 01-09: project.inlang/settings.json wires baseLocale=en + locales=[en] (D-17) with @inlang/plugin-message-format@4 reading messages/{locale}.json — locale-add is content-only
+- [Phase 01-foundation]: Plan 01-09: messages/en.json holds 9 Phase 1 UI strings (D-18 single-file dictionary at repo root); every src/routes/*.svelte uses m.* exclusively, no hard-coded English literals
+- [Phase 01-foundation]: Plan 01-09: VALIDATION 19 (locale-add invariant) asserted via explicit keyset toEqual on Object.keys(messages/en.json).sort() — more durable than toMatchSnapshot across renames; integration test greps m.<key>(...) over .svelte files and asserts each key exists in en.json
 
 ### Pending Todos
 
@@ -99,6 +103,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T11:54:01.009Z
-Stopped at: Completed 01-foundation/01-08-PLAN.md
+Last session: 2026-04-27T11:55:19.529Z
+Stopped at: Completed 01-foundation/01-09-PLAN.md
 Resume file: None

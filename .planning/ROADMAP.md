@@ -41,7 +41,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 01-06-PLAN.md — Hono app + trusted-proxy middleware (D-19/D-20 + CVE-2026-27700 mitigation) + /healthz + /readyz + APP_ROLE=app entrypoint + SvelteKit pass-through + minimal pages
 - [ ] 01-07-PLAN.md — Tenant-scope middleware (404 not 403) + /api/me + anonymous-401 sweep + cross-tenant integration test
 - [x] 01-08-PLAN.md — APP_ROLE=worker + APP_ROLE=scheduler entrypoints + pg-boss createBoss/stopBoss with graceful drain
-- [ ] 01-09-PLAN.md — Paraglide JS 2 wiring + messages/en.json + thread m.* through Svelte pages + locale-add snapshot test
+- [x] 01-09-PLAN.md — Paraglide JS 2 wiring + messages/en.json + thread m.* through Svelte pages + locale-add snapshot test
 - [ ] 01-10-PLAN.md — Self-host smoke test (D-15 six assertions; OAuth dance via oauth2-mock-server; human-verify checkpoint) + finalize VALIDATION.md
 
 ### Phase 2: Ingest, Secrets, and Audit
