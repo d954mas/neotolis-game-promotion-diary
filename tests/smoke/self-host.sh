@@ -65,6 +65,14 @@ fail() {
 # env.ts is module-level and validates everything at import time, so even
 # the worker / scheduler roles need every var present (CLAUDE.md / Plan
 # 01-01 lock this discipline).
+#
+# BETTER_AUTH_SECURE_COOKIES=false (review blocker P1 fix): smoke runs the
+# production image (NODE_ENV=production via Dockerfile) over plain HTTP.
+# Better Auth would otherwise emit `__Secure-neotolis.session_token` and
+# browsers / spec-compliant clients refuse to set `__Secure-` cookies over
+# HTTP — the cookie jar would be empty and the smoke driver would fail.
+# This override matches what a self-host operator does behind plain HTTP
+# behind a reverse-proxy that terminates TLS.
 common_env_args() {
   cat <<EOF
 -e APP_MODE=selfhost
@@ -76,6 +84,7 @@ common_env_args() {
 -e GOOGLE_DISCOVERY_URL=$GOOGLE_DISCOVERY_URL_VAL
 -e APP_KEK_BASE64=$KEK_BASE64
 -e TRUSTED_PROXY_CIDR=
+-e BETTER_AUTH_SECURE_COOKIES=false
 EOF
 }
 

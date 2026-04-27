@@ -33,6 +33,16 @@ const RawSchema = z.object({
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   APP_KEK_BASE64: z.string().min(1),
   KEK_CURRENT_VERSION: z.coerce.number().int().min(1).default(1),
+  // Override Better Auth's secure-cookie default (which tracks NODE_ENV ===
+  // "production"). Self-host operators running the production image behind a
+  // TLS-terminating proxy over plain HTTP between proxy and app must set this
+  // to "false" or Better Auth refuses to set the `__Secure-` cookie prefix
+  // over HTTP. Smoke tests do the same — they exercise the production image
+  // over plain HTTP. Leave unset in real production deployments.
+  BETTER_AUTH_SECURE_COOKIES: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === "true")),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -93,6 +103,7 @@ export const env = {
   LOG_LEVEL: raw.LOG_LEVEL,
   KEK_CURRENT_VERSION: raw.KEK_CURRENT_VERSION,
   KEK_VERSIONS: kekVersions,
+  BETTER_AUTH_SECURE_COOKIES: raw.BETTER_AUTH_SECURE_COOKIES,
 } as const;
 
 export type Env = typeof env;

@@ -255,10 +255,22 @@ async function main(): Promise<void> {
 
     // Better Auth's cookie name is `${cookiePrefix}.session_token`. Plan 05
     // locked the prefix to `neotolis`. In production with `useSecureCookies`
-    // the name is prefixed with `__Secure-`; the smoke test runs over plain
-    // HTTP (NODE_ENV=test or unset), so the unprefixed name applies.
+    // the name is prefixed with `__Secure-`; smoke runs the production image
+    // over plain HTTP and the smoke harness sets BETTER_AUTH_SECURE_COOKIES=false
+    // so the unprefixed name applies. We probe BOTH names anyway so a
+    // missing override surfaces a useful error rather than a silent failure.
     const sessionTokenValue = jar.get("neotolis.session_token");
+    const secureSessionTokenValue = jar.get("__Secure-neotolis.session_token");
     if (!sessionTokenValue) {
+      if (secureSessionTokenValue) {
+        console.error(
+          "[oauth-mock-driver] cookie set under __Secure-neotolis.session_token; the smoke",
+          "harness must set BETTER_AUTH_SECURE_COOKIES=false because the production image is",
+          "exercised over plain HTTP. Browsers / spec-compliant clients refuse __Secure-",
+          "cookies over HTTP.",
+        );
+        process.exit(1);
+      }
       console.error(
         "[oauth-mock-driver] no session cookie set after",
         hops,

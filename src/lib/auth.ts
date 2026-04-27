@@ -82,7 +82,12 @@ export const auth = betterAuth({
     crossSubDomainCookies: env.COOKIE_DOMAIN
       ? { enabled: true, domain: env.COOKIE_DOMAIN }
       : { enabled: false },
-    useSecureCookies: env.NODE_ENV === "production",
+    // BETTER_AUTH_SECURE_COOKIES override (review blocker P1 fix): a self-host
+    // operator running the production image behind a TLS-terminating reverse
+    // proxy over plain HTTP between proxy and app must set the env var to
+    // "false". Otherwise Better Auth emits the `__Secure-` cookie prefix and
+    // browsers refuse to set it over HTTP. Default tracks NODE_ENV.
+    useSecureCookies: env.BETTER_AUTH_SECURE_COOKIES ?? env.NODE_ENV === "production",
     defaultCookieAttributes: {
       httpOnly: true,
       sameSite: "lax",

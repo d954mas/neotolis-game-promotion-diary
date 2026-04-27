@@ -97,6 +97,11 @@ jobs:
       GOOGLE_DISCOVERY_URL: http://localhost:9090/.well-known/openid-configuration
       APP_KEK_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/neotolis
+      # Smoke runs the production image over plain HTTP; Better Auth would
+      # refuse to set __Secure- cookies over HTTP. This override matches what
+      # a self-host operator does behind a TLS-terminating reverse proxy that
+      # speaks plain HTTP to the app container.
+      BETTER_AUTH_SECURE_COOKIES: 'false'
       CI: 'true'
     steps:
       - uses: actions/checkout@v4
