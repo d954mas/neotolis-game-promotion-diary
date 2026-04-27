@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 01-01-PLAN.md (locked-stack scaffold + env/logger/ids primitives)
-last_updated: "2026-04-27T11:21:33.744Z"
+stopped_at: Completed 01-foundation/01-02-PLAN.md
+last_updated: "2026-04-27T11:24:19.984Z"
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 10
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 01 (foundation) — EXECUTING
-Plan: 2 of 10
+Plan: 3 of 10
 
 ## Performance Metrics
 
@@ -47,6 +47,7 @@ Plan: 2 of 10
 
 *Updated after each plan completion*
 | Phase 01-foundation P01 | 3min | 2 tasks | 14 files |
+| Phase 01-foundation P02 | 14min | 2 tasks | 22 files |
 
 ## Accumulated Context
 
@@ -61,6 +62,9 @@ Recent decisions affecting current work:
 - [Phase 01-foundation]: Plan 01-01 pinned the Phase 1 locked stack exactly per RESEARCH.md drift table (@hono/node-server@1.19.14 NOT 2.x; pg-boss@10.1.10 NOT 12.x; better-auth@1.6.9; drizzle-orm@0.45.2; hono@4.12.15; paraglide-js@2.16.1)
 - [Phase 01-foundation]: src/lib/server/config/env.ts is the SOLE process.env reader; ESLint no-restricted-properties enforces the boundary (P2 mitigation). KEK is decoded, length-checked at 32 bytes, and deleted from process.env after consumption
 - [Phase 01-foundation]: Pino redact paths fixed once at logger init covering all 14 D-24 secret-shaped key paths (apiKey, refreshToken, accessToken, password, secret, encrypted_*, wrapped_dek, dek, kek, plus Authorization and Cookie headers)
+- [Phase 01-foundation]: Plan 01-02: Wave 0 test scaffolding lands all 12 test files with named-plan it.skip placeholders (Nyquist invariant); vitest 4 test.projects splits unit/integration
+- [Phase 01-foundation]: Plan 01-02: Dockerfile = node:22-alpine multi-stage (deps/build/runtime) with non-root UID 10001 and HEALTHCHECK on /readyz; ENTRYPOINT [node, build/server.js] dispatches APP_ROLE (Plan 06 lands runtime dispatch)
+- [Phase 01-foundation]: Plan 01-02: CI workflow has SaaS-leak grep step (D-14) - fails PR on hardcoded admin@neotolis or analytics.neotolis or CF-Connecting-IP outside trusted-proxy module
 
 ### Pending Todos
 
@@ -74,6 +78,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T11:21:22.141Z
-Stopped at: Completed 01-01-PLAN.md (locked-stack scaffold + env/logger/ids primitives)
+Last session: 2026-04-27T11:24:08.020Z
+Stopped at: Completed 01-foundation/01-02-PLAN.md
 Resume file: None
