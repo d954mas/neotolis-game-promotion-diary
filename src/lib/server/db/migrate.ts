@@ -38,14 +38,18 @@ export async function runMigrations(): Promise<void> {
     await client.query(`SELECT pg_advisory_lock($1)`, [LOCK_KEY.toString()]);
     const localDb = drizzle(client);
     await migrate(localDb, { migrationsFolder: "./drizzle" });
+    // Defensive ordering: release the advisory lock BEFORE flipping the
+    // readyz flag. The previous order ran `migrationsApplied.current = true`
+    // first; if the subsequent unlock query failed (transient network blip
+    // during the unlock RPC), /readyz would answer 200 while this session
+    // still held the lock — the lock would only release on pool drain. With
+    // unlock first, /readyz can only flip true after the lock is gone, so an
+    // orchestrator that watches /readyz never routes traffic to a process
+    // still holding a session-level Postgres lock.
+    await client.query(`SELECT pg_advisory_unlock($1)`, [LOCK_KEY.toString()]);
     migrationsApplied.current = true;
     logger.info({ phase: "migrate" }, "migrations applied");
   } finally {
-    try {
-      await client.query(`SELECT pg_advisory_unlock($1)`, [LOCK_KEY.toString()]);
-    } catch (err) {
-      logger.warn({ err }, "advisory unlock failed (non-fatal)");
-    }
     client.release();
     await pool.end();
   }
