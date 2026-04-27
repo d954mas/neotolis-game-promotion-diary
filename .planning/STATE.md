@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02-05-api-keys-steam-service-PLAN.md
-last_updated: "2026-04-27T20:55:46.721Z"
+stopped_at: Completed 02-06-ingest-and-events-services-PLAN.md
+last_updated: "2026-04-27T21:10:13.726Z"
 last_activity: 2026-04-27
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 21
-  completed_plans: 15
+  completed_plans: 16
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02 (ingest-secrets-and-audit) — EXECUTING
-Plan: 6 of 11
+Plan: 7 of 11
 
 ## Performance Metrics
 
@@ -61,6 +61,7 @@ Plan: 6 of 11
 | Phase 02-ingest-secrets-and-audit P03 | 8min 30s | 2 tasks | 18 files |
 | Phase 02-ingest-secrets-and-audit P04 | 7min 38s | 2 tasks | 7 files |
 | Phase 02-ingest-secrets-and-audit P05 | 5m 33s | 2 tasks | 6 files |
+| Phase 02-ingest-secrets-and-audit P06 | 8m 48s | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -122,6 +123,10 @@ Recent decisions affecting current work:
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-05: removeSteamKey audits BEFORE the DELETE (D-32 forensics) — even if DELETE fails the security signal is captured. Reverse order would let a transient DB error swallow the audit row
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-05: decryptSteamKeyForOperator exported but documented internal-only — Phase 2 only uses it in tests (envelope round-trip proof); Phase 3 worker is the only future production caller. The 'forOperator' suffix is the reviewer signal that any PR adding a Hono route fails review under D-39
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-05: toApiKeySteamDto behavioural test in tests/unit/dto.test.ts is the runtime guard for D-39 — TypeScript erases at runtime; the projection function is the only barrier. Test asserts strip happens against a row literal carrying every ciphertext column
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-06: AppError extended with optional 4th metadata arg — youtube_unavailable carries {reason:'private'|'unavailable'} so Plan 02-08 can map a single 422 code to two distinct Paraglide messages without parsing message strings (Rule 2 fix; backward-compatible — NotFoundError still passes 3 args)
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-06: youtube-oembed integration ships W-6 discriminated-union return (kind: ok|unavailable|private) instead of RESEARCH.md §6's null contract — single null couldn't distinguish private vs deleted vs 5xx. Three kinds + thrown-on-5xx maps each axis to a distinct AppError code/metadata combination Plan 02-08 consumes mechanically
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-06: items-youtube.createTrackedYoutubeVideo wraps INSERT in try/catch ONLY to translate Postgres unique_violation 23505 → AppError 'duplicate_item' 409 — the EXCEPTION to the no-try/catch-around-insert D-19 rule (mapping a known DB constraint to a clean HTTP code is not cleaning up a half-write). The half-write rule still holds: no INSERT-then-DELETE-on-error path exists
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-06: listTimelineForGame uses tracked_youtube_videos.addedAt as the timeline timestamp (no occurredAt column on tracked videos). Two indexed selects + JS Array.sort beats a UNION ALL with disparate column shapes; matches the indie-budget zero-paid-DB-feature constraint
 
 ### Pending Todos
 
@@ -135,7 +140,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T20:55:46.718Z
+Last session: 2026-04-27T21:10:13.722Z
 Last Activity: 2026-04-27
-Stopped at: Completed 02-05-api-keys-steam-service-PLAN.md
+Stopped at: Completed 02-06-ingest-and-events-services-PLAN.md
 Resume file: None
