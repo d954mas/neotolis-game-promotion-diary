@@ -47,11 +47,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 ### Phase 2: Ingest, Secrets, and Audit
 **Goal**: Ship a usable end-to-end product without the polling worker. Validate the data model, the secret write path, and the audit story. After this phase the user can do everything they did in their spreadsheet, with encryption and audit on top.
 **Depends on**: Phase 1
-**Requirements**: GAMES-01, GAMES-02, GAMES-03, GAMES-04, KEYS-01, KEYS-02, KEYS-03, KEYS-04, KEYS-05, KEYS-06, INGEST-01, INGEST-02, INGEST-03, INGEST-04, EVENTS-01, EVENTS-02, EVENTS-03, PRIV-02, UX-01, UX-02, UX-03
+**Requirements**: GAMES-01, GAMES-02, GAMES-03, GAMES-04a, KEYS-03, KEYS-04, KEYS-05, KEYS-06, INGEST-02, INGEST-03, INGEST-04, EVENTS-01, EVENTS-02, EVENTS-03, PRIV-02, UX-01, UX-02, UX-03 *(KEYS-01, KEYS-02, INGEST-01 moved to Phase 3 per CONTEXT.md DV-1/DV-7; GAMES-04 split into GAMES-04a (P2) + GAMES-04b/c/d (backlog) per DV-8)*
 **Success Criteria** (what must be TRUE):
-  1. User creates a game card with title, Steam URL, optional cover, optional release date or "TBA", tags/genres, and free-form notes; can attach multiple YouTube channels, Telegram channels, Twitter handles, and an optional Discord per game; can soft-delete and recover within the documented retention window
-  2. User pastes a Reddit post URL or a YouTube video URL on a game and a tracked item is created (with own/blogger flag for YouTube videos, toggleable later); a malformed URL is rejected with a clear error and never half-writes a row
-  3. User saves a YouTube API key, authorizes Reddit OAuth, and optionally saves a Steam Web API key; after save the value is shown only as `••••••••XYZW`, the plaintext is never returned to the browser, the row is envelope-encrypted at rest, and rotation immediately invalidates the previous ciphertext
+  1. User creates a game card with title, Steam URL, optional cover, optional release date or "TBA", tags/genres, and free-form notes; can attach multiple YouTube channels per game (Telegram channels, Twitter handles, and optional Discord deferred to backlog by trigger per CONTEXT.md DV-8); can soft-delete and recover within the documented retention window
+  2. User pastes a YouTube video URL on a game and a tracked item is created (with own/blogger flag, toggleable later); user pastes a Twitter or Telegram URL and a free-form events row is created; user pastes a Reddit URL and sees an inline "Reddit support arrives in Phase 3" message (Reddit ingest moves to Phase 3 alongside poll.reddit per CONTEXT.md DV-7); a malformed URL is rejected with a clear error and never half-writes a row
+  3. User saves a Steam Web API key (YouTube API key paste UI and Reddit OAuth flow move to Phase 3 alongside their respective poll adapters per CONTEXT.md DV-1); after save the value is shown only as `••••••••XYZW`, the plaintext is never returned to the browser, the row is envelope-encrypted at rest, and rotation immediately invalidates the previous ciphertext
   4. User creates free-form timeline events (conferences, talks, Twitter/Telegram/Discord posts) with title, date, optional URL/category/notes; edits and deletes are recorded in the audit log
   5. User opens the audit log and sees a paginated, owner-only list of logins (timestamp + IP + user-agent), key add/rotate/remove, and event edit/delete entries — with cursors that are tenant-relative so listing one tenant never observes another's IDs
   6. Every page renders legibly on a 360px-wide phone viewport, honors `prefers-color-scheme` with a user override for dark/light, and every empty state shows a copy-paste example of the next action
@@ -74,7 +74,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 ### Phase 3: Polling Pipeline
 **Goal**: Adaptive polling worker pool actually fetches metrics. pg-boss queues, scheduler, three integration adapters, and the two wishlist ingest paths all land together because they are co-dependent and pitfall-dense (P4–P9, P11). Snapshots accumulate so Phase 4 has data to chart.
 **Depends on**: Phase 2
-**Requirements**: POLL-01, POLL-02, POLL-03, POLL-04, POLL-05, POLL-06, WISH-01, WISH-02, WISH-03
+**Requirements**: POLL-01, POLL-02, POLL-03, POLL-04, POLL-05, POLL-06, WISH-01, WISH-02, WISH-03, KEYS-01, KEYS-02, INGEST-01 *(KEYS-01, KEYS-02, INGEST-01 deferred from Phase 2 per CONTEXT.md DV-1/DV-7 — land alongside their respective poll adapters)*
 **Spike (gate at phase start, MEDIUM-confidence area)**:
   - One live authenticated `GET /r/IndieDev/about/rules.json` to confirm the JSON schema (raw rule text vs. structured `cooldown_days`/`flair_required` fields). Locks the `subreddit_rules` table shape used downstream in Phase 5.
   - Confirm batched `videos.list` quota math: a single `videos.list?id=v1,v2,...,v50&part=snippet,statistics` call returns 50 videos for 1 quota unit (the 50× saving over per-video calls). Validate against current YouTube Data API v3 documentation and a real call before committing the worker design.
@@ -85,7 +85,9 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Every successful poll appends an immutable row to `metric_snapshots` (timestamp + payload); the live `tracked_items` row carries only `last_polled_at` and `last_poll_status` — chart history is never mutated, which is what enables the Phase 4 differentiator
   5. The user can record a wishlist count manually for a date, upload a Steamworks `Wishlists.csv` and see daily counts imported, or — if a Steam Web API key is configured — the daily worker auto-fetches the wishlist count without any user action
   6. Operator runs `docker compose up -d` to redeploy and no in-flight poll is lost: workers honor SIGTERM with a configurable grace period (default 60s), pg-boss drains, snapshot inserts are idempotent on `(item_id, polled_at)`, and audit log records the shutdown event
-  7. *Phase 3 smoke extension (per Phase 1 DEPLOY-05 scope deferral, 2026-04-27):* CI self-host smoke test additionally enqueues and processes a poll-stub job end-to-end, asserting `metric_snapshots` records an immutable row and the worker drains on SIGTERM.
+  7. *(Deferred from Phase 2)* User saves a YouTube Data API v3 key (envelope-encrypted at rest); the key is consumed by `poll.youtube` worker. User authorizes Reddit via OAuth (per-user, BYO Reddit app credentials) and rotates / revokes at any time; the credentials are consumed by `poll.reddit` worker.
+  8. *(Deferred from Phase 2)* User pastes a Reddit post URL on a game and a tracked Reddit post is created; ingest validates against Reddit API; on success the row enters the polling pipeline alongside YouTube videos.
+  9. *Phase 3 smoke extension (per Phase 1 DEPLOY-05 scope deferral, 2026-04-27):* CI self-host smoke test additionally enqueues and processes a poll-stub job end-to-end, asserting `metric_snapshots` records an immutable row and the worker drains on SIGTERM.
 **Plans**: TBD
 
 ### Phase 4: Visualization

@@ -21,7 +21,10 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 - [ ] **GAMES-01**: User can create a game card with title, Steam app URL, optional cover image, optional release date (or "TBA"), tags/genres, and free-form notes
 - [ ] **GAMES-02**: User can edit and delete their own game cards; deletion is soft and recoverable for a documented retention window before purge
 - [ ] **GAMES-03**: User can have multiple games per developer account; every other entity (post, video, event, snapshot) is scoped to a specific game
-- [ ] **GAMES-04**: User can attach multiple associated channels per game — multiple YouTube channels, multiple Telegram channels, multiple Twitter handles, optional Discord — each as a separate row, not a single field
+- [ ] **GAMES-04a**: User can attach multiple YouTube channels per game (typed example for the social-handle pattern; per-channel as a separate row, not a single field)
+- [ ] **GAMES-04b**: User can attach Telegram channels per game *(by trigger — added when a real user requests Telegram channel tracking; pattern proven by GAMES-04a)*
+- [ ] **GAMES-04c**: User can attach Twitter/X handles per game *(by trigger; pattern proven by GAMES-04a)*
+- [ ] **GAMES-04d**: User can attach an optional Discord invite per game *(by trigger; pattern proven by GAMES-04a)*
 
 ### Secrets & Per-User API Keys (KEYS)
 
@@ -149,14 +152,17 @@ Each REQ-ID maps to exactly one phase. Coverage: 54/54 v1 requirements.
 | GAMES-01 | Phase 2 |
 | GAMES-02 | Phase 2 |
 | GAMES-03 | Phase 2 |
-| GAMES-04 | Phase 2 |
-| KEYS-01 | Phase 2 |
-| KEYS-02 | Phase 2 |
+| GAMES-04a | Phase 2 |
+| GAMES-04b | Backlog |
+| GAMES-04c | Backlog |
+| GAMES-04d | Backlog |
+| KEYS-01 | Phase 3 |
+| KEYS-02 | Phase 3 |
 | KEYS-03 | Phase 2 |
 | KEYS-04 | Phase 2 |
 | KEYS-05 | Phase 2 |
 | KEYS-06 | Phase 2 |
-| INGEST-01 | Phase 2 |
+| INGEST-01 | Phase 3 |
 | INGEST-02 | Phase 2 |
 | INGEST-03 | Phase 2 |
 | INGEST-04 | Phase 2 |
@@ -203,12 +209,12 @@ Each REQ-ID maps to exactly one phase. Coverage: 54/54 v1 requirements.
 | Phase | Requirement Count | Categories |
 |-------|-------------------|------------|
 | Phase 1 — Foundation | 6 | AUTH (3), PRIV (1), UX (1), DEPLOY (1) |
-| Phase 2 — Ingest, Secrets, Audit | 21 | GAMES (4), KEYS (6), INGEST (4), EVENTS (3), PRIV (1), UX (3) |
-| Phase 3 — Polling Pipeline | 9 | POLL (6), WISH (3) |
+| Phase 2 — Ingest, Secrets, Audit | 18 | GAMES (4: GAMES-01..03 + GAMES-04a), KEYS (4: KEYS-03..06), INGEST (3: INGEST-02..04), EVENTS (3), PRIV (1), UX (3) |
+| Phase 3 — Polling Pipeline | 12 | POLL (6), WISH (3), KEYS (2: KEYS-01..02), INGEST (1: INGEST-01) |
 | Phase 4 — Visualization | 5 | VIZ (4), WISH (1) |
 | Phase 5 — Reddit Rules Cockpit | 5 | REDDIT (5) |
 | Phase 6 — Trust & Self-Host Polish | 8 | PRIV (2), QUOTA (2), DEPLOY (4) |
-| **Total** | **54** | |
+| **Total** | **54 v1 + 3 backlog** | (backlog: GAMES-04b/c/d) |
 
 ---
 
