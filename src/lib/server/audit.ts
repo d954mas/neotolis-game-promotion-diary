@@ -18,13 +18,14 @@
 
 import { db } from "./db/client.js";
 import { auditLog } from "./db/schema/audit-log.js";
+import type { AuditAction } from "./audit/actions.js";
 import { logger } from "./logger.js";
 
 export interface AuditEntry {
   userId: string;
-  // e.g. 'session.signin', 'session.signout', 'session.signout_all',
-  // 'user.signup', 'key.add', 'key.rotate', 'key.remove' (last three Phase 2)
-  action: string;
+  // Phase 2 D-32: typed against the AUDIT_ACTIONS const list (single source
+  // of truth) so a stray string fails at the type check, not at INSERT.
+  action: AuditAction;
   // Resolved by Plan 06 trusted-proxy middleware (D-19). Required.
   ipAddress: string;
   userAgent?: string;

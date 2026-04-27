@@ -20,6 +20,9 @@ export const user = pgTable("user", {
   emailVerified: boolean("email_verified").notNull().default(false),
   name: text("name").notNull(),
   image: text("image"),
+  // Phase 2 D-40: cookie + DB persisted theme preference. Default 'system'
+  // honors prefers-color-scheme; explicit 'light' / 'dark' overrides.
+  themePreference: text("theme_preference").notNull().default("system"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
