@@ -21,6 +21,20 @@ const noProcessEnv = {
   ],
 };
 
+const tsUnusedVarsRule = {
+  "@typescript-eslint/no-unused-vars": [
+    "error",
+    {
+      argsIgnorePattern: "^_",
+      varsIgnorePattern: "^_",
+      caughtErrorsIgnorePattern: "^_",
+      destructuredArrayIgnorePattern: "^_",
+      ignoreRestSiblings: true,
+    },
+  ],
+  "no-unused-vars": "off",
+};
+
 export default [
   {
     ignores: [
@@ -29,6 +43,7 @@ export default [
       ".svelte-kit/",
       "src/lib/paraglide/",
       "drizzle/",
+      "messages/",
     ],
   },
   js.configs.recommended,
@@ -43,6 +58,10 @@ export default [
     plugins: { "@typescript-eslint": tsPlugin },
     rules: {
       ...tsPlugin.configs.recommended.rules,
+      ...tsUnusedVarsRule,
+      // TS handles undefined-ness; turning off no-undef avoids false positives
+      // on built-in DOM/Node globals like RequestInit, RequestRedirect.
+      "no-undef": "off",
       ...noProcessEnv,
     },
   },
@@ -54,11 +73,24 @@ export default [
       globals: { ...globals.browser },
     },
     plugins: { svelte: sveltePlugin },
-    rules: { ...noProcessEnv },
+    rules: {
+      "no-undef": "off",
+      ...noProcessEnv,
+    },
   },
   // Carve-out: env config is the ONE place process.env is allowed.
   {
     files: ["src/lib/server/config/env.ts"],
+    rules: { "no-restricted-properties": "off" },
+  },
+  // Tests legitimately read/manipulate process.env to drive env-config behavior.
+  {
+    files: [
+      "tests/**/*.ts",
+      "tests/**/*.js",
+      "vitest.config.ts",
+      "tests/setup.ts",
+    ],
     rules: { "no-restricted-properties": "off" },
   },
   prettier,
