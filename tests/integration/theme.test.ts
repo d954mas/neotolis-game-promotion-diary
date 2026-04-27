@@ -146,12 +146,61 @@ describe("theme cookie + DB persist (UX-01)", () => {
     expect(meta).toMatchObject({ from: "system", to: "dark" });
   });
 
-  it.skip("02-09: UX-01 cookie wins on signin reconciliation [02-10: deferred to Plan 10 +layout.server.ts wire]", () => {
-    // The reconciliation logic lives in src/routes/+layout.server.ts and
-    // Plan 10 wires it. Plan 09 ships the surface (themeHandle reads the
-    // cookie; updateUserTheme writes the DB) but the LOAD-TIME write-back
-    // when cookie and DB disagree on signin happens in the layout server
-    // load. Lighting this stub up here would either duplicate Plan 10 work
-    // or vacuous-pass against an unwired endpoint.
+  it("02-10: UX-01 cookie wins on signin reconciliation (+layout.server.ts)", async () => {
+    // Plan 10 wires the cookie-wins reconciliation in
+    // src/routes/+layout.server.ts. When an authenticated user has a valid
+    // __theme cookie that disagrees with the DB themePreference, the
+    // cookie wins — the DB is updated to match.
+    //
+    // We exercise the layout-server `load` directly with a synthetic event
+    // (rather than booting build/handler.js) — the same pattern the SSR
+    // no-flash tests use for themeHandle. The reconciliation has no audit
+    // side-effect (it's a sync, not a user action), so the only observable
+    // is: (a) the returned `theme` matches the cookie value; (b) the DB
+    // row's themePreference now equals the cookie.
+    const { load: layoutLoad } = await import("../../src/routes/+layout.server.js");
+    const u = await seedUserDirectly({ email: "rec@test.local" });
+
+    // Seed the DB so the user starts at "system"; cookie wants "dark".
+    await db.update(user).set({ themePreference: "system" }).where(eq(user.id, u.id));
+
+    const cookieMap = new Map<string, string>([["__theme", "dark"]]);
+    const cookies = {
+      get: (k: string) => cookieMap.get(k),
+      set: (k: string, v: string) => {
+        cookieMap.set(k, v);
+      },
+    };
+    const event = {
+      locals: {
+        user: { id: u.id, email: u.email, name: "rec", image: null },
+        theme: "dark" as const,
+      },
+      url: new URL("http://localhost/games"),
+      cookies,
+      request: new Request("http://localhost/games"),
+      params: {},
+      route: { id: null },
+      isDataRequest: false,
+      isSubRequest: false,
+      fetch: globalThis.fetch,
+      setHeaders: () => {},
+      depends: () => {},
+      parent: async () => ({}),
+      untrack: <T>(fn: () => T) => fn(),
+    } as unknown as Parameters<typeof layoutLoad>[0];
+
+    const result = await layoutLoad(event);
+
+    // Cookie won — the layout returns the cookie value.
+    expect((result as { theme?: string }).theme).toBe("dark");
+
+    // DB row now matches the cookie.
+    const [row] = await db
+      .select({ themePreference: user.themePreference })
+      .from(user)
+      .where(eq(user.id, u.id))
+      .limit(1);
+    expect(row!.themePreference).toBe("dark");
   });
 });
