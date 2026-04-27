@@ -28,9 +28,11 @@ export default defineConfig({
           setupFiles: ["./tests/setup.ts"],
           testTimeout: 30_000,
           // Each spec file runs in its own forked worker; avoids global pg.Pool state leak
-          // between specs while keeping parallelism for unrelated files.
+          // between specs while keeping parallelism for unrelated files. Vitest 4 dropped
+          // `poolOptions` from `ProjectConfig`; `isolate: true` is the equivalent knob now
+          // (every spec runs in its own isolated context).
           pool: "forks",
-          poolOptions: { forks: { singleFork: false } },
+          isolate: true,
         },
       },
     ],

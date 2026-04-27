@@ -18,26 +18,9 @@
 // needed. We keep the mock's natural issuer claim so Better Auth's strict-issuer
 // validation matches the discovery document the plugin fetched at boot.
 
-// @ts-expect-error — oauth2-mock-server (CJS) types may lag in this TS config.
 import { OAuth2Server } from "oauth2-mock-server";
 
-// Loose surface — oauth2-mock-server's emit/on signatures vary across minor versions.
-// We talk to it via the documented event names: `beforeTokenSigning`, `beforeUserinfo`.
-type MockServer = {
-  start: (port?: number, host?: string) => Promise<void>;
-  stop: () => Promise<void>;
-  issuer: {
-    url: string | null;
-    keys: { generate(alg: string): Promise<unknown> };
-  };
-  service: {
-    on: (event: string, handler: (...args: unknown[]) => void) => void;
-    removeAllListeners: (event?: string) => void;
-    buildResponse?: (claims: Record<string, unknown>) => Promise<{ id_token: string }>;
-  };
-};
-
-let server: MockServer | null = null;
+let server: OAuth2Server | null = null;
 
 export interface MockOauthHandle {
   issuerUrl: string;
@@ -50,7 +33,7 @@ export interface MockOauthHandle {
  */
 export async function startMockOauth(port = 9090): Promise<MockOauthHandle> {
   if (!server) {
-    const instance = new OAuth2Server() as MockServer;
+    const instance = new OAuth2Server();
     await instance.issuer.keys.generate("RS256");
     // Bind to 127.0.0.1 in CI to keep the surface local-only.
     await instance.start(port, "127.0.0.1");
@@ -128,33 +111,9 @@ export function setNextUserClaims(claims: MockUserClaims): void {
   });
 }
 
-/**
- * Mint an id_token directly with the given claims. Plan 10's smoke test uses
- * this for the rare case where bypassing the redirect dance is cheaper than
- * driving the full OAuth flow. Most integration tests should prefer
- * `seedUserDirectly` from tests/integration/helpers.ts.
- */
-export async function mintIdToken(userClaims: {
-  sub: string;
-  email: string;
-  name?: string;
-  picture?: string;
-  email_verified?: boolean;
-}): Promise<string> {
-  if (!server) {
-    throw new Error("oauth mock not started — call startMockOauth() first");
-  }
-  if (!server.service.buildResponse) {
-    throw new Error(
-      "oauth2-mock-server build target lacks buildResponse — upgrade oauth2-mock-server",
-    );
-  }
-  const { id_token } = await server.service.buildResponse({
-    // Mock's natural issuer flows through; Better Auth's genericOAuth plugin
-    // learned the issuer from the discovery document it fetched at boot.
-    aud: process.env.GOOGLE_CLIENT_ID ?? "ci-mock-client-id",
-    email_verified: true,
-    ...userClaims,
-  });
-  return id_token;
-}
+// `mintIdToken` was an early stub for direct id_token minting; oauth2-mock-server
+// 7.x does not expose a public `buildResponse` API, and the integration suite
+// drives the full OAuth dance through `setNextUserClaims` + Better Auth's
+// genericOAuth plugin (review blocker P0-2 fix). Removed to keep the surface
+// honest. See tests/integration/helpers.ts `seedUserDirectly` for the cheaper
+// "skip OAuth, seed a session row" path most specs use.

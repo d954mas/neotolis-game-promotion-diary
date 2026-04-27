@@ -43,7 +43,6 @@
  *     --name "User A"
  */
 
-// @ts-expect-error — oauth2-mock-server (CJS) types may lag in this TS config.
 import { OAuth2Server } from "oauth2-mock-server";
 
 interface Args {
@@ -52,19 +51,6 @@ interface Args {
   sub: string;
   email: string;
   name: string;
-}
-
-interface MockServer {
-  start: (port?: number, host?: string) => Promise<void>;
-  stop: () => Promise<void>;
-  issuer: {
-    url: string | null;
-    keys: { generate(alg: string): Promise<unknown> };
-  };
-  service: {
-    on: (event: string, handler: (...args: unknown[]) => void) => void;
-    removeAllListeners: (event?: string) => void;
-  };
 }
 
 function parseArgs(): Args {
@@ -133,7 +119,7 @@ function readSetCookies(res: Response): string[] {
 async function main(): Promise<void> {
   const args = parseArgs();
 
-  const server = new OAuth2Server() as MockServer;
+  const server = new OAuth2Server();
   await server.issuer.keys.generate("RS256");
   await server.start(args.mockPort, "127.0.0.1");
 
