@@ -12,7 +12,7 @@ Six phases derived from the architecture's locked 6-tier build order. Phase 1 la
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation** - Bootable image with Google OAuth, envelope encryption, tenant scoping, and self-host CI smoke test gating every PR
+- [x] **Phase 1: Foundation** - Bootable image with Google OAuth, envelope encryption, tenant scoping, and self-host CI smoke test gating every PR
 - [ ] **Phase 2: Ingest, Secrets, and Audit** - Games CRUD, paste-URL ingest, write-once API key storage, events timeline, owner-visible audit log
 - [ ] **Phase 3: Polling Pipeline** - Adaptive hot/warm/cold polling with three integration adapters and both wishlist ingest paths
 - [ ] **Phase 4: Visualization** - Per-item charts, combined per-game timeline, and the annotated wishlist correlation chart with UX baseline
@@ -121,8 +121,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 10/10 | Verifying | - |
-| 2. Ingest, Secrets, and Audit | 0/TBD | Not started | - |
+| 1. Foundation | 10/10 | Complete | 2026-04-27 |
+| 2. Ingest, Secrets, and Audit | 0/TBD | Ready for discussion | - |
 | 3. Polling Pipeline | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
 | 5. Reddit Rules Cockpit | 0/TBD | Not started | - |
