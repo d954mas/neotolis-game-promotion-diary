@@ -2,7 +2,7 @@
 
 **Project:** Neotolis Game Promotion Diary
 **Source:** PROJECT.md (locked context) + research/FEATURES.md (P1 selections) + research/ARCHITECTURE.md (build order)
-**Last updated:** 2026-04-27 after initialization
+**Last updated:** 2026-04-27 after roadmap creation
 
 This document is the v1 contract. Every requirement here is a hypothesis until shipped and validated. The roadmap maps each REQ-ID to exactly one phase.
 
@@ -139,11 +139,76 @@ Explicit exclusions with reasoning. These are NOT bugs; they are decisions.
 
 ## Traceability
 
-Filled by roadmap creation: each REQ-ID maps to exactly one phase.
+Each REQ-ID maps to exactly one phase. Coverage: 54/54 v1 requirements.
 
 | REQ-ID | Phase |
 |--------|-------|
-| (pending — populated by roadmapper) | |
+| AUTH-01 | Phase 1 |
+| AUTH-02 | Phase 1 |
+| AUTH-03 | Phase 1 |
+| GAMES-01 | Phase 2 |
+| GAMES-02 | Phase 2 |
+| GAMES-03 | Phase 2 |
+| GAMES-04 | Phase 2 |
+| KEYS-01 | Phase 2 |
+| KEYS-02 | Phase 2 |
+| KEYS-03 | Phase 2 |
+| KEYS-04 | Phase 2 |
+| KEYS-05 | Phase 2 |
+| KEYS-06 | Phase 2 |
+| INGEST-01 | Phase 2 |
+| INGEST-02 | Phase 2 |
+| INGEST-03 | Phase 2 |
+| INGEST-04 | Phase 2 |
+| POLL-01 | Phase 3 |
+| POLL-02 | Phase 3 |
+| POLL-03 | Phase 3 |
+| POLL-04 | Phase 3 |
+| POLL-05 | Phase 3 |
+| POLL-06 | Phase 3 |
+| WISH-01 | Phase 3 |
+| WISH-02 | Phase 3 |
+| WISH-03 | Phase 3 |
+| WISH-04 | Phase 4 |
+| VIZ-01 | Phase 4 |
+| VIZ-02 | Phase 4 |
+| VIZ-03 | Phase 4 |
+| VIZ-04 | Phase 4 |
+| REDDIT-01 | Phase 5 |
+| REDDIT-02 | Phase 5 |
+| REDDIT-03 | Phase 5 |
+| REDDIT-04 | Phase 5 |
+| REDDIT-05 | Phase 5 |
+| EVENTS-01 | Phase 2 |
+| EVENTS-02 | Phase 2 |
+| EVENTS-03 | Phase 2 |
+| PRIV-01 | Phase 1 |
+| PRIV-02 | Phase 2 |
+| PRIV-03 | Phase 6 |
+| PRIV-04 | Phase 6 |
+| QUOTA-01 | Phase 6 |
+| QUOTA-02 | Phase 6 |
+| UX-01 | Phase 2 |
+| UX-02 | Phase 2 |
+| UX-03 | Phase 2 |
+| UX-04 | Phase 1 |
+| DEPLOY-01 | Phase 6 |
+| DEPLOY-02 | Phase 6 |
+| DEPLOY-03 | Phase 6 |
+| DEPLOY-04 | Phase 6 |
+| DEPLOY-05 | Phase 1 |
+
+### Coverage by Phase
+
+| Phase | Requirement Count | Categories |
+|-------|-------------------|------------|
+| Phase 1 — Foundation | 6 | AUTH (3), PRIV (1), UX (1), DEPLOY (1) |
+| Phase 2 — Ingest, Secrets, Audit | 21 | GAMES (4), KEYS (6), INGEST (4), EVENTS (3), PRIV (1), UX (3) |
+| Phase 3 — Polling Pipeline | 9 | POLL (6), WISH (3) |
+| Phase 4 — Visualization | 5 | VIZ (4), WISH (1) |
+| Phase 5 — Reddit Rules Cockpit | 5 | REDDIT (5) |
+| Phase 6 — Trust & Self-Host Polish | 8 | PRIV (2), QUOTA (2), DEPLOY (4) |
+| **Total** | **54** | |
 
 ---
 
