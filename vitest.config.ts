@@ -27,12 +27,15 @@ export default defineConfig({
           environment: "node",
           setupFiles: ["./tests/setup.ts"],
           testTimeout: 30_000,
-          // Each spec file runs in its own forked worker; avoids global pg.Pool state leak
-          // between specs while keeping parallelism for unrelated files. Vitest 4 dropped
-          // `poolOptions` from `ProjectConfig`; `isolate: true` is the equivalent knob now
-          // (every spec runs in its own isolated context).
+          // Integration files share one Postgres DB and tests/setup.ts truncates every
+          // table in afterEach. If two files run in parallel, file A's afterEach can
+          // wipe data that file B's currently-running test depends on (observed: a
+          // tenant-scope test's seeded session vanishing mid-request, surfacing as a
+          // 401 from the auth middleware). Serialize file execution to keep the
+          // truncate scope honest. Unit tests still run in parallel (no DB).
           pool: "forks",
           isolate: true,
+          fileParallelism: false,
         },
       },
     ],
