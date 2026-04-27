@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02-02-eslint-tenant-scope-rule-PLAN.md
-last_updated: "2026-04-27T20:19:47.757Z"
+stopped_at: Completed 02-03-schema-and-migration-PLAN.md
+last_updated: "2026-04-27T20:32:41.762Z"
 last_activity: 2026-04-27
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 21
-  completed_plans: 12
+  completed_plans: 13
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02 (ingest-secrets-and-audit) — EXECUTING
-Plan: 3 of 11
+Plan: 4 of 11
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Plan: 3 of 11
 | Phase 01-foundation P07 | ~6min | 2 tasks | 11 files |
 | Phase 02-ingest-secrets-and-audit P01 | 5min | 2 tasks | 15 files |
 | Phase 02-ingest-secrets-and-audit P02 | 7min | 2 tasks | 9 files |
+| Phase 02-ingest-secrets-and-audit P03 | 8min 30s | 2 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -105,6 +106,10 @@ Recent decisions affecting current work:
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-02: RuleTester import path = @typescript-eslint/utils/ts-eslint (deprecated transitive re-export, plan-authorised fallback) — the standalone @typescript-eslint/rule-tester package is not in the dep graph. Wrapped class IS ESLint 9's own RuleTester via inheritance, so flat-config languageOptions.parser works as intended
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-02 deviation (Rule 1): single-loop chain walker (over MemberExpression / CallExpression / AwaitExpression) replaces two-loop walk that exited too early on tx.update(<T>).set({...}).where(...). Without the fix the rule was a vacuous-pass on the update form. RuleTester case 3 caught it before any Phase 2 service shipped
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-02: tenant-scope rule severity = error (not warn) for src/lib/server/services/**; disable comments require -- justification per AGENTS.md Pitfall 7. Two-layer Pattern 1 enforcement: this rule (STRUCTURAL, lint-time) + tests/integration/tenant-scope.test.ts (BEHAVIORAL, runtime — assertions land in plan 02-08)
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-03: audit_action enum source-of-truth lives in src/lib/server/audit/actions.ts but audit-log.ts re-exports it so drizzle-kit's schema scan (./src/lib/server/db/schema/*.ts glob) picks up the CREATE TYPE — without the re-export the enum was silently dropped from the generated SQL (#5174 manifestation)
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-03: drizzle-kit 0.31 emitted ALTER COLUMN action TYPE audit_action USING action::audit_action automatically — RESEARCH.md Open Question 2 worst case (manual hand-edit) did not materialize on our pinned drizzle-kit version
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-03: AuditEntry.action narrowed from string to AuditAction (Rule 1 fix) so a stray free-form string fails at TypeScript check, not at INSERT — completes the D-32 single-source-of-truth chain at compile-time
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-03: partial index on tracked_youtube_videos.last_polled_at WHERE NOT NULL deferred to Phase 3 (Option B from W-4) — column is NULL on every P2 row (no polling worker yet); index would be bloat over an all-NULL column. Filed as ROADMAP Phase 3 deferred item
 
 ### Pending Todos
 
@@ -118,7 +123,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T20:19:47.754Z
+Last session: 2026-04-27T20:32:41.758Z
 Last Activity: 2026-04-27
-Stopped at: Completed 02-02-eslint-tenant-scope-rule-PLAN.md
+Stopped at: Completed 02-03-schema-and-migration-PLAN.md
 Resume file: None

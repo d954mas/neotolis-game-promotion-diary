@@ -18,10 +18,10 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 
 ### Game Catalog (GAMES)
 
-- [ ] **GAMES-01**: User can create a game card with title, Steam app URL, optional cover image, optional release date (or "TBA"), tags/genres, and free-form notes
-- [ ] **GAMES-02**: User can edit and delete their own game cards; deletion is soft and recoverable for a documented retention window before purge
-- [ ] **GAMES-03**: User can have multiple games per developer account; every other entity (post, video, event, snapshot) is scoped to a specific game
-- [ ] **GAMES-04a**: User can attach multiple YouTube channels per game (typed example for the social-handle pattern; per-channel as a separate row, not a single field)
+- [x] **GAMES-01**: User can create a game card with title, Steam app URL, optional cover image, optional release date (or "TBA"), tags/genres, and free-form notes
+- [x] **GAMES-02**: User can edit and delete their own game cards; deletion is soft and recoverable for a documented retention window before purge
+- [x] **GAMES-03**: User can have multiple games per developer account; every other entity (post, video, event, snapshot) is scoped to a specific game
+- [x] **GAMES-04a**: User can attach multiple YouTube channels per game (typed example for the social-handle pattern; per-channel as a separate row, not a single field)
 - [ ] **GAMES-04b**: User can attach Telegram channels per game *(by trigger — added when a real user requests Telegram channel tracking; pattern proven by GAMES-04a)*
 - [ ] **GAMES-04c**: User can attach Twitter/X handles per game *(by trigger; pattern proven by GAMES-04a)*
 - [ ] **GAMES-04d**: User can attach an optional Discord invite per game *(by trigger; pattern proven by GAMES-04a)*
@@ -30,17 +30,17 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 
 - [ ] **KEYS-01**: User can paste a YouTube Data API v3 key into settings; the key is encrypted at rest with envelope encryption (KEK from env, DEK per row) before being persisted
 - [ ] **KEYS-02**: User can authorize Reddit via OAuth (per-user, BYO Reddit app credentials) and rotate or revoke at any time
-- [ ] **KEYS-03**: User can optionally paste a Steam Web API key; the wishlist tracker works without it (manual entry / CSV path remains available)
-- [ ] **KEYS-04**: After saving, every secret displays as `••••••••XYZW` (last 4 characters only); the plaintext is never returned to the browser
-- [ ] **KEYS-05**: User can rotate or remove any key; rotation immediately invalidates the previous ciphertext and all in-flight worker jobs reload the new value
-- [ ] **KEYS-06**: Audit log records every secret add / rotate / remove with timestamp and source IP
+- [x] **KEYS-03**: User can optionally paste a Steam Web API key; the wishlist tracker works without it (manual entry / CSV path remains available)
+- [x] **KEYS-04**: After saving, every secret displays as `••••••••XYZW` (last 4 characters only); the plaintext is never returned to the browser
+- [x] **KEYS-05**: User can rotate or remove any key; rotation immediately invalidates the previous ciphertext and all in-flight worker jobs reload the new value
+- [x] **KEYS-06**: Audit log records every secret add / rotate / remove with timestamp and source IP
 
 ### URL Ingestion (INGEST)
 
 - [ ] **INGEST-01**: User can paste a Reddit post URL; the system parses subreddit + post ID, validates with Reddit API, and creates a tracked item linked to the chosen game
-- [ ] **INGEST-02**: User can paste a YouTube video URL; the system parses video ID, fetches metadata via YouTube Data API v3, and creates a tracked item
-- [ ] **INGEST-03**: User can mark a YouTube video as `own` or `blogger` at creation time and toggle later; the distinction surfaces in every chart and filter
-- [ ] **INGEST-04**: System rejects malformed URLs with a clear error and never partially writes a tracked item
+- [x] **INGEST-02**: User can paste a YouTube video URL; the system parses video ID, fetches metadata via YouTube Data API v3, and creates a tracked item
+- [x] **INGEST-03**: User can mark a YouTube video as `own` or `blogger` at creation time and toggle later; the distinction surfaces in every chart and filter
+- [x] **INGEST-04**: System rejects malformed URLs with a clear error and never partially writes a tracked item
 
 ### Polling Engine (POLL)
 
@@ -75,14 +75,14 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 
 ### Free-form Events Timeline (EVENTS)
 
-- [ ] **EVENTS-01**: User can create a free-form timeline event with title, date, optional URL, optional category (conference, talk, Twitter post, Telegram post, Discord drop, other), optional notes
-- [ ] **EVENTS-02**: Events render on the same per-game timeline as polled items (single chronological feed)
-- [ ] **EVENTS-03**: User can edit and delete events; deletes are audit-logged
+- [x] **EVENTS-01**: User can create a free-form timeline event with title, date, optional URL, optional category (conference, talk, Twitter post, Telegram post, Discord drop, other), optional notes
+- [x] **EVENTS-02**: Events render on the same per-game timeline as polled items (single chronological feed)
+- [x] **EVENTS-03**: User can edit and delete events; deletes are audit-logged
 
 ### Privacy, Audit, Export (PRIV)
 
 - [x] **PRIV-01**: All data is private to the user_id that owns it; there is no public dashboard, share link, or read-only viewer in v1
-- [ ] **PRIV-02**: User can view an audit log in the UI showing logins (timestamp + IP + user-agent), key add/rotate/remove, exports, and bulk deletes — paginated, owner-only
+- [x] **PRIV-02**: User can view an audit log in the UI showing logins (timestamp + IP + user-agent), key add/rotate/remove, exports, and bulk deletes — paginated, owner-only
 - [ ] **PRIV-03**: User can export all of their data as a single JSON file and as CSV-per-table; export is audit-logged
 - [ ] **PRIV-04**: User can request account + data deletion; deletion runs as a documented procedure (soft-delete → purge) with audit-log retention only of the deletion event
 
