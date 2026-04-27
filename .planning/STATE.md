@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02-03-schema-and-migration-PLAN.md
-last_updated: "2026-04-27T20:32:41.762Z"
+stopped_at: Completed 02-04-games-services-PLAN.md
+last_updated: "2026-04-27T20:45:28.273Z"
 last_activity: 2026-04-27
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 21
-  completed_plans: 13
+  completed_plans: 14
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02 (ingest-secrets-and-audit) — EXECUTING
-Plan: 4 of 11
+Plan: 5 of 11
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Plan: 4 of 11
 | Phase 02-ingest-secrets-and-audit P01 | 5min | 2 tasks | 15 files |
 | Phase 02-ingest-secrets-and-audit P02 | 7min | 2 tasks | 9 files |
 | Phase 02-ingest-secrets-and-audit P03 | 8min 30s | 2 tasks | 18 files |
+| Phase 02-ingest-secrets-and-audit P04 | 7min 38s | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -110,6 +111,11 @@ Recent decisions affecting current work:
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-03: drizzle-kit 0.31 emitted ALTER COLUMN action TYPE audit_action USING action::audit_action automatically — RESEARCH.md Open Question 2 worst case (manual hand-edit) did not materialize on our pinned drizzle-kit version
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-03: AuditEntry.action narrowed from string to AuditAction (Rule 1 fix) so a stray free-form string fails at TypeScript check, not at INSERT — completes the D-32 single-source-of-truth chain at compile-time
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-03: partial index on tracked_youtube_videos.last_polled_at WHERE NOT NULL deferred to Phase 3 (Option B from W-4) — column is NULL on every P2 row (no polling worker yet); index would be bloat over an all-NULL column. Filed as ROADMAP Phase 3 deferred item
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-04: soft-cascade tx pattern (D-23) lands as reference impl — captured Date applied to parent + 4 children (game_steam_listings, game_youtube_channels, tracked_youtube_videos, events) in one tx; restore reverses ONLY children whose deletedAt === parent.deletedAt; youtube_channels + api_keys_steam intentionally NOT cascaded (D-24)
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-04: comingSoon column carries three states ('true'/'false'/'unavailable') — 'unavailable' is set when fetchSteamAppDetails returns null (Steam down or success:false); Phase 6 backfill worker recognizes rows by this sentinel
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-04: fetchSteamAppDetails wraps full fetch in try/catch (deviation Rule 1 from RESEARCH.md verbatim shape which had try/finally only) — addSteamListing always succeeds on Steam-down; AbortError no longer bubbles out as 500
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-04: softDeleteGame + updateGame + removeSteamListing add isNull(deletedAt) to WHERE so a second call on already-deleted row throws NotFoundError (idempotency made explicit; Plan 02-08 routes expect 404 on double-delete) — minor refinement to RESEARCH.md soft-cascade pattern
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-04: Phase 1 deferred VALIDATION 9 (cross-tenant DELETE 404) closed at the service layer in games.test.ts — softDeleteGame(userB.id, aGame.id) throws NotFoundError; Plan 02-08 will additionally cover the HTTP boundary
 
 ### Pending Todos
 
@@ -123,7 +129,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T20:32:41.758Z
+Last session: 2026-04-27T20:45:28.270Z
 Last Activity: 2026-04-27
-Stopped at: Completed 02-03-schema-and-migration-PLAN.md
+Stopped at: Completed 02-04-games-services-PLAN.md
 Resume file: None
