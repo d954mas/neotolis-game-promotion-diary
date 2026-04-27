@@ -56,7 +56,19 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. User opens the audit log and sees a paginated, owner-only list of logins (timestamp + IP + user-agent), key add/rotate/remove, and event edit/delete entries — with cursors that are tenant-relative so listing one tenant never observes another's IDs
   6. Every page renders legibly on a 360px-wide phone viewport, honors `prefers-color-scheme` with a user override for dark/light, and every empty state shows a copy-paste example of the next action
   7. *Phase 2 smoke extension (per Phase 1 DEPLOY-05 scope deferral, 2026-04-27):* CI self-host smoke test additionally exercises "user A creates a game" via the new GAMES endpoints; cross-tenant matrix expands from /api/me sentinel to /api/games (read/write/delete returns 404 for cross-tenant access).
-**Plans**: TBD
+**Plans**: 11 plans
+**Plan list**:
+- [ ] 02-01-traceability-and-test-scaffolds-PLAN.md — Wave 0: REQUIREMENTS / ROADMAP / AGENTS.md traceability uplift + 12 placeholder test files
+- [ ] 02-02-eslint-tenant-scope-rule-PLAN.md — Wave 0: custom ESLint AST rule no-unfiltered-tenant-query (D-38) + RuleTester suite
+- [ ] 02-03-schema-and-migration-PLAN.md — Wave 0: 7 new tables + audit-log enum + user.theme_preference + RETENTION_DAYS env + one Drizzle migration
+- [ ] 02-04-games-services-PLAN.md — Wave 1: games + game-steam-listings + youtube-channels services with soft-cascade transactional restore
+- [ ] 02-05-api-keys-steam-service-PLAN.md — Wave 1: api_keys_steam service with envelope encryption + Steam validateKey + DTO ciphertext-strip
+- [ ] 02-06-ingest-and-events-services-PLAN.md — Wave 1: URL parser + oEmbed integrations + items-youtube + events services + ingest orchestrator
+- [ ] 02-07-audit-read-service-PLAN.md — Wave 1: audit-read with cursor pagination + audit append-only behavioural test
+- [ ] 02-08-routes-and-sweeps-PLAN.md — Wave 2: 8 Hono sub-routers + theme route + anonymous-401 + cross-tenant matrix extensions
+- [ ] 02-09-theme-components-paraglide-PLAN.md — Wave 3: theme cookie SSR + design tokens + 18 reusable Svelte components + ~30 Paraglide keys
+- [ ] 02-10-svelte-pages-PLAN.md — Wave 3: 7 SvelteKit pages composing Plan 09 components + cookie-DB theme reconciliation
+- [ ] 02-11-smoke-360-validation-PLAN.md — Wave 4: smoke gate Phase 2 GAMES-01 extension + Vitest browser 360px + VALIDATION.md sign-off + checkpoint:human-verify
 **UI hint**: yes
 
 ### Phase 3: Polling Pipeline
@@ -122,7 +134,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 10/10 | Complete | 2026-04-27 |
-| 2. Ingest, Secrets, and Audit | 0/TBD | Ready for discussion | - |
+| 2. Ingest, Secrets, and Audit | 0/11 | Ready for execution | - |
 | 3. Polling Pipeline | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
 | 5. Reddit Rules Cockpit | 0/TBD | Not started | - |
