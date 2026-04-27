@@ -54,7 +54,7 @@ jobs:
       # Test KEK is a base64-encoded 32-byte string ("test-kek-" repeated to fill 32 bytes
       # then base64-encoded). Plan 01-04's envelope module verifies this passes the
       # length / base64 / fail-fast guards.
-      APP_KEK_BASE64: dGVzdC1rZWstdGVzdC1rZWstdGVzdC1rZWstdGVzdC1rZWs=
+      APP_KEK_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
@@ -88,7 +88,7 @@ jobs:
       BETTER_AUTH_URL: http://localhost:3000
       GOOGLE_CLIENT_ID: mock-client-id
       GOOGLE_CLIENT_SECRET: mock-client-secret
-      APP_KEK_BASE64: dGVzdC1rZWstdGVzdC1rZWstdGVzdC1rZWstdGVzdC1rZWs=
+      APP_KEK_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/neotolis
       CI: 'true'
     steps:

@@ -39,7 +39,7 @@ MOCK_PORT="${SMOKE_MOCK_PORT:-9090}"
 DB_URL="${DATABASE_URL:-postgres://postgres:postgres@localhost:5432/neotolis}"
 BETTER_AUTH_URL_VAL="${BETTER_AUTH_URL:-http://localhost:$APP_PORT}"
 BETTER_AUTH_SECRET_VAL="${BETTER_AUTH_SECRET:-ci-smoke-better-auth-secret-32-chars-min}"
-KEK_BASE64="${APP_KEK_BASE64:-dGVzdC1rZWstdGVzdC1rZWstdGVzdC1rZWstdGVzdC1rZWs=}"
+KEK_BASE64="${APP_KEK_BASE64:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}"
 GOOGLE_CLIENT_ID_VAL="${GOOGLE_CLIENT_ID:-mock-client-id}"
 GOOGLE_CLIENT_SECRET_VAL="${GOOGLE_CLIENT_SECRET:-mock-client-secret}"
 # INFO I2 inheritance: Plan 05 chose Path 3 (mock-side iss override). No
