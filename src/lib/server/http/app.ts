@@ -17,6 +17,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { proxyTrust } from "./middleware/proxy-trust.js";
 import { tenantScope } from "./middleware/tenant.js";
 import { meRoutes } from "./routes/me.js";
+import { sessionRoutes } from "./routes/sessions.js";
 import { auth } from "../../auth.js";
 import { migrationsApplied } from "../db/migrate.js";
 import { pool } from "../db/client.js";
@@ -82,8 +83,9 @@ export function createApp(): Hono<AppContext> {
   // by service functions (see src/lib/server/services/errors.ts).
   app.use("/api/*", tenantScope);
 
-  // /api routes (Phase 1: just /api/me; Phase 2 adds /api/games, etc.).
+  // /api routes (Phase 1: /api/me + /api/me/sessions/all; Phase 2 adds /api/games, etc.).
   app.route("/api", meRoutes);
+  app.route("/api", sessionRoutes);
 
   return app;
 }
