@@ -36,17 +36,21 @@ export async function start(): Promise<void> {
     res: import("node:http").ServerResponse,
     next?: () => void,
   ) => void;
+  const handlerPath =
+    typeof __SVELTEKIT_HANDLER__ !== "undefined"
+      ? __SVELTEKIT_HANDLER__
+      : "../../build/handler.js";
   try {
-    const handlerPath =
-      typeof __SVELTEKIT_HANDLER__ !== "undefined"
-        ? __SVELTEKIT_HANDLER__
-        : "../../build/handler.js";
     const built = (await import(/* @vite-ignore */ handlerPath)) as {
       handler: typeof svelteHandler;
     };
     svelteHandler = built.handler;
-  } catch {
-    logger.warn("build/handler.js not found — SvelteKit pass-through disabled (dev mode?)");
+    logger.info({ handlerPath }, "SvelteKit handler loaded");
+  } catch (err) {
+    logger.error(
+      { err, handlerPath },
+      "SvelteKit handler import failed — falling back to dev-mode 404 stub",
+    );
     svelteHandler = (_req, res, next) => {
       res.statusCode = 404;
       res.end("SvelteKit dev server runs on a different port; build first");
