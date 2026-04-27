@@ -243,15 +243,25 @@ done
 # end (Hono outer + SvelteKit adapter-node handler + Paraglide compiled
 # messages). Fatal on miss — never PARTIAL — because anything else lets a
 # regression in the SvelteKit-mount path slip through to master.
+log "----- pre-dashboard diagnostic: container state -----"
+docker ps -a --filter name=smoke-app
+docker exec smoke-app sh -c "ls -la /app/build" 2>&1 || echo "(docker exec failed)"
+docker exec smoke-app sh -c "ls -la /app/build/server" 2>&1 || true
+docker exec smoke-app sh -c "ls -la /app/.svelte-kit/output 2>/dev/null | head -10 || echo 'no .svelte-kit/output'" 2>&1 || true
+docker exec smoke-app sh -c "head -3 /app/build/handler.js" 2>&1 || true
+log "------------------------------------------------------"
+
 DASH_HTTP=$(curl -s -o /tmp/dash.html -w '%{http_code}' -H "cookie: $SESSION_COOKIE_A" "http://localhost:$APP_PORT/" || echo "curl-failed")
 DASH_HTML=$(cat /tmp/dash.html 2>/dev/null || echo "")
+log "(4) dashboard HTTP=$DASH_HTTP body-bytes=${#DASH_HTML}"
+log "----- dashboard response (first 600 chars) -----"
+echo "${DASH_HTML:0:600}"
+log "------------------------------------------------"
+log "----- recent app logs (last 80 lines) -----"
+docker logs smoke-app 2>&1 | tail -80 || true
+log "-------------------------------------------"
+
 if [[ "$DASH_HTTP" != "200" ]] || ! echo "$DASH_HTML" | grep -q "Promotion diary"; then
-  log "----- container build/ contents -----"
-  docker exec smoke-app sh -c "ls -la /app/build && echo --- && find /app/build -maxdepth 2 -name '*.js' | head -20" || true
-  log "-------------------------------------"
-  log "----- dashboard response (first 400 chars) -----"
-  echo "${DASH_HTML:0:400}"
-  log "------------------------------------------------"
   fail "(4) dashboard did not render 'Promotion diary' (Paraglide). HTTP=$DASH_HTTP"
 fi
 log "(4) PASS — OAuth login + /api/me + dashboard renders English"
