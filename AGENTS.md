@@ -49,6 +49,22 @@ The repo enforces this via GitHub settings:
 
 CI gates every PR with three jobs: `lint-typecheck`, `unit-integration` (Postgres service container), `smoke` (production Docker image, all three roles, OAuth dance via `oauth2-mock-server`, cross-tenant + anonymous-401 invariants). Smoke is the load-bearing trust signal — when it's green, a self-host operator can deploy with confidence.
 
+## Validation
+
+Before any PR is handed off for human review, the agent that authored it must self-review. The decision to merge into master is made by a human after external review (Codex + senior developer). The agent's job is to make sure that review has the smallest possible surface to flag.
+
+Self-review checklist — every PR, every time, before declaring done:
+
+1. **Constraints compliance.** Read the Constraints block above. For each constraint, identify whether the diff touches it. If it does, cite where + why the diff is compliant. Examples: any new code that reads `process.env` outside `src/lib/server/config/env.ts` is a Constraint violation; any new at-rest secret stored without envelope encryption is a Constraint violation; any new code path that diverges between SaaS and self-host is a Constraint violation.
+2. **Philosophy compliance.** Walk the five Philosophy bullets (simplicity for an outsider, SaaS/self-host parity, modularity, no premature abstraction, security as floor). For each, identify whether the diff drifts. Be honest: drift is fine if justified, but it must be acknowledged in the PR body.
+3. **Practices compliance.** Walk the Practices list. Atomic? Tests with feature? Migrations forward-only? Env reads centralized? Self-host parity holds? Secrets redaction unbroken? Comments only WHY? Conventional Commits? Versions pinned?
+4. **CI gate honesty.** Is every assertion in new tests load-bearing or is something vacuous-pass? If a smoke / integration test was softened, is the softening justified and tracked, or is it hiding a real regression?
+5. **Documentation drift.** Does any planning artifact (`.planning/...`, `CLAUDE.md`, `AGENTS.md`, `01-VALIDATION.md`, `01-CONTEXT.md`) now claim something the code no longer matches? Either the docs or the code must move.
+
+Output of the self-review goes in the PR body under a `## Self-review` heading, with one line per item ("Constraints: ✓ no new env reads outside config/env.ts", or "Philosophy: drift — see note in commit Y, accepted because Z"). After self-review, the agent runs a second-pass code review (separate agent, fresh context) and includes the findings as a `## Self-review (second pass)` section.
+
+If second-pass review finds new P0/P1 issues, the agent fixes them in the same branch before handoff. The human reviewer should not be the first to catch a P0.
+
 ## Practices
 
 - **Atomic PRs.** Each PR has one clear goal. If you start fixing unrelated things mid-branch, branch off a second PR — don't bundle.
