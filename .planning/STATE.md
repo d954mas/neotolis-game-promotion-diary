@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02-07-audit-read-service-PLAN.md
-last_updated: "2026-04-27T21:18:56.993Z"
+stopped_at: Completed 02-08-routes-and-sweeps-PLAN.md
+last_updated: "2026-04-27T21:32:00.214Z"
 last_activity: 2026-04-27
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 21
-  completed_plans: 17
+  completed_plans: 18
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02 (ingest-secrets-and-audit) — EXECUTING
-Plan: 8 of 11
+Plan: 9 of 11
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Plan: 8 of 11
 | Phase 02-ingest-secrets-and-audit P05 | 5m 33s | 2 tasks | 6 files |
 | Phase 02-ingest-secrets-and-audit P06 | 8m 48s | 3 tasks | 11 files |
 | Phase 02-ingest-secrets-and-audit P07 | 5m 7s | 2 tasks | 6 files |
+| Phase 02-ingest-secrets-and-audit P08 | 6m 41s | 2 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -132,6 +133,12 @@ Recent decisions affecting current work:
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-07: cursor format = base64url(JSON.stringify({at: ISO, id})); tuple-comparison (created_at, id) < (, ) is order-stable under same-ms ties because UUIDv7 ids are strictly monotonic — no SUBSELECT needed for cross-page disjointness
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-07: defense-in-depth on actionFilter — assertValidActionFilter validates against AUDIT_ACTIONS const before SQL builder; Plan 02-08 zod is the second guard. Two layers because a future smoke/forensic call can land in audit-read.ts without going through Hono
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-07: unit tests seed env via process.env.X ??= before await import(...) — established codebase pattern (proxy-trust.test.ts); audit.ts and audit-read.ts both value-import db/client.js which loads env at module init
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-08: centralized mapErr + RouteVars in routes/_shared.ts (Rule 3 fix) — every Phase 2 route file imports the shared helper; status type widened to Hono's ContentfulStatusCode so AppError carrying any 4xx/5xx (422, 502, 409) flows through without per-route mapping tables
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-08: AppError code mapping is automatic via mapErr — no per-route translation table; createSteamKey throwing AppError(422 'steam_key_label_exists') flows directly to {error:'steam_key_label_exists'} status 422 — Plan 02-09's Paraglide picker keys on the code string with zero message-string parsing at the boundary
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-08: DELETE /api/youtube-channels/:id INTENTIONALLY NOT shipped — service layer has no removeChannel; user-facing 'remove channel' detaches per-game via DELETE /api/games/:gameId/youtube-channels/:channelId. Future channel-level deletion lands the service function first
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-08: TimelineRow discriminated union from services/events.ts shipped over the wire from GET /api/games/:gameId/timeline as-is — no toTimelineRowDto needed because the union has no userId field by construction (built from already-projected fields). The lone exception to 'every response through a projection function', justified by P3 by-construction compliance
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-08: D-37 cross-tenant matrix uses expect.soft for 21 probes — single test surfaces every violation in one run rather than failing on the first; load-bearing for matrix size. Each probe carries a descriptive failure message keyed on method+path so triage doesn't require re-running individual probes
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-08: log-redact assertion is coarse (regex against base64-shaped strings after column-name keys) — fast-redact path-by-path fuzzing deferred to Phase 6 polish. Sufficient for the cross-cutting plaintext-and-ciphertext-don't-leak invariant the plan requires
 
 ### Pending Todos
 
@@ -145,7 +152,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T21:18:56.989Z
+Last session: 2026-04-27T21:31:36.602Z
 Last Activity: 2026-04-27
-Stopped at: Completed 02-07-audit-read-service-PLAN.md
+Stopped at: Completed 02-08-routes-and-sweeps-PLAN.md
 Resume file: None
