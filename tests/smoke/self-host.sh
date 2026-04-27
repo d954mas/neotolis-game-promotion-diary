@@ -310,4 +310,118 @@ if echo "$APP_ENV" | grep -E '^(CF_|CLOUDFLARE_|ANALYTICS_)' > /dev/null; then
 fi
 log "(6) PASS — no SaaS-only env vars present"
 
-log "ALL SMOKE ASSERTIONS PASSED (Phase 1 scope)"
+# ============================================================
+# Phase 2 — GAMES-01 + cross-tenant + sweep (per ROADMAP Phase 2 SC #7)
+# ============================================================
+# Per the 2026-04-27 DEPLOY-05 scope deferral, the "user A creates a game"
+# clause from D-15's earliest formulation lands here as the Phase 2 smoke
+# extension. Reuses SESSION_COOKIE_A (step 4) and SESSION_COOKIE_B (step 5)
+# already captured above — no extra OAuth dance needed.
+#
+# Five assertions (additive — Phase 1's six remain intact):
+#   P2.1 GAMES-01: user A POST /api/games → 201 + DTO with id
+#   P2.2 GAMES-03: user A GET /api/games → list contains the new gameId
+#   P2.3 cross-tenant: user B GET/PATCH/DELETE /api/games/<aId> → 404 (not 403)
+#   P2.4 cross-tenant integrity: A's game still readable + title unchanged
+#   P2.5 anon-401 sweep: every Phase 2 /api/* probed with NO cookie → 401
+log "=== Phase 2 smoke extension ==="
+
+# jq sanity — all P2 assertions parse JSON.
+command -v jq >/dev/null 2>&1 || fail "(P2) jq required for Phase 2 smoke extension"
+
+# Pre-flight: cookies from steps 4 + 5 must be in scope.
+[[ -n "${SESSION_COOKIE_A:-}" ]] || fail "(P2) SESSION_COOKIE_A missing — step 4 must run first"
+[[ -n "${SESSION_COOKIE_B:-}" ]] || fail "(P2) SESSION_COOKIE_B missing — step 5 must run first"
+
+# ---- P2.1 GAMES-01: user A creates a game ----
+log "(P2.1) GAMES-01 — user A POST /api/games"
+GAME_RESPONSE=$(curl -sS -X POST "http://localhost:$APP_PORT/api/games" \
+  -H "cookie: $SESSION_COOKIE_A" \
+  -H "content-type: application/json" \
+  -d '{"title":"Smoke Test Game","notes":"created by P2 smoke"}' || true)
+GAME_ID=$(echo "$GAME_RESPONSE" | jq -r '.id // empty' 2>/dev/null || true)
+if [[ -z "$GAME_ID" ]]; then
+  log "----- POST /api/games response body -----"
+  echo "$GAME_RESPONSE"
+  log "----- recent app logs -----"
+  docker logs smoke-app 2>&1 | tail -50 || true
+  log "---------------------------"
+  fail "(P2.1) POST /api/games returned no id"
+fi
+log "(P2.1) created gameId=$GAME_ID"
+
+# ---- P2.2 GAMES-03: user A lists games — must contain GAME_ID ----
+log "(P2.2) GAMES-03 — user A GET /api/games"
+LIST_BODY=$(curl -sS "http://localhost:$APP_PORT/api/games" -H "cookie: $SESSION_COOKIE_A" || true)
+if ! echo "$LIST_BODY" | jq -e ".[] | select(.id == \"$GAME_ID\")" >/dev/null 2>&1; then
+  log "----- GET /api/games response body -----"
+  echo "$LIST_BODY"
+  fail "(P2.2) list does not contain gameId=$GAME_ID"
+fi
+log "(P2.2) PASS — list contains the new gameId"
+
+# ---- P2.3 cross-tenant: user B GET/PATCH/DELETE /api/games/<aId> → 404 ----
+# PRIV-01 invariant: cross-tenant access surfaces as 404, NEVER 403; body must
+# not say "forbidden" or "permission" (Phase 2 plan 02-08 contract).
+log "(P2.3) cross-tenant — user B probes /api/games/$GAME_ID"
+for method in GET PATCH DELETE; do
+  case "$method" in
+    GET)
+      RESP=$(curl -sS -o /tmp/p2-cross.txt -w '%{http_code}' \
+        "http://localhost:$APP_PORT/api/games/$GAME_ID" \
+        -H "cookie: $SESSION_COOKIE_B" || echo "curl-failed")
+      ;;
+    PATCH)
+      RESP=$(curl -sS -o /tmp/p2-cross.txt -w '%{http_code}' \
+        -X PATCH "http://localhost:$APP_PORT/api/games/$GAME_ID" \
+        -H "cookie: $SESSION_COOKIE_B" \
+        -H "content-type: application/json" \
+        -d '{"title":"hacked"}' || echo "curl-failed")
+      ;;
+    DELETE)
+      RESP=$(curl -sS -o /tmp/p2-cross.txt -w '%{http_code}' \
+        -X DELETE "http://localhost:$APP_PORT/api/games/$GAME_ID" \
+        -H "cookie: $SESSION_COOKIE_B" || echo "curl-failed")
+      ;;
+  esac
+  if [[ "$RESP" != "404" ]]; then
+    log "----- cross-tenant $method body -----"
+    cat /tmp/p2-cross.txt 2>/dev/null
+    fail "(P2.3) cross-tenant $method /api/games/$GAME_ID with B's cookie returned $RESP, expected 404"
+  fi
+  if grep -Eqi 'forbidden|permission' /tmp/p2-cross.txt 2>/dev/null; then
+    log "----- cross-tenant $method body -----"
+    cat /tmp/p2-cross.txt
+    fail "(P2.3) cross-tenant $method body leaks 'forbidden' or 'permission' (PRIV-01 violation)"
+  fi
+  log "(P2.3) cross-tenant $method → 404 (correct)"
+done
+
+# ---- P2.4 cross-tenant integrity: A's game intact ----
+log "(P2.4) cross-tenant integrity — A's game unchanged"
+A_TITLE_AFTER=$(curl -sS "http://localhost:$APP_PORT/api/games/$GAME_ID" \
+  -H "cookie: $SESSION_COOKIE_A" | jq -r '.title // empty' 2>/dev/null || true)
+if [[ "$A_TITLE_AFTER" != "Smoke Test Game" ]]; then
+  fail "(P2.4) A's game title corrupted ('$A_TITLE_AFTER'); expected unchanged 'Smoke Test Game'"
+fi
+log "(P2.4) PASS — A's game intact after cross-tenant attempts"
+
+# ---- P2.5 anon-401 sweep: every new /api/* refuses anonymous access ----
+# Mirrors tests/integration/anonymous-401.test.ts MUST_BE_PROTECTED — sample a
+# representative subset of Phase 2 routes (one per sub-router family). The
+# integration test exercises all 24 routes; this smoke check exercises 6 to
+# keep CI fast while still catching middleware regressions at the production
+# image boundary. The 6 routes span all 5 service families: games, audit,
+# api-keys/steam, items/youtube, events, youtube-channels.
+log "(P2.5) anon-401 — sweeping 6 new Phase 2 routes anonymously"
+for path in /api/games /api/audit /api/api-keys/steam /api/items/youtube /api/events /api/youtube-channels; do
+  STATUS=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$APP_PORT$path")
+  if [[ "$STATUS" != "401" ]]; then
+    fail "(P2.5) anonymous $path returned $STATUS, expected 401"
+  fi
+done
+log "(P2.5) PASS — all 6 new routes return 401 anonymously"
+
+log "=== Phase 2 smoke extension PASSED ==="
+
+log "ALL SMOKE ASSERTIONS PASSED (Phase 1 + Phase 2 scope)"
