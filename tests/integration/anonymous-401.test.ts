@@ -25,7 +25,46 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
   // assertions — if no /api/* routes exist in the future, the sweep would silently
   // pass. The allowlist forces the sweep to fail loudly when expected routes
   // disappear.
-  const MUST_BE_PROTECTED = ["/api/me"];
+  //
+  // Plan 02-08 extends MUST_BE_PROTECTED to cover every D-37 Phase 2 route at the
+  // PARAMETERIZED level (/api/games/:id, not /api/games/<concrete-id>). The
+  // strings here are the literal route patterns Hono registered when sub-routers
+  // were mounted — drift between this list and the actual mounts trips the
+  // toContain guard below.
+  const MUST_BE_PROTECTED = [
+    // Phase 1
+    "/api/me",
+    "/api/me/sessions/all",
+    // Phase 2 (Plan 02-08; UX-01)
+    "/api/me/theme",
+    // Phase 2 — games
+    "/api/games",
+    "/api/games/:id",
+    "/api/games/:id/restore",
+    // Phase 2 — game-listings
+    "/api/games/:gameId/listings",
+    "/api/games/:gameId/listings/:listingId",
+    "/api/games/:gameId/listings/:listingId/key",
+    // Phase 2 — youtube channels (user-level + per-game)
+    "/api/youtube-channels",
+    "/api/youtube-channels/:id",
+    "/api/games/:gameId/youtube-channels",
+    "/api/games/:gameId/youtube-channels/:channelId",
+    // Phase 2 — api keys (steam)
+    "/api/api-keys/steam",
+    "/api/api-keys/steam/:id",
+    // Phase 2 — items (youtube) + paste orchestrator
+    "/api/items/youtube",
+    "/api/items/youtube/:id",
+    "/api/games/:gameId/items",
+    // Phase 2 — events + per-game lists + timeline
+    "/api/events",
+    "/api/events/:id",
+    "/api/games/:gameId/events",
+    "/api/games/:gameId/timeline",
+    // Phase 2 — audit
+    "/api/audit",
+  ];
 
   it("every /api/* route except /api/auth/* refuses anonymous with 401", async () => {
     // Hono exposes app.routes (array of {path, method, handler}).

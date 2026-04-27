@@ -46,17 +46,61 @@ describe("cross-tenant 404 (PRIV-01, VALIDATION 7/8/9)", () => {
     await expect(getAuditRowFor(userA.id, userB.id)).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  // VALIDATION behavior 8 — cross-tenant WRITE — is deferred to Phase 2 (which lands the
-  // first writable resource: /api/games). Phase 1 has no write-able tenant resource;
-  // documenting the deferral explicitly here (per checker iteration 1 W1) so the
-  // skip is not silent.
-  it.skip("user A cannot WRITE user B resource — returns 404 (deferred to Phase 2: no writable resource in Phase 1)", () => {
-    /* Phase 2 GAMES-01 lands /api/games and turns this on. */
+  // Plan 02-08 — VALIDATION 8 lit up (Phase 1 deferred from "no writable resource").
+  it("user A cannot WRITE user B resource — returns 404 (Phase 2 GAMES-01 turns this on)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { createGame, getGameById } = await import(
+      "../../src/lib/server/services/games.js"
+    );
+    const app = createApp();
+    const userA = await seedUserDirectly({ email: "wA@test.local" });
+    const userB = await seedUserDirectly({ email: "wB@test.local" });
+    const created = await createGame(userA.id, { title: "A's Game" }, "127.0.0.1");
+
+    // user B PATCHes user A's game id — must be 404, not 403, and not a successful write.
+    const res = await app.request(`/api/games/${created.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${userB.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ title: "B HACKED" }),
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({ error: "not_found" });
+
+    // P1 invariant: body MUST NOT contain "forbidden" or "permission".
+    const bodyStr = JSON.stringify(body);
+    expect(bodyStr).not.toMatch(/forbidden|permission/i);
+
+    // Verify A's game is unchanged.
+    const after = await getGameById(userA.id, created.id);
+    expect(after.title).toBe("A's Game");
   });
 
-  // VALIDATION behavior 9 — cross-tenant DELETE — same deferral.
-  it.skip("user A cannot DELETE user B resource — returns 404 (deferred to Phase 2: no deletable resource in Phase 1)", () => {
-    /* Phase 2 GAMES-01 lands /api/games and turns this on. */
+  // Plan 02-08 — VALIDATION 9 lit up (Phase 1 deferred from "no deletable resource").
+  it("user A cannot DELETE user B resource — returns 404", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { createGame, getGameByIdIncludingDeleted } = await import(
+      "../../src/lib/server/services/games.js"
+    );
+    const app = createApp();
+    const userA = await seedUserDirectly({ email: "dA@test.local" });
+    const userB = await seedUserDirectly({ email: "dB@test.local" });
+    const created = await createGame(userA.id, { title: "A's Game" }, "127.0.0.1");
+
+    const res = await app.request(`/api/games/${created.id}`, {
+      method: "DELETE",
+      headers: { cookie: `neotolis.session_token=${userB.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(404);
+    const bodyStr = await res.text();
+    expect(bodyStr).not.toMatch(/forbidden|permission/i);
+
+    // Verify A's game is NOT soft-deleted.
+    const after = await getGameByIdIncludingDeleted(userA.id, created.id);
+    expect(after.deletedAt).toBeNull();
   });
 
   it('NotFoundError serializes to {error: "not_found"} status 404 (never "forbidden")', () => {
@@ -89,5 +133,164 @@ describe("cross-tenant 404 (PRIV-01, VALIDATION 7/8/9)", () => {
     const bodyB = (await resB.json()) as Record<string, unknown>;
     expect(bodyB.email).toBe("mine-b@test.local");
     expect(bodyA.id).not.toBe(bodyB.id);
+  });
+});
+
+/**
+ * Plan 02-08 — D-37 cross-tenant matrix.
+ *
+ * For every Phase 2 route that takes an id (or gameId) parameter, exercise
+ * the cross-tenant case at the HTTP boundary: user B presents their own
+ * cookie against an id that belongs to user A and MUST receive 404 — never
+ * 403, never 200 with another tenant's data, and the body MUST NOT contain
+ * the strings 'forbidden' or 'permission' (P1 invariant; CLAUDE.md Privacy
+ * & multi-tenancy rule 2).
+ *
+ * The probes use `expect.soft` so a single test surfaces every violation in
+ * one run rather than failing on the first — the matrix is large enough
+ * that the all-or-nothing failure mode would mask regressions.
+ */
+describe("Phase 2 cross-tenant matrix (D-37)", () => {
+  it("user B requests on user A's resources return 404, never 403/200", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { createGame } = await import("../../src/lib/server/services/games.js");
+    const { createSteamKey } = await import(
+      "../../src/lib/server/services/api-keys-steam.js"
+    );
+    const { createChannel } = await import(
+      "../../src/lib/server/services/youtube-channels.js"
+    );
+    const { createEvent } = await import("../../src/lib/server/services/events.js");
+    const { addSteamListing } = await import(
+      "../../src/lib/server/services/game-steam-listings.js"
+    );
+    const SteamApi = await import("../../src/lib/server/integrations/steam-api.js");
+    const { vi } = await import("vitest");
+
+    // Mock validateSteamKey so createSteamKey doesn't hit the real Steam API.
+    const validateSpy = vi.spyOn(SteamApi, "validateSteamKey").mockResolvedValue(true);
+    // Mock fetchSteamAppDetails so addSteamListing doesn't hit Steam either.
+    const fetchSpy = vi
+      .spyOn(SteamApi, "fetchSteamAppDetails")
+      .mockResolvedValue(null);
+
+    try {
+      const app = createApp();
+      const userA = await seedUserDirectly({ email: "mA@test.local" });
+      const userB = await seedUserDirectly({ email: "mB@test.local" });
+
+      // Seed: A owns one of every kind of resource the routes operate on.
+      const game = await createGame(userA.id, { title: "A's Game" }, "127.0.0.1");
+      const key = await createSteamKey(
+        userA.id,
+        { label: "A's Key", plaintext: "STEAM-XYZW-AAAA-BBBB" },
+        "127.0.0.1",
+      );
+      const channel = await createChannel(userA.id, {
+        handleUrl: "https://www.youtube.com/@AOwn",
+        isOwn: true,
+      });
+      const event = await createEvent(
+        userA.id,
+        {
+          gameId: game.id,
+          kind: "twitter_post",
+          occurredAt: new Date(),
+          title: "A's tweet",
+        },
+        "127.0.0.1",
+      );
+      const listing = await addSteamListing(
+        userA.id,
+        { gameId: game.id, appId: 730, label: "A's listing" },
+        "127.0.0.1",
+      );
+
+      const cookie = `neotolis.session_token=${userB.signedSessionCookieValue}`;
+      type Probe = { method: string; path: string; body?: Record<string, unknown> };
+      const probes: Probe[] = [
+        // games
+        { method: "GET", path: `/api/games/${game.id}` },
+        { method: "PATCH", path: `/api/games/${game.id}`, body: { title: "X" } },
+        { method: "DELETE", path: `/api/games/${game.id}` },
+        { method: "POST", path: `/api/games/${game.id}/restore` },
+        // game-listings
+        { method: "GET", path: `/api/games/${game.id}/listings` },
+        {
+          method: "POST",
+          path: `/api/games/${game.id}/listings`,
+          body: { appId: 730 },
+        },
+        {
+          method: "DELETE",
+          path: `/api/games/${game.id}/listings/${listing.id}`,
+        },
+        {
+          method: "PATCH",
+          path: `/api/games/${game.id}/listings/${listing.id}/key`,
+          body: { apiKeyId: null },
+        },
+        // youtube channels (user-level + per-game)
+        {
+          method: "PATCH",
+          path: `/api/youtube-channels/${channel.id}`,
+          body: { isOwn: false },
+        },
+        { method: "GET", path: `/api/games/${game.id}/youtube-channels` },
+        {
+          method: "POST",
+          path: `/api/games/${game.id}/youtube-channels`,
+          body: { channelId: channel.id },
+        },
+        {
+          method: "DELETE",
+          path: `/api/games/${game.id}/youtube-channels/${channel.id}`,
+        },
+        // api keys (steam)
+        { method: "GET", path: `/api/api-keys/steam/${key.id}` },
+        {
+          method: "PATCH",
+          path: `/api/api-keys/steam/${key.id}`,
+          body: { plaintext: "STEAM-XYZW-NEWNEW-CCCC" },
+        },
+        { method: "DELETE", path: `/api/api-keys/steam/${key.id}` },
+        // items (youtube) per-game listing
+        { method: "GET", path: `/api/games/${game.id}/items` },
+        // events per-game + per-id
+        { method: "GET", path: `/api/games/${game.id}/events` },
+        { method: "GET", path: `/api/games/${game.id}/timeline` },
+        { method: "GET", path: `/api/events/${event.id}` },
+        {
+          method: "PATCH",
+          path: `/api/events/${event.id}`,
+          body: { title: "B HACKED" },
+        },
+        { method: "DELETE", path: `/api/events/${event.id}` },
+      ];
+
+      for (const p of probes) {
+        const init: RequestInit = {
+          method: p.method,
+          headers: {
+            cookie,
+            "content-type": "application/json",
+          },
+        };
+        if (p.body) (init as { body?: string }).body = JSON.stringify(p.body);
+        const res = await app.request(p.path, init);
+        expect.soft(
+          res.status,
+          `${p.method} ${p.path} should be 404 cross-tenant (got ${res.status})`,
+        ).toBe(404);
+        const txt = await res.text();
+        expect.soft(
+          txt,
+          `${p.method} ${p.path} body must not contain 'forbidden' or 'permission'`,
+        ).not.toMatch(/forbidden|permission/i);
+      }
+    } finally {
+      validateSpy.mockRestore();
+      fetchSpy.mockRestore();
+    }
   });
 });
