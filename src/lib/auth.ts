@@ -28,14 +28,20 @@
 // node_modules/better-auth/dist/plugins/generic-oauth/routes.mjs:246,266).
 
 import { betterAuth } from "better-auth";
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
+import { encryptedDrizzleAdapter } from "./server/auth-adapter.js";
 import { db } from "./server/db/client.js";
 import * as authSchema from "./server/db/schema/auth.js";
 import { env } from "./server/config/env.js";
 
 export const auth = betterAuth({
-  database: drizzleAdapter(db, {
+  // CLAUDE.md "Secrets at rest" + D-11: OAuth provider tokens
+  // (accessToken / refreshToken / idToken on the `account` row) are
+  // envelope-encrypted in src/lib/server/auth-adapter.ts. The wrapper sits
+  // between Better Auth and the official drizzleAdapter without changing
+  // schema columns — the `text` column now holds an `ev1:`-prefixed JSON
+  // blob; decryption happens transparently on read.
+  database: encryptedDrizzleAdapter(db, {
     provider: "pg",
     schema: {
       user: authSchema.user,
