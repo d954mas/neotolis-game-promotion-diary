@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02-08-routes-and-sweeps-PLAN.md
-last_updated: "2026-04-27T21:32:00.214Z"
+stopped_at: Completed 02-09-theme-components-paraglide-PLAN.md
+last_updated: "2026-04-27T21:56:49.002Z"
 last_activity: 2026-04-27
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 21
-  completed_plans: 18
+  completed_plans: 19
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02 (ingest-secrets-and-audit) — EXECUTING
-Plan: 9 of 11
+Plan: 10 of 11
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Plan: 9 of 11
 | Phase 02-ingest-secrets-and-audit P06 | 8m 48s | 3 tasks | 11 files |
 | Phase 02-ingest-secrets-and-audit P07 | 5m 7s | 2 tasks | 6 files |
 | Phase 02-ingest-secrets-and-audit P08 | 6m 41s | 2 tasks | 14 files |
+| Phase 02-ingest-secrets-and-audit P09 | 17m 55s | 3 tasks | 29 files |
 
 ## Accumulated Context
 
@@ -139,6 +140,13 @@ Recent decisions affecting current work:
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-08: TimelineRow discriminated union from services/events.ts shipped over the wire from GET /api/games/:gameId/timeline as-is — no toTimelineRowDto needed because the union has no userId field by construction (built from already-projected fields). The lone exception to 'every response through a projection function', justified by P3 by-construction compliance
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-08: D-37 cross-tenant matrix uses expect.soft for 21 probes — single test surfaces every violation in one run rather than failing on the first; load-bearing for matrix size. Each probe carries a descriptive failure message keyed on method+path so triage doesn't require re-running individual probes
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-08: log-redact assertion is coarse (regex against base64-shaped strings after column-name keys) — fast-redact path-by-path fuzzing deferred to Phase 6 polish. Sufficient for the cross-cutting plaintext-and-ciphertext-don't-leak invariant the plan requires
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-09: themeHandle exported separately from handle (Rule 3 fix) so the SSR-no-flash integration test can call it directly with a synthetic event — production path remains handle = sequence(authHandle, themeHandle); the export is purely additive
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-09: src/hooks.server.ts uses RELATIVE imports (./lib/auth.js) instead of $lib/* aliases — vitest doesn't load the full sveltekit() plugin so $lib is unresolved at test time; matches established pattern across the test suite
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-09: vitest.config.ts wires @sveltejs/vite-plugin-svelte (existing dep, no new install) on root + every project so integration tests can import .svelte files for SSR rendering via Svelte 5's built-in render from svelte/server (no @testing-library/svelte added — W-2 honored)
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-09: tests/unit/paraglide.test.ts D-41 keyset snapshot expanded from Phase 1's 9 keys to Phase 2's full 80-key alphabetical snapshot — test INTENT preserved (a future PR adding a key without expanding this list trips the test); locale-add invariant contract upheld
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-09: eslint.config.js .svelte block now includes the same TS-aware no-unused-vars rule (argsIgnorePattern: ^_) as the .ts block — Svelte 5 component callback prop types like onChange: (v: T) => void no longer false-positive
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-09: cookie-wins reconciliation NOT wired here — the third theme test stub stays it.skip with annotation '02-10: cookie wins on signin (deferred to Plan 10 +layout.server.ts wire)'; the reconciliation logic belongs in +layout.server.ts which Plan 10 amends
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-09: TagChip component INTENTIONALLY NOT shipped — UI-SPEC inventory listed it but tag chips render inline as <span class='chip'> in GameCard; promoting to a standalone abstraction now is premature for one consumer (Phase 4 may earn it when chip interactivity arrives)
 
 ### Pending Todos
 
@@ -152,7 +160,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T21:31:36.602Z
+Last session: 2026-04-27T21:56:23.190Z
 Last Activity: 2026-04-27
-Stopped at: Completed 02-08-routes-and-sweeps-PLAN.md
+Stopped at: Completed 02-09-theme-components-paraglide-PLAN.md
 Resume file: None
