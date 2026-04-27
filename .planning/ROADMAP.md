@@ -29,11 +29,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   1. User signs in with Google OAuth and lands on an empty dashboard scoped to their own user_id; signing out invalidates the server-side session and re-visiting any protected page redirects to login
   2. A second user signing in for the first time gets a fresh empty dashboard; an existing user signing back in resumes their data — and a cross-tenant integration test in CI proves user A cannot read user B's resources (returns 404, never 403)
   3. Every endpoint refuses anonymous traffic (anonymous-401 integration test passes for every route in CI) and no public dashboard, share-link, or read-only viewer route exists
-  4. Self-host CI smoke test passes on every PR: boots the image with minimal env, signs in via OAuth mock, creates a game, runs a poll stub, and asserts no SaaS-only assumption leaked (this gate prevents parity rot from day one per PITFALLS P14/P20)
+  4. Self-host CI smoke test passes on every PR: boots the image with minimal env, signs in via OAuth mock, asserts auth happy path + tenant scope holds + all three roles (app/worker/scheduler) dispatch correctly + no SaaS-only assumption leaked (this gate prevents parity rot from day one per PITFALLS P14/P20). *Phase 1 scope per user decision 2026-04-27: the literal "creates a game" clause is deferred to Phase 2 smoke and "runs a poll stub" to Phase 3 smoke.*
   5. The codebase carries an i18n-aware key-lookup structure (Paraglide compiled messages); adding a locale later requires only dropping a JSON file, not a refactor
 **Plans**: 10 plans
 **Plan list**:
-- [ ] 01-01-PLAN.md — Bootstrap pinned deps + ESLint/Prettier/tsconfig + zod env + Pino redaction + UUIDv7 helper
+- [x] 01-01-PLAN.md — Bootstrap pinned deps + ESLint/Prettier/tsconfig + zod env + Pino redaction + UUIDv7 helper
 - [ ] 01-02-PLAN.md — Wave 0 test scaffolding (vitest split, Wave 0 placeholder tests) + Dockerfile + GitHub Actions CI skeleton
 - [ ] 01-03-PLAN.md — Drizzle pg client + advisory-locked migrate runner + Better Auth schema + audit_log table + pg-boss queue registry
 - [ ] 01-04-PLAN.md — TDD envelope encryption module (AES-256-GCM, KEK→DEK, kek_version, rotation)
@@ -55,6 +55,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. User creates free-form timeline events (conferences, talks, Twitter/Telegram/Discord posts) with title, date, optional URL/category/notes; edits and deletes are recorded in the audit log
   5. User opens the audit log and sees a paginated, owner-only list of logins (timestamp + IP + user-agent), key add/rotate/remove, and event edit/delete entries — with cursors that are tenant-relative so listing one tenant never observes another's IDs
   6. Every page renders legibly on a 360px-wide phone viewport, honors `prefers-color-scheme` with a user override for dark/light, and every empty state shows a copy-paste example of the next action
+  7. *Phase 2 smoke extension (per Phase 1 DEPLOY-05 scope deferral, 2026-04-27):* CI self-host smoke test additionally exercises "user A creates a game" via the new GAMES endpoints; cross-tenant matrix expands from /api/me sentinel to /api/games (read/write/delete returns 404 for cross-tenant access).
 **Plans**: TBD
 **UI hint**: yes
 
@@ -72,6 +73,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Every successful poll appends an immutable row to `metric_snapshots` (timestamp + payload); the live `tracked_items` row carries only `last_polled_at` and `last_poll_status` — chart history is never mutated, which is what enables the Phase 4 differentiator
   5. The user can record a wishlist count manually for a date, upload a Steamworks `Wishlists.csv` and see daily counts imported, or — if a Steam Web API key is configured — the daily worker auto-fetches the wishlist count without any user action
   6. Operator runs `docker compose up -d` to redeploy and no in-flight poll is lost: workers honor SIGTERM with a configurable grace period (default 60s), pg-boss drains, snapshot inserts are idempotent on `(item_id, polled_at)`, and audit log records the shutdown event
+  7. *Phase 3 smoke extension (per Phase 1 DEPLOY-05 scope deferral, 2026-04-27):* CI self-host smoke test additionally enqueues and processes a poll-stub job end-to-end, asserting `metric_snapshots` records an immutable row and the worker drains on SIGTERM.
 **Plans**: TBD
 
 ### Phase 4: Visualization

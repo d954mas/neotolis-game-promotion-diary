@@ -101,7 +101,7 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 - [ ] **DEPLOY-02**: Application honors `X-Forwarded-For`, `CF-Connecting-IP`, and `X-Forwarded-Proto` headers when behind a trusted proxy (configurable trusted-proxy CIDR list); audit log records the real client IP, not the proxy
 - [ ] **DEPLOY-03**: Application can run behind any of: bare port, nginx, Caddy, Cloudflare Tunnel, with no code change
 - [ ] **DEPLOY-04**: Repository ships an MIT license, a self-host README with Docker compose example, an `.env.example` documenting every required variable, and a documented KEK-rotation runbook
-- [ ] **DEPLOY-05**: CI runs a self-host smoke test on every change — boots the image with a minimal env, signs in via OAuth mock, creates a game, runs a poll, and asserts no SaaS-only assumptions leaked into the codebase
+- [x] **DEPLOY-05**: CI runs a self-host smoke test on every change — boots the image with a minimal env, signs in via OAuth mock, creates a game, runs a poll, and asserts no SaaS-only assumptions leaked into the codebase
 
 ---
 

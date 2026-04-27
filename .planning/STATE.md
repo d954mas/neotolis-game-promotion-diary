@@ -2,16 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: planning
-stopped_at: Phase 1 context gathered
-last_updated: "2026-04-27T09:33:38.051Z"
-last_activity: 2026-04-27 — Roadmap created with 6 phases mapped to architecture's 6-tier build order; 54/54 v1 requirements covered
+status: Ready to execute
+stopped_at: Completed 01-01-PLAN.md (locked-stack scaffold + env/logger/ids primitives)
+last_updated: "2026-04-27T11:21:33.744Z"
 progress:
   total_phases: 6
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_plans: 10
+  completed_plans: 1
 ---
 
 # Project State
@@ -21,16 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Replace messy Google Sheets / markdown files with a structured, secure, query-friendly diary so an indie developer can see — at a glance — which promotion actions actually moved the needle on wishlists and engagement.
-**Current focus:** Phase 1 — Foundation
+**Current focus:** Phase 01 — foundation
 
 ## Current Position
 
-Phase: 1 of 6 (Foundation)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-04-27 — Roadmap created with 6 phases mapped to architecture's 6-tier build order; 54/54 v1 requirements covered
-
-Progress: [░░░░░░░░░░] 0%
+Phase: 01 (foundation) — EXECUTING
+Plan: 2 of 10
 
 ## Performance Metrics
 
@@ -52,6 +46,7 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: —
 
 *Updated after each plan completion*
+| Phase 01-foundation P01 | 3min | 2 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -63,6 +58,9 @@ Recent decisions affecting current work:
 - Roadmap creation: 6 phases derived from architecture tiers (not imposed); standard granularity, all 54 v1 REQ-IDs covered
 - Phase 1 includes DEPLOY-05 (self-host CI smoke test) as a gate from day one — prevents parity rot per PITFALLS.md
 - Phase 3 begins with two spikes: Reddit `/about/rules` JSON schema (MEDIUM confidence) and `videos.list` batched quota math (50× saving) — both gate downstream design
+- [Phase 01-foundation]: Plan 01-01 pinned the Phase 1 locked stack exactly per RESEARCH.md drift table (@hono/node-server@1.19.14 NOT 2.x; pg-boss@10.1.10 NOT 12.x; better-auth@1.6.9; drizzle-orm@0.45.2; hono@4.12.15; paraglide-js@2.16.1)
+- [Phase 01-foundation]: src/lib/server/config/env.ts is the SOLE process.env reader; ESLint no-restricted-properties enforces the boundary (P2 mitigation). KEK is decoded, length-checked at 32 bytes, and deleted from process.env after consumption
+- [Phase 01-foundation]: Pino redact paths fixed once at logger init covering all 14 D-24 secret-shaped key paths (apiKey, refreshToken, accessToken, password, secret, encrypted_*, wrapped_dek, dek, kek, plus Authorization and Cookie headers)
 
 ### Pending Todos
 
@@ -76,6 +74,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T09:33:38.049Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-foundation/01-CONTEXT.md
+Last session: 2026-04-27T11:21:22.141Z
+Stopped at: Completed 01-01-PLAN.md (locked-stack scaffold + env/logger/ids primitives)
+Resume file: None
