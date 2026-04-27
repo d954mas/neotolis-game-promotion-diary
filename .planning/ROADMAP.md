@@ -42,7 +42,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 01-07-PLAN.md — Tenant-scope middleware (404 not 403) + /api/me + anonymous-401 sweep + cross-tenant integration test
 - [x] 01-08-PLAN.md — APP_ROLE=worker + APP_ROLE=scheduler entrypoints + pg-boss createBoss/stopBoss with graceful drain
 - [x] 01-09-PLAN.md — Paraglide JS 2 wiring + messages/en.json + thread m.* through Svelte pages + locale-add snapshot test
-- [ ] 01-10-PLAN.md — Self-host smoke test (D-15 six assertions; OAuth dance via oauth2-mock-server; human-verify checkpoint) + finalize VALIDATION.md
+- [x] 01-10-PLAN.md — Self-host smoke test (D-15 six assertions; OAuth dance via oauth2-mock-server; human-verify checkpoint) + finalize VALIDATION.md (completed 2026-04-27)
 
 ### Phase 2: Ingest, Secrets, and Audit
 **Goal**: Ship a usable end-to-end product without the polling worker. Validate the data model, the secret write path, and the audit story. After this phase the user can do everything they did in their spreadsheet, with encryption and audit on top.
@@ -121,7 +121,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/TBD | Not started | - |
+| 1. Foundation | 10/10 | Verifying | - |
 | 2. Ingest, Secrets, and Audit | 0/TBD | Not started | - |
 | 3. Polling Pipeline | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
