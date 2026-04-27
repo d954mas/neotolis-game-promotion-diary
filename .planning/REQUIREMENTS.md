@@ -12,9 +12,9 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 
 ### Authentication & Identity (AUTH)
 
-- [ ] **AUTH-01**: User can sign in to the service with Google OAuth as the only supported login method (no email/password, no GitHub, no in-app TOTP — Google's own 2FA is the security boundary)
-- [ ] **AUTH-02**: User can sign out from any page; session is invalidated server-side
-- [ ] **AUTH-03**: First sign-in automatically creates a developer account; existing accounts resume their data on subsequent sign-ins
+- [x] **AUTH-01**: User can sign in to the service with Google OAuth as the only supported login method (no email/password, no GitHub, no in-app TOTP — Google's own 2FA is the security boundary)
+- [x] **AUTH-02**: User can sign out from any page; session is invalidated server-side
+- [x] **AUTH-03**: First sign-in automatically creates a developer account; existing accounts resume their data on subsequent sign-ins
 
 ### Game Catalog (GAMES)
 
