@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02-06-ingest-and-events-services-PLAN.md
-last_updated: "2026-04-27T21:10:13.726Z"
+stopped_at: Completed 02-07-audit-read-service-PLAN.md
+last_updated: "2026-04-27T21:18:56.993Z"
 last_activity: 2026-04-27
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 21
-  completed_plans: 16
+  completed_plans: 17
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02 (ingest-secrets-and-audit) — EXECUTING
-Plan: 7 of 11
+Plan: 8 of 11
 
 ## Performance Metrics
 
@@ -62,6 +62,7 @@ Plan: 7 of 11
 | Phase 02-ingest-secrets-and-audit P04 | 7min 38s | 2 tasks | 7 files |
 | Phase 02-ingest-secrets-and-audit P05 | 5m 33s | 2 tasks | 6 files |
 | Phase 02-ingest-secrets-and-audit P06 | 8m 48s | 3 tasks | 11 files |
+| Phase 02-ingest-secrets-and-audit P07 | 5m 7s | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -127,6 +128,10 @@ Recent decisions affecting current work:
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-06: youtube-oembed integration ships W-6 discriminated-union return (kind: ok|unavailable|private) instead of RESEARCH.md §6's null contract — single null couldn't distinguish private vs deleted vs 5xx. Three kinds + thrown-on-5xx maps each axis to a distinct AppError code/metadata combination Plan 02-08 consumes mechanically
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-06: items-youtube.createTrackedYoutubeVideo wraps INSERT in try/catch ONLY to translate Postgres unique_violation 23505 → AppError 'duplicate_item' 409 — the EXCEPTION to the no-try/catch-around-insert D-19 rule (mapping a known DB constraint to a clean HTTP code is not cleaning up a half-write). The half-write rule still holds: no INSERT-then-DELETE-on-error path exists
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-06: listTimelineForGame uses tracked_youtube_videos.addedAt as the timeline timestamp (no occurredAt column on tracked videos). Two indexed selects + JS Array.sort beats a UNION ALL with disparate column shapes; matches the indie-budget zero-paid-DB-feature constraint
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-07: PITFALL P19 mitigated by query construction (userId WHERE clause FIRST in and(...) and INDEPENDENT of cursor) — opacity is incidental, not the security property; cross-tenant integration test is the runtime assertion
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-07: cursor format = base64url(JSON.stringify({at: ISO, id})); tuple-comparison (created_at, id) < (, ) is order-stable under same-ms ties because UUIDv7 ids are strictly monotonic — no SUBSELECT needed for cross-page disjointness
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-07: defense-in-depth on actionFilter — assertValidActionFilter validates against AUDIT_ACTIONS const before SQL builder; Plan 02-08 zod is the second guard. Two layers because a future smoke/forensic call can land in audit-read.ts without going through Hono
+- [Phase 02-ingest-secrets-and-audit]: Plan 02-07: unit tests seed env via process.env.X ??= before await import(...) — established codebase pattern (proxy-trust.test.ts); audit.ts and audit-read.ts both value-import db/client.js which loads env at module init
 
 ### Pending Todos
 
@@ -140,7 +145,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-27T21:10:13.722Z
+Last session: 2026-04-27T21:18:56.989Z
 Last Activity: 2026-04-27
-Stopped at: Completed 02-06-ingest-and-events-services-PLAN.md
+Stopped at: Completed 02-07-audit-read-service-PLAN.md
 Resume file: None

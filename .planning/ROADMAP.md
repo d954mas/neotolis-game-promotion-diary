@@ -64,7 +64,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 02-04-games-services-PLAN.md — Wave 1: games + game-steam-listings + youtube-channels services with soft-cascade transactional restore
 - [x] 02-05-api-keys-steam-service-PLAN.md — Wave 1: api_keys_steam service with envelope encryption + Steam validateKey + DTO ciphertext-strip
 - [x] 02-06-ingest-and-events-services-PLAN.md — Wave 1: URL parser + oEmbed integrations + items-youtube + events services + ingest orchestrator
-- [ ] 02-07-audit-read-service-PLAN.md — Wave 1: audit-read with cursor pagination + audit append-only behavioural test
+- [x] 02-07-audit-read-service-PLAN.md — Wave 1: audit-read with cursor pagination + audit append-only behavioural test
 - [ ] 02-08-routes-and-sweeps-PLAN.md — Wave 2: 8 Hono sub-routers + theme route + anonymous-401 + cross-tenant matrix extensions
 - [ ] 02-09-theme-components-paraglide-PLAN.md — Wave 3: theme cookie SSR + design tokens + 18 reusable Svelte components + ~30 Paraglide keys
 - [ ] 02-10-svelte-pages-PLAN.md — Wave 3: 7 SvelteKit pages composing Plan 09 components + cookie-DB theme reconciliation
