@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [master]
 
 # Cancel old runs of the same ref on new pushes; keeps CI minutes honest on rebase-heavy
 # branches.
