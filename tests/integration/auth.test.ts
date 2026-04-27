@@ -17,29 +17,29 @@ import { seedUserDirectly } from "./helpers.js";
 // D-13 mechanism = oauth2-mock-server per CONTEXT.md <deviations> 2026-04-27.
 describe("Better Auth — DB session lifecycle (AUTH-01/02/03)", () => {
   it("seeded session is readable via auth.api.getSession", async () => {
-    const { sessionToken } = await seedUserDirectly({
+    const { signedSessionCookieValue } = await seedUserDirectly({
       email: "alice@test.local",
     });
     const headers = new Headers();
-    headers.set("cookie", `neotolis.session_token=${sessionToken}`);
+    headers.set("cookie", `neotolis.session_token=${signedSessionCookieValue}`);
     const result = await auth.api.getSession({ headers });
     expect(result).not.toBeNull();
     expect(result?.user.email).toBe("alice@test.local");
   });
 
   it("AUTH-02: invalidateSession removes the row; subsequent getSession returns null", async () => {
-    const { sessionToken, id: userId } = await seedUserDirectly({
+    const { sessionToken, signedSessionCookieValue, id: userId } = await seedUserDirectly({
       email: "bob@test.local",
     });
 
-    // Find the session id from the token.
+    // Find the session id from the raw (unsigned) token stored in the DB.
     const rows = await db.select().from(session).where(eq(session.token, sessionToken));
     expect(rows.length).toBe(1);
 
     await invalidateSession(rows[0]!.id);
 
     const headers = new Headers();
-    headers.set("cookie", `neotolis.session_token=${sessionToken}`);
+    headers.set("cookie", `neotolis.session_token=${signedSessionCookieValue}`);
     const result = await auth.api.getSession({ headers });
     expect(result).toBeNull();
 

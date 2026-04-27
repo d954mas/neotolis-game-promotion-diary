@@ -76,14 +76,14 @@ describe("cross-tenant 404 (PRIV-01, VALIDATION 7/8/9)", () => {
     const userB = await seedUserDirectly({ email: "mine-b@test.local", name: "B" });
 
     const resA = await app.request("/api/me", {
-      headers: { cookie: `neotolis.session_token=${userA.sessionToken}` },
+      headers: { cookie: `neotolis.session_token=${userA.signedSessionCookieValue}` },
     });
     expect(resA.status).toBe(200);
     const bodyA = (await resA.json()) as Record<string, unknown>;
     expect(bodyA.email).toBe("mine-a@test.local");
 
     const resB = await app.request("/api/me", {
-      headers: { cookie: `neotolis.session_token=${userB.sessionToken}` },
+      headers: { cookie: `neotolis.session_token=${userB.signedSessionCookieValue}` },
     });
     expect(resB.status).toBe(200);
     const bodyB = (await resB.json()) as Record<string, unknown>;

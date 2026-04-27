@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { makeSignature } from "better-auth/crypto";
 import { pool } from "../setup.js";
 
 // Integration-test helpers. Per RESEARCH.md Pattern 8 ("Test fixtures bypass OAuth"),
@@ -6,6 +7,13 @@ import { pool } from "../setup.js";
 // the OAuth dance roundtrip cost. The `fetchAs` helper injects the resulting cookie.
 //
 // Wave 0 shipped stable signatures; Plan 01-05 (this commit) lands the real bodies.
+// Review-blocker fix (I1/I2): Better Auth's session cookie value is HMAC-signed —
+// `<token>.<signature>`, where the signature is `makeSignature(token, BETTER_AUTH_SECRET)`.
+// `getSignedCookie` rejects any cookie missing or failing the signature check, so a
+// "raw token" cookie fails session lookup with no error trail (just a null session).
+// We mirror Better Auth's own `createCookieHeaders` test util (see
+// node_modules/better-auth/dist/plugins/test-utils/cookie-builder.mjs) by signing the
+// token value with the same secret the running auth instance uses.
 
 export async function setupTestDb(): Promise<void> {
   // Plan 01-03 owns programmatic migrate; here we just confirm the pool is reachable.
@@ -16,8 +24,16 @@ export async function setupTestDb(): Promise<void> {
 export interface CreatedUser {
   id: string;
   email: string;
+  /** Full `Cookie:` header value, including `Path=/` and `HttpOnly` attributes. */
   sessionCookie: string;
+  /** Raw, unsigned session token (matches the value stored in `session.token`). */
   sessionToken: string;
+  /**
+   * The cookie value as Better Auth writes it to the browser:
+   * `<sessionToken>.<HMAC-SHA256(sessionToken, BETTER_AUTH_SECRET)>`.
+   * This is what `getSignedCookie` will accept.
+   */
+  signedSessionCookieValue: string;
 }
 
 /**
@@ -29,7 +45,9 @@ export interface CreatedUser {
  *
  * Returns the cookie string the SvelteKit hook (Plan 01-06) will recognize —
  * cookie name follows Better Auth's `cookiePrefix + '.session_token'` rule
- * (D-05 — see src/lib/auth.ts `advanced.cookiePrefix = 'neotolis'`).
+ * (D-05 — see src/lib/auth.ts `advanced.cookiePrefix = 'neotolis'`). The
+ * value is HMAC-signed against `BETTER_AUTH_SECRET` so Better Auth's
+ * `getSignedCookie` accepts it on subsequent requests.
  */
 export async function seedUserDirectly(opts: {
   email: string;
@@ -39,6 +57,7 @@ export async function seedUserDirectly(opts: {
   const { db } = await import("../../src/lib/server/db/client.js");
   const { user, session } = await import("../../src/lib/server/db/schema/auth.js");
   const { uuidv7 } = await import("../../src/lib/server/ids.js");
+  const { env } = await import("../../src/lib/server/config/env.js");
 
   const userId = uuidv7();
   await db.insert(user).values({
@@ -59,17 +78,20 @@ export async function seedUserDirectly(opts: {
     expiresAt,
   });
 
-  // Better Auth cookie name format: `${cookiePrefix}.session_token`. Plan 01-05's
-  // src/lib/auth.ts sets cookiePrefix = 'neotolis'. The hook in Plan 01-06 reads
-  // this via Better Auth's getSession helper — tests just need to hand back a
-  // cookie string in that exact shape.
-  const sessionCookie = `neotolis.session_token=${sessionToken}; Path=/; HttpOnly; SameSite=Lax`;
+  // Better Auth signs the cookie value with HMAC-SHA256 using BETTER_AUTH_SECRET.
+  // The wire format is `<token>.<signature>` — see better-auth/cookies/index.mjs's
+  // `setSignedCookie(name, session.token, secret, ...)` and the matching read path
+  // `getSignedCookie(name, secret)` in api/routes/session.mjs.
+  const signature = await makeSignature(sessionToken, env.BETTER_AUTH_SECRET);
+  const signedSessionCookieValue = `${sessionToken}.${signature}`;
+  const sessionCookie = `neotolis.session_token=${signedSessionCookieValue}; Path=/; HttpOnly; SameSite=Lax`;
 
   return {
     id: userId,
     email: opts.email,
     sessionCookie,
     sessionToken,
+    signedSessionCookieValue,
   };
 }
 
@@ -85,20 +107,27 @@ export async function createGame(_userId: string, _title: string): Promise<{ id:
 }
 
 /**
- * fetchAs(sessionTokenOrCookie, path, init?) — make an authenticated request.
+ * fetchAs(sessionCookieOrToken, path, init?) — make an authenticated request.
  *
  * Accepts either:
- *   - a literal cookie string (contains `=`) — used as-is.
- *   - a raw session token — wrapped into the `neotolis.session_token=...` cookie.
+ *   - a literal cookie header value (contains `=`) — used as-is. Pass
+ *     `CreatedUser.sessionCookie` here.
+ *   - a signed session-cookie value (`<token>.<signature>` from
+ *     `CreatedUser.signedSessionCookieValue`) — wrapped into a
+ *     `neotolis.session_token=<value>` header.
+ *
+ * NOTE: Better Auth requires the cookie value to be HMAC-signed against
+ * `BETTER_AUTH_SECRET`. Passing a raw, unsigned `sessionToken` will fail
+ * `getSignedCookie` verification and produce a null session.
  */
 export async function fetchAs(
-  sessionTokenOrCookie: string,
+  sessionCookieOrToken: string,
   path: string,
   init: RequestInit = {},
 ): Promise<Response> {
-  const cookie = sessionTokenOrCookie.includes("=")
-    ? sessionTokenOrCookie
-    : `neotolis.session_token=${sessionTokenOrCookie}`;
+  const cookie = sessionCookieOrToken.includes("=")
+    ? sessionCookieOrToken
+    : `neotolis.session_token=${sessionCookieOrToken}`;
   const baseUrl = process.env.TEST_BASE_URL ?? "http://localhost:3000";
   const headers = new Headers(init.headers);
   headers.set("cookie", cookie);

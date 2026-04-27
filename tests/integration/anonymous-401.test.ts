@@ -74,7 +74,7 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     const { seedUserDirectly } = await import("./helpers.js");
     const seeded = await seedUserDirectly({ email: "priv@test.local", name: "Priv Tester" });
     const res = await app.request("/api/me", {
-      headers: { cookie: `neotolis.session_token=${seeded.sessionToken}` },
+      headers: { cookie: `neotolis.session_token=${seeded.signedSessionCookieValue}` },
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
