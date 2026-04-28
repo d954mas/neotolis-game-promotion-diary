@@ -172,6 +172,7 @@ Recent decisions affecting current work:
 - 2026-04-28-event-delete-needs-confirm — event delete needs ConfirmDialog (one-click is too easy, data-loss risk) — Phase 2.1
 - 2026-04-28-event-detail-page — Phase 4: dedicated /events/[id] detail page with notes + audit timeline (caught in Phase 2 UAT)
 - 2026-04-28-attachments-feature-new-milestone — **NEW MILESTONE**: file attachments per event/game (presskits, conf photos) — needs storage backend, ~4-6 phases of work
+- 2026-04-28-youtube-channels-ux-gaps — /accounts/youtube: missing channel delete + own/not-own explainer + auto-import expectation gap (caught in Phase 2 manual UAT)
 
 ### Blockers/Concerns
 
