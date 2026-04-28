@@ -41,13 +41,15 @@
 
 import { ESLintUtils } from "@typescript-eslint/utils";
 
+// Phase 2.1 (Plan 02.1-01): unified `dataSources` replaces the per-platform
+// `youtubeChannels` / `gameYoutubeChannels` / `trackedYoutubeVideos` trio.
+// `events` carries forward; `gameSteamListings` / `apiKeysSteam` / `games` /
+// `auditLog` unchanged from Phase 2.
 const TENANT_TABLES = new Set([
   "games",
   "gameSteamListings",
-  "youtubeChannels",
-  "gameYoutubeChannels",
+  "dataSources",
   "apiKeysSteam",
-  "trackedYoutubeVideos",
   "events",
   "auditLog",
 ]);

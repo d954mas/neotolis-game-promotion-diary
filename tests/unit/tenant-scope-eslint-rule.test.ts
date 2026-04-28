@@ -35,6 +35,10 @@ tester.run("no-unfiltered-tenant-query", rule, {
     `db.delete(apiKeysSteam).where(and(eq(apiKeysSteam.userId, userId), eq(apiKeysSteam.id, keyId)))`,
     // Phase 5 allowlisted table
     `db.select().from(subredditRules).where(eq(subredditRules.id, rid))`,
+    // Phase 2.1 dataSources select with userId filter
+    `db.select().from(dataSources).where(and(eq(dataSources.userId, userId), eq(dataSources.id, sid)))`,
+    // Phase 2.1 dataSources update with userId filter (mirrors Phase 2 single-loop chain walker)
+    `tx.update(dataSources).set({autoImport:true}).where(and(eq(dataSources.userId, userId), eq(dataSources.id, sid)))`,
   ],
   invalid: [
     {
@@ -49,18 +53,16 @@ tester.run("no-unfiltered-tenant-query", rule, {
       code: `db.update(apiKeysSteam).set({label:'x'}).where(eq(apiKeysSteam.id, keyId))`,
       errors: [{ messageId: "missingUserIdFilter", data: { table: "apiKeysSteam" } }],
     },
+    // Phase 2.1: dataSources select without userId filter trips the rule.
     {
-      code: `db.delete(trackedYoutubeVideos).where(eq(trackedYoutubeVideos.id, vid))`,
-      errors: [
-        {
-          messageId: "missingUserIdFilter",
-          data: { table: "trackedYoutubeVideos" },
-        },
-      ],
+      code: `db.select().from(dataSources).where(eq(dataSources.id, sid))`,
+      errors: [{ messageId: "missingUserIdFilter", data: { table: "dataSources" } }],
     },
+    // Phase 2.1: dataSources update form without userId filter trips the rule
+    // (mirrors Phase 2 fix to the single-loop chain walker).
     {
-      code: `db.select().from(youtubeChannels).where(eq(youtubeChannels.handleUrl, h))`,
-      errors: [{ messageId: "missingUserIdFilter", data: { table: "youtubeChannels" } }],
+      code: `tx.update(dataSources).set({autoImport:true}).where(eq(dataSources.id, sid))`,
+      errors: [{ messageId: "missingUserIdFilter", data: { table: "dataSources" } }],
     },
   ],
 });
