@@ -14,7 +14,9 @@
 
 import { Hono } from "hono";
 import { signOutAllDevices } from "../../services/users.js";
+import { deleteSessionById } from "../../services/sessions.js";
 import { logger } from "../../logger.js";
+import { mapErr } from "./_shared.js";
 
 export const sessionRoutes = new Hono<{
   Variables: { userId: string; sessionId: string };
@@ -25,4 +27,18 @@ sessionRoutes.post("/me/sessions/all", async (c) => {
   const result = await signOutAllDevices(userId);
   logger.info({ userId, deletedCount: result.deletedCount }, "user signed out of all devices");
   return c.json(result);
+});
+
+// Plan 02.1-09 — single-session sign-out from /settings active-sessions list.
+// Cross-tenant deletion attempts surface as 404 (PRIV-01: 404, never 403).
+// Idempotent (second DELETE on the same id also returns 404).
+sessionRoutes.delete("/sessions/:id", async (c) => {
+  const userId = c.var.userId;
+  const sessionId = c.req.param("id");
+  try {
+    await deleteSessionById(userId, sessionId);
+    return c.body(null, 204);
+  } catch (err) {
+    return mapErr(c, err, "DELETE /api/sessions/:id");
+  }
 });

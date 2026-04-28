@@ -185,6 +185,7 @@ describe("paraglide i18n (UX-04)", () => {
       "settings_sessions_only_current",
       "settings_sessions_signout_one",
       "settings_theme_blurb",
+      "settings_theme_heading",
       "sign_out",
       "sign_out_all_devices",
       "source_kind_label_discord_server",

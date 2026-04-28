@@ -1,18 +1,33 @@
 import type { PageServerLoad } from "./$types";
+import { redirect } from "@sveltejs/kit";
+import { listSessions } from "$lib/server/services/sessions.js";
+import { toSessionDto } from "$lib/server/dto.js";
 
 /**
- * /settings loader (Plan 02-10).
+ * /settings loader (Plan 02.1-09 extension).
  *
- * Reads `retentionDays` from the layout-server pass-through (NOT the Node
- * env directly — only `src/lib/server/config/env.ts` may read it per
- * CLAUDE.md / AGENTS.md hard rule). The +layout.server.ts surfaces
- * `env.RETENTION_DAYS` on every page load; this loader just forwards it.
+ * Plan 02-10 baseline: surfaces user / theme / retentionDays from the layout
+ * pass-through. Plan 02.1-09 ADDS the active-sessions list (UI-SPEC: new
+ * section "Active sessions") + the current-session id so the SessionsList
+ * component can mark the current row.
  *
- * Theme is also surfaced via the layout (resolved by themeHandle in
- * src/hooks.server.ts and reconciled in +layout.server.ts), so this loader
- * has nothing to fetch — the page reads everything from `parent()` data.
+ * env-discipline (CLAUDE.md / AGENTS.md): only src/lib/server/config/env.ts
+ * may read process.env. RETENTION_DAYS comes from the layout pass-through;
+ * this loader fetches sessions via the service layer (Pattern 1 tenant scope)
+ * and reads the current sessionId from event.locals.session (set by
+ * src/hooks.server.ts authHandle).
  */
-export const load: PageServerLoad = async ({ parent }) => {
+export const load: PageServerLoad = async ({ parent, locals, url }) => {
+  if (!locals.user) {
+    throw redirect(303, `/login?next=${encodeURIComponent(url.pathname)}`);
+  }
   const { user, theme, retentionDays } = await parent();
-  return { user, theme, retentionDays };
+  const sessionRows = await listSessions(locals.user.id).catch(() => []);
+  return {
+    user,
+    theme,
+    retentionDays,
+    sessions: sessionRows.map(toSessionDto),
+    currentSessionId: locals.session?.id ?? "",
+  };
 };

@@ -146,6 +146,7 @@
   "settings_sessions_only_current": "You're only signed in here.",
 
   "settings_theme_blurb": "Light and dark themes use your device preference unless you choose one explicitly. Changes apply immediately on every page.",
+  "settings_theme_heading": "Theme",
 
   "appheader_account_menu_aria": "Account menu — {email}",
 

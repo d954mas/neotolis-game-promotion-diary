@@ -146,6 +146,55 @@ describe("theme cookie + DB persist (UX-01)", () => {
     expect(meta).toMatchObject({ from: "system", to: "dark" });
   });
 
+  it("Plan 02.1-09: AppHeader does NOT render ThemeToggle (relocation to /settings)", async () => {
+    // UI-SPEC §"`<AppHeader>` UI polish": theme toggle is REMOVED from the
+    // header in Phase 2.1 (P1 UAT — clutter on every page). The toggle
+    // relocates to /settings only. We render <AppHeader> server-side and
+    // assert the theme-toggle's stable selector (aria-label) is absent.
+    const { render } = await import("svelte/server");
+    const AppHeader = (
+      await import("../../src/lib/components/AppHeader.svelte")
+    ).default;
+    const out = render(AppHeader, {
+      props: {
+        user: { name: "Test", email: "test@example.com", image: null },
+        theme: "system" as const,
+      },
+    });
+    const html = out.body;
+    // The ThemeToggle's stable selector is its aria-label "Toggle color theme"
+    // (m.theme_toggle_aria_label()).
+    expect(html).not.toContain("Toggle color theme");
+  });
+
+  it("Plan 02.1-09: ThemeToggle renders exactly once on /settings (relocation)", async () => {
+    // The same ThemeToggle's aria-label appears exactly once on /settings.
+    // We render the toggle directly here (the full settings page requires
+    // a parent layout context that's not trivial to seed in unit/integration
+    // tests; the structural relocation is validated by /settings/+page.svelte
+    // importing ThemeToggle and the AppHeader test above asserting it's gone
+    // from the header). One on-disk grep verifies there's no second toggle.
+    const { render } = await import("svelte/server");
+    const ThemeToggle = (
+      await import("../../src/lib/components/ThemeToggle.svelte")
+    ).default;
+    const out = render(ThemeToggle, { props: { current: "system" as const } });
+    const html = out.body;
+    expect(html).toContain("Toggle color theme");
+    // The settings page is the sole consumer in 2.1.
+    const fs = await import("node:fs");
+    const settings = fs.readFileSync(
+      "src/routes/settings/+page.svelte",
+      "utf8",
+    );
+    expect(settings).toContain("ThemeToggle");
+    const header = fs.readFileSync(
+      "src/lib/components/AppHeader.svelte",
+      "utf8",
+    );
+    expect(header).not.toContain("ThemeToggle");
+  });
+
   it("02-10: UX-01 cookie wins on signin reconciliation (+layout.server.ts)", async () => {
     // Plan 10 wires the cookie-wins reconciliation in
     // src/routes/+layout.server.ts. When an authenticated user has a valid

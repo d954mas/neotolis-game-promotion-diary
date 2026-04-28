@@ -57,4 +57,15 @@ describe("empty-state copy + Paraglide invariant (UX-03)", () => {
       expect(exported[k], `paraglide messages missing key: ${k}`).toBeDefined();
     }
   });
+
+  it("Plan 02.1-09: /keys/steam empty-state body uses the rephrased Plan 02.1-03 copy", () => {
+    // UI-SPEC §"Empty states — 3 new + 1 polish-fix": the OLD copy mentioned
+    // "manual wishlist entry and Steamworks CSV import" — neither exists in
+    // Phase 2.1; Plan 02.1-03 rephrased the key. This assertion locks the
+    // rephrasing so a future PR can't accidentally revert.
+    const url = "https://steamcommunity.com/dev/apikey";
+    const body = m.empty_keys_steam_body({ url });
+    expect(body).toContain("Phase 3 lands the manual-entry form");
+    expect(body).not.toContain("manual wishlist entry");
+  });
 });

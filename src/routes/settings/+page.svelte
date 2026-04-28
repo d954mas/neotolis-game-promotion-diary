@@ -1,24 +1,37 @@
 <script lang="ts">
-  // /settings — theme + account + retention info (Plan 02-10).
+  // /settings — theme + account + retention info + active sessions
+  // (Phase 2.1 Plan 02.1-09 extension).
   //
-  // Three sections per UI-SPEC §"/settings":
-  //   - Theme:      <ThemeToggle current={data.theme}> (write side already
-  //                 lands via POST /api/me/theme; toggle handles its own
-  //                 optimistic update + revert).
-  //   - Account:    read-only email + name + sign-out + sign-out-all-devices
-  //                 (the latter gated by <ConfirmDialog>).
-  //   - Retention:  read-only badge with the env.RETENTION_DAYS value passed
-  //                 through the layout (NOT read from the Node env in this
-  //                 page — see +page.server.ts comment).
+  // UI-SPEC §"/settings (EXTENDED — sessions list + theme blurb)":
+  //   - Theme (existing) + new sub-blurb (m.settings_theme_blurb()) +
+  //     ThemeToggle (relocated from AppHeader; only here now)
+  //   - Account (existing)
+  //   - Data retention (existing)
+  //   - Active sessions (NEW — uses <SessionsList>)
+  //
+  // The Phase 2 single-shot sign-out + sign-out-all-devices wiring carries
+  // forward; the new section adds per-session DELETE.
 
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
+  import SessionsList from "$lib/components/SessionsList.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { signOut } from "$lib/auth-client";
   import type { PageData } from "./$types";
 
+  type SessionDtoLocal = {
+    id: string;
+    expiresAt: Date | string;
+    ipAddress: string | null;
+    userAgent: string | null;
+    createdAt: Date | string;
+  };
+
   let { data }: { data: PageData } = $props();
+
+  const sessions = $derived(data.sessions as SessionDtoLocal[]);
+  const currentSessionId = $derived(data.currentSessionId as string);
 
   let confirmSignOutAllOpen = $state(false);
 
@@ -38,8 +51,8 @@
   <h1>Settings</h1>
 
   <article class="block">
-    <h2>Theme</h2>
-    <p class="muted">Choose how the app looks. System follows your OS setting.</p>
+    <h2>{m.settings_theme_heading()}</h2>
+    <p class="muted">{m.settings_theme_blurb()}</p>
     <div class="theme-row">
       <ThemeToggle current={data.theme} />
       <span class="muted">Current: {data.theme}</span>
@@ -72,6 +85,12 @@
       Soft-deleted items are kept for {data.retentionDays} days before permanent purge.
     </p>
     <span class="badge">Retention: {data.retentionDays} days</span>
+  </article>
+
+  <article class="block">
+    <h2>{m.settings_sessions_heading()}</h2>
+    <p class="muted">{m.settings_sessions_blurb()}</p>
+    <SessionsList {sessions} {currentSessionId} />
   </article>
 </section>
 

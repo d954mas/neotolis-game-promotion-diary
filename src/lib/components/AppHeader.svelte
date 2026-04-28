@@ -1,83 +1,41 @@
 <script lang="ts">
   // AppHeader — top bar present on every authenticated page.
-  // App title + ThemeToggle + sign-out menu. Mobile-friendly (44px touch targets).
   //
-  // The user prop carries the DTO-projected user (from event.locals.user
-  // populated by hooks.server.ts authHandle). When null, we render a minimal
-  // header with just the title + theme toggle (the page itself shows the
-  // sign-in CTA).
+  // Phase 2.1 Plan 02.1-09 changes (UI-SPEC §"`<AppHeader>` UI polish"):
+  //   1. ADD <UserChip>: avatar (Google profile picture) + email + sign-out
+  //      menu. The 28px circular avatar replaces the Phase 2 plain-text
+  //      "name" trigger.
+  //   2. REMOVE <ThemeToggle>: the toggle relocates to /settings only
+  //      (UI-SPEC: Phase 2 UAT P1 surfaced it was clutter on every page).
+  //
+  // The `theme` prop is no longer consumed here but stays in the props
+  // bag (set by +layout.svelte for backward compatibility) — removing it
+  // would force a layout-svelte change. Phase 4 cleanup can drop it.
 
   import { m } from "$lib/paraglide/messages.js";
-  import ThemeToggle from "./ThemeToggle.svelte";
+  import UserChip from "./UserChip.svelte";
 
-  type UserShape = { name: string; email: string } | null;
+  type UserShape = { name: string; email: string; image: string | null } | null;
   type Theme = "light" | "dark" | "system";
 
   let {
     user,
-    theme,
+    theme: _theme,
     onSignOut,
     onSignOutAllDevices,
   }: {
     user: UserShape;
-    theme: Theme;
+    theme?: Theme;
     onSignOut?: () => void;
     onSignOutAllDevices?: () => void;
   } = $props();
-
-  let menuOpen = $state(false);
-
-  function toggleMenu(): void {
-    menuOpen = !menuOpen;
-  }
-
-  function closeMenu(): void {
-    menuOpen = false;
-  }
 </script>
 
 <header class="header">
-  <a href="/" class="brand">{m.app_title()}</a>
+  <a href="/feed" class="brand">{m.app_title()}</a>
   <div class="actions">
-    <ThemeToggle current={theme} />
     {#if user}
-      <div class="user">
-        <button
-          type="button"
-          class="user-trigger"
-          onclick={toggleMenu}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-        >
-          {user.name}
-        </button>
-        {#if menuOpen}
-          <div class="menu" role="menu">
-            <button
-              type="button"
-              class="menu-item"
-              role="menuitem"
-              onclick={() => {
-                closeMenu();
-                onSignOut?.();
-              }}
-            >
-              {m.sign_out()}
-            </button>
-            <button
-              type="button"
-              class="menu-item"
-              role="menuitem"
-              onclick={() => {
-                closeMenu();
-                onSignOutAllDevices?.();
-              }}
-            >
-              {m.sign_out_all_devices()}
-            </button>
-          </div>
-        {/if}
-      </div>
+      <UserChip {user} {onSignOut} {onSignOutAllDevices} />
     {/if}
   </div>
 </header>
@@ -103,43 +61,5 @@
     display: flex;
     align-items: center;
     gap: var(--space-sm);
-  }
-  .user {
-    position: relative;
-  }
-  .user-trigger {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: transparent;
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    cursor: pointer;
-  }
-  .menu {
-    position: absolute;
-    top: calc(100% + var(--space-xs));
-    right: 0;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    box-shadow: 0 4px 12px rgb(0 0 0 / 12%);
-    min-width: 200px;
-    z-index: 10;
-  }
-  .menu-item {
-    display: block;
-    width: 100%;
-    text-align: left;
-    background: transparent;
-    color: var(--color-text);
-    border: none;
-    padding: var(--space-sm) var(--space-md);
-    font-size: var(--font-size-body);
-    cursor: pointer;
-  }
-  .menu-item:hover {
-    background: var(--color-bg);
   }
 </style>

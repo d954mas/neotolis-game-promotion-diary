@@ -53,7 +53,7 @@
 
 {#if data.user}
   <AppHeader
-    user={{ name: data.user.name, email: data.user.email }}
+    user={{ name: data.user.name, email: data.user.email, image: data.user.image }}
     theme={data.theme}
     onSignOut={handleSignOut}
     onSignOutAllDevices={handleSignOutAllDevices}
