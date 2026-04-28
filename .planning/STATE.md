@@ -174,6 +174,7 @@ Recent decisions affecting current work:
 - 2026-04-28-attachments-feature-new-milestone — **NEW MILESTONE**: file attachments per event/game (presskits, conf photos) — needs storage backend, ~4-6 phases of work
 - 2026-04-28-youtube-channels-ux-gaps — /accounts/youtube: missing channel delete + own/not-own explainer + auto-import expectation gap (caught in Phase 2 manual UAT)
 - 2026-04-28-channel-to-inbox-auto-import-flow — **P0 ARCH**: own channel → auto-import all videos to inbox → user attaches to games (Phase 2.1 schema + UI shell, Phase 3 polling, Phase 4 dashboard)
+- 2026-04-28-data-sources-unified-model — **P0 STRATEGIC**: rename "channels" → "data sources" (generalize across YouTube/Reddit/Twitter/etc.) — touches PROJECT.md + ROADMAP, schema lands in Phase 2.1
 
 ### Blockers/Concerns
 
