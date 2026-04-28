@@ -22,9 +22,8 @@ import { sessionRoutes } from "./routes/sessions.js";
 // a Hono sub-router mounted under /api/* so it inherits tenantScope.
 import { gamesRoutes } from "./routes/games.js";
 import { gameListingsRoutes } from "./routes/game-listings.js";
-import { youtubeChannelsRoutes } from "./routes/youtube-channels.js";
+import { sourcesRoutes } from "./routes/sources.js";
 import { apiKeysSteamRoutes } from "./routes/api-keys-steam.js";
-import { itemsYoutubeRoutes } from "./routes/items-youtube.js";
 import { eventsRoutes } from "./routes/events.js";
 import { auditRoutes } from "./routes/audit.js";
 import { meThemeRoutes } from "./routes/me-theme.js";
@@ -93,18 +92,22 @@ export function createApp(): Hono<AppContext> {
   // by service functions (see src/lib/server/services/errors.ts).
   app.use("/api/*", tenantScope);
 
-  // /api routes — Phase 1 + Phase 2 (Plan 02-08).
+  // /api routes — Phase 1 + Phase 2 + Phase 2.1 (Plan 02.1-06).
   app.route("/api", meRoutes);
   app.route("/api", sessionRoutes);
   // Phase 2: order matters minimally — `/api/games/*` parameterized routes
-  // (game-listings, youtube-channels-for-game) are registered AFTER the bare
+  // (game-listings, per-game events) are registered AFTER the bare
   // gamesRoutes so Hono's path-matching does not shadow `/api/games/:id`
-  // with `/api/games/:gameId/listings`.
+  // with `/api/games/:gameId/listings`. The per-game events sub-route lives
+  // on `gamesRoutes` itself (Plan 02.1-06 — replaces Phase 2's events.ts
+  // mount of `/api/games/:gameId/events`).
   app.route("/api", gamesRoutes);
   app.route("/api", gameListingsRoutes);
-  app.route("/api", youtubeChannelsRoutes);
+  // Phase 2.1: data_sources sub-router replaces Phase 2's youtube-channels +
+  // items-youtube route groups (their underlying services were retired in
+  // Plan 02.1-04 and 02.1-05; the route files are gone in Plan 02.1-06).
+  app.route("/api", sourcesRoutes);
   app.route("/api", apiKeysSteamRoutes);
-  app.route("/api", itemsYoutubeRoutes);
   app.route("/api", eventsRoutes);
   app.route("/api", auditRoutes);
   app.route("/api", meThemeRoutes);

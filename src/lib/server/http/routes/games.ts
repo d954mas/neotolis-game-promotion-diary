@@ -22,7 +22,8 @@ import {
   softDeleteGame,
   restoreGame,
 } from "../../services/games.js";
-import { toGameDto } from "../../dto.js";
+import { listEventsForGame } from "../../services/events.js";
+import { toGameDto, toEventDto } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
 
@@ -117,5 +118,20 @@ gamesRoutes.post("/games/:id/restore", async (c) => {
     return c.body(null, 204);
   } catch (err) {
     return mapErr(c, err, "POST /api/games/:id/restore");
+  }
+});
+
+// Per-game curated events list (Phase 2.1 — replaces Phase 2's
+// `/api/games/:gameId/timeline` JS-merge over events + tracked_youtube_videos).
+// The unified events table now holds every per-game artifact regardless of
+// platform; the JS merge is gone, replaced by a single tenant-scoped query
+// in `listEventsForGame`. Cross-tenant gameId surfaces as 404 (PRIV-01)
+// because `listEventsForGame` calls `assertGameOwnedByUser` first.
+gamesRoutes.get("/games/:gameId/events", async (c) => {
+  try {
+    const list = await listEventsForGame(c.var.userId, c.req.param("gameId"));
+    return c.json(list.map(toEventDto));
+  } catch (err) {
+    return mapErr(c, err, "GET /api/games/:gameId/events");
   }
 });
