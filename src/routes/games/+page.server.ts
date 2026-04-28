@@ -1,34 +1,34 @@
 import type { PageServerLoad } from "./$types";
+import { listGames, listSoftDeletedGames } from "$lib/server/services/games.js";
+import { toGameDto } from "$lib/server/dto.js";
 
 /**
  * /games loader — list the caller's games (Plan 02-10).
  *
- * Uses SvelteKit's `fetch` so the request's session cookie forwards to
- * `/api/games` automatically (no manual cookie threading). Returns both the
- * active list and the count of soft-deleted rows so the UI can render the
- * "Show N deleted games" toggle without a second SSR round-trip.
+ * Returns both the active list and the soft-deleted list so the UI can
+ * render the "Show N deleted games" toggle without a second SSR
+ * round-trip. Two service calls in parallel via Promise.all is acceptable
+ * here because the soft-deleted set is bounded by the user's lifetime
+ * games (small) and listGames is a thin SELECT against a tenant-scoped
+ * table.
  *
- * Soft-deleted-count technique: GET /api/games?includeSoftDeleted=true and
- * filter client-side. Two fetches in parallel is acceptable here because
- * the soft-deleted set is bounded by the user's lifetime games (small) and
- * the listing route is itself a thin SELECT against a tenant-scoped table.
- *
- * Errors: a 5xx from the API surfaces as a SvelteKit `error()`; a 4xx
- * (which should be unreachable for a logged-in user — the route is
- * tenant-scoped) returns an empty list rather than crashing the page.
+ * Direct service calls (NOT fetch('/api/...')): the API and the page
+ * render in the same Node process, so an HTTP roundtrip back to Hono
+ * would deadlock SvelteKit's internal_fetch (Hono routes don't live in
+ * SvelteKit's route tree — see post-execution P0 fix in SUMMARY). Both
+ * service functions enforce `userId` scoping; every row goes through
+ * `toGameDto` which strips `userId` (P3 discipline).
  */
-export const load: PageServerLoad = async ({ fetch, parent }) => {
-  const { user } = await parent();
-  if (!user) return { games: [], softDeleted: [] };
+export const load: PageServerLoad = async ({ locals }) => {
+  if (!locals.user) return { games: [], softDeleted: [] };
 
-  const [activeRes, allRes] = await Promise.all([
-    fetch("/api/games"),
-    fetch("/api/games?includeSoftDeleted=true"),
+  const [activeRows, softDeletedRows] = await Promise.all([
+    listGames(locals.user.id),
+    listSoftDeletedGames(locals.user.id),
   ]);
 
-  const games = activeRes.ok ? ((await activeRes.json()) as Array<unknown>) : [];
-  const all = allRes.ok ? ((await allRes.json()) as Array<{ deletedAt: string | null }>) : [];
-  const softDeleted = all.filter((g) => g.deletedAt !== null);
-
-  return { games, softDeleted };
+  return {
+    games: activeRows.map(toGameDto),
+    softDeleted: softDeletedRows.map(toGameDto),
+  };
 };
