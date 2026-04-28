@@ -104,8 +104,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 02.1-12-PLAN.md — Gap closure Wave 1: forward-only migration `0001_add_post_kind` adds `post` event kind (first migration after 2.1 baseline collapse) + service / route / KindIcon / FilterChips / FiltersSheet / events-new picker (Gap 12)
 - [x] 02.1-13-PLAN.md — Gap closure Wave 1: /events/new Today/Yesterday quick buttons + date-origin explainer (Gaps 7 + 8)
 - [x] 02.1-14-PLAN.md — Gap closure Wave 2: soft-delete event recovery — restoreEvent + listDeletedEvents services + PATCH /api/events/:id/restore + GET /api/events/deleted + DeletedEventsPanel + `event.restored` audit verb + forward-only migration `0002_add_event_restored_audit_action` (Gap 2)
-- [ ] 02.1-15-PLAN.md — Gap closure Wave 2: filters restructure — multi-select source/kind/game (inArray) + DateRangeControl primary control + per-value chip dismissal + checkbox-list FiltersSheet + last-30-days default + ?all=1 opt-out (Gaps 4 + 9 + 10)
-- [ ] 02.1-16-PLAN.md — Gap closure Wave 3: FeedCard redesign with media thumbnails + formatFeedDate compact-relative buckets + KindIcon kind-label adjacency (Gap 6 path b) + paraglide.test.ts EXPECTED_KEYS snapshot refresh + 02.1-VALIDATION.md per-task map populated + Gap Closure Complete note (Gaps 3 + 5 + 6)
+- [x] 02.1-15-PLAN.md — Gap closure Wave 2: filters restructure — multi-select source/kind/game (inArray) + DateRangeControl primary control + per-value chip dismissal + checkbox-list FiltersSheet + last-30-days default + ?all=1 opt-out (Gaps 4 + 9 + 10)
+- [x] 02.1-16-PLAN.md — Gap closure Wave 3: FeedCard redesign with media thumbnails + formatFeedDate compact-relative buckets + KindIcon kind-label adjacency (Gap 6 path b) + paraglide.test.ts EXPECTED_KEYS snapshot refresh + 02.1-VALIDATION.md per-task map populated + Gap Closure Complete note (Gaps 3 + 5 + 6)
 **UI hint**: yes
 
 ### Phase 3: Polling Pipeline
@@ -180,7 +180,7 @@ Phases execute in numeric order: 1 → 2 → 2.1 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation | 10/10 | Complete | 2026-04-27 |
 | 2. Ingest, Secrets, and Audit | 11/11 | Gaps Found | 2026-04-28 (closure in 2.1) |
-| 2.1. Architecture Realignment (INSERTED) | 9/16 | In progress (Plan 10 UAT surfaced 12 gaps; Plans 11-16 close them) | - |
+| 2.1. Architecture Realignment (INSERTED) | 15/16 | In progress (Plans 11-16 closed all 12 UAT gaps; Plan 10 UAT checkpoint resume next) | - |
 | 3. Polling Pipeline | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
 | 5. Reddit Rules Cockpit | 0/TBD | Not started | - |

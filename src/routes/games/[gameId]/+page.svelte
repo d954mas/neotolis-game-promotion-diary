@@ -10,8 +10,9 @@
   // youtube_video rows attached to the game.
   //
   // Curated events panel: rows are grouped by month (<MonthHeader>) and
-  // rendered with the same row component the /feed page uses (<FeedRow>).
-  // FeedRow handles its own ConfirmDialog on delete (UI polish-fix per
+  // rendered with the same card component the /feed page uses (<FeedCard>,
+  // Plan 02.1-16 replaces the prior <FeedRow>).
+  // FeedCard handles its own ConfirmDialog on delete (UI polish-fix per
   // UI-SPEC §"Destructive confirmations") and its own AttachToGamePicker.
   //
   // No paste box on this page in 2.1 (UI-SPEC). Manual paste lives on
@@ -21,7 +22,7 @@
   import { invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import EmptyState from "$lib/components/EmptyState.svelte";
-  import FeedRow from "$lib/components/FeedRow.svelte";
+  import FeedCard from "$lib/components/FeedCard.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
   import RenameInline from "$lib/components/RenameInline.svelte";
   import AddSteamListingForm from "$lib/components/AddSteamListingForm.svelte";
@@ -51,6 +52,10 @@
     authorIsMe: boolean;
     metadata: unknown;
     lastPolledAt: Date | string | null;
+    // Plan 02.1-16: FeedCard requires externalId for the YouTube thumbnail
+    // URL. toEventDto already projects this field; the local type needs to
+    // surface it so the props contract type-checks.
+    externalId: string | null;
   };
 
   type ListingDto = {
@@ -81,14 +86,14 @@
   const allGames = $derived(data.games as GameLite[]);
   const sources = $derived(data.sources as SourceLite[]);
 
-  // Source-id → SourceLite map for FeedRow's source chip resolution.
+  // Source-id → SourceLite map for FeedCard's source chip resolution.
   const sourceById = $derived.by(() => {
     const map = new Map<string, SourceLite>();
     for (const s of sources) map.set(s.id, s);
     return map;
   });
 
-  // Keep the page's <h1> rendered via FeedRow — single game lite for chip.
+  // Keep the page's <h1> rendered via FeedCard — single game lite for chip.
   const gameLite = $derived<GameLite>({ id: game.id, title: game.title });
 
   // -- Group curated events by month for <MonthHeader> --
@@ -206,7 +211,7 @@
         <ul class="rows">
           {#each group.rows as ev (ev.id)}
             <li>
-              <FeedRow
+              <FeedCard
                 event={ev}
                 source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
                 game={gameLite}

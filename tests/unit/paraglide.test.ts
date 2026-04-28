@@ -54,6 +54,11 @@ describe("paraglide i18n (UX-04)", () => {
     // REMOVED — the audit_action enum no longer carries those values
     // post-2.1 (UI-SPEC Copywriting Contract REMOVED block).
     //
+    // Phase 2.1 gap-closure (Plans 02.1-12 / 13 / 14 / 15 / 16): the snapshot
+    // absorbed every gap-closure-added key in lock-step (Plan 02.1-15 Task 3
+    // already pulled the prior plans' deferred entries; Plan 02.1-16 adds
+    // its own `feed_card_*` pair). Total post-Plan-16: 177 keys.
+    //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
     // across renames (Phase 2 STATE.md guidance, carried forward).
     const EXPECTED_KEYS = [
@@ -141,6 +146,8 @@ describe("paraglide i18n (UX-04)", () => {
       "feed_attach_error_game_not_found",
       "feed_attach_no_games_inline",
       "feed_attach_to_game",
+      "feed_card_open_external",
+      "feed_card_thumbnail_alt",
       "feed_cta_add_event",
       "feed_cta_new_event",
       "feed_date_range_30d",

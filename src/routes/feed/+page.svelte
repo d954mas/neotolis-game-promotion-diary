@@ -8,7 +8,8 @@
   //   - <DateRangeControl> above the chip strip (Plan 02.1-15 — Gap 10).
   //   - <FilterChips> at min-width 600px (inline strip), collapsing to a
   //     "Filters (N)" button below 600px that opens <FiltersSheet>.
-  //   - <ul> of <FeedRow> — the load-bearing surface.
+  //   - <ul> of <FeedCard> — the load-bearing surface (Plan 02.1-16
+  //     replaces <FeedRow> with <FeedCard> per Gap 3 closure).
   //   - <CursorPager> at the bottom (Older →) for pagination.
   //   - <DeletedEventsPanel> below the pager (Plan 02.1-14 — Gap 2).
   //   - <EmptyState> for first-time empty + filtered-no-match cases.
@@ -21,7 +22,7 @@
   import { goto, invalidateAll } from "$app/navigation";
   import { page } from "$app/state";
   import { m } from "$lib/paraglide/messages.js";
-  import FeedRow from "$lib/components/FeedRow.svelte";
+  import FeedCard from "$lib/components/FeedCard.svelte";
   import DateRangeControl from "$lib/components/DateRangeControl.svelte";
   import FilterChips from "$lib/components/FilterChips.svelte";
   import FiltersSheet from "$lib/components/FiltersSheet.svelte";
@@ -169,7 +170,7 @@
     <ul class="feed-list">
       {#each data.rows as row (row.id)}
         <li>
-          <FeedRow
+          <FeedCard
             event={row}
             source={row.sourceId ? (sourceById.get(row.sourceId) ?? null) : null}
             game={row.gameId ? (gameById.get(row.gameId) ?? null) : null}

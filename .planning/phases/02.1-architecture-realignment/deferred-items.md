@@ -128,3 +128,34 @@ the current plan; the listed plan / phase owns the fix.
   `_chip_default` / `_label_from` / `_label_to`. EXPECTED_KEYS list extended
   in the same commit; no follow-up refresh needed.
 - **Owner:** none — closed.
+
+## Resolved by Plan 02.1-16
+
+### `tests/unit/paraglide.test.ts` keyset snapshot — refreshed for Plan 02.1-16's 2 new keys
+
+- **Fixed in:** Plan 02.1-16 Task 3.
+- **Was:** Plan 02.1-15 Task 3 already absorbed every prior gap-closure
+  plan's deferred Paraglide-key entries (Plans 02.1-12 / 13 / 14). Plan
+  02.1-16 adds two more keys (`feed_card_thumbnail_alt`,
+  `feed_card_open_external`) for the new <FeedCard> component; the
+  EXPECTED_KEYS list is extended in the same commit.
+- **Now:** EXPECTED_KEYS regenerated alphabetically from
+  `Object.keys(messages/en.json).sort()`. Total keys: **177** (Plan 03's
+  baseline 156 + 19 gap-closure additions across Plans 02.1-12 → 02.1-16,
+  with 2 of those 19 owned by Plan 02.1-16). Note: the planner's pre-plan
+  estimate of 175 was off by 2 because intermediate plans added
+  `feed_attach_no_games_inline` and one other helper key not enumerated in
+  the plan's <interfaces> block; the live count is the load-bearing number
+  and the test now matches it exactly.
+- **Owner moved to:** Plan 02.1-16 (this plan); locking the keyset
+  invariant (D-41) for any post-Phase-2.1 Paraglide change.
+
+### Plan 02.1-01 paraglide-snapshot deferral — fully retired
+
+- **Resolved by:** Plan 02.1-15 Task 3 + Plan 02.1-16 Task 3.
+- **Was:** Plan 02.1-01's Wave 0 keyset baseline lagged behind Phase 2.1
+  UI plans that landed feed/sources/sessions copy. The deferral note
+  pointed to "the wave that finishes the copy contract" — that wave is
+  now Plan 02.1-15 (8 keys absorbed) + Plan 02.1-16 (2 keys absorbed,
+  this plan).
+- **Owner:** none — closed.
