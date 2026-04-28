@@ -274,6 +274,56 @@ All claims in this summary verified against disk and git history:
 - `grep -c "import.*app\\.css" src/routes/+layout.svelte` → 1
 - `grep -c "PROTECTED_PATHS" src/routes/+layout.server.ts` → 2 (definition + .some(...) usage)
 
+## Post-execution P0 fix (2026-04-28)
+
+### The bug
+
+UAT 2026-04-28: a freshly-created game (POST /api/games returned 201 with id `019dd26b-2efe-7687-b945-9e20a9be2274`) redirected to `/games/<id>`, and the SvelteKit detail loader threw `error(500, "Failed to load game")`. Server log showed `TypeError: fetch failed` originating in undici, with the stack walking through SvelteKit's `internal_fetch` → `respond` → `resolve` → `await fetch(request)` (the global undici fallback).
+
+Root cause: every Phase 2 `+page.server.ts` loader called `event.fetch('/api/...')` to reach Hono-owned routes. SvelteKit's `internal_fetch` treats same-origin URLs as in-tree, recursively re-runs `respond` (hooks → resolve), can't find `/api/*` in SvelteKit's route table (no `+server.ts` files exist — the API lives in Hono), and falls back to `await fetch(request)` from inside the same Node process serving the request. That fallback deadlocks/errors as `TypeError: fetch failed`.
+
+The architectural mismatch is the load-bearing point: the `/api/*` HTTP routes were always thin shells around tenant-scoped services. When the API and the page render in the same process, the HTTP roundtrip is pure overhead; when SvelteKit is hosted *under* Hono (this project's setup), the roundtrip is also actively broken.
+
+### The fix
+
+Replaced `event.fetch('/api/...')` with direct service imports in every loader. Each call uses `event.locals.user.id` (already populated by `authHandle` in `src/hooks.server.ts`) and projects each row through the matching `to*Dto` helper from `$lib/server/dto.ts` so the wire shape `+page.svelte` consumes is unchanged. Cross-tenant `NotFoundError` from `getGameById` converts to SvelteKit's `error(404)`, preserving PRIV-01 (404, never 403).
+
+Tenant-scope ESLint rule still satisfied: services do the `userId` filtering by construction (the rule applies to `src/lib/server/services/**` only). The DTO discipline is preserved because every loader runs the row(s) through `to*Dto` before returning. Best-effort branches (e.g. listings/channels/items/events on the game-detail page) use `.catch(() => [])` to keep the previous "render the rest of the page" contract.
+
+### Files changed
+
+| File | Commit | Notes |
+| --- | --- | --- |
+| `src/routes/keys/steam/+page.server.ts` | `aa27768` | `listSteamKeys` + `toApiKeySteamDto` (D-39 ciphertext discipline preserved) |
+| `src/routes/accounts/youtube/+page.server.ts` | `2fae7d8` | `listChannels` + `toYoutubeChannelDto` |
+| `src/routes/games/+page.server.ts` | `ff1fac7` | `listGames` + `listSoftDeletedGames` parallel; both project through `toGameDto` |
+| `src/routes/games/[gameId]/+page.server.ts` | `d2a8607` | Sequenced parent (`getGameById` → SvelteKit `error(404)` on `NotFoundError`) + 4-way `Promise.all` over `listListings` / `listChannelsForGame` / `listItemsForGame` / `listEventsForGame` (each `.catch(() => [])`); 5 DTO projections |
+| `src/routes/events/+page.server.ts` | `9694d35`, `c5468a4` | `listGames` + per-game `listEventsForGame` fan-out; explicit Date → ISO coercion for `occurredAt` so the page's `localeCompare` sort + `slice(0, 7)` month grouping continue to work. Follow-up commit narrows `EnrichedEvent` via `Omit` so the `occurredAt: string` override compiles |
+| `src/routes/audit/+page.server.ts` | `e95e172` | `listAuditPage` + `toAuditEntryDto`; defense-in-depth `action` validation against `AUDIT_ACTIONS` (the HTTP layer's zod schema used to be the first line; the service's `assertValidActionFilter` is the second) |
+
+`src/routes/+layout.server.ts` and `src/routes/settings/+page.server.ts` were already free of `event.fetch('/api/...')` calls (they read from `db` and `parent()` respectively) — no change needed.
+
+### Why this is a Rule 1 deviation
+
+Without this fix, every Phase 2 page that loads data is broken in production:
+
+- `/games` shows the empty list (active-list fetch returns 500)
+- `/games/[gameId]` shows the SvelteKit error page on every navigation (load-bearing parent fetch throws)
+- `/events` shows an empty timeline
+- `/audit` shows an empty audit log
+- `/accounts/youtube` shows an empty channel list
+- `/keys/steam` shows the empty-state branch even when keys exist
+
+The fix is mechanical (no behavior change at the wire) and load-bearing (the bug breaks the entire UI that Plan 02-10 shipped). It's a Rule 1 (auto-fix bug) by every reading of the deviation rules — the diagnosis was confirmed with the production server log and matches the SvelteKit + undici source code. It belongs in the same branch as Plan 02-10 because it's correcting a bug that was introduced by Plan 02-10's own loader pattern; splitting it into a separate phase would leave master broken.
+
+### Verification
+
+- `pnpm exec tsc --noEmit` — clean
+- `pnpm exec eslint src/routes/` — clean
+- `pnpm exec svelte-check` — 0 errors / 0 warnings on 1704 files
+- `pnpm exec vitest run --project unit` — 65 passed / 65
+- Manual UAT (game create → detail page) is the next step the user (d954mas) will run; the loader change is a prerequisite for green there.
+
 ---
 *Phase: 02-ingest-secrets-and-audit*
 *Completed: 2026-04-28*
