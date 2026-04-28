@@ -157,6 +157,7 @@ Recent decisions affecting current work:
 ### Pending Todos
 
 - 2026-04-28-show-user-avatar-and-email-in-ui — AppHeader account disambiguation (caught in Phase 2 manual UAT)
+- 2026-04-28-simplify-theme-toggle-in-header — move ThemeToggle out of AppHeader to /settings (caught in Phase 2 manual UAT)
 
 ### Blockers/Concerns
 
