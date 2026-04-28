@@ -168,6 +168,7 @@ Recent decisions affecting current work:
 - 2026-04-28-audit-ux-improvements — /audit needs grouped checkbox filters + table headers (caught in Phase 2 manual UAT)
 - 2026-04-28-settings-active-sessions-list — **P1 SECURITY UX**: /settings missing active sessions list (caught in Phase 2 manual UAT)
 - 2026-04-28-keys-empty-state-promises-vaporware — /keys/steam empty state mentions manual wishlist entry + CSV import that don't exist (caught in Phase 2 manual UAT)
+- 2026-04-28-events-page-layout-and-filter — /events: inline game tag + per-game filter (caught in Phase 2 manual UAT)
 
 ### Blockers/Concerns
 
