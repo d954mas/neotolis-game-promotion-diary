@@ -1,12 +1,21 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import enMessages from "../../messages/en.json" with { type: "json" };
 
 // Plan 01-09 (Wave 4) — UX-04 i18n structure.
 // VALIDATION 18: Paraglide message function resolves at runtime.
 // VALIDATION 19: Adding a locale = drop a JSON file (no source-code change).
 // D-17: baseLocale only in MVP — no locale detection.
 // D-18: single messages/en.json at repo root.
+//
+// Phase 2.1 (Plan 02.1-03 Wave 0) — keyset extends to the full Phase 2.1
+// alphabetical contract. The locale-add invariant is preserved by the
+// explicit alphabetical EXPECTED_KEYS list (D-41): a future PR adding a key
+// without expanding this list trips the test loudly. Two Phase 2 keys
+// (`audit_action_item_created`, `audit_action_item_deleted`) are REMOVED
+// because the audit_action enum no longer carries `item.created` /
+// `item.deleted` (UI-SPEC Copywriting Contract REMOVED block).
 describe("paraglide i18n (UX-04)", () => {
   it("VALIDATION 18: messages/en.json contains expected keys with the right English values", () => {
     const raw = JSON.parse(fs.readFileSync(path.resolve("messages/en.json"), "utf8"));
@@ -31,46 +40,43 @@ describe("paraglide i18n (UX-04)", () => {
     }
   });
 
-  it("VALIDATION 19: adding messages/ru.json is content-only — keyset must match en.json (snapshot)", () => {
+  it("messages/en.json keyset matches the Phase 2.1 alphabetical contract (locale-add invariant)", () => {
     // The CONTRACT is: every locale file MUST share en.json's keyset.
-    // This test snapshots the en.json keyset; if a future PR adds a key to en.json,
-    // the snapshot must be updated AND every other locale file extended.
-    // Adding a brand new locale is purely "drop a JSON file matching this keyset"
-    // — no source change required.
+    // This explicit alphabetical list IS the contract. A future PR adding a
+    // key to en.json without extending this list trips the test; a future
+    // PR adding a key to this list without extending en.json trips it too.
+    // Adding a brand new locale is purely "drop a JSON file matching this
+    // keyset" — no source change required.
     //
-    // Phase 2 (Plan 02-09, D-41) adds the P2 keyset: 8 primary CTAs + 12
-    // empty-state keys + 16 audit-action chip labels + 10 ingest/keys error
-    // states + 7 destructive confirmations + 6 status/toast keys + paste-box
-    // (label + placeholder) + theme-toggle (4 labels) + 7 common verbs.
-    // Updating this snapshot in lock-step with messages/en.json is the
-    // forcing function: a Phase 2 PR that ADDS a key without expanding this
-    // list trips the test loudly. (i18n.test.ts asserts the P2 keyset
-    // SUPERSET; this test asserts EXACT equality, so the two together
-    // catch both "added too few" and "added too many" drift.)
-    const raw = JSON.parse(fs.readFileSync(path.resolve("messages/en.json"), "utf8"));
-    const keys = Object.keys(raw)
-      .filter((k) => !k.startsWith("$"))
-      .sort();
-    // Asserting an explicit keyset (vs toMatchSnapshot) is more durable across renames.
-    // List is alphabetically sorted to match the .sort() above (Object.keys order is
-    // not stable; sort() is the deterministic source).
-    expect(keys).toEqual([
+    // Phase 2.1 (Plan 02.1-03, Wave 0): expanded from Phase 2's 81 keys to
+    // the Phase 2.1 alphabetical superset. Two Phase 2 audit-action keys
+    // (`audit_action_item_created`, `audit_action_item_deleted`) are
+    // REMOVED — the audit_action enum no longer carries those values
+    // post-2.1 (UI-SPEC Copywriting Contract REMOVED block).
+    //
+    // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
+    // across renames (Phase 2 STATE.md guidance, carried forward).
+    const EXPECTED_KEYS = [
       "app_title",
+      "appheader_account_menu_aria",
       "audit_action_all",
+      "audit_action_event_attached_to_game",
       "audit_action_event_created",
       "audit_action_event_deleted",
+      "audit_action_event_dismissed_from_inbox",
       "audit_action_event_edited",
       "audit_action_game_created",
       "audit_action_game_deleted",
       "audit_action_game_restored",
-      "audit_action_item_created",
-      "audit_action_item_deleted",
       "audit_action_key_add",
       "audit_action_key_remove",
       "audit_action_key_rotate",
       "audit_action_session_signin",
       "audit_action_session_signout",
       "audit_action_session_signout_all",
+      "audit_action_source_added",
+      "audit_action_source_removed",
+      "audit_action_source_toggled_auto_import",
       "audit_action_theme_changed",
       "badge_purge_in_days",
       "badge_purge_in_days_warning",
@@ -88,6 +94,7 @@ describe("paraglide i18n (UX-04)", () => {
       "confirm_key_remove",
       "confirm_key_replace",
       "confirm_signout_all",
+      "confirm_source_remove",
       "confirm_speedbump_acknowledge",
       "dashboard_title",
       "dashboard_unauth_intro",
@@ -96,18 +103,62 @@ describe("paraglide i18n (UX-04)", () => {
       "empty_audit_heading",
       "empty_events_body",
       "empty_events_heading",
+      "empty_feed_body",
+      "empty_feed_filtered_body",
+      "empty_feed_filtered_heading",
+      "empty_feed_heading",
       "empty_games_body",
       "empty_games_heading",
       "empty_items_example_youtube_url",
       "empty_items_heading",
       "empty_keys_steam_body",
       "empty_keys_steam_heading",
+      "empty_sources_body",
+      "empty_sources_heading",
       "empty_youtube_channels_body",
       "empty_youtube_channels_heading",
       "error_network",
       "error_server_generic",
+      "event_kind_label_conference",
+      "event_kind_label_discord_drop",
+      "event_kind_label_other",
+      "event_kind_label_press",
+      "event_kind_label_reddit_post",
+      "event_kind_label_talk",
+      "event_kind_label_telegram_post",
+      "event_kind_label_twitter_post",
+      "event_kind_label_youtube_video",
       "events_cta_new_event",
+      "events_detail_phase4_body",
+      "events_detail_phase4_heading",
+      "feed_attach_error_already_attached",
+      "feed_attach_error_game_not_found",
+      "feed_attach_no_games_inline",
+      "feed_attach_to_game",
+      "feed_cta_add_event",
+      "feed_cta_new_event",
+      "feed_dismiss_error_not_in_inbox",
+      "feed_dismiss_from_inbox",
+      "feed_filter_attached_false",
+      "feed_filter_attached_true",
+      "feed_filter_author_me",
+      "feed_filter_author_others",
+      "feed_filter_chip_dismiss_aria",
+      "feed_filter_date_range",
+      "feed_filter_game",
+      "feed_filter_kind",
+      "feed_filter_source",
+      "feed_filters_apply",
+      "feed_filters_clear_all",
+      "feed_move_to_inbox",
+      "feed_row_delete_aria",
+      "feed_row_edit_aria",
+      "game_add_steam_listing_cta",
+      "game_rename_cta_discard",
+      "game_rename_cta_save",
       "games_cta_new_game",
+      "inbox_badge",
+      "inbox_badge_tooltip",
       "ingest_cta_add",
       "ingest_error_malformed_url",
       "ingest_error_oembed_unreachable",
@@ -125,9 +176,35 @@ describe("paraglide i18n (UX-04)", () => {
       "login_page_title",
       "paste_box_label",
       "paste_box_placeholder",
+      "polling_badge_manual",
+      "polling_badge_phase3_placeholder",
       "settings_cta_save",
+      "settings_sessions_blurb",
+      "settings_sessions_current_badge",
+      "settings_sessions_heading",
+      "settings_sessions_only_current",
+      "settings_sessions_signout_one",
+      "settings_theme_blurb",
       "sign_out",
       "sign_out_all_devices",
+      "source_kind_label_discord_server",
+      "source_kind_label_reddit_account",
+      "source_kind_label_telegram_channel",
+      "source_kind_label_twitter_account",
+      "source_kind_label_youtube_channel",
+      "source_kind_phase_discord_server",
+      "source_kind_phase_reddit_account",
+      "source_kind_phase_telegram_channel",
+      "source_kind_phase_twitter_account",
+      "sources_cta_new_source",
+      "sources_cta_save_source",
+      "sources_error_duplicate",
+      "sources_error_kind_not_yet_functional",
+      "sources_kind_disabled_tooltip",
+      "sources_owned_by_me",
+      "sources_owned_by_other",
+      "sources_status_auto_off",
+      "sources_status_auto_on_pending",
       "theme_label_dark",
       "theme_label_light",
       "theme_label_system",
@@ -136,7 +213,17 @@ describe("paraglide i18n (UX-04)", () => {
       "toast_restored",
       "toast_saved",
       "youtube_channels_cta_add",
-    ]);
+    ] as const;
+
+    const keys = Object.keys(enMessages)
+      .filter((k) => !k.startsWith("$"))
+      .sort();
+    expect(keys).toEqual([...EXPECTED_KEYS].sort());
+  });
+
+  it("removes Phase 2 audit_action_item_* keys (dead after enum rename)", () => {
+    expect(enMessages).not.toHaveProperty("audit_action_item_created");
+    expect(enMessages).not.toHaveProperty("audit_action_item_deleted");
   });
 
   it("UX-04 invariant: project.inlang/settings.json has baseLocale=en and a single locale in MVP (D-17)", () => {
