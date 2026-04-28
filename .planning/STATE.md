@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: PhaseGapsFound
-stopped_at: Phase 2 UAT complete — 20 todos surfaced including 4 P0 architectural redesigns; awaiting PROJECT.md + ROADMAP rework before Phase 2.1 planning
-last_updated: "2026-04-28T07:45:00.000Z"
-last_activity: "Phase 2 manual UAT complete (d954mas, 60min). 20 forward-work todos captured. P0 self-fetch loader bug fixed in branch (10 commits). Phase 2 verdict: gaps_found — needs PROJECT.md + ROADMAP rework + Phase 2.1 plan before further execution."
+stopped_at: Phase 2.1 context gathered
+last_updated: "2026-04-28T09:42:02.800Z"
+last_activity: Phase 2 manual UAT complete — 20 todos surfaced (4 P0 architectural, 5 P0/P1 functional gaps, 4 polish, 2 Phase 4, 1 new milestone)
 progress:
-  total_phases: 6
-  completed_phases: 1
+  total_phases: 7
+  completed_phases: 2
   total_plans: 21
   completed_plans: 21
 ---
@@ -186,8 +186,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-28T07:45:00.000Z
+Last session: 2026-04-28T09:42:02.796Z
 Last Activity: Phase 2 manual UAT complete — 20 todos surfaced (4 P0 architectural, 5 P0/P1 functional gaps, 4 polish, 2 Phase 4, 1 new milestone)
-Stopped at: Phase 2 closed as gaps_found; need PROJECT.md + ROADMAP rework before Phase 2.1
-Resume file: .planning/todos/pending/ (20 todos) + .planning/phases/02-ingest-secrets-and-audit/02-11-smoke-360-validation-SUMMARY.md
+Stopped at: Phase 2.1 context gathered
+Resume file: .planning/phases/02.1-architecture-realignment/02.1-CONTEXT.md
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
