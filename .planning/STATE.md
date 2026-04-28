@@ -169,6 +169,9 @@ Recent decisions affecting current work:
 - 2026-04-28-settings-active-sessions-list — **P1 SECURITY UX**: /settings missing active sessions list (caught in Phase 2 manual UAT)
 - 2026-04-28-keys-empty-state-promises-vaporware — /keys/steam empty state mentions manual wishlist entry + CSV import that don't exist (caught in Phase 2 manual UAT)
 - 2026-04-28-events-page-layout-and-filter — /events: inline game tag + per-game filter (caught in Phase 2 manual UAT)
+- 2026-04-28-event-delete-needs-confirm — event delete needs ConfirmDialog (one-click is too easy, data-loss risk) — Phase 2.1
+- 2026-04-28-event-detail-page — Phase 4: dedicated /events/[id] detail page with notes + audit timeline (caught in Phase 2 UAT)
+- 2026-04-28-attachments-feature-new-milestone — **NEW MILESTONE**: file attachments per event/game (presskits, conf photos) — needs storage backend, ~4-6 phases of work
 
 ### Blockers/Concerns
 
