@@ -424,4 +424,26 @@ log "(P2.5) PASS — all 6 new routes return 401 anonymously"
 
 log "=== Phase 2 smoke extension PASSED ==="
 
-log "ALL SMOKE ASSERTIONS PASSED (Phase 1 + Phase 2 scope)"
+# ============================================================
+# Phase 2.1 — unified-flow extension (per CONTEXT D-11)
+# ============================================================
+# Phase 2.1 introduces /api/sources, the unified events table, and the
+# attach-to-game flow. The smoke test asserts the load-bearing user contract
+# end-to-end against the production image: register YouTube data_source ->
+# create youtube_video event (manual paste; sourceId=null) -> see in /feed
+# -> PATCH .../attach with {gameId} -> see in /games/:gameId/events.
+#
+# Cross-tenant probes cover the new routes (/api/sources/:id GET +
+# /api/events/:id/attach PATCH) so the AGENTS.md "404 never 403" invariant
+# holds for the new tenant-owned resources too.
+#
+# Reuses SESSION_COOKIE_A (step 4) and SESSION_COOKIE_B (step 5) — no extra
+# OAuth dance. The helper lives in tests/smoke/lib/phase21-flow.sh for
+# legibility (the function is sourced, not exec'd).
+log "=== Phase 2.1 smoke extension ==="
+# shellcheck source=tests/smoke/lib/phase21-flow.sh
+source "$(dirname "$0")/lib/phase21-flow.sh"
+phase21_unified_flow "http://localhost:$APP_PORT" "$SESSION_COOKIE_A" "$SESSION_COOKIE_B"
+log "=== Phase 2.1 smoke extension PASSED ==="
+
+log "ALL SMOKE ASSERTIONS PASSED (Phase 1 + Phase 2 + Phase 2.1 scope)"
