@@ -32,7 +32,7 @@ export const load: PageServerLoad = async ({ locals }) => {
     return { events: [], games };
   }
 
-  type EnrichedEvent = ReturnType<typeof toEventDto> & {
+  type EnrichedEvent = Omit<ReturnType<typeof toEventDto>, "occurredAt"> & {
     gameId: string;
     gameTitle: string;
     occurredAt: string;
