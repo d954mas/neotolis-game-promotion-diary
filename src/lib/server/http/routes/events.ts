@@ -1,13 +1,21 @@
-// Events HTTP routes (Plan 02-08, extended in Plan 02.1-06).
+// Events HTTP routes (Plan 02-08, extended in Plan 02.1-06; Plan 02.1-14
+// gap closure adds restore).
 //
 // Routes (Phase 2.1 unified-events shape):
 //   POST   /api/events                         — createEvent (free-form; D-09 /events/new)
 //   GET    /api/events                         — listFeedPage (FEED-01 chronological pool)
+//   GET    /api/events/deleted                 — listDeletedEvents (Plan 02.1-14 gap closure)
 //   GET    /api/events/:id                     — getEventById
 //   PATCH  /api/events/:id                     — updateEvent
 //   DELETE /api/events/:id                     — softDeleteEvent
 //   PATCH  /api/events/:id/attach              — attachToGame (GAMES-04a)
 //   PATCH  /api/events/:id/dismiss-inbox       — dismissFromInbox (INBOX-01)
+//   PATCH  /api/events/:id/restore             — restoreEvent (Plan 02.1-14 gap closure)
+//
+// Hono path-precedence note: GET /events/deleted is registered BEFORE
+// GET /events/:id because Hono matches the first declaration at a given depth.
+// Without this ordering, the parametric `:id` route would consume the literal
+// `deleted` segment and the deleted-events list endpoint would never fire.
 //
 // `/api/games/:gameId/events` and `/api/games/:gameId/timeline` retired here:
 //   - The per-game curated view now lives on /api/games/:gameId/events in
@@ -39,6 +47,8 @@ import {
   listFeedPage,
   attachToGame,
   dismissFromInbox,
+  listDeletedEvents,
+  restoreEvent,
 } from "../../services/events.js";
 import { toEventDto } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
@@ -162,6 +172,18 @@ eventsRoutes.get(
   },
 );
 
+// Plan 02.1-14: must register BEFORE GET /events/:id because Hono matches
+// the first registration at a given depth. The literal "deleted" segment
+// would otherwise be consumed by the parametric `:id`.
+eventsRoutes.get("/events/deleted", async (c) => {
+  try {
+    const rows = await listDeletedEvents(c.var.userId);
+    return c.json({ rows: rows.map(toEventDto) });
+  } catch (err) {
+    return mapErr(c, err, "GET /api/events/deleted");
+  }
+});
+
 eventsRoutes.get("/events/:id", async (c) => {
   try {
     const ev = await getEventById(c.var.userId, c.req.param("id"));
@@ -247,5 +269,24 @@ eventsRoutes.patch("/events/:id/dismiss-inbox", async (c) => {
     return c.json(toEventDto(ev));
   } catch (err) {
     return mapErr(c, err, "PATCH /api/events/:id/dismiss-inbox");
+  }
+});
+
+// Plan 02.1-14 (gap closure) — restore a soft-deleted event. Cross-tenant /
+// never-deleted / past-retention all return 404 by construction (the service
+// throws NotFoundError for all three cases; mapErr translates to
+// {error: "not_found"} status 404, never 403 — PRIV-01 / CLAUDE.md rule 2).
+eventsRoutes.patch("/events/:id/restore", async (c) => {
+  const ctx = getAuditContext(c);
+  try {
+    const ev = await restoreEvent(
+      ctx.userId,
+      c.req.param("id"),
+      ctx.ipAddress,
+      ctx.userAgent ?? undefined,
+    );
+    return c.json(toEventDto(ev));
+  } catch (err) {
+    return mapErr(c, err, "PATCH /api/events/:id/restore");
   }
 });

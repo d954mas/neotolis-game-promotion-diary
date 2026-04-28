@@ -72,6 +72,7 @@
   "audit_action_source_toggled_auto_import": "Data source auto-import toggled",
   "audit_action_event_attached_to_game": "Event attached to a game",
   "audit_action_event_dismissed_from_inbox": "Event dismissed from inbox",
+  "audit_action_event_restored": "Event restored",
 
   "feed_filter_source": "Source: {name}",
   "feed_filter_kind": "Kind: {kind}",
@@ -161,6 +162,11 @@
 
   "feed_row_edit_aria": "Edit event",
   "feed_row_delete_aria": "Delete event",
+
+  "feed_deleted_panel_toggle_show": "Show {count} deleted events (within {days} days)",
+  "feed_deleted_panel_toggle_hide": "Hide deleted events",
+  "feed_deleted_panel_restore_cta": "Restore",
+  "feed_deleted_panel_restore_aria": "Restore event",
 
   "feed_attach_no_games_inline": "No games yet — + Add a game",
 

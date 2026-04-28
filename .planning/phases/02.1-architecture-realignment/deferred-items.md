@@ -91,3 +91,13 @@ the current plan; the listed plan / phase owns the fix.
 - **Why deferred:** consistent with Plans 02.1-01 / 02.1-12; the LAST gap-closure plan (02.1-16) refreshes the alphabetical snapshot covering all additions in one commit.
 - **Owner:** Plan 02.1-16.
 - **Out of scope for Plan 02.1-13:** confirmed.
+
+## From Plan 02.1-14
+
+### `tests/unit/paraglide.test.ts` keyset snapshot — 5 new keys for soft-delete event recovery
+
+- **Discovered during:** Plan 02.1-14 (Gap 2 closure — soft-delete event recovery UI).
+- **Symptom:** EXPECTED_KEYS hard-coded alphabetical list does not include `audit_action_event_restored`, `feed_deleted_panel_toggle_show`, `feed_deleted_panel_toggle_hide`, `feed_deleted_panel_restore_cta`, or `feed_deleted_panel_restore_aria`; the snapshot test will fail until refreshed.
+- **Why deferred:** consistent with Plans 02.1-01 / 02.1-12 / 02.1-13; the LAST gap-closure plan (02.1-16) refreshes the alphabetical snapshot covering all additions in one commit.
+- **Owner:** Plan 02.1-16.
+- **Out of scope for Plan 02.1-14:** confirmed.

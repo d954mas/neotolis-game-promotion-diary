@@ -55,6 +55,8 @@
         return m.audit_action_event_attached_to_game();
       case "event.dismissed_from_inbox":
         return m.audit_action_event_dismissed_from_inbox();
+      case "event.restored":
+        return m.audit_action_event_restored();
       case "source.added":
         return m.audit_action_source_added();
       case "source.removed":

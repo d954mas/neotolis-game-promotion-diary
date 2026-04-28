@@ -45,6 +45,7 @@
     { value: "event.deleted", label: () => m.audit_action_event_deleted() },
     { value: "event.attached_to_game", label: () => m.audit_action_event_attached_to_game() },
     { value: "event.dismissed_from_inbox", label: () => m.audit_action_event_dismissed_from_inbox() },
+    { value: "event.restored", label: () => m.audit_action_event_restored() },
     // Phase 2.1 — data_sources
     { value: "source.added", label: () => m.audit_action_source_added() },
     { value: "source.removed", label: () => m.audit_action_source_removed() },

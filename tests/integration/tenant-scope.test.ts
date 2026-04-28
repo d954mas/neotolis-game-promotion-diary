@@ -160,7 +160,9 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
     const { createSource } = await import(
       "../../src/lib/server/services/data-sources.js"
     );
-    const { createEvent } = await import("../../src/lib/server/services/events.js");
+    const { createEvent, softDeleteEvent } = await import(
+      "../../src/lib/server/services/events.js"
+    );
     const { addSteamListing } = await import(
       "../../src/lib/server/services/game-steam-listings.js"
     );
@@ -217,6 +219,20 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
         },
         "127.0.0.1",
       );
+      // Plan 02.1-14: User A's soft-deleted event — used for the cross-tenant
+      // restore probe (must 404 by construction; restore is gated by the
+      // service-layer userId AND-clause on the UPDATE).
+      const deletedEvent = await createEvent(
+        userA.id,
+        {
+          gameId: game.id,
+          kind: "press",
+          occurredAt: new Date(),
+          title: "A's deleted press hit",
+        },
+        "127.0.0.1",
+      );
+      await softDeleteEvent(userA.id, deletedEvent.id, "127.0.0.1");
       const listing = await addSteamListing(
         userA.id,
         { gameId: game.id, appId: 730, label: "A's listing" },
@@ -299,6 +315,14 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
           method: "PATCH",
           path: `/api/events/${inboxEvent.id}/dismiss-inbox`,
         },
+        // Plan 02.1-14 — PATCH /api/events/:id/restore on A's soft-deleted
+        // event must 404 cross-tenant. The restore service's UPDATE WHERE
+        // clause is `userId AND id AND deleted_at IS NOT NULL`; user B's
+        // session id never satisfies the userId clause.
+        {
+          method: "PATCH",
+          path: `/api/events/${deletedEvent.id}/restore`,
+        },
       ];
 
       for (const p of probes) {
@@ -327,6 +351,22 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
           `${p.method} ${p.path} body must not contain 'forbidden' or 'permission'`,
         ).not.toMatch(/forbidden|permission/i);
       }
+
+      // Plan 02.1-14 — GET /api/events/deleted is a list endpoint, not a
+      // single-row endpoint, so the cross-tenant isolation contract is
+      // "user B's call returns ZERO of user A's rows" rather than 404. The
+      // service-layer eq(events.userId, userId) clause enforces this by
+      // construction; the route assertion confirms the wire-format isolation.
+      const deletedListRes = await app.request("/api/events/deleted", {
+        method: "GET",
+        headers: { cookie },
+      });
+      expect.soft(deletedListRes.status, "GET /api/events/deleted must be 200 for an authenticated user").toBe(200);
+      const deletedBody = (await deletedListRes.json()) as {
+        rows: Array<{ id: string }>;
+      };
+      // userB has no deleted events → empty list; A's deletedEvent.id MUST NOT appear.
+      expect.soft(deletedBody.rows.map((r) => r.id)).not.toContain(deletedEvent.id);
     } finally {
       validateSpy.mockRestore();
       fetchSpy.mockRestore();

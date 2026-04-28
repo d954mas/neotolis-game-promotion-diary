@@ -6,12 +6,15 @@ import {
   softDeleteEvent,
   listEventsForGame,
   listFeedPage,
+  listDeletedEvents,
+  restoreEvent,
   VALID_EVENT_KINDS,
 } from "../../src/lib/server/services/events.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { games } from "../../src/lib/server/db/schema/games.js";
 import { events, eventKindEnum } from "../../src/lib/server/db/schema/events.js";
 import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
+import { env } from "../../src/lib/server/config/env.js";
 import { uuidv7 } from "../../src/lib/server/ids.js";
 import { seedUserDirectly } from "./helpers.js";
 import { AppError, NotFoundError } from "../../src/lib/server/services/errors.js";
@@ -333,5 +336,341 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
       .limit(1);
     expect(row?.kind).toBe("post");
     expect(row?.title).toBe("Bluesky launch");
+  });
+});
+
+/**
+ * Plan 02.1-14 (gap closure) — soft-delete event recovery.
+ *
+ * Closes VERIFICATION.md Gap 2 (P0 — `confirm_event_delete` promises a 60-day
+ * restore but until this plan there was no service / route / UI surface to
+ * deliver on the promise). The service layer is the load-bearing tier: the
+ * UPDATE's WHERE clause encodes tenant scoping + retention window + idempotency
+ * by construction, so cross-tenant attempts, restore-on-never-deleted, and
+ * past-retention-window all collapse to NotFoundError.
+ */
+describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
+  it("02.1-14: restore round-trips deletedAt to null and audits event.restored", async () => {
+    const u = await seedUserDirectly({ email: "ev14a@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId,
+        kind: "talk",
+        occurredAt: new Date("2026-05-10T15:00:00Z"),
+        title: "Restorable talk",
+      },
+      "127.0.0.1",
+    );
+    await softDeleteEvent(u.id, ev.id, "127.0.0.1");
+
+    // Sanity: the row IS soft-deleted before restore.
+    const [beforeRow] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)))
+      .limit(1);
+    expect(beforeRow?.deletedAt).not.toBeNull();
+
+    const restored = await restoreEvent(u.id, ev.id, "127.0.0.1");
+    expect(restored.id).toBe(ev.id);
+    expect(restored.deletedAt).toBeNull();
+
+    const [afterRow] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)))
+      .limit(1);
+    expect(afterRow?.deletedAt).toBeNull();
+
+    // Audit chain: event.created → event.deleted → event.restored, in order.
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.userId, u.id))
+      .orderBy(auditLog.createdAt);
+    const actions = audits.map((a) => a.action);
+    // Three or more rows (signin from seed may add session.signin); the three
+    // event.* rows must appear in order.
+    const eventActions = actions.filter((a) => a.startsWith("event."));
+    expect(eventActions).toEqual(["event.created", "event.deleted", "event.restored"]);
+
+    const restoredEntry = audits.find((a) => a.action === "event.restored");
+    const restoredMeta = restoredEntry?.metadata as
+      | { event_id?: string; kind?: string }
+      | null;
+    expect(restoredMeta?.event_id).toBe(ev.id);
+    expect(restoredMeta?.kind).toBe("talk");
+  });
+
+  it("02.1-14: cross-tenant restore throws NotFoundError", async () => {
+    const userA = await seedUserDirectly({ email: "ev14b1@test.local" });
+    const userB = await seedUserDirectly({ email: "ev14b2@test.local" });
+    const gameA = uuidv7();
+    await db.insert(games).values({ id: gameA, userId: userA.id, title: "A" });
+
+    const evA = await createEvent(
+      userA.id,
+      {
+        gameId: gameA,
+        kind: "press",
+        occurredAt: new Date("2026-05-10T15:00:00Z"),
+        title: "A's press",
+      },
+      "127.0.0.1",
+    );
+    await softDeleteEvent(userA.id, evA.id, "127.0.0.1");
+
+    // userB attempts to restore userA's deleted event — must 404 by construction.
+    await expect(
+      restoreEvent(userB.id, evA.id, "127.0.0.1"),
+    ).rejects.toBeInstanceOf(NotFoundError);
+
+    // A's row remains soft-deleted (NOT silently restored by the cross-tenant call).
+    const [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, userA.id), eq(events.id, evA.id)))
+      .limit(1);
+    expect(row?.deletedAt).not.toBeNull();
+  });
+
+  it("02.1-14: restore on never-deleted event throws NotFoundError", async () => {
+    const u = await seedUserDirectly({ email: "ev14c@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId,
+        kind: "conference",
+        occurredAt: new Date("2026-05-10T15:00:00Z"),
+        title: "Live",
+      },
+      "127.0.0.1",
+    );
+
+    // The event was never soft-deleted — restore is a no-op-as-NotFoundError
+    // (idempotency: not-yet-deleted == not findable in the deleted-events scope).
+    await expect(restoreEvent(u.id, ev.id, "127.0.0.1")).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+  });
+
+  it("02.1-14: restore on past-retention-window event throws NotFoundError", async () => {
+    const u = await seedUserDirectly({ email: "ev14d@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+
+    const expiredEventId = uuidv7();
+    const pastDeleted = new Date(
+      Date.now() - (env.RETENTION_DAYS + 1) * 86_400_000,
+    );
+    // Direct INSERT with a deleted_at older than the retention window.
+    await db.insert(events).values({
+      id: expiredEventId,
+      userId: u.id,
+      gameId,
+      kind: "talk",
+      title: "Past retention",
+      occurredAt: pastDeleted,
+      deletedAt: pastDeleted,
+    });
+
+    // Past-retention rows are pending Phase 6 purge; restore returns 404
+    // (same null-result semantics as cross-tenant / never-deleted).
+    await expect(
+      restoreEvent(u.id, expiredEventId, "127.0.0.1"),
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("02.1-14: listDeletedEvents returns recent soft-deletes only, tenant-scoped", async () => {
+    const userA = await seedUserDirectly({ email: "ev14e1@test.local" });
+    const userB = await seedUserDirectly({ email: "ev14e2@test.local" });
+    const gameA = uuidv7();
+    await db.insert(games).values({ id: gameA, userId: userA.id, title: "A" });
+
+    // Two recent deletes for userA.
+    const recent1 = await createEvent(
+      userA.id,
+      {
+        gameId: gameA,
+        kind: "talk",
+        occurredAt: new Date("2026-05-10T15:00:00Z"),
+        title: "Recent 1",
+      },
+      "127.0.0.1",
+    );
+    await softDeleteEvent(userA.id, recent1.id, "127.0.0.1");
+    const recent2 = await createEvent(
+      userA.id,
+      {
+        gameId: gameA,
+        kind: "press",
+        occurredAt: new Date("2026-05-11T15:00:00Z"),
+        title: "Recent 2",
+      },
+      "127.0.0.1",
+    );
+    await softDeleteEvent(userA.id, recent2.id, "127.0.0.1");
+
+    // One past-retention soft-delete for userA — should NOT surface.
+    const expiredId = uuidv7();
+    const past = new Date(Date.now() - (env.RETENTION_DAYS + 1) * 86_400_000);
+    await db.insert(events).values({
+      id: expiredId,
+      userId: userA.id,
+      gameId: gameA,
+      kind: "other",
+      title: "Past retention",
+      occurredAt: past,
+      deletedAt: past,
+    });
+
+    // One live (non-deleted) event for userA — should NOT surface.
+    await createEvent(
+      userA.id,
+      {
+        gameId: gameA,
+        kind: "conference",
+        occurredAt: new Date("2026-05-12T15:00:00Z"),
+        title: "Live",
+      },
+      "127.0.0.1",
+    );
+
+    // userB has their own recent soft-delete — must NOT appear in userA's list.
+    const gameB = uuidv7();
+    await db.insert(games).values({ id: gameB, userId: userB.id, title: "B" });
+    const userBEvent = await createEvent(
+      userB.id,
+      {
+        gameId: gameB,
+        kind: "talk",
+        occurredAt: new Date("2026-05-10T15:00:00Z"),
+        title: "B's talk",
+      },
+      "127.0.0.1",
+    );
+    await softDeleteEvent(userB.id, userBEvent.id, "127.0.0.1");
+
+    const aDeleted = await listDeletedEvents(userA.id);
+    const aIds = aDeleted.map((r) => r.id);
+
+    // Tenant scoping: userB's event MUST NOT appear in userA's list.
+    expect(aIds).not.toContain(userBEvent.id);
+    // Retention window: past-retention row MUST NOT appear.
+    expect(aIds).not.toContain(expiredId);
+    // Recent soft-deletes appear.
+    expect(aIds).toContain(recent1.id);
+    expect(aIds).toContain(recent2.id);
+    // Sorted by deletedAt DESC — recent2 was deleted second, so it comes first.
+    const idx1 = aIds.indexOf(recent1.id);
+    const idx2 = aIds.indexOf(recent2.id);
+    expect(idx2).toBeLessThan(idx1);
+
+    // Cross-tenant call construction: userB sees their own event, never userA's.
+    const bDeleted = await listDeletedEvents(userB.id);
+    const bIds = bDeleted.map((r) => r.id);
+    expect(bIds).toContain(userBEvent.id);
+    expect(bIds).not.toContain(recent1.id);
+    expect(bIds).not.toContain(recent2.id);
+  });
+});
+
+/**
+ * Plan 02.1-14 Task 2 — HTTP-boundary tests for the new restore + deleted-list
+ * routes. The service-layer tests above prove the contract; these tests
+ * confirm the wire-format projection (toEventDto strips userId, deletedAt
+ * round-trips to null on restore, cross-tenant returns 404).
+ */
+describe("event soft-delete recovery routes (Plan 02.1-14 gap closure)", () => {
+  it("02.1-14: authenticated PATCH /api/events/:id/restore returns 200 + EventDto with deletedAt: null", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "ev14r1@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId,
+        kind: "talk",
+        occurredAt: new Date("2026-05-10T15:00:00Z"),
+        title: "HTTP restore round-trip",
+      },
+      "127.0.0.1",
+    );
+    await softDeleteEvent(u.id, ev.id, "127.0.0.1");
+
+    const res = await app.request(`/api/events/${ev.id}/restore`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.id).toBe(ev.id);
+    expect(body.deletedAt).toBeNull();
+    // DTO discipline (PRIV / P3): userId MUST NOT cross the wire.
+    expect(body).not.toHaveProperty("userId");
+  });
+
+  it("02.1-14: authenticated GET /api/events/deleted returns {rows: EventDto[]} scoped to RETENTION_DAYS", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "ev14r2@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+
+    const recent = await createEvent(
+      u.id,
+      {
+        gameId,
+        kind: "talk",
+        occurredAt: new Date("2026-05-10T15:00:00Z"),
+        title: "Recent deleted",
+      },
+      "127.0.0.1",
+    );
+    await softDeleteEvent(u.id, recent.id, "127.0.0.1");
+
+    // Past-retention row — should NOT surface in the list.
+    const expiredId = uuidv7();
+    const past = new Date(Date.now() - (env.RETENTION_DAYS + 1) * 86_400_000);
+    await db.insert(events).values({
+      id: expiredId,
+      userId: u.id,
+      gameId,
+      kind: "press",
+      title: "Past retention",
+      occurredAt: past,
+      deletedAt: past,
+    });
+
+    const res = await app.request("/api/events/deleted", {
+      method: "GET",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      rows: Array<{ id: string; deletedAt: string | null }>;
+    };
+    const ids = body.rows.map((r) => r.id);
+    expect(ids).toContain(recent.id);
+    expect(ids).not.toContain(expiredId);
+    // DTO discipline: every row carries deletedAt (kept by toEventDto for the
+    // restore UI's RetentionBadge), but no userId.
+    for (const row of body.rows) {
+      expect(row).not.toHaveProperty("userId");
+      expect(row.deletedAt).not.toBeNull();
+    }
   });
 });

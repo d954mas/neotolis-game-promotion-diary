@@ -47,6 +47,7 @@ import { games } from "../db/schema/games.js";
 import { dataSources } from "../db/schema/data-sources.js";
 import type { EventKind } from "../integrations/data-source-adapter.js";
 import { writeAudit } from "../audit.js";
+import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { encodeCursor, decodeCursor } from "./audit-read.js";
 
@@ -540,6 +541,82 @@ export async function softDeleteEvent(
     userAgent,
     metadata: { event_id: row.id, kind: row.kind },
   });
+}
+
+/**
+ * listDeletedEvents — return rows the user can still restore (Plan 02.1-14
+ * gap closure — VERIFICATION.md Gap 2).
+ *
+ * Tenant scope (CLAUDE.md invariant 1): userId-first; eq(events.userId, userId)
+ * is the first AND clause. Retention window: deletedAt > now() - RETENTION_DAYS
+ * days. Past-retention rows are NOT returned (they are pending Phase 6 purge);
+ * the UI never surfaces them.
+ *
+ * Sorted by deletedAt DESC so the most-recently-deleted row rises to the top.
+ */
+export async function listDeletedEvents(userId: string): Promise<EventRow[]> {
+  const cutoff = new Date(Date.now() - env.RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  return db
+    .select()
+    .from(events)
+    .where(
+      and(
+        eq(events.userId, userId),
+        isNotNull(events.deletedAt),
+        gte(events.deletedAt, cutoff),
+      ),
+    )
+    .orderBy(sql`${events.deletedAt} DESC, ${events.id} DESC`);
+}
+
+/**
+ * restoreEvent — clear deletedAt on a tenant-owned soft-deleted event (Plan
+ * 02.1-14 gap closure — VERIFICATION.md Gap 2).
+ *
+ * Tenant scope (CLAUDE.md invariants 1, 2): userId-first; cross-tenant /
+ * not-yet-deleted / past-retention-window all collapse to NotFoundError → 404
+ * at the HTTP boundary. The UPDATE's WHERE clause is the load-bearing barrier:
+ * the row only matches when (userId, id, deleted_at IS NOT NULL, deleted_at >=
+ * cutoff) all agree, so a forged event id from a different tenant returns no
+ * rows and the post-UPDATE `if (!row)` throws.
+ *
+ * Audit (CLAUDE.md invariant 4): writes `event.restored` AFTER the UPDATE
+ * succeeds. Ordering rationale: NotFoundError fires BEFORE writeAudit so a
+ * cross-tenant attempt does not generate a misleading audit trail. (The Phase 2
+ * `removeSteamKey` precedent — D-32 forensics order writing BEFORE the UPDATE —
+ * applies to security-relevant destructive actions; restore is non-destructive.)
+ */
+export async function restoreEvent(
+  userId: string,
+  eventId: string,
+  ipAddress: string,
+  userAgent?: string,
+): Promise<EventRow> {
+  const cutoff = new Date(Date.now() - env.RETENTION_DAYS * 24 * 60 * 60 * 1000);
+
+  const [row] = await db
+    .update(events)
+    .set({ deletedAt: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(events.userId, userId),
+        eq(events.id, eventId),
+        isNotNull(events.deletedAt),
+        gte(events.deletedAt, cutoff),
+      ),
+    )
+    .returning();
+  if (!row) throw new NotFoundError();
+
+  await writeAudit({
+    userId,
+    action: "event.restored",
+    ipAddress,
+    userAgent,
+    metadata: { event_id: row.id, kind: row.kind },
+  });
+
+  return row;
 }
 
 /**
