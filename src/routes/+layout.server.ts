@@ -33,10 +33,11 @@ import { env } from "$lib/server/config/env.js";
  * authenticated-only top-level paths shipped by Plan 02-10.
  */
 const PROTECTED_PATHS: string[] = [
+  "/feed",
+  "/sources",
   "/games",
   "/events",
   "/audit",
-  "/accounts",
   "/keys",
   "/settings",
 ];

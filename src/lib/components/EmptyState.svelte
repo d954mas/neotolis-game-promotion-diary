@@ -1,6 +1,6 @@
 <script lang="ts">
   // EmptyState — UX-03 empty-state primitive used by every list page
-  // (/games, /events, /audit, /accounts/youtube, /keys/steam, items panel).
+  // (/games, /events, /audit, /sources, /keys/steam, items panel).
   //
   // Contract per UI-SPEC §"Empty states":
   //   - heading at display size (32px / weight 600)

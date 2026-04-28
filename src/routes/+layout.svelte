@@ -19,19 +19,21 @@
 
   let { data, children }: { data: LayoutData; children: Snippet } = $props();
 
-  // Map the current pathname to the Nav's six closed-list keys. The
-  // dashboard ("/") has no Nav entry — we still render <Nav> for layout
-  // continuity but no item is "active". For unmapped paths we default to
-  // "games" (the most common landing).
-  type NavKey = "games" | "events" | "audit" | "accounts" | "keys" | "settings";
+  // Map the current pathname to the Nav's six closed-list keys (Phase 2.1
+  // reshuffle: Feed · Sources · Games · Events · Audit · Settings — UI-SPEC
+  // §"<Nav>" delta). The dashboard ("/") has no Nav entry — we still render
+  // <Nav> for layout continuity but no item is "active". For unmapped paths
+  // we default to "feed" (the new default-landing per RESEARCH §3.6).
+  type NavKey = "feed" | "sources" | "games" | "events" | "audit" | "settings";
   const navActive = $derived.by((): NavKey => {
     const p = page.url.pathname;
+    if (p.startsWith("/feed")) return "feed";
+    if (p.startsWith("/sources")) return "sources";
+    if (p.startsWith("/games")) return "games";
     if (p.startsWith("/events")) return "events";
     if (p.startsWith("/audit")) return "audit";
-    if (p.startsWith("/accounts")) return "accounts";
-    if (p.startsWith("/keys")) return "keys";
     if (p.startsWith("/settings")) return "settings";
-    return "games";
+    return "feed";
   });
 
   async function handleSignOut(): Promise<void> {

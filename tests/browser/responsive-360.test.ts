@@ -8,7 +8,7 @@
  * dashboard on a phone — which is the exact use case Phase 2 ships for.
  *
  * Scope: PUBLIC routes ('/', '/login') only. Authenticated-route 360px
- * sweep (/games, /games/[id], /events, /audit, /accounts/youtube,
+ * sweep (/feed, /sources, /games, /games/[id], /events, /audit,
  * /keys/steam, /settings) is deferred to manual checkpoint + Phase 6 — the
  * cookie-injection strategy needs a Better Auth-signed session cookie that
  * only `seedUserDirectly` (integration helper, requires Postgres) can mint,
@@ -54,11 +54,12 @@ const PHASE_2_PUBLIC_ROUTES = ["/", "/login"];
 // cookie-injection harness; also so a test runner enumeration sees every
 // Phase 2 route by name even when the assertion is deferred.
 const PHASE_2_AUTH_ROUTES = [
+  "/feed",
+  "/sources",
   "/games",
   "/games/[gameId]",
   "/events",
   "/audit",
-  "/accounts/youtube",
   "/keys/steam",
   "/settings",
 ];
