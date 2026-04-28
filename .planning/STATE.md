@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02.1-03-PLAN.md
-last_updated: "2026-04-28T10:29:54.690Z"
+stopped_at: Completed 02.1-01-PLAN.md
+last_updated: "2026-04-28T10:31:03.531Z"
 last_activity: 2026-04-28
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 31
-  completed_plans: 23
+  completed_plans: 24
 ---
 
 # Project State
@@ -68,6 +68,7 @@ Plan: 2 of 10
 | Phase 02-ingest-secrets-and-audit P10 | 19m 50s | 2 tasks | 18 files |
 | Phase 02.1 P02 | 2m 30s | 1 tasks | 5 files |
 | Phase 02.1-architecture-realignment P03 | 6min | 2 tasks | 5 files |
+| Phase 02.1-architecture-realignment P01 | ~10min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -159,6 +160,10 @@ Recent decisions affecting current work:
 - [Phase 02.1]: Plan 02.1-02: parallel-executor commit hygiene pattern — use 'git commit -o <pathspec>...' to scope a plan's commit to its own files when sibling agents have pre-staged unrelated index entries (avoids absorbing their work into this plan's commit); recovered from one such race via 'git reset --soft HEAD~1' + targeted -o re-commit (commit 1dd40e1)
 - [Phase 02.1-architecture-realignment]: Plan 02.1-03: Phase 2.1 keyset = 156 keys (81 baseline minus 2 audit_action_item_* removed plus 77 added per UI-SPEC); paraglide alphabetical EXPECTED_KEYS test asserts the full list, locking the locale-add invariant (D-41) for Wave 3 UI plans
 - [Phase 02.1-architecture-realignment]: Plan 02.1-03: DataSourceAdapter STUB convention — youtube_channel pollContent/pollStats throw 'implemented in Phase 3' on call; pure adapter (no DB / logger / env import); pollStats source param is nullable so manual-paste pollable events get stats history (CONTEXT D-05/D-06)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-01: Single new baseline migration drizzle/0000_phase02_1_baseline.sql collapses Phase 1 + Phase 2 migrations per CONTEXT D-03/D-04 — pre-launch + zero self-host deployments make destructive baseline acceptable; Phase 3+ resumes strict forward-only
+- [Phase 02.1-architecture-realignment]: Plan 02.1-01: events.game_id changed from NOT NULL CASCADE to NULL ON DELETE SET NULL — encodes inbox semantics (game_id IS NULL) and game-deletion-returns-events-to-inbox in one schema choice
+- [Phase 02.1-architecture-realignment]: Plan 02.1-01: Partial unique indexes for soft-delete (data_sources WHERE deleted_at IS NULL) and auto-import dedup (events WHERE source_id IS NOT NULL AND external_id IS NOT NULL) — soft-deleted handles can be re-added; manual paste rows are exempt from auto-import dedup
+- [Phase 02.1-architecture-realignment]: Plan 02.1-01: AUDIT_ACTIONS replaced wholesale (channel.* + item.* dropped; source.added/source.removed/source.toggled_auto_import/event.attached_to_game/event.dismissed_from_inbox added) — destructive baseline collapse means no ALTER TYPE ADD VALUE chain needed
 
 ### Pending Todos
 
@@ -191,8 +196,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-28T10:29:44.078Z
+Last session: 2026-04-28T10:30:39.009Z
 Last Activity: 2026-04-28
-Stopped at: Completed 02.1-03-PLAN.md
+Stopped at: Completed 02.1-01-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md

@@ -90,7 +90,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   8. Phase 2.1 smoke extension: CI self-host smoke test asserts the unified flow end-to-end — register a YouTube `data_source`, paste a YouTube URL, see the event in `/feed` with `source_id=NULL`, attach to a game, verify it appears in `/games/[id]` curated view; cross-tenant matrix extends to `/api/sources` + `/api/events`
 **Plans**: 10 plans
 **Plan list**:
-- [ ] 02.1-01-PLAN.md — Wave 0: single new baseline migration (Phase 1+2 collapsed) + final 2.1 schema modules + AUDIT_ACTIONS rename + ESLint TENANT_TABLES update
+- [x] 02.1-01-PLAN.md — Wave 0: single new baseline migration (Phase 1+2 collapsed) + final 2.1 schema modules + AUDIT_ACTIONS rename + ESLint TENANT_TABLES update
 - [x] 02.1-02-PLAN.md — Wave 0: 5 new placeholder test files (data-sources, feed, inbox, events-attach, browser feed-360) with named-plan it.skip per Phase 1+2 Wave 0 pattern
 - [x] 02.1-03-PLAN.md — Wave 0: ~53 new Paraglide keys (UI-SPEC Copywriting Contract) + extended keyset snapshot test + DataSourceAdapter interface + youtube_channel STUB
 - [ ] 02.1-04-PLAN.md — Wave 1: data_sources service (CRUD + soft-delete + restore + toggle + findSourceByAuthorUrl) + toDataSourceDto + extended toEventDto + Phase 2 youtube-channels deletion
