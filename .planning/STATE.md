@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02.1-15-PLAN.md (multi-select feed filters + DateRangeControl + last-30-days default)
-last_updated: "2026-04-28T15:29:41.938Z"
+stopped_at: Completed 02.1-16-PLAN.md (FeedCard media cards + formatFeedDate + paraglide snapshot refresh + 02.1-VALIDATION.md sign-off). Phase 2.1 gap-closure chain complete; Plan 02.1-10 UAT checkpoint resume next.
+last_updated: "2026-04-28T20:55:00.000Z"
 last_activity: 2026-04-28
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 37
-  completed_plans: 34
+  completed_plans: 35
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 3 of 16
+Plan: 16 of 16 (gap-closure chain complete; Plan 02.1-10 UAT checkpoint resume next)
 
 ## Performance Metrics
 
@@ -79,6 +79,7 @@ Plan: 3 of 16
 | Phase 02.1-architecture-realignment P11 | 37min | 1 tasks | 5 files |
 | Phase 02.1-architecture-realignment P14 | 30min | 3 tasks | 15 files |
 | Phase 02.1-architecture-realignment P15 | 30min | 3 tasks | 10 files |
+| Phase 02.1-architecture-realignment P16 | ~12min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -221,6 +222,13 @@ Recent decisions affecting current work:
 - 2026-04-28-channel-to-inbox-auto-import-flow — **P0 ARCH**: own channel → auto-import all videos to inbox → user attaches to games (Phase 2.1 schema + UI shell, Phase 3 polling, Phase 4 dashboard)
 - 2026-04-28-data-sources-unified-model — **P0 STRATEGIC**: rename "channels" → "data sources" (generalize across YouTube/Reddit/Twitter/etc.) — touches PROJECT.md + ROADMAP, schema lands in Phase 2.1
 - 2026-04-28-three-views-feed-sources-games — **P0 IA**: three primary views Sources / Feed / Per-game; /feed becomes primary daily workspace (Phase 2.1)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-16: <FeedCard> media-card replaces <FeedRow> on /feed + /games/[id]; YouTube events surface img.youtube.com/vi/{id}/mqdefault.jpg thumbnails (deterministic, public CDN, no API key); non-thumbnail kinds get centered KindIcon fallback (Gap 3 P0 closure)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-16: formatFeedDate utility 4-bucket compact relative format (Today HH:MM / Yesterday / MMM D / MMM D, YYYY); pure utility unit-tested via vi.setSystemTime; "—" graceful fallback on null/invalid input (Gap 5 P1 closure)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-16: Gap 6 path b chosen (visible kind text label adjacent to KindIcon, NOT path a kind-tinted icon borders) — text is unambiguous for a11y, scales across all 10 kinds without per-kind icon work, avoids brand-mark licensing question entirely
+- [Phase 02.1-architecture-realignment]: Plan 02.1-16: paraglide EXPECTED_KEYS snapshot back in lock-step with messages/en.json (177 keys total); D-41 invariant restored. Plan 02.1-15 already absorbed prior plans' deferred entries (12/13/14); Plan 02.1-16 only owns its own 2 new keys (feed_card_thumbnail_alt + feed_card_open_external)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-16: 02.1-VALIDATION.md frontmatter flipped nyquist_compliant=true; Per-Task Verification Map populated for Plans 02.1-11 → 02.1-16 (13 rows); Phase 2.1 ready for Plan 02.1-10 UAT checkpoint resume
+- [Phase 02.1-architecture-realignment]: Plan 02.1-16 deviation (Rule 2): EventDtoLocal in /games/[gameId]/+page.svelte missing externalId — extended local type to surface the field already projected by toEventDto so FeedCard's thumbnail prop type-checks
+- [Phase 02.1-architecture-realignment]: Plan 02.1-16: HARD CONTRACT preserved on /feed/+page.svelte during FeedRow→FeedCard swap — Plan 14's <DeletedEventsPanel> + Plan 15's <DateRangeControl> + multi-select <FilterChips>/<FiltersSheet> blocks intact, verified via grep guard before edit
 
 ### Blockers/Concerns
 
@@ -230,8 +238,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-28T15:29:30.092Z
+Last session: 2026-04-28T20:55:00.000Z
 Last Activity: 2026-04-28
-Stopped at: Completed 02.1-15-PLAN.md (multi-select feed filters + DateRangeControl + last-30-days default)
+Stopped at: Completed 02.1-16-PLAN.md (FeedCard media cards + formatFeedDate + paraglide snapshot refresh + 02.1-VALIDATION.md sign-off). All 12 UAT gaps closed across Plans 02.1-11 → 02.1-16. Plan 02.1-10 UAT checkpoint resume next.
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
