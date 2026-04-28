@@ -94,7 +94,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 02.1-02-PLAN.md — Wave 0: 5 new placeholder test files (data-sources, feed, inbox, events-attach, browser feed-360) with named-plan it.skip per Phase 1+2 Wave 0 pattern
 - [x] 02.1-03-PLAN.md — Wave 0: ~53 new Paraglide keys (UI-SPEC Copywriting Contract) + extended keyset snapshot test + DataSourceAdapter interface + youtube_channel STUB
 - [x] 02.1-04-PLAN.md — Wave 1: data_sources service (CRUD + soft-delete + restore + toggle + findSourceByAuthorUrl) + toDataSourceDto + extended toEventDto + Phase 2 youtube-channels deletion
-- [ ] 02.1-05-PLAN.md — Wave 1: unified events service (listFeedPage + attachToGame + dismissFromInbox + extended createEvent/createEventFromPaste) + ingest rewrite + items-youtube deletion
+- [x] 02.1-05-PLAN.md — Wave 1: unified events service (listFeedPage + attachToGame + dismissFromInbox + extended createEvent/createEventFromPaste) + ingest rewrite + items-youtube deletion
 - [ ] 02.1-06-PLAN.md — Wave 2: /api/sources router + /api/events extension (feed + attach + dismiss-inbox) + Hono app composition + anonymous-401 + cross-tenant matrix sweeps
 - [ ] 02.1-07-PLAN.md — Wave 3: /feed page (default landing) + root redirect + 6 new feed components (FeedRow, AttachToGamePicker, FilterChips, FiltersSheet, InboxBadge, PollingBadge) + KindIcon extension
 - [ ] 02.1-08-PLAN.md — Wave 3: /sources + /sources/new + SourceRow + SourceKindIcon + Nav update + /accounts/youtube + ChannelRow deletion

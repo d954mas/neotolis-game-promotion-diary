@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02.1-04-PLAN.md
-last_updated: "2026-04-28T10:51:25.361Z"
+stopped_at: Completed 02.1-05-PLAN.md
+last_updated: "2026-04-28T10:54:42.515Z"
 last_activity: 2026-04-28
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 31
-  completed_plans: 25
+  completed_plans: 26
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 3 of 10
+Plan: 4 of 10
 
 ## Performance Metrics
 
@@ -70,6 +70,7 @@ Plan: 3 of 10
 | Phase 02.1-architecture-realignment P03 | 6min | 2 tasks | 5 files |
 | Phase 02.1-architecture-realignment P01 | ~10min | 2 tasks | 12 files |
 | Phase 02.1-architecture-realignment P04 | ~12min | 1 tasks | 5 files |
+| Phase 02.1 P05 | 16min | 1 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -168,6 +169,9 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-04: tenant-scoped services/data-sources.ts replaces deleted youtube-channels service; FUNCTIONAL_KINDS={youtube_channel} gates non-functional kinds with AppError 'kind_not_yet_functional' (422); D-32 forensics ordering on softDeleteSource (audit BEFORE update — Phase 2 removeSteamKey precedent)
 - [Phase 02.1-architecture-realignment]: Plan 02.1-04: isPgUniqueViolation walks DrizzleQueryError.cause chain (depth-bounded to 5) — drizzle-orm 0.45 wraps pg errors so a bare 'code' in err check is vacuous-pass; reusable pattern for any service translating 23505/23503 to AppError
 - [Phase 02.1-architecture-realignment]: Plan 02.1-04: toDataSourceDto strips userId at runtime (P3 behavioural test in tests/unit/dto.test.ts); toEventDto full extension deferred to Plan 02.1-05 per parallel-execution scope (Plan 04 lands minimum compile-only fix: kind union widened, gameId nullable)
+- [Phase 02.1]: Plan 05: inlined findActiveSourceByHandleUrl in events.ts (instead of importing data-sources.ts findSourceByAuthorUrl) — keeps Plan 02.1-05 runtime-independent of Plan 02.1-04 during parallel execution
+- [Phase 02.1]: Plan 05: dismissFromInbox uses nested jsonb_set (outer creates inbox parent, inner creates dismissed key) — defensive against future metadata.inbox.* keys vs the || shallow-merge alternative
+- [Phase 02.1]: Plan 05: VALID_EVENT_KINDS asserted equal to eventKindEnum.enumValues at integration-test time (Pitfall 6) — schema enum changes force the const update in lock-step
 
 ### Pending Todos
 
@@ -200,8 +204,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-28T10:51:25.357Z
+Last session: 2026-04-28T10:54:42.510Z
 Last Activity: 2026-04-28
-Stopped at: Completed 02.1-04-PLAN.md
+Stopped at: Completed 02.1-05-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
