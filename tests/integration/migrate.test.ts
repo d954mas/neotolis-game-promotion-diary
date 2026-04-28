@@ -301,3 +301,33 @@ describe("Phase 2.1 forward-only migrations (Plan 02.1-12)", () => {
     }
   });
 });
+
+// Plan 02.1-14 (gap closure): forward-only migration
+// `0002_add_event_restored_audit_action` extends the audit_action pgEnum with
+// `event.restored` — the soft-delete recovery audit verb. Closes Gap 2 from
+// 02.1-VERIFICATION.md. Forward-only discipline (CONTEXT D-04 / DV-2) preserved.
+describe("Phase 2.1 forward-only migrations (Plan 02.1-14)", () => {
+  beforeAll(async () => {
+    await runMigrations();
+  });
+
+  it("02.1-14: audit_action enum extended with 'event.restored' (forward-only migration 0002)", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const result = await pool.query<{ enumlabel: string }>(
+        `select enumlabel from pg_enum
+         where enumtypid = 'public.audit_action'::regtype
+         order by enumsortorder`,
+      );
+      const values = result.rows.map((r) => r.enumlabel);
+      expect(values).toContain("event.restored");
+      // Sanity: the prior audit verbs are still present.
+      expect(values).toContain("event.deleted");
+      expect(values).toContain("game.restored");
+      // Total post-Plan-14: 19 (baseline) + 1 (event.restored) = 20.
+      expect(values).toHaveLength(20);
+    } finally {
+      await pool.end();
+    }
+  });
+});

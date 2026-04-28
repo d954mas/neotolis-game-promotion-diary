@@ -10,13 +10,19 @@
 //   - key.* (Phase 2)
 //   - game.* (Phase 2)
 //   - event.* (Phase 2.1: edited / deleted carry forward; created carries forward;
-//     attached_to_game and dismissed_from_inbox are NEW)
+//     attached_to_game and dismissed_from_inbox are NEW; restored is added by
+//     Plan 02.1-14 gap closure — VERIFICATION.md Gap 2)
 //   - source.* (Phase 2.1 NEW: replaces channel.*)
 //   - theme.changed (Phase 2)
 //
 // REMOVED in Phase 2.1 (CONTEXT D-03 baseline collapse — destructive baseline
 // per pre-launch / zero self-host deployments): channel.added, channel.removed,
 // channel.attached, channel.detached, item.created, item.deleted.
+//
+// Plan 02.1-14 (gap closure) extends with `event.restored` — the soft-delete
+// recovery path the user-facing copy in confirm_event_delete already promises.
+// Forward-only migration `0002_add_event_restored_audit_action.sql` lands the
+// pgEnum addition.
 
 import { pgEnum } from "drizzle-orm/pg-core";
 
@@ -39,6 +45,7 @@ export const AUDIT_ACTIONS = [
   "event.deleted",
   "event.attached_to_game",
   "event.dismissed_from_inbox",
+  "event.restored",
   // Phase 2.1: data_sources vocabulary (replaces channel.*)
   "source.added",
   "source.removed",

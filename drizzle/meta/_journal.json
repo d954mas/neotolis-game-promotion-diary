@@ -15,6 +15,13 @@
       "when": 1777382527602,
       "tag": "0001_add_post_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777393056000,
+      "tag": "0002_add_event_restored_audit_action",
+      "breakpoints": true
     }
   ]
 }
