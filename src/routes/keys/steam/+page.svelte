@@ -22,8 +22,10 @@
     id: string;
     label: string;
     last4: string;
-    createdAt: string;
-    rotatedAt: string | null;
+    // Direct service loaders return Date instances (devalue preserves them
+    // across SSR → CSR); KeyMaskRow accepts Date | string already.
+    createdAt: Date | string;
+    rotatedAt: Date | string | null;
   };
 
   let { data }: { data: PageData } = $props();

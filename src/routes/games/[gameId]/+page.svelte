@@ -56,7 +56,9 @@
     title: string | null;
     url: string;
     isOwn: boolean;
-    addedAt: string;
+    // Direct service loaders return Date instances (devalue preserves them
+    // across SSR → CSR); downstream components already accept Date | string.
+    addedAt: Date | string;
   };
 
   type EventDtoLocal = {
@@ -69,7 +71,8 @@
       | "discord_drop"
       | "press"
       | "other";
-    occurredAt: string;
+    // Direct service loaders return Date; EventRow accepts Date | string.
+    occurredAt: Date | string;
     title: string;
     url: string | null;
   };
