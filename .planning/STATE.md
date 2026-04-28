@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02.1-08-PLAN.md
-last_updated: "2026-04-28T11:31:30.154Z"
+stopped_at: Completed 02.1-07-PLAN.md (Wave 3A — /feed UI)
+last_updated: "2026-04-28T11:32:22.783Z"
 last_activity: 2026-04-28
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 31
-  completed_plans: 28
+  completed_plans: 29
 ---
 
 # Project State
@@ -73,6 +73,7 @@ Plan: 8 of 10
 | Phase 02.1 P05 | 16min | 1 tasks | 9 files |
 | Phase 02.1 P06 | ~10min | 2 tasks | 12 files |
 | Phase 02.1 P08 | 13min | 1 tasks | 14 files |
+| Phase 02.1 P07 | 14min | 2 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -179,6 +180,7 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-06: Rule 3 fix to services/games.ts soft-delete cascade — purged gameYoutubeChannels + trackedYoutubeVideos cascade UPDATEs (their schemas were retired in Plan 02.1-01); cascade now spans game_steam_listings + events only
 - [Phase 02.1-architecture-realignment]: Plan 02.1-06: HTTP-boundary tests added as new describe blocks alongside service-layer tests in data-sources/feed/inbox/events-attach — service-layer placeholders were already flipped by Plans 04/05 (named Plan 02.1-04: / 02.1-05:); this plan adds Plan 02.1-06: HTTP boundary blocks
 - [Phase 02.1]: Plan 08 ships /sources + /sources/new (full-page form per CONTEXT D-09); SourceRow + SourceKindIcon replace ChannelRow; Nav reshuffled to 6-destination Phase 2.1 order (Feed default landing)
+- [Phase 02.1]: Plan 07: /feed page + 6 new components (FeedRow, AttachToGamePicker, FilterChips, FiltersSheet, InboxBadge, PollingBadge); KindIcon extended 7→9 kinds; Phase 2 EventRow deleted; PollingBadge enforces D-05 unified contract (kind-pollable AND last_polled_at NULL — independent of source_id); / redirects to /feed for authenticated users; auth-routed 360px assertions stay manual UAT per VALIDATION.md
 
 ### Pending Todos
 
@@ -211,8 +213,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-28T11:31:23.314Z
+Last session: 2026-04-28T11:32:19.071Z
 Last Activity: 2026-04-28
-Stopped at: Completed 02.1-08-PLAN.md
+Stopped at: Completed 02.1-07-PLAN.md (Wave 3A — /feed UI)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
