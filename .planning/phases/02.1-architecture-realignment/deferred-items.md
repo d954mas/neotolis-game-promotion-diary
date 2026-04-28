@@ -101,3 +101,30 @@ the current plan; the listed plan / phase owns the fix.
 - **Why deferred:** consistent with Plans 02.1-01 / 02.1-12 / 02.1-13; the LAST gap-closure plan (02.1-16) refreshes the alphabetical snapshot covering all additions in one commit.
 - **Owner:** Plan 02.1-16.
 - **Out of scope for Plan 02.1-14:** confirmed.
+
+## Resolved by Plan 02.1-15
+
+### `tests/unit/paraglide.test.ts` keyset snapshot — refreshed in Plan 02.1-15
+
+- **Resolved by:** Plan 02.1-15 Task 3 (8 new feed_date_range_* keys for the
+  DateRangeControl). While refreshing for those 8 keys, the same commit also
+  added the previously-deferred entries from Plans 02.1-12 / 02.1-13 / 02.1-14
+  (`event_kind_label_post`; `events_new_date_today` / `_yesterday` /
+  `_explainer`; `audit_action_event_restored` + the four
+  `feed_deleted_panel_*` keys). The EXPECTED_KEYS list in
+  `tests/unit/paraglide.test.ts` is now byte-identical with the live keyset
+  in `messages/en.json`.
+- **Plan 02.1-16 note:** the snapshot refresh that 02.1-12 / 02.1-13 / 02.1-14
+  attributed to 02.1-16 already happened here — 02.1-16 still owns its own
+  copy refresh if it adds new keys but does NOT need to repair the prior
+  three plans.
+
+## From Plan 02.1-15
+
+### 8 new Paraglide keys for `<DateRangeControl>` — refreshed in-plan
+
+- **Added in:** Plan 02.1-15 Task 3.
+- **Keys:** `feed_date_range_today` / `_7d` / `_30d` / `_all` / `_custom` /
+  `_chip_default` / `_label_from` / `_label_to`. EXPECTED_KEYS list extended
+  in the same commit; no follow-up refresh needed.
+- **Owner:** none — closed.
