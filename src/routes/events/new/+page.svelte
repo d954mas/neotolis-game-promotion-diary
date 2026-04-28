@@ -47,6 +47,15 @@
   let pending = $state(false);
   let errorText = $state<string | null>(null);
 
+  function setToday(): void {
+    occurredAt = new Date().toISOString().slice(0, 10);
+  }
+  function setYesterday(): void {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    occurredAt = d.toISOString().slice(0, 10);
+  }
+
   const KINDS: ReadonlyArray<{ value: EventKind; label: string }> = [
     { value: "youtube_video", label: m.event_kind_label_youtube_video() },
     { value: "twitter_post", label: m.event_kind_label_twitter_post() },
@@ -135,16 +144,28 @@
       />
     </label>
 
-    <label class="field">
-      <span class="field-label">Date *</span>
+    <div class="field">
+      <label for="event-date" class="field-label-wrap">
+        <span class="field-label">Date *</span>
+      </label>
+      <div class="quick-set" role="group" aria-label="Quick date presets">
+        <button type="button" class="chip" onclick={setToday} disabled={pending}>
+          {m.events_new_date_today()}
+        </button>
+        <button type="button" class="chip" onclick={setYesterday} disabled={pending}>
+          {m.events_new_date_yesterday()}
+        </button>
+      </div>
       <input
+        id="event-date"
         class="input"
         type="date"
         bind:value={occurredAt}
         required
         disabled={pending}
       />
-    </label>
+      <span class="hint">{m.events_new_date_explainer()}</span>
+    </div>
 
     <label class="field">
       <span class="field-label">URL</span>
@@ -267,5 +288,32 @@
   .submit:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  .quick-set {
+    display: flex;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+  }
+  .chip {
+    min-height: 44px;
+    padding: 0 var(--space-md);
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    font-size: var(--font-size-label);
+    cursor: pointer;
+  }
+  .chip:hover {
+    border-color: var(--color-text);
+  }
+  .chip:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .hint {
+    font-size: var(--font-size-label);
+    color: var(--color-text-muted);
+    line-height: var(--line-height-body);
   }
 </style>
