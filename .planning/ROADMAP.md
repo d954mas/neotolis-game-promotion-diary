@@ -97,7 +97,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 02.1-05-PLAN.md — Wave 1: unified events service (listFeedPage + attachToGame + dismissFromInbox + extended createEvent/createEventFromPaste) + ingest rewrite + items-youtube deletion
 - [x] 02.1-06-PLAN.md — Wave 2: /api/sources router + /api/events extension (feed + attach + dismiss-inbox) + Hono app composition + anonymous-401 + cross-tenant matrix sweeps
 - [ ] 02.1-07-PLAN.md — Wave 3: /feed page (default landing) + root redirect + 6 new feed components (FeedRow, AttachToGamePicker, FilterChips, FiltersSheet, InboxBadge, PollingBadge) + KindIcon extension
-- [ ] 02.1-08-PLAN.md — Wave 3: /sources + /sources/new + SourceRow + SourceKindIcon + Nav update + /accounts/youtube + ChannelRow deletion
+- [x] 02.1-08-PLAN.md — Wave 3: /sources + /sources/new + SourceRow + SourceKindIcon + Nav update + /accounts/youtube + ChannelRow deletion
 - [ ] 02.1-09-PLAN.md — Wave 3: /games/[id] rebuild (RenameInline + AddSteamListingForm + MonthHeader + curated FeedRows) + /events/new + /events/[id] stub + Settings polish (sessions list, theme blurb, ThemeToggle relocation) + AppHeader UserChip + /keys/steam empty-state copy fix + /events list deletion
 - [ ] 02.1-10-PLAN.md — Wave 4: smoke extension (Phase 2.1 unified flow + cross-tenant probes per CONTEXT D-11) + manual UAT checkpoint + VALIDATION.md sign-off
 **UI hint**: yes
