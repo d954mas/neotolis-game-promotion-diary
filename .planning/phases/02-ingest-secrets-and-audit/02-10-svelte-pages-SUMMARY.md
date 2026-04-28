@@ -300,6 +300,7 @@ Tenant-scope ESLint rule still satisfied: services do the `userId` filtering by 
 | `src/routes/games/[gameId]/+page.server.ts` | `d2a8607` | Sequenced parent (`getGameById` → SvelteKit `error(404)` on `NotFoundError`) + 4-way `Promise.all` over `listListings` / `listChannelsForGame` / `listItemsForGame` / `listEventsForGame` (each `.catch(() => [])`); 5 DTO projections |
 | `src/routes/events/+page.server.ts` | `9694d35`, `c5468a4` | `listGames` + per-game `listEventsForGame` fan-out; explicit Date → ISO coercion for `occurredAt` so the page's `localeCompare` sort + `slice(0, 7)` month grouping continue to work. Follow-up commit narrows `EnrichedEvent` via `Omit` so the `occurredAt: string` override compiles |
 | `src/routes/audit/+page.server.ts` | `e95e172` | `listAuditPage` + `toAuditEntryDto`; defense-in-depth `action` validation against `AUDIT_ACTIONS` (the HTTP layer's zod schema used to be the first line; the service's `assertValidActionFilter` is the second) |
+| `src/routes/games/[gameId]/+page.svelte`, `src/routes/keys/steam/+page.svelte` | `ddf37b0` | Widen local type aliases for date fields to `Date \| string` — the previous fetch-then-JSON contract returned strings; direct service calls return Date instances (devalue preserves them across SSR → CSR). Downstream components already accept `Date \| string` and branch on `typeof === "string"` for both render paths. No runtime change; pure TS narrowing follow-up to the service-call switch |
 
 `src/routes/+layout.server.ts` and `src/routes/settings/+page.server.ts` were already free of `event.fetch('/api/...')` calls (they read from `db` and `parent()` respectively) — no change needed.
 
@@ -318,10 +319,10 @@ The fix is mechanical (no behavior change at the wire) and load-bearing (the bug
 
 ### Verification
 
-- `pnpm exec tsc --noEmit` — clean
+- `pnpm exec tsc --noEmit` — exits 0
 - `pnpm exec eslint src/routes/` — clean
-- `pnpm exec svelte-check` — 0 errors / 0 warnings on 1704 files
-- `pnpm exec vitest run --project unit` — 65 passed / 65
+- `pnpm exec svelte-check` — 0 errors / 0 warnings on 1704 files (after `pnpm exec svelte-kit sync` to regenerate `$types`)
+- `pnpm exec vitest run --project unit` — 65 passed / 65 (no regression — env-discipline grep + tenant-scope ESLint rule + audit-append-only invariant all still load-bearing)
 - Manual UAT (game create → detail page) is the next step the user (d954mas) will run; the loader change is a prerequisite for green there.
 
 ---
