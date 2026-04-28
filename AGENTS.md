@@ -1,7 +1,7 @@
 <!-- GSD:project-start source:PROJECT.md -->
 ## Project
 
-**Neotolis Game Promotion Diary** — a self-tracking diary for indie game developers. Log promotion activity (Reddit posts, YouTube videos, conferences, blogger coverage); the service auto-pulls metrics over time and shows which actions actually moved wishlists and engagement.
+**Neotolis Game Promotion Diary** — a self-tracking diary for indie game developers. Log promotion activity across multiple platforms (YouTube, Reddit, Telegram, Twitter, Discord, conferences, press) by registering data sources and / or pasting one-off URLs; the service auto-imports content from registered sources and accumulates stats over time so the user can see — in one chronological feed — which actions actually moved wishlists and engagement.
 
 Replaces messy Google Sheets / markdown files with a structured, secure, query-friendly diary.
 
@@ -113,6 +113,17 @@ To be populated as patterns emerge. Until then, follow what's already in `src/`.
 <!-- GSD:architecture-start source:ARCHITECTURE.md -->
 ## Architecture
 
-To be populated. Follow existing patterns.
+The authoritative architecture narrative lives in `.planning/PROJECT.md` "Architecture" section. Core abstractions (post-Phase-2.1):
+
+- **`games`** — per-tenant game cards.
+- **`data_sources`** — per-tenant registry of YouTube channels / Reddit accounts / Twitter accounts / Telegram channels / Discord servers (one table, one `kind` enum). Carries `is_owned_by_me`, `auto_import`, per-platform `metadata` jsonb. Replaces the per-platform channel tables of v1.0.
+- **`events`** — single timeline table over every promotion artifact regardless of platform. `kind` enum (`youtube_video`, `reddit_post`, `twitter_post`, `telegram_post`, `discord_drop`, `conference`, `talk`, `press`, `other`), `author_is_me` discriminator, nullable `source_id` (NULL on manual paste), nullable `game_id` (NULL when in inbox). Replaces the v1.0 `tracked_youtube_videos` + `events` split.
+- **`event_stats_snapshots`** (Phase 3+) — immutable time-series of per-event metrics. Charts source from this; the live `events` row is never mutated.
+- **`api_keys_*`** — per-tenant envelope-encrypted credentials.
+- **`audit_log`** — INSERT-only, tenant-relative cursor-paginated.
+
+Three views over the events table — `/feed` (primary nav, chronological pool, default landing), `/sources` (data source registry), `/games/[id]` (per-game curated). See PROJECT.md for the full picture and the `DataSourceAdapter` interface that drives Phase 3+ generic polling.
+
+The Privacy & multi-tenancy invariants in the section above remain the load-bearing contract for any code that touches `data_sources` or `events` — both are tenant-owned, both go through their `to<Entity>Dto` projection.
 <!-- GSD:architecture-end -->
 

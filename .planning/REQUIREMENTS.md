@@ -2,9 +2,11 @@
 
 **Project:** Neotolis Game Promotion Diary
 **Source:** PROJECT.md (locked context) + research/FEATURES.md (P1 selections) + research/ARCHITECTURE.md (build order)
-**Last updated:** 2026-04-27 after roadmap creation
+**Last updated:** 2026-04-28 after Phase 2 UAT — added Phase 2.1 Realignment Additions and reframed REQ-IDs touched by the unified `data_sources` + events / 3-view IA model
 
 This document is the v1 contract. Every requirement here is a hypothesis until shipped and validated. The roadmap maps each REQ-ID to exactly one phase.
+
+> **2026-04-28 — Phase 2.1 Architecture Realignment.** Phase 2 UAT surfaced 4 P0 architectural redesigns that change the v1 data model and IA. Per-platform channel tables collapse into a unified `data_sources` registry; `tracked_youtube_videos` collapses into a unified `events` table with an `author_is_me` discriminator; primary navigation becomes a chronological `/feed` over the events table, with `/sources` for source config and `/games/[id]` for the per-game curated view. REQ-IDs touched by this realignment are reframed in-place (terminology aligned with the new model — see notes inline below); 4 new REQ-IDs are added in the "Phase 2.1 Realignment Additions" section. Authoritative narrative lives in PROJECT.md "Architecture" section + ROADMAP Phase 2.1 detail.
 
 ---
 
@@ -21,10 +23,10 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 - [x] **GAMES-01**: User can create a game card with title, Steam app URL, optional cover image, optional release date (or "TBA"), tags/genres, and free-form notes
 - [x] **GAMES-02**: User can edit and delete their own game cards; deletion is soft and recoverable for a documented retention window before purge
 - [x] **GAMES-03**: User can have multiple games per developer account; every other entity (post, video, event, snapshot) is scoped to a specific game
-- [x] **GAMES-04a**: User can attach multiple YouTube channels per game (typed example for the social-handle pattern; per-channel as a separate row, not a single field)
-- [ ] **GAMES-04b**: User can attach Telegram channels per game *(by trigger — added when a real user requests Telegram channel tracking; pattern proven by GAMES-04a)*
-- [ ] **GAMES-04c**: User can attach Twitter/X handles per game *(by trigger; pattern proven by GAMES-04a)*
-- [ ] **GAMES-04d**: User can attach an optional Discord invite per game *(by trigger; pattern proven by GAMES-04a)*
+- [x] **GAMES-04a**: User can attach a YouTube data source's content to a game by attaching individual events (events of `kind=youtube_video` with `source_id` set get attached to a game by setting `game_id`); the data source itself is a per-user registry entry, not a per-game association *(reframed Phase 2.1: per-game channel attachment → per-user `data_sources` registry + per-event `game_id` attachment via the `/feed` "Attach to game" picker; see SOURCES-01 / FEED-01 / INBOX-01)*
+- [ ] **GAMES-04b**: ~~User can attach Telegram channels per game~~ **superseded** by SOURCES-01 — `data_source.kind=telegram_channel` covers this *(Phase 2.1 schema accepts the kind; functional adapter gated by Phase 5+ trigger)*
+- [ ] **GAMES-04c**: ~~User can attach Twitter/X handles per game~~ **superseded** by SOURCES-01 — `data_source.kind=twitter_account` covers this *(Phase 2.1 schema accepts the kind; functional adapter gated by Twitter API affordability — out of scope for v1)*
+- [ ] **GAMES-04d**: ~~User can attach an optional Discord invite per game~~ **superseded** by SOURCES-01 — `data_source.kind=discord_server` covers this *(Phase 2.1 schema accepts the kind; functional adapter gated by Phase 5+ trigger)*
 
 ### Secrets & Per-User API Keys (KEYS)
 
@@ -37,18 +39,18 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 
 ### URL Ingestion (INGEST)
 
-- [ ] **INGEST-01**: User can paste a Reddit post URL; the system parses subreddit + post ID, validates with Reddit API, and creates a tracked item linked to the chosen game
-- [x] **INGEST-02**: User can paste a YouTube video URL; the system parses video ID, fetches metadata via YouTube Data API v3, and creates a tracked item
-- [x] **INGEST-03**: User can mark a YouTube video as `own` or `blogger` at creation time and toggle later; the distinction surfaces in every chart and filter
-- [x] **INGEST-04**: System rejects malformed URLs with a clear error and never partially writes a tracked item
+- [ ] **INGEST-01**: User can paste a Reddit post URL; the system parses subreddit + post ID, validates with Reddit API, and creates an event of `kind=reddit_post` linked to the chosen game (or to inbox via `game_id=NULL` for later attachment) *(reframed Phase 2.1: tracked item → event)*
+- [x] **INGEST-02**: User can paste a YouTube video URL; the system parses video ID, fetches metadata via oEmbed (Phase 2) or YouTube Data API v3 (Phase 3+), and creates an event of `kind=youtube_video` *(reframed Phase 2.1: tracked item → event)*
+- [x] **INGEST-03**: System sets `author_is_me=true` on a created `youtube_video` event when the oEmbed `author_url` matches a registered `data_source` of `kind=youtube_channel` (with `is_owned_by_me=true`); user can toggle later from the event detail page *(reframed Phase 2.1: separate `is_own` column → `author_is_me` discriminator on unified events table; the distinction surfaces in every `/feed` filter and chart)*
+- [x] **INGEST-04**: System rejects malformed URLs with a clear error and never partially writes an event *(reframed Phase 2.1: tracked item → event)*
 
 ### Polling Engine (POLL)
 
 - [ ] **POLL-01**: A scheduler enqueues poll jobs on adaptive tiers — `hot` (item <24h old, 30–60 min cadence), `warm` (item 1–30 days old, 4×/day), `cold` (item >30 days old, 1×/day)
 - [ ] **POLL-02**: A worker pool consumes jobs across separate concurrency lanes per tier; cold backlogs cannot starve hot polling
 - [ ] **POLL-03**: Workers honor per-user API key rate limits; a 429 / quota-exhausted response defers the job with backoff and surfaces the condition to the user
-- [ ] **POLL-04**: Each successful poll appends a row to an immutable `metric_snapshots` table (timestamp + value); the live row on the tracked item carries only `last_polled_at` and `last_poll_status`
-- [ ] **POLL-05**: Each tracked item displays a polling status badge in the UI — "Hot — checked Xm ago" / "Warm — every 6h" / "Cold — daily" / "Stale" (no successful poll in >48h)
+- [ ] **POLL-04**: Each successful poll appends an immutable row to `event_stats_snapshots` (`event_id`, `polled_at`, `metric_key`, `metric_value`); the live `events` row carries only `last_polled_at` and `last_poll_status` *(reframed Phase 2.1: tracked_items + metric_snapshots → events + event_stats_snapshots; same chart-history-is-immutable invariant)*
+- [ ] **POLL-05**: Each event in `/feed` and on `/games/[id]` displays a polling status badge — "Hot — checked Xm ago" / "Warm — every 6h" / "Cold — daily" / "Stale" (no successful poll in >48h) *(reframed Phase 2.1: per-tracked-item badge → per-event badge in feed and curated views)*
 - [ ] **POLL-06**: Workers shut down gracefully on SIGTERM (configurable grace period) so deploys do not lose in-flight jobs
 
 ### Wishlist Tracking (WISH)
@@ -60,7 +62,7 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 
 ### Visualization (VIZ)
 
-- [ ] **VIZ-01**: User can open a per-item detail page for any tracked item and see its full snapshot history (upvotes/comments for Reddit, views for YouTube)
+- [ ] **VIZ-01**: User can open a per-event detail page for any event with `last_poll_status` non-null and see its full snapshot history (upvotes/comments for `reddit_post`, views for `youtube_video`); chart sources from `event_stats_snapshots`, never from a mutable "current value" field on the event row *(reframed Phase 2.1: per-item → per-event; metric_snapshots → event_stats_snapshots)*
 - [ ] **VIZ-02**: User can view a per-game combined timeline that overlays own actions, blogger coverage, and the wishlist line on a single chart with shared time axis
 - [ ] **VIZ-03**: User can see annotated wishlist correlation — every promotion event is a vertical marker on the wishlist line; clicking a marker opens a side panel with the event's metrics and a 24h / 7d wishlist delta after that event
 - [ ] **VIZ-04**: All charts render legibly under 600px viewport width
@@ -75,9 +77,9 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 
 ### Free-form Events Timeline (EVENTS)
 
-- [x] **EVENTS-01**: User can create a free-form timeline event with title, date, optional URL, optional category (conference, talk, Twitter post, Telegram post, Discord drop, other), optional notes
-- [x] **EVENTS-02**: Events render on the same per-game timeline as polled items (single chronological feed)
-- [x] **EVENTS-03**: User can edit and delete events; deletes are audit-logged
+- [x] **EVENTS-01**: User can create an event with `kind` (free-form `conference` / `talk` / `press` / `other` for non-pollable activity; pollable kinds `youtube_video` / `reddit_post` / `twitter_post` / `telegram_post` / `discord_drop` are created via the paste flow per INGEST-01..04, not free-form), title, `occurred_at` date, optional URL, optional notes; can attach to a game (`game_id`) or leave in inbox (`game_id=NULL`) *(reframed Phase 2.1: free-form events + tracked items collapse into one unified table with a `kind` enum)*
+- [x] **EVENTS-02**: Events render in the chronological `/feed` view (primary daily workspace, FEED-01) and on the per-game `/games/[id]` curated view; both are projections over the unified events table *(reframed Phase 2.1: per-game-only timeline → primary `/feed` + per-game projection)*
+- [x] **EVENTS-03**: User can edit and delete events; deletes are audit-logged and require a confirm dialog (data-loss UX safety)
 
 ### Privacy, Audit, Export (PRIV)
 
@@ -97,6 +99,15 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 - [ ] **UX-02**: UI is responsive — every screen is usable on a phone viewport (≥360px wide); charts reflow legibly
 - [x] **UX-03**: Every empty state shows a copy-paste example of what the user can do next (e.g., "Paste a Reddit post URL like `https://reddit.com/r/IndieDev/...`")
 - [x] **UX-04**: All user-facing copy is in English; the codebase carries an i18n structure (locale-aware key lookups) so adding locales later is a content-only change
+
+### Phase 2.1 Realignment Additions (SOURCES, FEED, INBOX)
+
+These REQ-IDs are the new contract pieces introduced by the Phase 2.1 realignment (see banner at top + ROADMAP Phase 2.1 detail). Together with the reframed GAMES-04a / INGEST-02..04 / EVENTS-01..03 / VIZ-01 / POLL-04..05 above, they replace the v1.0 per-platform-channels mental model.
+
+- [ ] **SOURCES-01**: User can register data sources of `kind` ∈ {`youtube_channel`, `reddit_account`, `twitter_account`, `telegram_channel`, `discord_server`}; each source carries `is_owned_by_me` (mine vs someone else's I want to track), `auto_import` toggle, `display_name`, `external_url`, and per-platform `metadata` jsonb (e.g. `uploads_playlist_id`). Phase 2.1 ships the UI shell and CRUD for all kinds; only `youtube_channel` is functional end-to-end in 2.1, other kinds gated by their poll adapter phase.
+- [ ] **SOURCES-02**: User can soft-delete a data source (with retention window, consistent with games + events); rotating display_name is a free-form edit; toggling `auto_import` immediately stops/starts the polling adapter for that source (Phase 3+ when adapters land); audit log records every add / remove / toggle / rotate event.
+- [ ] **FEED-01**: `/feed` shows all events for the authenticated user sorted by `occurred_at DESC`, paginated via tenant-relative cursor, filterable by URL params (`source`, `kind`, `game`, `attached`, `author_is_me`, `from`, `to`); per-row actions: "Attach to game" picker, "Open detail", "Mark not game-related", "Delete" (with confirm). `/feed` is the default landing page after authenticated login (replaces the dashboard). Renders legibly on 360px viewport with filter chips collapsing to a "Filters (N)" sheet button on mobile.
+- [ ] **INBOX-01**: Auto-imported events arrive with `game_id=NULL`; user attaches via the `/feed` "Attach to game" picker (sets `game_id`); a "Mark not game-related" toggle sets `metadata->>'inbox_dismissed' = 'true'` so the row drops out of `attached=false` view but stays findable by other filters and is not deleted. The `attached=false` filter is the inbox view; auto-imported events flow into it as the polling adapters (Phase 3+) come online.
 
 ### Deployment & Self-Host Parity (DEPLOY)
 
@@ -152,20 +163,20 @@ Each REQ-ID maps to exactly one phase. Coverage: 54/54 v1 requirements.
 | GAMES-01 | Phase 2 |
 | GAMES-02 | Phase 2 |
 | GAMES-03 | Phase 2 |
-| GAMES-04a | Phase 2 |
-| GAMES-04b | Backlog |
-| GAMES-04c | Backlog |
-| GAMES-04d | Backlog |
+| GAMES-04a | Phase 2 (shipped) → reframed Phase 2.1 |
+| GAMES-04b | Superseded by SOURCES-01 |
+| GAMES-04c | Superseded by SOURCES-01 |
+| GAMES-04d | Superseded by SOURCES-01 |
 | KEYS-01 | Phase 3 |
 | KEYS-02 | Phase 3 |
 | KEYS-03 | Phase 2 |
 | KEYS-04 | Phase 2 |
 | KEYS-05 | Phase 2 |
 | KEYS-06 | Phase 2 |
-| INGEST-01 | Phase 3 |
-| INGEST-02 | Phase 2 |
-| INGEST-03 | Phase 2 |
-| INGEST-04 | Phase 2 |
+| INGEST-01 | Phase 3 (reframed Phase 2.1) |
+| INGEST-02 | Phase 2 (shipped) → reframed Phase 2.1 |
+| INGEST-03 | Phase 2 (shipped) → reframed Phase 2.1 |
+| INGEST-04 | Phase 2 (shipped) → reframed Phase 2.1 |
 | POLL-01 | Phase 3 |
 | POLL-02 | Phase 3 |
 | POLL-03 | Phase 3 |
@@ -176,7 +187,7 @@ Each REQ-ID maps to exactly one phase. Coverage: 54/54 v1 requirements.
 | WISH-02 | Phase 3 |
 | WISH-03 | Phase 3 |
 | WISH-04 | Phase 4 |
-| VIZ-01 | Phase 4 |
+| VIZ-01 | Phase 4 (reframed Phase 2.1: per-event detail; data layer ready in 2.1, chart UI in 4) |
 | VIZ-02 | Phase 4 |
 | VIZ-03 | Phase 4 |
 | VIZ-04 | Phase 4 |
@@ -185,9 +196,13 @@ Each REQ-ID maps to exactly one phase. Coverage: 54/54 v1 requirements.
 | REDDIT-03 | Phase 5 |
 | REDDIT-04 | Phase 5 |
 | REDDIT-05 | Phase 5 |
-| EVENTS-01 | Phase 2 |
-| EVENTS-02 | Phase 2 |
-| EVENTS-03 | Phase 2 |
+| EVENTS-01 | Phase 2 (shipped) → reframed Phase 2.1 |
+| EVENTS-02 | Phase 2 (shipped) → reframed Phase 2.1 |
+| EVENTS-03 | Phase 2 (shipped) → reframed Phase 2.1 |
+| SOURCES-01 | Phase 2.1 |
+| SOURCES-02 | Phase 2.1 |
+| FEED-01 | Phase 2.1 |
+| INBOX-01 | Phase 2.1 (UI shell + manual attach); Phase 3 (auto-import-fed inbox) |
 | PRIV-01 | Phase 1 |
 | PRIV-02 | Phase 2 |
 | PRIV-03 | Phase 6 |
@@ -209,12 +224,13 @@ Each REQ-ID maps to exactly one phase. Coverage: 54/54 v1 requirements.
 | Phase | Requirement Count | Categories |
 |-------|-------------------|------------|
 | Phase 1 — Foundation | 6 | AUTH (3), PRIV (1), UX (1), DEPLOY (1) |
-| Phase 2 — Ingest, Secrets, Audit | 18 | GAMES (4: GAMES-01..03 + GAMES-04a), KEYS (4: KEYS-03..06), INGEST (3: INGEST-02..04), EVENTS (3), PRIV (1), UX (3) |
+| Phase 2 — Ingest, Secrets, Audit | 18 | GAMES (4: GAMES-01..03 + GAMES-04a), KEYS (4: KEYS-03..06), INGEST (3: INGEST-02..04), EVENTS (3), PRIV (1), UX (3) — *7 of these reframed in 2.1; data shipped, model realigned* |
+| Phase 2.1 — Architecture Realignment | 4 new (+ reframes 7 existing P2 + 1 P3 + 1 P4) | SOURCES (2), FEED (1), INBOX (1); reframes GAMES-04a, INGEST-02..04, EVENTS-01..03, INGEST-01, VIZ-01 |
 | Phase 3 — Polling Pipeline | 12 | POLL (6), WISH (3), KEYS (2: KEYS-01..02), INGEST (1: INGEST-01) |
 | Phase 4 — Visualization | 5 | VIZ (4), WISH (1) |
 | Phase 5 — Reddit Rules Cockpit | 5 | REDDIT (5) |
 | Phase 6 — Trust & Self-Host Polish | 8 | PRIV (2), QUOTA (2), DEPLOY (4) |
-| **Total** | **54 v1 + 3 backlog** | (backlog: GAMES-04b/c/d) |
+| **Total** | **58 v1 + 0 backlog** | *(GAMES-04b/c/d superseded by SOURCES-01; v1 count grows from 54 → 58 via the 4 Phase 2.1 additions)* |
 
 ---
 
