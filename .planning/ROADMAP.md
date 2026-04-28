@@ -68,7 +68,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 02-08-routes-and-sweeps-PLAN.md — Wave 2: 8 Hono sub-routers + theme route + anonymous-401 + cross-tenant matrix extensions
 - [x] 02-09-theme-components-paraglide-PLAN.md — Wave 3: theme cookie SSR + design tokens + 18 reusable Svelte components + ~30 Paraglide keys
 - [x] 02-10-svelte-pages-PLAN.md — Wave 3: 7 SvelteKit pages composing Plan 09 components + cookie-DB theme reconciliation
-- [ ] 02-11-smoke-360-validation-PLAN.md — Wave 4: smoke gate Phase 2 GAMES-01 extension + Vitest browser 360px + VALIDATION.md sign-off + checkpoint:human-verify
+- [x] 02-11-smoke-360-validation-PLAN.md — Wave 4: smoke gate Phase 2 GAMES-01 extension + Vitest browser 360px + VALIDATION.md sign-off + checkpoint:human-verify (cleared 2026-04-28 via 60min UAT — 20 todos surfaced; phase verdict: gaps_found)
 **UI hint**: yes
 
 ### Phase 3: Polling Pipeline
