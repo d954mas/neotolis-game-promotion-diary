@@ -159,6 +159,7 @@ Recent decisions affecting current work:
 - 2026-04-28-show-user-avatar-and-email-in-ui — AppHeader account disambiguation (caught in Phase 2 manual UAT)
 - 2026-04-28-simplify-theme-toggle-in-header — move ThemeToggle out of AppHeader to /settings (caught in Phase 2 manual UAT)
 - 2026-04-28-dashboard-first-step-cta — dashboard needs prominent "add first game" CTA for empty state (caught in Phase 2 manual UAT)
+- 2026-04-28-redirect-dashboard-to-games — redirect "/" → "/games" until Phase 4 dashboard has real metrics (caught in Phase 2 manual UAT)
 
 ### Blockers/Concerns
 
