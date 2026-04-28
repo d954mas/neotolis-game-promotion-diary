@@ -1,17 +1,30 @@
 /**
  * tests/browser/feed-360.test.ts
  *
- * Plan 02.1-07 — FEED-01 360px responsive surface.
+ * Plan 02.1-07 — FEED-01 360px responsive surface (extended Plan 02.1-16
+ * for FeedCard / Gap 3 closure).
  *
  * SCOPE: PUBLIC-routed assertion only. The plan's <action> Step D specifies
  * "/feed at 360x640 redirects an anonymous request to /login (public-routed
  * assertion only — auth-routed parts deferred to manual UAT)". The
  * authenticated-user 360px sweep (chips collapse to "Filters (N)" sheet
- * button, FeedRow vertical stack at 360px without horizontal overflow) is
- * deferred to Phase 6 per VALIDATION.md `Manual-Only Verifications` — the
- * cookie-injection harness deferred from Phase 2 still hasn't landed
- * (vitest browser-mode tests run in a separate process from the SvelteKit
- * preview server with no in-test DB connection available).
+ * button, FeedCard vertical stack at 360px without horizontal overflow,
+ * thumbnail occupies full card width on YouTube events) is deferred to
+ * Phase 6 per VALIDATION.md `Manual-Only Verifications` — the cookie-
+ * injection harness deferred from Phase 2 still hasn't landed (vitest
+ * browser-mode tests run in a separate process from the SvelteKit preview
+ * server with no in-test DB connection available).
+ *
+ * Plan 02.1-16 contract additions (deferred — manual UAT covers them):
+ *   - rendered cards expose data-kind={event.kind} attribute,
+ *   - kind=youtube_video cards contain <img src*="img.youtube.com/vi/">,
+ *   - kind=conference cards render the centered KindIcon (no <img>),
+ *   - card date strings match formatFeedDate buckets:
+ *       /^Today, /, /^Yesterday$/, /^[A-Z][a-z]{2} \d+/.
+ * The card-shape contract is unit-tested via tests/unit/format-feed-date
+ * + the SSR shape exercised in components-test (auth-gate doesn't apply
+ * to a pure render test). Authenticated end-to-end remains in the manual
+ * UAT block.
  *
  * Mirrors the pattern of `tests/browser/responsive-360.test.ts`: viewport
  * resize → goto → assert URL or DOM. CI provisions a `pnpm preview`
@@ -45,5 +58,9 @@ describe("FEED-01 (browser): /feed responsive at 360px", () => {
 
   it.skip(
     "authenticated /feed filter chips collapse to 'Filters (N)' button below 600px (manual UAT — see Manual-Only verifications)",
+  );
+
+  it.skip(
+    "Plan 02.1-16: authenticated /feed cards expose data-kind + youtube thumbnail / kind-icon fallback / formatFeedDate string (manual UAT — auth harness deferred to Phase 6)",
   );
 });

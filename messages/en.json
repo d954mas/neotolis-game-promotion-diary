@@ -172,6 +172,9 @@
   "feed_row_edit_aria": "Edit event",
   "feed_row_delete_aria": "Delete event",
 
+  "feed_card_thumbnail_alt": "Thumbnail for: {title}",
+  "feed_card_open_external": "Open external link",
+
   "feed_deleted_panel_toggle_show": "Show {count} deleted events (within {days} days)",
   "feed_deleted_panel_toggle_hide": "Hide deleted events",
   "feed_deleted_panel_restore_cta": "Restore",
