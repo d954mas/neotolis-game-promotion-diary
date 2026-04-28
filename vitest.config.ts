@@ -110,6 +110,17 @@ export default defineConfig({
                 };
                 return ctx.page.evaluate(() => document.documentElement.clientWidth);
               },
+              async currentUrl(context) {
+                // Plan 02.1-07 — feed-360 placeholder needs to assert the post-
+                // navigation URL after an anonymous /feed visit redirects to
+                // /login. BrowserPage from @vitest/browser/context is a locator
+                // surface and does not expose location/url; fetch from the
+                // underlying Playwright Page directly.
+                const ctx = context.provider.getCommandsContext(context.sessionId) as {
+                  page: { url: () => string };
+                };
+                return ctx.page.url();
+              },
             },
           },
         },

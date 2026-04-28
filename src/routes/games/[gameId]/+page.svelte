@@ -1,38 +1,55 @@
 <script lang="ts">
-  // /games/[gameId] — detail view (Plan 02-10).
+  // /games/[gameId] — detail view (Phase 2.1 Plan 02.1-09 rebuild).
   //
-  // Multi-panel layout per UI-SPEC §"/games/[gameId] (NEW — detail)":
-  //   - Header panel (title, TBA / release-date badge, tag chips, notes)
-  //   - Store-listings panel (one row per game_steam_listings row)
-  //   - YouTube channels panel (<ChannelRow> + attach affordance)
-  //   - Tracked items panel with <PasteBox> at the top
-  //   - Events timeline panel with <EventRow> + new-event form
+  // Closes the Phase 2 P0 functional gap: rename via <RenameInline> +
+  // add-Steam-listing via <AddSteamListingForm>. UI-SPEC §"/games/[id]
+  // rebuild" pivots from the Phase 2 panel-stack (header / listings /
+  // youtube-channels / tracked-items / events) to the unified-events
+  // curated layout (header / store-listings / events). The YouTube
+  // channels panel and tracked items panel are GONE — the unified
+  // `events` table carries youtube_video rows attached to the game now.
   //
-  // Each panel renders <EmptyState>-style empty branches. Cross-cutting
-  // mutations (paste, soft-delete, channel detach, event create) call the
-  // /api/* surface and `invalidateAll()` to refresh the loader's data.
+  // Curated events panel: rows are grouped by month (<MonthHeader>) and
+  // rendered with the same row component the /feed page uses (<FeedRow>).
+  // FeedRow handles its own ConfirmDialog on delete (UI polish-fix per
+  // UI-SPEC §"Destructive confirmations") and its own AttachToGamePicker.
   //
-  // Tag chips render inline as <span class="chip"> per UI-SPEC FLAG (no
-  // standalone TagChip component in P2).
+  // No paste box on this page in 2.1 (UI-SPEC). Manual paste lives on
+  // /feed where the user is already chronologically oriented; "+ New
+  // event" links to /events/new for free-form entry.
 
   import { invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import EmptyState from "$lib/components/EmptyState.svelte";
-  import PasteBox from "$lib/components/PasteBox.svelte";
-  import ChannelRow from "$lib/components/ChannelRow.svelte";
-  import EventRow from "$lib/components/EventRow.svelte";
-  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import FeedRow from "$lib/components/FeedRow.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
+  import RenameInline from "$lib/components/RenameInline.svelte";
+  import AddSteamListingForm from "$lib/components/AddSteamListingForm.svelte";
+  import MonthHeader from "$lib/components/MonthHeader.svelte";
   import type { PageData } from "./$types";
 
-  type GameDto = {
+  type EventKind =
+    | "youtube_video"
+    | "reddit_post"
+    | "conference"
+    | "talk"
+    | "twitter_post"
+    | "telegram_post"
+    | "discord_drop"
+    | "press"
+    | "other";
+
+  type EventDtoLocal = {
     id: string;
+    kind: EventKind;
+    occurredAt: Date | string;
     title: string;
-    coverUrl: string | null;
-    releaseDate: string | null;
-    releaseTba: boolean;
-    tags: string[];
-    notes: string;
+    url: string | null;
+    gameId: string | null;
+    sourceId: string | null;
+    authorIsMe: boolean;
+    metadata: unknown;
+    lastPolledAt: Date | string | null;
   };
 
   type ListingDto = {
@@ -44,116 +61,79 @@
     apiKeyId: string | null;
   };
 
-  type ChannelDto = {
+  type SourceLite = {
     id: string;
-    handleUrl: string;
     displayName: string | null;
-    isOwn: boolean;
+    handleUrl: string;
   };
 
-  type ItemDto = {
+  type GameLite = {
     id: string;
-    title: string | null;
-    url: string;
-    isOwn: boolean;
-    // Direct service loaders return Date instances (devalue preserves them
-    // across SSR → CSR); downstream components already accept Date | string.
-    addedAt: Date | string;
-  };
-
-  type EventDtoLocal = {
-    id: string;
-    kind:
-      | "conference"
-      | "talk"
-      | "twitter_post"
-      | "telegram_post"
-      | "discord_drop"
-      | "press"
-      | "other";
-    // Direct service loaders return Date; EventRow accepts Date | string.
-    occurredAt: Date | string;
     title: string;
-    url: string | null;
   };
 
   let { data }: { data: PageData } = $props();
 
-  const game = $derived(data.game as GameDto);
+  const game = $derived(data.game);
   const listings = $derived(data.listings as ListingDto[]);
-  const channels = $derived(data.channels as ChannelDto[]);
-  const items = $derived(data.items as ItemDto[]);
   const events = $derived(data.events as EventDtoLocal[]);
+  const allGames = $derived(data.games as GameLite[]);
+  const sources = $derived(data.sources as SourceLite[]);
 
-  // -- Item soft-delete dialog --
-  let confirmItemOpen = $state(false);
-  let pendingItemId = $state<string | null>(null);
-  function askDeleteItem(id: string): void {
-    pendingItemId = id;
-    confirmItemOpen = true;
-  }
-  async function confirmDeleteItem(): Promise<void> {
-    if (!pendingItemId) return;
-    const res = await fetch(`/api/items/youtube/${pendingItemId}`, { method: "DELETE" });
-    confirmItemOpen = false;
-    pendingItemId = null;
-    if (res.ok || res.status === 204) await invalidateAll();
-  }
+  // Source-id → SourceLite map for FeedRow's source chip resolution.
+  const sourceById = $derived.by(() => {
+    const map = new Map<string, SourceLite>();
+    for (const s of sources) map.set(s.id, s);
+    return map;
+  });
 
-  // -- New event inline form --
-  let showEventForm = $state(false);
-  let newEventTitle = $state("");
-  let newEventKind = $state<EventDtoLocal["kind"]>("other");
-  let newEventDate = $state(new Date().toISOString().slice(0, 10));
-  let newEventUrl = $state("");
-  let creatingEvent = $state(false);
-  let eventError = $state<string | null>(null);
+  // Keep the page's <h1> rendered via FeedRow — single game lite for chip.
+  const gameLite = $derived<GameLite>({ id: game.id, title: game.title });
 
-  async function submitNewEvent(e: Event): Promise<void> {
-    e.preventDefault();
-    if (creatingEvent || newEventTitle.trim().length === 0) return;
-    creatingEvent = true;
-    eventError = null;
-    try {
-      const res = await fetch("/api/events", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          gameId: game.id,
-          kind: newEventKind,
-          title: newEventTitle.trim(),
-          occurredAt: new Date(newEventDate).toISOString(),
-          url: newEventUrl.trim().length > 0 ? newEventUrl.trim() : null,
-        }),
+  // -- Group curated events by month for <MonthHeader> --
+  type Group = { key: string; label: string; rows: EventDtoLocal[] };
+  const grouped = $derived.by((): Group[] => {
+    const groups = new Map<string, Group>();
+    for (const ev of events) {
+      const occurred =
+        ev.occurredAt instanceof Date ? ev.occurredAt : new Date(ev.occurredAt);
+      const monthKey = `${occurred.getUTCFullYear()}-${String(
+        occurred.getUTCMonth() + 1,
+      ).padStart(2, "0")}`;
+      const monthLabel = occurred.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "long",
       });
-      if (!res.ok) {
-        eventError = m.error_server_generic();
-        return;
+      const existing = groups.get(monthKey);
+      if (existing) {
+        existing.rows.push(ev);
+      } else {
+        groups.set(monthKey, { key: monthKey, label: monthLabel, rows: [ev] });
       }
-      newEventTitle = "";
-      newEventUrl = "";
-      showEventForm = false;
-      await invalidateAll();
-    } catch {
-      eventError = m.error_network();
-    } finally {
-      creatingEvent = false;
     }
-  }
+    return [...groups.values()];
+  });
 
-  async function deleteEvent(id: string): Promise<void> {
-    const res = await fetch(`/api/events/${id}`, { method: "DELETE" });
-    if (res.ok || res.status === 204) await invalidateAll();
-  }
-
-  async function detachChannel(channelId: string): Promise<void> {
-    const res = await fetch(`/api/games/${game.id}/youtube-channels/${channelId}`, {
-      method: "DELETE",
+  // -- Rename: PATCH /api/games/:id { title } --
+  let renameError = $state<string | null>(null);
+  async function saveRename(title: string): Promise<void> {
+    renameError = null;
+    const res = await fetch(`/api/games/${game.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title }),
     });
-    if (res.ok || res.status === 204) await invalidateAll();
-  }
-
-  async function onPasteSuccess(): Promise<void> {
+    if (!res.ok) {
+      let code = "error_server_generic";
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body.error) code = body.error;
+      } catch {
+        /* ignore */
+      }
+      renameError = code;
+      throw new Error(code);
+    }
     await invalidateAll();
   }
 </script>
@@ -165,7 +145,8 @@
 </nav>
 
 <header class="header">
-  <h1>{game.title}</h1>
+  <RenameInline initial={game.title} onSave={saveRename} />
+  {#if renameError}<InlineError message={m.error_server_generic()} />{/if}
   <div class="meta">
     {#if game.releaseTba}
       <span class="badge">{m.badge_release_tba()}</span>
@@ -203,139 +184,41 @@
         {/each}
       </ul>
     {/if}
+    <AddSteamListingForm gameId={game.id} />
   </section>
 
-  <!-- YouTube channels -->
-  <section class="panel">
-    <h2>YouTube channels</h2>
-    {#if channels.length === 0}
-      <p class="empty-inline">No YouTube channels attached yet.</p>
-    {:else}
-      <ul class="rows">
-        {#each channels as ch (ch.id)}
-          <li>
-            <ChannelRow channel={ch} onRemove={() => detachChannel(ch.id)} />
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </section>
-
-  <!-- Items + paste box -->
-  <section class="panel">
-    <h2>Tracked items</h2>
-    <PasteBox gameId={game.id} onSuccess={onPasteSuccess} />
-    {#if items.length === 0}
-      <EmptyState
-        heading={m.empty_items_heading()}
-        body={m.empty_items_example_youtube_url({
-          url: "https://youtube.com/watch?v=dQw4w9WgXcQ",
-        })}
-        exampleUrl="https://youtube.com/watch?v=dQw4w9WgXcQ"
-      />
-    {:else}
-      <ul class="rows">
-        {#each items as it (it.id)}
-          <li class="item">
-            <a href={it.url} target="_blank" rel="noopener noreferrer" class="item-title">
-              {it.title ?? it.url}
-            </a>
-            <span class="chip">{it.isOwn ? "own" : "blogger"}</span>
-            <button
-              type="button"
-              class="action-danger"
-              onclick={() => askDeleteItem(it.id)}
-              aria-label={m.common_delete()}
-            >
-              ×
-            </button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </section>
-
-  <!-- Events timeline -->
+  <!-- Curated events panel — replaces Phase 2 youtube-channels + tracked-items + events -->
   <section class="panel">
     <header class="panel-head">
-      <h2>Events</h2>
-      <button type="button" class="cta-small" onclick={() => (showEventForm = !showEventForm)}>
-        {m.events_cta_new_event()}
-      </button>
+      <h2>Events ({events.length})</h2>
+      <a class="cta-small" href="/events/new">{m.feed_cta_add_event()}</a>
     </header>
-
-    {#if showEventForm}
-      <form class="newevent" onsubmit={submitNewEvent}>
-        <label class="field">
-          <span class="label">Title *</span>
-          <input class="input" type="text" bind:value={newEventTitle} required maxlength="500" />
-        </label>
-        <label class="field">
-          <span class="label">Kind *</span>
-          <select class="input" bind:value={newEventKind}>
-            <option value="conference">Conference</option>
-            <option value="talk">Talk</option>
-            <option value="twitter_post">Twitter post</option>
-            <option value="telegram_post">Telegram post</option>
-            <option value="discord_drop">Discord drop</option>
-            <option value="press">Press</option>
-            <option value="other">Other</option>
-          </select>
-        </label>
-        <label class="field">
-          <span class="label">Date *</span>
-          <input class="input" type="date" bind:value={newEventDate} required />
-        </label>
-        <label class="field">
-          <span class="label">URL</span>
-          <input class="input" type="url" bind:value={newEventUrl} placeholder="https://" />
-        </label>
-        <div class="actions">
-          <button type="button" class="cancel" onclick={() => (showEventForm = false)}>
-            {m.common_cancel()}
-          </button>
-          <button
-            type="submit"
-            class="submit"
-            disabled={creatingEvent || newEventTitle.trim().length === 0}
-          >
-            {m.events_cta_new_event()}
-          </button>
-        </div>
-        {#if eventError}<InlineError message={eventError} />{/if}
-      </form>
-    {/if}
 
     {#if events.length === 0}
       <EmptyState
-        heading={m.empty_events_heading()}
-        body={m.empty_events_body({
-          url: "https://twitter.com/AnnaIndie/status/123456",
-        })}
-        exampleUrl="https://twitter.com/AnnaIndie/status/123456"
+        heading={m.empty_feed_filtered_heading()}
+        body="Attach events from the /feed page to surface them here, or add a free-form event."
       />
     {:else}
-      <ul class="rows">
-        {#each events as ev (ev.id)}
-          <li>
-            <EventRow event={ev} onDelete={() => deleteEvent(ev.id)} />
-          </li>
-        {/each}
-      </ul>
+      {#each grouped as group (group.key)}
+        <MonthHeader month={group.label} count={group.rows.length} />
+        <ul class="rows">
+          {#each group.rows as ev (ev.id)}
+            <li>
+              <FeedRow
+                event={ev}
+                source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
+                game={gameLite}
+                games={allGames}
+                onChanged={() => invalidateAll()}
+              />
+            </li>
+          {/each}
+        </ul>
+      {/each}
     {/if}
   </section>
 </div>
-
-<ConfirmDialog
-  open={confirmItemOpen}
-  message={m.confirm_item_delete()}
-  confirmLabel={m.common_delete()}
-  onConfirm={confirmDeleteItem}
-  onCancel={() => {
-    confirmItemOpen = false;
-    pendingItemId = null;
-  }}
-/>
 
 <style>
   .breadcrumb {
@@ -354,11 +237,6 @@
     flex-direction: column;
     gap: var(--space-sm);
     margin-bottom: var(--space-lg);
-  }
-  .header h1 {
-    margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
   }
   .meta {
     display: flex;
@@ -443,39 +321,6 @@
   .label {
     color: var(--color-text);
   }
-  .item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-sm);
-    border-bottom: 1px solid var(--color-border);
-    min-width: 0;
-  }
-  .item-title {
-    flex: 1 1 auto;
-    color: var(--color-text);
-    text-decoration: none;
-    word-break: break-word;
-    min-width: 0;
-  }
-  .item-title:hover {
-    text-decoration: underline;
-  }
-  .action-danger {
-    min-width: 44px;
-    min-height: 44px;
-    background: transparent;
-    color: var(--color-text-muted);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: var(--font-size-heading);
-    line-height: 1;
-  }
-  .action-danger:hover {
-    color: var(--color-destructive);
-    border-color: var(--color-destructive);
-  }
   .cta-small {
     min-height: 44px;
     padding: 0 var(--space-md);
@@ -486,55 +331,9 @@
     font-size: var(--font-size-body);
     font-weight: var(--font-weight-semibold);
     cursor: pointer;
-  }
-  .newevent {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
-    padding: var(--space-md);
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-  }
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
-  }
-  .input {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-  }
-  .actions {
-    display: flex;
-    gap: var(--space-sm);
-    justify-content: flex-end;
-  }
-  .cancel {
-    background: transparent;
-    color: var(--color-text-muted);
-    border: none;
-    text-decoration: underline;
-    cursor: pointer;
-  }
-  .submit {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border: none;
-    border-radius: 4px;
-    font-weight: var(--font-weight-semibold);
-    cursor: pointer;
-  }
-  .submit:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
   }
   @media (min-width: 1024px) {
     .panels {

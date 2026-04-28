@@ -205,6 +205,62 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     );
   });
 
+  it("Plan 02.1-09: free-form event with kind=conference and gameId=null lands in inbox view", async () => {
+    // Phase 2.1 /events/new free-form path. Free-form events with no game
+    // attach drop into the inbox (game_id IS NULL). The unified-table reach
+    // means a kind=conference row co-exists with the kind=youtube_video
+    // rows of /games/[id] curated views.
+    const u = await seedUserDirectly({ email: "ev09a@test.local" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "conference",
+        occurredAt: new Date("2026-06-12T14:00:00Z"),
+        title: "GDC 2026 — solo-dev meetup",
+      },
+      "127.0.0.1",
+    );
+    expect(ev.kind).toBe("conference");
+    expect(ev.gameId).toBeNull();
+
+    // Inbox view (attached=false) surfaces the row.
+    const inbox = await listFeedPage(u.id, { attached: false }, null);
+    expect(inbox.rows.map((r) => r.id)).toContain(ev.id);
+    // The row also shows up in the global feed (no filter).
+    const all = await listFeedPage(u.id, {}, null);
+    expect(all.rows.map((r) => r.id)).toContain(ev.id);
+  });
+
+  it("Plan 02.1-09: free-form event with kind=youtube_video and gameId=:game lands in /games/:id curated view via listEventsForGame", async () => {
+    // Phase 2.1 unified-table reach: kind=youtube_video can be created
+    // free-form (without going through the paste flow / oEmbed). The /games
+    // /[id] curated panel surfaces it via listEventsForGame, which is what
+    // Plan 02.1-09's loader fetches. Validates the unified events table is
+    // happy serving both paste-flow and free-form youtube_video rows.
+    const u = await seedUserDirectly({ email: "ev09b@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "Hades" });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId,
+        kind: "youtube_video",
+        occurredAt: new Date("2026-04-15T09:00:00Z"),
+        title: "IGN Hades 2 Preview",
+        url: "https://www.youtube.com/watch?v=community",
+        externalId: "yt-community-1",
+      },
+      "127.0.0.1",
+    );
+
+    // Curated view returns the row (replaces Phase 2 listTimelineForGame).
+    const curated = await listEventsForGame(u.id, gameId);
+    expect(curated.map((r) => r.id)).toContain(ev.id);
+    expect(curated.find((r) => r.id === ev.id)?.kind).toBe("youtube_video");
+  });
+
   it("EVENTS-03 audit on edit and delete; soft-delete idempotency", async () => {
     const u = await seedUserDirectly({ email: "ev7@test.local" });
     const gameId = uuidv7();

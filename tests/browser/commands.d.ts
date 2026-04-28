@@ -13,6 +13,7 @@ declare module "vitest/internal/browser" {
     goto(url: string): Promise<void>;
     measureScrollWidth(): Promise<number>;
     measureClientWidth(): Promise<number>;
+    currentUrl(): Promise<string>;
   }
 }
 
