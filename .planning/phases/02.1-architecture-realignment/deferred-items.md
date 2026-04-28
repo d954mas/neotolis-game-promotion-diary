@@ -26,3 +26,33 @@ the current plan; the listed plan / phase owns the fix.
   alphabetical snapshot. (Phase 2 precedent: Plan 02-09 was the snapshot
   refresh point.)
 - **Out of scope for Plan 02.1-01:** confirmed.
+
+## From Plan 02.1-03
+
+### Pre-existing tsc errors in `src/lib/server/services/*` and `tests/integration/*`
+
+- **Discovered during:** Plan 02.1-03 Task 2 verification (`pnpm tsc --noEmit`).
+- **Symptom:** After Plan 02.1-01 deleted `youtube-channels.ts`,
+  `tracked-youtube-videos.ts`, and `game-youtube-channels.ts` schema files
+  (and dropped the `item.*` audit-action enum values), the following
+  pre-existing files no longer compile:
+  - `src/lib/server/services/youtube-channels.ts`
+  - `src/lib/server/services/items-youtube.ts`
+  - `src/lib/server/services/events.ts` (uses old `tracked_youtube_videos`)
+  - `src/lib/server/services/games.ts` (uses old `game_youtube_channels`)
+  - `src/lib/server/dto.ts` (re-exports the removed schema types + has a
+    Phase-2 `toEventDto` shape that doesn't yet account for nullable game_id /
+    new kind values)
+  - `tests/integration/events.test.ts`, `games.test.ts`, `ingest.test.ts`
+    (still import the deleted schema files)
+- **Why deferred:** these are Wave 1+ rewrites/deletions (per Phase 2.1 plan
+  README — Wave 1 deletes the old YouTube-only services and rewrites
+  `services/events.ts` + `services/games.ts` against the unified events
+  table; Wave 2 deletes the old routes; tests get extended in lock-step).
+  Plan 02.1-03 ships only the keyset + adapter contract — it does not own
+  service code.
+- **Owner:** Wave 1 plans (`02.1-04` onwards per planner discretion in
+  CONTEXT D-02) — service rewrites + DTO updates land alongside the
+  service files they belong to.
+- **Out of scope for Plan 02.1-03:** confirmed (Rule 4 boundary —
+  pre-existing failures in unrelated files are out of scope).

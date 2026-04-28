@@ -92,7 +92,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plan list**:
 - [ ] 02.1-01-PLAN.md — Wave 0: single new baseline migration (Phase 1+2 collapsed) + final 2.1 schema modules + AUDIT_ACTIONS rename + ESLint TENANT_TABLES update
 - [x] 02.1-02-PLAN.md — Wave 0: 5 new placeholder test files (data-sources, feed, inbox, events-attach, browser feed-360) with named-plan it.skip per Phase 1+2 Wave 0 pattern
-- [ ] 02.1-03-PLAN.md — Wave 0: ~53 new Paraglide keys (UI-SPEC Copywriting Contract) + extended keyset snapshot test + DataSourceAdapter interface + youtube_channel STUB
+- [x] 02.1-03-PLAN.md — Wave 0: ~53 new Paraglide keys (UI-SPEC Copywriting Contract) + extended keyset snapshot test + DataSourceAdapter interface + youtube_channel STUB
 - [ ] 02.1-04-PLAN.md — Wave 1: data_sources service (CRUD + soft-delete + restore + toggle + findSourceByAuthorUrl) + toDataSourceDto + extended toEventDto + Phase 2 youtube-channels deletion
 - [ ] 02.1-05-PLAN.md — Wave 1: unified events service (listFeedPage + attachToGame + dismissFromInbox + extended createEvent/createEventFromPaste) + ingest rewrite + items-youtube deletion
 - [ ] 02.1-06-PLAN.md — Wave 2: /api/sources router + /api/events extension (feed + attach + dismiss-inbox) + Hono app composition + anonymous-401 + cross-tenant matrix sweeps

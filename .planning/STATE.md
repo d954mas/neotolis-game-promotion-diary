@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Executing Phase 02.1
-stopped_at: Completed 02.1-02-PLAN.md
-last_updated: "2026-04-28T10:24:11.326Z"
+status: Ready to execute
+stopped_at: Completed 02.1-03-PLAN.md
+last_updated: "2026-04-28T10:29:54.690Z"
 last_activity: 2026-04-28
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 31
-  completed_plans: 22
+  completed_plans: 23
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 1 of 10
+Plan: 2 of 10
 
 ## Performance Metrics
 
@@ -67,6 +67,7 @@ Plan: 1 of 10
 | Phase 02-ingest-secrets-and-audit P09 | 17m 55s | 3 tasks | 29 files |
 | Phase 02-ingest-secrets-and-audit P10 | 19m 50s | 2 tasks | 18 files |
 | Phase 02.1 P02 | 2m 30s | 1 tasks | 5 files |
+| Phase 02.1-architecture-realignment P03 | 6min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -156,6 +157,8 @@ Recent decisions affecting current work:
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-10: /accounts/youtube intentionally omits channel-level remove (consistent with Plan 02-08 not shipping DELETE /api/youtube-channels/:id — service layer has no removeChannel); per-game detach flow (DELETE /api/games/:gameId/youtube-channels/:channelId) shipped on game-detail page covers the user-facing 'remove' need
 - [Phase 02.1]: Plan 02.1-02: Wave 0 placeholder tests landed — 5 new files (4 integration + 1 browser) with 41 named-plan it.skip stubs covering SOURCES-01, SOURCES-02, FEED-01, INBOX-01, GAMES-04a (reframed); each it.skip prefixes 'Plan 02.1-NN:' so later waves grep + flip to live; vitest filtered to the 4 new integration files reports 41 skipped / 0 failed
 - [Phase 02.1]: Plan 02.1-02: parallel-executor commit hygiene pattern — use 'git commit -o <pathspec>...' to scope a plan's commit to its own files when sibling agents have pre-staged unrelated index entries (avoids absorbing their work into this plan's commit); recovered from one such race via 'git reset --soft HEAD~1' + targeted -o re-commit (commit 1dd40e1)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-03: Phase 2.1 keyset = 156 keys (81 baseline minus 2 audit_action_item_* removed plus 77 added per UI-SPEC); paraglide alphabetical EXPECTED_KEYS test asserts the full list, locking the locale-add invariant (D-41) for Wave 3 UI plans
+- [Phase 02.1-architecture-realignment]: Plan 02.1-03: DataSourceAdapter STUB convention — youtube_channel pollContent/pollStats throw 'implemented in Phase 3' on call; pure adapter (no DB / logger / env import); pollStats source param is nullable so manual-paste pollable events get stats history (CONTEXT D-05/D-06)
 
 ### Pending Todos
 
@@ -188,8 +191,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-28T10:24:10.112Z
+Last session: 2026-04-28T10:29:44.078Z
 Last Activity: 2026-04-28
-Stopped at: Completed 02.1-02-PLAN.md
+Stopped at: Completed 02.1-03-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
