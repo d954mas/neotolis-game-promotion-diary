@@ -9,16 +9,21 @@
 //
 // Soft-delete + transactional restore (D-23): when a parent `games` row is
 // soft-deleted, the SAME captured `Date` value lands on the parent and on
-// every child row (game_steam_listings, game_youtube_channels,
-// tracked_youtube_videos, events) inside ONE database transaction. On
-// restore, we read the parent's `deletedAt` as the marker timestamp and
-// reverse ONLY children whose `deletedAt === markerTs`. Rows soft-deleted
-// EARLIER (before the parent) keep their original `deletedAt` and stay
-// deleted — that's the whole point of the marker-timestamp design.
+// every active child row (game_steam_listings, events) inside ONE database
+// transaction. On restore, we read the parent's `deletedAt` as the marker
+// timestamp and reverse ONLY children whose `deletedAt === markerTs`. Rows
+// soft-deleted EARLIER keep their original `deletedAt` and stay deleted —
+// that's the marker-timestamp design.
 //
-// NOT cascaded (D-24): `youtube_channels` (lives at user level — reused
-// across games) and `api_keys_steam` (the user's wishlist key is not
-// game-bound). Both belong on the user, not on the game.
+// Phase 2.1: `game_youtube_channels` and `tracked_youtube_videos` were
+// retired in Plan 02.1-01 (the per-platform M:N + per-platform tracked
+// tables collapsed into the unified `events` table + the user-level
+// `data_sources` registry). The cascade now only spans game_steam_listings
+// + events; data_sources is user-level (NOT game-bound) so it stays out of
+// the cascade by design (Plan 02.1-01 + Phase 2 D-24 inheritance).
+//
+// NOT cascaded: `data_sources` (user-level, reused across games) and
+// `api_keys_steam` (the user's wishlist key is not game-bound).
 //
 // writeAudit calls are `await`-ed but never throw — see src/lib/server/audit.ts.
 // We capture `game.created`, `game.deleted`, `game.restored` per D-32; listing
@@ -28,8 +33,6 @@ import { and, eq, isNull, desc } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { games } from "../db/schema/games.js";
 import { gameSteamListings } from "../db/schema/game-steam-listings.js";
-import { gameYoutubeChannels } from "../db/schema/game-youtube-channels.js";
-import { trackedYoutubeVideos } from "../db/schema/tracked-youtube-videos.js";
 import { events } from "../db/schema/events.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
@@ -246,26 +249,6 @@ export async function softDeleteGame(
         ),
       );
     await tx
-      .update(gameYoutubeChannels)
-      .set({ deletedAt })
-      .where(
-        and(
-          eq(gameYoutubeChannels.userId, userId),
-          eq(gameYoutubeChannels.gameId, gameId),
-          isNull(gameYoutubeChannels.deletedAt),
-        ),
-      );
-    await tx
-      .update(trackedYoutubeVideos)
-      .set({ deletedAt })
-      .where(
-        and(
-          eq(trackedYoutubeVideos.userId, userId),
-          eq(trackedYoutubeVideos.gameId, gameId),
-          isNull(trackedYoutubeVideos.deletedAt),
-        ),
-      );
-    await tx
       .update(events)
       .set({ deletedAt })
       .where(
@@ -318,26 +301,6 @@ export async function restoreGame(
           eq(gameSteamListings.userId, userId),
           eq(gameSteamListings.gameId, gameId),
           eq(gameSteamListings.deletedAt, markerTs),
-        ),
-      );
-    await tx
-      .update(gameYoutubeChannels)
-      .set({ deletedAt: null })
-      .where(
-        and(
-          eq(gameYoutubeChannels.userId, userId),
-          eq(gameYoutubeChannels.gameId, gameId),
-          eq(gameYoutubeChannels.deletedAt, markerTs),
-        ),
-      );
-    await tx
-      .update(trackedYoutubeVideos)
-      .set({ deletedAt: null })
-      .where(
-        and(
-          eq(trackedYoutubeVideos.userId, userId),
-          eq(trackedYoutubeVideos.gameId, gameId),
-          eq(trackedYoutubeVideos.deletedAt, markerTs),
         ),
       );
     await tx

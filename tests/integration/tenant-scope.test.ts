@@ -150,15 +150,15 @@ describe("cross-tenant 404 (PRIV-01, VALIDATION 7/8/9)", () => {
  * one run rather than failing on the first — the matrix is large enough
  * that the all-or-nothing failure mode would mask regressions.
  */
-describe("Phase 2 cross-tenant matrix (D-37)", () => {
+describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
   it("user B requests on user A's resources return 404, never 403/200", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const { createGame } = await import("../../src/lib/server/services/games.js");
     const { createSteamKey } = await import(
       "../../src/lib/server/services/api-keys-steam.js"
     );
-    const { createChannel } = await import(
-      "../../src/lib/server/services/youtube-channels.js"
+    const { createSource } = await import(
+      "../../src/lib/server/services/data-sources.js"
     );
     const { createEvent } = await import("../../src/lib/server/services/events.js");
     const { addSteamListing } = await import(
@@ -186,10 +186,27 @@ describe("Phase 2 cross-tenant matrix (D-37)", () => {
         { label: "A's Key", plaintext: "STEAM-XYZW-AAAA-BBBB" },
         "127.0.0.1",
       );
-      const channel = await createChannel(userA.id, {
-        handleUrl: "https://www.youtube.com/@AOwn",
-        isOwn: true,
-      });
+      const source = await createSource(
+        userA.id,
+        {
+          kind: "youtube_channel",
+          handleUrl: "https://www.youtube.com/@AOwn",
+          isOwnedByMe: true,
+        },
+        "127.0.0.1",
+      );
+      // User A's inbox event (game_id IS NULL) — used for dismiss-inbox probe.
+      const inboxEvent = await createEvent(
+        userA.id,
+        {
+          gameId: null,
+          kind: "twitter_post",
+          occurredAt: new Date(),
+          title: "A's inbox tweet",
+        },
+        "127.0.0.1",
+      );
+      // User A's attached event — used for the attach + edit + delete probes.
       const event = await createEvent(
         userA.id,
         {
@@ -205,6 +222,9 @@ describe("Phase 2 cross-tenant matrix (D-37)", () => {
         { gameId: game.id, appId: 730, label: "A's listing" },
         "127.0.0.1",
       );
+      // User B's own game — used as the cross-tenant attach target so we
+      // can exercise the "B has a game, but A's event still 404s" path.
+      const gameB = await createGame(userB.id, { title: "B's Game" }, "127.0.0.1");
 
       const cookie = `neotolis.session_token=${userB.signedSessionCookieValue}`;
       type Probe = { method: string; path: string; body?: Record<string, unknown> };
@@ -230,22 +250,15 @@ describe("Phase 2 cross-tenant matrix (D-37)", () => {
           path: `/api/games/${game.id}/listings/${listing.id}/key`,
           body: { apiKeyId: null },
         },
-        // youtube channels (user-level + per-game)
+        // Phase 2.1 — data_sources (replaces Phase 2 youtube-channels probes)
+        { method: "GET", path: `/api/sources/${source.id}` },
         {
           method: "PATCH",
-          path: `/api/youtube-channels/${channel.id}`,
-          body: { isOwn: false },
+          path: `/api/sources/${source.id}`,
+          body: { autoImport: false },
         },
-        { method: "GET", path: `/api/games/${game.id}/youtube-channels` },
-        {
-          method: "POST",
-          path: `/api/games/${game.id}/youtube-channels`,
-          body: { channelId: channel.id },
-        },
-        {
-          method: "DELETE",
-          path: `/api/games/${game.id}/youtube-channels/${channel.id}`,
-        },
+        { method: "DELETE", path: `/api/sources/${source.id}` },
+        { method: "POST", path: `/api/sources/${source.id}/restore` },
         // api keys (steam)
         { method: "GET", path: `/api/api-keys/steam/${key.id}` },
         {
@@ -254,11 +267,8 @@ describe("Phase 2 cross-tenant matrix (D-37)", () => {
           body: { plaintext: "STEAM-XYZW-NEWNEW-CCCC" },
         },
         { method: "DELETE", path: `/api/api-keys/steam/${key.id}` },
-        // items (youtube) per-game listing
-        { method: "GET", path: `/api/games/${game.id}/items` },
-        // events per-game + per-id
+        // events: per-game + per-id (Phase 2.1 unified-events surface)
         { method: "GET", path: `/api/games/${game.id}/events` },
-        { method: "GET", path: `/api/games/${game.id}/timeline` },
         { method: "GET", path: `/api/events/${event.id}` },
         {
           method: "PATCH",
@@ -266,6 +276,29 @@ describe("Phase 2 cross-tenant matrix (D-37)", () => {
           body: { title: "B HACKED" },
         },
         { method: "DELETE", path: `/api/events/${event.id}` },
+        // Phase 2.1 — events attach + dismiss-inbox cross-tenant probes
+        // PATCH /api/events/:id/attach with B's own gameId — B is authed but
+        // the event belongs to A so the UPDATE matches no rows and the
+        // service returns NotFoundError → 404. Pitfall 4 explicit guard
+        // (NOT 500 from a bare PG FK rejection).
+        {
+          method: "PATCH",
+          path: `/api/events/${event.id}/attach`,
+          body: { gameId: gameB.id },
+        },
+        // PATCH /api/events/:id/attach with A's own gameId — same outcome:
+        // event ownership wins, 404. The body's gameId never even gets
+        // validated (B doesn't own A's game either).
+        {
+          method: "PATCH",
+          path: `/api/events/${event.id}/attach`,
+          body: { gameId: game.id },
+        },
+        // PATCH /api/events/:id/dismiss-inbox on A's inbox event — 404.
+        {
+          method: "PATCH",
+          path: `/api/events/${inboxEvent.id}/dismiss-inbox`,
+        },
       ];
 
       for (const p of probes) {
@@ -282,6 +315,12 @@ describe("Phase 2 cross-tenant matrix (D-37)", () => {
           res.status,
           `${p.method} ${p.path} should be 404 cross-tenant (got ${res.status})`,
         ).toBe(404);
+        // Pitfall 4 explicit guard: cross-tenant attach must NEVER surface 500
+        // from a bare PG FK rejection — assertGameOwnedByUser fires first.
+        expect.soft(
+          res.status,
+          `${p.method} ${p.path} must NOT be 500 (Pitfall 4: cross-tenant FK)`,
+        ).not.toBe(500);
         const txt = await res.text();
         expect.soft(
           txt,

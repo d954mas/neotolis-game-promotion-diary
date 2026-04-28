@@ -1,6 +1,6 @@
 // Data Sources HTTP routes (Plan 02.1-06 — Wave 2).
 //
-// Replaces the Phase 2 `/api/youtube-channels*` route group with a unified
+// Replaces the Phase 2 per-platform channel route group with a unified
 // per-tenant data_source registry over kinds youtube_channel /
 // reddit_account / twitter_account / telegram_channel / discord_server.
 // In Phase 2.1 only youtube_channel is wired; non-functional kinds reject at

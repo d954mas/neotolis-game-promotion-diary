@@ -501,3 +501,109 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     expect(ids).not.toContain(dead.id);
   });
 });
+
+// Plan 02.1-06 — GET /api/events HTTP-boundary tests for the feed loader.
+describe("Plan 02.1-06: GET /api/events HTTP boundary", () => {
+  it("Plan 02.1-06: GET /api/events returns 200 + {rows, nextCursor} with EventDto-projected rows (no userId)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const { userId, gameId } = await seedUserGameAndSource("http-feed-1@test.local");
+    await createEvent(
+      userId,
+      {
+        gameId,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "press feed http",
+      },
+      "127.0.0.1",
+    );
+
+    // Resolve the user back to grab the signedSessionCookieValue. Easiest:
+    // re-seed a separate user is wrong; we need THIS user's cookie. We seed
+    // the user via seedUserDirectly inside seedUserGameAndSource, but the
+    // helper discards the cookie. Re-seed an explicit user for the cookie.
+    const u = await seedUserDirectly({ email: "http-feed-1b@test.local" });
+    // u has zero events; we want to assert the JSON envelope shape. Use u's
+    // session cookie to query its OWN feed (empty rows array but the envelope
+    // shape is what we assert).
+    const res = await app.request("/api/events", {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rows: unknown[]; nextCursor: string | null };
+    expect(Array.isArray(body.rows)).toBe(true);
+    expect(body.nextCursor).toBeNull();
+  });
+
+  it("Plan 02.1-06: GET /api/events?attached=true returns rows where game_id IS NOT NULL", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-feed-2@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+    const attached = await createEvent(
+      u.id,
+      {
+        gameId,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "attached",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "press",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "inbox",
+      },
+      "127.0.0.1",
+    );
+    const res = await app.request("/api/events?attached=true", {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rows: Array<{ id: string; gameId: string | null }> };
+    expect(body.rows).toHaveLength(1);
+    expect(body.rows[0]!.id).toBe(attached.id);
+    expect(body.rows[0]!.gameId).toBe(gameId);
+  });
+
+  it("Plan 02.1-06: GET /api/events response rows are EventDto-projected (no userId leaks)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-feed-3@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+    await createEvent(
+      u.id,
+      {
+        gameId,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "leak check",
+      },
+      "127.0.0.1",
+    );
+    const res = await app.request("/api/events", {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    const body = (await res.json()) as { rows: Array<Record<string, unknown>> };
+    expect(body.rows).toHaveLength(1);
+    expect(body.rows[0]).not.toHaveProperty("userId");
+  });
+
+  it("Plan 02.1-06: GET /api/events?kind=invalid returns 422 validation_failed", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-feed-4@test.local" });
+    const res = await app.request("/api/events?kind=not_a_kind", {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("validation_failed");
+  });
+});

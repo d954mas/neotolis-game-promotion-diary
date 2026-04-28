@@ -103,9 +103,10 @@ export function createApp(): Hono<AppContext> {
   // mount of `/api/games/:gameId/events`).
   app.route("/api", gamesRoutes);
   app.route("/api", gameListingsRoutes);
-  // Phase 2.1: data_sources sub-router replaces Phase 2's youtube-channels +
-  // items-youtube route groups (their underlying services were retired in
-  // Plan 02.1-04 and 02.1-05; the route files are gone in Plan 02.1-06).
+  // Phase 2.1: data_sources sub-router replaces the Phase 2 per-platform
+  // channel + tracked-video route groups (their underlying services were
+  // retired in Plan 02.1-04 and 02.1-05; the route files are gone in Plan
+  // 02.1-06).
   app.route("/api", sourcesRoutes);
   app.route("/api", apiKeysSteamRoutes);
   app.route("/api", eventsRoutes);

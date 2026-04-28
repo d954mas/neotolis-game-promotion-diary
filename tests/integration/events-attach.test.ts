@@ -202,3 +202,96 @@ describe("GAMES-04a (reframed): per-event game attachment", () => {
     ).rejects.toBeInstanceOf(NotFoundError);
   });
 });
+
+// Plan 02.1-06 — PATCH /api/events/:id/attach HTTP boundary tests.
+describe("Plan 02.1-06: PATCH /api/events/:id/attach HTTP boundary", () => {
+  it("Plan 02.1-06: PATCH /api/events/:id/attach { gameId } returns 200 + EventDto with game_id set", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-attach-1@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "HTTP attach",
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(`/api/events/${ev.id}/attach`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ gameId }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; gameId: string | null };
+    expect(body.id).toBe(ev.id);
+    expect(body.gameId).toBe(gameId);
+  });
+
+  it("Plan 02.1-06: PATCH /api/events/:id/attach { gameId: null } clears game_id (move-to-inbox)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-attach-2@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "HTTP detach",
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(`/api/events/${ev.id}/attach`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ gameId: null }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; gameId: string | null };
+    expect(body.gameId).toBeNull();
+  });
+
+  it("Plan 02.1-06: PATCH /api/events/:id/attach with non-existent gameId returns 404 not_found (Pitfall 4 — NEVER 500)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-attach-3@test.local" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "ev",
+      },
+      "127.0.0.1",
+    );
+    const fakeGameId = uuidv7();
+
+    const res = await app.request(`/api/events/${ev.id}/attach`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ gameId: fakeGameId }),
+    });
+    expect(res.status).toBe(404);
+    expect(res.status).not.toBe(500);
+    expect((await res.json()).error).toBe("not_found");
+  });
+});

@@ -443,3 +443,160 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     expect(second.deletedAt).toBeNull();
   });
 });
+
+// Plan 02.1-06 — /api/sources HTTP-boundary tests. The service-layer suite
+// above asserts SOURCES-01 + SOURCES-02 behaviour against the Drizzle layer;
+// these tests assert that Plan 02.1-06's Hono router wires the same contract
+// into the HTTP envelope (status codes + DTO projection + tenantScope guard).
+describe("Plan 02.1-06: /api/sources HTTP boundary", () => {
+  it("Plan 02.1-06: POST /api/sources kind=youtube_channel returns 201 + DataSourceDto without userId", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-src-1@test.local" });
+    const res = await app.request("/api/sources", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "youtube_channel",
+        handleUrl: "https://www.youtube.com/@http-happy",
+        displayName: "HTTP Happy",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("userId");
+    expect(body.kind).toBe("youtube_channel");
+    expect(body.handleUrl).toBe("https://www.youtube.com/@http-happy");
+  });
+
+  it("Plan 02.1-06: POST /api/sources kind=reddit_account returns 422 kind_not_yet_functional", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-src-2@test.local" });
+    const res = await app.request("/api/sources", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "reddit_account",
+        handleUrl: "https://reddit.com/user/me",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("kind_not_yet_functional");
+  });
+
+  it("Plan 02.1-06: POST /api/sources duplicate handleUrl returns 422 duplicate_source", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-src-3@test.local" });
+    const cookie = `neotolis.session_token=${u.signedSessionCookieValue}`;
+    const body = JSON.stringify({
+      kind: "youtube_channel",
+      handleUrl: "https://www.youtube.com/@http-dup",
+    });
+    const r1 = await app.request("/api/sources", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body,
+    });
+    expect(r1.status).toBe(201);
+    const r2 = await app.request("/api/sources", {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body,
+    });
+    expect(r2.status).toBe(422);
+    expect((await r2.json()).error).toBe("duplicate_source");
+  });
+
+  it("Plan 02.1-06: GET /api/sources omits soft-deleted by default; ?includeDeleted=true returns them", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-src-4@test.local" });
+    const a = await createSource(
+      u.id,
+      { kind: "youtube_channel", handleUrl: "https://www.youtube.com/@http-a" },
+      "127.0.0.1",
+    );
+    const b = await createSource(
+      u.id,
+      { kind: "youtube_channel", handleUrl: "https://www.youtube.com/@http-b" },
+      "127.0.0.1",
+    );
+    await softDeleteSource(u.id, b.id, "127.0.0.1");
+
+    const cookie = `neotolis.session_token=${u.signedSessionCookieValue}`;
+    const rDefault = await app.request("/api/sources", { headers: { cookie } });
+    expect(rDefault.status).toBe(200);
+    const listDefault = (await rDefault.json()) as Array<{ id: string }>;
+    expect(listDefault.map((r) => r.id)).toEqual([a.id]);
+
+    const rAll = await app.request("/api/sources?includeDeleted=true", {
+      headers: { cookie },
+    });
+    expect(rAll.status).toBe(200);
+    const listAll = (await rAll.json()) as Array<{ id: string }>;
+    expect(listAll.map((r) => r.id).sort()).toEqual([a.id, b.id].sort());
+  });
+
+  it("Plan 02.1-06: DELETE /api/sources/:id returns 200 + soft-deleted DTO; second call returns 404", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-src-5@test.local" });
+    const src = await createSource(
+      u.id,
+      { kind: "youtube_channel", handleUrl: "https://www.youtube.com/@http-del" },
+      "127.0.0.1",
+    );
+    const cookie = `neotolis.session_token=${u.signedSessionCookieValue}`;
+    const r1 = await app.request(`/api/sources/${src.id}`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
+    expect(r1.status).toBe(200);
+    const body = (await r1.json()) as { id: string; deletedAt: string | null };
+    expect(body.id).toBe(src.id);
+    expect(body.deletedAt).not.toBeNull();
+
+    const r2 = await app.request(`/api/sources/${src.id}`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
+    expect(r2.status).toBe(404);
+    expect((await r2.json()).error).toBe("not_found");
+  });
+
+  it("Plan 02.1-06: POST /api/sources/:id/restore beyond RETENTION_DAYS returns 422 retention_expired", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-src-6@test.local" });
+    const src = await createSource(
+      u.id,
+      {
+        kind: "youtube_channel",
+        handleUrl: "https://www.youtube.com/@http-retn",
+      },
+      "127.0.0.1",
+    );
+    await softDeleteSource(u.id, src.id, "127.0.0.1");
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 86_400_000);
+    await db
+      .update(dataSources)
+      .set({ deletedAt: ninetyDaysAgo })
+      .where(and(eq(dataSources.userId, u.id), eq(dataSources.id, src.id)));
+
+    const res = await app.request(`/api/sources/${src.id}/restore`, {
+      method: "POST",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("retention_expired");
+  });
+});

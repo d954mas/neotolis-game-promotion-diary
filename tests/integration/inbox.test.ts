@@ -169,3 +169,82 @@ describe("INBOX-01: inbox flow + dismissal", () => {
 
   it.skip("Phase 3 Plan: auto-imported events arrive with source_id != NULL AND game_id=NULL — covered in Phase 3 smoke (deferred per CONTEXT D-11)");
 });
+
+// Plan 02.1-06 — PATCH /api/events/:id/dismiss-inbox HTTP boundary.
+describe("Plan 02.1-06: PATCH /api/events/:id/dismiss-inbox HTTP boundary", () => {
+  it("Plan 02.1-06: PATCH /api/events/:id/dismiss-inbox returns 200 with metadata.inbox.dismissed=true", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-inbox-1@test.local" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Dismiss me HTTP",
+      },
+      "127.0.0.1",
+    );
+    const res = await app.request(`/api/events/${ev.id}/dismiss-inbox`, {
+      method: "PATCH",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      id: string;
+      metadata: { inbox?: { dismissed?: boolean } };
+    };
+    expect(body.id).toBe(ev.id);
+    expect(body.metadata.inbox?.dismissed).toBe(true);
+  });
+
+  it("Plan 02.1-06: PATCH /api/events/:id/dismiss-inbox on attached event returns 422 not_in_inbox", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-inbox-2@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Attached, cannot dismiss",
+      },
+      "127.0.0.1",
+    );
+    const res = await app.request(`/api/events/${ev.id}/dismiss-inbox`, {
+      method: "PATCH",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("not_in_inbox");
+  });
+
+  it("Plan 02.1-06: PATCH /api/events/:id/dismiss-inbox cross-tenant returns 404 not_found", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({ email: "http-inbox-3a@test.local" });
+    const userB = await seedUserDirectly({ email: "http-inbox-3b@test.local" });
+    const evA = await createEvent(
+      userA.id,
+      {
+        gameId: null,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "User A inbox",
+      },
+      "127.0.0.1",
+    );
+    const res = await app.request(`/api/events/${evA.id}/dismiss-inbox`, {
+      method: "PATCH",
+      headers: { cookie: `neotolis.session_token=${userB.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body).toEqual({ error: "not_found" });
+    expect(JSON.stringify(body)).not.toMatch(/forbidden|permission/i);
+  });
+});
