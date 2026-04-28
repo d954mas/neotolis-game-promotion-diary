@@ -36,19 +36,45 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   }
   const userId = locals.user.id;
 
+  // Plan 02.1-15 — multi-value axes via URLSearchParams.getAll(). Repeated
+  // query params (?source=A&source=B) yield ["A","B"]; a single param yields
+  // ["A"]; absence yields []. The service-layer pushAxis helper collapses
+  // each shape to its right SQL form (empty = no filter, 1-elem = eq,
+  // N-elem = inArray).
+  const sourceList = url.searchParams.getAll("source");
+  const kindList = url.searchParams.getAll("kind");
+  const gameList = url.searchParams.getAll("game");
+
   const fromParam = url.searchParams.get("from");
   const toParam = url.searchParams.get("to");
+  const allParam = url.searchParams.get("all");
+
+  // Plan 02.1-15 Gap 9: when neither from/to nor all=1 is set, default the
+  // window to the last 30 days. The default surfaces in `activeFilters` so
+  // the chip strip shows a "Last 30 days (default)" chip the user can
+  // dismiss — dismissing navigates to ?all=1 (opt-out). When the user picks
+  // any explicit from / to, those win.
+  let fromForFilter = fromParam ?? undefined;
+  let toForFilter = toParam ?? undefined;
+  if (fromForFilter === undefined && toForFilter === undefined && allParam !== "1") {
+    const today = new Date();
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setUTCDate(today.getUTCDate() - 30);
+    fromForFilter = thirtyDaysAgo.toISOString().slice(0, 10);
+    toForFilter = today.toISOString().slice(0, 10);
+  }
+
   // Date-only inputs (YYYY-MM-DD) are inclusive on both ends — `from` becomes
   // 00:00:00 UTC of that day (start), `to` becomes 23:59:59.999 UTC (end).
   // Without the end-of-day shift, picking `from=to=2026-04-26` would match
   // nothing because midnight-26 ≤ event ≤ midnight-26 has zero width.
-  const fromDate = fromParam ? new Date(`${fromParam}T00:00:00.000Z`) : undefined;
-  const toDate = toParam ? new Date(`${toParam}T23:59:59.999Z`) : undefined;
+  const fromDate = fromForFilter ? new Date(`${fromForFilter}T00:00:00.000Z`) : undefined;
+  const toDate = toForFilter ? new Date(`${toForFilter}T23:59:59.999Z`) : undefined;
 
   const filters: FeedFilters = {
-    source: url.searchParams.get("source") ?? undefined,
-    kind: (url.searchParams.get("kind") as FeedFilters["kind"]) ?? undefined,
-    game: url.searchParams.get("game") ?? undefined,
+    source: sourceList.length > 0 ? sourceList : undefined,
+    kind: kindList.length > 0 ? (kindList as FeedFilters["kind"]) : undefined,
+    game: gameList.length > 0 ? gameList : undefined,
     attached:
       url.searchParams.get("attached") === "true"
         ? true
@@ -82,15 +108,28 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     nextCursor: page.nextCursor,
     games: gameRows.map(toGameDto),
     sources: sourceRows.map(toDataSourceDto),
+    // Plan 02.1-14 (preserved): listDeletedEvents flows through the loader
+    // so /feed renders the soft-delete recovery panel without a second
+    // round-trip. retentionDays continues to come from the layout
+    // pass-through (CLAUDE.md / AGENTS.md hard rule — only env.ts reads
+    // process.env; the layout already exposes RETENTION_DAYS).
     deletedEvents: deletedRows.map(toEventDto),
     activeFilters: {
-      source: filters.source,
-      kind: filters.kind,
-      game: filters.game,
+      // Plan 02.1-15: array form for the multi-value axes — always present,
+      // possibly empty. The chip strip / sheet always treat them as
+      // string[] so single-value renders the same as zero-value.
+      source: sourceList,
+      kind: kindList,
+      game: gameList,
       attached: filters.attached,
       authorIsMe: filters.authorIsMe,
       from: filters.from ? filters.from.toISOString().slice(0, 10) : undefined,
       to: filters.to ? filters.to.toISOString().slice(0, 10) : undefined,
+      // Default-flag (Gap 9): the UI uses this to render the date chip as
+      // "default" (dismissable via ?all=1) rather than user-applied. True
+      // only when no from/to/all params were supplied.
+      defaultDateRange: fromParam === null && toParam === null && allParam !== "1",
+      all: allParam === "1",
     },
   };
 };

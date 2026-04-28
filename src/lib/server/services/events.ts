@@ -40,7 +40,9 @@
 // event.deleted on softDelete, event.attached_to_game on attach, and
 // event.dismissed_from_inbox on dismiss.
 
-import { and, eq, gte, isNull, isNotNull, lte, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, isNotNull, lte, sql, inArray } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import type { PgColumn } from "drizzle-orm/pg-core";
 import { db } from "../db/client.js";
 import { events } from "../db/schema/events.js";
 import { games } from "../db/schema/games.js";
@@ -104,9 +106,9 @@ export interface PasteInput {
 }
 
 export interface FeedFilters {
-  source?: string;
-  kind?: EventKind;
-  game?: string;
+  source?: string | string[];
+  kind?: EventKind | EventKind[];
+  game?: string | string[];
   attached?: boolean;
   authorIsMe?: boolean;
   from?: Date;
@@ -126,6 +128,42 @@ function assertValidKind(kind: string): asserts kind is EventKind {
       422,
       { field: "kind" },
     );
+  }
+}
+
+/**
+ * pushAxis (Plan 02.1-15) — array-aware helper for the multi-select feed
+ * filter axes (source / kind / game). Treats:
+ *   - undefined           → no clause appended (axis omitted from URL)
+ *   - empty array         → no clause appended ("nothing selected" === no filter)
+ *   - one-element array   → eq(column, value[0])  (zero query-plan regression
+ *                            against the single-string back-compat path)
+ *   - many-element array  → inArray(column, values)
+ *   - bare scalar         → eq(column, value)     (legacy single-string callers)
+ *
+ * The userId WHERE clause is NOT routed through this helper — it stays
+ * lexically present in `listFeedPage`'s `.where(...)` so the
+ * `tenant-scope/no-unfiltered-tenant-query` ESLint rule sees it.
+ */
+function pushAxis<T>(
+  parts: SQL[],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  column: PgColumn<any>,
+  value: T | T[] | undefined,
+): void {
+  if (value === undefined) return;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return;
+    if (value.length === 1) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      parts.push(eq(column, value[0] as any));
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      parts.push(inArray(column, value as any[]));
+    }
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    parts.push(eq(column, value as any));
   }
 }
 
@@ -660,21 +698,18 @@ export async function listFeedPage(
   // .where(...) call so the structural ESLint rule recognizes it. Other
   // filter axes are accumulated into a separate array and combined via
   // `and()` — the userId clause stays load-bearing and visible.
-  const filterParts = [isNull(events.deletedAt)];
-  if (filters.source !== undefined) {
-    filterParts.push(eq(events.sourceId, filters.source));
-  }
-  if (filters.kind !== undefined) {
-    filterParts.push(eq(events.kind, filters.kind));
-  }
-  if (filters.game !== undefined) {
-    filterParts.push(eq(events.gameId, filters.game));
-  }
+  const filterParts: SQL[] = [isNull(events.deletedAt) as SQL];
+  // Plan 02.1-15: source / kind / game are now multi-valued. pushAxis turns
+  // each axis into eq() or inArray() depending on shape; back-compat with
+  // bare-string callers preserved by the helper's discriminator.
+  pushAxis(filterParts, events.sourceId, filters.source);
+  pushAxis(filterParts, events.kind, filters.kind);
+  pushAxis(filterParts, events.gameId, filters.game);
   if (filters.attached === true) {
-    filterParts.push(isNotNull(events.gameId));
+    filterParts.push(isNotNull(events.gameId) as SQL);
   }
   if (filters.attached === false) {
-    filterParts.push(isNull(events.gameId));
+    filterParts.push(isNull(events.gameId) as SQL);
     // RESEARCH §6.2: inbox view excludes events whose
     // metadata.inbox.dismissed === true.
     filterParts.push(

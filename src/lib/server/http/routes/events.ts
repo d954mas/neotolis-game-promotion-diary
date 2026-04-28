@@ -49,7 +49,9 @@ import {
   dismissFromInbox,
   listDeletedEvents,
   restoreEvent,
+  VALID_EVENT_KINDS,
 } from "../../services/events.js";
+import type { EventKind } from "../../integrations/data-source-adapter.js";
 import { toEventDto } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
@@ -89,18 +91,24 @@ const updateEventSchema = z
     message: "at least one field must be supplied",
   });
 
-// Feed query schema (RESEARCH §3.2 verbatim). Booleans arrive as the strings
-// "true"|"false" because URL query params are stringly-typed; we coerce to
-// real booleans before calling listFeedPage.
+// Feed query schema (RESEARCH §3.2 + Plan 02.1-15 multi-select). Multi-value
+// axes (source / kind / game) are NOT validated here because Hono's
+// `c.req.queries(name)` returns string[] for repeated params and the zod
+// validator only sees the FIRST value of a repeated key. The multi-value
+// axes are read separately via `c.req.queries(...)` below; the schema only
+// enforces the single-value back-compat surface (one ?source=, one ?kind=,
+// one ?game=). Defense-in-depth on the kind values lives in-handler against
+// VALID_EVENT_KINDS.
+//
+// Booleans arrive as the strings "true"|"false" because URL query params are
+// stringly-typed; we coerce to real booleans before calling listFeedPage.
 const feedQuerySchema = z.object({
   cursor: z.string().optional(),
-  source: z.string().min(1).optional(),
-  kind: eventKindEnum.optional(),
-  game: z.string().min(1).optional(),
   attached: z.enum(["true", "false"]).optional(),
   authorIsMe: z.enum(["true", "false"]).optional(),
-  from: z.string().datetime().optional(),
-  to: z.string().datetime().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  all: z.enum(["1", "0"]).optional(),
 });
 
 const attachSchema = z.object({
@@ -141,13 +149,34 @@ eventsRoutes.get(
   }),
   async (c) => {
     const q = c.req.valid("query");
+    // Plan 02.1-15: multi-value axes via Hono's c.req.queries() — repeated
+    // ?source=A&source=B query params produce string[]. Single-param /
+    // back-compat callers receive a one-element array which the service-layer
+    // pushAxis helper collapses to eq() (zero query-plan regression).
+    const sourceList = c.req.queries("source") ?? undefined;
+    const kindList = c.req.queries("kind") as EventKind[] | undefined;
+    const gameList = c.req.queries("game") ?? undefined;
+    // Defense-in-depth (Pitfall 6): validate each kind value against the
+    // closed enum BEFORE the service. Service-level assertValidKind is the
+    // second layer; the route-layer 422 here keeps the failure mode crisp
+    // for malformed multi-value URLs.
+    if (kindList) {
+      for (const k of kindList) {
+        if (!(VALID_EVENT_KINDS as readonly string[]).includes(k)) {
+          return c.json(
+            { error: "validation_failed", details: [{ field: "kind", value: k }] },
+            422,
+          );
+        }
+      }
+    }
     try {
       const page = await listFeedPage(
         c.var.userId,
         {
-          source: q.source,
-          kind: q.kind,
-          game: q.game,
+          source: sourceList && sourceList.length > 0 ? sourceList : undefined,
+          kind: kindList && kindList.length > 0 ? kindList : undefined,
+          game: gameList && gameList.length > 0 ? gameList : undefined,
           attached:
             q.attached === "true" ? true : q.attached === "false" ? false : undefined,
           authorIsMe:

@@ -1,24 +1,28 @@
 <script lang="ts">
-  // /feed — primary daily workspace for authenticated users (Plan 02.1-07).
+  // /feed — primary daily workspace for authenticated users (Plan 02.1-07,
+  // extended Plan 02.1-14 + 02.1-15).
   //
   // Composition (UI-SPEC §"/feed"):
   //   - <h1>Feed</h1> at heading-24 (NOT display-32) — the rows ARE the page;
   //     the heading is the label, deliberately understated.
+  //   - <DateRangeControl> above the chip strip (Plan 02.1-15 — Gap 10).
   //   - <FilterChips> at min-width 600px (inline strip), collapsing to a
   //     "Filters (N)" button below 600px that opens <FiltersSheet>.
   //   - <ul> of <FeedRow> — the load-bearing surface.
   //   - <CursorPager> at the bottom (Older →) for pagination.
+  //   - <DeletedEventsPanel> below the pager (Plan 02.1-14 — Gap 2).
   //   - <EmptyState> for first-time empty + filtered-no-match cases.
   //
-  // Filter changes always reset cursor (RESEARCH §3.4 b). All copy via
-  // Paraglide m.* (D-41). No hard-coded English literals beyond the single
-  // "Feed" heading (UI-SPEC notes the heading is structural and not in the
-  // budget).
+  // Plan 02.1-15: filter changes always reset cursor (RESEARCH §3.4 b);
+  // multi-value axes use URLSearchParams.append() so repeated params survive
+  // navigation. dismissAxis(axis, value?) removes ONE value from a
+  // multi-select axis when value is supplied.
 
   import { goto, invalidateAll } from "$app/navigation";
   import { page } from "$app/state";
   import { m } from "$lib/paraglide/messages.js";
   import FeedRow from "$lib/components/FeedRow.svelte";
+  import DateRangeControl from "$lib/components/DateRangeControl.svelte";
   import FilterChips from "$lib/components/FilterChips.svelte";
   import FiltersSheet from "$lib/components/FiltersSheet.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
@@ -34,49 +38,95 @@
   const gameById = $derived(new Map(data.games.map((g) => [g.id, g])));
 
   function hasNoActiveFilters(f: typeof data.activeFilters): boolean {
+    // Plan 02.1-15: source / kind / game are arrays; "no filter" means all
+    // empty. The default 30-day window IS an active filter from the user's
+    // perspective (the chip strip shows it), so defaultDateRange === true
+    // counts as "filters active".
     return (
-      f.source === undefined &&
-      f.kind === undefined &&
-      f.game === undefined &&
+      f.source.length === 0 &&
+      f.kind.length === 0 &&
+      f.game.length === 0 &&
       f.attached === undefined &&
       f.authorIsMe === undefined &&
+      !f.defaultDateRange &&
       f.from === undefined &&
-      f.to === undefined
+      f.to === undefined &&
+      !f.all
     );
   }
 
-  function buildUrl(next: Record<string, string | boolean | undefined>): string {
-    const params = new URLSearchParams();
-    for (const [k, v] of Object.entries(next)) {
-      if (v === undefined || v === "") continue;
-      params.set(k, String(v));
-    }
-    // Filter changes always reset cursor (RESEARCH §3.4 b).
+  function applyDateRange(next: { from?: string; to?: string; all?: boolean }): void {
+    const params = new URLSearchParams(page.url.searchParams);
+    params.delete("from");
+    params.delete("to");
+    params.delete("all");
     params.delete("cursor");
+    if (next.all) {
+      params.set("all", "1");
+    } else {
+      if (next.from) params.set("from", next.from);
+      if (next.to) params.set("to", next.to);
+    }
     const qs = params.toString();
-    return qs.length > 0 ? `/feed?${qs}` : "/feed";
+    void goto(qs ? `/feed?${qs}` : "/feed");
   }
 
-  function applyFilters(next: Record<string, string | boolean | undefined>): void {
-    void goto(buildUrl(next));
+  function dismissAxis(axis: string, value?: string): void {
+    const params = new URLSearchParams(page.url.searchParams);
+    params.delete("cursor");
+    if (axis === "dateRange") {
+      // Dismissing the date chip means: opt out of the default 30-day
+      // window. Drop any explicit from/to and set all=1 so the next render
+      // shows "all time" without the default chip.
+      params.delete("from");
+      params.delete("to");
+      params.set("all", "1");
+    } else if (axis === "attached" || axis === "authorIsMe") {
+      params.delete(axis);
+    } else if (value !== undefined) {
+      // Multi-select dismiss: remove ONE value, keep the rest.
+      const remaining = params.getAll(axis).filter((v) => v !== value);
+      params.delete(axis);
+      for (const v of remaining) params.append(axis, v);
+    } else {
+      // Fallback for axes that can be wiped wholesale.
+      params.delete(axis);
+    }
+    const qs = params.toString();
+    void goto(qs ? `/feed?${qs}` : "/feed");
   }
 
-  function dismissAxis(axis: string): void {
-    const current: Record<string, string | boolean | undefined> = {
-      source: data.activeFilters.source,
-      kind: data.activeFilters.kind,
-      game: data.activeFilters.game,
-      attached: data.activeFilters.attached,
-      authorIsMe: data.activeFilters.authorIsMe,
-      from: data.activeFilters.from,
-      to: data.activeFilters.to,
-    };
-    delete current[axis];
-    applyFilters(current);
+  function applyFiltersFromSheet(next: {
+    source?: string[];
+    kind?: string[];
+    game?: string[];
+    attached?: boolean;
+    authorIsMe?: boolean;
+  }): void {
+    const params = new URLSearchParams(page.url.searchParams);
+    // Sheet owns source/kind/game/attached/authorIsMe; the date-range params
+    // belong to <DateRangeControl> and are PRESERVED here.
+    params.delete("source");
+    params.delete("kind");
+    params.delete("game");
+    params.delete("attached");
+    params.delete("authorIsMe");
+    params.delete("cursor");
+    for (const v of next.source ?? []) params.append("source", v);
+    for (const v of next.kind ?? []) params.append("kind", v);
+    for (const v of next.game ?? []) params.append("game", v);
+    if (next.attached === true) params.set("attached", "true");
+    if (next.attached === false) params.set("attached", "false");
+    if (next.authorIsMe === true) params.set("authorIsMe", "true");
+    if (next.authorIsMe === false) params.set("authorIsMe", "false");
+    const qs = params.toString();
+    void goto(qs ? `/feed?${qs}` : "/feed");
   }
 
   function clearAll(): void {
-    void goto("/feed");
+    // Clear every filter — including the date range. Land on ?all=1 so the
+    // 30-day default doesn't immediately re-apply.
+    void goto("/feed?all=1");
   }
 
   function gotoNextPage(): void {
@@ -92,6 +142,8 @@
     <h1>Feed</h1>
     <a href="/events/new" class="cta">{m.feed_cta_add_event()}</a>
   </header>
+
+  <DateRangeControl activeFilters={data.activeFilters} onApply={applyDateRange} />
 
   {#if data.rows.length === 0 && hasNoActiveFilters(data.activeFilters)}
     <EmptyState heading={m.empty_feed_heading()} body={m.empty_feed_body()} />
@@ -152,7 +204,7 @@
       games={data.games}
       onApply={(next) => {
         sheetOpen = false;
-        applyFilters(next);
+        applyFiltersFromSheet(next);
       }}
       onClose={() => (sheetOpen = false)}
     />

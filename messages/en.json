@@ -84,6 +84,15 @@
   "feed_filter_date_range": "From {from} to {to}",
   "feed_filter_chip_dismiss_aria": "Remove {filter} filter",
 
+  "feed_date_range_today": "Today",
+  "feed_date_range_7d": "Last 7 days",
+  "feed_date_range_30d": "Last 30 days",
+  "feed_date_range_all": "All time",
+  "feed_date_range_custom": "Custom…",
+  "feed_date_range_chip_default": "Last 30 days (default)",
+  "feed_date_range_label_from": "From",
+  "feed_date_range_label_to": "To",
+
   "event_kind_label_youtube_video": "YouTube video",
   "event_kind_label_twitter_post": "Twitter post",
   "event_kind_label_telegram_post": "Telegram post",

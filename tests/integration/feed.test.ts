@@ -607,3 +607,389 @@ describe("Plan 02.1-06: GET /api/events HTTP boundary", () => {
     expect((await res.json()).error).toBe("validation_failed");
   });
 });
+
+// Plan 02.1-15 — multi-select filter tests (VERIFICATION.md Gap 4 closure).
+// OR-within-axis (source IN (A, B)) + AND-across-axes ((source IN ...) AND
+// (kind = ...)) semantics; bare-string back-compat preserved; HTTP-layer
+// repeated-param parsing (?source=A&source=B) lands the same envelope.
+describe("Plan 02.1-15: multi-select feed filters (OR-within-axis, AND-across-axes)", () => {
+  async function seedThreeSources(
+    email: string,
+  ): Promise<{ userId: string; sourceA: string; sourceB: string; sourceC: string }> {
+    const u = await seedUserDirectly({ email });
+    const sourceA = uuidv7();
+    const sourceB = uuidv7();
+    const sourceC = uuidv7();
+    await db.insert(dataSources).values([
+      {
+        id: sourceA,
+        userId: u.id,
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/@A-${u.id.slice(0, 8)}`,
+        displayName: "Source A",
+        isOwnedByMe: true,
+        autoImport: true,
+      },
+      {
+        id: sourceB,
+        userId: u.id,
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/@B-${u.id.slice(0, 8)}`,
+        displayName: "Source B",
+        isOwnedByMe: true,
+        autoImport: true,
+      },
+      {
+        id: sourceC,
+        userId: u.id,
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/@C-${u.id.slice(0, 8)}`,
+        displayName: "Source C",
+        isOwnedByMe: true,
+        autoImport: true,
+      },
+    ]);
+    return { userId: u.id, sourceA, sourceB, sourceC };
+  }
+
+  it("Plan 02.1-15: source=[A, B] returns rows from A or B (OR within axis), excludes C", async () => {
+    const { userId, sourceA, sourceB, sourceC } =
+      await seedThreeSources("ms-feed-1@test.local");
+    const eA = await createEvent(
+      userId,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Video A",
+        sourceId: sourceA,
+        externalId: "ms-A-1",
+      },
+      "127.0.0.1",
+    );
+    const eB = await createEvent(
+      userId,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "Video B",
+        sourceId: sourceB,
+        externalId: "ms-B-1",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      userId,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-03T10:00:00Z"),
+        title: "Video C",
+        sourceId: sourceC,
+        externalId: "ms-C-1",
+      },
+      "127.0.0.1",
+    );
+
+    const page = await listFeedPage(userId, { source: [sourceA, sourceB] }, null);
+    expect(page.rows).toHaveLength(2);
+    const ids = page.rows.map((r) => r.id);
+    expect(ids).toContain(eA.id);
+    expect(ids).toContain(eB.id);
+    expect(page.rows.every((r) => r.sourceId === sourceA || r.sourceId === sourceB)).toBe(
+      true,
+    );
+  });
+
+  it("Plan 02.1-15: source=[A] (single-element array) returns one row — eq() back-compat", async () => {
+    const { userId, sourceA, sourceB } = await seedThreeSources("ms-feed-2@test.local");
+    const eA = await createEvent(
+      userId,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Video A",
+        sourceId: sourceA,
+        externalId: "ms-A-2",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      userId,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "Video B",
+        sourceId: sourceB,
+        externalId: "ms-B-2",
+      },
+      "127.0.0.1",
+    );
+
+    const page = await listFeedPage(userId, { source: [sourceA] }, null);
+    expect(page.rows).toHaveLength(1);
+    expect(page.rows[0]!.id).toBe(eA.id);
+  });
+
+  it("Plan 02.1-15: source='A' (legacy bare string) preserves Phase 2 callers", async () => {
+    const { userId, sourceA, sourceB } = await seedThreeSources("ms-feed-3@test.local");
+    const eA = await createEvent(
+      userId,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Video A",
+        sourceId: sourceA,
+        externalId: "ms-A-3",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      userId,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "Video B",
+        sourceId: sourceB,
+        externalId: "ms-B-3",
+      },
+      "127.0.0.1",
+    );
+
+    const page = await listFeedPage(userId, { source: sourceA }, null);
+    expect(page.rows).toHaveLength(1);
+    expect(page.rows[0]!.id).toBe(eA.id);
+  });
+
+  it("Plan 02.1-15: source=[] (empty array) is treated as no filter — returns all rows", async () => {
+    const { userId, sourceA, sourceB, sourceC } =
+      await seedThreeSources("ms-feed-4@test.local");
+    await createEvent(
+      userId,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Video A",
+        sourceId: sourceA,
+        externalId: "ms-A-4",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      userId,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "Video B",
+        sourceId: sourceB,
+        externalId: "ms-B-4",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      userId,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-03T10:00:00Z"),
+        title: "Video C",
+        sourceId: sourceC,
+        externalId: "ms-C-4",
+      },
+      "127.0.0.1",
+    );
+
+    const page = await listFeedPage(userId, { source: [] }, null);
+    expect(page.rows).toHaveLength(3);
+  });
+
+  it("Plan 02.1-15: AND-across-axes — source=[A,B] AND kind=[youtube_video]", async () => {
+    const { userId, sourceA, sourceB } = await seedThreeSources("ms-feed-5@test.local");
+    // Mixed kinds: A has a youtube_video AND a press; B has only youtube_video.
+    const aYt = await createEvent(
+      userId,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "A youtube",
+        sourceId: sourceA,
+        externalId: "ms-A-5-yt",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      userId,
+      {
+        kind: "press",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "A press",
+        sourceId: sourceA,
+      },
+      "127.0.0.1",
+    );
+    const bYt = await createEvent(
+      userId,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-03T10:00:00Z"),
+        title: "B youtube",
+        sourceId: sourceB,
+        externalId: "ms-B-5-yt",
+      },
+      "127.0.0.1",
+    );
+
+    const page = await listFeedPage(
+      userId,
+      { source: [sourceA, sourceB], kind: ["youtube_video"] },
+      null,
+    );
+    expect(page.rows).toHaveLength(2);
+    const ids = page.rows.map((r) => r.id);
+    expect(ids).toContain(aYt.id);
+    expect(ids).toContain(bYt.id);
+    expect(page.rows.every((r) => r.kind === "youtube_video")).toBe(true);
+  });
+
+  it("Plan 02.1-15: GET /api/events?source=A&source=B returns 200 + rows scoped to those 2 sources", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "ms-feed-http-1@test.local" });
+    const sourceA = uuidv7();
+    const sourceB = uuidv7();
+    const sourceC = uuidv7();
+    await db.insert(dataSources).values([
+      {
+        id: sourceA,
+        userId: u.id,
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/@http-A-${u.id.slice(0, 8)}`,
+        displayName: "Source A",
+        isOwnedByMe: true,
+        autoImport: true,
+      },
+      {
+        id: sourceB,
+        userId: u.id,
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/@http-B-${u.id.slice(0, 8)}`,
+        displayName: "Source B",
+        isOwnedByMe: true,
+        autoImport: true,
+      },
+      {
+        id: sourceC,
+        userId: u.id,
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/@http-C-${u.id.slice(0, 8)}`,
+        displayName: "Source C",
+        isOwnedByMe: true,
+        autoImport: true,
+      },
+    ]);
+    await createEvent(
+      u.id,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "A vid",
+        sourceId: sourceA,
+        externalId: "ms-http-A",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      u.id,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "B vid",
+        sourceId: sourceB,
+        externalId: "ms-http-B",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      u.id,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-03T10:00:00Z"),
+        title: "C vid",
+        sourceId: sourceC,
+        externalId: "ms-http-C",
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(`/api/events?source=${sourceA}&source=${sourceB}`, {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      rows: Array<{ sourceId: string | null }>;
+      nextCursor: string | null;
+    };
+    expect(body.rows).toHaveLength(2);
+    expect(body.rows.every((r) => r.sourceId === sourceA || r.sourceId === sourceB)).toBe(
+      true,
+    );
+  });
+
+  it("Plan 02.1-15: GET /api/events?source=A (single param) preserves single-value back-compat", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "ms-feed-http-2@test.local" });
+    const sourceA = uuidv7();
+    const sourceB = uuidv7();
+    await db.insert(dataSources).values([
+      {
+        id: sourceA,
+        userId: u.id,
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/@http2-A-${u.id.slice(0, 8)}`,
+        displayName: "Source A",
+        isOwnedByMe: true,
+        autoImport: true,
+      },
+      {
+        id: sourceB,
+        userId: u.id,
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/@http2-B-${u.id.slice(0, 8)}`,
+        displayName: "Source B",
+        isOwnedByMe: true,
+        autoImport: true,
+      },
+    ]);
+    await createEvent(
+      u.id,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "A vid",
+        sourceId: sourceA,
+        externalId: "ms-http2-A",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      u.id,
+      {
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "B vid",
+        sourceId: sourceB,
+        externalId: "ms-http2-B",
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(`/api/events?source=${sourceA}`, {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      rows: Array<{ sourceId: string | null }>;
+      nextCursor: string | null;
+    };
+    expect(body.rows).toHaveLength(1);
+    expect(body.rows[0]!.sourceId).toBe(sourceA);
+  });
+});
