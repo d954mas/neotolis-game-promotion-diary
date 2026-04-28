@@ -1,6 +1,10 @@
 import type { PageServerLoad } from "./$types.js";
 import { redirect } from "@sveltejs/kit";
-import { listFeedPage, type FeedFilters } from "$lib/server/services/events.js";
+import {
+  listFeedPage,
+  listDeletedEvents,
+  type FeedFilters,
+} from "$lib/server/services/events.js";
 import { listGames } from "$lib/server/services/games.js";
 import { listSources } from "$lib/server/services/data-sources.js";
 import { toEventDto, toGameDto, toDataSourceDto } from "$lib/server/dto.js";
@@ -62,10 +66,15 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   };
   const cursor = url.searchParams.get("cursor");
 
-  const [page, gameRows, sourceRows] = await Promise.all([
+  // Plan 02.1-14 (gap closure): listDeletedEvents joins the parallel fetch
+  // so the /feed page can render the soft-delete recovery panel below the
+  // CursorPager. retentionDays is forwarded from +layout.server.ts (the
+  // SOLE process.env reader path — CLAUDE.md / AGENTS.md hard rule).
+  const [page, gameRows, sourceRows, deletedRows] = await Promise.all([
     listFeedPage(userId, filters, cursor),
     listGames(userId),
     listSources(userId),
+    listDeletedEvents(userId),
   ]);
 
   return {
@@ -73,6 +82,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     nextCursor: page.nextCursor,
     games: gameRows.map(toGameDto),
     sources: sourceRows.map(toDataSourceDto),
+    deletedEvents: deletedRows.map(toEventDto),
     activeFilters: {
       source: filters.source,
       kind: filters.kind,

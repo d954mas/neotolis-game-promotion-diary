@@ -163,6 +163,11 @@
   "feed_row_edit_aria": "Edit event",
   "feed_row_delete_aria": "Delete event",
 
+  "feed_deleted_panel_toggle_show": "Show {count} deleted events (within {days} days)",
+  "feed_deleted_panel_toggle_hide": "Hide deleted events",
+  "feed_deleted_panel_restore_cta": "Restore",
+  "feed_deleted_panel_restore_aria": "Restore event",
+
   "feed_attach_no_games_inline": "No games yet — + Add a game",
 
   "badge_release_tba": "TBA",

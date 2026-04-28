@@ -23,6 +23,7 @@
   import FiltersSheet from "$lib/components/FiltersSheet.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import CursorPager from "$lib/components/CursorPager.svelte";
+  import DeletedEventsPanel from "$lib/components/DeletedEventsPanel.svelte";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
@@ -133,6 +134,16 @@
       onPrev={() => {}}
     />
   {/if}
+
+  <!-- Plan 02.1-14 (gap closure) — soft-delete recovery panel sits below
+       CursorPager. The component returns nothing when there are no recoverable
+       events, so it has zero footprint on the empty-feed and filtered-empty
+       branches above. -->
+  <DeletedEventsPanel
+    deletedEvents={data.deletedEvents}
+    retentionDays={data.retentionDays}
+    onChanged={() => invalidateAll()}
+  />
 
   {#if sheetOpen}
     <FiltersSheet
