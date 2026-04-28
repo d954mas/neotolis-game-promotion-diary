@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: PhaseGapsFound
-stopped_at: Phase 2.1 context gathered
-last_updated: "2026-04-28T09:42:02.800Z"
-last_activity: Phase 2 manual UAT complete — 20 todos surfaced (4 P0 architectural, 5 P0/P1 functional gaps, 4 polish, 2 Phase 4, 1 new milestone)
+status: Executing Phase 02.1
+stopped_at: Completed 02.1-02-PLAN.md
+last_updated: "2026-04-28T10:24:11.326Z"
+last_activity: 2026-04-28
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 21
-  completed_plans: 21
+  total_plans: 31
+  completed_plans: 22
 ---
 
 # Project State
@@ -20,13 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Replace messy Google Sheets / markdown files with a structured, secure, query-friendly diary so an indie developer can see — at a glance — which promotion actions actually moved the needle on wishlists and engagement.
-**Current focus:** Phase 02 — ingest-secrets-and-audit
+**Current focus:** Phase 02.1 — architecture-realignment
 
 ## Current Position
 
-Phase: 02 (ingest-secrets-and-audit) — GAPS FOUND (UAT complete)
-Plan: 11 of 11 (all executed; verdict gaps_found)
-Next: rework PROJECT.md + ROADMAP under data_sources/feed model, then plan Phase 2.1
+Phase: 02.1 (architecture-realignment) — EXECUTING
+Plan: 1 of 10
 
 ## Performance Metrics
 
@@ -67,6 +66,7 @@ Next: rework PROJECT.md + ROADMAP under data_sources/feed model, then plan Phase
 | Phase 02-ingest-secrets-and-audit P08 | 6m 41s | 2 tasks | 14 files |
 | Phase 02-ingest-secrets-and-audit P09 | 17m 55s | 3 tasks | 29 files |
 | Phase 02-ingest-secrets-and-audit P10 | 19m 50s | 2 tasks | 18 files |
+| Phase 02.1 P02 | 2m 30s | 1 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -154,6 +154,8 @@ Recent decisions affecting current work:
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-10: Plan 09's third theme test stub (cookie-wins reconciliation) flipped from it.skip → live it() exercising +layout.server.ts directly via synthetic event (not via app.request — SvelteKit handler is build-time-only); asserts both result.theme matches cookie AND DB row was updated
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-10: env-discipline grep (tests/unit/logger.test.ts) does not distinguish code from comments — initial Plan 10 comments mentioning literal 'process.env' to explain WHY the value is routed through layout tripped the test; rewrote to 'the Node env' / 'env vars via the Node global' (Rule 3 — blocking — fixes preserve educational intent without weakening the cross-cutting invariant)
 - [Phase 02-ingest-secrets-and-audit]: Plan 02-10: /accounts/youtube intentionally omits channel-level remove (consistent with Plan 02-08 not shipping DELETE /api/youtube-channels/:id — service layer has no removeChannel); per-game detach flow (DELETE /api/games/:gameId/youtube-channels/:channelId) shipped on game-detail page covers the user-facing 'remove' need
+- [Phase 02.1]: Plan 02.1-02: Wave 0 placeholder tests landed — 5 new files (4 integration + 1 browser) with 41 named-plan it.skip stubs covering SOURCES-01, SOURCES-02, FEED-01, INBOX-01, GAMES-04a (reframed); each it.skip prefixes 'Plan 02.1-NN:' so later waves grep + flip to live; vitest filtered to the 4 new integration files reports 41 skipped / 0 failed
+- [Phase 02.1]: Plan 02.1-02: parallel-executor commit hygiene pattern — use 'git commit -o <pathspec>...' to scope a plan's commit to its own files when sibling agents have pre-staged unrelated index entries (avoids absorbing their work into this plan's commit); recovered from one such race via 'git reset --soft HEAD~1' + targeted -o re-commit (commit 1dd40e1)
 
 ### Pending Todos
 
@@ -186,8 +188,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-28T09:42:02.796Z
-Last Activity: Phase 2 manual UAT complete — 20 todos surfaced (4 P0 architectural, 5 P0/P1 functional gaps, 4 polish, 2 Phase 4, 1 new milestone)
-Stopped at: Phase 2.1 context gathered
-Resume file: .planning/phases/02.1-architecture-realignment/02.1-CONTEXT.md
+Last session: 2026-04-28T10:24:10.112Z
+Last Activity: 2026-04-28
+Stopped at: Completed 02.1-02-PLAN.md
+Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
