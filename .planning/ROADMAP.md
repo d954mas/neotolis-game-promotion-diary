@@ -32,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Every endpoint refuses anonymous traffic (anonymous-401 integration test passes for every route in CI) and no public dashboard, share-link, or read-only viewer route exists
   4. Self-host CI smoke test passes on every PR: boots the image with minimal env, signs in via OAuth mock, asserts auth happy path + tenant scope holds + all three roles (app/worker/scheduler) dispatch correctly + no SaaS-only assumption leaked (this gate prevents parity rot from day one per PITFALLS P14/P20). *Phase 1 scope per user decision 2026-04-27: the literal "creates a game" clause is deferred to Phase 2 smoke and "runs a poll stub" to Phase 3 smoke.*
   5. The codebase carries an i18n-aware key-lookup structure (Paraglide compiled messages); adding a locale later requires only dropping a JSON file, not a refactor
-**Plans**: 10 plans
+**Plans**: 16 plans (10 original + 6 gap closure from UAT 2026-04-28)
 **Plan list**:
 - [x] 01-01-PLAN.md — Bootstrap pinned deps + ESLint/Prettier/tsconfig + zod env + Pino redaction + UUIDv7 helper
 - [x] 01-02-PLAN.md — Wave 0 test scaffolding (vitest split, Wave 0 placeholder tests) + Dockerfile + GitHub Actions CI skeleton
@@ -88,7 +88,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   6. Cross-tenant + anonymous-401 invariants extend to `/api/sources`, `/api/events`, `/feed` and `/sources` SvelteKit loaders; `eslint-plugin-tenant-scope/no-unfiltered-tenant-query` covers the renamed `data_sources` and the extended `events` table; `MUST_BE_PROTECTED` allowlist gains the new routes
   7. UI polish bundled because cheap to land alongside the rebuild: `/settings` active sessions list, `/keys/steam` empty-state copy fix (no fictitious manual-wishlist mention), event delete confirm dialog, AppHeader avatar+email; theme toggle moved out of AppHeader to `/settings`
   8. Phase 2.1 smoke extension: CI self-host smoke test asserts the unified flow end-to-end — register a YouTube `data_source`, paste a YouTube URL, see the event in `/feed` with `source_id=NULL`, attach to a game, verify it appears in `/games/[id]` curated view; cross-tenant matrix extends to `/api/sources` + `/api/events`
-**Plans**: 10 plans
+**Plans**: 16 plans (10 original + 6 gap closure from UAT 2026-04-28)
 **Plan list**:
 - [x] 02.1-01-PLAN.md — Wave 0: single new baseline migration (Phase 1+2 collapsed) + final 2.1 schema modules + AUDIT_ACTIONS rename + ESLint TENANT_TABLES update
 - [x] 02.1-02-PLAN.md — Wave 0: 5 new placeholder test files (data-sources, feed, inbox, events-attach, browser feed-360) with named-plan it.skip per Phase 1+2 Wave 0 pattern
@@ -100,6 +100,12 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 02.1-08-PLAN.md — Wave 3: /sources + /sources/new + SourceRow + SourceKindIcon + Nav update + /accounts/youtube + ChannelRow deletion
 - [x] 02.1-09-PLAN.md — Wave 3: /games/[id] rebuild (RenameInline + AddSteamListingForm + MonthHeader + curated FeedRows) + /events/new + /events/[id] stub + Settings polish (sessions list, theme blurb, ThemeToggle relocation) + AppHeader UserChip + /keys/steam empty-state copy fix + /events list deletion
 - [ ] 02.1-10-PLAN.md — Wave 4: smoke extension (Phase 2.1 unified flow + cross-tenant probes per CONTEXT D-11) + manual UAT checkpoint + VALIDATION.md sign-off
+- [ ] 02.1-11-PLAN.md — Gap closure Wave 1: `/audit` runtime crash fix (drop dead `item.*` Paraglide refs in ActionFilter + AuditRow) + render regression test (Gaps 1 + 11)
+- [ ] 02.1-12-PLAN.md — Gap closure Wave 1: forward-only migration `0001_add_post_kind` adds `post` event kind (first migration after 2.1 baseline collapse) + service / route / KindIcon / FilterChips / FiltersSheet / events-new picker (Gap 12)
+- [ ] 02.1-13-PLAN.md — Gap closure Wave 1: /events/new Today/Yesterday quick buttons + date-origin explainer (Gaps 7 + 8)
+- [ ] 02.1-14-PLAN.md — Gap closure Wave 2: soft-delete event recovery — restoreEvent + listDeletedEvents services + PATCH /api/events/:id/restore + GET /api/events/deleted + DeletedEventsPanel + `event.restored` audit verb + forward-only migration `0002_add_event_restored_audit_action` (Gap 2)
+- [ ] 02.1-15-PLAN.md — Gap closure Wave 2: filters restructure — multi-select source/kind/game (inArray) + DateRangeControl primary control + per-value chip dismissal + checkbox-list FiltersSheet + last-30-days default + ?all=1 opt-out (Gaps 4 + 9 + 10)
+- [ ] 02.1-16-PLAN.md — Gap closure Wave 3: FeedCard redesign with media thumbnails + formatFeedDate compact-relative buckets + KindIcon kind-label adjacency (Gap 6 path b) + paraglide.test.ts EXPECTED_KEYS snapshot refresh + 02.1-VALIDATION.md per-task map populated + Gap Closure Complete note (Gaps 3 + 5 + 6)
 **UI hint**: yes
 
 ### Phase 3: Polling Pipeline
@@ -174,7 +180,7 @@ Phases execute in numeric order: 1 → 2 → 2.1 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation | 10/10 | Complete | 2026-04-27 |
 | 2. Ingest, Secrets, and Audit | 11/11 | Gaps Found | 2026-04-28 (closure in 2.1) |
-| 2.1. Architecture Realignment (INSERTED) | 0/10 | Not started | - |
+| 2.1. Architecture Realignment (INSERTED) | 9/16 | In progress (Plan 10 UAT surfaced 12 gaps; Plans 11-16 close them) | - |
 | 3. Polling Pipeline | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
 | 5. Reddit Rules Cockpit | 0/TBD | Not started | - |
