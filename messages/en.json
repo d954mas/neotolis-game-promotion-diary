@@ -153,6 +153,10 @@
   "events_detail_phase4_heading": "Detail page lands in Phase 4",
   "events_detail_phase4_body": "Graphs and per-event metric history arrive in Phase 4 with VIZ-01 (LayerChart-driven event detail). For now, head back to your feed.",
 
+  "events_new_date_today": "Today",
+  "events_new_date_yesterday": "Yesterday",
+  "events_new_date_explainer": "The date defaults to today. Pick a different date manually for past conferences, talks, or backdated posts.",
+
   "feed_row_edit_aria": "Edit event",
   "feed_row_delete_aria": "Delete event",
 

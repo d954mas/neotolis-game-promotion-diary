@@ -71,3 +71,13 @@ the current plan; the listed plan / phase owns the fix.
   service files they belong to.
 - **Out of scope for Plan 02.1-03:** confirmed (Rule 4 boundary —
   pre-existing failures in unrelated files are out of scope).
+
+## From Plan 02.1-13
+
+### `tests/unit/paraglide.test.ts` keyset snapshot — 3 new keys for /events/new UX
+
+- **Discovered during:** Plan 02.1-13 Task 1 (Gap 7 + 8 closure).
+- **Symptom:** EXPECTED_KEYS hard-coded list does not include `events_new_date_today`, `events_new_date_yesterday`, or `events_new_date_explainer`; the snapshot test will fail until refreshed.
+- **Why deferred:** consistent with Plans 02.1-01 / 02.1-12; the LAST gap-closure plan (02.1-16) refreshes the alphabetical snapshot covering all additions in one commit.
+- **Owner:** Plan 02.1-16.
+- **Out of scope for Plan 02.1-13:** confirmed.
