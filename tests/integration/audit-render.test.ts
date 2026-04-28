@@ -9,7 +9,7 @@ import AuditRow from "../../src/lib/components/AuditRow.svelte";
 import { AUDIT_ACTIONS } from "../../src/lib/server/audit/actions.js";
 
 describe("/audit render-time guard (Gap 1 + Gap 11 — Plan 02.1-11)", () => {
-  it("ActionFilter renders one option per AUDIT_ACTIONS value plus 'all' (20 total)", () => {
+  it("ActionFilter renders one option per AUDIT_ACTIONS value plus 'all' (21 total)", () => {
     const out = render(ActionFilter, {
       props: {
         value: "all",
@@ -17,11 +17,12 @@ describe("/audit render-time guard (Gap 1 + Gap 11 — Plan 02.1-11)", () => {
       },
     });
 
-    // Count <option ... > occurrences in the rendered HTML. 1 "all" + 19
-    // AUDIT_ACTIONS = 20 total. Counting via substring is robust against
-    // attribute reordering by the renderer.
+    // Count <option ... > occurrences in the rendered HTML. Plan 02.1-14
+    // gap closure adds `event.restored` to AUDIT_ACTIONS (the 20th entry);
+    // total = 1 "all" + 20 AUDIT_ACTIONS = 21. Counting via substring is
+    // robust against attribute reordering by the renderer.
     const optionCount = (out.body.match(/<option/g) ?? []).length;
-    expect(optionCount).toBe(20);
+    expect(optionCount).toBe(21);
   });
 
   it("AuditRow renders a non-fallback chip label for every AUDIT_ACTIONS value", () => {

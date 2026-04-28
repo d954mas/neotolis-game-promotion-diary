@@ -59,11 +59,14 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     "/api/sources",
     "/api/sources/:id",
     "/api/sources/:id/restore",
-    // Phase 2 + 2.1 — events (extended with feed + attach + dismiss-inbox)
+    // Phase 2 + 2.1 — events (extended with feed + attach + dismiss-inbox +
+    // Plan 02.1-14 gap closure: restore + deleted-list)
     "/api/events",
+    "/api/events/deleted",
     "/api/events/:id",
     "/api/events/:id/attach",
     "/api/events/:id/dismiss-inbox",
+    "/api/events/:id/restore",
     "/api/games/:gameId/events",
     // Phase 2 — audit
     "/api/audit",
@@ -183,6 +186,20 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
 
   it("Plan 02.1-06: anonymous PATCH /api/events/:id/dismiss-inbox returns 401 unauthorized", async () => {
     const res = await app.request("/api/events/fixture-id/dismiss-inbox", {
+      method: "PATCH",
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-14: anonymous GET /api/events/deleted returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events/deleted");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-14: anonymous PATCH /api/events/:id/restore returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events/fixture-id/restore", {
       method: "PATCH",
     });
     expect(res.status).toBe(401);
