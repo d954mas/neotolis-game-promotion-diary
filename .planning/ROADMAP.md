@@ -73,7 +73,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 **UI hint**: yes
 **Phase 2 closure note (2026-04-28)**: phase verdict `gaps_found`. UAT surfaced 4 P0 architectural redesigns (data_sources unified abstraction / 3-view feed-first IA / auto-import inbox flow / unified events table with author_is_me) plus 1 P0 functional gap (rename + add-Steam UI missing on `/games/[id]`). Closure delegated to Phase 2.1 (INSERTED below); see PROJECT.md "Architecture" section + 4 todos in `.planning/todos/pending/2026-04-28-{data-sources-unified-model,three-views-feed-sources-games,channel-to-inbox-auto-import-flow,rethink-items-vs-events-architecture}.md`.
 
-### Phase 2.1: Architecture Realignment (INSERTED — gap closure from Phase 2 UAT)
+### Phase 2.1: Architecture Realignment
+*INSERTED — gap closure from Phase 2 UAT (2026-04-28)*
+
 **Goal**: Replace per-platform channel tables and the tracked_items / events split with the unified `data_sources` + single `events` table model surfaced during Phase 2 UAT (2026-04-28). Ship the three primary views (`/feed`, `/sources`, `/games/[id]`) so the user has a daily workspace. Close the rename + add-Steam-listing UI gap on `/games/[id]`. Schema migration is destructive but cheap — zero production data (Phase 2 is dev-only).
 **Depends on**: Phase 2
 **Requirements**: SOURCES-01, SOURCES-02, FEED-01, INBOX-01 (new — see REQUIREMENTS.md "Phase 2.1 Realignment Additions"); reframes GAMES-04a + INGEST-02 + INGEST-03 + EVENTS-01 + EVENTS-02 + VIZ-01 under the unified events / data_sources / `/feed` model
@@ -86,7 +88,18 @@ Decimal phases appear between their surrounding integers in numeric order.
   6. Cross-tenant + anonymous-401 invariants extend to `/api/sources`, `/api/events`, `/feed` and `/sources` SvelteKit loaders; `eslint-plugin-tenant-scope/no-unfiltered-tenant-query` covers the renamed `data_sources` and the extended `events` table; `MUST_BE_PROTECTED` allowlist gains the new routes
   7. UI polish bundled because cheap to land alongside the rebuild: `/settings` active sessions list, `/keys/steam` empty-state copy fix (no fictitious manual-wishlist mention), event delete confirm dialog, AppHeader avatar+email; theme toggle moved out of AppHeader to `/settings`
   8. Phase 2.1 smoke extension: CI self-host smoke test asserts the unified flow end-to-end — register a YouTube `data_source`, paste a YouTube URL, see the event in `/feed` with `source_id=NULL`, attach to a game, verify it appears in `/games/[id]` curated view; cross-tenant matrix extends to `/api/sources` + `/api/events`
-**Plans**: TBD (planned via `/gsd:plan-phase 2.1`)
+**Plans**: 10 plans
+**Plan list**:
+- [ ] 02.1-01-PLAN.md — Wave 0: single new baseline migration (Phase 1+2 collapsed) + final 2.1 schema modules + AUDIT_ACTIONS rename + ESLint TENANT_TABLES update
+- [ ] 02.1-02-PLAN.md — Wave 0: 5 new placeholder test files (data-sources, feed, inbox, events-attach, browser feed-360) with named-plan it.skip per Phase 1+2 Wave 0 pattern
+- [ ] 02.1-03-PLAN.md — Wave 0: ~53 new Paraglide keys (UI-SPEC Copywriting Contract) + extended keyset snapshot test + DataSourceAdapter interface + youtube_channel STUB
+- [ ] 02.1-04-PLAN.md — Wave 1: data_sources service (CRUD + soft-delete + restore + toggle + findSourceByAuthorUrl) + toDataSourceDto + extended toEventDto + Phase 2 youtube-channels deletion
+- [ ] 02.1-05-PLAN.md — Wave 1: unified events service (listFeedPage + attachToGame + dismissFromInbox + extended createEvent/createEventFromPaste) + ingest rewrite + items-youtube deletion
+- [ ] 02.1-06-PLAN.md — Wave 2: /api/sources router + /api/events extension (feed + attach + dismiss-inbox) + Hono app composition + anonymous-401 + cross-tenant matrix sweeps
+- [ ] 02.1-07-PLAN.md — Wave 3: /feed page (default landing) + root redirect + 6 new feed components (FeedRow, AttachToGamePicker, FilterChips, FiltersSheet, InboxBadge, PollingBadge) + KindIcon extension
+- [ ] 02.1-08-PLAN.md — Wave 3: /sources + /sources/new + SourceRow + SourceKindIcon + Nav update + /accounts/youtube + ChannelRow deletion
+- [ ] 02.1-09-PLAN.md — Wave 3: /games/[id] rebuild (RenameInline + AddSteamListingForm + MonthHeader + curated FeedRows) + /events/new + /events/[id] stub + Settings polish (sessions list, theme blurb, ThemeToggle relocation) + AppHeader UserChip + /keys/steam empty-state copy fix + /events list deletion
+- [ ] 02.1-10-PLAN.md — Wave 4: smoke extension (Phase 2.1 unified flow + cross-tenant probes per CONTEXT D-11) + manual UAT checkpoint + VALIDATION.md sign-off
 **UI hint**: yes
 
 ### Phase 3: Polling Pipeline
@@ -161,7 +174,7 @@ Phases execute in numeric order: 1 → 2 → 2.1 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation | 10/10 | Complete | 2026-04-27 |
 | 2. Ingest, Secrets, and Audit | 11/11 | Gaps Found | 2026-04-28 (closure in 2.1) |
-| 2.1. Architecture Realignment (INSERTED) | 0/TBD | Not started | - |
+| 2.1. Architecture Realignment (INSERTED) | 0/10 | Not started | - |
 | 3. Polling Pipeline | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
 | 5. Reddit Rules Cockpit | 0/TBD | Not started | - |
