@@ -3,11 +3,11 @@
   //
   // Closes the Phase 2 P0 functional gap: rename via <RenameInline> +
   // add-Steam-listing via <AddSteamListingForm>. UI-SPEC §"/games/[id]
-  // rebuild" pivots from the Phase 2 panel-stack (header / listings /
-  // youtube-channels / tracked-items / events) to the unified-events
-  // curated layout (header / store-listings / events). The YouTube
-  // channels panel and tracked items panel are GONE — the unified
-  // `events` table carries youtube_video rows attached to the game now.
+  // rebuild" pivots from the Phase 2 multi-panel layout to the
+  // unified-events curated layout (header / store-listings / events).
+  // The Phase 2 per-platform-channel panel and the per-game tracked-video
+  // panel are GONE — the unified `events` table now carries kind
+  // youtube_video rows attached to the game.
   //
   // Curated events panel: rows are grouped by month (<MonthHeader>) and
   // rendered with the same row component the /feed page uses (<FeedRow>).
@@ -187,7 +187,7 @@
     <AddSteamListingForm gameId={game.id} />
   </section>
 
-  <!-- Curated events panel — replaces Phase 2 youtube-channels + tracked-items + events -->
+  <!-- Curated events panel — replaces the Phase 2 channels + items + events panel stack -->
   <section class="panel">
     <header class="panel-head">
       <h2>Events ({events.length})</h2>
