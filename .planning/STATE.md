@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02.1-01-PLAN.md
-last_updated: "2026-04-28T10:31:03.531Z"
+stopped_at: Completed 02.1-04-PLAN.md
+last_updated: "2026-04-28T10:51:25.361Z"
 last_activity: 2026-04-28
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 31
-  completed_plans: 24
+  completed_plans: 25
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 2 of 10
+Plan: 3 of 10
 
 ## Performance Metrics
 
@@ -69,6 +69,7 @@ Plan: 2 of 10
 | Phase 02.1 P02 | 2m 30s | 1 tasks | 5 files |
 | Phase 02.1-architecture-realignment P03 | 6min | 2 tasks | 5 files |
 | Phase 02.1-architecture-realignment P01 | ~10min | 2 tasks | 12 files |
+| Phase 02.1-architecture-realignment P04 | ~12min | 1 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -164,6 +165,9 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-01: events.game_id changed from NOT NULL CASCADE to NULL ON DELETE SET NULL — encodes inbox semantics (game_id IS NULL) and game-deletion-returns-events-to-inbox in one schema choice
 - [Phase 02.1-architecture-realignment]: Plan 02.1-01: Partial unique indexes for soft-delete (data_sources WHERE deleted_at IS NULL) and auto-import dedup (events WHERE source_id IS NOT NULL AND external_id IS NOT NULL) — soft-deleted handles can be re-added; manual paste rows are exempt from auto-import dedup
 - [Phase 02.1-architecture-realignment]: Plan 02.1-01: AUDIT_ACTIONS replaced wholesale (channel.* + item.* dropped; source.added/source.removed/source.toggled_auto_import/event.attached_to_game/event.dismissed_from_inbox added) — destructive baseline collapse means no ALTER TYPE ADD VALUE chain needed
+- [Phase 02.1-architecture-realignment]: Plan 02.1-04: tenant-scoped services/data-sources.ts replaces deleted youtube-channels service; FUNCTIONAL_KINDS={youtube_channel} gates non-functional kinds with AppError 'kind_not_yet_functional' (422); D-32 forensics ordering on softDeleteSource (audit BEFORE update — Phase 2 removeSteamKey precedent)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-04: isPgUniqueViolation walks DrizzleQueryError.cause chain (depth-bounded to 5) — drizzle-orm 0.45 wraps pg errors so a bare 'code' in err check is vacuous-pass; reusable pattern for any service translating 23505/23503 to AppError
+- [Phase 02.1-architecture-realignment]: Plan 02.1-04: toDataSourceDto strips userId at runtime (P3 behavioural test in tests/unit/dto.test.ts); toEventDto full extension deferred to Plan 02.1-05 per parallel-execution scope (Plan 04 lands minimum compile-only fix: kind union widened, gameId nullable)
 
 ### Pending Todos
 
@@ -196,8 +200,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-28T10:30:39.009Z
+Last session: 2026-04-28T10:51:25.357Z
 Last Activity: 2026-04-28
-Stopped at: Completed 02.1-01-PLAN.md
+Stopped at: Completed 02.1-04-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
