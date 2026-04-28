@@ -161,6 +161,29 @@ The user reached this through actual product use — they want a **promotion ana
 - ROADMAP.md Phase 3-6: re-evaluate against the generic polling worker model (probably simplifies, doesn't expand scope)
 - REQUIREMENTS.md: KEYS-01 (YouTube key) becomes "first concrete use of data_source kind=youtube_channel"; KEYS-02 (Reddit) becomes data_source kind=reddit_account; INGEST-01 (Reddit URL) becomes a manual-paste fallback for users without a registered Reddit data_source
 
+## Manual paste coexists with auto-import (clarification)
+
+User explicitly confirmed (2026-04-28): "И при этом я же могу добавить одно видео, без целого канала?"
+
+The model supports both ingestion paths cleanly via nullable `source_id`:
+
+**Path 1 — auto-import (Phase 3):**
+- Registered data_source → polling worker → events with `source_id = <data_source.id>`
+
+**Path 2 — manual paste (works in Phase 2 today):**
+- User pastes one URL → service calls oEmbed → creates event with `source_id = NULL`
+- INGEST-03 enrichment: oEmbed `author_url` is matched against user's registered data_sources to set `author_is_me`
+  - Match found → `author_is_me` inherited from the matched data_source
+  - No match → `author_is_me = false` (default to "blogger / not mine")
+- User can manually flip `author_is_me` from the event detail page (Phase 4)
+
+Three real-world scenarios, all clean:
+1. *"I want my own channel auto-tracked"* → register data_source(kind=youtube_channel, is_owned_by_me=true, auto_import=true) → all videos flow in
+2. *"I want to record one blogger review"* → just paste URL → event with source_id=NULL, author_is_me=false (default)
+3. *"I want to continuously track a specific blogger"* → register data_source(kind=youtube_channel, is_owned_by_me=false, auto_import=true) → all their videos flow in (with author_is_me=false)
+
+This makes data_sources a **convenience for high-volume ingestion**, not a requirement. The manual paste path stays first-class.
+
 ## Open questions for Phase 2.1 planning
 
 1. Should Phase 2.1 keep "/accounts/youtube" as the URL or rename to "/sources" now? (User-facing rename = bookmark breakage; internal-only = no impact yet — vote internal, since Phase 2 is dev-only data)
