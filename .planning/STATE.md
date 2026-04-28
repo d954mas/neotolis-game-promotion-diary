@@ -161,6 +161,7 @@ Recent decisions affecting current work:
 - 2026-04-28-dashboard-first-step-cta — dashboard needs prominent "add first game" CTA for empty state (caught in Phase 2 manual UAT)
 - 2026-04-28-redirect-dashboard-to-games — redirect "/" → "/games" until Phase 4 dashboard has real metrics (caught in Phase 2 manual UAT)
 - 2026-04-28-games-empty-state-misleading — /games empty state says "paste URL" but create flow asks only for title; reconcile (caught in Phase 2 manual UAT)
+- 2026-04-28-game-detail-missing-rename-and-add-steam — **P0 GAP**: /games/[id] missing rename + add-Steam-listing UI (backend ready, UI not composed) — blocks primary use case
 
 ### Blockers/Concerns
 
