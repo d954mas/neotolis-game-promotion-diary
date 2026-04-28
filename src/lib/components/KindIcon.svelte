@@ -1,21 +1,33 @@
 <script lang="ts">
-  // KindIcon — inline SVG dispatch on the 7 event kinds (UI-SPEC FLAG:
-  // "no icon library means every icon ships as inline SVG"; per-component
-  // file at executor's discretion is used here for tree-shake friendliness).
+  // KindIcon — inline SVG dispatch on the 9 event kinds (Phase 2.1 extends
+  // the Phase 2 7-kind dispatch with `youtube_video` and `reddit_post` per
+  // UI-SPEC §"Inline-SVG icon additions" + §"Component inventory" KindIcon
+  // MODIFY entry).
   //
-  // The 7 kinds match EventDto.kind from src/lib/server/dto.ts:
-  //   conference, talk, twitter_post, telegram_post, discord_drop, press, other
+  // The 9 kinds match EventDto.kind from src/lib/server/dto.ts (Plan 02.1-05
+  // toEventDto extension) and the eventKindEnum schema:
+  //   youtube_video, reddit_post, twitter_post, telegram_post, discord_drop,
+  //   conference, talk, press, other.
   //
-  // Icons are simple geometric forms (no brand marks — Twitter "x" / Telegram
-  // paper-plane would tie us to brand assets); the kind label below the icon
-  // is what users actually read. Icons live to give the row a visual anchor.
+  // Icon style contract (UI-SPEC — UNCHANGED from Phase 2): 24px viewBox,
+  // stroke="currentColor", stroke-width 2, round caps/joins, fill="none",
+  // colored via --color-text-muted. Geometric forms only — NO brand marks
+  // (a YouTube "play" rectangle is the closest visual; we render it as a
+  // generic play-button triangle inside a rounded rect, indistinguishable
+  // from a generic media icon).
+  //
+  // Accessibility (UI-SPEC §"Accessibility Floor delta"): aria-hidden="true"
+  // (decorative); the kind name is conveyed in adjacent text via the
+  // m.event_kind_label_*() Paraglide labels.
 
   type EventKind =
-    | "conference"
-    | "talk"
+    | "youtube_video"
+    | "reddit_post"
     | "twitter_post"
     | "telegram_post"
     | "discord_drop"
+    | "conference"
+    | "talk"
     | "press"
     | "other";
 
@@ -34,7 +46,15 @@
   stroke-linejoin="round"
   aria-hidden="true"
 >
-  {#if kind === "conference"}
+  {#if kind === "youtube_video"}
+    <!-- play-button triangle inside a rounded rect (generic media, not brand) -->
+    <rect x="2" y="5" width="20" height="14" rx="3" />
+    <path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none" />
+  {:else if kind === "reddit_post"}
+    <!-- speech bubble + upvote arrow (generic forum form, not brand) -->
+    <path d="M21 13a8 8 0 01-8 8 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7A8 8 0 1121 13z" />
+    <path d="M9 13l3-3 3 3" />
+  {:else if kind === "conference"}
     <!-- people / podium -->
     <circle cx="12" cy="7" r="3" />
     <path d="M5 21v-2a4 4 0 014-4h6a4 4 0 014 4v2" />
