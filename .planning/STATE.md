@@ -164,6 +164,7 @@ Recent decisions affecting current work:
 - 2026-04-28-game-detail-missing-rename-and-add-steam — **P0 GAP**: /games/[id] missing rename + add-Steam-listing UI (backend ready, UI not composed) — blocks primary use case
 - 2026-04-28-tracked-items-vs-events-unclear — /games/[id] "Tracked items" vs "Events" panels need helper text explaining the difference (caught in Phase 2 manual UAT)
 - 2026-04-28-rethink-items-vs-events-architecture — **STRATEGIC**: Phase 4 should re-evaluate tracked_items vs events split (unify? UI-only? keep split?) — driven by user confusion in Phase 2 UAT
+- 2026-04-28-phase4-video-detail-cards-with-charts — Phase 4 expectation: internal video detail page with view-count chart (caught in Phase 2 manual UAT)
 
 ### Blockers/Concerns
 
