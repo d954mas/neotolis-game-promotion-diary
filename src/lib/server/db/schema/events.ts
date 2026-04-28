@@ -39,6 +39,10 @@ import { uuidv7 } from "../../ids.js";
 //
 // Phase 2.1 adds `youtube_video` and `reddit_post` (both pollable kinds);
 // existing kinds are carried forward unchanged.
+//
+// Plan 02.1-12 (Gap 12): adds `post` — generic platform-agnostic kind for
+// Mastodon / LinkedIn / Bluesky / Threads / unmapped platforms beyond the
+// platform-tagged kinds. Forward-only enum extension via migration 0001.
 export const eventKindEnum = pgEnum("event_kind", [
   "youtube_video",
   "reddit_post",
@@ -49,6 +53,7 @@ export const eventKindEnum = pgEnum("event_kind", [
   "talk",
   "press",
   "other",
+  "post",
 ]);
 
 export const events = pgTable(
