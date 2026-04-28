@@ -21,24 +21,35 @@
 
   // Mirror AUDIT_ACTIONS from src/lib/server/audit/actions.ts. Duplicated
   // here so this client-side component doesn't reach into server modules.
-  // The i18n.test invariant catches any drift in label keys; the
-  // anonymous-401 + cross-tenant tests catch any drift in server values.
+  // The audit-render integration test (Plan 02.1-11) catches drift in this
+  // mirror by iterating AUDIT_ACTIONS and rendering this component; the
+  // i18n.test invariant catches drift in label keys.
   const options: ReadonlyArray<{ value: string; label: () => string }> = [
     { value: "all", label: () => m.audit_action_all() },
+    // Phase 1
     { value: "session.signin", label: () => m.audit_action_session_signin() },
     { value: "session.signout", label: () => m.audit_action_session_signout() },
     { value: "session.signout_all", label: () => m.audit_action_session_signout_all() },
+    { value: "user.signup", label: () => m.audit_action_user_signup() },
+    // Phase 2 — keys
     { value: "key.add", label: () => m.audit_action_key_add() },
     { value: "key.rotate", label: () => m.audit_action_key_rotate() },
     { value: "key.remove", label: () => m.audit_action_key_remove() },
+    // Phase 2 — games
     { value: "game.created", label: () => m.audit_action_game_created() },
     { value: "game.deleted", label: () => m.audit_action_game_deleted() },
     { value: "game.restored", label: () => m.audit_action_game_restored() },
-    { value: "item.created", label: () => m.audit_action_item_created() },
-    { value: "item.deleted", label: () => m.audit_action_item_deleted() },
+    // Phase 2.1 — events (incl. attach + dismiss)
     { value: "event.created", label: () => m.audit_action_event_created() },
     { value: "event.edited", label: () => m.audit_action_event_edited() },
     { value: "event.deleted", label: () => m.audit_action_event_deleted() },
+    { value: "event.attached_to_game", label: () => m.audit_action_event_attached_to_game() },
+    { value: "event.dismissed_from_inbox", label: () => m.audit_action_event_dismissed_from_inbox() },
+    // Phase 2.1 — data_sources
+    { value: "source.added", label: () => m.audit_action_source_added() },
+    { value: "source.removed", label: () => m.audit_action_source_removed() },
+    { value: "source.toggled_auto_import", label: () => m.audit_action_source_toggled_auto_import() },
+    // Phase 2 — theme
     { value: "theme.changed", label: () => m.audit_action_theme_changed() },
   ];
 </script>

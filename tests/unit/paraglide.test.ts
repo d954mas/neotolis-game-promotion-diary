@@ -78,6 +78,7 @@ describe("paraglide i18n (UX-04)", () => {
       "audit_action_source_removed",
       "audit_action_source_toggled_auto_import",
       "audit_action_theme_changed",
+      "audit_action_user_signup",
       "badge_purge_in_days",
       "badge_purge_in_days_warning",
       "badge_release_tba",
