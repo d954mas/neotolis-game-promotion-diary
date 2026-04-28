@@ -27,6 +27,21 @@ the current plan; the listed plan / phase owns the fix.
   refresh point.)
 - **Out of scope for Plan 02.1-01:** confirmed.
 
+## Resolved by Plan 02.1-06 (Wave 2 HTTP routes)
+
+### `src/lib/server/services/games.ts` — soft-delete cascade purged of retired schemas
+
+- **Fixed in:** Plan 02.1-06 commit `98dfc09` (Rule 3 blocking fix).
+- **Was:** services/games.ts imported `gameYoutubeChannels` +
+  `trackedYoutubeVideos` schemas (retired in Plan 02.1-01) and cascaded
+  soft-delete + restore against them. The dead imports prevented
+  `createApp()` from loading the gamesRoutes sub-router, which in turn
+  blocked the anonymous-401 sweep + cross-tenant matrix from running.
+- **Now:** the soft-delete cascade spans only `game_steam_listings` +
+  `events` (the surviving game-bound child tables). Per the unified-events
+  shape, the cross-tenant test runs and the `gamesRoutes` mount succeeds.
+- **Owner moved to:** Plan 02.1-06 (this plan); not Wave 3.
+
 ## From Plan 02.1-03
 
 ### Pre-existing tsc errors in `src/lib/server/services/*` and `tests/integration/*`
