@@ -1,67 +1,114 @@
 ---
 created: 2026-04-28T05:35:00.000Z
-title: ARCH: rethink tracked_items vs events split (one unified promotion log?)
+updated: 2026-04-28T05:50:00.000Z
+title: ARCH P0: unify tracked_items + events into single events table (user's proposal)
 area: planning
 files:
-  - src/lib/server/db/schema/tracked-youtube-videos.ts
-  - src/lib/server/db/schema/events.ts
-  - .planning/REQUIREMENTS.md (KEYS-01..02 deferred to Phase 3)
-  - .planning/PROJECT.md (Constraints — indie budget)
+  - src/lib/server/db/schema/tracked-youtube-videos.ts (DROP)
+  - src/lib/server/db/schema/events.ts (EXTEND with kind enum + author_is_me + url)
+  - src/lib/server/services/items-youtube.ts (FOLD INTO events.ts)
+  - src/lib/server/services/events.ts (extend)
+  - src/lib/server/http/routes/items-youtube.ts (DROP — events route covers all)
+  - src/lib/server/services/audit/actions.ts (item.* actions fold into event.*)
+  - .planning/REQUIREMENTS.md (INGEST-02..04 + EVENTS-01..03 reconcile)
+  - drizzle/0002_unify_events.sql (NEW migration)
 ---
 
 ## Problem
 
-During Phase 2 manual UAT (2026-04-28), the user asked:
-**"Так но я ведь могу захотеть трекать твиттер посты, или ютуб видео?"**
+During Phase 2 manual UAT (2026-04-28), the user surfaced two related observations and proposed a clean architectural simplification:
 
-This exposes a real architectural ambiguity in the data model. Current split:
+**Observation 1** — "Tracked items vs Events panels are confusing — what's the difference?"
+**Observation 2** — "Can I track Twitter posts? Or YouTube videos? Why is one auto-tracked and the other not?"
 
-- `tracked_youtube_videos` — YouTube videos with auto-pulled metadata (Phase 3 will add view-count polling via Data API v3 — fits in free quota)
-- `events` — all other promotion: `twitter_post | telegram_post | discord_drop | conference | talk | press | other` — manual log only, never auto-polled
+After my answer (split is driven by API cost: free YouTube vs paid Twitter), the user proposed a much simpler model:
 
-The split is **driven by API cost**, not by user mental model:
-- Twitter API became paid ($100+/month) in 2023 → outside "indie / zero-budget" constraint
-- Telegram public posts have no engagement API
-- Discord ditto
-- YouTube Data API v3: free tier with 10k units/day → batched videos.list call ~50× quota saving (per Phase 3 spike)
+> **"Все это события. Просто есть события где автор я, мое видео. И где автор не я блоггер. И так со всеми источниками данных. И тогда например конференция, доклад, просто не трекаем."**
 
-So the user sees two panels that look semantically equivalent ("things I did about my game") but are split by an invisible technical reason.
+In English: **everything is an event. The dimension that matters is "author = me vs author = blogger". Polling/auto-stats apply only to the kinds where we have a free adapter (currently YouTube). Conferences and talks are events with no auto-stats, period.**
 
-## The strategic question
+This nails the fundamental mismatch in the current Phase 2 schema:
 
-Three possible architectures going forward:
+- We split `tracked_youtube_videos` from `events` because **we** thought "things we can poll" vs "things we can't" was the natural division
+- The **user** thinks "promotion activity I did" is the natural division — and the dimension that matters is "author = me" vs "author = blogger"
+- The polling capability is a **technical attribute of the kind**, not a categorical division at the data-model level
 
-### Option A — keep current split (data model = "auto-trackable" vs "manual log")
-- Pro: clean separation; Phase 3 polling worker only touches `tracked_youtube_videos`
-- Pro: Phase 4 charts can clearly distinguish "things we have view counts for" vs "things we just logged"
-- Con: invisible to user; needs UX explanation work (already captured in todo `2026-04-28-tracked-items-vs-events-unclear`)
-- Con: extending to a 4th platform requires either schema split (yet another table) OR a polymorphic events.metadata column
+## Proposed schema (user's model)
 
-### Option B — unify into one `promotion_log` table
-- Single table with `kind`, `url`, `metadata jsonb` — both items and events become rows
-- Per-kind `auto_polled` flag drives which rows the Phase 3 worker picks up
-- Pro: matches user mental model ("everything I did, in one place")
-- Pro: trivial to add new platforms (just a new `kind` enum value + maybe a poll adapter)
-- Con: existing Phase 2 schema needs migration (cleanup of 2 tables → 1) — would invalidate `INGEST-03` is_own auto-decision logic that lives on `tracked_youtube_videos`
-- Con: queries for "videos only" (Phase 4 charts) need a `WHERE kind LIKE 'youtube_%'` filter — slower than dedicated table
+Single `events` table:
 
-### Option C — keep tables separate but UNIFY UI
-- Keep `tracked_youtube_videos` and `events` as-is
-- Combine UI into a single "Promotion log" panel that lists both, sorted by date
-- Distinct row visuals (auto-stat indicator on YouTube rows, "manual" tag on events)
-- Pro: minimal schema churn
-- Pro: matches user mental model in UI without rewriting backend
-- Con: list query needs UNION across two tables — Phase 3 cursor pagination becomes more complex
+```sql
+events:
+  id              text PRIMARY KEY
+  user_id         text NOT NULL
+  game_id         text NOT NULL REFERENCES games(id)
+  kind            event_kind NOT NULL
+  author_is_me    boolean NOT NULL DEFAULT false   -- ← user's discriminator
+  url             text                              -- nullable: conferences/talks have no url
+  title           text NOT NULL
+  occurred_at     timestamptz NOT NULL
+  added_at        timestamptz NOT NULL DEFAULT now()
+  metadata        jsonb DEFAULT '{}'                -- e.g. youtube views snapshot, conference location
+  -- soft-delete + audit invariants from Phase 2 schema preserved
 
-### Recommendation
-- **Defer this decision to Phase 4 planning** when LayerChart wishlist-correlation work begins. That's the moment we'll know: do we need fast per-platform queries (favors A), or do we want a single unified timeline (favors B/C)?
-- For now: ship Phase 2 with current split + the cosmetic clarification in todo `2026-04-28-tracked-items-vs-events-unclear`
-- Add a **Phase 4 spike**: 1-day investigation of "what query shape does the wishlist-correlation chart need?" before committing to a refactor
+event_kind ENUM:
+  youtube_video       -- pollable (Phase 3 YouTube Data API)
+  twitter_post        -- not pollable (no free Twitter API)
+  telegram_post       -- not pollable
+  discord_drop        -- not pollable
+  reddit_post         -- pollable (Phase 3 Reddit OAuth) — INGEST-01 deferred
+  conference          -- not pollable (no API)
+  talk                -- not pollable (no API)
+  press               -- not pollable (could scrape but out of scope)
+  other               -- not pollable
+```
 
-## Constraints to honor in any direction
+**Polling worker (Phase 3):** `WHERE kind IN ('youtube_video', 'reddit_post') AND url IS NOT NULL` — clean conditional, no table split needed.
 
-- "Indie budget" — no paid Twitter API in v1
-- "SaaS = self-host parity" — schema migration must work for both
-- Existing Phase 2 audit-log entries reference `events.id` and `tracked_youtube_videos.id` — any unification needs to handle audit traceability
+**INGEST-03 own/blogger detection:** moves to setting `author_is_me = true | false` on YouTube event creation, based on `findOwnChannelByHandle(oembed.author_url)`.
 
-Owner: Phase 4 planner. Add to Phase 4 RESEARCH.md once that phase opens.
+## Why now (not Phase 4)
+
+The strategic todo I previously wrote (and replaced with this version) said "defer to Phase 4". **Wrong call** — the user is right that NOW is the cheapest time:
+
+- Phase 2 just shipped, **zero production data** (one test game + one test event in dev DB only)
+- Migrating Phase 2 schema → unified schema = simple destructive `DROP TABLE tracked_youtube_videos` + extend `events` (no data preservation needed)
+- Phase 3 polling worker hasn't been written yet — designing it against the unified schema is cheaper than writing it twice
+- Audit log entries reference both tables — migrating cleanup is a one-time cost
+- Every additional Phase makes this refactor more expensive
+
+## Phase 2.1 (gap closure) scope
+
+This todo + the existing P0 gap (rename + add Steam UI) + any other functional gaps from continuing UAT all roll into Phase 2.1. Suggested wave breakdown:
+
+**Wave A (schema + data layer):**
+1. Drop `tracked_youtube_videos` table; extend `events` table; new migration `0002_unify_events.sql`
+2. Update `event_kind` enum to add `youtube_video` (and `reddit_post` for forward-compat)
+3. Add `author_is_me` boolean column on `events`
+4. Update audit actions enum: `item.add` / `item.remove` fold into `event.add` / `event.remove`
+
+**Wave B (service + route layer):**
+5. Fold `items-youtube.ts` service into `events.ts` (parseIngestUrl already routes to the right kind)
+6. Drop `items-youtube.ts` HTTP route; events route handles all kinds
+7. Update INGEST-03 logic: `findOwnChannelByHandle` sets `author_is_me` instead of separate `is_own` column
+
+**Wave C (UI):**
+8. Drop "Tracked items" panel on `/games/[id]`; rename "Events" panel to "Promotion log" (or keep "Events")
+9. Filter chips in panel: "Mine only / Others only / All", "Pollable only", per-kind filter
+10. PasteBox accepts any supported URL kind, routes via parseIngestUrl
+
+**Wave D (other gaps):**
+11. Rename UI on /games/[id]
+12. Add Steam listing UI on /games/[id]
+13. (other UAT findings)
+
+**Wave E (smoke + verify):**
+14. Smoke test extends to assert unified events flow
+15. Re-run Nyquist coverage check
+
+## Risk
+
+- This is a P0 architectural change. Plan checker should flag if anything in current Phase 2 makes assumptions that the unified model breaks (audit invariants, cursor pagination, anonymous-401 sweep).
+- Constraint check: must hold "SaaS = self-host parity" after migration. Migration must work for both modes.
+
+Owner: Phase 2.1 gap closure. **Block Phase 2 verifier from declaring `passed`** — surface this as `gaps_found` so the next step is `/gsd:plan-phase 2.1`.
