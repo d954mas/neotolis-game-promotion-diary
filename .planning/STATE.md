@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Plan 02.1-10 Task 1 complete; awaiting Task 2 manual UAT checkpoint
-last_updated: "2026-04-28T11:38:25.727Z"
+stopped_at: Completed 02.1-15-PLAN.md (multi-select feed filters + DateRangeControl + last-30-days default)
+last_updated: "2026-04-28T15:29:41.938Z"
 last_activity: 2026-04-28
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 31
-  completed_plans: 30
+  total_plans: 37
+  completed_plans: 34
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 9 of 10
+Plan: 3 of 16
 
 ## Performance Metrics
 
@@ -75,6 +75,10 @@ Plan: 9 of 10
 | Phase 02.1 P08 | 13min | 1 tasks | 14 files |
 | Phase 02.1 P07 | 14min | 2 tasks | 14 files |
 | Phase 02.1 P09 | ~28min | 2 tasks | 20 files |
+| Phase 02.1-architecture-realignment P12 | ~7min | 2 tasks | 18 files |
+| Phase 02.1-architecture-realignment P11 | 37min | 1 tasks | 5 files |
+| Phase 02.1-architecture-realignment P14 | 30min | 3 tasks | 15 files |
+| Phase 02.1-architecture-realignment P15 | 30min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -186,6 +190,14 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-09: AppHeader retains the unused 'theme' prop (Phase 4 cleanup can drop) — removing now would force a +layout.svelte signature change for no functional benefit. UserChip's 480px email-visibility breakpoint is hard-coded per UI-SPEC FLAG (the token would be premature).
 - [Phase 02.1-architecture-realignment]: Plan 02.1-09: Task 1 work absorbed by Plan 07's commit e1f8435 due to a parallel-staging race (Plan 02.1-02 deviation pattern). Per-plan atomic-commit invariant broken; wave-level outcome correct. Verifier MUST account for Task 1 living at e1f8435, not under a Plan 09 hash.
 - [Phase 02.1-architecture-realignment]: Plan 02.1-09: sessions service extended with listSessions(userId) + deleteSessionById(userId, id); both follow Pattern 1 (tenant scope) + cross-tenant 404 via NotFoundError. Phase 2's invalidateSession(id) (no userId scope) left intact for the sign-out hook.
+- [Phase 02.1-architecture-realignment]: [Plan 02.1-12]: Forward-only migration discipline resumes — drizzle/0001_add_post_kind.sql is the FIRST migration after the Phase 2.1 baseline collapse (DV-2 exception scoped to baseline only)
+- [Phase 02.1-architecture-realignment]: [Plan 02.1-12]: event_kind pgEnum gains 'post' (10 values total); Pitfall 6 mirror still holds across schema/service/zod/DTO; 4 Svelte-local EventKind unions extended (Rule 3) to keep TS narrowing in lock-step
+- [Phase 02.1-architecture-realignment]: Plan 02.1-11: closed VERIFICATION Gap 1 (P0 /audit runtime crash on m.audit_action_item_*) + Gap 11 (P1 render regression guard) — ActionFilter+AuditRow realigned with 19-action AUDIT_ACTIONS + new tests/integration/audit-render.test.ts asserts every value renders without throw. Rule 3 deviation: added missing audit_action_user_signup key to messages/en.json (Plan 02.1-03 baseline collapse missed it).
+- [Phase 02.1-architecture-realignment]: Plan 02.1-14: Audit fires AFTER restore UPDATE succeeds (not BEFORE) — restore is non-destructive; cross-tenant NotFoundError must NOT generate misleading audit. The Phase 2 forensics-BEFORE pattern (removeSteamKey, softDeleteSource) is reserved for security-relevant DESTRUCTIVE actions
+- [Phase 02.1-architecture-realignment]: Plan 02.1-14: GET /api/events/deleted registered BEFORE GET /api/events/:id in routes/events.ts (Hono first-match-wins path-precedence; the parametric :id would otherwise consume the literal 'deleted' segment)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-14: DeletedEventsPanel renders nothing when deletedEvents.length===0 — /feed gains zero visual footprint when there's nothing recoverable. Empty-state branches above CursorPager are unaware of the panel
+- [Phase 02.1-architecture-realignment]: Plan 02.1-14: retentionDays plumbing reuses Plan 02-10's +layout.server.ts → data.retentionDays pass-through; no new process.env reader added (Phase 1 D-14 invariant preserved)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-15: FeedFilters extended with string|string[] union (back-compat preserved); pushAxis helper collapses to eq()/inArray() based on shape — empty array == no filter (multi-select with zero checkboxes returns ALL rows, not zero); URL convention is repeated params (?source=A&source=B) per URLSearchParams.getAll convention; default last-30-days lives in /feed/+page.server.ts (UI affordance), not in /api/events; DateRangeControl is a separate component above FilterChips (not absorbed into FiltersSheet) per standard analytics-feed pattern; clearAll navigates to /feed?all=1 so the 30-day default doesn't immediately re-apply
 
 ### Pending Todos
 
@@ -218,8 +230,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-28T11:38:25.722Z
+Last session: 2026-04-28T15:29:30.092Z
 Last Activity: 2026-04-28
-Stopped at: Plan 02.1-10 Task 1 complete; awaiting Task 2 manual UAT checkpoint
+Stopped at: Completed 02.1-15-PLAN.md (multi-select feed filters + DateRangeControl + last-30-days default)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
