@@ -31,6 +31,8 @@
         return m.audit_action_session_signout();
       case "session.signout_all":
         return m.audit_action_session_signout_all();
+      case "user.signup":
+        return m.audit_action_user_signup();
       case "key.add":
         return m.audit_action_key_add();
       case "key.rotate":
@@ -43,16 +45,22 @@
         return m.audit_action_game_deleted();
       case "game.restored":
         return m.audit_action_game_restored();
-      case "item.created":
-        return m.audit_action_item_created();
-      case "item.deleted":
-        return m.audit_action_item_deleted();
       case "event.created":
         return m.audit_action_event_created();
       case "event.edited":
         return m.audit_action_event_edited();
       case "event.deleted":
         return m.audit_action_event_deleted();
+      case "event.attached_to_game":
+        return m.audit_action_event_attached_to_game();
+      case "event.dismissed_from_inbox":
+        return m.audit_action_event_dismissed_from_inbox();
+      case "source.added":
+        return m.audit_action_source_added();
+      case "source.removed":
+        return m.audit_action_source_removed();
+      case "source.toggled_auto_import":
+        return m.audit_action_source_toggled_auto_import();
       case "theme.changed":
         return m.audit_action_theme_changed();
       default:

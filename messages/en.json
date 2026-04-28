@@ -56,6 +56,7 @@
   "audit_action_session_signin": "Sign-in",
   "audit_action_session_signout": "Sign-out",
   "audit_action_session_signout_all": "Sign-out (all devices)",
+  "audit_action_user_signup": "Account created",
   "audit_action_key_add": "API key added",
   "audit_action_key_rotate": "API key replaced",
   "audit_action_key_remove": "API key removed",

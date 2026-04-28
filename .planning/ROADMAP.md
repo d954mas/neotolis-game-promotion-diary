@@ -100,7 +100,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 02.1-08-PLAN.md — Wave 3: /sources + /sources/new + SourceRow + SourceKindIcon + Nav update + /accounts/youtube + ChannelRow deletion
 - [x] 02.1-09-PLAN.md — Wave 3: /games/[id] rebuild (RenameInline + AddSteamListingForm + MonthHeader + curated FeedRows) + /events/new + /events/[id] stub + Settings polish (sessions list, theme blurb, ThemeToggle relocation) + AppHeader UserChip + /keys/steam empty-state copy fix + /events list deletion
 - [ ] 02.1-10-PLAN.md — Wave 4: smoke extension (Phase 2.1 unified flow + cross-tenant probes per CONTEXT D-11) + manual UAT checkpoint + VALIDATION.md sign-off
-- [ ] 02.1-11-PLAN.md — Gap closure Wave 1: `/audit` runtime crash fix (drop dead `item.*` Paraglide refs in ActionFilter + AuditRow) + render regression test (Gaps 1 + 11)
+- [x] 02.1-11-PLAN.md — Gap closure Wave 1: `/audit` runtime crash fix (drop dead `item.*` Paraglide refs in ActionFilter + AuditRow) + render regression test (Gaps 1 + 11)
 - [ ] 02.1-12-PLAN.md — Gap closure Wave 1: forward-only migration `0001_add_post_kind` adds `post` event kind (first migration after 2.1 baseline collapse) + service / route / KindIcon / FilterChips / FiltersSheet / events-new picker (Gap 12)
 - [ ] 02.1-13-PLAN.md — Gap closure Wave 1: /events/new Today/Yesterday quick buttons + date-origin explainer (Gaps 7 + 8)
 - [ ] 02.1-14-PLAN.md — Gap closure Wave 2: soft-delete event recovery — restoreEvent + listDeletedEvents services + PATCH /api/events/:id/restore + GET /api/events/deleted + DeletedEventsPanel + `event.restored` audit verb + forward-only migration `0002_add_event_restored_audit_action` (Gap 2)
