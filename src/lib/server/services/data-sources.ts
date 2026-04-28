@@ -16,8 +16,8 @@
 // NOT allowed in this file.
 //
 // Cross-tenant access throws `NotFoundError` (404, never 403) per AGENTS.md
-// Privacy invariant 2 + PRIV-01. `ForbiddenError` is reserved for Phase 6+
-// admin endpoints and MUST NEVER fire on tenant-owned resources.
+// Privacy invariant 2 + PRIV-01. The 403 error class is reserved for
+// Phase 6+ admin endpoints and MUST NEVER fire on tenant-owned resources.
 //
 // Soft-delete + RETENTION_DAYS (SOURCES-02): `softDeleteSource` sets
 // `deleted_at`; `restoreSource` clears it only when within

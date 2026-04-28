@@ -184,7 +184,8 @@ export function toGameSteamListingDto(r: SteamListingRow): GameSteamListingDto {
  *     not into `data_sources.metadata`.
  *   - deletedAt — soft-delete state surfaces to UI for the restore flow.
  *
- * Replaces the Phase 2 `toYoutubeChannelDto` projection.
+ * Replaces the Phase 2 per-platform youtube_channels projection retired in
+ * Plan 02.1-01 (the unified data_sources schema).
  */
 export interface DataSourceDto {
   id: string;
