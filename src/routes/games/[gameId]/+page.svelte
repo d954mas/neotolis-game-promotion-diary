@@ -37,7 +37,8 @@
     | "telegram_post"
     | "discord_drop"
     | "press"
-    | "other";
+    | "other"
+    | "post";
 
   type EventDtoLocal = {
     id: string;

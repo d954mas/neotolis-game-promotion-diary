@@ -92,6 +92,7 @@
   "event_kind_label_talk": "Talk",
   "event_kind_label_press": "Press mention",
   "event_kind_label_other": "Other",
+  "event_kind_label_post": "Post",
 
   "source_kind_label_youtube_channel": "YouTube channel",
   "source_kind_label_reddit_account": "Reddit account",

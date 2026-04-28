@@ -272,3 +272,32 @@ describe("Phase 2.1 baseline schema migration (Plan 02.1-01)", () => {
     }
   });
 });
+
+// Plan 02.1-12: forward-only migration `0001_add_post_kind` extends the
+// event_kind pgEnum with a generic platform-agnostic `post` value (Mastodon /
+// LinkedIn / Bluesky / Threads / unmapped). Resumes strict forward-only
+// migration discipline (CONTEXT D-04 / DV-2) — first migration after the 2.1
+// baseline collapse.
+describe("Phase 2.1 forward-only migrations (Plan 02.1-12)", () => {
+  beforeAll(async () => {
+    await runMigrations();
+  });
+
+  it("02.1-12: event_kind enum extended with 'post' (forward-only migration 0001 — first after baseline)", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const result = await pool.query<{ enumlabel: string }>(
+        `select enumlabel from pg_enum
+         where enumtypid = 'public.event_kind'::regtype
+         order by enumsortorder`,
+      );
+      const values = result.rows.map((r) => r.enumlabel);
+      expect(values).toContain("post");
+      expect(values).toContain("youtube_video");
+      expect(values).toContain("other");
+      expect(values).toHaveLength(10);
+    } finally {
+      await pool.end();
+    }
+  });
+});

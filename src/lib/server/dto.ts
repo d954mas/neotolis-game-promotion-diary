@@ -311,7 +311,8 @@ export interface EventDto {
     | "telegram_post"
     | "discord_drop"
     | "press"
-    | "other";
+    | "other"
+    | "post";
   authorIsMe: boolean;
   occurredAt: Date;
   title: string;

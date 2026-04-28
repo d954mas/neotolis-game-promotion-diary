@@ -29,7 +29,8 @@
     | "conference"
     | "talk"
     | "press"
-    | "other";
+    | "other"
+    | "post";
 
   let { kind, size = 20 }: { kind: EventKind; size?: number } = $props();
 </script>
@@ -82,6 +83,12 @@
     <line x1="7" y1="9" x2="17" y2="9" />
     <line x1="7" y1="13" x2="17" y2="13" />
     <line x1="7" y1="17" x2="13" y2="17" />
+  {:else if kind === "post"}
+    <!-- generic post: document/paper silhouette -->
+    <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+    <polyline points="14 3 14 9 20 9" />
+    <line x1="8" y1="13" x2="16" y2="13" />
+    <line x1="8" y1="17" x2="13" y2="17" />
   {:else}
     <!-- other / generic dot -->
     <circle cx="12" cy="12" r="9" />
