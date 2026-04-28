@@ -1,35 +1,33 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { parsePasteAndCreate } from "../../src/lib/server/services/ingest.js";
-import { createGame } from "../../src/lib/server/services/games.js";
-import {
-  createChannel,
-  toggleIsOwn as toggleChannelIsOwn,
-} from "../../src/lib/server/services/youtube-channels.js";
-import { toggleIsOwn as toggleItemIsOwn } from "../../src/lib/server/services/items-youtube.js";
 import { db } from "../../src/lib/server/db/client.js";
-import { trackedYoutubeVideos } from "../../src/lib/server/db/schema/tracked-youtube-videos.js";
 import { events } from "../../src/lib/server/db/schema/events.js";
+import { dataSources } from "../../src/lib/server/db/schema/data-sources.js";
+import { games } from "../../src/lib/server/db/schema/games.js";
 import * as YT from "../../src/lib/server/integrations/youtube-oembed.js";
 import * as TW from "../../src/lib/server/integrations/twitter-oembed.js";
+import { uuidv7 } from "../../src/lib/server/ids.js";
 import { seedUserDirectly } from "./helpers.js";
 
 /**
- * Plan 02-06 — INGEST-02..04 + Twitter/Telegram event create live tests.
+ * Phase 2.1 Wave 1B (Plan 02.1-05) — INGEST-02..04 reframed under unified events.
  *
- * The 8 placeholder it.skip stubs from Plan 02-01 are replaced with `it(...)`
- * bodies here. Names match exactly so Wave 0 traceability holds.
+ * The Phase 2 ingest path wrote a row to `tracked_youtube_videos`. Phase 2.1
+ * collapses that into ONE `events` row (kind=youtube_video) carrying source_id
+ * (NULL on no match) + author_is_me (false on no match). This test file is
+ * the contract: the items-youtube service is gone, and a YouTube paste
+ * produces exactly one events row.
  *
- * Mocking strategy: `vi.spyOn(YT, 'fetchYoutubeOembed')` and
- * `vi.spyOn(TW, 'fetchTwitterOembed')` against the imported namespaces.
- * ESM partial mocks via `vi.mock` are flaky on @sveltejs/kit + Vitest 4;
- * spyOn against `import * as` is the same pattern Plan 02-05 (Steam) used.
+ * Mocking strategy: vi.spyOn(YT, 'fetchYoutubeOembed') and the same against
+ * twitter-oembed. ESM partial mocks via vi.mock are flaky on @sveltejs/kit +
+ * Vitest 4; spyOn against `import * as` mirrors the Phase 2 precedent.
  *
- * D-19 (validate-first) verification: every test exercising a 422 / 502
- * failure path asserts ZERO rows in both `tracked_youtube_videos` and
- * `events` after the failure — the load-bearing INGEST-04 invariant.
+ * D-19 / AGENTS.md "validate-first INGEST" verification: every test exercising
+ * a 422 / 502 failure asserts ZERO rows in `events` after the failure — no
+ * half-write.
  */
-describe("URL ingest paste-box (INGEST-02..04, twitter/telegram event create)", () => {
+describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
   const ytSpy = vi.spyOn(YT, "fetchYoutubeOembed");
   const twSpy = vi.spyOn(TW, "fetchTwitterOembed");
   afterEach(() => {
@@ -37,7 +35,7 @@ describe("URL ingest paste-box (INGEST-02..04, twitter/telegram event create)", 
     twSpy.mockReset();
   });
 
-  it("02-06: INGEST-02 youtube paste creates tracked item with title", async () => {
+  it("INGEST-02: YouTube paste creates events row (kind=youtube_video, source_id=NULL on no match)", async () => {
     ytSpy.mockResolvedValue({
       kind: "ok",
       data: {
@@ -47,32 +45,49 @@ describe("URL ingest paste-box (INGEST-02..04, twitter/telegram event create)", 
         thumbnailUrl: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
       },
     });
-    const u = await seedUserDirectly({ email: "i1@test.local" });
-    const g = await createGame(u.id, { title: "G" }, "127.0.0.1");
+    const u = await seedUserDirectly({ email: "ing1@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
 
     const r = await parsePasteAndCreate(
       u.id,
-      g.id,
+      gameId,
       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
       "127.0.0.1",
     );
-    expect(r.kind).toBe("youtube_video_created");
+    expect(r.kind).toBe("event_created");
 
-    const rows = await db
-      .select()
-      .from(trackedYoutubeVideos)
-      .where(eq(trackedYoutubeVideos.userId, u.id));
+    const rows = await db.select().from(events).where(eq(events.userId, u.id));
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
+    expect(row.kind).toBe("youtube_video");
     expect(row.title).toBe("Never Gonna Give You Up");
-    expect(row.videoId).toBe("dQw4w9WgXcQ");
     expect(row.url).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
-    expect(row.authorUrl).toBe("https://www.youtube.com/@RickAstleyYT");
-    // No registered own-channel match → is_own=false (blogger coverage default).
-    expect(row.isOwn).toBe(false);
+    expect(row.externalId).toBe("dQw4w9WgXcQ");
+    // No registered data_source matches → source_id NULL, author_is_me false.
+    expect(row.sourceId).toBeNull();
+    expect(row.authorIsMe).toBe(false);
+    expect(row.gameId).toBe(gameId);
+    const meta = row.metadata as { author_url?: string; author_name?: string };
+    expect(meta.author_url).toBe("https://www.youtube.com/@RickAstleyYT");
+    expect(meta.author_name).toBe("Rick Astley");
   });
 
-  it("02-06: INGEST-03 is_own auto decision via youtube_channels match", async () => {
+  it("INGEST-03: YouTube paste with author_url matching registered data_source (is_owned_by_me=true) sets author_is_me=true and source_id=:source", async () => {
+    const u = await seedUserDirectly({ email: "ing2@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+    const sourceId = uuidv7();
+    await db.insert(dataSources).values({
+      id: sourceId,
+      userId: u.id,
+      kind: "youtube_channel",
+      handleUrl: "https://www.youtube.com/@MyOwn",
+      displayName: "My Own Channel",
+      isOwnedByMe: true,
+      autoImport: true,
+    });
+
     ytSpy.mockResolvedValue({
       kind: "ok",
       data: {
@@ -82,126 +97,135 @@ describe("URL ingest paste-box (INGEST-02..04, twitter/telegram event create)", 
         thumbnailUrl: "",
       },
     });
-    const u = await seedUserDirectly({ email: "i2@test.local" });
-    const g = await createGame(u.id, { title: "G" }, "127.0.0.1");
-    // Pre-register the user's own channel keyed on the same handle URL the
-    // oEmbed mock returns. INGEST-03 / D-21 / Pitfall 3 Option C: the
-    // ingest flow looks up youtube_channels WHERE handle_url = author_url
-    // AND is_own = true.
-    await createChannel(u.id, {
-      handleUrl: "https://www.youtube.com/@MyOwn",
-      isOwn: true,
-    });
 
     await parsePasteAndCreate(
       u.id,
-      g.id,
+      gameId,
       "https://www.youtube.com/watch?v=ABC12345678",
       "127.0.0.1",
     );
 
-    const [row] = await db
-      .select()
-      .from(trackedYoutubeVideos)
-      .where(eq(trackedYoutubeVideos.userId, u.id))
-      .limit(1);
-    expect(row!.isOwn).toBe(true);
-    expect(row!.authorUrl).toBe("https://www.youtube.com/@MyOwn");
+    const rows = await db.select().from(events).where(eq(events.userId, u.id));
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
+    expect(row.sourceId).toBe(sourceId);
+    expect(row.authorIsMe).toBe(true);
+    expect(row.kind).toBe("youtube_video");
   });
 
-  it("02-06: INGEST-03 toggle is_own", async () => {
+  it("INGEST-03: YouTube paste with no author_url match keeps author_is_me=false and source_id=NULL", async () => {
+    ytSpy.mockResolvedValue({
+      kind: "ok",
+      data: {
+        title: "Some blogger",
+        authorName: "Blogger",
+        authorUrl: "https://www.youtube.com/@SomeBlogger",
+        thumbnailUrl: "",
+      },
+    });
+    const u = await seedUserDirectly({ email: "ing3@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+    // Pre-register a DIFFERENT source — should NOT match.
+    await db.insert(dataSources).values({
+      id: uuidv7(),
+      userId: u.id,
+      kind: "youtube_channel",
+      handleUrl: "https://www.youtube.com/@MyOwn",
+      isOwnedByMe: true,
+      autoImport: true,
+    });
+
+    await parsePasteAndCreate(
+      u.id,
+      gameId,
+      "https://www.youtube.com/watch?v=tog12345678",
+      "127.0.0.1",
+    );
+
+    const rows = await db.select().from(events).where(eq(events.userId, u.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.sourceId).toBeNull();
+    expect(rows[0]!.authorIsMe).toBe(false);
+  });
+
+  it("INGEST-03: YouTube paste with author_url matching a soft-deleted source does NOT inherit (deletedAt filter)", async () => {
     ytSpy.mockResolvedValue({
       kind: "ok",
       data: {
         title: "T",
         authorName: "A",
-        authorUrl: "https://www.youtube.com/@SomeBlogger",
+        authorUrl: "https://www.youtube.com/@DeadSource",
         thumbnailUrl: "",
       },
     });
-    const u = await seedUserDirectly({ email: "i3@test.local" });
-    const g = await createGame(u.id, { title: "G" }, "127.0.0.1");
-    // No own-channel pre-registered → ingest defaults is_own=false.
+    const u = await seedUserDirectly({ email: "ing3b@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+    await db.insert(dataSources).values({
+      id: uuidv7(),
+      userId: u.id,
+      kind: "youtube_channel",
+      handleUrl: "https://www.youtube.com/@DeadSource",
+      isOwnedByMe: true,
+      autoImport: true,
+      deletedAt: new Date(),
+    });
+
     await parsePasteAndCreate(
       u.id,
-      g.id,
-      "https://www.youtube.com/watch?v=tog12345678",
+      gameId,
+      "https://www.youtube.com/watch?v=ded12345678",
       "127.0.0.1",
     );
 
-    const [before] = await db
-      .select()
-      .from(trackedYoutubeVideos)
-      .where(eq(trackedYoutubeVideos.userId, u.id))
-      .limit(1);
-    expect(before!.isOwn).toBe(false);
-
-    // User flips the flag manually via the items-youtube service.
-    const updated = await toggleItemIsOwn(u.id, before!.id, true);
-    expect(updated.isOwn).toBe(true);
-
-    // And can flip it back.
-    const back = await toggleItemIsOwn(u.id, before!.id, false);
-    expect(back.isOwn).toBe(false);
-
-    // Sanity: the channel-level toggleIsOwn (different surface, same name)
-    // also exists for user-level channels — exercised in Plan 02-04 tests.
-    void toggleChannelIsOwn;
+    const rows = await db.select().from(events).where(eq(events.userId, u.id));
+    expect(rows[0]!.sourceId).toBeNull();
+    expect(rows[0]!.authorIsMe).toBe(false);
   });
 
-  it("02-06: INGEST-04 malformed URL rejects + no half-write", async () => {
-    const u = await seedUserDirectly({ email: "i4@test.local" });
-    const g = await createGame(u.id, { title: "G" }, "127.0.0.1");
+  it("INGEST-04: malformed URL returns 422 unsupported_url; NO row inserted (validate-first)", async () => {
+    const u = await seedUserDirectly({ email: "ing4@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
 
     await expect(
-      parsePasteAndCreate(u.id, g.id, "not-a-url", "127.0.0.1"),
+      parsePasteAndCreate(u.id, gameId, "not-a-url", "127.0.0.1"),
     ).rejects.toMatchObject({ status: 422, code: "unsupported_url" });
 
-    // D-19 invariant: NO rows in either table after the validation failure.
-    const tracked = await db
-      .select()
-      .from(trackedYoutubeVideos)
-      .where(eq(trackedYoutubeVideos.userId, u.id));
-    expect(tracked).toHaveLength(0);
-    const evs = await db.select().from(events).where(eq(events.userId, u.id));
-    expect(evs).toHaveLength(0);
+    const rows = await db.select().from(events).where(eq(events.userId, u.id));
+    expect(rows).toHaveLength(0);
   });
 
-  it("02-06: INGEST-04 oembed 5xx no row", async () => {
-    // W-6: 5xx is THROWN by fetchYoutubeOembed; orchestrator catches and
-    // rethrows as AppError 502 'youtube_oembed_unreachable'.
+  it("INGEST-04: oEmbed 5xx returns 502 youtube_oembed_unreachable; NO row inserted", async () => {
     ytSpy.mockRejectedValue(new Error("youtube_oembed_5xx"));
-    const u = await seedUserDirectly({ email: "i5@test.local" });
-    const g = await createGame(u.id, { title: "G" }, "127.0.0.1");
+    const u = await seedUserDirectly({ email: "ing5@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
 
     await expect(
       parsePasteAndCreate(
         u.id,
-        g.id,
+        gameId,
         "https://www.youtube.com/watch?v=ABC12345678",
         "127.0.0.1",
       ),
     ).rejects.toMatchObject({ status: 502, code: "youtube_oembed_unreachable" });
 
-    // D-19 invariant: NO row after a 502.
-    const tracked = await db
-      .select()
-      .from(trackedYoutubeVideos)
-      .where(eq(trackedYoutubeVideos.userId, u.id));
-    expect(tracked).toHaveLength(0);
+    const rows = await db.select().from(events).where(eq(events.userId, u.id));
+    expect(rows).toHaveLength(0);
   });
 
-  it("02-06: INGEST-04 oembed 404 unavailable no row", async () => {
-    // W-6: 404 (deleted / region-locked) maps to 422 youtube_unavailable
-    // with metadata.reason='unavailable'. No row.
+  it("INGEST-04: oEmbed 404 unavailable returns 422 youtube_unavailable; NO row inserted", async () => {
     ytSpy.mockResolvedValue({ kind: "unavailable" });
-    const u = await seedUserDirectly({ email: "i5b@test.local" });
-    const g = await createGame(u.id, { title: "G" }, "127.0.0.1");
+    const u = await seedUserDirectly({ email: "ing5b@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
 
     await expect(
       parsePasteAndCreate(
         u.id,
-        g.id,
+        gameId,
         "https://www.youtube.com/watch?v=ABC12345678",
         "127.0.0.1",
       ),
@@ -211,25 +235,41 @@ describe("URL ingest paste-box (INGEST-02..04, twitter/telegram event create)", 
       metadata: { reason: "unavailable" },
     });
 
-    const tracked = await db
-      .select()
-      .from(trackedYoutubeVideos)
-      .where(eq(trackedYoutubeVideos.userId, u.id));
-    expect(tracked).toHaveLength(0);
+    const rows = await db.select().from(events).where(eq(events.userId, u.id));
+    expect(rows).toHaveLength(0);
   });
 
-  it("02-06: twitter paste creates events row kind=twitter_post", async () => {
+  it("INGEST-04: Reddit paste returns 422 reddit_pending_phase3 — no row inserted (CONTEXT DV-7)", async () => {
+    const u = await seedUserDirectly({ email: "ing6@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+
+    await expect(
+      parsePasteAndCreate(
+        u.id,
+        gameId,
+        "https://www.reddit.com/r/IndieDev/comments/abc/foo/",
+        "127.0.0.1",
+      ),
+    ).rejects.toMatchObject({ status: 422, code: "reddit_pending_phase3" });
+
+    const rows = await db.select().from(events).where(eq(events.userId, u.id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("Twitter paste creates events row kind=twitter_post (carry-forward Phase 2 behavior)", async () => {
     twSpy.mockResolvedValue({
       authorName: "Anna Indie",
       authorHandle: "AnnaIndie",
       html: "<blockquote>Tweet body</blockquote>",
     });
-    const u = await seedUserDirectly({ email: "i6@test.local" });
-    const g = await createGame(u.id, { title: "G" }, "127.0.0.1");
+    const u = await seedUserDirectly({ email: "ing7@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
 
     const r = await parsePasteAndCreate(
       u.id,
-      g.id,
+      gameId,
       "https://twitter.com/AnnaIndie/status/12345",
       "127.0.0.1",
     );
@@ -244,25 +284,27 @@ describe("URL ingest paste-box (INGEST-02..04, twitter/telegram event create)", 
     expect(row.notes).toContain("Tweet body");
   });
 
-  it("02-06: reddit paste returns inline info, no row created", async () => {
-    const u = await seedUserDirectly({ email: "i7@test.local" });
-    const g = await createGame(u.id, { title: "G" }, "127.0.0.1");
+  it("YouTube paste with gameId=null lands in inbox (inbox-first IA)", async () => {
+    ytSpy.mockResolvedValue({
+      kind: "ok",
+      data: {
+        title: "Manual paste",
+        authorName: "Anyone",
+        authorUrl: "https://www.youtube.com/@Anyone",
+        thumbnailUrl: "",
+      },
+    });
+    const u = await seedUserDirectly({ email: "ing8@test.local" });
 
-    const r = await parsePasteAndCreate(
+    await parsePasteAndCreate(
       u.id,
-      g.id,
-      "https://www.reddit.com/r/IndieDev/comments/abc/foo/",
+      null,
+      "https://www.youtube.com/watch?v=inb12345678",
       "127.0.0.1",
     );
-    expect(r.kind).toBe("reddit_deferred");
 
-    // D-18: reddit_deferred is informational; NO row in either table.
-    const tracked = await db
-      .select()
-      .from(trackedYoutubeVideos)
-      .where(eq(trackedYoutubeVideos.userId, u.id));
-    expect(tracked).toHaveLength(0);
-    const evs = await db.select().from(events).where(eq(events.userId, u.id));
-    expect(evs).toHaveLength(0);
+    const rows = await db.select().from(events).where(eq(events.userId, u.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.gameId).toBeNull();
   });
 });

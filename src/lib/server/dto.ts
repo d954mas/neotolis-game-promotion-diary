@@ -283,17 +283,25 @@ export function toApiKeySteamDto(r: ApiKeySteamRow): ApiKeySteamDto {
  * EventDto — DTO for `events` rows. Kind is the closed picklist from the
  * eventKindEnum. `userId` omitted per P3 discipline.
  *
- * Phase 2.1 Plan 02.1-04 (this plan) lands the minimum-compile shape: kind
- * union widened to include the new `youtube_video` / `reddit_post` values
- * and `gameId` widened to `string | null` (inbox semantics — events.game_id
- * is now nullable per Plan 02.1-01). Plan 02.1-05 extends this DTO to add
- * `authorIsMe`, `sourceId`, `metadata`, `lastPolledAt`, `lastPollStatus`
- * per RESEARCH §10.2 — that work belongs to the events service rewrite that
- * actually consumes the new fields.
+ * Phase 2.1 Plan 02.1-05 extension (this plan): adds `authorIsMe`, `sourceId`,
+ * `metadata`, `externalId`, `lastPolledAt`, `lastPollStatus` per RESEARCH
+ * §10.2 — these are the unified-table fields the events service now writes.
+ * Plan 02.1-04 widened `gameId` to `string | null` and the kind union to
+ * include `youtube_video` / `reddit_post`; this plan completes the shape.
+ *
+ * `metadata` is kept (jsonb) — it carries `inbox.dismissed=true` for
+ * dismissed inbox events plus per-platform fields like `author_url`,
+ * `author_name`, `thumbnail_url` for YouTube paste rows. There is no
+ * secret-shaped data in `events.metadata`; the redact list in logger.ts
+ * does not need an addition.
+ *
+ * `lastPolledAt` / `lastPollStatus` are NULL on every row in 2.1 (no
+ * polling worker yet); Phase 3 fills them in.
  */
 export interface EventDto {
   id: string;
   gameId: string | null;
+  sourceId: string | null;
   kind:
     | "youtube_video"
     | "reddit_post"
@@ -304,10 +312,15 @@ export interface EventDto {
     | "discord_drop"
     | "press"
     | "other";
+  authorIsMe: boolean;
   occurredAt: Date;
   title: string;
   url: string | null;
   notes: string | null;
+  metadata: unknown;
+  externalId: string | null;
+  lastPolledAt: Date | null;
+  lastPollStatus: string | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -317,11 +330,17 @@ export function toEventDto(r: EventRow): EventDto {
   return {
     id: r.id,
     gameId: r.gameId,
+    sourceId: r.sourceId,
     kind: r.kind,
+    authorIsMe: r.authorIsMe,
     occurredAt: r.occurredAt,
     title: r.title,
     url: r.url,
     notes: r.notes,
+    metadata: r.metadata,
+    externalId: r.externalId,
+    lastPolledAt: r.lastPolledAt,
+    lastPollStatus: r.lastPollStatus,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     deletedAt: r.deletedAt,

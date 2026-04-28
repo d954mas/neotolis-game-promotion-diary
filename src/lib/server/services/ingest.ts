@@ -1,58 +1,64 @@
-// Ingest orchestrator — paste-box backend (D-18 routing + D-19 validate-first).
+// Ingest orchestrator — paste-box backend (Phase 2.1 unified events refactor).
 //
-// The "single most-used widget on the game detail page" (UI-SPEC §"<PasteBox>
-// interaction contract"). The user pastes a URL; we parse → fetch oEmbed →
-// INSERT only on success, all-or-nothing (D-19; INGEST-04).
+// Phase 2.1 reframe: the YouTube paste path no longer writes to a separate
+// `tracked_youtube_videos` table — it writes ONE row into the unified `events`
+// table via `events.createEventFromPaste` (kind=youtube_video). The
+// `tracked_youtube_videos` table is gone (Plan 02.1-01 baseline collapse) and
+// the `items-youtube.ts` service is deleted (this plan, Plan 02.1-05).
 //
-// Validate-first invariant (D-19; PITFALL Pitfall 1): for the youtube_video
-// branch, fetchYoutubeOembed runs BEFORE any INSERT. There is no try/catch
-// AROUND the INSERT to "clean up" a half-write — the validation IS the gate.
-// On 422 / 502 the database is provably untouched (the integration tests in
-// Plan 02-06 Task 3 assert zero rows after every failure).
+// Twitter and Telegram paste paths still go through createEvent directly —
+// they're free-form social posts (no oEmbed-driven dedup / source attachment),
+// and the orchestrator wires the platform-specific oEmbed call before INSERT.
 //
-// Result is a discriminated union the route handler (Plan 02-08) maps to:
-//   { kind: 'youtube_video_created', itemId } → 201 + projected DTO
-//   { kind: 'event_created', eventId }         → 201 + projected DTO
-//   { kind: 'reddit_deferred' }                → 200 + friendly info body (D-18)
-// Throws AppError 422 (unsupported_url / youtube_unavailable) or AppError
-// 502 (youtube_oembed_unreachable) for the failure modes.
+// Reddit URLs return AppError 'reddit_pending_phase3' (422). CONTEXT DV-7:
+// Reddit ingest lands in Phase 3 alongside the poll.reddit adapter.
+//
+// Validate-first invariant (D-19; INGEST-04 / AGENTS.md "validate-first
+// INGEST" anti-pattern): URL parsing + oEmbed call run BEFORE any INSERT.
+// On 422 / 502 the database is provably untouched.
+//
+// Result is a discriminated union the route handler (Plan 02.1-06) maps to:
+//   { kind: 'event_created', eventId } → 201 + projected DTO
+//   { kind: 'reddit_deferred' }         → kept only for backwards-compat with
+//                                         Phase 2 callers; new code throws
+//                                         AppError 'reddit_pending_phase3'.
+// Throws AppError 422 (unsupported_url / youtube_unavailable /
+// reddit_pending_phase3) or AppError 502 (youtube_oembed_unreachable) for the
+// failure modes.
 
 import { parseIngestUrl } from "./url-parser.js";
-import { fetchYoutubeOembed } from "../integrations/youtube-oembed.js";
-import type { YoutubeOembedResult } from "../integrations/youtube-oembed.js";
 import { fetchTwitterOembed } from "../integrations/twitter-oembed.js";
-import { createTrackedYoutubeVideo } from "./items-youtube.js";
-import { createEvent } from "./events.js";
+import { createEvent, createEventFromPaste } from "./events.js";
 import { AppError } from "./errors.js";
 
-export type IngestResult =
-  | { kind: "youtube_video_created"; itemId: string }
-  | { kind: "event_created"; eventId: string }
-  | { kind: "reddit_deferred" };
+export type IngestResult = { kind: "event_created"; eventId: string };
 
 /**
- * parsePasteAndCreate — the orchestrator the route layer (Plan 02-08) calls.
+ * parsePasteAndCreate — the orchestrator the route layer (Plan 02.1-06) calls.
  *
- * Branch table (5 ParsedUrl kinds → IngestResult / AppError):
- *   - unsupported    → throw AppError("URL not yet supported", "unsupported_url", 422)
- *   - reddit_deferred → return { kind: "reddit_deferred" } (200 + info)
- *   - youtube_video  → fetchYoutubeOembed → switch on YoutubeOembedResult.kind:
- *                        ok          → createTrackedYoutubeVideo → { youtube_video_created }
- *                        unavailable → throw AppError(422, code='youtube_unavailable', metadata.reason='unavailable')
- *                        private     → throw AppError(422, code='youtube_unavailable', metadata.reason='private')
- *                      Thrown error (5xx/network/abort) → catch + rethrow as
- *                      AppError(502, code='youtube_oembed_unreachable')
- *   - twitter_post   → fetchTwitterOembed (best-effort, null OK) → createEvent kind='twitter_post'
- *   - telegram_post  → no oEmbed → createEvent kind='telegram_post' with URL-derived placeholder
+ * Phase 2.1 contract (vs Phase 2):
+ *   - youtube_video → events.createEventFromPaste (NOT items-youtube anymore;
+ *     ONE events row carries everything, no separate tracked_youtube_videos
+ *     row). source_id and author_is_me are inherited from the user's
+ *     registered data_source on author_url match.
+ *   - twitter_post / telegram_post → createEvent directly (free-form social
+ *     posts; oEmbed best-effort for Twitter, URL-derived placeholder title
+ *     for Telegram).
+ *   - reddit_post → AppError 'reddit_pending_phase3' (422). CONTEXT DV-7.
+ *   - unsupported → AppError 'unsupported_url' (422).
  *
- * The user's gameId is asserted by the underlying createTrackedYoutubeVideo /
- * createEvent calls (both pre-flight `getGameById` for cross-tenant defense).
+ * gameId is OPTIONAL (nullable) per Phase 2.1 — manual paste with no game
+ * lands in the inbox (events.game_id IS NULL).
+ *
+ * The user's gameId is asserted by the underlying createEvent /
+ * createEventFromPaste calls (cross-tenant 404 BEFORE INSERT — Pitfall 4).
  */
 export async function parsePasteAndCreate(
   userId: string,
-  gameId: string,
+  gameId: string | null,
   input: string,
   ipAddress: string,
+  userAgent?: string,
 ): Promise<IngestResult> {
   const parsed = parseIngestUrl(input);
 
@@ -61,57 +67,31 @@ export async function parsePasteAndCreate(
   }
 
   if (parsed.kind === "reddit_deferred") {
-    // D-18 friendly message — no DB write. Plan 02-08 maps to 200 + info body.
-    return { kind: "reddit_deferred" };
+    // CONTEXT DV-7: Reddit ingest lands in Phase 3 with poll.reddit. The route
+    // layer (Plan 02.1-06) maps this to a friendly inline-info body.
+    throw new AppError(
+      "Reddit ingest arrives in Phase 3",
+      "reddit_pending_phase3",
+      422,
+    );
   }
 
   if (parsed.kind === "youtube_video") {
-    let oembed: YoutubeOembedResult;
-    try {
-      oembed = await fetchYoutubeOembed(parsed.canonicalUrl);
-    } catch (err) {
-      // 5xx / network / abort — translate to a single 502 code so Plan 02-08
-      // can map without parsing message strings.
-      throw new AppError(
-        "youtube oembed unreachable",
-        "youtube_oembed_unreachable",
-        502,
-        { cause: String((err as Error)?.message ?? err) },
-      );
-    }
-    if (oembed.kind === "private") {
-      throw new AppError("video is private", "youtube_unavailable", 422, {
-        reason: "private",
-      });
-    }
-    if (oembed.kind === "unavailable") {
-      throw new AppError("video unavailable", "youtube_unavailable", 422, {
-        reason: "unavailable",
-      });
-    }
-    // oembed.kind === "ok" — INSERT only after validate succeeds (D-19; INGEST-04).
-    const item = await createTrackedYoutubeVideo(
+    const event = await createEventFromPaste(
       userId,
-      {
-        gameId,
-        videoId: parsed.videoId,
-        url: parsed.canonicalUrl,
-        title: oembed.data.title || null,
-        // Pitfall 3 Option C: keep channel_id null in Phase 2; INGEST-03's
-        // own/blogger lookup uses author_url instead.
-        channelId: null,
-        authorUrl: oembed.data.authorUrl || null,
-      },
+      { url: input, gameId },
       ipAddress,
+      userAgent,
     );
-    return { kind: "youtube_video_created", itemId: item.id };
+    return { kind: "event_created", eventId: event.id };
   }
 
   if (parsed.kind === "twitter_post") {
     // Twitter oEmbed is best-effort (Pitfall 8 / D-29). Failure is non-fatal —
-    // events row still created with a URL-derived placeholder title. We catch
-    // here too in case the integration's own catch ever changes shape.
-    const oembed = await fetchTwitterOembed(parsed.canonicalUrl).catch(() => null);
+    // event row still created with a URL-derived placeholder title.
+    const oembed = await fetchTwitterOembed(parsed.canonicalUrl).catch(
+      () => null,
+    );
     const title = oembed?.authorName
       ? `Tweet by ${oembed.authorName}`
       : `Tweet at ${new URL(parsed.canonicalUrl).pathname}`;
@@ -126,6 +106,7 @@ export async function parsePasteAndCreate(
         notes: oembed?.html ?? null,
       },
       ipAddress,
+      userAgent,
     );
     return { kind: "event_created", eventId: event.id };
   }
@@ -143,6 +124,7 @@ export async function parsePasteAndCreate(
       notes: null,
     },
     ipAddress,
+    userAgent,
   );
   return { kind: "event_created", eventId: event.id };
 }
