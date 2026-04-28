@@ -305,4 +305,33 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
       softDeleteEvent(u.id, ev.id, "127.0.0.1"),
     ).rejects.toBeInstanceOf(AppError);
   });
+
+  it("02.1-12: createEvent accepts kind='post' and persists round-trip", async () => {
+    // Plan 02.1-12 (Gap 12) — generic platform-agnostic kind for Mastodon /
+    // LinkedIn / Bluesky / Threads / unmapped platforms. Service must accept
+    // the value and round-trip it through SELECT.
+    const u = await seedUserDirectly({ email: "ev12post@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId,
+        kind: "post",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+        title: "Bluesky launch",
+      },
+      "127.0.0.1",
+    );
+    expect(ev.kind).toBe("post");
+
+    const [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)))
+      .limit(1);
+    expect(row?.kind).toBe("post");
+    expect(row?.title).toBe("Bluesky launch");
+  });
 });

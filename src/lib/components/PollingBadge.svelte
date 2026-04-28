@@ -28,7 +28,8 @@
     | "conference"
     | "talk"
     | "press"
-    | "other";
+    | "other"
+    | "post";
 
   type EventForBadge = {
     kind: EventKind;

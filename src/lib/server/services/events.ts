@@ -68,6 +68,7 @@ export const VALID_EVENT_KINDS = [
   "talk",
   "press",
   "other",
+  "post",
 ] as const satisfies ReadonlyArray<EventKind>;
 
 export const FEED_PAGE_SIZE = 50;

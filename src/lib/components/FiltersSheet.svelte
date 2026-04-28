@@ -120,6 +120,7 @@
         <option value="talk">{m.event_kind_label_talk()}</option>
         <option value="press">{m.event_kind_label_press()}</option>
         <option value="other">{m.event_kind_label_other()}</option>
+        <option value="post">{m.event_kind_label_post()}</option>
       </select>
     </label>
 

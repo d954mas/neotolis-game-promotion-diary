@@ -54,6 +54,7 @@ const eventKindEnum = z.enum([
   "talk",
   "press",
   "other",
+  "post",
 ]);
 
 const createEventSchema = z.object({

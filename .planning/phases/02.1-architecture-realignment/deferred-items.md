@@ -42,6 +42,16 @@ the current plan; the listed plan / phase owns the fix.
   shape, the cross-tenant test runs and the `gamesRoutes` mount succeeds.
 - **Owner moved to:** Plan 02.1-06 (this plan); not Wave 3.
 
+## From Plan 02.1-12
+
+### `tests/unit/paraglide.test.ts` keyset snapshot — `event_kind_label_post` added
+
+- **Discovered during:** Plan 02.1-12 Task 2 (Gap 12 closure).
+- **Symptom:** EXPECTED_KEYS hard-coded alphabetical list does not include `event_kind_label_post`; the snapshot test will fail until refreshed.
+- **Why deferred:** consistent with the existing 02.1-01 deferral — multiple gap-closure plans add keys; the LAST plan in the chain (02.1-16 FeedCard redesign) refreshes the snapshot in one commit covering all additions.
+- **Owner:** Plan 02.1-16.
+- **Out of scope for Plan 02.1-12:** confirmed.
+
 ## From Plan 02.1-03
 
 ### Pre-existing tsc errors in `src/lib/server/services/*` and `tests/integration/*`

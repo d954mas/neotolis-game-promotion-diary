@@ -76,6 +76,8 @@
         return m.event_kind_label_press();
       case "other":
         return m.event_kind_label_other();
+      case "post":
+        return m.event_kind_label_post();
       default:
         return filters.kind;
     }

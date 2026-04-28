@@ -32,7 +32,8 @@ export type EventKind =
   | "conference"
   | "talk"
   | "press"
-  | "other";
+  | "other"
+  | "post";
 
 export interface RawEvent {
   externalId: string;

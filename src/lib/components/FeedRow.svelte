@@ -44,7 +44,8 @@
     | "conference"
     | "talk"
     | "press"
-    | "other";
+    | "other"
+    | "post";
 
   type EventDtoLite = {
     id: string;

@@ -30,7 +30,8 @@
     | "conference"
     | "talk"
     | "press"
-    | "other";
+    | "other"
+    | "post";
 
   type GameOpt = { id: string; title: string };
 
@@ -56,6 +57,7 @@
     { value: "talk", label: m.event_kind_label_talk() },
     { value: "press", label: m.event_kind_label_press() },
     { value: "other", label: m.event_kind_label_other() },
+    { value: "post", label: m.event_kind_label_post() },
   ];
 
   async function submit(e: Event): Promise<void> {
