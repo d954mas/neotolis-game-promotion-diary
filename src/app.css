@@ -105,6 +105,27 @@
   box-sizing: border-box;
 }
 
+/* Native date/time/color picker icons are dark by default — invisible on the
+ * dark theme. Invert them so they remain readable. WebKit-only selector but
+ * covers Chrome/Edge/Safari; Firefox renders its own picker that already
+ * adapts to color-scheme. */
+:root[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
+:root[data-theme="dark"] input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+:root[data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator,
+:root[data-theme="dark"] input[type="month"]::-webkit-calendar-picker-indicator,
+:root[data-theme="dark"] input[type="week"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] input[type="date"]::-webkit-calendar-picker-indicator,
+  :root[data-theme="system"] input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+  :root[data-theme="system"] input[type="time"]::-webkit-calendar-picker-indicator,
+  :root[data-theme="system"] input[type="month"]::-webkit-calendar-picker-indicator,
+  :root[data-theme="system"] input[type="week"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+  }
+}
+
 html,
 body {
   margin: 0;

@@ -145,8 +145,9 @@ eventsRoutes.get(
               : q.authorIsMe === "false"
                 ? false
                 : undefined,
-          from: q.from ? new Date(q.from) : undefined,
-          to: q.to ? new Date(q.to) : undefined,
+          // Date-only (YYYY-MM-DD) is inclusive on both ends — see /feed/+page.server.ts.
+          from: q.from ? new Date(`${q.from}T00:00:00.000Z`) : undefined,
+          to: q.to ? new Date(`${q.to}T23:59:59.999Z`) : undefined,
         },
         q.cursor ?? null,
       );

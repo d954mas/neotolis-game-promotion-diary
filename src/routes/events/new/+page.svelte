@@ -40,7 +40,7 @@
   let gameId = $state<string>("");
   let kind = $state<EventKind>("other");
   let title = $state("");
-  let occurredAt = $state(new Date().toISOString().slice(0, 16));
+  let occurredAt = $state(new Date().toISOString().slice(0, 10));
   let url = $state("");
   let notes = $state("");
   let pending = $state(false);
@@ -137,7 +137,7 @@
       <span class="field-label">Date *</span>
       <input
         class="input"
-        type="datetime-local"
+        type="date"
         bind:value={occurredAt}
         required
         disabled={pending}

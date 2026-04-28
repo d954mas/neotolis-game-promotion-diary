@@ -89,6 +89,7 @@
 <section class="feed">
   <header class="head">
     <h1>Feed</h1>
+    <a href="/events/new" class="cta">{m.feed_cta_add_event()}</a>
   </header>
 
   {#if data.rows.length === 0 && hasNoActiveFilters(data.activeFilters)}
@@ -165,6 +166,22 @@
     font-size: var(--font-size-heading);
     font-weight: var(--font-weight-semibold);
     line-height: var(--line-height-heading);
+  }
+  .cta {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 var(--space-md);
+    background: var(--color-accent);
+    color: var(--color-on-accent, #fff);
+    border-radius: 4px;
+    text-decoration: none;
+    font-size: var(--font-size-body);
+    font-weight: var(--font-weight-semibold);
+    white-space: nowrap;
+  }
+  .cta:hover {
+    filter: brightness(1.05);
   }
   .feed-list {
     list-style: none;

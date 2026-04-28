@@ -144,8 +144,8 @@
   const activeCount = $derived(chips.length);
 </script>
 
-{#if activeCount > 0}
-  <div class="filter-row">
+<div class="filter-row">
+  {#if activeCount > 0}
     <!-- Inline chip strip — visible at >= 600px via CSS media query. -->
     <div class="chips" aria-label="Active filters">
       {#each chips as chip (chip.axis)}
@@ -167,13 +167,13 @@
         {m.feed_filters_clear_all()}
       </button>
     </div>
+  {/if}
 
-    <!-- Sheet trigger — visible at < 600px via CSS media query. -->
-    <button type="button" class="sheet-trigger" onclick={onOpenSheet}>
-      Filters ({activeCount})
-    </button>
-  </div>
-{/if}
+  <!-- Sheet trigger — always visible so users can discover and add filters. -->
+  <button type="button" class="sheet-trigger" onclick={onOpenSheet}>
+    Filters{activeCount > 0 ? ` (${activeCount})` : ""}
+  </button>
+</div>
 
 <style>
   .filter-row {
@@ -201,13 +201,12 @@
     font-weight: var(--font-weight-semibold);
     cursor: pointer;
   }
-  /* Chips inline at >= 600px; sheet trigger hides. */
+  /* Chips inline at >= 600px. Sheet trigger stays visible at all widths so
+   * users can always open the full filter sheet (date range, etc.) — chips
+   * alone only let users dismiss already-applied filters. */
   @media (min-width: 600px) {
     .chips {
       display: flex;
-    }
-    .sheet-trigger {
-      display: none;
     }
   }
   .chip {

@@ -23,8 +23,6 @@
     { key: "feed", href: "/feed", label: "Feed" },
     { key: "sources", href: "/sources", label: "Sources" },
     { key: "games", href: "/games", label: "Games" },
-    { key: "events", href: "/events", label: "Events" },
-    { key: "audit", href: "/audit", label: "Audit" },
     { key: "settings", href: "/settings", label: "Settings" },
   ];
 

@@ -34,8 +34,12 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
   const fromParam = url.searchParams.get("from");
   const toParam = url.searchParams.get("to");
-  const fromDate = fromParam ? new Date(fromParam) : undefined;
-  const toDate = toParam ? new Date(toParam) : undefined;
+  // Date-only inputs (YYYY-MM-DD) are inclusive on both ends — `from` becomes
+  // 00:00:00 UTC of that day (start), `to` becomes 23:59:59.999 UTC (end).
+  // Without the end-of-day shift, picking `from=to=2026-04-26` would match
+  // nothing because midnight-26 ≤ event ≤ midnight-26 has zero width.
+  const fromDate = fromParam ? new Date(`${fromParam}T00:00:00.000Z`) : undefined;
+  const toDate = toParam ? new Date(`${toParam}T23:59:59.999Z`) : undefined;
 
   const filters: FeedFilters = {
     source: url.searchParams.get("source") ?? undefined,

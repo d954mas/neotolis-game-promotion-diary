@@ -165,11 +165,11 @@
 
     <label class="field">
       <span class="label">From</span>
-      <input class="input" type="date" bind:value={from} />
+      <input class="input" type="date" bind:value={from} max={to || undefined} />
     </label>
     <label class="field">
       <span class="label">To</span>
-      <input class="input" type="date" bind:value={to} />
+      <input class="input" type="date" bind:value={to} min={from || undefined} />
     </label>
   </div>
 

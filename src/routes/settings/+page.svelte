@@ -92,6 +92,12 @@
     <p class="muted">{m.settings_sessions_blurb()}</p>
     <SessionsList {sessions} {currentSessionId} />
   </article>
+
+  <article class="block">
+    <h2>Activity log</h2>
+    <p class="muted">Audit trail of every action on your account.</p>
+    <a href="/audit" class="audit-link">View audit log →</a>
+  </article>
 </section>
 
 <ConfirmDialog
@@ -185,5 +191,13 @@
     border: 1px solid var(--color-border);
     border-radius: 999px;
     padding: 2px var(--space-sm);
+  }
+  .audit-link {
+    color: var(--color-accent);
+    text-decoration: none;
+    font-size: var(--font-size-body);
+  }
+  .audit-link:hover {
+    text-decoration: underline;
   }
 </style>
