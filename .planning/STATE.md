@@ -166,6 +166,8 @@ Recent decisions affecting current work:
 - 2026-04-28-rethink-items-vs-events-architecture — **ARCH P0**: unify tracked_items + events into single events table with author_is_me discriminator (user's proposal during Phase 2 UAT — do in Phase 2.1)
 - 2026-04-28-phase4-video-detail-cards-with-charts — Phase 4 expectation: internal video detail page with view-count chart (caught in Phase 2 manual UAT)
 - 2026-04-28-audit-ux-improvements — /audit needs grouped checkbox filters + table headers (caught in Phase 2 manual UAT)
+- 2026-04-28-settings-active-sessions-list — **P1 SECURITY UX**: /settings missing active sessions list (caught in Phase 2 manual UAT)
+- 2026-04-28-keys-empty-state-promises-vaporware — /keys/steam empty state mentions manual wishlist entry + CSV import that don't exist (caught in Phase 2 manual UAT)
 
 ### Blockers/Concerns
 
