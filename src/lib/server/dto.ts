@@ -11,9 +11,8 @@ import type { user, session } from "./db/schema/auth.js";
 import type {
   games,
   gameSteamListings,
-  youtubeChannels,
+  dataSources,
   apiKeysSteam,
-  trackedYoutubeVideos,
   events,
 } from "./db/schema/index.js";
 import type { auditLog } from "./db/schema/audit-log.js";
@@ -22,9 +21,8 @@ type User = typeof user.$inferSelect;
 type Session = typeof session.$inferSelect;
 type GameRow = typeof games.$inferSelect;
 type SteamListingRow = typeof gameSteamListings.$inferSelect;
-type YoutubeChannelRow = typeof youtubeChannels.$inferSelect;
+type DataSourceRow = typeof dataSources.$inferSelect;
 type ApiKeySteamRow = typeof apiKeysSteam.$inferSelect;
-type YoutubeVideoRow = typeof trackedYoutubeVideos.$inferSelect;
 type EventRow = typeof events.$inferSelect;
 type AuditEntryRow = typeof auditLog.$inferSelect;
 
@@ -171,29 +169,55 @@ export function toGameSteamListingDto(r: SteamListingRow): GameSteamListingDto {
 }
 
 /**
- * YoutubeChannelDto — DTO for `youtube_channels` rows. The table has no
- * `deletedAt` (channels live at user level, never soft-deleted per D-24);
- * this DTO mirrors that.
+ * DataSourceDto — DTO for `data_sources` rows (Phase 2.1 SOURCES-01).
+ *
+ * INTENTIONALLY OMITTED:
+ *   - userId — P3 discipline (caller knows their own id). The behavioural
+ *     test in tests/unit/dto.test.ts asserts the strip happens at runtime
+ *     even when an input row literal carries userId.
+ *
+ * INTENTIONALLY KEPT:
+ *   - metadata — non-secret per-kind config (e.g. `uploads_playlist_id` for
+ *     youtube_channel; nothing in 2.1 for the other kinds since they are
+ *     schema-only — RESEARCH §5/§10). NOT a secret-shaped field — secrets
+ *     live in `api_keys_*`. If a future kind needs a secret, it goes there,
+ *     not into `data_sources.metadata`.
+ *   - deletedAt — soft-delete state surfaces to UI for the restore flow.
+ *
+ * Replaces the Phase 2 `toYoutubeChannelDto` projection.
  */
-export interface YoutubeChannelDto {
+export interface DataSourceDto {
   id: string;
+  kind:
+    | "youtube_channel"
+    | "reddit_account"
+    | "twitter_account"
+    | "telegram_channel"
+    | "discord_server";
   handleUrl: string;
   channelId: string | null;
   displayName: string | null;
-  isOwn: boolean;
+  isOwnedByMe: boolean;
+  autoImport: boolean;
+  metadata: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
+  deletedAt: Date | null;
 }
 
-export function toYoutubeChannelDto(r: YoutubeChannelRow): YoutubeChannelDto {
+export function toDataSourceDto(r: DataSourceRow): DataSourceDto {
   return {
     id: r.id,
+    kind: r.kind,
     handleUrl: r.handleUrl,
     channelId: r.channelId,
     displayName: r.displayName,
-    isOwn: r.isOwn,
+    isOwnedByMe: r.isOwnedByMe,
+    autoImport: r.autoImport,
+    metadata: (r.metadata ?? {}) as Record<string, unknown>,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
+    deletedAt: r.deletedAt,
   };
 }
 
@@ -249,57 +273,29 @@ export function toApiKeySteamDto(r: ApiKeySteamRow): ApiKeySteamDto {
   };
 }
 
-/**
- * YoutubeVideoDto — DTO for `tracked_youtube_videos` rows. Mirrors the
- * underlying table minus `userId` (P3 discipline — caller knows their own id).
- *
- * Phase 2 fills `lastPolledAt` / `lastPollStatus` with NULL on every row;
- * Phase 3's polling worker is the first writer of those columns.
- */
-export interface YoutubeVideoDto {
-  id: string;
-  gameId: string;
-  videoId: string;
-  url: string;
-  title: string | null;
-  channelId: string | null;
-  authorUrl: string | null;
-  isOwn: boolean;
-  addedAt: Date;
-  lastPolledAt: Date | null;
-  lastPollStatus: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  deletedAt: Date | null;
-}
-
-export function toYoutubeVideoDto(r: YoutubeVideoRow): YoutubeVideoDto {
-  return {
-    id: r.id,
-    gameId: r.gameId,
-    videoId: r.videoId,
-    url: r.url,
-    title: r.title,
-    channelId: r.channelId,
-    authorUrl: r.authorUrl,
-    isOwn: r.isOwn,
-    addedAt: r.addedAt,
-    lastPolledAt: r.lastPolledAt,
-    lastPollStatus: r.lastPollStatus,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-    deletedAt: r.deletedAt,
-  };
-}
+// `toYoutubeVideoDto` was removed in Phase 2.1 Plan 02.1-04 alongside the
+// retirement of the `tracked_youtube_videos` schema (Plan 02.1-01). The
+// unified `events` table now carries `kind=youtube_video` rows; their
+// projection runs through `toEventDto` (Plan 02.1-05 owns the extension).
 
 /**
  * EventDto — DTO for `events` rows. Kind is the closed picklist from the
- * eventKindEnum (D-28). `userId` omitted per P3 discipline.
+ * eventKindEnum. `userId` omitted per P3 discipline.
+ *
+ * Phase 2.1 Plan 02.1-04 (this plan) lands the minimum-compile shape: kind
+ * union widened to include the new `youtube_video` / `reddit_post` values
+ * and `gameId` widened to `string | null` (inbox semantics — events.game_id
+ * is now nullable per Plan 02.1-01). Plan 02.1-05 extends this DTO to add
+ * `authorIsMe`, `sourceId`, `metadata`, `lastPolledAt`, `lastPollStatus`
+ * per RESEARCH §10.2 — that work belongs to the events service rewrite that
+ * actually consumes the new fields.
  */
 export interface EventDto {
   id: string;
-  gameId: string;
+  gameId: string | null;
   kind:
+    | "youtube_video"
+    | "reddit_post"
     | "conference"
     | "talk"
     | "twitter_post"
