@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Phase 02.1 PAUSED — Plan 02.1-10 round-4 manual UAT 2026-04-29 surfaced 22 NEW findings (6 P0 + 16 P1) blocking sign-off; persisted in 02.1-10-UAT-NOTES.md round-4 section; round-4 gap-closure plans needed
-stopped_at: Plan 02.1-10 round-4 UAT walked /feed FeedCard+FeedQuickNav, /sources, /games/[id], /events/[id]/edit, /audit, /settings, /keys/steam at 360px. P0 (6) — 4.24.A Standalone label, 4.24.D no standalone toggle in edit form, 4.24.G events need M:N games, 4.25.E addSteamListing 500-on-duplicate, 4.25.J constraint must be (game_id, app_id), 4.25.B /games/[id] redesign uses oversized cards instead of FeedCard list. P1 (16) — 4.22.A sticky AppHeader regression, 4.22.B-E SourceRow Remove/Edit/auto_import duplication + Save/Cancel placement, 4.22.F body-scroll-lock regression, 4.18.A-B /events/[id] Delete/Edit placement, 4.21.A /audit date duplication, 4.24.C-F standalone+game conflict + attach button visibility/size, 4.25.A Mine accent color, 4.25.C Stores section UX, 4.25.G Steam-duplicate UX hint, 4.25.H removeSteamListing UI/HTTP missing. Plans 21-26 SHIPPED + verified clean automation tests; manual UAT is the gate. Next: /clear → /gsd:plan-phase 02.1 --gaps → /gsd:execute-phase 02.1 --gaps-only → round-5 UAT → Plan 10 sign-off.
-last_updated: "2026-04-29T13:55:24.255Z"
+status: Ready to execute
+stopped_at: "Completed Plan 02.1-27 — event_games M:N junction + Steam listing unique swap (Wave 0 schema-only; 0005 pure-DDL + 0006 lone ALTER TYPE)"
+last_updated: "2026-04-29T16:24:33.909Z"
 last_activity: 2026-04-29
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 47
-  completed_plans: 46
+  total_plans: 55
+  completed_plans: 47
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 5 of 26
+Plan: 2 of 34
 
 ## Performance Metrics
 
@@ -90,6 +90,7 @@ Plan: 5 of 26
 | Phase 02.1 P24 | ~25min | 2 tasks | 17 files |
 | Phase 02.1-architecture-realignment P26 | ~6min | 1 tasks | 6 files |
 | Phase 02.1-architecture-realignment P25 | ~25min | 3 tasks | 18 files |
+| Phase 02.1-architecture-realignment P27 | 17min 41s | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -248,6 +249,11 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-25: Rule-of-three earns the <PageHeader> abstraction (3 list pages share the title+CTA pattern); inline-on-the-left flex layout (no justify-content: space-between) per UAT-NOTES.md §3.1-polish; href + onClick CTA variants + opt-in sticky? prop preserves /sources Plan 02.1-22 §2.2-bug closure
 - [Phase 02.1-architecture-realignment]: Plan 02.1-25: /games/[id] restructured into 2-card stacked layout (GAME HEADER CARD + EVENTS FEED CARD) per UAT-NOTES.md §3.2-redesign; previous 2-col grid (>= 1024px) dropped — round-3 UAT preferred top-down read of artwork → metadata → listings → events; manual cover upload + itch.io fallback DEFERRED to Phase 3+ via TODO marker in GameCover.svelte
 - [Phase 02.1-architecture-realignment]: Plan 02.1-25: SourceRow Mine treatment combines C+A (overlay-mine pill + 4px accent left border) mirroring FeedCard from Plan 02.1-23; only 1 new Paraglide key (steam_listing_open_link_label) — the 5 source_kind_label_* keys flagged in plan-frontmatter as new were ALREADY shipped in Plan 02.1-08 (verified via grep before keyset extension)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-27: Pre-emptive 0005+0006 split — drizzle-kit emitted single combined migration; manually forked into 0005 (pure DDL: CREATE TABLE event_games + DROP COLUMN events.game_id + DROP CONSTRAINT user-scoped Steam unique) + 0006 (lone ALTER TYPE audit_action ADD VALUE event.detached_from_game). Driven by Pitfall 1 (Postgres 16 transaction rules) + Plan 02.1-12 precedent
+- [Phase 02.1-architecture-realignment]: Plan 02.1-27: event_games junction denormalizes userId — required for ESLint tenant-scope rule which walks chained text and cannot inspect FK-chained values. TENANT_TABLES set extended; every Drizzle query against eventGames must include eq(eventGames.userId, userId)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-27: events.game_id column DROPPED (not retained as denormalized cache) — drift risk too high; pre-launch (CONTEXT D-04) makes destructive cheap; Plan 02.1-28 rewrites consumers in lock-step. Inbox criterion becomes event_games.length === 0
+- [Phase 02.1-architecture-realignment]: Plan 02.1-27: game_steam_listings unique stays UNCONDITIONAL — Plan 02.1-29 chose Path B (service-layer pre-INSERT lookup catches soft-deleted dupes BEFORE 23505); Plan 27 only DROPS the user-scoped uniqueness, does NOT add a partial-WHERE clause
+- [Phase 02.1-architecture-realignment]: Plan 02.1-27: Plan 02.1-24 audit_action length-22 hard assertion relaxed to >=22 lower bound; exact-length-23 assertion now lives in Plan 02.1-27 describe block (mirrors how Plan 02.1-14 absorbed Plan 02.1-24's additive growth)
 
 ### Pending Todos
 
@@ -288,8 +294,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-29T13:55:24.251Z
+Last session: 2026-04-29T16:24:33.906Z
 Last Activity: 2026-04-29
-Stopped at: Completed Plan 02.1-25 — card visual language consistency (SourceRow Mine, PageHeader, /games/[id] two-card, Steam listing name)
+Stopped at: Completed Plan 02.1-27 — event_games M:N junction + Steam listing unique swap (Wave 0 schema-only; 0005 pure-DDL + 0006 lone ALTER TYPE)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
