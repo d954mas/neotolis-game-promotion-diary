@@ -71,6 +71,10 @@ describe("paraglide i18n (UX-04)", () => {
     // restore}, events_edit_{author_is_me,heading,save},
     // events_new_author_is_me). Net delta: +10 keys.
     //
+    // Plan 02.1-26 (round-3 gap closure — FeedQuickNav): adds 4 keys
+    // (feed_quick_nav_all, feed_quick_nav_inbox, feed_quick_nav_more_games,
+    // feed_quick_nav_standalone). Net delta: +4 keys.
+    //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
     // across renames (Phase 2 STATE.md guidance, carried forward).
     const EXPECTED_KEYS = [
@@ -210,6 +214,10 @@ describe("paraglide i18n (UX-04)", () => {
       "feed_loading_more",
       "feed_move_to_inbox",
       "feed_no_more_events",
+      "feed_quick_nav_all",
+      "feed_quick_nav_inbox",
+      "feed_quick_nav_more_games",
+      "feed_quick_nav_standalone",
       "feed_row_delete_aria",
       "feed_row_edit_aria",
       "game_add_steam_listing_cta",
@@ -269,6 +277,7 @@ describe("paraglide i18n (UX-04)", () => {
       "sources_owned_by_other",
       "sources_status_auto_off",
       "sources_status_auto_on_pending",
+      "steam_listing_open_link_label",
       "theme_label_dark",
       "theme_label_light",
       "theme_label_system",

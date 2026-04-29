@@ -21,6 +21,10 @@
 
   "feed_cta_add_event": "Add event",
   "feed_cta_new_event": "+ New event",
+  "feed_quick_nav_all": "All",
+  "feed_quick_nav_inbox": "Inbox",
+  "feed_quick_nav_more_games": "More games",
+  "feed_quick_nav_standalone": "Standalone",
   "sources_cta_new_source": "+ Add data source",
   "sources_cta_save_source": "Save source",
   "game_rename_cta_save": "Save name",
@@ -136,6 +140,8 @@
   "sources_owned_by_me": "Mine",
   "sources_owned_by_other": "Tracking",
   "sources_kind_disabled_tooltip": "{kind} — {phase}. Schema is ready; the polling adapter ships in {phase}.",
+
+  "steam_listing_open_link_label": "Open on Steam",
 
   "inbox_badge": "Inbox",
   "inbox_badge_tooltip": "This event isn't attached to a game yet. Use the \"Attach to game\" picker on the right.",

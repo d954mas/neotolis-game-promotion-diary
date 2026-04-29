@@ -42,6 +42,27 @@
 
   let { source }: { source: DataSourceDto } = $props();
 
+  // Plan 02.1-25 (UAT-NOTES.md §2.1-redesign): kind icon + TEXT label
+  // rendered together so users can scan the source list and see "YouTube
+  // channel" / "Reddit account" / etc. at a glance. User quote: "И еще
+  // писать тип и иконку типа". The 5 source_kind_label_* keys already
+  // existed in messages/en.json (Plan 02.1-08); this plan adds the
+  // visible inline rendering.
+  function kindLabel(k: SourceKind): string {
+    switch (k) {
+      case "youtube_channel":
+        return m.source_kind_label_youtube_channel();
+      case "reddit_account":
+        return m.source_kind_label_reddit_account();
+      case "twitter_account":
+        return m.source_kind_label_twitter_account();
+      case "telegram_channel":
+        return m.source_kind_label_telegram_channel();
+      case "discord_server":
+        return m.source_kind_label_discord_server();
+    }
+  }
+
   let editing = $state(false);
   // Hold the rename buffer in plain state — when the edit form opens we
   // re-seed it from the current source row in `openEdit()`. Initialising
@@ -114,9 +135,16 @@
   }
 </script>
 
-<div class="row">
+<div class="row" class:mine={source.isOwnedByMe}>
   <div class="primary">
-    <SourceKindIcon kind={source.kind} />
+    <!-- Plan 02.1-25 (UAT-NOTES.md §2.1-redesign): kind icon + text label
+         rendered together so the source list is scannable. Mirrors the
+         FeedCard overlay-kind pattern from Plan 02.1-23 but adapted to
+         SourceRow's row-display surface. -->
+    <span class="kind-tag">
+      <SourceKindIcon kind={source.kind} />
+      {kindLabel(source.kind)}
+    </span>
     {#if editing}
       <form class="rename" onsubmit={saveSourceEdit}>
         <input
@@ -217,12 +245,29 @@
     border-radius: 4px;
     min-width: 0;
   }
+  /* Plan 02.1-25 (UAT-NOTES.md §2.1-redesign): mirror FeedCard's Mine
+     treatment from Plan 02.1-23. User quote: "Тут нужно как в feed
+     сделать для mine". The 4px accent left-border + the upgraded
+     overlay-style "Mine" pill combine for the same C+A treatment users
+     get on FeedCard. */
+  .row.mine {
+    border-left: 4px solid var(--color-accent);
+  }
   .primary {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
     flex-wrap: wrap;
     min-width: 0;
+  }
+  /* Plan 02.1-25: kind icon+text bundle. Visually pairs with the
+     SourceKindIcon (currentColor inherits from this span). */
+  .kind-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    color: var(--color-text);
+    font-weight: var(--font-weight-semibold);
   }
   .display {
     color: var(--color-text);
@@ -275,9 +320,14 @@
     border-radius: 999px;
     font-size: var(--font-size-label);
   }
+  /* Plan 02.1-25 (UAT-NOTES.md §2.1-redesign): upgrade the Mine pill to the
+     overlay-mine visual style used by FeedCard (Plan 02.1-23). Accent
+     background + white text reads as a strong, consistent "this is yours"
+     signal across feed and sources. */
   .ownership-badge.mine {
-    color: var(--color-text);
-    border-color: var(--color-text-muted);
+    background: var(--color-accent);
+    color: var(--color-accent-text, #fff);
+    border-color: var(--color-accent);
   }
   .meta {
     min-width: 0;
