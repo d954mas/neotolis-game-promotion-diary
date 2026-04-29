@@ -65,6 +65,12 @@ describe("paraglide i18n (UX-04)", () => {
     // dropped axes (Plan 02.1-15 5-preset DateRangeControl + 2 attached
     // chips + 1 date-range chip). Net delta: +5 keys.
     //
+    // Plan 02.1-18 (round-2 UAT closure — edit-flow rebuild via /events/[id]
+    // detail page): adds 10 keys (feed_card_author_is_me_badge,
+    // events_detail_{delete,edit,open_original,phase4_chart_placeholder,
+    // restore}, events_edit_{author_is_me,heading,save},
+    // events_new_author_is_me). Net delta: +10 keys.
+    //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
     // across renames (Phase 2 STATE.md guidance, carried forward).
     const EXPECTED_KEYS = [
@@ -153,6 +159,7 @@ describe("paraglide i18n (UX-04)", () => {
       "feed_attach_error_game_not_found",
       "feed_attach_no_games_inline",
       "feed_attach_to_game",
+      "feed_card_author_is_me_badge",
       "feed_card_open_external",
       "feed_card_thumbnail_alt",
       "feed_chip_axis_kind",

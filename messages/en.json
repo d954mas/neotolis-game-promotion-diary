@@ -180,6 +180,7 @@
   "feed_row_edit_aria": "Edit event",
   "feed_row_delete_aria": "Delete event",
 
+  "feed_card_author_is_me_badge": "Mine",
   "feed_card_thumbnail_alt": "Thumbnail for: {title}",
   "feed_card_open_external": "Open external link",
 

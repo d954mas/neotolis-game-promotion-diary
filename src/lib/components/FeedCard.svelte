@@ -1,6 +1,13 @@
 <script lang="ts">
-  // FeedCard — media-card replacement for <FeedRow> (Plan 02.1-16 / Gap 3,
-  // refined in Plan 02.1-19 round-2 UAT).
+  // FeedCard — pure preview tile (Plan 02.1-18 round-2 UAT closure).
+  //
+  // Plan 02.1-18 STRIP: removed Open / Edit / Delete buttons + the
+  // surrounding ConfirmDialog. All mutating + destructive actions move to
+  // /events/[id]. The card body wraps in <a href="/events/${id}"> so the
+  // ENTIRE tile is the click target. AttachToGamePicker stays — it is the
+  // primary inbox-clear flow per FEED-01 / INBOX-01 and is non-destructive
+  // (the user can re-attach freely). Per UAT round-2 gap "FeedCard becomes
+  // a pure preview tile."
   //
   // Visual contract (Plan 02.1-19 — vertical stack at all viewports, sized
   // by /feed's CSS grid cell `repeat(auto-fill, minmax(280px, 1fr))`):
@@ -8,25 +15,24 @@
   //   1. Media row — 16:9 thumbnail for kind=youtube_video
   //      (img.youtube.com/vi/{id}/mqdefault.jpg) OR a centered KindIcon in a
   //      muted block for non-thumbnail kinds.
-  //   2. Title + open-external icon.
+  //   2. Title.
   //   3. Meta row — kind label (text) + InboxBadge + PollingBadge.
   //      DATE IS NOT RENDERED HERE in Plan 02.1-19 — the
   //      <FeedDateGroupHeader> above the group is the date label
   //      (Google Photos / Apple Photos timeline pattern).
-  //   4. Chips row — source / game / author_is_me.
-  //   5. Actions row — AttachToGamePicker + Open + Edit + Delete (44×44 hit).
+  //   4. Chips row — source / game / "Mine" badge for author_is_me=true.
+  //   5. Picker row — AttachToGamePicker (the only mutating control on a
+  //      tile; OUTSIDE the wrapping <a> so its onclick handlers don't
+  //      trigger card navigation).
   //
-  // Plan 02.1-19 layout: card stays vertical-stack at all widths. The Plan
-  // 02.1-16 desktop horizontal flexbox layout is RETIRED because grid cells
-  // are visually better as tiles.
-  //
-  // Accessibility (UI-SPEC §"Accessibility Floor delta"):
-  //   - Thumbnail <img alt> via m.feed_card_thumbnail_alt({ title }).
-  //   - Open / Edit / Delete buttons reuse Plan 02.1-13 keys
-  //     m.feed_row_edit_aria() / m.feed_row_delete_aria(); the URL link
-  //     uses the new m.feed_card_open_external().
+  // Accessibility:
+  //   - Wrapping <a> carries the title text (in .title-line) so a screen
+  //     reader reads the link with the title as its accessible name.
+  //   - AttachToGamePicker is OUTSIDE the anchor — its keyboard tabbable
+  //     controls navigate independently of the card's link target.
+  //   - "Mine" badge is a non-interactive <span>, just a visible chip.
   //   - KindIcon stays aria-hidden="true" — kind name is conveyed by the
-  //     adjacent .kind-tag span (Gap 6 path b).
+  //     adjacent .kind-tag span (Plan 02.1-16 Gap 6 path b).
   //
   // Privacy invariants:
   //   - <img referrerpolicy="no-referrer" crossorigin="anonymous"> mirrors
@@ -34,16 +40,12 @@
   //     YouTube oEmbed thumbs).
   //   - Thumbnail URL is deterministic from `externalId` already projected
   //     by toEventDto; no ciphertext / userId leaks through this surface.
-  //   - DELETE flow is unchanged from FeedRow: confirm → fetch → onChanged.
 
-  import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import KindIcon from "./KindIcon.svelte";
   import AttachToGamePicker from "./AttachToGamePicker.svelte";
   import InboxBadge from "./InboxBadge.svelte";
   import PollingBadge from "./PollingBadge.svelte";
-  import ConfirmDialog from "./ConfirmDialog.svelte";
-  import InlineError from "./InlineError.svelte";
 
   type EventKind =
     | "youtube_video"
@@ -136,76 +138,29 @@
     kind: event.kind,
     lastPolledAt: event.lastPolledAt as Date | string | null,
   });
-
-  let confirmDeleteOpen = $state(false);
-  let deleteError = $state<string | null>(null);
-  let deleting = $state(false);
-
-  function askDelete(): void {
-    confirmDeleteOpen = true;
-  }
-  function cancelDelete(): void {
-    confirmDeleteOpen = false;
-  }
-  async function confirmDelete(): Promise<void> {
-    if (deleting) return;
-    deleting = true;
-    deleteError = null;
-    try {
-      const res = await fetch(`/api/events/${event.id}`, { method: "DELETE" });
-      if (!res.ok && res.status !== 204) {
-        deleteError = m.error_server_generic();
-        return;
-      }
-      confirmDeleteOpen = false;
-      onChanged?.();
-    } catch {
-      deleteError = m.error_network();
-    } finally {
-      deleting = false;
-    }
-  }
-
-  function gotoEdit(): void {
-    void goto(`/events/${event.id}/edit`);
-  }
-  function gotoOpen(): void {
-    void goto(`/events/${event.id}`);
-  }
 </script>
 
 <article class="feed-card" data-kind={event.kind}>
-  <div class="media">
-    {#if thumbnailUrl}
-      <img
-        class="thumbnail"
-        src={thumbnailUrl}
-        alt={m.feed_card_thumbnail_alt({ title: event.title })}
-        referrerpolicy="no-referrer"
-        crossorigin="anonymous"
-        loading="lazy"
-      />
-    {:else}
-      <div class="icon-anchor" aria-hidden="true">
-        <KindIcon kind={event.kind} size={48} />
-      </div>
-    {/if}
-  </div>
+  <a class="card-body" href={`/events/${event.id}`}>
+    <div class="media">
+      {#if thumbnailUrl}
+        <img
+          class="thumbnail"
+          src={thumbnailUrl}
+          alt={m.feed_card_thumbnail_alt({ title: event.title })}
+          referrerpolicy="no-referrer"
+          crossorigin="anonymous"
+          loading="lazy"
+        />
+      {:else}
+        <div class="icon-anchor" aria-hidden="true">
+          <KindIcon kind={event.kind} size={48} />
+        </div>
+      {/if}
+    </div>
 
-  <div class="body">
     <div class="title-line">
       <h3 class="title">{event.title}</h3>
-      {#if event.url}
-        <a
-          class="link"
-          href={event.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={m.feed_card_open_external()}
-        >
-          ↗
-        </a>
-      {/if}
     </div>
 
     <div class="meta-line">
@@ -227,52 +182,24 @@
           <span class="chip">{game.title}</span>
         {/if}
         {#if event.authorIsMe}
-          <span class="chip chip-author">{m.sources_owned_by_me()}</span>
+          <span class="chip chip-author">{m.feed_card_author_is_me_badge()}</span>
         {/if}
       </div>
     {/if}
+  </a>
 
-    <div class="actions-line">
-      <AttachToGamePicker {event} {games} onChanged={() => onChanged?.()} />
-      <button type="button" class="action open" onclick={gotoOpen}>Open</button>
-      <button
-        type="button"
-        class="action icon"
-        aria-label={m.feed_row_edit_aria()}
-        onclick={gotoEdit}
-      >
-        ✎
-      </button>
-      <button
-        type="button"
-        class="action icon danger"
-        aria-label={m.feed_row_delete_aria()}
-        onclick={askDelete}
-      >
-        ×
-      </button>
-    </div>
-
-    {#if deleteError}
-      <InlineError message={deleteError} />
-    {/if}
+  <div class="picker-line">
+    <AttachToGamePicker {event} {games} onChanged={() => onChanged?.()} />
   </div>
 </article>
 
-<ConfirmDialog
-  open={confirmDeleteOpen}
-  message={m.confirm_event_delete()}
-  confirmLabel={m.common_delete()}
-  onConfirm={confirmDelete}
-  onCancel={cancelDelete}
-/>
-
 <style>
-  /* Plan 02.1-19 layout: FeedCard is sized by its CSS grid CELL on /feed
-   * (grid-template-columns: repeat(auto-fill, minmax(280px, 1fr))). Card is
-   * always vertical-stack — desktop horizontal layout from Plan 02.1-16 is
-   * RETIRED because grid cells are visually better as tiles.
-   * AttachToGamePicker (Plan 02.1-18 contract) is the only mutating control. */
+  /* Plan 02.1-18 layout: card body is a single clickable <a> wrapping
+   * media + title + meta + chips. AttachToGamePicker is OUTSIDE the anchor
+   * so its menu/buttons stay interactive without nesting an interactive
+   * inside an <a>. Plan 02.1-19 grid cell sizing
+   * (`repeat(auto-fill, minmax(280px, 1fr))`) preserved — vertical-stack
+   * tile at all viewports. */
   .feed-card {
     display: flex;
     flex-direction: column;
@@ -283,6 +210,19 @@
     border-radius: 6px;
     min-width: 0;
     max-width: 100%;
+    cursor: pointer;
+    transition: background 120ms ease;
+  }
+  .feed-card:hover {
+    background: var(--color-bg);
+  }
+  .card-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    min-width: 0;
+    text-decoration: none;
+    color: inherit;
   }
   .media {
     flex: 0 0 auto;
@@ -309,13 +249,6 @@
     justify-content: center;
     color: var(--color-text-muted);
   }
-  .body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
-    min-width: 0;
-    flex: 1 1 auto;
-  }
   .title-line {
     display: flex;
     align-items: flex-start;
@@ -331,16 +264,6 @@
     word-break: break-word;
     min-width: 0;
   }
-  .link {
-    color: var(--color-accent);
-    text-decoration: none;
-    min-width: 44px;
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
   .meta-line {
     display: flex;
     flex-wrap: wrap;
@@ -353,8 +276,7 @@
     font-weight: var(--font-weight-semibold);
     color: var(--color-text);
   }
-  .chips-line,
-  .actions-line {
+  .chips-line {
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-sm);
@@ -376,35 +298,9 @@
   .chip-author {
     color: var(--color-text);
   }
-  .action {
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: var(--font-size-label);
-    min-height: 44px;
-    padding: 0 var(--space-md);
+  .picker-line {
+    display: flex;
+    align-items: center;
+    min-width: 0;
   }
-  .action.icon {
-    min-width: 44px;
-    padding: 0;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-body);
-  }
-  .action.icon:hover {
-    color: var(--color-text);
-  }
-  .action.icon.danger:hover {
-    color: var(--color-destructive);
-    border-color: var(--color-destructive);
-  }
-  .action.open {
-    color: var(--color-accent);
-  }
-
-  /* Plan 02.1-19 RETIRED: Plan 02.1-16's @media (min-width: 768px) horizontal
-   * flexbox layout has been removed. The card is vertical-stack at all
-   * viewports — see comment above .feed-card. /feed's CSS grid sets the cell
-   * width; the card fills its cell as a tile. */
 </style>
