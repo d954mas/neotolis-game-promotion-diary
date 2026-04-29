@@ -258,5 +258,6 @@
   "common_edit": "Edit",
   "common_delete": "Delete",
   "common_restore": "Restore",
+  "common_save": "Save",
   "common_close": "Close"
 }

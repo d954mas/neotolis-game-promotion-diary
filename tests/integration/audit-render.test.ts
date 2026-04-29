@@ -636,11 +636,20 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
     expect(out.body).toMatch(/data-testid="feed-quick-nav"/);
     expect(out.body).toMatch(/data-tab="all"/);
     expect(out.body).toMatch(/data-tab="inbox"/);
+    // Plan 02.1-31: technical state name 'standalone' (lowercase) STAYS on
+    // the data-tab attribute (URL contract preserved); the user-facing
+    // rendered text is now "Not game-related" via the renamed m.* value.
     expect(out.body).toMatch(/data-tab="standalone"/);
     // Paraglide labels render at runtime (m.feed_quick_nav_*).
     expect(out.body).toContain("All");
     expect(out.body).toContain("Inbox");
-    expect(out.body).toContain("Standalone");
+    // Plan 02.1-31: standalone segment now renders user-facing text
+    // "Not game-related" instead of "Standalone" (UAT-NOTES.md §4.24.A).
+    expect(out.body).toContain("Not game-related");
+    // The literal English word "Standalone" MUST NOT appear in the rendered
+    // user-facing text — the data-tab attribute uses the lowercase technical
+    // identifier, not the capitalized English word.
+    expect(out.body).not.toMatch(/>[^<]*\bStandalone\b[^<]*</);
   });
 
   it("renders one tab per game (up to 5 visible) with the game id and title", async () => {
@@ -1187,5 +1196,353 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
         `${route}: no inline <header class="head"> in markup`,
       ).not.toMatch(/<header[^>]*class="head"/);
     }
+  });
+});
+
+/**
+ * Plan 02.1-31 — Standalone label rename to "Not game-related".
+ *
+ * Closes UAT-NOTES.md §4.24.A — the user does not parse "Standalone" as
+ * "not related to any game". User quote: "Standalone странный текст. Не
+ * очевидно что это вообще не про игры."
+ *
+ * Pure i18n value rename. The Paraglide KEYS stay (URL contract / state
+ * shape preserved); only the VALUES change for 3 user-facing keys. The
+ * audit-action keys (audit_action_event_marked_standalone /
+ * audit_action_event_unmarked_standalone) STAY unchanged — the audit log
+ * displays the technical verb name to match existing entries like "Event
+ * attached to a game".
+ *
+ * Component-level regression guards over each surface that displays the
+ * standalone label:
+ *   - FeedQuickNav segment via m.feed_quick_nav_standalone()
+ *   - FilterChips chip via m.feed_filter_show_standalone()
+ *   - FiltersSheet radio via m.feed_filter_show_standalone()
+ *   - FeedCard inline button via m.feed_card_mark_standalone_button()
+ * Plus a positive guard that the audit-action verb names STAY as the
+ * technical strings (m.audit_action_event_marked_standalone() unchanged).
+ */
+describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () => {
+  it("FeedQuickNav standalone segment renders 'Not game-related' (NOT 'Standalone')", async () => {
+    const FeedQuickNav = (
+      await import("../../src/lib/components/FeedQuickNav.svelte")
+    ).default;
+    const out = render(FeedQuickNav, {
+      props: {
+        games: [],
+        activeShow: { kind: "any" as const },
+        currentUrlSearch: "",
+        onNavigate: () => {},
+      },
+    });
+    // The standalone tab anchor renders the renamed copy. The data-tab
+    // attribute carries the lowercase technical state name (URL contract
+    // preserved); the anchor's user-facing text content is the new value.
+    const standaloneTabMatch = out.body.match(
+      /<a[^>]*data-tab="standalone"[^>]*>([^<]*)<\/a>/,
+    );
+    expect(
+      standaloneTabMatch,
+      "Standalone tab anchor not found in FeedQuickNav SSR output",
+    ).not.toBeNull();
+    expect(standaloneTabMatch![1]!.trim()).toBe("Not game-related");
+    // The user-facing literal "Standalone" (capitalized English word) MUST
+    // NOT appear inside any rendered text node.
+    expect(out.body).not.toMatch(/>[^<]*\bStandalone\b[^<]*</);
+  });
+
+  it("FilterChips chip for show=standalone reads 'Show: Not game-related'", async () => {
+    const FilterChips = (
+      await import("../../src/lib/components/FilterChips.svelte")
+    ).default;
+    const out = render(FilterChips, {
+      props: {
+        filters: {
+          source: [],
+          kind: [],
+          show: { kind: "standalone" as const },
+          defaultDateRange: false,
+          all: false,
+        },
+        sources: [],
+        games: [],
+        schema: ["kind", "source", "show", "authorIsMe", "date"] as const,
+        onDismiss: () => {},
+        onOpenSheet: () => {},
+        onClearAll: () => {},
+      },
+    });
+    expect(out.body).toContain("Show: Not game-related");
+    // The user-facing literal "Standalone" MUST NOT leak into the chip text.
+    expect(out.body).not.toMatch(/Show:\s*Standalone/);
+  });
+
+  it("FiltersSheet show fieldset radio with value='standalone' renders 'Not game-related' label", async () => {
+    const FiltersSheet = (
+      await import("../../src/lib/components/FiltersSheet.svelte")
+    ).default;
+    const out = render(FiltersSheet, {
+      props: {
+        filters: {
+          source: [],
+          kind: [],
+          show: { kind: "any" as const },
+          defaultDateRange: false,
+          all: false,
+        },
+        sources: [],
+        games: [],
+        schema: ["kind", "source", "show", "authorIsMe", "date"] as const,
+        onApply: () => {},
+        onClose: () => {},
+      },
+    });
+    // The standalone radio's input value="standalone" (technical state name
+    // STAYS) is followed by the label text "Not game-related" inside its
+    // wrapping <label class="toggle">.
+    expect(out.body).toMatch(/value="standalone"/);
+    // The renamed value renders as the label text.
+    expect(out.body).toContain("Not game-related");
+    // The literal English "Standalone" string MUST NOT appear in the
+    // rendered radio label text.
+    const labelMatch = out.body.match(
+      /<label[^>]*class="[^"]*toggle[^"]*"[^>]*>[^<]*<input[^>]*value="standalone"[^>]*\/?>([^<]*)<\/label>/,
+    );
+    if (labelMatch) {
+      expect(labelMatch[1]!.trim()).not.toMatch(/^Standalone\b/);
+    }
+  });
+
+  it("FeedCard inline 'Mark standalone' button reads 'Mark as not game-related' on inbox cards", async () => {
+    const FeedCard = (
+      await import("../../src/lib/components/FeedCard.svelte")
+    ).default;
+    // Inbox card (gameIds=[]) with no triage.standalone marker → renders
+    // the inline mark-standalone button. The button text is the renamed
+    // copy.
+    const out = render(FeedCard, {
+      props: {
+        event: {
+          id: "evt-1",
+          gameIds: [],
+          sourceId: null,
+          kind: "post" as const,
+          authorIsMe: false,
+          occurredAt: new Date("2026-04-29T12:00:00Z"),
+          title: "Test event",
+          url: null,
+          externalId: null,
+          notes: null,
+          metadata: null,
+          lastPolledAt: null,
+        },
+        source: null,
+        game: null,
+        games: [],
+      },
+    });
+    // The button rendering — class="standalone-button" carries the renamed
+    // text via m.feed_card_mark_standalone_button().
+    const buttonMatch = out.body.match(
+      /<button[^>]*class="[^"]*standalone-button[^"]*"[^>]*>([\s\S]*?)<\/button>/,
+    );
+    expect(
+      buttonMatch,
+      "standalone-button not found in inbox FeedCard SSR output",
+    ).not.toBeNull();
+    expect(buttonMatch![1]!.trim()).toBe("Mark as not game-related");
+  });
+
+  it("audit-action verb names STAY unchanged (technical context — by design)", async () => {
+    // Plan 02.1-31 INVARIANT: the audit log is a technical surface and
+    // the audit verbs match existing entries like "Event attached to a
+    // game". The marked_standalone / unmarked_standalone audit-action
+    // values stay as the technical verb names (NOT renamed to the
+    // user-facing "not game-related" copy).
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const raw = JSON.parse(
+      fs.readFileSync(path.resolve("messages/en.json"), "utf8"),
+    );
+    expect(raw.audit_action_event_marked_standalone).toBe(
+      "Event marked standalone",
+    );
+    expect(raw.audit_action_event_unmarked_standalone).toBe(
+      "Event unmarked standalone",
+    );
+  });
+
+  it("messages/en.json has the renamed user-facing values for the 3 standalone keys", async () => {
+    // Lock in the value contract at JSON-source level too — a future PR
+    // that flips the value back to "Standalone" trips this assertion.
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const raw = JSON.parse(
+      fs.readFileSync(path.resolve("messages/en.json"), "utf8"),
+    );
+    expect(raw.feed_card_mark_standalone_button).toBe(
+      "Mark as not game-related",
+    );
+    expect(raw.feed_filter_show_standalone).toBe("Not game-related");
+    expect(raw.feed_quick_nav_standalone).toBe("Not game-related");
+  });
+});
+
+/**
+ * Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema cleanup.
+ *
+ * Closes UAT-NOTES.md §4.22.A (sticky AppHeader regression — fixed via
+ * src/app.css overflow-x: clip; covered by tests/browser/responsive-360.test.ts),
+ * §4.22.F (FiltersSheet body-scroll-lock regression — fixed via declarative
+ * CSS :has(dialog[open]) in src/app.css and removal of imperative
+ * document.body.style.overflow in FiltersSheet), and §4.21.A (/audit dateRange
+ * duplication — fixed via /audit AUDIT_SCHEMA dropping 'date' axis).
+ *
+ * Component-level regression guards:
+ *   1. /audit caller schema is ['action'] only (no 'date') — page-level
+ *      DateRangeControl is the single source of truth on /audit.
+ *   2. /feed caller schema still includes 'date' (no regression on the
+ *      working surface — the in-sheet date axis is the design-intentional
+ *      secondary entry on /feed).
+ *   3. FiltersSheet.svelte source no longer references
+ *      `document.body.style.overflow` (imperative approach removed; CSS
+ *      :has() handles the lock declaratively).
+ *   4. src/app.css contains the body:has(dialog[open]) overflow:hidden rule.
+ *   5. src/app.css uses overflow-x: clip on body (NOT hidden) — the sticky
+ *      regression-source guard.
+ */
+describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema cleanup", () => {
+  it("/audit AUDIT_SCHEMA is exactly ['action'] — no 'date' axis (UAT-NOTES.md §4.21.A)", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(
+      path.resolve("src/routes/audit/+page.svelte"),
+      "utf8",
+    );
+    // Match the AUDIT_SCHEMA literal — the array MUST contain 'action' and
+    // MUST NOT contain 'date'. The page-level DateRangeControl above
+    // FilterChips is the single source of truth for date filtering on
+    // /audit; the in-sheet date axis was duplicating that control.
+    const match = src.match(/const AUDIT_SCHEMA\s*=\s*(\[[^\]]*\])/);
+    expect(
+      match,
+      "src/routes/audit/+page.svelte: AUDIT_SCHEMA literal not found",
+    ).not.toBeNull();
+    const literal = match![1]!;
+    expect(literal).toMatch(/"action"/);
+    expect(
+      literal,
+      "AUDIT_SCHEMA still references 'date' — Plan 02.1-34 removes it",
+    ).not.toMatch(/"date"/);
+  });
+
+  it("/feed schema still includes 'date' (no regression on the working surface)", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(
+      path.resolve("src/routes/feed/+page.svelte"),
+      "utf8",
+    );
+    // /feed's schema MUST still include 'date' — the in-sheet date axis is
+    // the design-intentional secondary entry there (DateRangeControl is the
+    // primary always-visible entry; the sheet-axis is the fallback for
+    // users opening the sheet via a chip click). Plan 02.1-34 only narrows
+    // /audit's schema, not /feed's.
+    expect(
+      src,
+      "/feed schema dropped 'date' — Plan 02.1-34 should preserve it on /feed",
+    ).toMatch(/"date"/);
+  });
+
+  it("FiltersSheet.svelte no longer references document.body.style.overflow (UAT-NOTES.md §4.22.F)", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(
+      path.resolve("src/lib/components/FiltersSheet.svelte"),
+      "utf8",
+    );
+    // Plan 02.1-22's imperative approach (document.body.style.overflow =
+    // 'hidden' / '') is replaced by declarative CSS :has(dialog[open]) in
+    // src/app.css. The component MUST NOT touch document.body.style at all
+    // — drift is a regression candidate.
+    expect(
+      src,
+      "FiltersSheet.svelte still imperatively sets document.body.style.overflow — Plan 02.1-34 removes that path in favor of CSS :has()",
+    ).not.toMatch(/document\.body\.style\.overflow/);
+    // Sanity: showModal / dialog wiring still in place.
+    expect(src).toMatch(/showModal\(\)/);
+  });
+
+  it("src/app.css contains the body:has(dialog[open]) overflow:hidden rule (UAT-NOTES.md §4.22.F)", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const css = fs.readFileSync(path.resolve("src/app.css"), "utf8");
+    // The rule must be present AND apply overflow: hidden. Whitespace
+    // tolerant; the CSS minifier may collapse whitespace at build time
+    // but the source contract is what we lock in here.
+    expect(
+      css,
+      "src/app.css missing body:has(dialog[open]) declarative scroll-lock rule",
+    ).toMatch(/body:has\(dialog\[open\]\)\s*\{[^}]*overflow:\s*hidden/);
+  });
+
+  it("src/app.css uses overflow-x: clip on body (NOT hidden) — sticky regression-source guard (UAT-NOTES.md §4.22.A)", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const css = fs.readFileSync(path.resolve("src/app.css"), "utf8");
+    // The html+body block MUST use overflow-x: clip. `hidden` paired with
+    // overflow-y: visible promotes body to a scroll container per CSS spec
+    // (overflow-y coerced to auto), which breaks position: sticky on
+    // descendants — that was the round-3 regression source. `clip` crops
+    // without promoting.
+    expect(
+      css,
+      "src/app.css must use 'overflow-x: clip' on body (Plan 02.1-34 sticky regression fix)",
+    ).toMatch(/overflow-x:\s*clip/);
+    // Negative guard: 'overflow-x: hidden' must NOT appear on the html+body
+    // block (the regression source). The match below is intentionally
+    // narrow to the html+body block by anchoring on the line range.
+    const htmlBodyBlock = css.match(/html,\s*\n?body\s*\{[\s\S]*?\}/);
+    expect(
+      htmlBodyBlock,
+      "html, body { ... } block not located in src/app.css",
+    ).not.toBeNull();
+    expect(
+      htmlBodyBlock![0],
+      "html+body block still uses overflow-x: hidden — Plan 02.1-34 should switch it to clip",
+    ).not.toMatch(/overflow-x:\s*hidden/);
+  });
+
+  it("FiltersSheet schema=['action'] (Plan 02.1-34 /audit shape) renders ONLY action fieldset — no date leak", () => {
+    const out = render(FiltersSheet, {
+      props: {
+        filters: {
+          source: [],
+          kind: [],
+          show: { kind: "any" },
+          defaultDateRange: false,
+          all: true,
+          action: ["key.add"],
+        },
+        sources: [],
+        games: [],
+        // Plan 02.1-34: /audit's new schema — date axis dropped.
+        schema: ["action"] as const,
+        onApply: () => {},
+        onClose: () => {},
+      },
+    });
+    expect(out.body).toMatch(/<fieldset[^>]*data-axis="action"/);
+    // Critical regression guard: date axis MUST NOT render when /audit's
+    // schema (now ['action'] only) opens the sheet.
+    expect(
+      out.body,
+      "FiltersSheet rendered date axis even when schema=['action'] (Plan 02.1-34 §4.21.A regression)",
+    ).not.toMatch(/<fieldset[^>]*data-axis="date"/);
+    // Other /feed-only axes also stay out (regression carry-over from Plan 02.1-21).
+    expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="source"/);
+    expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="kind"/);
+    expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="show"/);
+    expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="authorIsMe"/);
   });
 });

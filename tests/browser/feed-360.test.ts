@@ -326,3 +326,90 @@ describe("Plan 02.1-26: FeedQuickNav at top of /feed", () => {
     "URL /feed?show=specific&game=<id> highlights the matching game tab as active on direct navigation (manual UAT — auth harness deferred)",
   );
 });
+
+/**
+ * Plan 02.1-31 — Standalone label rename to "Not game-related" / "Не про игры".
+ *
+ * Closes UAT-NOTES.md §4.24.A — the user does not parse "Standalone" as
+ * "not related to any game". User quote: "Standalone странный текст. Не
+ * очевидно что это вообще не про игры."
+ *
+ * Pure i18n value rename. The Paraglide KEYS stay (URL contract / state
+ * shape preserved); only the VALUES change:
+ *   - feed_card_mark_standalone_button: → "Mark as not game-related"
+ *   - feed_filter_show_standalone:      → "Not game-related"
+ *   - feed_quick_nav_standalone:        → "Not game-related"
+ *   - audit_action_event_marked_standalone:   STAYS (technical audit log)
+ *   - audit_action_event_unmarked_standalone: STAYS (technical audit log)
+ *
+ * The full end-to-end browser flow at 360px (visit /feed → FeedQuickNav
+ * standalone tab reads "Not game-related"; click → URL ?show=standalone;
+ * FilterChips axis chip reads "Show: Not game-related"; FiltersSheet show
+ * radio reads "Not game-related"; FeedCard inbox card inline button reads
+ * "Mark as not game-related") requires the cookie-injection auth harness
+ * still deferred to Phase 6 (same precedent as Plans 02.1-18 / 19 / 20 /
+ * 21 / 23 / 26). Stub-skipped here for grep discoverability when the
+ * harness arrives.
+ *
+ * The component-level regression guard lives in
+ * tests/integration/audit-render.test.ts (Plan 02.1-31 describe block) —
+ * SSR render-time assertions over each surface that displays the
+ * standalone label.
+ */
+describe("Plan 02.1-31: Standalone label rename — 'Not game-related'", () => {
+  it.skip(
+    "FeedQuickNav segment for the standalone state renders 'Not game-related' — NOT 'Standalone' (manual UAT — auth harness deferred to Phase 6)",
+  );
+  it.skip(
+    "FilterChips chip for show=standalone reads 'Show: Not game-related' (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "FiltersSheet show fieldset radio with value='standalone' has label 'Not game-related' (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "FeedCard inbox card inline button reads 'Mark as not game-related' — NOT 'Mark standalone' (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "URL contract preserved — clicking the renamed FeedQuickNav segment navigates to /feed?show=standalone (lowercase technical state name STAYS) (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "Audit log row for event.marked_standalone still reads 'Event marked standalone' (technical context — by design) (manual UAT — auth harness deferred)",
+  );
+});
+
+/**
+ * Plan 02.1-34 — FiltersSheet body-scroll-lock via CSS :has() (UAT-NOTES.md §4.22.F).
+ *
+ * Plan 02.1-22 added an imperative document.body.style.overflow = 'hidden'
+ * inside the FiltersSheet's $effect (with a cleanup return restoring it).
+ * Round-4 UAT surfaced regression: body still scrolled when sheet was open.
+ * Root causes (per analysis):
+ *   - Svelte 5 $effect cleanup timing was unreliable across re-runs.
+ *   - Other dialog components (e.g. ConfirmDialog) could overwrite the
+ *     inline style back to '' on their own lifecycle.
+ *
+ * Plan 02.1-34 fix: declarative CSS :has() selector in src/app.css —
+ *   body:has(dialog[open]) { overflow: hidden; }
+ * The browser engine applies the lock the moment ANY <dialog open> is in
+ * the DOM, and self-restores when none is. No JS state to manage. Works
+ * for FiltersSheet, ConfirmDialog, and any future modal using <dialog>.
+ *
+ * The full end-to-end (open sheet → body unscrollable → close → body
+ * scrollable) requires the cookie-injection auth harness still deferred
+ * to Phase 6. Stub-skipped here for grep discoverability when the harness
+ * arrives. The CSS rule's mere presence in src/app.css is the
+ * regression-source guard for this plan; an integration test in
+ * tests/integration/audit-render.test.ts (Plan 02.1-34 describe block)
+ * also asserts FiltersSheet no longer touches document.body.style.overflow.
+ */
+describe("Plan 02.1-34: FiltersSheet body-scroll-lock via CSS :has()", () => {
+  it.skip(
+    "/feed open FiltersSheet → window.scrollTo(0, 100) on body → document.body.scrollTop stays 0 (manual UAT — auth harness deferred to Phase 6)",
+  );
+  it.skip(
+    "/feed close FiltersSheet → window.scrollTo(0, 100) on body → document.body.scrollTop > 0 (lock released) (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "getComputedStyle(document.body).overflow === 'hidden' while a <dialog open> is in the DOM (CSS :has() rule applied) (manual UAT — auth harness deferred)",
+  );
+});
