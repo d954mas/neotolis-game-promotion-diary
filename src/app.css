@@ -177,3 +177,20 @@ div {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+
+/* Plan 02.1-34 (UAT-NOTES.md §4.22.F regression fix): declarative body-scroll
+ * lock when ANY <dialog> is open. Replaces the imperative
+ * document.body.style.overflow approach Plan 02.1-22 introduced — that
+ * approach regressed because Svelte 5 $effect cleanup timing was unreliable
+ * AND nested ConfirmDialog instances could overwrite the inline style back
+ * to ''. CSS :has() lets the browser engine apply the lock the moment any
+ * <dialog open> exists in the DOM and self-restore the moment none does.
+ *
+ * Applies to FiltersSheet, ConfirmDialog, and any future modal that uses
+ * the native <dialog> element + showModal(). Supported in Chrome 105+,
+ * Safari 15.4+, Firefox 121+ — within the project's modern-browser
+ * baseline. Older browsers fall back to no scroll lock; the dialog still
+ * focus-traps via showModal() so the regression is graceful. */
+body:has(dialog[open]) {
+  overflow: hidden;
+}

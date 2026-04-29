@@ -1454,7 +1454,7 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     ).toMatch(/"date"/);
   });
 
-  it("FiltersSheet.svelte no longer references document.body.style.overflow (UAT-NOTES.md §4.22.F)", async () => {
+  it("FiltersSheet.svelte no longer references document.body.style.overflow in code (UAT-NOTES.md §4.22.F)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(
@@ -1464,9 +1464,14 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     // Plan 02.1-22's imperative approach (document.body.style.overflow =
     // 'hidden' / '') is replaced by declarative CSS :has(dialog[open]) in
     // src/app.css. The component MUST NOT touch document.body.style at all
-    // — drift is a regression candidate.
+    // in CODE — drift is a regression candidate. Comments referring to the
+    // historical approach are fine (and useful for reviewers); the test
+    // strips // single-line and /* ... */ block comments before matching.
+    const codeOnly = src
+      .replace(/\/\/[^\n]*/g, "")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
     expect(
-      src,
+      codeOnly,
       "FiltersSheet.svelte still imperatively sets document.body.style.overflow — Plan 02.1-34 removes that path in favor of CSS :has()",
     ).not.toMatch(/document\.body\.style\.overflow/);
     // Sanity: showModal / dialog wiring still in place.
@@ -1500,15 +1505,17 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
       "src/app.css must use 'overflow-x: clip' on body (Plan 02.1-34 sticky regression fix)",
     ).toMatch(/overflow-x:\s*clip/);
     // Negative guard: 'overflow-x: hidden' must NOT appear on the html+body
-    // block (the regression source). The match below is intentionally
-    // narrow to the html+body block by anchoring on the line range.
+    // block (the regression source). The match below isolates the html+body
+    // block AND strips CSS comments — comments referring to the historical
+    // approach are fine (and useful for reviewers).
     const htmlBodyBlock = css.match(/html,\s*\n?body\s*\{[\s\S]*?\}/);
     expect(
       htmlBodyBlock,
       "html, body { ... } block not located in src/app.css",
     ).not.toBeNull();
+    const htmlBodyCodeOnly = htmlBodyBlock![0].replace(/\/\*[\s\S]*?\*\//g, "");
     expect(
-      htmlBodyBlock![0],
+      htmlBodyCodeOnly,
       "html+body block still uses overflow-x: hidden — Plan 02.1-34 should switch it to clip",
     ).not.toMatch(/overflow-x:\s*hidden/);
   });

@@ -279,12 +279,15 @@
   $effect(() => {
     if (dialogEl && !dialogEl.open) {
       dialogEl.showModal();
-      // Plan 02.1-22 (UAT-NOTES.md §1.4-bug closure): lock body scroll while
-      // the dialog is open so the underlying feed/audit page does not scroll
-      // behind the modal. The cleanup function below restores the original
-      // overflow on dialog close (works for the close-button, apply, and
-      // unmount paths; onDialogCancel handles the Esc/backdrop path).
-      document.body.style.overflow = "hidden";
+      // Plan 02.1-34 (UAT-NOTES.md §4.22.F regression fix): the imperative
+      // document.body.style.overflow = 'hidden' approach Plan 02.1-22 used
+      // here regressed — Svelte 5 $effect cleanup timing was unreliable AND
+      // nested ConfirmDialog instances could overwrite the inline style
+      // back to ''. The body-scroll-lock is now declarative via
+      // `body:has(dialog[open]) { overflow: hidden; }` in src/app.css —
+      // the browser engine applies it the moment any <dialog open> exists
+      // and self-restores when none does. No JS state to manage here.
+      //
       // Plan 02.1-19: focus-jump support — when chip click opens the sheet
       // with a specific axis hint, scroll its fieldset into view + focus
       // the first interactive control. Lightweight UX nice-to-have.
@@ -302,21 +305,13 @@
           }
         });
       }
-      return () => {
-        // Plan 02.1-22: restore body scroll on every effect re-run / unmount.
-        document.body.style.overflow = "";
-      };
     }
   });
 
   function onDialogCancel(e: Event): void {
     e.preventDefault();
-    // Plan 02.1-22: Esc / backdrop close path — restore body scroll
-    // immediately so the underlying page is interactive again the moment
-    // the user dismisses the sheet (cleanup function is also wired through
-    // the $effect re-run, but explicit restore here keeps the intent
-    // visible in the close handlers).
-    document.body.style.overflow = "";
+    // Plan 02.1-34: body-scroll lock is declarative (CSS :has(dialog[open]))
+    // — no imperative restore needed on Esc/backdrop close.
     onClose();
   }
 

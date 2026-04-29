@@ -52,7 +52,16 @@
 
   // Plan 02.1-21: schema is the authoritative list of axes /audit owns.
   // FiltersSheet renders only these; FilterChips emits chips only for these.
-  const AUDIT_SCHEMA = ["action", "date"] as const;
+  //
+  // Plan 02.1-34 (UAT-NOTES.md §4.21.A): 'date' axis REMOVED from /audit's
+  // schema. The page-level <DateRangeControl> above <FilterChips> stays as
+  // the single source of truth for date filtering on /audit. Plan 02.1-21
+  // shipped both the page-level DateRangeControl AND the in-sheet date
+  // axis; round-4 UAT surfaced the duplication ("Дублируется выбор даты —
+  // и в date-range-control, и в окне фильтров"). The /feed schema KEEPS
+  // 'date' in the sheet (no duplication on /feed by design — there the
+  // sheet date axis is the secondary entry the user actively wants).
+  const AUDIT_SCHEMA = ["action"] as const;
 
   let prevStack = $state<string[]>([]);
   let sheetOpen = $state(false);
