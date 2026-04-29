@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02.1-28-PLAN.md
-last_updated: "2026-04-29T17:24:17.641Z"
+stopped_at: Completed 02.1-30-PLAN.md
+last_updated: "2026-04-29T17:45:07.301Z"
 last_activity: 2026-04-29
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 55
-  completed_plans: 49
+  completed_plans: 52
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 4 of 34
+Plan: 7 of 34
 
 ## Performance Metrics
 
@@ -93,6 +93,9 @@ Plan: 4 of 34
 | Phase 02.1-architecture-realignment P27 | 17min 41s | 2 tasks | 12 files |
 | Phase 02.1-architecture-realignment P29 | 32min | 1 tasks | 6 files |
 | Phase 02.1-architecture-realignment P28 | 34min 28s | 2 tasks | 31 files |
+| Phase 02.1 P31 | ~9 min | 1 tasks | 3 files |
+| Phase 02.1-architecture-realignment P34 | ~14 min | 2 tasks | 8 files |
+| Phase 02.1 P30 | ~14min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -262,6 +265,16 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-28: markStandalone REJECTS attached events (422 standalone_conflicts_with_game) — replaces Plan 02.1-24 silent-detach behavior
 - [Phase 02.1-architecture-realignment]: Plan 02.1-28: HTTP route schemas accept BOTH {gameIds} (canonical) AND {gameId|null} (back-compat alias for one round of UAT); Plan 02.1-32 retires the alias UI-side
 - [Phase 02.1-architecture-realignment]: Plan 02.1-28: toEventDto signature extended to (event, gameIds[]) — pure projection; mapEventsToDtos batch helper avoids N+1 on list paths
+- [Phase 02.1]: Plan 02.1-31: Standalone label renamed to 'Not game-related' (FeedQuickNav / FilterChips / FiltersSheet / FeedCard) — pure i18n value rename. URL contract / state shape / audit verb / service / schema preserved. Audit log keeps technical verb 'Event marked standalone'. Russian copy ('Не про игры') deferred to Phase 6 ru.json. Closes UAT-NOTES.md §4.24.A.
+- [Phase 02.1-architecture-realignment]: Plan 02.1-34: sticky AppHeader regression closed via overflow-x:clip on body (CSS spec compliance — hidden+visible coerces overflow-y to auto, promoting body to a scroll container and breaking position:sticky); diagnosed via grep across +layout.svelte / AppHeader.svelte / Nav.svelte / FeedQuickNav.svelte (only candidate was src/app.css line 139)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-34: FiltersSheet body-scroll-lock rewritten declaratively via body:has(dialog[open]) { overflow: hidden; } in src/app.css; replaces Plan 02.1-22 imperative document.body.style.overflow approach (regressed because Svelte 5 $effect cleanup timing was unreliable AND nested ConfirmDialog could overwrite the inline style). CSS :has() supported in Chrome 105+/Safari 15.4+/Firefox 121+ — within modern-browser baseline; cross-component-safe by construction (any future <dialog> inherits).
+- [Phase 02.1-architecture-realignment]: Plan 02.1-34: /audit AUDIT_SCHEMA narrowed from ['action','date'] to ['action'] — page-level <DateRangeControl> stays as the SINGLE source of truth for date filtering; /feed schema unchanged (date axis preserved by design — in-sheet date axis is the secondary entry users want on /feed per Plan 02.1-21 design)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-34: comment-stripping in negative-grep regression guards — extends Plan 02.1-10 precedent (which moved a comment to avoid a literal); audit-render.test.ts strips // and /* */ comments before negative-grep so historical-explanation comments mentioning the regressed pattern (e.g. 'document.body.style.overflow' / 'overflow-x: hidden') don't trip the assertion. Pattern: when asserting a code-side absence, strip comments first.
+- [Phase 02.1-architecture-realignment]: Plan 02.1-30: --color-mine token defined as a per-axis CSS custom property layered on --color-accent (defaults to var(--color-accent) for now; can diverge later in a single-line edit). FeedCard.mine + SourceRow.mine .row.mine border-left + .ownership-badge.mine bg/border resolve via the new token. UAT-NOTES.md §4.25.A user direction closed.
+- [Phase 02.1-architecture-realignment]: Plan 02.1-30: /games/[id] retired Plan 02.1-25 oversized 2-card layout per UAT-NOTES.md §4.25.B; new shape = lean game header (no panel surface) + StoresSection + vertical FeedCard list grouped by date via the SAME groupEventsByDate util as /feed (no FilterChips / DateRangeControl / FiltersSheet). FeedCard reused as-is — Plan 02.1-28 isInboxRow gate hides 'Mark standalone' on /games/[id] cards by construction.
+- [Phase 02.1-architecture-realignment]: Plan 02.1-30: NEW StoresSection.svelte component (Magazины / Stores section header + + Add CTA + AddSteamListingForm body); Phase 2.1 ships Steam-only behind the new shell, Itch + Epic explicitly deferred per UAT-NOTES.md §4.25.C.
+- [Phase 02.1-architecture-realignment]: Plan 02.1-30: SteamListingRow gains edit-mode-only Remove × button + ConfirmDialog wired to DELETE /api/games/:gameId/listings/:listingId. Page-level editMode state on /games/[id] mirrors Plan 02.1-22's SourceRow pattern but at PAGE scope. UAT-NOTES.md §4.25.H closed.
+- [Phase 02.1-architecture-realignment]: Plan 02.1-30: AddSteamListingForm reads 422 body.metadata.{existingGameId, existingState} (Plan 02.1-29 service hardening) and surfaces inline error with deep link to /games/{existingGameId} OR soft-deleted explanation. UAT-NOTES.md §4.25.G closed.
 
 ### Pending Todos
 
@@ -302,8 +315,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-29T17:24:17.637Z
+Last session: 2026-04-29T17:45:07.298Z
 Last Activity: 2026-04-29
-Stopped at: Completed 02.1-28-PLAN.md
+Stopped at: Completed 02.1-30-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md

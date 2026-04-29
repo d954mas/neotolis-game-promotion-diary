@@ -116,6 +116,10 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 02.1-24-PLAN.md — Round-3 gap closure Wave 1: inbox triage + standalone state — markStandalone/unmarkStandalone services + 2 new HTTP routes + forward-only migration 0003_add_event_standalone_audit_actions + ShowFilter discriminated union extended + FeedCard dim CSS + inline Standalone button on inbox cards (explicit user-accepted exception to read-only feed) (UAT-NOTES.md §6.1-redesign)
 - [x] 02.1-25-PLAN.md — Round-3 gap closure Wave 2: card visual language consistency — SourceRow Mine treatment + kind icon+text label, NEW <PageHeader> shared across /feed /games /sources, NEW <GameCover> placeholder + Steam header_image fallback, NEW <SteamListingRow> with Steam name + Open-on-Steam link, /games/[id] two-card layout, forward-only migration 0004_add_steam_listing_name persists Steam name (UAT-NOTES.md §2.1 + §3.1 + §3.2 + §3.3)
 - [x] 02.1-26-PLAN.md — Round-3 gap closure Wave 2: NEW <FeedQuickNav> chip strip at top of /feed (All / Inbox / Standalone / per-game tabs + More games overflow dropdown for >5 games) — shortcut to FiltersSheet Show axis; horizontal scroll at 360px (UAT-NOTES.md §6.2-redesign)
+- [x] 02.1-27-PLAN.md — Round-4 gap closure Wave 0: forward-only migrations 0005 (event_games junction for M:N) + 0006 (Steam listing user-scoped unique constraint swap) — schema-layer prep for Plans 02.1-28 / 02.1-29 / 02.1-30
+- [x] 02.1-28-PLAN.md — Round-4 gap closure Wave 1: M:N migration application layer — attachEventToGames service rewrite + DTO migration (gameId → gameIds[]) + HTTP route updates + tenant-scope probes + Pitfall 6 mirror; closes UAT-NOTES.md §4.24.G
+- [x] 02.1-29-PLAN.md — Round-4 gap closure Wave 1: Steam listing service hardening — addSteamListing translates Postgres 23505 to AppError 422 'steam_listing_duplicate' with metadata payload (Path B: pre-INSERT lookup catches soft-deleted dupes; race-window catch around INSERT); closes UAT-NOTES.md §4.25.E + §4.25.G prep + §4.25.H
+- [x] 02.1-31-PLAN.md — Round-4 gap closure Wave 2: Standalone label rename — 3 user-facing Paraglide values updated ("Standalone" → "Not game-related" / "Mark standalone" → "Mark as not game-related"); URL contract / state shape / audit verb / service / schema preserved; audit log keeps technical verb 'Event marked standalone'; closes UAT-NOTES.md §4.24.A
 **UI hint**: yes
 
 ### Phase 3: Polling Pipeline
@@ -190,7 +194,7 @@ Phases execute in numeric order: 1 → 2 → 2.1 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation | 10/10 | Complete | 2026-04-27 |
 | 2. Ingest, Secrets, and Audit | 11/11 | Gaps Found | 2026-04-28 (closure in 2.1) |
-| 2.1. Architecture Realignment (INSERTED) | 19/26 | In progress (Plans 11-16 closed round-1 UAT gaps; Plans 17-20 closed round-2 UAT gaps; Plans 21-26 close round-3 UAT gaps from 2026-04-29; Plan 10 UAT checkpoint resume after round-3 ships) | - |
+| 2.1. Architecture Realignment (INSERTED) | 29/34 | In progress (Plans 11-16 closed round-1 UAT gaps; Plans 17-20 closed round-2 UAT gaps; Plans 21-26 closed round-3 UAT gaps from 2026-04-29; Plans 27-34 close round-4 UAT gaps from 2026-04-29 — 02.1-31 Standalone label rename to "Not game-related" complete; Plan 10 UAT checkpoint resume after round-4 ships) | - |
 | 3. Polling Pipeline | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
 | 5. Reddit Rules Cockpit | 0/TBD | Not started | - |
