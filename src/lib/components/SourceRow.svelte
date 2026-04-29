@@ -49,33 +49,23 @@
   // value, so a parent passing a fresh source after rename would render
   // stale text in the input on next open.
   let editName = $state("");
+  // Plan 02.1-22 (UAT-NOTES.md §2.4-decision option A): auto_import editing
+  // moved out of the always-visible row UI into the edit form. Local buffer
+  // mirrors `source.autoImport` and is re-seeded each time the edit form
+  // opens (mirrors editName seeding). Sent in the PATCH /api/sources/:id
+  // payload alongside displayName when the user saves.
+  let editAutoImport = $state(false);
   let confirmingRemove = $state(false);
   let mutating = $state(false);
   let rowError = $state<string | null>(null);
 
-  async function toggleAutoImport(next: boolean): Promise<void> {
-    if (mutating) return;
-    mutating = true;
-    rowError = null;
-    try {
-      const res = await fetch(`/api/sources/${source.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ autoImport: next }),
-      });
-      if (!res.ok) {
-        rowError = m.error_server_generic();
-        return;
-      }
-      await invalidateAll();
-    } catch {
-      rowError = m.error_network();
-    } finally {
-      mutating = false;
-    }
-  }
+  // Plan 02.1-22 (UAT-NOTES.md §2.4-decision option A): the standalone
+  // toggleAutoImport() function was DELETED. The previous one-click toggle
+  // in row-display mode was too easy to mis-tap and there was no audit
+  // discoverability before the round-3 UAT. The toggle now lives inside the
+  // edit form and ships in the same PATCH as a display-name change.
 
-  async function saveDisplayName(e: Event): Promise<void> {
+  async function saveSourceEdit(e: Event): Promise<void> {
     e.preventDefault();
     if (mutating) return;
     mutating = true;
@@ -84,7 +74,13 @@
       const res = await fetch(`/api/sources/${source.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ displayName: editName.trim() || null }),
+        // Plan 02.1-22: PATCH body now sends BOTH displayName AND autoImport.
+        // The /api/sources/:id route already accepts both fields in the same
+        // payload (Plan 02.1-06) — no service or zod schema change needed.
+        body: JSON.stringify({
+          displayName: editName.trim() || null,
+          autoImport: editAutoImport,
+        }),
       });
       if (!res.ok) {
         rowError = m.error_server_generic();
@@ -122,7 +118,7 @@
   <div class="primary">
     <SourceKindIcon kind={source.kind} />
     {#if editing}
-      <form class="rename" onsubmit={saveDisplayName}>
+      <form class="rename" onsubmit={saveSourceEdit}>
         <input
           class="input"
           type="text"
@@ -130,6 +126,13 @@
           maxlength="120"
           aria-label="Display name"
         />
+        <!-- Plan 02.1-22 (§2.4-decision option A): the auto_import toggle
+             lives inside the edit form so it can't be mis-tapped from the
+             row-display surface. Saved alongside displayName in one PATCH. -->
+        <label class="toggle">
+          <input type="checkbox" bind:checked={editAutoImport} />
+          <span>Auto-import</span>
+        </label>
         <button type="submit" class="rename-save" disabled={mutating}>
           {m.toast_saved()}
         </button>
@@ -153,15 +156,13 @@
     <span class="polling-status" role="status">
       {source.autoImport ? m.sources_status_auto_on_pending() : m.sources_status_auto_off()}
     </span>
-    <label class="toggle">
-      <input
-        type="checkbox"
-        checked={source.autoImport}
-        disabled={mutating}
-        onchange={(e) => toggleAutoImport((e.currentTarget as HTMLInputElement).checked)}
-      />
-      <span>Auto-import</span>
-    </label>
+    <!-- Plan 02.1-22 (§2.4-decision option A): non-interactive pill replaces
+         the inline checkbox. The toggle moved into the edit form so a misclick
+         can't flip auto-import without going through the same PATCH path that
+         renames also use. -->
+    <span class="auto-pill">
+      {source.autoImport ? m.sources_auto_import_on() : m.sources_auto_import_off()}
+    </span>
   </div>
 
   <div class="actions">
@@ -170,7 +171,13 @@
       class="icon-btn"
       aria-label={m.common_edit()}
       onclick={() => {
-        if (!editing) editName = source.displayName ?? "";
+        if (!editing) {
+          editName = source.displayName ?? "";
+          // Plan 02.1-22: re-seed editAutoImport from the live row each
+          // time the edit form opens so a stale toggle from a previous
+          // open doesn't mask the current persisted value.
+          editAutoImport = source.autoImport;
+        }
         editing = !editing;
       }}
     >
@@ -298,6 +305,19 @@
     color: var(--color-text-muted);
     font-size: var(--font-size-label);
     cursor: pointer;
+  }
+  /* Plan 02.1-22 (§2.4-decision option A): non-interactive auto-import pill
+     in row-display mode. Visually similar to .ownership-badge but borrowed
+     into the row-status surface. */
+  .auto-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px var(--space-sm);
+    background: var(--color-bg);
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    font-size: var(--font-size-label);
   }
   .actions {
     display: flex;

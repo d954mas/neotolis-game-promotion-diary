@@ -12,7 +12,7 @@
   //
   // Renders rows that look like AuditRow but are interactive (UI-SPEC).
 
-  import { invalidate } from "$app/navigation";
+  import { invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "./InlineError.svelte";
 
@@ -55,7 +55,13 @@
         errorText = m.error_server_generic();
         return;
       }
-      await invalidate("/settings");
+      // Plan 02.1-22 (UAT-NOTES.md §6.3-bug closure): use invalidateAll() so
+      // every loader on /settings re-runs (the page's +layout.server.ts
+      // sessions loader IS what populates this list — the previous
+      // invalidate("/settings") only invalidated the page-level loader, not
+      // the broader chain that supplies session data). After the call
+      // SessionsList re-renders without the destroyed session.
+      await invalidateAll();
     } catch {
       errorText = m.error_network();
     } finally {

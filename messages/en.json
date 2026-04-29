@@ -72,7 +72,9 @@
   "audit_action_source_toggled_auto_import": "Data source auto-import toggled",
   "audit_action_event_attached_to_game": "Event attached to a game",
   "audit_action_event_dismissed_from_inbox": "Event dismissed from inbox",
+  "audit_action_event_marked_standalone": "Event marked standalone",
   "audit_action_event_restored": "Event restored",
+  "audit_action_event_unmarked_standalone": "Event unmarked standalone",
 
   "audit_filter_action_axis_label": "Action",
   "audit_filter_date_axis_label": "Date range",
@@ -87,6 +89,7 @@
   "feed_filter_show_axis_label": "Show",
   "feed_filter_show_inbox": "Inbox only",
   "feed_filter_show_specific": "Attached to games",
+  "feed_filter_show_standalone": "Standalone — not related to any game",
 
   "feed_chip_axis_action": "Action",
   "feed_chip_axis_kind": "Kind",
@@ -128,6 +131,8 @@
 
   "sources_status_auto_on_pending": "Auto-import: ON · Phase 3 will start polling",
   "sources_status_auto_off": "Auto-import: OFF",
+  "sources_auto_import_on": "Auto-import: On",
+  "sources_auto_import_off": "Auto-import: Off",
   "sources_owned_by_me": "Mine",
   "sources_owned_by_other": "Tracking",
   "sources_kind_disabled_tooltip": "{kind} — {phase}. Schema is ready; the polling adapter ships in {phase}.",
@@ -163,6 +168,9 @@
   "confirm_speedbump_acknowledge": "I understand this is permanent",
   "confirm_source_remove": "Remove \"{display_name}\"? Existing events stay in your feed but will keep pointing at this retired source. You can restore the source within 60 days from the deleted-sources view.",
 
+  "settings_credentials_heading": "Credentials",
+  "settings_credentials_steam_link_label": "Steam Web API key",
+
   "settings_sessions_heading": "Active sessions",
   "settings_sessions_blurb": "These are the devices currently signed in to your account. Sign out from any session you don't recognize.",
   "settings_sessions_current_badge": "Current session",
@@ -194,6 +202,7 @@
   "feed_row_delete_aria": "Delete event",
 
   "feed_card_author_is_me_badge": "Mine",
+  "feed_card_mark_standalone_button": "Mark standalone",
   "feed_card_thumbnail_alt": "Thumbnail for: {title}",
   "feed_card_open_external": "Open external link",
 

@@ -94,6 +94,22 @@
   </article>
 
   <article class="block">
+    <h2>{m.settings_credentials_heading()}</h2>
+    <!-- Plan 02.1-22 (UAT-NOTES.md §8.1-bug minimal closure): /keys/steam was
+         unreachable from any nav. This is the MINIMAL fix — a single link from
+         /settings. The unified /settings/credentials hub described in
+         UAT-NOTES.md §8.2-redesign is DEFERRED to Phase 3+ (it pairs with
+         KEYS-01 YouTube + KEYS-02 Reddit which only become functional in
+         Phase 3). The `_credentials_` prefix on the Paraglide keys means the
+         Phase 3+ rebuild is a search-and-restructure, not a from-scratch
+         rewrite. -->
+    <p class="muted">Manage API keys for external services.</p>
+    <a href="/keys/steam" class="audit-link">
+      {m.settings_credentials_steam_link_label()} →
+    </a>
+  </article>
+
+  <article class="block">
     <h2>Activity log</h2>
     <p class="muted">Audit trail of every action on your account.</p>
     <a href="/audit" class="audit-link">View audit log →</a>

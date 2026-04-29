@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { render } from "svelte/server";
 import EmptyState from "../../src/lib/components/EmptyState.svelte";
 import * as m from "../../src/lib/paraglide/messages.js";
@@ -67,5 +69,23 @@ describe("empty-state copy + Paraglide invariant (UX-03)", () => {
     const body = m.empty_keys_steam_body({ url });
     expect(body).toContain("Phase 3 lands the manual-entry form");
     expect(body).not.toContain("manual wishlist entry");
+  });
+
+  it("Plan 02.1-22: /settings page links to /keys/steam (UAT-NOTES.md §8.1-bug closure)", () => {
+    // /keys/steam was unreachable from any nav before round-3 — UAT-NOTES.md
+    // §8.1-bug. The minimal fix in Plan 02.1-22 adds a Credentials block on
+    // /settings with a single link to /keys/steam. This assertion guards the
+    // closure so a future refactor (e.g. Phase 3+ unified /settings/credentials
+    // hub per §8.2-redesign) cannot remove the access path before its
+    // replacement lands. File-content assertion (vs SSR render) because
+    // /settings/+page.svelte depends on +layout.server.ts data shape that an
+    // isolated `render` call would have to mock.
+    const settingsPage = fs.readFileSync(
+      path.resolve("src/routes/settings/+page.svelte"),
+      "utf8",
+    );
+    expect(settingsPage).toContain("/keys/steam");
+    expect(settingsPage).toContain("settings_credentials_heading");
+    expect(settingsPage).toContain("settings_credentials_steam_link_label");
   });
 });
