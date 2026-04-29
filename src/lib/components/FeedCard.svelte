@@ -1,21 +1,24 @@
 <script lang="ts">
-  // FeedCard — media-card replacement for <FeedRow> (Plan 02.1-16 / Gap 3).
+  // FeedCard — media-card replacement for <FeedRow> (Plan 02.1-16 / Gap 3,
+  // refined in Plan 02.1-19 round-2 UAT).
   //
-  // Visual contract (UI-SPEC §"/feed row interaction contract" REVISED for
-  // Gap 3 + Gap 6 path b — kind label adjacent to the icon, no brand mark):
+  // Visual contract (Plan 02.1-19 — vertical stack at all viewports, sized
+  // by /feed's CSS grid cell `repeat(auto-fill, minmax(280px, 1fr))`):
   //
-  //   Mobile (<768px) vertical stack inside a card:
-  //     1. Media row — 16:9 thumbnail for kind=youtube_video
-  //        (img.youtube.com/vi/{id}/mqdefault.jpg) OR a centered KindIcon in a
-  //        muted block for non-thumbnail kinds.
-  //     2. Title + open-external icon.
-  //     3. Meta row — kind label (text) + compact date (formatFeedDate) +
-  //        InboxBadge + PollingBadge.
-  //     4. Chips row — source / game / author_is_me.
-  //     5. Actions row — AttachToGamePicker + Open + Edit + Delete (44×44 hit).
+  //   1. Media row — 16:9 thumbnail for kind=youtube_video
+  //      (img.youtube.com/vi/{id}/mqdefault.jpg) OR a centered KindIcon in a
+  //      muted block for non-thumbnail kinds.
+  //   2. Title + open-external icon.
+  //   3. Meta row — kind label (text) + InboxBadge + PollingBadge.
+  //      DATE IS NOT RENDERED HERE in Plan 02.1-19 — the
+  //      <FeedDateGroupHeader> above the group is the date label
+  //      (Google Photos / Apple Photos timeline pattern).
+  //   4. Chips row — source / game / author_is_me.
+  //   5. Actions row — AttachToGamePicker + Open + Edit + Delete (44×44 hit).
   //
-  //   Desktop (>=768px) horizontal flexbox: 160px-wide thumbnail on left,
-  //   content stack on right.
+  // Plan 02.1-19 layout: card stays vertical-stack at all widths. The Plan
+  // 02.1-16 desktop horizontal flexbox layout is RETIRED because grid cells
+  // are visually better as tiles.
   //
   // Accessibility (UI-SPEC §"Accessibility Floor delta"):
   //   - Thumbnail <img alt> via m.feed_card_thumbnail_alt({ title }).
@@ -35,7 +38,6 @@
 
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
-  import { formatFeedDate } from "$lib/util/format-feed-date.js";
   import KindIcon from "./KindIcon.svelte";
   import AttachToGamePicker from "./AttachToGamePicker.svelte";
   import InboxBadge from "./InboxBadge.svelte";
@@ -91,12 +93,6 @@
     games: GameLite[];
     onChanged?: () => void;
   } = $props();
-
-  const compactDate = $derived(formatFeedDate(event.occurredAt));
-
-  const occurredIso = $derived(
-    typeof event.occurredAt === "string" ? event.occurredAt : event.occurredAt.toISOString(),
-  );
 
   const thumbnailUrl = $derived.by((): string | null => {
     if (event.kind !== "youtube_video") return null;
@@ -214,7 +210,8 @@
 
     <div class="meta-line">
       <span class="kind-tag">{kindLabel}</span>
-      <time class="when" datetime={occurredIso} title={occurredIso}>{compactDate}</time>
+      <!-- Plan 02.1-19: inline date display REMOVED — the
+           <FeedDateGroupHeader> above each card group is the date label. -->
       {#if isInboxRow}
         <InboxBadge />
       {/if}
@@ -271,6 +268,11 @@
 />
 
 <style>
+  /* Plan 02.1-19 layout: FeedCard is sized by its CSS grid CELL on /feed
+   * (grid-template-columns: repeat(auto-fill, minmax(280px, 1fr))). Card is
+   * always vertical-stack — desktop horizontal layout from Plan 02.1-16 is
+   * RETIRED because grid cells are visually better as tiles.
+   * AttachToGamePicker (Plan 02.1-18 contract) is the only mutating control. */
   .feed-card {
     display: flex;
     flex-direction: column;
@@ -280,6 +282,7 @@
     border: 1px solid var(--color-border);
     border-radius: 6px;
     min-width: 0;
+    max-width: 100%;
   }
   .media {
     flex: 0 0 auto;
@@ -350,9 +353,6 @@
     font-weight: var(--font-weight-semibold);
     color: var(--color-text);
   }
-  .when {
-    color: var(--color-text-muted);
-  }
   .chips-line,
   .actions-line {
     display: flex;
@@ -403,15 +403,8 @@
     color: var(--color-accent);
   }
 
-  @media (min-width: 768px) {
-    .feed-card {
-      flex-direction: row;
-      align-items: stretch;
-    }
-    .media {
-      width: 160px;
-      aspect-ratio: 16 / 9;
-      flex-shrink: 0;
-    }
-  }
+  /* Plan 02.1-19 RETIRED: Plan 02.1-16's @media (min-width: 768px) horizontal
+   * flexbox layout has been removed. The card is vertical-stack at all
+   * viewports — see comment above .feed-card. /feed's CSS grid sets the cell
+   * width; the card fills its cell as a tile. */
 </style>

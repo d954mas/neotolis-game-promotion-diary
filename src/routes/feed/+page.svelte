@@ -1,34 +1,40 @@
 <script lang="ts">
   // /feed — primary daily workspace for authenticated users (Plan 02.1-07,
-  // extended Plan 02.1-14 + 02.1-15).
+  // extended Plan 02.1-14 + 02.1-15; Plan 02.1-19 round-2 UAT rebuild).
   //
-  // Composition (UI-SPEC §"/feed"):
-  //   - <h1>Feed</h1> at heading-24 (NOT display-32) — the rows ARE the page;
-  //     the heading is the label, deliberately understated.
-  //   - <DateRangeControl> above the chip strip (Plan 02.1-15 — Gap 10).
-  //   - <FilterChips> at min-width 600px (inline strip), collapsing to a
-  //     "Filters (N)" button below 600px that opens <FiltersSheet>.
-  //   - <ul> of <FeedCard> — the load-bearing surface (Plan 02.1-16
-  //     replaces <FeedRow> with <FeedCard> per Gap 3 closure).
-  //   - <CursorPager> at the bottom (Older →) for pagination.
-  //   - <DeletedEventsPanel> below the pager (Plan 02.1-14 — Gap 2).
+  // Composition (Plan 02.1-19):
+  //   - <h1>Feed</h1> at heading-24.
+  //   - <DateRangeControl> with always-visible from/to inputs + 4 presets +
+  //     × clear (Plan 02.1-15 Custom toggle dropped).
+  //   - <FilterChips> emits one chip per active axis (kind / source / show /
+  //     authorIsMe), comma-joined values; click opens FiltersSheet on that
+  //     axis; × clears entire axis.
+  //   - <FeedDateGroupHeader> + <FeedCard> tiles in a CSS grid
+  //     (auto-fill, minmax 280px) — Google Photos / Apple Photos timeline.
+  //   - Sentinel <div> drives IntersectionObserver-based infinite scroll
+  //     (replaces <CursorPager>).
+  //   - <DeletedEventsPanel> below the grid (Plan 02.1-14 — Gap 2; the panel
+  //     keeps its own pagination — recovery is a different mental model).
   //   - <EmptyState> for first-time empty + filtered-no-match cases.
   //
-  // Plan 02.1-15: filter changes always reset cursor (RESEARCH §3.4 b);
-  // multi-value axes use URLSearchParams.append() so repeated params survive
-  // navigation. dismissAxis(axis, value?) removes ONE value from a
-  // multi-select axis when value is supplied.
+  // Plan 02.1-19 a11y note: infinite scroll has no JavaScript-disabled
+  // fallback in 2.1. Screen-reader users can still scroll the rendered first
+  // page; subsequent pages require IntersectionObserver. A "Load more"
+  // button fallback is filed as Phase 6 polish if user feedback surfaces it.
+  // The role="status" on the loading + end banners ensures assistive tech
+  // announces state changes.
 
   import { goto, invalidateAll } from "$app/navigation";
   import { page } from "$app/state";
   import { m } from "$lib/paraglide/messages.js";
   import FeedCard from "$lib/components/FeedCard.svelte";
+  import FeedDateGroupHeader from "$lib/components/FeedDateGroupHeader.svelte";
   import DateRangeControl from "$lib/components/DateRangeControl.svelte";
   import FilterChips from "$lib/components/FilterChips.svelte";
   import FiltersSheet from "$lib/components/FiltersSheet.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
-  import CursorPager from "$lib/components/CursorPager.svelte";
   import DeletedEventsPanel from "$lib/components/DeletedEventsPanel.svelte";
+  import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
@@ -136,12 +142,69 @@
     void goto("/feed?all=1");
   }
 
-  function gotoNextPage(): void {
-    if (!data.nextCursor) return;
-    const params = new URLSearchParams(page.url.searchParams);
-    params.set("cursor", data.nextCursor);
-    void goto(`/feed?${params.toString()}`);
+  // Plan 02.1-19: cumulative rows for infinite scroll. data.rows is the
+  // first page from the loader; loadMore() appends next pages via fetch.
+  let allRows = $state(data.rows);
+  let nextCursor = $state<string | null>(data.nextCursor);
+  let loading = $state(false);
+  let endReached = $state(data.nextCursor === null);
+  let sentinelEl = $state<HTMLDivElement | null>(null);
+  let observer: IntersectionObserver | null = null;
+
+  // Reset cumulative state when data changes (filter change → fresh load
+  // → new first page). The $effect re-runs whenever any reactive read
+  // inside it changes, so reading data.rows + data.nextCursor here is the
+  // load-bearing tripwire for "the loader re-ran".
+  $effect(() => {
+    allRows = data.rows;
+    nextCursor = data.nextCursor;
+    endReached = data.nextCursor === null;
+    loading = false;
+  });
+
+  const groupedRows = $derived(groupEventsByDate(allRows));
+
+  async function loadMore(): Promise<void> {
+    if (loading || endReached || !nextCursor) return;
+    loading = true;
+    try {
+      const params = new URLSearchParams(page.url.searchParams);
+      params.set("cursor", nextCursor);
+      const res = await fetch(`/api/events?${params.toString()}`);
+      if (!res.ok) {
+        // On error, stop trying — user can refresh manually. Phase 4 may
+        // add a toast retry banner.
+        endReached = true;
+        return;
+      }
+      const body = (await res.json()) as {
+        rows: typeof data.rows;
+        nextCursor: string | null;
+      };
+      allRows = [...allRows, ...body.rows];
+      nextCursor = body.nextCursor;
+      if (body.nextCursor === null) endReached = true;
+    } catch {
+      endReached = true;
+    } finally {
+      loading = false;
+    }
   }
+
+  $effect(() => {
+    if (!sentinelEl) return;
+    observer?.disconnect();
+    observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) void loadMore();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(sentinelEl);
+    return () => observer?.disconnect();
+  });
 </script>
 
 <section class="feed">
@@ -179,9 +242,10 @@
       }}
       onClearAll={clearAll}
     />
-    <ul class="feed-list">
-      {#each data.rows as row (row.id)}
-        <li>
+    <div class="feed-grid">
+      {#each groupedRows as group (group.date)}
+        <FeedDateGroupHeader occurredAt={group.occurredAt} />
+        {#each group.rows as row (row.id)}
           <FeedCard
             event={row}
             source={row.sourceId ? (sourceById.get(row.sourceId) ?? null) : null}
@@ -189,21 +253,24 @@
             games={data.games}
             onChanged={() => invalidateAll()}
           />
-        </li>
+        {/each}
       {/each}
-    </ul>
-    <CursorPager
-      hasNext={data.nextCursor !== null}
-      hasPrev={false}
-      onNext={gotoNextPage}
-      onPrev={() => {}}
-    />
+      {#if !endReached}
+        <div class="sentinel" bind:this={sentinelEl} aria-hidden="true"></div>
+        {#if loading}
+          <p class="feed-status" role="status">{m.feed_loading_more()}</p>
+        {/if}
+      {:else if allRows.length > 0}
+        <p class="feed-status feed-end" role="status">{m.feed_no_more_events()}</p>
+      {/if}
+    </div>
   {/if}
 
   <!-- Plan 02.1-14 (gap closure) — soft-delete recovery panel sits below
-       CursorPager. The component returns nothing when there are no recoverable
-       events, so it has zero footprint on the empty-feed and filtered-empty
-       branches above. -->
+       the feed grid (was: below CursorPager pre-Plan-02.1-19). The
+       component returns nothing when there are no recoverable events, so
+       it has zero footprint on the empty-feed and filtered-empty branches
+       above. -->
   <DeletedEventsPanel
     deletedEvents={data.deletedEvents}
     retentionDays={data.retentionDays}
@@ -264,14 +331,36 @@
   .cta:hover {
     filter: brightness(1.05);
   }
-  .feed-list {
-    list-style: none;
-    padding: 0;
+  /* Plan 02.1-19: CSS grid (auto-fill, minmax 280px) replaces the Plan
+   * 02.1-15 vertical list. Multi-column on >=640px; single column below.
+   * <FeedDateGroupHeader> sets `grid-column: 1 / -1` so the header spans
+   * the full row, separating card groups visually. */
+  .feed-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: var(--space-md);
     margin: 0;
-    display: flex;
-    flex-direction: column;
+    padding: 0;
   }
-  .feed-list > li {
-    border-bottom: 1px solid var(--color-border);
+  @media (max-width: 639px) {
+    /* Force single-column on mobile (auto-fill collapses naturally below
+     * ~280px + gutter, but force it across 360-639px per UAT gap "single
+     * column on <640px"). */
+    .feed-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+  .sentinel {
+    width: 100%;
+    height: 1px;
+    grid-column: 1 / -1;
+  }
+  .feed-status {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+    padding: var(--space-md) 0;
+    margin: 0;
   }
 </style>
