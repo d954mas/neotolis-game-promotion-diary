@@ -218,3 +218,41 @@ describe("Plan 02.1-21: /audit FiltersSheet schema honored + date-range filter",
     "/audit DateRangeControl × clear button removes ?from / ?to from the URL (manual UAT — auth harness deferred)",
   );
 });
+
+/**
+ * Plan 02.1-23 — FeedCard restructured layout (UAT §1.5-redesign closure).
+ *
+ * The user-proposed card layout from round-3 UAT (ASCII mockup in
+ * UAT-NOTES.md §1.5-redesign):
+ *   - Top overlay on image carries kind icon+text + Inbox + Mine pills.
+ *   - Title under image; notes (if present) clipped at 3 lines.
+ *   - Associated games block at the BOTTOM of the card.
+ *   - Mine treatment combines `border-left: 4px solid var(--color-accent)`
+ *     AND a `Mine` badge in the top overlay (user choice "C and A").
+ *
+ * Component-level regression guard lives in
+ * tests/integration/audit-render.test.ts (Plan 02.1-23 describe block).
+ * The end-to-end browser flow at 360px (computed border-left-width === '4px',
+ * overlay positioned absolute over the media area) requires the cookie-
+ * injection auth harness still deferred to Phase 6 (same precedent as Plans
+ * 02.1-18 / 19 / 20 / 21). Stub-skipped here for grep discoverability when
+ * the harness arrives; manual UAT covers the visual gate via
+ * 02.1-VALIDATION.md "Manual-Only Verifications".
+ */
+describe("Plan 02.1-23: FeedCard restructured layout (top overlay + bottom games block + Mine treatment)", () => {
+  it.skip(
+    "FeedCard with author_is_me=true at 360px renders with computed border-left-width === '4px' (manual UAT — auth harness deferred to Phase 6)",
+  );
+  it.skip(
+    "FeedCard top overlay element is absolutely positioned over the media area (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "FeedCard top overlay contains kind label + Inbox + Mine pills when applicable (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "FeedCard games-block sits at the BOTTOM of the card body (after chips-line) (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "FeedCard notes paragraph clamps to 3 lines via -webkit-line-clamp CSS (manual UAT — auth harness deferred)",
+  );
+});

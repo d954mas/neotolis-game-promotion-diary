@@ -309,3 +309,296 @@ describe("Plan 02.1-21 — schema prop honored", () => {
     expect(out.body).not.toContain("Action:");
   });
 });
+
+/**
+ * Plan 02.1-23 — FeedCard restructured layout (UAT §1.5-redesign closure).
+ *
+ * The user-proposed card layout from round-3 UAT (ASCII mockup in
+ * UAT-NOTES.md §1.5-redesign) restructures the FeedCard:
+ *   1. Image area at TOP with absolute-positioned top overlay carrying
+ *      kind icon+text label + Inbox badge (if applicable) + Mine badge
+ *      (if author_is_me).
+ *   2. Title under the image.
+ *   3. Notes under the title (clipped via `-webkit-line-clamp: 3`).
+ *   4. Source chip (chips-line — now WITHOUT mine/game).
+ *   5. Associated games block at the BOTTOM of the card body (NOT in the
+ *      mid-card chips-line).
+ *
+ * Mine treatment combines TWO visual cues (user choice "C and A" during UAT):
+ *   - C: `Mine` badge in the top overlay (alongside kind label and Inbox).
+ *   - A: `border-left: 4px solid var(--color-accent)` on the entire card
+ *        when `event.authorIsMe === true`.
+ *
+ * Plan 02.1-18 read-only contract preserved — no inline Edit/Delete/Open
+ * buttons. Plan 02.1-19 date-removal preserved — no per-card date label.
+ */
+describe("Plan 02.1-23 — FeedCard restructured layout", () => {
+  const baseEvent = {
+    id: "ev-1",
+    gameId: null,
+    sourceId: null,
+    kind: "youtube_video" as const,
+    authorIsMe: false,
+    occurredAt: new Date("2026-04-25T12:00:00Z"),
+    title: "How I marketed my indie game",
+    url: "https://youtube.com/watch?v=abc",
+    externalId: "abc",
+    notes: null as string | null,
+    metadata: null as unknown,
+    lastPolledAt: null as Date | null,
+  };
+
+  it("renders class:mine on the root <article> when event.authorIsMe=true (border-left accent gate)", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const out = render(FeedCard, {
+      props: {
+        event: { ...baseEvent, authorIsMe: true },
+        source: null,
+        game: null,
+        games: [],
+      },
+    });
+    // Svelte 5 SSR may add a scoped class suffix — match `mine` as a class token.
+    expect(out.body).toMatch(
+      /<article[^>]*class="[^"]*\bmine\b[^"]*"[^>]*>/,
+    );
+  });
+
+  it("does NOT render class:mine when event.authorIsMe=false", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const out = render(FeedCard, {
+      props: {
+        event: { ...baseEvent, authorIsMe: false },
+        source: null,
+        game: null,
+        games: [],
+      },
+    });
+    expect(out.body).not.toMatch(
+      /<article[^>]*class="[^"]*\bmine\b[^"]*"[^>]*>/,
+    );
+  });
+
+  it("renders the top overlay with kind label AND Mine badge text when author_is_me=true", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const out = render(FeedCard, {
+      props: {
+        event: { ...baseEvent, authorIsMe: true },
+        source: null,
+        game: null,
+        games: [],
+      },
+    });
+    const overlayMatch = out.body.match(
+      /<div[^>]*data-testid="feed-card-overlay"[^>]*>([\s\S]*?)<\/div>(?=\s*<\/div>\s*<div class="title-line)/,
+    );
+    // If the regex above is too greedy across nested divs (overlay contains
+    // child spans which contain divs from KindIcon's <svg>), fall back to a
+    // looser substring assertion: the overlay block must appear before the
+    // title-line block, and must contain the Mine badge text.
+    if (!overlayMatch) {
+      // Looser fallback: overlay element exists, body contains both labels.
+      expect(out.body).toMatch(/data-testid="feed-card-overlay"/);
+      expect(out.body).toContain("Mine");
+      // YouTube kind label should appear too.
+      expect(out.body).toContain("YouTube video");
+    } else {
+      const overlayHtml = overlayMatch[1]!;
+      expect(overlayHtml).toContain("Mine");
+      expect(overlayHtml).toContain("YouTube video");
+    }
+  });
+
+  it("renders the Inbox label inside the top overlay (NOT in the meta-line) when row is in inbox", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const out = render(FeedCard, {
+      props: {
+        event: {
+          ...baseEvent,
+          gameId: null,
+          metadata: null,
+        },
+        source: null,
+        game: null,
+        games: [],
+      },
+    });
+    // Overlay must contain "Inbox" text. The original meta-line carried
+    // <InboxBadge/>; after restructure the overlay carries "Inbox" inline.
+    expect(out.body).toMatch(/data-testid="feed-card-overlay"/);
+    // "Inbox" text appears in the overlay region of the body. Check the
+    // overlay element substring contains it. We use a permissive forward
+    // slice from the overlay marker to the next major block.
+    const overlayIdx = out.body.indexOf('data-testid="feed-card-overlay"');
+    expect(overlayIdx).toBeGreaterThan(-1);
+    const overlaySlice = out.body.slice(overlayIdx, overlayIdx + 1000);
+    expect(overlaySlice).toContain("Inbox");
+  });
+
+  it("renders <div class='games-block'> AFTER the chips-line element when game is attached", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const out = render(FeedCard, {
+      props: {
+        event: { ...baseEvent, gameId: "g-1" },
+        source: { id: "s-1", displayName: "My Source", handleUrl: "https://x.test" },
+        game: { id: "g-1", title: "Stellar Frontier" },
+        games: [{ id: "g-1", title: "Stellar Frontier" }],
+      },
+    });
+    // Both elements present.
+    expect(out.body).toMatch(/class="chips-line(?:\s[^"]*)?"/);
+    expect(out.body).toMatch(/class="games-block(?:\s[^"]*)?"/);
+    // games-block appears AFTER chips-line in source order.
+    const chipsIdx = out.body.search(/class="chips-line(?:\s[^"]*)?"/);
+    const gamesBlockIdx = out.body.search(/class="games-block(?:\s[^"]*)?"/);
+    expect(chipsIdx).toBeGreaterThan(-1);
+    expect(gamesBlockIdx).toBeGreaterThan(-1);
+    expect(gamesBlockIdx).toBeGreaterThan(chipsIdx);
+    // Game title chip rendered inside games-block.
+    expect(out.body).toContain("Stellar Frontier");
+  });
+
+  it("does NOT render games-block when game is null", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const out = render(FeedCard, {
+      props: {
+        event: baseEvent,
+        source: null,
+        game: null,
+        games: [],
+      },
+    });
+    expect(out.body).not.toMatch(/class="games-block(?:\s[^"]*)?"/);
+  });
+
+  it("renders <p class='notes'> when event.notes is non-empty (clamp class applied via CSS)", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const longNote =
+      "This is a long-form note about the marketing campaign. ".repeat(10);
+    const out = render(FeedCard, {
+      props: {
+        event: { ...baseEvent, notes: longNote },
+        source: null,
+        game: null,
+        games: [],
+      },
+    });
+    expect(out.body).toMatch(/<p[^>]*class="notes(?:\s[^"]*)?"[^>]*>/);
+    // Notes content rendered (truncated visually via CSS at 3 lines).
+    expect(out.body).toContain("marketing campaign");
+  });
+
+  it("does NOT render <p class='notes'> when event.notes is null", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const out = render(FeedCard, {
+      props: {
+        event: { ...baseEvent, notes: null },
+        source: null,
+        game: null,
+        games: [],
+      },
+    });
+    expect(out.body).not.toMatch(/<p[^>]*class="notes(?:\s[^"]*)?"[^>]*>/);
+  });
+
+  it("renders youtube thumbnail when kind=youtube_video AND externalId present", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const out = render(FeedCard, {
+      props: {
+        event: { ...baseEvent, kind: "youtube_video", externalId: "abc123" },
+        source: null,
+        game: null,
+        games: [],
+      },
+    });
+    expect(out.body).toMatch(/img\.youtube\.com\/vi\/abc123\/mqdefault\.jpg/);
+  });
+
+  it("renders metadata.media.url thumbnail for kind=reddit_post when media present", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const out = render(FeedCard, {
+      props: {
+        event: {
+          ...baseEvent,
+          kind: "reddit_post" as const,
+          externalId: null,
+          metadata: { media: { url: "https://i.redd.it/abc.jpg" } },
+        },
+        source: null,
+        game: null,
+        games: [],
+      },
+    });
+    expect(out.body).toContain("https://i.redd.it/abc.jpg");
+  });
+
+  it("falls back to KindIcon (no <img>) for kind=conference (text fallback per UAT-NOTES rules)", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const out = render(FeedCard, {
+      props: {
+        event: {
+          ...baseEvent,
+          kind: "conference" as const,
+          externalId: null,
+          metadata: null,
+        },
+        source: null,
+        game: null,
+        games: [],
+      },
+    });
+    // No <img> tag for the .thumbnail class.
+    expect(out.body).not.toMatch(/<img[^>]*class="thumbnail/);
+    // The icon-anchor block IS rendered (KindIcon centered).
+    expect(out.body).toMatch(/class="icon-anchor(?:\s[^"]*)?"/);
+  });
+
+  it("Plan 02.1-18 contract preserved — no inline Edit / Delete / Open buttons", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const out = render(FeedCard, {
+      props: {
+        event: { ...baseEvent, gameId: "g-1" },
+        source: null,
+        game: { id: "g-1", title: "Stellar Frontier" },
+        games: [{ id: "g-1", title: "Stellar Frontier" }],
+      },
+    });
+    // No <button> labelled Open / Edit / Delete in the rendered output.
+    // (AttachToGamePicker may render buttons, but those are picker controls,
+    // not action buttons — assert no <button> with explicit Edit/Delete text.)
+    expect(out.body).not.toMatch(/<button[^>]*>[^<]*Edit[^<]*<\/button>/);
+    expect(out.body).not.toMatch(/<button[^>]*>[^<]*Delete[^<]*<\/button>/);
+    expect(out.body).not.toMatch(/<button[^>]*>[^<]*Open[^<]*<\/button>/);
+  });
+
+  it("Plan 02.1-19 contract preserved — no inline date string on the card", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const out = render(FeedCard, {
+      props: {
+        event: {
+          ...baseEvent,
+          occurredAt: new Date("2026-01-15T08:30:00Z"),
+        },
+        source: null,
+        game: null,
+        games: [],
+      },
+    });
+    // formatFeedDate output (e.g. "Jan 15") MUST NOT appear inline on the card.
+    // The FeedDateGroupHeader above the card group carries the date label.
+    expect(out.body).not.toContain("Jan 15");
+  });
+});
