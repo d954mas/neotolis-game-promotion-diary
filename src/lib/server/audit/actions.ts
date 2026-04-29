@@ -23,6 +23,14 @@
 // recovery path the user-facing copy in confirm_event_delete already promises.
 // Forward-only migration `0002_add_event_restored_audit_action.sql` lands the
 // pgEnum addition.
+//
+// Plan 02.1-24 (round-3 gap closure — UAT-NOTES.md §6.1-redesign) extends with
+// `event.marked_standalone` and `event.unmarked_standalone` — the two new
+// triage verbs introduced when a user explicitly marks an inbox event "not
+// related to any game". Forward-only migration
+// `0003_add_event_standalone_audit_actions.sql` lands the pgEnum addition.
+// Pitfall 6 mirror: TS const update + ALTER TYPE migration + Paraglide keys
+// + AuditRow/FilterChips/FiltersSheet switch cases all in lock-step.
 
 import { pgEnum } from "drizzle-orm/pg-core";
 
@@ -46,6 +54,8 @@ export const AUDIT_ACTIONS = [
   "event.attached_to_game",
   "event.dismissed_from_inbox",
   "event.restored",
+  "event.marked_standalone",
+  "event.unmarked_standalone",
   // Phase 2.1: data_sources vocabulary (replaces channel.*)
   "source.added",
   "source.removed",

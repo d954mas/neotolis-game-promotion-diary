@@ -57,6 +57,10 @@
         return m.audit_action_event_dismissed_from_inbox();
       case "event.restored":
         return m.audit_action_event_restored();
+      case "event.marked_standalone":
+        return m.audit_action_event_marked_standalone();
+      case "event.unmarked_standalone":
+        return m.audit_action_event_unmarked_standalone();
       case "source.added":
         return m.audit_action_source_added();
       case "source.removed":

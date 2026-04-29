@@ -325,7 +325,43 @@ describe("Phase 2.1 forward-only migrations (Plan 02.1-14)", () => {
       expect(values).toContain("event.deleted");
       expect(values).toContain("game.restored");
       // Total post-Plan-14: 19 (baseline) + 1 (event.restored) = 20.
-      expect(values).toHaveLength(20);
+      // Plan 02.1-24 adds 2 more verbs (event.marked_standalone +
+      // event.unmarked_standalone). Length assertion moves to that block to
+      // avoid double-counting; here we only assert the lower bound.
+      expect(values.length).toBeGreaterThanOrEqual(20);
+    } finally {
+      await pool.end();
+    }
+  });
+});
+
+// Plan 02.1-24 (round-3 gap closure — UAT-NOTES.md §6.1-redesign): forward-only
+// migration `0003_add_event_standalone_audit_actions` extends the audit_action
+// pgEnum with `event.marked_standalone` and `event.unmarked_standalone` — the
+// two new triage verbs for the user-explicit "not related to any game" state.
+// Forward-only discipline (CONTEXT D-04 / DV-2) preserved — third migration
+// after the 2.1 baseline collapse.
+describe("Phase 2.1 forward-only migrations (Plan 02.1-24)", () => {
+  beforeAll(async () => {
+    await runMigrations();
+  });
+
+  it("02.1-24: audit_action enum extended with 'event.marked_standalone' and 'event.unmarked_standalone' (forward-only migration 0003)", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const result = await pool.query<{ enumlabel: string }>(
+        `select enumlabel from pg_enum
+         where enumtypid = 'public.audit_action'::regtype
+         order by enumsortorder`,
+      );
+      const values = result.rows.map((r) => r.enumlabel);
+      expect(values).toContain("event.marked_standalone");
+      expect(values).toContain("event.unmarked_standalone");
+      // Sanity: prior verbs still present after the additive migration.
+      expect(values).toContain("event.restored");
+      expect(values).toContain("event.dismissed_from_inbox");
+      // Total post-Plan-24: 20 (post-Plan-14) + 2 (Plan 02.1-24) = 22.
+      expect(values).toHaveLength(22);
     } finally {
       await pool.end();
     }

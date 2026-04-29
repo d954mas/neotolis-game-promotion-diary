@@ -8,3 +8,12 @@ Pre-existing typecheck errors in tests/integration/game-listings.test.ts and gam
 - src/lib/server/db/schema/tracked-youtube-videos.js
 
 Out of scope for Plan 02.1-21 (it does not touch these files). Pre-Phase-02.1-01 cleanup; either update or delete these test files.
+
+## Plan 02.1-24 — out-of-scope unit-test failures observed during execution
+
+Two unit-test failures pre-existing on master (verified 2026-04-29 during Plan 02.1-24 Task 1 verification run):
+
+- `tests/unit/format-feed-date.test.ts` — locale-dependent regex mismatch on prior-year date assertions ("Dec 24, 2025" vs "Dec 25, 2025"); driven by host timezone, not by Plan 02.1-24 changes.
+- `tests/unit/logger.test.ts` — env-discipline grep flags `src/routes/settings/+page.server.ts:15` (a comment that mentions `process.env`). Pre-existing, not introduced by this plan.
+
+Both are out of scope for Plan 02.1-24 (which does not touch those files). Filed for separate follow-up.
