@@ -18,6 +18,11 @@
   import SourceRow from "$lib/components/SourceRow.svelte";
   import RetentionBadge from "$lib/components/RetentionBadge.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
+  // Plan 02.1-25 (UAT-NOTES.md §3.1-polish): shared PageHeader replaces the
+  // inline <header class="head"> + .cta block. The `sticky` prop preserves
+  // Plan 02.1-22's §2.2-bug closure (CTA reachable while a long source list
+  // scrolls).
+  import PageHeader from "$lib/components/PageHeader.svelte";
   import type { PageData } from "./$types";
 
   type SourceKind =
@@ -71,10 +76,11 @@
 </script>
 
 <section class="sources">
-  <header class="head">
-    <h1>Data sources</h1>
-    <a class="cta" href="/sources/new">{m.sources_cta_new_source()}</a>
-  </header>
+  <PageHeader
+    title="Data sources"
+    cta={{ href: "/sources/new", label: m.sources_cta_new_source() }}
+    sticky
+  />
 
   {#if active.length === 0 && deleted.length === 0}
     <EmptyState
@@ -126,43 +132,10 @@
     gap: var(--space-md);
     min-width: 0;
   }
-  .head {
-    /* Plan 02.1-22 (UAT-NOTES.md §2.2-bug closure): sticky page-header so
-       the "+ Add data source" CTA stays reachable while a long source list
-       scrolls. Anchored just below the AppHeader (sticky top:0, ~64-72px
-       tall — sticky top: 72px keeps the page-header flush with it without
-       overlap). The background fill prevents content from bleeding through
-       when scrolled underneath. */
-    position: sticky;
-    top: 72px;
-    z-index: 5;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-md);
-    flex-wrap: wrap;
-    padding: var(--space-sm) 0;
-    background: var(--color-bg);
-  }
-  .head h1 {
-    margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
-  }
-  .cta {
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border: none;
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
-    text-decoration: none;
-    cursor: pointer;
-  }
+  /* Plan 02.1-25: inline .head + .cta CSS removed — replaced by the shared
+   * <PageHeader sticky> component (see top of file). Plan 02.1-22's
+   * sticky-top: 72px + background fill is preserved on PageHeader's
+   * .page-header.sticky rule. */
   .sources-list {
     list-style: none;
     padding: 0;

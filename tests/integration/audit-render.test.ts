@@ -602,3 +602,318 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
     expect(out.body).not.toContain("Jan 15");
   });
 });
+
+/**
+ * Plan 02.1-26 — FeedQuickNav SSR render-time guards.
+ *
+ * NEW component — chip strip / segmented control at the TOP of /feed for the
+ * most-common Show axis values (All / Inbox / Standalone / per-game). Closes
+ * UAT-NOTES.md §6.2-redesign. The end-to-end browser flow at 360px (computed
+ * overflow-x: auto, click→URL change) is stub-skipped in
+ * tests/browser/feed-360.test.ts pending the cookie-injection auth harness
+ * (Phase 6); the SSR-render-time contract is locked in HERE.
+ *
+ * Component is testable in pure SSR because it takes `currentUrlSearch`
+ * (string) and `onNavigate` (callback) as props instead of importing
+ * `$app/state` / `$app/navigation` directly. The /feed/+page.svelte parent
+ * threads those values through.
+ */
+describe("Plan 02.1-26 — FeedQuickNav", () => {
+  it("renders <nav class='quick-nav'> with All / Inbox / Standalone fixed tabs", async () => {
+    const FeedQuickNav = (
+      await import("../../src/lib/components/FeedQuickNav.svelte")
+    ).default;
+    const out = render(FeedQuickNav, {
+      props: {
+        games: [],
+        activeShow: { kind: "any" as const },
+        currentUrlSearch: "",
+        onNavigate: () => {},
+      },
+    });
+    expect(out.body).toMatch(/data-testid="feed-quick-nav"/);
+    expect(out.body).toMatch(/data-tab="all"/);
+    expect(out.body).toMatch(/data-tab="inbox"/);
+    expect(out.body).toMatch(/data-tab="standalone"/);
+    // Paraglide labels render at runtime (m.feed_quick_nav_*).
+    expect(out.body).toContain("All");
+    expect(out.body).toContain("Inbox");
+    expect(out.body).toContain("Standalone");
+  });
+
+  it("renders one tab per game (up to 5 visible) with the game id and title", async () => {
+    const FeedQuickNav = (
+      await import("../../src/lib/components/FeedQuickNav.svelte")
+    ).default;
+    const out = render(FeedQuickNav, {
+      props: {
+        games: [
+          { id: "g-1", title: "Stellar Frontier" },
+          { id: "g-2", title: "Pixel Legends" },
+        ],
+        activeShow: { kind: "any" as const },
+        currentUrlSearch: "",
+        onNavigate: () => {},
+      },
+    });
+    expect(out.body).toMatch(/data-tab="game"[^>]*data-game-id="g-1"/);
+    expect(out.body).toMatch(/data-tab="game"[^>]*data-game-id="g-2"/);
+    expect(out.body).toContain("Stellar Frontier");
+    expect(out.body).toContain("Pixel Legends");
+  });
+
+  it("Inbox tab is marked active when activeShow.kind === 'inbox'", async () => {
+    const FeedQuickNav = (
+      await import("../../src/lib/components/FeedQuickNav.svelte")
+    ).default;
+    const out = render(FeedQuickNav, {
+      props: {
+        games: [],
+        activeShow: { kind: "inbox" as const },
+        currentUrlSearch: "?show=inbox",
+        onNavigate: () => {},
+      },
+    });
+    // Inbox <a> carries class:active. Match: <a class="...active..."
+    // data-tab="inbox" OR <a data-tab="inbox" ... class="...active...".
+    // Svelte 5 SSR may add scoped class suffix.
+    expect(out.body).toMatch(
+      /<a[^>]*data-tab="inbox"[^>]*class="[^"]*\bactive\b[^"]*"|<a[^>]*class="[^"]*\bactive\b[^"]*"[^>]*data-tab="inbox"/,
+    );
+    // All tab is NOT active when Inbox is active.
+    expect(out.body).not.toMatch(
+      /<a[^>]*data-tab="all"[^>]*class="[^"]*\bactive\b[^"]*"|<a[^>]*class="[^"]*\bactive\b[^"]*"[^>]*data-tab="all"/,
+    );
+  });
+
+  it("Standalone tab is marked active when activeShow.kind === 'standalone'", async () => {
+    const FeedQuickNav = (
+      await import("../../src/lib/components/FeedQuickNav.svelte")
+    ).default;
+    const out = render(FeedQuickNav, {
+      props: {
+        games: [],
+        activeShow: { kind: "standalone" as const },
+        currentUrlSearch: "?show=standalone",
+        onNavigate: () => {},
+      },
+    });
+    expect(out.body).toMatch(
+      /<a[^>]*data-tab="standalone"[^>]*class="[^"]*\bactive\b[^"]*"|<a[^>]*class="[^"]*\bactive\b[^"]*"[^>]*data-tab="standalone"/,
+    );
+  });
+
+  it("per-game tab is marked active when activeShow.kind === 'specific' AND gameIds=[that id]", async () => {
+    const FeedQuickNav = (
+      await import("../../src/lib/components/FeedQuickNav.svelte")
+    ).default;
+    const out = render(FeedQuickNav, {
+      props: {
+        games: [
+          { id: "g-1", title: "Stellar Frontier" },
+          { id: "g-2", title: "Pixel Legends" },
+        ],
+        activeShow: { kind: "specific" as const, gameIds: ["g-2"] },
+        currentUrlSearch: "?show=specific&game=g-2",
+        onNavigate: () => {},
+      },
+    });
+    // g-2 tab is active.
+    expect(out.body).toMatch(
+      /<a[^>]*data-game-id="g-2"[^>]*class="[^"]*\bactive\b[^"]*"|<a[^>]*class="[^"]*\bactive\b[^"]*"[^>]*data-game-id="g-2"/,
+    );
+    // g-1 tab is NOT active.
+    expect(out.body).not.toMatch(
+      /<a[^>]*data-game-id="g-1"[^>]*class="[^"]*\bactive\b[^"]*"|<a[^>]*class="[^"]*\bactive\b[^"]*"[^>]*data-game-id="g-1"/,
+    );
+  });
+
+  it("All tab is the default active when activeShow.kind === 'any' (no Show param in URL)", async () => {
+    const FeedQuickNav = (
+      await import("../../src/lib/components/FeedQuickNav.svelte")
+    ).default;
+    const out = render(FeedQuickNav, {
+      props: {
+        games: [{ id: "g-1", title: "Stellar Frontier" }],
+        activeShow: { kind: "any" as const },
+        currentUrlSearch: "",
+        onNavigate: () => {},
+      },
+    });
+    expect(out.body).toMatch(
+      /<a[^>]*data-tab="all"[^>]*class="[^"]*\bactive\b[^"]*"|<a[^>]*class="[^"]*\bactive\b[^"]*"[^>]*data-tab="all"/,
+    );
+    // Inbox / Standalone / per-game NOT active.
+    expect(out.body).not.toMatch(
+      /<a[^>]*data-tab="inbox"[^>]*class="[^"]*\bactive\b[^"]*"|<a[^>]*class="[^"]*\bactive\b[^"]*"[^>]*data-tab="inbox"/,
+    );
+    expect(out.body).not.toMatch(
+      /<a[^>]*data-tab="standalone"[^>]*class="[^"]*\bactive\b[^"]*"|<a[^>]*class="[^"]*\bactive\b[^"]*"[^>]*data-tab="standalone"/,
+    );
+  });
+
+  it("Inbox tab href = '/feed?show=inbox' when starting from an empty URL", async () => {
+    const FeedQuickNav = (
+      await import("../../src/lib/components/FeedQuickNav.svelte")
+    ).default;
+    const out = render(FeedQuickNav, {
+      props: {
+        games: [],
+        activeShow: { kind: "any" as const },
+        currentUrlSearch: "",
+        onNavigate: () => {},
+      },
+    });
+    expect(out.body).toMatch(
+      /<a[^>]*data-tab="inbox"[^>]*href="\/feed\?show=inbox"|<a[^>]*href="\/feed\?show=inbox"[^>]*data-tab="inbox"/,
+    );
+  });
+
+  it("All tab href preserves date / kind / source / authorIsMe params (only show + game cleared)", async () => {
+    const FeedQuickNav = (
+      await import("../../src/lib/components/FeedQuickNav.svelte")
+    ).default;
+    const out = render(FeedQuickNav, {
+      props: {
+        games: [],
+        activeShow: { kind: "inbox" as const },
+        currentUrlSearch:
+          "?show=inbox&kind=press&source=src-1&from=2026-01-01&authorIsMe=true&cursor=stale",
+        onNavigate: () => {},
+      },
+    });
+    // The 'all' href drops show / game / cursor but preserves the rest. The
+    // exact param order depends on URLSearchParams iteration order; assert
+    // by searching the All tab anchor for each preserved key.
+    // Match the All tab anchor with a regex spanning attributes.
+    const allTabMatch = out.body.match(
+      /<a[^>]*data-tab="all"[^>]*href="([^"]+)"/,
+    );
+    if (!allTabMatch) {
+      throw new Error("All tab href not found");
+    }
+    const href = allTabMatch[1]!;
+    expect(href).toContain("kind=press");
+    expect(href).toContain("source=src-1");
+    expect(href).toContain("from=2026-01-01");
+    expect(href).toContain("authorIsMe=true");
+    expect(href).not.toContain("show=");
+    expect(href).not.toContain("cursor=");
+    expect(href).not.toContain("game=");
+  });
+
+  it("Inbox tab href clears any pre-existing ?game=… while setting ?show=inbox", async () => {
+    const FeedQuickNav = (
+      await import("../../src/lib/components/FeedQuickNav.svelte")
+    ).default;
+    const out = render(FeedQuickNav, {
+      props: {
+        games: [{ id: "g-1", title: "X" }],
+        activeShow: { kind: "specific" as const, gameIds: ["g-1"] },
+        currentUrlSearch: "?show=specific&game=g-1",
+        onNavigate: () => {},
+      },
+    });
+    const inboxMatch = out.body.match(
+      /<a[^>]*data-tab="inbox"[^>]*href="([^"]+)"/,
+    );
+    if (!inboxMatch) {
+      throw new Error("Inbox tab href not found");
+    }
+    const href = inboxMatch[1]!;
+    expect(href).toContain("show=inbox");
+    expect(href).not.toContain("game=g-1");
+  });
+
+  it("per-game tab href = '/feed?show=specific&game=<id>' (single value) when starting from empty URL", async () => {
+    const FeedQuickNav = (
+      await import("../../src/lib/components/FeedQuickNav.svelte")
+    ).default;
+    const out = render(FeedQuickNav, {
+      props: {
+        games: [{ id: "g-1", title: "X" }],
+        activeShow: { kind: "any" as const },
+        currentUrlSearch: "",
+        onNavigate: () => {},
+      },
+    });
+    const gameMatch = out.body.match(
+      /<a[^>]*data-game-id="g-1"[^>]*href="([^"]+)"/,
+    );
+    if (!gameMatch) {
+      throw new Error("Per-game tab href not found");
+    }
+    const href = gameMatch[1]!;
+    expect(href).toContain("show=specific");
+    expect(href).toContain("game=g-1");
+    // Cursor / prior game params are cleared.
+    expect(href).not.toContain("cursor=");
+  });
+
+  it("'More games' dropdown does NOT render when games.length <= 5", async () => {
+    const FeedQuickNav = (
+      await import("../../src/lib/components/FeedQuickNav.svelte")
+    ).default;
+    const out = render(FeedQuickNav, {
+      props: {
+        games: Array.from({ length: 5 }, (_, i) => ({
+          id: `g-${i}`,
+          title: `Game ${i}`,
+        })),
+        activeShow: { kind: "any" as const },
+        currentUrlSearch: "",
+        onNavigate: () => {},
+      },
+    });
+    expect(out.body).not.toMatch(/data-testid="feed-quick-nav-more"/);
+    // All 5 games rendered as inline tabs.
+    for (let i = 0; i < 5; i++) {
+      expect(out.body).toContain(`Game ${i}`);
+    }
+  });
+
+  it("'More games' dropdown renders with overflow games when games.length > 5", async () => {
+    const FeedQuickNav = (
+      await import("../../src/lib/components/FeedQuickNav.svelte")
+    ).default;
+    const games = Array.from({ length: 7 }, (_, i) => ({
+      id: `g-${i}`,
+      title: `Game ${i}`,
+    }));
+    const out = render(FeedQuickNav, {
+      props: {
+        games,
+        activeShow: { kind: "any" as const },
+        currentUrlSearch: "",
+        onNavigate: () => {},
+      },
+    });
+    // Dropdown <details> exists with the right testid.
+    expect(out.body).toMatch(/data-testid="feed-quick-nav-more"/);
+    // Inline tabs cover 0..4; overflow tabs (5, 6) live inside the dropdown.
+    // Count: 5 inline + 2 dropdown = 7 instances of "Game N" total. We can
+    // assert each title appears exactly once at minimum.
+    for (let i = 0; i < 7; i++) {
+      expect(out.body).toContain(`Game ${i}`);
+    }
+    // The overflow games (g-5, g-6) carry data-game-id attributes — both
+    // inside the dropdown (the inline strip's max index is g-4).
+    expect(out.body).toMatch(/data-game-id="g-5"/);
+    expect(out.body).toMatch(/data-game-id="g-6"/);
+  });
+
+  it("the strip renders horizontally — overflow-x: auto declared in component CSS", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(
+      path.resolve("src/lib/components/FeedQuickNav.svelte"),
+      "utf8",
+    );
+    // The 360px horizontal-scroll behavior is locked in via the component
+    // style declaration. The end-to-end at-360px assertion is stub-skipped in
+    // tests/browser/feed-360.test.ts pending the auth harness; here we lock
+    // in the source-level contract.
+    expect(src).toMatch(/overflow-x:\s*auto/);
+    expect(src).toMatch(/scroll-snap-type:\s*x\s+mandatory/);
+  });
+});

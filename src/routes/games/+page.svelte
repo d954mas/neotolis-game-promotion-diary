@@ -14,6 +14,10 @@
   import RetentionBadge from "$lib/components/RetentionBadge.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
+  // Plan 02.1-25 (UAT-NOTES.md §3.1-polish): shared PageHeader replaces the
+  // inline <header class="head"> + button. Uses the onClick CTA variant so
+  // the toggle behavior (showForm = true) stays a button (not a link).
+  import PageHeader from "$lib/components/PageHeader.svelte";
   import type { PageData } from "./$types";
 
   type GameDto = {
@@ -89,12 +93,15 @@
 </script>
 
 <section class="games">
-  <header class="head">
-    <h1>Games</h1>
-    <button class="cta" type="button" onclick={() => (showForm = !showForm)}>
-      {m.games_cta_new_game()}
-    </button>
-  </header>
+  <PageHeader
+    title="Games"
+    cta={{
+      onClick: () => {
+        showForm = !showForm;
+      },
+      label: m.games_cta_new_game(),
+    }}
+  />
 
   {#if showForm}
     <form class="newgame" onsubmit={submitNewGame}>
@@ -193,28 +200,10 @@
     gap: var(--space-lg);
     min-width: 0;
   }
-  .head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-md);
-  }
-  .head h1 {
-    margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
-  }
-  .cta {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border: none;
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
-    cursor: pointer;
-  }
+  /* Plan 02.1-25: inline .head + .cta CSS removed — replaced by the shared
+   * <PageHeader> component (see top of file). PageHeader uses the inline-
+   * on-the-left flex layout per UAT-NOTES.md §3.1-polish. The onClick CTA
+   * variant preserves the inline-form-toggle behavior (showForm = !showForm). */
   .grid {
     list-style: none;
     padding: 0;

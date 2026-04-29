@@ -27,6 +27,13 @@
   import RenameInline from "$lib/components/RenameInline.svelte";
   import AddSteamListingForm from "$lib/components/AddSteamListingForm.svelte";
   import MonthHeader from "$lib/components/MonthHeader.svelte";
+  // Plan 02.1-25 (UAT-NOTES.md §3.2-redesign): /games/[id] restructures into
+  // two visually distinct panel cards — GAME HEADER CARD on top + EVENTS
+  // FEED CARD below. <GameCover> renders the Steam header_image at the
+  // top of the header card; <SteamListingRow> replaces the inline <li>
+  // listings with a richer row that includes Steam name + Open-on-Steam link.
+  import GameCover from "$lib/components/GameCover.svelte";
+  import SteamListingRow from "$lib/components/SteamListingRow.svelte";
   import type { PageData } from "./$types";
 
   type EventKind =
@@ -66,6 +73,10 @@
     id: string;
     appId: number;
     label: string;
+    // Plan 02.1-25: persisted Steam name (Plan 02.1-25 column added in
+    // drizzle/0004); SteamListingRow falls back to "App {appId}" when null
+    // (legacy rows + Steam-down inserts).
+    name: string | null;
     coverUrl: string | null;
     releaseDate: string | null;
     apiKeyId: string | null;
@@ -154,7 +165,15 @@
   <span>{game.title}</span>
 </nav>
 
-<header class="header">
+<!--
+  Plan 02.1-25 (UAT-NOTES.md §3.2-redesign): two-card layout.
+  GAME HEADER CARD: cover + rename + metadata + Steam listings + add-listing.
+  EVENTS FEED CARD: month-grouped FeedCards (existing).
+  Both wrapped as panel cards (background, border, radius) so the visual
+  separation is unmistakable on first scroll.
+-->
+<section class="game-header-card">
+  <GameCover title={game.title} listings={listings} />
   <RenameInline initial={game.title} onSave={saveRename} />
   {#if renameError}<InlineError message={m.error_server_generic()} />{/if}
   <div class="meta">
@@ -170,65 +189,52 @@
   {#if game.notes}
     <p class="notes">{game.notes}</p>
   {/if}
-</header>
 
-<div class="panels">
-  <!-- Store listings -->
-  <section class="panel">
-    <h2>Store listings</h2>
-    {#if listings.length === 0}
-      <p class="empty-inline">No Steam listings attached yet.</p>
-    {:else}
-      <ul class="listings">
-        {#each listings as listing (listing.id)}
-          <li class="listing">
-            <span class="appid">App {listing.appId}</span>
-            <span class="label">{listing.label}</span>
-            {#if listing.releaseDate}
-              <span class="badge">{listing.releaseDate}</span>
-            {/if}
-            {#if listing.apiKeyId}
-              <span class="chip">key linked</span>
-            {/if}
+  <h2 class="listings-heading">Store listings</h2>
+  {#if listings.length === 0}
+    <p class="empty-inline">No Steam listings attached yet.</p>
+  {:else}
+    <ul class="listings">
+      {#each listings as listing (listing.id)}
+        <li>
+          <SteamListingRow {listing} />
+        </li>
+      {/each}
+    </ul>
+  {/if}
+  <AddSteamListingForm gameId={game.id} />
+</section>
+
+<section class="events-feed-card">
+  <header class="panel-head">
+    <h2>Events ({events.length})</h2>
+    <a class="cta-small" href="/events/new">{m.feed_cta_add_event()}</a>
+  </header>
+
+  {#if events.length === 0}
+    <EmptyState
+      heading={m.empty_feed_filtered_heading()}
+      body="Attach events from the /feed page to surface them here, or add a free-form event."
+    />
+  {:else}
+    {#each grouped as group (group.key)}
+      <MonthHeader month={group.label} count={group.rows.length} />
+      <ul class="rows">
+        {#each group.rows as ev (ev.id)}
+          <li>
+            <FeedCard
+              event={ev}
+              source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
+              game={gameLite}
+              games={allGames}
+              onChanged={() => invalidateAll()}
+            />
           </li>
         {/each}
       </ul>
-    {/if}
-    <AddSteamListingForm gameId={game.id} />
-  </section>
-
-  <!-- Curated events panel — replaces the Phase 2 channels + items + events panel stack -->
-  <section class="panel">
-    <header class="panel-head">
-      <h2>Events ({events.length})</h2>
-      <a class="cta-small" href="/events/new">{m.feed_cta_add_event()}</a>
-    </header>
-
-    {#if events.length === 0}
-      <EmptyState
-        heading={m.empty_feed_filtered_heading()}
-        body="Attach events from the /feed page to surface them here, or add a free-form event."
-      />
-    {:else}
-      {#each grouped as group (group.key)}
-        <MonthHeader month={group.label} count={group.rows.length} />
-        <ul class="rows">
-          {#each group.rows as ev (ev.id)}
-            <li>
-              <FeedCard
-                event={ev}
-                source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
-                game={gameLite}
-                games={allGames}
-                onChanged={() => invalidateAll()}
-              />
-            </li>
-          {/each}
-        </ul>
-      {/each}
-    {/if}
-  </section>
-</div>
+    {/each}
+  {/if}
+</section>
 
 <style>
   .breadcrumb {
@@ -242,11 +248,24 @@
     color: var(--color-accent);
     text-decoration: none;
   }
-  .header {
+  /* Plan 02.1-25 (UAT-NOTES.md §3.2-redesign): two panel cards stacked
+   * vertically. Each card has the same surface styling so the visual
+   * grouping is unambiguous on first scroll. The previous .panels grid
+   * (2-col >= 1024px) is dropped — keeping them stacked makes the page
+   * read top-down: artwork → metadata → listings → add-listing →
+   * events feed. The grid layout encouraged horizontal scanning that
+   * round-3 UAT explicitly rejected. */
+  .game-header-card,
+  .events-feed-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    padding: var(--space-md);
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: var(--space-md);
     margin-bottom: var(--space-lg);
+    min-width: 0;
   }
   .meta {
     display: flex;
@@ -268,23 +287,12 @@
     line-height: var(--line-height-body);
     white-space: pre-wrap;
   }
-  .panels {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xl);
-    min-width: 0;
+  .listings-heading {
+    margin: 0;
+    font-size: var(--font-size-heading);
+    font-weight: var(--font-weight-semibold);
   }
-  .panel {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    padding: var(--space-md);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-md);
-    min-width: 0;
-  }
-  .panel h2 {
+  .events-feed-card h2 {
     margin: 0;
     font-size: var(--font-size-heading);
     font-weight: var(--font-weight-semibold);
@@ -316,21 +324,6 @@
     flex-direction: column;
     gap: var(--space-sm);
   }
-  .listing {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-sm);
-    align-items: center;
-    padding: var(--space-sm);
-    border-bottom: 1px solid var(--color-border);
-  }
-  .appid {
-    font-family: var(--font-family-mono);
-    color: var(--color-text-muted);
-  }
-  .label {
-    color: var(--color-text);
-  }
   .cta-small {
     min-height: 44px;
     padding: 0 var(--space-md);
@@ -344,12 +337,5 @@
     text-decoration: none;
     display: inline-flex;
     align-items: center;
-  }
-  @media (min-width: 1024px) {
-    .panels {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: var(--space-lg);
-    }
   }
 </style>

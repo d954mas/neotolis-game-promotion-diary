@@ -256,3 +256,44 @@ describe("Plan 02.1-23: FeedCard restructured layout (top overlay + bottom games
     "FeedCard notes paragraph clamps to 3 lines via -webkit-line-clamp CSS (manual UAT — auth harness deferred)",
   );
 });
+
+/**
+ * Plan 02.1-26 — FeedQuickNav (chip strip / segmented control at top of /feed).
+ *
+ * Closes UAT-NOTES.md §6.2-redesign — the user wants single-click switch
+ * between All / Inbox / Standalone / per-game views. NEW component,
+ * <FeedQuickNav>, renders ABOVE <DateRangeControl>.
+ *
+ * The end-to-end 360px viewport flow (visit /feed → strip renders → click
+ * Inbox → URL becomes /feed?show=inbox → tab is highlighted; > 5 games →
+ * 'More games' dropdown reveals the rest; horizontal scroll within the
+ * strip works smoothly on touch) requires the cookie-injection auth harness
+ * still deferred to Phase 6 (same precedent as Plans 02.1-18 / 19 / 20 /
+ * 21 / 23). Stub-skipped here for grep discoverability when the harness
+ * arrives; manual UAT covers the visual + click flow.
+ *
+ * The component-level regression guard lives in
+ * tests/integration/audit-render.test.ts (Plan 02.1-26 describe block) —
+ * 13 SSR render-time tests over the tab structure, active-state logic,
+ * href construction, and dropdown overflow behavior.
+ */
+describe("Plan 02.1-26: FeedQuickNav at top of /feed", () => {
+  it.skip(
+    "FeedQuickNav renders above DateRangeControl with All / Inbox / Standalone tabs at 360px (manual UAT — auth harness deferred to Phase 6)",
+  );
+  it.skip(
+    "clicking 'Inbox' tab navigates to /feed?show=inbox and the loader re-runs (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "active tab has the accent background — computed background matches var(--color-accent) (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "at 360px viewport with 6 game tabs the strip horizontally scrolls without page-body horizontal scroll (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "with > 5 games the 'More games' dropdown reveals the overflow on summary click (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "URL /feed?show=specific&game=<id> highlights the matching game tab as active on direct navigation (manual UAT — auth harness deferred)",
+  );
+});

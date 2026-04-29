@@ -29,6 +29,11 @@
   import { m } from "$lib/paraglide/messages.js";
   import FeedCard from "$lib/components/FeedCard.svelte";
   import FeedDateGroupHeader from "$lib/components/FeedDateGroupHeader.svelte";
+  import FeedQuickNav from "$lib/components/FeedQuickNav.svelte";
+  // Plan 02.1-25 (UAT-NOTES.md §3.1-polish): shared PageHeader replaces the
+  // inline <header class="head"> + .cta block — title + CTA inline on the
+  // left instead of justify-content: space-between.
+  import PageHeader from "$lib/components/PageHeader.svelte";
   import DateRangeControl from "$lib/components/DateRangeControl.svelte";
   import FilterChips from "$lib/components/FilterChips.svelte";
   import FiltersSheet from "$lib/components/FiltersSheet.svelte";
@@ -255,10 +260,24 @@
 </script>
 
 <section class="feed">
-  <header class="head">
-    <h1>Feed</h1>
-    <a href="/events/new" class="cta">{m.feed_cta_add_event()}</a>
-  </header>
+  <PageHeader
+    title="Feed"
+    cta={{ href: "/events/new", label: m.feed_cta_add_event() }}
+  />
+
+  <!-- Plan 02.1-26 — FeedQuickNav: chip strip / segmented control for the
+       most-common Show axis values (All / Inbox / Standalone / per-game).
+       Closes UAT-NOTES.md §6.2-redesign — the user wants single-click switch
+       instead of opening FiltersSheet. The full FiltersSheet stays for
+       long-tail filters (kind, source, date, authorIsMe). -->
+  <FeedQuickNav
+    games={data.games}
+    activeShow={data.activeFilters.show}
+    currentUrlSearch={page.url.search}
+    onNavigate={(href) => {
+      void goto(href).then(() => invalidateAll());
+    }}
+  />
 
   <DateRangeControl activeFilters={data.activeFilters} onApply={applyDateRange} />
 
@@ -353,34 +372,10 @@
     gap: var(--space-md);
     min-width: 0;
   }
-  .head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-md);
-  }
-  .head h1 {
-    margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
-    line-height: var(--line-height-heading);
-  }
-  .cta {
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-on-accent, #fff);
-    border-radius: 4px;
-    text-decoration: none;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
-    white-space: nowrap;
-  }
-  .cta:hover {
-    filter: brightness(1.05);
-  }
+  /* Plan 02.1-25: inline .head + .cta CSS removed — replaced by the shared
+   * <PageHeader> component (see top of file). The new component uses the
+   * inline-on-the-left flex layout instead of justify-content: space-between
+   * per UAT-NOTES.md §3.1-polish. */
   /* Plan 02.1-19: CSS grid (auto-fill, minmax 280px) replaces the Plan
    * 02.1-15 vertical list. Multi-column on >=640px; single column below.
    * <FeedDateGroupHeader> sets `grid-column: 1 / -1` so the header spans

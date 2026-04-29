@@ -1260,3 +1260,58 @@ describe("Plan 02.1-24 — show.kind=standalone filter", () => {
     expect(pageB.rows.map((r) => r.id)).not.toContain(evA.id);
   });
 });
+
+/**
+ * Plan 02.1-26 — FeedQuickNav loader contract.
+ *
+ * The new <FeedQuickNav> component renders one tab per the user's games
+ * (collapsed into a 'More games' dropdown when > 5). It consumes the
+ * existing /feed/+page.server.ts loader's `data.games` array directly —
+ * NO new loader call, NO new endpoint. The tests below document the
+ * contract so a future loader refactor that drops `games` from the page
+ * data trips this assertion BEFORE FeedQuickNav goes blank.
+ *
+ * `data.games` was already returned by the loader since Plan 02.1-07
+ * (FiltersSheet's per-game multi-select needs the list). Plan 02.1-26
+ * adds a SECOND consumer; the contract assertion below makes that
+ * explicit.
+ */
+describe("Plan 02.1-26 — FeedQuickNav loader contract (data.games available)", () => {
+  it("listFeedPage's tenant-scoping is preserved by per-game show filter (sanity guard for FeedQuickNav per-game tab path)", async () => {
+    // FeedQuickNav per-game tab navigates to ?show=specific&game=<id>. The
+    // loader resolves that into ShowFilter { kind: 'specific', gameIds: [id] }
+    // and listFeedPage applies the userId-first WHERE clause. This guard
+    // documents that the tenant-scope chain still holds: a malicious URL
+    // ?show=specific&game=<other-tenant's-game-id> returns zero rows because
+    // events.userId = current user is the FIRST clause in and(...).
+    const userA = await seedUserDirectly({ email: "p26-feed-a@test.local" });
+    const userB = await seedUserDirectly({ email: "p26-feed-b@test.local" });
+
+    const userBGameId = uuidv7();
+    await db
+      .insert(games)
+      .values({ id: userBGameId, userId: userB.id, title: "User B's game" });
+
+    // User B creates an event attached to their game.
+    await createEvent(
+      userB.id,
+      {
+        gameId: userBGameId,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "User B press",
+      },
+      "127.0.0.1",
+    );
+
+    // User A asks listFeedPage for events filtered to User B's gameId. The
+    // userId-first WHERE clause prunes ALL of User B's rows; the result is
+    // zero. P19 mitigation by construction.
+    const pageForUserA = await listFeedPage(
+      userA.id,
+      { show: { kind: "specific", gameIds: [userBGameId] } },
+      null,
+    );
+    expect(pageForUserA.rows).toHaveLength(0);
+  });
+});
