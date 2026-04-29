@@ -5,11 +5,34 @@
   // YouTube API key warning in 2.1; the only signal is "Phase 3 will start
   // polling") + auto_import toggle + edit + remove (44×44 hit areas).
   //
-  // Edit affordance opens an inline form to rename `display_name` only;
-  // auto_import is toggled directly on the row (PATCH /api/sources/:id).
-  // Remove opens <ConfirmDialog> using m.confirm_source_remove({display_name})
-  // and DELETEs /api/sources/:id (60-day soft-delete window — restore lives
-  // on the /sources page below the active list).
+  // Edit affordance opens an inline form to rename `display_name` and toggle
+  // auto_import; both fields ship in one PATCH /api/sources/:id (Plan 02.1-22
+  // contract). Remove opens <ConfirmDialog> using
+  // m.confirm_source_remove({display_name}) and DELETEs /api/sources/:id
+  // (60-day soft-delete window — restore lives on the /sources page below
+  // the active list).
+  //
+  // Plan 02.1-33 (UAT-NOTES.md §4.22.B + §4.22.C + §4.22.E): edit-mode
+  // visibility-gates and footer placement.
+  //   - Read mode renders ONLY the Edit pencil in .actions; the destructive
+  //     Remove button moved into the edit-form footer where /events parity
+  //     keeps destructive actions confined to the edit surface.
+  //   - Edit mode hides the read-mode Edit pencil entirely (the user is
+  //     already editing — a second pencil-to-enter-edit-mode would duplicate
+  //     state).
+  //   - The edit form ends with a section divider followed by a 3-button
+  //     footer (Save primary / Cancel ghost / Remove danger) at the BOTTOM
+  //     of the form block so users can find the action row without
+  //     scanning the middle of the card. Closes user quote
+  //     "Кнопки save cancel нужно внизу карточки делать, иначе не очевидно
+  //     где они и зачем".
+  //
+  // Plan 02.1-33 (UAT-NOTES.md §4.22.D): auto_import is rendered as exactly
+  // ONE checkbox bound to editAutoImport. Plan-time review found no
+  // duplicate text input on this branch — the §4.22.D finding was stale —
+  // but the negative-grep regression assertions in the audit-render
+  // integration test and the responsive-360 browser describe block catch
+  // any future reintroduction of a parallel text-input control.
   //
   // PollingBadge text is rendered INLINE here (not via a shared <PollingBadge>
   // component) — Plan 02.1-07 owns the FeedRow PollingBadge and ships its
@@ -86,6 +109,23 @@
   // discoverability before the round-3 UAT. The toggle now lives inside the
   // edit form and ships in the same PATCH as a display-name change.
 
+  // Plan 02.1-33: explicit open/cancel helpers re-seed the local buffers
+  // each time. Splitting the open path from the cancel path makes the
+  // edit-mode visibility gates (§4.22.B / §4.22.C) read straightforwardly:
+  // the Edit pencil in read mode invokes openEdit; the Cancel button in
+  // the edit-form footer invokes cancelEdit.
+  function openEdit(): void {
+    editName = source.displayName ?? "";
+    editAutoImport = source.autoImport;
+    editing = true;
+  }
+
+  function cancelEdit(): void {
+    editing = false;
+    editName = source.displayName ?? "";
+    editAutoImport = source.autoImport;
+  }
+
   async function saveSourceEdit(e: Event): Promise<void> {
     e.preventDefault();
     if (mutating) return;
@@ -145,30 +185,7 @@
       <SourceKindIcon kind={source.kind} />
       {kindLabel(source.kind)}
     </span>
-    {#if editing}
-      <form class="rename" onsubmit={saveSourceEdit}>
-        <input
-          class="input"
-          type="text"
-          bind:value={editName}
-          maxlength="120"
-          aria-label="Display name"
-        />
-        <!-- Plan 02.1-22 (§2.4-decision option A): the auto_import toggle
-             lives inside the edit form so it can't be mis-tapped from the
-             row-display surface. Saved alongside displayName in one PATCH. -->
-        <label class="toggle">
-          <input type="checkbox" bind:checked={editAutoImport} />
-          <span>Auto-import</span>
-        </label>
-        <button type="submit" class="rename-save" disabled={mutating}>
-          {m.toast_saved()}
-        </button>
-        <button type="button" class="rename-cancel" onclick={() => (editing = false)}>
-          {m.common_cancel()}
-        </button>
-      </form>
-    {:else}
+    {#if !editing}
       <span class="display">{source.displayName ?? source.handleUrl}</span>
     {/if}
     <span class="ownership-badge" class:mine={source.isOwnedByMe}>
@@ -180,46 +197,95 @@
     <code class="handle">{source.handleUrl}</code>
   </div>
 
-  <div class="status">
-    <span class="polling-status" role="status">
-      {source.autoImport ? m.sources_status_auto_on_pending() : m.sources_status_auto_off()}
-    </span>
-    <!-- Plan 02.1-22 (§2.4-decision option A): non-interactive pill replaces
-         the inline checkbox. The toggle moved into the edit form so a misclick
-         can't flip auto-import without going through the same PATCH path that
-         renames also use. -->
-    <span class="auto-pill">
-      {source.autoImport ? m.sources_auto_import_on() : m.sources_auto_import_off()}
-    </span>
-  </div>
+  {#if !editing}
+    <div class="status">
+      <span class="polling-status" role="status">
+        {source.autoImport ? m.sources_status_auto_on_pending() : m.sources_status_auto_off()}
+      </span>
+      <!-- Plan 02.1-22 (§2.4-decision option A): non-interactive pill replaces
+           the inline checkbox. The toggle moved into the edit form so a misclick
+           can't flip auto-import without going through the same PATCH path that
+           renames also use. -->
+      <span class="auto-pill">
+        {source.autoImport ? m.sources_auto_import_on() : m.sources_auto_import_off()}
+      </span>
+    </div>
+  {/if}
 
-  <div class="actions">
-    <button
-      type="button"
-      class="icon-btn"
-      aria-label={m.common_edit()}
-      onclick={() => {
-        if (!editing) {
-          editName = source.displayName ?? "";
-          // Plan 02.1-22: re-seed editAutoImport from the live row each
-          // time the edit form opens so a stale toggle from a previous
-          // open doesn't mask the current persisted value.
-          editAutoImport = source.autoImport;
-        }
-        editing = !editing;
-      }}
-    >
-      {m.common_edit()}
-    </button>
-    <button
-      type="button"
-      class="icon-btn destructive"
-      aria-label={m.common_remove()}
-      onclick={() => (confirmingRemove = true)}
-    >
-      {m.common_remove()}
-    </button>
-  </div>
+  {#if !editing}
+    <!-- Plan 02.1-33 (UAT-NOTES.md §4.22.B): read-mode .actions hosts ONLY
+         the Edit pencil. Remove moved into the edit-form footer below — its
+         visibility gate is the {#if editing} branch. -->
+    <div class="actions">
+      <button
+        type="button"
+        class="icon-btn edit-icon"
+        aria-label={m.common_edit()}
+        onclick={openEdit}
+      >
+        {m.common_edit()}
+      </button>
+    </div>
+  {:else}
+    <form class="edit-form" onsubmit={saveSourceEdit}>
+      <input
+        class="input"
+        type="text"
+        bind:value={editName}
+        maxlength="120"
+        aria-label="Display name"
+      />
+      <!-- Plan 02.1-22 (§2.4-decision option A): the auto_import toggle
+           lives inside the edit form so it can't be mis-tapped from the
+           row-display surface. Saved alongside displayName in one PATCH.
+
+           Plan 02.1-33 (UAT-NOTES.md §4.22.D — regression prevention):
+           auto_import is rendered as EXACTLY ONE checkbox here. There is
+           no parallel <input type="text"> control bound to editAutoImport
+           anywhere in this component; the negative-grep assertions in the
+           audit-render integration test enforce that contract. -->
+      <label class="checkbox-row">
+        <input type="checkbox" bind:checked={editAutoImport} />
+        <span>Auto-import</span>
+      </label>
+
+      <!-- Plan 02.1-33 (UAT-NOTES.md §4.22.E): section divider above the
+           form footer so the user reads top-to-bottom (fields → divider
+           → action row). User quote: "Кнопки save cancel нужно внизу
+           карточки делать, иначе не очевидно где они и зачем". -->
+      <hr class="section-divider" />
+
+      <!-- Plan 02.1-33 (UAT-NOTES.md §4.22.B + §4.22.C + §4.22.E):
+           form-footer hosts Save (primary) / Cancel (ghost) / Remove
+           (danger) at the BOTTOM of the edit-form block. The Remove
+           button's visibility gate is THIS branch — not the read-mode
+           .actions row above. The read-mode Edit pencil is intentionally
+           NOT rendered here (no duplicate edit affordance once the user
+           is already editing). -->
+      <div class="form-footer">
+        <button type="submit" class="footer-btn footer-btn-primary" disabled={mutating}>
+          {m.common_save()}
+        </button>
+        <button
+          type="button"
+          class="footer-btn footer-btn-ghost"
+          onclick={cancelEdit}
+          disabled={mutating}
+        >
+          {m.common_cancel()}
+        </button>
+        <button
+          type="button"
+          class="footer-btn footer-btn-danger remove-icon"
+          aria-label={m.common_remove()}
+          onclick={() => (confirmingRemove = true)}
+          disabled={mutating}
+        >
+          {m.common_remove()}
+        </button>
+      </div>
+    </form>
+  {/if}
 
   {#if rowError}
     <InlineError message={rowError} />
@@ -279,12 +345,15 @@
     word-break: break-word;
     min-width: 0;
   }
-  .rename {
+  /* Plan 02.1-33: edit-form replaces the previous .rename inline strip.
+     The form is now its own row in the .row column flex with a fields
+     stack on top and a footer action row at the bottom. */
+  .edit-form {
     display: flex;
-    align-items: center;
-    gap: var(--space-xs);
-    flex-grow: 1;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: var(--space-sm);
+    width: 100%;
+    min-width: 0;
   }
   .input {
     min-height: 36px;
@@ -294,24 +363,16 @@
     border: 1px solid var(--color-border);
     border-radius: 4px;
     font-size: var(--font-size-body);
-    flex-grow: 1;
+    width: 100%;
     min-width: 0;
   }
-  .rename-save,
-  .rename-cancel {
-    min-height: 36px;
-    padding: 0 var(--space-sm);
-    border-radius: 4px;
-    border: 1px solid var(--color-border);
-    background: var(--color-surface);
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
     color: var(--color-text);
+    font-size: var(--font-size-body);
     cursor: pointer;
-    font-size: var(--font-size-label);
-  }
-  .rename-save {
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border-color: var(--color-accent);
   }
   .ownership-badge {
     display: inline-flex;
@@ -356,14 +417,6 @@
     color: var(--color-text-muted);
     font-size: var(--font-size-label);
   }
-  .toggle {
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs);
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
-    cursor: pointer;
-  }
   /* Plan 02.1-22 (§2.4-decision option A): non-interactive auto-import pill
      in row-display mode. Visually similar to .ownership-badge but borrowed
      into the row-status surface. */
@@ -396,11 +449,59 @@
   .icon-btn:hover {
     color: var(--color-text);
   }
-  .icon-btn.destructive {
+  /* Plan 02.1-33: section divider visually separates form fields from the
+     action row that follows. Border-top on a zero-height <hr> keeps the
+     stacking simple while honoring the "fields above, actions below"
+     read order. */
+  .section-divider {
+    width: 100%;
+    margin: 0;
+    border: 0;
+    border-top: 1px solid var(--color-border);
+  }
+  /* Plan 02.1-33 (UAT-NOTES.md §4.22.E): edit-form footer. Save / Cancel /
+     Remove sit at the BOTTOM of the form block, full-width and reachable
+     at 360px without horizontal scroll. Save is the primary action
+     (--color-accent fill), Cancel is the ghost variant (transparent +
+     border), Remove is the danger variant (--color-destructive border
+     and label color). */
+  .form-footer {
+    display: flex;
+    gap: var(--space-xs);
+    flex-wrap: wrap;
+    margin-top: 0;
+  }
+  .footer-btn {
+    min-height: 44px;
+    padding: 0 var(--space-md);
+    border-radius: 4px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text);
+    cursor: pointer;
+    font-size: var(--font-size-label);
+    flex: 1 1 auto;
+  }
+  .footer-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .footer-btn-primary {
+    background: var(--color-accent);
+    color: var(--color-accent-text, #fff);
+    border-color: var(--color-accent);
+  }
+  .footer-btn-ghost {
+    background: transparent;
+    color: var(--color-text);
+    border-color: var(--color-border);
+  }
+  .footer-btn-danger {
+    background: transparent;
     color: var(--color-destructive);
     border-color: var(--color-border);
   }
-  .icon-btn.destructive:hover {
+  .footer-btn-danger:hover {
     border-color: var(--color-destructive);
   }
   @media (min-width: 768px) {
@@ -415,6 +516,12 @@
     .meta {
       flex-basis: 100%;
       order: 99;
+    }
+    .edit-form {
+      /* Edit form takes a full row when active so the field stack +
+         section divider + footer all line up correctly. */
+      flex-basis: 100%;
+      order: 50;
     }
   }
 </style>

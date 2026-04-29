@@ -1553,3 +1553,144 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="authorIsMe"/);
   });
 });
+
+/**
+ * Plan 02.1-33 — SourceRow edit-mode polish (UAT-NOTES.md §4.22.B/C/D/E).
+ *
+ * Closes four findings on the same component:
+ *   §4.22.B — Remove visible only inside edit mode.
+ *   §4.22.C — Edit pencil hidden inside edit mode.
+ *   §4.22.D — auto_import is rendered as EXACTLY one checkbox (regression
+ *             guard against re-introduction of a parallel text-input
+ *             control bound to editAutoImport).
+ *   §4.22.E — Save / Cancel / Remove sit at the BOTTOM of the edit-form
+ *             block with a section divider above the action row.
+ *
+ * The vitest-browser end-to-end (interactive open / cancel / save) is
+ * stub-skipped pending the Phase 6 auth harness. SSR-level regression
+ * guards live here — grep + structural assertions on SourceRow.svelte
+ * source — same pattern as the Plan 02.1-25 SourceRow Mine treatment
+ * scan above.
+ */
+describe("Plan 02.1-33 — SourceRow edit-mode polish (visibility gates + footer)", () => {
+  it("SourceRow renders the read-mode Edit pencil ONLY when !editing — closes §4.22.B/C", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
+    // Read-mode block has the Edit pencil (icon-btn edit-icon class pair)
+    // and explicitly NO Remove button — the {#if !editing} ... {:else}
+    // structure encodes the visibility gate.
+    expect(src, "{#if !editing} block exists").toMatch(/\{#if !editing\}/);
+    expect(src, "{:else} branch exists for edit mode").toMatch(/\{:else\}/);
+    // The read-mode .actions div contains an edit-icon class but no
+    // remove-icon class — assert by structural slice.
+    const ifNotEditingMatch = src.match(
+      /\{#if !editing\}\s*<!--[\s\S]*?-->\s*<div class="actions">[\s\S]*?<\/div>\s*\{:else\}/,
+    );
+    expect(
+      ifNotEditingMatch,
+      "read-mode .actions block matches the {#if !editing} ... {:else} structure",
+    ).not.toBeNull();
+    if (ifNotEditingMatch) {
+      const readModeBlock = ifNotEditingMatch[0];
+      expect(readModeBlock).toMatch(/edit-icon/);
+      // Read-mode block must NOT contain the destructive remove-icon class.
+      expect(readModeBlock).not.toMatch(/remove-icon/);
+    }
+  });
+
+  it("SourceRow renders the destructive Remove button ONLY in edit-form footer — closes §4.22.B", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
+    // The edit branch holds the form-footer with three buttons. The Remove
+    // (footer-btn-danger / remove-icon) lives ONLY here.
+    expect(src).toMatch(/form-footer/);
+    expect(src).toMatch(/footer-btn-danger/);
+    // The Remove button is wired to confirmingRemove = true, opening the
+    // existing ConfirmDialog flow — preserves Plan 02.1-08 soft-delete
+    // contract.
+    expect(src).toMatch(/confirmingRemove\s*=\s*true/);
+    // remove-icon class lives on the footer button (Plan 02.1-33), not on
+    // a top-level read-mode .actions button.
+    const removeIconMatches = src.match(/remove-icon/g) ?? [];
+    expect(
+      removeIconMatches.length,
+      "remove-icon class appears exactly once (footer-btn-danger remove-icon)",
+    ).toBe(1);
+  });
+
+  it("SourceRow form-footer hosts Save (primary) / Cancel (ghost) / Remove (danger) AT THE BOTTOM — closes §4.22.E", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
+    // Section divider above the footer row visually separates fields from
+    // actions. Both must exist; the divider must precede the footer in
+    // source order.
+    expect(src).toMatch(/section-divider/);
+    expect(src).toMatch(/form-footer/);
+    const dividerIdx = src.indexOf("section-divider");
+    const footerIdx = src.indexOf("form-footer");
+    expect(dividerIdx, "section-divider exists in SourceRow.svelte").toBeGreaterThan(-1);
+    expect(footerIdx, "form-footer exists in SourceRow.svelte").toBeGreaterThan(-1);
+    expect(
+      dividerIdx < footerIdx,
+      "section-divider precedes form-footer in source order (fields → divider → action row)",
+    ).toBe(true);
+    // Footer button variants — primary (Save), ghost (Cancel), danger (Remove).
+    expect(src).toMatch(/footer-btn-primary/);
+    expect(src).toMatch(/footer-btn-ghost/);
+    expect(src).toMatch(/footer-btn-danger/);
+    // Save uses common_save (added in this plan); Cancel uses common_cancel;
+    // Remove uses common_remove.
+    expect(src).toMatch(/m\.common_save\(\)/);
+    expect(src).toMatch(/m\.common_cancel\(\)/);
+    expect(src).toMatch(/m\.common_remove\(\)/);
+  });
+
+  it("SourceRow auto_import is rendered as EXACTLY ONE checkbox (regression guard) — closes §4.22.D", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
+    // Positive: exactly ONE input bound to editAutoImport (the checkbox).
+    const checkedBindings = src.match(/bind:checked=\{editAutoImport\}/g) ?? [];
+    expect(checkedBindings.length, "exactly one input[type=checkbox] bound to editAutoImport").toBe(
+      1,
+    );
+    // Negative: no <input type="text"> attribute references editAutoImport
+    // anywhere in the component (catch-all against future regressions to
+    // a parallel string control).
+    expect(src).not.toMatch(/type="text"[^>]*editAutoImport/);
+    // Negative: no value-binding to editAutoImport (which would imply a
+    // non-checkbox control such as <input type="text" bind:value=...>).
+    expect(src).not.toMatch(/bind:value=\{editAutoImport\}/);
+    // Catch-all: no <input type="text"> whose attribute name mentions
+    // auto-import in any casing/separator (autoImport / auto-import /
+    // auto_import). Current variable name is editAutoImport (camelCase);
+    // this catch-all guards against renames.
+    expect(src).not.toMatch(/type="text"[^>]*[Aa]uto[_-]?[Ii]mport/);
+  });
+
+  it("SourceRow PATCH /api/sources/:id payload still ships { displayName, autoImport } — preserves Plan 02.1-22 contract", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
+    // saveSourceEdit body still serializes displayName + autoImport — no
+    // schema or service change in Plan 02.1-33; pure component refactor.
+    expect(src).toMatch(/method:\s*"PATCH"/);
+    expect(src).toMatch(/displayName:\s*editName\.trim\(\)\s*\|\|\s*null/);
+    expect(src).toMatch(/autoImport:\s*editAutoImport/);
+  });
+
+  it("SourceRow ConfirmDialog wired to existing soft-delete flow — preserves Plan 02.1-08 contract", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
+    // The Remove button (now in the edit-form footer) opens the same
+    // ConfirmDialog used since Plan 02.1-08; on confirm, DELETE
+    // /api/sources/:id is fired.
+    expect(src).toMatch(/<ConfirmDialog\s/);
+    expect(src).toMatch(/method:\s*"DELETE"/);
+    expect(src).toMatch(/m\.confirm_source_remove/);
+  });
+});

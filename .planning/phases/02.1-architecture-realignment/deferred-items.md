@@ -49,3 +49,23 @@ Verified at task time (2026-04-29) during Plan 02.1-29 verification:
   file is a dev-time OAuth mock helper, not part of the production code
   path). File for a one-line cleanup PR that routes through the env module
   or moves the file under `tests/` where the rule does not fire.
+
+## Plan 02.1-33 deferred items
+
+- **`tests/integration/audit-render.test.ts` Plan 02.1-25 SSR scan asserts
+  `var(--color-accent)` on `.row.mine` border-left and `.ownership-badge.mine`
+  background.** Plan 02.1-30 unified the Mine token via `var(--color-mine)`
+  (which defaults to `--color-accent` but is structurally distinct). The
+  Plan 02.1-25 test regex was not updated by Plan 02.1-30 and now fails
+  whenever SourceRow.svelte renders the `--color-mine` token. Out of scope
+  for Plan 02.1-33 — this is Plan 02.1-30's test-update gap, not a
+  Plan 02.1-33-introduced regression. Fix path: change the two
+  `var\(--color-accent\)` substrings in the regex to `var\(--color-mine\)`
+  in tests/integration/audit-render.test.ts (Plan 02.1-25 describe block,
+  "SourceRow.svelte source carries the Mine treatment CSS rule + kind label"
+  case).
+- **`tests/integration/audit-render.test.ts` Plan 02.1-25 two-card layout
+  scan fails on /games/[gameId]/+page.svelte.** Plan 02.1-30 (StoresSection)
+  restructured the page; the two-card structural assertions need updating
+  to match the post-Plan-02.1-30 markup. Out of scope for Plan 02.1-33 —
+  this is Plan 02.1-30's test-update gap.
