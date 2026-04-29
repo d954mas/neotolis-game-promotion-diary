@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed Plan 02.1-21 — schema prop on FiltersSheet/FilterChips + /audit date-range filter (Wave 0 of round-3 gap closure). Plans 22-24 unblocked.
-last_updated: "2026-04-29T12:48:51.298Z"
+stopped_at: Completed Plan 02.1-23 — FeedCard restructured layout per UAT §1.5-redesign (top overlay + bottom games-block + Mine = border-left + overlay-pill).
+last_updated: "2026-04-29T13:02:14.688Z"
 last_activity: 2026-04-29
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 47
-  completed_plans: 41
+  completed_plans: 42
 ---
 
 # Project State
@@ -85,6 +85,7 @@ Plan: 2 of 26
 | Phase 02.1-architecture-realignment P18 | 9min 22s | 5 tasks | 10 files |
 | Phase 02.1 P20 | ~17min 37s | 5 tasks | 16 files |
 | Phase 02.1-architecture-realignment P21 | ~25min | 2 tasks | 11 files |
+| Phase 02.1 P23 | 9min | 1 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -223,6 +224,9 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-21: listAuditPage gains optional dateRange?: AuditDateRange 4th parameter; gte/lte clauses appended to filterParts; userId WHERE clause STAYS the FIRST clause in and(...) per PRIVACY INVARIANT 1; cross-tenant 404 (P19) preserved by construction (verified by date+action+forged-cursor integration test)
 - [Phase 02.1-architecture-realignment]: Plan 02.1-21: /audit deliberately omits the 30-day default window (unlike /feed) — auditing is investigative, default is 'show every row'; mirrors /feed's date parsing pattern but skips the default-window assignment
 - [Phase 02.1-architecture-realignment]: Plan 02.1-21: 'date' axis is in both /feed and /audit schemas but emits NO chip — visible <DateRangeControl> from/to inputs ARE the indicator; chip duplication is confusing (Plan 02.1-19 contract preserved); FilterChips ChipAxis union deliberately excludes 'date'
+- [Phase 02.1]: Plan 02.1-23: FeedCard restructured per UAT §1.5-redesign — top overlay (kind+inbox+mine pills absolute over .media), title + 3-line clamped notes below, source chip in chips-line, game chip in bottom .games-block (margin-top:auto). Mine = class:mine + border-left:4px var(--color-accent) AND overlay-mine pill (user choice C+A combined).
+- [Phase 02.1]: Plan 02.1-23: image rules ship auto-derived only for round-3 — youtube_video → mqdefault.jpg; reddit/twitter/telegram → metadata.media.url via type-safe readMediaUrlFromMetadata helper; everything else → KindIcon text fallback. Manual upload UI deferred to Phase 3+ (TODO comment documents the schema shape).
+- [Phase 02.1]: Plan 02.1-23: Inbox label rendered INLINE in overlay (option b) — span.overlay-inbox with m.inbox_badge() text — not via a variant prop on InboxBadge (premature abstraction for one consumer). No new Paraglide keys; EXPECTED_KEYS snapshot stays in lock-step.
 
 ### Pending Todos
 
@@ -263,8 +267,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-29T12:48:51.292Z
+Last session: 2026-04-29T13:02:00.511Z
 Last Activity: 2026-04-29
-Stopped at: Completed Plan 02.1-21 — schema prop on FiltersSheet/FilterChips + /audit date-range filter (Wave 0 of round-3 gap closure). Plans 22-24 unblocked.
+Stopped at: Completed Plan 02.1-23 — FeedCard restructured layout per UAT §1.5-redesign (top overlay + bottom games-block + Mine = border-left + overlay-pill).
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
