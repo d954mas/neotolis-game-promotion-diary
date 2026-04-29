@@ -34,20 +34,21 @@
   let { data }: { data: PageData } = $props();
 
   let sheetOpen = $state(false);
+  let sheetFocusAxis = $state<
+    "kind" | "source" | "show" | "authorIsMe" | undefined
+  >(undefined);
 
   const sourceById = $derived(new Map(data.sources.map((s) => [s.id, s])));
   const gameById = $derived(new Map(data.games.map((g) => [g.id, g])));
 
   function hasNoActiveFilters(f: typeof data.activeFilters): boolean {
-    // Plan 02.1-15: source / kind / game are arrays; "no filter" means all
-    // empty. The default 30-day window IS an active filter from the user's
-    // perspective (the chip strip shows it), so defaultDateRange === true
-    // counts as "filters active".
+    // Plan 02.1-19: source / kind are arrays + show is a discriminated
+    // union. "No filter" = all arrays empty, show.kind === 'any',
+    // authorIsMe undefined, no date constraint.
     return (
       f.source.length === 0 &&
       f.kind.length === 0 &&
-      f.game.length === 0 &&
-      f.attached === undefined &&
+      f.show.kind === "any" &&
       f.authorIsMe === undefined &&
       !f.defaultDateRange &&
       f.from === undefined &&
@@ -72,52 +73,57 @@
     void goto(qs ? `/feed?${qs}` : "/feed");
   }
 
-  function dismissAxis(axis: string, value?: string): void {
+  // Plan 02.1-19: per-axis dismiss — × on a chip clears the entire axis
+  // (drops all values for that axis, NOT a single value).
+  type ChipAxis = "kind" | "source" | "show" | "authorIsMe";
+  function dismissAxis(axis: ChipAxis): void {
     const params = new URLSearchParams(page.url.searchParams);
     params.delete("cursor");
-    if (axis === "dateRange") {
-      // Dismissing the date chip means: opt out of the default 30-day
-      // window. Drop any explicit from/to and set all=1 so the next render
-      // shows "all time" without the default chip.
-      params.delete("from");
-      params.delete("to");
-      params.set("all", "1");
-    } else if (axis === "attached" || axis === "authorIsMe") {
-      params.delete(axis);
-    } else if (value !== undefined) {
-      // Multi-select dismiss: remove ONE value, keep the rest.
-      const remaining = params.getAll(axis).filter((v) => v !== value);
-      params.delete(axis);
-      for (const v of remaining) params.append(axis, v);
-    } else {
-      // Fallback for axes that can be wiped wholesale.
-      params.delete(axis);
+    if (axis === "show") {
+      // Clear the show axis → land on default (any) by removing both ?show
+      // and ?game params. Default 30-day window is preserved.
+      params.delete("show");
+      params.delete("game");
+    } else if (axis === "authorIsMe") {
+      params.delete("authorIsMe");
+    } else if (axis === "kind") {
+      params.delete("kind");
+    } else if (axis === "source") {
+      params.delete("source");
     }
     const qs = params.toString();
     void goto(qs ? `/feed?${qs}` : "/feed");
   }
 
+  type ShowFilter =
+    | { kind: "any" }
+    | { kind: "inbox" }
+    | { kind: "specific"; gameIds: string[] };
+
   function applyFiltersFromSheet(next: {
     source?: string[];
     kind?: string[];
-    game?: string[];
-    attached?: boolean;
+    show: ShowFilter;
     authorIsMe?: boolean;
   }): void {
     const params = new URLSearchParams(page.url.searchParams);
-    // Sheet owns source/kind/game/attached/authorIsMe; the date-range params
-    // belong to <DateRangeControl> and are PRESERVED here.
+    // Sheet owns source/kind/show/authorIsMe; the date-range params belong
+    // to <DateRangeControl> and are PRESERVED here.
     params.delete("source");
     params.delete("kind");
     params.delete("game");
-    params.delete("attached");
+    params.delete("show");
     params.delete("authorIsMe");
     params.delete("cursor");
     for (const v of next.source ?? []) params.append("source", v);
     for (const v of next.kind ?? []) params.append("kind", v);
-    for (const v of next.game ?? []) params.append("game", v);
-    if (next.attached === true) params.set("attached", "true");
-    if (next.attached === false) params.set("attached", "false");
+    if (next.show.kind === "inbox") {
+      params.set("show", "inbox");
+    } else if (next.show.kind === "specific") {
+      params.set("show", "specific");
+      for (const v of next.show.gameIds) params.append("game", v);
+    }
+    // show.kind === "any": no params (default).
     if (next.authorIsMe === true) params.set("authorIsMe", "true");
     if (next.authorIsMe === false) params.set("authorIsMe", "false");
     const qs = params.toString();
@@ -154,7 +160,10 @@
       sources={data.sources}
       games={data.games}
       onDismiss={dismissAxis}
-      onOpenSheet={() => (sheetOpen = true)}
+      onOpenSheet={(axis) => {
+        sheetFocusAxis = axis;
+        sheetOpen = true;
+      }}
       onClearAll={clearAll}
     />
     <EmptyState heading={m.empty_feed_filtered_heading()} body={m.empty_feed_filtered_body()} />
@@ -164,7 +173,10 @@
       sources={data.sources}
       games={data.games}
       onDismiss={dismissAxis}
-      onOpenSheet={() => (sheetOpen = true)}
+      onOpenSheet={(axis) => {
+        sheetFocusAxis = axis;
+        sheetOpen = true;
+      }}
       onClearAll={clearAll}
     />
     <ul class="feed-list">
@@ -203,11 +215,16 @@
       filters={data.activeFilters}
       sources={data.sources}
       games={data.games}
+      focusAxis={sheetFocusAxis}
       onApply={(next) => {
         sheetOpen = false;
+        sheetFocusAxis = undefined;
         applyFiltersFromSheet(next);
       }}
-      onClose={() => (sheetOpen = false)}
+      onClose={() => {
+        sheetOpen = false;
+        sheetFocusAxis = undefined;
+      }}
     />
   {/if}
 </section>

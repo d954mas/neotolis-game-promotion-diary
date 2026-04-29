@@ -1,39 +1,34 @@
 <script lang="ts">
-  // FilterChips — horizontally-scrollable chip strip rendering active /feed
-  // filters (UI-SPEC §"Component inventory" + §"/feed filter row — chips →
-  // sheet pattern"; Plan 02.1-15 rewrites the per-axis chip emission to
-  // per-VALUE emission for the multi-select axes).
+  // FilterChips — per-axis chip strip rendering active /feed filters
+  // (UI-SPEC §"Component inventory" + §"/feed filter row — chips → sheet
+  // pattern"; Plan 02.1-19 rewrites the chip emission to one chip per
+  // active axis, not one per value).
   //
-  // Layout contract (UI-SPEC):
-  //   - min-width 600px: render one <button aria-pressed="true"> per active
-  //     filter VALUE with text from the corresponding m.feed_filter_*() key,
-  //     plus a 44×44 dismiss × button per chip with
-  //     aria-label={m.feed_filter_chip_dismiss_aria({filter: axisLabel})}.
-  //     A "Clear all filters" link at the right end if any filter is active.
-  //   - max-width 599px: render only <button>Filters (N)</button> that opens
-  //     <FiltersSheet>.
-  //
-  // Plan 02.1-15: source / kind / game emit ONE chip per VALUE (e.g.
-  // source=[A,B,C] → 3 chips). The dismiss × passes the VALUE so the parent
-  // page-server URL rebuild removes only that single value (other values in
-  // the axis stay).
-  //
-  // Plan 02.1-15: from / to no longer emit a chip here — the date range
-  // chip is owned by <DateRangeControl> (Gap 10). The default-30d chip and
-  // user-applied custom-range chip both render here as a single chip with
-  // axis === "dateRange"; dismissing it navigates to ?all=1 (opt-out of the
-  // default; user-applied custom ranges flow through the same code path).
-  //
-  // FLAG (UI-SPEC): chip wrap permitted at 600–800px when many filters
-  // active (`flex-wrap: wrap`).
+  // Layout contract (Plan 02.1-19):
+  //   - One chip per active axis (kind / source / show / authorIsMe), with
+  //     value labels comma-joined inside the chip text. No '+N more'
+  //     truncation — long chips wrap text inside (word-break: break-word;
+  //     min-width: 0). flex-wrap moves whole chips to a new row when
+  //     natural width exceeds the strip.
+  //   - Click chip body → opens FiltersSheet with focusAxis hint so the
+  //     sheet scrolls/focuses the corresponding fieldset.
+  //   - Click × → clears the entire axis (drops all values for that axis,
+  //     NOT a single value).
+  //   - Date-range chip is NOT emitted — the visible from/to inputs above
+  //     the chip strip ARE the indicator (round-2 UAT gap "no chip
+  //     duplication").
 
   import { m } from "$lib/paraglide/messages.js";
+
+  type ShowFilter =
+    | { kind: "any" }
+    | { kind: "inbox" }
+    | { kind: "specific"; gameIds: string[] };
 
   type ActiveFilters = {
     source: string[];
     kind: string[];
-    game: string[];
-    attached?: boolean;
+    show: ShowFilter;
     authorIsMe?: boolean;
     from?: string;
     to?: string;
@@ -42,6 +37,8 @@
   };
   type SourceOption = { id: string; displayName: string | null; handleUrl: string };
   type GameOption = { id: string; title: string };
+
+  type ChipAxis = "kind" | "source" | "show" | "authorIsMe";
 
   let {
     filters,
@@ -54,8 +51,8 @@
     filters: ActiveFilters;
     sources: SourceOption[];
     games: GameOption[];
-    onDismiss: (axis: string, value?: string) => void;
-    onOpenSheet: () => void;
+    onDismiss: (axis: ChipAxis) => void;
+    onOpenSheet: (focusAxis?: ChipAxis) => void;
     onClearAll: () => void;
   } = $props();
 
@@ -86,36 +83,46 @@
     }
   }
 
-  type Chip = { axis: string; value?: string; label: string; ariaName: string; key: string };
+  type Chip = { axis: ChipAxis; label: string; ariaName: string; key: string };
   const chips = $derived.by((): Chip[] => {
     const out: Chip[] = [];
-    // One chip per source value (Gap 4 — multi-select).
-    for (const sId of filters.source) {
-      const s = sources.find((x) => x.id === sId);
-      const name = s ? (s.displayName ?? s.handleUrl) : sId;
-      const label = m.feed_filter_source({ name });
-      out.push({ axis: "source", value: sId, label, ariaName: label, key: `source:${sId}` });
+
+    // Kind axis — one chip with comma-joined value labels.
+    if (filters.kind.length > 0) {
+      const labels = filters.kind.map(kindLabel).join(", ");
+      const label = `${m.feed_chip_axis_kind()}: ${labels}`;
+      out.push({ axis: "kind", label, ariaName: label, key: "axis:kind" });
     }
-    // One chip per kind value.
-    for (const k of filters.kind) {
-      const label = m.feed_filter_kind({ kind: kindLabel(k) });
-      out.push({ axis: "kind", value: k, label, ariaName: label, key: `kind:${k}` });
+
+    // Source axis — one chip with comma-joined display names.
+    if (filters.source.length > 0) {
+      const labels = filters.source
+        .map((id) => {
+          const s = sources.find((x) => x.id === id);
+          return s ? (s.displayName ?? s.handleUrl) : id;
+        })
+        .join(", ");
+      const label = `${m.feed_chip_axis_source()}: ${labels}`;
+      out.push({ axis: "source", label, ariaName: label, key: "axis:source" });
     }
-    // One chip per game value.
-    for (const gId of filters.game) {
-      const g = games.find((x) => x.id === gId);
-      const title = g ? g.title : gId;
-      const label = m.feed_filter_game({ title });
-      out.push({ axis: "game", value: gId, label, ariaName: label, key: `game:${gId}` });
+
+    // Show axis (merged from old game + attached).
+    if (filters.show.kind === "inbox") {
+      const label = `${m.feed_chip_axis_show()}: ${m.feed_filter_show_inbox()}`;
+      out.push({ axis: "show", label, ariaName: label, key: "axis:show:inbox" });
+    } else if (filters.show.kind === "specific" && filters.show.gameIds.length > 0) {
+      const labels = filters.show.gameIds
+        .map((id) => {
+          const g = games.find((x) => x.id === id);
+          return g ? g.title : id;
+        })
+        .join(", ");
+      const label = `${m.feed_chip_axis_show()}: ${labels}`;
+      out.push({ axis: "show", label, ariaName: label, key: "axis:show:specific" });
     }
-    // Boolean axes — one chip each.
-    if (filters.attached === true) {
-      const label = m.feed_filter_attached_true();
-      out.push({ axis: "attached", label, ariaName: label, key: "attached:true" });
-    } else if (filters.attached === false) {
-      const label = m.feed_filter_attached_false();
-      out.push({ axis: "attached", label, ariaName: label, key: "attached:false" });
-    }
+    // show.kind === "any": no chip (default).
+
+    // Author axis — single value, kept as-is.
     if (filters.authorIsMe === true) {
       const label = m.feed_filter_author_me();
       out.push({ axis: "authorIsMe", label, ariaName: label, key: "authorIsMe:true" });
@@ -123,21 +130,10 @@
       const label = m.feed_filter_author_others();
       out.push({ axis: "authorIsMe", label, ariaName: label, key: "authorIsMe:false" });
     }
-    // Date range chip — single chip even for multi-day ranges. Skipped for
-    // "all time" (the absence of a constraint should not render a chip;
-    // dismissing it would be a no-op).
-    if (filters.all) {
-      // No chip — "all time" is already the no-constraint state.
-    } else if (filters.defaultDateRange) {
-      const label = m.feed_date_range_chip_default();
-      out.push({ axis: "dateRange", label, ariaName: label, key: "dateRange:default" });
-    } else if (filters.from !== undefined || filters.to !== undefined) {
-      const range = m.feed_filter_date_range({
-        from: filters.from ?? "—",
-        to: filters.to ?? "—",
-      });
-      out.push({ axis: "dateRange", label: range, ariaName: range, key: "dateRange:custom" });
-    }
+
+    // Plan 02.1-19: NO date-range chip emission. The visible from/to inputs
+    // in <DateRangeControl> ARE the indicator. Duplication is confusing
+    // (UAT round-2 gap "FilterChips MUST NOT emit any chip for date range").
     return out;
   });
 
@@ -150,14 +146,19 @@
     <div class="chips" aria-label="Active filters">
       {#each chips as chip (chip.key)}
         <span class="chip">
-          <button type="button" class="chip-label" aria-pressed="true">
+          <button
+            type="button"
+            class="chip-label"
+            aria-pressed="true"
+            onclick={() => onOpenSheet(chip.axis)}
+          >
             {chip.label}
           </button>
           <button
             type="button"
             class="chip-dismiss"
             aria-label={m.feed_filter_chip_dismiss_aria({ filter: chip.ariaName })}
-            onclick={() => onDismiss(chip.axis, chip.value)}
+            onclick={() => onDismiss(chip.axis)}
           >
             ×
           </button>
@@ -170,7 +171,7 @@
   {/if}
 
   <!-- Sheet trigger — always visible so users can discover and add filters. -->
-  <button type="button" class="sheet-trigger" onclick={onOpenSheet}>
+  <button type="button" class="sheet-trigger" onclick={() => onOpenSheet()}>
     Filters{activeCount > 0 ? ` (${activeCount})` : ""}
   </button>
 </div>
@@ -218,6 +219,11 @@
     padding: 0 var(--space-xs) 0 var(--space-sm);
     font-size: var(--font-size-label);
     line-height: 1;
+    /* Plan 02.1-19: chip text wraps inside the chip when natural width
+     * exceeds the strip. No '+N more' truncation. */
+    max-width: 100%;
+    min-width: 0;
+    word-break: break-word;
   }
   .chip-label {
     background: transparent;
@@ -227,6 +233,8 @@
     font-size: var(--font-size-label);
     font-weight: var(--font-weight-semibold);
     cursor: pointer;
+    white-space: normal;
+    text-align: left;
   }
   .chip-dismiss {
     min-width: 44px;
@@ -238,6 +246,7 @@
     font-size: var(--font-size-body);
     line-height: 1;
     border-radius: 999px;
+    flex-shrink: 0;
   }
   .chip-dismiss:hover {
     color: var(--color-text);
