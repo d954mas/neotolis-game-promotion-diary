@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
-stopped_at: Completed 02.1-20-PLAN.md (last round-2 UAT polish batch — alphabetical sort / hide non-functional kinds / remove date explainer / /audit filter UX rewrite via FilterChips+FiltersSheet+\"action\" axis extension). Phase 2.1 round-2 cleanup is COMPLETE. /audit and /feed now share the same filter UX language. Plan 02.1-10 (UAT checkpoint) is the last incomplete plan.
-last_updated: "2026-04-29T09:57:42.760Z"
+status: Executing Phase 02.1 — Plan 02.1-10 Task 1 verified at commit dd71efb; awaiting Task 2 manual UAT checkpoint
+stopped_at: Plan 02.1-10 Task 1 (smoke-flow extension) verified at pre-existing commit dd71efb (shipped during the original 2026-04-28 Plan-10 first-pass before the 11-20 round-2 UAT polish batch). bash -n PASS on both files; all plan acceptance-criteria literal substrings present. Returning checkpoint for Task 2 (manual UAT, 9 items) before Task 3 (VALIDATION.md sign-off + SUMMARY.md).
+last_updated: "2026-04-29T10:02:35.695Z"
 last_activity: 2026-04-29
 progress:
   total_phases: 7
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 5 of 20
+Plan: 10 of 20 (last incomplete plan; Tasks 11-20 already complete)
 
 ## Performance Metrics
 
@@ -248,6 +248,7 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-16: 02.1-VALIDATION.md frontmatter flipped nyquist_compliant=true; Per-Task Verification Map populated for Plans 02.1-11 → 02.1-16 (13 rows); Phase 2.1 ready for Plan 02.1-10 UAT checkpoint resume
 - [Phase 02.1-architecture-realignment]: Plan 02.1-16 deviation (Rule 2): EventDtoLocal in /games/[gameId]/+page.svelte missing externalId — extended local type to surface the field already projected by toEventDto so FeedCard's thumbnail prop type-checks
 - [Phase 02.1-architecture-realignment]: Plan 02.1-16: HARD CONTRACT preserved on /feed/+page.svelte during FeedRow→FeedCard swap — Plan 14's <DeletedEventsPanel> + Plan 15's <DateRangeControl> + multi-select <FilterChips>/<FiltersSheet> blocks intact, verified via grep guard before edit
+- [Phase 02.1-architecture-realignment]: Plan 02.1-10 Task 1 (smoke unified flow + cross-tenant probes) verified ALREADY-SHIPPED at commit dd71efb (2026-04-28, shipped during original Plan-10 first-pass before round-2 UAT batch redirected execution to Plans 11-20). bash -n PASS on tests/smoke/self-host.sh + tests/smoke/lib/phase21-flow.sh; all plan acceptance-criteria literal substrings present (/api/sources×6, /api/events×14, /attach×7, /api/games/×3, gameId×12, sourceId×9, 404×9, forbidden|permission×5). Continuation agent picks up at Task 2 (manual UAT checkpoint, 9 items) → Task 3 (VALIDATION.md sign-off + SUMMARY.md).
 
 ### Blockers/Concerns
 
@@ -257,8 +258,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-29T09:57:42.755Z
+Last session: 2026-04-29T10:02:35.695Z
 Last Activity: 2026-04-29
-Stopped at: Completed 02.1-20-PLAN.md (last round-2 UAT polish batch — alphabetical sort / hide non-functional kinds / remove date explainer / /audit filter UX rewrite via FilterChips+FiltersSheet+\"action\" axis extension). Phase 2.1 round-2 cleanup is COMPLETE. /audit and /feed now share the same filter UX language. Plan 02.1-10 (UAT checkpoint) is the last incomplete plan.
+Stopped at: Plan 02.1-10 Task 1 verified at pre-existing commit dd71efb. Awaiting Task 2 manual UAT checkpoint (9 items per 02.1-10-PLAN.md <how-to-verify>). On approval, continuation agent runs Task 3 (VALIDATION.md sign-off, SUMMARY.md, STATE/ROADMAP updates).
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
