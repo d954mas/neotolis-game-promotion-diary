@@ -70,6 +70,7 @@
   "audit_action_event_created": "Event created",
   "audit_action_event_edited": "Event edited",
   "audit_action_event_deleted": "Event deleted",
+  "audit_action_event_detached_from_game": "Event detached from a game",
   "audit_action_theme_changed": "Theme changed",
   "audit_action_source_added": "Data source added",
   "audit_action_source_removed": "Data source removed",

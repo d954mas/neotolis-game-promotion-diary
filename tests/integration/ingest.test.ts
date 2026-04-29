@@ -67,7 +67,14 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
     // No registered data_source matches → source_id NULL, author_is_me false.
     expect(row.sourceId).toBeNull();
     expect(row.authorIsMe).toBe(false);
-    expect(row.gameId).toBe(gameId);
+    // Plan 02.1-28: gameId column gone; verify the junction has the gameId.
+    const { eventGames: eg28 } = await import("../../src/lib/server/db/schema/event-games.js");
+    const { and: and28, eq: eq28 } = await import("drizzle-orm");
+    const junction = await db
+      .select()
+      .from(eg28)
+      .where(and28(eq28(eg28.userId, u.id), eq28(eg28.eventId, row.id)));
+    expect(junction.map((r) => r.gameId)).toEqual([gameId]);
     const meta = row.metadata as { author_url?: string; author_name?: string };
     expect(meta.author_url).toBe("https://www.youtube.com/@RickAstleyYT");
     expect(meta.author_name).toBe("Rick Astley");
@@ -305,6 +312,14 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
 
     const rows = await db.select().from(events).where(eq(events.userId, u.id));
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.gameId).toBeNull();
+    // Plan 02.1-28: inbox criterion is "zero junction rows" — verify the
+    // event has no event_games attachments.
+    const { eventGames: eg28 } = await import("../../src/lib/server/db/schema/event-games.js");
+    const { and: and28, eq: eq28 } = await import("drizzle-orm");
+    const junction = await db
+      .select()
+      .from(eg28)
+      .where(and28(eq28(eg28.userId, u.id), eq28(eg28.eventId, rows[0]!.id)));
+    expect(junction).toHaveLength(0);
   });
 });

@@ -38,7 +38,10 @@
 
   type EventDtoLocal = {
     id: string;
-    gameId: string | null;
+    // Plan 02.1-28 (M:N migration): gameIds[] replaces the legacy singular
+    // gameId. Round-3 detail page surfaces the first attached game as the
+    // primary "game" chip via the loader's primaryGame derivation.
+    gameIds: string[];
     sourceId: string | null;
     kind: EventKind;
     authorIsMe: boolean;

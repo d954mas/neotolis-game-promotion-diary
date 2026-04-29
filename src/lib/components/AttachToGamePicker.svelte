@@ -3,9 +3,16 @@
   // affordance on FeedRow (UI-SPEC §"Component inventory" + §"/feed row
   // interaction contract" point 4). Three workflows:
   //
-  //   1. Pick a game → PATCH /api/events/:id/attach with {gameId}
-  //   2. "Move to inbox" → PATCH /api/events/:id/attach with {gameId: null}
+  //   1. Pick a game → PATCH /api/events/:id/attach with {gameIds: [X]}
+  //      (round-3 picker is single-select; Plan 02.1-32 multi-select swap
+  //      is staged behind the back-compat alias which the route accepts).
+  //   2. "Move to inbox" → PATCH /api/events/:id/attach with {gameIds: []}
   //   3. "Mark not game-related" → PATCH /api/events/:id/dismiss-inbox
+  //
+  // Plan 02.1-28: switches from {gameId} to {gameIds} on the wire while
+  // preserving the single-select UX for round-3 UAT. The full multi-
+  // select rebuild lands in Plan 02.1-32 (separate plan; declares
+  // depends_on: ["02.1-28"]).
   //
   // Closed state: a button labeled "Attach to game" (no game) or the matched
   // game's title (game attached).
@@ -31,7 +38,11 @@
 
   type EventForPicker = {
     id: string;
-    gameId: string | null;
+    // Plan 02.1-28 (M:N migration): the picker now reads gameIds[] from
+    // the EventDto. Round-3 single-select UX surfaces the FIRST attached
+    // game as the trigger label (matchedGame derivation below); Plan
+    // 02.1-32 swaps for full multi-select.
+    gameIds: string[];
   };
   type GameOption = {
     id: string;
@@ -52,9 +63,14 @@
   let busy = $state(false);
   let error = $state<string | null>(null);
 
-  const matchedGame = $derived(
-    event.gameId ? (games.find((g) => g.id === event.gameId) ?? null) : null,
-  );
+  // Plan 02.1-28: pick the first attached game for the round-3 trigger
+  // label. Multi-game events render the first; Plan 02.1-32's multi-select
+  // surface will replace this with a full chip cluster.
+  const matchedGame = $derived.by(() => {
+    if (event.gameIds.length === 0) return null;
+    const firstId = event.gameIds[0]!;
+    return games.find((g) => g.id === firstId) ?? null;
+  });
   const triggerLabel = $derived(matchedGame ? matchedGame.title : m.feed_attach_to_game());
 
   function toggle(): void {
@@ -77,10 +93,13 @@
     busy = true;
     error = null;
     try {
+      // Plan 02.1-28: send the canonical {gameIds: string[]} shape.
+      // Empty array === "move to inbox" (replaces the legacy {gameId: null}).
+      const gameIds = gameId === null ? [] : [gameId];
       const res = await fetch(`/api/events/${event.id}/attach`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ gameId }),
+        body: JSON.stringify({ gameIds }),
       });
       if (!res.ok) {
         if (res.status === 404) error = m.feed_attach_error_game_not_found();
@@ -169,7 +188,7 @@
         class="opt"
         role="menuitem"
         onclick={() => attach(null)}
-        disabled={busy || event.gameId === null}
+        disabled={busy || event.gameIds.length === 0}
       >
         {m.feed_move_to_inbox()}
       </button>
@@ -178,7 +197,7 @@
         class="opt"
         role="menuitem"
         onclick={dismiss}
-        disabled={busy || event.gameId !== null}
+        disabled={busy || event.gameIds.length > 0}
       >
         {m.feed_dismiss_from_inbox()}
       </button>

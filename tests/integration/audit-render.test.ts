@@ -335,7 +335,9 @@ describe("Plan 02.1-21 — schema prop honored", () => {
 describe("Plan 02.1-23 — FeedCard restructured layout", () => {
   const baseEvent = {
     id: "ev-1",
-    gameId: null,
+    // Plan 02.1-28 (M:N migration): the legacy singular gameId is REPLACED
+    // with gameIds[]. Empty array === inbox event (no attached games).
+    gameIds: [] as string[],
     sourceId: null,
     kind: "youtube_video" as const,
     authorIsMe: false,
@@ -419,7 +421,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
       props: {
         event: {
           ...baseEvent,
-          gameId: null,
+          gameIds: [],
           metadata: null,
         },
         source: null,
@@ -444,7 +446,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
       .default;
     const out = render(FeedCard, {
       props: {
-        event: { ...baseEvent, gameId: "g-1" },
+        event: { ...baseEvent, gameIds: ["g-1"] },
         source: { id: "s-1", displayName: "My Source", handleUrl: "https://x.test" },
         game: { id: "g-1", title: "Stellar Frontier" },
         games: [{ id: "g-1", title: "Stellar Frontier" }],
@@ -468,7 +470,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
       .default;
     const out = render(FeedCard, {
       props: {
-        event: baseEvent,
+        event: { ...baseEvent },
         source: null,
         game: null,
         games: [],
@@ -569,7 +571,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
       .default;
     const out = render(FeedCard, {
       props: {
-        event: { ...baseEvent, gameId: "g-1" },
+        event: { ...baseEvent, gameIds: ["g-1"] },
         source: null,
         game: { id: "g-1", title: "Stellar Frontier" },
         games: [{ id: "g-1", title: "Stellar Frontier" }],

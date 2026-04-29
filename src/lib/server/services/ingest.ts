@@ -76,10 +76,16 @@ export async function parsePasteAndCreate(
     );
   }
 
+  // Plan 02.1-28 (M:N migration): the underlying createEvent /
+  // createEventFromPaste services accept gameIds[] (M:N junction); the
+  // legacy singular gameId is normalized to a single-element array (or
+  // empty array on null) before the call.
+  const gameIds = gameId === null ? [] : [gameId];
+
   if (parsed.kind === "youtube_video") {
     const event = await createEventFromPaste(
       userId,
-      { url: input, gameId },
+      { url: input, gameIds },
       ipAddress,
       userAgent,
     );
@@ -98,7 +104,7 @@ export async function parsePasteAndCreate(
     const event = await createEvent(
       userId,
       {
-        gameId,
+        gameIds,
         kind: "twitter_post",
         occurredAt: new Date(),
         title,
@@ -116,7 +122,7 @@ export async function parsePasteAndCreate(
   const event = await createEvent(
     userId,
     {
-      gameId,
+      gameIds,
       kind: "telegram_post",
       occurredAt: new Date(),
       title: `Telegram post at ${new URL(parsed.canonicalUrl).pathname}`,

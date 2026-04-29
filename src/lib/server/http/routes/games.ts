@@ -23,7 +23,7 @@ import {
   restoreGame,
 } from "../../services/games.js";
 import { listEventsForGame } from "../../services/events.js";
-import { toGameDto, toEventDto } from "../../dto.js";
+import { toGameDto, mapEventsToDtos } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
 
@@ -130,7 +130,13 @@ gamesRoutes.post("/games/:id/restore", async (c) => {
 gamesRoutes.get("/games/:gameId/events", async (c) => {
   try {
     const list = await listEventsForGame(c.var.userId, c.req.param("gameId"));
-    return c.json(list.map(toEventDto));
+    // Plan 02.1-28: batch-load junction rows so each EventDto carries its
+    // gameIds[] array. The list-of-events itself is already filtered to
+    // the requested game by listEventsForGame's INNER JOIN; the gameIds
+    // array on the response surfaces ALL games each event is attached to
+    // (multi-game events render with their full attachment set).
+    const dtos = await mapEventsToDtos(c.var.userId, list);
+    return c.json(dtos);
   } catch (err) {
     return mapErr(c, err, "GET /api/games/:gameId/events");
   }

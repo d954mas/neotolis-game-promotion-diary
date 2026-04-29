@@ -134,6 +134,8 @@
         return m.audit_action_event_deleted();
       case "event.attached_to_game":
         return m.audit_action_event_attached_to_game();
+      case "event.detached_from_game":
+        return m.audit_action_event_detached_from_game();
       case "event.dismissed_from_inbox":
         return m.audit_action_event_dismissed_from_inbox();
       case "event.restored":

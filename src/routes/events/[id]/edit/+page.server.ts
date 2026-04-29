@@ -2,7 +2,7 @@ import type { PageServerLoad } from "./$types";
 import { error, redirect } from "@sveltejs/kit";
 import { getEventById } from "$lib/server/services/events.js";
 import { listGames } from "$lib/server/services/games.js";
-import { toEventDto, toGameDto } from "$lib/server/dto.js";
+import { toEventDto, toGameDto, loadGameIdsForEvent } from "$lib/server/dto.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
 
 /**
@@ -29,8 +29,12 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   try {
     const row = await getEventById(locals.user.id, params.id);
     const games = await listGames(locals.user.id);
+    // Plan 02.1-28: load gameIds for the edit form. The Plan 02.1-32 UI
+    // swap will use the full array; for round-3 continuity we surface
+    // the first attached game as the singular "Game" select default.
+    const gameIds = await loadGameIdsForEvent(locals.user.id, row.id);
     return {
-      event: toEventDto(row),
+      event: toEventDto(row, gameIds),
       games: games.map(toGameDto),
     };
   } catch (err) {

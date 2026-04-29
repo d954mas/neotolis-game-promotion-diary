@@ -40,3 +40,12 @@ Verified at task time (2026-04-29) during Plan 02.1-29 verification:
   `neotolis_test`, but runMigrations() reads env.DATABASE_URL which points at `neotolis`"). The
   Plan 02.1-29 tests use `randomBytes(4)` per-invocation suffixes to dodge the conflation; broader
   fix is the test-harness wiring (deferred — already noted in game-listings.test.ts).
+
+## Plan 02.1-28 deferred items
+
+- **Lint error in `dev-mock-oauth.mjs:26`** — pre-existing P2 violation
+  (`process.env` read outside `src/lib/server/config/env.ts`). Found during
+  Plan 02.1-28 lint pass; out of scope (not introduced by this plan; the
+  file is a dev-time OAuth mock helper, not part of the production code
+  path). File for a one-line cleanup PR that routes through the env module
+  or moves the file under `tests/` where the rule does not fire.

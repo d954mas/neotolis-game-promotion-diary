@@ -4,6 +4,7 @@ import {
   toSessionDto,
   toApiKeySteamDto,
   toDataSourceDto,
+  toEventDto,
 } from "../../src/lib/server/dto.js";
 
 // Plan 01-07 (Wave 4) — PITFALL P3 DTO discipline. Round-trip projection
@@ -194,5 +195,138 @@ describe("toDataSourceDto strips userId (P3 behavioural)", () => {
     };
     const dto = toDataSourceDto(fakeRow as Parameters<typeof toDataSourceDto>[0]);
     expect(dto.metadata).toEqual({});
+  });
+});
+
+/**
+ * Plan 02.1-28 (UAT-NOTES.md §4.24.G — M:N migration application layer) —
+ * toEventDto behavioural test.
+ *
+ * The signature change (toEventDto now takes (event, gameIds: string[]))
+ * is the load-bearing API change. The DTO discipline contract (P3 / D-39):
+ * userId must be stripped at runtime even when a row literal carries it.
+ * The legacy singular `gameId` field MUST NOT appear on the projected
+ * output (it's not in the new EventDto interface).
+ */
+describe("Plan 02.1-28 — toEventDto with gameIds (P3 behavioural)", () => {
+  it("Plan 02.1-28: gameIds is a defensive copy of the input array (caller cannot mutate the source)", () => {
+    const gameIds = ["g1", "g2"];
+    const fakeRow = {
+      id: "ev1",
+      userId: "should-NOT-leak",
+      sourceId: null,
+      kind: "press" as const,
+      authorIsMe: false,
+      occurredAt: new Date("2026-04-29T00:00:00Z"),
+      title: "T",
+      url: null,
+      notes: null,
+      metadata: {},
+      externalId: null,
+      lastPolledAt: null,
+      lastPollStatus: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: null,
+    };
+    const dto = toEventDto(
+      fakeRow as unknown as Parameters<typeof toEventDto>[0],
+      gameIds,
+    );
+
+    expect(dto.gameIds).toEqual(["g1", "g2"]);
+    // Defensive copy: mutating the result does not affect the input.
+    dto.gameIds.push("g3");
+    expect(gameIds).toEqual(["g1", "g2"]);
+  });
+
+  it("Plan 02.1-28: userId is stripped from the projected DTO (P3 discipline)", () => {
+    const fakeRow = {
+      id: "ev2",
+      userId: "leak-target",
+      sourceId: null,
+      kind: "press" as const,
+      authorIsMe: false,
+      occurredAt: new Date(),
+      title: "T",
+      url: null,
+      notes: null,
+      metadata: {},
+      externalId: null,
+      lastPolledAt: null,
+      lastPollStatus: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: null,
+    };
+    const dto = toEventDto(
+      fakeRow as unknown as Parameters<typeof toEventDto>[0],
+      [],
+    );
+
+    expect(Object.keys(dto)).not.toContain("userId");
+    const json = JSON.stringify(dto);
+    expect(json).not.toMatch(/userId|user_id|leak-target/);
+  });
+
+  it("Plan 02.1-28: legacy singular gameId field MUST NOT appear on the projected output", () => {
+    // Even when a (legacy) row literal carries `gameId`, the projection
+    // function MUST NOT pass it through — the new EventDto interface
+    // exposes `gameIds: string[]` only. This is the runtime tripwire for
+    // a future contributor accidentally re-adding gameId to the projection.
+    const fakeRow = {
+      id: "ev3",
+      userId: "u1",
+      // Phantom legacy field — should not surface on the DTO.
+      gameId: "should-not-appear",
+      sourceId: null,
+      kind: "press" as const,
+      authorIsMe: false,
+      occurredAt: new Date(),
+      title: "T",
+      url: null,
+      notes: null,
+      metadata: {},
+      externalId: null,
+      lastPolledAt: null,
+      lastPollStatus: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: null,
+    };
+    const dto = toEventDto(
+      fakeRow as unknown as Parameters<typeof toEventDto>[0],
+      ["g1"],
+    );
+
+    expect(Object.keys(dto)).not.toContain("gameId");
+    expect(dto.gameIds).toEqual(["g1"]);
+  });
+
+  it("Plan 02.1-28: empty gameIds array produces gameIds: [] (inbox semantic)", () => {
+    const fakeRow = {
+      id: "ev4",
+      userId: "u1",
+      sourceId: null,
+      kind: "press" as const,
+      authorIsMe: false,
+      occurredAt: new Date(),
+      title: "T",
+      url: null,
+      notes: null,
+      metadata: {},
+      externalId: null,
+      lastPolledAt: null,
+      lastPollStatus: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: null,
+    };
+    const dto = toEventDto(
+      fakeRow as unknown as Parameters<typeof toEventDto>[0],
+      [],
+    );
+
+    expect(dto.gameIds).toEqual([]);
   });
 });

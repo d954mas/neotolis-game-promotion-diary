@@ -7,7 +7,7 @@ import { listSources } from "$lib/server/services/data-sources.js";
 import {
   toGameDto,
   toGameSteamListingDto,
-  toEventDto,
+  mapEventsToDtos,
   toDataSourceDto,
 } from "$lib/server/dto.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
@@ -62,10 +62,15 @@ export const load: PageServerLoad = async ({ locals, params }) => {
     listSources(userId).catch(() => []),
   ]);
 
+  // Plan 02.1-28: per-game events list now carries gameIds[] on each row
+  // via the batch junction loader. Multi-game events surface their full
+  // attachment set; the rendering page can show "also attached to X, Y".
+  const eventDtos = await mapEventsToDtos(userId, events);
+
   return {
     game: toGameDto(game),
     listings: listings.map(toGameSteamListingDto),
-    events: events.map(toEventDto),
+    events: eventDtos,
     games: gamesAll.map(toGameDto),
     sources: sources.map(toDataSourceDto),
   };

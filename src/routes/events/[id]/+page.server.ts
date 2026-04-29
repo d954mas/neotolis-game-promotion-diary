@@ -2,7 +2,7 @@ import type { PageServerLoad } from "./$types";
 import { error, redirect } from "@sveltejs/kit";
 import { getEventById } from "$lib/server/services/events.js";
 import { listGames } from "$lib/server/services/games.js";
-import { toEventDto, toGameDto } from "$lib/server/dto.js";
+import { toEventDto, toGameDto, loadGameIdsForEvent } from "$lib/server/dto.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
 
 /**
@@ -32,11 +32,19 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   try {
     const row = await getEventById(locals.user.id, params.id, { includeSoftDeleted });
     const games = await listGames(locals.user.id);
-    const game = row.gameId ? (games.find((g) => g.id === row.gameId) ?? null) : null;
+    // Plan 02.1-28: load attached gameIds via the M:N junction. The page
+    // surfaces the FIRST attached game as the "primary" (legacy single-
+    // game UI affordance preserved for round-3 UAT continuity); future
+    // Plan 02.1-32 swaps this for a full multi-game chip render.
+    const gameIds = await loadGameIdsForEvent(locals.user.id, row.id);
+    const primaryGame =
+      gameIds.length > 0
+        ? (games.find((g) => g.id === gameIds[0]) ?? null)
+        : null;
     return {
-      event: toEventDto(row),
+      event: toEventDto(row, gameIds),
       games: games.map(toGameDto),
-      game: game ? toGameDto(game) : null,
+      game: primaryGame ? toGameDto(primaryGame) : null,
     };
   } catch (err) {
     if (err instanceof NotFoundError) throw error(404, "Event not found");

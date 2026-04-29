@@ -8,7 +8,11 @@ import {
 } from "$lib/server/services/events.js";
 import { listGames } from "$lib/server/services/games.js";
 import { listSources } from "$lib/server/services/data-sources.js";
-import { toEventDto, toGameDto, toDataSourceDto } from "$lib/server/dto.js";
+import {
+  mapEventsToDtos,
+  toGameDto,
+  toDataSourceDto,
+} from "$lib/server/dto.js";
 
 // Plan 02.1-19 URL contract: /feed accepts ?show=any|inbox|specific +
 // ?game=A&game=B (when show=specific). The legacy ?attached=true|false is
@@ -125,8 +129,15 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     listDeletedEvents(userId),
   ]);
 
+  // Plan 02.1-28: mapEventsToDtos batch-loads the event_games junction rows
+  // so each EventDto carries its gameIds[] without an N+1 query (one
+  // junction lookup per page; one for the deletedEvents list).
+  const [rowDtos, deletedDtos] = await Promise.all([
+    mapEventsToDtos(userId, page.rows),
+    mapEventsToDtos(userId, deletedRows),
+  ]);
   return {
-    rows: page.rows.map(toEventDto),
+    rows: rowDtos,
     nextCursor: page.nextCursor,
     games: gameRows.map(toGameDto),
     sources: sourceRows.map(toDataSourceDto),
@@ -135,7 +146,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     // round-trip. retentionDays continues to come from the layout
     // pass-through (CLAUDE.md / AGENTS.md hard rule — only env.ts reads
     // process.env; the layout already exposes RETENTION_DAYS).
-    deletedEvents: deletedRows.map(toEventDto),
+    deletedEvents: deletedDtos,
     activeFilters: {
       // Plan 02.1-15: array form for the multi-value axes — always present,
       // possibly empty. The chip strip / sheet always treat them as

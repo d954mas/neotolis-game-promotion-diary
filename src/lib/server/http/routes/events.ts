@@ -1,6 +1,7 @@
 // Events HTTP routes (Plan 02-08, extended in Plan 02.1-06; Plan 02.1-14
 // gap closure adds restore; Plan 02.1-17 adds preview-url + url-required-for-
-// youtube superRefine + authorIsMe in create/update schemas).
+// youtube superRefine + authorIsMe in create/update schemas; Plan 02.1-28
+// switches to the M:N event_games junction).
 //
 // Routes (Phase 2.1 unified-events shape):
 //   POST   /api/events                         — createEvent (free-form; D-09 /events/new)
@@ -10,9 +11,15 @@
 //   GET    /api/events/:id                     — getEventById
 //   PATCH  /api/events/:id                     — updateEvent
 //   DELETE /api/events/:id                     — softDeleteEvent
-//   PATCH  /api/events/:id/attach              — attachToGame (GAMES-04a)
+//   PATCH  /api/events/:id/attach              — attachEventToGames (Plan 02.1-28 — M:N)
 //   PATCH  /api/events/:id/dismiss-inbox       — dismissFromInbox (INBOX-01)
 //   PATCH  /api/events/:id/restore             — restoreEvent (Plan 02.1-14 gap closure)
+//
+// Plan 02.1-28 contract: createEventSchema and attachSchema accept BOTH
+// the canonical {gameIds: string[]} shape AND the deprecated singular
+// {gameId: string | null} alias for one round of UAT. Plan 02.1-32
+// retires the alias on the UI side. The route's transform normalizes
+// to gameIds before calling the service.
 //
 // Plan 02.1-17 deferral: enrichment does NOT auto-fill `occurredAt` in 2.1.
 // YouTube oEmbed has no `published_at`; HTML scraping is fragile; YouTube
@@ -59,7 +66,7 @@ import {
   updateEvent,
   softDeleteEvent,
   listFeedPage,
-  attachToGame,
+  attachEventToGames,
   dismissFromInbox,
   listDeletedEvents,
   restoreEvent,
@@ -70,7 +77,11 @@ import {
 } from "../../services/events.js";
 import { parseIngestUrl } from "../../services/url-parser.js";
 import type { EventKind } from "../../integrations/data-source-adapter.js";
-import { toEventDto } from "../../dto.js";
+import {
+  toEventDto,
+  loadGameIdsForEvent,
+  mapEventsToDtos,
+} from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
 
@@ -122,7 +133,11 @@ function youtubeUrlRequired(
 
 const createEventSchema = z
   .object({
+    // Plan 02.1-28: gameId is the DEPRECATED back-compat alias for one round
+    // of UAT (Plan 02.1-32 retires the alias on the UI side). gameIds is
+    // canonical. The transform below normalizes singular → plural.
     gameId: z.string().min(1).nullable().optional(),
+    gameIds: z.array(z.string().min(1)).optional(),
     kind: eventKindEnum,
     occurredAt: z.string().datetime(),
     title: z.string().min(1).max(500),
@@ -134,7 +149,22 @@ const createEventSchema = z
     // Service defaults to false when omitted (preserves existing semantics).
     authorIsMe: z.boolean().optional(),
   })
-  .superRefine(youtubeUrlRequired);
+  .superRefine(youtubeUrlRequired)
+  .transform((obj) => {
+    // Plan 02.1-28: normalize back-compat alias. When gameIds is absent
+    // and gameId is supplied, internalize gameId → gameIds (single-element
+    // array, or empty array if gameId is null). gameIds wins when both are
+    // supplied (UI consumers migrating to the new shape are expected to
+    // send only gameIds; the alias path is for in-flight legacy callers).
+    const out: typeof obj & { gameIds: string[] } = { ...obj, gameIds: [] };
+    if (obj.gameIds !== undefined) {
+      out.gameIds = obj.gameIds;
+    } else if (obj.gameId != null) {
+      out.gameIds = [obj.gameId];
+    }
+    delete (out as { gameId?: unknown }).gameId;
+    return out;
+  });
 
 const updateEventSchema = z
   .object({
@@ -147,6 +177,10 @@ const updateEventSchema = z
     // (Plan 02.1-18) needs to flip the discriminator without re-creating the
     // event.
     authorIsMe: z.boolean().optional(),
+    // Plan 02.1-28: gameIds patch on the edit path. Optional — omitting
+    // leaves the junction unchanged; supplying replaces (set semantics
+    // via attachEventToGames).
+    gameIds: z.array(z.string().min(1)).optional(),
   })
   .refine((obj) => Object.keys(obj).length > 0, {
     message: "at least one field must be supplied",
@@ -176,9 +210,17 @@ const feedQuerySchema = z.object({
   all: z.enum(["1", "0"]).optional(),
 });
 
-const attachSchema = z.object({
-  gameId: z.string().min(1).nullable(),
-});
+// Plan 02.1-28: PATCH /api/events/:id/attach accepts BOTH the canonical
+// {gameIds: string[]} shape AND the deprecated {gameId: string | null}
+// alias for one round of UAT. The union + transform pattern below
+// normalizes either shape into a `{gameIds: string[]}` payload before
+// the handler reads it. Plan 02.1-32 retires the alias on the UI side.
+const attachSchema = z.union([
+  z.object({ gameIds: z.array(z.string().min(1)) }),
+  z
+    .object({ gameId: z.string().min(1).nullable() })
+    .transform((o) => ({ gameIds: o.gameId === null ? [] : [o.gameId] })),
+]);
 
 // Plan 02.1-17 — read-only enrichment endpoint. Pure URL parse + oEmbed fetch,
 // no DB write. The /events/new client (Plan 02.1-18) calls this before the
@@ -206,7 +248,11 @@ eventsRoutes.post(
         ctx.ipAddress,
         ctx.userAgent ?? undefined,
       );
-      return c.json(toEventDto(ev), 201);
+      // Plan 02.1-28: load the freshly-inserted junction rows for the
+      // response DTO. The createEvent service already wrote them in the
+      // same call, so this is a deterministic single-event lookup.
+      const gameIds = await loadGameIdsForEvent(ctx.userId, ev.id);
+      return c.json(toEventDto(ev, gameIds), 201);
     } catch (err) {
       return mapErr(c, err, "POST /api/events");
     }
@@ -276,8 +322,13 @@ eventsRoutes.get(
         },
         q.cursor ?? null,
       );
+      // Plan 02.1-28: batch-load junction rows for every event in the
+      // page so each EventDto carries its gameIds[] without an N+1
+      // lookup. Two queries total: one for events (page.rows above),
+      // one for the junction (mapEventsToDtos).
+      const dtos = await mapEventsToDtos(c.var.userId, page.rows);
       return c.json({
-        rows: page.rows.map(toEventDto),
+        rows: dtos,
         nextCursor: page.nextCursor,
       });
     } catch (err) {
@@ -327,7 +378,13 @@ eventsRoutes.post(
 eventsRoutes.get("/events/deleted", async (c) => {
   try {
     const rows = await listDeletedEvents(c.var.userId);
-    return c.json({ rows: rows.map(toEventDto) });
+    // Plan 02.1-28: batch-load gameIds for the deleted-event list. Soft-
+    // deleted events keep their junction rows (only the events.deletedAt
+    // column carries the deletion marker; the junction has no deletedAt
+    // column by Plan 02.1-27 design), so the DTO will surface the gameIds
+    // they were attached to at delete time.
+    const dtos = await mapEventsToDtos(c.var.userId, rows);
+    return c.json({ rows: dtos });
   } catch (err) {
     return mapErr(c, err, "GET /api/events/deleted");
   }
@@ -336,7 +393,10 @@ eventsRoutes.get("/events/deleted", async (c) => {
 eventsRoutes.get("/events/:id", async (c) => {
   try {
     const ev = await getEventById(c.var.userId, c.req.param("id"));
-    return c.json(toEventDto(ev));
+    // Plan 02.1-28: single-event detail loads its gameIds via the
+    // single-event helper.
+    const gameIds = await loadGameIdsForEvent(c.var.userId, ev.id);
+    return c.json(toEventDto(ev, gameIds));
   } catch (err) {
     return mapErr(c, err, "GET /api/events/:id");
   }
@@ -359,7 +419,12 @@ eventsRoutes.patch(
         ctx.ipAddress,
         ctx.userAgent ?? undefined,
       );
-      return c.json(toEventDto(ev));
+      // Plan 02.1-28: load junction rows AFTER the patch. updateEvent
+      // may have called attachEventToGames internally (when the body
+      // included gameIds), so the post-patch junction state is the
+      // correct source of truth.
+      const gameIds = await loadGameIdsForEvent(ctx.userId, ev.id);
+      return c.json(toEventDto(ev, gameIds));
     } catch (err) {
       return mapErr(c, err, "PATCH /api/events/:id");
     }
@@ -390,16 +455,21 @@ eventsRoutes.patch(
   }),
   async (c) => {
     const ctx = getAuditContext(c);
+    // Plan 02.1-28: the schema's union+transform guarantees `body.gameIds`
+    // is a string[] regardless of whether the caller sent {gameIds: [...]}
+    // or the deprecated {gameId: X | null} alias.
     const body = c.req.valid("json");
     try {
-      const ev = await attachToGame(
+      const ev = await attachEventToGames(
         ctx.userId,
         c.req.param("id"),
-        body.gameId,
+        body.gameIds,
         ctx.ipAddress,
         ctx.userAgent ?? undefined,
       );
-      return c.json(toEventDto(ev));
+      // Plan 02.1-28: response carries the post-attach junction state.
+      const gameIds = await loadGameIdsForEvent(ctx.userId, ev.id);
+      return c.json(toEventDto(ev, gameIds));
     } catch (err) {
       return mapErr(c, err, "PATCH /api/events/:id/attach");
     }
@@ -415,7 +485,8 @@ eventsRoutes.patch("/events/:id/dismiss-inbox", async (c) => {
       ctx.ipAddress,
       ctx.userAgent ?? undefined,
     );
-    return c.json(toEventDto(ev));
+    const gameIds = await loadGameIdsForEvent(ctx.userId, ev.id);
+    return c.json(toEventDto(ev, gameIds));
   } catch (err) {
     return mapErr(c, err, "PATCH /api/events/:id/dismiss-inbox");
   }
@@ -434,7 +505,8 @@ eventsRoutes.patch("/events/:id/restore", async (c) => {
       ctx.ipAddress,
       ctx.userAgent ?? undefined,
     );
-    return c.json(toEventDto(ev));
+    const gameIds = await loadGameIdsForEvent(ctx.userId, ev.id);
+    return c.json(toEventDto(ev, gameIds));
   } catch (err) {
     return mapErr(c, err, "PATCH /api/events/:id/restore");
   }
@@ -456,7 +528,8 @@ eventsRoutes.patch("/events/:id/mark-standalone", async (c) => {
       ctx.ipAddress,
       ctx.userAgent ?? undefined,
     );
-    return c.json(toEventDto(ev));
+    const gameIds = await loadGameIdsForEvent(ctx.userId, ev.id);
+    return c.json(toEventDto(ev, gameIds));
   } catch (err) {
     return mapErr(c, err, "PATCH /api/events/:id/mark-standalone");
   }
@@ -471,7 +544,8 @@ eventsRoutes.patch("/events/:id/unmark-standalone", async (c) => {
       ctx.ipAddress,
       ctx.userAgent ?? undefined,
     );
-    return c.json(toEventDto(ev));
+    const gameIds = await loadGameIdsForEvent(ctx.userId, ev.id);
+    return c.json(toEventDto(ev, gameIds));
   } catch (err) {
     return mapErr(c, err, "PATCH /api/events/:id/unmark-standalone");
   }

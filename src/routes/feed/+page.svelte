@@ -317,7 +317,9 @@
           <FeedCard
             event={row}
             source={row.sourceId ? (sourceById.get(row.sourceId) ?? null) : null}
-            game={row.gameId ? (gameById.get(row.gameId) ?? null) : null}
+            game={row.gameIds.length > 0
+              ? (gameById.get(row.gameIds[0]!) ?? null)
+              : null}
             games={data.games}
             onChanged={() => invalidateAll()}
           />

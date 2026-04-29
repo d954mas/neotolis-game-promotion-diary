@@ -86,7 +86,12 @@
 
   type EventDtoLite = {
     id: string;
-    gameId: string | null;
+    // Plan 02.1-28: M:N migration — gameIds[] replaces the singular gameId.
+    // Empty array === inbox (no attached games); non-empty === at least
+    // one attached game. The card renders the first attached game as the
+    // primary chip for round-3 UAT continuity (Plan 02.1-32 swaps for the
+    // full chip-set render).
+    gameIds: string[];
     sourceId: string | null;
     kind: EventKind;
     authorIsMe: boolean;
@@ -179,7 +184,10 @@
   });
 
   const isInboxRow = $derived.by((): boolean => {
-    if (event.gameId !== null) return false;
+    // Plan 02.1-28 (M:N migration): inbox criterion = ZERO attached games.
+    // The legacy `event.gameId !== null` check is replaced with the
+    // `gameIds.length > 0` check on the new EventDto shape.
+    if (event.gameIds.length > 0) return false;
     const md = event.metadata as
       | { inbox?: { dismissed?: boolean }; triage?: { standalone?: boolean } }
       | null

@@ -7,6 +7,9 @@
 //
 // Phase 1 establishes this pattern; every later phase inherits it.
 
+import { and, eq, inArray } from "drizzle-orm";
+import { db } from "./db/client.js";
+import { eventGames } from "./db/schema/event-games.js";
 import type { user, session } from "./db/schema/auth.js";
 import type {
   games,
@@ -288,11 +291,21 @@ export function toApiKeySteamDto(r: ApiKeySteamRow): ApiKeySteamDto {
  * EventDto — DTO for `events` rows. Kind is the closed picklist from the
  * eventKindEnum. `userId` omitted per P3 discipline.
  *
- * Phase 2.1 Plan 02.1-05 extension (this plan): adds `authorIsMe`, `sourceId`,
+ * Phase 2.1 Plan 02.1-05 extension: adds `authorIsMe`, `sourceId`,
  * `metadata`, `externalId`, `lastPolledAt`, `lastPollStatus` per RESEARCH
  * §10.2 — these are the unified-table fields the events service now writes.
- * Plan 02.1-04 widened `gameId` to `string | null` and the kind union to
- * include `youtube_video` / `reddit_post`; this plan completes the shape.
+ *
+ * Plan 02.1-28 (UAT-NOTES.md §4.24.G — M:N migration application layer):
+ * the legacy singular `gameId: string | null` is REPLACED with
+ * `gameIds: string[]`. Events relate to ZERO-or-MORE games via the
+ * `event_games` junction table (Plan 02.1-27 schema). The DTO shape
+ * change is wire-breaking; consumers must use the new array shape. The
+ * `toEventDto` signature is also extended — it now accepts the loaded
+ * gameIds as a second argument so callers explicitly pass the junction
+ * row set (the projection function does NOT issue its own DB query —
+ * that would tangle DB I/O with pure projection). Callers use the
+ * `loadGameIdsForEvent` (single) or `mapEventsToDtos` (batch) helpers
+ * below to load the junction efficiently.
  *
  * `metadata` is kept (jsonb) — it carries `inbox.dismissed=true` for
  * dismissed inbox events plus per-platform fields like `author_url`,
@@ -305,7 +318,12 @@ export function toApiKeySteamDto(r: ApiKeySteamRow): ApiKeySteamDto {
  */
 export interface EventDto {
   id: string;
-  gameId: string | null;
+  // Plan 02.1-28: REPLACES the legacy `gameId: string | null` with the
+  // M:N junction-derived list. Empty array === inbox; non-empty === at
+  // least one attached game. Order is implementation-defined (matches
+  // junction-table SELECT order); UI consumers should not assume
+  // ordering and should sort if rendering needs determinism.
+  gameIds: string[];
   sourceId: string | null;
   kind:
     | "youtube_video"
@@ -332,10 +350,22 @@ export interface EventDto {
   deletedAt: Date | null;
 }
 
-export function toEventDto(r: EventRow): EventDto {
+/**
+ * toEventDto — Plan 02.1-28: signature extended to take the loaded
+ * gameIds as a second argument. Pure projection — no DB I/O. Callers
+ * MUST load the junction rows separately (via loadGameIdsForEvent for
+ * single events or mapEventsToDtos for lists) and pass the result.
+ *
+ * The `userId` field on EventRow is intentionally NOT projected (P3
+ * discipline). Defensive copy of `gameIds` so a downstream caller
+ * mutating the array doesn't leak back to the source. Tests in
+ * tests/unit/dto.test.ts verify the strip happens at runtime even
+ * when the input row literal carries userId.
+ */
+export function toEventDto(r: EventRow, gameIds: string[]): EventDto {
   return {
     id: r.id,
-    gameId: r.gameId,
+    gameIds: [...gameIds],
     sourceId: r.sourceId,
     kind: r.kind,
     authorIsMe: r.authorIsMe,
@@ -351,6 +381,68 @@ export function toEventDto(r: EventRow): EventDto {
     updatedAt: r.updatedAt,
     deletedAt: r.deletedAt,
   };
+}
+
+/**
+ * Plan 02.1-28 — batched junction loader for list response paths.
+ * Two queries per request: one for events (caller's responsibility),
+ * one for the junction filtered by user_id + event_ids IN (...).
+ * Returns Map<eventId, gameIds[]>. Avoids the N+1 query that would
+ * fire if every toEventDto call issued its own junction lookup.
+ *
+ * Tenant scope: the userId WHERE clause is the literal column the
+ * ESLint tenant-scope rule walks for. Cross-tenant eventId values
+ * yield zero rows by construction (the userId AND eventId constraint
+ * is the load-bearing privacy guard).
+ */
+export async function loadGameIdsForEvents(
+  userId: string,
+  eventIds: string[],
+): Promise<Map<string, string[]>> {
+  if (eventIds.length === 0) return new Map();
+  const rows = await db
+    .select({ eventId: eventGames.eventId, gameId: eventGames.gameId })
+    .from(eventGames)
+    .where(
+      and(eq(eventGames.userId, userId), inArray(eventGames.eventId, eventIds)),
+    );
+  const map = new Map<string, string[]>();
+  for (const r of rows) {
+    const existing = map.get(r.eventId) ?? [];
+    existing.push(r.gameId);
+    map.set(r.eventId, existing);
+  }
+  return map;
+}
+
+/**
+ * Convenience: load the gameIds for one event. Single-event detail
+ * pages use this so they don't need to wrap a single id in an array.
+ */
+export async function loadGameIdsForEvent(
+  userId: string,
+  eventId: string,
+): Promise<string[]> {
+  const map = await loadGameIdsForEvents(userId, [eventId]);
+  return map.get(eventId) ?? [];
+}
+
+/**
+ * Convenience: project a list of EventRows to DTOs with gameIds
+ * populated. Two queries: one for the events (caller's), one for the
+ * junction (this function). Replaces every Phase 2.1 `rows.map(toEventDto)`
+ * call site that no longer compiles after the toEventDto signature
+ * extension.
+ */
+export async function mapEventsToDtos(
+  userId: string,
+  rows: EventRow[],
+): Promise<EventDto[]> {
+  const map = await loadGameIdsForEvents(
+    userId,
+    rows.map((e) => e.id),
+  );
+  return rows.map((e) => toEventDto(e, map.get(e.id) ?? []));
 }
 
 /**

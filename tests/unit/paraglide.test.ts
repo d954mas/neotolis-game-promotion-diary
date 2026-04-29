@@ -75,6 +75,11 @@ describe("paraglide i18n (UX-04)", () => {
     // (feed_quick_nav_all, feed_quick_nav_inbox, feed_quick_nav_more_games,
     // feed_quick_nav_standalone). Net delta: +4 keys.
     //
+    // Plan 02.1-28 (round-4 gap closure — UAT-NOTES.md §4.24.G M:N migration
+    // application layer): adds 1 key (audit_action_event_detached_from_game)
+    // for the symmetric inverse of attached_to_game on the new event_games
+    // junction. Net delta: +1 key.
+    //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
     // across renames (Phase 2 STATE.md guidance, carried forward).
     const EXPECTED_KEYS = [
@@ -84,6 +89,7 @@ describe("paraglide i18n (UX-04)", () => {
       "audit_action_event_attached_to_game",
       "audit_action_event_created",
       "audit_action_event_deleted",
+      "audit_action_event_detached_from_game",
       "audit_action_event_dismissed_from_inbox",
       "audit_action_event_edited",
       "audit_action_event_marked_standalone",

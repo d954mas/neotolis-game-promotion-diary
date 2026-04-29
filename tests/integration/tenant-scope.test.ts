@@ -262,7 +262,7 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
       const inboxEvent = await createEvent(
         userA.id,
         {
-          gameId: null,
+          gameIds: [],
           kind: "twitter_post",
           occurredAt: new Date(),
           title: "A's inbox tweet",
@@ -273,7 +273,7 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
       const event = await createEvent(
         userA.id,
         {
-          gameId: game.id,
+          gameIds: [game.id],
           kind: "twitter_post",
           occurredAt: new Date(),
           title: "A's tweet",
@@ -286,7 +286,7 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
       const deletedEvent = await createEvent(
         userA.id,
         {
-          gameId: game.id,
+          gameIds: [game.id],
           kind: "press",
           occurredAt: new Date(),
           title: "A's deleted press hit",
@@ -445,5 +445,157 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
       validateSpy.mockRestore();
       fetchSpy.mockRestore();
     }
+  });
+});
+
+/**
+ * Plan 02.1-28 (UAT-NOTES.md §4.24.G — M:N migration application layer) —
+ * cross-tenant probes against the new `event_games` junction.
+ *
+ * Two probe shapes:
+ *   - userB attempting to attach userA's eventId to userB's own gameId →
+ *     404 (NotFoundError on the eventId lookup; userB's session never
+ *     satisfies the userId clause on the events SELECT).
+ *   - userB attempting to attach userB's own eventId to userA's gameId →
+ *     404 (NotFoundError from assertGameOwnedByUser; userB's session
+ *     never satisfies the userId clause on the games SELECT).
+ *
+ * Body MUST NOT contain 'forbidden' / 'permission' (P1 invariant;
+ * CLAUDE.md Privacy & multi-tenancy rule 2).
+ *
+ * The eventGames table is tenant-scoped at every read site via the
+ * denormalized userId column (Plan 02.1-27 schema design); the
+ * ESLint tenant-scope rule fires on any future Drizzle query that
+ * omits eq(eventGames.userId, userId).
+ */
+describe("Plan 02.1-28 — event_games cross-tenant", () => {
+  it("Plan 02.1-28: userB attaches userA's event to userB's game → 404 (eventId ownership wins)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { createGame } = await import("../../src/lib/server/services/games.js");
+    const { createEvent } = await import("../../src/lib/server/services/events.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({ email: "p28-xtA@test.local" });
+    const userB = await seedUserDirectly({ email: "p28-xtB@test.local" });
+
+    // userA owns an event; userB owns a game.
+    const evA = await createEvent(
+      userA.id,
+      {
+        gameIds: [],
+        kind: "press",
+        occurredAt: new Date(),
+        title: "User A's event",
+      },
+      "127.0.0.1",
+    );
+    const gB = await createGame(userB.id, { title: "B's game" }, "127.0.0.1");
+
+    const res = await app.request(`/api/events/${evA.id}/attach`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${userB.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ gameIds: [gB.id] }),
+    });
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body).toEqual({ error: "not_found" });
+    const bodyStr = JSON.stringify(body);
+    expect(bodyStr).not.toMatch(/forbidden|permission/i);
+  });
+
+  it("Plan 02.1-28: userB attaches userB's own event to userA's game → 404 (gameId ownership wins via assertGameOwnedByUser)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { createGame } = await import("../../src/lib/server/services/games.js");
+    const { createEvent } = await import("../../src/lib/server/services/events.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({ email: "p28-xt2A@test.local" });
+    const userB = await seedUserDirectly({ email: "p28-xt2B@test.local" });
+
+    // userA owns a game; userB owns an event.
+    const gA = await createGame(userA.id, { title: "A's game" }, "127.0.0.1");
+    const evB = await createEvent(
+      userB.id,
+      {
+        gameIds: [],
+        kind: "press",
+        occurredAt: new Date(),
+        title: "User B's event",
+      },
+      "127.0.0.1",
+    );
+
+    // userB attempts to attach their own event to userA's game.
+    const res = await app.request(`/api/events/${evB.id}/attach`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${userB.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ gameIds: [gA.id] }),
+    });
+    expect(res.status).toBe(404);
+    expect(res.status).not.toBe(500);
+    const body = await res.json();
+    expect(body).toEqual({ error: "not_found" });
+    const bodyStr = JSON.stringify(body);
+    expect(bodyStr).not.toMatch(/forbidden|permission/i);
+  });
+
+  it("Plan 02.1-28: GET /api/events list response from userB cursor never contains userA's gameIds in any row", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { createGame } = await import("../../src/lib/server/services/games.js");
+    const { createEvent, attachEventToGames } = await import(
+      "../../src/lib/server/services/events.js"
+    );
+    const app = createApp();
+    const userA = await seedUserDirectly({ email: "p28-xt3A@test.local" });
+    const userB = await seedUserDirectly({ email: "p28-xt3B@test.local" });
+
+    // userA: one game + one event attached to it.
+    const gA = await createGame(userA.id, { title: "A's game" }, "127.0.0.1");
+    const evA = await createEvent(
+      userA.id,
+      {
+        gameIds: [gA.id],
+        kind: "press",
+        occurredAt: new Date(),
+        title: "A's attached event",
+      },
+      "127.0.0.1",
+    );
+    void evA;
+
+    // userB: one own event in inbox.
+    const evB = await createEvent(
+      userB.id,
+      {
+        gameIds: [],
+        kind: "press",
+        occurredAt: new Date(),
+        title: "B's inbox event",
+      },
+      "127.0.0.1",
+    );
+    // (Avoid unused-var warning.)
+    void attachEventToGames;
+
+    // userB hits GET /api/events. The response rows MUST NOT contain
+    // userA's gameId in any row's gameIds[] array (the mapEventsToDtos
+    // junction lookup is filtered by userB.id).
+    const res = await app.request("/api/events?show=any", {
+      headers: { cookie: `neotolis.session_token=${userB.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      rows: Array<{ id: string; gameIds: string[] }>;
+    };
+    // userB's own inbox event should appear (with empty gameIds).
+    const ids = body.rows.map((r) => r.id);
+    expect(ids).toContain(evB.id);
+    // No row carries userA's gameId.
+    const allGameIds = body.rows.flatMap((r) => r.gameIds);
+    expect(allGameIds).not.toContain(gA.id);
   });
 });

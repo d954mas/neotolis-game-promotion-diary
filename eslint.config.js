@@ -44,6 +44,11 @@ export default [
       "src/lib/paraglide/",
       "drizzle/",
       "messages/",
+      // Plan 02.1-28 (Rule 3 — Blocking): exclude parallel-agent worktrees
+      // from lint. These are GSD orchestrator scratch dirs that mirror the
+      // repo state from prior plan runs; ESLint should not police them.
+      // The active source-of-truth is the top-level src/ + tests/ trees.
+      ".claude/",
     ],
   },
   js.configs.recommended,

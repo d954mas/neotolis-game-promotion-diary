@@ -38,7 +38,10 @@
 
   type EventDtoLocal = {
     id: string;
-    gameId: string | null;
+    // Plan 02.1-28 (M:N migration): gameIds[] replaces the legacy singular
+    // gameId. The edit form preserves a single-select Game picker for
+    // round-3 UAT continuity (Plan 02.1-32 swaps for multi-select).
+    gameIds: string[];
     kind: EventKind;
     authorIsMe: boolean;
     occurredAt: Date | string;
@@ -66,9 +69,14 @@
   );
   let url = $state(event.url ?? "");
   let notes = $state(event.notes ?? "");
-  let gameId = $state(event.gameId ?? "");
+  // Plan 02.1-28 (M:N migration): the edit form keeps a single-select Game
+  // affordance for round-3 UAT continuity (Plan 02.1-32 swaps for full
+  // multi-select). The first attached gameId becomes the default; on
+  // submit we send {gameIds: [picked]} or {gameIds: []} via the canonical
+  // attach endpoint.
+  let gameId = $state(event.gameIds[0] ?? "");
   let authorIsMe = $state(event.authorIsMe);
-  const originalGameId = event.gameId ?? null;
+  const originalGameId = event.gameIds[0] ?? null;
 
   let pending = $state(false);
   let errorText = $state<string | null>(null);
@@ -135,12 +143,18 @@
 
       // 2) If gameId changed, PATCH /attach as a separate fetch so the
       //    dedicated endpoint validates game ownership (Pitfall 4).
+      // Plan 02.1-28: send the canonical {gameIds} shape. Empty array
+      // === detach (move to inbox); single-element === attach to one
+      // game (round-3 single-select UX preserved). The route also
+      // accepts the deprecated {gameId} alias for one round of UAT —
+      // we use the canonical shape here so the UI side migrates first.
       const newGameId = gameId || null;
       if (newGameId !== originalGameId) {
+        const newGameIds = newGameId === null ? [] : [newGameId];
         const attachRes = await fetch(`/api/events/${event.id}/attach`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ gameId: newGameId }),
+          body: JSON.stringify({ gameIds: newGameIds }),
         });
         if (!attachRes.ok) {
           errorText = m.error_server_generic();

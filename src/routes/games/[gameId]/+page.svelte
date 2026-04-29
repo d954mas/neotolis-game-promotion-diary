@@ -54,7 +54,10 @@
     occurredAt: Date | string;
     title: string;
     url: string | null;
-    gameId: string | null;
+    // Plan 02.1-28 (M:N migration): the legacy singular gameId is REPLACED
+    // with gameIds[] from the event_games junction. The page renders the
+    // first attached game as the primary chip for round-3 UAT continuity.
+    gameIds: string[];
     sourceId: string | null;
     authorIsMe: boolean;
     metadata: unknown;
