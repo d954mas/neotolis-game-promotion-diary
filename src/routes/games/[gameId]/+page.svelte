@@ -1,39 +1,56 @@
 <script lang="ts">
-  // /games/[gameId] — detail view (Phase 2.1 Plan 02.1-09 rebuild).
+  // /games/[gameId] — detail view (Plan 02.1-30 redesign).
   //
-  // Closes the Phase 2 P0 functional gap: rename via <RenameInline> +
-  // add-Steam-listing via <AddSteamListingForm>. UI-SPEC §"/games/[id]
-  // rebuild" pivots from the Phase 2 multi-panel layout to the
-  // unified-events curated layout (header / store-listings / events).
-  // The Phase 2 per-platform-channel panel and the per-game tracked-video
-  // panel are GONE — the unified `events` table now carries kind
-  // youtube_video rows attached to the game.
+  // Plan 02.1-30 RETIRES the Plan 02.1-25 oversized 2-card layout (game-
+  // header-card + events-feed-card panel cards) per UAT-NOTES.md §4.25.B
+  // user quote: "Карточки слишком большие. Часть 1 — карточки игр, стим,
+  // итч и т.д. Затем фид по игре, карточки как в feed ленте, небольшие,
+  // без фильтров и выбора даты".
   //
-  // Curated events panel: rows are grouped by month (<MonthHeader>) and
-  // rendered with the same card component the /feed page uses (<FeedCard>,
-  // Plan 02.1-16 replaces the prior <FeedRow>).
-  // FeedCard handles its own ConfirmDialog on delete (UI polish-fix per
-  // UI-SPEC §"Destructive confirmations") and its own AttachToGamePicker.
+  // New layout (top → bottom):
+  //   1. Lean game-header section: GameCover + RenameInline + meta
+  //      (releaseDate / tags / notes) + page-level Edit toggle. NO panel
+  //      border / background / radius — the oversized card surface from
+  //      Plan 02.1-25 is GONE.
+  //   2. <StoresSection> — header 'Магазины / Stores' + + Add CTA +
+  //      SteamListingRow list (with edit-mode-only Remove × buttons).
+  //      Closes UAT-NOTES.md §4.25.C (Stores section refactor).
+  //   3. Events feed — heading + + New event link + vertical FeedCard
+  //      list grouped by date via the SAME groupEventsByDate utility as
+  //      /feed (Plan 02.1-19). NO FilterChips / DateRangeControl /
+  //      FiltersSheet — pure list per UAT-NOTES.md §4.25.B.
   //
-  // No paste box on this page in 2.1 (UI-SPEC). Manual paste lives on
-  // /feed where the user is already chronologically oriented; "+ New
-  // event" links to /events/new for free-form entry.
+  // FeedCard reuse on /games/[gameId] is identical to /feed: the same
+  // component with no new variants. The inline 'Mark standalone' button
+  // is gated by `isInboxRow` (gameIds.length === 0), so cards on this
+  // page (gameIds.length > 0 by construction — they're attached to the
+  // current game) HIDE that affordance automatically.
+  //
+  // Page-level edit-mode toggle (Plan 02.1-30, UAT-NOTES.md §4.25.H):
+  // mirrors Plan 02.1-22's SourceRow pattern but at the PAGE level (one
+  // toggle per page, not per row). When `editMode` is true, every
+  // SteamListingRow in StoresSection shows its × Remove button.
+  //
+  // Privacy invariants preserved:
+  //   - Loader uses tenant-scoped service calls (listEventsForGame +
+  //     mapEventsToDtos — Plan 02.1-28).
+  //   - DELETE /api/games/:gameId/listings/:listingId uses cross-tenant
+  //     404 (Plan 02-08 + Plan 02.1-29).
+  //   - AddSteamListingForm duplicate-toast surfaces existingGameId, but
+  //     the lookup is userId-scoped so cross-tenant existingGameId never
+  //     leaks (Plan 02.1-29 service hardening).
 
   import { invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import FeedCard from "$lib/components/FeedCard.svelte";
+  import FeedDateGroupHeader from "$lib/components/FeedDateGroupHeader.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
   import RenameInline from "$lib/components/RenameInline.svelte";
-  import AddSteamListingForm from "$lib/components/AddSteamListingForm.svelte";
-  import MonthHeader from "$lib/components/MonthHeader.svelte";
-  // Plan 02.1-25 (UAT-NOTES.md §3.2-redesign): /games/[id] restructures into
-  // two visually distinct panel cards — GAME HEADER CARD on top + EVENTS
-  // FEED CARD below. <GameCover> renders the Steam header_image at the
-  // top of the header card; <SteamListingRow> replaces the inline <li>
-  // listings with a richer row that includes Steam name + Open-on-Steam link.
+  import StoresSection from "$lib/components/StoresSection.svelte";
   import GameCover from "$lib/components/GameCover.svelte";
-  import SteamListingRow from "$lib/components/SteamListingRow.svelte";
+  import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
+  import type { GameSteamListingDto } from "$lib/server/dto.js";
   import type { PageData } from "./$types";
 
   type EventKind =
@@ -55,35 +72,23 @@
     title: string;
     url: string | null;
     // Plan 02.1-28 (M:N migration): the legacy singular gameId is REPLACED
-    // with gameIds[] from the event_games junction. The page renders the
-    // first attached game as the primary chip for round-3 UAT continuity.
+    // with gameIds[] from the event_games junction. Cards on /games/[id]
+    // always have at least one attached game (the current one), so the
+    // inline 'Mark standalone' affordance HIDES automatically via the
+    // FeedCard isInboxRow gate.
     gameIds: string[];
     sourceId: string | null;
     authorIsMe: boolean;
     metadata: unknown;
     lastPolledAt: Date | string | null;
-    // Plan 02.1-16: FeedCard requires externalId for the YouTube thumbnail
-    // URL. toEventDto already projects this field; the local type needs to
-    // surface it so the props contract type-checks.
     externalId: string | null;
-    // Plan 02.1-23: FeedCard renders a clipped notes paragraph below the
-    // title. toEventDto already projects this field (events.notes column);
-    // the local type needs to surface it so the props contract type-checks.
     notes: string | null;
   };
 
-  type ListingDto = {
-    id: string;
-    appId: number;
-    label: string;
-    // Plan 02.1-25: persisted Steam name (Plan 02.1-25 column added in
-    // drizzle/0004); SteamListingRow falls back to "App {appId}" when null
-    // (legacy rows + Steam-down inserts).
-    name: string | null;
-    coverUrl: string | null;
-    releaseDate: string | null;
-    apiKeyId: string | null;
-  };
+  // Plan 02.1-30: align listings type with the GameSteamListingDto produced
+  // by the loader's `listings.map(toGameSteamListingDto)`. StoresSection +
+  // SteamListingRow expect the full DTO shape.
+  type ListingDto = GameSteamListingDto;
 
   type SourceLite = {
     id: string;
@@ -111,32 +116,22 @@
     return map;
   });
 
-  // Keep the page's <h1> rendered via FeedCard — single game lite for chip.
-  const gameLite = $derived<GameLite>({ id: game.id, title: game.title });
+  // Game-id → GameLite map for FeedCard's primary game chip resolution.
+  // Plan 02.1-28: events on /games/[id] can be attached to multiple games
+  // (M:N junction); FeedCard renders gameIds[0] as the primary chip per
+  // round-3 UAT continuity (Plan 02.1-32 swaps for full chip-set render).
+  const gameById = $derived(new Map(allGames.map((g) => [g.id, g])));
 
-  // -- Group curated events by month for <MonthHeader> --
-  type Group = { key: string; label: string; rows: EventDtoLocal[] };
-  const grouped = $derived.by((): Group[] => {
-    const groups = new Map<string, Group>();
-    for (const ev of events) {
-      const occurred =
-        ev.occurredAt instanceof Date ? ev.occurredAt : new Date(ev.occurredAt);
-      const monthKey = `${occurred.getUTCFullYear()}-${String(
-        occurred.getUTCMonth() + 1,
-      ).padStart(2, "0")}`;
-      const monthLabel = occurred.toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "long",
-      });
-      const existing = groups.get(monthKey);
-      if (existing) {
-        existing.rows.push(ev);
-      } else {
-        groups.set(monthKey, { key: monthKey, label: monthLabel, rows: [ev] });
-      }
-    }
-    return [...groups.values()];
-  });
+  // Plan 02.1-30 (UAT-NOTES.md §4.25.H): page-level edit-mode toggle that
+  // controls SteamListingRow Remove button visibility inside StoresSection.
+  // Single toggle per page, not per row — mirrors Plan 02.1-22 SourceRow
+  // pattern adapted to the /games/[id] surface.
+  let editMode = $state(false);
+
+  // Plan 02.1-30 (UAT-NOTES.md §4.25.B): group events by date using the
+  // SAME groupEventsByDate utility /feed uses (Plan 02.1-19). The events
+  // feed on /games/[id] reads exactly like /feed minus the filter chrome.
+  const groupedEvents = $derived(groupEventsByDate(events));
 
   // -- Rename: PATCH /api/games/:id { title } --
   let renameError = $state<string | null>(null);
@@ -169,13 +164,12 @@
 </nav>
 
 <!--
-  Plan 02.1-25 (UAT-NOTES.md §3.2-redesign): two-card layout.
-  GAME HEADER CARD: cover + rename + metadata + Steam listings + add-listing.
-  EVENTS FEED CARD: month-grouped FeedCards (existing).
-  Both wrapped as panel cards (background, border, radius) so the visual
-  separation is unmistakable on first scroll.
+  Plan 02.1-30 (UAT-NOTES.md §4.25.B): three-section vertical layout.
+  Lean game header (no panel surface) → StoresSection → events feed.
+  The Plan 02.1-25 oversized 2-card layout (game-header-card +
+  events-feed-card panel cards) is RETIRED.
 -->
-<section class="game-header-card">
+<section class="game-header">
   <GameCover title={game.title} listings={listings} />
   <RenameInline initial={game.title} onSave={saveRename} />
   {#if renameError}<InlineError message={m.error_server_generic()} />{/if}
@@ -192,49 +186,50 @@
   {#if game.notes}
     <p class="notes">{game.notes}</p>
   {/if}
-
-  <h2 class="listings-heading">Store listings</h2>
-  {#if listings.length === 0}
-    <p class="empty-inline">No Steam listings attached yet.</p>
-  {:else}
-    <ul class="listings">
-      {#each listings as listing (listing.id)}
-        <li>
-          <SteamListingRow {listing} />
-        </li>
-      {/each}
-    </ul>
-  {/if}
-  <AddSteamListingForm gameId={game.id} />
+  <button
+    type="button"
+    class="edit-toggle"
+    onclick={() => (editMode = !editMode)}
+    aria-pressed={editMode}
+  >
+    {editMode ? m.common_close() : m.common_edit()}
+  </button>
 </section>
 
-<section class="events-feed-card">
-  <header class="panel-head">
-    <h2>Events ({events.length})</h2>
-    <a class="cta-small" href="/events/new">{m.feed_cta_add_event()}</a>
+<StoresSection
+  {listings}
+  gameId={game.id}
+  {editMode}
+  onChange={() => invalidateAll()}
+/>
+
+<section class="events-feed">
+  <header class="events-feed-head">
+    <h2 class="events-heading">{m.games_detail_events_heading()}</h2>
+    <a class="cta-secondary" href={`/events/new?gameId=${game.id}`}>
+      + {m.feed_cta_add_event()}
+    </a>
   </header>
 
   {#if events.length === 0}
     <EmptyState
-      heading={m.empty_feed_filtered_heading()}
-      body="Attach events from the /feed page to surface them here, or add a free-form event."
+      heading={m.games_detail_events_empty()}
+      body={m.empty_feed_filtered_body()}
     />
   {:else}
-    {#each grouped as group (group.key)}
-      <MonthHeader month={group.label} count={group.rows.length} />
-      <ul class="rows">
-        {#each group.rows as ev (ev.id)}
-          <li>
-            <FeedCard
-              event={ev}
-              source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
-              game={gameLite}
-              games={allGames}
-              onChanged={() => invalidateAll()}
-            />
-          </li>
-        {/each}
-      </ul>
+    {#each groupedEvents as group (group.date)}
+      <FeedDateGroupHeader occurredAt={group.occurredAt} />
+      {#each group.rows as ev (ev.id)}
+        <FeedCard
+          event={ev}
+          source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
+          game={ev.gameIds.length > 0
+            ? (gameById.get(ev.gameIds[0]!) ?? null)
+            : null}
+          games={allGames}
+          onChanged={() => invalidateAll()}
+        />
+      {/each}
     {/each}
   {/if}
 </section>
@@ -251,22 +246,14 @@
     color: var(--color-accent);
     text-decoration: none;
   }
-  /* Plan 02.1-25 (UAT-NOTES.md §3.2-redesign): two panel cards stacked
-   * vertically. Each card has the same surface styling so the visual
-   * grouping is unambiguous on first scroll. The previous .panels grid
-   * (2-col >= 1024px) is dropped — keeping them stacked makes the page
-   * read top-down: artwork → metadata → listings → add-listing →
-   * events feed. The grid layout encouraged horizontal scanning that
-   * round-3 UAT explicitly rejected. */
-  .game-header-card,
-  .events-feed-card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    padding: var(--space-md);
+  /* Plan 02.1-30 (UAT-NOTES.md §4.25.B): lean game header. NO panel border /
+   * background / radius — the oversized .game-header-card from Plan
+   * 02.1-25 is RETIRED. Section is a simple vertical flex column. */
+  .game-header {
     display: flex;
     flex-direction: column;
     gap: var(--space-md);
+    padding: var(--space-md) 0;
     margin-bottom: var(--space-lg);
     min-width: 0;
   }
@@ -290,49 +277,52 @@
     line-height: var(--line-height-body);
     white-space: pre-wrap;
   }
-  .listings-heading {
-    margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
+  /* Plan 02.1-30: page-level Edit toggle. Shape mirrors SourceRow's
+   * .icon-btn but rendered at the page level controlling all
+   * SteamListingRow Remove buttons via the editMode prop. */
+  .edit-toggle {
+    align-self: flex-start;
+    min-height: 44px;
+    padding: 0 var(--space-md);
+    background: transparent;
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: var(--font-size-label);
   }
-  .events-feed-card h2 {
-    margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
+  .edit-toggle[aria-pressed="true"] {
+    background: var(--color-surface);
+    border-color: var(--color-accent);
+    color: var(--color-accent);
   }
-  .panel-head {
+  /* Plan 02.1-30: events feed section — simple vertical column matching
+   * /feed's surface (no panel wrapper). FeedCard handles its own width. */
+  .events-feed {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    margin-top: var(--space-lg);
+    min-width: 0;
+  }
+  .events-feed-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--space-md);
+    flex-wrap: wrap;
   }
-  .empty-inline {
+  .events-heading {
     margin: 0;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    font-size: var(--font-size-heading);
+    font-weight: var(--font-weight-semibold);
   }
-  .rows {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
-  }
-  .listings {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
-  }
-  .cta-small {
+  .cta-secondary {
     min-height: 44px;
     padding: 0 var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border: none;
+    background: var(--color-surface);
+    color: var(--color-accent);
+    border: 1px solid var(--color-accent);
     border-radius: 4px;
     font-size: var(--font-size-body);
     font-weight: var(--font-weight-semibold);
@@ -340,5 +330,9 @@
     text-decoration: none;
     display: inline-flex;
     align-items: center;
+  }
+  .cta-secondary:hover {
+    background: var(--color-accent);
+    color: var(--color-accent-text);
   }
 </style>

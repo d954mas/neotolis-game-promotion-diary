@@ -297,3 +297,109 @@ describe("Plan 02.1-25 — PageHeader inline + SourceRow Mine + /games/[id] two-
     "/games/[id] GameCover renders Steam header_image when listing has coverUrl, gradient placeholder + initials otherwise (manual UAT — auth harness deferred)",
   );
 });
+
+/**
+ * Plan 02.1-33 — SourceRow edit-mode polish (UAT-NOTES.md §4.22.B/C/D/E).
+ *
+ * Closes four findings on the same component:
+ *   §4.22.B — Remove button visible only in edit mode (read-mode .actions
+ *             hosts ONLY the Edit pencil; Remove moves to edit-form footer).
+ *   §4.22.C — Edit pencil hidden inside edit mode (no duplicate edit
+ *             affordance once the user is already editing).
+ *   §4.22.D — auto_import single source of truth (one checkbox bound to
+ *             editAutoImport; no parallel <input type="text"> control).
+ *             Plan-time review of SourceRow.svelte found NO duplicate
+ *             text input on this branch — the §4.22.D quote was likely
+ *             stale from a previous iteration; the regression guard below
+ *             prevents re-introduction.
+ *   §4.22.E — Save / Cancel / Remove sit at the BOTTOM of the edit-form
+ *             block, separated from the form fields by a section divider.
+ *             User quote: "Кнопки save cancel нужно внизу карточки делать,
+ *             иначе не очевидно где они и зачем".
+ *
+ * The full end-to-end interaction (click Edit pencil → edit form expands →
+ * verify visibility gates → click Cancel) requires an authenticated
+ * /sources route which the cookie-injection auth harness in vitest-browser
+ * does not have access to (same constraint as Plans 02.1-18 / 19 / 20 /
+ * 21 / 22 / 23 / 24 / 25 / 26 / 28 / 30 / 32 / 34). The component-level
+ * regression guard lives in tests/integration/audit-render.test.ts —
+ * SSR-level grep + structural assertions on SourceRow.svelte source —
+ * and is the load-bearing protection against drift.
+ *
+ * The four browser-mode tests below are stub-skipped placeholders so a
+ * future Phase 6 task that lifts the auth harness sees the contract
+ * surface by name and flips it to a live assertion. Each placeholder
+ * carries the manual-UAT recipe in its skip-reason so the human
+ * reviewer can reproduce the assertion at the keyboard.
+ */
+describe("Plan 02.1-33 — SourceRow edit-mode polish at 360px", () => {
+  it.skip(
+    "/sources SourceRow read-mode shows ONLY Edit pencil (no Remove icon) — §4.22.B (manual UAT — auth harness deferred to Phase 6)",
+  );
+  it.skip(
+    "/sources SourceRow edit-mode hides the read-mode Edit pencil + reveals Remove inside form-footer — §4.22.B/C (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/sources SourceRow edit-mode renders auto_import as EXACTLY one input[type=checkbox] (no parallel <input type=text>) — §4.22.D (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/sources SourceRow edit-mode form-footer (Save/Cancel/Remove) sits BELOW the form fields — getBoundingClientRect().top of footer > rect.bottom of last form field — §4.22.E (manual UAT — auth harness deferred)",
+  );
+});
+
+/**
+ * Plan 02.1-30 — /games/[id] redesign + StoresSection + edit-mode Remove +
+ * Mine accent token unification at 360px.
+ *
+ * Closes UAT-NOTES.md §4.25.A (Mine token unification across FeedCard +
+ * SourceRow), §4.25.B (oversized 2-card layout retired in favor of lean
+ * game header + StoresSection + vertical FeedCard list), §4.25.C
+ * (Stores section refactor — header 'Магазины / Stores' + + Add CTA +
+ * collapsible AddSteamListingForm), §4.25.G (Steam listing duplicate
+ * inline error with existingGameId deep link), §4.25.H (SteamListingRow
+ * edit-mode-only Remove × button + ConfirmDialog).
+ *
+ * The full end-to-end at 360px (visit /games/[id] → see Stores section
+ * header + listings + Add CTA, then events feed below; click Edit at the
+ * page header → SteamListingRow shows × button; check getComputedStyle
+ * on FeedCard.mine.border-left equals SourceRow.mine.border-left) requires
+ * the cookie-injection auth harness still deferred to Phase 6 (same
+ * precedent as Plans 02.1-18 / 19 / 20 / 21 / 22 / 23 / 24 / 25 / 26 / 33).
+ *
+ * Stub-skipped here for grep discoverability when the harness arrives;
+ * manual UAT covers the visual + click flow per the per-plan VALIDATION
+ * recipe. The component-level regression guards live in
+ * tests/integration/audit-render.test.ts (Plan 02.1-30 describe block).
+ */
+describe("Plan 02.1-30 — /games/[id] redesign + StoresSection + edit-mode Remove + Mine token at 360px", () => {
+  it.skip(
+    "/games/[id] no longer renders <section class='game-header-card'> + <section class='events-feed-card'> oversized 2-card layout — §4.25.B (manual UAT — auth harness deferred to Phase 6)",
+  );
+  it.skip(
+    "/games/[id] renders <section class='game-header'> + <StoresSection> + <section class='events-feed'> three-section layout — §4.25.B (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games/[id] StoresSection header text === m.stores_section_heading() and renders + Add CTA — §4.25.C (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games/[id] page-level Edit toggle at editMode=false → SteamListingRow.remove-btn is NOT in the DOM — §4.25.H (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games/[id] page-level Edit toggle at editMode=true → SteamListingRow.remove-btn IS in the DOM with aria-label === m.steam_listing_remove_aria() — §4.25.H (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games/[id] click .remove-btn → ConfirmDialog opens with title m.confirm_listing_remove_title() + body m.confirm_listing_remove_body() (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games/[id] AddSteamListingForm POST returning 422 with body.error==='steam_listing_duplicate' renders inline .duplicate-error <p> with <a href=`/games/${existingGameId}`> — §4.25.G (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "AddSteamListingForm 422 with body.metadata.existingState==='soft_deleted' renders the soft-deleted explanation copy (no link) — §4.25.G (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "Mine token consistency: getComputedStyle(FeedCard.mine).borderLeftColor === getComputedStyle(SourceRow.mine).borderLeftColor (--color-mine resolves to same value on both surfaces) — §4.25.A (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games/[id] events feed renders no FilterChips / no DateRangeControl / no FiltersSheet (pure list per UAT-NOTES.md §4.25.B user direction) — §4.25.B (manual UAT — auth harness deferred)",
+  );
+});

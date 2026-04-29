@@ -413,3 +413,45 @@ describe("Plan 02.1-34: FiltersSheet body-scroll-lock via CSS :has()", () => {
     "getComputedStyle(document.body).overflow === 'hidden' while a <dialog open> is in the DOM (CSS :has() rule applied) (manual UAT — auth harness deferred)",
   );
 });
+
+/**
+ * Plan 02.1-30 — /games/[id] reuses the SAME FeedCard component as /feed.
+ *
+ * UAT-NOTES.md §4.25.B user direction: "карточки как в feed ленте,
+ * небольшие, без фильтров и выбора даты". Plan 02.1-30 RETIRES the Plan
+ * 02.1-25 oversized 2-card layout and replaces it with a vertical FeedCard
+ * list grouped by date via the same groupEventsByDate util as /feed —
+ * pure list, no FilterChips / DateRangeControl / FiltersSheet on the
+ * /games/[id] surface.
+ *
+ * On /games/[id], every event has at least one attached game (the
+ * current game), so EventDto.gameIds.length > 0 by construction. The
+ * FeedCard isInboxRow gate (Plan 02.1-28: gameIds.length === 0 → inbox)
+ * automatically HIDES the inline 'Mark standalone' affordance on these
+ * cards. No FeedCard change required.
+ *
+ * The end-to-end (visit /games/[id] → cards render with the SAME visual
+ * shape as /feed → no inline 'Mark standalone' button anywhere on the
+ * page) requires the cookie-injection auth harness still deferred to
+ * Phase 6 (same precedent as Plans 02.1-18 / 19 / 20 / 21 / 23 / 25 / 26).
+ * Stub-skipped here for grep discoverability when the harness arrives.
+ *
+ * The component-level regression guard lives in
+ * tests/integration/audit-render.test.ts (Plan 02.1-30 describe block) —
+ * SSR rendering of the new /games/[id] layout + StoresSection + FeedCard
+ * reuse + the standalone-button suppression contract.
+ */
+describe("Plan 02.1-30: FeedCard reuse on /games/[id] at 360px", () => {
+  it.skip(
+    "/games/[id] renders the SAME <FeedCard> component as /feed (no per-page variant) — §4.25.B (manual UAT — auth harness deferred to Phase 6)",
+  );
+  it.skip(
+    "/games/[id] FeedCard with gameIds.length > 0 does NOT render the inline 'Mark standalone' button (gated by isInboxRow) — §4.25.B (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games/[id] events list groups cards under <FeedDateGroupHeader> via the SAME groupEventsByDate util as /feed — §4.25.B (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games/[id] does NOT render <FilterChips> / <DateRangeControl> / <FiltersSheet> components — §4.25.B user direction (manual UAT — auth harness deferred)",
+  );
+});
