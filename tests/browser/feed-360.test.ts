@@ -64,3 +64,51 @@ describe("FEED-01 (browser): /feed responsive at 360px", () => {
     "Plan 02.1-16: authenticated /feed cards expose data-kind + youtube thumbnail / kind-icon fallback / formatFeedDate string (manual UAT — auth harness deferred to Phase 6)",
   );
 });
+
+/**
+ * Plan 02.1-19 — feed UX rebuild: filters / scroll / grouping / layout.
+ *
+ * The full Plan 02.1-19 flow (chip per axis, Show 3-state, date-group
+ * headers, infinite scroll auto-append, multi-column at 1024px,
+ * /events/new round-trip without manual refresh) requires the
+ * authenticated cookie-injection harness which is still deferred to
+ * Phase 6 (see 02.1-VALIDATION.md "Manual-Only Verifications"). The
+ * 11 specific cases below are stub-skipped here and documented in the
+ * VALIDATION.md manual UAT block. The PUBLIC-routed 360px no-horizontal-
+ * scroll D-42 invariant remains covered by the existing test above.
+ */
+describe("Plan 02.1-19: feed UX rebuild — filters / scroll / grouping / layout", () => {
+  it.skip(
+    "DateRangeControl renders from/to inputs without clicking 'Custom' (manual UAT — auth harness deferred to Phase 6)",
+  );
+  it.skip(
+    "DateRangeControl exposes 4 presets — Today, Week, Month, Year (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "DateRangeControl × clear button navigates to ?all=1 (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "FilterChips emits one chip per axis with comma-joined values (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "FilterChips × dismiss clears the entire axis (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "FiltersSheet 'Show: Inbox' hides the games multi-select (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "FiltersSheet 'Show: Specific games' reveals the games multi-select (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/feed renders date-group headers above each group's cards (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/feed infinite scroll auto-appends rows on scroll (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/feed renders multiple columns at 1024px viewport (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/events/new submit → /feed shows new event without manual refresh (manual UAT — auth harness deferred)",
+  );
+});
