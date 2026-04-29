@@ -160,7 +160,6 @@ describe("paraglide i18n (UX-04)", () => {
       "events_edit_heading",
       "events_edit_save",
       "events_new_author_is_me",
-      "events_new_date_explainer",
       "events_new_date_today",
       "events_new_date_yesterday",
       "events_new_url_required",

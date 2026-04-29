@@ -6,11 +6,14 @@
   // handles the pollable kinds (youtube_video) for users who already have
   // the URL.
   //
-  // 9-kind picker: ALL 9 kinds enabled (per UI-SPEC fallback note). The
-  // paste flow is the FAST path; free-form is the FALLBACK. Pollable kinds
-  // (youtube_video / reddit_post) are not disabled because the service
-  // accepts them — the user might be logging a community video they don't
-  // want auto-polled.
+  // Plan 02.1-20: kind picker shows ONLY functional kinds (youtube_video,
+  // post, conference, talk, press, other) — non-functional Phase-3+ kinds
+  // (reddit_post, twitter_post, telegram_post, discord_drop) are HIDDEN.
+  // Backend continues to accept all enum values (UI-gate only); legacy rows
+  // of hidden kinds still render correctly via KindIcon + FilterChips.
+  //
+  // The paste flow is the FAST path; free-form is the FALLBACK. When a
+  // Phase-3+ adapter ships, add the value back to FUNCTIONAL_KINDS.
   //
   // Submit → POST /api/events { gameId|null, kind, occurredAt, title, url,
   // notes }. On 201 → goto("/feed") so the user sees their event in the
@@ -19,6 +22,7 @@
   import { goto, invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "$lib/components/InlineError.svelte";
+  import { sortByLabel } from "$lib/util/sort-kinds.js";
   import type { PageData } from "./$types";
 
   type EventKind =
@@ -59,18 +63,56 @@
     occurredAt = d.toISOString().slice(0, 10);
   }
 
-  const KINDS: ReadonlyArray<{ value: EventKind; label: string }> = [
-    { value: "youtube_video", label: m.event_kind_label_youtube_video() },
-    { value: "twitter_post", label: m.event_kind_label_twitter_post() },
-    { value: "telegram_post", label: m.event_kind_label_telegram_post() },
-    { value: "discord_drop", label: m.event_kind_label_discord_drop() },
-    { value: "reddit_post", label: m.event_kind_label_reddit_post() },
-    { value: "conference", label: m.event_kind_label_conference() },
-    { value: "talk", label: m.event_kind_label_talk() },
-    { value: "press", label: m.event_kind_label_press() },
-    { value: "other", label: m.event_kind_label_other() },
-    { value: "post", label: m.event_kind_label_post() },
+  // Plan 02.1-20: functional-only allowlist + alphabetical-by-label sort.
+  // Hidden kinds (reddit_post, twitter_post, telegram_post, discord_drop)
+  // re-appear when their adapter ships in Phase 3+ — just add the value
+  // back to FUNCTIONAL_KINDS. Backend continues to accept all enum values;
+  // legacy rows of hidden kinds still render correctly via KindIcon +
+  // FilterChips. UI-gate only — no schema / migration / service change.
+  const FUNCTIONAL_KINDS: ReadonlyArray<EventKind> = [
+    "youtube_video",
+    "post",
+    "conference",
+    "talk",
+    "press",
+    "other",
   ];
+
+  function eventKindLabel(k: EventKind): string {
+    switch (k) {
+      case "youtube_video":
+        return m.event_kind_label_youtube_video();
+      case "post":
+        return m.event_kind_label_post();
+      case "conference":
+        return m.event_kind_label_conference();
+      case "talk":
+        return m.event_kind_label_talk();
+      case "press":
+        return m.event_kind_label_press();
+      case "other":
+        return m.event_kind_label_other();
+      // Hidden kinds (reddit_post, twitter_post, telegram_post,
+      // discord_drop) are unreachable here — FUNCTIONAL_KINDS excludes
+      // them — but the switch is exhaustive for type-safety.
+      case "reddit_post":
+        return m.event_kind_label_reddit_post();
+      case "twitter_post":
+        return m.event_kind_label_twitter_post();
+      case "telegram_post":
+        return m.event_kind_label_telegram_post();
+      case "discord_drop":
+        return m.event_kind_label_discord_drop();
+    }
+  }
+
+  // $derived so the sort re-runs on locale change; EventKind type preserved.
+  const KINDS = $derived(
+    sortByLabel(
+      FUNCTIONAL_KINDS.map((value) => ({ value, label: eventKindLabel(value) })),
+      (item) => item.label,
+    ),
+  );
 
   async function submit(e: Event): Promise<void> {
     e.preventDefault();
@@ -173,7 +215,6 @@
         required
         disabled={pending}
       />
-      <span class="hint">{m.events_new_date_explainer()}</span>
     </div>
 
     <label class="field checkbox">
@@ -334,10 +375,5 @@
   .chip:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-  }
-  .hint {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    line-height: var(--line-height-body);
   }
 </style>

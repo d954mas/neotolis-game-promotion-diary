@@ -23,6 +23,7 @@
   //     chip strip on /feed (Gap 10).
 
   import { m } from "$lib/paraglide/messages.js";
+  import { sortByLabel } from "$lib/util/sort-kinds.js";
 
   type ShowFilter =
     | { kind: "any" }
@@ -81,18 +82,23 @@
     filters.authorIsMe === true ? "true" : filters.authorIsMe === false ? "false" : "any",
   );
 
-  const KIND_OPTIONS = [
+  // Plan 02.1-20: functional-only allowlist + alphabetical-by-label sort.
+  // Mirrors the /events/new picker — same allowlist, same sort. Hidden
+  // kinds (reddit_post / twitter_post / telegram_post / discord_drop)
+  // re-appear when their Phase 3+ adapter ships. Legacy rows of hidden
+  // kinds still render via FilterChips' kindLabel switch (preserved — no
+  // change to FilterChips kind cases).
+  const FUNCTIONAL_KIND_OPTIONS: ReadonlyArray<string> = [
     "youtube_video",
-    "reddit_post",
-    "twitter_post",
-    "telegram_post",
-    "discord_drop",
+    "post",
     "conference",
     "talk",
     "press",
-    "post",
     "other",
-  ] as const;
+  ];
+  const KIND_OPTIONS = $derived(
+    sortByLabel(FUNCTIONAL_KIND_OPTIONS, (k) => kindLabel(k)),
+  );
 
   function kindLabel(k: string): string {
     switch (k) {
