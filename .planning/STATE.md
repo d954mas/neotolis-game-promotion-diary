@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed Plan 02.1-23 — FeedCard restructured layout per UAT §1.5-redesign (top overlay + bottom games-block + Mine = border-left + overlay-pill).
-last_updated: "2026-04-29T13:02:14.688Z"
+stopped_at: Completed Plan 02.1-22 — round-3 bug-batch (sticky positioning + body-scroll-lock + invalidateAll + /keys/steam link + auto_import edit-gate). Plans 02.1-23 and 02.1-24 still in parallel execution.
+last_updated: "2026-04-29T13:06:44.981Z"
 last_activity: 2026-04-29
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 47
-  completed_plans: 42
+  completed_plans: 43
 ---
 
 # Project State
@@ -86,6 +86,7 @@ Plan: 2 of 26
 | Phase 02.1 P20 | ~17min 37s | 5 tasks | 16 files |
 | Phase 02.1-architecture-realignment P21 | ~25min | 2 tasks | 11 files |
 | Phase 02.1 P23 | 9min | 1 tasks | 4 files |
+| Phase 02.1-architecture-realignment P22 | 12m | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -227,6 +228,10 @@ Recent decisions affecting current work:
 - [Phase 02.1]: Plan 02.1-23: FeedCard restructured per UAT §1.5-redesign — top overlay (kind+inbox+mine pills absolute over .media), title + 3-line clamped notes below, source chip in chips-line, game chip in bottom .games-block (margin-top:auto). Mine = class:mine + border-left:4px var(--color-accent) AND overlay-mine pill (user choice C+A combined).
 - [Phase 02.1]: Plan 02.1-23: image rules ship auto-derived only for round-3 — youtube_video → mqdefault.jpg; reddit/twitter/telegram → metadata.media.url via type-safe readMediaUrlFromMetadata helper; everything else → KindIcon text fallback. Manual upload UI deferred to Phase 3+ (TODO comment documents the schema shape).
 - [Phase 02.1]: Plan 02.1-23: Inbox label rendered INLINE in overlay (option b) — span.overlay-inbox with m.inbox_badge() text — not via a variant prop on InboxBadge (premature abstraction for one consumer). No new Paraglide keys; EXPECTED_KEYS snapshot stays in lock-step.
+- [Phase 02.1-architecture-realignment]: Plan 02.1-22: Layout flex-column scaffold (.layout-root with min-height: 100vh) is the prerequisite for position: sticky on AppHeader (top:0,z:10) and per-page sticky CTAs like /sources .head (top:72px,z:5); without the scaffold the sticky parent collapses to viewport on every browser engine
+- [Phase 02.1-architecture-realignment]: Plan 02.1-22: FiltersSheet body-scroll-lock implemented via Svelte 5 $effect cleanup function (return () => { document.body.style.overflow = '' }) that fires on every effect re-run / unmount; onDialogCancel also restores explicitly to keep the intent visible in the close handler
+- [Phase 02.1-architecture-realignment]: Plan 02.1-22: SourceRow auto_import edit-gate (UAT §2.4-decision option A) — read-mode pill replaces inline checkbox, toggle moves into edit form, saveDisplayName renamed to saveSourceEdit, PATCH body sends both displayName + autoImport in one round-trip; standalone toggle handler deleted
+- [Phase 02.1-architecture-realignment]: Plan 02.1-22: /keys/steam discoverability — MINIMAL fix only (single link from /settings); unified /settings/credentials hub deferred to Phase 3+ when KEYS-01+KEYS-02 functional. Paraglide keys prefixed _credentials_ so the rebuild is search-and-restructure
 
 ### Pending Todos
 
@@ -267,8 +272,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-29T13:02:00.511Z
+Last session: 2026-04-29T13:06:39.366Z
 Last Activity: 2026-04-29
-Stopped at: Completed Plan 02.1-23 — FeedCard restructured layout per UAT §1.5-redesign (top overlay + bottom games-block + Mine = border-left + overlay-pill).
+Stopped at: Completed Plan 02.1-22 — round-3 bug-batch (sticky positioning + body-scroll-lock + invalidateAll + /keys/steam link + auto_import edit-gate). Plans 02.1-23 and 02.1-24 still in parallel execution.
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
