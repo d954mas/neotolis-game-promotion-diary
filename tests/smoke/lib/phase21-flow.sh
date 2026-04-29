@@ -87,14 +87,19 @@ phase21_unified_flow() {
   echo "  game created: id=$gameId"
 
   echo "== Phase 2.1: PATCH /api/events/:id/attach =="
+  # Plan 02.1-28 (round-4 closure §4.24.G): the canonical wire shape is
+  # {gameIds: string[]}. The legacy {gameId: string | null} alias is still
+  # accepted by the route's union schema for one round of UAT, but the
+  # response DTO ALWAYS uses the new array shape. We send the canonical
+  # shape and assert the canonical shape on the response.
   local attachResp
   attachResp=$(curl -sf -X PATCH "$base/api/events/$eventId/attach" \
     -H "cookie: $cookieA" \
     -H "content-type: application/json" \
-    -d "{\"gameId\":\"$gameId\"}") \
+    -d "{\"gameIds\":[\"$gameId\"]}") \
     || { echo "FAIL: PATCH /api/events/:id/attach did not return 2xx"; exit 1; }
-  echo "$attachResp" | jq -e --arg gid "$gameId" '.gameId == $gid' >/dev/null \
-    || { echo "FAIL: attach did not set gameId on event; body=$attachResp"; exit 1; }
+  echo "$attachResp" | jq -e --arg gid "$gameId" '.gameIds | index($gid) != null' >/dev/null \
+    || { echo "FAIL: attach did not include gameId in gameIds[]; body=$attachResp"; exit 1; }
 
   echo "== Phase 2.1: GET /api/games/:gameId/events returns the attached event =="
   local gameEventsResp
@@ -140,7 +145,7 @@ phase21_unified_flow() {
     -X PATCH "$base/api/events/$eventId/attach" \
     -H "cookie: $cookieB" \
     -H "content-type: application/json" \
-    -d "{\"gameId\":\"$userbGameId\"}")
+    -d "{\"gameIds\":[\"$userbGameId\"]}")
   if [[ "$statusAttach" != "404" ]]; then
     echo "FAIL: cross-tenant PATCH /api/events/:id/attach status=$statusAttach (expected 404; Pitfall 4 — must NOT be 500)"
     cat /tmp/p21-cross-attach.txt 2>/dev/null
