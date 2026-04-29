@@ -120,6 +120,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 02.1-28-PLAN.md — Round-4 gap closure Wave 1: M:N migration application layer — attachEventToGames service rewrite + DTO migration (gameId → gameIds[]) + HTTP route updates + tenant-scope probes + Pitfall 6 mirror; closes UAT-NOTES.md §4.24.G
 - [x] 02.1-29-PLAN.md — Round-4 gap closure Wave 1: Steam listing service hardening — addSteamListing translates Postgres 23505 to AppError 422 'steam_listing_duplicate' with metadata payload (Path B: pre-INSERT lookup catches soft-deleted dupes; race-window catch around INSERT); closes UAT-NOTES.md §4.25.E + §4.25.G prep + §4.25.H
 - [x] 02.1-31-PLAN.md — Round-4 gap closure Wave 2: Standalone label rename — 3 user-facing Paraglide values updated ("Standalone" → "Not game-related" / "Mark standalone" → "Mark as not game-related"); URL contract / state shape / audit verb / service / schema preserved; audit log keeps technical verb 'Event marked standalone'; closes UAT-NOTES.md §4.24.A
+- [x] 02.1-33-PLAN.md — Round-4 gap closure Wave 2: SourceRow edit-mode polish — Remove visibility gated to edit-form footer (§4.22.B), Edit pencil hidden in edit mode (§4.22.C), auto_import single-source-of-truth via 3-layer negative-grep regression guard (§4.22.D), Save/Cancel/Remove footer at form bottom with section divider above (§4.22.E); pure component refactor; PATCH /api/sources/:id contract preserved
 **UI hint**: yes
 
 ### Phase 3: Polling Pipeline
@@ -194,7 +195,7 @@ Phases execute in numeric order: 1 → 2 → 2.1 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation | 10/10 | Complete | 2026-04-27 |
 | 2. Ingest, Secrets, and Audit | 11/11 | Gaps Found | 2026-04-28 (closure in 2.1) |
-| 2.1. Architecture Realignment (INSERTED) | 29/34 | In progress (Plans 11-16 closed round-1 UAT gaps; Plans 17-20 closed round-2 UAT gaps; Plans 21-26 closed round-3 UAT gaps from 2026-04-29; Plans 27-34 close round-4 UAT gaps from 2026-04-29 — 02.1-31 Standalone label rename to "Not game-related" complete; Plan 10 UAT checkpoint resume after round-4 ships) | - |
+| 2.1. Architecture Realignment (INSERTED) | 30/34 | In progress (Plans 11-16 closed round-1 UAT gaps; Plans 17-20 closed round-2 UAT gaps; Plans 21-26 closed round-3 UAT gaps from 2026-04-29; Plans 27-34 close round-4 UAT gaps from 2026-04-29 — 02.1-33 SourceRow edit-mode polish complete; Plan 10 UAT checkpoint resume after round-4 ships) | - |
 | 3. Polling Pipeline | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
 | 5. Reddit Rules Cockpit | 0/TBD | Not started | - |

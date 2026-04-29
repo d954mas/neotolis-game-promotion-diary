@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02.1-30-PLAN.md
-last_updated: "2026-04-29T17:45:07.301Z"
+stopped_at: Completed 02.1-33-PLAN.md
+last_updated: "2026-04-29T17:48:11.037Z"
 last_activity: 2026-04-29
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 55
-  completed_plans: 52
+  completed_plans: 53
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 7 of 34
+Plan: 8 of 34
 
 ## Performance Metrics
 
@@ -96,6 +96,7 @@ Plan: 7 of 34
 | Phase 02.1 P31 | ~9 min | 1 tasks | 3 files |
 | Phase 02.1-architecture-realignment P34 | ~14 min | 2 tasks | 8 files |
 | Phase 02.1 P30 | ~14min | 3 tasks | 10 files |
+| Phase 02.1-architecture-realignment P33 | 25min | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -275,6 +276,8 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-30: NEW StoresSection.svelte component (Magazины / Stores section header + + Add CTA + AddSteamListingForm body); Phase 2.1 ships Steam-only behind the new shell, Itch + Epic explicitly deferred per UAT-NOTES.md §4.25.C.
 - [Phase 02.1-architecture-realignment]: Plan 02.1-30: SteamListingRow gains edit-mode-only Remove × button + ConfirmDialog wired to DELETE /api/games/:gameId/listings/:listingId. Page-level editMode state on /games/[id] mirrors Plan 02.1-22's SourceRow pattern but at PAGE scope. UAT-NOTES.md §4.25.H closed.
 - [Phase 02.1-architecture-realignment]: Plan 02.1-30: AddSteamListingForm reads 422 body.metadata.{existingGameId, existingState} (Plan 02.1-29 service hardening) and surfaces inline error with deep link to /games/{existingGameId} OR soft-deleted explanation. UAT-NOTES.md §4.25.G closed.
+- [Phase 02.1-architecture-realignment]: Plan 02.1-33: SourceRow edit-mode polish — Remove visibility gated to edit-form footer (closes §4.22.B); Edit pencil hidden when editing=true (§4.22.C); auto_import single-source-of-truth via 3-layer negative-grep regression guard (§4.22.D was stale per plan-time review); Save/Cancel/Remove footer at form bottom with section divider above (§4.22.E)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-33: common_save Paraglide key added (replaces toast_saved misuse as button label); browser-mode end-to-end tests stub-skipped pending Phase 6 auth harness (precedent from Plans 02.1-18..34); SSR-level regression guards in audit-render.test.ts are the load-bearing protection
 
 ### Pending Todos
 
@@ -315,8 +318,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-29T17:45:07.298Z
+Last session: 2026-04-29T17:48:11.034Z
 Last Activity: 2026-04-29
-Stopped at: Completed 02.1-30-PLAN.md
+Stopped at: Completed 02.1-33-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
