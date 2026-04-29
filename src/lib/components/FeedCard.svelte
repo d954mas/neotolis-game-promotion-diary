@@ -1,50 +1,75 @@
 <script lang="ts">
-  // FeedCard — pure preview tile (Plan 02.1-18 round-2 UAT closure).
+  // FeedCard — pure preview tile (Plan 02.1-18 read-only contract preserved).
   //
-  // Plan 02.1-18 STRIP: removed Open / Edit / Delete buttons + the
-  // surrounding ConfirmDialog. All mutating + destructive actions move to
-  // /events/[id]. The card body wraps in <a href="/events/${id}"> so the
-  // ENTIRE tile is the click target. AttachToGamePicker stays — it is the
-  // primary inbox-clear flow per FEED-01 / INBOX-01 and is non-destructive
-  // (the user can re-attach freely). Per UAT round-2 gap "FeedCard becomes
-  // a pure preview tile."
+  // Plan 02.1-23 RESTRUCTURE per UAT-NOTES.md §1.5-redesign — the user-
+  // proposed card layout from round-3 UAT (ASCII mockup drawn by the user).
+  // The vertical structure is now (top → bottom):
   //
-  // Visual contract (Plan 02.1-19 — vertical stack at all viewports, sized
-  // by /feed's CSS grid cell `repeat(auto-fill, minmax(280px, 1fr))`):
+  //   1. Image area at TOP with absolute-positioned top overlay carrying
+  //      kind icon+text label + Inbox badge (if applicable) + Mine badge
+  //      (if author_is_me=true).
+  //   2. Title under the image.
+  //   3. Notes under the title (clipped via -webkit-line-clamp: 3).
+  //   4. Meta-line — ONLY <PollingBadge> remains here. Kind label, Inbox,
+  //      and Mine moved into the top overlay.
+  //   5. Source chip (chips-line — without mine/game).
+  //   6. Associated games block at the BOTTOM of the card body. The
+  //      .games-block <div> sits AFTER the chips-line by design (user
+  //      quote "Ассоцированные игры, давай внизу карточки.").
+  //   7. Picker-line — AttachToGamePicker (the only mutating control,
+  //      OUTSIDE the wrapping <a> so its onclick handlers don't trigger
+  //      card navigation). INBOX-only flow.
   //
-  //   1. Media row — 16:9 thumbnail for kind=youtube_video
-  //      (img.youtube.com/vi/{id}/mqdefault.jpg) OR a centered KindIcon in a
-  //      muted block for non-thumbnail kinds.
-  //   2. Title.
-  //   3. Meta row — kind label (text) + InboxBadge + PollingBadge.
-  //      DATE IS NOT RENDERED HERE in Plan 02.1-19 — the
-  //      <FeedDateGroupHeader> above the group is the date label
-  //      (Google Photos / Apple Photos timeline pattern).
-  //   4. Chips row — source / game / "Mine" badge for author_is_me=true.
-  //   5. Picker row — AttachToGamePicker (the only mutating control on a
-  //      tile; OUTSIDE the wrapping <a> so its onclick handlers don't
-  //      trigger card navigation).
+  // Mine treatment (UAT user choice "C and A combined"):
+  //   - C: `<span class='overlay-mine'>` pill in the top overlay alongside
+  //        kind label and Inbox indicator.
+  //   - A: `border-left: 4px solid var(--color-accent)` on the entire card
+  //        when `event.authorIsMe === true`. The class:mine={authorIsMe}
+  //        toggle on the root <article> drives the CSS rule.
   //
-  // Accessibility:
-  //   - Wrapping <a> carries the title text (in .title-line) so a screen
-  //     reader reads the link with the title as its accessible name.
-  //   - AttachToGamePicker is OUTSIDE the anchor — its keyboard tabbable
-  //     controls navigate independently of the card's link target.
-  //   - "Mine" badge is a non-interactive <span>, just a visible chip.
-  //   - KindIcon stays aria-hidden="true" — kind name is conveyed by the
-  //     adjacent .kind-tag span (Plan 02.1-16 Gap 6 path b).
+  // Image-source rules per kind (UAT-NOTES.md §1.5-redesign — auto-derived
+  // images only; manual upload UI is OUT OF SCOPE for round-3, see TODO):
+  //   - kind=youtube_video AND externalId → img.youtube.com/vi/{id}/mqdefault.jpg
+  //   - kind=reddit_post / twitter_post / telegram_post → metadata.media.url
+  //     (type-safe lookup; falls through if missing)
+  //   - all other kinds (conference, talk, press, other, post, discord_drop)
+  //     → text fallback (KindIcon centered in the .icon-anchor block)
+  //
+  // The Inbox indicator is rendered INLINE in the overlay (Plan 02.1-23
+  // executor pick — option (b) per <interfaces>): a `<span class='overlay-inbox'>`
+  // showing m.inbox_badge() text. The standalone <InboxBadge> component is no
+  // longer used here (the overlay needs the dark-pill visual style consistent
+  // with overlay-kind / overlay-mine; threading a `variant` prop through
+  // InboxBadge would be premature for one consumer). InboxBadge stays
+  // exported for potential future contexts.
+  //
+  // Plan 02.1-18 read-only contract PRESERVED:
+  //   - No inline Edit / Delete / Open buttons.
+  //   - The wrapping <a href={`/events/${id}`}> stays as the click target.
+  //   - AttachToGamePicker is the only mutating control (INBOX-only flow).
+  //
+  // Plan 02.1-19 date-removal PRESERVED:
+  //   - No inline date string on the card. The <FeedDateGroupHeader> above
+  //     each card group is the date label (Google Photos / Apple Photos
+  //     timeline pattern).
+  //
+  // TODO Phase 3+: support manual image upload per UAT-NOTES.md §1.5-redesign
+  // user quote "Хочется чтобы пользователь мог для каждого такого события сам
+  // добавить картинку". Schema would add `cover_url TEXT NULL` on events OR
+  // `metadata.image.url` (jsonb path); resolver returns manual upload OR
+  // auto-derived per kind. Round-3 ships auto-derived only.
   //
   // Privacy invariants:
-  //   - <img referrerpolicy="no-referrer" crossorigin="anonymous"> mirrors
-  //     UI-SPEC §"Registry Safety" precedent (Steam appdetails covers,
-  //     YouTube oEmbed thumbs).
-  //   - Thumbnail URL is deterministic from `externalId` already projected
-  //     by toEventDto; no ciphertext / userId leaks through this surface.
+  //   - <img referrerpolicy="no-referrer" crossorigin="anonymous"> for any
+  //     external image source (existing pattern preserved).
+  //   - Image URLs come from already-projected event fields (externalId is
+  //     projected by toEventDto; metadata.media.url is part of the metadata
+  //     jsonb that toEventDto passes through). No ciphertext / userId leaks.
+  //   - Tenant scoping unchanged — this is a pure presentational refactor.
 
   import { m } from "$lib/paraglide/messages.js";
   import KindIcon from "./KindIcon.svelte";
   import AttachToGamePicker from "./AttachToGamePicker.svelte";
-  import InboxBadge from "./InboxBadge.svelte";
   import PollingBadge from "./PollingBadge.svelte";
 
   type EventKind =
@@ -69,6 +94,7 @@
     title: string;
     url: string | null;
     externalId: string | null;
+    notes: string | null;
     metadata: unknown;
     lastPolledAt: Date | string | null;
   };
@@ -96,10 +122,34 @@
     onChanged?: () => void;
   } = $props();
 
+  // Type-safe metadata.media.url extraction (Plan 02.1-23 image-source rules).
+  // metadata is `unknown` from toEventDto — we narrow before reading.
+  function readMediaUrlFromMetadata(md: unknown): string | null {
+    if (md === null || typeof md !== "object") return null;
+    const mediaContainer = (md as { media?: unknown }).media;
+    if (
+      mediaContainer === null ||
+      mediaContainer === undefined ||
+      typeof mediaContainer !== "object"
+    )
+      return null;
+    const url = (mediaContainer as { url?: unknown }).url;
+    return typeof url === "string" && url.length > 0 ? url : null;
+  }
+
   const thumbnailUrl = $derived.by((): string | null => {
-    if (event.kind !== "youtube_video") return null;
-    if (!event.externalId) return null;
-    return `https://img.youtube.com/vi/${event.externalId}/mqdefault.jpg`;
+    if (event.kind === "youtube_video") {
+      if (!event.externalId) return null;
+      return `https://img.youtube.com/vi/${event.externalId}/mqdefault.jpg`;
+    }
+    if (
+      event.kind === "reddit_post" ||
+      event.kind === "twitter_post" ||
+      event.kind === "telegram_post"
+    ) {
+      return readMediaUrlFromMetadata(event.metadata);
+    }
+    return null;
   });
 
   const kindLabel = $derived.by(() => {
@@ -140,7 +190,7 @@
   });
 </script>
 
-<article class="feed-card" data-kind={event.kind}>
+<article class="feed-card" class:mine={event.authorIsMe} data-kind={event.kind}>
   <a class="card-body" href={`/events/${event.id}`}>
     <div class="media">
       {#if thumbnailUrl}
@@ -157,33 +207,50 @@
           <KindIcon kind={event.kind} size={48} />
         </div>
       {/if}
+      <!-- Plan 02.1-23 top overlay: kind label + Inbox + Mine pills.
+           Always rendered (kind label is unconditional); Inbox / Mine are
+           conditional. pointer-events: none so the overlay never intercepts
+           clicks on the wrapping <a>. -->
+      <div class="overlay" data-testid="feed-card-overlay">
+        <span class="overlay-kind">
+          <KindIcon kind={event.kind} size={14} />
+          {kindLabel}
+        </span>
+        {#if isInboxRow}
+          <span class="overlay-inbox">{m.inbox_badge()}</span>
+        {/if}
+        {#if event.authorIsMe}
+          <span class="overlay-mine">{m.feed_card_author_is_me_badge()}</span>
+        {/if}
+      </div>
     </div>
 
     <div class="title-line">
       <h3 class="title">{event.title}</h3>
     </div>
 
+    {#if event.notes}
+      <p class="notes">{event.notes}</p>
+    {/if}
+
     <div class="meta-line">
-      <span class="kind-tag">{kindLabel}</span>
       <!-- Plan 02.1-19: inline date display REMOVED — the
-           <FeedDateGroupHeader> above each card group is the date label. -->
-      {#if isInboxRow}
-        <InboxBadge />
-      {/if}
+           <FeedDateGroupHeader> above each card group is the date label.
+           Plan 02.1-23: kind label + Inbox indicator moved into the top
+           overlay. Mine moved into the overlay too. Only <PollingBadge>
+           remains in this row. -->
       <PollingBadge event={pollingForBadge} />
     </div>
 
-    {#if source || game || event.authorIsMe}
+    {#if source}
       <div class="chips-line">
-        {#if source}
-          <span class="chip">{source.displayName ?? source.handleUrl}</span>
-        {/if}
-        {#if game}
-          <span class="chip">{game.title}</span>
-        {/if}
-        {#if event.authorIsMe}
-          <span class="chip chip-author">{m.feed_card_author_is_me_badge()}</span>
-        {/if}
+        <span class="chip">{source.displayName ?? source.handleUrl}</span>
+      </div>
+    {/if}
+
+    {#if game}
+      <div class="games-block">
+        <span class="chip chip-game">{game.title}</span>
       </div>
     {/if}
   </a>
@@ -194,12 +261,11 @@
 </article>
 
 <style>
-  /* Plan 02.1-18 layout: card body is a single clickable <a> wrapping
-   * media + title + meta + chips. AttachToGamePicker is OUTSIDE the anchor
-   * so its menu/buttons stay interactive without nesting an interactive
-   * inside an <a>. Plan 02.1-19 grid cell sizing
-   * (`repeat(auto-fill, minmax(280px, 1fr))`) preserved — vertical-stack
-   * tile at all viewports. */
+  /* Plan 02.1-23 layout: card body remains a vertical flex column. The
+   * Mine treatment combines a left-border accent (CSS) and a top-overlay
+   * Mine pill (DOM). Plan 02.1-19 grid cell sizing
+   * (`repeat(auto-fill, minmax(280px, 1fr))`) preserved by /feed's grid;
+   * this card sizes to its content within the cell. */
   .feed-card {
     display: flex;
     flex-direction: column;
@@ -216,6 +282,12 @@
   .feed-card:hover {
     background: var(--color-bg);
   }
+  /* Mine treatment (A): left-border accent on the whole card. Combined with
+   * the overlay Mine pill (C) per UAT-NOTES.md §1.5-redesign user choice
+   * "C and A combined". */
+  .feed-card.mine {
+    border-left: 4px solid var(--color-accent);
+  }
   .card-body {
     display: flex;
     flex-direction: column;
@@ -223,6 +295,9 @@
     min-width: 0;
     text-decoration: none;
     color: inherit;
+    /* Stretches to fill the card so .games-block margin-top:auto reaches
+     * the bottom even when notes are short. */
+    flex: 1 1 auto;
   }
   .media {
     flex: 0 0 auto;
@@ -234,6 +309,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    /* Anchors the absolutely-positioned .overlay child. */
+    position: relative;
   }
   .thumbnail {
     width: 100%;
@@ -248,6 +325,38 @@
     align-items: center;
     justify-content: center;
     color: var(--color-text-muted);
+  }
+  /* Plan 02.1-23 top overlay — flex row of dark pills over the image. */
+  .overlay {
+    position: absolute;
+    top: var(--space-xs);
+    left: var(--space-xs);
+    right: var(--space-xs);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    /* Don't intercept clicks on the wrapping <a> — the overlay is purely
+     * visual; the entire card surface remains the click target. */
+    pointer-events: none;
+  }
+  .overlay-kind,
+  .overlay-inbox,
+  .overlay-mine {
+    background: rgb(0 0 0 / 70%);
+    color: white;
+    border-radius: 999px;
+    padding: 2px var(--space-sm);
+    font-size: var(--font-size-label);
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    white-space: nowrap;
+  }
+  /* The kind icon inside .overlay-kind inherits white via currentColor since
+   * the parent sets `color: white`. */
+  .overlay-kind :global(svg.kind) {
+    color: white;
   }
   .title-line {
     display: flex;
@@ -264,6 +373,22 @@
     word-break: break-word;
     min-width: 0;
   }
+  /* Plan 02.1-23: notes paragraph clipped to 3 lines with ellipsis. The
+   * underlying CSS uses the prefixed `-webkit-line-clamp` block trick which
+   * is the de facto cross-browser standard for line clamping (Firefox 68+
+   * supports the prefixed form). */
+  .notes {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+    line-height: var(--line-height-body);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+  }
   .meta-line {
     display: flex;
     flex-wrap: wrap;
@@ -272,11 +397,18 @@
     font-size: var(--font-size-label);
     color: var(--color-text-muted);
   }
-  .kind-tag {
-    font-weight: var(--font-weight-semibold);
-    color: var(--color-text);
-  }
   .chips-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    align-items: center;
+    min-width: 0;
+  }
+  /* Plan 02.1-23: associated games block at the BOTTOM of the card body.
+   * `margin-top: auto` pushes it to the bottom when the .card-body has
+   * space remaining; otherwise it sits naturally after the chips-line. */
+  .games-block {
+    margin-top: auto;
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-sm);
@@ -295,8 +427,11 @@
     line-height: 1;
     white-space: nowrap;
   }
-  .chip-author {
+  /* Game chip stands out a bit more than the source chip (slightly stronger
+   * border) since it represents the primary association. */
+  .chip-game {
     color: var(--color-text);
+    border-color: var(--color-text-muted);
   }
   .picker-line {
     display: flex;

@@ -56,6 +56,10 @@
     // URL. toEventDto already projects this field; the local type needs to
     // surface it so the props contract type-checks.
     externalId: string | null;
+    // Plan 02.1-23: FeedCard renders a clipped notes paragraph below the
+    // title. toEventDto already projects this field (events.notes column);
+    // the local type needs to surface it so the props contract type-checks.
+    notes: string | null;
   };
 
   type ListingDto = {
