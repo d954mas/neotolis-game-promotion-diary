@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
-stopped_at: Completed Plan 02.1-25 — card visual language consistency (SourceRow Mine, PageHeader, /games/[id] two-card, Steam listing name)
+status: Phase 02.1 PAUSED — Plan 02.1-10 round-4 manual UAT 2026-04-29 surfaced 22 NEW findings (6 P0 + 16 P1) blocking sign-off; persisted in 02.1-10-UAT-NOTES.md round-4 section; round-4 gap-closure plans needed
+stopped_at: Plan 02.1-10 round-4 UAT walked /feed FeedCard+FeedQuickNav, /sources, /games/[id], /events/[id]/edit, /audit, /settings, /keys/steam at 360px. P0 (6) — 4.24.A Standalone label, 4.24.D no standalone toggle in edit form, 4.24.G events need M:N games, 4.25.E addSteamListing 500-on-duplicate, 4.25.J constraint must be (game_id, app_id), 4.25.B /games/[id] redesign uses oversized cards instead of FeedCard list. P1 (16) — 4.22.A sticky AppHeader regression, 4.22.B-E SourceRow Remove/Edit/auto_import duplication + Save/Cancel placement, 4.22.F body-scroll-lock regression, 4.18.A-B /events/[id] Delete/Edit placement, 4.21.A /audit date duplication, 4.24.C-F standalone+game conflict + attach button visibility/size, 4.25.A Mine accent color, 4.25.C Stores section UX, 4.25.G Steam-duplicate UX hint, 4.25.H removeSteamListing UI/HTTP missing. Plans 21-26 SHIPPED + verified clean automation tests; manual UAT is the gate. Next: /clear → /gsd:plan-phase 02.1 --gaps → /gsd:execute-phase 02.1 --gaps-only → round-5 UAT → Plan 10 sign-off.
 last_updated: "2026-04-29T13:55:24.255Z"
 last_activity: 2026-04-29
 progress:
