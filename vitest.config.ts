@@ -1,6 +1,14 @@
 import { defineConfig } from "vitest/config";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { playwright } from "@vitest/browser-playwright";
+import path from "node:path";
+
+// Plan 02.1-20: $lib alias mirror — Svelte components imported by tests
+// (audit-render.test.ts and any future SSR-render test) use $lib/*
+// internally to match svelte.config.js kit.alias. The vitest config does
+// NOT pull the SvelteKit plugin (W-2 honored) so the alias must be declared
+// here; otherwise component SSR rendering fails resolving $lib/paraglide/messages.js.
+const $libAlias = { $lib: path.resolve("./src/lib") };
 
 // Vitest 4 supports test.projects to split unit (no DB) from integration (with DB).
 // Plan 01-02 (Phase 1 Wave 0) lands the structural split; later plans wire real assertions.
@@ -31,10 +39,12 @@ import { playwright } from "@vitest/browser-playwright";
 //   pnpm test              (all three)
 export default defineConfig({
   plugins: [svelte()],
+  resolve: { alias: $libAlias },
   test: {
     projects: [
       {
         plugins: [svelte()],
+        resolve: { alias: $libAlias },
         test: {
           name: "unit",
           include: ["tests/unit/**/*.test.ts"],
@@ -43,6 +53,7 @@ export default defineConfig({
       },
       {
         plugins: [svelte()],
+        resolve: { alias: $libAlias },
         test: {
           name: "integration",
           include: ["tests/integration/**/*.test.ts"],
@@ -62,6 +73,7 @@ export default defineConfig({
       },
       {
         plugins: [svelte()],
+        resolve: { alias: $libAlias },
         test: {
           name: "browser",
           include: ["tests/browser/**/*.test.ts"],

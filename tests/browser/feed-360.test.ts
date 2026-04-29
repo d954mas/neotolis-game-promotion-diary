@@ -153,3 +153,36 @@ describe("Plan 02.1-18: edit-flow rebuild via detail page", () => {
     "/events/[id] at 360px viewport renders without horizontal scroll (manual UAT — auth harness deferred)",
   );
 });
+
+/**
+ * Plan 02.1-20 — /audit FilterChips + FiltersSheet UX rewrite.
+ *
+ * Round-2 UAT closure: ActionFilter dropdown is REMOVED; /audit reuses
+ * <FilterChips> + <FiltersSheet> from /feed. URL contract switches from
+ * single-select ?action=A to multi-select ?action=A&action=B. These stubs
+ * are it.skip pending the cookie-injection auth harness (same pattern as
+ * Plan 02.1-18 / 02.1-19 — VALIDATION.md "Manual-Only Verifications").
+ */
+describe("Plan 02.1-20: /audit FilterChips + FiltersSheet UX", () => {
+  it.skip(
+    "/audit renders FilterChips strip (no ActionFilter dropdown) (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "clicking 'Filters' opens FiltersSheet with action checkbox-list (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "selecting two actions produces ONE chip with comma-joined labels (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "clicking × on the action chip clears the entire axis (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "URL contract: /audit?action=A&action=B repeated params are honored on direct navigation (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "invalid ?action=foo entries are silently dropped (forgiving GET) (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/audit at 360px viewport renders without horizontal scroll with chip visible (manual UAT — auth harness deferred)",
+  );
+});
