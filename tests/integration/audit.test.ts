@@ -30,11 +30,11 @@ describe("audit log read endpoint (PRIV-02 + KEYS-06 metadata)", () => {
         ipAddress: `10.0.0.${(i % 250) + 1}`,
       });
     }
-    const page1 = await listAuditPage(u.id, null, "all");
+    const page1 = await listAuditPage(u.id, null, []);
     expect(page1.rows.length).toBe(50);
     expect(page1.nextCursor).toBeTruthy();
 
-    const page2 = await listAuditPage(u.id, page1.nextCursor!, "all");
+    const page2 = await listAuditPage(u.id, page1.nextCursor!, []);
     expect(page2.rows.length).toBe(10);
     expect(page2.nextCursor).toBeNull();
 
@@ -50,10 +50,10 @@ describe("audit log read endpoint (PRIV-02 + KEYS-06 metadata)", () => {
     await writeAudit({ userId: u.id, action: "key.add", ipAddress: "10.0.0.1" });
     await writeAudit({ userId: u.id, action: "key.rotate", ipAddress: "10.0.0.1" });
 
-    const all = await listAuditPage(u.id, null, "all");
+    const all = await listAuditPage(u.id, null, []);
     expect(all.rows.length).toBe(3);
 
-    const keyAdds = await listAuditPage(u.id, null, "key.add");
+    const keyAdds = await listAuditPage(u.id, null, ["key.add"]);
     expect(keyAdds.rows.length).toBe(1);
     expect(keyAdds.rows[0]!.action).toBe("key.add");
   });
@@ -73,7 +73,7 @@ describe("audit log read endpoint (PRIV-02 + KEYS-06 metadata)", () => {
         ipAddress: "10.0.0.1",
       });
     }
-    const aPage = await listAuditPage(userA.id, null, "all");
+    const aPage = await listAuditPage(userA.id, null, []);
     expect(aPage.rows.length).toBe(5);
 
     // Forge a cursor pointing at the middle of A's page.
@@ -81,14 +81,14 @@ describe("audit log read endpoint (PRIV-02 + KEYS-06 metadata)", () => {
 
     // Query as user B with A's cursor — must return 0 rows. This is the
     // load-bearing PRIV-02 / P19 assertion.
-    const bPage = await listAuditPage(userB.id, aCursor, "all");
+    const bPage = await listAuditPage(userB.id, aCursor, []);
     expect(bPage.rows.length).toBe(0);
     expect(bPage.nextCursor).toBeNull();
 
     // Belt-and-suspenders: B with no cursor also sees zero (B has no seeded
     // rows). Confirms the previous assertion is not vacuous on a degenerate
     // cursor — B genuinely has nothing.
-    const bAll = await listAuditPage(userB.id, null, "all");
+    const bAll = await listAuditPage(userB.id, null, []);
     expect(bAll.rows.length).toBe(0);
   });
 });
@@ -129,5 +129,84 @@ describe("audit IP forwarding (KEYS-06)", () => {
       .limit(1);
     expect(a).toBeDefined();
     expect(a!.ipAddress).toBe("203.0.113.7");
+  });
+});
+
+/**
+ * Plan 02.1-20 — listAuditPage multi-action filter (round-2 UAT closure).
+ *
+ * The `actionFilter` parameter widens from `"all" | AuditAction` (single
+ * value with sentinel) to `AuditAction[]` (empty array = "all" semantics).
+ * The /audit UI consumes the new shape via FilterChips + FiltersSheet
+ * (Plan 02.1-19 reshape) and emits ?action=A&action=B repeated params.
+ *
+ * Tests cover the four SQL branches (0, 1, 2+ entries; invalid entry fails
+ * closed) AND the cross-tenant 404 invariant under the new shape.
+ */
+describe("Plan 02.1-20: listAuditPage multi-action filter", () => {
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
+  it("empty array returns all rows ('all' semantics)", async () => {
+    const u = await seedUserDirectly({ email: `p20-all-${uniq()}@test.local` });
+    await writeAudit({ userId: u.id, action: "session.signin", ipAddress: "10.0.0.1" });
+    await writeAudit({ userId: u.id, action: "key.add", ipAddress: "10.0.0.1" });
+    const out = await listAuditPage(u.id, null, []);
+    expect(out.rows.length).toBe(2);
+  });
+
+  it("single-element array uses eq and returns matching rows", async () => {
+    const u = await seedUserDirectly({ email: `p20-eq-${uniq()}@test.local` });
+    await writeAudit({ userId: u.id, action: "session.signin", ipAddress: "10.0.0.1" });
+    await writeAudit({ userId: u.id, action: "key.add", ipAddress: "10.0.0.1" });
+    const out = await listAuditPage(u.id, null, ["key.add"]);
+    expect(out.rows.length).toBe(1);
+    expect(out.rows[0]!.action).toBe("key.add");
+  });
+
+  it("multi-element array uses inArray and returns the OR of the action sets", async () => {
+    const u = await seedUserDirectly({ email: `p20-or-${uniq()}@test.local` });
+    await writeAudit({ userId: u.id, action: "session.signin", ipAddress: "10.0.0.1" });
+    await writeAudit({ userId: u.id, action: "key.add", ipAddress: "10.0.0.1" });
+    await writeAudit({ userId: u.id, action: "theme.changed", ipAddress: "10.0.0.1" });
+    const out = await listAuditPage(u.id, null, ["session.signin", "key.add"]);
+    expect(out.rows.length).toBe(2);
+    const actions = new Set(out.rows.map((r) => r.action));
+    expect(actions.has("session.signin")).toBe(true);
+    expect(actions.has("key.add")).toBe(true);
+    expect(actions.has("theme.changed")).toBe(false);
+  });
+
+  it("invalid single-element array throws AppError 422", async () => {
+    const u = await seedUserDirectly({ email: `p20-invalid1-${uniq()}@test.local` });
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      listAuditPage(u.id, null, ["not_a_real_action" as any]),
+    ).rejects.toMatchObject({ code: "validation_failed", status: 422 });
+  });
+
+  it("invalid entry in multi-element array throws AppError 422 (fail closed)", async () => {
+    const u = await seedUserDirectly({ email: `p20-invalid2-${uniq()}@test.local` });
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      listAuditPage(u.id, null, ["key.add", "not_a_real_action" as any]),
+    ).rejects.toMatchObject({ code: "validation_failed", status: 422 });
+  });
+
+  it("cross-tenant 404 invariant preserved with multi-action filter (P19)", async () => {
+    const userA = await seedUserDirectly({ email: `p20-tcA-${uniq()}@test.local` });
+    const userB = await seedUserDirectly({ email: `p20-tcB-${uniq()}@test.local` });
+    for (let i = 0; i < 3; i++) {
+      await writeAudit({ userId: userA.id, action: "key.add", ipAddress: "10.0.0.1" });
+      await writeAudit({ userId: userA.id, action: "session.signin", ipAddress: "10.0.0.1" });
+    }
+    const aPage = await listAuditPage(userA.id, null, ["key.add", "session.signin"]);
+    expect(aPage.rows.length).toBe(6);
+    const aCursor = encodeCursor(aPage.rows[2]!.createdAt, aPage.rows[2]!.id);
+    // userB queries with userA's cursor + multi-action filter — must
+    // return zero rows. The userId WHERE clause prunes BEFORE the
+    // action filter narrows further. This is the load-bearing P19
+    // assertion under the new multi-action shape.
+    const bPage = await listAuditPage(userB.id, aCursor, ["key.add", "session.signin"]);
+    expect(bPage.rows.length).toBe(0);
   });
 });

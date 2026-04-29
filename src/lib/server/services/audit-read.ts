@@ -1,10 +1,15 @@
-// Audit log READ surface (PRIV-02 — Plan 02-07).
+// Audit log READ surface (PRIV-02 — Plan 02-07; widened Plan 02.1-20).
 //
 // Phase 1 shipped the WRITE side (`src/lib/server/audit.ts` writeAudit only,
 // PITFALL P19 append-only). This service lights up the user-visible read:
 // tuple-comparison cursor pagination, the action filter (single source of
 // truth: `AUDIT_ACTIONS` from src/lib/server/audit/actions.ts), and the DTO
 // projection (toAuditEntryDto in dto.ts).
+//
+// Plan 02.1-20: actionFilter widens from single ("all" | AuditAction) to
+// AuditAction[] (empty array = "all" semantics; 1-element uses eq; 2+ uses
+// inArray). The "all" sentinel is gone — callers pass [] for the no-filter
+// branch. /audit loader passes url.searchParams.getAll("action") directly.
 //
 // Pattern 1 (tenant scope): listAuditPage takes `userId: string` first; the
 // SELECT's WHERE clause begins with `eq(auditLog.userId, userId)`. The custom
@@ -14,17 +19,18 @@
 // preference. Disable comments are NOT allowed.
 //
 // PITFALL P19 mitigation by construction: the userId filter is INDEPENDENT of
-// the cursor. Even if an attacker forges a cursor encoding another tenant's
-// (created_at, id) coordinates, the userId WHERE clause filters to the
-// caller's rows only. The cross-tenant test in tests/integration/audit.test.ts
-// is the runtime assertion.
+// the cursor AND the action filter. Even if an attacker forges a cursor
+// encoding another tenant's (created_at, id) coordinates and a multi-action
+// filter, the userId WHERE clause filters to the caller's rows only. The
+// cross-tenant test in tests/integration/audit.test.ts is the runtime
+// assertion (Plan 02.1-20 extends it to multi-action filters).
 //
 // Cursor format (D-31): base64url(JSON.stringify({at: ISO, id})). Tuple
 // comparison `(created_at, id) < ($1, $2)` is stable under same-millisecond
 // ties: id is UUIDv7 so the (created_at, id) ordering is deterministic and
 // strictly decreasing.
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { auditLog } from "../db/schema/audit-log.js";
 import { AUDIT_ACTIONS, type AuditAction } from "../audit/actions.js";
@@ -37,7 +43,10 @@ export interface AuditPage {
   nextCursor: string | null;
 }
 
-export type AuditActionFilter = "all" | AuditAction;
+// Plan 02.1-20: collapse the "all" sentinel — empty array = "all" semantics.
+// Callers pass AuditAction[] directly. The previous "all" | AuditAction
+// union is gone; all imports updated accordingly (loader passes [], not "all").
+export type AuditActionFilter = AuditAction;
 
 export const PAGE_SIZE = 50;
 
@@ -72,15 +81,12 @@ export function decodeCursor(s: string): { at: Date; id: string } {
 }
 
 /**
- * Defense-in-depth: validate the actionFilter parameter against the
- * AUDIT_ACTIONS const list (single source of truth, D-32). Plan 02-08's
- * route layer also validates via zod against `['all', ...AUDIT_ACTIONS]` —
- * this is the second layer so even a direct service-level call (a future
- * smoke / forensic tool) cannot poison the WHERE clause with an unknown
- * action string.
+ * Defense-in-depth: validate every entry against AUDIT_ACTIONS (single source
+ * of truth, D-32). The /audit loader (Plan 02.1-20) drops invalid entries
+ * silently before reaching here, but a forensic / smoke caller could pass a
+ * forged value directly. Fail closed.
  */
-function assertValidActionFilter(filter: string): asserts filter is AuditActionFilter {
-  if (filter === "all") return;
+function assertValidActionFilter(filter: string): asserts filter is AuditAction {
   if ((AUDIT_ACTIONS as readonly string[]).includes(filter)) return;
   throw new AppError("invalid action filter", "validation_failed", 422);
 }
@@ -94,16 +100,22 @@ function assertValidActionFilter(filter: string): asserts filter is AuditActionF
  * cursor, so a forged cross-tenant cursor returns zero of the other tenant's
  * rows by construction (P19 mitigation).
  *
- * actionFilter='all' lists every action; actionFilter='key.add' (or any
- * AUDIT_ACTIONS member) filters to that single action — uses the
- * (user_id, action, created_at) composite index added by Plan 02-03.
+ * actionFilter semantics (Plan 02.1-20):
+ *   - [] (default) — no action filter; lists every action (the "all" branch).
+ *   - [a] — filters to that single action; uses eq + the (user_id, action,
+ *     created_at) composite index added by Plan 02-03.
+ *   - [a, b, ...] — filters to the OR of the listed actions; uses inArray.
  */
 export async function listAuditPage(
   userId: string,
   cursor: string | null,
-  actionFilter: AuditActionFilter = "all",
+  actionFilter: AuditActionFilter[] = [],
 ): Promise<AuditPage> {
-  assertValidActionFilter(actionFilter);
+  // Defense-in-depth: validate every entry in the array. Plan 02-08's
+  // route layer is gone (Plan 02-10 went direct-service); the loader
+  // now drops invalid entries before reaching here, but a forensic /
+  // smoke caller could pass a forged value. Fail closed.
+  for (const a of actionFilter) assertValidActionFilter(a);
 
   // Decode the cursor ONCE so the SQL builder doesn't re-parse the same
   // string twice (a pure refinement of RESEARCH.md §"Cursor pagination" —
@@ -114,16 +126,27 @@ export async function listAuditPage(
   const cursorClause = parsedCursor
     ? sql`(${auditLog.createdAt}, ${auditLog.id}) < (${parsedCursor.at}, ${parsedCursor.id})`
     : sql`true`;
-  const filterClause =
-    actionFilter === "all" ? sql`true` : eq(auditLog.action, actionFilter);
+
+  // Action-filter clause: 0 = no clause, 1 = eq (cheaper, uses the
+  // (user_id, action, created_at) composite index added by Plan 02-03),
+  // 2+ = inArray (Postgres optimizer flattens to IN(...)).
+  let actionClause;
+  if (actionFilter.length === 0) {
+    actionClause = sql`true`;
+  } else if (actionFilter.length === 1) {
+    actionClause = eq(auditLog.action, actionFilter[0]!);
+  } else {
+    actionClause = inArray(auditLog.action, actionFilter);
+  }
 
   // userId filter is FIRST in `and(...)` — load-bearing for the
   // tenant-scope ESLint rule's structural match and for query-plan
-  // intuition (the index leads with user_id).
+  // intuition (the index leads with user_id). PRIVACY INVARIANT
+  // (CLAUDE.md item 1) preserved by construction.
   const rows = await db
     .select()
     .from(auditLog)
-    .where(and(eq(auditLog.userId, userId), cursorClause, filterClause))
+    .where(and(eq(auditLog.userId, userId), cursorClause, actionClause))
     .orderBy(sql`${auditLog.createdAt} desc, ${auditLog.id} desc`)
     .limit(PAGE_SIZE + 1);
 
