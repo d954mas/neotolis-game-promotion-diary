@@ -14,6 +14,11 @@ declare module "vitest/internal/browser" {
     measureScrollWidth(): Promise<number>;
     measureClientWidth(): Promise<number>;
     currentUrl(): Promise<string>;
+    // Plan 02.1-34 (UAT-NOTES.md §4.22.A regression guard): expose
+    // getComputedStyle(document.body).overflowX so a public-routed test can
+    // assert body's overflow-x is `clip` (not `hidden`) — the load-bearing
+    // distinction that keeps `position: sticky` working on AppHeader.
+    measureBodyOverflowX(): Promise<string>;
   }
 }
 

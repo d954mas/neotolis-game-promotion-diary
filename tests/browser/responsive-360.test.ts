@@ -195,6 +195,85 @@ describe("Plan 02.1-22 — sticky + body-scroll-lock at 360px", () => {
  * 360px-viewport assertions remain stub-skipped pending the Phase 6 auth
  * harness (same precedent as Plans 02.1-18 / 19 / 20 / 21 / 22 / 23 / 24).
  */
+/**
+ * Plan 02.1-34 — sticky AppHeader regression fix at 360px (UAT-NOTES.md §4.22.A).
+ *
+ * Diagnosis (executor 2026-04-29): Plan 02.1-22 added position: sticky; top: 0
+ * on .header in AppHeader.svelte AND a layout-root flex column with min-height
+ * 100vh in +layout.svelte. The sticky scaffold stopped engaging because
+ * src/app.css line 139 set `overflow-x: hidden` on html+body. Per CSS spec,
+ * when `overflow-x: hidden` is paired with `overflow-y: visible`, browsers
+ * coerce `overflow-y` to `auto`, which establishes a scroll container on
+ * <body> — and `position: sticky` on a descendant anchors to the FIRST
+ * scrolling ancestor. With body promoted to a scroll container, the .header
+ * anchored against body (not the viewport), so it scrolled away with content.
+ *
+ * Fix path A: src/app.css line 139 changed from `overflow-x: hidden` to
+ * `overflow-x: clip`. Per CSS spec, `clip` crops overflow WITHOUT establishing
+ * a scroll container; `position: sticky` descendants once again anchor to the
+ * viewport. Supported in Chrome 90+, Firefox 81+, Safari 16+ — well within
+ * the project's modern-browser baseline.
+ *
+ * The test below is PUBLIC-routed: the dashboard "/" loads without auth and
+ * exposes the same html+body styles. It asserts the computed overflow-x on
+ * body is "clip" (not "hidden") — the regression-source guard. The full
+ * end-to-end "scroll feed body 200px → AppHeader.boundingRect.top === 0"
+ * assertion still requires the cookie-injection auth harness deferred to
+ * Phase 6 (same precedent as Plan 02.1-22), so it lives as an `it.skip`
+ * placeholder for grep discoverability.
+ */
+describe("Plan 02.1-34 — sticky AppHeader regression fix (overflow-x clip on body)", () => {
+  it("body computed overflow-x is 'clip' (not 'hidden') — sticky descendants anchor to viewport", async () => {
+    await page.viewport(360, 640);
+    await commands.goto(`${BASE}/`);
+    const overflowX = await commands.measureBodyOverflowX();
+    // `clip` is the load-bearing value: it crops overflow WITHOUT establishing
+    // a scroll container, preserving position: sticky on descendants.
+    // `hidden` (the regression source) would coerce overflow-y to auto and
+    // promote body to a scroll container, breaking sticky anchoring.
+    expect(
+      overflowX,
+      `body computed overflow-x === ${overflowX} — expected 'clip' to preserve sticky descendants (UAT-NOTES.md §4.22.A regression fix)`,
+    ).toBe("clip");
+  });
+
+  it.skip(
+    "/feed AppHeader.boundingRect.top stays 0 after window.scrollTo(0, 200) at 360px (manual UAT — auth harness deferred to Phase 6)",
+  );
+  it.skip(
+    "/sources AppHeader.boundingRect.top stays 0 after window.scrollTo(0, 200) at 360px (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games/[id] AppHeader.boundingRect.top stays 0 after window.scrollTo(0, 200) at 360px (manual UAT — auth harness deferred)",
+  );
+});
+
+/**
+ * Plan 02.1-34 — /audit FiltersSheet has no date axis (UAT-NOTES.md §4.21.A).
+ *
+ * Plan 02.1-21 added `dateRange` (sheet axis label "date") to /audit's
+ * FiltersSheet schema AND added a page-level <DateRangeControl> above
+ * <FilterChips>. Round-4 UAT surfaced the duplication — the user sees the
+ * same date controls in two places. Plan 02.1-34 removes 'date' from
+ * /audit's schema axes; <DateRangeControl> stays as the single source of
+ * truth for date filtering on /audit. /feed FiltersSheet schema is
+ * unchanged (no duplication on /feed — DateRangeControl is the always-
+ * visible primary entry, the in-sheet date axis is the secondary entry
+ * that the user actively wants on /feed per Plan 02.1-21 design).
+ *
+ * Component-level regression guard: tests/integration/audit-render.test.ts
+ * (Plan 02.1-34 describe block) covers the SSR-level assertion that /audit
+ * FiltersSheet renders only the action axis. The browser-mode end-to-end
+ * (open sheet at 360px → only audit_action axis visible) requires the
+ * auth harness deferred to Phase 6 (same precedent as Plans 02.1-18 / 19
+ * / 20 / 21 / 22 / 23 / 24 / 25 / 26).
+ */
+describe("Plan 02.1-34 — /audit FiltersSheet has no date axis", () => {
+  it.skip(
+    "/audit FiltersSheet renders ONLY action axis (no date / source / kind / show / authorIsMe leak) (manual UAT — auth harness deferred to Phase 6)",
+  );
+});
+
 describe("Plan 02.1-25 — PageHeader inline + SourceRow Mine + /games/[id] two-card at 360px", () => {
   it.skip(
     "/feed PageHeader: title + CTA inline on the LEFT (CTA bounding rect.left < 50% viewport) (manual UAT — auth harness deferred)",

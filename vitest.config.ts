@@ -133,6 +133,21 @@ export default defineConfig({
                 };
                 return ctx.page.url();
               },
+              async measureBodyOverflowX(context) {
+                // Plan 02.1-34 (UAT-NOTES.md §4.22.A regression guard): the
+                // load-bearing distinction is `clip` vs `hidden` on body's
+                // computed overflow-x. `hidden` paired with `overflow-y:
+                // visible` coerces overflow-y to `auto` per CSS spec,
+                // promoting body to a scroll container and breaking
+                // position: sticky on AppHeader. `clip` crops without
+                // promoting, preserving sticky.
+                const ctx = context.provider.getCommandsContext(context.sessionId) as {
+                  page: { evaluate: <T>(fn: () => T) => Promise<T> };
+                };
+                return ctx.page.evaluate(
+                  () => window.getComputedStyle(document.body).overflowX,
+                );
+              },
             },
           },
         },

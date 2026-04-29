@@ -64,6 +64,11 @@
   --color-destructive: #b91c1c;
   --color-info: #0891b2;
   --color-success: #15803d;
+  /* Plan 02.1-30 (UAT-NOTES.md §4.25.A): single source of truth for the
+   * Mine accent. Defaults to --color-accent so the existing visual stays
+   * unchanged across FeedCard.mine and SourceRow.mine; can diverge later
+   * if Mine should read distinctly from the generic accent. */
+  --color-mine: var(--color-accent);
 }
 
 /* Color — dark theme (explicit). */
@@ -78,6 +83,8 @@
   --color-destructive: #f87171;
   --color-info: #22d3ee;
   --color-success: #4ade80;
+  /* Plan 02.1-30: Mine accent inherits the dark-theme accent. */
+  --color-mine: var(--color-accent);
 }
 
 /* Color — system theme honors prefers-color-scheme. The light baseline above
@@ -95,6 +102,8 @@
     --color-destructive: #f87171;
     --color-info: #22d3ee;
     --color-success: #4ade80;
+    /* Plan 02.1-30: Mine accent inherits the system-dark accent. */
+    --color-mine: var(--color-accent);
   }
 }
 
@@ -135,8 +144,19 @@ body {
   font-family: var(--font-family-sans);
   font-size: var(--font-size-body);
   line-height: var(--line-height-body);
-  /* UX-02 — no horizontal scroll at 360px. */
-  overflow-x: hidden;
+  /* UX-02 — no horizontal scroll at 360px.
+   *
+   * Plan 02.1-34 (UAT-NOTES.md §4.22.A regression fix): use `overflow-x: clip`
+   * instead of `overflow-x: hidden`. Per CSS spec, when `overflow-x: hidden`
+   * is paired with `overflow-y: visible`, browsers coerce `overflow-y` to
+   * `auto`, which establishes a scroll container on <body> and BREAKS
+   * `position: sticky` on descendants (AppHeader.svelte and per-page sticky
+   * CTAs anchored against the layout-root flex column). `overflow-x: clip`
+   * crops the same overflow without establishing a scroll container, so
+   * sticky descendants continue to anchor against the viewport. Supported in
+   * Chrome 90+, Firefox 81+, Safari 16+ — well within the project's
+   * modern-browser baseline. */
+  overflow-x: clip;
 }
 
 /* Defeat default flex/grid `min-width: auto` so children at 360px don't
