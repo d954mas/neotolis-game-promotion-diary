@@ -1,67 +1,121 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createGame } from "../../src/lib/server/services/games.js";
-import {
-  createChannel,
-  attachToGame,
-  listChannelsForGame,
-} from "../../src/lib/server/services/youtube-channels.js";
 import { seedUserDirectly } from "./helpers.js";
-import { NotFoundError } from "../../src/lib/server/services/errors.js";
 
 /**
- * Plan 02-04 — GAMES-04a live integration tests for the M:N attach
- * (game ↔ youtube-channels). Placeholder it.skip stubs from Plan 02-01
- * are flipped to `it(...)` here.
+ * Plan 02-04 — GAMES-04a integration tests for `youtube-channels` were
+ * retired in Plan 02.1-01 baseline collapse (the per-platform table was
+ * dropped in favor of `data_sources`). The original Phase 2 attach tests
+ * lived in this file; their service imports are gone post-2.1, so the
+ * file now hosts the Plan 02.1-25 round-3 closure for Steam listing
+ * `name` persistence. Cross-tenant ownership of Steam listings stays
+ * exercised in `tests/integration/games.test.ts` and the cross-tenant
+ * matrix in `tests/integration/tenant-scope.test.ts`.
  */
-describe("game ↔ youtube-channels link (GAMES-04a)", () => {
-  it("02-04: GAMES-04a attach youtube channel", async () => {
-    const userA = await seedUserDirectly({ email: "ch1-a@test.local" });
-    const game = await createGame(userA.id, { title: "G1" }, "127.0.0.1");
-    const channel = await createChannel(userA.id, {
-      handleUrl: "https://www.youtube.com/@SoloDev",
-      isOwn: true,
-    });
 
-    await attachToGame(userA.id, game.id, channel.id);
+// Plan 02.1-25 — Steam listing `name` persistence.
+//
+// Round-3 UAT §3.3-polish: user wants the game's Steam name visible on
+// /games/[id] (not just `App {id}`) plus an "Open on Steam" link. This
+// test covers the data layer: addSteamListing populates the new `name`
+// column from the Steam appdetails fetch; toGameSteamListingDto projects
+// it; on Steam-down the column stays NULL (UI fallback to "App {id}"
+// renders correctly via SteamListingRow).
+//
+// We mock fetchSteamAppDetails via vi.mock so the test does not call the
+// public Steam endpoint (deterministic + no rate-limit risk).
+vi.mock("../../src/lib/server/integrations/steam-api.js", () => ({
+  fetchSteamAppDetails: vi.fn(),
+}));
 
-    const linked = await listChannelsForGame(userA.id, game.id);
-    expect(linked).toHaveLength(1);
-    expect(linked[0]!.id).toBe(channel.id);
-    expect(linked[0]!.handleUrl).toBe("https://www.youtube.com/@SoloDev");
-    expect(linked[0]!.isOwn).toBe(true);
+// Re-import after the mock is registered.
+const { addSteamListing, listListings } = await import(
+  "../../src/lib/server/services/game-steam-listings.js"
+);
+const { toGameSteamListingDto } = await import("../../src/lib/server/dto.js");
+const { fetchSteamAppDetails } = await import(
+  "../../src/lib/server/integrations/steam-api.js"
+);
+
+describe("Plan 02.1-25 — Steam listing name persistence", () => {
+  beforeEach(() => {
+    vi.mocked(fetchSteamAppDetails).mockReset();
   });
 
-  it("02-04: GAMES-04a multiple channels per game (M:N)", async () => {
-    const userA = await seedUserDirectly({ email: "ch2-a@test.local" });
-    const game = await createGame(userA.id, { title: "G2" }, "127.0.0.1");
-    const c1 = await createChannel(userA.id, { handleUrl: "https://www.youtube.com/@A" });
-    const c2 = await createChannel(userA.id, { handleUrl: "https://www.youtube.com/@B" });
-
-    await attachToGame(userA.id, game.id, c1.id);
-    await attachToGame(userA.id, game.id, c2.id);
-
-    const all = await listChannelsForGame(userA.id, game.id);
-    expect(all.map((c) => c.id).sort()).toEqual([c1.id, c2.id].sort());
-
-    // Third attach with the same channel — UNIQUE(game_id, channel_id) rejects.
-    await expect(attachToGame(userA.id, game.id, c1.id)).rejects.toThrow(/unique|duplicate/i);
+  afterEach(() => {
+    vi.mocked(fetchSteamAppDetails).mockReset();
   });
 
-  it("02-04: cross-tenant attachToGame returns NotFoundError (404, not 403)", async () => {
-    const userA = await seedUserDirectly({ email: "ct-list-a@test.local" });
-    const userB = await seedUserDirectly({ email: "ct-list-b@test.local" });
-    const aGame = await createGame(userA.id, { title: "A's Game" }, "127.0.0.1");
-    const bChannel = await createChannel(userB.id, {
-      handleUrl: "https://www.youtube.com/@BBlogger",
+  it("addSteamListing persists Steam name when fetchSteamAppDetails returns success", async () => {
+    vi.mocked(fetchSteamAppDetails).mockResolvedValueOnce({
+      appId: 620,
+      name: "Portal 2",
+      coverUrl: "https://shared.akamai.steamstatic.com/.../header.jpg",
+      releaseDate: "Apr 19, 2011",
+      comingSoon: false,
+      genres: ["Action", "Adventure"],
+      categories: ["Single-player", "Multi-player"],
+      raw: { name: "Portal 2" },
     });
 
-    // user B trying to attach their own channel to user A's game → NotFoundError on game lookup.
-    await expect(attachToGame(userB.id, aGame.id, bChannel.id)).rejects.toBeInstanceOf(
-      NotFoundError,
+    const userA = await seedUserDirectly({ email: "p25-a@test.local" });
+    const game = await createGame(userA.id, { title: "Hosted" }, "127.0.0.1");
+
+    const row = await addSteamListing(userA.id, { gameId: game.id, appId: 620 }, "127.0.0.1");
+
+    expect(row.name).toBe("Portal 2");
+
+    const dto = toGameSteamListingDto(row);
+    expect(dto.name).toBe("Portal 2");
+    // P3 discipline: userId never crosses the projection boundary.
+    expect(dto).not.toHaveProperty("userId");
+  });
+
+  it("addSteamListing leaves name NULL when fetchSteamAppDetails returns null (Steam down)", async () => {
+    vi.mocked(fetchSteamAppDetails).mockResolvedValueOnce(null);
+
+    const userA = await seedUserDirectly({ email: "p25-b@test.local" });
+    const game = await createGame(userA.id, { title: "Steam-down case" }, "127.0.0.1");
+
+    const row = await addSteamListing(
+      userA.id,
+      { gameId: game.id, appId: 99999 },
+      "127.0.0.1",
     );
-    // user A trying to attach user B's channel to user A's game → NotFoundError on channel lookup.
-    await expect(attachToGame(userA.id, aGame.id, bChannel.id)).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
+
+    expect(row.name).toBeNull();
+    expect(row.coverUrl).toBeNull();
+    expect(row.comingSoon).toBe("unavailable");
+
+    const dto = toGameSteamListingDto(row);
+    expect(dto.name).toBeNull();
+  });
+
+  it("listListings returns name for both populated and NULL rows (mixed-state forward-compat)", async () => {
+    vi.mocked(fetchSteamAppDetails)
+      .mockResolvedValueOnce({
+        appId: 1145360,
+        name: "HADES",
+        coverUrl: "https://shared.akamai.steamstatic.com/header_hades.jpg",
+        releaseDate: "Sep 17, 2020",
+        comingSoon: false,
+        genres: [],
+        categories: [],
+        raw: {},
+      })
+      .mockResolvedValueOnce(null);
+
+    const userA = await seedUserDirectly({ email: "p25-c@test.local" });
+    const game = await createGame(userA.id, { title: "Mixed" }, "127.0.0.1");
+
+    await addSteamListing(userA.id, { gameId: game.id, appId: 1145360 }, "127.0.0.1");
+    await addSteamListing(userA.id, { gameId: game.id, appId: 31337 }, "127.0.0.1");
+
+    const rows = await listListings(userA.id, game.id);
+    const dtos = rows.map((r) => toGameSteamListingDto(r));
+    const byApp = new Map(dtos.map((d) => [d.appId, d]));
+
+    expect(byApp.get(1145360)?.name).toBe("HADES");
+    expect(byApp.get(31337)?.name).toBeNull();
   });
 });
