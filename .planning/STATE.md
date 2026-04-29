@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02.1-18-PLAN.md (edit-flow rebuild — pencil moves from FeedCard to /events/[id] detail; new /events/[id]/edit route ships with author_is_me checkbox; FeedCard becomes pure preview tile; /events/new gains author_is_me checkbox + visible Mine badge on FeedCard). Round-2 UAT gap 'edit flow rebuild' closed. Plan 02.1-20 next.
-last_updated: "2026-04-29T09:34:49.836Z"
+stopped_at: Completed 02.1-20-PLAN.md (last round-2 UAT polish batch — alphabetical sort / hide non-functional kinds / remove date explainer / /audit filter UX rewrite via FilterChips+FiltersSheet+\"action\" axis extension). Phase 2.1 round-2 cleanup is COMPLETE. /audit and /feed now share the same filter UX language. Plan 02.1-10 (UAT checkpoint) is the last incomplete plan.
+last_updated: "2026-04-29T09:57:42.760Z"
 last_activity: 2026-04-29
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 41
-  completed_plans: 39
+  completed_plans: 40
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 4 of 20
+Plan: 5 of 20
 
 ## Performance Metrics
 
@@ -83,6 +83,7 @@ Plan: 4 of 20
 | Phase 02.1-architecture-realignment P17 | 12min | 2 tasks | 7 files |
 | Phase 02.1 P19 | 16m 22s | 10 tasks | 19 files |
 | Phase 02.1-architecture-realignment P18 | 9min 22s | 5 tasks | 10 files |
+| Phase 02.1 P20 | ~17min 37s | 5 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -212,6 +213,11 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-18: /events/[id] replaces Phase-4 stub with full detail (KindIcon + title + chips + notes + Open external + Edit pencil + Delete with ConfirmDialog + Restore-when-soft-deleted + inline Phase-4 chart placeholder); CONTEXT D-07 spirit preserved by anchoring LayerChart slot inline. /events/[id]/edit ships as new route mirroring /events/new shape PLUS author_is_me checkbox; PATCH /api/events/:id round-trip via Plan 02.1-17 schema; gameId routed through /api/events/:id/attach (Pitfall 4 — game-ownership validation lives in attach endpoint)
 - [Phase 02.1-architecture-realignment]: Plan 02.1-18: getEventById gains optional { includeSoftDeleted?: boolean } opt — flag toggles deletedAt filter only; userId WHERE clause is unchanged so cross-tenant scope preserved by query construction (Test 2 verifies user B asking for user A's soft-deleted row still 404s); default behavior unchanged for existing callers (Plan 02.1-09 stub loader, Plan 02.1-14 restore service)
 - [Phase 02.1-architecture-realignment]: Plan 02.1-18: feed_card_author_is_me_badge ('Mine') is a NEW Paraglide key distinct from sources_owned_by_me — same English copy, different contexts (feed-tile-context label vs /sources page row descriptor); two contexts, two keys (UI-SPEC §'Note on m.common_cancel()' precedent for context-scoped keys)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-20: sortByLabel utility uses Intl.Collator(undefined, {sensitivity: 'base'}) for locale-stable accent-insensitive primary collation; non-mutating spread + sort; $derived re-runs on locale change without cache invalidation
+- [Phase 02.1-architecture-realignment]: Plan 02.1-20: functional-only kind allowlist (UI-gate only — schema/enum unchanged); FUNCTIONAL_KINDS in /events/new + FUNCTIONAL_KIND_OPTIONS in FiltersSheet; FilterChips kindLabel switch retains all 10 cases for back-compat with legacy rows
+- [Phase 02.1-architecture-realignment]: Plan 02.1-20: AuditActionFilter narrowed from 'all'|AuditAction to AuditAction (no sentinel); empty array is the new 'all' semantics; SQL clause branches over array length (0→sql`true`, 1→eq, 2+→inArray); userId WHERE clause STAYS first in and(...) by construction
+- [Phase 02.1-architecture-realignment]: Plan 02.1-20: vitest $lib alias added to resolve.alias for unit/integration/browser projects; fixes Plan 02.1-11 audit-render.test.ts latent loading issue (any test SSR-rendering a component with $lib/* imports needed the alias); also fixes the chip-match regex for Svelte 5 SSR scoped class output (<span class='chip svelte-XXXXX'>) — both Plan 02.1-11 latent bugs surfaced + fixed in one motion
+- [Phase 02.1-architecture-realignment]: Plan 02.1-20: /audit URL contract switches from ?action=A to ?action=A&action=B repeated params (mirrors /feed multi-select convention from Plan 02.1-15); pre-launch (CONTEXT D-04) so destructive change is OK; old single-value URLs still work via single-element array eq() branch; old ?action=all URLs fall through forgiving-GET (filtered out by VALID_ACTIONS) without leak
 
 ### Pending Todos
 
@@ -251,8 +257,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-29T09:34:49.830Z
+Last session: 2026-04-29T09:57:42.755Z
 Last Activity: 2026-04-29
-Stopped at: Completed 02.1-18-PLAN.md (edit-flow rebuild — pencil moves from FeedCard to /events/[id] detail; new /events/[id]/edit route ships with author_is_me checkbox; FeedCard becomes pure preview tile; /events/new gains author_is_me checkbox + visible Mine badge on FeedCard). Round-2 UAT gap 'edit flow rebuild' closed. Plan 02.1-20 next.
+Stopped at: Completed 02.1-20-PLAN.md (last round-2 UAT polish batch — alphabetical sort / hide non-functional kinds / remove date explainer / /audit filter UX rewrite via FilterChips+FiltersSheet+\"action\" axis extension). Phase 2.1 round-2 cleanup is COMPLETE. /audit and /feed now share the same filter UX language. Plan 02.1-10 (UAT checkpoint) is the last incomplete plan.
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
