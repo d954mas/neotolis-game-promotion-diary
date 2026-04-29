@@ -16,7 +16,7 @@
   // notes }. On 201 → goto("/feed") so the user sees their event in the
   // chronological pool. On 422 → InlineError.
 
-  import { goto } from "$app/navigation";
+  import { goto, invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "$lib/components/InlineError.svelte";
   import type { PageData } from "./$types";
@@ -105,6 +105,11 @@
             : m.error_server_generic();
         return;
       }
+      // Plan 02.1-19: invalidateAll() forces SvelteKit to re-run /feed's
+      // +page.server.ts loader after the POST succeeds. Without this, /feed
+      // shows stale data and the user must hard-refresh to see the new
+      // event (UAT round-2 gap "feed loader stale after POST /api/events").
+      await invalidateAll();
       await goto("/feed");
     } catch {
       errorText = m.error_network();
