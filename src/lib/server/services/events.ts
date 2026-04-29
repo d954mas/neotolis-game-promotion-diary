@@ -578,12 +578,16 @@ export async function listEventsForGame(
 }
 
 /**
- * Read one event scoped to userId. Soft-deleted rows count as missing.
- * Cross-tenant access throws NotFoundError (PRIV-01: 404, never 403).
+ * Read one event scoped to userId. Soft-deleted rows count as missing by
+ * default. Pass `{ includeSoftDeleted: true }` (Plan 02.1-18) to surface
+ * soft-deleted rows for the Restore flow on /events/[id]?deleted=1 — the
+ * userId WHERE clause is unaffected so cross-tenant access still throws
+ * NotFoundError regardless of the opts flag (PRIV-01: 404, never 403).
  */
 export async function getEventById(
   userId: string,
   eventId: string,
+  opts?: { includeSoftDeleted?: boolean },
 ): Promise<EventRow> {
   const rows = await db
     .select()
@@ -591,7 +595,8 @@ export async function getEventById(
     .where(and(eq(events.userId, userId), eq(events.id, eventId)))
     .limit(1);
   const row = rows[0];
-  if (!row || row.deletedAt !== null) throw new NotFoundError();
+  if (!row) throw new NotFoundError();
+  if (row.deletedAt !== null && !opts?.includeSoftDeleted) throw new NotFoundError();
   return row;
 }
 

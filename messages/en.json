@@ -169,8 +169,13 @@
 
   "appheader_account_menu_aria": "Account menu — {email}",
 
+  "events_detail_delete": "Delete",
+  "events_detail_edit": "Edit",
+  "events_detail_open_original": "Open original",
   "events_detail_phase4_heading": "Detail page lands in Phase 4",
   "events_detail_phase4_body": "Graphs and per-event metric history arrive in Phase 4 with VIZ-01 (LayerChart-driven event detail). For now, head back to your feed.",
+  "events_detail_phase4_chart_placeholder": "VIZ-01 lands in Phase 4 — view-count and engagement charts will render here once the polling worker ships.",
+  "events_detail_restore": "Restore",
 
   "events_new_date_today": "Today",
   "events_new_date_yesterday": "Yesterday",
