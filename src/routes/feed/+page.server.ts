@@ -80,15 +80,24 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   // Plan 02.1-19: ?show=any|inbox|specific URL contract. Default = "any".
   // Any other value (including null / unrecognized) falls back to "any" so a
   // malformed URL doesn't 500 — the chip strip will simply show no Show chip.
+  // Plan 02.1-24: adds 'standalone' for the new triage-state filter.
   const showParam = url.searchParams.get("show") ?? "any";
-  const showKind: "any" | "inbox" | "specific" =
-    showParam === "inbox" ? "inbox" : showParam === "specific" ? "specific" : "any";
+  const showKind: "any" | "inbox" | "standalone" | "specific" =
+    showParam === "inbox"
+      ? "inbox"
+      : showParam === "standalone"
+        ? "standalone"
+        : showParam === "specific"
+          ? "specific"
+          : "any";
   const showFilter: ShowFilter =
     showKind === "inbox"
       ? { kind: "inbox" }
-      : showKind === "specific"
-        ? { kind: "specific", gameIds: gameList }
-        : { kind: "any" };
+      : showKind === "standalone"
+        ? { kind: "standalone" }
+        : showKind === "specific"
+          ? { kind: "specific", gameIds: gameList }
+          : { kind: "any" };
 
   const filters: FeedFilters = {
     source: sourceList.length > 0 ? sourceList : undefined,
@@ -134,12 +143,15 @@ export const load: PageServerLoad = async ({ locals, url }) => {
       source: sourceList,
       kind: kindList,
       // Plan 02.1-19: merged 'show' axis replaces game + attached pair.
+      // Plan 02.1-24: adds 'standalone' branch.
       show:
         showKind === "inbox"
           ? { kind: "inbox" as const }
-          : showKind === "specific"
-            ? { kind: "specific" as const, gameIds: gameList }
-            : { kind: "any" as const },
+          : showKind === "standalone"
+            ? { kind: "standalone" as const }
+            : showKind === "specific"
+              ? { kind: "specific" as const, gameIds: gameList }
+              : { kind: "any" as const },
       authorIsMe: filters.authorIsMe,
       from: filters.from ? filters.from.toISOString().slice(0, 10) : undefined,
       to: filters.to ? filters.to.toISOString().slice(0, 10) : undefined,

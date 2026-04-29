@@ -63,6 +63,8 @@ import {
   dismissFromInbox,
   listDeletedEvents,
   restoreEvent,
+  markStandalone,
+  unmarkStandalone,
   VALID_EVENT_KINDS,
   type ShowFilter,
 } from "../../services/events.js";
@@ -166,7 +168,8 @@ const feedQuerySchema = z.object({
   cursor: z.string().optional(),
   // Plan 02.1-19: ?show replaces ?attached. ?attached is no longer recognized
   // (pre-launch destructive contract change — CONTEXT D-04).
-  show: z.enum(["any", "inbox", "specific"]).optional(),
+  // Plan 02.1-24: adds 'standalone' branch for the new triage state.
+  show: z.enum(["any", "inbox", "standalone", "specific"]).optional(),
   authorIsMe: z.enum(["true", "false"]).optional(),
   from: z.string().optional(),
   to: z.string().optional(),
@@ -243,13 +246,17 @@ eventsRoutes.get(
     // Plan 02.1-19: discriminated show axis replaces attached + game pair.
     // A bare ?game= without ?show=specific is ignored — the UI never produces
     // that combo.
+    // Plan 02.1-24: adds 'standalone' branch (game_id IS NULL AND
+    // metadata.triage.standalone='true').
     const showParam = q.show ?? "any";
     const showFilter: ShowFilter =
       showParam === "inbox"
         ? { kind: "inbox" }
-        : showParam === "specific"
-          ? { kind: "specific", gameIds: gameList }
-          : { kind: "any" };
+        : showParam === "standalone"
+          ? { kind: "standalone" }
+          : showParam === "specific"
+            ? { kind: "specific", gameIds: gameList }
+            : { kind: "any" };
     try {
       const page = await listFeedPage(
         c.var.userId,
@@ -430,5 +437,42 @@ eventsRoutes.patch("/events/:id/restore", async (c) => {
     return c.json(toEventDto(ev));
   } catch (err) {
     return mapErr(c, err, "PATCH /api/events/:id/restore");
+  }
+});
+
+// Plan 02.1-24 (round-3 gap closure — UAT-NOTES.md §6.1-redesign) —
+// markStandalone + unmarkStandalone triage routes. The user explicitly asked
+// for an inline "Mark standalone" affordance on inbox cards (the explicit
+// exception to Plan 02.1-18's read-only contract). Cross-tenant returns 404
+// by construction (the service's UPDATE WHERE clause requires the userId
+// match; B's session never satisfies it); mapErr translates NotFoundError to
+// {error: "not_found"} status 404 (PRIV-01 / CLAUDE.md rule 2).
+eventsRoutes.patch("/events/:id/mark-standalone", async (c) => {
+  const ctx = getAuditContext(c);
+  try {
+    const ev = await markStandalone(
+      ctx.userId,
+      c.req.param("id"),
+      ctx.ipAddress,
+      ctx.userAgent ?? undefined,
+    );
+    return c.json(toEventDto(ev));
+  } catch (err) {
+    return mapErr(c, err, "PATCH /api/events/:id/mark-standalone");
+  }
+});
+
+eventsRoutes.patch("/events/:id/unmark-standalone", async (c) => {
+  const ctx = getAuditContext(c);
+  try {
+    const ev = await unmarkStandalone(
+      ctx.userId,
+      c.req.param("id"),
+      ctx.ipAddress,
+      ctx.userAgent ?? undefined,
+    );
+    return c.json(toEventDto(ev));
+  } catch (err) {
+    return mapErr(c, err, "PATCH /api/events/:id/unmark-standalone");
   }
 });

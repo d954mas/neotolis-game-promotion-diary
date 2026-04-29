@@ -121,6 +121,7 @@
   type ShowFilter =
     | { kind: "any" }
     | { kind: "inbox" }
+    | { kind: "standalone" }
     | { kind: "specific"; gameIds: string[] };
 
   function applyFiltersFromSheet(next: {
@@ -168,6 +169,9 @@
     const show: ShowFilter = next.show ?? { kind: "any" };
     if (show.kind === "inbox") {
       params.set("show", "inbox");
+    } else if (show.kind === "standalone") {
+      // Plan 02.1-24: standalone filter axis.
+      params.set("show", "standalone");
     } else if (show.kind === "specific") {
       params.set("show", "specific");
       for (const v of show.gameIds) params.append("game", v);

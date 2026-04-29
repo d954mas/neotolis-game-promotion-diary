@@ -69,6 +69,10 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     "/api/events/:id/attach",
     "/api/events/:id/dismiss-inbox",
     "/api/events/:id/restore",
+    // Plan 02.1-24 (round-3 gap closure — UAT-NOTES.md §6.1-redesign):
+    // markStandalone + unmarkStandalone triage routes.
+    "/api/events/:id/mark-standalone",
+    "/api/events/:id/unmark-standalone",
     "/api/games/:gameId/events",
     // Phase 2 — audit
     "/api/audit",
@@ -202,6 +206,22 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
 
   it("Plan 02.1-14: anonymous PATCH /api/events/:id/restore returns 401 unauthorized", async () => {
     const res = await app.request("/api/events/fixture-id/restore", {
+      method: "PATCH",
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-24: anonymous PATCH /api/events/:id/mark-standalone returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events/fixture-id/mark-standalone", {
+      method: "PATCH",
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-24: anonymous PATCH /api/events/:id/unmark-standalone returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events/fixture-id/unmark-standalone", {
       method: "PATCH",
     });
     expect(res.status).toBe(401);

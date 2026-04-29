@@ -116,10 +116,17 @@ export interface PasteInput {
  * construction (FiltersSheet renders one 3-radio for "Show: Any/Inbox/
  * Specific games"); the backend mirrors that constraint by replacing two
  * orthogonal filters with one tagged shape.
+ *
+ * Plan 02.1-24 (UAT-NOTES.md §6.1-redesign): adds the `standalone` branch
+ * for the new "not related to any game" triage state. Standalone events
+ * have game_id IS NULL AND metadata.triage.standalone='true'. The Show
+ * fieldset's 4-option radio (Any / Inbox / Standalone / Specific) cannot
+ * represent invalid combinations by construction.
  */
 export type ShowFilter =
   | { kind: "any" }
   | { kind: "inbox" }
+  | { kind: "standalone" }
   | { kind: "specific"; gameIds: string[] };
 
 export interface FeedFilters {
@@ -839,6 +846,23 @@ export async function listFeedPage(
     filterParts.push(
       sql`COALESCE(${events.metadata}->'inbox'->>'dismissed', 'false') = 'false'`,
     );
+    // Plan 02.1-24 (UAT-NOTES.md §6.1-redesign): inbox view ALSO excludes
+    // standalone events. "Standalone" is a separate triage state — the
+    // user has explicitly said the event is not related to any game, so
+    // it does NOT belong in the inbox awaiting triage.
+    filterParts.push(
+      sql`COALESCE(${events.metadata}->'triage'->>'standalone', 'false') = 'false'`,
+    );
+  } else if (filters.show?.kind === "standalone") {
+    // Plan 02.1-24: standalone view = events the user explicitly marked
+    // "not related to any game". game_id IS NULL by construction (the
+    // markStandalone service detaches the game at the same time it sets
+    // the flag); the metadata.triage.standalone clause is what
+    // distinguishes standalone from plain inbox.
+    filterParts.push(isNull(events.gameId) as SQL);
+    filterParts.push(
+      sql`COALESCE(${events.metadata}->'triage'->>'standalone', 'false') = 'true'`,
+    );
   } else if (filters.show?.kind === "specific") {
     if (filters.show.gameIds.length === 1) {
       filterParts.push(eq(events.gameId, filters.show.gameIds[0]!) as SQL);
@@ -986,6 +1010,127 @@ export async function dismissFromInbox(
   await writeAudit({
     userId,
     action: "event.dismissed_from_inbox",
+    ipAddress,
+    userAgent,
+    metadata: { event_id: row.id, kind: row.kind },
+  });
+
+  return row;
+}
+
+/**
+ * markStandalone — set metadata.triage.standalone=true AND detach the event
+ * from any game (game_id=null). Plan 02.1-24 (UAT-NOTES.md §6.1-redesign).
+ * The user has explicitly said this event is not related to any game; the
+ * /feed view dims standalone events (FeedCard opacity 0.55) so they don't
+ * distract from game-tied events.
+ *
+ * Tenant scope (CLAUDE.md invariant 1): userId-first; the UPDATE WHERE
+ * clause `eq(events.userId, userId) AND eq(events.id, eventId)` ensures
+ * cross-tenant attempts return zero rows and surface as NotFoundError →
+ * 404 at the HTTP boundary (CLAUDE.md invariant 2: 404, never 403).
+ *
+ * Idempotency: jsonb_set with create_missing=true is idempotent. Calling
+ * markStandalone twice in a row is safe — both calls succeed; both write
+ * fresh audit rows (mirroring the dismissFromInbox precedent — Plan 02.1-05).
+ *
+ * Audit (CLAUDE.md invariant 4): writes `event.marked_standalone` AFTER the
+ * UPDATE succeeds. Ordering rationale: NotFoundError fires BEFORE writeAudit
+ * so a cross-tenant attempt does not generate a misleading audit trail
+ * (mirrors restoreEvent — Plan 02.1-14 — for non-destructive triage).
+ */
+export async function markStandalone(
+  userId: string,
+  eventId: string,
+  ipAddress: string,
+  userAgent?: string,
+): Promise<EventRow> {
+  // Two nested jsonb_set calls: outer creates `triage` parent; inner sets
+  // `triage.standalone=true`. Mirrors dismissFromInbox's nested-jsonb_set
+  // pattern so a future metadata.triage.* sibling key (e.g., a flagged-as-
+  // duplicate marker) won't collide. Also detaches gameId=null in the same
+  // UPDATE — standalone implies "not tied to any game" by definition.
+  const [row] = await db
+    .update(events)
+    .set({
+      gameId: null,
+      metadata: sql`jsonb_set(
+        jsonb_set(
+          COALESCE(${events.metadata}, '{}'::jsonb),
+          '{triage}',
+          COALESCE(${events.metadata}->'triage', '{}'::jsonb),
+          true
+        ),
+        '{triage,standalone}',
+        'true'::jsonb,
+        true
+      )`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(events.userId, userId),
+        eq(events.id, eventId),
+        isNull(events.deletedAt),
+      ),
+    )
+    .returning();
+  if (!row) throw new NotFoundError();
+
+  await writeAudit({
+    userId,
+    action: "event.marked_standalone",
+    ipAddress,
+    userAgent,
+    metadata: { event_id: row.id, kind: row.kind },
+  });
+
+  return row;
+}
+
+/**
+ * unmarkStandalone — clear metadata.triage.standalone (set to false). Plan
+ * 02.1-24. Restores the event to plain inbox state (game_id remains null;
+ * the user can re-attach via /events/[id]/edit if they change their mind).
+ *
+ * Tenant scope + audit ordering match markStandalone exactly. Audit verb is
+ * `event.unmarked_standalone`.
+ */
+export async function unmarkStandalone(
+  userId: string,
+  eventId: string,
+  ipAddress: string,
+  userAgent?: string,
+): Promise<EventRow> {
+  const [row] = await db
+    .update(events)
+    .set({
+      metadata: sql`jsonb_set(
+        jsonb_set(
+          COALESCE(${events.metadata}, '{}'::jsonb),
+          '{triage}',
+          COALESCE(${events.metadata}->'triage', '{}'::jsonb),
+          true
+        ),
+        '{triage,standalone}',
+        'false'::jsonb,
+        true
+      )`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(events.userId, userId),
+        eq(events.id, eventId),
+        isNull(events.deletedAt),
+      ),
+    )
+    .returning();
+  if (!row) throw new NotFoundError();
+
+  await writeAudit({
+    userId,
+    action: "event.unmarked_standalone",
     ipAddress,
     userAgent,
     metadata: { event_id: row.id, kind: row.kind },

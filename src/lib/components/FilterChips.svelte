@@ -23,6 +23,7 @@
   type ShowFilter =
     | { kind: "any" }
     | { kind: "inbox" }
+    | { kind: "standalone" }
     | { kind: "specific"; gameIds: string[] };
 
   type ActiveFilters = {
@@ -188,6 +189,10 @@
       if (filters.show.kind === "inbox") {
         const label = `${m.feed_chip_axis_show()}: ${m.feed_filter_show_inbox()}`;
         out.push({ axis: "show", label, ariaName: label, key: "axis:show:inbox" });
+      } else if (filters.show.kind === "standalone") {
+        // Plan 02.1-24: standalone triage state chip.
+        const label = `${m.feed_chip_axis_show()}: ${m.feed_filter_show_standalone()}`;
+        out.push({ axis: "show", label, ariaName: label, key: "axis:show:standalone" });
       } else if (filters.show.kind === "specific" && filters.show.gameIds.length > 0) {
         const labels = filters.show.gameIds
           .map((id) => {

@@ -180,9 +180,45 @@
 
   const isInboxRow = $derived.by((): boolean => {
     if (event.gameId !== null) return false;
-    const md = event.metadata as { inbox?: { dismissed?: boolean } } | null | undefined;
-    return md?.inbox?.dismissed !== true;
+    const md = event.metadata as
+      | { inbox?: { dismissed?: boolean }; triage?: { standalone?: boolean } }
+      | null
+      | undefined;
+    if (md?.inbox?.dismissed === true) return false;
+    // Plan 02.1-24: standalone events are NOT inbox rows — they have a
+    // separate triage state. The inline "Mark standalone" button only
+    // appears on plain inbox cards (not on already-standalone ones).
+    if (md?.triage?.standalone === true) return false;
+    return true;
   });
+
+  // Plan 02.1-24 (UAT-NOTES.md §6.1-redesign): standalone events render dimmed
+  // in /feed (opacity 0.55) so they don't distract from game-tied events.
+  // The user-explicit "not related to any game" state surfaces as a visible
+  // muting in the timeline.
+  const isStandalone = $derived.by((): boolean => {
+    const md = event.metadata as { triage?: { standalone?: boolean } } | null | undefined;
+    return md?.triage?.standalone === true;
+  });
+
+  // Plan 02.1-24: inline "Mark standalone" handler. Calls the new HTTP
+  // endpoint then bubbles onChanged() so /feed's invalidateAll() re-runs the
+  // loader. The button is the EXPLICIT user-accepted exception to Plan
+  // 02.1-18's read-only-tile contract (UAT round-3 user direction). Errors
+  // are swallowed silently in 2.1; phase 6 polish may surface a toast.
+  let markingStandalone = $state(false);
+  async function markStandaloneClick(): Promise<void> {
+    if (markingStandalone) return;
+    markingStandalone = true;
+    try {
+      const res = await fetch(`/api/events/${event.id}/mark-standalone`, {
+        method: "PATCH",
+      });
+      if (res.ok) onChanged?.();
+    } finally {
+      markingStandalone = false;
+    }
+  }
 
   const pollingForBadge = $derived({
     kind: event.kind,
@@ -190,7 +226,12 @@
   });
 </script>
 
-<article class="feed-card" class:mine={event.authorIsMe} data-kind={event.kind}>
+<article
+  class="feed-card"
+  class:mine={event.authorIsMe}
+  class:standalone={isStandalone}
+  data-kind={event.kind}
+>
   <a class="card-body" href={`/events/${event.id}`}>
     <div class="media">
       {#if thumbnailUrl}
@@ -257,6 +298,21 @@
 
   <div class="picker-line">
     <AttachToGamePicker {event} {games} onChanged={() => onChanged?.()} />
+    {#if isInboxRow}
+      <!-- Plan 02.1-24 (UAT-NOTES.md §6.1-redesign): inline "Mark standalone"
+           triage button on inbox cards ONLY. EXPLICIT exception to the
+           Plan 02.1-18 read-only-tile contract — accepted by the user
+           during round-3 UAT. Outside the wrapping <a> so its onclick
+           doesn't trigger card navigation. -->
+      <button
+        type="button"
+        class="standalone-button"
+        onclick={markStandaloneClick}
+        disabled={markingStandalone}
+      >
+        {m.feed_card_mark_standalone_button()}
+      </button>
+    {/if}
   </div>
 </article>
 
@@ -287,6 +343,14 @@
    * "C and A combined". */
   .feed-card.mine {
     border-left: 4px solid var(--color-accent);
+  }
+  /* Plan 02.1-24 (UAT-NOTES.md §6.1-redesign): standalone events render
+   * dimmed in /feed so they don't distract from game-tied events. User
+   * quote: "такие не связанные с игрой, нужно как-то затемнять, чтобы они
+   * не мешали". The reduced opacity is purely visual — the card remains
+   * clickable + the wrapping <a> still navigates to /events/[id]. */
+  .feed-card.standalone {
+    opacity: 0.55;
   }
   .card-body {
     display: flex;
@@ -436,6 +500,28 @@
   .picker-line {
     display: flex;
     align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
     min-width: 0;
+  }
+  /* Plan 02.1-24: inline "Mark standalone" triage button. Visual style
+   * mirrors the AttachToGamePicker trigger (subtle ghost button) so the
+   * two affordances read as a triage pair on inbox cards. */
+  .standalone-button {
+    min-height: 44px;
+    padding: 0 var(--space-md);
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    font-size: var(--font-size-label);
+    cursor: pointer;
+  }
+  .standalone-button:hover:not(:disabled) {
+    background: var(--color-bg);
+  }
+  .standalone-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 </style>

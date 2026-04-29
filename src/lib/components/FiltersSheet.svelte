@@ -41,6 +41,7 @@
   type ShowFilter =
     | { kind: "any" }
     | { kind: "inbox" }
+    | { kind: "standalone" }
     | { kind: "specific"; gameIds: string[] };
 
   // Plan 02.1-21: explicit axis enumeration. Each consumer page passes the
@@ -106,7 +107,7 @@
   // checkbox `checked` bindings recompute.
   let sourceSelected = $state<Set<string>>(new Set(filters.source ?? []));
   let kindSelected = $state<Set<string>>(new Set(filters.kind ?? []));
-  let showSelection = $state<"any" | "inbox" | "specific">(filters.show.kind);
+  let showSelection = $state<"any" | "inbox" | "standalone" | "specific">(filters.show.kind);
   let gameSelected = $state<Set<string>>(
     filters.show.kind === "specific" ? new Set(filters.show.gameIds) : new Set(),
   );
@@ -329,7 +330,9 @@
         ? { kind: "any" }
         : showSelection === "inbox"
           ? { kind: "inbox" }
-          : { kind: "specific", gameIds: Array.from(gameSelected) };
+          : showSelection === "standalone"
+            ? { kind: "standalone" }
+            : { kind: "specific", gameIds: Array.from(gameSelected) };
     // Plan 02.1-21: emit each axis only when the consumer's schema includes
     // it. The consumer page maps the apply payload back to URL params; an
     // omitted key means "this consumer doesn't own this axis".
@@ -452,6 +455,10 @@
         <label class="toggle">
           <input type="radio" name="show" value="inbox" bind:group={showSelection} />
           {m.feed_filter_show_inbox()}
+        </label>
+        <label class="toggle">
+          <input type="radio" name="show" value="standalone" bind:group={showSelection} />
+          {m.feed_filter_show_standalone()}
         </label>
         <label class="toggle">
           <input type="radio" name="show" value="specific" bind:group={showSelection} />

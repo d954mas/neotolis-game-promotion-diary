@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import {
   createEvent,
   listFeedPage,
+  markStandalone,
   FEED_PAGE_SIZE,
 } from "../../src/lib/server/services/events.js";
 import { db } from "../../src/lib/server/db/client.js";
@@ -1144,5 +1145,118 @@ describe("Plan 02.1-15: multi-select feed filters (OR-within-axis, AND-across-ax
     };
     expect(body.rows).toHaveLength(1);
     expect(body.rows[0]!.sourceId).toBe(sourceA);
+  });
+});
+
+// Plan 02.1-24 — listFeedPage gains a fourth ShowFilter branch:
+// `{ kind: 'standalone' }` returns only events where game_id IS NULL AND
+// metadata.triage.standalone='true'. Inbox view continues to exclude
+// dismissed events AND now also excludes standalone events (they are a
+// separate triage state, not "still in inbox"). Cross-tenant probe with
+// show.kind=standalone returns ZERO of the other tenant's standalone rows.
+describe("Plan 02.1-24 — show.kind=standalone filter", () => {
+  it("Plan 02.1-24 Test A: listFeedPage with show.kind=standalone returns ONLY events where game_id IS NULL AND metadata.triage.standalone=true", async () => {
+    const u = await seedUserDirectly({ email: "p24-feed-1@test.local" });
+
+    // Inbox event (game_id=null, no standalone flag) — must NOT appear in standalone view.
+    const inboxEv = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Inbox plain",
+      },
+      "127.0.0.1",
+    );
+
+    // Standalone event — game_id will become null + standalone=true.
+    const standaloneEv = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "conference",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "Standalone target",
+      },
+      "127.0.0.1",
+    );
+    await markStandalone(u.id, standaloneEv.id, "127.0.0.1");
+
+    // Attached event (game_id != null) — must NOT appear in standalone view.
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+    const attachedEv = await createEvent(
+      u.id,
+      {
+        gameId,
+        kind: "talk",
+        occurredAt: new Date("2026-06-03T10:00:00Z"),
+        title: "Attached talk",
+      },
+      "127.0.0.1",
+    );
+
+    const standalonePage = await listFeedPage(
+      u.id,
+      { show: { kind: "standalone" } },
+      null,
+    );
+    const ids = standalonePage.rows.map((r) => r.id);
+    expect(ids).toContain(standaloneEv.id);
+    expect(ids).not.toContain(inboxEv.id);
+    expect(ids).not.toContain(attachedEv.id);
+  });
+
+  it("Plan 02.1-24 Test B: listFeedPage with show.kind=inbox EXCLUDES standalone events (in addition to existing dismissed exclusion)", async () => {
+    const u = await seedUserDirectly({ email: "p24-feed-2@test.local" });
+
+    const inboxEv = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Plain inbox",
+      },
+      "127.0.0.1",
+    );
+    const standaloneEv = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "conference",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "Standalone — not inbox anymore",
+      },
+      "127.0.0.1",
+    );
+    await markStandalone(u.id, standaloneEv.id, "127.0.0.1");
+
+    const inboxPage = await listFeedPage(u.id, { show: { kind: "inbox" } }, null);
+    const ids = inboxPage.rows.map((r) => r.id);
+    expect(ids).toContain(inboxEv.id);
+    // Standalone is its own triage state — must NOT appear in inbox view.
+    expect(ids).not.toContain(standaloneEv.id);
+  });
+
+  it("Plan 02.1-24 Test C: cross-tenant probe with show.kind=standalone returns ZERO of other-tenant standalone rows (P19 mitigation by construction)", async () => {
+    const userA = await seedUserDirectly({ email: "p24-feed-3a@test.local" });
+    const userB = await seedUserDirectly({ email: "p24-feed-3b@test.local" });
+
+    const evA = await createEvent(
+      userA.id,
+      {
+        gameId: null,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "User A standalone",
+      },
+      "127.0.0.1",
+    );
+    await markStandalone(userA.id, evA.id, "127.0.0.1");
+
+    const pageB = await listFeedPage(userB.id, { show: { kind: "standalone" } }, null);
+    expect(pageB.rows.map((r) => r.id)).not.toContain(evA.id);
   });
 });

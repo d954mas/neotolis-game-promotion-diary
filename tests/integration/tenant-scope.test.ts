@@ -384,6 +384,19 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
           method: "PATCH",
           path: `/api/events/${deletedEvent.id}/restore`,
         },
+        // Plan 02.1-24 — PATCH /api/events/:id/mark-standalone +
+        // /unmark-standalone on A's inbox event must 404 cross-tenant. The
+        // service's UPDATE WHERE clause requires the userId match; B's
+        // session never satisfies it (tenant-scope/no-unfiltered-tenant-query
+        // ESLint rule plus the explicit eq(events.userId, userId) clause).
+        {
+          method: "PATCH",
+          path: `/api/events/${inboxEvent.id}/mark-standalone`,
+        },
+        {
+          method: "PATCH",
+          path: `/api/events/${inboxEvent.id}/unmark-standalone`,
+        },
       ];
 
       for (const p of probes) {
