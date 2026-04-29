@@ -4,10 +4,16 @@ import {
   listFeedPage,
   listDeletedEvents,
   type FeedFilters,
+  type ShowFilter,
 } from "$lib/server/services/events.js";
 import { listGames } from "$lib/server/services/games.js";
 import { listSources } from "$lib/server/services/data-sources.js";
 import { toEventDto, toGameDto, toDataSourceDto } from "$lib/server/dto.js";
+
+// Plan 02.1-19 URL contract: /feed accepts ?show=any|inbox|specific +
+// ?game=A&game=B (when show=specific). The legacy ?attached=true|false is
+// no longer recognized. Pre-launch destructive contract change (CONTEXT
+// D-04). When neither ?show nor ?game is present, default = "any".
 
 /**
  * /feed loader — the primary daily workspace for authenticated users.
@@ -71,16 +77,23 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const fromDate = fromForFilter ? new Date(`${fromForFilter}T00:00:00.000Z`) : undefined;
   const toDate = toForFilter ? new Date(`${toForFilter}T23:59:59.999Z`) : undefined;
 
+  // Plan 02.1-19: ?show=any|inbox|specific URL contract. Default = "any".
+  // Any other value (including null / unrecognized) falls back to "any" so a
+  // malformed URL doesn't 500 — the chip strip will simply show no Show chip.
+  const showParam = url.searchParams.get("show") ?? "any";
+  const showKind: "any" | "inbox" | "specific" =
+    showParam === "inbox" ? "inbox" : showParam === "specific" ? "specific" : "any";
+  const showFilter: ShowFilter =
+    showKind === "inbox"
+      ? { kind: "inbox" }
+      : showKind === "specific"
+        ? { kind: "specific", gameIds: gameList }
+        : { kind: "any" };
+
   const filters: FeedFilters = {
     source: sourceList.length > 0 ? sourceList : undefined,
     kind: kindList.length > 0 ? (kindList as FeedFilters["kind"]) : undefined,
-    game: gameList.length > 0 ? gameList : undefined,
-    attached:
-      url.searchParams.get("attached") === "true"
-        ? true
-        : url.searchParams.get("attached") === "false"
-          ? false
-          : undefined,
+    show: showFilter,
     authorIsMe:
       url.searchParams.get("authorIsMe") === "true"
         ? true
@@ -120,8 +133,13 @@ export const load: PageServerLoad = async ({ locals, url }) => {
       // string[] so single-value renders the same as zero-value.
       source: sourceList,
       kind: kindList,
-      game: gameList,
-      attached: filters.attached,
+      // Plan 02.1-19: merged 'show' axis replaces game + attached pair.
+      show:
+        showKind === "inbox"
+          ? { kind: "inbox" as const }
+          : showKind === "specific"
+            ? { kind: "specific" as const, gameIds: gameList }
+            : { kind: "any" as const },
       authorIsMe: filters.authorIsMe,
       from: filters.from ? filters.from.toISOString().slice(0, 10) : undefined,
       to: filters.to ? filters.to.toISOString().slice(0, 10) : undefined,
