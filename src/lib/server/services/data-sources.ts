@@ -38,6 +38,7 @@ import type { SourceKind } from "../integrations/data-source-adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
+import { isPgUniqueViolation } from "../db/postgres-errors.js";
 
 export type DataSourceRow = typeof dataSources.$inferSelect;
 
@@ -119,27 +120,11 @@ function validateHandleUrl(handleUrl: string): void {
   }
 }
 
-function isPgUniqueViolation(err: unknown): boolean {
-  // drizzle-orm 0.45 wraps the underlying pg error in `DrizzleQueryError` whose
-  // `.cause` carries the original error with `.code === '23505'`. Walk the
-  // cause chain (defensively bounded) so the translation lands on either form.
-  let current: unknown = err;
-  for (let depth = 0; depth < 5 && current; depth++) {
-    if (
-      typeof current === "object" &&
-      current !== null &&
-      "code" in current &&
-      (current as { code: unknown }).code === "23505"
-    ) {
-      return true;
-    }
-    current =
-      typeof current === "object" && current !== null && "cause" in current
-        ? (current as { cause: unknown }).cause
-        : undefined;
-  }
-  return false;
-}
+// Plan 02.1-29 — `isPgUniqueViolation` extracted to
+// src/lib/server/db/postgres-errors.ts (shared with
+// services/game-steam-listings.ts addSteamListing's 23505 translation).
+// The cause-chain walker shape and the depth=5 bound stay the same — the
+// only change is the import surface.
 
 /**
  * Create a data_source for `userId`. Rejects schema-only kinds with

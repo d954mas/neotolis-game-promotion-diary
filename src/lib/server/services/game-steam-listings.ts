@@ -14,6 +14,31 @@
 // later (Phase 6 backfill worker). The listing row itself is the source of
 // truth for `app_id` + `game_id` + `label`.
 //
+// Plan 02.1-29 (UAT-NOTES.md §4.25.E + §4.25.G): `addSteamListing` translates
+// Postgres 23505 unique_violation on `game_steam_listings_game_app_id_unq`
+// into AppError(422, 'steam_listing_duplicate', { gameId, appId,
+// existingGameId, existingState }). Plan 02.1-27 dropped the user-scoped
+// `(user_id, app_id)` constraint; the only remaining listing uniqueness is
+// `(game_id, app_id)` UNCONDITIONAL (no `WHERE deleted_at IS NULL` clause).
+//
+// Path B (Plan 02.1-29): a defensive pre-INSERT same-tenant same-game lookup
+// runs FIRST — without an `isNull(deletedAt)` filter — so soft-deleted same-
+// game duplicates surface as `existingState='soft_deleted'` BEFORE the
+// INSERT (saving a roundtrip + giving the UI the hint to render the "use
+// Restore" affordance). The INSERT is wrapped in `isPgUniqueViolation`
+// try/catch as the race-window backstop: an active row that landed
+// between our SELECT and INSERT translates to `existingState='active'`.
+// Path B chosen over Path A (partial-WHERE constraint) because it (i)
+// doesn't require changing Plan 02.1-27's constraint shape, (ii) matches
+// the Plan 02.1-14 events soft-delete-Restore UX precedent, (iii) keeps
+// audit forensics simple — every (game_id, app_id) tuple maps to one
+// historical row chain regardless of soft-delete state.
+//
+// The 422 metadata payload is non-secret (gameId / appId / existingGameId /
+// existingState — all non-credential identifiers); Pino redact paths
+// unchanged. The payload reaches the user via mapErr → JSON response →
+// Plan 02.1-30 client-side toast.
+//
 // NO audit entries from this service (D-32): the audit verbs `key.*`,
 // `game.*`, `item.*`, `event.*`, `theme.*`, `session.*` cover the
 // security-relevant operations. Listing CRUD is creation/destruction of
@@ -25,7 +50,8 @@ import { db } from "../db/client.js";
 import { gameSteamListings } from "../db/schema/game-steam-listings.js";
 import { fetchSteamAppDetails } from "../integrations/steam-api.js";
 import { getGameById } from "./games.js";
-import { NotFoundError } from "./errors.js";
+import { AppError, NotFoundError } from "./errors.js";
+import { isPgUniqueViolation } from "../db/postgres-errors.js";
 
 export type SteamListingRow = typeof gameSteamListings.$inferSelect;
 
@@ -43,10 +69,21 @@ export interface AddSteamListingInput {
  *
  * Throws:
  *   - NotFoundError if `input.gameId` does not belong to `userId`
- *     (cross-tenant 404, not 403 — PRIV-01)
- *   - the raw pg duplicate-key error if (game_id, app_id) or
- *     (user_id, app_id) already exists; Plan 02-08 translates that to
- *     a 409 at the route boundary
+ *     (cross-tenant 404, not 403 — PRIV-01).
+ *   - AppError(422, 'steam_listing_duplicate', { gameId, appId,
+ *     existingGameId, existingState }) when an active OR soft-deleted
+ *     same-game listing already exists for `(userId, gameId, appId)`.
+ *     `existingState` is `'active'` for non-deleted rows and
+ *     `'soft_deleted'` for tombstoned rows (Plan 02.1-29 / Path B —
+ *     pre-INSERT lookup catches soft-deletes BEFORE the INSERT). Plan
+ *     02.1-30's UI reads `existingGameId` to render an actionable toast
+ *     ("open game" for active duplicates; "use Restore" for soft-
+ *     deleted duplicates).
+ *
+ *     Cross-game same-appId is ALLOWED (post-Plan-02.1-27 the
+ *     user-scoped unique constraint is gone): the same Steam appId can
+ *     attach to multiple games of the same user (e.g. a Portal-2 main
+ *     card + a Portal-2 review-notes card — denorm cost accepted).
  *
  * `ipAddress` is currently unused (no audit row per D-32) but kept in
  * the signature for parity with the audited services and so Plan 02-08
@@ -62,26 +99,89 @@ export async function addSteamListing(
   // attempts surface as 404, not a foreign-key violation.
   await getGameById(userId, input.gameId);
 
-  const meta = await fetchSteamAppDetails(input.appId);
-  const [row] = await db
-    .insert(gameSteamListings)
-    .values({
-      userId,
-      gameId: input.gameId,
-      appId: input.appId,
-      label: input.label ?? "",
-      // Plan 02.1-25: persist Steam game name when the appdetails fetch
-      // succeeded; otherwise NULL (Steam down or success:false). The UI
-      // (SteamListingRow) renders `App {appId}` fallback for null rows.
-      name: meta?.name ?? null,
-      coverUrl: meta?.coverUrl ?? null,
-      releaseDate: meta?.releaseDate ?? null,
-      comingSoon: meta ? (meta.comingSoon ? "true" : "false") : "unavailable",
-      steamGenres: meta?.genres ?? [],
-      steamCategories: meta?.categories ?? [],
-      rawAppdetails: meta?.raw ?? null,
+  // Plan 02.1-29 Path B — pre-INSERT same-tenant same-game lookup. NO
+  // `isNull(deletedAt)` filter so soft-deleted dupes surface as
+  // existingState='soft_deleted'. Cross-game same-appId is NOT scoped
+  // here (different gameId) — falls through to the INSERT, which is
+  // the post-Plan-02.1-27 expected path.
+  const existing = await db
+    .select({
+      id: gameSteamListings.id,
+      gameId: gameSteamListings.gameId,
+      deletedAt: gameSteamListings.deletedAt,
     })
-    .returning();
+    .from(gameSteamListings)
+    .where(
+      and(
+        eq(gameSteamListings.userId, userId),
+        eq(gameSteamListings.gameId, input.gameId),
+        eq(gameSteamListings.appId, input.appId),
+      ),
+    )
+    .limit(1);
+
+  if (existing.length > 0 && existing[0]) {
+    const exRow = existing[0];
+    throw new AppError(
+      "steam listing already exists",
+      "steam_listing_duplicate",
+      422,
+      {
+        gameId: input.gameId,
+        appId: input.appId,
+        existingGameId: exRow.gameId,
+        existingState: exRow.deletedAt === null ? "active" : "soft_deleted",
+      },
+    );
+  }
+
+  const meta = await fetchSteamAppDetails(input.appId);
+
+  // Plan 02.1-29 — defense-in-depth try/catch translates the (game_id,
+  // app_id) unique-violation race window: an active same-game row that
+  // landed between our SELECT above and the INSERT below. Pattern reused
+  // from Plan 02.1-04 services/data-sources.ts (now via the shared
+  // src/lib/server/db/postgres-errors.ts module). The catch can't know
+  // whether the colliding row was soft-deleted post-our-SELECT, so it
+  // defaults to existingState='active'; Plan 02.1-30's UI re-fetches
+  // the listing list after a 422 to reconcile that edge case.
+  let row: SteamListingRow | undefined;
+  try {
+    [row] = await db
+      .insert(gameSteamListings)
+      .values({
+        userId,
+        gameId: input.gameId,
+        appId: input.appId,
+        label: input.label ?? "",
+        // Plan 02.1-25: persist Steam game name when the appdetails fetch
+        // succeeded; otherwise NULL (Steam down or success:false). The UI
+        // (SteamListingRow) renders `App {appId}` fallback for null rows.
+        name: meta?.name ?? null,
+        coverUrl: meta?.coverUrl ?? null,
+        releaseDate: meta?.releaseDate ?? null,
+        comingSoon: meta ? (meta.comingSoon ? "true" : "false") : "unavailable",
+        steamGenres: meta?.genres ?? [],
+        steamCategories: meta?.categories ?? [],
+        rawAppdetails: meta?.raw ?? null,
+      })
+      .returning();
+  } catch (e: unknown) {
+    if (isPgUniqueViolation(e)) {
+      throw new AppError(
+        "steam listing already exists",
+        "steam_listing_duplicate",
+        422,
+        {
+          gameId: input.gameId,
+          appId: input.appId,
+          existingGameId: input.gameId,
+          existingState: "active",
+        },
+      );
+    }
+    throw e;
+  }
   if (!row) throw new Error("addSteamListing: INSERT returned no row");
   return row;
 }
