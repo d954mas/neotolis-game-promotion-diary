@@ -469,13 +469,16 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
  * omits eq(eventGames.userId, userId).
  */
 describe("Plan 02.1-28 — event_games cross-tenant", () => {
+  // Parallel-executor email-uniqueness coordination (Plan 02.1-17 pattern):
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
   it("Plan 02.1-28: userB attaches userA's event to userB's game → 404 (eventId ownership wins)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const { createGame } = await import("../../src/lib/server/services/games.js");
     const { createEvent } = await import("../../src/lib/server/services/events.js");
     const app = createApp();
-    const userA = await seedUserDirectly({ email: "p28-xtA@test.local" });
-    const userB = await seedUserDirectly({ email: "p28-xtB@test.local" });
+    const userA = await seedUserDirectly({ email: `p28-xtA-${uniq()}@test.local` });
+    const userB = await seedUserDirectly({ email: `p28-xtB-${uniq()}@test.local` });
 
     // userA owns an event; userB owns a game.
     const evA = await createEvent(
@@ -510,8 +513,8 @@ describe("Plan 02.1-28 — event_games cross-tenant", () => {
     const { createGame } = await import("../../src/lib/server/services/games.js");
     const { createEvent } = await import("../../src/lib/server/services/events.js");
     const app = createApp();
-    const userA = await seedUserDirectly({ email: "p28-xt2A@test.local" });
-    const userB = await seedUserDirectly({ email: "p28-xt2B@test.local" });
+    const userA = await seedUserDirectly({ email: `p28-xt2A-${uniq()}@test.local` });
+    const userB = await seedUserDirectly({ email: `p28-xt2B-${uniq()}@test.local` });
 
     // userA owns a game; userB owns an event.
     const gA = await createGame(userA.id, { title: "A's game" }, "127.0.0.1");
@@ -550,8 +553,8 @@ describe("Plan 02.1-28 — event_games cross-tenant", () => {
       "../../src/lib/server/services/events.js"
     );
     const app = createApp();
-    const userA = await seedUserDirectly({ email: "p28-xt3A@test.local" });
-    const userB = await seedUserDirectly({ email: "p28-xt3B@test.local" });
+    const userA = await seedUserDirectly({ email: `p28-xt3A-${uniq()}@test.local` });
+    const userB = await seedUserDirectly({ email: `p28-xt3B-${uniq()}@test.local` });
 
     // userA: one game + one event attached to it.
     const gA = await createGame(userA.id, { title: "A's game" }, "127.0.0.1");

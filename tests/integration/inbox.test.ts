@@ -306,7 +306,8 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
     // Rationale: silent detach was the wrong UX because the user could
     // miss that a game was attached; the 422 + UI-hidden affordance
     // (Plan 02.1-32) is defense-in-depth + user-honest.
-    const u = await seedUserDirectly({ email: "standalone2@test.local" });
+    const uniqId = Math.random().toString(36).slice(2, 10);
+    const u = await seedUserDirectly({ email: `standalone2-${uniqId}@test.local` });
     const gameId = uuidv7();
     await db.insert(games).values({ id: gameId, userId: u.id, title: "Some game" });
     const ev = await createEvent(
@@ -543,9 +544,12 @@ describe("Plan 02.1-24: PATCH /api/events/:id/mark-standalone + unmark-standalon
  * service-layer guard is defense-in-depth.
  */
 describe("Plan 02.1-28 — standalone conflict guard (mutual exclusion)", () => {
+  // Parallel-executor email-uniqueness coordination (Plan 02.1-17 pattern):
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
   it("Plan 02.1-28: markStandalone on event with attached games throws AppError 422 'standalone_conflicts_with_game'; metadata + junction unchanged", async () => {
     const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
-    const u = await seedUserDirectly({ email: "inbox28-1@test.local" });
+    const u = await seedUserDirectly({ email: `inbox28-1-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
     const ev = await createEvent(
@@ -600,7 +604,7 @@ describe("Plan 02.1-28 — standalone conflict guard (mutual exclusion)", () => 
       "../../src/lib/server/services/events.js"
     );
     const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
-    const u = await seedUserDirectly({ email: "inbox28-2@test.local" });
+    const u = await seedUserDirectly({ email: `inbox28-2-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
     const ev = await createEvent(
@@ -643,7 +647,7 @@ describe("Plan 02.1-28 — standalone conflict guard (mutual exclusion)", () => 
     const { attachEventToGames: attach28 } = await import(
       "../../src/lib/server/services/events.js"
     );
-    const u = await seedUserDirectly({ email: "inbox28-3@test.local" });
+    const u = await seedUserDirectly({ email: `inbox28-3-${uniq()}@test.local` });
     const ev = await createEvent(
       u.id,
       {

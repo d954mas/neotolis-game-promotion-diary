@@ -1334,8 +1334,11 @@ describe("Plan 02.1-26 — FeedQuickNav loader contract (data.games available)",
  * column is the literal column the ESLint tenant-scope rule walks for).
  */
 describe("Plan 02.1-28 — listFeedPage M:N show-axis", () => {
+  // Parallel-executor email-uniqueness coordination (Plan 02.1-17 pattern):
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
   it("Plan 02.1-28: listFeedPage show=specific gameIds=[A] returns events attached to A only via EXISTS junction subquery", async () => {
-    const u = await seedUserDirectly({ email: "feed28-specific-a@test.local" });
+    const u = await seedUserDirectly({ email: `feed28-specific-a-${uniq()}@test.local` });
     const gA = uuidv7();
     const gB = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
@@ -1383,7 +1386,7 @@ describe("Plan 02.1-28 — listFeedPage M:N show-axis", () => {
   });
 
   it("Plan 02.1-28: listFeedPage show=inbox returns events with ZERO event_games rows (NOT EXISTS subquery)", async () => {
-    const u = await seedUserDirectly({ email: "feed28-inbox@test.local" });
+    const u = await seedUserDirectly({ email: `feed28-inbox-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
     const inbox1 = await createEvent(
@@ -1414,7 +1417,7 @@ describe("Plan 02.1-28 — listFeedPage M:N show-axis", () => {
   });
 
   it("Plan 02.1-28: listFeedPage show=specific multi-game uses EXISTS + IN — returns events attached to ANY of the gameIds", async () => {
-    const u = await seedUserDirectly({ email: "feed28-multi@test.local" });
+    const u = await seedUserDirectly({ email: `feed28-multi-${uniq()}@test.local` });
     const gA = uuidv7();
     const gB = uuidv7();
     const gC = uuidv7();
@@ -1464,8 +1467,8 @@ describe("Plan 02.1-28 — listFeedPage M:N show-axis", () => {
   });
 
   it("Plan 02.1-28: listFeedPage show=specific cross-tenant gameId returns zero rows (subquery userId clause)", async () => {
-    const userA = await seedUserDirectly({ email: "feed28-xt-a@test.local" });
-    const userB = await seedUserDirectly({ email: "feed28-xt-b@test.local" });
+    const userA = await seedUserDirectly({ email: `feed28-xt-a-${uniq()}@test.local` });
+    const userB = await seedUserDirectly({ email: `feed28-xt-b-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: userA.id, title: "A's game" });
     // userA has an event attached to gA.

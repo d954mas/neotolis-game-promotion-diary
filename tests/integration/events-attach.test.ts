@@ -30,8 +30,11 @@ import { AppError, NotFoundError } from "../../src/lib/server/services/errors.js
  */
 
 describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
+  // Parallel-executor email-uniqueness coordination (Plan 02.1-17 pattern):
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
   it("Plan 02.1-28: attachEventToGames(userId, eventId, [A]) on inbox event → 1 junction row + 1 audit", async () => {
-    const u = await seedUserDirectly({ email: "attach28-1@test.local" });
+    const u = await seedUserDirectly({ email: `attach28-1-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
     const ev = await createEvent(
@@ -73,7 +76,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
   });
 
   it("Plan 02.1-28: attachEventToGames(userId, eventId, [A, B]) writes 2 junction rows + 2 attached_to_game audits", async () => {
-    const u = await seedUserDirectly({ email: "attach28-2@test.local" });
+    const u = await seedUserDirectly({ email: `attach28-2-${uniq()}@test.local` });
     const gA = uuidv7();
     const gB = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
@@ -112,7 +115,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
   });
 
   it("Plan 02.1-28: attachEventToGames(userId, eventId, []) on attached event detaches all games + writes detached_from_game audit per removed", async () => {
-    const u = await seedUserDirectly({ email: "attach28-3@test.local" });
+    const u = await seedUserDirectly({ email: `attach28-3-${uniq()}@test.local` });
     const gA = uuidv7();
     const gB = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
@@ -161,7 +164,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
   });
 
   it("Plan 02.1-28: attachEventToGames(userId, eventId, [A, A]) is idempotent under input dedup → 1 junction row", async () => {
-    const u = await seedUserDirectly({ email: "attach28-4@test.local" });
+    const u = await seedUserDirectly({ email: `attach28-4-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
     const ev = await createEvent(
@@ -186,8 +189,8 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
   });
 
   it("Plan 02.1-28: attachEventToGames with cross-tenant gameId throws NotFoundError 404 (Pitfall 4)", async () => {
-    const userA = await seedUserDirectly({ email: "attach28-5a@test.local" });
-    const userB = await seedUserDirectly({ email: "attach28-5b@test.local" });
+    const userA = await seedUserDirectly({ email: `attach28-5a-${uniq()}@test.local` });
+    const userB = await seedUserDirectly({ email: `attach28-5b-${uniq()}@test.local` });
     const evA = await createEvent(
       userA.id,
       {
@@ -225,8 +228,8 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
   });
 
   it("Plan 02.1-28: cross-tenant attachEventToGames on another tenant's event returns 404 (event-ownership wins)", async () => {
-    const userA = await seedUserDirectly({ email: "attach28-6a@test.local" });
-    const userB = await seedUserDirectly({ email: "attach28-6b@test.local" });
+    const userA = await seedUserDirectly({ email: `attach28-6a-${uniq()}@test.local` });
+    const userB = await seedUserDirectly({ email: `attach28-6b-${uniq()}@test.local` });
     const evA = await createEvent(
       userA.id,
       {
@@ -261,7 +264,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
   });
 
   it("Plan 02.1-28: attachEventToGames on non-existent eventId returns 404 not_found", async () => {
-    const u = await seedUserDirectly({ email: "attach28-7@test.local" });
+    const u = await seedUserDirectly({ email: `attach28-7-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
     const fakeEventId = uuidv7();
@@ -272,7 +275,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
   });
 
   it("Plan 02.1-28: attachEventToGames with non-existent gameId returns 404 not_found (Pitfall 4)", async () => {
-    const u = await seedUserDirectly({ email: "attach28-8@test.local" });
+    const u = await seedUserDirectly({ email: `attach28-8-${uniq()}@test.local` });
     const ev = await createEvent(
       u.id,
       {
@@ -291,7 +294,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
   });
 
   it("Plan 02.1-28: attachEventToGames(non-empty) on a standalone event throws AppError 422 'standalone_conflicts_with_game'", async () => {
-    const u = await seedUserDirectly({ email: "attach28-9@test.local" });
+    const u = await seedUserDirectly({ email: `attach28-9-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
     const ev = await createEvent(
@@ -325,7 +328,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
   });
 
   it("Plan 02.1-28: attachEventToGames bumps events.updatedAt", async () => {
-    const u = await seedUserDirectly({ email: "attach28-10@test.local" });
+    const u = await seedUserDirectly({ email: `attach28-10-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
     const ev = await createEvent(
@@ -352,10 +355,13 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
 // AND the deprecated { gameId: string | null } back-compat alias for one
 // round of UAT (Plan 02.1-32 retires the alias on the UI side).
 describe("Plan 02.1-28: PATCH /api/events/:id/attach HTTP boundary (M:N + back-compat alias)", () => {
+  // Parallel-executor email-uniqueness coordination (Plan 02.1-17 pattern):
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
   it("Plan 02.1-28: PATCH /api/events/:id/attach { gameIds: [A, B] } returns 200 + EventDto.gameIds with both", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
-    const u = await seedUserDirectly({ email: "http-attach28-1@test.local" });
+    const u = await seedUserDirectly({ email: `http-attach28-1-${uniq()}@test.local` });
     const gA = uuidv7();
     const gB = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
@@ -388,7 +394,7 @@ describe("Plan 02.1-28: PATCH /api/events/:id/attach HTTP boundary (M:N + back-c
   it("Plan 02.1-28: PATCH /api/events/:id/attach { gameIds: [] } detaches all (move-to-inbox)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
-    const u = await seedUserDirectly({ email: "http-attach28-2@test.local" });
+    const u = await seedUserDirectly({ email: `http-attach28-2-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
     const ev = await createEvent(
@@ -418,7 +424,7 @@ describe("Plan 02.1-28: PATCH /api/events/:id/attach HTTP boundary (M:N + back-c
   it("Plan 02.1-28: PATCH /api/events/:id/attach { gameId: A } (back-compat alias) attaches single game", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
-    const u = await seedUserDirectly({ email: "http-attach28-3@test.local" });
+    const u = await seedUserDirectly({ email: `http-attach28-3-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
     const ev = await createEvent(
@@ -448,7 +454,7 @@ describe("Plan 02.1-28: PATCH /api/events/:id/attach HTTP boundary (M:N + back-c
   it("Plan 02.1-28: PATCH /api/events/:id/attach { gameId: null } (back-compat alias) detaches all", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
-    const u = await seedUserDirectly({ email: "http-attach28-4@test.local" });
+    const u = await seedUserDirectly({ email: `http-attach28-4-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
     const ev = await createEvent(
@@ -478,7 +484,7 @@ describe("Plan 02.1-28: PATCH /api/events/:id/attach HTTP boundary (M:N + back-c
   it("Plan 02.1-28: PATCH /api/events/:id/attach with non-existent gameId returns 404 not_found (Pitfall 4 — NEVER 500)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
-    const u = await seedUserDirectly({ email: "http-attach28-5@test.local" });
+    const u = await seedUserDirectly({ email: `http-attach28-5-${uniq()}@test.local` });
     const ev = await createEvent(
       u.id,
       {
@@ -507,7 +513,7 @@ describe("Plan 02.1-28: PATCH /api/events/:id/attach HTTP boundary (M:N + back-c
   it("Plan 02.1-28: PATCH /api/events/:id/mark-standalone on event with attached games returns 422 'standalone_conflicts_with_game'", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
-    const u = await seedUserDirectly({ email: "http-attach28-6@test.local" });
+    const u = await seedUserDirectly({ email: `http-attach28-6-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
     const ev = await createEvent(

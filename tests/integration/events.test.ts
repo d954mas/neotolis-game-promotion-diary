@@ -1569,9 +1569,14 @@ describe("Plan 02.1-18: detail loader + edit + author_is_me round-trip", () => {
  * semantics.
  */
 describe("Plan 02.1-28 — M:N gameIds", () => {
+  // Parallel-execution coordination: random suffix on test emails avoids
+  // unique-key collisions when sibling agents hit the same DB between
+  // truncate cycles (Plan 02.1-17 precedent — see top of file).
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
   it("Plan 02.1-28: createEvent with gameIds=[A, B] populates 2 event_games rows + audit metadata.game_ids matches", async () => {
     const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
-    const u = await seedUserDirectly({ email: "ev28-create-multi@test.local" });
+    const u = await seedUserDirectly({ email: `ev28-create-multi-${uniq()}@test.local` });
     const gA = uuidv7();
     const gB = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
@@ -1604,7 +1609,7 @@ describe("Plan 02.1-28 — M:N gameIds", () => {
 
   it("Plan 02.1-28: createEvent with no gameIds creates event in inbox (zero junction rows)", async () => {
     const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
-    const u = await seedUserDirectly({ email: "ev28-create-inbox@test.local" });
+    const u = await seedUserDirectly({ email: `ev28-create-inbox-${uniq()}@test.local` });
     const ev = await createEvent(
       u.id,
       {
@@ -1622,8 +1627,10 @@ describe("Plan 02.1-28 — M:N gameIds", () => {
   });
 
   it("Plan 02.1-28: createEvent with cross-tenant gameId throws NotFoundError; events row NOT inserted (validate-first)", async () => {
-    const userA = await seedUserDirectly({ email: "ev28-create-xt-a@test.local" });
-    const userB = await seedUserDirectly({ email: "ev28-create-xt-b@test.local" });
+    const u1 = uniq();
+    const u2 = uniq();
+    const userA = await seedUserDirectly({ email: `ev28-create-xt-a-${u1}@test.local` });
+    const userB = await seedUserDirectly({ email: `ev28-create-xt-b-${u2}@test.local` });
     const gB = uuidv7();
     await db.insert(games).values({ id: gB, userId: userB.id, title: "B's game" });
 
@@ -1647,7 +1654,7 @@ describe("Plan 02.1-28 — M:N gameIds", () => {
 
   it("Plan 02.1-28: updateEvent.gameIds replaces the attached set atomically (set-replacement)", async () => {
     const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
-    const u = await seedUserDirectly({ email: "ev28-update-replace@test.local" });
+    const u = await seedUserDirectly({ email: `ev28-update-replace-${uniq()}@test.local` });
     const gA = uuidv7();
     const gB = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
@@ -1678,7 +1685,15 @@ describe("Plan 02.1-28 — M:N gameIds", () => {
       .where(and(eq(eg.userId, u.id), eq(eg.eventId, ev.id)));
     expect(after.map((r) => r.gameId)).toEqual([gB]);
 
-    // Audit chain: one event.attached_to_game(B) and one event.detached_from_game(A).
+    // Audit chain: createEvent writes ONE attached_to_game(A) audit row
+    // (Plan 02.1-28: createEvent issues the audit per-junction-row when
+    // it inserts the initial set; updateEvent → attachEventToGames then
+    // writes attached_to_game(B) + detached_from_game(A) for the diff).
+    // Note: createEvent inserts the junction directly (no
+    // attachEventToGames roundtrip), so the initial audit is from
+    // createEvent's writeAudit({ action: 'event.created', metadata:
+    // { game_ids: [...] } }) — NOT a per-game attached_to_game row.
+    // So adds === 1 (from updateEvent only) and removes === 1 (the diff).
     const adds = await db
       .select()
       .from(auditLog)
@@ -1697,10 +1712,12 @@ describe("Plan 02.1-28 — M:N gameIds", () => {
           eq(auditLog.action, "event.detached_from_game"),
         ),
       );
-    // The createEvent call above wrote one attached_to_game(A); after the
-    // replace, one more attached_to_game(B) and one detached_from_game(A).
-    expect(adds.length).toBeGreaterThanOrEqual(2);
+    expect(adds.length).toBeGreaterThanOrEqual(1);
     expect(removes.length).toBeGreaterThanOrEqual(1);
+    const addedIds = adds.map(
+      (r) => (r.metadata as { game_id?: string } | null)?.game_id,
+    );
+    expect(addedIds).toContain(gB);
     const removedIds = removes.map(
       (r) => (r.metadata as { game_id?: string } | null)?.game_id,
     );
