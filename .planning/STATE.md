@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02.1-17-PLAN.md (manual-create enrichment + preview-url endpoint + url-required superRefine + authorIsMe round-trip)
-last_updated: "2026-04-29T09:14:32.008Z"
+stopped_at: Completed 02.1-19-PLAN.md (feed UX rebuild — discriminated 'show' axis backend + URL contract + always-visible date inputs + per-axis chip grouping + Show 3-radio + UTC date grouping + IntersectionObserver infinite scroll + CSS grid layout + invalidateAll-before-goto on /events/new). 7 round-2 UAT gaps closed. Plan 02.1-20 next.
+last_updated: "2026-04-29T09:19:57.274Z"
 last_activity: 2026-04-29
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 41
-  completed_plans: 37
+  completed_plans: 38
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 2 of 20
+Plan: 3 of 20
 
 ## Performance Metrics
 
@@ -81,6 +81,7 @@ Plan: 2 of 20
 | Phase 02.1-architecture-realignment P15 | 30min | 3 tasks | 10 files |
 | Phase 02.1-architecture-realignment P16 | ~12min | 3 tasks | 11 files |
 | Phase 02.1-architecture-realignment P17 | 12min | 2 tasks | 7 files |
+| Phase 02.1 P19 | 16m 22s | 10 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -201,6 +202,11 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-14: retentionDays plumbing reuses Plan 02-10's +layout.server.ts → data.retentionDays pass-through; no new process.env reader added (Phase 1 D-14 invariant preserved)
 - [Phase 02.1-architecture-realignment]: Plan 02.1-15: FeedFilters extended with string|string[] union (back-compat preserved); pushAxis helper collapses to eq()/inArray() based on shape — empty array == no filter (multi-select with zero checkboxes returns ALL rows, not zero); URL convention is repeated params (?source=A&source=B) per URLSearchParams.getAll convention; default last-30-days lives in /feed/+page.server.ts (UI affordance), not in /api/events; DateRangeControl is a separate component above FilterChips (not absorbed into FiltersSheet) per standard analytics-feed pattern; clearAll navigates to /feed?all=1 so the 30-day default doesn't immediately re-apply
 - [Phase 02.1-architecture-realignment]: Plan 02.1-17: enrichFromUrl extracted from createEventFromPaste — DRY shared helper for paste flow + new POST /api/events/preview-url; createEvent opportunistically derives external_id for kind=youtube_video (idempotent — caller-supplied externalId wins); youtubeUrlRequired superRefine shared between createEventSchema + updateEventSchema; updateEvent accepts authorIsMe so /events/[id]/edit can flip the discriminator; publishedAt auto-fill DEFERRED to Phase 3 KEYS-01 (YouTube oEmbed lacks published_at; Data API needs per-tenant key)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-19: ShowFilter discriminated union { kind: 'any' | 'inbox' | 'specific'; gameIds? } collapses Plan 02.1-15's attached + game pair into one axis at the FeedFilters type level; UI cannot construct invalid combos so the type mirrors the constraint
+- [Phase 02.1-architecture-realignment]: Plan 02.1-19: URL contract change ?attached=true|false → ?show=any|inbox|specific is destructive (no back-compat); pre-launch (CONTEXT D-04) so the URL break is OK. CursorPager.svelte retained because /audit still consumes it; /feed switches to IntersectionObserver infinite scroll independently
+- [Phase 02.1-architecture-realignment]: Plan 02.1-19: groupEventsByDate uses UTC calendar date (YYYY-MM-DD via .toISOString().slice(0,10)); FeedDateGroupHeader truncates 'Today, HH:MM' → 'Today' for the header context; FeedCard drops inline date display + drops Plan 02.1-16's >=768px horizontal flexbox layout (grid cells are vertical-stack tiles); CSS grid template = repeat(auto-fill, minmax(280px, 1fr)); single column <640px
+- [Phase 02.1-architecture-realignment]: Plan 02.1-19: FilterChips emits ONE chip per active axis (kind/source/show/authorIsMe) with comma-joined values; click chip → onOpenSheet(axis) for focus jump; × → onDismiss(axis) clears entire axis; long chips wrap text inside (word-break: break-word; min-width: 0); NO date chip — visible from/to inputs ARE the indicator
+- [Phase 02.1-architecture-realignment]: Plan 02.1-19 deviation (Rule 3): migrated all existing { attached: ... } and bare { game: ... } test calls in feed.test.ts / events.test.ts / inbox.test.ts to the new { show: { kind: ... } } shape (typecheck dependency); CursorPager.svelte retained per plan's interface block 'leave as-is and document' (audit/+page.svelte still uses it); Tasks 6/7/8 bundled into one commit (b039619) because they all rewrite /feed/+page.svelte and split commits would leave intermediate broken states
 
 ### Pending Todos
 
@@ -240,8 +246,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-29T09:14:32.005Z
+Last session: 2026-04-29T09:19:57.269Z
 Last Activity: 2026-04-29
-Stopped at: Completed 02.1-17-PLAN.md (manual-create enrichment + preview-url endpoint + url-required superRefine + authorIsMe round-trip)
+Stopped at: Completed 02.1-19-PLAN.md (feed UX rebuild — discriminated 'show' axis backend + URL contract + always-visible date inputs + per-axis chip grouping + Show 3-radio + UTC date grouping + IntersectionObserver infinite scroll + CSS grid layout + invalidateAll-before-goto on /events/new). 7 round-2 UAT gaps closed. Plan 02.1-20 next.
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
