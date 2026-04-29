@@ -1,8 +1,10 @@
 // Events HTTP routes (Plan 02-08, extended in Plan 02.1-06; Plan 02.1-14
-// gap closure adds restore).
+// gap closure adds restore; Plan 02.1-17 adds preview-url + url-required-for-
+// youtube superRefine + authorIsMe in create/update schemas).
 //
 // Routes (Phase 2.1 unified-events shape):
 //   POST   /api/events                         — createEvent (free-form; D-09 /events/new)
+//   POST   /api/events/preview-url             — enrichFromUrl (Plan 02.1-17; no DB write)
 //   GET    /api/events                         — listFeedPage (FEED-01 chronological pool)
 //   GET    /api/events/deleted                 — listDeletedEvents (Plan 02.1-14 gap closure)
 //   GET    /api/events/:id                     — getEventById
@@ -11,6 +13,11 @@
 //   PATCH  /api/events/:id/attach              — attachToGame (GAMES-04a)
 //   PATCH  /api/events/:id/dismiss-inbox       — dismissFromInbox (INBOX-01)
 //   PATCH  /api/events/:id/restore             — restoreEvent (Plan 02.1-14 gap closure)
+//
+// Plan 02.1-17 deferral: enrichment does NOT auto-fill `occurredAt` in 2.1.
+// YouTube oEmbed has no `published_at`; HTML scraping is fragile; YouTube
+// Data API requires KEYS-01 (Phase 3). Client (Plan 02.1-18 /events/new)
+// shows occurredAt = today (existing default) and lets the user override.
 //
 // Hono path-precedence note: GET /events/deleted is registered BEFORE
 // GET /events/:id because Hono matches the first declaration at a given depth.
@@ -47,6 +54,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import {
   createEvent,
+  enrichFromUrl,
   getEventById,
   updateEvent,
   softDeleteEvent,
@@ -58,6 +66,7 @@ import {
   VALID_EVENT_KINDS,
   type ShowFilter,
 } from "../../services/events.js";
+import { parseIngestUrl } from "../../services/url-parser.js";
 import type { EventKind } from "../../integrations/data-source-adapter.js";
 import { toEventDto } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
@@ -76,15 +85,54 @@ const eventKindEnum = z.enum([
   "post",
 ]);
 
-const createEventSchema = z.object({
-  gameId: z.string().min(1).nullable().optional(),
-  kind: eventKindEnum,
-  occurredAt: z.string().datetime(),
-  title: z.string().min(1).max(500),
-  url: z.string().url().nullable().optional(),
-  notes: z.string().max(5000).nullable().optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
+/**
+ * Plan 02.1-17 — kind=youtube_video MUST carry a parseable YouTube url.
+ * Other kinds accept null/undefined url (free-form events; conferences,
+ * posts, etc.). Service-layer createEvent is the second layer of defense
+ * (opportunistic external_id derivation); this superRefine is the
+ * load-bearing validator.
+ *
+ * Shared between createEventSchema and updateEventSchema so a kind-change
+ * PATCH that drops the url tripwires here too (plan-checker round-2 P0).
+ */
+function youtubeUrlRequired(
+  obj: { kind?: string | undefined; url?: string | null | undefined },
+  ctx: z.RefinementCtx,
+): void {
+  if (obj.kind !== "youtube_video") return;
+  if (!obj.url) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["url"],
+      message: "url is required for kind=youtube_video",
+    });
+    return;
+  }
+  const parsed = parseIngestUrl(obj.url);
+  if (parsed.kind !== "youtube_video") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["url"],
+      message: "url must be a recognized YouTube video URL",
+    });
+  }
+}
+
+const createEventSchema = z
+  .object({
+    gameId: z.string().min(1).nullable().optional(),
+    kind: eventKindEnum,
+    occurredAt: z.string().datetime(),
+    title: z.string().min(1).max(500),
+    url: z.string().url().nullable().optional(),
+    notes: z.string().max(5000).nullable().optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    // Plan 02.1-17 — authorIsMe round-trips through the schema so the
+    // /events/new client can flip "Author: me / not me" at create time.
+    // Service defaults to false when omitted (preserves existing semantics).
+    authorIsMe: z.boolean().optional(),
+  })
+  .superRefine(youtubeUrlRequired);
 
 const updateEventSchema = z
   .object({
@@ -93,10 +141,15 @@ const updateEventSchema = z
     title: z.string().min(1).max(500).optional(),
     url: z.string().url().nullable().optional(),
     notes: z.string().max(5000).nullable().optional(),
+    // Plan 02.1-17 — authorIsMe is also editable; the /events/[id]/edit form
+    // (Plan 02.1-18) needs to flip the discriminator without re-creating the
+    // event.
+    authorIsMe: z.boolean().optional(),
   })
   .refine((obj) => Object.keys(obj).length > 0, {
     message: "at least one field must be supplied",
-  });
+  })
+  .superRefine(youtubeUrlRequired);
 
 // Feed query schema (RESEARCH §3.2 + Plan 02.1-15 multi-select). Multi-value
 // axes (source / kind / game) are NOT validated here because Hono's
@@ -122,6 +175,14 @@ const feedQuerySchema = z.object({
 
 const attachSchema = z.object({
   gameId: z.string().min(1).nullable(),
+});
+
+// Plan 02.1-17 — read-only enrichment endpoint. Pure URL parse + oEmbed fetch,
+// no DB write. The /events/new client (Plan 02.1-18) calls this before the
+// user submits the form so they see auto-filled title + thumbnail + external_id
+// without committing the row.
+const previewUrlSchema = z.object({
+  url: z.string().url(),
 });
 
 export const eventsRoutes = new Hono<RouteVars>();
@@ -214,6 +275,41 @@ eventsRoutes.get(
       });
     } catch (err) {
       return mapErr(c, err, "GET /api/events");
+    }
+  },
+);
+
+// Plan 02.1-17 — POST /api/events/preview-url. Read-only enrichment; no DB
+// write. Tenant-scoped (mounted under tenantScope) so anonymous → 401, but
+// no tenant-owned data is read (the URL is the only input). HONO PATH-
+// PRECEDENCE: register BEFORE any parametric POST `/events/:id/...` route
+// (none currently exist for POST, but Plan 02.1-14 precedent applies — keep
+// literals first as a discipline).
+eventsRoutes.post(
+  "/events/preview-url",
+  zValidator("json", previewUrlSchema, (r, c) => {
+    if (!r.success) {
+      return c.json({ error: "validation_failed", details: r.error.issues }, 422);
+    }
+  }),
+  async (c) => {
+    try {
+      const enriched = await enrichFromUrl(
+        c.var.userId,
+        c.req.valid("json").url,
+      );
+      return c.json({
+        kind: enriched.kind,
+        externalId: enriched.externalId,
+        title: enriched.title,
+        thumbnailUrl: enriched.thumbnailUrl,
+        // ISO string when set; null in 2.1 (Phase 3 fills via YouTube Data API key).
+        occurredAt: enriched.occurredAt
+          ? enriched.occurredAt.toISOString()
+          : null,
+      });
+    } catch (err) {
+      return mapErr(c, err, "POST /api/events/preview-url");
     }
   },
 );

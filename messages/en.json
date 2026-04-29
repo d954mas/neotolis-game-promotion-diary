@@ -175,6 +175,7 @@
   "events_new_date_today": "Today",
   "events_new_date_yesterday": "Yesterday",
   "events_new_date_explainer": "The date defaults to today. Pick a different date manually for past conferences, talks, or backdated posts.",
+  "events_new_url_required": "A YouTube URL is required for YouTube video events.",
 
   "feed_row_edit_aria": "Edit event",
   "feed_row_delete_aria": "Delete event",

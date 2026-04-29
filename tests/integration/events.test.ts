@@ -1049,3 +1049,376 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     expect(ids).toContain(inbox.id);
   });
 });
+
+/**
+ * Plan 02.1-17 Task 2 — createEventSchema authorIsMe + url-required-for-youtube
+ * superRefine; new POST /api/events/preview-url endpoint.
+ *
+ * Closes UAT gaps "kind=youtube_video → url required validation",
+ * "author_is_me toggle restoration on backend", and "POST /api/events/preview-url
+ * endpoint". The 12 test cases assert the HTTP-boundary contract; the
+ * Task 1 service-layer contract is already covered above.
+ */
+describe("Plan 02.1-17: createEventSchema + preview-url", () => {
+  // Same parallel-execution coordination pattern as Task 1.
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
+  it("Plan 02.1-17 Task 2 Test 1: POST /api/events kind=youtube_video + url=null → 422 'validation_failed' field='url'", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t1-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "youtube_video",
+        url: null,
+        title: "x",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as {
+      error: string;
+      details: Array<{ path: string[] }>;
+    };
+    expect(body.error).toBe("validation_failed");
+    // superRefine attaches the issue to path: ["url"].
+    const fields = body.details.map((d) => d.path?.[0]);
+    expect(fields).toContain("url");
+  });
+
+  it("Plan 02.1-17 Task 2 Test 2: POST /api/events kind=youtube_video + non-YouTube url → 422 'validation_failed'", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t2-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "youtube_video",
+        url: "https://example.com/not-a-youtube-url",
+        title: "x",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("validation_failed");
+  });
+
+  it("Plan 02.1-17 Task 2 Test 3: POST /api/events kind=youtube_video + valid YouTube url → 201 + body.externalId set", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t3-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "youtube_video",
+        url: "https://www.youtube.com/watch?v=ABCDEFGHIJK",
+        title: "x",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { externalId: string };
+    expect(body.externalId).toBe("ABCDEFGHIJK");
+  });
+
+  it("Plan 02.1-17 Task 2 Test 4: POST /api/events kind=post + url=null → 201 (kind-aware rule fires only for youtube_video)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t4-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "post",
+        url: null,
+        title: "Bluesky launch",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("Plan 02.1-17 Task 2 Test 5: POST /api/events with authorIsMe=true → 201 + body.authorIsMe===true (round-trip)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t5-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "conference",
+        title: "GDC 2026",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+        authorIsMe: true,
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { authorIsMe: boolean };
+    expect(body.authorIsMe).toBe(true);
+  });
+
+  it("Plan 02.1-17 Task 2 Test 6: POST /api/events without authorIsMe → 201 + body.authorIsMe===false (default)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t6-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "conference",
+        title: "GDC 2026",
+        occurredAt: "2026-04-28T12:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { authorIsMe: boolean };
+    expect(body.authorIsMe).toBe(false);
+  });
+
+  it("Plan 02.1-17 Task 2 Test 7: POST /api/events/preview-url with valid YouTube URL → 200 + enrichment shape", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t7-${uniq()}@test.local` });
+
+    // Mock the oEmbed fetch — same pattern as paste-flow tests.
+    const youtubeOembed = await import(
+      "../../src/lib/server/integrations/youtube-oembed.js"
+    );
+    const spy = vi.spyOn(youtubeOembed, "fetchYoutubeOembed").mockResolvedValue({
+      kind: "ok",
+      data: {
+        title: "Never Gonna Give You Up",
+        authorName: "Rick Astley",
+        authorUrl: "https://www.youtube.com/@RickAstleyYT",
+        thumbnailUrl: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+      },
+    });
+
+    try {
+      const res = await app.request("/api/events/preview-url", {
+        method: "POST",
+        headers: {
+          cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        kind: string;
+        externalId: string;
+        title: string;
+        thumbnailUrl: string;
+        occurredAt: string | null;
+      };
+      expect(body.kind).toBe("youtube_video");
+      expect(body.externalId).toBe("dQw4w9WgXcQ");
+      expect(body.title).toBe("Never Gonna Give You Up");
+      expect(body.thumbnailUrl).toBe(
+        "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg",
+      );
+      expect(body.occurredAt).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("Plan 02.1-17 Task 2 Test 8: POST /api/events/preview-url with garbage URL → 422 'unsupported_url'", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t8-${uniq()}@test.local` });
+
+    const res = await app.request("/api/events/preview-url", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ url: "https://example.com/not-supported" }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("unsupported_url");
+  });
+
+  it("Plan 02.1-17 Task 2 Test 9: anonymous POST /api/events/preview-url → 401 unauthorized (sweep complement)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+
+    const res = await app.request("/api/events/preview-url", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      }),
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-17 Task 2 Test 10: POST /api/events/preview-url is read-only — both userA and userB get same shape from same URL", async () => {
+    // /api/events/preview-url is read-only — pure URL parse + oEmbed fetch.
+    // No tenant-owned data is read. Cross-tenant invariant: both users get
+    // the same enrichment shape from the same URL.
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({ email: `ev17t2t10a-${uniq()}@test.local` });
+    const userB = await seedUserDirectly({ email: `ev17t2t10b-${uniq()}@test.local` });
+
+    const youtubeOembed = await import(
+      "../../src/lib/server/integrations/youtube-oembed.js"
+    );
+    const spy = vi.spyOn(youtubeOembed, "fetchYoutubeOembed").mockResolvedValue({
+      kind: "ok",
+      data: {
+        title: "Cross-tenant test",
+        authorName: "Author",
+        authorUrl: "",
+        thumbnailUrl: "",
+      },
+    });
+
+    try {
+      const url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+
+      const resA = await app.request("/api/events/preview-url", {
+        method: "POST",
+        headers: {
+          cookie: `neotolis.session_token=${userA.signedSessionCookieValue}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ url }),
+      });
+      expect(resA.status).toBe(200);
+      const bodyA = (await resA.json()) as {
+        kind: string;
+        externalId: string;
+        title: string;
+      };
+
+      const resB = await app.request("/api/events/preview-url", {
+        method: "POST",
+        headers: {
+          cookie: `neotolis.session_token=${userB.signedSessionCookieValue}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ url }),
+      });
+      expect(resB.status).toBe(200);
+      const bodyB = (await resB.json()) as {
+        kind: string;
+        externalId: string;
+        title: string;
+      };
+
+      // Same URL → same enrichment shape (no tenant-owned data is touched).
+      expect(bodyA.externalId).toBe(bodyB.externalId);
+      expect(bodyA.kind).toBe(bodyB.kind);
+      expect(bodyA.title).toBe(bodyB.title);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("Plan 02.1-17 Task 2 Test 11: PATCH /api/events/:id with authorIsMe=true → 200 + body.authorIsMe===true (updateEventSchema round-trip)", async () => {
+    // Plan-checker round-2 P0 fix: without this test, partial-ship risk is
+    // real (createEventSchema gets authorIsMe but updateEventSchema silently
+    // doesn't, edit form fails at runtime). Plan 02.1-18's edit form depends
+    // on this contract.
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t11-${uniq()}@test.local` });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "conference",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+        title: "Initial",
+      },
+      "127.0.0.1",
+    );
+    expect(ev.authorIsMe).toBe(false);
+
+    const res = await app.request(`/api/events/${ev.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ authorIsMe: true }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { authorIsMe: boolean };
+    expect(body.authorIsMe).toBe(true);
+  });
+
+  it("Plan 02.1-17 Task 2 Test 12: PATCH /api/events/:id changing kind=youtube_video without url → 422 'validation_failed' field='url'", async () => {
+    // Plan-checker round-2 P0 fix: catches a kind-change PATCH that drops the
+    // url. updateEventSchema superRefine fires on the same kind-aware rule as
+    // createEventSchema.
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev17t2t12-${uniq()}@test.local` });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "conference",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+        title: "Was a conference",
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(`/api/events/${ev.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ kind: "youtube_video", url: null }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as {
+      error: string;
+      details: Array<{ path: string[] }>;
+    };
+    expect(body.error).toBe("validation_failed");
+    const fields = body.details.map((d) => d.path?.[0]);
+    expect(fields).toContain("url");
+  });
+});

@@ -60,9 +60,11 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     "/api/sources/:id",
     "/api/sources/:id/restore",
     // Phase 2 + 2.1 — events (extended with feed + attach + dismiss-inbox +
-    // Plan 02.1-14 gap closure: restore + deleted-list)
+    // Plan 02.1-14 gap closure: restore + deleted-list +
+    // Plan 02.1-17 gap closure: preview-url)
     "/api/events",
     "/api/events/deleted",
+    "/api/events/preview-url",
     "/api/events/:id",
     "/api/events/:id/attach",
     "/api/events/:id/dismiss-inbox",

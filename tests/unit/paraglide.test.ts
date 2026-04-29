@@ -148,6 +148,7 @@ describe("paraglide i18n (UX-04)", () => {
       "events_new_date_explainer",
       "events_new_date_today",
       "events_new_date_yesterday",
+      "events_new_url_required",
       "feed_attach_error_already_attached",
       "feed_attach_error_game_not_found",
       "feed_attach_no_games_inline",

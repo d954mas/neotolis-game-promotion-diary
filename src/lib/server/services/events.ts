@@ -98,6 +98,10 @@ export interface UpdateEventInput {
   title?: string;
   url?: string | null;
   notes?: string | null;
+  // Plan 02.1-17 — author_is_me toggle restoration on the edit path so the
+  // /events/[id]/edit form (Plan 02.1-18) can flip the discriminator without
+  // re-creating the event.
+  authorIsMe?: boolean;
 }
 
 export interface PasteInput {
@@ -628,6 +632,12 @@ export async function updateEvent(
   if (input.notes !== undefined) {
     patch.notes = input.notes;
     fields.push("notes");
+  }
+  // Plan 02.1-17 — authorIsMe toggle on the edit path. Round-trips through
+  // the same `events.author_is_me` column the discriminator uses everywhere.
+  if (input.authorIsMe !== undefined) {
+    patch.authorIsMe = input.authorIsMe;
+    fields.push("authorIsMe");
   }
 
   const [row] = await db

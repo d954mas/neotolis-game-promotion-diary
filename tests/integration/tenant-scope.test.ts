@@ -113,6 +113,67 @@ describe("cross-tenant 404 (PRIV-01, VALIDATION 7/8/9)", () => {
     expect(body).not.toContain("permission");
   });
 
+  // Plan 02.1-17 — POST /api/events/preview-url is read-only (pure URL parse +
+  // oEmbed fetch). No tenant-owned data is read. Cross-tenant invariant: both
+  // users get the same enrichment shape from the same URL. This test asserts
+  // that contract and surfaces any future drift if a refactor accidentally
+  // reads from the caller's tenant scope.
+  it("Plan 02.1-17: POST /api/events/preview-url is tenant-scoped but tenant-data-free — same URL → same shape for any user", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const youtubeOembed = await import(
+      "../../src/lib/server/integrations/youtube-oembed.js"
+    );
+    const { vi } = await import("vitest");
+    const spy = vi.spyOn(youtubeOembed, "fetchYoutubeOembed").mockResolvedValue({
+      kind: "ok",
+      data: {
+        title: "Cross-tenant preview",
+        authorName: "Author",
+        authorUrl: "",
+        thumbnailUrl: "",
+      },
+    });
+    try {
+      const app = createApp();
+      const userA = await seedUserDirectly({ email: "p17-tnA@test.local" });
+      const userB = await seedUserDirectly({ email: "p17-tnB@test.local" });
+      const url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+
+      const resA = await app.request("/api/events/preview-url", {
+        method: "POST",
+        headers: {
+          cookie: `neotolis.session_token=${userA.signedSessionCookieValue}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ url }),
+      });
+      expect(resA.status).toBe(200);
+      const bodyA = (await resA.json()) as Record<string, unknown>;
+
+      const resB = await app.request("/api/events/preview-url", {
+        method: "POST",
+        headers: {
+          cookie: `neotolis.session_token=${userB.signedSessionCookieValue}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ url }),
+      });
+      expect(resB.status).toBe(200);
+      const bodyB = (await resB.json()) as Record<string, unknown>;
+
+      // Same URL → same enrichment payload. No leakage of one tenant's data
+      // into the other's response.
+      expect(bodyA.externalId).toBe(bodyB.externalId);
+      expect(bodyA.kind).toBe(bodyB.kind);
+      expect(bodyA.title).toBe(bodyB.title);
+      // DTO discipline (P3): preview-url response carries no userId.
+      expect(bodyA).not.toHaveProperty("userId");
+      expect(bodyB).not.toHaveProperty("userId");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("user A reading their own /api/me returns 200; user B reading their own returns 200 with different data", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
