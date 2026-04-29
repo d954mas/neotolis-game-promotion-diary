@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Phase 02.1 PAUSED — Plan 02.1-10 Task 2 manual UAT identified gaps; phase scope expanded with 5 bug fixes + card visual language redesign cluster; user direction "Мы не закрываем еще фазу, она не готовая"
-stopped_at: Plan 02.1-10 Task 2 (manual UAT) walked 9 items 2026-04-29; user identified 5 real bugs (sticky / sign-out invalidation / keys/steam discoverability / audit FiltersSheet schema regression / body-scroll-lock) + ~7-item card visual language redesign cluster + 4 product additions (auto_import edit-gate, /settings/credentials hub, multi-credentials, game cover with Steam fallback) + 1 ingest UX (post-ingest register-channel prompt). Findings captured in 02.1-10-UAT-NOTES.md (commit 1a35a80). Phase 3+ deferred items (external_id matching, re-link orphans, per-source stats, itch.io polling) not in 02.1. VALIDATION.md sign-off and 02.1-10-SUMMARY.md DEFERRED until gap-closure plans complete and UAT re-runs.
-last_updated: "2026-04-29T10:02:35.695Z"
+status: Ready to execute
+stopped_at: Completed Plan 02.1-21 — schema prop on FiltersSheet/FilterChips + /audit date-range filter (Wave 0 of round-3 gap closure). Plans 22-24 unblocked.
+last_updated: "2026-04-29T12:48:51.298Z"
 last_activity: 2026-04-29
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 41
-  completed_plans: 40
+  total_plans: 47
+  completed_plans: 41
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 10 of 20 (last incomplete plan; Tasks 11-20 already complete)
+Plan: 2 of 26
 
 ## Performance Metrics
 
@@ -84,6 +84,7 @@ Plan: 10 of 20 (last incomplete plan; Tasks 11-20 already complete)
 | Phase 02.1 P19 | 16m 22s | 10 tasks | 19 files |
 | Phase 02.1-architecture-realignment P18 | 9min 22s | 5 tasks | 10 files |
 | Phase 02.1 P20 | ~17min 37s | 5 tasks | 16 files |
+| Phase 02.1-architecture-realignment P21 | ~25min | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -218,6 +219,10 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-20: AuditActionFilter narrowed from 'all'|AuditAction to AuditAction (no sentinel); empty array is the new 'all' semantics; SQL clause branches over array length (0→sql`true`, 1→eq, 2+→inArray); userId WHERE clause STAYS first in and(...) by construction
 - [Phase 02.1-architecture-realignment]: Plan 02.1-20: vitest $lib alias added to resolve.alias for unit/integration/browser projects; fixes Plan 02.1-11 audit-render.test.ts latent loading issue (any test SSR-rendering a component with $lib/* imports needed the alias); also fixes the chip-match regex for Svelte 5 SSR scoped class output (<span class='chip svelte-XXXXX'>) — both Plan 02.1-11 latent bugs surfaced + fixed in one motion
 - [Phase 02.1-architecture-realignment]: Plan 02.1-20: /audit URL contract switches from ?action=A to ?action=A&action=B repeated params (mirrors /feed multi-select convention from Plan 02.1-15); pre-launch (CONTEXT D-04) so destructive change is OK; old single-value URLs still work via single-element array eq() branch; old ?action=all URLs fall through forgiving-GET (filtered out by VALID_ACTIONS) without leak
+- [Phase 02.1-architecture-realignment]: Plan 02.1-21: schema prop is REQUIRED on FiltersSheet+FilterChips (no default) — consumer pages must opt in to each axis explicitly; eliminates Plan 02.1-20's implicit gate (filters.action presence) and prevents leak regressions by construction
+- [Phase 02.1-architecture-realignment]: Plan 02.1-21: listAuditPage gains optional dateRange?: AuditDateRange 4th parameter; gte/lte clauses appended to filterParts; userId WHERE clause STAYS the FIRST clause in and(...) per PRIVACY INVARIANT 1; cross-tenant 404 (P19) preserved by construction (verified by date+action+forged-cursor integration test)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-21: /audit deliberately omits the 30-day default window (unlike /feed) — auditing is investigative, default is 'show every row'; mirrors /feed's date parsing pattern but skips the default-window assignment
+- [Phase 02.1-architecture-realignment]: Plan 02.1-21: 'date' axis is in both /feed and /audit schemas but emits NO chip — visible <DateRangeControl> from/to inputs ARE the indicator; chip duplication is confusing (Plan 02.1-19 contract preserved); FilterChips ChipAxis union deliberately excludes 'date'
 
 ### Pending Todos
 
@@ -258,8 +263,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-29T10:02:35.695Z
+Last session: 2026-04-29T12:48:51.292Z
 Last Activity: 2026-04-29
-Stopped at: Plan 02.1-10 Task 1 verified at pre-existing commit dd71efb. Awaiting Task 2 manual UAT checkpoint (9 items per 02.1-10-PLAN.md <how-to-verify>). On approval, continuation agent runs Task 3 (VALIDATION.md sign-off, SUMMARY.md, STATE/ROADMAP updates).
+Stopped at: Completed Plan 02.1-21 — schema prop on FiltersSheet/FilterChips + /audit date-range filter (Wave 0 of round-3 gap closure). Plans 22-24 unblocked.
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
