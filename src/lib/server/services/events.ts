@@ -260,6 +260,16 @@ async function findActiveSourceByHandleUrl(
  * the inbox. When provided, the row is verified to belong to userId BEFORE
  * the INSERT (Pitfall 4).
  *
+ * Plan 02.1-17 — kind-aware external_id enrichment for the manual-create
+ * path. When `kind === "youtube_video"` AND `input.externalId` is null /
+ * undefined AND `input.url` is set, parse the URL synchronously (no oEmbed
+ * fetch) and set externalId from the canonical videoId so the FeedCard
+ * thumbnail renders end-to-end. Idempotent — explicit `input.externalId`
+ * always wins (caller-supplied value is never overwritten). Defense-in-depth
+ * vs the route-layer superRefine: a malformed YouTube URL slipping past the
+ * route silently leaves externalId null rather than throwing (the route is
+ * the load-bearing validator; the service is opportunistic enrichment).
+ *
  * Audit: writes `event.created` with metadata
  *   { kind, event_id, game_id, occurred_at }
  *
@@ -281,6 +291,28 @@ export async function createEvent(
     await assertGameOwnedByUser(userId, input.gameId);
   }
 
+  // Plan 02.1-17 — opportunistic external_id derivation for kind=youtube_video.
+  // Synchronous URL parse only; oEmbed enrichment is a separate concern handled
+  // by enrichFromUrl below (and POST /api/events/preview-url). Caller-supplied
+  // externalId always wins — this branch only runs when input.externalId is
+  // null/undefined and a YouTube URL is present.
+  let derivedExternalId: string | null = input.externalId ?? null;
+  if (
+    input.kind === "youtube_video" &&
+    derivedExternalId == null &&
+    input.url != null &&
+    input.url !== ""
+  ) {
+    const { parseIngestUrl } = await import("./url-parser.js");
+    const parsed = parseIngestUrl(input.url);
+    if (parsed.kind === "youtube_video") {
+      derivedExternalId = parsed.videoId;
+    }
+    // Any other shape (unsupported / reddit_deferred / etc.) — leave null.
+    // The route-layer superRefine catches malformed YouTube URLs before
+    // service is called; this is defense-in-depth only.
+  }
+
   let row: EventRow | undefined;
   try {
     [row] = await db
@@ -296,7 +328,7 @@ export async function createEvent(
         url: input.url ?? null,
         notes: input.notes ?? null,
         metadata: input.metadata ?? {},
-        externalId: input.externalId ?? null,
+        externalId: derivedExternalId,
       })
       .returning();
   } catch (e: unknown) {
@@ -308,7 +340,7 @@ export async function createEvent(
         {
           kind: input.kind,
           source_id: input.sourceId ?? null,
-          external_id: input.externalId ?? null,
+          external_id: derivedExternalId,
         },
       );
     }
@@ -333,44 +365,63 @@ export async function createEvent(
 }
 
 /**
- * createEventFromPaste — INGEST-02/03/04 unified path. Replaces the Phase 2
- * `items-youtube.createTrackedYoutubeVideo` flow. The YouTube paste path now
- * writes ONE events row (kind=youtube_video) carrying:
- *   - source_id   = matched data_sources row's id, or NULL on no match
- *   - author_is_me = matched source's is_owned_by_me, or false on no match
- *   - external_id = canonical YouTube videoId (auto-import dedup key)
+ * Plan 02.1-17 — EnrichmentResult is the shared shape returned by
+ * `enrichFromUrl` (used by both the paste flow and the new
+ * POST /api/events/preview-url endpoint). Pure data — no side effects, no DB
+ * write. The route handler decides whether to INSERT or just preview.
  *
- * Validate-first invariant (D-19): URL parse + oEmbed validation runs BEFORE
- * any INSERT. On unsupported / private / unavailable / Reddit, the database
- * is provably untouched.
+ * `occurredAt` is `null` in 2.1 because YouTube oEmbed has no `published_at`
+ * field; auto-fill of the date lands in Phase 3 alongside the YouTube Data API
+ * key (KEYS-01). The /events/new client falls back to today's date.
  *
- * Reddit URLs throw AppError 'reddit_pending_phase3' (422) — CONTEXT DV-7:
- * Reddit ingest stays Phase 3 alongside the poll.reddit adapter.
+ * `sourceMatch` carries the matched data_sources row's id + isOwnedByMe so
+ * createEventFromPaste can inherit `author_is_me` from a registered source
+ * without re-querying.
  */
-export async function createEventFromPaste(
+export interface EnrichmentResult {
+  kind: EventKind;
+  externalId: string | null;
+  title: string;
+  occurredAt: Date | null;
+  thumbnailUrl: string | null;
+  authorName: string | null;
+  authorUrl: string | null;
+  canonicalUrl: string;
+  sourceMatch: { id: string; isOwnedByMe: boolean } | null;
+}
+
+/**
+ * Plan 02.1-17 — enrichFromUrl is the URL → metadata bridge shared by the
+ * paste flow (createEventFromPaste) and the new POST /api/events/preview-url
+ * endpoint. Pure read: parses the URL, calls oEmbed, matches author_url
+ * against registered data_sources, returns the enrichment payload. NO DB
+ * write happens here — both callers consume the result and either INSERT
+ * (paste) or render (preview).
+ *
+ * Error mapping mirrors createEventFromPaste exactly so the route layer
+ * preserves UX:
+ *   - unsupported URL          → AppError 'unsupported_url' 422
+ *   - reddit_deferred          → AppError 'reddit_pending_phase3' 422
+ *   - twitter_post/telegram_post → AppError 'kind_not_yet_functional' 422
+ *   - oEmbed 5xx/network       → AppError 'youtube_oembed_unreachable' 502
+ *   - oEmbed 401 (private)     → AppError 'youtube_unavailable' 422
+ *   - oEmbed 404 (unavailable) → AppError 'youtube_unavailable' 422
+ */
+export async function enrichFromUrl(
   userId: string,
-  input: PasteInput,
-  ipAddress: string,
-  userAgent?: string,
-): Promise<EventRow> {
-  // Lazy-import the parser + oEmbed integration so this module compiles even
-  // if the ingest layer is mid-transition (parallel-executor friendly).
+  url: string,
+): Promise<EnrichmentResult> {
   const { parseIngestUrl } = await import("./url-parser.js");
   const { fetchYoutubeOembed } = await import(
     "../integrations/youtube-oembed.js"
   );
 
-  const parsed = parseIngestUrl(input.url);
+  const parsed = parseIngestUrl(url);
 
   if (parsed.kind === "unsupported") {
-    throw new AppError("URL not yet supported", "unsupported_url", 422, {
-      url: input.url,
-    });
+    throw new AppError("URL not yet supported", "unsupported_url", 422, { url });
   }
   if (parsed.kind === "reddit_deferred") {
-    // CONTEXT DV-7: Reddit ingest lands in Phase 3 with poll.reddit. Surface a
-    // typed error so the route layer (Plan 02.1-06) can map to the friendly
-    // inline-info message.
     throw new AppError(
       "Reddit ingest arrives in Phase 3",
       "reddit_pending_phase3",
@@ -378,27 +429,21 @@ export async function createEventFromPaste(
     );
   }
   if (parsed.kind === "twitter_post" || parsed.kind === "telegram_post") {
-    // These flows are implemented by the higher-level orchestrator (ingest.ts)
-    // because they want to call platform-specific oEmbed integrations.
-    // createEventFromPaste is the YouTube-only convenience entry; the
-    // orchestrator uses createEvent directly for Twitter / Telegram.
     throw new AppError(
-      `paste flow does not yet handle kind '${parsed.kind}' via createEventFromPaste`,
+      `paste flow does not yet handle kind '${parsed.kind}'`,
       "kind_not_yet_functional",
       422,
       { kind: parsed.kind },
     );
   }
   if (parsed.kind !== "youtube_video") {
-    // Unreachable — exhaustive over the ParsedUrl union — but the assertion
-    // makes future kinds (D-09 /events/new free-form) easier to plug in.
+    // Exhaustive guard — every ParsedUrl variant handled above.
     const _exhaustive: never = parsed;
     void _exhaustive;
     throw new AppError("unhandled paste kind", "unsupported_url", 422);
   }
 
-  // YouTube oEmbed validation — Phase 2 precedent (discriminated-union catch
-  // mapping). 5xx / network / abort throws; 401 → private; 404 → unavailable.
+  // YouTube oEmbed (5xx/network → 502; 401 → private; 404 → unavailable).
   let oembed;
   try {
     oembed = await fetchYoutubeOembed(parsed.canonicalUrl);
@@ -428,6 +473,54 @@ export async function createEventFromPaste(
       ? await findActiveSourceByHandleUrl(userId, oembed.data.authorUrl)
       : null;
 
+  return {
+    kind: "youtube_video",
+    externalId: parsed.videoId,
+    title: oembed.data.title || `YouTube video ${parsed.videoId}`,
+    // 2.1 SKIP — YouTube oEmbed has no published_at. Phase 3 fills via
+    // YouTube Data API key (KEYS-01) alongside the polling worker.
+    occurredAt: null,
+    // Deterministic public-CDN thumbnail; oEmbed's `thumbnail_url` is HQ but
+    // platform-versioned. mqdefault.jpg matches the Plan 02.1-16 FeedCard.
+    thumbnailUrl: `https://img.youtube.com/vi/${parsed.videoId}/mqdefault.jpg`,
+    authorName: oembed.data.authorName || null,
+    authorUrl: oembed.data.authorUrl || null,
+    canonicalUrl: parsed.canonicalUrl,
+    sourceMatch: matchedSource
+      ? { id: matchedSource.id, isOwnedByMe: matchedSource.isOwnedByMe }
+      : null,
+  };
+}
+
+/**
+ * createEventFromPaste — INGEST-02/03/04 unified path. Replaces the Phase 2
+ * `items-youtube.createTrackedYoutubeVideo` flow. The YouTube paste path now
+ * writes ONE events row (kind=youtube_video) carrying:
+ *   - source_id   = matched data_sources row's id, or NULL on no match
+ *   - author_is_me = matched source's is_owned_by_me, or false on no match
+ *   - external_id = canonical YouTube videoId (auto-import dedup key)
+ *
+ * Validate-first invariant (D-19): URL parse + oEmbed validation runs BEFORE
+ * any INSERT. On unsupported / private / unavailable / Reddit, the database
+ * is provably untouched.
+ *
+ * Plan 02.1-17 refactor: the URL parse + oEmbed fetch + author-match logic
+ * is extracted into the shared `enrichFromUrl` helper so the new
+ * POST /api/events/preview-url endpoint can call it without duplicating the
+ * fetch (DRY). The paste-specific logic that remains here is gameId
+ * validation + the createEvent INSERT.
+ *
+ * Reddit URLs throw AppError 'reddit_pending_phase3' (422) — CONTEXT DV-7:
+ * Reddit ingest stays Phase 3 alongside the poll.reddit adapter.
+ */
+export async function createEventFromPaste(
+  userId: string,
+  input: PasteInput,
+  ipAddress: string,
+  userAgent?: string,
+): Promise<EventRow> {
+  const enriched = await enrichFromUrl(userId, input.url);
+
   if (input.gameId != null) {
     await assertGameOwnedByUser(userId, input.gameId);
   }
@@ -437,16 +530,19 @@ export async function createEventFromPaste(
     {
       gameId: input.gameId ?? null,
       kind: "youtube_video",
+      // Paste flow defaults occurredAt to "now" (the moment the user pasted);
+      // the unified shape preserves this — preview-url callers get null and
+      // the client renders today's date instead.
       occurredAt: new Date(),
-      title: oembed.data.title || `YouTube video ${parsed.videoId}`,
-      url: parsed.canonicalUrl,
-      externalId: parsed.videoId,
-      sourceId: matchedSource?.id ?? null,
-      authorIsMe: matchedSource?.isOwnedByMe ?? false,
+      title: enriched.title,
+      url: enriched.canonicalUrl,
+      externalId: enriched.externalId,
+      sourceId: enriched.sourceMatch?.id ?? null,
+      authorIsMe: enriched.sourceMatch?.isOwnedByMe ?? false,
       metadata: {
-        author_name: oembed.data.authorName,
-        author_url: oembed.data.authorUrl,
-        thumbnail_url: oembed.data.thumbnailUrl,
+        author_name: enriched.authorName ?? "",
+        author_url: enriched.authorUrl ?? "",
+        thumbnail_url: enriched.thumbnailUrl ?? "",
       },
     },
     ipAddress,

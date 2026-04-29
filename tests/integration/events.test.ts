@@ -688,8 +688,14 @@ describe("event soft-delete recovery routes (Plan 02.1-14 gap closure)", () => {
  * endpoint (Task 2) — pure URL parse + oEmbed fetch, no DB write.
  */
 describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
+  // Parallel-execution coordination: Plan 02.1-19 runs against the same DB
+  // concurrently. Random suffixes on test emails avoid unique-key collisions
+  // when the parallel agent's tests reach this DB between our truncate and
+  // our insert. See PLAN front-matter parallel_execution block.
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
   it("Plan 02.1-17 Test 1: createEvent kind=youtube_video + url derives external_id from canonical YouTube videoId", async () => {
-    const u = await seedUserDirectly({ email: "ev17t1@test.local" });
+    const u = await seedUserDirectly({ email: `ev17t1-${uniq()}@test.local` });
     const ev = await createEvent(
       u.id,
       {
@@ -706,7 +712,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
   });
 
   it("Plan 02.1-17 Test 2: explicit input.externalId overrides URL-parsed value (caller wins)", async () => {
-    const u = await seedUserDirectly({ email: "ev17t2@test.local" });
+    const u = await seedUserDirectly({ email: `ev17t2-${uniq()}@test.local` });
     const ev = await createEvent(
       u.id,
       {
@@ -723,7 +729,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
   });
 
   it("Plan 02.1-17 Test 3: kind=youtube_video with null url leaves external_id NULL (route-layer catches the missing url; service is opportunistic)", async () => {
-    const u = await seedUserDirectly({ email: "ev17t3@test.local" });
+    const u = await seedUserDirectly({ email: `ev17t3-${uniq()}@test.local` });
     // Service-layer is opportunistic — the route-layer superRefine catches the
     // missing-url case BEFORE service is called. Direct service call without
     // url leaves externalId null.
@@ -742,7 +748,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
   });
 
   it("Plan 02.1-17 Test 4: kind=conference + YouTube URL does NOT set external_id (parsing only fires for kind=youtube_video)", async () => {
-    const u = await seedUserDirectly({ email: "ev17t4@test.local" });
+    const u = await seedUserDirectly({ email: `ev17t4-${uniq()}@test.local` });
     const ev = await createEvent(
       u.id,
       {
@@ -758,7 +764,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
   });
 
   it("Plan 02.1-17 Test 5: enrichFromUrl returns full enrichment shape for YouTube URL (no DB write)", async () => {
-    const u = await seedUserDirectly({ email: "ev17t5@test.local" });
+    const u = await seedUserDirectly({ email: `ev17t5-${uniq()}@test.local` });
 
     // Mock the oEmbed fetch — same pattern as Phase 2 paste-flow tests.
     const youtubeOembed = await import(
@@ -796,7 +802,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
   });
 
   it("Plan 02.1-17 Test 6: enrichFromUrl with garbage URL throws AppError 'unsupported_url' 422", async () => {
-    const u = await seedUserDirectly({ email: "ev17t6@test.local" });
+    const u = await seedUserDirectly({ email: `ev17t6-${uniq()}@test.local` });
     await expect(
       enrichFromUrl(u.id, "not-a-url-at-all"),
     ).rejects.toMatchObject({
