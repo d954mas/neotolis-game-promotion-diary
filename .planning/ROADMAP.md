@@ -88,7 +88,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   6. Cross-tenant + anonymous-401 invariants extend to `/api/sources`, `/api/events`, `/feed` and `/sources` SvelteKit loaders; `eslint-plugin-tenant-scope/no-unfiltered-tenant-query` covers the renamed `data_sources` and the extended `events` table; `MUST_BE_PROTECTED` allowlist gains the new routes
   7. UI polish bundled because cheap to land alongside the rebuild: `/settings` active sessions list, `/keys/steam` empty-state copy fix (no fictitious manual-wishlist mention), event delete confirm dialog, AppHeader avatar+email; theme toggle moved out of AppHeader to `/settings`
   8. Phase 2.1 smoke extension: CI self-host smoke test asserts the unified flow end-to-end — register a YouTube `data_source`, paste a YouTube URL, see the event in `/feed` with `source_id=NULL`, attach to a game, verify it appears in `/games/[id]` curated view; cross-tenant matrix extends to `/api/sources` + `/api/events`
-**Plans**: 18 plans (10 original + 6 round-1 gap closure from UAT 2026-04-28 + 2 round-2 gap closure from UAT 2026-04-29)
+**Plans**: 19 plans (10 original + 6 round-1 gap closure from UAT 2026-04-28 + 3 round-2 gap closure from UAT 2026-04-29)
 **Plan list**:
 - [x] 02.1-01-PLAN.md — Wave 0: single new baseline migration (Phase 1+2 collapsed) + final 2.1 schema modules + AUDIT_ACTIONS rename + ESLint TENANT_TABLES update
 - [x] 02.1-02-PLAN.md — Wave 0: 5 new placeholder test files (data-sources, feed, inbox, events-attach, browser feed-360) with named-plan it.skip per Phase 1+2 Wave 0 pattern
@@ -108,6 +108,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 02.1-16-PLAN.md — Gap closure Wave 3: FeedCard redesign with media thumbnails + formatFeedDate compact-relative buckets + KindIcon kind-label adjacency (Gap 6 path b) + paraglide.test.ts EXPECTED_KEYS snapshot refresh + 02.1-VALIDATION.md per-task map populated + Gap Closure Complete note (Gaps 3 + 5 + 6)
 - [ ] 02.1-17-PLAN.md — Round-2 gap closure Wave 1: backend kind-aware enrichment — createEvent auto-derives external_id from url for kind=youtube_video + new POST /api/events/preview-url endpoint + createEventSchema/updateEventSchema accept authorIsMe + url-required-for-youtube superRefine (round-2 UAT gaps: external_id parsing BLOCKER, author_is_me persistence, kind-aware URL validation, preview-url enrichment)
 - [ ] 02.1-18-PLAN.md — Round-2 gap closure Wave 2: edit-flow rebuild — pencil REMOVED from FeedCard + /events/[id] detail page replaces Phase-4 stub (KindIcon + title + chips + Edit pencil + Delete + Restore-if-soft-deleted + Open external + inline Phase-4 chart placeholder) + NEW /events/[id]/edit form route mirroring /events/new + author_is_me checkbox on /events/new + /events/[id]/edit + visible "Mine" badge on FeedCard (round-2 UAT gaps: edit-flow rebuild, FeedCard becomes pure preview tile, author_is_me toggle restoration)
+- [ ] 02.1-19-PLAN.md — Round-2 gap closure Wave 1: feed UX rebuild — DateRangeControl always-visible from/to inputs + 4 presets (Today/Week/Month/Year) + × clear; Game/Attached merge into single "Show" axis (Any/Inbox/Specific games); FilterChips per-axis grouping (one chip per axis with comma-joined values, × clears axis); <FeedDateGroupHeader> + groupEventsByDate utility (Google Photos-style timeline grouping; per-card date REMOVED); IntersectionObserver-driven infinite scroll (CursorPager.svelte DELETED); CSS grid layout (multi-column >=640px, single column <640px); /events/new POST → invalidateAll before goto so /feed loader reruns (round-2 UAT gaps: date filter rewrite, Game/Attached merge, FilterChips per-axis grouping, date-group header, infinite scroll, grid layout, feed loader stale after POST)
 **UI hint**: yes
 
 ### Phase 3: Polling Pipeline
@@ -182,7 +183,7 @@ Phases execute in numeric order: 1 → 2 → 2.1 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation | 10/10 | Complete | 2026-04-27 |
 | 2. Ingest, Secrets, and Audit | 11/11 | Gaps Found | 2026-04-28 (closure in 2.1) |
-| 2.1. Architecture Realignment (INSERTED) | 15/18 | In progress (Plans 11-16 closed all 12 round-1 UAT gaps; Plans 17-18 close round-2 UAT gaps; Plan 10 UAT checkpoint resume next) | - |
+| 2.1. Architecture Realignment (INSERTED) | 15/19 | In progress (Plans 11-16 closed all 12 round-1 UAT gaps; Plans 17-19 close round-2 UAT gaps; Plan 10 UAT checkpoint resume next) | - |
 | 3. Polling Pipeline | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
 | 5. Reddit Rules Cockpit | 0/TBD | Not started | - |
