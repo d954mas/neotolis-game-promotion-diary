@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed Plan 02.1-26 — FeedQuickNav (Wave 2 of round-3 gap closure)
-last_updated: "2026-04-29T13:48:50.730Z"
+stopped_at: Completed Plan 02.1-25 — card visual language consistency (SourceRow Mine, PageHeader, /games/[id] two-card, Steam listing name)
+last_updated: "2026-04-29T13:55:24.255Z"
 last_activity: 2026-04-29
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 47
-  completed_plans: 45
+  completed_plans: 46
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 4 of 26
+Plan: 5 of 26
 
 ## Performance Metrics
 
@@ -89,6 +89,7 @@ Plan: 4 of 26
 | Phase 02.1-architecture-realignment P22 | 12m | 2 tasks | 12 files |
 | Phase 02.1 P24 | ~25min | 2 tasks | 17 files |
 | Phase 02.1-architecture-realignment P26 | ~6min | 1 tasks | 6 files |
+| Phase 02.1-architecture-realignment P25 | ~25min | 3 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -243,6 +244,10 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-26: FeedQuickNav consumes existing ?show=any|inbox|standalone&game=<id> URL contract from Plans 02.1-19 + 02.1-24 verbatim — NO new URL params, NO new endpoints, NO new audit verbs; privacy invariants preserved by construction (existing loader userId-first WHERE clause covers all QuickNav-driven URLs)
 - [Phase 02.1-architecture-realignment]: Plan 02.1-26: COLLAPSE_THRESHOLD=5 games before 'More games ▾' overflow dropdown; sized for 360px viewport with 4 fixed tabs (All/Inbox/Standalone/More) + 5 indie-typical 80-120px game chips; tunable via container query later when real users ship 10+ games
 - [Phase 02.1-architecture-realignment]: Plan 02.1-26: Task 1 commit absorbed by sibling Plan 02.1-25 commits c43aa0e (route .svelte files + new component + 3 test files) + 4bc7ab9 (Paraglide keys + EXPECTED_KEYS); documented parallel-execution race pattern from Plans 02.1-02/09/24; Plan 02.1-26 carries no atomic commit of its own but all required content lands at HEAD
+- [Phase 02.1-architecture-realignment]: Plan 02.1-25: Forward-only migration drizzle/0004 adds nullable name TEXT column to game_steam_listings; addSteamListing INSERT writes meta?.name; toGameSteamListingDto projects it; SteamListingRow renders listing.name ?? 'App {appId}' fallback for legacy NULL rows (no backfill — indie-budget round-3 closure)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-25: Rule-of-three earns the <PageHeader> abstraction (3 list pages share the title+CTA pattern); inline-on-the-left flex layout (no justify-content: space-between) per UAT-NOTES.md §3.1-polish; href + onClick CTA variants + opt-in sticky? prop preserves /sources Plan 02.1-22 §2.2-bug closure
+- [Phase 02.1-architecture-realignment]: Plan 02.1-25: /games/[id] restructured into 2-card stacked layout (GAME HEADER CARD + EVENTS FEED CARD) per UAT-NOTES.md §3.2-redesign; previous 2-col grid (>= 1024px) dropped — round-3 UAT preferred top-down read of artwork → metadata → listings → events; manual cover upload + itch.io fallback DEFERRED to Phase 3+ via TODO marker in GameCover.svelte
+- [Phase 02.1-architecture-realignment]: Plan 02.1-25: SourceRow Mine treatment combines C+A (overlay-mine pill + 4px accent left border) mirroring FeedCard from Plan 02.1-23; only 1 new Paraglide key (steam_listing_open_link_label) — the 5 source_kind_label_* keys flagged in plan-frontmatter as new were ALREADY shipped in Plan 02.1-08 (verified via grep before keyset extension)
 
 ### Pending Todos
 
@@ -283,8 +288,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-29T13:48:50.726Z
+Last session: 2026-04-29T13:55:24.251Z
 Last Activity: 2026-04-29
-Stopped at: Completed Plan 02.1-26 — FeedQuickNav (Wave 2 of round-3 gap closure)
+Stopped at: Completed Plan 02.1-25 — card visual language consistency (SourceRow Mine, PageHeader, /games/[id] two-card, Steam listing name)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
