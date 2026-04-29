@@ -44,6 +44,9 @@
   let occurredAt = $state(new Date().toISOString().slice(0, 10));
   let url = $state("");
   let notes = $state("");
+  // Plan 02.1-18 — author_is_me discriminator (default false). Server-side
+  // schema acceptance ships in Plan 02.1-17; this wires the client.
+  let authorIsMe = $state(false);
   let pending = $state(false);
   let errorText = $state<string | null>(null);
 
@@ -89,6 +92,7 @@
           title: title.trim(),
           url: url.trim() || null,
           notes: notes.trim() || null,
+          authorIsMe,
         }),
       });
       if (!res.ok) {
@@ -172,6 +176,11 @@
       <span class="hint">{m.events_new_date_explainer()}</span>
     </div>
 
+    <label class="field checkbox">
+      <input type="checkbox" bind:checked={authorIsMe} disabled={pending} />
+      <span class="field-label">{m.events_new_author_is_me()}</span>
+    </label>
+
     <label class="field">
       <span class="field-label">URL</span>
       <input
@@ -248,6 +257,16 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
+  }
+  .field.checkbox {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+  .field.checkbox input {
+    width: 18px;
+    height: 18px;
+    min-height: 0;
   }
   .field-label {
     font-size: var(--font-size-label);
