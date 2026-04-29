@@ -112,3 +112,44 @@ describe("Plan 02.1-19: feed UX rebuild — filters / scroll / grouping / layout
     "/events/new submit → /feed shows new event without manual refresh (manual UAT — auth harness deferred)",
   );
 });
+
+/**
+ * Plan 02.1-18 — edit-flow rebuild via /events/[id] detail page.
+ *
+ * The full Plan 02.1-18 flow (FeedCard click → /events/[id] detail →
+ * Edit pencil → /events/[id]/edit form → Save → back to detail with
+ * updated title; Delete-from-detail → ConfirmDialog → /feed without the
+ * deleted row; FeedCard renders no Edit/Delete/Open-external buttons;
+ * 360px detail page no horizontal scroll) requires the authenticated
+ * cookie-injection harness which is still deferred to Phase 6 (see
+ * 02.1-VALIDATION.md "Manual-Only Verifications"). The 6 specific cases
+ * below are stub-skipped here and documented in the VALIDATION.md
+ * manual UAT block. The PUBLIC-routed 360px no-horizontal-scroll D-42
+ * invariant for the detail page is partially covered by the existing
+ * /feed redirect test above (anonymous /events/[id] also redirects to
+ * /login — page-route gate via the loader's redirect(303)).
+ *
+ * Per Plan 02.1-19's Task 10 deviation #4 precedent, these stubs use
+ * `it.skip` with named-plan annotations for grep discoverability when
+ * the auth harness arrives.
+ */
+describe("Plan 02.1-18: edit-flow rebuild via detail page", () => {
+  it.skip(
+    "FeedCard click → /events/[id] detail page (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "FeedCard does NOT render Edit / Delete / Open-external buttons (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/events/[id] detail → Edit pencil → /events/[id]/edit form pre-filled (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/events/[id]/edit save → PATCH /api/events/:id → back to detail with updated title (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/events/[id] Delete → ConfirmDialog → confirm → /feed without the row (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/events/[id] at 360px viewport renders without horizontal scroll (manual UAT — auth harness deferred)",
+  );
+});

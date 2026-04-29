@@ -1422,3 +1422,131 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     expect(fields).toContain("url");
   });
 });
+
+/**
+ * Plan 02.1-18 — edit-flow rebuild via /events/[id] detail page.
+ *
+ * Service-layer + HTTP-boundary tests for:
+ *   - getEventById opts.includeSoftDeleted toggle (Restore flow needs to
+ *     surface soft-deleted rows; default behavior unchanged for existing
+ *     callers; cross-tenant scope MUST NOT relax under the opts flag)
+ *   - PATCH /api/events/:id round-trips authorIsMe through Plan 02.1-17's
+ *     updateEventSchema + service-layer updateEvent patch builder
+ */
+describe("Plan 02.1-18: detail loader + edit + author_is_me round-trip", () => {
+  // Same parallel-execution coordination pattern as Plan 02.1-17.
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
+  it("Plan 02.1-18 Test 1: getEventById opts.includeSoftDeleted=true returns soft-deleted row", async () => {
+    const { getEventById } = await import("../../src/lib/server/services/events.js");
+    const u = await seedUserDirectly({ email: `ev18t1-${uniq()}@test.local` });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "conference",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+        title: "Event soon to be soft-deleted",
+      },
+      "127.0.0.1",
+    );
+    await softDeleteEvent(u.id, ev.id, "127.0.0.1");
+
+    // Default behavior: throws NotFoundError on soft-deleted rows.
+    await expect(getEventById(u.id, ev.id)).rejects.toBeInstanceOf(NotFoundError);
+    // Plan 02.1-18: opt-in surfaces the soft-deleted row.
+    const row = await getEventById(u.id, ev.id, { includeSoftDeleted: true });
+    expect(row.id).toBe(ev.id);
+    expect(row.deletedAt).not.toBeNull();
+  });
+
+  it("Plan 02.1-18 Test 2: getEventById opts.includeSoftDeleted=true cross-tenant still throws NotFoundError", async () => {
+    // The opts flag MUST NOT bypass the userId WHERE clause. Privacy
+    // invariants are encoded by query construction, not by the opts.
+    const { getEventById } = await import("../../src/lib/server/services/events.js");
+    const a = await seedUserDirectly({ email: `ev18t2a-${uniq()}@test.local` });
+    const b = await seedUserDirectly({ email: `ev18t2b-${uniq()}@test.local` });
+    const ev = await createEvent(
+      a.id,
+      {
+        gameId: null,
+        kind: "conference",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+        title: "User A's event",
+      },
+      "127.0.0.1",
+    );
+    await softDeleteEvent(a.id, ev.id, "127.0.0.1");
+
+    // User B asks for user A's row with includeSoftDeleted=true: still 404.
+    await expect(
+      getEventById(b.id, ev.id, { includeSoftDeleted: true }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("Plan 02.1-18 Test 3: PATCH /api/events/:id { authorIsMe: true } persists author_is_me=true on the row", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev18t3-${uniq()}@test.local` });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "conference",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+        title: "Conference notes",
+        authorIsMe: false,
+      },
+      "127.0.0.1",
+    );
+    expect(ev.authorIsMe).toBe(false);
+
+    const res = await app.request(`/api/events/${ev.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ authorIsMe: true }),
+    });
+    expect(res.status).toBe(200);
+
+    // Verify the row in the DB carries the new value (not just the response).
+    const [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)))
+      .limit(1);
+    expect(row?.authorIsMe).toBe(true);
+  });
+
+  it("Plan 02.1-18 Test 4: PATCH /api/events/:id authorIsMe round-trips: response body matches request", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev18t4-${uniq()}@test.local` });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "talk",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+        title: "My GDC talk",
+        authorIsMe: false,
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(`/api/events/${ev.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ authorIsMe: true, title: "My GDC talk (revised)" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { authorIsMe: boolean; title: string };
+    expect(body.authorIsMe).toBe(true);
+    expect(body.title).toBe("My GDC talk (revised)");
+  });
+});
