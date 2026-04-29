@@ -105,11 +105,23 @@ export interface PasteInput {
   gameId?: string | null;
 }
 
+/**
+ * Plan 02.1-19: ShowFilter — discriminated union collapses Plan 02.1-15's
+ * `attached?: boolean` + `game?: string | string[]` pair into one axis. The
+ * UI cannot construct `attached=false AND game=X` simultaneously by
+ * construction (FiltersSheet renders one 3-radio for "Show: Any/Inbox/
+ * Specific games"); the backend mirrors that constraint by replacing two
+ * orthogonal filters with one tagged shape.
+ */
+export type ShowFilter =
+  | { kind: "any" }
+  | { kind: "inbox" }
+  | { kind: "specific"; gameIds: string[] };
+
 export interface FeedFilters {
   source?: string | string[];
   kind?: EventKind | EventKind[];
-  game?: string | string[];
-  attached?: boolean;
+  show?: ShowFilter;
   authorIsMe?: boolean;
   from?: Date;
   to?: Date;
@@ -662,13 +674,15 @@ export async function restoreEvent(
  * Returns up to FEED_PAGE_SIZE (50) rows ordered by (occurred_at desc, id desc)
  * plus a nextCursor when more rows exist.
  *
- * Filters (RESEARCH §3.3):
- *   source       → events.source_id = X
- *   kind         → events.kind = X
- *   game         → events.game_id = X
- *   attached     → true: game_id IS NOT NULL; false: game_id IS NULL AND
- *                  metadata.inbox.dismissed != true (RESEARCH §6.2 — inbox
- *                  view excludes dismissed events).
+ * Filters (RESEARCH §3.3 + Plan 02.1-19 reshape):
+ *   source       → events.source_id IN (...) (multi-select)
+ *   kind         → events.kind IN (...) (multi-select)
+ *   show         → discriminated union (Plan 02.1-19):
+ *                    { kind: 'any' }      → no clause (default)
+ *                    { kind: 'inbox' }    → game_id IS NULL AND
+ *                                           metadata.inbox.dismissed != true
+ *                                           (RESEARCH §6.2)
+ *                    { kind: 'specific', gameIds: [...] } → game_id IN (...)
  *   authorIsMe   → events.author_is_me = X
  *   from / to    → events.occurred_at range
  *
@@ -699,23 +713,31 @@ export async function listFeedPage(
   // filter axes are accumulated into a separate array and combined via
   // `and()` — the userId clause stays load-bearing and visible.
   const filterParts: SQL[] = [isNull(events.deletedAt) as SQL];
-  // Plan 02.1-15: source / kind / game are now multi-valued. pushAxis turns
-  // each axis into eq() or inArray() depending on shape; back-compat with
-  // bare-string callers preserved by the helper's discriminator.
+  // Plan 02.1-15: source / kind are multi-valued. pushAxis turns each axis
+  // into eq() or inArray() depending on shape.
   pushAxis(filterParts, events.sourceId, filters.source);
   pushAxis(filterParts, events.kind, filters.kind);
-  pushAxis(filterParts, events.gameId, filters.game);
-  if (filters.attached === true) {
-    filterParts.push(isNotNull(events.gameId) as SQL);
-  }
-  if (filters.attached === false) {
+  // Plan 02.1-19: show axis (collapses Plan 02.1-15 attached + game into a
+  // single discriminated union). The UI's 3-radio Show fieldset cannot emit
+  // "Inbox AND specific games" simultaneously, so we encode that in the type.
+  if (filters.show?.kind === "inbox") {
     filterParts.push(isNull(events.gameId) as SQL);
-    // RESEARCH §6.2: inbox view excludes events whose
-    // metadata.inbox.dismissed === true.
+    // RESEARCH §6.2 + Plan 02.1-15 attached=false precedent: inbox view
+    // excludes events whose metadata.inbox.dismissed === 'true'. Without
+    // this, dismissed events would resurface in the inbox.
     filterParts.push(
       sql`COALESCE(${events.metadata}->'inbox'->>'dismissed', 'false') = 'false'`,
     );
+  } else if (filters.show?.kind === "specific") {
+    if (filters.show.gameIds.length === 1) {
+      filterParts.push(eq(events.gameId, filters.show.gameIds[0]!) as SQL);
+    } else if (filters.show.gameIds.length > 1) {
+      filterParts.push(inArray(events.gameId, filters.show.gameIds) as SQL);
+    }
+    // Empty gameIds = no clause appended — semantically equivalent to "any"
+    // (the UI prevents this state but the service stays defensive).
   }
+  // show.kind === "any" or undefined: no clause appended (default).
   if (filters.authorIsMe !== undefined) {
     filterParts.push(eq(events.authorIsMe, filters.authorIsMe));
   }

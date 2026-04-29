@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import {
   createEvent,
@@ -8,6 +8,7 @@ import {
   listFeedPage,
   listDeletedEvents,
   restoreEvent,
+  enrichFromUrl,
   VALID_EVENT_KINDS,
 } from "../../src/lib/server/services/events.js";
 import { db } from "../../src/lib/server/db/client.js";
@@ -95,7 +96,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     expect(ev.gameId).toBeNull();
 
     // Surfaces in attached=false (inbox) view.
-    const inbox = await listFeedPage(u.id, { attached: false }, null);
+    const inbox = await listFeedPage(u.id, { show: { kind: "inbox" } }, null);
     expect(inbox.rows.map((r) => r.id)).toContain(ev.id);
   });
 
@@ -228,7 +229,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     expect(ev.gameId).toBeNull();
 
     // Inbox view (attached=false) surfaces the row.
-    const inbox = await listFeedPage(u.id, { attached: false }, null);
+    const inbox = await listFeedPage(u.id, { show: { kind: "inbox" } }, null);
     expect(inbox.rows.map((r) => r.id)).toContain(ev.id);
     // The row also shows up in the global feed (no filter).
     const all = await listFeedPage(u.id, {}, null);
@@ -672,5 +673,373 @@ describe("event soft-delete recovery routes (Plan 02.1-14 gap closure)", () => {
       expect(row).not.toHaveProperty("userId");
       expect(row.deletedAt).not.toBeNull();
     }
+  });
+});
+
+/**
+ * Plan 02.1-17 — createEvent kind-aware enrichment + enrichFromUrl helper.
+ *
+ * Closes UAT BLOCKER "external_id parsing in createEvent" — manual-create path
+ * (POST /api/events with kind=youtube_video + url) must parse the URL and
+ * persist the canonical YouTube videoId so FeedCard thumbnails render
+ * end-to-end. Idempotent: explicit input.externalId wins.
+ *
+ * enrichFromUrl is the shared helper backing the new POST /api/events/preview-url
+ * endpoint (Task 2) — pure URL parse + oEmbed fetch, no DB write.
+ */
+describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
+  it("Plan 02.1-17 Test 1: createEvent kind=youtube_video + url derives external_id from canonical YouTube videoId", async () => {
+    const u = await seedUserDirectly({ email: "ev17t1@test.local" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "youtube_video",
+        url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        title: "any",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+      },
+      "127.0.0.1",
+    );
+    expect(ev.externalId).toBe("dQw4w9WgXcQ");
+    expect(ev.kind).toBe("youtube_video");
+  });
+
+  it("Plan 02.1-17 Test 2: explicit input.externalId overrides URL-parsed value (caller wins)", async () => {
+    const u = await seedUserDirectly({ email: "ev17t2@test.local" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "youtube_video",
+        url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        externalId: "ABC123EXPLI",
+        title: "any",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+      },
+      "127.0.0.1",
+    );
+    expect(ev.externalId).toBe("ABC123EXPLI");
+  });
+
+  it("Plan 02.1-17 Test 3: kind=youtube_video with null url leaves external_id NULL (route-layer catches the missing url; service is opportunistic)", async () => {
+    const u = await seedUserDirectly({ email: "ev17t3@test.local" });
+    // Service-layer is opportunistic — the route-layer superRefine catches the
+    // missing-url case BEFORE service is called. Direct service call without
+    // url leaves externalId null.
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "youtube_video",
+        url: null,
+        title: "manual-no-url",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+      },
+      "127.0.0.1",
+    );
+    expect(ev.externalId).toBeNull();
+  });
+
+  it("Plan 02.1-17 Test 4: kind=conference + YouTube URL does NOT set external_id (parsing only fires for kind=youtube_video)", async () => {
+    const u = await seedUserDirectly({ email: "ev17t4@test.local" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "conference",
+        url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        title: "GDC stream",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+      },
+      "127.0.0.1",
+    );
+    expect(ev.externalId).toBeNull();
+  });
+
+  it("Plan 02.1-17 Test 5: enrichFromUrl returns full enrichment shape for YouTube URL (no DB write)", async () => {
+    const u = await seedUserDirectly({ email: "ev17t5@test.local" });
+
+    // Mock the oEmbed fetch — same pattern as Phase 2 paste-flow tests.
+    const youtubeOembed = await import(
+      "../../src/lib/server/integrations/youtube-oembed.js"
+    );
+    const spy = vi.spyOn(youtubeOembed, "fetchYoutubeOembed").mockResolvedValue({
+      kind: "ok",
+      data: {
+        title: "Never Gonna Give You Up",
+        authorName: "Rick Astley",
+        authorUrl: "https://www.youtube.com/@RickAstleyYT",
+        thumbnailUrl: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+      },
+    });
+
+    try {
+      const result = await enrichFromUrl(
+        u.id,
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      );
+      expect(result.kind).toBe("youtube_video");
+      expect(result.externalId).toBe("dQw4w9WgXcQ");
+      expect(result.title).toBe("Never Gonna Give You Up");
+      expect(result.thumbnailUrl).toBe(
+        "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg",
+      );
+      expect(result.occurredAt).toBeNull(); // 2.1 SKIP — Phase 3 fills via YouTube Data API key
+
+      // No event row written.
+      const rows = await db.select().from(events).where(eq(events.userId, u.id));
+      expect(rows).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("Plan 02.1-17 Test 6: enrichFromUrl with garbage URL throws AppError 'unsupported_url' 422", async () => {
+    const u = await seedUserDirectly({ email: "ev17t6@test.local" });
+    await expect(
+      enrichFromUrl(u.id, "not-a-url-at-all"),
+    ).rejects.toMatchObject({
+      code: "unsupported_url",
+      status: 422,
+    });
+  });
+});
+
+// Plan 02.1-19 — feed UX rebuild: discriminated 'show' axis URL contract.
+// Backend FeedFilters reshape collapses Plan 02.1-15's `attached?: boolean` +
+// `game?: string | string[]` into a single `show: ShowFilter` discriminator.
+// HTTP query-string switches from ?attached=true|false&game=A&game=B to
+// ?show=any|inbox|specific&game=A&game=B. Pre-launch destructive contract
+// change (CONTEXT D-04: zero self-host deployments).
+describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events", () => {
+  it("Plan 02.1-19 Test 6a: GET /api/events?show=any returns ALL rows for that user (default)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "ev19-a@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+    const attached = await createEvent(
+      u.id,
+      {
+        gameId,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Attached",
+      },
+      "127.0.0.1",
+    );
+    const inbox = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "press",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "Inbox",
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request("/api/events?show=any", {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rows: Array<{ id: string }> };
+    const ids = body.rows.map((r) => r.id);
+    expect(ids).toContain(attached.id);
+    expect(ids).toContain(inbox.id);
+  });
+
+  it("Plan 02.1-19 Test 6b: GET /api/events?show=inbox returns ONLY inbox rows (game_id IS NULL AND not dismissed)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "ev19-b@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+    await createEvent(
+      u.id,
+      {
+        gameId,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Attached",
+      },
+      "127.0.0.1",
+    );
+    const inbox = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "press",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "Inbox active",
+      },
+      "127.0.0.1",
+    );
+    const dismissed = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "press",
+        occurredAt: new Date("2026-06-03T10:00:00Z"),
+        title: "Dismissed",
+        metadata: { inbox: { dismissed: true } },
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request("/api/events?show=inbox", {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      rows: Array<{ id: string; gameId: string | null }>;
+    };
+    const ids = body.rows.map((r) => r.id);
+    expect(ids).toContain(inbox.id);
+    expect(ids).not.toContain(dismissed.id);
+    expect(body.rows.every((r) => r.gameId === null)).toBe(true);
+  });
+
+  it("Plan 02.1-19 Test 6c: GET /api/events?show=specific&game=A&game=B returns rows attached to A or B", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "ev19-c@test.local" });
+    const gA = uuidv7();
+    const gB = uuidv7();
+    const gC = uuidv7();
+    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
+    await db.insert(games).values({ id: gB, userId: u.id, title: "B" });
+    await db.insert(games).values({ id: gC, userId: u.id, title: "C" });
+    const evA = await createEvent(
+      u.id,
+      {
+        gameId: gA,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "A",
+      },
+      "127.0.0.1",
+    );
+    const evB = await createEvent(
+      u.id,
+      {
+        gameId: gB,
+        kind: "press",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "B",
+      },
+      "127.0.0.1",
+    );
+    const evC = await createEvent(
+      u.id,
+      {
+        gameId: gC,
+        kind: "press",
+        occurredAt: new Date("2026-06-03T10:00:00Z"),
+        title: "C",
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(
+      `/api/events?show=specific&game=${gA}&game=${gB}`,
+      {
+        headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rows: Array<{ id: string }> };
+    const ids = body.rows.map((r) => r.id);
+    expect(ids).toContain(evA.id);
+    expect(ids).toContain(evB.id);
+    expect(ids).not.toContain(evC.id);
+  });
+
+  it("Plan 02.1-19 Test 6d: GET /api/events with no ?show param defaults to 'any' (returns all rows)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "ev19-d@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+    const attached = await createEvent(
+      u.id,
+      {
+        gameId,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Attached",
+      },
+      "127.0.0.1",
+    );
+    const inbox = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "press",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "Inbox",
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request("/api/events", {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rows: Array<{ id: string }> };
+    const ids = body.rows.map((r) => r.id);
+    expect(ids).toContain(attached.id);
+    expect(ids).toContain(inbox.id);
+  });
+
+  it("Plan 02.1-19 Test 7: GET /api/events?show=garbage returns 422 validation_failed (zod enum)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "ev19-e@test.local" });
+    const res = await app.request("/api/events?show=garbage", {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("validation_failed");
+  });
+
+  it("Plan 02.1-19 Test 8: GET /api/events?game=X with no ?show treats as 'any' (bare ?game without ?show=specific is ignored)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "ev19-f@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+    const attached = await createEvent(
+      u.id,
+      {
+        gameId,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Attached",
+      },
+      "127.0.0.1",
+    );
+    const inbox = await createEvent(
+      u.id,
+      {
+        gameId: null,
+        kind: "press",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "Inbox",
+      },
+      "127.0.0.1",
+    );
+
+    // Bare ?game=X without ?show=specific is ignored — server treats this
+    // as ?show=any. The UI never produces this combo.
+    const res = await app.request(`/api/events?game=${gameId}`, {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rows: Array<{ id: string }> };
+    const ids = body.rows.map((r) => r.id);
+    expect(ids).toContain(attached.id);
+    expect(ids).toContain(inbox.id);
   });
 });

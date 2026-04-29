@@ -36,7 +36,7 @@ describe("INBOX-01: inbox flow + dismissal", () => {
     );
     expect(ev.gameId).toBeNull();
 
-    const page = await listFeedPage(u.id, { attached: false }, null);
+    const page = await listFeedPage(u.id, { show: { kind: "inbox" } }, null);
     const ids = page.rows.map((r) => r.id);
     expect(ids).toContain(ev.id);
   });
@@ -75,7 +75,7 @@ describe("INBOX-01: inbox flow + dismissal", () => {
 
     await dismissFromInbox(u.id, ev.id, "127.0.0.1");
 
-    const page = await listFeedPage(u.id, { attached: false }, null);
+    const page = await listFeedPage(u.id, { show: { kind: "inbox" } }, null);
     expect(page.rows.map((r) => r.id)).not.toContain(ev.id);
 
     // The row still exists; it's just out of the inbox view. Advanced filter

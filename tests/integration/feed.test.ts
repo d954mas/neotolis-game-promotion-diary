@@ -179,12 +179,151 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
       "127.0.0.1",
     );
 
-    const page = await listFeedPage(u.id, { game: gameA }, null);
+    const page = await listFeedPage(
+      u.id,
+      { show: { kind: "specific", gameIds: [gameA] } },
+      null,
+    );
     expect(page.rows).toHaveLength(1);
     expect(page.rows[0]!.id).toBe(evA.id);
   });
 
-  it("filter attached=true returns only events with game_id IS NOT NULL", async () => {
+  it("filter show.specific with empty gameIds is equivalent to any (no filter applied)", async () => {
+    // Plan 02.1-19 contract: `show: { kind: 'specific', gameIds: [] }` is
+    // semantically equivalent to `show: { kind: 'any' }`. The UI prevents
+    // this state but the service stays defensive (mirrors pushAxis empty-
+    // array semantics).
+    const u = await seedUserDirectly({ email: "feed4b@test.local" });
+    const gA = uuidv7();
+    await db.insert(games).values({ id: gA, userId: u.id, title: "GA" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameId: gA,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Specific empty",
+      },
+      "127.0.0.1",
+    );
+    const page = await listFeedPage(
+      u.id,
+      { show: { kind: "specific", gameIds: [] } },
+      null,
+    );
+    expect(page.rows.map((r) => r.id)).toContain(ev.id);
+  });
+
+  it("filter show.specific with multiple gameIds returns events attached to ANY of them", async () => {
+    const u = await seedUserDirectly({ email: "feed4c@test.local" });
+    const gA = uuidv7();
+    const gB = uuidv7();
+    const gC = uuidv7();
+    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
+    await db.insert(games).values({ id: gB, userId: u.id, title: "B" });
+    await db.insert(games).values({ id: gC, userId: u.id, title: "C" });
+    const evA = await createEvent(
+      u.id,
+      {
+        gameId: gA,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "A",
+      },
+      "127.0.0.1",
+    );
+    const evB = await createEvent(
+      u.id,
+      {
+        gameId: gB,
+        kind: "press",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "B",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      u.id,
+      {
+        gameId: gC,
+        kind: "press",
+        occurredAt: new Date("2026-06-03T10:00:00Z"),
+        title: "C",
+      },
+      "127.0.0.1",
+    );
+    const page = await listFeedPage(
+      u.id,
+      { show: { kind: "specific", gameIds: [gA, gB] } },
+      null,
+    );
+    const ids = page.rows.map((r) => r.id);
+    expect(ids).toContain(evA.id);
+    expect(ids).toContain(evB.id);
+    expect(page.rows).toHaveLength(2);
+  });
+
+  it("filter show.any returns ALL rows for that user (no game/inbox filter applied)", async () => {
+    const { userId, gameId } = await seedUserGameAndSource("feed4d@test.local");
+    const attached = await createEvent(
+      userId,
+      {
+        gameId,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Attached row",
+      },
+      "127.0.0.1",
+    );
+    const inbox = await createEvent(
+      userId,
+      {
+        gameId: null,
+        kind: "press",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "Inbox row",
+      },
+      "127.0.0.1",
+    );
+    const page = await listFeedPage(userId, { show: { kind: "any" } }, null);
+    const ids = page.rows.map((r) => r.id);
+    expect(ids).toContain(attached.id);
+    expect(ids).toContain(inbox.id);
+  });
+
+  it("Plan 02.1-19: cross-tenant probe — userB cannot pierce userId scope via show.specific&gameIds=[userAGameId]", async () => {
+    // userId WHERE clause is the firewall — gameId match is downstream of
+    // tenant scope. CLAUDE.md item 1: tenant scope is mandatory and explicit.
+    const userA = await seedUserDirectly({ email: "feed-cross-a@test.local" });
+    const userB = await seedUserDirectly({ email: "feed-cross-b@test.local" });
+    const gameAofUserA = uuidv7();
+    await db.insert(games).values({
+      id: gameAofUserA,
+      userId: userA.id,
+      title: "User A Game",
+    });
+    await createEvent(
+      userA.id,
+      {
+        gameId: gameAofUserA,
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "User A event",
+      },
+      "127.0.0.1",
+    );
+
+    const page = await listFeedPage(
+      userB.id,
+      { show: { kind: "specific", gameIds: [gameAofUserA] } },
+      null,
+    );
+    // userB sees ZERO rows even though the gameId matches a real row
+    // belonging to userA — userId WHERE is FIRST in the and(...) clause.
+    expect(page.rows).toHaveLength(0);
+  });
+
+  it("Plan 02.1-19: show.specific with one game returns only events with game_id = X (replaces legacy attached=true semantic)", async () => {
     const { userId, gameId } = await seedUserGameAndSource("feed5@test.local");
     const attached = await createEvent(
       userId,
@@ -207,13 +346,17 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
       "127.0.0.1",
     );
 
-    const page = await listFeedPage(userId, { attached: true }, null);
+    const page = await listFeedPage(
+      userId,
+      { show: { kind: "specific", gameIds: [gameId] } },
+      null,
+    );
     expect(page.rows).toHaveLength(1);
     expect(page.rows[0]!.id).toBe(attached.id);
     expect(page.rows[0]!.gameId).toBe(gameId);
   });
 
-  it("filter attached=false returns events with game_id IS NULL AND not dismissed", async () => {
+  it("Plan 02.1-19: show.inbox returns events with game_id IS NULL AND metadata.inbox.dismissed != true (replaces legacy attached=false)", async () => {
     const { userId, gameId } = await seedUserGameAndSource("feed6@test.local");
     const inbox = await createEvent(
       userId,
@@ -249,7 +392,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
       "127.0.0.1",
     );
 
-    const page = await listFeedPage(userId, { attached: false }, null);
+    const page = await listFeedPage(userId, { show: { kind: "inbox" } }, null);
     const ids = page.rows.map((r) => r.id);
     expect(ids).toContain(inbox.id);
     expect(ids).not.toContain(dismissed.id);
@@ -334,7 +477,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     expect(page.rows[0]!.id).toBe(may.id);
   });
 
-  it("combination filter source+kind+attached works", async () => {
+  it("combination filter source+kind+show.specific works", async () => {
     const { userId, gameId, sourceId } = await seedUserGameAndSource("feed9@test.local");
     const target = await createEvent(
       userId,
@@ -388,7 +531,11 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
 
     const page = await listFeedPage(
       userId,
-      { source: sourceId, kind: "youtube_video", attached: true },
+      {
+        source: sourceId,
+        kind: "youtube_video",
+        show: { kind: "specific", gameIds: [gameId] },
+      },
       null,
     );
     expect(page.rows).toHaveLength(1);
@@ -536,7 +683,10 @@ describe("Plan 02.1-06: GET /api/events HTTP boundary", () => {
     expect(body.nextCursor).toBeNull();
   });
 
-  it("Plan 02.1-06: GET /api/events?attached=true returns rows where game_id IS NOT NULL", async () => {
+  it("Plan 02.1-19: GET /api/events?show=specific&game=:id returns rows attached to that game (replaces legacy ?attached=true)", async () => {
+    // Plan 02.1-19 destructive contract change: ?attached=true|false is gone;
+    // ?show=any|inbox|specific&game=A&game=B replaces it. Pre-launch
+    // (CONTEXT D-04: zero self-host deployments) so the URL break is OK.
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-feed-2@test.local" });
@@ -562,9 +712,12 @@ describe("Plan 02.1-06: GET /api/events HTTP boundary", () => {
       },
       "127.0.0.1",
     );
-    const res = await app.request("/api/events?attached=true", {
-      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
-    });
+    const res = await app.request(
+      `/api/events?show=specific&game=${gameId}`,
+      {
+        headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+      },
+    );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { rows: Array<{ id: string; gameId: string | null }> };
     expect(body.rows).toHaveLength(1);

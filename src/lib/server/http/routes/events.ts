@@ -35,6 +35,12 @@
 //   - dismissFromInbox on attached event → AppError 'not_in_inbox' 422
 //   - attachToGame cross-tenant gameId → NotFoundError 404
 //   - cross-tenant /:id access → NotFoundError 404 (PRIV-01)
+//
+// Plan 02.1-19 contract change: GET /api/events query-string switches from
+// ?attached=true|false&game=A&game=B to ?show=any|inbox|specific&game=A&game=B.
+// The ?attached parameter is no longer recognized. Pre-launch destructive
+// change (CONTEXT D-04: zero self-host deployments). UI consumers updated
+// in lockstep — see /feed/+page.server.ts and FiltersSheet.svelte.
 
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
@@ -50,6 +56,7 @@ import {
   listDeletedEvents,
   restoreEvent,
   VALID_EVENT_KINDS,
+  type ShowFilter,
 } from "../../services/events.js";
 import type { EventKind } from "../../integrations/data-source-adapter.js";
 import { toEventDto } from "../../dto.js";
@@ -104,7 +111,9 @@ const updateEventSchema = z
 // stringly-typed; we coerce to real booleans before calling listFeedPage.
 const feedQuerySchema = z.object({
   cursor: z.string().optional(),
-  attached: z.enum(["true", "false"]).optional(),
+  // Plan 02.1-19: ?show replaces ?attached. ?attached is no longer recognized
+  // (pre-launch destructive contract change — CONTEXT D-04).
+  show: z.enum(["any", "inbox", "specific"]).optional(),
   authorIsMe: z.enum(["true", "false"]).optional(),
   from: z.string().optional(),
   to: z.string().optional(),
@@ -155,7 +164,7 @@ eventsRoutes.get(
     // pushAxis helper collapses to eq() (zero query-plan regression).
     const sourceList = c.req.queries("source") ?? undefined;
     const kindList = c.req.queries("kind") as EventKind[] | undefined;
-    const gameList = c.req.queries("game") ?? undefined;
+    const gameList = c.req.queries("game") ?? [];
     // Defense-in-depth (Pitfall 6): validate each kind value against the
     // closed enum BEFORE the service. Service-level assertValidKind is the
     // second layer; the route-layer 422 here keeps the failure mode crisp
@@ -170,15 +179,23 @@ eventsRoutes.get(
         }
       }
     }
+    // Plan 02.1-19: discriminated show axis replaces attached + game pair.
+    // A bare ?game= without ?show=specific is ignored — the UI never produces
+    // that combo.
+    const showParam = q.show ?? "any";
+    const showFilter: ShowFilter =
+      showParam === "inbox"
+        ? { kind: "inbox" }
+        : showParam === "specific"
+          ? { kind: "specific", gameIds: gameList }
+          : { kind: "any" };
     try {
       const page = await listFeedPage(
         c.var.userId,
         {
           source: sourceList && sourceList.length > 0 ? sourceList : undefined,
           kind: kindList && kindList.length > 0 ? kindList : undefined,
-          game: gameList && gameList.length > 0 ? gameList : undefined,
-          attached:
-            q.attached === "true" ? true : q.attached === "false" ? false : undefined,
+          show: showFilter,
           authorIsMe:
             q.authorIsMe === "true"
               ? true
