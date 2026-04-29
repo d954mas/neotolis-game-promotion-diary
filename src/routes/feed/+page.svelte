@@ -40,8 +40,12 @@
   let { data }: { data: PageData } = $props();
 
   let sheetOpen = $state(false);
+  // Plan 02.1-20 widens FilterChips/FiltersSheet axis union to include
+  // 'action' for /audit reuse; /feed never receives that axis (filters.action
+  // is left undefined here) but the local type must match the component
+  // contract.
   let sheetFocusAxis = $state<
-    "kind" | "source" | "show" | "authorIsMe" | undefined
+    "kind" | "source" | "show" | "authorIsMe" | "action" | undefined
   >(undefined);
 
   const sourceById = $derived(new Map(data.sources.map((s) => [s.id, s])));
@@ -81,7 +85,9 @@
 
   // Plan 02.1-19: per-axis dismiss — × on a chip clears the entire axis
   // (drops all values for that axis, NOT a single value).
-  type ChipAxis = "kind" | "source" | "show" | "authorIsMe";
+  // Plan 02.1-20: 'action' is part of the FilterChips axis union for /audit
+  // reuse but is unreachable here (/feed never sets filters.action).
+  type ChipAxis = "kind" | "source" | "show" | "authorIsMe" | "action";
   function dismissAxis(axis: ChipAxis): void {
     const params = new URLSearchParams(page.url.searchParams);
     params.delete("cursor");
@@ -96,6 +102,9 @@
       params.delete("kind");
     } else if (axis === "source") {
       params.delete("source");
+    } else if (axis === "action") {
+      // /feed never carries an 'action' chip — defensive no-op.
+      return;
     }
     const qs = params.toString();
     void goto(qs ? `/feed?${qs}` : "/feed");
@@ -109,8 +118,12 @@
   function applyFiltersFromSheet(next: {
     source?: string[];
     kind?: string[];
-    show: ShowFilter;
+    // Plan 02.1-20: FiltersSheet's onApply widens show to optional so /audit
+    // can omit it. /feed always supplies it; default to { kind: 'any' } when
+    // the sheet returns undefined (defensive).
+    show?: ShowFilter;
     authorIsMe?: boolean;
+    action?: string[];  // unused on /feed
   }): void {
     const params = new URLSearchParams(page.url.searchParams);
     // Sheet owns source/kind/show/authorIsMe; the date-range params belong
@@ -123,11 +136,12 @@
     params.delete("cursor");
     for (const v of next.source ?? []) params.append("source", v);
     for (const v of next.kind ?? []) params.append("kind", v);
-    if (next.show.kind === "inbox") {
+    const show: ShowFilter = next.show ?? { kind: "any" };
+    if (show.kind === "inbox") {
       params.set("show", "inbox");
-    } else if (next.show.kind === "specific") {
+    } else if (show.kind === "specific") {
       params.set("show", "specific");
-      for (const v of next.show.gameIds) params.append("game", v);
+      for (const v of show.gameIds) params.append("game", v);
     }
     // show.kind === "any": no params (default).
     if (next.authorIsMe === true) params.set("authorIsMe", "true");

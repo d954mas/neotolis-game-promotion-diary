@@ -39,6 +39,9 @@
     to?: string;
     defaultDateRange: boolean;
     all: boolean;
+    // Plan 02.1-20: optional action axis for /audit reuse. /feed never sets
+    // this; /audit always sets it (possibly to []). undefined → no fieldset.
+    action?: string[];
   };
   type SourceOption = { id: string; displayName: string | null; handleUrl: string };
   type GameOption = { id: string; title: string };
@@ -54,12 +57,14 @@
     filters: ActiveFilters;
     sources: SourceOption[];
     games: GameOption[];
-    focusAxis?: "kind" | "source" | "show" | "authorIsMe";
+    focusAxis?: "kind" | "source" | "show" | "authorIsMe" | "action";
     onApply: (next: {
       source?: string[];
       kind?: string[];
-      show: ShowFilter;
+      show?: ShowFilter;
       authorIsMe?: boolean;
+      // Plan 02.1-20: optional action axis for /audit reuse.
+      action?: string[];
     }) => void;
     onClose: () => void;
   } = $props();
@@ -82,6 +87,10 @@
     filters.authorIsMe === true ? "true" : filters.authorIsMe === false ? "false" : "any",
   );
 
+  // Plan 02.1-20: action axis state (used by /audit). /feed leaves
+  // filters.action undefined so this Set stays empty + the fieldset hides.
+  let actionSelected = $state<Set<string>>(new Set(filters.action ?? []));
+
   // Plan 02.1-20: functional-only allowlist + alphabetical-by-label sort.
   // Mirrors the /events/new picker — same allowlist, same sort. Hidden
   // kinds (reddit_post / twitter_post / telegram_post / discord_drop)
@@ -98,6 +107,84 @@
   ];
   const KIND_OPTIONS = $derived(
     sortByLabel(FUNCTIONAL_KIND_OPTIONS, (k) => kindLabel(k)),
+  );
+
+  // Plan 02.1-20: AUDIT_ACTIONS mirror for the /audit reuse. Inlined to keep
+  // this client-side component out of server modules. Drift caught by
+  // tests/integration/audit-render.test.ts (Task 5) which iterates AUDIT_ACTIONS
+  // and asserts the rendered fieldset has one checkbox per action.
+  const AUDIT_ACTIONS_MIRROR = [
+    "session.signin",
+    "session.signout",
+    "session.signout_all",
+    "user.signup",
+    "key.add",
+    "key.rotate",
+    "key.remove",
+    "game.created",
+    "game.deleted",
+    "game.restored",
+    "event.created",
+    "event.edited",
+    "event.deleted",
+    "event.attached_to_game",
+    "event.dismissed_from_inbox",
+    "event.restored",
+    "source.added",
+    "source.removed",
+    "source.toggled_auto_import",
+    "theme.changed",
+  ] as const;
+
+  function auditActionLabel(a: string): string {
+    switch (a) {
+      case "session.signin":
+        return m.audit_action_session_signin();
+      case "session.signout":
+        return m.audit_action_session_signout();
+      case "session.signout_all":
+        return m.audit_action_session_signout_all();
+      case "user.signup":
+        return m.audit_action_user_signup();
+      case "key.add":
+        return m.audit_action_key_add();
+      case "key.rotate":
+        return m.audit_action_key_rotate();
+      case "key.remove":
+        return m.audit_action_key_remove();
+      case "game.created":
+        return m.audit_action_game_created();
+      case "game.deleted":
+        return m.audit_action_game_deleted();
+      case "game.restored":
+        return m.audit_action_game_restored();
+      case "event.created":
+        return m.audit_action_event_created();
+      case "event.edited":
+        return m.audit_action_event_edited();
+      case "event.deleted":
+        return m.audit_action_event_deleted();
+      case "event.attached_to_game":
+        return m.audit_action_event_attached_to_game();
+      case "event.dismissed_from_inbox":
+        return m.audit_action_event_dismissed_from_inbox();
+      case "event.restored":
+        return m.audit_action_event_restored();
+      case "source.added":
+        return m.audit_action_source_added();
+      case "source.removed":
+        return m.audit_action_source_removed();
+      case "source.toggled_auto_import":
+        return m.audit_action_source_toggled_auto_import();
+      case "theme.changed":
+        return m.audit_action_theme_changed();
+      default:
+        return a;
+    }
+  }
+
+  const ACTION_OPTIONS = $derived(
+    sortByLabel(AUDIT_ACTIONS_MIRROR, (a) => auditActionLabel(a)),
   );
 
   function kindLabel(k: string): string {
@@ -189,11 +276,22 @@
       kind: Array.from(kindSelected),
       show: showResult,
       authorIsMe: authorIsMe === "any" ? undefined : authorIsMe === "true",
+      // Plan 02.1-20: emit action axis only when /audit is the consumer
+      // (filters.action !== undefined). /feed leaves it undefined so this
+      // key is omitted from the apply payload.
+      ...(filters.action !== undefined ? { action: Array.from(actionSelected) } : {}),
     });
   }
 
   function clearAll(): void {
-    onApply({ show: { kind: "any" } });
+    // Plan 02.1-20: clearAll preserves the axis-presence contract — if the
+    // consumer passes filters.action, return action: [] (empty) so the
+    // consumer can rebuild URL state; if not, omit the key (the /feed case).
+    if (filters.action !== undefined) {
+      onApply({ show: { kind: "any" }, action: [] });
+    } else {
+      onApply({ show: { kind: "any" } });
+    }
   }
 </script>
 
@@ -299,6 +397,26 @@
         {m.feed_filter_author_others()}
       </label>
     </fieldset>
+
+    <!-- Plan 02.1-20: optional action axis for /audit reuse. /feed leaves
+         filters.action undefined so this fieldset stays hidden there. -->
+    {#if filters.action !== undefined}
+      <fieldset class="field" data-axis="action">
+        <legend class="label">{m.audit_filter_action_axis_label()}</legend>
+        <div class="checklist">
+          {#each ACTION_OPTIONS as a (a)}
+            <label class="check">
+              <input
+                type="checkbox"
+                checked={actionSelected.has(a)}
+                onchange={() => (actionSelected = toggle(actionSelected, a))}
+              />
+              {auditActionLabel(a)}
+            </label>
+          {/each}
+        </div>
+      </fieldset>
+    {/if}
   </div>
 
   <div class="actions">

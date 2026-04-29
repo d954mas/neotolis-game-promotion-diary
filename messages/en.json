@@ -74,6 +74,8 @@
   "audit_action_event_dismissed_from_inbox": "Event dismissed from inbox",
   "audit_action_event_restored": "Event restored",
 
+  "audit_filter_action_axis_label": "Action",
+
   "feed_filter_source": "Source: {name}",
   "feed_filter_kind": "Kind: {kind}",
   "feed_filter_game": "Game: {title}",
@@ -85,6 +87,7 @@
   "feed_filter_show_inbox": "Inbox only",
   "feed_filter_show_specific": "Attached to games",
 
+  "feed_chip_axis_action": "Action",
   "feed_chip_axis_kind": "Kind",
   "feed_chip_axis_source": "Source",
   "feed_chip_axis_show": "Show",

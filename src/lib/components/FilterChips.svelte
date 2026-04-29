@@ -34,11 +34,14 @@
     to?: string;
     defaultDateRange: boolean;
     all: boolean;
+    // Plan 02.1-20: optional action axis for /audit reuse. /feed never sets
+    // this; /audit always sets it (possibly to []). undefined → no chip.
+    action?: string[];
   };
   type SourceOption = { id: string; displayName: string | null; handleUrl: string };
   type GameOption = { id: string; title: string };
 
-  type ChipAxis = "kind" | "source" | "show" | "authorIsMe";
+  type ChipAxis = "kind" | "source" | "show" | "authorIsMe" | "action";
 
   let {
     filters,
@@ -80,6 +83,56 @@
         return m.event_kind_label_post();
       default:
         return k;
+    }
+  }
+
+  // Plan 02.1-20: AUDIT_ACTIONS mirror for the /audit reuse. Drift caught
+  // by tests/integration/audit-render.test.ts (Task 5) which iterates
+  // AUDIT_ACTIONS and asserts every value renders a non-fallback label.
+  function auditActionLabel(a: string): string {
+    switch (a) {
+      case "session.signin":
+        return m.audit_action_session_signin();
+      case "session.signout":
+        return m.audit_action_session_signout();
+      case "session.signout_all":
+        return m.audit_action_session_signout_all();
+      case "user.signup":
+        return m.audit_action_user_signup();
+      case "key.add":
+        return m.audit_action_key_add();
+      case "key.rotate":
+        return m.audit_action_key_rotate();
+      case "key.remove":
+        return m.audit_action_key_remove();
+      case "game.created":
+        return m.audit_action_game_created();
+      case "game.deleted":
+        return m.audit_action_game_deleted();
+      case "game.restored":
+        return m.audit_action_game_restored();
+      case "event.created":
+        return m.audit_action_event_created();
+      case "event.edited":
+        return m.audit_action_event_edited();
+      case "event.deleted":
+        return m.audit_action_event_deleted();
+      case "event.attached_to_game":
+        return m.audit_action_event_attached_to_game();
+      case "event.dismissed_from_inbox":
+        return m.audit_action_event_dismissed_from_inbox();
+      case "event.restored":
+        return m.audit_action_event_restored();
+      case "source.added":
+        return m.audit_action_source_added();
+      case "source.removed":
+        return m.audit_action_source_removed();
+      case "source.toggled_auto_import":
+        return m.audit_action_source_toggled_auto_import();
+      case "theme.changed":
+        return m.audit_action_theme_changed();
+      default:
+        return a;
     }
   }
 
@@ -129,6 +182,15 @@
     } else if (filters.authorIsMe === false) {
       const label = m.feed_filter_author_others();
       out.push({ axis: "authorIsMe", label, ariaName: label, key: "authorIsMe:false" });
+    }
+
+    // Plan 02.1-20: action axis (used by /audit). One chip per active axis
+    // with comma-joined translated labels. /feed never passes filters.action
+    // so this branch is dormant on /feed.
+    if (filters.action !== undefined && filters.action.length > 0) {
+      const labels = filters.action.map(auditActionLabel).join(", ");
+      const label = `${m.feed_chip_axis_action()}: ${labels}`;
+      out.push({ axis: "action", label, ariaName: label, key: "axis:action" });
     }
 
     // Plan 02.1-19: NO date-range chip emission. The visible from/to inputs
