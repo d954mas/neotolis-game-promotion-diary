@@ -10,6 +10,7 @@ export * from "./audit-log.js";
 // resolved by drizzle-kit at generate time via `references()`.
 export * from "./api-keys-steam.js";
 export * from "./data-sources.js";
+export * from "./event-games.js";
 export * from "./events.js";
 export * from "./game-steam-listings.js";
 export * from "./games.js";

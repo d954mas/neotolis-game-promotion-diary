@@ -45,12 +45,17 @@ import { ESLintUtils } from "@typescript-eslint/utils";
 // `youtubeChannels` / `gameYoutubeChannels` / `trackedYoutubeVideos` trio.
 // `events` carries forward; `gameSteamListings` / `apiKeysSteam` / `games` /
 // `auditLog` unchanged from Phase 2.
+//
+// Plan 02.1-27 (UAT-NOTES.md §4.24.G): `eventGames` M:N junction added —
+// userId is denormalized so this rule can require a userId WHERE clause on
+// every Drizzle query (the rule cannot inspect FK-chained values).
 const TENANT_TABLES = new Set([
   "games",
   "gameSteamListings",
   "dataSources",
   "apiKeysSteam",
   "events",
+  "eventGames",
   "auditLog",
 ]);
 

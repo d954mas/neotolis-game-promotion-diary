@@ -31,6 +31,13 @@
 // `0003_add_event_standalone_audit_actions.sql` lands the pgEnum addition.
 // Pitfall 6 mirror: TS const update + ALTER TYPE migration + Paraglide keys
 // + AuditRow/FilterChips/FiltersSheet switch cases all in lock-step.
+//
+// Plan 02.1-27 (round-4 gap closure — UAT-NOTES.md §4.24.G) extends with
+// `event.detached_from_game` — the symmetric inverse of
+// `event.attached_to_game` for the new M:N event_games junction. Forward-only
+// migration `0006_add_event_detached_from_game_audit_action.sql` lands the
+// pgEnum addition (split from 0005 per Pitfall 1 + Plan 02.1-12 precedent —
+// one ALTER TYPE per migration file).
 
 import { pgEnum } from "drizzle-orm/pg-core";
 
@@ -52,6 +59,7 @@ export const AUDIT_ACTIONS = [
   "event.edited",
   "event.deleted",
   "event.attached_to_game",
+  "event.detached_from_game",
   "event.dismissed_from_inbox",
   "event.restored",
   "event.marked_standalone",

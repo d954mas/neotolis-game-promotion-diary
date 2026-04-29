@@ -2,9 +2,12 @@
 //
 // Multi-listing per game: a publisher's "HADES" entry can have a Demo
 // app_id, a Full app_id, a DLC app_id, and a Soundtrack app_id all
-// attached to the same logical games row. UNIQUE(game_id, app_id) and
-// UNIQUE(user_id, app_id) prevent dupes both within a game and across
-// games for the same user.
+// attached to the same logical games row. UNIQUE(game_id, app_id) prevents
+// dupes within a game; same Steam appId is allowed across multiple games of
+// the same user (Plan 02.1-27 / UAT-NOTES.md §4.25.J). The constraint is
+// unconditional — soft-deleted-same-game re-add is caught by the
+// service-layer pre-INSERT lookup (Plan 02.1-29 Path B), which surfaces a
+// "restore the soft-deleted listing" UX before the INSERT hits 23505.
 //
 // api_key_id FK -> api_keys_steam.id is the "this listing's wishlist is
 // polled by this Steamworks key" link (D-13). Nullable because P2 ships
@@ -60,6 +63,5 @@ export const gameSteamListings = pgTable(
     userIdx: index("game_steam_listings_user_id_idx").on(t.userId),
     gameIdx: index("game_steam_listings_game_id_idx").on(t.gameId),
     gameAppIdUnique: unique("game_steam_listings_game_app_id_unq").on(t.gameId, t.appId),
-    userAppIdUnique: unique("game_steam_listings_user_app_id_unq").on(t.userId, t.appId),
   }),
 );

@@ -4,9 +4,9 @@
 // + `events` split. `kind` enum (closed picklist — D-28) discriminates platform;
 // `author_is_me` boolean discriminates the user's own content from blogger /
 // community coverage; nullable `source_id` distinguishes auto-imported events
-// (source_id set) from manually-pasted ones (source_id NULL); nullable
-// `game_id` distinguishes attached events from the inbox (game_id NULL ==
-// awaiting attachment).
+// (source_id set) from manually-pasted ones (source_id NULL); events have
+// ZERO-or-MORE attached games via the event_games junction (Plan 02.1-27);
+// inbox criterion is event_games.length === 0.
 //
 // occurred_at is the user-meaningful timestamp (when the talk / post / drop
 // happened); created_at is the row insertion time.
@@ -31,7 +31,6 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.js";
-import { games } from "./games.js";
 import { dataSources } from "./data-sources.js";
 import { uuidv7 } from "../../ids.js";
 
@@ -65,10 +64,9 @@ export const events = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    // Nullable: events with game_id IS NULL are the inbox (awaiting attachment).
-    // ON DELETE SET NULL so deleting a game returns its events to the inbox
-    // rather than cascading them away.
-    gameId: text("game_id").references(() => games.id, { onDelete: "set null" }),
+    // Plan 02.1-27 (UAT-NOTES.md §4.24.G): the legacy `game_id` FK was DROPPED;
+    // events relate to ZERO-or-MORE games via the event_games junction table.
+    // Inbox criterion is event_games.length === 0 (no attached rows).
     // Nullable: NULL for manually-pasted events; set when auto-imported from
     // a registered data_source.
     sourceId: text("source_id").references(() => dataSources.id, { onDelete: "set null" }),
@@ -90,12 +88,10 @@ export const events = pgTable(
   },
   (t) => ({
     userIdx: index("events_user_id_idx").on(t.userId),
-    // Carry forward — used by /games/[id] curated view.
-    userGameOccurredIdx: index("events_user_id_game_id_occurred_at_idx").on(
-      t.userId,
-      t.gameId,
-      t.occurredAt,
-    ),
+    // Plan 02.1-27 dropped the (user_id, game_id, occurred_at) composite index
+    // — per-game lookups now JOIN through event_games and rely on the
+    // event_games(user_id, game_id) index plus the (user_id, occurred_at DESC)
+    // cursor index below.
     // /feed cursor pagination: ORDER BY occurred_at DESC, id DESC.
     userOccurredAtIdx: index("events_user_occurred_at_idx").on(
       t.userId,
