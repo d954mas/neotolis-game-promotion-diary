@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Executing Phase 02.1 — Plan 02.1-10 Task 1 verified at commit dd71efb; awaiting Task 2 manual UAT checkpoint
-stopped_at: Plan 02.1-10 Task 1 (smoke-flow extension) verified at pre-existing commit dd71efb (shipped during the original 2026-04-28 Plan-10 first-pass before the 11-20 round-2 UAT polish batch). bash -n PASS on both files; all plan acceptance-criteria literal substrings present. Returning checkpoint for Task 2 (manual UAT, 9 items) before Task 3 (VALIDATION.md sign-off + SUMMARY.md).
+status: Phase 02.1 PAUSED — Plan 02.1-10 Task 2 manual UAT identified gaps; phase scope expanded with 5 bug fixes + card visual language redesign cluster; user direction "Мы не закрываем еще фазу, она не готовая"
+stopped_at: Plan 02.1-10 Task 2 (manual UAT) walked 9 items 2026-04-29; user identified 5 real bugs (sticky / sign-out invalidation / keys/steam discoverability / audit FiltersSheet schema regression / body-scroll-lock) + ~7-item card visual language redesign cluster + 4 product additions (auto_import edit-gate, /settings/credentials hub, multi-credentials, game cover with Steam fallback) + 1 ingest UX (post-ingest register-channel prompt). Findings captured in 02.1-10-UAT-NOTES.md (commit 1a35a80). Phase 3+ deferred items (external_id matching, re-link orphans, per-source stats, itch.io polling) not in 02.1. VALIDATION.md sign-off and 02.1-10-SUMMARY.md DEFERRED until gap-closure plans complete and UAT re-runs.
 last_updated: "2026-04-29T10:02:35.695Z"
 last_activity: 2026-04-29
 progress:
