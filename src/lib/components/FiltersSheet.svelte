@@ -1,28 +1,38 @@
 <script lang="ts">
   // FiltersSheet — mobile-only <dialog>-based bottom-sheet filter UX
   // (UI-SPEC §"Component inventory" + §"/feed filter row — chips → sheet
-  // pattern"; Plan 02.1-15 reshapes per VERIFICATION.md Gap 4 + Gap 10).
-  // Triggered by the FilterChips "Filters (N)" button below 600px viewport.
+  // pattern"; Plan 02.1-19 reshape over Plan 02.1-15).
+  // Triggered by the FilterChips "Filters (N)" button.
   //
   // Native <dialog> + showModal() gives focus-trap + Esc-to-close out of
   // the box. Mirrors the ConfirmDialog pattern.
   //
-  // Plan 02.1-15 changes:
-  //   - source / kind / game become checkbox LISTS (multi-select per Gap 4).
+  // Plan 02.1-19 changes (round-2 UAT):
+  //   - Game checkbox-list + Attached radio MERGE into one "Show" 3-radio
+  //     (Any / Inbox only / Attached to games). Picking "Attached to games"
+  //     reveals the games multi-select; the conflict between
+  //     "Attached=Inbox AND Game=X" is impossible by construction (UI guard).
+  //   - onApply payload: replaces { game?, attached? } with
+  //     { show: { kind: 'any' | 'inbox' | 'specific'; gameIds? } }.
+  //
+  // Plan 02.1-15 carry-over:
+  //   - source / kind become checkbox LISTS (multi-select per Gap 4).
   //   - source + game lists carry a typeahead `<input type="search">` so a
   //     long source/game list stays scannable.
-  //   - from / to date inputs are REMOVED — date range is now owned by
-  //     <DateRangeControl> rendered above the chip strip on /feed (Gap 10).
-  //   - onApply now passes string[] for source / kind / game (back-compat
-  //     with single-string consumers requires the parent to flatten).
+  //   - from / to date inputs are owned by <DateRangeControl> above the
+  //     chip strip on /feed (Gap 10).
 
   import { m } from "$lib/paraglide/messages.js";
+
+  type ShowFilter =
+    | { kind: "any" }
+    | { kind: "inbox" }
+    | { kind: "specific"; gameIds: string[] };
 
   type ActiveFilters = {
     source: string[];
     kind: string[];
-    game: string[];
-    attached?: boolean;
+    show: ShowFilter;
     authorIsMe?: boolean;
     from?: string;
     to?: string;
@@ -36,17 +46,18 @@
     filters,
     sources,
     games,
+    focusAxis,
     onApply,
     onClose,
   }: {
     filters: ActiveFilters;
     sources: SourceOption[];
     games: GameOption[];
+    focusAxis?: "kind" | "source" | "show" | "authorIsMe";
     onApply: (next: {
       source?: string[];
       kind?: string[];
-      game?: string[];
-      attached?: boolean;
+      show: ShowFilter;
       authorIsMe?: boolean;
     }) => void;
     onClose: () => void;
@@ -59,13 +70,13 @@
   // checkbox `checked` bindings recompute.
   let sourceSelected = $state<Set<string>>(new Set(filters.source ?? []));
   let kindSelected = $state<Set<string>>(new Set(filters.kind ?? []));
-  let gameSelected = $state<Set<string>>(new Set(filters.game ?? []));
+  let showSelection = $state<"any" | "inbox" | "specific">(filters.show.kind);
+  let gameSelected = $state<Set<string>>(
+    filters.show.kind === "specific" ? new Set(filters.show.gameIds) : new Set(),
+  );
   let sourceTypeahead = $state("");
   let gameTypeahead = $state("");
 
-  let attached = $state<"any" | "true" | "false">(
-    filters.attached === true ? "true" : filters.attached === false ? "false" : "any",
-  );
   let authorIsMe = $state<"any" | "true" | "false">(
     filters.authorIsMe === true ? "true" : filters.authorIsMe === false ? "false" : "any",
   );
@@ -128,6 +139,23 @@
   $effect(() => {
     if (dialogEl && !dialogEl.open) {
       dialogEl.showModal();
+      // Plan 02.1-19: focus-jump support — when chip click opens the sheet
+      // with a specific axis hint, scroll its fieldset into view + focus
+      // the first interactive control. Lightweight UX nice-to-have.
+      if (focusAxis) {
+        queueMicrotask(() => {
+          const el = dialogEl?.querySelector<HTMLElement>(
+            `[data-axis="${focusAxis}"]`,
+          );
+          if (el) {
+            el.scrollIntoView({ block: "nearest" });
+            const firstControl = el.querySelector<HTMLElement>(
+              "input, button, select, textarea",
+            );
+            firstControl?.focus();
+          }
+        });
+      }
     }
   });
 
@@ -144,17 +172,22 @@
   }
 
   function applyAll(): void {
+    const showResult: ShowFilter =
+      showSelection === "any"
+        ? { kind: "any" }
+        : showSelection === "inbox"
+          ? { kind: "inbox" }
+          : { kind: "specific", gameIds: Array.from(gameSelected) };
     onApply({
       source: Array.from(sourceSelected),
       kind: Array.from(kindSelected),
-      game: Array.from(gameSelected),
-      attached: attached === "any" ? undefined : attached === "true",
+      show: showResult,
       authorIsMe: authorIsMe === "any" ? undefined : authorIsMe === "true",
     });
   }
 
   function clearAll(): void {
-    onApply({});
+    onApply({ show: { kind: "any" } });
   }
 </script>
 
@@ -167,7 +200,7 @@
   <h2 id="filters-sheet-heading" class="heading">Filters</h2>
 
   <div class="grid">
-    <fieldset class="field">
+    <fieldset class="field" data-axis="source">
       <legend class="label">Source</legend>
       <input
         type="search"
@@ -189,7 +222,7 @@
       </div>
     </fieldset>
 
-    <fieldset class="field">
+    <fieldset class="field" data-axis="kind">
       <legend class="label">Kind</legend>
       <div class="checklist">
         {#each KIND_OPTIONS as k (k)}
@@ -205,44 +238,48 @@
       </div>
     </fieldset>
 
-    <fieldset class="field">
-      <legend class="label">Game</legend>
-      <input
-        type="search"
-        class="input"
-        placeholder="Filter games…"
-        bind:value={gameTypeahead}
-      />
-      <div class="checklist">
-        {#each filteredGames as g (g.id)}
-          <label class="check">
-            <input
-              type="checkbox"
-              checked={gameSelected.has(g.id)}
-              onchange={() => (gameSelected = toggle(gameSelected, g.id))}
-            />
-            {g.title}
-          </label>
-        {/each}
-      </div>
+    <!-- Plan 02.1-19: Game checkbox-list + Attached radio MERGED into a
+         single Show 3-radio with a conditional games multi-select. The
+         conflict between "Inbox AND specific games" is impossible by
+         construction. -->
+    <fieldset class="field" data-axis="show">
+      <legend class="label">{m.feed_filter_show_axis_label()}</legend>
+      <label class="toggle">
+        <input type="radio" name="show" value="any" bind:group={showSelection} />
+        {m.feed_filter_show_any()}
+      </label>
+      <label class="toggle">
+        <input type="radio" name="show" value="inbox" bind:group={showSelection} />
+        {m.feed_filter_show_inbox()}
+      </label>
+      <label class="toggle">
+        <input type="radio" name="show" value="specific" bind:group={showSelection} />
+        {m.feed_filter_show_specific()}
+      </label>
+
+      {#if showSelection === "specific"}
+        <input
+          type="search"
+          class="input"
+          placeholder="Filter games…"
+          bind:value={gameTypeahead}
+        />
+        <div class="checklist">
+          {#each filteredGames as g (g.id)}
+            <label class="check">
+              <input
+                type="checkbox"
+                checked={gameSelected.has(g.id)}
+                onchange={() => (gameSelected = toggle(gameSelected, g.id))}
+              />
+              {g.title}
+            </label>
+          {/each}
+        </div>
+      {/if}
     </fieldset>
 
-    <fieldset class="field">
-      <legend class="label">Attached</legend>
-      <label class="toggle">
-        <input type="radio" name="attached" value="any" bind:group={attached} /> Any
-      </label>
-      <label class="toggle">
-        <input type="radio" name="attached" value="true" bind:group={attached} />
-        {m.feed_filter_attached_true()}
-      </label>
-      <label class="toggle">
-        <input type="radio" name="attached" value="false" bind:group={attached} />
-        {m.feed_filter_attached_false()}
-      </label>
-    </fieldset>
-
-    <fieldset class="field">
+    <fieldset class="field" data-axis="authorIsMe">
       <legend class="label">Author</legend>
       <label class="toggle">
         <input type="radio" name="author" value="any" bind:group={authorIsMe} /> Any
