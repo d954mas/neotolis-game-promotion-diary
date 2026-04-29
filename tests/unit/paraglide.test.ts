@@ -59,6 +59,12 @@ describe("paraglide i18n (UX-04)", () => {
     // already pulled the prior plans' deferred entries; Plan 02.1-16 adds
     // its own `feed_card_*` pair). Total post-Plan-16: 177 keys.
     //
+    // Plan 02.1-19 (round-2 UAT closure): adds 13 keys for the redesigned
+    // /feed (4 date-range presets + clear + 4 show-axis labels + 3 chip-axis
+    // labels + 2 infinite-scroll status banners). Removes 8 keys for the
+    // dropped axes (Plan 02.1-15 5-preset DateRangeControl + 2 attached
+    // chips + 1 date-range chip). Net delta: +5 keys.
+    //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
     // across renames (Phase 2 STATE.md guidance, carried forward).
     const EXPECTED_KEYS = [
@@ -148,34 +154,39 @@ describe("paraglide i18n (UX-04)", () => {
       "feed_attach_to_game",
       "feed_card_open_external",
       "feed_card_thumbnail_alt",
+      "feed_chip_axis_kind",
+      "feed_chip_axis_show",
+      "feed_chip_axis_source",
       "feed_cta_add_event",
       "feed_cta_new_event",
-      "feed_date_range_30d",
-      "feed_date_range_7d",
-      "feed_date_range_all",
-      "feed_date_range_chip_default",
-      "feed_date_range_custom",
+      "feed_date_range_clear",
       "feed_date_range_label_from",
       "feed_date_range_label_to",
+      "feed_date_range_month",
       "feed_date_range_today",
+      "feed_date_range_week",
+      "feed_date_range_year",
       "feed_deleted_panel_restore_aria",
       "feed_deleted_panel_restore_cta",
       "feed_deleted_panel_toggle_hide",
       "feed_deleted_panel_toggle_show",
       "feed_dismiss_error_not_in_inbox",
       "feed_dismiss_from_inbox",
-      "feed_filter_attached_false",
-      "feed_filter_attached_true",
       "feed_filter_author_me",
       "feed_filter_author_others",
       "feed_filter_chip_dismiss_aria",
-      "feed_filter_date_range",
       "feed_filter_game",
       "feed_filter_kind",
+      "feed_filter_show_any",
+      "feed_filter_show_axis_label",
+      "feed_filter_show_inbox",
+      "feed_filter_show_specific",
       "feed_filter_source",
       "feed_filters_apply",
       "feed_filters_clear_all",
+      "feed_loading_more",
       "feed_move_to_inbox",
+      "feed_no_more_events",
       "feed_row_delete_aria",
       "feed_row_edit_aria",
       "game_add_steam_listing_cta",
