@@ -1724,3 +1724,144 @@ describe("Plan 02.1-28 — M:N gameIds", () => {
     expect(removedIds).toContain(gA);
   });
 });
+
+/**
+ * Plan 02.1-32 (UAT-NOTES.md §4.24.D + §4.24.C + §4.18.A) —
+ * /events/[id]/edit standalone toggle round-trip.
+ *
+ * Closes the round-trip behavior the form relies on:
+ *   1. PATCH /api/events/:id (main fields) followed by PATCH
+ *      /api/events/:id/mark-standalone reaches the desired state
+ *      (metadata.triage.standalone === true) AND writes both audit verbs
+ *      in order (event.edited, event.marked_standalone).
+ *   2. PATCH /api/events/:id/mark-standalone on an event with attached
+ *      games returns 422 standalone_conflicts_with_game (defense-in-depth
+ *      mirror of the events-attach.test.ts coverage; verifies the same
+ *      contract from the events.test.ts perspective).
+ *   3. DELETE /api/events/:id soft-deletes the event; subsequent GET
+ *      returns 404 (default loader excludes soft-deleted rows). The Delete
+ *      button now lives at the /events/[id]/edit form footer (Plan
+ *      02.1-32) rather than the read-only detail page.
+ */
+describe("Plan 02.1-32 — /events/[id]/edit standalone toggle round-trip", () => {
+  // Parallel-executor email-uniqueness coordination (Plan 02.1-17 pattern):
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
+  it("Plan 02.1-32: PATCH /api/events/:id then PATCH /api/events/:id/mark-standalone reaches metadata.triage.standalone=true + audit chain", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev32-roundtrip-${uniq()}@test.local` });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Round-trip seed",
+      },
+      "127.0.0.1",
+    );
+
+    // Step 1: PATCH the main fields (mirrors the edit-form's first fetch).
+    const patchRes = await app.request(`/api/events/${ev.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "press",
+        title: "Round-trip after edit",
+        occurredAt: new Date("2026-06-02T10:00:00Z").toISOString(),
+        url: null,
+        notes: null,
+        authorIsMe: true,
+      }),
+    });
+    expect(patchRes.status).toBe(200);
+
+    // Step 2: PATCH /mark-standalone (the dedicated route the edit-form's
+    // submit handler calls when the standalone toggle differs from loaded).
+    const standaloneRes = await app.request(
+      `/api/events/${ev.id}/mark-standalone`,
+      {
+        method: "PATCH",
+        headers: {
+          cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        },
+      },
+    );
+    expect(standaloneRes.status).toBe(200);
+    const standaloneBody = (await standaloneRes.json()) as {
+      id: string;
+      metadata: { triage?: { standalone?: boolean } } | null;
+    };
+    expect(standaloneBody.metadata?.triage?.standalone).toBe(true);
+
+    // Audit chain: event.edited (from the PATCH) then event.marked_standalone.
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.userId, u.id));
+    const actions = audits.map((r) => r.action);
+    expect(actions).toContain("event.edited");
+    expect(actions).toContain("event.marked_standalone");
+  });
+
+  it("Plan 02.1-32: PATCH /api/events/:id/mark-standalone on event with attached games returns 422 standalone_conflicts_with_game (defense-in-depth)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev32-conflict-${uniq()}@test.local` });
+    const gA = uuidv7();
+    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [gA],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Cannot go standalone",
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(`/api/events/${ev.id}/mark-standalone`, {
+      method: "PATCH",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("standalone_conflicts_with_game");
+  });
+
+  it("Plan 02.1-32: DELETE /api/events/:id soft-deletes; subsequent GET /api/events/:id returns 404", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev32-delete-${uniq()}@test.local` });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "To be deleted from edit footer",
+      },
+      "127.0.0.1",
+    );
+
+    const delRes = await app.request(`/api/events/${ev.id}`, {
+      method: "DELETE",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect([200, 204]).toContain(delRes.status);
+
+    // Default GET excludes soft-deleted rows → 404.
+    const getRes = await app.request(`/api/events/${ev.id}`, {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(getRes.status).toBe(404);
+  });
+});

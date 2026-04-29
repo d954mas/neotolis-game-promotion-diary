@@ -21,6 +21,7 @@
 
   import { goto, invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
   import type { PageData } from "./$types";
 
@@ -48,6 +49,11 @@
     title: string;
     url: string | null;
     notes: string | null;
+    // Plan 02.1-32 (UAT-NOTES.md §4.24.D): metadata.triage.standalone
+    // surfaces the "Not game-related" toggle on the edit form. toEventDto
+    // already projects metadata so the value reaches the page load function
+    // unchanged.
+    metadata: unknown;
   };
 
   type GameOpt = { id: string; title: string };
@@ -78,8 +84,64 @@
   let authorIsMe = $state(event.authorIsMe);
   const originalGameId = event.gameIds[0] ?? null;
 
+  // Plan 02.1-32 (UAT-NOTES.md §4.24.D): standalone toggle hydrated from
+  // metadata.triage.standalone. The submit handler fires PATCH
+  // /api/events/:id/mark-standalone (or /unmark-standalone) ONLY when the
+  // toggle's value differs from the loaded value — reuses the existing
+  // service surface from Plan 02.1-24 so no new audit verb is added.
+  function readStandaloneFromMetadata(md: unknown): boolean {
+    if (md === null || typeof md !== "object") return false;
+    const triage = (md as { triage?: unknown }).triage;
+    if (triage === null || triage === undefined || typeof triage !== "object") return false;
+    return (triage as { standalone?: unknown }).standalone === true;
+  }
+  const initialStandalone = readStandaloneFromMetadata(event.metadata);
+  let editStandalone = $state(initialStandalone);
+
+  // Plan 02.1-32 (UAT-NOTES.md §4.24.C — UI guard layer; service-layer 422
+  // from Plan 02.1-28 is defense-in-depth): when the form has a game
+  // attached AND the user toggles standalone=true, surface an inline
+  // conflict error and disable Save. The user must clear one or the other.
+  const hasAttachedGame = $derived(gameId.length > 0);
+  const standaloneConflict = $derived(editStandalone === true && hasAttachedGame);
+
   let pending = $state(false);
   let errorText = $state<string | null>(null);
+
+  // Plan 02.1-32 (UAT-NOTES.md §4.18.A): Delete button moves from the
+  // /events/[id] read-only detail page to this edit form's footer. Uses
+  // the existing ConfirmDialog flow (Plan 02.1-14 pattern) + soft-delete
+  // semantics (DELETE /api/events/:id → restore-within-60-days).
+  let confirmDeleteOpen = $state(false);
+  let deleteBusy = $state(false);
+  let deleteError = $state<string | null>(null);
+
+  function askDelete(): void {
+    confirmDeleteOpen = true;
+  }
+  function cancelDelete(): void {
+    confirmDeleteOpen = false;
+  }
+
+  async function confirmDelete(): Promise<void> {
+    if (deleteBusy) return;
+    deleteBusy = true;
+    deleteError = null;
+    try {
+      const res = await fetch(`/api/events/${event.id}`, { method: "DELETE" });
+      if (!res.ok && res.status !== 204) {
+        deleteError = m.error_server_generic();
+        return;
+      }
+      confirmDeleteOpen = false;
+      await invalidateAll();
+      await goto("/feed");
+    } catch {
+      deleteError = m.error_network();
+    } finally {
+      deleteBusy = false;
+    }
+  }
 
   function setToday(): void {
     occurredAt = new Date().toISOString().slice(0, 10);
@@ -108,6 +170,12 @@
     if (pending) return;
     if (title.trim().length === 0) {
       errorText = m.error_server_generic();
+      return;
+    }
+    // Plan 02.1-32 UI guard: prevent submit when standalone+game conflict.
+    // The Save button is disabled, but defense-in-depth here too in case the
+    // user finds an alternate trigger.
+    if (standaloneConflict) {
       return;
     }
     pending = true;
@@ -145,9 +213,9 @@
       //    dedicated endpoint validates game ownership (Pitfall 4).
       // Plan 02.1-28: send the canonical {gameIds} shape. Empty array
       // === detach (move to inbox); single-element === attach to one
-      // game (round-3 single-select UX preserved). The route also
-      // accepts the deprecated {gameId} alias for one round of UAT —
-      // we use the canonical shape here so the UI side migrates first.
+      // game (round-3 single-select UX preserved). Plan 02.1-32 retires
+      // the {gameId} back-compat alias on the UI side — we send the
+      // canonical {gameIds} shape exclusively from here on.
       const newGameId = gameId || null;
       if (newGameId !== originalGameId) {
         const newGameIds = newGameId === null ? [] : [newGameId];
@@ -157,6 +225,24 @@
           body: JSON.stringify({ gameIds: newGameIds }),
         });
         if (!attachRes.ok) {
+          errorText = m.error_server_generic();
+          return;
+        }
+      }
+
+      // 3) Plan 02.1-32 (UAT-NOTES.md §4.24.D): if the standalone toggle
+      //    differs from the loaded value, fire the dedicated route. Two
+      //    PATCHes (instead of folding the toggle into the main updateEvent)
+      //    because (a) markStandalone has its own audit verb (forensics
+      //    intact — event.marked_standalone / event.unmarked_standalone),
+      //    (b) the conflict-guard 422 (Plan 02.1-28) fires correctly only
+      //    on the dedicated route, (c) reuses existing service surface.
+      if (editStandalone !== initialStandalone) {
+        const path = editStandalone ? "mark-standalone" : "unmark-standalone";
+        const standaloneRes = await fetch(`/api/events/${event.id}/${path}`, {
+          method: "PATCH",
+        });
+        if (!standaloneRes.ok) {
           errorText = m.error_server_generic();
           return;
         }
@@ -262,19 +348,64 @@
       ></textarea>
     </label>
 
+    <!-- Plan 02.1-32 (UAT-NOTES.md §4.24.D): standalone toggle. Submit
+         fires PATCH /api/events/:id/mark-standalone (or /unmark-standalone)
+         when the toggle differs from the loaded value. The conflict
+         warning surfaces when standalone=true AND a game is attached;
+         the Save button stays disabled while the conflict is active. -->
+    <fieldset class="field standalone-fieldset">
+      <label class="field checkbox">
+        <input
+          type="checkbox"
+          bind:checked={editStandalone}
+          disabled={pending}
+        />
+        <span class="field-label">{m.events_edit_standalone_label()}</span>
+      </label>
+      <p class="help muted">{m.events_edit_standalone_help()}</p>
+      {#if standaloneConflict}
+        <p class="conflict-error">{m.events_edit_standalone_conflict()}</p>
+      {/if}
+    </fieldset>
+
     <div class="actions">
       <a class="cancel" href={`/events/${event.id}`}>{m.common_cancel()}</a>
       <button
         type="submit"
         class="submit"
-        disabled={pending || title.trim().length === 0}
+        disabled={pending || title.trim().length === 0 || standaloneConflict}
       >
         {m.events_edit_save()}
       </button>
     </div>
     {#if errorText}<InlineError message={errorText} />{/if}
+
+    <!-- Plan 02.1-32 (UAT-NOTES.md §4.18.A): Delete button at the form
+         footer. Replaces the Delete on /events/[id] read-only page. Uses
+         the existing ConfirmDialog flow (Plan 02.1-14 pattern) +
+         soft-delete + restore-within-60-days semantics. -->
+    <hr class="section-divider" />
+    <div class="footer-actions">
+      <button
+        type="button"
+        class="delete-button"
+        onclick={askDelete}
+        disabled={deleteBusy}
+      >
+        {m.events_edit_delete_button()}
+      </button>
+    </div>
+    {#if deleteError}<InlineError message={deleteError} />{/if}
   </form>
 </section>
+
+<ConfirmDialog
+  open={confirmDeleteOpen}
+  message={m.confirm_event_delete()}
+  confirmLabel={m.common_delete()}
+  onConfirm={confirmDelete}
+  onCancel={cancelDelete}
+/>
 
 <style>
   .breadcrumb {
@@ -366,6 +497,58 @@
     cursor: pointer;
   }
   .submit:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  /* Plan 02.1-32: standalone toggle fieldset wrapping. Reset native
+   * <fieldset> default (border/padding/margin) to fit the existing form
+   * style. The conflict-error styling uses the destructive accent color
+   * to flag the mutual-exclusion violation. */
+  .standalone-fieldset {
+    border: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+  }
+  .help {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+  }
+  .conflict-error {
+    margin: 0;
+    color: var(--color-destructive);
+    font-size: var(--font-size-label);
+  }
+  /* Plan 02.1-32: form footer Delete button. Visually separated by a
+   * divider so it reads as a destructive action distinct from the
+   * Save / Cancel pair. */
+  .section-divider {
+    border: none;
+    border-top: 1px solid var(--color-border);
+    margin: var(--space-md) 0 0 0;
+  }
+  .footer-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .delete-button {
+    min-height: 44px;
+    padding: 0 var(--space-md);
+    background: transparent;
+    color: var(--color-destructive);
+    border: 1px solid var(--color-destructive);
+    border-radius: 4px;
+    font-weight: var(--font-weight-semibold);
+    cursor: pointer;
+  }
+  .delete-button:hover:not(:disabled) {
+    background: var(--color-destructive);
+    color: #fff;
+  }
+  .delete-button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }

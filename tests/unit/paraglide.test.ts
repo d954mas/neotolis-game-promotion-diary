@@ -99,6 +99,13 @@ describe("paraglide i18n (UX-04)", () => {
     // stores_add_cta, stores_empty, stores_section_heading). Net delta:
     // +11 keys.
     //
+    // Plan 02.1-33 (round-4 gap closure — UAT-NOTES.md §4.22.B/C/D/E —
+    // SourceRow edit-mode polish): adds 1 key (common_save) for the
+    // edit-form footer Save button. The previous Save button reused
+    // m.toast_saved() ("Saved.") which is the post-action toast text — a
+    // subtly wrong label for a button that has not yet acted. Net delta:
+    // +1 key.
+    //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
     // across renames (Phase 2 STATE.md guidance, carried forward).
     const EXPECTED_KEYS = [
@@ -140,6 +147,7 @@ describe("paraglide i18n (UX-04)", () => {
       "common_edit",
       "common_remove",
       "common_restore",
+      "common_save",
       "confirm_event_delete",
       "confirm_game_delete",
       "confirm_item_delete",
