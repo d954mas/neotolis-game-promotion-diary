@@ -186,3 +186,35 @@ describe("Plan 02.1-20: /audit FilterChips + FiltersSheet UX", () => {
     "/audit at 360px viewport renders without horizontal scroll with chip visible (manual UAT — auth harness deferred)",
   );
 });
+
+/**
+ * Plan 02.1-21 — /audit FiltersSheet schema honored + date-range filter.
+ *
+ * Round-3 UAT closure for §9.2-bug. Two requirements verified here:
+ *   1. /audit FiltersSheet renders date-range inputs AND action checkbox-list
+ *      and renders NO source/kind/show/authorIsMe fieldsets (UAT user quote:
+ *      "Открывает окно, там есть типы аудита, но и куча полей из feed
+ *      фильтров").
+ *   2. /audit URL contract supports ?from=YYYY-MM-DD&to=YYYY-MM-DD and the
+ *      rendered rows reflect the filter (UAT user quote: "В окне аудита нет
+ *      возможности выбрать дату как в feed").
+ *
+ * Stub-skipped here pending the cookie-injection auth harness (same pattern
+ * as Plans 02.1-18 / 19 / 20). The component-level regression guard is
+ * covered by tests/integration/audit-render.test.ts (Plan 02.1-21 describe
+ * block), and the service-level dateRange filter is covered by
+ * tests/integration/audit.test.ts (Plan 02.1-21 describe block). The
+ * end-to-end browser flow is captured in 02.1-VALIDATION.md "Manual-Only
+ * Verifications" until the auth harness ships in Phase 6.
+ */
+describe("Plan 02.1-21: /audit FiltersSheet schema honored + date-range filter", () => {
+  it.skip(
+    "/audit FiltersSheet renders date-range + action fieldsets ONLY (no source/kind/show/authorIsMe leak) (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/audit URL ?from=YYYY-MM-DD&to=YYYY-MM-DD reflects in DateRangeControl + narrows rendered rows (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/audit DateRangeControl × clear button removes ?from / ?to from the URL (manual UAT — auth harness deferred)",
+  );
+});

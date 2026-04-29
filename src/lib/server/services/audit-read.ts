@@ -1,4 +1,4 @@
-// Audit log READ surface (PRIV-02 — Plan 02-07; widened Plan 02.1-20).
+// Audit log READ surface (PRIV-02 — Plan 02-07; widened Plan 02.1-20 + 21).
 //
 // Phase 1 shipped the WRITE side (`src/lib/server/audit.ts` writeAudit only,
 // PITFALL P19 append-only). This service lights up the user-visible read:
@@ -10,6 +10,11 @@
 // AuditAction[] (empty array = "all" semantics; 1-element uses eq; 2+ uses
 // inArray). The "all" sentinel is gone — callers pass [] for the no-filter
 // branch. /audit loader passes url.searchParams.getAll("action") directly.
+//
+// Plan 02.1-21: dateRange filter added to mirror /feed (UAT §9.2-bug — user
+// quote: "В окне аудита нет возможности выбрать дату как в feed"). The userId
+// WHERE clause stays FIRST in `and(...)` per P19 / privacy invariant 1; the
+// dateRange clauses are independent of userId and append to filterParts.
 //
 // Pattern 1 (tenant scope): listAuditPage takes `userId: string` first; the
 // SELECT's WHERE clause begins with `eq(auditLog.userId, userId)`. The custom
@@ -30,7 +35,7 @@
 // ties: id is UUIDv7 so the (created_at, id) ordering is deterministic and
 // strictly decreasing.
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { auditLog } from "../db/schema/audit-log.js";
 import { AUDIT_ACTIONS, type AuditAction } from "../audit/actions.js";
@@ -47,6 +52,14 @@ export interface AuditPage {
 // Callers pass AuditAction[] directly. The previous "all" | AuditAction
 // union is gone; all imports updated accordingly (loader passes [], not "all").
 export type AuditActionFilter = AuditAction;
+
+// Plan 02.1-21: optional date-range filter (mirrors /feed). Both ends are
+// inclusive — the loader applies the end-of-day shift on `to` so a calendar-
+// day URL param yields the same row count as a /feed query for the same day.
+export interface AuditDateRange {
+  from?: Date;
+  to?: Date;
+}
 
 export const PAGE_SIZE = 50;
 
@@ -105,11 +118,22 @@ function assertValidActionFilter(filter: string): asserts filter is AuditAction 
  *   - [a] — filters to that single action; uses eq + the (user_id, action,
  *     created_at) composite index added by Plan 02-03.
  *   - [a, b, ...] — filters to the OR of the listed actions; uses inArray.
+ *
+ * dateRange semantics (Plan 02.1-21):
+ *   - undefined (default) — no date filter; lists every row.
+ *   - { from } — inclusive lower bound on createdAt.
+ *   - { to } — inclusive upper bound on createdAt (loader shifts to
+ *     23:59:59.999Z so a calendar-day URL param matches all rows on that day).
+ *   - { from, to } — inclusive window.
+ *   The userId WHERE clause stays FIRST in `and(...)` (PRIVACY INVARIANT 1);
+ *   the dateRange clauses are independent of userId, so cross-tenant 404
+ *   (P19) holds by construction even with a forged cursor + date filter.
  */
 export async function listAuditPage(
   userId: string,
   cursor: string | null,
   actionFilter: AuditActionFilter[] = [],
+  dateRange?: AuditDateRange,
 ): Promise<AuditPage> {
   // Defense-in-depth: validate every entry in the array. Plan 02-08's
   // route layer is gone (Plan 02-10 went direct-service); the loader
@@ -139,6 +163,19 @@ export async function listAuditPage(
     actionClause = inArray(auditLog.action, actionFilter);
   }
 
+  // Plan 02.1-21: optional date-range clauses. Independent of userId.
+  // Pushed to filterParts so the WHERE structure stays:
+  //   and(eq(userId), cursorClause, actionClause, ...filterParts)
+  // — userId remains the FIRST clause for ESLint tenant-scope structural
+  // matching and PRIVACY INVARIANT 1.
+  const filterParts: Array<ReturnType<typeof gte>> = [];
+  if (dateRange?.from !== undefined) {
+    filterParts.push(gte(auditLog.createdAt, dateRange.from));
+  }
+  if (dateRange?.to !== undefined) {
+    filterParts.push(lte(auditLog.createdAt, dateRange.to));
+  }
+
   // userId filter is FIRST in `and(...)` — load-bearing for the
   // tenant-scope ESLint rule's structural match and for query-plan
   // intuition (the index leads with user_id). PRIVACY INVARIANT
@@ -146,7 +183,7 @@ export async function listAuditPage(
   const rows = await db
     .select()
     .from(auditLog)
-    .where(and(eq(auditLog.userId, userId), cursorClause, actionClause))
+    .where(and(eq(auditLog.userId, userId), cursorClause, actionClause, ...filterParts))
     .orderBy(sql`${auditLog.createdAt} desc, ${auditLog.id} desc`)
     .limit(PAGE_SIZE + 1);
 

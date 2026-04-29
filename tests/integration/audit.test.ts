@@ -210,3 +210,102 @@ describe("Plan 02.1-20: listAuditPage multi-action filter", () => {
     expect(bPage.rows.length).toBe(0);
   });
 });
+
+/**
+ * Plan 02.1-21 — listAuditPage dateRange (round-3 UAT closure for §9.2-bug).
+ *
+ * UAT-NOTES.md §9.2-bug user quote: "В окне аудита нет возможности выбрать
+ * дату как в feed". /audit gains a date-range filter that mirrors /feed's
+ * URL contract (?from=YYYY-MM-DD&to=YYYY-MM-DD). listAuditPage signature
+ * widens to accept an optional `dateRange?: { from?: Date; to?: Date }`
+ * parameter; SQL clause adds gte/lte on auditLog.createdAt when present.
+ *
+ * Privacy invariant: the userId WHERE clause STAYS the FIRST clause in
+ * `and(...)`. Cross-tenant 404 invariant (P19) preserved by construction
+ * — the userId filter is independent of the date filter.
+ */
+describe("Plan 02.1-21: listAuditPage dateRange", () => {
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
+  it("dateRange.from + to filters rows to the inclusive window", async () => {
+    const u = await seedUserDirectly({ email: `p21-window-${uniq()}@test.local` });
+    // Seed 3 rows with explicit createdAt — one before the window, one
+    // inside, one after. Then assert the filter returns exactly the
+    // inside row.
+    const beforeAt = new Date("2026-03-15T12:00:00.000Z");
+    const insideAt = new Date("2026-04-10T12:00:00.000Z");
+    const afterAt = new Date("2026-05-20T12:00:00.000Z");
+    await db.insert(auditLog).values([
+      { userId: u.id, action: "session.signin", ipAddress: "10.0.0.1", createdAt: beforeAt },
+      { userId: u.id, action: "session.signin", ipAddress: "10.0.0.1", createdAt: insideAt },
+      { userId: u.id, action: "session.signin", ipAddress: "10.0.0.1", createdAt: afterAt },
+    ]);
+
+    const out = await listAuditPage(u.id, null, [], {
+      from: new Date("2026-04-01T00:00:00.000Z"),
+      to: new Date("2026-04-30T23:59:59.999Z"),
+    });
+    expect(out.rows.length).toBe(1);
+    expect(out.rows[0]!.createdAt.toISOString()).toBe(insideAt.toISOString());
+  });
+
+  it("dateRange combined with actionFilter narrows on BOTH conditions", async () => {
+    const u = await seedUserDirectly({ email: `p21-and-${uniq()}@test.local` });
+    const oldAt = new Date("2026-01-01T12:00:00.000Z");
+    const newAt = new Date("2026-04-10T12:00:00.000Z");
+    await db.insert(auditLog).values([
+      // Old + key.add: matches action but excluded by date.
+      { userId: u.id, action: "key.add", ipAddress: "10.0.0.1", createdAt: oldAt },
+      // New + session.signin: matches date but excluded by action.
+      { userId: u.id, action: "session.signin", ipAddress: "10.0.0.1", createdAt: newAt },
+      // New + key.add: matches both — the only row in the result.
+      { userId: u.id, action: "key.add", ipAddress: "10.0.0.1", createdAt: newAt },
+    ]);
+
+    const out = await listAuditPage(u.id, null, ["key.add"], {
+      from: new Date("2026-04-01T00:00:00.000Z"),
+    });
+    expect(out.rows.length).toBe(1);
+    expect(out.rows[0]!.action).toBe("key.add");
+    expect(out.rows[0]!.createdAt.toISOString()).toBe(newAt.toISOString());
+  });
+
+  it("cross-tenant 404 invariant preserved with date+action filter combination (P19)", async () => {
+    const userA = await seedUserDirectly({ email: `p21-tcA-${uniq()}@test.local` });
+    const userB = await seedUserDirectly({ email: `p21-tcB-${uniq()}@test.local` });
+    const insideAt = new Date("2026-04-10T12:00:00.000Z");
+    for (let i = 0; i < 3; i++) {
+      await db.insert(auditLog).values({
+        userId: userA.id,
+        action: "key.add",
+        ipAddress: "10.0.0.1",
+        createdAt: insideAt,
+      });
+    }
+    // userA sees 3 rows in the window with key.add filter.
+    const aPage = await listAuditPage(userA.id, null, ["key.add"], {
+      from: new Date("2026-04-01T00:00:00.000Z"),
+      to: new Date("2026-04-30T23:59:59.999Z"),
+    });
+    expect(aPage.rows.length).toBe(3);
+
+    // userB asks for the same window + action + a forged cursor pointing
+    // into userA's page. Must return zero rows. The userId WHERE clause
+    // prunes BEFORE date / action narrow further.
+    const aCursor = encodeCursor(aPage.rows[1]!.createdAt, aPage.rows[1]!.id);
+    const bPage = await listAuditPage(userB.id, aCursor, ["key.add"], {
+      from: new Date("2026-04-01T00:00:00.000Z"),
+      to: new Date("2026-04-30T23:59:59.999Z"),
+    });
+    expect(bPage.rows.length).toBe(0);
+  });
+
+  it("undefined dateRange returns all rows (default behavior)", async () => {
+    const u = await seedUserDirectly({ email: `p21-default-${uniq()}@test.local` });
+    await writeAudit({ userId: u.id, action: "session.signin", ipAddress: "10.0.0.1" });
+    await writeAudit({ userId: u.id, action: "key.add", ipAddress: "10.0.0.1" });
+    // dateRange omitted → no date filter; both rows return.
+    const out = await listAuditPage(u.id, null, []);
+    expect(out.rows.length).toBe(2);
+  });
+});

@@ -43,10 +43,18 @@
   // Plan 02.1-20 widens FilterChips/FiltersSheet axis union to include
   // 'action' for /audit reuse; /feed never receives that axis (filters.action
   // is left undefined here) but the local type must match the component
-  // contract.
+  // contract. Plan 02.1-21 adds 'date' to the union (in-sheet secondary
+  // entry; the always-visible <DateRangeControl> stays the primary).
   let sheetFocusAxis = $state<
-    "kind" | "source" | "show" | "authorIsMe" | "action" | undefined
+    "kind" | "source" | "show" | "authorIsMe" | "date" | "action" | undefined
   >(undefined);
+
+  // Plan 02.1-21: schema is the explicit list of axes /feed owns. Replaces
+  // FiltersSheet's old implicit "render everything" default. Behavior is
+  // unchanged for end users — kind/source/show/authorIsMe/date are all
+  // rendered in the sheet exactly as before; the explicit list is just a
+  // forward-compatible API for adding axes in Phase 3+.
+  const FEED_SCHEMA = ["kind", "source", "show", "authorIsMe", "date"] as const;
 
   const sourceById = $derived(new Map(data.sources.map((s) => [s.id, s])));
   const gameById = $derived(new Map(data.games.map((g) => [g.id, g])));
@@ -123,17 +131,38 @@
     // the sheet returns undefined (defensive).
     show?: ShowFilter;
     authorIsMe?: boolean;
+    // Plan 02.1-21: schema=['kind','source','show','authorIsMe','date'] for
+    // /feed → the sheet's in-sheet date axis can emit from/to. The primary
+    // entry remains <DateRangeControl> above the chip strip; the sheet path
+    // is the secondary entry for users opening the sheet from a chip click.
+    from?: string;
+    to?: string;
     action?: string[];  // unused on /feed
   }): void {
     const params = new URLSearchParams(page.url.searchParams);
-    // Sheet owns source/kind/show/authorIsMe; the date-range params belong
-    // to <DateRangeControl> and are PRESERVED here.
+    // Sheet owns source/kind/show/authorIsMe (always), and date (when
+    // schema includes 'date' — true for /feed). Plan 02.1-21: when the
+    // sheet emits from/to (or omits both), we honor it as the new
+    // date-range source of truth — same shape as <DateRangeControl>.
     params.delete("source");
     params.delete("kind");
     params.delete("game");
     params.delete("show");
     params.delete("authorIsMe");
     params.delete("cursor");
+    // Plan 02.1-21: only rewrite from/to if the sheet emitted them (i.e.
+    // schema includes 'date'). The sheet's clearAll sends from=undefined
+    // + to=undefined → we drop both params and ?all=1 lands the user on
+    // the no-default-window state to match clearAll's intent.
+    if ("from" in next || "to" in next) {
+      params.delete("from");
+      params.delete("to");
+      params.delete("all");
+      if (next.from) params.set("from", next.from);
+      if (next.to) params.set("to", next.to);
+      // If the sheet sent neither value, preserve the no-default state.
+      if (!next.from && !next.to) params.set("all", "1");
+    }
     for (const v of next.source ?? []) params.append("source", v);
     for (const v of next.kind ?? []) params.append("kind", v);
     const show: ShowFilter = next.show ?? { kind: "any" };
@@ -236,6 +265,7 @@
       filters={data.activeFilters}
       sources={data.sources}
       games={data.games}
+      schema={FEED_SCHEMA}
       onDismiss={dismissAxis}
       onOpenSheet={(axis) => {
         sheetFocusAxis = axis;
@@ -249,6 +279,7 @@
       filters={data.activeFilters}
       sources={data.sources}
       games={data.games}
+      schema={FEED_SCHEMA}
       onDismiss={dismissAxis}
       onOpenSheet={(axis) => {
         sheetFocusAxis = axis;
@@ -296,6 +327,7 @@
       filters={data.activeFilters}
       sources={data.sources}
       games={data.games}
+      schema={FEED_SCHEMA}
       focusAxis={sheetFocusAxis}
       onApply={(next) => {
         sheetOpen = false;
