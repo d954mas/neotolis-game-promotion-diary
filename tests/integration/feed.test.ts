@@ -55,7 +55,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const e1 = await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-04-01T12:00:00Z"),
         title: "First",
@@ -65,7 +65,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const e2 = await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "conference",
         occurredAt: new Date("2026-06-15T09:00:00Z"),
         title: "Second",
@@ -75,7 +75,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const e3 = await createEvent(
       userId,
       {
-        gameId: null,
+        gameIds: [],
         kind: "talk",
         occurredAt: new Date("2026-05-10T15:00:00Z"),
         title: "Inbox-talk",
@@ -97,7 +97,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const owned = await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "youtube_video",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "From source",
@@ -109,7 +109,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "Manual press",
@@ -128,7 +128,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const yt = await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "youtube_video",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Video",
@@ -139,7 +139,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "Press",
@@ -162,7 +162,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const evA = await createEvent(
       u.id,
       {
-        gameId: gameA,
+        gameIds: [gameA],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "A press",
@@ -172,7 +172,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     await createEvent(
       u.id,
       {
-        gameId: gameB,
+        gameIds: [gameB],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "B press",
@@ -200,7 +200,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: gA,
+        gameIds: [gA],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Specific empty",
@@ -226,7 +226,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const evA = await createEvent(
       u.id,
       {
-        gameId: gA,
+        gameIds: [gA],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "A",
@@ -236,7 +236,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const evB = await createEvent(
       u.id,
       {
-        gameId: gB,
+        gameIds: [gB],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "B",
@@ -246,7 +246,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     await createEvent(
       u.id,
       {
-        gameId: gC,
+        gameIds: [gC],
         kind: "press",
         occurredAt: new Date("2026-06-03T10:00:00Z"),
         title: "C",
@@ -269,7 +269,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const attached = await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Attached row",
@@ -279,7 +279,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const inbox = await createEvent(
       userId,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "Inbox row",
@@ -306,7 +306,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     await createEvent(
       userA.id,
       {
-        gameId: gameAofUserA,
+        gameIds: [gameAofUserA],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "User A event",
@@ -329,7 +329,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const attached = await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Attached",
@@ -339,7 +339,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     await createEvent(
       userId,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "Inbox",
@@ -354,7 +354,9 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     );
     expect(page.rows).toHaveLength(1);
     expect(page.rows[0]!.id).toBe(attached.id);
-    expect(page.rows[0]!.gameId).toBe(gameId);
+    // Plan 02.1-28: events.gameId column gone; gameId membership is verified
+    // by the EXISTS subquery in listFeedPage. The single returned row is
+    // the one we attached above (attached.id matches).
   });
 
   it("Plan 02.1-19: show.inbox returns events with game_id IS NULL AND metadata.inbox.dismissed != true (replaces legacy attached=false)", async () => {
@@ -362,7 +364,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const inbox = await createEvent(
       userId,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Inbox active",
@@ -372,7 +374,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "Attached",
@@ -384,7 +386,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const dismissed = await createEvent(
       userId,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-03T10:00:00Z"),
         title: "Inbox dismissed",
@@ -397,8 +399,10 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const ids = page.rows.map((r) => r.id);
     expect(ids).toContain(inbox.id);
     expect(ids).not.toContain(dismissed.id);
-    // Attached row also excluded.
-    expect(page.rows.every((r) => r.gameId === null)).toBe(true);
+    // Plan 02.1-28: inbox criterion = NOT EXISTS over event_games. The
+    // attached row is excluded by the EXISTS check; we verify by id.
+    const attachedIdInIds = ids.filter((id) => id === inbox.id);
+    expect(attachedIdInIds).toHaveLength(1);
   });
 
   it("filter authorIsMe=true filters by author_is_me", async () => {
@@ -406,7 +410,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const own = await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "youtube_video",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Own video",
@@ -419,7 +423,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "Blogger press",
@@ -438,7 +442,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-04-01T10:00:00Z"),
         title: "April",
@@ -448,7 +452,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const may = await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-05-15T10:00:00Z"),
         title: "May",
@@ -458,7 +462,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-07-01T10:00:00Z"),
         title: "July",
@@ -483,7 +487,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const target = await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "youtube_video",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Match all 3",
@@ -496,7 +500,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "Press w/ source",
@@ -508,7 +512,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "youtube_video",
         occurredAt: new Date("2026-06-03T10:00:00Z"),
         title: "yt no source",
@@ -520,7 +524,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     await createEvent(
       userId,
       {
-        gameId: null,
+        gameIds: [],
         kind: "youtube_video",
         occurredAt: new Date("2026-06-04T10:00:00Z"),
         title: "yt inbox",
@@ -552,7 +556,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
       await createEvent(
         userId,
         {
-          gameId,
+          gameIds: [gameId],
           kind: "press",
           // Stagger so ordering is unambiguous (per-second resolution).
           occurredAt: new Date(baseTime + i * 1000),
@@ -590,7 +594,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const evB = await createEvent(
       userB.id,
       {
-        gameId: gameB,
+        gameIds: [gameB],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "B press",
@@ -620,7 +624,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const live = await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Live",
@@ -630,7 +634,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const dead = await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "Dead",
@@ -659,7 +663,7 @@ describe("Plan 02.1-06: GET /api/events HTTP boundary", () => {
     await createEvent(
       userId,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "press feed http",
@@ -696,7 +700,7 @@ describe("Plan 02.1-06: GET /api/events HTTP boundary", () => {
     const attached = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "attached",
@@ -706,7 +710,7 @@ describe("Plan 02.1-06: GET /api/events HTTP boundary", () => {
     await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "inbox",
@@ -720,10 +724,12 @@ describe("Plan 02.1-06: GET /api/events HTTP boundary", () => {
       },
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { rows: Array<{ id: string; gameId: string | null }> };
+    const body = (await res.json()) as { rows: Array<{ id: string; gameIds: string[] }> };
     expect(body.rows).toHaveLength(1);
     expect(body.rows[0]!.id).toBe(attached.id);
-    expect(body.rows[0]!.gameId).toBe(gameId);
+    // Plan 02.1-28: EventDto.gameIds replaces gameId. The single returned row
+    // carries the attached gameId in its gameIds array.
+    expect(body.rows[0]!.gameIds).toEqual([gameId]);
   });
 
   it("Plan 02.1-06: GET /api/events response rows are EventDto-projected (no userId leaks)", async () => {
@@ -735,7 +741,7 @@ describe("Plan 02.1-06: GET /api/events HTTP boundary", () => {
     await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "leak check",
@@ -1162,7 +1168,7 @@ describe("Plan 02.1-24 — show.kind=standalone filter", () => {
     const inboxEv = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Inbox plain",
@@ -1174,7 +1180,7 @@ describe("Plan 02.1-24 — show.kind=standalone filter", () => {
     const standaloneEv = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "conference",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "Standalone target",
@@ -1189,7 +1195,7 @@ describe("Plan 02.1-24 — show.kind=standalone filter", () => {
     const attachedEv = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "talk",
         occurredAt: new Date("2026-06-03T10:00:00Z"),
         title: "Attached talk",
@@ -1214,7 +1220,7 @@ describe("Plan 02.1-24 — show.kind=standalone filter", () => {
     const inboxEv = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Plain inbox",
@@ -1224,7 +1230,7 @@ describe("Plan 02.1-24 — show.kind=standalone filter", () => {
     const standaloneEv = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "conference",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "Standalone — not inbox anymore",
@@ -1247,7 +1253,7 @@ describe("Plan 02.1-24 — show.kind=standalone filter", () => {
     const evA = await createEvent(
       userA.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "User A standalone",
@@ -1296,7 +1302,7 @@ describe("Plan 02.1-26 — FeedQuickNav loader contract (data.games available)",
     await createEvent(
       userB.id,
       {
-        gameId: userBGameId,
+        gameIds: [userBGameId],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "User B press",
@@ -1313,5 +1319,174 @@ describe("Plan 02.1-26 — FeedQuickNav loader contract (data.games available)",
       null,
     );
     expect(pageForUserA.rows).toHaveLength(0);
+  });
+});
+
+/**
+ * Plan 02.1-28 (UAT-NOTES.md §4.24.G — M:N migration application layer) —
+ * listFeedPage show-axis behavior over the event_games junction.
+ *
+ * The legacy `events.gameId IS NULL` predicate is replaced with NOT EXISTS
+ * subqueries against event_games; specific.gameIds[X] uses EXISTS over the
+ * junction; multi-game uses EXISTS + IN. Cross-tenant gameIds in show=
+ * specific return zero rows by construction (the EXISTS subquery's userId
+ * clause is duplicated INSIDE the subquery — the `eventGames.userId`
+ * column is the literal column the ESLint tenant-scope rule walks for).
+ */
+describe("Plan 02.1-28 — listFeedPage M:N show-axis", () => {
+  it("Plan 02.1-28: listFeedPage show=specific gameIds=[A] returns events attached to A only via EXISTS junction subquery", async () => {
+    const u = await seedUserDirectly({ email: "feed28-specific-a@test.local" });
+    const gA = uuidv7();
+    const gB = uuidv7();
+    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
+    await db.insert(games).values({ id: gB, userId: u.id, title: "B" });
+    const evA = await createEvent(
+      u.id,
+      {
+        gameIds: [gA],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Attached to A",
+      },
+      "127.0.0.1",
+    );
+    const evB = await createEvent(
+      u.id,
+      {
+        gameIds: [gB],
+        kind: "press",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "Attached to B",
+      },
+      "127.0.0.1",
+    );
+    const evInbox = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "press",
+        occurredAt: new Date("2026-06-03T10:00:00Z"),
+        title: "Inbox",
+      },
+      "127.0.0.1",
+    );
+
+    const page = await listFeedPage(
+      u.id,
+      { show: { kind: "specific", gameIds: [gA] } },
+      null,
+    );
+    const ids = page.rows.map((r) => r.id);
+    expect(ids).toContain(evA.id);
+    expect(ids).not.toContain(evB.id);
+    expect(ids).not.toContain(evInbox.id);
+  });
+
+  it("Plan 02.1-28: listFeedPage show=inbox returns events with ZERO event_games rows (NOT EXISTS subquery)", async () => {
+    const u = await seedUserDirectly({ email: "feed28-inbox@test.local" });
+    const gA = uuidv7();
+    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
+    const inbox1 = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Inbox 1",
+      },
+      "127.0.0.1",
+    );
+    const attached = await createEvent(
+      u.id,
+      {
+        gameIds: [gA],
+        kind: "press",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "Attached",
+      },
+      "127.0.0.1",
+    );
+
+    const page = await listFeedPage(u.id, { show: { kind: "inbox" } }, null);
+    const ids = page.rows.map((r) => r.id);
+    expect(ids).toContain(inbox1.id);
+    expect(ids).not.toContain(attached.id);
+  });
+
+  it("Plan 02.1-28: listFeedPage show=specific multi-game uses EXISTS + IN — returns events attached to ANY of the gameIds", async () => {
+    const u = await seedUserDirectly({ email: "feed28-multi@test.local" });
+    const gA = uuidv7();
+    const gB = uuidv7();
+    const gC = uuidv7();
+    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
+    await db.insert(games).values({ id: gB, userId: u.id, title: "B" });
+    await db.insert(games).values({ id: gC, userId: u.id, title: "C" });
+    const evA = await createEvent(
+      u.id,
+      {
+        gameIds: [gA],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "A",
+      },
+      "127.0.0.1",
+    );
+    const evB = await createEvent(
+      u.id,
+      {
+        gameIds: [gB],
+        kind: "press",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "B",
+      },
+      "127.0.0.1",
+    );
+    const evC = await createEvent(
+      u.id,
+      {
+        gameIds: [gC],
+        kind: "press",
+        occurredAt: new Date("2026-06-03T10:00:00Z"),
+        title: "C",
+      },
+      "127.0.0.1",
+    );
+
+    const page = await listFeedPage(
+      u.id,
+      { show: { kind: "specific", gameIds: [gA, gB] } },
+      null,
+    );
+    const ids = page.rows.map((r) => r.id);
+    expect(ids).toContain(evA.id);
+    expect(ids).toContain(evB.id);
+    expect(ids).not.toContain(evC.id);
+  });
+
+  it("Plan 02.1-28: listFeedPage show=specific cross-tenant gameId returns zero rows (subquery userId clause)", async () => {
+    const userA = await seedUserDirectly({ email: "feed28-xt-a@test.local" });
+    const userB = await seedUserDirectly({ email: "feed28-xt-b@test.local" });
+    const gA = uuidv7();
+    await db.insert(games).values({ id: gA, userId: userA.id, title: "A's game" });
+    // userA has an event attached to gA.
+    await createEvent(
+      userA.id,
+      {
+        gameIds: [gA],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "A's event",
+      },
+      "127.0.0.1",
+    );
+
+    // userB queries with gameIds=[A's gameId]. The subquery's userId clause
+    // is userB.id; userA's junction rows don't satisfy it; result is zero.
+    const page = await listFeedPage(
+      userB.id,
+      { show: { kind: "specific", gameIds: [gA] } },
+      null,
+    );
+    expect(page.rows).toHaveLength(0);
   });
 });

@@ -9,7 +9,7 @@
 //
 // Soft-delete + transactional restore (D-23): when a parent `games` row is
 // soft-deleted, the SAME captured `Date` value lands on the parent and on
-// every active child row (game_steam_listings, events) inside ONE database
+// every active child row (game_steam_listings) inside ONE database
 // transaction. On restore, we read the parent's `deletedAt` as the marker
 // timestamp and reverse ONLY children whose `deletedAt === markerTs`. Rows
 // soft-deleted EARLIER keep their original `deletedAt` and stay deleted —
@@ -18,12 +18,23 @@
 // Phase 2.1: `game_youtube_channels` and `tracked_youtube_videos` were
 // retired in Plan 02.1-01 (the per-platform M:N + per-platform tracked
 // tables collapsed into the unified `events` table + the user-level
-// `data_sources` registry). The cascade now only spans game_steam_listings
-// + events; data_sources is user-level (NOT game-bound) so it stays out of
-// the cascade by design (Plan 02.1-01 + Phase 2 D-24 inheritance).
+// `data_sources` registry).
 //
-// NOT cascaded: `data_sources` (user-level, reused across games) and
-// `api_keys_steam` (the user's wishlist key is not game-bound).
+// Plan 02.1-28 (M:N migration): the events cascade is REMOVED. With the
+// `events.game_id` column dropped (Plan 02.1-27) and events relating to
+// games via the `event_games` junction, soft-deleting a game no longer
+// has a clean "delete events whose gameId = this" semantic — events can
+// be attached to multiple games, and soft-deleting an event because ONE
+// of its attached games went away would be wrong. The schema's CASCADE
+// on `event_games(game_id)` means HARD-deleting a game removes the
+// junction row but leaves the event; soft-deleting a game leaves the
+// junction rows alone too (no deletedAt column on the junction). The
+// per-game listEventsForGame query naturally JOINs through the junction
+// — events stay visible only on the games they're still attached to.
+//
+// NOT cascaded: `data_sources` (user-level, reused across games),
+// `api_keys_steam` (the user's wishlist key is not game-bound), and
+// `events` (M:N relation; see Plan 02.1-28 rationale above).
 //
 // writeAudit calls are `await`-ed but never throw — see src/lib/server/audit.ts.
 // We capture `game.created`, `game.deleted`, `game.restored` per D-32; listing
@@ -33,7 +44,6 @@ import { and, eq, isNull, desc } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { games } from "../db/schema/games.js";
 import { gameSteamListings } from "../db/schema/game-steam-listings.js";
-import { events } from "../db/schema/events.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
@@ -248,16 +258,13 @@ export async function softDeleteGame(
           isNull(gameSteamListings.deletedAt),
         ),
       );
-    await tx
-      .update(events)
-      .set({ deletedAt })
-      .where(
-        and(
-          eq(events.userId, userId),
-          eq(events.gameId, gameId),
-          isNull(events.deletedAt),
-        ),
-      );
+    // Plan 02.1-28: events cascade REMOVED — see file-header rationale.
+    // Events are M:N to games via event_games (Plan 02.1-27 schema); a
+    // game's soft-delete no longer cleanly maps to "delete events
+    // attached to this game" because events can be attached to multiple
+    // games. Per-game views (listEventsForGame) JOIN through the
+    // junction so events stop appearing on the deleted game's curated
+    // list as long as the game stays soft-deleted.
   });
   await writeAudit({
     userId,
@@ -303,16 +310,9 @@ export async function restoreGame(
           eq(gameSteamListings.deletedAt, markerTs),
         ),
       );
-    await tx
-      .update(events)
-      .set({ deletedAt: null })
-      .where(
-        and(
-          eq(events.userId, userId),
-          eq(events.gameId, gameId),
-          eq(events.deletedAt, markerTs),
-        ),
-      );
+    // Plan 02.1-28: events cascade REMOVED — see file-header rationale.
+    // Symmetric with softDeleteGame: no events were soft-deleted as part
+    // of the game's cascade, so there's nothing to restore here.
   });
   await writeAudit({
     userId,

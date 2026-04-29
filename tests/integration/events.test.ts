@@ -52,7 +52,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "conference",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "GDC 2026",
@@ -63,12 +63,19 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     expect(ev.kind).toBe("conference");
     expect(ev.title).toBe("GDC 2026");
     expect(ev.userId).toBe(u.id);
-    expect(ev.gameId).toBe(gameId);
     expect(ev.deletedAt).toBeNull();
     // Phase 2.1 defaults.
     expect(ev.authorIsMe).toBe(false);
     expect(ev.sourceId).toBeNull();
     expect(ev.metadata).toEqual({});
+    // Plan 02.1-28: junction-based attachment replaces events.gameId. Query
+    // event_games to verify the gameId is attached.
+    const { eventGames: eg28 } = await import("../../src/lib/server/db/schema/event-games.js");
+    const junction1 = await db
+      .select()
+      .from(eg28)
+      .where(and(eq(eg28.userId, u.id), eq(eg28.eventId, ev.id)));
+    expect(junction1.map((r) => r.gameId)).toEqual([gameId]);
 
     const audits = await db
       .select()
@@ -84,7 +91,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "youtube_video",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Manual paste",
@@ -93,7 +100,8 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
       "127.0.0.1",
     );
     expect(ev.kind).toBe("youtube_video");
-    expect(ev.gameId).toBeNull();
+    // Plan 02.1-28: gameId column gone; "no game attached" === zero junction
+    // rows. Surfaces in inbox view via the NOT EXISTS subquery in listFeedPage.
 
     // Surfaces in attached=false (inbox) view.
     const inbox = await listFeedPage(u.id, { show: { kind: "inbox" } }, null);
@@ -109,7 +117,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
       createEvent(
         u.id,
         {
-          gameId,
+          gameIds: [gameId],
           kind: "not-a-kind" as unknown as "conference",
           occurredAt: new Date(),
           title: "X",
@@ -133,7 +141,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
       createEvent(
         userA.id,
         {
-          gameId: gameB,
+          gameIds: [gameB],
           kind: "press",
           occurredAt: new Date(),
           title: "X",
@@ -158,7 +166,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     const yt = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "youtube_video",
         occurredAt: new Date("2026-04-01T12:00:00Z"),
         title: "YT video",
@@ -169,7 +177,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     const press = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-15T09:00:00Z"),
         title: "Press hit",
@@ -180,7 +188,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     await createEvent(
       u.id,
       {
-        gameId: otherGame,
+        gameIds: [otherGame],
         kind: "talk",
         occurredAt: new Date("2026-05-15T09:00:00Z"),
         title: "Other-game talk",
@@ -218,7 +226,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "conference",
         occurredAt: new Date("2026-06-12T14:00:00Z"),
         title: "GDC 2026 — solo-dev meetup",
@@ -226,7 +234,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
       "127.0.0.1",
     );
     expect(ev.kind).toBe("conference");
-    expect(ev.gameId).toBeNull();
+    // Plan 02.1-28: gameId column gone; inbox criterion is "zero junction rows".
 
     // Inbox view (attached=false) surfaces the row.
     const inbox = await listFeedPage(u.id, { show: { kind: "inbox" } }, null);
@@ -249,7 +257,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "youtube_video",
         occurredAt: new Date("2026-04-15T09:00:00Z"),
         title: "IGN Hades 2 Preview",
@@ -272,7 +280,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "talk",
         occurredAt: new Date("2026-05-10T15:00:00Z"),
         title: "Original",
@@ -321,7 +329,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "post",
         occurredAt: new Date("2026-04-28T12:00:00Z"),
         title: "Bluesky launch",
@@ -359,7 +367,7 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "talk",
         occurredAt: new Date("2026-05-10T15:00:00Z"),
         title: "Restorable talk",
@@ -416,7 +424,7 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
     const evA = await createEvent(
       userA.id,
       {
-        gameId: gameA,
+        gameIds: [gameA],
         kind: "press",
         occurredAt: new Date("2026-05-10T15:00:00Z"),
         title: "A's press",
@@ -447,7 +455,7 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "conference",
         occurredAt: new Date("2026-05-10T15:00:00Z"),
         title: "Live",
@@ -475,7 +483,6 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
     await db.insert(events).values({
       id: expiredEventId,
       userId: u.id,
-      gameId,
       kind: "talk",
       title: "Past retention",
       occurredAt: pastDeleted,
@@ -499,7 +506,7 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
     const recent1 = await createEvent(
       userA.id,
       {
-        gameId: gameA,
+        gameIds: [gameA],
         kind: "talk",
         occurredAt: new Date("2026-05-10T15:00:00Z"),
         title: "Recent 1",
@@ -510,7 +517,7 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
     const recent2 = await createEvent(
       userA.id,
       {
-        gameId: gameA,
+        gameIds: [gameA],
         kind: "press",
         occurredAt: new Date("2026-05-11T15:00:00Z"),
         title: "Recent 2",
@@ -525,7 +532,6 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
     await db.insert(events).values({
       id: expiredId,
       userId: userA.id,
-      gameId: gameA,
       kind: "other",
       title: "Past retention",
       occurredAt: past,
@@ -536,7 +542,7 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
     await createEvent(
       userA.id,
       {
-        gameId: gameA,
+        gameIds: [gameA],
         kind: "conference",
         occurredAt: new Date("2026-05-12T15:00:00Z"),
         title: "Live",
@@ -550,7 +556,7 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
     const userBEvent = await createEvent(
       userB.id,
       {
-        gameId: gameB,
+        gameIds: [gameB],
         kind: "talk",
         occurredAt: new Date("2026-05-10T15:00:00Z"),
         title: "B's talk",
@@ -600,7 +606,7 @@ describe("event soft-delete recovery routes (Plan 02.1-14 gap closure)", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "talk",
         occurredAt: new Date("2026-05-10T15:00:00Z"),
         title: "HTTP restore round-trip",
@@ -634,7 +640,7 @@ describe("event soft-delete recovery routes (Plan 02.1-14 gap closure)", () => {
     const recent = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "talk",
         occurredAt: new Date("2026-05-10T15:00:00Z"),
         title: "Recent deleted",
@@ -649,7 +655,6 @@ describe("event soft-delete recovery routes (Plan 02.1-14 gap closure)", () => {
     await db.insert(events).values({
       id: expiredId,
       userId: u.id,
-      gameId,
       kind: "press",
       title: "Past retention",
       occurredAt: past,
@@ -699,7 +704,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "youtube_video",
         url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         title: "any",
@@ -716,7 +721,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "youtube_video",
         url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         externalId: "ABC123EXPLI",
@@ -736,7 +741,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "youtube_video",
         url: null,
         title: "manual-no-url",
@@ -752,7 +757,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "conference",
         url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         title: "GDC stream",
@@ -828,7 +833,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     const attached = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Attached",
@@ -838,7 +843,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     const inbox = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "Inbox",
@@ -865,7 +870,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Attached",
@@ -875,7 +880,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     const inbox = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "Inbox active",
@@ -885,7 +890,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     const dismissed = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-03T10:00:00Z"),
         title: "Dismissed",
@@ -899,12 +904,14 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      rows: Array<{ id: string; gameId: string | null }>;
+      rows: Array<{ id: string; gameIds: string[] }>;
     };
     const ids = body.rows.map((r) => r.id);
     expect(ids).toContain(inbox.id);
     expect(ids).not.toContain(dismissed.id);
-    expect(body.rows.every((r) => r.gameId === null)).toBe(true);
+    // Plan 02.1-28: inbox events have ZERO junction rows; the EventDto
+    // surfaces this via gameIds: [].
+    expect(body.rows.every((r) => r.gameIds.length === 0)).toBe(true);
   });
 
   it("Plan 02.1-19 Test 6c: GET /api/events?show=specific&game=A&game=B returns rows attached to A or B", async () => {
@@ -920,7 +927,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     const evA = await createEvent(
       u.id,
       {
-        gameId: gA,
+        gameIds: [gA],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "A",
@@ -930,7 +937,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     const evB = await createEvent(
       u.id,
       {
-        gameId: gB,
+        gameIds: [gB],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "B",
@@ -940,7 +947,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     const evC = await createEvent(
       u.id,
       {
-        gameId: gC,
+        gameIds: [gC],
         kind: "press",
         occurredAt: new Date("2026-06-03T10:00:00Z"),
         title: "C",
@@ -971,7 +978,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     const attached = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Attached",
@@ -981,7 +988,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     const inbox = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "Inbox",
@@ -1019,7 +1026,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     const attached = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Attached",
@@ -1029,7 +1036,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     const inbox = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-02T10:00:00Z"),
         title: "Inbox",
@@ -1363,7 +1370,7 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "conference",
         occurredAt: new Date("2026-04-28T12:00:00Z"),
         title: "Initial",
@@ -1396,7 +1403,7 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "conference",
         occurredAt: new Date("2026-04-28T12:00:00Z"),
         title: "Was a conference",
@@ -1443,7 +1450,7 @@ describe("Plan 02.1-18: detail loader + edit + author_is_me round-trip", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "conference",
         occurredAt: new Date("2026-04-28T12:00:00Z"),
         title: "Event soon to be soft-deleted",
@@ -1469,7 +1476,7 @@ describe("Plan 02.1-18: detail loader + edit + author_is_me round-trip", () => {
     const ev = await createEvent(
       a.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "conference",
         occurredAt: new Date("2026-04-28T12:00:00Z"),
         title: "User A's event",
@@ -1491,7 +1498,7 @@ describe("Plan 02.1-18: detail loader + edit + author_is_me round-trip", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "conference",
         occurredAt: new Date("2026-04-28T12:00:00Z"),
         title: "Conference notes",
@@ -1527,7 +1534,7 @@ describe("Plan 02.1-18: detail loader + edit + author_is_me round-trip", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "talk",
         occurredAt: new Date("2026-04-28T12:00:00Z"),
         title: "My GDC talk",
@@ -1548,5 +1555,155 @@ describe("Plan 02.1-18: detail loader + edit + author_is_me round-trip", () => {
     const body = (await res.json()) as { authorIsMe: boolean; title: string };
     expect(body.authorIsMe).toBe(true);
     expect(body.title).toBe("My GDC talk (revised)");
+  });
+});
+
+/**
+ * Plan 02.1-28 (UAT-NOTES.md §4.24.G — M:N migration application layer) —
+ * createEvent / updateEvent gameIds[] semantics.
+ *
+ * Closes the M:N gap at the events service: events relate to ZERO-or-MORE
+ * games via the event_games junction; gameIds=[] === inbox; non-empty
+ * gameIds[] populates one junction row per id; updateEvent.gameIds is a
+ * SET-replacement (not an additive append) per attachEventToGames diff
+ * semantics.
+ */
+describe("Plan 02.1-28 — M:N gameIds", () => {
+  it("Plan 02.1-28: createEvent with gameIds=[A, B] populates 2 event_games rows + audit metadata.game_ids matches", async () => {
+    const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
+    const u = await seedUserDirectly({ email: "ev28-create-multi@test.local" });
+    const gA = uuidv7();
+    const gB = uuidv7();
+    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
+    await db.insert(games).values({ id: gB, userId: u.id, title: "B" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [gA, gB],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "M:N create",
+      },
+      "127.0.0.1",
+    );
+
+    const junction = await db
+      .select({ gameId: eg.gameId })
+      .from(eg)
+      .where(and(eq(eg.userId, u.id), eq(eg.eventId, ev.id)));
+    const gids = junction.map((r) => r.gameId).sort();
+    expect(gids).toEqual([gA, gB].sort());
+
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.created")));
+    const meta = audits[0]!.metadata as { game_ids?: string[] } | null;
+    expect((meta?.game_ids ?? []).sort()).toEqual([gA, gB].sort());
+  });
+
+  it("Plan 02.1-28: createEvent with no gameIds creates event in inbox (zero junction rows)", async () => {
+    const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
+    const u = await seedUserDirectly({ email: "ev28-create-inbox@test.local" });
+    const ev = await createEvent(
+      u.id,
+      {
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Inbox via omission",
+      },
+      "127.0.0.1",
+    );
+    const junction = await db
+      .select()
+      .from(eg)
+      .where(and(eq(eg.userId, u.id), eq(eg.eventId, ev.id)));
+    expect(junction).toHaveLength(0);
+  });
+
+  it("Plan 02.1-28: createEvent with cross-tenant gameId throws NotFoundError; events row NOT inserted (validate-first)", async () => {
+    const userA = await seedUserDirectly({ email: "ev28-create-xt-a@test.local" });
+    const userB = await seedUserDirectly({ email: "ev28-create-xt-b@test.local" });
+    const gB = uuidv7();
+    await db.insert(games).values({ id: gB, userId: userB.id, title: "B's game" });
+
+    await expect(
+      createEvent(
+        userA.id,
+        {
+          gameIds: [gB],
+          kind: "press",
+          occurredAt: new Date(),
+          title: "Should not insert",
+        },
+        "127.0.0.1",
+      ),
+    ).rejects.toBeInstanceOf(NotFoundError);
+
+    // No row written — validate-first invariant.
+    const rowsA = await db.select().from(events).where(eq(events.userId, userA.id));
+    expect(rowsA).toHaveLength(0);
+  });
+
+  it("Plan 02.1-28: updateEvent.gameIds replaces the attached set atomically (set-replacement)", async () => {
+    const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
+    const u = await seedUserDirectly({ email: "ev28-update-replace@test.local" });
+    const gA = uuidv7();
+    const gB = uuidv7();
+    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
+    await db.insert(games).values({ id: gB, userId: u.id, title: "B" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [gA],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Replace test",
+      },
+      "127.0.0.1",
+    );
+    // Sanity: junction has [A].
+    const before = await db
+      .select({ gameId: eg.gameId })
+      .from(eg)
+      .where(and(eq(eg.userId, u.id), eq(eg.eventId, ev.id)));
+    expect(before.map((r) => r.gameId)).toEqual([gA]);
+
+    // Replace [A] → [B] via updateEvent.
+    await updateEvent(u.id, ev.id, { gameIds: [gB] }, "127.0.0.1");
+
+    const after = await db
+      .select({ gameId: eg.gameId })
+      .from(eg)
+      .where(and(eq(eg.userId, u.id), eq(eg.eventId, ev.id)));
+    expect(after.map((r) => r.gameId)).toEqual([gB]);
+
+    // Audit chain: one event.attached_to_game(B) and one event.detached_from_game(A).
+    const adds = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.userId, u.id),
+          eq(auditLog.action, "event.attached_to_game"),
+        ),
+      );
+    const removes = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.userId, u.id),
+          eq(auditLog.action, "event.detached_from_game"),
+        ),
+      );
+    // The createEvent call above wrote one attached_to_game(A); after the
+    // replace, one more attached_to_game(B) and one detached_from_game(A).
+    expect(adds.length).toBeGreaterThanOrEqual(2);
+    expect(removes.length).toBeGreaterThanOrEqual(1);
+    const removedIds = removes.map(
+      (r) => (r.metadata as { game_id?: string } | null)?.game_id,
+    );
+    expect(removedIds).toContain(gA);
   });
 });

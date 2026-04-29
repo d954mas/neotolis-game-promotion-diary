@@ -9,6 +9,7 @@ import {
 } from "../../src/lib/server/services/events.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { games } from "../../src/lib/server/db/schema/games.js";
+import { events as events28 } from "../../src/lib/server/db/schema/events.js";
 import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
 import { uuidv7 } from "../../src/lib/server/ids.js";
 import { seedUserDirectly } from "./helpers.js";
@@ -29,14 +30,15 @@ describe("INBOX-01: inbox flow + dismissal", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Paste with no game",
       },
       "127.0.0.1",
     );
-    expect(ev.gameId).toBeNull();
+    // Plan 02.1-28: gameId column gone; the inbox criterion is "zero junction
+    // rows", which the listFeedPage NOT EXISTS subquery surfaces below.
 
     const page = await listFeedPage(u.id, { show: { kind: "inbox" } }, null);
     const ids = page.rows.map((r) => r.id);
@@ -48,7 +50,7 @@ describe("INBOX-01: inbox flow + dismissal", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Inbox row",
@@ -67,7 +69,7 @@ describe("INBOX-01: inbox flow + dismissal", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Will be dismissed",
@@ -94,7 +96,7 @@ describe("INBOX-01: inbox flow + dismissal", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Attached event",
@@ -114,7 +116,7 @@ describe("INBOX-01: inbox flow + dismissal", () => {
     const evA = await createEvent(
       userA.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "User A inbox",
@@ -142,7 +144,7 @@ describe("INBOX-01: inbox flow + dismissal", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Audit me",
@@ -181,7 +183,7 @@ describe("Plan 02.1-06: PATCH /api/events/:id/dismiss-inbox HTTP boundary", () =
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Dismiss me HTTP",
@@ -210,7 +212,7 @@ describe("Plan 02.1-06: PATCH /api/events/:id/dismiss-inbox HTTP boundary", () =
     const ev = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Attached, cannot dismiss",
@@ -233,7 +235,7 @@ describe("Plan 02.1-06: PATCH /api/events/:id/dismiss-inbox HTTP boundary", () =
     const evA = await createEvent(
       userA.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "User A inbox",
@@ -268,7 +270,7 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "conference",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Industry talk",
@@ -278,7 +280,8 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
 
     const updated = await markStandalone(u.id, ev.id, "10.20.30.40", "ua-test");
     expect(updated.id).toBe(ev.id);
-    expect(updated.gameId).toBeNull();
+    // Plan 02.1-28: gameId column gone; standalone events are guaranteed
+    // junction-empty by the conflict guard (verified separately below).
     const meta = updated.metadata as { triage?: { standalone?: unknown } };
     expect(meta.triage?.standalone).toBe(true);
 
@@ -297,27 +300,53 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
     expect(audits[0]!.userAgent).toBe("ua-test");
   });
 
-  it("Plan 02.1-24: markStandalone on already-attached event detaches game (game_id=null) AND sets standalone=true", async () => {
+  it("Plan 02.1-28 (UAT-NOTES.md §4.24.C): markStandalone on event with attached games throws AppError 422 'standalone_conflicts_with_game' (replaces Plan 02.1-24 silent-detach behavior)", async () => {
+    // Plan 02.1-28 changes the contract from Plan 02.1-24's "silently
+    // detach + mark standalone" to "reject 422 — user must detach first".
+    // Rationale: silent detach was the wrong UX because the user could
+    // miss that a game was attached; the 422 + UI-hidden affordance
+    // (Plan 02.1-32) is defense-in-depth + user-honest.
     const u = await seedUserDirectly({ email: "standalone2@test.local" });
     const gameId = uuidv7();
     await db.insert(games).values({ id: gameId, userId: u.id, title: "Some game" });
     const ev = await createEvent(
       u.id,
       {
-        gameId,
+        gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Press piece I attached by mistake",
       },
       "127.0.0.1",
     );
-    expect(ev.gameId).toBe(gameId);
 
-    const updated = await markStandalone(u.id, ev.id, "127.0.0.1");
-    // Standalone implies detached from game.
-    expect(updated.gameId).toBeNull();
-    const meta = updated.metadata as { triage?: { standalone?: unknown } };
-    expect(meta.triage?.standalone).toBe(true);
+    let threw: unknown;
+    try {
+      await markStandalone(u.id, ev.id, "127.0.0.1");
+    } catch (e) {
+      threw = e;
+    }
+    expect(threw).toBeInstanceOf(AppError);
+    expect((threw as AppError).code).toBe("standalone_conflicts_with_game");
+    expect((threw as AppError).status).toBe(422);
+
+    // Junction unchanged — the event is still attached to the game.
+    const { eventGames: eg28 } = await import("../../src/lib/server/db/schema/event-games.js");
+    const junction = await db
+      .select()
+      .from(eg28)
+      .where(and(eq(eg28.userId, u.id), eq(eg28.eventId, ev.id)));
+    expect(junction).toHaveLength(1);
+    expect(junction[0]!.gameId).toBe(gameId);
+
+    // Metadata.triage.standalone is NOT set.
+    const [row] = await db
+      .select()
+      .from(events28)
+      .where(and(eq(events28.userId, u.id), eq(events28.id, ev.id)))
+      .limit(1);
+    const md = row?.metadata as { triage?: { standalone?: unknown } } | null;
+    expect(md?.triage?.standalone).toBeUndefined();
   });
 
   it("Plan 02.1-24: cross-tenant markStandalone throws NotFoundError (404, never 403); no audit row written", async () => {
@@ -326,7 +355,7 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
     const evA = await createEvent(
       userA.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "conference",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "User A inbox",
@@ -367,7 +396,7 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "talk",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Indie talk",
@@ -394,7 +423,7 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Press piece",
@@ -427,7 +456,7 @@ describe("Plan 02.1-24: PATCH /api/events/:id/mark-standalone + unmark-standalon
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "conference",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Mark standalone HTTP",
@@ -441,11 +470,13 @@ describe("Plan 02.1-24: PATCH /api/events/:id/mark-standalone + unmark-standalon
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       id: string;
-      gameId: string | null;
+      gameIds: string[];
       metadata: { triage?: { standalone?: boolean } };
     };
     expect(body.id).toBe(ev.id);
-    expect(body.gameId).toBeNull();
+    // Plan 02.1-28: gameId column gone; standalone events have ZERO junction
+    // rows (the conflict guard refuses to standalone an attached event).
+    expect(body.gameIds).toEqual([]);
     expect(body.metadata.triage?.standalone).toBe(true);
   });
 
@@ -457,7 +488,7 @@ describe("Plan 02.1-24: PATCH /api/events/:id/mark-standalone + unmark-standalon
     const evA = await createEvent(
       userA.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "conference",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "User A inbox",
@@ -481,7 +512,7 @@ describe("Plan 02.1-24: PATCH /api/events/:id/mark-standalone + unmark-standalon
     const ev = await createEvent(
       u.id,
       {
-        gameId: null,
+        gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
         title: "Will be standalone then unmarked",
@@ -499,5 +530,134 @@ describe("Plan 02.1-24: PATCH /api/events/:id/mark-standalone + unmark-standalon
       metadata: { triage?: { standalone?: boolean } };
     };
     expect(body.metadata.triage?.standalone).toBe(false);
+  });
+});
+
+/**
+ * Plan 02.1-28 (UAT-NOTES.md §4.24.C — standalone↔game mutual exclusion) —
+ * standalone conflict guard at the service layer.
+ *
+ * markStandalone REJECTS attached events; attachEventToGames(non-empty)
+ * REJECTS standalone events. AppError 'standalone_conflicts_with_game'
+ * (422). The UI (Plan 02.1-32) hides the conflicting affordances; this
+ * service-layer guard is defense-in-depth.
+ */
+describe("Plan 02.1-28 — standalone conflict guard (mutual exclusion)", () => {
+  it("Plan 02.1-28: markStandalone on event with attached games throws AppError 422 'standalone_conflicts_with_game'; metadata + junction unchanged", async () => {
+    const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
+    const u = await seedUserDirectly({ email: "inbox28-1@test.local" });
+    const gA = uuidv7();
+    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [gA],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Attached + cannot standalone",
+      },
+      "127.0.0.1",
+    );
+
+    let threw: unknown;
+    try {
+      await markStandalone(u.id, ev.id, "127.0.0.1");
+    } catch (e) {
+      threw = e;
+    }
+    expect(threw).toBeInstanceOf(AppError);
+    expect((threw as AppError).code).toBe("standalone_conflicts_with_game");
+    expect((threw as AppError).status).toBe(422);
+
+    // Junction unchanged.
+    const junction = await db
+      .select()
+      .from(eg)
+      .where(and(eq(eg.userId, u.id), eq(eg.eventId, ev.id)));
+    expect(junction).toHaveLength(1);
+
+    // metadata.triage.standalone NOT set.
+    const [row] = await db
+      .select()
+      .from(events28)
+      .where(and(eq(events28.userId, u.id), eq(events28.id, ev.id)))
+      .limit(1);
+    const md = row?.metadata as { triage?: { standalone?: unknown } } | null;
+    expect(md?.triage?.standalone).toBeUndefined();
+
+    // No event.marked_standalone audit row was written.
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.marked_standalone")),
+      );
+    expect(audits).toHaveLength(0);
+  });
+
+  it("Plan 02.1-28: attachEventToGames(non-empty) on standalone event throws AppError 422 'standalone_conflicts_with_game'; junction unchanged", async () => {
+    const { attachEventToGames: attach28 } = await import(
+      "../../src/lib/server/services/events.js"
+    );
+    const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
+    const u = await seedUserDirectly({ email: "inbox28-2@test.local" });
+    const gA = uuidv7();
+    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Standalone first",
+      },
+      "127.0.0.1",
+    );
+    await markStandalone(u.id, ev.id, "127.0.0.1");
+
+    let threw: unknown;
+    try {
+      await attach28(u.id, ev.id, [gA], "127.0.0.1");
+    } catch (e) {
+      threw = e;
+    }
+    expect(threw).toBeInstanceOf(AppError);
+    expect((threw as AppError).code).toBe("standalone_conflicts_with_game");
+    expect((threw as AppError).status).toBe(422);
+
+    // Junction unchanged (still empty — the standalone state is preserved).
+    const junction = await db
+      .select()
+      .from(eg)
+      .where(and(eq(eg.userId, u.id), eq(eg.eventId, ev.id)));
+    expect(junction).toHaveLength(0);
+  });
+
+  it("Plan 02.1-28: attachEventToGames([]) on standalone event SUCCEEDS — empty target set is the no-op detach path", async () => {
+    // The mutual-exclusion guard only fires for NON-EMPTY gameIds. Empty
+    // gameIds is the "move to inbox" affordance; calling it on a standalone
+    // event is a no-op (zero junction rows + zero added/removed → zero
+    // audit rows). This is the path Plan 02.1-32 wires up to "I changed
+    // my mind, this isn't standalone after all" (followed by an explicit
+    // unmarkStandalone).
+    const { attachEventToGames: attach28 } = await import(
+      "../../src/lib/server/services/events.js"
+    );
+    const u = await seedUserDirectly({ email: "inbox28-3@test.local" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Standalone empty-attach",
+      },
+      "127.0.0.1",
+    );
+    await markStandalone(u.id, ev.id, "127.0.0.1");
+
+    // Should NOT throw — empty target set bypasses the guard.
+    const result = await attach28(u.id, ev.id, [], "127.0.0.1");
+    expect(result.id).toBe(ev.id);
   });
 });

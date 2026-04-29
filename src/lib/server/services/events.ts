@@ -3,32 +3,51 @@
 // REPLACES the Phase 2 `events` + `tracked_youtube_videos` split. One row per
 // (user, occurrence) regardless of platform. `kind` discriminates platform;
 // `author_is_me` discriminates own content from blogger / community coverage;
-// nullable `source_id` distinguishes auto-imported from manually-pasted events;
-// nullable `game_id` distinguishes attached from inbox events.
+// nullable `source_id` distinguishes auto-imported from manually-pasted events.
+//
+// Plan 02.1-28 (UAT-NOTES.md §4.24.G — M:N migration application layer):
+// events relate to ZERO-or-MORE games via the `event_games` junction table
+// (Plan 02.1-27 schema). `events.game_id` is GONE. Inbox criterion is
+// "no event_games rows for this event"; standalone criterion is the same
+// junction-empty check PLUS metadata.triage.standalone === true.
 //
 // Pattern 1 (tenant scope): EVERY function takes `userId: string` first; EVERY
-// Drizzle query .where()-clauses on `eq(events.userId, userId)`. The custom
-// ESLint rule `tenant-scope/no-unfiltered-tenant-query` (Plan 02-02 / 02.1-01)
-// fires on any query that omits this filter — disable comments NOT allowed.
+// Drizzle query .where()-clauses on `eq(events.userId, userId)` AND, when
+// querying `eventGames`, also `eq(eventGames.userId, userId)`. The custom
+// ESLint rule `tenant-scope/no-unfiltered-tenant-query` (Plan 02-02 / 02.1-01
+// / 02.1-27) fires on any query that omits these filters — disable comments
+// NOT allowed.
 //
 // VALID_EVENT_KINDS mirrors the schema enum (Pitfall 6 — defense-in-depth).
 // A unit/integration test asserts list equality so a schema enum change forces
 // a service-layer update.
 //
-// listFeedPage (RESEARCH §3.3): chronological pool with 7 filter axes + tuple
-// cursor on (occurred_at desc, id desc). Reuses encodeCursor / decodeCursor
-// from audit-read.ts (Phase 2 D-31 cursor format). PITFALL P19 mitigation by
-// construction: the userId WHERE clause is independent of the cursor — a
-// forged cross-tenant cursor returns zero of the other tenant's rows.
+// listFeedPage (RESEARCH §3.3 + Plan 02.1-28): chronological pool with 7
+// filter axes + tuple cursor on (occurred_at desc, id desc). Show-axis
+// branches (inbox / standalone / specific) use EXISTS / NOT EXISTS / IN
+// subqueries against `event_games`. The outer userId clause stays FIRST
+// (PITFALL P19 mitigation by construction); the EXISTS subqueries duplicate
+// the userId clause INSIDE so the eventGames table is also tenant-scoped at
+// every read site.
 //
-// attachToGame (RESEARCH §3.4 + Pitfall 4): validates the target gameId
-// belongs to the user BEFORE the UPDATE. Cross-tenant attach returns
-// NotFoundError → 404 (NOT 500 from a bare PG FK error). Audit-logged
-// `event.attached_to_game`.
+// attachEventToGames (Plan 02.1-28 — replaces Plan 02.1-05 attachToGame):
+// SET semantics over the junction. Diffs the current attached set against
+// the requested set; INSERTs added rows; DELETEs removed rows; writes one
+// audit row per add (event.attached_to_game) and one per remove
+// (event.detached_from_game). Cross-tenant gameIds throw NotFoundError →
+// 404 by construction (assertGameOwnedByUser pre-check). Pitfall 4 holds.
 //
-// dismissFromInbox (RESEARCH §6.4): writes metadata.inbox.dismissed=true via
-// jsonb_set; only valid on inbox events (game_id IS NULL); otherwise throws
-// AppError 'not_in_inbox' (422). Audit-logged `event.dismissed_from_inbox`.
+// Plan 02.1-28 standalone↔game mutual exclusion (UAT-NOTES.md §4.24.C):
+// markStandalone REJECTS when the event has ≥ 1 event_games rows;
+// attachEventToGames REJECTS when the event is already metadata.triage.
+// standalone === true AND non-empty gameIds are passed. AppError
+// 'standalone_conflicts_with_game' (422). Defense-in-depth — the UI
+// (Plan 02.1-32) hides the conflicting affordances.
+//
+// dismissFromInbox (RESEARCH §6.4 + Plan 02.1-28): writes
+// metadata.inbox.dismissed=true via jsonb_set; only valid on inbox events
+// (zero junction rows); otherwise throws AppError 'not_in_inbox' (422).
+// Audit-logged `event.dismissed_from_inbox`.
 //
 // createEventFromPaste — INGEST-02/03/04 reframed under unified events. The
 // YouTube paste flow no longer writes to a separate tracked_youtube_videos
@@ -36,15 +55,17 @@
 // match oEmbed.author_url against registered data_sources by handleUrl exact
 // match (case-sensitive in 2.1; case-insensitive is a Phase 6 polish).
 //
-// Audit (D-32 + Phase 2.1): event.created on INSERT, event.edited on UPDATE,
-// event.deleted on softDelete, event.attached_to_game on attach, and
-// event.dismissed_from_inbox on dismiss.
+// Audit (D-32 + Phase 2.1 + Plan 02.1-28): event.created on INSERT, event.
+// edited on UPDATE, event.deleted on softDelete, event.attached_to_game on
+// each game added to the junction, event.detached_from_game on each game
+// removed from the junction, event.dismissed_from_inbox on dismiss.
 
 import { and, eq, gte, isNull, isNotNull, lte, sql, inArray } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { db } from "../db/client.js";
 import { events } from "../db/schema/events.js";
+import { eventGames } from "../db/schema/event-games.js";
 import { games } from "../db/schema/games.js";
 import { dataSources } from "../db/schema/data-sources.js";
 import type { EventKind } from "../integrations/data-source-adapter.js";
@@ -80,7 +101,13 @@ const TITLE_MIN = 1;
 const TITLE_MAX = 500;
 
 export interface CreateEventInput {
-  gameId?: string | null;
+  // Plan 02.1-28: M:N migration. The legacy singular `gameId` is GONE —
+  // events have ZERO-or-MORE attached games via the event_games junction.
+  // Empty array (or omission) means "create in inbox" (no junction rows).
+  // The HTTP route schema accepts BOTH `gameId` (deprecated alias) AND
+  // `gameIds`; the route's superRefine normalizes singular→plural before
+  // calling this service.
+  gameIds?: string[];
   kind: EventKind;
   occurredAt: Date | string;
   title: string;
@@ -102,11 +129,17 @@ export interface UpdateEventInput {
   // /events/[id]/edit form (Plan 02.1-18) can flip the discriminator without
   // re-creating the event.
   authorIsMe?: boolean;
+  // Plan 02.1-28 — gameIds patch. When supplied, calls attachEventToGames
+  // BEFORE the main UPDATE so the standalone-conflict guard fires first.
+  // Omit to leave the junction unchanged.
+  gameIds?: string[];
 }
 
 export interface PasteInput {
   url: string;
-  gameId?: string | null;
+  // Plan 02.1-28: aligned with CreateEventInput.gameIds (M:N junction).
+  // Empty array = inbox; non-empty = pre-attached.
+  gameIds?: string[];
 }
 
 /**
@@ -267,9 +300,13 @@ async function findActiveSourceByHandleUrl(
  * BEFORE any INSERT — never produces an orphan row on validation fail
  * (D-19 / AGENTS.md "validate-first INGEST" anti-pattern).
  *
- * gameId is OPTIONAL (nullable) per Phase 2.1: events with game_id=NULL are
- * the inbox. When provided, the row is verified to belong to userId BEFORE
- * the INSERT (Pitfall 4).
+ * Plan 02.1-28 (M:N migration): events have ZERO-or-MORE attached games via
+ * the event_games junction. `input.gameIds ?? []` controls the initial
+ * attached set. Empty = inbox. Each gameId is verified to belong to userId
+ * BEFORE the INSERT (Pitfall 4). The HTTP route schema accepts both
+ * `gameId` (deprecated alias for one round of UAT) and `gameIds`; the
+ * normalization happens in the route's superRefine, so by the time we get
+ * here, `input.gameIds` is the only shape that matters.
  *
  * Plan 02.1-17 — kind-aware external_id enrichment for the manual-create
  * path. When `kind === "youtube_video"` AND `input.externalId` is null /
@@ -282,7 +319,10 @@ async function findActiveSourceByHandleUrl(
  * the load-bearing validator; the service is opportunistic enrichment).
  *
  * Audit: writes `event.created` with metadata
- *   { kind, event_id, game_id, occurred_at }
+ *   { kind, event_id, game_ids, occurred_at }
+ * Plan 02.1-28: `game_ids` (plural array) replaces the v2.1-pre-28 singular
+ * `game_id`. The audit consumers are forensics-only (no UI surface), so the
+ * shape change is non-breaking at the user level.
  *
  * Throws AppError 'duplicate_event' (409) on the partial-unique-index
  * violation `(user_id, kind, source_id, external_id)` — only fires when both
@@ -298,8 +338,15 @@ export async function createEvent(
   assertValidKind(input.kind);
   validateTitle(input.title);
   const occurredAt = coerceOccurredAt(input.occurredAt);
-  if (input.gameId != null) {
-    await assertGameOwnedByUser(userId, input.gameId);
+
+  // Plan 02.1-28: validate every gameId belongs to userId BEFORE any INSERT
+  // (validate-first; Pitfall 4). De-dup the input via Set so the same gameId
+  // passed twice doesn't trigger duplicate junction INSERTs (composite PK
+  // would catch it, but we'd surface 23505 as duplicate_event which is
+  // misleading — the M:N relation is set-valued by definition).
+  const targetGameIds = Array.from(new Set(input.gameIds ?? []));
+  for (const gid of targetGameIds) {
+    await assertGameOwnedByUser(userId, gid);
   }
 
   // Plan 02.1-17 — opportunistic external_id derivation for kind=youtube_video.
@@ -330,7 +377,6 @@ export async function createEvent(
       .insert(events)
       .values({
         userId,
-        gameId: input.gameId ?? null,
         sourceId: input.sourceId ?? null,
         kind: input.kind,
         authorIsMe: input.authorIsMe ?? false,
@@ -359,6 +405,18 @@ export async function createEvent(
   }
   if (!row) throw new Error("createEvent: INSERT returned no row");
 
+  // Plan 02.1-28: write event_games junction rows. Loop is fine for the
+  // expected size (single-digit attached games per event in typical usage);
+  // a future bulk-INSERT optimization is a one-line change if profiling
+  // surfaces the need.
+  for (const gid of targetGameIds) {
+    await db.insert(eventGames).values({
+      userId,
+      eventId: row.id,
+      gameId: gid,
+    });
+  }
+
   await writeAudit({
     userId,
     action: "event.created",
@@ -367,7 +425,7 @@ export async function createEvent(
     metadata: {
       kind: row.kind,
       event_id: row.id,
-      game_id: row.gameId,
+      game_ids: targetGameIds,
       occurred_at: occurredAt.toISOString(),
     },
   });
@@ -532,14 +590,18 @@ export async function createEventFromPaste(
 ): Promise<EventRow> {
   const enriched = await enrichFromUrl(userId, input.url);
 
-  if (input.gameId != null) {
-    await assertGameOwnedByUser(userId, input.gameId);
+  // Plan 02.1-28: validate every requested gameId belongs to userId before
+  // calling through to createEvent (which also validates — this is a fast-fail
+  // for the paste-flow's own UX). Set-dedup mirrors createEvent.
+  const pasteGameIds = Array.from(new Set(input.gameIds ?? []));
+  for (const gid of pasteGameIds) {
+    await assertGameOwnedByUser(userId, gid);
   }
 
   return createEvent(
     userId,
     {
-      gameId: input.gameId ?? null,
+      gameIds: pasteGameIds,
       kind: "youtube_video",
       // Paste flow defaults occurredAt to "now" (the moment the user pasted);
       // the unified shape preserves this — preview-url callers get null and
@@ -565,23 +627,37 @@ export async function createEventFromPaste(
  * Per-game curated view (replaces Phase 2 listTimelineForGame's JS-merge of
  * events + tracked_youtube_videos — the unified events table makes the merge
  * unnecessary). Soft-deleted rows excluded. Cross-tenant gameId throws 404.
+ *
+ * Plan 02.1-28 (M:N migration): the legacy `events.game_id` FK is GONE;
+ * per-game lookups now INNER JOIN through `event_games`. The denormalized
+ * `eventGames.userId` column lets the ESLint tenant-scope rule see a literal
+ * userId WHERE clause on the junction (the rule cannot inspect FK-chained
+ * values). Both `events.userId` AND `eventGames.userId` carry the same
+ * caller id, so a forged cross-tenant gameId returns zero rows by
+ * construction.
  */
 export async function listEventsForGame(
   userId: string,
   gameId: string,
 ): Promise<EventRow[]> {
   await assertGameOwnedByUser(userId, gameId);
-  return db
-    .select()
-    .from(events)
+  // Drizzle's join + select-fields shape: pull the events row out of the
+  // joined query so consumers continue to receive `EventRow[]` (no shape
+  // change at call sites).
+  const rows = await db
+    .select({ event: events })
+    .from(eventGames)
+    .innerJoin(events, eq(eventGames.eventId, events.id))
     .where(
       and(
+        eq(eventGames.userId, userId),
+        eq(eventGames.gameId, gameId),
         eq(events.userId, userId),
-        eq(events.gameId, gameId),
         isNull(events.deletedAt),
       ),
     )
     .orderBy(sql`${events.occurredAt} DESC, ${events.id} DESC`);
+  return rows.map((r) => r.event);
 }
 
 /**
@@ -611,7 +687,18 @@ export async function getEventById(
  * Update an event in-place. Validates kind / title / occurredAt only when
  * supplied. Bumps updatedAt. NotFoundError on miss / cross-tenant.
  *
+ * Plan 02.1-28: when `input.gameIds` is supplied, calls attachEventToGames
+ * BEFORE the main UPDATE so the standalone-conflict guard fires first
+ * (a kind/title patch shouldn't be allowed to side-step the 422 the
+ * junction-set update would otherwise raise). The two operations are
+ * sequenced rather than transactional — attachEventToGames already audits
+ * its own changes per add/remove; the events.edited audit row that follows
+ * captures the patch fields independently.
+ *
  * Audit: writes `event.edited` with metadata { kind, event_id, fields }.
+ * `gameIds` is NOT listed in `fields` because the attachEventToGames call
+ * already wrote attached_to_game / detached_from_game audit rows for each
+ * delta. Listing it on event.edited would double-count.
  */
 export async function updateEvent(
   userId: string,
@@ -622,6 +709,22 @@ export async function updateEvent(
 ): Promise<EventRow> {
   if (input.kind !== undefined) assertValidKind(input.kind);
   if (input.title !== undefined) validateTitle(input.title);
+
+  // Plan 02.1-28: gameIds patch flows through attachEventToGames so the
+  // standalone-conflict guard fires + the per-add/per-remove audit rows
+  // are written. Order: gameIds FIRST so a 422 on conflict aborts before
+  // we touch the patch fields (caller sees the 422 atomically — they
+  // never see a half-applied edit where title changed but gameIds
+  // refused).
+  if (input.gameIds !== undefined) {
+    await attachEventToGames(
+      userId,
+      eventId,
+      input.gameIds,
+      ipAddress,
+      userAgent,
+    );
+  }
 
   const patch: Partial<typeof events.$inferInsert> = { updatedAt: new Date() };
   const fields: string[] = [];
@@ -665,13 +768,20 @@ export async function updateEvent(
     .returning();
   if (!row) throw new NotFoundError();
 
-  await writeAudit({
-    userId,
-    action: "event.edited",
-    ipAddress,
-    userAgent,
-    metadata: { kind: row.kind, event_id: row.id, fields },
-  });
+  // Plan 02.1-28: skip the event.edited audit when ONLY gameIds was supplied
+  // (attachEventToGames already wrote per-add/per-remove audit rows; an empty
+  // event.edited with fields=[] would be noise). When fields.length === 0
+  // and input.gameIds was supplied, the only change was the junction set —
+  // the attached_to_game/detached_from_game audit chain captures it.
+  if (fields.length > 0) {
+    await writeAudit({
+      userId,
+      action: "event.edited",
+      ipAddress,
+      userAgent,
+      metadata: { kind: row.kind, event_id: row.id, fields },
+    });
+  }
 
   return row;
 }
@@ -838,8 +948,20 @@ export async function listFeedPage(
   // Plan 02.1-19: show axis (collapses Plan 02.1-15 attached + game into a
   // single discriminated union). The UI's 3-radio Show fieldset cannot emit
   // "Inbox AND specific games" simultaneously, so we encode that in the type.
+  //
+  // Plan 02.1-28 (M:N migration): every show.kind branch now JOINs against
+  // the `event_games` junction. The old `events.gameId` column is GONE
+  // (Plan 02.1-27 schema). The userId clause is duplicated INSIDE every
+  // EXISTS / NOT EXISTS subquery so the eventGames table is also tenant-
+  // scoped at the read site (the ESLint tenant-scope rule fires on the
+  // outer-only filter; cross-tenant data isolation needs both layers).
   if (filters.show?.kind === "inbox") {
-    filterParts.push(isNull(events.gameId) as SQL);
+    // Inbox = event has ZERO event_games rows AND not dismissed AND not
+    // standalone. The NOT EXISTS subquery is the M:N translation of the
+    // legacy `game_id IS NULL` predicate.
+    filterParts.push(
+      sql`NOT EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId})` as SQL,
+    );
     // RESEARCH §6.2 + Plan 02.1-15 attached=false precedent: inbox view
     // excludes events whose metadata.inbox.dismissed === 'true'. Without
     // this, dismissed events would resurface in the inbox.
@@ -854,20 +976,36 @@ export async function listFeedPage(
       sql`COALESCE(${events.metadata}->'triage'->>'standalone', 'false') = 'false'`,
     );
   } else if (filters.show?.kind === "standalone") {
-    // Plan 02.1-24: standalone view = events the user explicitly marked
-    // "not related to any game". game_id IS NULL by construction (the
-    // markStandalone service detaches the game at the same time it sets
-    // the flag); the metadata.triage.standalone clause is what
-    // distinguishes standalone from plain inbox.
-    filterParts.push(isNull(events.gameId) as SQL);
+    // Plan 02.1-24 + 02.1-28: standalone view = events the user explicitly
+    // marked "not related to any game". The junction-empty constraint is
+    // structural (markStandalone refuses if any junction rows exist — Plan
+    // 02.1-28 mutual exclusion); the metadata.triage.standalone clause is
+    // what distinguishes standalone from plain inbox.
+    filterParts.push(
+      sql`NOT EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId})` as SQL,
+    );
     filterParts.push(
       sql`COALESCE(${events.metadata}->'triage'->>'standalone', 'false') = 'true'`,
     );
   } else if (filters.show?.kind === "specific") {
     if (filters.show.gameIds.length === 1) {
-      filterParts.push(eq(events.gameId, filters.show.gameIds[0]!) as SQL);
+      // Single-game EXISTS subquery — equivalent query plan to the legacy
+      // `events.gameId = $1` predicate plus the junction lookup cost.
+      const gid = filters.show.gameIds[0]!;
+      filterParts.push(
+        sql`EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId} AND ${eventGames.gameId} = ${gid})` as SQL,
+      );
     } else if (filters.show.gameIds.length > 1) {
-      filterParts.push(inArray(events.gameId, filters.show.gameIds) as SQL);
+      // Multi-game EXISTS subquery — IN over the junction. Drizzle's `inArray`
+      // emits a parameterized list; we splice it into the raw subquery via
+      // `sql.join` so each value gets its own bind slot (no string
+      // interpolation of caller-supplied ids).
+      filterParts.push(
+        sql`EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId} AND ${eventGames.gameId} IN (${sql.join(
+          filters.show.gameIds.map((id) => sql`${id}`),
+          sql.raw(", "),
+        )}))` as SQL,
+      );
     }
     // Empty gameIds = no clause appended — semantically equivalent to "any"
     // (the UI prevents this state but the service stays defensive).
@@ -900,32 +1038,59 @@ export async function listFeedPage(
 }
 
 /**
- * attachToGame — set or clear events.game_id. Pitfall 4 mitigation: when
- * gameId is non-null, validate it belongs to userId BEFORE the UPDATE so a
- * cross-tenant attach surfaces as 404 (NotFoundError), not 500 from the bare
- * PG FK rejection.
+ * attachEventToGames — replace the event's attached-games set atomically.
  *
- * gameId=null is the "move to inbox" affordance; the row's metadata is left
- * intact (a dismissed event that gets attached later would re-clear the
- * dismissed flag if the UI offered that flow — out of scope for 2.1).
+ * Plan 02.1-28 (UAT-NOTES.md §4.24.G — M:N migration): events have ZERO-or-
+ * MORE attached games via the event_games junction. This function takes the
+ * full target set (gameIds[]) and SETs it via a forward-only diff:
  *
- * Audit: writes `event.attached_to_game` with metadata
- *   { event_id, kind, game_id }.
+ *   - INSERT junction rows for gameIds in the target set NOT in the current
+ *     set (one event.attached_to_game audit row per addition).
+ *   - DELETE junction rows in the current set NOT in the target set (one
+ *     event.detached_from_game audit row per removal).
+ *   - Update the event's updatedAt timestamp so consumers see the row as
+ *     freshly modified.
+ *
+ * Empty target set === "move to inbox" (idempotent — calling with [] on an
+ * already-empty junction is a no-op + no audit).
+ *
+ * Tenant scope (Pitfall 4 + CLAUDE.md invariant 1): every gameId is
+ * validated against `assertGameOwnedByUser` BEFORE any junction write — a
+ * cross-tenant gameId in the array surfaces as NotFoundError → 404, not
+ * 500 from the bare PG FK rejection. The eventId itself is also validated
+ * by the initial events SELECT (cross-tenant eventId returns zero rows →
+ * NotFoundError 404 by construction).
+ *
+ * Plan 02.1-28 standalone↔game mutual exclusion (UAT-NOTES.md §4.24.C):
+ * if `gameIds.length > 0` AND the event has metadata.triage.standalone ===
+ * true, throws AppError(422, 'standalone_conflicts_with_game'). The user
+ * must un-standalone first (or the UI hides the conflicting affordances —
+ * Plan 02.1-32). Defense-in-depth at the service layer regardless of the
+ * UI's enforcement.
+ *
+ * Set-input dedup: the input array is normalized via `Set` so the same
+ * gameId passed twice doesn't trip the composite-PK 23505 (which would
+ * surface as a misleading "duplicate_event" error code). M:N junctions are
+ * set-valued by construction; idempotent input handling is the right shape.
+ *
+ * Audit shape: each write carries `{ event_id, kind, game_id }` (singular
+ * game_id per row) so existing consumers (AuditRow + FilterChips +
+ * FiltersSheet auditActionLabel switch) render unchanged. The new
+ * detached_from_game verb mirrors the attached_to_game payload exactly.
  */
-export async function attachToGame(
+export async function attachEventToGames(
   userId: string,
   eventId: string,
-  gameId: string | null,
+  gameIds: string[],
   ipAddress: string,
   userAgent?: string,
 ): Promise<EventRow> {
-  if (gameId !== null) {
-    await assertGameOwnedByUser(userId, gameId);
-  }
-
-  const [row] = await db
-    .update(events)
-    .set({ gameId, updatedAt: new Date() })
+  // 1. Load + validate the event ownership. Cross-tenant eventId surfaces
+  //    as 404 here (zero rows → NotFoundError) BEFORE any junction read or
+  //    write. The userId WHERE clause is the load-bearing privacy guard.
+  const [event] = await db
+    .select()
+    .from(events)
     .where(
       and(
         eq(events.userId, userId),
@@ -933,24 +1098,115 @@ export async function attachToGame(
         isNull(events.deletedAt),
       ),
     )
-    .returning();
-  if (!row) throw new NotFoundError();
+    .limit(1);
+  if (!event) throw new NotFoundError();
 
-  await writeAudit({
-    userId,
-    action: "event.attached_to_game",
-    ipAddress,
-    userAgent,
-    metadata: { event_id: row.id, kind: row.kind, game_id: gameId },
-  });
+  // 2. Plan 02.1-28 standalone↔game mutual exclusion guard. Fires BEFORE
+  //    we touch the junction so the 422 surfaces atomically — a partial
+  //    add/remove sequence followed by a 422 would be a confusing UX.
+  if (gameIds.length > 0) {
+    const md = event.metadata as { triage?: { standalone?: boolean } } | null;
+    if (md?.triage?.standalone === true) {
+      throw new AppError(
+        "event marked standalone cannot be attached to a game",
+        "standalone_conflicts_with_game",
+        422,
+        { event_id: eventId },
+      );
+    }
+  }
 
-  return row;
+  // 3. Validate every gameId in the target set belongs to userId.
+  //    Cross-tenant gameId throws NotFoundError → 404 (Pitfall 4 explicit
+  //    guard). De-dup via Set so duplicate input doesn't fire the same
+  //    assertGameOwnedByUser twice (perf-only refinement).
+  const uniqueGameIds = Array.from(new Set(gameIds));
+  for (const gid of uniqueGameIds) {
+    await assertGameOwnedByUser(userId, gid);
+  }
+
+  // 4. Read the current attached set (tenant-scoped — userId on the
+  //    junction is the literal column name the ESLint rule walks for).
+  const existing = await db
+    .select({ gameId: eventGames.gameId })
+    .from(eventGames)
+    .where(and(eq(eventGames.userId, userId), eq(eventGames.eventId, eventId)));
+  const existingSet = new Set(existing.map((r) => r.gameId));
+  const targetSet = new Set(uniqueGameIds);
+
+  // 5. Compute add / remove diffs.
+  const toAdd = uniqueGameIds.filter((gid) => !existingSet.has(gid));
+  const toRemove = [...existingSet].filter((gid) => !targetSet.has(gid));
+
+  // 6. Apply DELETEs + INSERTs. No transaction wrapper required — the
+  //    diff is forward-only (a duplicate INSERT is impossible after the
+  //    existingSet check), and a partial failure leaves the junction in
+  //    a consistent state (each row is independent). If the events
+  //    UPDATE below ever fails, the junction is already a valid superset
+  //    of the requested state.
+  for (const gid of toRemove) {
+    await db
+      .delete(eventGames)
+      .where(
+        and(
+          eq(eventGames.userId, userId),
+          eq(eventGames.eventId, eventId),
+          eq(eventGames.gameId, gid),
+        ),
+      );
+  }
+  for (const gid of toAdd) {
+    await db.insert(eventGames).values({
+      userId,
+      eventId,
+      gameId: gid,
+    });
+  }
+
+  // 7. Bump updatedAt on the parent event so list consumers see the change.
+  await db
+    .update(events)
+    .set({ updatedAt: new Date() })
+    .where(and(eq(events.userId, userId), eq(events.id, eventId)));
+
+  // 8. Audit — one row per add (event.attached_to_game) and one per remove
+  //    (event.detached_from_game). The {event_id, kind, game_id} payload
+  //    mirrors the legacy attachToGame shape so existing forensics
+  //    consumers keep working.
+  for (const gid of toAdd) {
+    await writeAudit({
+      userId,
+      action: "event.attached_to_game",
+      ipAddress,
+      userAgent,
+      metadata: { event_id: eventId, kind: event.kind, game_id: gid },
+    });
+  }
+  for (const gid of toRemove) {
+    await writeAudit({
+      userId,
+      action: "event.detached_from_game",
+      ipAddress,
+      userAgent,
+      metadata: { event_id: eventId, kind: event.kind, game_id: gid },
+    });
+  }
+
+  // Return the freshly-updated event row (parent updatedAt bumped). The
+  // caller projects via mapEventsToDtos / loadEventDto to get the DTO
+  // with the new gameIds array.
+  return { ...event, updatedAt: new Date() };
 }
 
 /**
  * dismissFromInbox — write metadata.inbox.dismissed=true via jsonb_set on an
- * inbox event (game_id IS NULL). Throws AppError 'not_in_inbox' (422) when
- * called on an attached event — only inbox events can be dismissed.
+ * inbox event (no event_games rows). Throws AppError 'not_in_inbox' (422)
+ * when called on an attached event — only inbox events can be dismissed.
+ *
+ * Plan 02.1-28: the inbox criterion is now "zero event_games rows" (M:N
+ * junction); the legacy `events.gameId IS NULL` check is replaced with a
+ * COUNT(*) lookup against the junction. Tenant-scoped on both events
+ * (via getEventById) and eventGames (via the userId WHERE clause).
  *
  * Idempotency: a second dismiss on an already-dismissed event succeeds
  * silently (jsonb_set re-sets the same value); the audit row still fires.
@@ -967,12 +1223,27 @@ export async function dismissFromInbox(
   // getEventById throws NotFoundError on miss / cross-tenant — load-bearing
   // before we decide whether the event is in the inbox.
   const existing = await getEventById(userId, eventId);
-  if (existing.gameId !== null) {
+
+  // Plan 02.1-28: junction-count check replaces the legacy `gameId IS NULL`
+  // predicate. Any event_games row attached to this event disqualifies it
+  // from the inbox-dismiss flow.
+  const attached = await db
+    .select({ gameId: eventGames.gameId })
+    .from(eventGames)
+    .where(and(eq(eventGames.userId, userId), eq(eventGames.eventId, eventId)));
+  if (attached.length > 0) {
     throw new AppError(
       "event is attached to a game; only inbox events can be dismissed",
       "not_in_inbox",
       422,
-      { event_id: existing.id, game_id: existing.gameId },
+      {
+        event_id: existing.id,
+        // Plan 02.1-28: pass through the attached game_ids so the UI can
+        // surface a "this is attached to {Game} — detach first" hint
+        // without a second round-trip. Non-breaking — Phase 2 callers
+        // didn't read this field.
+        game_ids: attached.map((r) => r.gameId),
+      },
     );
   }
 
@@ -1019,11 +1290,19 @@ export async function dismissFromInbox(
 }
 
 /**
- * markStandalone — set metadata.triage.standalone=true AND detach the event
- * from any game (game_id=null). Plan 02.1-24 (UAT-NOTES.md §6.1-redesign).
- * The user has explicitly said this event is not related to any game; the
- * /feed view dims standalone events (FeedCard opacity 0.55) so they don't
- * distract from game-tied events.
+ * markStandalone — set metadata.triage.standalone=true on an event with NO
+ * attached games. Plan 02.1-24 (UAT-NOTES.md §6.1-redesign). The user has
+ * explicitly said this event is not related to any game; the /feed view
+ * dims standalone events (FeedCard opacity 0.55) so they don't distract
+ * from game-tied events.
+ *
+ * Plan 02.1-28 (UAT-NOTES.md §4.24.C — standalone↔game mutual exclusion):
+ * REJECTS when the event has ≥ 1 event_games rows. AppError 'standalone_
+ * conflicts_with_game' (422). The legacy "detach gameId at the same time"
+ * behavior is REMOVED — the column is gone, and silent detachment was
+ * the wrong UX anyway (the user might not realize a game is attached).
+ * The route layer surfaces the 422; the UI (Plan 02.1-32) hides the
+ * conflicting affordance, so this code path is defense-in-depth.
  *
  * Tenant scope (CLAUDE.md invariant 1): userId-first; the UPDATE WHERE
  * clause `eq(events.userId, userId) AND eq(events.id, eventId)` ensures
@@ -1045,15 +1324,50 @@ export async function markStandalone(
   ipAddress: string,
   userAgent?: string,
 ): Promise<EventRow> {
+  // Plan 02.1-28 conflict guard: if the event has any junction rows,
+  // reject with a 422 rather than silently detaching. The user must
+  // detach explicitly (via attachEventToGames(..., [])) before marking
+  // standalone. We need to load the event ID first (cross-tenant 404)
+  // before the junction lookup so a forged eventId from a different
+  // tenant returns 404 not "standalone_conflicts_with_game".
+  const [eventRow] = await db
+    .select({ id: events.id })
+    .from(events)
+    .where(
+      and(
+        eq(events.userId, userId),
+        eq(events.id, eventId),
+        isNull(events.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!eventRow) throw new NotFoundError();
+  const attached = await db
+    .select({ gameId: eventGames.gameId })
+    .from(eventGames)
+    .where(and(eq(eventGames.userId, userId), eq(eventGames.eventId, eventId)));
+  if (attached.length > 0) {
+    throw new AppError(
+      "event has attached games; detach before marking standalone",
+      "standalone_conflicts_with_game",
+      422,
+      {
+        event_id: eventId,
+        game_count: attached.length,
+      },
+    );
+  }
+
   // Two nested jsonb_set calls: outer creates `triage` parent; inner sets
   // `triage.standalone=true`. Mirrors dismissFromInbox's nested-jsonb_set
   // pattern so a future metadata.triage.* sibling key (e.g., a flagged-as-
-  // duplicate marker) won't collide. Also detaches gameId=null in the same
-  // UPDATE — standalone implies "not tied to any game" by definition.
+  // duplicate marker) won't collide.
+  // Plan 02.1-28: the legacy `gameId: null` field is GONE (column dropped
+  // by Plan 02.1-27); the conflict guard above ensures the junction is
+  // already empty when we reach the UPDATE.
   const [row] = await db
     .update(events)
     .set({
-      gameId: null,
       metadata: sql`jsonb_set(
         jsonb_set(
           COALESCE(${events.metadata}, '{}'::jsonb),
