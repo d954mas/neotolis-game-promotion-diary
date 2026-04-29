@@ -177,6 +177,11 @@
   "events_detail_phase4_chart_placeholder": "VIZ-01 lands in Phase 4 — view-count and engagement charts will render here once the polling worker ships.",
   "events_detail_restore": "Restore",
 
+  "events_edit_author_is_me": "Author is me",
+  "events_edit_heading": "Edit event",
+  "events_edit_save": "Save changes",
+
+  "events_new_author_is_me": "Author is me",
   "events_new_date_today": "Today",
   "events_new_date_yesterday": "Yesterday",
   "events_new_date_explainer": "The date defaults to today. Pick a different date manually for past conferences, talks, or backdated posts.",
