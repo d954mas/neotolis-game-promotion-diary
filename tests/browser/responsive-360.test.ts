@@ -177,3 +177,44 @@ describe("Plan 02.1-22 — sticky + body-scroll-lock at 360px", () => {
     // it. Covers /feed and /audit reuse via Plan 02.1-21 schema unification.
   });
 });
+
+/**
+ * Plan 02.1-25 — PageHeader inline + SourceRow Mine border + /games/[id]
+ * two-card layout at 360px viewport.
+ *
+ * Closes UAT-NOTES.md §3.1-polish (Хочется кнопку после заголовка) +
+ * §2.1-redesign (SourceRow Mine treatment matching FeedCard) + §3.2-redesign
+ * (/games/[id] two-card layout: GAME HEADER CARD + EVENTS FEED CARD).
+ *
+ * The component-level regression guards live in
+ * tests/integration/audit-render.test.ts (Plan 02.1-25 describe block) —
+ * 13 SSR-rendered tests over PageHeader CTA variants, GameCover img/
+ * placeholder switching, SteamListingRow Steam name + Open-on-Steam href,
+ * SourceRow class:mine + border-left rule, /games/[id] two-card structure,
+ * and /sources, /feed, /games each importing PageHeader. Browser-mode
+ * 360px-viewport assertions remain stub-skipped pending the Phase 6 auth
+ * harness (same precedent as Plans 02.1-18 / 19 / 20 / 21 / 22 / 23 / 24).
+ */
+describe("Plan 02.1-25 — PageHeader inline + SourceRow Mine + /games/[id] two-card at 360px", () => {
+  it.skip(
+    "/feed PageHeader: title + CTA inline on the LEFT (CTA bounding rect.left < 50% viewport) (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games PageHeader: onClick CTA toggles inline new-game form without navigation (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/sources PageHeader: link CTA navigates to /sources/new and stays sticky on scroll (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/sources SourceRow with isOwnedByMe=true has 4px accent left border (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/sources SourceRow renders kind icon + text label (e.g. 'YouTube channel') side-by-side (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games/[id] renders <section class='game-header-card'> + <section class='events-feed-card'> as two distinct panel cards (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games/[id] GameCover renders Steam header_image when listing has coverUrl, gradient placeholder + initials otherwise (manual UAT — auth harness deferred)",
+  );
+});

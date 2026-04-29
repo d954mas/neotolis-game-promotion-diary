@@ -258,6 +258,35 @@ describe("Plan 02.1-23: FeedCard restructured layout (top overlay + bottom games
 });
 
 /**
+ * Plan 02.1-25 — SteamListingRow + GameCover on /games/[id] at 360px.
+ *
+ * Closes UAT-NOTES.md §3.3-polish (Steam name + Open-on-Steam link) +
+ * §3.2-redesign (GameCover Steam header_image vs gradient placeholder).
+ * The component-level regression guards (SSR render-time) live in
+ * tests/integration/audit-render.test.ts (Plan 02.1-25 describe block —
+ * 13 tests). Browser-mode at-360px assertions remain stub-skipped pending
+ * the Phase 6 auth harness (same precedent as Plans 02.1-18 / 19 / 20 /
+ * 21 / 22 / 23 / 24 / 26).
+ */
+describe("Plan 02.1-25: SteamListingRow + GameCover on /games/[id] at 360px", () => {
+  it.skip(
+    "SteamListingRow displays the Steam name (e.g. 'Portal 2') instead of 'App 620' when name column is populated (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "SteamListingRow Open-on-Steam <a> href === 'https://store.steampowered.com/app/{appId}/' (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "SteamListingRow Open-on-Steam <a> opens in a new tab (target='_blank' + rel='noopener noreferrer') (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "GameCover renders <img> with referrerpolicy='no-referrer' when first listing has coverUrl (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "GameCover renders gradient placeholder + game initials when no listing has coverUrl (manual UAT — auth harness deferred)",
+  );
+});
+
+/**
  * Plan 02.1-26 — FeedQuickNav (chip strip / segmented control at top of /feed).
  *
  * Closes UAT-NOTES.md §6.2-redesign — the user wants single-click switch

@@ -917,3 +917,273 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
     expect(src).toMatch(/scroll-snap-type:\s*x\s+mandatory/);
   });
 });
+
+/**
+ * Plan 02.1-25 — render-time regression guards for the new components
+ * (PageHeader, GameCover, SteamListingRow) + the SourceRow Mine treatment +
+ * the /games/[id] two-card layout.
+ *
+ * The end-to-end browser flow at 360px (PageHeader inline-on-the-left,
+ * /games/[id] two-card layout, SourceRow accent left-border, GameCover img
+ * vs placeholder, SteamListingRow Open-on-Steam href) requires the
+ * cookie-injection auth harness still deferred to Phase 6 — stub-skipped
+ * in tests/browser/responsive-360.test.ts + feed-360.test.ts. The
+ * component-level contracts are locked in HERE via SSR render so a future
+ * regression breaks at CI time, not at manual UAT.
+ */
+describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
+  it("PageHeader with href CTA renders <a class='cta'> as the call-to-action", async () => {
+    const PageHeader = (
+      await import("../../src/lib/components/PageHeader.svelte")
+    ).default;
+    const out = render(PageHeader, {
+      props: {
+        title: "Data sources",
+        cta: { href: "/sources/new", label: "+ Add data source" },
+      },
+    });
+    expect(out.body).toContain("Data sources");
+    expect(out.body).toContain("+ Add data source");
+    expect(out.body).toMatch(/<a[^>]*href="\/sources\/new"[^>]*class="[^"]*\bcta\b/);
+    // Inline-on-the-left layout — no justify-content: space-between in the
+    // shipped component CSS. The plan's UAT-NOTES.md §3.1-polish quote was
+    // "Хочется кнопку после заголовка". The CSS is asserted on source.
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(
+      path.resolve("src/lib/components/PageHeader.svelte"),
+      "utf8",
+    );
+    expect(src).not.toMatch(/justify-content:\s*space-between/);
+    expect(src).toMatch(/display:\s*flex/);
+  });
+
+  it("PageHeader with onClick CTA renders <button> instead of <a>", async () => {
+    const PageHeader = (
+      await import("../../src/lib/components/PageHeader.svelte")
+    ).default;
+    const out = render(PageHeader, {
+      props: {
+        title: "Games",
+        cta: { onClick: () => {}, label: "+ New game" },
+      },
+    });
+    expect(out.body).toMatch(/<button[^>]*type="button"[^>]*class="[^"]*\bcta\b/);
+    expect(out.body).toContain("+ New game");
+    // The link variant is NOT present.
+    expect(out.body).not.toMatch(/<a[^>]*class="[^"]*\bcta\b/);
+  });
+
+  it("PageHeader with sticky=true adds .sticky class on the root <header>", async () => {
+    const PageHeader = (
+      await import("../../src/lib/components/PageHeader.svelte")
+    ).default;
+    const out = render(PageHeader, {
+      props: {
+        title: "Data sources",
+        cta: { href: "/sources/new", label: "+ Add data source" },
+        sticky: true,
+      },
+    });
+    expect(out.body).toMatch(/<header[^>]*class="[^"]*\bsticky\b/);
+  });
+
+  it("GameCover renders <img> with the FIRST listing's coverUrl when present", async () => {
+    const GameCover = (
+      await import("../../src/lib/components/GameCover.svelte")
+    ).default;
+    const out = render(GameCover, {
+      props: {
+        title: "Portal 2",
+        listings: [
+          { coverUrl: "https://shared.akamai.steamstatic.com/portal2.jpg" },
+          { coverUrl: null },
+        ],
+      },
+    });
+    expect(out.body).toMatch(
+      /<img[^>]*src="https:\/\/shared\.akamai\.steamstatic\.com\/portal2\.jpg"/,
+    );
+    expect(out.body).toMatch(/referrerpolicy="no-referrer"/);
+    expect(out.body).toContain('alt="Cover for Portal 2"');
+  });
+
+  it("GameCover renders gradient placeholder + initials when no listing has coverUrl", async () => {
+    const GameCover = (
+      await import("../../src/lib/components/GameCover.svelte")
+    ).default;
+    const out = render(GameCover, {
+      props: {
+        title: "Stellar Frontier",
+        listings: [{ coverUrl: null }],
+      },
+    });
+    // No <img> when coverSrc is null.
+    expect(out.body).not.toMatch(/<img[^>]*src=/);
+    expect(out.body).toMatch(/<div[^>]*class="[^"]*\bplaceholder\b/);
+    // Initials = "SF" (first letters of "Stellar" + "Frontier" uppercased).
+    expect(out.body).toContain("SF");
+  });
+
+  it("GameCover renders <img> when listings is empty AND skips placeholder when coverUrl present in any listing", async () => {
+    const GameCover = (
+      await import("../../src/lib/components/GameCover.svelte")
+    ).default;
+    // Empty listings → placeholder.
+    const empty = render(GameCover, {
+      props: { title: "HADES", listings: [] },
+    });
+    expect(empty.body).toMatch(/<div[^>]*class="[^"]*\bplaceholder\b/);
+    expect(empty.body).toContain("H");
+  });
+
+  it("GameCover comments document the Phase 3+ deferred manual-upload path", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(
+      path.resolve("src/lib/components/GameCover.svelte"),
+      "utf8",
+    );
+    expect(src).toMatch(/TODO Phase 3\+/);
+  });
+
+  it("SteamListingRow renders the persisted name when listing.name is present", async () => {
+    const SteamListingRow = (
+      await import("../../src/lib/components/SteamListingRow.svelte")
+    ).default;
+    const out = render(SteamListingRow, {
+      props: {
+        listing: {
+          id: "l-1",
+          appId: 620,
+          label: "PC",
+          name: "Portal 2",
+          coverUrl: null,
+          releaseDate: "Apr 19, 2011",
+          apiKeyId: null,
+        },
+      },
+    });
+    expect(out.body).toContain("Portal 2");
+    // The fallback "App {appId}" text is NOT rendered when name is present.
+    expect(out.body).not.toContain("App 620");
+  });
+
+  it("SteamListingRow falls back to 'App {appId}' when listing.name is null", async () => {
+    const SteamListingRow = (
+      await import("../../src/lib/components/SteamListingRow.svelte")
+    ).default;
+    const out = render(SteamListingRow, {
+      props: {
+        listing: {
+          id: "l-2",
+          appId: 99999,
+          label: "",
+          name: null,
+          coverUrl: null,
+          releaseDate: null,
+          apiKeyId: null,
+        },
+      },
+    });
+    expect(out.body).toContain("App 99999");
+  });
+
+  it("SteamListingRow Open-on-Steam href targets store.steampowered.com/app/{appId}/", async () => {
+    const SteamListingRow = (
+      await import("../../src/lib/components/SteamListingRow.svelte")
+    ).default;
+    const out = render(SteamListingRow, {
+      props: {
+        listing: {
+          id: "l-3",
+          appId: 1145360,
+          label: "PC",
+          name: "HADES",
+          coverUrl: null,
+          releaseDate: "Sep 17, 2020",
+          apiKeyId: null,
+        },
+      },
+    });
+    expect(out.body).toMatch(
+      /<a[^>]*href="https:\/\/store\.steampowered\.com\/app\/1145360\/"/,
+    );
+    expect(out.body).toMatch(/target="_blank"/);
+    expect(out.body).toMatch(/rel="noopener noreferrer"/);
+    // Paraglide label ("Open on Steam") renders.
+    expect(out.body).toContain("Open on Steam");
+  });
+
+  it("SourceRow.svelte source carries the Mine treatment CSS rule + kind label", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(
+      path.resolve("src/lib/components/SourceRow.svelte"),
+      "utf8",
+    );
+    // class:mine on root .row div + .row.mine border-left rule.
+    expect(src).toMatch(/class:mine=\{source\.isOwnedByMe\}/);
+    expect(src).toMatch(
+      /\.row\.mine\s*\{[\s\S]*?border-left:\s*4px solid var\(--color-accent\)/,
+    );
+    // ownership-badge.mine upgraded to overlay-mine visual style (accent
+    // background + accent-text).
+    expect(src).toMatch(
+      /\.ownership-badge\.mine[\s\S]*?background:\s*var\(--color-accent\)/,
+    );
+    // Kind label rendered next to the icon via kindLabel(SourceKind).
+    expect(src).toMatch(/kindLabel/);
+    expect(src).toMatch(/source_kind_label_youtube_channel/);
+    expect(src).toMatch(/source_kind_label_reddit_account/);
+    expect(src).toMatch(/source_kind_label_twitter_account/);
+    expect(src).toMatch(/source_kind_label_telegram_channel/);
+    expect(src).toMatch(/source_kind_label_discord_server/);
+  });
+
+  it("/games/[id]/+page.svelte renders the GAME HEADER CARD + EVENTS FEED CARD layout", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(
+      path.resolve("src/routes/games/[gameId]/+page.svelte"),
+      "utf8",
+    );
+    // Two named panel cards.
+    expect(src).toMatch(/<section[^>]*class="game-header-card"/);
+    expect(src).toMatch(/<section[^>]*class="events-feed-card"/);
+    // GameCover + SteamListingRow used inside the header card.
+    expect(src).toMatch(/<GameCover\s/);
+    expect(src).toMatch(/<SteamListingRow\s/);
+    // Both panels styled (background var(--color-surface) + border).
+    expect(src).toMatch(
+      /\.game-header-card[\s\S]*?\.events-feed-card[\s\S]*?background:\s*var\(--color-surface\)/,
+    );
+  });
+
+  it("/sources, /feed, /games each use the shared <PageHeader>", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    for (const route of [
+      "src/routes/sources/+page.svelte",
+      "src/routes/feed/+page.svelte",
+      "src/routes/games/+page.svelte",
+    ]) {
+      const src = fs.readFileSync(path.resolve(route), "utf8");
+      expect(
+        src,
+        `${route}: imports PageHeader`,
+      ).toMatch(/import PageHeader from "\$lib\/components\/PageHeader\.svelte"/);
+      expect(src, `${route}: renders <PageHeader`).toMatch(/<PageHeader\s/);
+      // The inline <header class="head"> block is gone from the markup
+      // section. Strip the <script>...</script> block first so a comment
+      // mentioning "<header class=\"head\">" in code doesn't match. The
+      // markup region is whatever sits after the closing </script> tag
+      // and before <style>.
+      const markupOnly = src.replace(/<script[\s\S]*?<\/script>/g, "");
+      expect(
+        markupOnly,
+        `${route}: no inline <header class="head"> in markup`,
+      ).not.toMatch(/<header[^>]*class="head"/);
+    }
+  });
+});
