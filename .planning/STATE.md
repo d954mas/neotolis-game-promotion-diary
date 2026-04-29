@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02.1-19-PLAN.md (feed UX rebuild — discriminated 'show' axis backend + URL contract + always-visible date inputs + per-axis chip grouping + Show 3-radio + UTC date grouping + IntersectionObserver infinite scroll + CSS grid layout + invalidateAll-before-goto on /events/new). 7 round-2 UAT gaps closed. Plan 02.1-20 next.
-last_updated: "2026-04-29T09:19:57.274Z"
+stopped_at: Completed 02.1-18-PLAN.md (edit-flow rebuild — pencil moves from FeedCard to /events/[id] detail; new /events/[id]/edit route ships with author_is_me checkbox; FeedCard becomes pure preview tile; /events/new gains author_is_me checkbox + visible Mine badge on FeedCard). Round-2 UAT gap 'edit flow rebuild' closed. Plan 02.1-20 next.
+last_updated: "2026-04-29T09:34:49.836Z"
 last_activity: 2026-04-29
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 41
-  completed_plans: 38
+  completed_plans: 39
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 3 of 20
+Plan: 4 of 20
 
 ## Performance Metrics
 
@@ -82,6 +82,7 @@ Plan: 3 of 20
 | Phase 02.1-architecture-realignment P16 | ~12min | 3 tasks | 11 files |
 | Phase 02.1-architecture-realignment P17 | 12min | 2 tasks | 7 files |
 | Phase 02.1 P19 | 16m 22s | 10 tasks | 19 files |
+| Phase 02.1-architecture-realignment P18 | 9min 22s | 5 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -207,6 +208,10 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-19: groupEventsByDate uses UTC calendar date (YYYY-MM-DD via .toISOString().slice(0,10)); FeedDateGroupHeader truncates 'Today, HH:MM' → 'Today' for the header context; FeedCard drops inline date display + drops Plan 02.1-16's >=768px horizontal flexbox layout (grid cells are vertical-stack tiles); CSS grid template = repeat(auto-fill, minmax(280px, 1fr)); single column <640px
 - [Phase 02.1-architecture-realignment]: Plan 02.1-19: FilterChips emits ONE chip per active axis (kind/source/show/authorIsMe) with comma-joined values; click chip → onOpenSheet(axis) for focus jump; × → onDismiss(axis) clears entire axis; long chips wrap text inside (word-break: break-word; min-width: 0); NO date chip — visible from/to inputs ARE the indicator
 - [Phase 02.1-architecture-realignment]: Plan 02.1-19 deviation (Rule 3): migrated all existing { attached: ... } and bare { game: ... } test calls in feed.test.ts / events.test.ts / inbox.test.ts to the new { show: { kind: ... } } shape (typecheck dependency); CursorPager.svelte retained per plan's interface block 'leave as-is and document' (audit/+page.svelte still uses it); Tasks 6/7/8 bundled into one commit (b039619) because they all rewrite /feed/+page.svelte and split commits would leave intermediate broken states
+- [Phase 02.1-architecture-realignment]: Plan 02.1-18: FeedCard becomes pure preview tile (Open/Edit/Delete buttons + ConfirmDialog moved to /events/[id]); AttachToGamePicker stays OUTSIDE the wrapping <a href> as the only mutating control on the tile (UAT round-2 'FeedCard becomes a pure preview tile' closure)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-18: /events/[id] replaces Phase-4 stub with full detail (KindIcon + title + chips + notes + Open external + Edit pencil + Delete with ConfirmDialog + Restore-when-soft-deleted + inline Phase-4 chart placeholder); CONTEXT D-07 spirit preserved by anchoring LayerChart slot inline. /events/[id]/edit ships as new route mirroring /events/new shape PLUS author_is_me checkbox; PATCH /api/events/:id round-trip via Plan 02.1-17 schema; gameId routed through /api/events/:id/attach (Pitfall 4 — game-ownership validation lives in attach endpoint)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-18: getEventById gains optional { includeSoftDeleted?: boolean } opt — flag toggles deletedAt filter only; userId WHERE clause is unchanged so cross-tenant scope preserved by query construction (Test 2 verifies user B asking for user A's soft-deleted row still 404s); default behavior unchanged for existing callers (Plan 02.1-09 stub loader, Plan 02.1-14 restore service)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-18: feed_card_author_is_me_badge ('Mine') is a NEW Paraglide key distinct from sources_owned_by_me — same English copy, different contexts (feed-tile-context label vs /sources page row descriptor); two contexts, two keys (UI-SPEC §'Note on m.common_cancel()' precedent for context-scoped keys)
 
 ### Pending Todos
 
@@ -246,8 +251,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-29T09:19:57.269Z
+Last session: 2026-04-29T09:34:49.830Z
 Last Activity: 2026-04-29
-Stopped at: Completed 02.1-19-PLAN.md (feed UX rebuild — discriminated 'show' axis backend + URL contract + always-visible date inputs + per-axis chip grouping + Show 3-radio + UTC date grouping + IntersectionObserver infinite scroll + CSS grid layout + invalidateAll-before-goto on /events/new). 7 round-2 UAT gaps closed. Plan 02.1-20 next.
+Stopped at: Completed 02.1-18-PLAN.md (edit-flow rebuild — pencil moves from FeedCard to /events/[id] detail; new /events/[id]/edit route ships with author_is_me checkbox; FeedCard becomes pure preview tile; /events/new gains author_is_me checkbox + visible Mine badge on FeedCard). Round-2 UAT gap 'edit flow rebuild' closed. Plan 02.1-20 next.
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
