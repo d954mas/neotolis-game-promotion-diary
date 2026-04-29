@@ -249,9 +249,12 @@
      treatment from Plan 02.1-23. User quote: "Тут нужно как в feed
      сделать для mine". The 4px accent left-border + the upgraded
      overlay-style "Mine" pill combine for the same C+A treatment users
-     get on FeedCard. */
+     get on FeedCard.
+     Plan 02.1-30 (UAT-NOTES.md §4.25.A): swap var(--color-accent) for
+     var(--color-mine) so FeedCard.mine + SourceRow.mine resolve to the
+     same shared token (defaults to accent today; can diverge). */
   .row.mine {
-    border-left: 4px solid var(--color-accent);
+    border-left: 4px solid var(--color-mine);
   }
   .primary {
     display: flex;
@@ -323,11 +326,16 @@
   /* Plan 02.1-25 (UAT-NOTES.md §2.1-redesign): upgrade the Mine pill to the
      overlay-mine visual style used by FeedCard (Plan 02.1-23). Accent
      background + white text reads as a strong, consistent "this is yours"
-     signal across feed and sources. */
+     signal across feed and sources.
+     Plan 02.1-30 (UAT-NOTES.md §4.25.A): pill background + border resolved
+     via var(--color-mine) — same shared token as the .row.mine border-left.
+     The accent-text foreground intentionally stays on --color-accent-text
+     because it is a paired text-on-accent token (Mine pill is white-on-accent
+     by visual contract). */
   .ownership-badge.mine {
-    background: var(--color-accent);
+    background: var(--color-mine);
     color: var(--color-accent-text, #fff);
-    border-color: var(--color-accent);
+    border-color: var(--color-mine);
   }
   .meta {
     min-width: 0;

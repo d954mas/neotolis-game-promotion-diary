@@ -24,7 +24,7 @@
   "feed_quick_nav_all": "All",
   "feed_quick_nav_inbox": "Inbox",
   "feed_quick_nav_more_games": "More games",
-  "feed_quick_nav_standalone": "Standalone",
+  "feed_quick_nav_standalone": "Not game-related",
   "sources_cta_new_source": "+ Add data source",
   "sources_cta_save_source": "Save source",
   "game_rename_cta_save": "Save name",
@@ -94,7 +94,7 @@
   "feed_filter_show_axis_label": "Show",
   "feed_filter_show_inbox": "Inbox only",
   "feed_filter_show_specific": "Attached to games",
-  "feed_filter_show_standalone": "Standalone — not related to any game",
+  "feed_filter_show_standalone": "Not game-related",
 
   "feed_chip_axis_action": "Action",
   "feed_chip_axis_kind": "Kind",
@@ -143,6 +143,15 @@
   "sources_kind_disabled_tooltip": "{kind} — {phase}. Schema is ready; the polling adapter ships in {phase}.",
 
   "steam_listing_open_link_label": "Open on Steam",
+  "steam_listing_remove_aria": "Remove listing",
+  "steam_listing_duplicate_active_prefix": "This Steam app is already attached to a game —",
+  "steam_listing_duplicate_active_link_label": "open the game",
+  "steam_listing_duplicate_soft_deleted": "This Steam app is attached to a soft-deleted game. Restore the game or use a different appId.",
+  "stores_section_heading": "Stores",
+  "stores_add_cta": "Add",
+  "stores_empty": "No stores linked yet.",
+  "games_detail_events_heading": "Events",
+  "games_detail_events_empty": "No events for this game yet.",
 
   "inbox_badge": "Inbox",
   "inbox_badge_tooltip": "This event isn't attached to a game yet. Use the \"Attach to game\" picker on the right.",
@@ -174,6 +183,8 @@
   "confirm_signout_all": "Sign out from every device? You'll need to sign in again everywhere.",
   "confirm_speedbump_acknowledge": "I understand this is permanent",
   "confirm_source_remove": "Remove \"{display_name}\"? Existing events stay in your feed but will keep pointing at this retired source. You can restore the source within 60 days from the deleted-sources view.",
+  "confirm_listing_remove_title": "Remove listing?",
+  "confirm_listing_remove_body": "Can be restored within 60 days.",
 
   "settings_credentials_heading": "Credentials",
   "settings_credentials_steam_link_label": "Steam Web API key",
@@ -196,9 +207,14 @@
   "events_detail_phase4_chart_placeholder": "VIZ-01 lands in Phase 4 — view-count and engagement charts will render here once the polling worker ships.",
   "events_detail_restore": "Restore",
 
+  "event_edit_aria_label": "Edit event",
   "events_edit_author_is_me": "Author is me",
+  "events_edit_delete_button": "Delete event",
   "events_edit_heading": "Edit event",
   "events_edit_save": "Save changes",
+  "events_edit_standalone_conflict": "\"Not game-related\" is mutually exclusive with attached games. Clear games or the flag.",
+  "events_edit_standalone_help": "Clear this to attach a game",
+  "events_edit_standalone_label": "Not game-related",
 
   "events_new_author_is_me": "Author is me",
   "events_new_date_today": "Today",
@@ -208,8 +224,9 @@
   "feed_row_edit_aria": "Edit event",
   "feed_row_delete_aria": "Delete event",
 
+  "feed_card_attach_compact_label": "Attach",
   "feed_card_author_is_me_badge": "Mine",
-  "feed_card_mark_standalone_button": "Mark standalone",
+  "feed_card_mark_standalone_button": "Mark as not game-related",
   "feed_card_thumbnail_alt": "Thumbnail for: {title}",
   "feed_card_open_external": "Open external link",
 

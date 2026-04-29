@@ -348,9 +348,12 @@
   }
   /* Mine treatment (A): left-border accent on the whole card. Combined with
    * the overlay Mine pill (C) per UAT-NOTES.md §1.5-redesign user choice
-   * "C and A combined". */
+   * "C and A combined".
+   * Plan 02.1-30 (UAT-NOTES.md §4.25.A): swap var(--color-accent) for
+   * var(--color-mine) so FeedCard.mine + SourceRow.mine resolve to the
+   * single shared Mine token (defaults to accent today; can diverge). */
   .feed-card.mine {
-    border-left: 4px solid var(--color-accent);
+    border-left: 4px solid var(--color-mine);
   }
   /* Plan 02.1-24 (UAT-NOTES.md §6.1-redesign): standalone events render
    * dimmed in /feed so they don't distract from game-tied events. User

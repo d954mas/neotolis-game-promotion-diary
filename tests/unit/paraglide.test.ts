@@ -80,6 +80,25 @@ describe("paraglide i18n (UX-04)", () => {
     // for the symmetric inverse of attached_to_game on the new event_games
     // junction. Net delta: +1 key.
     //
+    // Plan 02.1-32 (round-4 gap closure — UAT-NOTES.md §4.24.C/D/E/F + 4.18.A/B):
+    // adds 6 keys for the /events/[id]/edit standalone toggle + Delete-at-footer +
+    // /events/[id] read-only Edit pencil aria-label + AttachToGamePicker compact
+    // label. Keys: event_edit_aria_label, events_edit_delete_button,
+    // events_edit_standalone_conflict, events_edit_standalone_help,
+    // events_edit_standalone_label, feed_card_attach_compact_label. Net delta:
+    // +6 keys.
+    //
+    // Plan 02.1-30 (round-4 gap closure — UAT-NOTES.md §4.25.A/B/C/G/H —
+    // /games/[id] Stores section + FeedCard list redesign + duplicate-toast
+    // UX + Remove listing UI + Mine accent token unification): adds 11 keys
+    // (confirm_listing_remove_body, confirm_listing_remove_title,
+    // games_detail_events_empty, games_detail_events_heading,
+    // steam_listing_duplicate_active_link_label,
+    // steam_listing_duplicate_active_prefix,
+    // steam_listing_duplicate_soft_deleted, steam_listing_remove_aria,
+    // stores_add_cta, stores_empty, stores_section_heading). Net delta:
+    // +11 keys.
+    //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
     // across renames (Phase 2 STATE.md guidance, carried forward).
     const EXPECTED_KEYS = [
@@ -126,6 +145,8 @@ describe("paraglide i18n (UX-04)", () => {
       "confirm_item_delete",
       "confirm_key_remove",
       "confirm_key_replace",
+      "confirm_listing_remove_body",
+      "confirm_listing_remove_title",
       "confirm_signout_all",
       "confirm_source_remove",
       "confirm_speedbump_acknowledge",
@@ -152,6 +173,7 @@ describe("paraglide i18n (UX-04)", () => {
       "empty_youtube_channels_heading",
       "error_network",
       "error_server_generic",
+      "event_edit_aria_label",
       "event_kind_label_conference",
       "event_kind_label_discord_drop",
       "event_kind_label_other",
@@ -171,8 +193,12 @@ describe("paraglide i18n (UX-04)", () => {
       "events_detail_phase4_heading",
       "events_detail_restore",
       "events_edit_author_is_me",
+      "events_edit_delete_button",
       "events_edit_heading",
       "events_edit_save",
+      "events_edit_standalone_conflict",
+      "events_edit_standalone_help",
+      "events_edit_standalone_label",
       "events_new_author_is_me",
       "events_new_date_today",
       "events_new_date_yesterday",
@@ -181,6 +207,7 @@ describe("paraglide i18n (UX-04)", () => {
       "feed_attach_error_game_not_found",
       "feed_attach_no_games_inline",
       "feed_attach_to_game",
+      "feed_card_attach_compact_label",
       "feed_card_author_is_me_badge",
       "feed_card_mark_standalone_button",
       "feed_card_open_external",
@@ -230,6 +257,8 @@ describe("paraglide i18n (UX-04)", () => {
       "game_rename_cta_discard",
       "game_rename_cta_save",
       "games_cta_new_game",
+      "games_detail_events_empty",
+      "games_detail_events_heading",
       "inbox_badge",
       "inbox_badge_tooltip",
       "ingest_cta_add",
@@ -283,7 +312,14 @@ describe("paraglide i18n (UX-04)", () => {
       "sources_owned_by_other",
       "sources_status_auto_off",
       "sources_status_auto_on_pending",
+      "steam_listing_duplicate_active_link_label",
+      "steam_listing_duplicate_active_prefix",
+      "steam_listing_duplicate_soft_deleted",
       "steam_listing_open_link_label",
+      "steam_listing_remove_aria",
+      "stores_add_cta",
+      "stores_empty",
+      "stores_section_heading",
       "theme_label_dark",
       "theme_label_light",
       "theme_label_system",
