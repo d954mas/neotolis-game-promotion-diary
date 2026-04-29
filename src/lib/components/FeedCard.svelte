@@ -304,9 +304,23 @@
     {/if}
   </a>
 
-  <div class="picker-line">
-    <AttachToGamePicker {event} {games} onChanged={() => onChanged?.()} />
-    {#if isInboxRow}
+  <!-- Plan 02.1-32 (UAT-NOTES.md §4.24.E + §4.24.F): the inline picker
+       is gated on isInboxRow — it shows ONLY on cards where
+       gameIds.length === 0 AND metadata.inbox.dismissed !== true AND
+       metadata.triage.standalone !== true. Cards already attached to a
+       game OR marked standalone hide the picker entirely (the user's
+       triage decision is already recorded; the affordance would be
+       noise). On inbox cards the picker uses compact={true} so it reads
+       as a quick-action affordance instead of competing with the card's
+       primary content. -->
+  {#if isInboxRow}
+    <div class="picker-line">
+      <AttachToGamePicker
+        {event}
+        {games}
+        onChanged={() => onChanged?.()}
+        compact={true}
+      />
       <!-- Plan 02.1-24 (UAT-NOTES.md §6.1-redesign): inline "Mark standalone"
            triage button on inbox cards ONLY. EXPLICIT exception to the
            Plan 02.1-18 read-only-tile contract — accepted by the user
@@ -320,8 +334,8 @@
       >
         {m.feed_card_mark_standalone_button()}
       </button>
-    {/if}
-  </div>
+    </div>
+  {/if}
 </article>
 
 <style>

@@ -19,7 +19,6 @@
   import { goto, invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import KindIcon from "$lib/components/KindIcon.svelte";
-  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
   import type { PageData } from "./$types";
@@ -96,38 +95,13 @@
     }
   });
 
-  let confirmDeleteOpen = $state(false);
-  let deleteBusy = $state(false);
-  let deleteError = $state<string | null>(null);
+  // Plan 02.1-32 (UAT-NOTES.md §4.18.A): Delete moved to /events/[id]/edit
+  // form footer; the read-only detail page no longer carries a Delete
+  // button. Restore stays here because it only applies on the
+  // soft-deleted-events view (?deleted=1) and the edit page intentionally
+  // doesn't load soft-deleted rows.
   let restoreBusy = $state(false);
   let restoreError = $state<string | null>(null);
-
-  function askDelete(): void {
-    confirmDeleteOpen = true;
-  }
-  function cancelDelete(): void {
-    confirmDeleteOpen = false;
-  }
-
-  async function confirmDelete(): Promise<void> {
-    if (deleteBusy) return;
-    deleteBusy = true;
-    deleteError = null;
-    try {
-      const res = await fetch(`/api/events/${event.id}`, { method: "DELETE" });
-      if (!res.ok && res.status !== 204) {
-        deleteError = m.error_server_generic();
-        return;
-      }
-      confirmDeleteOpen = false;
-      await invalidateAll();
-      await goto("/feed");
-    } catch {
-      deleteError = m.error_network();
-    } finally {
-      deleteBusy = false;
-    }
-  }
 
   async function restoreEvent(): Promise<void> {
     if (restoreBusy) return;
@@ -157,6 +131,20 @@
 </nav>
 
 <article class="detail">
+  <!-- Plan 02.1-32 (UAT-NOTES.md §4.18.B): Edit pencil moves to the
+       top-right corner of the card, mirroring the FeedCard top-right
+       overlay placement Plan 02.1-23 established. Hidden when the row
+       is soft-deleted (Restore is the only action available there). -->
+  {#if !isSoftDeleted}
+    <a
+      class="edit-pencil"
+      href={`/events/${event.id}/edit`}
+      aria-label={m.event_edit_aria_label()}
+    >
+      ✎
+    </a>
+  {/if}
+
   <header class="head">
     <KindIcon kind={event.kind} size={48} />
     <div class="meta">
@@ -183,24 +171,17 @@
     </section>
   {/if}
 
+  <!-- Plan 02.1-32 (UAT-NOTES.md §4.18.A): Delete REMOVED from this
+       read-only detail page. The Delete button now lives at the
+       /events/[id]/edit form footer (Plan 02.1-32 Task 1). The Edit
+       affordance is the top-right pencil above. The actions row keeps
+       Open-original (no-op for events without a URL) and Restore (only
+       on soft-deleted rows). -->
   <div class="actions">
     {#if event.url}
       <a class="action" href={event.url} target="_blank" rel="noopener noreferrer">
         {m.events_detail_open_original()} ↗
       </a>
-    {/if}
-    {#if !isSoftDeleted}
-      <a class="action primary" href={`/events/${event.id}/edit`}>
-        ✎ {m.events_detail_edit()}
-      </a>
-      <button
-        type="button"
-        class="action danger"
-        onclick={askDelete}
-        disabled={deleteBusy}
-      >
-        {m.events_detail_delete()}
-      </button>
     {/if}
     {#if isSoftDeleted}
       <button
@@ -214,7 +195,6 @@
     {/if}
   </div>
 
-  {#if deleteError}<InlineError message={deleteError} />{/if}
   {#if restoreError}<InlineError message={restoreError} />{/if}
 
   <section class="chart-placeholder" aria-label="Phase-4 chart placeholder">
@@ -224,14 +204,6 @@
     />
   </section>
 </article>
-
-<ConfirmDialog
-  open={confirmDeleteOpen}
-  message={m.confirm_event_delete()}
-  confirmLabel={m.common_delete()}
-  onConfirm={confirmDelete}
-  onCancel={cancelDelete}
-/>
 
 <a class="back" href="/feed">Back to feed</a>
 
@@ -255,6 +227,36 @@
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: 4px;
+    /* Plan 02.1-32 (UAT-NOTES.md §4.18.B): anchor the absolutely-positioned
+     * .edit-pencil (top-right corner) — mirrors the FeedCard top-right
+     * overlay anchoring Plan 02.1-23 established. */
+    position: relative;
+  }
+  /* Plan 02.1-32: Edit pencil at the top-right of the card. Sized to a
+   * 44x44 touch target so a 360px-viewport tap reaches it without the user
+   * fumbling for the small icon (UAT-NOTES.md §4.18.B). z-index: 1 lifts
+   * it above the chart placeholder section if the layout overlaps. */
+  .edit-pencil {
+    position: absolute;
+    top: var(--space-md);
+    right: var(--space-md);
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    text-decoration: none;
+    font-size: var(--font-size-body);
+    cursor: pointer;
+  }
+  .edit-pencil:hover {
+    background: var(--color-bg);
+    border-color: var(--color-text);
   }
   .head {
     display: flex;

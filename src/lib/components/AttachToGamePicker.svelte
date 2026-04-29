@@ -53,10 +53,19 @@
     event,
     games,
     onChanged,
+    compact = false,
   }: {
     event: EventForPicker;
     games: GameOption[];
     onChanged?: () => void;
+    // Plan 02.1-32 (UAT-NOTES.md §4.24.F): compact-mode trigger for the
+    // /feed inbox card surface. Reduces visual weight (smaller font,
+    // lighter background, shrunken padding) and swaps the trigger label
+    // to m.feed_card_attach_compact_label() (`"Attach"`). The expanded
+    // dropdown menu is unchanged — only the trigger button shrinks.
+    // The /events/[id]/edit form usage stays on the default (full-size)
+    // picker.
+    compact?: boolean;
   } = $props();
 
   let open = $state(false);
@@ -71,7 +80,17 @@
     const firstId = event.gameIds[0]!;
     return games.find((g) => g.id === firstId) ?? null;
   });
-  const triggerLabel = $derived(matchedGame ? matchedGame.title : m.feed_attach_to_game());
+  // Plan 02.1-32 (UAT-NOTES.md §4.24.F): compact-mode trigger always shows
+  // the short label regardless of attached state — the inbox-card use case
+  // never has an attached game (the picker is hidden via isInboxRow gate
+  // when gameIds.length > 0), so the matched-game branch is unreachable
+  // in compact mode. The defensive `matchedGame` check below preserves
+  // round-trip safety if a future caller passes compact=true with a
+  // non-empty gameIds[].
+  const triggerLabel = $derived.by(() => {
+    if (compact) return m.feed_card_attach_compact_label();
+    return matchedGame ? matchedGame.title : m.feed_attach_to_game();
+  });
 
   function toggle(): void {
     if (busy) return;
@@ -150,6 +169,7 @@
   <button
     type="button"
     class="trigger"
+    class:compact
     onclick={toggle}
     disabled={busy}
     aria-haspopup="menu"
@@ -234,6 +254,20 @@
   .trigger:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  /* Plan 02.1-32 (UAT-NOTES.md §4.24.F): compact-mode trigger shrinks the
+   * visual weight of the inline picker on inbox cards. User quote:
+   * "это кнопка ее сделать меньше, это по сути просто быстрый способ
+   * разбирать инбокс". Smaller font, lighter (transparent) background,
+   * tighter padding, muted color — the picker reads as a quick-action
+   * affordance instead of competing with the card's primary content. */
+  .trigger.compact {
+    min-height: 0;
+    padding: var(--space-xs) var(--space-sm);
+    background: transparent;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-small, var(--font-size-label));
+    font-weight: var(--font-weight-regular, normal);
   }
   .chev {
     color: var(--color-text-muted);

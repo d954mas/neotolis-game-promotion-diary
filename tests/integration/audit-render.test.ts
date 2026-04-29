@@ -1694,3 +1694,170 @@ describe("Plan 02.1-33 — SourceRow edit-mode polish (visibility gates + footer
     expect(src).toMatch(/m\.confirm_source_remove/);
   });
 });
+
+/**
+ * Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker compact + FeedCard visibility gate.
+ *
+ * Closes UAT-NOTES.md §4.18.A + §4.18.B + §4.24.E + §4.24.F. The four
+ * findings ride together because they all reshape the read-only detail
+ * page + inbox card surface in one user-visible UX delta:
+ *   §4.18.A — /events/[id] Delete REMOVED (now at /events/[id]/edit footer).
+ *   §4.18.B — /events/[id] Edit pencil moves to top-right corner.
+ *   §4.24.E — AttachToGamePicker hidden when gameIds.length > 0 OR standalone.
+ *   §4.24.F — AttachToGamePicker visual shrink (compact mode label + style).
+ *
+ * SSR-render-time guards live here. Browser-mode 360px assertions live in
+ * tests/browser/feed-360.test.ts (auth harness deferred to Phase 6 — same
+ * precedent as Plans 02.1-18 / 19 / 20 / 21 / 23 / 25 / 26 / 33).
+ */
+describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker compact + FeedCard visibility gate", () => {
+  const baseEvent = {
+    id: "ev-1",
+    gameIds: [] as string[],
+    sourceId: null,
+    kind: "youtube_video" as const,
+    authorIsMe: false,
+    occurredAt: new Date("2026-04-25T12:00:00Z"),
+    title: "How I marketed my indie game",
+    url: "https://youtube.com/watch?v=abc",
+    externalId: "abc",
+    notes: null as string | null,
+    metadata: null as unknown,
+    lastPolledAt: null as Date | null,
+  };
+
+  it("Plan 02.1-32 — FeedCard with gameIds.length > 0 does NOT render AttachToGamePicker (closes §4.24.E)", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const out = render(FeedCard, {
+      props: {
+        event: { ...baseEvent, gameIds: ["g-1"] },
+        source: null,
+        game: { id: "g-1", title: "Attached Game" },
+        games: [{ id: "g-1", title: "Attached Game" }],
+      },
+    });
+    // The picker-line wrapper is gated on isInboxRow — no game means
+    // gameIds.length > 0 → not rendered.
+    expect(out.body).not.toMatch(/class="picker-line(?:\s[^"]*)?"/);
+    // Defense-in-depth: the AttachToGamePicker root <div class="picker">
+    // must also be absent (it would only exist if rendered).
+    expect(out.body).not.toMatch(/<div class="picker(?:\s[^"]*)?"/);
+  });
+
+  it("Plan 02.1-32 — FeedCard with metadata.triage.standalone === true does NOT render AttachToGamePicker (closes §4.24.E)", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const out = render(FeedCard, {
+      props: {
+        event: {
+          ...baseEvent,
+          gameIds: [],
+          metadata: { triage: { standalone: true } },
+        },
+        source: null,
+        game: null,
+        games: [],
+      },
+    });
+    expect(out.body).not.toMatch(/class="picker-line(?:\s[^"]*)?"/);
+  });
+
+  it("Plan 02.1-32 — FeedCard inbox row (gameIds=[], no triage flags) renders AttachToGamePicker WITH compact class (closes §4.24.F)", async () => {
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
+      .default;
+    const out = render(FeedCard, {
+      props: {
+        event: {
+          ...baseEvent,
+          gameIds: [],
+          metadata: null,
+        },
+        source: null,
+        game: null,
+        games: [{ id: "g-1", title: "Some Game" }],
+      },
+    });
+    // The picker-line is rendered (inbox row).
+    expect(out.body).toMatch(/class="picker-line(?:\s[^"]*)?"/);
+    // The trigger button carries the compact class.
+    expect(out.body).toMatch(
+      /<button[^>]*class="trigger(?:\s[^"]*)?\s+compact(?:\s[^"]*)?"/,
+    );
+    // The compact-mode label is rendered (see messages/en.json).
+    expect(out.body).toContain("Attach");
+  });
+
+  it("Plan 02.1-32 — AttachToGamePicker compact={true} swaps the trigger label to feed_card_attach_compact_label (closes §4.24.F)", async () => {
+    const AttachToGamePicker = (
+      await import("../../src/lib/components/AttachToGamePicker.svelte")
+    ).default;
+    const out = render(AttachToGamePicker, {
+      props: {
+        event: { id: "ev-1", gameIds: [] as string[] },
+        games: [{ id: "g-1", title: "Stellar Frontier" }],
+        compact: true,
+      },
+    });
+    expect(out.body).toMatch(/<button[^>]*class="[^"]*\bcompact\b[^"]*"/);
+    expect(out.body).toContain("Attach");
+  });
+
+  it("Plan 02.1-32 — AttachToGamePicker compact={false} (default) keeps the original 'Attach to game' label", async () => {
+    const AttachToGamePicker = (
+      await import("../../src/lib/components/AttachToGamePicker.svelte")
+    ).default;
+    const out = render(AttachToGamePicker, {
+      props: {
+        event: { id: "ev-1", gameIds: [] as string[] },
+        games: [{ id: "g-1", title: "Stellar Frontier" }],
+      },
+    });
+    // Default trigger: "Attach to game" (full label).
+    expect(out.body).toContain("Attach to game");
+    // Trigger button does NOT carry the compact class.
+    expect(out.body).not.toMatch(/<button[^>]*class="[^"]*\bcompact\b[^"]*"/);
+  });
+
+  it("Plan 02.1-32 — /events/[id]/+page.svelte renders an edit-pencil link top-right; NO Delete button (closes §4.18.A + §4.18.B)", async () => {
+    const fs = await import("node:fs");
+    const src = fs.readFileSync(
+      "src/routes/events/[id]/+page.svelte",
+      "utf8",
+    );
+    // Edit pencil link is present.
+    expect(src).toMatch(/class="edit-pencil"/);
+    // CSS rule for absolute positioning is present.
+    expect(src).toMatch(/position:\s*absolute/);
+    // Delete button has been REMOVED — no <button> with the Delete label
+    // and no DELETE method fired from this read-only page.
+    expect(src).not.toMatch(/m\.events_detail_delete\(\)/);
+    expect(src).not.toMatch(/method:\s*"DELETE"/);
+    // ConfirmDialog import was removed (Delete moved to edit page).
+    expect(src).not.toMatch(/import\s+ConfirmDialog\s+from/);
+  });
+
+  it("Plan 02.1-32 — /events/[id]/edit/+page.svelte ships standalone toggle + Delete button at footer (closes §4.18.A + §4.24.D)", async () => {
+    const fs = await import("node:fs");
+    const src = fs.readFileSync(
+      "src/routes/events/[id]/edit/+page.svelte",
+      "utf8",
+    );
+    // Standalone toggle state + conflict guard derivation present.
+    expect(src).toMatch(/editStandalone/);
+    expect(src).toMatch(/standaloneConflict/);
+    expect(src).toMatch(/metadata\.triage\.standalone|triage.*standalone/);
+    // Standalone Paraglide labels referenced (4 keys from Task 1).
+    expect(src).toMatch(/m\.events_edit_standalone_label\(\)/);
+    expect(src).toMatch(/m\.events_edit_standalone_help\(\)/);
+    expect(src).toMatch(/m\.events_edit_standalone_conflict\(\)/);
+    expect(src).toMatch(/m\.events_edit_delete_button\(\)/);
+    // Mark-standalone OR unmark-standalone PATCH is fired conditionally.
+    expect(src).toMatch(/mark-standalone/);
+    expect(src).toMatch(/unmark-standalone/);
+    // Delete button at footer + ConfirmDialog flow present.
+    expect(src).toMatch(/<ConfirmDialog\s/);
+    expect(src).toMatch(/class="delete-button"/);
+    expect(src).toMatch(/method:\s*"DELETE"/);
+  });
+});

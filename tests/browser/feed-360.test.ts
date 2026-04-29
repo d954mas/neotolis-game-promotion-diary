@@ -455,3 +455,44 @@ describe("Plan 02.1-30: FeedCard reuse on /games/[id] at 360px", () => {
     "/games/[id] does NOT render <FilterChips> / <DateRangeControl> / <FiltersSheet> components — §4.25.B user direction (manual UAT — auth harness deferred)",
   );
 });
+
+/**
+ * Plan 02.1-32 — /events/[id] Edit pencil + Delete placement + AttachToGamePicker compact + visibility.
+ *
+ * Closes UAT-NOTES.md §4.18.A + §4.18.B + §4.24.E + §4.24.F. The full
+ * 360px-viewport flow (visit /events/[id] → pencil at top-right + NO
+ * Delete; visit /events/[id]/edit → Delete at form footer; visit /feed
+ * → inbox card has compact picker, attached card has NO picker)
+ * requires the cookie-injection auth harness still deferred to Phase 6
+ * (same precedent as Plans 02.1-18 / 19 / 20 / 21 / 23 / 25 / 26 / 30 /
+ * 31 / 33).
+ *
+ * The component-level regression guard lives in
+ * tests/integration/audit-render.test.ts (Plan 02.1-32 describe block) —
+ * 7 SSR-render-time tests over the picker visibility gate, compact
+ * label swap, /events/[id] edit-pencil presence + Delete absence, and
+ * /events/[id]/edit standalone toggle + Delete-at-footer wiring.
+ */
+describe("Plan 02.1-32: /events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker compact + visibility", () => {
+  it.skip(
+    "/events/[id] at 360px renders <a class='edit-pencil'> with computed position: absolute, top: small, right: small (manual UAT — auth harness deferred to Phase 6)",
+  );
+  it.skip(
+    "/events/[id] read-only page does NOT render a Delete button (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/events/[id]/edit form footer renders the Delete button (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/events/[id]/edit standalone checkbox toggles metadata.triage.standalone via PATCH /api/events/:id/mark-standalone (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "FeedCard with gameIds.length > 0 does NOT render AttachToGamePicker on /feed (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "FeedCard with metadata.triage.standalone=true does NOT render AttachToGamePicker on /feed (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "FeedCard inbox row renders AttachToGamePicker with class='compact' and label='Attach' (manual UAT — auth harness deferred)",
+  );
+});
