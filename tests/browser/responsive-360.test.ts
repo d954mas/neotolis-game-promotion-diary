@@ -117,3 +117,63 @@ describe("UX-02 — 360px viewport authenticated-route sweep (D-42)", () => {
     },
   );
 });
+
+/**
+ * Plan 02.1-22 — sticky positioning + body-scroll-lock at 360px.
+ *
+ * UAT-NOTES.md §2.2-bug + §1.4-bug closures. Three behaviors are asserted:
+ *   (a) AppHeader sticky-top: scrolling the page does not move the header
+ *       off-screen (its bounding rect's top stays at 0).
+ *   (b) /sources page-header sticky: the "+ Add data source" CTA stays
+ *       reachable while a long source list scrolls (the .head element's
+ *       top stays anchored under the AppHeader, ~72px from viewport top).
+ *   (c) FiltersSheet body-scroll-lock: opening the sheet sets
+ *       document.body.style.overflow = "hidden"; closing restores "".
+ *
+ * Like Plan 02-11's authenticated-route sweep, the in-app interactions
+ * (AppHeader visibility, /sources scrolling, FiltersSheet open/close)
+ * require an authenticated session that vitest-browser cannot mint without
+ * a Postgres harness. The functional UAT for these three behaviors is in
+ * the Per-Task Verification Map row "02.1-22 T1" (manual + integration).
+ *
+ * The placeholder `it.skip` blocks below keep the contract surface visible
+ * to a future Phase 6 task that lifts the auth harness — the same pattern
+ * Plan 02-11 / 02.1-16 / 02.1-19 / 02.1-20 / 02.1-21 use.
+ */
+describe("Plan 02.1-22 — sticky + body-scroll-lock at 360px", () => {
+  it.skip("AppHeader stays at viewport top after scrolling 200px (deferred — auth harness)", async () => {
+    // Manual UAT (Per-Task Verification Map 02.1-22 T1):
+    //   1. sign in, viewport 360x640
+    //   2. visit any authenticated route with scrollable content (e.g. /feed
+    //      with seeded events, or /sources with 6+ sources)
+    //   3. window.scrollTo(0, 200)
+    //   4. document.querySelector("header.header").getBoundingClientRect().top === 0
+    //
+    // Asserts the Plan 02.1-22 §2.2-bug closure: position: sticky; top: 0
+    // on .header anchored against the layout-root flex column.
+  });
+
+  it.skip("/sources page-header stays under AppHeader after scroll (deferred — auth harness)", async () => {
+    // Manual UAT (Per-Task Verification Map 02.1-22 T1):
+    //   1. sign in, register 6+ sources, viewport 360x640
+    //   2. visit /sources, window.scrollTo(0, 400)
+    //   3. document.querySelector("section.sources > header.head")
+    //        .getBoundingClientRect().top stays ≈ 72px (under sticky AppHeader)
+    //
+    // Asserts position: sticky; top: 72px on .head with background fill so
+    // scrolled content does not bleed through.
+  });
+
+  it.skip("FiltersSheet locks body scroll on open + restores on close (deferred — auth harness)", async () => {
+    // Manual UAT (Per-Task Verification Map 02.1-22 T1):
+    //   1. sign in, viewport 360x640, visit /feed
+    //   2. click "Filters" button → sheet opens
+    //   3. document.body.style.overflow === "hidden" (background does not scroll)
+    //   4. close sheet (Cancel / Apply / Esc / backdrop)
+    //   5. document.body.style.overflow === "" (background scroll restored)
+    //
+    // Asserts UAT-NOTES.md §1.4-bug closure: $effect sets overflow:hidden
+    // on showModal() and the cleanup function (+ onDialogCancel) restores
+    // it. Covers /feed and /audit reuse via Plan 02.1-21 schema unification.
+  });
+});

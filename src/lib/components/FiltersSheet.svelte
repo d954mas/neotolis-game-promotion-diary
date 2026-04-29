@@ -167,6 +167,8 @@
     "event.attached_to_game",
     "event.dismissed_from_inbox",
     "event.restored",
+    "event.marked_standalone",
+    "event.unmarked_standalone",
     "source.added",
     "source.removed",
     "source.toggled_auto_import",
@@ -207,6 +209,10 @@
         return m.audit_action_event_dismissed_from_inbox();
       case "event.restored":
         return m.audit_action_event_restored();
+      case "event.marked_standalone":
+        return m.audit_action_event_marked_standalone();
+      case "event.unmarked_standalone":
+        return m.audit_action_event_unmarked_standalone();
       case "source.added":
         return m.audit_action_source_added();
       case "source.removed":
@@ -269,6 +275,12 @@
   $effect(() => {
     if (dialogEl && !dialogEl.open) {
       dialogEl.showModal();
+      // Plan 02.1-22 (UAT-NOTES.md §1.4-bug closure): lock body scroll while
+      // the dialog is open so the underlying feed/audit page does not scroll
+      // behind the modal. The cleanup function below restores the original
+      // overflow on dialog close (works for the close-button, apply, and
+      // unmount paths; onDialogCancel handles the Esc/backdrop path).
+      document.body.style.overflow = "hidden";
       // Plan 02.1-19: focus-jump support — when chip click opens the sheet
       // with a specific axis hint, scroll its fieldset into view + focus
       // the first interactive control. Lightweight UX nice-to-have.
@@ -286,11 +298,21 @@
           }
         });
       }
+      return () => {
+        // Plan 02.1-22: restore body scroll on every effect re-run / unmount.
+        document.body.style.overflow = "";
+      };
     }
   });
 
   function onDialogCancel(e: Event): void {
     e.preventDefault();
+    // Plan 02.1-22: Esc / backdrop close path — restore body scroll
+    // immediately so the underlying page is interactive again the moment
+    // the user dismisses the sheet (cleanup function is also wired through
+    // the $effect re-run, but explicit restore here keeps the intent
+    // visible in the close handlers).
+    document.body.style.overflow = "";
     onClose();
   }
 

@@ -127,11 +127,22 @@
     min-width: 0;
   }
   .head {
+    /* Plan 02.1-22 (UAT-NOTES.md §2.2-bug closure): sticky page-header so
+       the "+ Add data source" CTA stays reachable while a long source list
+       scrolls. Anchored just below the AppHeader (sticky top:0, ~64-72px
+       tall — sticky top: 72px keeps the page-header flush with it without
+       overlap). The background fill prevents content from bleeding through
+       when scrolled underneath. */
+    position: sticky;
+    top: 72px;
+    z-index: 5;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--space-md);
     flex-wrap: wrap;
+    padding: var(--space-sm) 0;
+    background: var(--color-bg);
   }
   .head h1 {
     margin: 0;

@@ -51,23 +51,42 @@
   <title>{m.app_title()}</title>
 </svelte:head>
 
-{#if data.user}
-  <AppHeader
-    user={{ name: data.user.name, email: data.user.email, image: data.user.image }}
-    theme={data.theme}
-    onSignOut={handleSignOut}
-    onSignOutAllDevices={handleSignOutAllDevices}
-  />
-  <Nav active={navActive} />
-{/if}
+<!--
+  Plan 02.1-22 (UAT-NOTES.md §2.2-bug closure): the wrapping `.layout-root`
+  sets `display: flex; flex-direction: column; min-height: 100vh` so that
+  AppHeader's `position: sticky; top: 0` AND per-page sticky CTAs (e.g.
+  /sources `+ Add data source`) anchor to a scrolling parent. Without this
+  scaffold `position: sticky` has no effect — the page-content scroll
+  parent collapses to the viewport on every browser engine.
+-->
+<div class="layout-root">
+  {#if data.user}
+    <AppHeader
+      user={{ name: data.user.name, email: data.user.email, image: data.user.image }}
+      theme={data.theme}
+      onSignOut={handleSignOut}
+      onSignOutAllDevices={handleSignOutAllDevices}
+    />
+    <Nav active={navActive} />
+  {/if}
 
-<main>
-  {@render children()}
-</main>
+  <main>
+    {@render children()}
+  </main>
+</div>
 
 <style>
+  /* Plan 02.1-22: flex-column scaffold w/ min-height: 100vh anchors sticky
+     children (AppHeader top-sticky + per-page sticky CTAs). */
+  .layout-root {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
   main {
+    flex: 1;
     max-width: 1024px;
+    width: 100%;
     margin: 0 auto;
     padding: var(--space-md);
     min-width: 0;

@@ -42,6 +42,13 @@
 
 <style>
   .header {
+    /* Plan 02.1-22 (UAT-NOTES.md §2.2-bug closure): sticky-top so the header
+       stays visible while page content scrolls beneath. The flex-column
+       scaffold added in src/routes/+layout.svelte gives this rule a
+       scrolling parent to anchor against. */
+    position: sticky;
+    top: 0;
+    z-index: 10;
     display: flex;
     align-items: center;
     justify-content: space-between;
