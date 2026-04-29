@@ -75,6 +75,7 @@
   "audit_action_event_restored": "Event restored",
 
   "audit_filter_action_axis_label": "Action",
+  "audit_filter_date_axis_label": "Date range",
 
   "feed_filter_source": "Source: {name}",
   "feed_filter_kind": "Kind: {kind}",

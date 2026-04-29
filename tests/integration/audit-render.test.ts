@@ -63,10 +63,12 @@ describe("/audit render-time guard (Plan 02.1-20 — FiltersSheet + AuditRow)", 
           show: { kind: "any" },
           defaultDateRange: false,
           all: true,
-          action: [], // ← non-undefined enables the action fieldset
+          action: [], // ← Plan 02.1-21: schema decides rendering, not filters.action
         },
         sources: [],
         games: [],
+        // Plan 02.1-21: schema explicit; was implicit on filters.action shape.
+        schema: ["action"] as const,
         onApply: () => {},
         onClose: () => {},
       },
@@ -84,7 +86,7 @@ describe("/audit render-time guard (Plan 02.1-20 — FiltersSheet + AuditRow)", 
     expect(checkboxCount).toBe(AUDIT_ACTIONS.length);
   });
 
-  it("FiltersSheet does NOT render action fieldset when action axis is undefined", () => {
+  it("FiltersSheet does NOT render action fieldset when schema omits 'action'", () => {
     const out = render(FiltersSheet, {
       props: {
         filters: {
@@ -93,10 +95,12 @@ describe("/audit render-time guard (Plan 02.1-20 — FiltersSheet + AuditRow)", 
           show: { kind: "any" },
           defaultDateRange: false,
           all: true,
-          // action: undefined  ← omitted; axis must NOT render
+          // action: undefined  ← Plan 02.1-21: schema decides rendering.
         },
         sources: [],
         games: [],
+        // Plan 02.1-21: /feed-shape schema (no 'action').
+        schema: ["kind", "source", "show", "authorIsMe", "date"] as const,
         onApply: () => {},
         onClose: () => {},
       },
@@ -117,6 +121,7 @@ describe("/audit render-time guard (Plan 02.1-20 — FiltersSheet + AuditRow)", 
         },
         sources: [],
         games: [],
+        schema: ["action"] as const,
         onApply: () => {},
         onClose: () => {},
       },
@@ -140,5 +145,167 @@ describe("/audit render-time guard (Plan 02.1-20 — FiltersSheet + AuditRow)", 
       new Intl.Collator(undefined, { sensitivity: "base" }).compare(a, b),
     );
     expect(labels).toEqual(sorted);
+  });
+});
+
+/**
+ * Plan 02.1-21 — schema prop honored.
+ *
+ * The `schema` prop replaces Plan 02.1-20's implicit `filters.action !==
+ * undefined` axis-detection. Each consumer page (/feed, /audit) passes the
+ * authoritative list of axes its FiltersSheet / FilterChips renders. Plan
+ * 02.1-20 shoehorned /audit into /feed's contract; this plan replaces that
+ * with an explicit array. UAT-NOTES.md §9.2-bug user quote: "Открывает окно,
+ * там есть типы аудита, но и куча полей из feed фильтров" — the audit sheet
+ * MUST NOT render kind/source/show/authorIsMe.
+ *
+ * Tests cover both components:
+ *   - FiltersSheet: only fieldsets in `schema` render.
+ *   - FilterChips: chips only emit for axes in `schema`.
+ * Both regression-guard against the Plan 02.1-20 leak.
+ */
+describe("Plan 02.1-21 — schema prop honored", () => {
+  it("FiltersSheet schema=['action'] renders ONLY the action fieldset (no kind/source/show/authorIsMe)", () => {
+    const out = render(FiltersSheet, {
+      props: {
+        filters: {
+          source: [],
+          kind: [],
+          show: { kind: "any" },
+          defaultDateRange: false,
+          all: true,
+          action: ["key.add"],
+        },
+        sources: [],
+        games: [],
+        schema: ["action"] as const,
+        onApply: () => {},
+        onClose: () => {},
+      },
+    });
+    expect(out.body).toMatch(/<fieldset[^>]*data-axis="action"/);
+    // Regression guard for UAT §9.2-bug — Plan 02.1-20 leak.
+    expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="source"/);
+    expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="kind"/);
+    expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="show"/);
+    expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="authorIsMe"/);
+  });
+
+  it("FiltersSheet schema=['action','date'] renders action fieldset AND date fieldset", () => {
+    const out = render(FiltersSheet, {
+      props: {
+        filters: {
+          source: [],
+          kind: [],
+          show: { kind: "any" },
+          defaultDateRange: false,
+          all: true,
+          action: [],
+        },
+        sources: [],
+        games: [],
+        schema: ["action", "date"] as const,
+        onApply: () => {},
+        onClose: () => {},
+      },
+    });
+    expect(out.body).toMatch(/<fieldset[^>]*data-axis="action"/);
+    expect(out.body).toMatch(/<fieldset[^>]*data-axis="date"/);
+    // No /feed-only axes leak into /audit's sheet.
+    expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="source"/);
+    expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="kind"/);
+    expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="show"/);
+    expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="authorIsMe"/);
+  });
+
+  it("FiltersSheet schema=['kind','source','show','authorIsMe','date'] renders all /feed fieldsets and date (NO action)", () => {
+    const out = render(FiltersSheet, {
+      props: {
+        filters: {
+          source: [],
+          kind: [],
+          show: { kind: "any" },
+          defaultDateRange: false,
+          all: true,
+          // action present in filters but schema does NOT include it — must NOT render.
+          action: ["key.add"],
+        },
+        sources: [],
+        games: [],
+        schema: ["kind", "source", "show", "authorIsMe", "date"] as const,
+        onApply: () => {},
+        onClose: () => {},
+      },
+    });
+    expect(out.body).toMatch(/<fieldset[^>]*data-axis="source"/);
+    expect(out.body).toMatch(/<fieldset[^>]*data-axis="kind"/);
+    expect(out.body).toMatch(/<fieldset[^>]*data-axis="show"/);
+    expect(out.body).toMatch(/<fieldset[^>]*data-axis="authorIsMe"/);
+    expect(out.body).toMatch(/<fieldset[^>]*data-axis="date"/);
+    // Action fieldset MUST NOT render even though filters.action is populated.
+    expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="action"/);
+  });
+
+  it("FilterChips schema=['action'] emits ONLY the action chip (no kind/source/show/authorIsMe)", async () => {
+    const FilterChips = (
+      await import("../../src/lib/components/FilterChips.svelte")
+    ).default;
+    const out = render(FilterChips, {
+      props: {
+        filters: {
+          source: ["src-x"],
+          kind: ["youtube_video"],
+          show: { kind: "inbox" as const },
+          authorIsMe: true,
+          defaultDateRange: false,
+          all: false,
+          action: ["key.add"],
+        },
+        sources: [{ id: "src-x", displayName: "Src X", handleUrl: "https://x" }],
+        games: [],
+        schema: ["action"] as const,
+        onDismiss: () => {},
+        onOpenSheet: () => {},
+        onClearAll: () => {},
+      },
+    });
+    // The chip strip on /audit MUST NOT show source / kind / show / author chips
+    // even though those fields are populated. The 'action' chip IS expected.
+    expect(out.body).toContain("Action:");
+    expect(out.body).not.toContain("Kind:");
+    expect(out.body).not.toContain("Source:");
+    expect(out.body).not.toContain("Show:");
+    expect(out.body).not.toContain("Author: me");
+    expect(out.body).not.toContain("Author: not me");
+  });
+
+  it("FilterChips schema=['kind','source','show','authorIsMe'] never emits an action chip even when filters.action is populated", async () => {
+    const FilterChips = (
+      await import("../../src/lib/components/FilterChips.svelte")
+    ).default;
+    const out = render(FilterChips, {
+      props: {
+        filters: {
+          source: ["src-x"],
+          kind: ["youtube_video"],
+          show: { kind: "any" as const },
+          authorIsMe: true,
+          defaultDateRange: false,
+          all: false,
+          action: ["key.add"], // Populated but schema excludes 'action'.
+        },
+        sources: [{ id: "src-x", displayName: "Src X", handleUrl: "https://x" }],
+        games: [],
+        schema: ["kind", "source", "show", "authorIsMe"] as const,
+        onDismiss: () => {},
+        onOpenSheet: () => {},
+        onClearAll: () => {},
+      },
+    });
+    // /feed schema — kind / source / authorIsMe chips render; action does NOT.
+    expect(out.body).toContain("Kind:");
+    expect(out.body).toContain("Source:");
+    expect(out.body).toContain("Author: me");
+    expect(out.body).not.toContain("Action:");
   });
 });

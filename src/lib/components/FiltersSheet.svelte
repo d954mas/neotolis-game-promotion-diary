@@ -21,6 +21,19 @@
   //     long source/game list stays scannable.
   //   - from / to date inputs are owned by <DateRangeControl> above the
   //     chip strip on /feed (Gap 10).
+  //
+  // Plan 02.1-21 changes (round-3 UAT closure for §9.2-bug):
+  //   - REQUIRED `schema: ReadonlyArray<FilterAxis>` prop replaces Plan
+  //     02.1-20's implicit axis-detection (was: filters.action presence as
+  //     the gate). /feed passes ['kind','source','show','authorIsMe','date'];
+  //     /audit passes ['action','date']. Each fieldset is gated on
+  //     `schema.includes('axisName')` so the rendered surface mirrors the
+  //     consumer's intent exactly.
+  //   - New 'date' axis fieldset (two date inputs) renders when
+  //     schema.includes('date'). /feed and /audit both keep <DateRangeControl>
+  //     ABOVE the chip strip as the always-visible primary entry; the
+  //     in-sheet date fieldset is the secondary entry for users opening the
+  //     sheet from a chip click.
 
   import { m } from "$lib/paraglide/messages.js";
   import { sortByLabel } from "$lib/util/sort-kinds.js";
@@ -29,6 +42,10 @@
     | { kind: "any" }
     | { kind: "inbox" }
     | { kind: "specific"; gameIds: string[] };
+
+  // Plan 02.1-21: explicit axis enumeration. Each consumer page passes the
+  // subset it wants rendered; FiltersSheet renders ONLY axes in `schema`.
+  type FilterAxis = "kind" | "source" | "show" | "authorIsMe" | "date" | "action";
 
   type ActiveFilters = {
     source: string[];
@@ -39,8 +56,10 @@
     to?: string;
     defaultDateRange: boolean;
     all: boolean;
-    // Plan 02.1-20: optional action axis for /audit reuse. /feed never sets
-    // this; /audit always sets it (possibly to []). undefined → no fieldset.
+    // Plan 02.1-20 carry-over: action stays in the type so /audit can
+    // populate it. Plan 02.1-21: axis rendering is now driven by `schema`,
+    // not by the presence of this field. The field is still a string[]
+    // so the action checkbox state can survive a re-render.
     action?: string[];
   };
   type SourceOption = { id: string; displayName: string | null; handleUrl: string };
@@ -51,19 +70,30 @@
     sources,
     games,
     focusAxis,
+    schema,
     onApply,
     onClose,
   }: {
     filters: ActiveFilters;
     sources: SourceOption[];
     games: GameOption[];
-    focusAxis?: "kind" | "source" | "show" | "authorIsMe" | "action";
+    focusAxis?: FilterAxis;
+    // Plan 02.1-21: REQUIRED — consumer pages opt in to each axis explicitly.
+    // /feed passes ['kind','source','show','authorIsMe','date']; /audit
+    // passes ['action','date']. Replaces Plan 02.1-20's implicit gate.
+    schema: ReadonlyArray<FilterAxis>;
     onApply: (next: {
       source?: string[];
       kind?: string[];
       show?: ShowFilter;
       authorIsMe?: boolean;
-      // Plan 02.1-20: optional action axis for /audit reuse.
+      // Plan 02.1-21: date axis applied via this payload when 'date' is in
+      // the schema. /feed continues to use <DateRangeControl> (date params
+      // still flow via that path); the sheet's date inputs are a secondary
+      // entry that emits the same shape.
+      from?: string;
+      to?: string;
+      // Plan 02.1-20 carry-over: action axis emitted when schema includes it.
       action?: string[];
     }) => void;
     onClose: () => void;
@@ -88,8 +118,15 @@
   );
 
   // Plan 02.1-20: action axis state (used by /audit). /feed leaves
-  // filters.action undefined so this Set stays empty + the fieldset hides.
+  // filters.action undefined so this Set stays empty.
+  // Plan 02.1-21: rendering gate moved to schema.includes('action').
   let actionSelected = $state<Set<string>>(new Set(filters.action ?? []));
+
+  // Plan 02.1-21: in-sheet date axis (secondary entry; <DateRangeControl>
+  // above the chip strip is the primary always-visible entry). Local state
+  // mirrors the loader-supplied values so users can edit + Apply.
+  let fromVal = $state<string>(filters.from ?? "");
+  let toVal = $state<string>(filters.to ?? "");
 
   // Plan 02.1-20: functional-only allowlist + alphabetical-by-label sort.
   // Mirrors the /events/new picker — same allowlist, same sort. Hidden
@@ -271,27 +308,58 @@
         : showSelection === "inbox"
           ? { kind: "inbox" }
           : { kind: "specific", gameIds: Array.from(gameSelected) };
-    onApply({
-      source: Array.from(sourceSelected),
-      kind: Array.from(kindSelected),
-      show: showResult,
-      authorIsMe: authorIsMe === "any" ? undefined : authorIsMe === "true",
-      // Plan 02.1-20: emit action axis only when /audit is the consumer
-      // (filters.action !== undefined). /feed leaves it undefined so this
-      // key is omitted from the apply payload.
-      ...(filters.action !== undefined ? { action: Array.from(actionSelected) } : {}),
-    });
+    // Plan 02.1-21: emit each axis only when the consumer's schema includes
+    // it. The consumer page maps the apply payload back to URL params; an
+    // omitted key means "this consumer doesn't own this axis".
+    const payload: {
+      source?: string[];
+      kind?: string[];
+      show?: ShowFilter;
+      authorIsMe?: boolean;
+      from?: string;
+      to?: string;
+      action?: string[];
+    } = {};
+    if (schema.includes("source")) payload.source = Array.from(sourceSelected);
+    if (schema.includes("kind")) payload.kind = Array.from(kindSelected);
+    if (schema.includes("show")) payload.show = showResult;
+    if (schema.includes("authorIsMe")) {
+      payload.authorIsMe = authorIsMe === "any" ? undefined : authorIsMe === "true";
+    }
+    if (schema.includes("date")) {
+      if (fromVal) payload.from = fromVal;
+      if (toVal) payload.to = toVal;
+    }
+    if (schema.includes("action")) payload.action = Array.from(actionSelected);
+    onApply(payload);
   }
 
   function clearAll(): void {
-    // Plan 02.1-20: clearAll preserves the axis-presence contract — if the
-    // consumer passes filters.action, return action: [] (empty) so the
-    // consumer can rebuild URL state; if not, omit the key (the /feed case).
-    if (filters.action !== undefined) {
-      onApply({ show: { kind: "any" }, action: [] });
-    } else {
-      onApply({ show: { kind: "any" } });
+    // Plan 02.1-21: clearAll preserves the schema-presence contract. Each
+    // axis the consumer owns is reset to its empty form; axes the consumer
+    // does NOT own are omitted from the payload entirely.
+    const payload: {
+      source?: string[];
+      kind?: string[];
+      show?: ShowFilter;
+      authorIsMe?: boolean;
+      from?: string;
+      to?: string;
+      action?: string[];
+    } = {};
+    if (schema.includes("source")) payload.source = [];
+    if (schema.includes("kind")) payload.kind = [];
+    if (schema.includes("show")) payload.show = { kind: "any" };
+    if (schema.includes("authorIsMe")) payload.authorIsMe = undefined;
+    if (schema.includes("date")) {
+      // Empty strings clear the date axis; the consumer maps this to
+      // ?all=1 on /feed (opt-out of the 30-day default) or to no params
+      // on /audit (no date constraint).
+      payload.from = undefined;
+      payload.to = undefined;
     }
+    if (schema.includes("action")) payload.action = [];
+    onApply(payload);
   }
 </script>
 
@@ -304,103 +372,137 @@
   <h2 id="filters-sheet-heading" class="heading">Filters</h2>
 
   <div class="grid">
-    <fieldset class="field" data-axis="source">
-      <legend class="label">Source</legend>
-      <input
-        type="search"
-        class="input"
-        placeholder="Filter sources…"
-        bind:value={sourceTypeahead}
-      />
-      <div class="checklist">
-        {#each filteredSources as s (s.id)}
-          <label class="check">
-            <input
-              type="checkbox"
-              checked={sourceSelected.has(s.id)}
-              onchange={() => (sourceSelected = toggle(sourceSelected, s.id))}
-            />
-            {s.displayName ?? s.handleUrl}
-          </label>
-        {/each}
-      </div>
-    </fieldset>
+    <!-- Plan 02.1-21: each fieldset is gated on schema.includes(axis).
+         Replaces Plan 02.1-20's implicit filters.action-detection. -->
+    {#if schema.includes("source")}
+      <fieldset class="field" data-axis="source">
+        <legend class="label">Source</legend>
+        <input
+          type="search"
+          class="input"
+          placeholder="Filter sources…"
+          bind:value={sourceTypeahead}
+        />
+        <div class="checklist">
+          {#each filteredSources as s (s.id)}
+            <label class="check">
+              <input
+                type="checkbox"
+                checked={sourceSelected.has(s.id)}
+                onchange={() => (sourceSelected = toggle(sourceSelected, s.id))}
+              />
+              {s.displayName ?? s.handleUrl}
+            </label>
+          {/each}
+        </div>
+      </fieldset>
+    {/if}
 
-    <fieldset class="field" data-axis="kind">
-      <legend class="label">Kind</legend>
-      <div class="checklist">
-        {#each KIND_OPTIONS as k (k)}
-          <label class="check">
-            <input
-              type="checkbox"
-              checked={kindSelected.has(k)}
-              onchange={() => (kindSelected = toggle(kindSelected, k))}
-            />
-            {kindLabel(k)}
-          </label>
-        {/each}
-      </div>
-    </fieldset>
+    {#if schema.includes("kind")}
+      <fieldset class="field" data-axis="kind">
+        <legend class="label">Kind</legend>
+        <div class="checklist">
+          {#each KIND_OPTIONS as k (k)}
+            <label class="check">
+              <input
+                type="checkbox"
+                checked={kindSelected.has(k)}
+                onchange={() => (kindSelected = toggle(kindSelected, k))}
+              />
+              {kindLabel(k)}
+            </label>
+          {/each}
+        </div>
+      </fieldset>
+    {/if}
 
     <!-- Plan 02.1-19: Game checkbox-list + Attached radio MERGED into a
          single Show 3-radio with a conditional games multi-select. The
          conflict between "Inbox AND specific games" is impossible by
          construction. -->
-    <fieldset class="field" data-axis="show">
-      <legend class="label">{m.feed_filter_show_axis_label()}</legend>
-      <label class="toggle">
-        <input type="radio" name="show" value="any" bind:group={showSelection} />
-        {m.feed_filter_show_any()}
-      </label>
-      <label class="toggle">
-        <input type="radio" name="show" value="inbox" bind:group={showSelection} />
-        {m.feed_filter_show_inbox()}
-      </label>
-      <label class="toggle">
-        <input type="radio" name="show" value="specific" bind:group={showSelection} />
-        {m.feed_filter_show_specific()}
-      </label>
+    {#if schema.includes("show")}
+      <fieldset class="field" data-axis="show">
+        <legend class="label">{m.feed_filter_show_axis_label()}</legend>
+        <label class="toggle">
+          <input type="radio" name="show" value="any" bind:group={showSelection} />
+          {m.feed_filter_show_any()}
+        </label>
+        <label class="toggle">
+          <input type="radio" name="show" value="inbox" bind:group={showSelection} />
+          {m.feed_filter_show_inbox()}
+        </label>
+        <label class="toggle">
+          <input type="radio" name="show" value="specific" bind:group={showSelection} />
+          {m.feed_filter_show_specific()}
+        </label>
 
-      {#if showSelection === "specific"}
-        <input
-          type="search"
-          class="input"
-          placeholder="Filter games…"
-          bind:value={gameTypeahead}
-        />
-        <div class="checklist">
-          {#each filteredGames as g (g.id)}
-            <label class="check">
-              <input
-                type="checkbox"
-                checked={gameSelected.has(g.id)}
-                onchange={() => (gameSelected = toggle(gameSelected, g.id))}
-              />
-              {g.title}
-            </label>
-          {/each}
-        </div>
-      {/if}
-    </fieldset>
+        {#if showSelection === "specific"}
+          <input
+            type="search"
+            class="input"
+            placeholder="Filter games…"
+            bind:value={gameTypeahead}
+          />
+          <div class="checklist">
+            {#each filteredGames as g (g.id)}
+              <label class="check">
+                <input
+                  type="checkbox"
+                  checked={gameSelected.has(g.id)}
+                  onchange={() => (gameSelected = toggle(gameSelected, g.id))}
+                />
+                {g.title}
+              </label>
+            {/each}
+          </div>
+        {/if}
+      </fieldset>
+    {/if}
 
-    <fieldset class="field" data-axis="authorIsMe">
-      <legend class="label">Author</legend>
-      <label class="toggle">
-        <input type="radio" name="author" value="any" bind:group={authorIsMe} /> Any
-      </label>
-      <label class="toggle">
-        <input type="radio" name="author" value="true" bind:group={authorIsMe} />
-        {m.feed_filter_author_me()}
-      </label>
-      <label class="toggle">
-        <input type="radio" name="author" value="false" bind:group={authorIsMe} />
-        {m.feed_filter_author_others()}
-      </label>
-    </fieldset>
+    {#if schema.includes("authorIsMe")}
+      <fieldset class="field" data-axis="authorIsMe">
+        <legend class="label">Author</legend>
+        <label class="toggle">
+          <input type="radio" name="author" value="any" bind:group={authorIsMe} /> Any
+        </label>
+        <label class="toggle">
+          <input type="radio" name="author" value="true" bind:group={authorIsMe} />
+          {m.feed_filter_author_me()}
+        </label>
+        <label class="toggle">
+          <input type="radio" name="author" value="false" bind:group={authorIsMe} />
+          {m.feed_filter_author_others()}
+        </label>
+      </fieldset>
+    {/if}
 
-    <!-- Plan 02.1-20: optional action axis for /audit reuse. /feed leaves
-         filters.action undefined so this fieldset stays hidden there. -->
-    {#if filters.action !== undefined}
+    <!-- Plan 02.1-21: in-sheet date axis. Secondary entry; the always-
+         visible <DateRangeControl> above the chip strip is the primary one. -->
+    {#if schema.includes("date")}
+      <fieldset class="field" data-axis="date">
+        <legend class="label">{m.audit_filter_date_axis_label()}</legend>
+        <label class="input-wrap">
+          <span class="input-label">{m.feed_date_range_label_from()}</span>
+          <input
+            type="date"
+            class="input"
+            bind:value={fromVal}
+            max={toVal || undefined}
+          />
+        </label>
+        <label class="input-wrap">
+          <span class="input-label">{m.feed_date_range_label_to()}</span>
+          <input
+            type="date"
+            class="input"
+            bind:value={toVal}
+            min={fromVal || undefined}
+          />
+        </label>
+      </fieldset>
+    {/if}
+
+    {#if schema.includes("action")}
       <fieldset class="field" data-axis="action">
         <legend class="label">{m.audit_filter_action_axis_label()}</legend>
         <div class="checklist">
@@ -483,6 +585,16 @@
     border: 1px solid var(--color-border);
     border-radius: 4px;
     font-size: var(--font-size-body);
+  }
+  /* Plan 02.1-21: in-sheet date axis label/input pair. */
+  .input-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+  }
+  .input-label {
+    font-size: var(--font-size-label);
+    color: var(--color-text-muted);
   }
   .checklist {
     display: flex;

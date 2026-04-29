@@ -34,19 +34,26 @@
     to?: string;
     defaultDateRange: boolean;
     all: boolean;
-    // Plan 02.1-20: optional action axis for /audit reuse. /feed never sets
-    // this; /audit always sets it (possibly to []). undefined → no chip.
+    // Plan 02.1-20 carry-over: action stays in the type so /audit can
+    // populate it. Plan 02.1-21: chip emission is gated on `schema`,
+    // not on the presence of this field.
     action?: string[];
   };
   type SourceOption = { id: string; displayName: string | null; handleUrl: string };
   type GameOption = { id: string; title: string };
 
+  // Plan 02.1-21: the FilterChips axis union mirrors FiltersSheet's
+  // FilterAxis type. 'date' is intentionally NOT included — the visible
+  // from/to inputs in <DateRangeControl> are the date indicator (round-2
+  // UAT contract preserved).
   type ChipAxis = "kind" | "source" | "show" | "authorIsMe" | "action";
+  type FilterAxis = ChipAxis | "date";
 
   let {
     filters,
     sources,
     games,
+    schema,
     onDismiss,
     onOpenSheet,
     onClearAll,
@@ -54,6 +61,13 @@
     filters: ActiveFilters;
     sources: SourceOption[];
     games: GameOption[];
+    // Plan 02.1-21: REQUIRED — same shape as FiltersSheet's schema. Chips
+    // are only emitted for axes present in schema. /feed passes
+    // ['kind','source','show','authorIsMe','date']; /audit passes
+    // ['action','date']. (The 'date' entry has no chip — the date inputs
+    // ARE the indicator — but it stays in the schema to keep the array a
+    // single source of truth across both components.)
+    schema: ReadonlyArray<FilterAxis>;
     onDismiss: (axis: ChipAxis) => void;
     onOpenSheet: (focusAxis?: ChipAxis) => void;
     onClearAll: () => void;
@@ -140,15 +154,21 @@
   const chips = $derived.by((): Chip[] => {
     const out: Chip[] = [];
 
+    // Plan 02.1-21: each axis emits a chip only when the consumer's schema
+    // includes it. Replaces Plan 02.1-20's implicit gate (was: action
+    // presence on filters). /audit passes schema=['action','date'] so
+    // /feed-only axes (kind/source/show/authorIsMe) don't leak into the
+    // audit chip strip even if filters carries default values for them.
+
     // Kind axis — one chip with comma-joined value labels.
-    if (filters.kind.length > 0) {
+    if (schema.includes("kind") && filters.kind.length > 0) {
       const labels = filters.kind.map(kindLabel).join(", ");
       const label = `${m.feed_chip_axis_kind()}: ${labels}`;
       out.push({ axis: "kind", label, ariaName: label, key: "axis:kind" });
     }
 
     // Source axis — one chip with comma-joined display names.
-    if (filters.source.length > 0) {
+    if (schema.includes("source") && filters.source.length > 0) {
       const labels = filters.source
         .map((id) => {
           const s = sources.find((x) => x.id === id);
@@ -160,42 +180,48 @@
     }
 
     // Show axis (merged from old game + attached).
-    if (filters.show.kind === "inbox") {
-      const label = `${m.feed_chip_axis_show()}: ${m.feed_filter_show_inbox()}`;
-      out.push({ axis: "show", label, ariaName: label, key: "axis:show:inbox" });
-    } else if (filters.show.kind === "specific" && filters.show.gameIds.length > 0) {
-      const labels = filters.show.gameIds
-        .map((id) => {
-          const g = games.find((x) => x.id === id);
-          return g ? g.title : id;
-        })
-        .join(", ");
-      const label = `${m.feed_chip_axis_show()}: ${labels}`;
-      out.push({ axis: "show", label, ariaName: label, key: "axis:show:specific" });
+    if (schema.includes("show")) {
+      if (filters.show.kind === "inbox") {
+        const label = `${m.feed_chip_axis_show()}: ${m.feed_filter_show_inbox()}`;
+        out.push({ axis: "show", label, ariaName: label, key: "axis:show:inbox" });
+      } else if (filters.show.kind === "specific" && filters.show.gameIds.length > 0) {
+        const labels = filters.show.gameIds
+          .map((id) => {
+            const g = games.find((x) => x.id === id);
+            return g ? g.title : id;
+          })
+          .join(", ");
+        const label = `${m.feed_chip_axis_show()}: ${labels}`;
+        out.push({ axis: "show", label, ariaName: label, key: "axis:show:specific" });
+      }
+      // show.kind === "any": no chip (default).
     }
-    // show.kind === "any": no chip (default).
 
     // Author axis — single value, kept as-is.
-    if (filters.authorIsMe === true) {
-      const label = m.feed_filter_author_me();
-      out.push({ axis: "authorIsMe", label, ariaName: label, key: "authorIsMe:true" });
-    } else if (filters.authorIsMe === false) {
-      const label = m.feed_filter_author_others();
-      out.push({ axis: "authorIsMe", label, ariaName: label, key: "authorIsMe:false" });
+    if (schema.includes("authorIsMe")) {
+      if (filters.authorIsMe === true) {
+        const label = m.feed_filter_author_me();
+        out.push({ axis: "authorIsMe", label, ariaName: label, key: "authorIsMe:true" });
+      } else if (filters.authorIsMe === false) {
+        const label = m.feed_filter_author_others();
+        out.push({ axis: "authorIsMe", label, ariaName: label, key: "authorIsMe:false" });
+      }
     }
 
-    // Plan 02.1-20: action axis (used by /audit). One chip per active axis
-    // with comma-joined translated labels. /feed never passes filters.action
-    // so this branch is dormant on /feed.
-    if (filters.action !== undefined && filters.action.length > 0) {
-      const labels = filters.action.map(auditActionLabel).join(", ");
+    // Action axis (used by /audit). One chip with comma-joined translated
+    // labels. /feed never passes 'action' in its schema so this branch is
+    // dormant on /feed.
+    if (schema.includes("action") && (filters.action?.length ?? 0) > 0) {
+      const labels = filters.action!.map(auditActionLabel).join(", ");
       const label = `${m.feed_chip_axis_action()}: ${labels}`;
       out.push({ axis: "action", label, ariaName: label, key: "axis:action" });
     }
 
-    // Plan 02.1-19: NO date-range chip emission. The visible from/to inputs
-    // in <DateRangeControl> ARE the indicator. Duplication is confusing
-    // (UAT round-2 gap "FilterChips MUST NOT emit any chip for date range").
+    // Plan 02.1-19/21: NO date-range chip emission. The visible from/to
+    // inputs in <DateRangeControl> ARE the indicator. Duplication is
+    // confusing (UAT round-2 gap "FilterChips MUST NOT emit any chip for
+    // date range"). 'date' may appear in schema (it does on /audit and
+    // /feed) but the chip strip stays silent on it.
     return out;
   });
 
