@@ -60,7 +60,7 @@
   let rowError = $state<string | null>(null);
 
   // Plan 02.1-22 (UAT-NOTES.md §2.4-decision option A): the standalone
-  // toggleAutoImport() function was DELETED. The previous one-click toggle
+  // auto-import toggle handler was DELETED — the previous one-click toggle
   // in row-display mode was too easy to mis-tap and there was no audit
   // discoverability before the round-3 UAT. The toggle now lives inside the
   // edit form and ships in the same PATCH as a display-name change.
