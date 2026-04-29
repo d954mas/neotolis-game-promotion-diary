@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02.1-16-PLAN.md (FeedCard media cards + formatFeedDate + paraglide snapshot refresh + 02.1-VALIDATION.md sign-off). Phase 2.1 gap-closure chain complete; Plan 02.1-10 UAT checkpoint resume next.
-last_updated: "2026-04-28T20:55:00.000Z"
-last_activity: 2026-04-28
+stopped_at: Completed 02.1-17-PLAN.md (manual-create enrichment + preview-url endpoint + url-required superRefine + authorIsMe round-trip)
+last_updated: "2026-04-29T09:14:32.008Z"
+last_activity: 2026-04-29
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 37
-  completed_plans: 35
+  total_plans: 41
+  completed_plans: 37
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 16 of 16 (gap-closure chain complete; Plan 02.1-10 UAT checkpoint resume next)
+Plan: 2 of 20
 
 ## Performance Metrics
 
@@ -80,6 +80,7 @@ Plan: 16 of 16 (gap-closure chain complete; Plan 02.1-10 UAT checkpoint resume n
 | Phase 02.1-architecture-realignment P14 | 30min | 3 tasks | 15 files |
 | Phase 02.1-architecture-realignment P15 | 30min | 3 tasks | 10 files |
 | Phase 02.1-architecture-realignment P16 | ~12min | 3 tasks | 11 files |
+| Phase 02.1-architecture-realignment P17 | 12min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -199,6 +200,7 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-14: DeletedEventsPanel renders nothing when deletedEvents.length===0 — /feed gains zero visual footprint when there's nothing recoverable. Empty-state branches above CursorPager are unaware of the panel
 - [Phase 02.1-architecture-realignment]: Plan 02.1-14: retentionDays plumbing reuses Plan 02-10's +layout.server.ts → data.retentionDays pass-through; no new process.env reader added (Phase 1 D-14 invariant preserved)
 - [Phase 02.1-architecture-realignment]: Plan 02.1-15: FeedFilters extended with string|string[] union (back-compat preserved); pushAxis helper collapses to eq()/inArray() based on shape — empty array == no filter (multi-select with zero checkboxes returns ALL rows, not zero); URL convention is repeated params (?source=A&source=B) per URLSearchParams.getAll convention; default last-30-days lives in /feed/+page.server.ts (UI affordance), not in /api/events; DateRangeControl is a separate component above FilterChips (not absorbed into FiltersSheet) per standard analytics-feed pattern; clearAll navigates to /feed?all=1 so the 30-day default doesn't immediately re-apply
+- [Phase 02.1-architecture-realignment]: Plan 02.1-17: enrichFromUrl extracted from createEventFromPaste — DRY shared helper for paste flow + new POST /api/events/preview-url; createEvent opportunistically derives external_id for kind=youtube_video (idempotent — caller-supplied externalId wins); youtubeUrlRequired superRefine shared between createEventSchema + updateEventSchema; updateEvent accepts authorIsMe so /events/[id]/edit can flip the discriminator; publishedAt auto-fill DEFERRED to Phase 3 KEYS-01 (YouTube oEmbed lacks published_at; Data API needs per-tenant key)
 
 ### Pending Todos
 
@@ -238,8 +240,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-28T20:55:00.000Z
-Last Activity: 2026-04-28
-Stopped at: Completed 02.1-16-PLAN.md (FeedCard media cards + formatFeedDate + paraglide snapshot refresh + 02.1-VALIDATION.md sign-off). All 12 UAT gaps closed across Plans 02.1-11 → 02.1-16. Plan 02.1-10 UAT checkpoint resume next.
+Last session: 2026-04-29T09:14:32.005Z
+Last Activity: 2026-04-29
+Stopped at: Completed 02.1-17-PLAN.md (manual-create enrichment + preview-url endpoint + url-required superRefine + authorIsMe round-trip)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
