@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02.1-29-PLAN.md
-last_updated: "2026-04-29T16:42:44.736Z"
+stopped_at: Completed 02.1-28-PLAN.md
+last_updated: "2026-04-29T17:24:17.641Z"
 last_activity: 2026-04-29
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 55
-  completed_plans: 48
+  completed_plans: 49
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 3 of 34
+Plan: 4 of 34
 
 ## Performance Metrics
 
@@ -92,6 +92,7 @@ Plan: 3 of 34
 | Phase 02.1-architecture-realignment P25 | ~25min | 3 tasks | 18 files |
 | Phase 02.1-architecture-realignment P27 | 17min 41s | 2 tasks | 12 files |
 | Phase 02.1-architecture-realignment P29 | 32min | 1 tasks | 6 files |
+| Phase 02.1-architecture-realignment P28 | 34min 28s | 2 tasks | 31 files |
 
 ## Accumulated Context
 
@@ -256,6 +257,11 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-27: game_steam_listings unique stays UNCONDITIONAL — Plan 02.1-29 chose Path B (service-layer pre-INSERT lookup catches soft-deleted dupes BEFORE 23505); Plan 27 only DROPS the user-scoped uniqueness, does NOT add a partial-WHERE clause
 - [Phase 02.1-architecture-realignment]: Plan 02.1-27: Plan 02.1-24 audit_action length-22 hard assertion relaxed to >=22 lower bound; exact-length-23 assertion now lives in Plan 02.1-27 describe block (mirrors how Plan 02.1-14 absorbed Plan 02.1-24's additive growth)
 - [Phase 02.1-architecture-realignment]: Plan 02.1-29 — Path B (unconditional DB constraint + pre-INSERT lookup + race-window catch) for Steam listing duplicate handling. Closes UAT-NOTES.md §4.25.E (500→422), §4.25.G prep (existingGameId/existingState payload), §4.25.H verification (DELETE route). isPgUniqueViolation extracted to shared db/postgres-errors.ts; mapErr extended to forward AppError.metadata.
+- [Phase 02.1-architecture-realignment]: Plan 02.1-28: createEvent does NOT issue per-game attached_to_game audits — only attachEventToGames diff path writes them; event.created carries the initial set via metadata.game_ids
+- [Phase 02.1-architecture-realignment]: Plan 02.1-28: events soft-delete cascade REMOVED in services/games.ts (M:N can't cleanly map game-deletion → event-deletion when events attach to multiple games)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-28: markStandalone REJECTS attached events (422 standalone_conflicts_with_game) — replaces Plan 02.1-24 silent-detach behavior
+- [Phase 02.1-architecture-realignment]: Plan 02.1-28: HTTP route schemas accept BOTH {gameIds} (canonical) AND {gameId|null} (back-compat alias for one round of UAT); Plan 02.1-32 retires the alias UI-side
+- [Phase 02.1-architecture-realignment]: Plan 02.1-28: toEventDto signature extended to (event, gameIds[]) — pure projection; mapEventsToDtos batch helper avoids N+1 on list paths
 
 ### Pending Todos
 
@@ -296,8 +302,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-29T16:42:44.733Z
+Last session: 2026-04-29T17:24:17.637Z
 Last Activity: 2026-04-29
-Stopped at: Completed 02.1-29-PLAN.md
+Stopped at: Completed 02.1-28-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
