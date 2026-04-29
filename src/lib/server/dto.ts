@@ -139,6 +139,10 @@ export interface GameSteamListingDto {
   gameId: string;
   appId: number;
   label: string;
+  // Plan 02.1-25: Steam game name (e.g. "Portal 2"). NULL when the
+  // appdetails fetch failed at INSERT time (Steam down) or the row predates
+  // the column. UI fallback: `App {appId}`.
+  name: string | null;
   coverUrl: string | null;
   releaseDate: string | null;
   comingSoon: string | null;
@@ -156,6 +160,7 @@ export function toGameSteamListingDto(r: SteamListingRow): GameSteamListingDto {
     gameId: r.gameId,
     appId: r.appId,
     label: r.label,
+    name: r.name,
     coverUrl: r.coverUrl,
     releaseDate: r.releaseDate,
     comingSoon: r.comingSoon,

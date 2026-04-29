@@ -34,6 +34,11 @@ export const gameSteamListings = pgTable(
       .references(() => games.id, { onDelete: "cascade" }),
     appId: integer("app_id").notNull(),
     label: text("label").notNull().default(""),
+    // Plan 02.1-25 (UAT-NOTES.md §3.3-polish): Steam game name persisted
+    // from fetchSteamAppDetails (already returned but never written). Nullable
+    // — legacy rows + Steam-down inserts keep NULL; SteamListingRow renders
+    // `App {appId}` fallback when null.
+    name: text("name"),
     coverUrl: text("cover_url"),
     releaseDate: text("release_date"),
     comingSoon: text("coming_soon"),

@@ -29,6 +29,13 @@
       "when": 1777467149000,
       "tag": "0003_add_event_standalone_audit_actions",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1777469400000,
+      "tag": "0004_add_steam_listing_name",
+      "breakpoints": true
     }
   ]
 }

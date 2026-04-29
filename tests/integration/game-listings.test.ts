@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { randomBytes } from "node:crypto";
 import { createGame } from "../../src/lib/server/services/games.js";
 import { seedUserDirectly } from "./helpers.js";
+
+// Plan 02.1-25 round-3 dev/test-DB conflation: tests/setup.ts truncates
+// `neotolis_test`, but runMigrations() reads env.DATABASE_URL which points
+// at `neotolis` (the dev DB). Tests run against the dev DB, so a fixed
+// email collides across re-runs. Random suffix keeps emails unique per
+// invocation without changing the test-harness wiring (deferred).
+const sfx = (): string => randomBytes(4).toString("hex");
 
 /**
  * Plan 02-04 — GAMES-04a integration tests for `youtube-channels` were
@@ -58,7 +66,7 @@ describe("Plan 02.1-25 — Steam listing name persistence", () => {
       raw: { name: "Portal 2" },
     });
 
-    const userA = await seedUserDirectly({ email: "p25-a@test.local" });
+    const userA = await seedUserDirectly({ email: `p25-a-${sfx()}@test.local` });
     const game = await createGame(userA.id, { title: "Hosted" }, "127.0.0.1");
 
     const row = await addSteamListing(userA.id, { gameId: game.id, appId: 620 }, "127.0.0.1");
@@ -74,7 +82,7 @@ describe("Plan 02.1-25 — Steam listing name persistence", () => {
   it("addSteamListing leaves name NULL when fetchSteamAppDetails returns null (Steam down)", async () => {
     vi.mocked(fetchSteamAppDetails).mockResolvedValueOnce(null);
 
-    const userA = await seedUserDirectly({ email: "p25-b@test.local" });
+    const userA = await seedUserDirectly({ email: `p25-b-${sfx()}@test.local` });
     const game = await createGame(userA.id, { title: "Steam-down case" }, "127.0.0.1");
 
     const row = await addSteamListing(
@@ -105,7 +113,7 @@ describe("Plan 02.1-25 — Steam listing name persistence", () => {
       })
       .mockResolvedValueOnce(null);
 
-    const userA = await seedUserDirectly({ email: "p25-c@test.local" });
+    const userA = await seedUserDirectly({ email: `p25-c-${sfx()}@test.local` });
     const game = await createGame(userA.id, { title: "Mixed" }, "127.0.0.1");
 
     await addSteamListing(userA.id, { gameId: game.id, appId: 1145360 }, "127.0.0.1");

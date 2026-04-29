@@ -70,6 +70,10 @@ export async function addSteamListing(
       gameId: input.gameId,
       appId: input.appId,
       label: input.label ?? "",
+      // Plan 02.1-25: persist Steam game name when the appdetails fetch
+      // succeeded; otherwise NULL (Steam down or success:false). The UI
+      // (SteamListingRow) renders `App {appId}` fallback for null rows.
+      name: meta?.name ?? null,
       coverUrl: meta?.coverUrl ?? null,
       releaseDate: meta?.releaseDate ?? null,
       comingSoon: meta ? (meta.comingSoon ? "true" : "false") : "unavailable",
