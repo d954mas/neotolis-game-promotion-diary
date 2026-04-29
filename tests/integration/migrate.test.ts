@@ -186,16 +186,11 @@ describe("Phase 2.1 baseline schema migration (Plan 02.1-01)", () => {
     }
   });
 
-  it("makes events.game_id nullable", async () => {
-    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
-    try {
-      const result = await pool.query<{ is_nullable: string }>(
-        `select is_nullable from information_schema.columns where table_name='events' and column_name='game_id'`,
-      );
-      expect(result.rows[0]?.is_nullable).toBe("YES");
-    } finally {
-      await pool.end();
-    }
+  it.skip("makes events.game_id nullable (superseded by Plan 02.1-27 — column DROPPED in 0005)", async () => {
+    // The Phase 2.1 baseline made events.game_id nullable to encode inbox
+    // semantics (game_id IS NULL). Plan 02.1-27 (UAT-NOTES.md §4.24.G)
+    // DROPS the column entirely in favour of the event_games M:N junction.
+    // The Plan 02.1-27 describe block below asserts the column is gone.
   });
 
   it("adds events.author_is_me / source_id / last_polled_at / last_poll_status columns", async () => {
@@ -335,6 +330,127 @@ describe("Phase 2.1 forward-only migrations (Plan 02.1-14)", () => {
   });
 });
 
+// Plan 02.1-27 (round-4 gap closure — UAT-NOTES.md §4.24.G + §4.25.J):
+// SPLIT migration pair. 0005_event_games_and_steam_listing_unique_swap is
+// pure DDL — CREATE TABLE event_games (M:N junction) + DROP COLUMN
+// events.game_id + DROP CONSTRAINT game_steam_listings_user_app_id_unq.
+// 0006_add_event_detached_from_game_audit_action is the lone ALTER TYPE
+// (audit_action enum gains 'event.detached_from_game'), isolated in its
+// own migration file per Pitfall 1 (Postgres 16 ALTER TYPE rules) +
+// Plan 02.1-12 precedent.
+describe("Plan 02.1-27 — event_games + steam listing unique swap (0005 + 0006 split)", () => {
+  beforeAll(async () => {
+    await runMigrations();
+  });
+
+  it("0005: event_games table exists with composite PK + denormalized user_id", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const tableRes = await pool.query<{ tablename: string }>(
+        `select tablename from pg_tables where schemaname='public' and tablename='event_games'`,
+      );
+      expect(tableRes.rows.length).toBe(1);
+
+      const colRes = await pool.query<{ column_name: string; data_type: string }>(
+        `select column_name, data_type from information_schema.columns
+         where table_name='event_games' order by ordinal_position`,
+      );
+      const cols = colRes.rows.map((r) => r.column_name).sort();
+      expect(cols).toEqual(["created_at", "event_id", "game_id", "user_id"]);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("0005: events.game_id column dropped", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const result = await pool.query<{ column_name: string }>(
+        `select column_name from information_schema.columns
+         where table_name='events' and column_name='game_id'`,
+      );
+      expect(result.rows.length).toBe(0);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("0005: user-scoped Steam listing unique constraint dropped (game-scoped retained, unconditional)", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const userScopedDropped = await pool.query<{ constraint_name: string }>(
+        `select constraint_name from information_schema.table_constraints
+         where table_name='game_steam_listings'
+           and constraint_name='game_steam_listings_user_app_id_unq'`,
+      );
+      expect(userScopedDropped.rows.length).toBe(0);
+
+      const gameScopedRetained = await pool.query<{ constraint_name: string }>(
+        `select constraint_name from information_schema.table_constraints
+         where table_name='game_steam_listings'
+           and constraint_name='game_steam_listings_game_app_id_unq'`,
+      );
+      expect(gameScopedRetained.rows.length).toBe(1);
+
+      // Path B: constraint stays UNCONDITIONAL — no partial-WHERE clause.
+      // pg_get_constraintdef returns the full definition; assert it has no WHERE.
+      const defRes = await pool.query<{ def: string }>(
+        `select pg_get_constraintdef(c.oid) as def from pg_constraint c
+         where c.conname = 'game_steam_listings_game_app_id_unq'`,
+      );
+      expect(defRes.rows[0]?.def ?? "").not.toMatch(/where/i);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("0006: audit_action enum extended with 'event.detached_from_game'", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const result = await pool.query<{ enumlabel: string }>(
+        `select enumlabel from pg_enum
+         where enumtypid = 'public.audit_action'::regtype
+         order by enumsortorder`,
+      );
+      const values = result.rows.map((r) => r.enumlabel);
+      expect(values).toContain("event.detached_from_game");
+      // Sanity: prior verbs from Plans 14 + 24 still present.
+      expect(values).toContain("event.attached_to_game");
+      expect(values).toContain("event.marked_standalone");
+      // Total post-Plan-27: 22 (post-Plan-24) + 1 (event.detached_from_game) = 23.
+      expect(values).toHaveLength(23);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("re-running migrate is a no-op (idempotency — IF NOT EXISTS / IF EXISTS guards on 0005 + 0006)", async () => {
+    // runMigrations already ran in beforeAll; second invocation must succeed
+    // without error and leave the schema unchanged.
+    await runMigrations();
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const tableRes = await pool.query<{ tablename: string }>(
+        `select tablename from pg_tables where schemaname='public' and tablename='event_games'`,
+      );
+      expect(tableRes.rows.length).toBe(1);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("_journal.json carries idx=5 (0005) and idx=6 (0006) entries", async () => {
+    // Read the journal from disk and assert both Plan 27 entries exist.
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const journalPath = path.resolve(process.cwd(), "drizzle/meta/_journal.json");
+    const journal = JSON.parse(await fs.readFile(journalPath, "utf8"));
+    const tags = journal.entries.map((e: { idx: number; tag: string }) => `${e.idx}:${e.tag}`);
+    expect(tags).toContain("5:0005_event_games_and_steam_listing_unique_swap");
+    expect(tags).toContain("6:0006_add_event_detached_from_game_audit_action");
+  });
+});
+
 // Plan 02.1-24 (round-3 gap closure — UAT-NOTES.md §6.1-redesign): forward-only
 // migration `0003_add_event_standalone_audit_actions` extends the audit_action
 // pgEnum with `event.marked_standalone` and `event.unmarked_standalone` — the
@@ -360,8 +476,12 @@ describe("Phase 2.1 forward-only migrations (Plan 02.1-24)", () => {
       // Sanity: prior verbs still present after the additive migration.
       expect(values).toContain("event.restored");
       expect(values).toContain("event.dismissed_from_inbox");
-      // Total post-Plan-24: 20 (post-Plan-14) + 2 (Plan 02.1-24) = 22.
-      expect(values).toHaveLength(22);
+      // Post-Plan-24 added 2 verbs (post-Plan-14 = 20 → post-Plan-24 = 22).
+      // Plan 02.1-27 adds `event.detached_from_game` for the M:N detach path,
+      // moving the total to 23. The exact-length assertion lives in the Plan
+      // 02.1-27 describe block above to avoid double-counting on every future
+      // additive enum migration; here we only assert the lower bound.
+      expect(values.length).toBeGreaterThanOrEqual(22);
     } finally {
       await pool.end();
     }

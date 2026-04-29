@@ -36,6 +36,20 @@
       "when": 1777469400000,
       "tag": "0004_add_steam_listing_name",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777478647000,
+      "tag": "0005_event_games_and_steam_listing_unique_swap",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777478648000,
+      "tag": "0006_add_event_detached_from_game_audit_action",
+      "breakpoints": true
     }
   ]
 }
