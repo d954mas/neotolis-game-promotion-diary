@@ -1520,6 +1520,118 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     ).not.toMatch(/"date"/);
   });
 
+  it("/feed clearAll() preserves the date axis — chip-strip Clear filters does NOT touch ?from/?to/?all (Plan 02.1-39 round-6 polish #10)", async () => {
+    // Plan 02.1-39 round-6 polish #10 (UAT-NOTES.md §5.6 follow-up #10,
+    // 2026-04-30). User clarified after polish #9 landed:
+    //   "и clear filters вообще никак не трогает дату"
+    //   ("and Clear filters should not touch the date AT ALL")
+    //
+    // Polish #9 made the IN-SHEET Clear preserve the date axis on /feed
+    // (via FEED_SCHEMA dropping 'date'). Polish #10 extends the same
+    // contract to the chip-strip Clear button: BOTH "Clear filters"
+    // surfaces now clear ONLY the chip-owned axes (kind / source / show /
+    // game / authorIsMe / cursor) and PRESERVE the user's date range.
+    //
+    // The previous contract — chip-strip clearAll did `goto("/feed?all=1")`
+    // — wiped the date range as a "wipe everything" affordance. The user
+    // disagreed: date is owned exclusively by <DateRangeControl> and
+    // changes ONLY when the user interacts with that control directly
+    // (presets, inputs, or its own × reset button).
+    //
+    // Regression-guard the source of /feed/+page.svelte: clearAll() MUST
+    // NOT contain `goto("/feed?all=1")` and MUST NOT delete the from/to/
+    // all params; it MUST delete the chip-owned axes.
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(
+      path.resolve("src/routes/feed/+page.svelte"),
+      "utf8",
+    );
+    // Match the clearAll function body. The closing brace of the function
+    // is the next standalone `}` on its own line at the same indent as
+    // `function clearAll`. Use a non-greedy capture that stops at the
+    // first `\n  }\n` (two-space indent matches /feed/+page.svelte style).
+    const match = src.match(/function clearAll\(\):\s*void\s*\{([\s\S]*?)\n  \}/);
+    expect(
+      match,
+      "src/routes/feed/+page.svelte: clearAll() function body not found",
+    ).not.toBeNull();
+    const body = match![1]!;
+    // Old behavior MUST be gone — `?all=1` reset wiped the date range.
+    expect(
+      body,
+      "clearAll() still uses goto(\"/feed?all=1\") — round-6 polish #10 removes the date-wipe behavior",
+    ).not.toMatch(/goto\(["']\/feed\?all=1["']\)/);
+    // Chip-owned axes MUST be deleted.
+    expect(body).toMatch(/params\.delete\(["']kind["']\)/);
+    expect(body).toMatch(/params\.delete\(["']source["']\)/);
+    expect(body).toMatch(/params\.delete\(["']show["']\)/);
+    expect(body).toMatch(/params\.delete\(["']game["']\)/);
+    expect(body).toMatch(/params\.delete\(["']authorIsMe["']\)/);
+    expect(body).toMatch(/params\.delete\(["']cursor["']\)/);
+    // Date-axis params MUST NOT be deleted — that's the whole point.
+    expect(
+      body,
+      "clearAll() deletes ?from — round-6 polish #10 requires date axis to be preserved",
+    ).not.toMatch(/params\.delete\(["']from["']\)/);
+    expect(
+      body,
+      "clearAll() deletes ?to — round-6 polish #10 requires date axis to be preserved",
+    ).not.toMatch(/params\.delete\(["']to["']\)/);
+    expect(
+      body,
+      "clearAll() deletes ?all — round-6 polish #10 requires date axis to be preserved (?all=1 is a date-axis state, not a filter state)",
+    ).not.toMatch(/params\.delete\(["']all["']\)/);
+  });
+
+  it("/feed clearAll() URL behavior — preserves from/to and strips chip-owned axes (Plan 02.1-39 round-6 polish #10)", () => {
+    // Behavioral test mirroring clearAll()'s URL-construction logic. The
+    // /feed/+page.svelte function is wired to <FilterChips onClearAll> and
+    // does:
+    //   const params = new URLSearchParams(page.url.search);
+    //   params.delete("kind"); params.delete("source"); ...
+    //   const qs = params.toString();
+    //   goto(qs ? `/feed?${qs}` : "/feed");
+    //
+    // We can't import the .svelte function directly (Vitest runs the test
+    // outside the Svelte 5 compiler context for /feed), so we re-implement
+    // the same param-mutation here and assert the resulting URL on a
+    // fixture that exercises every relevant axis.
+    const initial =
+      "?from=2026-04-01&to=2026-04-15&kind=youtube_video&kind=reddit_post" +
+      "&source=src-1&show=inbox&game=g-1&authorIsMe=true&cursor=abc";
+    const params = new URLSearchParams(initial);
+    // Mirror clearAll() body — chip-owned axes only.
+    params.delete("kind");
+    params.delete("source");
+    params.delete("show");
+    params.delete("game");
+    params.delete("authorIsMe");
+    params.delete("cursor");
+    const qs = params.toString();
+    const result = qs ? `/feed?${qs}` : "/feed";
+    // Date axis MUST survive intact.
+    expect(result).toBe("/feed?from=2026-04-01&to=2026-04-15");
+  });
+
+  it("/feed clearAll() URL behavior — preserves ?all=1 when user opted into all-time view (Plan 02.1-39 round-6 polish #10)", () => {
+    // Same logic as above but starting from ?all=1 (user clicked × on
+    // <DateRangeControl> for all-time view). Clear filters MUST NOT wipe
+    // that — the user explicitly chose all-time, so it survives.
+    const initial =
+      "?all=1&kind=youtube_video&source=src-1&show=standalone&authorIsMe=false";
+    const params = new URLSearchParams(initial);
+    params.delete("kind");
+    params.delete("source");
+    params.delete("show");
+    params.delete("game");
+    params.delete("authorIsMe");
+    params.delete("cursor");
+    const qs = params.toString();
+    const result = qs ? `/feed?${qs}` : "/feed";
+    expect(result).toBe("/feed?all=1");
+  });
+
   it("FiltersSheet.svelte no longer references document.body.style.overflow in code (UAT-NOTES.md §4.22.F)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");

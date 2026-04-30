@@ -68,12 +68,15 @@
   // the in-sheet secondary axis Plan 02.1-21 added was redundant since the
   // primary control is never hidden. Removing the axis from FEED_SCHEMA
   // makes FiltersSheet skip the date fieldset (the schema.includes('date')
-  // gate handles it) AND makes FiltersSheet's clearAll skip the date axis,
-  // which is exactly what we want: clicking "Clear filters" inside the
-  // sheet now leaves the user's selected date range intact, since that
-  // axis is owned by DateRangeControl, not the sheet. The chip-strip
-  // clearAll (FilterChips → /feed clearAll → ?all=1) DOES still reset the
-  // date range — that's the "wipe everything" button, not the sheet's.
+  // gate handles it) AND makes FiltersSheet's clearAll skip the date axis.
+  //
+  // Plan 02.1-39 round-6 polish #10 (UAT-NOTES.md §5.6 follow-up #10,
+  // 2026-04-30) extended this contract to BOTH "Clear filters" surfaces.
+  // User quote: "и clear filters вообще никак не трогает дату." The
+  // chip-strip clearAll (see clearAll() below) now also preserves the date
+  // range, matching the in-sheet behavior. Date is owned exclusively by
+  // <DateRangeControl>; both "Clear filters" buttons clear ONLY the chip-
+  // owned axes (kind / source / show / game / authorIsMe / cursor).
   const FEED_SCHEMA = ["kind", "source", "show", "authorIsMe"] as const;
 
   const sourceById = $derived(new Map(data.sources.map((s) => [s.id, s])));
@@ -209,15 +212,36 @@
   }
 
   function clearAll(): void {
-    // Wired to <FilterChips onClearAll>. The chip-strip's "Clear filters"
-    // button is the wipe-everything affordance — it clears every axis
-    // INCLUDING the date range, landing on ?all=1 so the 30-day default
-    // doesn't immediately re-apply. The sheet's own clearAll (inside
-    // FiltersSheet) is a different surface: it only resets the axes the
-    // sheet OWNS per FEED_SCHEMA — and since Plan 02.1-39 round-6 polish #9
-    // dropped 'date' from that schema, the sheet's clearAll preserves the
-    // user's date range. The two surfaces are intentionally distinct.
-    void goto("/feed?all=1");
+    // Wired to <FilterChips onClearAll>. Plan 02.1-39 round-6 polish #10
+    // (UAT-NOTES.md §5.6 follow-up #10, 2026-04-30) — user clarified after
+    // polish #9 landed:
+    //
+    //   "и clear filters вообще никак не трогает дату"
+    //   ("and Clear filters should not touch the date AT ALL")
+    //
+    // After polish #9 made the in-sheet Clear preserve the date axis on
+    // /feed, the user expects the same from the chip-strip Clear button.
+    // Both surfaces now do the same thing: clear chip-owned axes
+    // (kind / source / show / game / authorIsMe / cursor) and PRESERVE
+    // the user's selected date range (?from / ?to / ?all).
+    //
+    // Date is owned exclusively by <DateRangeControl>; the only way to
+    // change the date range is to interact with that control directly
+    // (presets, from/to inputs, or its own × reset button). Both
+    // "Clear filters" buttons are now date-axis-neutral, matching the
+    // mental model where the date range is established BEFORE picking
+    // filters and survives every filter operation.
+    const params = new URLSearchParams(page.url.search);
+    // Drop chip-owned axes only.
+    params.delete("kind");
+    params.delete("source");
+    params.delete("show");
+    params.delete("game");
+    params.delete("authorIsMe");
+    params.delete("cursor");
+    // ?from, ?to, ?all are preserved by virtue of NOT deleting them.
+    const qs = params.toString();
+    void goto(qs ? `/feed?${qs}` : "/feed");
   }
 
   // Plan 02.1-19: cumulative rows for infinite scroll. data.rows is the
