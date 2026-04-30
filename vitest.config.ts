@@ -84,26 +84,28 @@ export default defineConfig({
           // import — the legacy "playwright" string was removed in favor of
           // an explicit `playwright()` call from `@vitest/browser-playwright`.
           // See https://vitest.dev/config/browser/provider.
+          // Phase 2.1 round-17: known upstream issue vitest-dev/vitest#7981 —
+          // "Browser connection was closed while running tests" disconnects
+          // randomly on CI. No upstream fix; ecosystem workaround is `retry`
+          // at the test runner level. 2 retries is what the discussion
+          // contributors converged on.
+          retry: 2,
           browser: {
             enabled: true,
             // Pass --no-sandbox + --disable-dev-shm-usage to chromium so
-            // headless tests can launch inside the GitHub Actions runner
-            // (Phase 2.1 round-11 CI fix). The default sandboxed launch
-            // disconnects mid-test on the ubuntu-24.04 runner with
-            // "Browser connection was closed while running tests" because
-            // the runner's user-namespace + cgroup setup blocks chromium's
-            // sandbox spawn. Both flags are standard CI-headless practice
-            // and only loosen browser sandboxing inside the test process —
-            // the production app surface is unaffected.
-            // launchOptions is a PlaywrightProviderOptions field (passed
-            // to playwright.launch); per-instance config does NOT accept
-            // a `launch` key (round-10 typecheck rejected that shape).
+            // headless tests can launch inside the GitHub Actions runner.
             provider: playwright({
               launchOptions: {
+                channel: "chromium",
                 args: ["--no-sandbox", "--disable-dev-shm-usage"],
               },
             }),
             headless: true,
+            // fileParallelism on the browser config (not just CLI flag)
+            // and screenshotFailures off — both per the upstream workaround
+            // pattern in vitest-dev/vitest#7981.
+            fileParallelism: false,
+            screenshotFailures: false,
             instances: [{ browser: "chromium" }],
             // Custom commands that delegate to the underlying Playwright
             // page. Vitest 4's `BrowserPage` (from @vitest/browser/context)
