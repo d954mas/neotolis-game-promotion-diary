@@ -1187,7 +1187,7 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     expect(src).toMatch(/source_kind_label_discord_server/);
   });
 
-  it("/games/[id]/+page.svelte renders the three-section layout (Plan 02.1-39 §5.3 + round-6 polish #13)", async () => {
+  it("/games/[id]/+page.svelte renders the three-section layout (Plan 02.1-39 §5.3 + round-6 polish #13/#14b)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(
@@ -1204,42 +1204,53 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     // the "Game" h2 + section-header row is REMOVED — game.title in
     // PageHeader is the primary identifier. Edit moves to PageHeader's
     // cta slot. Stores/Events sections KEEP their h2 markers.
+    //
+    // Plan 02.1-39 round-6 polish #14b (UAT-NOTES.md §5.8 follow-up #14):
+    // the polish #13 `gameInfoEditing` toggle (which only flipped a
+    // non-functional "Edit…" hint) is REPLACED by `editGameOpen` — the
+    // open-state of the new <GameEditDialog> modal. PageHeader's cta
+    // opens the dialog; <RenameInline> (the duplicate h1) is GONE.
     expect(src).toMatch(/<section[^>]*class="game-info"[^>]*id="section-game"/);
     expect(src).toMatch(/<section[^>]*class="stores"[^>]*id="section-stores"/);
     expect(src).toMatch(/<section[^>]*class="events"[^>]*id="section-events"/);
-    // Sticky PageHeader (Plan 02.1-39 §5.7) sits at the top with the
-    // game's title. Round-6 #13: now also carries a `cta` prop for the
-    // game's Edit toggle — the Edit affordance moved up here from the
-    // §5.3 game-info section header.
+    // Sticky PageHeader sits at the top with the game's title.
     expect(src).toMatch(/<PageHeader[\s\S]*?title=\{game\.title\}/);
-    expect(src).toMatch(/cta=\{[\s\S]*?label:\s*gameInfoEditing/);
+    // Polish #14b: cta opens the modal (editGameOpen = true), label is
+    // the static "Edit" key (no longer a toggle pair).
+    expect(src).toMatch(/editGameOpen\s*=\s*true/);
+    expect(src).toMatch(/label:\s*m\.games_detail_edit_cta\(\)/);
     // GameCover + StoresSection used inside the page (no <SteamListingRow>
     // direct usage — that lives inside StoresSection).
     expect(src).toMatch(/<GameCover\s/);
     expect(src).toMatch(/<StoresSection\s/);
+    // GameEditDialog mounted with title + description from the game DTO.
+    expect(src).toMatch(/<GameEditDialog\s/);
+    expect(src).toMatch(/initialTitle=\{game\.title\}/);
+    expect(src).toMatch(/initialDescription=\{game\.description\}/);
     // Plan 02.1-39 §5.3 item D: FeedCards wrapped in a feedcard-grid.
     expect(src).toMatch(/class="feedcard-grid"/);
     expect(src).toMatch(
       /\.feedcard-grid[\s\S]*?grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(280px/,
     );
-    // Plan 02.1-39 round-6 polish #13: the §5.3 dual-toggle (editingGame +
-    // editingStores) is REPLACED with a single `gameInfoEditing` toggle
-    // for the game's edit affordance (driven by PageHeader's cta) and
-    // per-card edit state inside SteamListingRow (driven by per-card
-    // Edit buttons). The previous editingStores toggle is GONE.
-    expect(src).toMatch(/let gameInfoEditing = \$state\(false\)/);
+    // Polish #14b: the polish #13 `gameInfoEditing` toggle is GONE
+    // (replaced by `editGameOpen` modal-open state). RenameInline import
+    // and usage are removed entirely — the title lives only in
+    // PageHeader.title now (no duplicate h1 surface).
+    expect(src).toMatch(/let editGameOpen = \$state\(false\)/);
+    expect(src).not.toMatch(/let gameInfoEditing\s*=\s*\$state/);
     expect(src).not.toMatch(/let editingStores\s*=\s*\$state/);
+    expect(src).not.toMatch(/import RenameInline/);
+    expect(src).not.toMatch(/<RenameInline\s/);
     // Negative assertion: the §5.3 "Game" section <h2> is REMOVED in
     // round-6 #13. The game's name lives in PageHeader.title now.
-    // The `m.games_detail_section_game()` call is gone from the markup.
-    // (Strip the <script> block first so a comment mentioning the call
-    // doesn't false-match.)
     const markupOnly = src.replace(/<script[\s\S]*?<\/script>/g, "");
     expect(markupOnly).not.toMatch(/m\.games_detail_section_game\s*\(/);
-    // Negative assertion: the section-edit toggle markup pattern from
-    // §5.3 (per-section button[aria-pressed]) is GONE on game-info.
-    // Stores section header is heading-only — no Edit button there.
     expect(markupOnly).not.toMatch(/onclick=\{[^}]*editingStores/);
+    // Polish #14b: the polish #13 "editing-hint" paragraph is GONE.
+    expect(markupOnly).not.toMatch(/class="editing-hint"/);
+    // Description paragraph renders when game.description is non-null.
+    expect(markupOnly).toMatch(/{#if game\.description}/);
+    expect(markupOnly).toMatch(/<p class="description">/);
     // Negative assertion: the obsolete two-card classes are gone.
     expect(src).not.toMatch(/<section[^>]*class="game-header-card"/);
     expect(src).not.toMatch(/<section[^>]*class="events-feed-card"/);
@@ -1269,9 +1280,11 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
       expect(gameInfoMatch, "game-info section must render").not.toBeNull();
       const gameInfoBody = gameInfoMatch![1]!;
       expect(gameInfoBody).not.toMatch(/<header[^>]*class="section-header"/);
-      // PageHeader carries the cta prop pointing at gameInfoEditing.
+      // Polish #14b: PageHeader.cta opens the new <GameEditDialog>
+      // modal (editGameOpen = true), replacing polish #13's
+      // hint-toggle. The Edit label is the static games_detail_edit_cta key.
       expect(src).toMatch(/<PageHeader[\s\S]*?cta=\{/);
-      expect(src).toMatch(/gameInfoEditing\s*=\s*!gameInfoEditing/);
+      expect(src).toMatch(/editGameOpen\s*=\s*true/);
       expect(src).toMatch(/m\.games_detail_edit_cta\(\)/);
     });
 

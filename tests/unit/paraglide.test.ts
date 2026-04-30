@@ -136,9 +136,20 @@ describe("paraglide i18n (UX-04)", () => {
     // (steam_listing_app_id) — the cover image alt text (steam_listing_
     // cover_alt) keeps screen-readers covered. Net delta: +6 keys.
     //
+    // Plan 02.1-39 round-6 polish #14 (UAT-NOTES.md §5.8 follow-up #14 —
+    // /games/[id] consolidated UI fix): adds 11 keys across the three
+    // child commits. #14b (GameEditDialog modal): games_edit_cancel_cta,
+    // games_edit_description_empty, games_edit_description_label,
+    // games_edit_description_placeholder, games_edit_dialog_heading,
+    // games_edit_save_cta, games_edit_title_label. #14c (per-store
+    // label edit + AddStoreDialog): add_store_dialog_heading,
+    // steam_listing_edit_save_cta, steam_listing_label_edit_label,
+    // steam_listing_label_prefix. Net delta: +11 keys.
+    //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
     // across renames (Phase 2 STATE.md guidance, carried forward).
     const EXPECTED_KEYS = [
+      "add_store_dialog_heading",
       "app_title",
       "appheader_account_menu_aria",
       "audit_action_all",
@@ -298,6 +309,13 @@ describe("paraglide i18n (UX-04)", () => {
       "game_rename_cta_save",
       "games_cta_new_game",
       "games_detail_edit_cta",
+      "games_edit_cancel_cta",
+      "games_edit_description_empty",
+      "games_edit_description_label",
+      "games_edit_description_placeholder",
+      "games_edit_dialog_heading",
+      "games_edit_save_cta",
+      "games_edit_title_label",
       "games_detail_events_empty",
       "games_detail_events_heading",
       "games_detail_section_events",
@@ -365,7 +383,10 @@ describe("paraglide i18n (UX-04)", () => {
       "steam_listing_duplicate_active_prefix",
       "steam_listing_duplicate_soft_deleted",
       "steam_listing_edit_aria",
+      "steam_listing_edit_save_cta",
       "steam_listing_kind_steam",
+      "steam_listing_label_edit_label",
+      "steam_listing_label_prefix",
       "steam_listing_open_in_steam",
       "steam_listing_open_link_label",
       "steam_listing_remove_aria",

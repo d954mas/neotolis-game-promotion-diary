@@ -164,6 +164,19 @@
   "stores_add_cta_after_cards": "+ Add store",
   "games_detail_edit_cta": "Edit",
 
+  "games_edit_dialog_heading": "Edit game",
+  "games_edit_title_label": "Title",
+  "games_edit_description_label": "Description",
+  "games_edit_save_cta": "Save",
+  "games_edit_cancel_cta": "Cancel",
+  "games_edit_description_placeholder": "What's this game about? Pitch, target audience, current status…",
+  "games_edit_description_empty": "No description yet.",
+
+  "steam_listing_label_edit_label": "Label (Demo / Full / DLC / OST)",
+  "steam_listing_edit_save_cta": "Save",
+  "steam_listing_label_prefix": "Label:",
+  "add_store_dialog_heading": "Add store",
+
   "inbox_badge": "Inbox",
   "inbox_badge_tooltip": "This event isn't attached to a game yet. Use the \"Attach to game\" picker on the right.",
   "polling_badge_phase3_placeholder": "Phase 3 will start polling",
