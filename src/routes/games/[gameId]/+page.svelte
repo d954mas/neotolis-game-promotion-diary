@@ -217,7 +217,6 @@
     },
     label: m.games_detail_edit_cta(),
   }}
-  sticky
   deletedCount={deletedListings.length}
   onOpenRecovery={() => (recoveryOpen = true)}
 />
