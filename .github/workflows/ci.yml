@@ -93,7 +93,10 @@ jobs:
       OAUTH_CLIENT_SECRET: browser-test-client-secret
       OAUTH_DISCOVERY_URL: http://localhost:9090/.well-known/openid-configuration
       APP_KEK_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
-      NODE_ENV: production
+      # NODE_ENV intentionally NOT set at job level — pnpm install with
+      # NODE_ENV=production skips devDependencies (tsup, vitest, etc.),
+      # breaking `pnpm build`. Set NODE_ENV=production on individual run
+      # steps below if a step needs it.
       BROWSER_TEST_BASE_URL: http://localhost:5173
     steps:
       - uses: actions/checkout@v4

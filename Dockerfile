@@ -25,6 +25,19 @@ RUN pnpm install --frozen-lockfile
 # ---------- build stage ----------
 FROM deps AS build
 COPY . .
+# Build-time placeholder env vars so src/lib/server/config/env.ts Zod
+# parse succeeds during `pnpm run build` (svelte-kit sync + vite build
+# import server modules at analyse time). These ARE NOT secrets — they
+# stay in the build stage only; the runtime stage starts fresh from
+# node:22-alpine so no build-time ENV propagates to the final image.
+# A real deploy injects real env via docker run -e / compose service env.
+ENV DATABASE_URL=postgres://placeholder:placeholder@localhost:5432/placeholder \
+    BETTER_AUTH_URL=http://localhost:3000 \
+    BETTER_AUTH_SECRET=docker-build-placeholder-secret-32-chars-min-len \
+    OAUTH_CLIENT_ID=docker-build-placeholder-client-id \
+    OAUTH_CLIENT_SECRET=docker-build-placeholder-client-secret \
+    OAUTH_DISCOVERY_URL=http://localhost:9090/.well-known/openid-configuration \
+    APP_KEK_BASE64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 RUN pnpm run build
 # Prune dev deps so runtime stage carries only what production needs.
 RUN pnpm prune --prod
