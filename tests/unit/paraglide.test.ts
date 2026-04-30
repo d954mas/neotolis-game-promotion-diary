@@ -138,13 +138,17 @@ describe("paraglide i18n (UX-04)", () => {
     //
     // Plan 02.1-39 round-6 polish #14 (UAT-NOTES.md §5.8 follow-up #14 —
     // /games/[id] consolidated UI fix): adds 11 keys across the three
-    // child commits. #14b (GameEditDialog modal): games_edit_cancel_cta,
+    // child commits + REMOVES 1 dead key (polish #13 reverted). #14b
+    // (GameEditDialog modal): games_edit_cancel_cta,
     // games_edit_description_empty, games_edit_description_label,
     // games_edit_description_placeholder, games_edit_dialog_heading,
     // games_edit_save_cta, games_edit_title_label. #14c (per-store
     // label edit + AddStoreDialog): add_store_dialog_heading,
     // steam_listing_edit_save_cta, steam_listing_label_edit_label,
-    // steam_listing_label_prefix. Net delta: +11 keys.
+    // steam_listing_label_prefix. REMOVED: stores_add_cta_after_cards
+    // (polish #13 inline-Add CTA reverted in #14c — back to the
+    // section-header CTA which uses the existing stores_add_cta key).
+    // Net delta: +11 -1 = +10 keys.
     //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
     // across renames (Phase 2 STATE.md guidance, carried forward).
@@ -392,7 +396,6 @@ describe("paraglide i18n (UX-04)", () => {
       "steam_listing_remove_aria",
       "steam_listing_unnamed",
       "stores_add_cta",
-      "stores_add_cta_after_cards",
       "stores_empty",
       "stores_section_heading",
       "theme_label_dark",

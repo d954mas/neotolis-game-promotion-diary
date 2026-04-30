@@ -1288,35 +1288,57 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
       expect(src).toMatch(/m\.games_detail_edit_cta\(\)/);
     });
 
-    it("StoresSection mounts the Add CTA AFTER the cards (not above them)", async () => {
+    it("StoresSection becomes a pure list renderer (polish #14c reversal); Add CTA lives next to the Stores h2 in +page.svelte", async () => {
       const fs = await import("node:fs");
       const path = await import("node:path");
-      const src = fs.readFileSync(
+      // Plan 02.1-39 round-6 polish #14c (UAT-NOTES.md §5.8 follow-up
+      // #14): polish #13's bottom-of-section Add CTA is REVERTED. The
+      // CTA moves back to the section-header row next to the h2 (in
+      // +page.svelte, not StoresSection). StoresSection no longer
+      // renders an Add affordance, an inline form, or any add-state
+      // — it's a pure list renderer.
+      const storesSrc = fs.readFileSync(
         path.resolve("src/lib/components/StoresSection.svelte"),
         "utf8",
       );
-      const markupOnly = src.replace(/<script[\s\S]*?<\/script>/g, "");
-      // The previous .actions-row block above the grid is GONE.
-      expect(markupOnly).not.toMatch(/class="actions-row"/);
-      // The new .add-row block exists, and it appears AFTER the
-      // .stores-grid in the markup (so the natural read order is
-      // cards → Add).
-      const gridIdx = markupOnly.indexOf('class="stores-grid"');
-      const addRowIdx = markupOnly.indexOf('class="add-row"');
-      expect(gridIdx, "stores-grid must render").toBeGreaterThan(-1);
-      expect(addRowIdx, "add-row must render").toBeGreaterThan(-1);
-      expect(
-        addRowIdx,
-        "Add CTA (.add-row) must appear AFTER the stores grid in DOM order",
-      ).toBeGreaterThan(gridIdx);
-      // The CTA uses the new key targeting the after-cards layout.
-      expect(src).toMatch(/m\.stores_add_cta_after_cards\(\)/);
-      // The component no longer accepts an editMode prop — per-card
-      // edit-mode replaces it.
-      expect(src).not.toMatch(/editMode:\s*boolean/);
+      const storesMarkup = storesSrc.replace(/<script[\s\S]*?<\/script>/g, "");
+      // Both the polish-13 .add-row AND the pre-polish-13 .actions-row
+      // are GONE — StoresSection has no add affordance now.
+      expect(storesMarkup).not.toMatch(/class="actions-row"/);
+      expect(storesMarkup).not.toMatch(/class="add-row"/);
+      // The component no longer imports AddSteamListingForm — the
+      // form lives only inside <AddStoreDialog> mounted by the parent.
+      expect(storesSrc).not.toMatch(/import AddSteamListingForm/);
+      expect(storesMarkup).not.toMatch(/<AddSteamListingForm\s/);
+      // No editMode prop and no showAddForm state — pure list renderer.
+      expect(storesSrc).not.toMatch(/editMode:\s*boolean/);
+      expect(storesSrc).not.toMatch(/let showAddForm\s*=\s*\$state/);
+      // The +page.svelte mounts AddStoreDialog and renders the Add CTA
+      // inside the stores section-header row.
+      const pageSrc = fs.readFileSync(
+        path.resolve("src/routes/games/[gameId]/+page.svelte"),
+        "utf8",
+      );
+      expect(pageSrc).toMatch(/import AddStoreDialog/);
+      expect(pageSrc).toMatch(/<AddStoreDialog\s/);
+      expect(pageSrc).toMatch(/let addStoreOpen = \$state\(false\)/);
+      // The Add CTA appears INSIDE the stores section-header. We
+      // extract the .stores section and assert the CTA lives in its
+      // <header class="section-header"> block.
+      const pageMarkup = pageSrc.replace(/<script[\s\S]*?<\/script>/g, "");
+      const storesSectionMatch = pageMarkup.match(
+        /<section[^>]*class="stores"[\s\S]*?<\/section>/,
+      );
+      expect(storesSectionMatch, "stores section must render").not.toBeNull();
+      const storesSection = storesSectionMatch![0]!;
+      // Section-header carries the CTA + h2.
+      expect(storesSection).toMatch(/<header[^>]*class="section-header"/);
+      expect(storesSection).toMatch(/m\.stores_add_cta\(\)/);
+      // The polish-13 stores_add_cta_after_cards key is no longer used.
+      expect(storesSection).not.toMatch(/m\.stores_add_cta_after_cards\(\)/);
     });
 
-    it("SteamListingRow renders cover image + STEAM badge + appId + per-card Edit button", async () => {
+    it("SteamListingRow renders cover image + STEAM badge + appId + per-card Edit button + inline label form (polish #14c)", async () => {
       const fs = await import("node:fs");
       const path = await import("node:path");
       const src = fs.readFileSync(
@@ -1333,13 +1355,27 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
       expect(src).toMatch(/class="app-id"/);
       expect(src).toMatch(/m\.steam_listing_app_id\(\{/);
       // Per-card Edit button replaces the section-level editMode prop.
-      // The component no longer accepts editMode at all.
       expect(src).not.toMatch(/editMode\?:\s*boolean/);
       // Local `editing` state owned by each card.
       expect(src).toMatch(/let editing = \$state\(false\)/);
-      // Edit button visible when not editing; × Remove visible when editing.
+      // Edit button visible when not editing.
       expect(src).toMatch(/class="edit-btn"/);
       expect(src).toMatch(/m\.steam_listing_edit_aria\(\)/);
+      // Plan 02.1-39 round-6 polish #14c: inline label edit FORM
+      // (not just a × Remove). Local labelDraft state + saveEdit
+      // function + .edit-form markup with a label input.
+      expect(src).toMatch(/let labelDraft = \$state/);
+      expect(src).toMatch(/async function saveEdit/);
+      expect(src).toMatch(/class="edit-form"/);
+      expect(src).toMatch(/class="edit-input"/);
+      expect(src).toMatch(/m\.steam_listing_edit_save_cta\(\)/);
+      expect(src).toMatch(/m\.steam_listing_label_edit_label\(\)/);
+      // The PATCH /api/games/:gameId/listings/:listingId target is
+      // wired into saveEdit (same path the integration test exercises).
+      expect(src).toMatch(/method:\s*"PATCH"/);
+      // Label prefix in read-mode so users know what the field is.
+      expect(src).toMatch(/m\.steam_listing_label_prefix\(\)/);
+      expect(src).toMatch(/class="label-prefix"/);
     });
   });
 

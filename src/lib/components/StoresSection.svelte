@@ -1,37 +1,31 @@
 <script lang="ts">
   // StoresSection — /games/[id] stores section body (Plan 02.1-30; Plan
   // 02.1-39 round-6 grid layout; Plan 02.1-39 round-6 polish #13 layout
-  // restructure).
+  // restructure; Plan 02.1-39 round-6 polish #14c list-only refactor).
   //
   // Plan 02.1-30 created the section-header + listings-list pattern. Plan
-  // 02.1-39 §5.3 RELOCATED the section-header (`Магазины` h2 + Edit toggle
-  // + Add CTA) up to the parent page, leaving this component to render
-  // ONLY the listings body — the grid + an inline + Add affordance.
+  // 02.1-39 §5.3 RELOCATED the section-header (`Магазины` h2) up to the
+  // parent page, leaving this component to render the listings body.
   //
-  // Plan 02.1-39 round-6 polish #13 (UAT-NOTES.md §5.8 follow-up #13,
-  // 2026-04-30): the user surfaced two layout changes during round-6 UAT:
+  // Plan 02.1-39 round-6 polish #13 (UAT-NOTES.md §5.8 follow-up #13)
+  // moved the Add CTA from above the grid to AFTER the grid (`.add-row`
+  // block) per user direction "добавление давай сделаем внизу после
+  // карточек сторов". The form expanded inline on the page.
   //
-  //   "Stores. Там добавление давай сделаем внизу после карточек сторов."
-  //   ("Stores. Add should go at the bottom after the store cards.")
+  // Plan 02.1-39 round-6 polish #14c (UAT-NOTES.md §5.8 follow-up #14,
+  // 2026-04-30): user surfaced a reversal during round-6 UAT after
+  // polish #13 landed (verbatim, ru):
+  //   "сейчас добавление стора сделано полями на этой странице. Я хочу
+  //    через кнопку add рядом с заголовкот Stores"
+  //   ("right now adding a store is done with fields on the page. I
+  //    want it via an Add button next to the Stores heading.")
   //
-  //   "На картчоке стора нужно имя, и картинка из стора. app id и
-  //    обозначить стор(стим, итч)"
-  //   ("Each store card needs the name, the image from the store, the
-  //    app id, and a store-type marker (Steam, Itch).")
-  //
-  //   "кнопка edit она у каждой карточки стора, мелко и отдельно"
-  //   ("the Edit button is on each store card, small and separate")
-  //
-  // What changes in this component:
-  //   1. The Add CTA moves from above the grid (the old `.actions-row`)
-  //      to AFTER the grid (a new `.add-row` block) so the natural read
-  //      order is "see the cards → tap Add to register a new store".
-  //   2. The `editMode` prop is RETIRED — each <SteamListingRow> owns
-  //      its own per-card edit-mode now, surfaced by a small per-card
-  //      Edit button (round-6 polish #13). The parent page no longer
-  //      passes editMode at all.
-  //   3. The CTA is restyled as a secondary button at the bottom of the
-  //      section so it does not compete visually with the cards.
+  // The add-affordance moves AGAIN: this time back next to the Stores
+  // h2 (where polish #13 had moved it AWAY from), but the click now
+  // opens an <AddStoreDialog> modal instead of expanding the form
+  // inline on the page. StoresSection consequently becomes a pure list
+  // renderer — no add-form state, no Add CTA, no inline form. The
+  // parent page owns the Add lifecycle.
   //
   // Layout grid (unchanged from §5.3 item A/D — round-5 user direction):
   // listings flow in a CSS grid (`auto-fill, minmax(260px, 1fr)`) — 3-per-
@@ -44,7 +38,6 @@
 
   import { m } from "$lib/paraglide/messages.js";
   import SteamListingRow from "./SteamListingRow.svelte";
-  import AddSteamListingForm from "./AddSteamListingForm.svelte";
   import type { GameSteamListingDto } from "$lib/server/dto.js";
 
   let {
@@ -56,12 +49,10 @@
     gameId: string;
     onChange: () => void;
   } = $props();
-
-  let showAddForm = $state(false);
 </script>
 
 <div class="stores-body">
-  {#if listings.length === 0 && !showAddForm}
+  {#if listings.length === 0}
     <p class="muted">{m.stores_empty()}</p>
   {/if}
 
@@ -73,36 +64,6 @@
         </li>
       {/each}
     </ul>
-  {/if}
-
-  {#if showAddForm}
-    <!-- Phase 2.1 ships Steam-only. Phase 3+ adds platform selector +
-         per-platform sub-forms. Per CONTEXT.md / UAT-NOTES.md §4.25.C:
-         Itch + Epic deferred. -->
-    <AddSteamListingForm
-      {gameId}
-      onSuccess={() => {
-        showAddForm = false;
-        onChange();
-      }}
-    />
-  {/if}
-
-  <!-- Plan 02.1-39 round-6 polish #13: the Add CTA sits at the BOTTOM of
-       the section (after the grid + the active form, if any). User
-       direction: "добавление давай сделаем внизу после карточек сторов".
-       Hidden while the form is open so we don't show a redundant button
-       above its own form. -->
-  {#if !showAddForm}
-    <div class="add-row">
-      <button
-        type="button"
-        class="cta-secondary add-store"
-        onclick={() => (showAddForm = true)}
-      >
-        {m.stores_add_cta_after_cards()}
-      </button>
-    </div>
   {/if}
 </div>
 
@@ -129,31 +90,5 @@
     margin: 0;
     color: var(--color-text-muted);
     font-size: var(--font-size-label);
-  }
-  /* Plan 02.1-39 round-6 polish #13: the Add CTA at the BOTTOM of the
-   * section is styled as a secondary button (not the primary accent
-   * background) so it visually subordinates to the cards above. The
-   * row container left-aligns the button so on wide viewports it sits
-   * under the first column rather than stretching across all three. */
-  .add-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-sm);
-  }
-  .cta-secondary.add-store {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-accent);
-    border: 1px dashed var(--color-accent);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
-    cursor: pointer;
-  }
-  .cta-secondary.add-store:hover {
-    background: var(--color-accent);
-    color: var(--color-accent-text, #fff);
-    border-style: solid;
   }
 </style>

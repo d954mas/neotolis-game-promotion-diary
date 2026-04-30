@@ -161,7 +161,6 @@
   "steam_listing_app_id": "App {appId}",
   "steam_listing_edit_aria": "Edit listing",
   "steam_listing_cover_alt": "Cover image for {name}",
-  "stores_add_cta_after_cards": "+ Add store",
   "games_detail_edit_cta": "Edit",
 
   "games_edit_dialog_heading": "Edit game",

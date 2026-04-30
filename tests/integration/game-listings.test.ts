@@ -480,6 +480,225 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
     expect(dto).not.toHaveProperty("userId");
   });
 
+  // Plan 02.1-39 round-6 polish #14c (UAT-NOTES.md §5.8 follow-up #14,
+  // 2026-04-30): per-listing label edit. User during round-6 UAT:
+  //   "При редактировании стора, я бы хотел иметь возможноть поменять label"
+  // Today only `label` is mutable (the rest of §5.3 item B remains a
+  // Phase 6 deferred). New service updateListing + PATCH route
+  // /api/games/:gameId/listings/:listingId. Cross-tenant 404 invariant
+  // exercised; same-tenant happy-path round-trips; route accepts {label}
+  // and rejects {label: <too long>} at the Zod boundary.
+  describe("Plan 02.1-39 round-6 polish #14c — per-listing label edit", () => {
+    it("updateListing service round-trips label and the DTO projects the new value", async () => {
+      vi.mocked(fetchSteamAppDetails).mockResolvedValue({
+        appId: 620,
+        name: "Portal 2",
+        coverUrl: null,
+        releaseDate: null,
+        comingSoon: false,
+        genres: [],
+        categories: [],
+        raw: {},
+      });
+      const { updateListing } = await import(
+        "../../src/lib/server/services/game-steam-listings.js"
+      );
+      const userA = await seedUserDirectly({ email: `p14c-rt-${sfx()}@test.local` });
+      const game = await createGame(userA.id, { title: "Label RT" }, "127.0.0.1");
+      const listing = await addSteamListing(
+        userA.id,
+        { gameId: game.id, appId: 620, label: "Demo" },
+        "127.0.0.1",
+      );
+      expect(listing.label).toBe("Demo");
+      const updated = await updateListing(userA.id, game.id, listing.id, {
+        label: "Full",
+      });
+      expect(updated.label).toBe("Full");
+      // userId stripped at the DTO boundary.
+      const dto = toGameSteamListingDto(updated);
+      expect(dto.label).toBe("Full");
+      expect(dto).not.toHaveProperty("userId");
+    });
+
+    it("updateListing — cross-tenant gameId/listingId surfaces NotFoundError (404, not 403)", async () => {
+      vi.mocked(fetchSteamAppDetails).mockResolvedValue({
+        appId: 620,
+        name: "Portal 2",
+        coverUrl: null,
+        releaseDate: null,
+        comingSoon: false,
+        genres: [],
+        categories: [],
+        raw: {},
+      });
+      const { updateListing } = await import(
+        "../../src/lib/server/services/game-steam-listings.js"
+      );
+      const { NotFoundError } = await import(
+        "../../src/lib/server/services/errors.js"
+      );
+      const userA = await seedUserDirectly({ email: `p14c-ct-a-${sfx()}@test.local` });
+      const userB = await seedUserDirectly({ email: `p14c-ct-b-${sfx()}@test.local` });
+      const aGame = await createGame(userA.id, { title: "A's" }, "127.0.0.1");
+      const aListing = await addSteamListing(
+        userA.id,
+        { gameId: aGame.id, appId: 620, label: "Original" },
+        "127.0.0.1",
+      );
+      // User B writes to A's listing → NotFoundError (PRIV-01).
+      await expect(
+        updateListing(userB.id, aGame.id, aListing.id, { label: "leak" }),
+      ).rejects.toBeInstanceOf(NotFoundError);
+      // The original label is unchanged.
+      const [unchanged] = await db
+        .select()
+        .from(gameSteamListings)
+        .where(eq(gameSteamListings.id, aListing.id));
+      expect(unchanged?.label).toBe("Original");
+    });
+
+    it("updateListing — soft-deleted row returns NotFoundError (must restore first)", async () => {
+      vi.mocked(fetchSteamAppDetails).mockResolvedValue({
+        appId: 620,
+        name: "Portal 2",
+        coverUrl: null,
+        releaseDate: null,
+        comingSoon: false,
+        genres: [],
+        categories: [],
+        raw: {},
+      });
+      const { updateListing } = await import(
+        "../../src/lib/server/services/game-steam-listings.js"
+      );
+      const { NotFoundError } = await import(
+        "../../src/lib/server/services/errors.js"
+      );
+      const userA = await seedUserDirectly({ email: `p14c-sd-${sfx()}@test.local` });
+      const game = await createGame(userA.id, { title: "SD" }, "127.0.0.1");
+      const listing = await addSteamListing(
+        userA.id,
+        { gameId: game.id, appId: 620 },
+        "127.0.0.1",
+      );
+      await db
+        .update(gameSteamListings)
+        .set({ deletedAt: new Date() })
+        .where(eq(gameSteamListings.id, listing.id));
+      await expect(
+        updateListing(userA.id, game.id, listing.id, { label: "should-fail" }),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it("PATCH /api/games/:gameId/listings/:listingId — happy path returns updated DTO", async () => {
+      vi.mocked(fetchSteamAppDetails).mockResolvedValue({
+        appId: 620,
+        name: "Portal 2",
+        coverUrl: null,
+        releaseDate: null,
+        comingSoon: false,
+        genres: [],
+        categories: [],
+        raw: {},
+      });
+      const { createApp } = await import("../../src/lib/server/http/app.js");
+      const app = createApp();
+      const userA = await seedUserDirectly({ email: `p14c-http-${sfx()}@test.local` });
+      const game = await createGame(userA.id, { title: "HTTP" }, "127.0.0.1");
+      const listing = await addSteamListing(
+        userA.id,
+        { gameId: game.id, appId: 620, label: "Old" },
+        "127.0.0.1",
+      );
+      const cookie = `neotolis.session_token=${userA.signedSessionCookieValue}`;
+      const res = await app.request(
+        `/api/games/${game.id}/listings/${listing.id}`,
+        {
+          method: "PATCH",
+          headers: { cookie, "content-type": "application/json" },
+          body: JSON.stringify({ label: "New" }),
+        },
+      );
+      expect(res.status).toBe(200);
+      const dto = (await res.json()) as Record<string, unknown>;
+      expect(dto.id).toBe(listing.id);
+      expect(dto.label).toBe("New");
+      expect(dto).not.toHaveProperty("userId");
+    });
+
+    it("PATCH /api/games/:gameId/listings/:listingId — cross-tenant returns 404 with no forbidden|permission body leak", async () => {
+      vi.mocked(fetchSteamAppDetails).mockResolvedValue({
+        appId: 620,
+        name: "Portal 2",
+        coverUrl: null,
+        releaseDate: null,
+        comingSoon: false,
+        genres: [],
+        categories: [],
+        raw: {},
+      });
+      const { createApp } = await import("../../src/lib/server/http/app.js");
+      const app = createApp();
+      const userA = await seedUserDirectly({ email: `p14c-ct-a2-${sfx()}@test.local` });
+      const userB = await seedUserDirectly({ email: `p14c-ct-b2-${sfx()}@test.local` });
+      const aGame = await createGame(userA.id, { title: "A" }, "127.0.0.1");
+      const aListing = await addSteamListing(
+        userA.id,
+        { gameId: aGame.id, appId: 620 },
+        "127.0.0.1",
+      );
+      const cookieB = `neotolis.session_token=${userB.signedSessionCookieValue}`;
+      const res = await app.request(
+        `/api/games/${aGame.id}/listings/${aListing.id}`,
+        {
+          method: "PATCH",
+          headers: { cookie: cookieB, "content-type": "application/json" },
+          body: JSON.stringify({ label: "intrusion" }),
+        },
+      );
+      expect(res.status).toBe(404);
+      const body = await res.text();
+      expect(body).not.toMatch(/forbidden/i);
+      expect(body).not.toMatch(/permission/i);
+    });
+
+    it("PATCH /api/games/:gameId/listings/:listingId — Zod rejects label > 100 chars at the boundary", async () => {
+      vi.mocked(fetchSteamAppDetails).mockResolvedValue({
+        appId: 620,
+        name: "Portal 2",
+        coverUrl: null,
+        releaseDate: null,
+        comingSoon: false,
+        genres: [],
+        categories: [],
+        raw: {},
+      });
+      const { createApp } = await import("../../src/lib/server/http/app.js");
+      const app = createApp();
+      const userA = await seedUserDirectly({ email: `p14c-cap-${sfx()}@test.local` });
+      const game = await createGame(userA.id, { title: "Cap" }, "127.0.0.1");
+      const listing = await addSteamListing(
+        userA.id,
+        { gameId: game.id, appId: 620 },
+        "127.0.0.1",
+      );
+      const cookie = `neotolis.session_token=${userA.signedSessionCookieValue}`;
+      const tooLong = "x".repeat(101);
+      const res = await app.request(
+        `/api/games/${game.id}/listings/${listing.id}`,
+        {
+          method: "PATCH",
+          headers: { cookie, "content-type": "application/json" },
+          body: JSON.stringify({ label: tooLong }),
+        },
+      );
+      expect(res.status).toBe(422);
+      const body = (await res.json()) as { error?: string };
+      expect(body.error).toBe("validation_failed");
+    });
+  });
+
   it("Test 6 (mapErr metadata): HTTP 422 body includes the full metadata object (existingGameId, existingState, gameId, appId)", async () => {
     vi.mocked(fetchSteamAppDetails).mockResolvedValue({
       appId: 620,

@@ -33,28 +33,34 @@
   //      image rendered as the visual anchor. Falls back to a flat
   //      surface when null (Steam-down-on-INSERT case).
   //   2. Header row: STEAM badge + name. Badge is a small accent pill
-  //      identifying the store. When future stores ship (Itch / Epic),
-  //      this badge becomes kind-aware (Plan 7+ adds the discriminator).
+  //      identifying the store.
   //   3. App ID line ("App {appId}") in muted monospace.
-  //   4. Optional user label (when listing.label is non-empty).
+  //   4. Optional user label (when listing.label is non-empty) — now
+  //      prefixed with "Label:" so the user knows what that text is
+  //      (polish #14c clarification — "мне не понятно что так лейбл и
+  //      где" / "I don't understand what 'label' is or where it lives").
   //   5. Optional release date (when listing.releaseDate is non-null).
   //   6. Optional "key linked" chip when listing.apiKeyId is non-null.
   //   7. "Open in Steam" deep-link CTA (preserved from §5.3 item A).
   //
-  // Per-card edit affordance:
-  //   - A small Edit button at the top-right corner of the card (same
-  //     touch target shape as the previous Remove × had — 44×44).
-  //   - Click → flips the card's LOCAL `editing` state; the × Remove
-  //     button replaces the Edit button and the user can Confirm-Dialog
-  //     their way through deletion.
-  //   - Click again on Edit (which is now the × Remove during edit
-  //     mode) cancels back. Per-card edit-mode replaces the section-
-  //     level editMode prop entirely.
+  // Plan 02.1-39 round-6 polish #14c (UAT-NOTES.md §5.8 follow-up #14,
+  // 2026-04-30): per-card Edit toggle now reveals an inline LABEL EDIT
+  // FORM in addition to the × Remove button. User direction (verbatim,
+  // ru): "При редактировании стора, я бы хотел иметь возможноть
+  // поменять label." Label is the only mutable field today (other §5.3
+  // item B fields — release-date / categories — remain Phase 6
+  // backlog); the form layout accommodates future fields by living
+  // inside `.edit-form` block scoped to `editing === true`.
   //
-  // Item B from §5.3 (full Steam-listing edit form — release-date /
-  // label / categories override) is EXPLICITLY DEFERRED to Phase 6
-  // polish backlog. Today's "Edit" toggle only reveals the Remove ×;
-  // a future plan extends this state to surface a full edit panel.
+  // Per-card edit-mode (polish #13 + #14c):
+  //   - A small Edit button at the top-right corner of the card.
+  //   - Click → flips local `editing` state. In edit mode the card
+  //     reveals an inline `<form class="edit-form">` with a label
+  //     input + Save / Cancel + × Remove (the destructive action stays
+  //     gated behind ConfirmDialog as before). Edit button hides.
+  //   - Save → PATCH /api/games/:gameId/listings/:listingId { label }
+  //     → onChange() so the parent invalidates and the new label
+  //     surfaces. Cancel reverts the local input value + flips back.
   //
   // displayName: prefer the persisted `name` (Plan 02.1-25 column added in
   // Task 1's migration 0004); fall back to m.steam_listing_unnamed() for
@@ -66,6 +72,7 @@
 
   import { m } from "$lib/paraglide/messages.js";
   import ConfirmDialog from "./ConfirmDialog.svelte";
+  import InlineError from "./InlineError.svelte";
 
   type Listing = {
     id: string;
@@ -94,11 +101,70 @@
   // each card. Replaces the section-level `editMode` prop from §5.3.
   let editing = $state(false);
 
+  // Plan 02.1-39 round-6 polish #14c: inline label edit form state.
+  // Initialized lazily when the user enters edit mode so the buffer
+  // always reflects the latest server value (a previous edit + reload
+  // round-trip would otherwise carry the stale buffer).
+  let labelDraft = $state(listing.label);
+  let saving = $state(false);
+  let editError = $state<string | null>(null);
+
   const displayName = $derived(listing.name ?? m.steam_listing_unnamed());
   const steamUrl = $derived(`https://store.steampowered.com/app/${listing.appId}/`);
 
   let confirmOpen = $state(false);
   let removing = $state(false);
+
+  function startEdit(): void {
+    // Pull the current persisted label into the draft buffer so the
+    // input reflects what's saved (not whatever was typed during a
+    // prior open). Clear any stale error from a previous failed save.
+    labelDraft = listing.label;
+    editError = null;
+    editing = true;
+  }
+
+  function cancelEdit(): void {
+    if (saving) return;
+    labelDraft = listing.label;
+    editError = null;
+    editing = false;
+  }
+
+  async function saveEdit(e: Event): Promise<void> {
+    e.preventDefault();
+    if (saving || !gameId) return;
+    saving = true;
+    editError = null;
+    try {
+      const res = await fetch(`/api/games/${gameId}/listings/${listing.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ label: labelDraft }),
+      });
+      if (!res.ok) {
+        let code = "error_server_generic";
+        try {
+          const body = (await res.json()) as { error?: string };
+          if (body.error) code = body.error;
+        } catch {
+          /* ignore */
+        }
+        editError =
+          code === "validation_failed"
+            ? m.error_server_generic()
+            : m.error_server_generic();
+        return;
+      }
+      // Success — flip back to read mode + ask the parent to refresh.
+      editing = false;
+      onChange?.();
+    } catch {
+      editError = m.error_network();
+    } finally {
+      saving = false;
+    }
+  }
 
   async function handleRemoveConfirmed(): Promise<void> {
     if (removing || !gameId) return;
@@ -141,8 +207,14 @@
     <h3 class="store-name">{displayName}</h3>
   </header>
   <p class="app-id">{m.steam_listing_app_id({ appId: listing.appId })}</p>
-  {#if listing.label}
-    <p class="user-label">{listing.label}</p>
+  {#if listing.label && !editing}
+    <!-- Plan 02.1-39 round-6 polish #14c: prefix "Label:" so the user
+         knows what the free-text under the appId means. Hidden in
+         edit mode (the inline form has its own labelled input below). -->
+    <p class="user-label">
+      <span class="label-prefix">{m.steam_listing_label_prefix()}</span>
+      {listing.label}
+    </p>
   {/if}
   {#if listing.releaseDate}
     <p class="release-date">{listing.releaseDate}</p>
@@ -152,45 +224,76 @@
       <span class="chip linked">key linked</span>
     </p>
   {/if}
-  <a
-    class="cta-secondary store-link"
-    href={steamUrl}
-    target="_blank"
-    rel="noopener noreferrer"
-  >
-    {m.steam_listing_open_in_steam()}
-  </a>
+  {#if !editing}
+    <a
+      class="cta-secondary store-link"
+      href={steamUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {m.steam_listing_open_in_steam()}
+    </a>
+  {/if}
   {#if gameId}
-    <!-- Plan 02.1-39 round-6 polish #13: per-card Edit toggle (top-right
-         corner). Click reveals the × Remove button on the same card,
-         which opens the existing ConfirmDialog before DELETEing. Edit
-         mode is per-card so destructive affordances stay localized. -->
+    <!-- Plan 02.1-39 round-6 polish #14c: per-card Edit toggle now
+         reveals an inline LABEL EDIT FORM in addition to the × Remove
+         button. The Edit button at the top-right corner flips into a
+         × Cancel-edit button while editing. -->
     {#if !editing}
       <button
         type="button"
         class="edit-btn"
         aria-label={m.steam_listing_edit_aria()}
-        onclick={() => (editing = true)}
+        onclick={startEdit}
       >
         {m.common_edit()}
       </button>
     {:else}
       <button
         type="button"
-        class="remove-btn"
-        aria-label={m.steam_listing_remove_aria()}
-        onclick={() => (confirmOpen = true)}
-        disabled={removing}
+        class="cancel-edit-btn"
+        aria-label={m.common_close()}
+        onclick={cancelEdit}
+        disabled={saving}
       >
         ×
       </button>
-      <button
-        type="button"
-        class="cancel-edit-btn"
-        onclick={() => (editing = false)}
-      >
-        {m.common_close()}
-      </button>
+      <form class="edit-form" onsubmit={saveEdit}>
+        <label class="edit-field">
+          <span class="edit-field-label">{m.steam_listing_label_edit_label()}</span>
+          <input
+            class="edit-input"
+            type="text"
+            bind:value={labelDraft}
+            maxlength="100"
+            placeholder="Demo / Full / DLC / OST"
+            disabled={saving}
+          />
+        </label>
+        <div class="edit-actions">
+          <button type="submit" class="edit-save" disabled={saving}>
+            {m.steam_listing_edit_save_cta()}
+          </button>
+          <button
+            type="button"
+            class="edit-cancel"
+            onclick={cancelEdit}
+            disabled={saving}
+          >
+            {m.common_cancel()}
+          </button>
+          <button
+            type="button"
+            class="remove-btn-inline"
+            aria-label={m.steam_listing_remove_aria()}
+            onclick={() => (confirmOpen = true)}
+            disabled={removing || saving}
+          >
+            × {m.common_remove()}
+          </button>
+        </div>
+        {#if editError}<InlineError message={editError} />{/if}
+      </form>
     {/if}
   {/if}
 </article>
@@ -285,6 +388,16 @@
     color: var(--color-text-muted);
     font-size: var(--font-size-label);
   }
+  /* Plan 02.1-39 round-6 polish #14c: "Label:" prefix in front of the
+   * free-text user label so the field is self-documenting. The prefix
+   * uses the same muted token as the value but uppercases / weights
+   * for visual hierarchy ("Label: Demo" reads as a key-value pair). */
+  .label-prefix {
+    font-weight: var(--font-weight-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-right: 4px;
+  }
   .key-linked-note {
     margin: 0;
   }
@@ -343,38 +456,23 @@
   .edit-btn:hover {
     background: rgb(0 0 0 / 80%);
   }
-  /* Plan 02.1-39 round-6 polish #13: in edit mode the Edit button is
-   * REPLACED by a × Remove button + a Cancel button. Remove keeps the
-   * destructive accent (matching ConfirmDialog flow); Cancel uses the
-   * neutral edit-btn shape. */
-  .remove-btn {
-    position: absolute;
-    top: var(--space-xs);
-    right: calc(var(--space-xs) + 80px);
-    min-width: 44px;
-    min-height: 44px;
-    padding: 0 var(--space-sm);
-    background: var(--color-surface);
-    color: var(--color-destructive);
-    border: 1px solid var(--color-destructive);
-    border-radius: 4px;
-    font-size: var(--font-size-heading);
-    line-height: 1;
-    cursor: pointer;
-    z-index: 1;
-  }
-  .remove-btn:hover:not(:disabled) {
-    background: var(--color-destructive);
-    color: #fff;
-  }
-  .remove-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
+  /* Plan 02.1-39 round-6 polish #14c: inline label edit form. Replaces
+   * polish #13's "edit mode reveals × Remove only" with a real form
+   * (label input + Save / Cancel + × Remove). The form sits inline in
+   * the card body — no modal — so the user can compare the new label
+   * against the cover/name/appId without context-switching.
+   *
+   * The Cancel-edit × button at the top-right replaces the polish #13
+   * Edit-button position (same coords) so the user can dismiss
+   * without scrolling to find a Cancel. The form's own Save/Cancel
+   * buttons are the primary affordance for the field edit; the top-
+   * right × is the "discard + close" parallel of GameEditDialog's
+   * close button. */
   .cancel-edit-btn {
     position: absolute;
     top: var(--space-xs);
     right: var(--space-xs);
+    min-width: 32px;
     min-height: 32px;
     padding: 0 var(--space-sm);
     background: rgb(0 0 0 / 60%);
@@ -385,7 +483,95 @@
     cursor: pointer;
     z-index: 1;
   }
-  .cancel-edit-btn:hover {
+  .cancel-edit-btn:hover:not(:disabled) {
     background: rgb(0 0 0 / 80%);
+  }
+  .cancel-edit-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    padding: var(--space-sm);
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+  }
+  .edit-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+  }
+  .edit-field-label {
+    font-size: var(--font-size-label);
+    color: var(--color-text-muted);
+    font-weight: var(--font-weight-semibold);
+  }
+  .edit-input {
+    min-height: 36px;
+    padding: 0 var(--space-sm);
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    font-size: var(--font-size-body);
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .edit-actions {
+    display: flex;
+    gap: var(--space-xs);
+    flex-wrap: wrap;
+  }
+  .edit-save {
+    min-height: 36px;
+    padding: 0 var(--space-md);
+    background: var(--color-accent);
+    color: var(--color-accent-text, #fff);
+    border: 1px solid var(--color-accent);
+    border-radius: 4px;
+    font-size: var(--font-size-label);
+    font-weight: var(--font-weight-semibold);
+    cursor: pointer;
+  }
+  .edit-save:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .edit-cancel {
+    min-height: 36px;
+    padding: 0 var(--space-md);
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    font-size: var(--font-size-label);
+    cursor: pointer;
+  }
+  .edit-cancel:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .remove-btn-inline {
+    margin-left: auto;
+    min-height: 36px;
+    padding: 0 var(--space-md);
+    background: var(--color-surface);
+    color: var(--color-destructive);
+    border: 1px solid var(--color-destructive);
+    border-radius: 4px;
+    font-size: var(--font-size-label);
+    font-weight: var(--font-weight-semibold);
+    cursor: pointer;
+  }
+  .remove-btn-inline:hover:not(:disabled) {
+    background: var(--color-destructive);
+    color: #fff;
+  }
+  .remove-btn-inline:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 </style>

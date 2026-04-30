@@ -27,6 +27,7 @@ import {
   removeSteamListing,
   restoreListing,
   attachKeyToListing,
+  updateListing,
 } from "../../services/game-steam-listings.js";
 import { toGameSteamListingDto } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
@@ -39,6 +40,16 @@ const addListingSchema = z.object({
 
 const attachKeySchema = z.object({
   apiKeyId: z.string().min(1).nullable(),
+});
+
+// Plan 02.1-39 round-6 polish #14c (UAT-NOTES.md §5.8 follow-up #14,
+// 2026-04-30): per-listing field edit. Today only `label` is mutable;
+// the schema is shaped to accept future fields without a breaking
+// rename of the route. `label` is `string` not `string.optional()`-only
+// because Zod's `.optional()` on a single property leaves the body
+// type as `{ label?: string }` — that's the contract we want.
+const updateListingSchema = z.object({
+  label: z.string().max(100).optional(),
 });
 
 export const gameListingsRoutes = new Hono<RouteVars>();
@@ -74,6 +85,34 @@ gameListingsRoutes.get("/games/:gameId/listings", async (c) => {
     return mapErr(c, err, "GET /api/games/:gameId/listings");
   }
 });
+
+// Plan 02.1-39 round-6 polish #14c (UAT-NOTES.md §5.8 follow-up #14):
+// per-listing label edit. PATCH /api/games/:gameId/listings/:listingId
+// accepts { label?: string }. Cross-tenant gameId/listingId surfaces
+// as 404 (PRIV-01: 404, not 403). Future fields hang off the same
+// route shape via the updateListingSchema extension.
+gameListingsRoutes.patch(
+  "/games/:gameId/listings/:listingId",
+  zValidator("json", updateListingSchema, (r, c) => {
+    if (!r.success) {
+      return c.json({ error: "validation_failed", details: r.error.issues }, 422);
+    }
+  }),
+  async (c) => {
+    const body = c.req.valid("json");
+    try {
+      const listing = await updateListing(
+        c.var.userId,
+        c.req.param("gameId"),
+        c.req.param("listingId"),
+        body,
+      );
+      return c.json(toGameSteamListingDto(listing));
+    } catch (err) {
+      return mapErr(c, err, "PATCH /api/games/:gameId/listings/:listingId");
+    }
+  },
+);
 
 gameListingsRoutes.delete("/games/:gameId/listings/:listingId", async (c) => {
   const ctx = getAuditContext(c);

@@ -34,6 +34,19 @@
   // textarea survive the round-trip. When NULL, nothing renders — the
   // empty state is invisible (the user can always click Edit to add one).
   //
+  // Plan 02.1-39 round-6 polish #14c (UAT-NOTES.md §5.8 follow-up #14):
+  //   "сейчас добавление стора сделано полями на этой странице. Я хочу
+  //    через кнопку add рядом с заголовкот Stores"
+  //   ("right now adding a store is done with fields on the page. I
+  //    want it via an Add button next to the Stores heading")
+  //
+  // Polish #13's bottom-of-section Add CTA is REVERTED — the CTA moves
+  // back next to the Stores h2 in the section-header row, and clicking
+  // it opens AddStoreDialog (a modal wrapping the existing
+  // AddSteamListingForm) rather than expanding the form inline.
+  // StoresSection becomes a pure list renderer; the page owns the Add
+  // modal lifecycle.
+  //
   // Privacy invariants preserved:
   //   - Loader uses tenant-scoped service calls (listEventsForGame +
   //     mapEventsToDtos — Plan 02.1-28).
@@ -52,6 +65,7 @@
   import GameCover from "$lib/components/GameCover.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
   import GameEditDialog from "$lib/components/GameEditDialog.svelte";
+  import AddStoreDialog from "$lib/components/AddStoreDialog.svelte";
   // Plan 02.1-39 round-6 polish #12 (UAT-NOTES.md §5.8 follow-up #12,
   // 2026-04-30): RecoveryDialog extends to per-game soft-deleted listings.
   import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
@@ -120,6 +134,11 @@
   // (which only flipped a non-functional hint) with `editGameOpen` — the
   // open-state of the new <GameEditDialog>. PageHeader's cta opens it.
   let editGameOpen = $state(false);
+
+  // Plan 02.1-39 round-6 polish #14c: open-state of the new
+  // <AddStoreDialog> modal. The Add CTA next to the Stores h2 toggles
+  // it; the dialog's onSuccess closes it + invalidateAll().
+  let addStoreOpen = $state(false);
 
   const groupedEvents = $derived(groupEventsByDate(events));
 
@@ -211,6 +230,22 @@
   onSave={saveGameEdits}
 />
 
+<!--
+  Plan 02.1-39 round-6 polish #14c: AddStoreDialog modal — wraps the
+  existing AddSteamListingForm. Always mounted (the dialog defends
+  the closed state via .dialog[open] CSS scoping); the parent owns
+  the open prop. Opened by the Add CTA next to the Stores h2 (below).
+-->
+<AddStoreDialog
+  open={addStoreOpen}
+  gameId={game.id}
+  onClose={() => (addStoreOpen = false)}
+  onSuccess={() => {
+    addStoreOpen = false;
+    void invalidateAll();
+  }}
+/>
+
 {#if deletedListings.length > 0}
   <RecoveryDialog
     open={recoveryOpen}
@@ -248,9 +283,21 @@
   {/if}
 </section>
 
+<!--
+  Plan 02.1-39 round-6 polish #14c: Add CTA back next to the Stores h2
+  (reverts polish #13's bottom-of-section placement). Click opens
+  <AddStoreDialog>. StoresSection becomes a pure list renderer.
+-->
 <section class="stores" id="section-stores">
   <header class="section-header">
     <h2>{m.games_detail_section_stores()}</h2>
+    <button
+      type="button"
+      class="cta-secondary add-store-cta"
+      onclick={() => (addStoreOpen = true)}
+    >
+      + {m.stores_add_cta()}
+    </button>
   </header>
   <StoresSection
     {listings}
@@ -304,11 +351,10 @@
     color: var(--color-accent);
     text-decoration: none;
   }
-  /* Plan 02.1-39 round-6 polish #14b: the Stores section's
-   * section-header is heading-only (the Add CTA still lives at the
-   * BOTTOM of StoresSection per polish #13); the Events section keeps
-   * its New event link. Polish #14c (separate commit) moves the Add
-   * CTA back here next to the h2 with a modal trigger. */
+  /* Plan 02.1-39 round-6 polish #14c: Stores + Events both render
+   * their CTA in the section-header row (h2 + button/link). Stores'
+   * Add CTA opens AddStoreDialog modal; Events' "+ New event" stays
+   * a navigation link to /events/new. */
   .section-header {
     display: flex;
     align-items: center;
@@ -402,5 +448,13 @@
   .cta-secondary:hover {
     background: var(--color-accent);
     color: var(--color-accent-text);
+  }
+  /* Plan 02.1-39 round-6 polish #14c: the Add Store CTA in the
+   * stores section-header matches the Events "+ New event" CTA
+   * visually so the two section headers read as a consistent pattern.
+   * Cursor: pointer because it's a <button> not an <a>. */
+  .add-store-cta {
+    cursor: pointer;
+    font-family: inherit;
   }
 </style>

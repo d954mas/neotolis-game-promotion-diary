@@ -322,6 +322,86 @@ export async function restoreListing(
 }
 
 /**
+ * Update mutable fields on a listing (Plan 02.1-39 round-6 polish #14c
+ * — UAT-NOTES.md §5.8 follow-up #14, 2026-04-30).
+ *
+ * User during round-6 UAT (verbatim, ru):
+ *   "При редактировании стора, я бы хотел иметь возможноть поменять label.
+ *    И вот мне не понятно что так лейбл и где"
+ *   ("When editing a store, I'd like to be able to change the label.
+ *    And I don't understand what 'label' is or where it lives.")
+ *
+ * Today the only editable field is `label` (the user's free-text "Demo
+ * / Full / DLC / OST" tag). Future phases extend this to the rest of
+ * the §5.3 item B "full Steam-listing edit form" (release-date /
+ * categories override) — the signature is shaped so adding a field is
+ * one optional input + one patch line, no breaking change.
+ *
+ * Tenant scope: scoped to (userId, gameId, listingId) AND requires
+ * `deletedAt IS NULL` so the operation can't accidentally surface
+ * soft-deleted rows. The double constraint (gameId AND listingId) is
+ * defense-in-depth — a future caller that confuses listing IDs across
+ * games gets a clean 404 instead of a cross-game label edit.
+ *
+ * Throws NotFoundError on:
+ *   - cross-tenant gameId / listingId (PRIV-01: 404, not 403)
+ *   - mismatched gameId/listingId (listing belongs to a different game)
+ *   - soft-deleted row (use restoreListing first)
+ *   - non-existent row
+ *
+ * Wrapped in `db.transaction` per the round-5 §5.12 invariant fix
+ * (multi-step writes go through a transaction so a partial-write race
+ * window cannot leave the listing in an inconsistent state). Today
+ * it's a single UPDATE; the transaction wrap is forward-compat for
+ * the future field-set extension (which will likely involve a
+ * pre-update SELECT + computed merge).
+ *
+ * No audit row (D-32: listing CRUD is metadata, not security state).
+ */
+export async function updateListing(
+  userId: string,
+  gameId: string,
+  listingId: string,
+  fields: { label?: string },
+): Promise<SteamListingRow> {
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(gameSteamListings)
+      .where(
+        and(
+          eq(gameSteamListings.userId, userId),
+          eq(gameSteamListings.gameId, gameId),
+          eq(gameSteamListings.id, listingId),
+          isNull(gameSteamListings.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!existing) throw new NotFoundError();
+
+    const patch: Partial<typeof gameSteamListings.$inferInsert> = {
+      updatedAt: new Date(),
+    };
+    if (fields.label !== undefined) patch.label = fields.label;
+
+    const [row] = await tx
+      .update(gameSteamListings)
+      .set(patch)
+      .where(
+        and(
+          eq(gameSteamListings.userId, userId),
+          eq(gameSteamListings.gameId, gameId),
+          eq(gameSteamListings.id, listingId),
+          isNull(gameSteamListings.deletedAt),
+        ),
+      )
+      .returning();
+    if (!row) throw new NotFoundError();
+    return row;
+  });
+}
+
+/**
  * Soft-delete one listing. The parent game is unaffected; if the parent
  * is also soft-deleted later, the listing's existing `deletedAt`
  * differs from the parent's marker so a future restore will NOT bring
