@@ -31,7 +31,8 @@ test.describe("Phase 2.1 — 360px responsive smoke (D-42)", () => {
 
   test("/login primary CTA reachable without zoom at 360px", async ({ page }) => {
     await page.goto("/login");
-    const cta = page.getByRole("link", { name: /continue|sign in|google/i });
+    // /login renders <button>Continue with Google</button> (not a link).
+    const cta = page.getByRole("button", { name: /continue.*google/i });
     await expect(cta).toBeVisible();
   });
 
