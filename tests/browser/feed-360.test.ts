@@ -43,17 +43,7 @@ import { page, commands } from "@vitest/browser/context";
 const BASE = "http://localhost:5173";
 
 describe("FEED-01 (browser): /feed responsive at 360px", () => {
-  // Phase 2.1 round-13 CI: vitest 4.1.5 + @vitest/browser-playwright 4.1.5 +
-  // playwright 1.59.1 disconnects mid-test on ubuntu-24.04 GitHub Actions
-  // runners ("Browser connection was closed while running tests"). 13 rounds
-  // of fixes ruled out: chromium binary, sandbox flags, file parallelism,
-  // preview server liveness, process.env globals, launchOptions placement,
-  // chrome-headless-shell version mismatch. Root cause is upstream — likely
-  // vitest 4.x browser provider stability on ubuntu-24.04 + actions runner
-  // user namespaces. Phase 2.5 Ship-to-Prod owns the upgrade investigation.
-  // Skipping the 3 active tests so the suite passes vacuously; smoke job
-  // covers auth flow + manual UAT covered live UX during Plan 02.1-39.
-  it.skip("anonymous request to /feed redirects to /login (public-routed)", async () => {
+  it("anonymous request to /feed redirects to /login (public-routed)", async () => {
     await page.viewport(360, 640);
     await commands.goto(`${BASE}/feed`);
     // Anonymous → +layout.server.ts protected-paths sweep redirects to /login,
