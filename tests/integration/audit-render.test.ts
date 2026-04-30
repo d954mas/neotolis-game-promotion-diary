@@ -1096,12 +1096,14 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     expect(src).toMatch(/\.row\.mine\s*\{[\s\S]*?border-left:\s*4px solid var\(--color-mine\)/);
     expect(src).toMatch(/\.ownership-badge\.mine[\s\S]*?background:\s*var\(--color-mine\)/);
     // Kind label rendered next to the icon via kindLabel(SourceKind).
+    // Plan 02.1-39 round-6 polish #7 extracted the per-kind paraglide keys
+    // into src/lib/util/source-kind-label.ts (sourceKindLabel helper); the
+    // SourceRow component imports + calls the helper rather than referencing
+    // m.source_kind_label_* directly, so the literal-string assertions live
+    // in the helper's own test now (covered indirectly by paraglide.test.ts
+    // EXPECTED_KEYS snapshot).
     expect(src).toMatch(/kindLabel/);
-    expect(src).toMatch(/source_kind_label_youtube_channel/);
-    expect(src).toMatch(/source_kind_label_reddit_account/);
-    expect(src).toMatch(/source_kind_label_twitter_account/);
-    expect(src).toMatch(/source_kind_label_telegram_channel/);
-    expect(src).toMatch(/source_kind_label_discord_server/);
+    expect(src).toMatch(/from\s+["']\$lib\/util\/source-kind-label\.js["']/);
   });
 
   it("/games/[id]/+page.svelte renders the three-section layout (Plan 02.1-39 §5.3 + round-6 polish #13/#14b)", async () => {
