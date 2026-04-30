@@ -66,14 +66,26 @@
    *
    * `--app-header-height` is a runtime measurement, not a static guess: a
    * ResizeObserver in src/routes/+layout.svelte writes AppHeader's real
-   * `offsetHeight` to :root each layout. Round-6 follow-up — the static
-   * 72px fallback was 4-5px short of AppHeader's actual rendered height
-   * (padding × 2 + avatar/brand content), so Nav engaged sticky only
-   * AFTER the user had already scrolled through that gap. The 72px in
-   * the fallback below stays for SSR / no-JS / pre-effect first paint. */
+   * `getBoundingClientRect().height` (raw fractional float) to :root each
+   * layout. Round-6 follow-up — the static 72px fallback was 4-5px short
+   * of AppHeader's actual rendered height (padding × 2 + avatar/brand
+   * content), so Nav engaged sticky only AFTER the user had already
+   * scrolled through that gap. The 72px in the fallback below stays for
+   * SSR / no-JS / pre-effect first paint.
+   *
+   * Round-6 follow-up #3 (UAT-NOTES.md §5.4): the `top:` calc subtracts
+   * `--sticky-overlap` (1px design token in app.css) so Nav overlaps
+   * AppHeader's bottom edge by 1 invisible pixel. Both elements share
+   * `background: var(--color-surface)`, so the overlap renders identically
+   * to no-overlap. This pre-empts any subpixel rounding gap that might
+   * appear at non-integer device-pixel ratios when the browser's sticky
+   * engine snaps fractional positions. Round-6 #2 (e91bd29) tried to fix
+   * the same gap with `Math.ceil` on the height; that worked here but
+   * moved the gap to PageHeader/Nav. Raw fractional heights + 1px overlap
+   * is the symmetric, drift-resistant solution. */
   .nav {
     position: sticky;
-    top: var(--app-header-height, 72px);
+    top: calc(var(--app-header-height, 72px) - var(--sticky-overlap, 1px));
     z-index: 9;
     display: flex;
     gap: var(--space-md);

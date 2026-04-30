@@ -81,6 +81,26 @@
    *   PageHeader.sticky (top: --app-header-h + --nav-h). */
   --app-header-height: 72px;
   --nav-height: 44px;
+
+  /* Plan 02.1-39 round-6 follow-up #3 (UAT-NOTES.md §5.4): defensive 1px
+   * overlap between adjacent sticky tiers so subpixel rounding artifacts
+   * never produce a visible gap. AppHeader, Nav, and PageHeader.sticky all
+   * paint with matching backgrounds (`background: var(--color-surface)` /
+   * `var(--color-bg)` blended with the existing border-bottom), so a 1px
+   * overlap renders identically to no overlap — there is no visual cost.
+   *
+   * Each tier subtracts N × --sticky-overlap from its sticky `top:` calc:
+   *   Nav            top: calc(--app-header-height - --sticky-overlap)
+   *   PageHeader     top: calc(--app-header-height + --nav-height
+   *                              - 2 × --sticky-overlap)
+   *
+   * Round-6 #2 (commit e91bd29) used `Math.ceil(getBoundingClientRect)` to
+   * round each height UP. That fixed the AppHeader/Nav gap but pushed the
+   * SAME gap one tier downstream (Nav/PageHeader). Round-6 #3 (this) drops
+   * ceil entirely — raw fractional heights flow through the subpixel sticky
+   * machinery, and this 1px overlap token is the belt-and-suspenders safety
+   * net for any future browser-engine drift. */
+  --sticky-overlap: 1px;
 }
 
 /* Color — light theme (default + explicit). */

@@ -75,10 +75,30 @@
   // edge and Nav's top edge through which scrolling content peeks. User
   // verbatim after first runtime-measurement fix landed (273904d): "есть
   // gap в 1-2 пикселя между заголовком и табами, через него я вижу контент
-  // скролла". Use `getBoundingClientRect().height` (fractional float) and
-  // `Math.ceil` to round UP — guarantees `top` ≥ AppHeader's bottom edge,
-  // so the worst case is a subpixel overlap rather than a gap. Overlap is
-  // invisible because both elements share `background: var(--color-surface)`.
+  // скролла".
+  //
+  // Round-6 follow-up #3 (2026-04-30): the previous fix used
+  // `Math.ceil(getBoundingClientRect().height)` to round UP and eliminate
+  // the AppHeader/Nav gap. That worked for tier 1, but rounding `--nav-height`
+  // up by ≤1px pushed PageHeader.sticky's `top: calc(--app-header-height +
+  // --nav-height)` BELOW Nav's real bottom edge — which moved the SAME gap
+  // one tier downstream. User verbatim: "Теперь геп межно табами (feed
+  // Sources) и заголовком feed Add Event" ("now the gap is between the
+  // tabs (feed/sources) and the title 'Feed + Add event'"). Both ceil and
+  // floor produce visible artifacts: ceil → gap at the next tier; floor →
+  // gap at this tier. There is no integer-only value that fits both
+  // adjacent tiers when the source height is fractional.
+  //
+  // Fix: write the RAW fractional value (no Math.ceil/floor/round). Modern
+  // browsers (Chrome 90+, Firefox 81+, Safari 16+) handle subpixel `position:
+  // sticky` correctly — Nav at `top: 77.5px` engages at exactly AppHeader's
+  // real bottom edge regardless of DPR. The `--sticky-overlap: 1px` design
+  // token in src/app.css is the belt-and-suspenders safety net: each sticky
+  // tier subtracts N × --sticky-overlap from its `top:` calc (Nav: 1×,
+  // PageHeader: 2×) so adjacent tiers overlap by 1 invisible pixel. Since
+  // AppHeader, Nav, and PageHeader.sticky all paint with matching backgrounds
+  // (--color-surface), the 1px overlap renders identically to no overlap —
+  // but it pre-empts any subpixel artifact at any zoom level / browser engine.
   $effect(() => {
     // Read `data.user` so the effect re-runs when chrome mounts/unmounts on
     // sign-in / sign-out — `<AppHeader>` and `<Nav>` only render under
@@ -92,11 +112,11 @@
     const sync = (): void => {
       root.style.setProperty(
         "--app-header-height",
-        `${Math.ceil(appHeader.getBoundingClientRect().height)}px`,
+        `${appHeader.getBoundingClientRect().height}px`,
       );
       root.style.setProperty(
         "--nav-height",
-        `${Math.ceil(nav.getBoundingClientRect().height)}px`,
+        `${nav.getBoundingClientRect().height}px`,
       );
     };
     sync();

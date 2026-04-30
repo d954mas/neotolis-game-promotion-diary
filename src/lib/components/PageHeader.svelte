@@ -83,10 +83,22 @@
    * sticky <PageHeader> must anchor BELOW Nav. The offset becomes
    * calc(--app-header-height + --nav-height); fallback 72px + 44px = 116px
    * preserves zero visual regression. The combined sticky stack is now:
-   * AppHeader → Nav → PageHeader → (per-page content). */
+   * AppHeader → Nav → PageHeader → (per-page content).
+   * Plan 02.1-39 (UAT-NOTES.md §5.4 round-6 follow-up #3): subtract
+   * `2 * --sticky-overlap` from the `top:` calc — PageHeader is two tiers
+   * deep, so it overlaps both AppHeader (via --app-header-height, 1×) and
+   * Nav (via --nav-height, 1×) for a total of 2 × 1px = 2px upward shift.
+   * Each overlap is invisible (matching backgrounds with the tier above),
+   * but together they pre-empt the subpixel gap user reported on round-6 #2:
+   * "Теперь геп межно табами и заголовком feed Add Event". Raw fractional
+   * heights from getBoundingClientRect() (no Math.ceil) flow through here
+   * unrounded; the overlap token is the belt-and-suspenders safety net. */
   .page-header.sticky {
     position: sticky;
-    top: calc(var(--app-header-height, 72px) + var(--nav-height, 44px));
+    top: calc(
+      var(--app-header-height, 72px) + var(--nav-height, 44px)
+        - 2 * var(--sticky-overlap, 1px)
+    );
     z-index: 5;
     padding: var(--space-sm) 0;
     background: var(--color-bg);
