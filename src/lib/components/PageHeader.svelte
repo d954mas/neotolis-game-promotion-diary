@@ -72,33 +72,33 @@
     flex-wrap: wrap;
   }
   /* Plan 02.1-25 (sticky variant — preserves Plan 02.1-22 §2.2-bug closure):
-   * anchors under the global AppHeader (sticky top:0); background fill +
+   * anchors under the global chrome (AppHeader + Nav); background fill +
    * padding prevent scrolled content from bleeding through.
-   * Plan 02.1-39 (UAT-NOTES.md §5.4 + §5.7): swap the hardcoded `top: 72px`
-   * for `var(--app-header-height, 72px)` so this offset shares its source
-   * of truth with FeedQuickNav's sticky calc(). The 72px fallback preserves
-   * zero visual regression in browsers without custom-property support.
-   * Plan 02.1-39 (UAT-NOTES.md §5.4 true closure — round-6 follow-up): the
-   * primary <Nav> is now also sticky (top: --app-header-height), so this
-   * sticky <PageHeader> must anchor BELOW Nav. The offset becomes
-   * calc(--app-header-height + --nav-height); fallback 72px + 44px = 116px
-   * preserves zero visual regression. The combined sticky stack is now:
-   * AppHeader → Nav → PageHeader → (per-page content).
-   * Plan 02.1-39 (UAT-NOTES.md §5.4 round-6 follow-up #3): subtract
-   * `2 * --sticky-overlap` from the `top:` calc — PageHeader is two tiers
-   * deep, so it overlaps both AppHeader (via --app-header-height, 1×) and
-   * Nav (via --nav-height, 1×) for a total of 2 × 1px = 2px upward shift.
-   * Each overlap is invisible (matching backgrounds with the tier above),
-   * but together they pre-empt the subpixel gap user reported on round-6 #2:
-   * "Теперь геп межно табами и заголовком feed Add Event". Raw fractional
-   * heights from getBoundingClientRect() (no Math.ceil) flow through here
-   * unrounded; the overlap token is the belt-and-suspenders safety net. */
+   *
+   * Plan 02.1-39 round-6 #5 (UAT-NOTES.md §5.4 follow-up #5): the chrome
+   * (AppHeader + Nav) is now a SINGLE sticky wrapper in +layout.svelte
+   * rather than two independent sticky elements. PageHeader's sticky top
+   * therefore reads ONE runtime-measured CSS var — `--chrome-height` —
+   * instead of summing `--app-header-height + --nav-height`. The wrapper
+   * height is written by a ResizeObserver in src/routes/+layout.svelte
+   * (raw fractional `getBoundingClientRect().height`); the static fallback
+   * 116px (= 72px AppHeader + 44px Nav) preserves zero visual regression
+   * during SSR / pre-effect / no-JS.
+   *
+   * The sticky stack collapses from three tiers to two:
+   *   1. .sticky-chrome (top: 0, z: 10)            — wraps AppHeader + Nav
+   *   2. .page-header.sticky (top: --chrome-height, z: 5)
+   *
+   * `--sticky-overlap` is 1px (was 4px in round-6 #4 because we needed
+   * larger slack to absorb subpixel-rounding error across TWO independent
+   * boundaries simultaneously). With only one sticky boundary remaining
+   * here (chrome ↔ PageHeader), 1px is sufficient — proved in round-6 #3
+   * (435697e) for a single-tier defense. The overlap is invisible because
+   * `.sticky-chrome` (z: 10) paints over `.page-header.sticky` (z: 5) in
+   * the overlap zone. */
   .page-header.sticky {
     position: sticky;
-    top: calc(
-      var(--app-header-height, 72px) + var(--nav-height, 44px)
-        - 2 * var(--sticky-overlap, 1px)
-    );
+    top: calc(var(--chrome-height, 116px) - var(--sticky-overlap, 1px));
     z-index: 5;
     padding: var(--space-sm) 0;
     background: var(--color-bg);

@@ -42,13 +42,19 @@
 
 <style>
   .header {
-    /* Plan 02.1-22 (UAT-NOTES.md §2.2-bug closure): sticky-top so the header
-       stays visible while page content scrolls beneath. The flex-column
-       scaffold added in src/routes/+layout.svelte gives this rule a
-       scrolling parent to anchor against. */
-    position: sticky;
-    top: 0;
-    z-index: 10;
+    /* Plan 02.1-39 round-6 #5 (UAT-NOTES.md §5.4 follow-up #5): AppHeader is
+       NON-STICKY here. The Plan 02.1-22 closure required AppHeader to stay
+       visible while content scrolled — that contract is preserved, but the
+       sticky positioning has moved UP one level to the `.sticky-chrome`
+       wrapper in src/routes/+layout.svelte that contains both AppHeader and
+       Nav. Reason: when AppHeader and Nav were each independently sticky
+       (top: 0 and top: --app-header-height respectively), every overlap
+       value either left a subpixel gap (too small) or made Nav visibly slip
+       up on scroll-start (too large). User quote on the slip after round-6
+       #4 (419e3c7): "Зазора нет, но есть небольшой скрол табов feed sources
+       что выглядит как артефакт". Wrapping both in a single sticky block
+       removes the AppHeader↔Nav internal sticky boundary entirely — they
+       move as one DOM unit, so neither gap nor slip is possible. */
     display: flex;
     align-items: center;
     justify-content: space-between;

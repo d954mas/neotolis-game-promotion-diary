@@ -48,45 +48,30 @@
 </nav>
 
 <style>
-  /* Plan 02.1-39 (UAT-NOTES.md §5.4 — true closure): primary <Nav> sticks
-   * just below the AppHeader so the user can switch between Feed / Sources /
-   * Games / Settings while scrolling deep inside any list page. Round-5 user
-   * quote: "хедер сейчас липкий все ок. Но вот табы после хедера, не липкие".
-   * The first round-6 attempt misread "табы после хедера" as <FeedQuickNav>
-   * (the per-feed chip strip) and made THAT sticky; user clarified the
-   * intended target is the primary nav strip rendered immediately under
-   * AppHeader on every authenticated page. Commit 4717c3c reversed the
-   * FeedQuickNav misfix; this rule is the actual closure.
+  /* Plan 02.1-39 round-6 #5 (UAT-NOTES.md §5.4 follow-up #5): <Nav> is
+   * NON-STICKY here. Sticky positioning moved UP one level to the
+   * `.sticky-chrome` wrapper in src/routes/+layout.svelte that contains
+   * both AppHeader and Nav. The user-visible behavior (Nav stays pinned
+   * just under AppHeader while content scrolls) is unchanged — AppHeader
+   * and Nav now move as a single DOM unit because the wrapper is the only
+   * sticky element.
    *
-   * Sticky stack now: AppHeader (top: 0, z: 10) → Nav (top: 72px, z: 9) →
-   * PageHeader.sticky (top: 72px + --nav-height, z: 5). Background +
-   * border-bottom already present prevent see-through during scroll.
-   * z-index 9 sits one below AppHeader (10) so AppHeader still wins the
-   * visual layer if any future overlay edge case occurs.
+   * History: round-6 #1-#4 tried to make Nav independently sticky at
+   * `top: var(--app-header-height) - var(--sticky-overlap)`. That math
+   * never quite worked: at every overlap value some browser-zoom + DPR
+   * combination either left a subpixel gap (overlap too small) or made
+   * Nav visibly slip up on scroll-start (overlap too large, so Nav's
+   * sticky `top:` sat ABOVE its in-flow position by the overlap amount,
+   * forcing it to scroll up by N pixels before the sticky engaged).
+   * User reported the slip after the 4px overlap landed (419e3c7):
+   * "Зазора нет, но есть небольшой скрол табов feed sources что выглядит
+   * как артефакт".
    *
-   * `--app-header-height` is a runtime measurement, not a static guess: a
-   * ResizeObserver in src/routes/+layout.svelte writes AppHeader's real
-   * `getBoundingClientRect().height` (raw fractional float) to :root each
-   * layout. Round-6 follow-up — the static 72px fallback was 4-5px short
-   * of AppHeader's actual rendered height (padding × 2 + avatar/brand
-   * content), so Nav engaged sticky only AFTER the user had already
-   * scrolled through that gap. The 72px in the fallback below stays for
-   * SSR / no-JS / pre-effect first paint.
-   *
-   * Round-6 follow-up #3 (UAT-NOTES.md §5.4): the `top:` calc subtracts
-   * `--sticky-overlap` (1px design token in app.css) so Nav overlaps
-   * AppHeader's bottom edge by 1 invisible pixel. Both elements share
-   * `background: var(--color-surface)`, so the overlap renders identically
-   * to no-overlap. This pre-empts any subpixel rounding gap that might
-   * appear at non-integer device-pixel ratios when the browser's sticky
-   * engine snaps fractional positions. Round-6 #2 (e91bd29) tried to fix
-   * the same gap with `Math.ceil` on the height; that worked here but
-   * moved the gap to PageHeader/Nav. Raw fractional heights + 1px overlap
-   * is the symmetric, drift-resistant solution. */
+   * The fix is architectural: there's no overlap-math sweet spot for two
+   * stacked independent sticky elements. Wrap them in a single sticky
+   * container instead — the AppHeader↔Nav boundary is no longer a sticky
+   * boundary, so it can neither gap nor slip by construction. */
   .nav {
-    position: sticky;
-    top: calc(var(--app-header-height, 72px) - var(--sticky-overlap, 1px));
-    z-index: 9;
     display: flex;
     gap: var(--space-md);
     padding: 0 var(--space-md);

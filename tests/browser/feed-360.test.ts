@@ -549,50 +549,64 @@ describe("Plan 02.1-39 — /feed FeedQuickNav non-sticky (round-6 reversal) + Fi
 });
 
 /**
- * Plan 02.1-39 — true §5.4 closure: primary <Nav> sticks below AppHeader.
+ * Plan 02.1-39 — §5.4 closure (final, round-6 follow-up #5): single
+ * `.sticky-chrome` wrapper makes AppHeader + Nav one DOM block.
  *
- * Round-5 UAT user quote: "хедер сейчас липкий все ок. Но вот табы после
- * хедера, не липкие" — round-6 first attempt misread the quote as
- * <FeedQuickNav> (the per-feed chip strip) and applied sticky there;
- * commit 4717c3c reversed that misfix after the user clarified
- * "ТАБЫ ДОЛЖНЫ — табы которые навигация по страницам" (the tabs that
- * navigate between pages — i.e. the primary <Nav> rendered immediately
- * under AppHeader on every authenticated page from src/routes/+layout.svelte).
+ * Iteration history (UAT-NOTES.md §5.4 round-6 follow-ups):
+ *   * round-6 #1-#4 — AppHeader and Nav each independently sticky, with
+ *     `--sticky-overlap` math (1px → 4px) attempting to absorb subpixel
+ *     rounding. Each overlap value either left a gap (too small, at non-
+ *     100% zoom) or made Nav slip up by N pixels on scroll-engage (too
+ *     large, perceptible at 4px). Trade-off was fundamental.
+ *   * round-6 #5 (this) — wrap AppHeader + Nav in a single
+ *     `<div class="sticky-chrome">` in `src/routes/+layout.svelte`. The
+ *     wrapper is the only sticky element; AppHeader + Nav are non-sticky
+ *     DOM children in normal flow. With no internal sticky boundary,
+ *     neither gap nor slip is possible by construction. Only one sticky
+ *     boundary remains: chrome ↔ PageHeader (kept at 1px overlap).
  *
  * The CSS contract for the closure:
- *   <Nav> .nav { position: sticky; top: var(--app-header-height, 72px); z-index: 9 }
- *   PageHeader.sticky { top: calc(--app-header-height + --nav-height) }
+ *   .sticky-chrome { position: sticky; top: 0; z-index: 10 }
+ *   .page-header.sticky { top: calc(--chrome-height - --sticky-overlap) }
  *
  * Manual UAT recipe (Russian):
  *   1. Открыть /feed (или /sources, /games, /audit) при ширине ≤ 768px.
  *   2. Прокрутить страницу вниз минимум на 600px.
- *   3. Подтвердить, что AppHeader (полоса с логотипом + аватаром) остаётся
- *      приклеенным к верху экрана.
- *   4. Подтвердить, что табы Feed / Sources / Games / Settings (Nav)
- *      ОСТАЮТСЯ приклеенными СРАЗУ под AppHeader, а не уезжают вверх.
- *   5. Подтвердить, что PageHeader (заголовок страницы + основная CTA)
- *      остаётся приклеенным сразу под Nav (трёхуровневый липкий стек).
- *   6. На /feed подтвердить, что FeedQuickNav (All / Inbox / Standalone /
- *      по-играм) ПРОКРУЧИВАЕТСЯ ВМЕСТЕ с лентой — в отличие от Nav, не
- *      становится липким (это закрытие через откат, см. описание выше).
+ *   3. Подтвердить, что AppHeader + Nav (как ОДИН блок) остаются
+ *      приклеенными к верху экрана. Между AppHeader и Nav не должно быть
+ *      никакого зазора и Nav не должен «съезжать» при начале прокрутки.
+ *   4. Подтвердить, что PageHeader (заголовок страницы + основная CTA)
+ *      остаётся приклеенным сразу под Nav (двухуровневый липкий стек:
+ *      .sticky-chrome → .page-header.sticky).
+ *   5. На /feed подтвердить, что FeedQuickNav (All / Inbox / Standalone /
+ *      по-играм) ПРОКРУЧИВАЕТСЯ ВМЕСТЕ с лентой — не становится липким
+ *      (закрытие §5.4 через откат, сохранено).
+ *   6. Повторить на 90% / 110% / 125% browser zoom — никаких регрессий
+ *      на любом из уровней зума.
  *
  * Auth harness deferred to Phase 6 — same precedent as Plans 02.1-18 / 19 /
  * 20 / 21 / 23 / 26 / 39 (FeedQuickNav reversal block above).
  */
-describe("Plan 02.1-39 — primary <Nav> sticky (true §5.4 closure)", () => {
+describe("Plan 02.1-39 — single .sticky-chrome wrapper (true §5.4 closure, round-6 #5)", () => {
   it.skip(
-    "/feed Nav .nav has computed position === 'sticky' and top === var(--app-header-height) — getBoundingClientRect().top stays at AppHeader-height after window.scrollTo(0, 600) (manual UAT — auth harness deferred to Phase 6) — §5.4 true closure",
+    "/feed .sticky-chrome has computed position === 'sticky' and top === '0px' — getBoundingClientRect().top stays at 0 after window.scrollTo(0, 600) (manual UAT — auth harness deferred to Phase 6) — §5.4 final closure",
   );
   it.skip(
-    "/sources Nav stays pinned below AppHeader on scroll — three-level sticky stack AppHeader → Nav → PageHeader (manual UAT — auth harness deferred)",
+    "/feed AppHeader (header.header) inside .sticky-chrome has computed position !== 'sticky' — sticky moved up to wrapper (manual UAT — auth harness deferred)",
   );
   it.skip(
-    "/games Nav stays pinned below AppHeader on scroll — three-level sticky stack AppHeader → Nav → PageHeader (manual UAT — auth harness deferred)",
+    "/feed Nav (nav.nav) inside .sticky-chrome has computed position !== 'sticky' — sticky moved up to wrapper (manual UAT — auth harness deferred)",
   );
   it.skip(
-    "/audit Nav stays pinned below AppHeader on scroll — three-level sticky stack AppHeader → Nav → PageHeader (manual UAT — auth harness deferred)",
+    "/sources .sticky-chrome stays pinned at top:0 on scroll — two-level sticky stack .sticky-chrome → PageHeader.sticky (manual UAT — auth harness deferred)",
   );
   it.skip(
-    "/feed FeedQuickNav scrolls WITH the feed — getBoundingClientRect().top advances with window.scrollTo(0, 400); only AppHeader + Nav + PageHeader stay pinned (manual UAT — auth harness deferred) — §5.4 closed-by-reversal preserved",
+    "/games .sticky-chrome stays pinned at top:0 on scroll — two-level sticky stack .sticky-chrome → PageHeader.sticky (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/audit .sticky-chrome stays pinned at top:0 on scroll — two-level sticky stack .sticky-chrome → PageHeader.sticky (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/feed FeedQuickNav scrolls WITH the feed — getBoundingClientRect().top advances with window.scrollTo(0, 400); only .sticky-chrome + PageHeader stay pinned (manual UAT — auth harness deferred) — §5.4 closed-by-reversal preserved",
   );
 });

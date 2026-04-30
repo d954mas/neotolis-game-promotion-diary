@@ -46,83 +46,62 @@
     await goto("/", { invalidateAll: true });
   }
 
-  // Plan 02.1-39 (UAT-NOTES.md §5.4 round-6 follow-up): keep the sticky-stack
-  // CSS vars in sync with the actually-rendered chrome heights.
+  // Plan 02.1-39 (UAT-NOTES.md §5.4 round-6 follow-up #5): the sticky chrome
+  // is a SINGLE wrapper element, not two stacked sticky elements.
   //
-  // Round-6 first pass shipped static fallbacks `--app-header-height: 72px`
-  // and `--nav-height: 44px` in src/app.css. UAT user feedback (verbatim):
-  // "есть странный эффект у табов(feed, Source и тд) есть неболшой скролл,
-  // а потом оно фиксируется. Выглядит так что когда я начинаю скрол то там
-  // есть 4-5 пикселя скроад". Root cause: AppHeader's actual rendered height
-  // (padding `--space-md` × 2 + avatar 28px + brand line-height) is ~76-78px,
-  // not 72px. Nav's `top: var(--app-header-height)` therefore sat 4-5px BELOW
-  // AppHeader's bottom edge, so sticky engaged only after the user scrolled
-  // through that gap.
+  // History — why this is a wrapper, not two adjacent stickies:
+  //   * c7f890f          — Nav.sticky introduced; AppHeader (top: 0) and Nav
+  //                        (top: --app-header-height) were two INDEPENDENT
+  //                        sticky elements stacked vertically.
+  //   * 273904d          — round-6 #1: ResizeObserver writes runtime height
+  //                        to fix a 4-5px slip from the static 72px fallback.
+  //   * e91bd29          — round-6 #2: Math.ceil() to close subpixel gap; the
+  //                        gap moved one tier downstream to PageHeader.
+  //   * 435697e          — round-6 #3: raw fractional + 1px overlap. Gap
+  //                        eliminated at 100% zoom; reappeared at non-100%.
+  //   * 419e3c7          — round-6 #4: --sticky-overlap bumped to 4px.
+  //                        Gap gone, but Nav now visibly slips UP by 4px on
+  //                        scroll-start before locking. User quote (verbatim):
+  //                        "Зазора нет, но есть небольшой скрол табов feed
+  //                        sources что выглядит как артефакт" ("No gap, but
+  //                        the Feed/Sources tabs do a small scroll on engage
+  //                        that looks like an artifact").
+  //   * THIS COMMIT (#5) — eliminate the AppHeader↔Nav boundary entirely.
+  //                        Wrap both in a single <div.sticky-chrome>; that
+  //                        wrapper is the only sticky element. AppHeader and
+  //                        Nav become non-sticky DOM children in normal flow
+  //                        within the wrapper. With no internal sticky
+  //                        relationship, no internal gap or slip is possible
+  //                        by construction. The only remaining sticky
+  //                        boundary is chrome ↔ PageHeader, where the proven
+  //                        1px overlap from 435697e is reinstated as the
+  //                        single-tier defensive shim.
   //
-  // Fix: a ResizeObserver on the rendered <header.header> and <nav.nav>
-  // pushes their measured height onto :root as `--app-header-height` /
-  // `--nav-height`. Static fallbacks in src/app.css remain for SSR and the
-  // brief tick before this $effect runs. We query the DOM directly rather
-  // than threading `bind:this` props through AppHeader / Nav — both always
-  // render here, and a wrapping `<div bind:this>` would create a new
-  // offsetParent that breaks `position: sticky` for the children.
+  // The trade-off (overlap-too-small → gap; overlap-too-large → slip) is
+  // FUNDAMENTAL to two independent sticky elements sharing overlap math —
+  // there is no overlap value that satisfies both at every zoom + DPR + DOM
+  // engine. Removing the boundary removes the trade-off.
   //
-  // Subpixel rounding (round-6 follow-up #2): `offsetHeight` returns an
-  // integer (floor-rounded). When AppHeader's actual rendered height is
-  // fractional (e.g. 77.5px from a DPR-scaled border or font line-box at
-  // non-integer device-pixel ratios), `offsetHeight = 77` and Nav stickies
-  // at `top: 77px` — leaving a 0.5-2px gap between AppHeader's real bottom
-  // edge and Nav's top edge through which scrolling content peeks. User
-  // verbatim after first runtime-measurement fix landed (273904d): "есть
-  // gap в 1-2 пикселя между заголовком и табами, через него я вижу контент
-  // скролла".
-  //
-  // Round-6 follow-up #3 (2026-04-30): the previous fix used
-  // `Math.ceil(getBoundingClientRect().height)` to round UP and eliminate
-  // the AppHeader/Nav gap. That worked for tier 1, but rounding `--nav-height`
-  // up by ≤1px pushed PageHeader.sticky's `top: calc(--app-header-height +
-  // --nav-height)` BELOW Nav's real bottom edge — which moved the SAME gap
-  // one tier downstream. User verbatim: "Теперь геп межно табами (feed
-  // Sources) и заголовком feed Add Event" ("now the gap is between the
-  // tabs (feed/sources) and the title 'Feed + Add event'"). Both ceil and
-  // floor produce visible artifacts: ceil → gap at the next tier; floor →
-  // gap at this tier. There is no integer-only value that fits both
-  // adjacent tiers when the source height is fractional.
-  //
-  // Fix: write the RAW fractional value (no Math.ceil/floor/round). Modern
-  // browsers (Chrome 90+, Firefox 81+, Safari 16+) handle subpixel `position:
-  // sticky` correctly — Nav at `top: 77.5px` engages at exactly AppHeader's
-  // real bottom edge regardless of DPR. The `--sticky-overlap: 1px` design
-  // token in src/app.css is the belt-and-suspenders safety net: each sticky
-  // tier subtracts N × --sticky-overlap from its `top:` calc (Nav: 1×,
-  // PageHeader: 2×) so adjacent tiers overlap by 1 invisible pixel. Since
-  // AppHeader, Nav, and PageHeader.sticky all paint with matching backgrounds
-  // (--color-surface), the 1px overlap renders identically to no overlap —
-  // but it pre-empts any subpixel artifact at any zoom level / browser engine.
+  // We still measure runtime chrome height for PageHeader.sticky's `top:`
+  // calc — PageHeader sticks below the chrome wrapper, so it needs the
+  // wrapper's real height. ResizeObserver on the wrapper writes the
+  // fractional rect height to `--chrome-height` on `:root`. Static fallback
+  // 116px (= 72px AppHeader + 44px Nav) covers SSR / pre-effect / no-JS.
   $effect(() => {
-    // Read `data.user` so the effect re-runs when chrome mounts/unmounts on
-    // sign-in / sign-out — `<AppHeader>` and `<Nav>` only render under
-    // `{#if data.user}` so their DOM nodes don't exist for anonymous routes.
     if (!data.user) return;
     if (typeof window === "undefined") return;
-    const appHeader = document.querySelector("header.header") as HTMLElement | null;
-    const nav = document.querySelector("nav.nav") as HTMLElement | null;
-    if (!appHeader || !nav) return;
+    const chrome = document.querySelector(".sticky-chrome") as HTMLElement | null;
+    if (!chrome) return;
     const root = document.documentElement;
     const sync = (): void => {
       root.style.setProperty(
-        "--app-header-height",
-        `${appHeader.getBoundingClientRect().height}px`,
-      );
-      root.style.setProperty(
-        "--nav-height",
-        `${nav.getBoundingClientRect().height}px`,
+        "--chrome-height",
+        `${chrome.getBoundingClientRect().height}px`,
       );
     };
     sync();
     const ro = new ResizeObserver(sync);
-    ro.observe(appHeader);
-    ro.observe(nav);
+    ro.observe(chrome);
     return () => ro.disconnect();
   });
 </script>
@@ -141,13 +120,19 @@
 -->
 <div class="layout-root">
   {#if data.user}
-    <AppHeader
-      user={{ name: data.user.name, email: data.user.email, image: data.user.image }}
-      theme={data.theme}
-      onSignOut={handleSignOut}
-      onSignOutAllDevices={handleSignOutAllDevices}
-    />
-    <Nav active={navActive} />
+    <!-- Plan 02.1-39 round-6 #5: single sticky chrome wrapper. AppHeader and
+         Nav are NON-sticky in normal flow inside this wrapper; the wrapper
+         alone is `position: sticky; top: 0`. See $effect comment above for
+         the full iteration timeline that led here. -->
+    <div class="sticky-chrome">
+      <AppHeader
+        user={{ name: data.user.name, email: data.user.email, image: data.user.image }}
+        theme={data.theme}
+        onSignOut={handleSignOut}
+        onSignOutAllDevices={handleSignOutAllDevices}
+      />
+      <Nav active={navActive} />
+    </div>
   {/if}
 
   <main>
@@ -162,6 +147,17 @@
     display: flex;
     flex-direction: column;
     min-height: 100vh;
+  }
+  /* Plan 02.1-39 round-6 #5: the sticky chrome wrapper. This is the SINGLE
+     sticky element for the AppHeader + Nav pair. Background fill prevents
+     scrolled content from showing through; matches AppHeader's own
+     `--color-surface` so the wrapper is visually invisible. z-index 10
+     keeps the chrome above per-page sticky elements (PageHeader z:5). */
+  .sticky-chrome {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--color-surface);
   }
   main {
     flex: 1;

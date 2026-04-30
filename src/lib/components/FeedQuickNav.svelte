@@ -206,9 +206,11 @@
      * (round-5 made the tabs strip pin below AppHeader + PageHeader) and
      * REMOVED on round-6 user reconsideration — the user found the double-
      * sticky layer visually noisy and asked for the tabs to scroll with
-     * the feed. AppHeader (top: 0) and PageHeader.sticky
-     * (top: var(--app-header-height)) remain pinned and are sufficient
-     * for orientation; FeedQuickNav now lives inline above the feed list.
+     * the feed. The chrome wrapper `.sticky-chrome` (top: 0, see
+     * src/routes/+layout.svelte) and PageHeader.sticky (top:
+     * var(--chrome-height) - var(--sticky-overlap)) remain pinned and are
+     * sufficient for orientation; FeedQuickNav now lives inline above the
+     * feed list.
      *
      * Round-6 UAT user quote: "табы не залипают. В эвентах хотелось бы
      * inbox all тоже не залипали, это лишнее." */
