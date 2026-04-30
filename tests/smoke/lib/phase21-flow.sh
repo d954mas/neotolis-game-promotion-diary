@@ -59,7 +59,7 @@ phase21_unified_flow() {
   eventResp=$(curl -sf -X POST "$base/api/events" \
     -H "cookie: $cookieA" \
     -H "content-type: application/json" \
-    -d '{"kind":"youtube_video","title":"Smoke 2.1 video","occurredAt":"2026-04-28T12:00:00Z","url":"https://youtube.com/watch?v=smoke21"}') \
+    -d '{"kind":"youtube_video","title":"Smoke 2.1 video","occurredAt":"2026-04-28T12:00:00Z","url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ"}') \
     || { echo "FAIL: POST /api/events did not return 2xx"; exit 1; }
   eventId=$(echo "$eventResp" | jq -r '.id // empty')
   [[ -n "$eventId" ]] || { echo "FAIL: event id missing in response: $eventResp"; exit 1; }
