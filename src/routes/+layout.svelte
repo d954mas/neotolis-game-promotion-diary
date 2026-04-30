@@ -60,13 +60,25 @@
   // through that gap.
   //
   // Fix: a ResizeObserver on the rendered <header.header> and <nav.nav>
-  // pushes their `offsetHeight` (border-box, includes padding + border) onto
-  // :root as `--app-header-height` / `--nav-height`. Static fallbacks in
-  // src/app.css remain for SSR and the brief tick before this $effect runs.
-  // We query the DOM directly rather than threading `bind:this` props through
-  // AppHeader / Nav — both components always render here, and a wrapping
-  // <div bind:this> would create a new offsetParent that breaks `position:
-  // sticky` for the children.
+  // pushes their measured height onto :root as `--app-header-height` /
+  // `--nav-height`. Static fallbacks in src/app.css remain for SSR and the
+  // brief tick before this $effect runs. We query the DOM directly rather
+  // than threading `bind:this` props through AppHeader / Nav — both always
+  // render here, and a wrapping `<div bind:this>` would create a new
+  // offsetParent that breaks `position: sticky` for the children.
+  //
+  // Subpixel rounding (round-6 follow-up #2): `offsetHeight` returns an
+  // integer (floor-rounded). When AppHeader's actual rendered height is
+  // fractional (e.g. 77.5px from a DPR-scaled border or font line-box at
+  // non-integer device-pixel ratios), `offsetHeight = 77` and Nav stickies
+  // at `top: 77px` — leaving a 0.5-2px gap between AppHeader's real bottom
+  // edge and Nav's top edge through which scrolling content peeks. User
+  // verbatim after first runtime-measurement fix landed (273904d): "есть
+  // gap в 1-2 пикселя между заголовком и табами, через него я вижу контент
+  // скролла". Use `getBoundingClientRect().height` (fractional float) and
+  // `Math.ceil` to round UP — guarantees `top` ≥ AppHeader's bottom edge,
+  // so the worst case is a subpixel overlap rather than a gap. Overlap is
+  // invisible because both elements share `background: var(--color-surface)`.
   $effect(() => {
     // Read `data.user` so the effect re-runs when chrome mounts/unmounts on
     // sign-in / sign-out — `<AppHeader>` and `<Nav>` only render under
@@ -78,8 +90,14 @@
     if (!appHeader || !nav) return;
     const root = document.documentElement;
     const sync = (): void => {
-      root.style.setProperty("--app-header-height", `${appHeader.offsetHeight}px`);
-      root.style.setProperty("--nav-height", `${nav.offsetHeight}px`);
+      root.style.setProperty(
+        "--app-header-height",
+        `${Math.ceil(appHeader.getBoundingClientRect().height)}px`,
+      );
+      root.style.setProperty(
+        "--nav-height",
+        `${Math.ceil(nav.getBoundingClientRect().height)}px`,
+      );
     };
     sync();
     const ro = new ResizeObserver(sync);
