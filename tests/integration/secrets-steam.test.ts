@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { createSteamKey, rotateSteamKey } from "../../src/lib/server/services/api-keys-steam.js";
+import { AppError } from "../../src/lib/server/services/errors.js";
 import { toApiKeySteamDto } from "../../src/lib/server/dto.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { apiKeysSteam } from "../../src/lib/server/db/schema/api-keys-steam.js";
@@ -179,5 +180,32 @@ describe("api_keys_steam envelope encryption (KEYS-03..06)", () => {
       label: "My Test Key",
       last4: "1234",
     });
+  });
+
+  it("Codex round-19 P2: concurrent INSERT race maps 23505 to 422 steam_key_label_exists", async () => {
+    // The pre-check on (userId, label) cannot prevent two concurrent
+    // requests from both passing it and racing the INSERT. Before the
+    // round-19 fix, the second INSERT bubbled as a generic 500. Now the
+    // service catches isPgUniqueViolation(e) and surfaces the documented
+    // 422 contract — same shape the sequential pre-check produces.
+    //
+    // Simulate the race by issuing two parallel createSteamKey calls and
+    // asserting one succeeds while the other surfaces AppError 422 with
+    // the steam_key_label_exists code (matching the sequential
+    // pre-check's contract).
+    validateSpy.mockResolvedValue(true);
+    const userA = await seedUserDirectly({ email: "k6-race@test.local" });
+    const results = await Promise.allSettled([
+      createSteamKey(userA.id, { label: "RACE", plaintext: "AAAA1234" }, "127.0.0.1"),
+      createSteamKey(userA.id, { label: "RACE", plaintext: "BBBB5678" }, "127.0.0.1"),
+    ]);
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    const reason = (rejected[0] as PromiseRejectedResult).reason;
+    expect(reason).toBeInstanceOf(AppError);
+    expect((reason as AppError).code).toBe("steam_key_label_exists");
+    expect((reason as AppError).status).toBe(422);
   });
 });

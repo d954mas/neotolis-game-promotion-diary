@@ -44,4 +44,17 @@ describe("audit cursor encode/decode", () => {
     expect(() => decodeCursor(Buffer.from("{}").toString("base64url"))).toThrow(AppError);
     expect(() => decodeCursor(Buffer.from('{"at":"x"}').toString("base64url"))).toThrow(AppError);
   });
+
+  it("Codex round-19 P2: cursor decode rejects invalid Date strings", () => {
+    // `new Date("not-a-date")` returns an Invalid Date sentinel that used
+    // to flow into Drizzle and surface as a generic 500. After the
+    // round-19 fix, decodeCursor checks Number.isNaN(at.getTime()) and
+    // throws AppError 422 invalid_cursor BEFORE the Date reaches the
+    // query builder. Two shapes: a clearly bogus string and a numeric-
+    // looking string outside the valid range.
+    const bogus = Buffer.from('{"at":"not-a-date","id":"x"}').toString("base64url");
+    expect(() => decodeCursor(bogus)).toThrow(AppError);
+    const numericGarbage = Buffer.from('{"at":"99999-13-99T25:99","id":"x"}').toString("base64url");
+    expect(() => decodeCursor(numericGarbage)).toThrow(AppError);
+  });
 });

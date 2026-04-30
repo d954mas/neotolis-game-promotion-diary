@@ -86,7 +86,15 @@ export function decodeCursor(s: string): { at: Date; id: string } {
     if (typeof parsed?.at !== "string" || typeof parsed?.id !== "string") {
       throw new AppError("invalid cursor", "invalid_cursor", 422);
     }
-    return { at: new Date(parsed.at), id: parsed.id };
+    // Codex review (round-19 P2): `new Date("not-a-date")` returns an
+    // Invalid Date sentinel that flows into Drizzle and surfaces as a
+    // generic 500 instead of the documented 422 `invalid_cursor`. Reject
+    // here so a forged cursor never reaches the query builder.
+    const at = new Date(parsed.at);
+    if (Number.isNaN(at.getTime())) {
+      throw new AppError("invalid cursor", "invalid_cursor", 422);
+    }
+    return { at, id: parsed.id };
   } catch (err) {
     if (err instanceof AppError) throw err;
     throw new AppError("invalid cursor", "invalid_cursor", 422);

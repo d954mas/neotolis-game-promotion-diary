@@ -38,6 +38,7 @@ import { writeAudit } from "../audit.js";
 import { encryptSecret, decryptSecret } from "../crypto/envelope.js";
 import { validateSteamKey } from "../integrations/steam-api.js";
 import { AppError, NotFoundError } from "./errors.js";
+import { isPgUniqueViolation } from "../db/postgres-errors.js";
 
 export type ApiKeySteamRow = typeof apiKeysSteam.$inferSelect;
 
@@ -146,21 +147,35 @@ export async function createSteamKey(
   // Explicit field listing (NOT `...enc`) — keeps the schema-DTO mapping
   // reviewable. RETURNING projects ONLY the DTO-shaped fields so a future
   // `logger.info({ row })` cannot serialize ciphertext.
-  const [row] = await db
-    .insert(apiKeysSteam)
-    .values({
-      userId,
-      label: input.label,
-      last4,
-      secretCt: enc.secretCt,
-      secretIv: enc.secretIv,
-      secretTag: enc.secretTag,
-      wrappedDek: enc.wrappedDek,
-      dekIv: enc.dekIv,
-      dekTag: enc.dekTag,
-      kekVersion: enc.kekVersion,
-    })
-    .returning();
+  //
+  // Codex review (round-19 P2): the (userId, label) pre-check above is a
+  // best-effort guard but cannot prevent two concurrent requests from both
+  // passing it and racing the INSERT. Catch the resulting 23505 here and
+  // map to the same 422 contract a sequential pre-check produces, mirroring
+  // the addSteamListing pattern (Plan 02.1-29).
+  let row;
+  try {
+    [row] = await db
+      .insert(apiKeysSteam)
+      .values({
+        userId,
+        label: input.label,
+        last4,
+        secretCt: enc.secretCt,
+        secretIv: enc.secretIv,
+        secretTag: enc.secretTag,
+        wrappedDek: enc.wrappedDek,
+        dekIv: enc.dekIv,
+        dekTag: enc.dekTag,
+        kekVersion: enc.kekVersion,
+      })
+      .returning();
+  } catch (e) {
+    if (isPgUniqueViolation(e)) {
+      throw new AppError("a key with this label already exists", "steam_key_label_exists", 422);
+    }
+    throw e;
+  }
   if (!row) {
     throw new Error("createSteamKey: INSERT returned no row");
   }
