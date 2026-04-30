@@ -13,10 +13,24 @@
 // `metadata` is jsonb and intentionally untyped: callers pass only their
 // OWN tenant's data. We do not introspect — that would create a different
 // kind of leak (a sanitizer ruleset that sees other tenants' identifiers).
+//
+// Phase 2 (D-32): the `action` column is now typed as the `audit_action`
+// pgEnum defined in src/lib/server/audit/actions.ts (the single source of
+// truth for the vocabulary). A new (user_id, action, created_at) index
+// powers the action-filter dropdown in the audit UI.
 
 import { pgTable, text, timestamp, jsonb, index } from "drizzle-orm/pg-core";
 import { user } from "./auth.js";
+import { auditActionEnum } from "../../audit/actions.js";
 import { uuidv7 } from "../../ids.js";
+
+// Re-export so drizzle-kit's schema scan (glob: ./src/lib/server/db/schema/*.ts)
+// picks up the audit_action pgEnum even though its source of truth lives in
+// src/lib/server/audit/actions.ts (D-32). Without this re-export drizzle-kit
+// silently drops the CREATE TYPE statement (drizzle-team/drizzle-orm#5174)
+// and the generated migration's ALTER COLUMN ... TYPE audit_action fails
+// because the enum doesn't exist yet.
+export { auditActionEnum };
 
 export const auditLog = pgTable(
   "audit_log",
@@ -27,9 +41,9 @@ export const auditLog = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    // e.g. 'session.signin', 'session.signout', 'session.signout_all',
-    // 'user.signup', 'key.add', 'key.rotate', 'key.remove' (last three Phase 2).
-    action: text("action").notNull(),
+    // Typed pgEnum as of Phase 2 D-32 — values defined in
+    // src/lib/server/audit/actions.ts (AUDIT_ACTIONS const).
+    action: auditActionEnum("action").notNull(),
     // Resolved by Plan 06 trusted-proxy middleware (D-19). Phase 1 records
     // real IPs from day one — a stub would be a bug, not a feature.
     ipAddress: text("ip_address").notNull(),
@@ -45,5 +59,12 @@ export const auditLog = pgTable(
     // tenant ordering (PITFALL P19).
     userIdx: index("audit_log_user_id_idx").on(t.userId),
     userCreatedIdx: index("audit_log_user_id_created_at_idx").on(t.userId, t.createdAt),
+    // Phase 2 D-32: action-filter dropdown — `WHERE user_id = ? AND action = ?
+    // ORDER BY created_at DESC` uses this composite index.
+    userActionCreatedIdx: index("audit_log_user_id_action_created_at_idx").on(
+      t.userId,
+      t.action,
+      t.createdAt,
+    ),
   }),
 );

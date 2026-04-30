@@ -18,6 +18,15 @@ import { proxyTrust } from "./middleware/proxy-trust.js";
 import { tenantScope } from "./middleware/tenant.js";
 import { meRoutes } from "./routes/me.js";
 import { sessionRoutes } from "./routes/sessions.js";
+// Phase 2 (Plan 02-08) sub-routers — every Phase 2 service surface gets
+// a Hono sub-router mounted under /api/* so it inherits tenantScope.
+import { gamesRoutes } from "./routes/games.js";
+import { gameListingsRoutes } from "./routes/game-listings.js";
+import { sourcesRoutes } from "./routes/sources.js";
+import { apiKeysSteamRoutes } from "./routes/api-keys-steam.js";
+import { eventsRoutes } from "./routes/events.js";
+import { auditRoutes } from "./routes/audit.js";
+import { meThemeRoutes } from "./routes/me-theme.js";
 import { auth } from "../../auth.js";
 import { migrationsApplied } from "../db/migrate.js";
 import { pool } from "../db/client.js";
@@ -83,9 +92,26 @@ export function createApp(): Hono<AppContext> {
   // by service functions (see src/lib/server/services/errors.ts).
   app.use("/api/*", tenantScope);
 
-  // /api routes (Phase 1: /api/me + /api/me/sessions/all; Phase 2 adds /api/games, etc.).
+  // /api routes — Phase 1 + Phase 2 + Phase 2.1 (Plan 02.1-06).
   app.route("/api", meRoutes);
   app.route("/api", sessionRoutes);
+  // Phase 2: order matters minimally — `/api/games/*` parameterized routes
+  // (game-listings, per-game events) are registered AFTER the bare
+  // gamesRoutes so Hono's path-matching does not shadow `/api/games/:id`
+  // with `/api/games/:gameId/listings`. The per-game events sub-route lives
+  // on `gamesRoutes` itself (Plan 02.1-06 — replaces Phase 2's events.ts
+  // mount of `/api/games/:gameId/events`).
+  app.route("/api", gamesRoutes);
+  app.route("/api", gameListingsRoutes);
+  // Phase 2.1: data_sources sub-router replaces the Phase 2 per-platform
+  // channel + tracked-video route groups (their underlying services were
+  // retired in Plan 02.1-04 and 02.1-05; the route files are gone in Plan
+  // 02.1-06).
+  app.route("/api", sourcesRoutes);
+  app.route("/api", apiKeysSteamRoutes);
+  app.route("/api", eventsRoutes);
+  app.route("/api", auditRoutes);
+  app.route("/api", meThemeRoutes);
 
   return app;
 }

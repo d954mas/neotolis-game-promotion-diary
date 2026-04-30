@@ -42,6 +42,10 @@ const RawSchema = z.object({
   TRUSTED_PROXY_CIDR: z.string().default(""),
   COOKIE_DOMAIN: z.string().optional(),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  // Phase 2 D-22: soft-delete retention window in days. The Phase 3 purge
+  // worker hard-deletes rows where deleted_at < now() - RETENTION_DAYS::interval.
+  // Self-host operators may set their own value; SaaS uses the default.
+  RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(60),
   APP_KEK_BASE64: z.string().min(1),
   KEK_CURRENT_VERSION: z.coerce.number().int().min(1).default(1),
   // Override Better Auth's secure-cookie default (which tracks NODE_ENV ===
@@ -128,6 +132,7 @@ export const env = {
   TRUSTED_PROXY_CIDR: raw.TRUSTED_PROXY_CIDR,
   COOKIE_DOMAIN: raw.COOKIE_DOMAIN,
   LOG_LEVEL: raw.LOG_LEVEL,
+  RETENTION_DAYS: raw.RETENTION_DAYS,
   KEK_CURRENT_VERSION: raw.KEK_CURRENT_VERSION,
   KEK_VERSIONS: kekVersions,
   BETTER_AUTH_SECURE_COOKIES: raw.BETTER_AUTH_SECURE_COOKIES,

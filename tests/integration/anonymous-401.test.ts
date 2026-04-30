@@ -25,7 +25,61 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
   // assertions — if no /api/* routes exist in the future, the sweep would silently
   // pass. The allowlist forces the sweep to fail loudly when expected routes
   // disappear.
-  const MUST_BE_PROTECTED = ["/api/me"];
+  //
+  // Plan 02-08 extends MUST_BE_PROTECTED to cover every D-37 Phase 2 route at the
+  // PARAMETERIZED level (/api/games/:id, not /api/games/<concrete-id>). The
+  // strings here are the literal route patterns Hono registered when sub-routers
+  // were mounted — drift between this list and the actual mounts trips the
+  // toContain guard below.
+  //
+  // Plan 02.1-06: REMOVED `/api/youtube-channels*`, `/api/items/youtube*`, and
+  // `/api/games/:gameId/youtube-channels*`, `/api/games/:gameId/items`,
+  // `/api/games/:gameId/timeline` (their routes are gone — the underlying
+  // services were retired in Plans 02.1-04 and 02.1-05). ADDED `/api/sources`,
+  // `/api/sources/:id`, `/api/sources/:id/restore`, `/api/events/:id/attach`,
+  // `/api/events/:id/dismiss-inbox` (the new unified-events HTTP surface).
+  const MUST_BE_PROTECTED = [
+    // Phase 1
+    "/api/me",
+    "/api/me/sessions/all",
+    // Phase 2 (Plan 02-08; UX-01)
+    "/api/me/theme",
+    // Phase 2 — games
+    "/api/games",
+    "/api/games/:id",
+    "/api/games/:id/restore",
+    // Phase 2 — game-listings
+    "/api/games/:gameId/listings",
+    "/api/games/:gameId/listings/:listingId",
+    "/api/games/:gameId/listings/:listingId/key",
+    // Plan 02.1-39 round-6 polish #12 (UAT-NOTES.md §5.8 follow-up #12):
+    // per-game listing restore — same shape as /api/sources/:id/restore.
+    "/api/games/:gameId/listings/:listingId/restore",
+    // Phase 2 — api keys (steam)
+    "/api/api-keys/steam",
+    "/api/api-keys/steam/:id",
+    // Phase 2.1 — data_sources (replaces Phase 2 /api/youtube-channels*)
+    "/api/sources",
+    "/api/sources/:id",
+    "/api/sources/:id/restore",
+    // Phase 2 + 2.1 — events (extended with feed + attach + dismiss-inbox +
+    // Plan 02.1-14 gap closure: restore + deleted-list +
+    // Plan 02.1-17 gap closure: preview-url)
+    "/api/events",
+    "/api/events/deleted",
+    "/api/events/preview-url",
+    "/api/events/:id",
+    "/api/events/:id/attach",
+    "/api/events/:id/dismiss-inbox",
+    "/api/events/:id/restore",
+    // Plan 02.1-24 (round-3 gap closure — UAT-NOTES.md §6.1-redesign):
+    // markStandalone + unmarkStandalone triage routes.
+    "/api/events/:id/mark-standalone",
+    "/api/events/:id/unmark-standalone",
+    "/api/games/:gameId/events",
+    // Phase 2 — audit
+    "/api/audit",
+  ];
 
   it("every /api/* route except /api/auth/* refuses anonymous with 401", async () => {
     // Hono exposes app.routes (array of {path, method, handler}).
@@ -68,6 +122,113 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body).toEqual({ error: "unauthorized" });
+  });
+
+  // Plan 02.1-06 — explicit per-route anonymous-401 assertions for the new
+  // unified-events HTTP surface. The sweep above is the vacuous-pass guard;
+  // these assertions are the load-bearing explicit checks (AGENTS.md Privacy
+  // invariant 3 requires both layers).
+  it("Plan 02.1-06: anonymous POST /api/sources returns 401 unauthorized", async () => {
+    const res = await app.request("/api/sources", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "youtube_channel",
+        handleUrl: "https://www.youtube.com/@x",
+      }),
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-06: anonymous GET /api/sources returns 401 unauthorized", async () => {
+    const res = await app.request("/api/sources");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-06: anonymous GET /api/sources/:id returns 401 unauthorized", async () => {
+    const res = await app.request("/api/sources/fixture-id");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-06: anonymous PATCH /api/sources/:id returns 401 unauthorized", async () => {
+    const res = await app.request("/api/sources/fixture-id", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ autoImport: false }),
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-06: anonymous DELETE /api/sources/:id returns 401 unauthorized", async () => {
+    const res = await app.request("/api/sources/fixture-id", { method: "DELETE" });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-06: anonymous POST /api/sources/:id/restore returns 401 unauthorized", async () => {
+    const res = await app.request("/api/sources/fixture-id/restore", {
+      method: "POST",
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-06: anonymous GET /api/events (feed) returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-06: anonymous PATCH /api/events/:id/attach returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events/fixture-id/attach", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ gameId: null }),
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-06: anonymous PATCH /api/events/:id/dismiss-inbox returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events/fixture-id/dismiss-inbox", {
+      method: "PATCH",
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-14: anonymous GET /api/events/deleted returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events/deleted");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-14: anonymous PATCH /api/events/:id/restore returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events/fixture-id/restore", {
+      method: "PATCH",
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-24: anonymous PATCH /api/events/:id/mark-standalone returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events/fixture-id/mark-standalone", {
+      method: "PATCH",
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.1-24: anonymous PATCH /api/events/:id/unmark-standalone returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events/fixture-id/unmark-standalone", {
+      method: "PATCH",
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
   it("AUTH-01: /api/me with valid session returns 200 + UserDto", async () => {

@@ -1,0 +1,285 @@
+/* Design tokens — Phase 2 UI-SPEC contract (Plan 02-09).
+ *
+ * Single global stylesheet imported once from src/routes/+layout.svelte.
+ * Components reference these vars; nothing else lands here.
+ *
+ * Token contract sourced verbatim from .planning/phases/02-ingest-secrets-and-audit/02-UI-SPEC.md
+ * (sections "Spacing Scale" + "Typography" + "Color" + "Layout & Responsive Contract").
+ *
+ * Theme model (D-40, UX-01):
+ *   data-theme="light"  → explicit light tokens
+ *   data-theme="dark"   → explicit dark tokens
+ *   data-theme="system" → light tokens by default, dark tokens via @media (prefers-color-scheme: dark)
+ *
+ * The data-theme attribute is set on <html> by themeHandle (src/hooks.server.ts)
+ * via transformPageChunk replacing %theme% in src/app.html — so SSR delivers
+ * the right tokens on the first byte (no FOUC).
+ */
+
+:root {
+  /* Spacing — 8-point baseline. Used as gaps and padding throughout. */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px; /* reserved — Phase 4 chart breathing room */
+
+  /* Typography — three sizes + display. */
+  --font-size-body: 16px;
+  --font-size-label: 14px;
+  --font-size-heading: 24px;
+  --font-size-display: 32px;
+
+  --font-weight-regular: 400;
+  --font-weight-semibold: 600;
+
+  --line-height-body: 1.5;
+  --line-height-heading: 1.2;
+  --line-height-mono: 1.4;
+
+  --font-family-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-family-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Breakpoints — declared as custom properties for documentation; @media
+   * queries below reference the literal pixel values (CSS spec doesn't allow
+   * custom properties inside @media conditions). */
+  --bp-mobile: 360px; /* hard floor — UX-02 */
+  --bp-tablet: 768px;
+  --bp-desktop: 1024px;
+
+  /* Plan 02.1-39 round-6 #5 (UAT-NOTES.md §5.4 follow-up #5): single source
+   * of truth for the sticky chrome offset. The chrome wrapper
+   * (`.sticky-chrome` in src/routes/+layout.svelte) contains BOTH AppHeader
+   * AND Nav and is the only sticky element for the top bar — the previous
+   * design exposed AppHeader and Nav as two INDEPENDENT sticky elements,
+   * which produced an unsolvable trade-off between subpixel gap (overlap
+   * too small) and visible Nav slip on engage (overlap too large).
+   *
+   * `PageHeader.sticky` reads `top: calc(var(--chrome-height) - --sticky-overlap)`.
+   *
+   * IMPORTANT — this declaration is a FALLBACK, not an authoritative value.
+   * src/routes/+layout.svelte runs a ResizeObserver on `.sticky-chrome` and
+   * overwrites `--chrome-height` on `document.documentElement` with the
+   * actual rendered `getBoundingClientRect().height` (raw fractional float,
+   * no Math.ceil — modern browsers handle subpixel sticky correctly). The
+   * static 116px (= 72px AppHeader fallback + 44px Nav fallback) covers:
+   *   1. SSR first paint (no DOM yet — `:root` style is applied as raw CSS).
+   *   2. The brief tick between hydration and the `$effect` running.
+   *   3. JS-disabled browsers (graceful slip beats broken layout).
+   *
+   * Removed in round-6 #5 (no remaining consumer): `--app-header-height`,
+   * `--nav-height`. Both vars served the prior two-independent-sticky
+   * design where Nav anchored at `var(--app-header-height)` and PageHeader
+   * at `--app-header-height + --nav-height`. With the chrome wrapper
+   * collapsing those two sticky tiers into one, only the wrapper's total
+   * height matters.
+   *
+   * Sticky stack (using runtime-measured wrapper height):
+   *   .sticky-chrome (top: 0)              height: --chrome-height (~116-122px)
+   *   .page-header.sticky (top: --chrome-height - --sticky-overlap). */
+  --chrome-height: 116px;
+
+  /* Plan 02.1-39 round-6 polish follow-up #6 (2026-04-30): published by
+   * PageHeader.svelte's ResizeObserver on its rendered <header> element.
+   * Consumed by FeedDateGroupHeader so its sticky `top:` lands below the
+   * chrome+PageHeader stack (Instagram / Google Sheets section-header
+   * pattern). User quote (ru, round-6 UAT, NOT a round-5 finding):
+   *   "хотелось чтобы дата была всегда виджимая наверху, пока я скролю
+   *    эту дату. Так в гугл таблицах или инстаграмме сделоано"
+   *
+   * IMPORTANT — the 56px declared here is a FALLBACK, not authoritative.
+   * PageHeader.svelte runs a ResizeObserver and overwrites this var on
+   * `document.documentElement` with the actual rendered fractional
+   * `getBoundingClientRect().height`. The static 56px (~24px h1 + 2 ×
+   * space-sm padding + line-height) covers:
+   *   1. SSR first paint (no DOM yet — `:root` style is applied as raw CSS).
+   *   2. The brief tick between hydration and the `$effect` running.
+   *   3. JS-disabled browsers (graceful approximation beats broken layout).
+   *
+   * Set to '0px' on PageHeader unmount cleanup so routes that don't render
+   * PageHeader don't carry stale data. */
+  --page-header-height: 56px;
+
+  /* Plan 02.1-39 round-6 #5: reduced from 4px back to 1px. Round-6 #4 (the
+   * 4px bump) was needed because TWO independent sticky boundaries
+   * (AppHeader↔Nav and Nav↔PageHeader) each needed enough overlap budget
+   * to absorb subpixel + browser-zoom + observer-lag drift simultaneously.
+   * Round-6 #5 collapsed the AppHeader↔Nav boundary into a single sticky
+   * wrapper, leaving only ONE sticky boundary in the stack (chrome ↔
+   * PageHeader). 1px proved sufficient as a single-tier defense in
+   * round-6 #3 (commit 435697e). Larger overlap on a single boundary just
+   * resurrects the slip artifact (PageHeader sliding up by N pixels on
+   * scroll-engage, which the user reported on Nav after round-6 #4 with
+   * `--sticky-overlap: 4px`).
+   *
+   * .page-header.sticky reads:
+   *   top: calc(var(--chrome-height) - var(--sticky-overlap))
+   *
+   * Plan 02.1-39 round-6 polish follow-up #6 added a SECOND consumer:
+   * .date-header in FeedDateGroupHeader sticks below chrome+PageHeader at
+   *   top: calc(var(--chrome-height) + var(--page-header-height) - var(--sticky-overlap))
+   * Single-tier defense applies — there is only one boundary above each
+   * sticky tier (chrome+PageHeader vs the date-header below), so the
+   * round-6 #3 single-boundary proof carries over. 1px stays correct.
+   *
+   * Overlap is invisible: `.sticky-chrome` (z: 10) paints over
+   * `.page-header.sticky` (z: 5) paints over `.date-header` (z: 1) in the
+   * 1px overlap rows, and adjacent tiers share `--color-surface` /
+   * `--color-bg` backgrounds so even without z-stacking the column would
+   * look identical. */
+  --sticky-overlap: 1px;
+}
+
+/* Color — light theme (default + explicit). */
+:root,
+:root[data-theme="light"] {
+  --color-bg: #fafafa;
+  --color-surface: #ffffff;
+  --color-border: #e5e5e5;
+  --color-text: #1a1a1a;
+  --color-text-muted: #666666;
+  --color-accent: #2563eb;
+  --color-accent-text: #ffffff;
+  --color-destructive: #b91c1c;
+  --color-info: #0891b2;
+  --color-success: #15803d;
+  /* Plan 02.1-30 (UAT-NOTES.md §4.25.A): single source of truth for the
+   * Mine accent. Defaults to --color-accent so the existing visual stays
+   * unchanged across FeedCard.mine and SourceRow.mine; can diverge later
+   * if Mine should read distinctly from the generic accent. */
+  --color-mine: var(--color-accent);
+}
+
+/* Color — dark theme (explicit). */
+:root[data-theme="dark"] {
+  --color-bg: #0d0d0d;
+  --color-surface: #171717;
+  --color-border: #262626;
+  --color-text: #f5f5f5;
+  --color-text-muted: #a3a3a3;
+  --color-accent: #60a5fa;
+  --color-accent-text: #0d0d0d;
+  --color-destructive: #f87171;
+  --color-info: #22d3ee;
+  --color-success: #4ade80;
+  /* Plan 02.1-30: Mine accent inherits the dark-theme accent. */
+  --color-mine: var(--color-accent);
+}
+
+/* Color — system theme honors prefers-color-scheme. The light baseline above
+ * already applies via :root, so this block only flips when the OS asks for
+ * dark AND the user has selected the "system" option. */
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] {
+    --color-bg: #0d0d0d;
+    --color-surface: #171717;
+    --color-border: #262626;
+    --color-text: #f5f5f5;
+    --color-text-muted: #a3a3a3;
+    --color-accent: #60a5fa;
+    --color-accent-text: #0d0d0d;
+    --color-destructive: #f87171;
+    --color-info: #22d3ee;
+    --color-success: #4ade80;
+    /* Plan 02.1-30: Mine accent inherits the system-dark accent. */
+    --color-mine: var(--color-accent);
+  }
+}
+
+/* Global resets per UI-SPEC §"Layout & Responsive Contract". */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Native date/time/color picker icons are dark by default — invisible on the
+ * dark theme. Invert them so they remain readable. WebKit-only selector but
+ * covers Chrome/Edge/Safari; Firefox renders its own picker that already
+ * adapts to color-scheme. */
+:root[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
+:root[data-theme="dark"] input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+:root[data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator,
+:root[data-theme="dark"] input[type="month"]::-webkit-calendar-picker-indicator,
+:root[data-theme="dark"] input[type="week"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] input[type="date"]::-webkit-calendar-picker-indicator,
+  :root[data-theme="system"] input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+  :root[data-theme="system"] input[type="time"]::-webkit-calendar-picker-indicator,
+  :root[data-theme="system"] input[type="month"]::-webkit-calendar-picker-indicator,
+  :root[data-theme="system"] input[type="week"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+  }
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-family-sans);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+  /* UX-02 — no horizontal scroll at 360px.
+   *
+   * Plan 02.1-34 (UAT-NOTES.md §4.22.A regression fix): use `overflow-x: clip`
+   * instead of `overflow-x: hidden`. Per CSS spec, when `overflow-x: hidden`
+   * is paired with `overflow-y: visible`, browsers coerce `overflow-y` to
+   * `auto`, which establishes a scroll container on <body> and BREAKS
+   * `position: sticky` on descendants (AppHeader.svelte and per-page sticky
+   * CTAs anchored against the layout-root flex column). `overflow-x: clip`
+   * crops the same overflow without establishing a scroll container, so
+   * sticky descendants continue to anchor against the viewport. Supported in
+   * Chrome 90+, Firefox 81+, Safari 16+ — well within the project's
+   * modern-browser baseline. */
+  overflow-x: clip;
+}
+
+/* Defeat default flex/grid `min-width: auto` so children at 360px don't
+ * overflow the viewport. UI-SPEC §"Layout" mandates min-width: 0 on every
+ * flex container. */
+main,
+section,
+article,
+header,
+nav,
+footer,
+div {
+  min-width: 0;
+}
+
+/* Focus ring — never removed; 2px solid accent with 2px offset. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Plan 02.1-34 (UAT-NOTES.md §4.22.F regression fix): declarative body-scroll
+ * lock when ANY <dialog> is open. Replaces the imperative
+ * document.body.style.overflow approach Plan 02.1-22 introduced — that
+ * approach regressed because Svelte 5 $effect cleanup timing was unreliable
+ * AND nested ConfirmDialog instances could overwrite the inline style back
+ * to ''. CSS :has() lets the browser engine apply the lock the moment any
+ * <dialog open> exists in the DOM and self-restore the moment none does.
+ *
+ * Applies to FiltersSheet, ConfirmDialog, and any future modal that uses
+ * the native <dialog> element + showModal(). Supported in Chrome 105+,
+ * Safari 15.4+, Firefox 121+ — within the project's modern-browser
+ * baseline. Older browsers fall back to no scroll lock; the dialog still
+ * focus-traps via showModal() so the regression is graceful.
+ *
+ * Plan 02.1-39 (UAT-NOTES.md §5.5): mirror the lock onto :root. Modern
+ * browsers' scroll root is <html>, so wheel events scroll <html> even when
+ * <body> is overflow-locked — round-5 UAT user quote "скролл работает под
+ * окном, колесико мышки". Both selectors stay because some browsers only
+ * honor :has() on the originating element if the rule lives there. */
+:root:has(dialog[open]),
+body:has(dialog[open]) {
+  overflow: hidden;
+}

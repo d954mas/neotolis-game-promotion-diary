@@ -17,11 +17,21 @@
 export class AppError extends Error {
   readonly code: string;
   readonly status: number;
+  /**
+   * Optional structured metadata. Used by ingest (Plan 02-06) to attach
+   * `{reason: 'private' | 'unavailable'}` to youtube_unavailable errors so
+   * the route layer (Plan 02-08) can map a single 422 code to two distinct
+   * Paraglide messages without parsing the human-readable message string.
+   * Add new keys here only when the boundary needs to discriminate at
+   * mapping time — message-string parsing is the anti-pattern.
+   */
+  readonly metadata: Record<string, unknown>;
 
-  constructor(message: string, code: string, status: number) {
+  constructor(message: string, code: string, status: number, metadata?: Record<string, unknown>) {
     super(message);
     this.code = code;
     this.status = status;
+    this.metadata = metadata ?? {};
     this.name = this.constructor.name;
   }
 }
