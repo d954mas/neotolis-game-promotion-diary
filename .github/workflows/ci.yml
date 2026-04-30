@@ -117,7 +117,12 @@ jobs:
       # despite playwright being in pnpm-lock.yaml (runs 25172908050,
       # 25173249473, 25173474241). Pin the version to match
       # devDependencies to keep behavior consistent.
-      - run: pnpm dlx playwright@1.49.0 install chromium --with-deps
+      # Install BOTH chromium (full) and chromium-headless-shell — the
+      # vitest browser config (vitest.config.ts) sets `headless: true`
+      # which makes playwright launch chrome-headless-shell, NOT chromium.
+      # Plain `playwright install chromium` does NOT include the headless-
+      # shell binary as of v1.49+; it must be installed by name.
+      - run: pnpm dlx playwright@1.49.0 install chromium chromium-headless-shell --with-deps
       - run: pnpm build
       # Boot the preview server in the background and wait for it to listen.
       # `vite preview` exits when stdin closes; nohup + & detaches it from
