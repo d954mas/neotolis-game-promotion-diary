@@ -106,7 +106,12 @@ jobs:
       # Install only Chromium — Firefox/WebKit are deferred to Phase 6 if
       # cross-engine layout differences surface. `--with-deps` pulls the
       # Linux libs Chromium needs (libnss3, libatk1, etc).
-      - run: pnpm exec playwright install chromium --with-deps
+      # Routed through an npm-script (`playwright:install`) instead of
+      # `pnpm exec playwright` because the latter surfaced "Command not
+      # found" in CI even with playwright present in devDependencies —
+      # `pnpm <script>` resolves binaries through node_modules/.bin
+      # reliably across pnpm versions.
+      - run: pnpm playwright:install
       - run: pnpm build
       # Boot the preview server in the background and wait for it to listen.
       # `vite preview` exits when stdin closes; nohup + & detaches it from

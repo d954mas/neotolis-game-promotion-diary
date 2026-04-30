@@ -1090,10 +1090,11 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
     // class:mine on root .row div + .row.mine border-left rule.
     expect(src).toMatch(/class:mine=\{source\.isOwnedByMe\}/);
-    expect(src).toMatch(/\.row\.mine\s*\{[\s\S]*?border-left:\s*4px solid var\(--color-accent\)/);
-    // ownership-badge.mine upgraded to overlay-mine visual style (accent
-    // background + accent-text).
-    expect(src).toMatch(/\.ownership-badge\.mine[\s\S]*?background:\s*var\(--color-accent\)/);
+    // Plan 02.1-30 (UAT-NOTES.md §4.25.A): swapped --color-accent for
+    // --color-mine so SourceRow.mine + FeedCard.mine resolve to the same
+    // shared token (defaults to accent today; can diverge later).
+    expect(src).toMatch(/\.row\.mine\s*\{[\s\S]*?border-left:\s*4px solid var\(--color-mine\)/);
+    expect(src).toMatch(/\.ownership-badge\.mine[\s\S]*?background:\s*var\(--color-mine\)/);
     // Kind label rendered next to the icon via kindLabel(SourceKind).
     expect(src).toMatch(/kindLabel/);
     expect(src).toMatch(/source_kind_label_youtube_channel/);
@@ -1132,9 +1133,11 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     // the static "Edit" key (no longer a toggle pair).
     expect(src).toMatch(/editGameOpen\s*=\s*true/);
     expect(src).toMatch(/label:\s*m\.games_detail_edit_cta\(\)/);
-    // GameCover + StoresSection used inside the page (no <SteamListingRow>
-    // direct usage — that lives inside StoresSection).
-    expect(src).toMatch(/<GameCover\s/);
+    // Plan 02.1-39 round-6 polish #15 removed <GameCover> from this page
+    // (user during UAT: "после названия игры идет огромная картинка...
+    // она тут лишняя, она есть в карточки стора"). The cover already
+    // surfaces on each SteamListingRow inside StoresSection.
+    expect(src).not.toMatch(/<GameCover\s/);
     expect(src).toMatch(/<StoresSection\s/);
     // GameEditDialog mounted with title + description from the game DTO.
     expect(src).toMatch(/<GameEditDialog\s/);

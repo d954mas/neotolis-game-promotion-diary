@@ -182,7 +182,11 @@ describe("theme cookie + DB persist (UX-01)", () => {
     const settings = fs.readFileSync("src/routes/settings/+page.svelte", "utf8");
     expect(settings).toContain("ThemeToggle");
     const header = fs.readFileSync("src/lib/components/AppHeader.svelte", "utf8");
-    expect(header).not.toContain("ThemeToggle");
+    // AppHeader's comment block historically references ThemeToggle to
+    // document the Plan 02.1-09 relocation. Match on JSX/import usage
+    // patterns, not bare word, so the historical narrative survives.
+    expect(header).not.toMatch(/<ThemeToggle\b/);
+    expect(header).not.toMatch(/from ['"][^'"]*ThemeToggle\.svelte['"]/);
   });
 
   it("02-10: UX-01 cookie wins on signin reconciliation (+layout.server.ts)", async () => {

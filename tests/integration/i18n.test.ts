@@ -98,8 +98,9 @@ describe("i18n at runtime (UX-04, VALIDATION 18, D-41)", () => {
       "audit_action_game_created",
       "audit_action_game_deleted",
       "audit_action_game_restored",
-      "audit_action_item_created",
-      "audit_action_item_deleted",
+      // audit_action_item_* keys removed in Phase 2.1 baseline (item.* → event.*
+      // rename per ROADMAP success-criterion 1; new audit verbs land under the
+      // unified events table so the key family converges with audit_action_event_*).
       "audit_action_event_created",
       "audit_action_event_edited",
       "audit_action_event_deleted",
