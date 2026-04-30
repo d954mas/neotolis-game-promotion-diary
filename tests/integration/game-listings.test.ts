@@ -354,6 +354,132 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
     expect(stillThere?.deletedAt).toBeNull();
   });
 
+  // Plan 02.1-39 round-6 polish #12 (UAT-NOTES.md §5.8 follow-up #12,
+  // 2026-04-30): per-game listing restore endpoint. New surface:
+  //   POST /api/games/:gameId/listings/:listingId/restore
+  // Cross-tenant access on either gameId or listingId returns 404, never
+  // 403 (AGENTS.md item 2 — tenant-scope invariant). Body must NOT
+  // contain "forbidden" / "permission" for tenant-owned resources.
+  it("Plan 02.1-39 #12: cross-tenant POST /api/games/:gameId/listings/:listingId/restore → 404", async () => {
+    vi.mocked(fetchSteamAppDetails).mockResolvedValue(null);
+
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({ email: `p39-12a-${sfx()}@test.local` });
+    const userB = await seedUserDirectly({ email: `p39-12b-${sfx()}@test.local` });
+    const gameA = await createGame(userA.id, { title: "A's game" }, "127.0.0.1");
+    const listing = await addSteamListing(
+      userA.id,
+      { gameId: gameA.id, appId: 730 },
+      "127.0.0.1",
+    );
+
+    // userA soft-deletes the listing first (so a row is restorable).
+    await db
+      .update(gameSteamListings)
+      .set({ deletedAt: new Date() })
+      .where(eq(gameSteamListings.id, listing.id));
+
+    // userB POSTing against userA's restore endpoint returns 404 — no
+    // discrimination between "doesn't exist" and "exists but yours not".
+    const res = await app.request(
+      `/api/games/${gameA.id}/listings/${listing.id}/restore`,
+      {
+        method: "POST",
+        headers: { cookie: `neotolis.session_token=${userB.signedSessionCookieValue}` },
+      },
+    );
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe("not_found");
+    const bodyStr = JSON.stringify(body);
+    expect(bodyStr).not.toMatch(/forbidden|permission/i);
+
+    // Verify userA's listing is still soft-deleted (NOT restored by the
+    // failed cross-tenant call).
+    const [stillDeleted] = await db
+      .select()
+      .from(gameSteamListings)
+      .where(
+        and(
+          eq(gameSteamListings.userId, userA.id),
+          eq(gameSteamListings.id, listing.id),
+        ),
+      );
+    expect(stillDeleted).toBeDefined();
+    expect(stillDeleted?.deletedAt).not.toBeNull();
+  });
+
+  it("Plan 02.1-39 #12: same-tenant POST /listings/:listingId/restore on already-active row → 404", async () => {
+    vi.mocked(fetchSteamAppDetails).mockResolvedValue(null);
+
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({ email: `p39-12c-${sfx()}@test.local` });
+    const game = await createGame(userA.id, { title: "Hosted" }, "127.0.0.1");
+    const listing = await addSteamListing(
+      userA.id,
+      { gameId: game.id, appId: 730 },
+      "127.0.0.1",
+    );
+
+    // Listing is active (not soft-deleted) — restore must throw NotFoundError
+    // (programming error: the UI should not surface this case).
+    const res = await app.request(
+      `/api/games/${game.id}/listings/${listing.id}/restore`,
+      {
+        method: "POST",
+        headers: { cookie: `neotolis.session_token=${userA.signedSessionCookieValue}` },
+      },
+    );
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.error).toBe("not_found");
+  });
+
+  it("Plan 02.1-39 #12: same-tenant POST /listings/:listingId/restore on soft-deleted row → 200 + active DTO", async () => {
+    vi.mocked(fetchSteamAppDetails).mockResolvedValue({
+      appId: 730,
+      name: "Counter-Strike 2",
+      coverUrl: null,
+      releaseDate: null,
+      comingSoon: false,
+      genres: [],
+      categories: [],
+      raw: {},
+    });
+
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({ email: `p39-12d-${sfx()}@test.local` });
+    const game = await createGame(userA.id, { title: "Hosted" }, "127.0.0.1");
+    const listing = await addSteamListing(
+      userA.id,
+      { gameId: game.id, appId: 730 },
+      "127.0.0.1",
+    );
+
+    // Soft-delete via the existing DELETE endpoint flow (sets deletedAt).
+    await db
+      .update(gameSteamListings)
+      .set({ deletedAt: new Date() })
+      .where(eq(gameSteamListings.id, listing.id));
+
+    const res = await app.request(
+      `/api/games/${game.id}/listings/${listing.id}/restore`,
+      {
+        method: "POST",
+        headers: { cookie: `neotolis.session_token=${userA.signedSessionCookieValue}` },
+      },
+    );
+    expect(res.status).toBe(200);
+    const dto = (await res.json()) as Record<string, unknown>;
+    expect(dto.id).toBe(listing.id);
+    expect(dto.deletedAt).toBeNull();
+    // P3 discipline: userId is stripped at the projection layer.
+    expect(dto).not.toHaveProperty("userId");
+  });
+
   it("Test 6 (mapErr metadata): HTTP 422 body includes the full metadata object (existingGameId, existingState, gameId, appId)", async () => {
     vi.mocked(fetchSteamAppDetails).mockResolvedValue({
       appId: 620,

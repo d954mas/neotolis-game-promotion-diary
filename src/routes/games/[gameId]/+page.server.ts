@@ -1,7 +1,10 @@
 import { error } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 import { getGameById, listGames } from "$lib/server/services/games.js";
-import { listListings } from "$lib/server/services/game-steam-listings.js";
+import {
+  listListings,
+  listSoftDeletedListings,
+} from "$lib/server/services/game-steam-listings.js";
 import { listEventsForGame } from "$lib/server/services/events.js";
 import { listSources } from "$lib/server/services/data-sources.js";
 import {
@@ -55,8 +58,14 @@ export const load: PageServerLoad = async ({ locals, params }) => {
     throw error(500, "Failed to load game");
   }
 
-  const [listings, events, gamesAll, sources] = await Promise.all([
+  // Plan 02.1-39 round-6 polish #12 (UAT-NOTES.md §5.8 follow-up #12):
+  // soft-deleted listings load alongside active ones so /games/[gameId]
+  // can mount <RecoveryDialog> with entityType="store". Same defensive
+  // best-effort pattern as the other child fetches — a service throw
+  // returns empty so the rest of the page still renders.
+  const [listings, deletedListings, events, gamesAll, sources] = await Promise.all([
     listListings(userId, gameId).catch(() => []),
+    listSoftDeletedListings(userId, gameId).catch(() => []),
     listEventsForGame(userId, gameId).catch(() => []),
     listGames(userId).catch(() => []),
     listSources(userId).catch(() => []),
@@ -70,6 +79,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
   return {
     game: toGameDto(game),
     listings: listings.map(toGameSteamListingDto),
+    deletedListings: deletedListings.map(toGameSteamListingDto),
     events: eventDtos,
     games: gamesAll.map(toGameDto),
     sources: sources.map(toDataSourceDto),

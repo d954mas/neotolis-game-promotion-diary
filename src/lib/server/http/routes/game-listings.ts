@@ -4,11 +4,19 @@
 //   POST   /api/games/:gameId/listings                       — addSteamListing
 //   GET    /api/games/:gameId/listings                       — listListings
 //   DELETE /api/games/:gameId/listings/:listingId            — removeSteamListing
+//   POST   /api/games/:gameId/listings/:listingId/restore    — restoreListing (Plan 02.1-39 round-6 #12)
 //   PATCH  /api/games/:gameId/listings/:listingId/key        — attachKeyToListing
 //
 // All routes inherit tenantScope; cross-tenant gameId / listingId surfaces as
 // NotFoundError (404) from the service layer. Service rejects on non-existent
 // gameId BEFORE INSERT (defense-in-depth).
+//
+// Plan 02.1-39 round-6 polish #12 (UAT-NOTES.md §5.8 follow-up #12):
+// `POST /api/games/:gameId/listings/:listingId/restore` exposes the new
+// `restoreListing` service function so the per-game RecoveryDialog can
+// flip soft-deleted listings back to active. Mirrors the pattern of
+// `POST /api/sources/:id/restore` (sources.ts) — same shape, same 404
+// semantics, same DTO projection.
 
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
@@ -17,6 +25,7 @@ import {
   addSteamListing,
   listListings,
   removeSteamListing,
+  restoreListing,
   attachKeyToListing,
 } from "../../services/game-steam-listings.js";
 import { toGameSteamListingDto } from "../../dto.js";
@@ -75,6 +84,28 @@ gameListingsRoutes.delete("/games/:gameId/listings/:listingId", async (c) => {
     return mapErr(c, err, "DELETE /api/games/:gameId/listings/:listingId");
   }
 });
+
+// Plan 02.1-39 round-6 polish #12 (UAT-NOTES.md §5.8 follow-up #12,
+// 2026-04-30): per-game listing restore. Returns the restored listing
+// DTO on 200 so the client can update the active list without a separate
+// GET roundtrip (matches the Sources restore endpoint contract).
+gameListingsRoutes.post(
+  "/games/:gameId/listings/:listingId/restore",
+  async (c) => {
+    const ctx = getAuditContext(c);
+    try {
+      const listing = await restoreListing(
+        ctx.userId,
+        c.req.param("gameId"),
+        c.req.param("listingId"),
+        ctx.ipAddress,
+      );
+      return c.json(toGameSteamListingDto(listing));
+    } catch (err) {
+      return mapErr(c, err, "POST /api/games/:gameId/listings/:listingId/restore");
+    }
+  },
+);
 
 gameListingsRoutes.patch(
   "/games/:gameId/listings/:listingId/key",

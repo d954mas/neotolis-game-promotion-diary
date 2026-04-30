@@ -52,6 +52,9 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     "/api/games/:gameId/listings",
     "/api/games/:gameId/listings/:listingId",
     "/api/games/:gameId/listings/:listingId/key",
+    // Plan 02.1-39 round-6 polish #12 (UAT-NOTES.md §5.8 follow-up #12):
+    // per-game listing restore — same shape as /api/sources/:id/restore.
+    "/api/games/:gameId/listings/:listingId/restore",
     // Phase 2 — api keys (steam)
     "/api/api-keys/steam",
     "/api/api-keys/steam/:id",

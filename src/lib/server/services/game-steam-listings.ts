@@ -45,7 +45,7 @@
 // metadata, not security state — recording every add/remove would balloon
 // the audit log without forensic benefit.
 
-import { and, eq, isNull, desc } from "drizzle-orm";
+import { and, eq, isNull, isNotNull, desc } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { gameSteamListings } from "../db/schema/game-steam-listings.js";
 import { fetchSteamAppDetails } from "../integrations/steam-api.js";
@@ -206,6 +206,119 @@ export async function listListings(userId: string, gameId: string): Promise<Stea
       ),
     )
     .orderBy(desc(gameSteamListings.createdAt));
+}
+
+/**
+ * List the caller's SOFT-DELETED listings for a given game (Plan 02.1-39
+ * round-6 polish #12 — UAT-NOTES.md §5.8 follow-up #12, 2026-04-30).
+ *
+ * User during round-6 UAT after `d4d55eb` extended <RecoveryDialog> to
+ * /games + /sources reported (verbatim, ru):
+ *   "и я удалил стор, и теперь нет вохзможности его восстановить"
+ *   ("and I deleted a store, and now there's no way to restore it")
+ *
+ * The schema's `deletedAt` column has been carrying soft-delete state
+ * since Plan 02.1-04; only the recovery UI/endpoint was missing. This
+ * function powers the per-game RecoveryDialog mounted on
+ * /games/[gameId]/+page.svelte — same pattern as listSoftDeletedGames
+ * on the games service.
+ *
+ * Throws NotFoundError if the parent game does not belong to userId
+ * (defense-in-depth — same pre-check as listListings; cross-tenant
+ * gameId surfaces as 404, not 403, per AGENTS.md item 2).
+ *
+ * Ordered by `deletedAt DESC` so the most recently soft-deleted listing
+ * surfaces first in the dialog (mirrors listSoftDeletedGames ordering by
+ * createdAt DESC — most-recent-first is the natural recovery UX).
+ */
+export async function listSoftDeletedListings(
+  userId: string,
+  gameId: string,
+): Promise<SteamListingRow[]> {
+  // Tenant scope on (userId, gameId) plus `isNotNull(deletedAt)` filter
+  // is exactly the inverse of listListings's `isNull(deletedAt)`. Cross-
+  // tenant gameId returns an empty array by construction (the userId
+  // filter prunes it before isNotNull discrimination); the page-level
+  // loader has already validated the parent via getGameById, so a
+  // legitimate empty array here is simply "no soft-deleted listings yet".
+  return db
+    .select()
+    .from(gameSteamListings)
+    .where(
+      and(
+        eq(gameSteamListings.userId, userId),
+        eq(gameSteamListings.gameId, gameId),
+        isNotNull(gameSteamListings.deletedAt),
+      ),
+    )
+    .orderBy(desc(gameSteamListings.deletedAt));
+}
+
+/**
+ * Restore a soft-deleted listing (Plan 02.1-39 round-6 polish #12).
+ *
+ * Mirrors `restoreSource` (data-sources service): sets `deletedAt = NULL`
+ * + bumps `updatedAt`, scoped to (userId, gameId, listingId) AND requiring
+ * `deletedAt IS NOT NULL` so the operation is idempotent for the dialog
+ * (calling restore on an already-active row throws NotFoundError instead
+ * of silently no-op'ing — the UI should not surface this case).
+ *
+ * Wrapped in `db.transaction` per the round-5 §5.12 invariant fix
+ * (Plan 02.1-39 §5.12 closure — multi-step writes go through a
+ * transaction so a partial-write race window cannot leave the listing
+ * in an inconsistent state). The audit-write-OUTSIDE-the-transaction
+ * pattern from softDeleteSource is N/A here because no audit verb is
+ * recorded for listing CRUD (D-32 — see file-header rationale).
+ *
+ * Throws NotFoundError on:
+ *   - cross-tenant gameId / listingId (PRIV-01: 404, not 403)
+ *   - already-active row (deletedAt IS NULL — programming error)
+ *   - non-existent row
+ *
+ * No retention-window check (Plan 02.1-39 round-6 #12 design — listings
+ * have no retention purge worker yet; row keeps `deletedAt` indefinitely
+ * until Phase 6+ adds a purge job. When that lands, mirror restoreSource's
+ * 422 retention_expired path here too.)
+ */
+export async function restoreListing(
+  userId: string,
+  gameId: string,
+  listingId: string,
+  _ipAddress: string,
+): Promise<SteamListingRow> {
+  return db.transaction(async (tx) => {
+    // Defense-in-depth pre-check: even though the UPDATE's WHERE clause
+    // already enforces (userId, gameId, listingId), the explicit SELECT
+    // gives us a clean NotFoundError discriminator between "row exists
+    // but is not soft-deleted" and "row does not exist / cross-tenant".
+    const [existing] = await tx
+      .select()
+      .from(gameSteamListings)
+      .where(
+        and(
+          eq(gameSteamListings.userId, userId),
+          eq(gameSteamListings.gameId, gameId),
+          eq(gameSteamListings.id, listingId),
+        ),
+      )
+      .limit(1);
+    if (!existing) throw new NotFoundError();
+    if (existing.deletedAt === null) throw new NotFoundError();
+
+    const [row] = await tx
+      .update(gameSteamListings)
+      .set({ deletedAt: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(gameSteamListings.userId, userId),
+          eq(gameSteamListings.gameId, gameId),
+          eq(gameSteamListings.id, listingId),
+        ),
+      )
+      .returning();
+    if (!row) throw new NotFoundError();
+    return row;
+  });
 }
 
 /**

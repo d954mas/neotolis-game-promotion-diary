@@ -109,7 +109,12 @@ describe("Plan 02.1-39 round-6 polish #11 — RecoveryDialog (anchor → modal)"
   });
 
   it("sets data-entity-type on the dialog so future per-type styling / a11y hooks can target it", () => {
-    for (const entityType of ["event", "game", "source"] as const) {
+    // Plan 02.1-39 round-6 polish #12 (UAT-NOTES.md §5.8 follow-up #12,
+    // 2026-04-30): "store" added for game_steam_listings recovery on
+    // /games/[gameId]. The discriminator is exposed via data-entity-type
+    // so future per-type styling / a11y hooks can target it; today the
+    // visual treatment is identical across all four types.
+    for (const entityType of ["event", "game", "source", "store"] as const) {
       const out = render(RecoveryDialog, {
         props: {
           open: true,
@@ -122,6 +127,37 @@ describe("Plan 02.1-39 round-6 polish #11 — RecoveryDialog (anchor → modal)"
       });
       expect(out.body).toContain(`data-entity-type="${entityType}"`);
     }
+  });
+
+  it("Plan 02.1-39 round-6 #12 — renders entityType='store' rows with the listing name as the recovery label", () => {
+    // Mirrors the production wiring on /games/[gameId]/+page.svelte:
+    // `recoveryItems` maps `deletedListings` into { id, name: l.name ??
+    // `App ${l.appId}`, deletedAt }. SteamListingRow's displayName
+    // fallback is `m.steam_listing_unnamed()` ("Untitled") but the
+    // dialog shows the raw `App {appId}` fallback so users can
+    // disambiguate two unnamed soft-deleted listings of the same game.
+    const out = render(RecoveryDialog, {
+      props: {
+        open: true,
+        items: [
+          { id: "lst-1", name: "Portal 2", deletedAt: new Date("2026-04-25T12:00:00Z") },
+          // Steam-down case: name fell back to `App {appId}` at the
+          // page-level mapper.
+          { id: "lst-2", name: "App 99999", deletedAt: new Date("2026-04-26T14:30:00Z") },
+        ],
+        entityType: "store" as const,
+        retentionDays: 60,
+        onClose: () => {},
+        onRestore: async () => {},
+      },
+    });
+
+    expect(out.body).toContain("Portal 2");
+    expect(out.body).toContain("App 99999");
+    expect(out.body).toContain('data-entity-type="store"');
+    // One Restore button per item.
+    const restoreMatches = out.body.match(/<button[^>]*class="[^"]*\brestore\b[^"]*"/g);
+    expect(restoreMatches?.length, "expected one Restore button per item").toBe(2);
   });
 
   it("renders a close button with an aria-label for screen-reader users (Escape + backdrop + × all close)", () => {

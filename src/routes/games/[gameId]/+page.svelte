@@ -57,6 +57,16 @@
   import StoresSection from "$lib/components/StoresSection.svelte";
   import GameCover from "$lib/components/GameCover.svelte";
   import PageHeader from "$lib/components/PageHeader.svelte";
+  // Plan 02.1-39 round-6 polish #12 (UAT-NOTES.md §5.8 follow-up #12,
+  // 2026-04-30): RecoveryDialog extends to per-game soft-deleted listings.
+  // User during round-6 UAT after the polish #11 parity sweep landed
+  // (verbatim, ru): "и я удалил стор, и теперь нет вохзможности его
+  // восстановить" ("and I deleted a store, and now there's no way to
+  // restore it"). The data layer was already there (Plan 02.1-04 added
+  // `deleted_at` to `game_steam_listings`); only the recovery UI was
+  // missing. Mounts the same RecoveryDialog the parity sweep wired into
+  // /feed, /games, /sources — entityType="store" is the new discriminator.
+  import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
   import type { GameSteamListingDto } from "$lib/server/dto.js";
   import type { PageData } from "./$types";
@@ -109,10 +119,15 @@
     title: string;
   };
 
-  let { data }: { data: PageData } = $props();
+  // Plan 02.1-39 round-6 polish #12: PageData carries the new
+  // `deletedListings: GameSteamListingDto[]` payload alongside the active
+  // listings. `retentionDays` flows from the root +layout.server.ts so
+  // RecoveryDialog renders the per-row purge countdown via RetentionBadge.
+  let { data }: { data: PageData & { retentionDays: number } } = $props();
 
   const game = $derived(data.game);
   const listings = $derived(data.listings as ListingDto[]);
+  const deletedListings = $derived(data.deletedListings as ListingDto[]);
   const events = $derived(data.events as EventDtoLocal[]);
   const allGames = $derived(data.games as GameLite[]);
   const sources = $derived(data.sources as SourceLite[]);
@@ -149,6 +164,40 @@
   // feed on /games/[id] reads exactly like /feed minus the filter chrome.
   const groupedEvents = $derived(groupEventsByDate(events));
 
+  // Plan 02.1-39 round-6 polish #12: RecoveryDialog open state. Same
+  // contract as /feed, /games, /sources: opened by PageHeader's "Recently
+  // deleted (N)" button; closed by Escape, backdrop click, dialog × button,
+  // or auto-closes when the last recoverable item is restored.
+  let recoveryOpen = $state(false);
+
+  // Map deletedListings into the dialog's generic { id, name, deletedAt }
+  // shape. `name` may be NULL when the Steam appdetails fetch failed at
+  // INSERT time; fall back to `App {appId}` so every row has a recognizable
+  // label (mirror of SteamListingRow's displayName fallback).
+  const recoveryItems = $derived(
+    deletedListings.map((l) => ({
+      id: l.id,
+      name: l.name ?? `App ${l.appId}`,
+      deletedAt: l.deletedAt,
+    })),
+  );
+
+  async function restoreListingFn(listingId: string): Promise<void> {
+    const res = await fetch(
+      `/api/games/${game.id}/listings/${listingId}/restore`,
+      { method: "POST" },
+    );
+    if (res.ok || res.status === 200) {
+      await invalidateAll();
+      // If that was the last recoverable item, close the dialog so the
+      // user is not stuck staring at "Nothing to recover" (the parent
+      // also stops rendering the PageHeader CTA at the same time —
+      // deletedCount falls to 0). Same pattern as the parity sweep on
+      // /feed, /games, /sources.
+      if (deletedListings.length <= 1) recoveryOpen = false;
+    }
+  }
+
   // -- Rename: PATCH /api/games/:id { title } --
   let renameError = $state<string | null>(null);
   async function saveRename(title: string): Promise<void> {
@@ -179,7 +228,29 @@
   <span>{game.title}</span>
 </nav>
 
-<PageHeader title={game.title} sticky />
+<PageHeader
+  title={game.title}
+  sticky
+  deletedCount={deletedListings.length}
+  onOpenRecovery={() => (recoveryOpen = true)}
+/>
+
+<!--
+  Plan 02.1-39 round-6 polish #12 (UAT-NOTES.md §5.8 follow-up #12,
+  2026-04-30): RecoveryDialog for soft-deleted Steam listings. Mounts
+  only when deletedListings.length > 0 (the dialog itself defends
+  against the empty case too — defense-in-depth).
+-->
+{#if deletedListings.length > 0}
+  <RecoveryDialog
+    open={recoveryOpen}
+    items={recoveryItems}
+    entityType="store"
+    retentionDays={data.retentionDays}
+    onClose={() => (recoveryOpen = false)}
+    onRestore={restoreListingFn}
+  />
+{/if}
 
 <!--
   Plan 02.1-39 (UAT-NOTES.md §5.3): three labelled sections with

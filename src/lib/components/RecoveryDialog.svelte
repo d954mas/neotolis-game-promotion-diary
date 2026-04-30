@@ -26,13 +26,20 @@
   // <ConfirmDialog> — native <dialog> element, showModal() traps focus,
   // Escape closes for free. No focus-trap library needed.
   //
-  // Generic across entity types (event / game / source) — the props are
-  // shaped { id, name, deletedAt } per item plus an entityType discriminator
-  // and an onRestore callback. /feed (only consumer in 2.1) maps the
-  // existing deletedEvents[] (toEventDto-projected, no ciphertext columns)
-  // into this shape; future Phase-3+ pages (/games, /sources soft-delete
-  // sections — currently inline <details> blocks) can drop in without
-  // rebuilding the dialog.
+  // Generic across entity types (event / game / source / store) — the props
+  // are shaped { id, name, deletedAt } per item plus an entityType
+  // discriminator and an onRestore callback. /feed (initial consumer in 2.1)
+  // maps the existing deletedEvents[] (toEventDto-projected, no ciphertext
+  // columns) into this shape; the parity sweep extended adoption to /games
+  // (entityType="game"), /sources (entityType="source"), and the per-game
+  // /games/[gameId] view (entityType="store" — Plan 02.1-39 round-6 polish
+  // #12, UAT-NOTES.md §5.8 follow-up #12, 2026-04-30). User during round-6
+  // UAT after the parity sweep landed (verbatim, ru):
+  //   "и я удалил стор, и теперь нет вохзможности его восстановить"
+  //   ("and I deleted a store, and now there's no way to restore it")
+  // The "store" entityType discriminator covers `game_steam_listings` rows;
+  // the data layer has carried `deletedAt` since Plan 02.1-04, only the
+  // recovery UI/endpoint was missing.
   //
   // Privacy invariant (CLAUDE.md):
   //   - The component receives only DTO-projected items from SSR.
@@ -60,7 +67,11 @@
   }: {
     open: boolean;
     items: RecoveryItem[];
-    entityType: "game" | "source" | "event";
+    // Plan 02.1-39 round-6 polish #12: "store" added for game_steam_listings
+    // recovery on /games/[gameId]. Visual treatment is identical across
+    // entity types today; the discriminator is exposed via data-entity-type
+    // for future per-type styling / a11y hooks (forward-compat from #11).
+    entityType: "game" | "source" | "event" | "store";
     retentionDays: number;
     onClose: () => void;
     onRestore: (id: string) => Promise<void>;
@@ -107,10 +118,11 @@
     }
   }
 
-  // entityType is part of the prop contract for forward-compat — /games
-  // and /sources will adopt this dialog in Phase 6 polish (see UAT-NOTES.md
-  // §5.8 paths B/C deferred to /trash). We expose it on the dialog as a
-  // data attribute so future styling / a11y hooks can target per-type.
+  // entityType is part of the prop contract for forward-compat — /games,
+  // /sources adopted this dialog in the polish #11 parity sweep (commit
+  // d4d55eb), and /games/[gameId] adopts it for soft-deleted listings in
+  // polish #12 (entityType="store"). We expose it on the dialog as a data
+  // attribute so future styling / a11y hooks can target per-type.
 </script>
 
 <dialog
