@@ -48,18 +48,33 @@
   // Plan 02.1-20 widens FilterChips/FiltersSheet axis union to include
   // 'action' for /audit reuse; /feed never receives that axis (filters.action
   // is left undefined here) but the local type must match the component
-  // contract. Plan 02.1-21 adds 'date' to the union (in-sheet secondary
-  // entry; the always-visible <DateRangeControl> stays the primary).
+  // contract. Plan 02.1-21 added 'date' to the union (secondary entry inside
+  // the sheet); Plan 02.1-39 round-6 polish #9 (UAT-NOTES.md §5.6 follow-up
+  // #9, 2026-04-30) REVERSES that — see FEED_SCHEMA comment below — but the
+  // axis identifier stays in the union so the type still flows through
+  // FiltersSheet/FilterChips on other surfaces (e.g. /audit).
   let sheetFocusAxis = $state<
     "kind" | "source" | "show" | "authorIsMe" | "date" | "action" | undefined
   >(undefined);
 
   // Plan 02.1-21: schema is the explicit list of axes /feed owns. Replaces
-  // FiltersSheet's old implicit "render everything" default. Behavior is
-  // unchanged for end users — kind/source/show/authorIsMe/date are all
-  // rendered in the sheet exactly as before; the explicit list is just a
-  // forward-compatible API for adding axes in Phase 3+.
-  const FEED_SCHEMA = ["kind", "source", "show", "authorIsMe", "date"] as const;
+  // FiltersSheet's old implicit "render everything" default.
+  //
+  // Plan 02.1-39 round-6 polish #9 (UAT-NOTES.md §5.6 follow-up #9,
+  // 2026-04-30): 'date' DROPPED from /feed's schema. User during round-6 UAT:
+  // "Так и в фильрах в feed не нужна дата, дату мы задаем до выбора
+  // фильтров." The always-visible <DateRangeControl> above the chip strip
+  // (rendered unconditionally below) is the SOLE date-range entry on /feed —
+  // the in-sheet secondary axis Plan 02.1-21 added was redundant since the
+  // primary control is never hidden. Removing the axis from FEED_SCHEMA
+  // makes FiltersSheet skip the date fieldset (the schema.includes('date')
+  // gate handles it) AND makes FiltersSheet's clearAll skip the date axis,
+  // which is exactly what we want: clicking "Clear filters" inside the
+  // sheet now leaves the user's selected date range intact, since that
+  // axis is owned by DateRangeControl, not the sheet. The chip-strip
+  // clearAll (FilterChips → /feed clearAll → ?all=1) DOES still reset the
+  // date range — that's the "wipe everything" button, not the sheet's.
+  const FEED_SCHEMA = ["kind", "source", "show", "authorIsMe"] as const;
 
   const sourceById = $derived(new Map(data.sources.map((s) => [s.id, s])));
   const gameById = $derived(new Map(data.games.map((g) => [g.id, g])));
@@ -137,19 +152,21 @@
     // the sheet returns undefined (defensive).
     show?: ShowFilter;
     authorIsMe?: boolean;
-    // Plan 02.1-21: schema=['kind','source','show','authorIsMe','date'] for
-    // /feed → the sheet's in-sheet date axis can emit from/to. The primary
-    // entry remains <DateRangeControl> above the chip strip; the sheet path
-    // is the secondary entry for users opening the sheet from a chip click.
+    // Plan 02.1-21 originally added an in-sheet date axis emitting from/to;
+    // Plan 02.1-39 round-6 polish #9 reversed that on /feed (FEED_SCHEMA no
+    // longer includes 'date'). The keys remain in the type signature because
+    // FiltersSheet's onApply contract is shared with /audit (which DOES use
+    // 'date' via its own schema). With FEED_SCHEMA missing 'date', the sheet
+    // never emits these on /feed — the `"from" in next || "to" in next` gate
+    // below is what makes the omission a no-op for the date params.
     from?: string;
     to?: string;
     action?: string[];  // unused on /feed
   }): void {
     const params = new URLSearchParams(page.url.searchParams);
-    // Sheet owns source/kind/show/authorIsMe (always), and date (when
-    // schema includes 'date' — true for /feed). Plan 02.1-21: when the
-    // sheet emits from/to (or omits both), we honor it as the new
-    // date-range source of truth — same shape as <DateRangeControl>.
+    // Sheet owns source/kind/show/authorIsMe on /feed. The 'date' axis was
+    // dropped in Plan 02.1-39 round-6 polish #9 (FEED_SCHEMA above) — the
+    // <DateRangeControl> above the chip strip is the sole date entry now.
     params.delete("source");
     params.delete("kind");
     params.delete("game");
@@ -157,9 +174,12 @@
     params.delete("authorIsMe");
     params.delete("cursor");
     // Plan 02.1-21: only rewrite from/to if the sheet emitted them (i.e.
-    // schema includes 'date'). The sheet's clearAll sends from=undefined
-    // + to=undefined → we drop both params and ?all=1 lands the user on
-    // the no-default-window state to match clearAll's intent.
+    // schema includes 'date'). After Plan 02.1-39 round-6 polish #9 dropped
+    // 'date' from FEED_SCHEMA on /feed, this branch is a no-op on /feed —
+    // the user's date range survives the sheet's apply/clearAll round-trip,
+    // which matches the new contract (DateRangeControl owns the axis). The
+    // gate is preserved so the same handler shape stays compatible if a
+    // future surface re-introduces 'date' in its schema.
     if ("from" in next || "to" in next) {
       params.delete("from");
       params.delete("to");
@@ -189,8 +209,14 @@
   }
 
   function clearAll(): void {
-    // Clear every filter — including the date range. Land on ?all=1 so the
-    // 30-day default doesn't immediately re-apply.
+    // Wired to <FilterChips onClearAll>. The chip-strip's "Clear filters"
+    // button is the wipe-everything affordance — it clears every axis
+    // INCLUDING the date range, landing on ?all=1 so the 30-day default
+    // doesn't immediately re-apply. The sheet's own clearAll (inside
+    // FiltersSheet) is a different surface: it only resets the axes the
+    // sheet OWNS per FEED_SCHEMA — and since Plan 02.1-39 round-6 polish #9
+    // dropped 'date' from that schema, the sheet's clearAll preserves the
+    // user's date range. The two surfaces are intentionally distinct.
     void goto("/feed?all=1");
   }
 

@@ -25,15 +25,31 @@
   // Plan 02.1-21 changes (round-3 UAT closure for §9.2-bug):
   //   - REQUIRED `schema: ReadonlyArray<FilterAxis>` prop replaces Plan
   //     02.1-20's implicit axis-detection (was: filters.action presence as
-  //     the gate). /feed passes ['kind','source','show','authorIsMe','date'];
-  //     /audit passes ['action','date']. Each fieldset is gated on
-  //     `schema.includes('axisName')` so the rendered surface mirrors the
-  //     consumer's intent exactly.
+  //     the gate). Each fieldset is gated on `schema.includes('axisName')`
+  //     so the rendered surface mirrors the consumer's intent exactly.
   //   - New 'date' axis fieldset (two date inputs) renders when
-  //     schema.includes('date'). /feed and /audit both keep <DateRangeControl>
-  //     ABOVE the chip strip as the always-visible primary entry; the
-  //     in-sheet date fieldset is the secondary entry for users opening the
-  //     sheet from a chip click.
+  //     schema.includes('date').
+  //
+  // Schema-by-consumer matrix (current state, post Plan 02.1-39 round-6):
+  //   - /feed:     ['kind','source','show','authorIsMe']  ← 'date' DROPPED
+  //                in Plan 02.1-39 round-6 polish #9 (UAT-NOTES.md §5.6
+  //                follow-up #9). DateRangeControl above the chip strip is
+  //                the sole date-range entry on /feed; the in-sheet axis
+  //                Plan 02.1-21 added was redundant since the primary
+  //                always-visible control is never hidden.
+  //   - /audit:    ['action']  ← 'date' DROPPED in Plan 02.1-34 (§4.21.A);
+  //                same rationale — page-level DateRangeControl is the SOT.
+  //   - Future surfaces that don't render their own DateRangeControl can
+  //     opt into the in-sheet 'date' axis by including it in their schema.
+  //
+  // The gating logic (schema.includes(axis)) MUST cover BOTH applyAll and
+  // clearAll. clearAll is the load-bearing piece: when 'date' is absent
+  // from a consumer's schema, the sheet's clearAll MUST NOT emit
+  // from=undefined / to=undefined — emitting them would let the consumer
+  // wipe the user's selected date range from the SOT (DateRangeControl)
+  // via a button that says "clear filters" inside the sheet. The current
+  // gate at line ~402 satisfies this — a future refactor that breaks it
+  // would silently regress the /feed UX.
 
   import { m } from "$lib/paraglide/messages.js";
   import { sortByLabel } from "$lib/util/sort-kinds.js";

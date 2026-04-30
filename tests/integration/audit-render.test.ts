@@ -99,8 +99,10 @@ describe("/audit render-time guard (Plan 02.1-20 — FiltersSheet + AuditRow)", 
         },
         sources: [],
         games: [],
-        // Plan 02.1-21: /feed-shape schema (no 'action').
-        schema: ["kind", "source", "show", "authorIsMe", "date"] as const,
+        // /feed-shape schema (post Plan 02.1-39 round-6 polish #9: 'date'
+        // dropped — DateRangeControl is the SOT). Same regression-guard
+        // intent: no 'action' fieldset leaks into /feed's sheet.
+        schema: ["kind", "source", "show", "authorIsMe"] as const,
         onApply: () => {},
         onClose: () => {},
       },
@@ -218,7 +220,15 @@ describe("Plan 02.1-21 — schema prop honored", () => {
     expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="authorIsMe"/);
   });
 
-  it("FiltersSheet schema=['kind','source','show','authorIsMe','date'] renders all /feed fieldsets and date (NO action)", () => {
+  it("FiltersSheet schema=['kind','source','show','authorIsMe','date'] renders all those fieldsets (NO action) — prop-machinery test", () => {
+    // Note: this is a prop-machinery test, NOT a /feed snapshot — Plan
+    // 02.1-39 round-6 polish #9 narrowed /feed's actual schema to
+    // ['kind','source','show','authorIsMe'] (no 'date'). The schema prop
+    // contract still has to render the date fieldset when a consumer DOES
+    // include 'date', so we keep this assertion to guard the schema-honored
+    // contract. /audit's actual schema is asserted in the Plan 02.1-34
+    // describe block; /feed's actual schema is asserted in the
+    // 02.1-39-round-6-#9 describe block below.
     const out = render(FiltersSheet, {
       props: {
         filters: {
@@ -1292,7 +1302,10 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
         },
         sources: [],
         games: [],
-        schema: ["kind", "source", "show", "authorIsMe", "date"] as const,
+        // /feed schema post Plan 02.1-39 round-6 polish #9: no 'date' axis
+        // (DateRangeControl above the chip strip is the SOT). Asserting the
+        // standalone label rendering — schema content is fixture-only here.
+        schema: ["kind", "source", "show", "authorIsMe"] as const,
         onDismiss: () => {},
         onOpenSheet: () => {},
         onClearAll: () => {},
@@ -1325,7 +1338,8 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
         },
         sources: [],
         games: [],
-        schema: ["kind", "source", "show", "authorIsMe", "date"] as const,
+        // /feed schema post Plan 02.1-39 round-6 polish #9: no 'date' axis.
+        schema: ["kind", "source", "show", "authorIsMe"] as const,
         onApply: () => {},
         onClose: () => {},
       },
@@ -1473,22 +1487,37 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     ).not.toMatch(/"date"/);
   });
 
-  it("/feed schema still includes 'date' (no regression on the working surface)", async () => {
+  it("/feed FEED_SCHEMA does NOT include 'date' (Plan 02.1-39 round-6 polish #9 reversal of Plan 02.1-21 in-sheet date axis)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(
       path.resolve("src/routes/feed/+page.svelte"),
       "utf8",
     );
-    // /feed's schema MUST still include 'date' — the in-sheet date axis is
-    // the design-intentional secondary entry there (DateRangeControl is the
-    // primary always-visible entry; the sheet-axis is the fallback for
-    // users opening the sheet via a chip click). Plan 02.1-34 only narrows
-    // /audit's schema, not /feed's.
+    // Plan 02.1-39 round-6 polish #9 (UAT-NOTES.md §5.6 follow-up #9,
+    // 2026-04-30) — user during round-6 UAT: "в фильрах в feed не нужна
+    // дата, дату мы задаем до выбора фильтров." The always-visible
+    // <DateRangeControl> above the chip strip is the SOLE date-range entry
+    // on /feed; the in-sheet secondary axis Plan 02.1-21 added was
+    // redundant and the user explicitly asked for its removal during UAT.
+    //
+    // Match the FEED_SCHEMA literal — the array MUST contain
+    // 'kind','source','show','authorIsMe' and MUST NOT contain 'date'.
+    // Mirrors the Plan 02.1-34 AUDIT_SCHEMA assertion shape.
+    const match = src.match(/const FEED_SCHEMA\s*=\s*(\[[^\]]*\])/);
     expect(
-      src,
-      "/feed schema dropped 'date' — Plan 02.1-34 should preserve it on /feed",
-    ).toMatch(/"date"/);
+      match,
+      "src/routes/feed/+page.svelte: FEED_SCHEMA literal not found",
+    ).not.toBeNull();
+    const literal = match![1]!;
+    expect(literal).toMatch(/"kind"/);
+    expect(literal).toMatch(/"source"/);
+    expect(literal).toMatch(/"show"/);
+    expect(literal).toMatch(/"authorIsMe"/);
+    expect(
+      literal,
+      "FEED_SCHEMA still references 'date' — Plan 02.1-39 round-6 polish #9 removes it",
+    ).not.toMatch(/"date"/);
   });
 
   it("FiltersSheet.svelte no longer references document.body.style.overflow in code (UAT-NOTES.md §4.22.F)", async () => {
