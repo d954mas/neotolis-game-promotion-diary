@@ -84,3 +84,13 @@ Pre-existing lint error observed during Plan 02.1-36 verification (2026-04-30):
   scope for Plan 02.1-36 — this plan only touches `src/lib/util/`,
   `src/lib/server/logger.ts`, and `tests/unit/`. The error was present on
   master before this branch (commit 9a0792e); not a regression.
+
+## Plan 02.1-39 round-6 polish #11 follow-up — pre-existing audit-render failures (2026-04-30)
+
+Verified at task time during the RecoveryDialog parity-sweep work (extending the modal to /games and /sources). Three audit-render integration tests were already failing on `c98eadf` (the parent commit) — confirmed by stashing the in-progress diff and re-running the same test selection against unchanged HEAD:
+
+- `SteamListingRow falls back to 'App {appId}' when listing.name is null`
+- `SteamListingRow Open-on-Steam href targets store.steampowered.com/app/{appId}/`
+- `SourceRow.svelte source carries the Mine treatment CSS rule + kind label`
+
+Out of scope for the round-6 polish #11 follow-up (the diff only touches `/games`, `/sources`, the `audit-render.test.ts` parity describe block, UAT-NOTES.md, and VALIDATION.md). The five new RecoveryDialog parity tests added by this commit all pass; the unit suite (`pnpm test:unit`) is green.

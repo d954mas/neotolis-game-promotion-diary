@@ -16,13 +16,23 @@
   import { m } from "$lib/paraglide/messages.js";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import SourceRow from "$lib/components/SourceRow.svelte";
-  import RetentionBadge from "$lib/components/RetentionBadge.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
   // Plan 02.1-25 (UAT-NOTES.md §3.1-polish): shared PageHeader replaces the
   // inline <header class="head"> + .cta block. The `sticky` prop preserves
   // Plan 02.1-22's §2.2-bug closure (CTA reachable while a long source list
   // scrolls).
   import PageHeader from "$lib/components/PageHeader.svelte";
+  // Plan 02.1-39 round-6 polish #11 follow-up (UAT-NOTES.md §5.8 follow-up
+  // #11 extension, 2026-04-30): the RecoveryDialog modal that landed on
+  // /feed in c98eadf is extended to /sources too — same single recovery
+  // surface across the app. User quote (verbatim, ru):
+  //   "и так сделать для всеху удаленных обьектов на других страницах"
+  // The previous bottom-of-page <details class="deleted-sources"> block is
+  // REMOVED; the dialog opens from PageHeader's "Recently deleted (N)"
+  // button. RetentionBadge + per-row Restore live INSIDE the dialog now
+  // (the dialog already mirrors the visual treatment SourceRow used for
+  // soft-deleted rows).
+  import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
   import type { PageData } from "./$types";
 
   type SourceKind =
@@ -46,9 +56,27 @@
   const active = $derived(data.active as DataSourceDto[]);
   const deleted = $derived(data.deleted as DataSourceDto[]);
 
+  // Plan 02.1-39 round-6 polish #11 follow-up: RecoveryDialog open state.
+  // Opened by PageHeader's "Recently deleted (N)" button; closed by
+  // Escape, backdrop click, the dialog's × button, or auto-closes when
+  // the last recoverable item is restored (same contract as /feed and
+  // /games).
+  let recoveryOpen = $state(false);
   let restoreError = $state<string | null>(null);
 
-  async function restore(id: string): Promise<void> {
+  // Map deleted (toDataSourceDto-projected, no ciphertext) into the
+  // RecoveryDialog's generic { id, name, deletedAt } shape. `displayName`
+  // is nullable on data_sources (the user may not have set one); fall
+  // back to handleUrl so every row has a recognizable label.
+  const recoveryItems = $derived(
+    deleted.map((s) => ({
+      id: s.id,
+      name: s.displayName ?? s.handleUrl,
+      deletedAt: s.deletedAt,
+    })),
+  );
+
+  async function restoreSource(id: string): Promise<void> {
     restoreError = null;
     try {
       const res = await fetch(`/api/sources/${id}/restore`, { method: "POST" });
@@ -69,6 +97,11 @@
         return;
       }
       await invalidateAll();
+      // If that was the last recoverable item, close the dialog so the
+      // user is not stuck staring at "Nothing to recover" — the parent
+      // also stops rendering the PageHeader CTA at the same time
+      // (deletedCount falls to 0). Same pattern as /feed and /games.
+      if (deleted.length <= 1) recoveryOpen = false;
     } catch {
       restoreError = m.error_network();
     }
@@ -80,6 +113,8 @@
     title="Data sources"
     cta={{ href: "/sources/new", label: m.sources_cta_new_source() }}
     sticky
+    deletedCount={deleted.length}
+    onOpenRecovery={() => (recoveryOpen = true)}
   />
 
   {#if active.length === 0 && deleted.length === 0}
@@ -101,27 +136,28 @@
       {/each}
     </ul>
 
-    {#if deleted.length > 0}
-      <details class="deleted-sources">
-        <summary>{`Show ${deleted.length} deleted source${deleted.length === 1 ? "" : "s"}`}</summary>
-        <ul class="sources-list">
-          {#each deleted as source (source.id)}
-            <li class="deleted-row">
-              <SourceRow {source} />
-              {#if source.deletedAt}
-                <RetentionBadge deletedAt={source.deletedAt} retentionDays={data.retentionDays} />
-              {/if}
-              <button type="button" class="restore" onclick={() => restore(source.id)}>
-                {m.common_restore()}
-              </button>
-            </li>
-          {/each}
-        </ul>
-        {#if restoreError}
-          <InlineError message={restoreError} />
-        {/if}
-      </details>
+    <!-- Plan 02.1-39 round-6 polish #11 follow-up: bottom-of-page
+         <details class="deleted-sources"> recovery block REMOVED; the
+         InlineError used to surface 422 retention_expired stays here so
+         the user sees feedback even when the modal is closed. -->
+    {#if restoreError}
+      <InlineError message={restoreError} />
     {/if}
+  {/if}
+
+  <!-- Plan 02.1-39 round-6 polish #11 follow-up (UAT-NOTES.md §5.8 follow-up
+       #11 extension): same RecoveryDialog modal as /feed and /games. The
+       dialog mounts only when deleted.length > 0; the dialog itself still
+       defends against the empty case. -->
+  {#if deleted.length > 0}
+    <RecoveryDialog
+      open={recoveryOpen}
+      items={recoveryItems}
+      entityType="source"
+      retentionDays={data.retentionDays}
+      onClose={() => (recoveryOpen = false)}
+      onRestore={restoreSource}
+    />
   {/if}
 </section>
 
@@ -144,32 +180,7 @@
     flex-direction: column;
     gap: var(--space-sm);
   }
-  .deleted-sources {
-    margin-top: var(--space-lg);
-    padding: var(--space-sm) 0;
-    color: var(--color-text-muted);
-    border-top: 1px dashed var(--color-border);
-  }
-  .deleted-sources summary {
-    cursor: pointer;
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    padding: var(--space-xs) 0;
-  }
-  .deleted-row {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
-  }
-  .restore {
-    align-self: flex-start;
-    min-height: 36px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: var(--font-size-label);
-  }
+  /* Plan 02.1-39 round-6 polish #11 follow-up: .deleted-sources, .deleted-row,
+   * and .restore CSS removed alongside the bottom-of-page <details> recovery
+   * block. RecoveryDialog owns the surface (same component on /feed and /games). */
 </style>

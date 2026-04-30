@@ -2039,3 +2039,157 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
     expect(src).toMatch(/method:\s*"DELETE"/);
   });
 });
+
+/**
+ * Plan 02.1-39 round-6 polish #11 follow-up — RecoveryDialog parity sweep
+ * across /feed, /games, /sources.
+ *
+ * c98eadf wired <RecoveryDialog> into /feed only. The user surfaced the
+ * single-recovery-surface intent during round-6 UAT (verbatim, ru):
+ *   "и так сделать для всеху удаленных обьектов на других страницах"
+ *   ("and do the same for all deleted objects on other pages")
+ *
+ * This describe block guards two contracts:
+ *   1. PageHeader's "Recently deleted (N)" affordance is a <button> (NOT
+ *      an anchor) and only renders when deletedCount > 0 AND
+ *      onOpenRecovery is provided. The negative branches (count=0, no
+ *      callback, count undefined) all suppress the affordance.
+ *   2. /feed, /games, /sources all import <RecoveryDialog>, mount it
+ *      with a non-empty entityType, and pass an onOpenRecovery callback
+ *      to PageHeader. The bottom-of-page <details class="trash"> /
+ *      <details class="deleted-sources"> blocks are gone (no <details>
+ *      wrapping the soft-deleted list survives in the markup).
+ */
+describe("Plan 02.1-39 round-6 polish #11 follow-up — RecoveryDialog parity across /feed, /games, /sources", () => {
+  it("PageHeader renders a recovery-link <button> when deletedCount > 0 AND onOpenRecovery is provided", async () => {
+    const PageHeader = (
+      await import("../../src/lib/components/PageHeader.svelte")
+    ).default;
+    const out = render(PageHeader, {
+      props: {
+        title: "Feed",
+        cta: { href: "/events/new", label: "+ Add event" },
+        deletedCount: 3,
+        onOpenRecovery: () => {},
+      },
+    });
+    // The affordance is a <button> (round-6 #11 — anchor → modal-trigger
+    // button) with class="recovery-link" + the localized count string.
+    expect(out.body).toMatch(/<button[^>]*class="[^"]*\brecovery-link\b/);
+    expect(out.body).toMatch(/Recently deleted \(3\)/);
+    // Defensive: the previous Path A <a href="#deleted-events"> anchor
+    // pattern is gone from PageHeader entirely. No <a> with the
+    // recovery-link class survives.
+    expect(out.body).not.toMatch(/<a[^>]*class="[^"]*\brecovery-link\b/);
+    expect(out.body).not.toMatch(/href="#deleted-events"/);
+  });
+
+  it("PageHeader does NOT render the recovery-link button when deletedCount is 0", async () => {
+    const PageHeader = (
+      await import("../../src/lib/components/PageHeader.svelte")
+    ).default;
+    const out = render(PageHeader, {
+      props: {
+        title: "Games",
+        cta: { onClick: () => {}, label: "+ New game" },
+        deletedCount: 0,
+        onOpenRecovery: () => {},
+      },
+    });
+    expect(out.body).not.toMatch(/\brecovery-link\b/);
+    expect(out.body).not.toMatch(/Recently deleted/);
+  });
+
+  it("PageHeader does NOT render the recovery-link button when onOpenRecovery is omitted (defense-in-depth)", async () => {
+    const PageHeader = (
+      await import("../../src/lib/components/PageHeader.svelte")
+    ).default;
+    const out = render(PageHeader, {
+      props: {
+        title: "Data sources",
+        cta: { href: "/sources/new", label: "+ Add data source" },
+        deletedCount: 5,
+        // onOpenRecovery intentionally omitted — count alone is not enough
+        // to render the button. Both must be present (the && guard in the
+        // template).
+      },
+    });
+    expect(out.body).not.toMatch(/\brecovery-link\b/);
+  });
+
+  it("/feed, /games, /sources all import RecoveryDialog and wire onOpenRecovery into PageHeader", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    for (const route of [
+      "src/routes/feed/+page.svelte",
+      "src/routes/games/+page.svelte",
+      "src/routes/sources/+page.svelte",
+    ]) {
+      const src = fs.readFileSync(path.resolve(route), "utf8");
+      expect(
+        src,
+        `${route}: imports RecoveryDialog`,
+      ).toMatch(/import RecoveryDialog from "\$lib\/components\/RecoveryDialog\.svelte"/);
+      expect(src, `${route}: mounts <RecoveryDialog`).toMatch(/<RecoveryDialog\s/);
+      // entityType is the load-bearing discriminator — every consumer
+      // must pass one of the three known values. The dialog's prop type
+      // is a literal union "game" | "source" | "event"; the regex below
+      // catches any of the three.
+      expect(
+        src,
+        `${route}: passes entityType="event" | "game" | "source"`,
+      ).toMatch(/entityType="(event|game|source)"/);
+      // PageHeader receives the callback via the new prop name (round-6
+      // #11 replaced recoveryAnchor with onOpenRecovery).
+      expect(
+        src,
+        `${route}: PageHeader receives onOpenRecovery callback`,
+      ).toMatch(/onOpenRecovery=\{/);
+      // Negative: the previous Path A `recoveryAnchor=` prop is gone.
+      expect(
+        src,
+        `${route}: legacy recoveryAnchor prop removed`,
+      ).not.toMatch(/recoveryAnchor=/);
+    }
+  });
+
+  it("/feed, /games, /sources have NO bottom-of-page <details> recovery wrapper in the markup", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    for (const route of [
+      "src/routes/feed/+page.svelte",
+      "src/routes/games/+page.svelte",
+      "src/routes/sources/+page.svelte",
+    ]) {
+      const src = fs.readFileSync(path.resolve(route), "utf8");
+      // Strip <script>, <style>, AND HTML comments so historical
+      // references in code comments / removed-CSS commentary / breadcrumb
+      // <!-- comments --> documenting the round-6 #11 follow-up don't
+      // trigger false positives — we only care about live, rendered
+      // markup. Both /games and /sources keep breadcrumb comments
+      // mentioning the retired class names by design.
+      const markupOnly = src
+        .replace(/<script[\s\S]*?<\/script>/g, "")
+        .replace(/<style[\s\S]*?<\/style>/g, "")
+        .replace(/<!--[\s\S]*?-->/g, "");
+      // The two retired bottom-of-page wrappers were:
+      //   /games  → <details class="trash">
+      //   /sources → <details class="deleted-sources">
+      //   /feed   → <div id="deleted-events"><DeletedEventsPanel />  (already
+      //             removed by c98eadf; re-asserted here to keep the parity
+      //             sweep symmetric across all three pages).
+      expect(
+        markupOnly,
+        `${route}: no <details class="trash"> bottom recovery block`,
+      ).not.toMatch(/<details[^>]*class="[^"]*\btrash\b/);
+      expect(
+        markupOnly,
+        `${route}: no <details class="deleted-sources"> bottom recovery block`,
+      ).not.toMatch(/<details[^>]*class="[^"]*\bdeleted-sources\b/);
+      expect(
+        markupOnly,
+        `${route}: no <div id="deleted-events"> bottom recovery anchor target`,
+      ).not.toMatch(/<div[^>]*id="deleted-events"/);
+    }
+  });
+});

@@ -11,13 +11,25 @@
   import { m } from "$lib/paraglide/messages.js";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import GameCard from "$lib/components/GameCard.svelte";
-  import RetentionBadge from "$lib/components/RetentionBadge.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
   // Plan 02.1-25 (UAT-NOTES.md §3.1-polish): shared PageHeader replaces the
   // inline <header class="head"> + button. Uses the onClick CTA variant so
   // the toggle behavior (showForm = true) stays a button (not a link).
   import PageHeader from "$lib/components/PageHeader.svelte";
+  // Plan 02.1-39 round-6 polish #11 follow-up (UAT-NOTES.md §5.8 follow-up
+  // #11 extension, 2026-04-30): the RecoveryDialog modal that landed on
+  // /feed in c98eadf is extended to /games — same single recovery surface
+  // across the app. The user surfaced this during UAT (verbatim, ru):
+  //   "и так сделать для всеху удаленных обьектов на других страницах"
+  //   ("and do the same for all deleted objects on other pages")
+  // The previous bottom-of-page <details class="trash"> block is REMOVED;
+  // the dialog opens from PageHeader's "Recently deleted (N)" button. This
+  // also matches the pattern for /sources and any future surface that
+  // surfaces soft-deleted entities — entityType="game" lets RecoveryDialog
+  // forward-style per-type even though the visual treatment is identical
+  // today.
+  import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
   import type { PageData } from "./$types";
 
   type GameDto = {
@@ -84,12 +96,36 @@
     if (res.ok || res.status === 204) await invalidateAll();
   }
 
-  async function restore(id: string): Promise<void> {
-    const res = await fetch(`/api/games/${id}/restore`, { method: "POST" });
-    if (res.ok || res.status === 204) await invalidateAll();
-  }
+  // Plan 02.1-39 round-6 polish #11 follow-up: RecoveryDialog open state.
+  // Opened by PageHeader's "Recently deleted (N)" button; closed by
+  // Escape, backdrop click, the dialog's × button, or auto-closes when
+  // the last recoverable item is restored (same contract as /feed).
+  let recoveryOpen = $state(false);
 
-  let trashOpen = $state(false);
+  // Map softDeleted (toGameDto-projected, no ciphertext) into the
+  // RecoveryDialog's generic { id, name, deletedAt } shape. `name` falls
+  // back from `title` — every game has a non-empty title by schema, so
+  // this is a straight projection, but the dialog's prop contract is
+  // entity-agnostic.
+  const recoveryItems = $derived(
+    softDeleted.map((g) => ({
+      id: g.id,
+      name: g.title,
+      deletedAt: g.deletedAt,
+    })),
+  );
+
+  async function restoreGame(id: string): Promise<void> {
+    const res = await fetch(`/api/games/${id}/restore`, { method: "POST" });
+    if (res.ok || res.status === 204) {
+      await invalidateAll();
+      // If that was the last recoverable item, close the dialog so the
+      // user is not stuck staring at "Nothing to recover" — the parent
+      // also stops rendering the PageHeader CTA at the same time
+      // (deletedCount falls to 0). Same pattern as /feed.
+      if (softDeleted.length <= 1) recoveryOpen = false;
+    }
+  }
 </script>
 
 <section class="games">
@@ -102,6 +138,8 @@
       label: m.games_cta_new_game(),
     }}
     sticky
+    deletedCount={softDeleted.length}
+    onOpenRecovery={() => (recoveryOpen = true)}
   />
 
   {#if showForm}
@@ -155,31 +193,22 @@
     </ul>
   {/if}
 
+  <!-- Plan 02.1-39 round-6 polish #11 follow-up (UAT-NOTES.md §5.8 follow-up
+       #11 extension): the bottom-of-page <details class="trash"> recovery
+       block is REMOVED. The same flow now lives in <RecoveryDialog> — a
+       modal opened from PageHeader's "Recently deleted (N)" button. The
+       dialog mounts only when softDeleted.length > 0; the dialog itself
+       still defends against the empty case (renders the localized empty
+       message). RetentionBadge is rendered INSIDE the dialog per item. -->
   {#if softDeleted.length > 0}
-    <details class="trash" bind:open={trashOpen}>
-      <summary>Show {softDeleted.length} deleted game{softDeleted.length === 1 ? "" : "s"}</summary>
-      <ul class="grid">
-        {#each softDeleted as g (g.id)}
-          <li class="trashrow">
-            <GameCard
-              game={{
-                id: g.id,
-                title: g.title,
-                coverUrl: g.coverUrl,
-                releaseDate: g.releaseDate,
-                releaseTba: g.releaseTba,
-                tags: g.tags,
-                deletedAt: g.deletedAt,
-              }}
-              onRestore={() => restore(g.id)}
-            />
-            {#if g.deletedAt}
-              <RetentionBadge deletedAt={g.deletedAt} retentionDays={data.retentionDays} />
-            {/if}
-          </li>
-        {/each}
-      </ul>
-    </details>
+    <RecoveryDialog
+      open={recoveryOpen}
+      items={recoveryItems}
+      entityType="game"
+      retentionDays={data.retentionDays}
+      onClose={() => (recoveryOpen = false)}
+      onRestore={restoreGame}
+    />
   {/if}
 
   <ConfirmDialog
@@ -276,17 +305,7 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
-  .trash {
-    margin-top: var(--space-lg);
-  }
-  .trash summary {
-    cursor: pointer;
-    color: var(--color-text-muted);
-    padding: var(--space-sm) 0;
-  }
-  .trashrow {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
-  }
+  /* Plan 02.1-39 round-6 polish #11 follow-up: .trash + .trashrow CSS
+   * removed alongside the bottom-of-page <details> recovery block.
+   * RecoveryDialog owns the surface (same component on /feed and /sources). */
 </style>
