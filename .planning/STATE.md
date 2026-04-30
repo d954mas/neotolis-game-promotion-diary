@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
-stopped_at: Completed 02.1-32-PLAN.md
-last_updated: "2026-04-29T17:53:42.613Z"
-last_activity: 2026-04-29
+status: Phase 02.1 PAUSED — Plan 02.1-10 round-5 UAT 2026-04-30 + external code review surfaced 13 NEW findings (3 P0 + 6 P1 + 4 P2) blocking sign-off; persisted in 02.1-10-UAT-NOTES.md round-5 section; round-6 gap-closure plans needed (recommended 02.1-35..39, 5 plans across 3 waves)
+stopped_at: Plan 02.1-10 round-5 UAT walked 17 items + ingested external review. All 8 closure plans (27-34) of round-4 SHIPPED + verified clean. P0 (3) — 5.1 metadata.inbox.dismissed sticky after attach→detach (event invisible in any filter except All), 5.2 /events/[id]/edit picker still single-select (multi-game M:N from UI impossible), 5.9 pnpm test:unit CI red (locale-dep format-feed-date + JSDoc env-scanner false positive). P1 (6) — 5.3 /games/[id] redesign incomplete (oversized cards + missing 3-section structure with collocated CTAs + store-card grid + Steam deep-link; description+icon deferred to Phase 6), 5.4 FeedQuickNav not sticky, 5.5 wheel-scroll bypasses body-scroll-lock (need :root mirror), 5.10 REDACT_PATHS missing 12 ciphertext paths (privacy floor violation), 5.11 PATCH events kind=youtube_video→URL invariant breakable on body-only validation, 5.12 createEvent + attachEventToGames multi-step writes without db.transaction. P2 (4) — 5.6 FiltersSheet source list missing kind glyph, 5.7 PageHeader sticky only on /sources (extend to /feed/games/audit), 5.8 recovery panels buried at bottom of long lists, 5.13 /feed loader kindList cast without VALID_EVENT_KINDS check. Manual UAT items 3,4,9,10,11,13,15,16,17 = PASS clean; item 8 PASS-with-nit (text "Edit" instead of pencil — P3 polish backlog). Plans 27-34 SHIPPED + verified; manual UAT + external review are the gates. Next: /clear → /gsd:plan-phase 02.1 --gaps → /gsd:execute-phase 02.1 --gaps-only → round-6 UAT → Plan 10 sign-off.
+last_updated: "2026-04-30T05:00:00.000Z"
+last_activity: 2026-04-30
 progress:
   total_phases: 7
   completed_phases: 2
