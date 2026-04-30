@@ -17,7 +17,9 @@ import {
   restoreGame,
   getGameById,
   getGameByIdIncludingDeleted,
+  updateGame,
 } from "../../src/lib/server/services/games.js";
+import { toGameDto } from "../../src/lib/server/dto.js";
 import { seedUserDirectly } from "./helpers.js";
 import { AppError, NotFoundError } from "../../src/lib/server/services/errors.js";
 
@@ -145,6 +147,89 @@ describe("games CRUD (GAMES-01, GAMES-02)", () => {
       .where(and(eq(auditLog.userId, userA.id), eq(auditLog.action, "game.restored")));
     expect(audits.length).toBeGreaterThanOrEqual(1);
     expect((audits[0]!.metadata as { gameId?: string } | null)?.gameId).toBe(game.id);
+  });
+
+  // Plan 02.1-39 round-6 polish #14a (UAT-NOTES.md §5.8 follow-up #14,
+  // 2026-04-30): games.description column added in migration 0007 +
+  // updateGame service extension + DTO projection. User during round-6
+  // UAT (verbatim, ru): "Еще я хочу чтобы тут можно было сделать
+  // описание игры." The service-layer 2000-char cap and the
+  // empty-string → NULL normalization are exercised here so the
+  // contract holds independently of the HTTP-route Zod schema (which
+  // also caps at 2000 — defense-in-depth).
+  describe("Plan 02.1-39 round-6 polish #14a — games.description", () => {
+    it("updateGame round-trips a description and the DTO projects it", async () => {
+      const userA = await seedUserDirectly({ email: "p14a-rt-a@test.local" });
+      const game = await createGame(userA.id, { title: "Desc RT" }, "127.0.0.1");
+      // Initial state: NULL description.
+      expect(game.description).toBeNull();
+      const dto0 = toGameDto(game);
+      expect(dto0.description).toBeNull();
+
+      const updated = await updateGame(userA.id, game.id, {
+        description: "A short pitch about the game.",
+      });
+      expect(updated.description).toBe("A short pitch about the game.");
+
+      const dto1 = toGameDto(updated);
+      expect(dto1.description).toBe("A short pitch about the game.");
+      // P3 discipline: userId never crosses the projection boundary.
+      expect(dto1).not.toHaveProperty("userId");
+    });
+
+    it("updateGame normalizes empty string to NULL", async () => {
+      const userA = await seedUserDirectly({ email: "p14a-empty-a@test.local" });
+      const game = await createGame(userA.id, { title: "Empty Desc" }, "127.0.0.1");
+      // Set a real description first.
+      const set = await updateGame(userA.id, game.id, {
+        description: "Initial",
+      });
+      expect(set.description).toBe("Initial");
+      // Empty string → NULL (service-layer normalization).
+      const cleared = await updateGame(userA.id, game.id, {
+        description: "",
+      });
+      expect(cleared.description).toBeNull();
+      // Whitespace-only also normalizes to NULL.
+      const wsCleared = await updateGame(userA.id, game.id, {
+        description: "   \n  ",
+      });
+      expect(wsCleared.description).toBeNull();
+    });
+
+    it("updateGame allows explicit null to clear description", async () => {
+      const userA = await seedUserDirectly({ email: "p14a-null-a@test.local" });
+      const game = await createGame(userA.id, { title: "Null Desc" }, "127.0.0.1");
+      await updateGame(userA.id, game.id, { description: "Set first" });
+      const cleared = await updateGame(userA.id, game.id, { description: null });
+      expect(cleared.description).toBeNull();
+    });
+
+    it("updateGame rejects descriptions over 2000 chars (validation_failed 422)", async () => {
+      const userA = await seedUserDirectly({ email: "p14a-cap-a@test.local" });
+      const game = await createGame(userA.id, { title: "Cap" }, "127.0.0.1");
+      const tooLong = "x".repeat(2001);
+      await expect(
+        updateGame(userA.id, game.id, { description: tooLong }),
+      ).rejects.toMatchObject({ code: "validation_failed", status: 422 });
+      // Boundary case: exactly 2000 chars is OK.
+      const exactly2000 = "y".repeat(2000);
+      const ok = await updateGame(userA.id, game.id, { description: exactly2000 });
+      expect(ok.description).toBe(exactly2000);
+    });
+
+    it("cross-tenant updateGame with description still surfaces NotFoundError (404, not 403)", async () => {
+      const userA = await seedUserDirectly({ email: "p14a-ct-a@test.local" });
+      const userB = await seedUserDirectly({ email: "p14a-ct-b@test.local" });
+      const aGame = await createGame(userA.id, { title: "A's Desc" }, "127.0.0.1");
+      // User B writes a description to A's game → NotFoundError (PRIV-01).
+      await expect(
+        updateGame(userB.id, aGame.id, { description: "leak attempt" }),
+      ).rejects.toBeInstanceOf(NotFoundError);
+      // A's game description stays NULL.
+      const stillThere = await getGameById(userA.id, aGame.id);
+      expect(stillThere.description).toBeNull();
+    });
   });
 
   it("02-04: cross-tenant getGameById returns NotFoundError (404, not 403)", async () => {

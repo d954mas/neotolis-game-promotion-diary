@@ -43,6 +43,12 @@ const updateGameSchema = z.object({
     .nullable()
     .optional(),
   coverUrl: z.string().url().nullable().optional(),
+  // Plan 02.1-39 round-6 polish #14a: long-form per-game description.
+  // Nullable + optional; service layer normalizes empty string → null
+  // and enforces the 2000-char cap (DB column is unconstrained per
+  // migration 0007). Zod also rejects oversized payloads at the
+  // boundary so a malformed client cannot reach the service.
+  description: z.string().max(2000).nullable().optional(),
 });
 
 export const gamesRoutes = new Hono<RouteVars>();

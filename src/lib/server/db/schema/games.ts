@@ -11,6 +11,14 @@
 // tags is a text[] array column populated from Steam appdetails
 // (genres + categories + steam_tags merged at game-listing-create
 // time; the column on `games` carries the merged user-facing list).
+//
+// `description` (Plan 02.1-39 round-6 polish #14a) is a free-form
+// long-text field for the user's per-game prose ("what's this game
+// about, what's the pitch"). Nullable — empty/unset state is NULL,
+// not an empty string, so the DTO can render `null` distinct from
+// `""` if the future UI cares. Service layer enforces a 2000-char
+// upper bound at validation time; the DB column has no length
+// constraint to keep migration 0007 a pure additive change.
 
 import { pgTable, text, timestamp, date, boolean, index } from "drizzle-orm/pg-core";
 import { user } from "./auth.js";
@@ -34,6 +42,13 @@ export const games = pgTable(
       .notNull()
       .default([] as string[]),
     notes: text("notes").notNull().default(""),
+    // Plan 02.1-39 round-6 polish #14a: long-form per-game description
+    // (nullable). Service-layer cap: 2000 chars (validated in
+    // updateGame). NULL distinguishes "never set" from empty string —
+    // the DTO + UI honor the distinction so a future Phase-6 polish
+    // pass can show "no description yet" copy without breaking
+    // round-trips on rows that explicitly cleared their description.
+    description: text("description"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),

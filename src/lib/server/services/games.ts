@@ -62,16 +62,41 @@ export interface UpdateGameInput {
   releaseTba?: boolean;
   releaseDate?: string | null;
   coverUrl?: string | null;
+  // Plan 02.1-39 round-6 polish #14a: nullable long-form description.
+  // Service-layer max length 2000 chars (DB column has no constraint
+  // — the migration is purely additive). Pass `null` explicitly to
+  // clear an existing description; omit the field to leave it
+  // untouched. The empty-string case is normalized to NULL at the
+  // service entry so callers can pass an empty textarea verbatim.
+  description?: string | null;
 }
 
 const TITLE_MIN = 1;
 const TITLE_MAX = 200;
+// Plan 02.1-39 round-6 polish #14a: description is bounded at the
+// service layer (DB column is unconstrained — see schema/games.ts).
+// 2000 chars is roughly two short paragraphs — enough for "what's
+// the pitch / target audience / status" without growing into a wiki
+// surface. The validateDescription helper accepts NULL (clear) and
+// validates length on string inputs only.
+const DESCRIPTION_MAX = 2000;
 
 function validateTitle(title: string): void {
   const trimmed = title.trim();
   if (trimmed.length < TITLE_MIN || trimmed.length > TITLE_MAX) {
     throw new AppError(
       `title must be between ${TITLE_MIN} and ${TITLE_MAX} characters`,
+      "validation_failed",
+      422,
+    );
+  }
+}
+
+function validateDescription(description: string | null): void {
+  if (description === null) return;
+  if (description.length > DESCRIPTION_MAX) {
+    throw new AppError(
+      `description must be at most ${DESCRIPTION_MAX} characters`,
       "validation_failed",
       422,
     );
@@ -199,6 +224,19 @@ export async function updateGame(
   input: UpdateGameInput,
 ): Promise<GameRow> {
   if (input.title !== undefined) validateTitle(input.title);
+  // Plan 02.1-39 round-6 polish #14a: normalize empty string → null
+  // BEFORE validation so the 2000-char check operates on the
+  // post-normalization value. Empty string is semantically equivalent
+  // to "no description"; collapsing it to NULL keeps the column
+  // tri-state-free (NULL vs string-with-content).
+  let normalizedDescription: string | null | undefined = input.description;
+  if (typeof normalizedDescription === "string") {
+    if (normalizedDescription.trim().length === 0) {
+      normalizedDescription = null;
+    } else {
+      validateDescription(normalizedDescription);
+    }
+  }
 
   const patch: Partial<typeof games.$inferInsert> = { updatedAt: new Date() };
   if (input.title !== undefined) patch.title = input.title.trim();
@@ -207,6 +245,7 @@ export async function updateGame(
   if (input.releaseTba !== undefined) patch.releaseTba = input.releaseTba;
   if (input.releaseDate !== undefined) patch.releaseDate = input.releaseDate;
   if (input.coverUrl !== undefined) patch.coverUrl = input.coverUrl;
+  if (normalizedDescription !== undefined) patch.description = normalizedDescription;
 
   const [row] = await db
     .update(games)

@@ -98,6 +98,10 @@ export function toSessionDto(s: Session): SessionDto {
 /**
  * GameDto — the per-game DTO returned by /api/games and embedded in many
  * other endpoints. Mirrors the `games` table minus `userId` (P3 discipline).
+ *
+ * Plan 02.1-39 round-6 polish #14a: `description` (nullable text) is
+ * projected — non-secret per-game prose set by the user via the new
+ * GameEditDialog modal on /games/[gameId].
  */
 export interface GameDto {
   id: string;
@@ -107,6 +111,7 @@ export interface GameDto {
   releaseTba: boolean;
   tags: string[];
   notes: string;
+  description: string | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -121,6 +126,7 @@ export function toGameDto(r: GameRow): GameDto {
     releaseTba: r.releaseTba,
     tags: r.tags,
     notes: r.notes,
+    description: r.description ?? null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     deletedAt: r.deletedAt,

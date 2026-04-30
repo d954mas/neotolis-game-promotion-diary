@@ -50,6 +50,13 @@
       "when": 1777478648000,
       "tag": "0006_add_event_detached_from_game_audit_action",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777564800000,
+      "tag": "0007_add_games_description",
+      "breakpoints": true
     }
   ]
 }
