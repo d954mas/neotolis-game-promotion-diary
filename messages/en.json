@@ -210,6 +210,8 @@
   "event_edit_aria_label": "Edit event",
   "events_edit_author_is_me": "Author is me",
   "events_edit_delete_button": "Delete event",
+  "events_edit_games_empty": "No games yet. Create one first.",
+  "events_edit_games_label": "Games (select one or more — leave empty to drop in inbox)",
   "events_edit_heading": "Edit event",
   "events_edit_save": "Save changes",
   "events_edit_standalone_conflict": "\"Not game-related\" is mutually exclusive with attached games. Clear games or the flag.",

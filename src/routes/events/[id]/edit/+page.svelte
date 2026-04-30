@@ -40,8 +40,9 @@
   type EventDtoLocal = {
     id: string;
     // Plan 02.1-28 (M:N migration): gameIds[] replaces the legacy singular
-    // gameId. The edit form preserves a single-select Game picker for
-    // round-3 UAT continuity (Plan 02.1-32 swaps for multi-select).
+    // gameId. Plan 02.1-38 (UAT-NOTES.md §5.2 — Path A) swaps the round-3
+    // single-select continuity for a multi-select checkbox-list bound
+    // directly to gameIds.
     gameIds: string[];
     kind: EventKind;
     authorIsMe: boolean;
@@ -75,14 +76,22 @@
   );
   let url = $state(event.url ?? "");
   let notes = $state(event.notes ?? "");
-  // Plan 02.1-28 (M:N migration): the edit form keeps a single-select Game
-  // affordance for round-3 UAT continuity (Plan 02.1-32 swaps for full
-  // multi-select). The first attached gameId becomes the default; on
-  // submit we send {gameIds: [picked]} or {gameIds: []} via the canonical
-  // attach endpoint.
-  let gameId = $state(event.gameIds[0] ?? "");
+  // Plan 02.1-38 (UAT-NOTES.md §5.2 — Path A): multi-select via checkbox-list.
+  // The round-3 single-select continuity preserved by Plan 02.1-32 is
+  // RETIRED — the user can now attach the event to ≥2 games from the UI.
+  // Submit sends `{gameIds: [...]}` to PATCH /api/events/:id/attach
+  // unchanged (backend set-replacement semantics — Plan 02.1-28).
+  let gameIds = $state<string[]>([...event.gameIds]);
   let authorIsMe = $state(event.authorIsMe);
-  const originalGameId = event.gameIds[0] ?? null;
+  const originalGameIds = new Set(event.gameIds);
+
+  function toggleGame(id: string, checked: boolean): void {
+    if (checked) {
+      if (!gameIds.includes(id)) gameIds = [...gameIds, id];
+    } else {
+      gameIds = gameIds.filter((g) => g !== id);
+    }
+  }
 
   // Plan 02.1-32 (UAT-NOTES.md §4.24.D): standalone toggle hydrated from
   // metadata.triage.standalone. The submit handler fires PATCH
@@ -99,10 +108,12 @@
   let editStandalone = $state(initialStandalone);
 
   // Plan 02.1-32 (UAT-NOTES.md §4.24.C — UI guard layer; service-layer 422
-  // from Plan 02.1-28 is defense-in-depth): when the form has a game
-  // attached AND the user toggles standalone=true, surface an inline
+  // from Plan 02.1-28 is defense-in-depth): when the form has at least one
+  // game attached AND the user toggles standalone=true, surface an inline
   // conflict error and disable Save. The user must clear one or the other.
-  const hasAttachedGame = $derived(gameId.length > 0);
+  // Plan 02.1-38 (UAT-NOTES.md §5.2): predicate now checks gameIds.length —
+  // semantics unchanged ("at least one attached game conflicts").
+  const hasAttachedGame = $derived(gameIds.length > 0);
   const standaloneConflict = $derived(editStandalone === true && hasAttachedGame);
 
   let pending = $state(false);
@@ -209,20 +220,21 @@
         return;
       }
 
-      // 2) If gameId changed, PATCH /attach as a separate fetch so the
-      //    dedicated endpoint validates game ownership (Pitfall 4).
-      // Plan 02.1-28: send the canonical {gameIds} shape. Empty array
-      // === detach (move to inbox); single-element === attach to one
-      // game (round-3 single-select UX preserved). Plan 02.1-32 retires
-      // the {gameId} back-compat alias on the UI side — we send the
-      // canonical {gameIds} shape exclusively from here on.
-      const newGameId = gameId || null;
-      if (newGameId !== originalGameId) {
-        const newGameIds = newGameId === null ? [] : [newGameId];
+      // 2) If the gameIds set changed, PATCH /attach as a separate fetch so
+      //    the dedicated endpoint validates game ownership (Pitfall 4).
+      // Plan 02.1-38 (UAT-NOTES.md §5.2 — Path A): set-difference dirty
+      // check (order-agnostic). attachEventToGames is set-replacement
+      // semantics on the backend (Plan 02.1-28 — DELETE diff + INSERT
+      // diff), so any membership change triggers exactly one PATCH.
+      const currentSet = new Set(gameIds);
+      const sameSize = currentSet.size === originalGameIds.size;
+      const sameMembers =
+        sameSize && [...currentSet].every((id) => originalGameIds.has(id));
+      if (!sameMembers) {
         const attachRes = await fetch(`/api/events/${event.id}/attach`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ gameIds: newGameIds }),
+          body: JSON.stringify({ gameIds }),
         });
         if (!attachRes.ok) {
           errorText = m.error_server_generic();
@@ -328,15 +340,35 @@
       />
     </label>
 
-    <label class="field">
-      <span class="field-label">Game (optional — leave empty to drop in inbox)</span>
-      <select class="input" bind:value={gameId} disabled={pending}>
-        <option value="">No game (inbox)</option>
-        {#each games as g (g.id)}
-          <option value={g.id}>{g.title}</option>
-        {/each}
-      </select>
-    </label>
+    <!-- Plan 02.1-38 (UAT-NOTES.md §5.2 — Path A): multi-select Game picker.
+         Replaces the single-select <select> with a checkbox-list bound to
+         gameIds. The user can attach the event to ≥2 games from the UI;
+         submit handler sends `{gameIds: [...]}` via PATCH /api/events/:id/attach
+         (backend unchanged — Plan 02.1-28 set-replacement semantics). Empty
+         array === detach (move to inbox). -->
+    <fieldset class="field game-picker">
+      <legend class="field-label">{m.events_edit_games_label()}</legend>
+      {#if games.length === 0}
+        <p class="hint">{m.events_edit_games_empty()}</p>
+      {:else}
+        <ul class="game-list">
+          {#each games as g (g.id)}
+            <li>
+              <label class="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={gameIds.includes(g.id)}
+                  disabled={pending}
+                  onchange={(e) =>
+                    toggleGame(g.id, (e.target as HTMLInputElement).checked)}
+                />
+                <span>{g.title}</span>
+              </label>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </fieldset>
 
     <label class="field">
       <span class="field-label">Notes</span>
@@ -511,6 +543,49 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
+  }
+  /* Plan 02.1-38 (UAT-NOTES.md §5.2 — Path A): multi-select Game picker.
+   * Mirrors the SourceRow / FiltersSheet checkbox-row visual pattern at
+   * 360px the list scrolls vertically inside the form (no horizontal
+   * overflow); each <li> is full-width with the checkbox left-aligned. */
+  .game-picker {
+    border: none;
+    padding: 0;
+    margin: 0;
+  }
+  .game-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .game-list .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-height: 44px;
+    padding: var(--space-xs) var(--space-sm);
+    cursor: pointer;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    background: var(--color-bg);
+  }
+  .game-list .checkbox-row:hover {
+    border-color: var(--color-text);
+  }
+  .game-list .checkbox-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    min-height: 0;
+  }
+  .hint {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
   }
   .help {
     margin: 0;

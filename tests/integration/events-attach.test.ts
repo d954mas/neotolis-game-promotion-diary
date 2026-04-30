@@ -626,3 +626,70 @@ describe("Plan 02.1-35 — attachEventToGames transactional rollback", () => {
     expect(afterRow!.updatedAt.getTime()).toBe(updatedAtBefore.getTime());
   });
 });
+
+/**
+ * Phase 2.1 Plan 02.1-38 — UAT-NOTES.md §5.2 (P0) closure: /events/[id]/edit
+ * Game picker becomes multi-select via Path A (checkbox-list bound to
+ * gameIds: string[]). The UI fix is in src/routes/events/[id]/edit/+page.svelte;
+ * the test below labels the backend round-trip that the fix now exercises.
+ *
+ * The backend correctness of attachEventToGames with multi-element arrays
+ * is already proven by the Plan 02.1-28 block above. The value of this
+ * describe block is the labeled trace from UI fix → backend round-trip:
+ * future grep "Plan 02.1-38" surfaces both ends of the §5.2 closure.
+ *
+ * Round-trip is asserted at the SERVICE layer (attachEventToGames + direct
+ * eventGames query) rather than the HTTP layer because (a) the HTTP route is
+ * a thin adapter over the service (Plan 02.1-28 already covers it), and (b)
+ * the integration suite has no fetchAuthed harness — every other test in this
+ * file calls the service directly and queries the junction.
+ */
+describe("Plan 02.1-38 — multi-select gameIds round-trip (UAT-NOTES.md §5.2)", () => {
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
+  it("Plan 02.1-38: attach with [g1, g2] writes both junction rows + reverse [] detaches both", async () => {
+    const u = await seedUserDirectly({ email: `attach38-1-${uniq()}@test.local` });
+    const g1 = uuidv7();
+    const g2 = uuidv7();
+    await db.insert(games).values({ id: g1, userId: u.id, title: "G1" });
+    await db.insert(games).values({ id: g2, userId: u.id, title: "G2" });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "other",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Press article covering both games",
+      },
+      "127.0.0.1",
+    );
+
+    // Initial: zero junction rows.
+    const before = await db
+      .select({ gameId: eventGames.gameId })
+      .from(eventGames)
+      .where(and(eq(eventGames.userId, u.id), eq(eventGames.eventId, ev.id)));
+    expect(before).toEqual([]);
+
+    // Attach with multi-element array — the shape the multi-select UI
+    // submits when the user checks 2 boxes.
+    await attachEventToGames(u.id, ev.id, [g1, g2], "127.0.0.1");
+
+    // Round-trip: both junction rows present (order-agnostic — the junction
+    // INNER JOIN order is implementation-defined).
+    const after = await db
+      .select({ gameId: eventGames.gameId })
+      .from(eventGames)
+      .where(and(eq(eventGames.userId, u.id), eq(eventGames.eventId, ev.id)));
+    expect(new Set(after.map((r) => r.gameId))).toEqual(new Set([g1, g2]));
+
+    // Reverse: empty array detaches both — the shape the UI submits when
+    // the user un-checks every box.
+    await attachEventToGames(u.id, ev.id, [], "127.0.0.1");
+    const reverted = await db
+      .select({ gameId: eventGames.gameId })
+      .from(eventGames)
+      .where(and(eq(eventGames.userId, u.id), eq(eventGames.eventId, ev.id)));
+    expect(reverted).toEqual([]);
+  });
+});

@@ -106,6 +106,12 @@ describe("paraglide i18n (UX-04)", () => {
     // subtly wrong label for a button that has not yet acted. Net delta:
     // +1 key.
     //
+    // Plan 02.1-38 (round-6 gap closure — UAT-NOTES.md §5.2 P0 —
+    // /events/[id]/edit Game picker becomes multi-select via Path A
+    // checkbox-list): adds 2 keys for the new fieldset legend +
+    // empty-state hint (events_edit_games_label, events_edit_games_empty).
+    // Net delta: +2 keys.
+    //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
     // across renames (Phase 2 STATE.md guidance, carried forward).
     const EXPECTED_KEYS = [
@@ -202,6 +208,8 @@ describe("paraglide i18n (UX-04)", () => {
       "events_detail_restore",
       "events_edit_author_is_me",
       "events_edit_delete_button",
+      "events_edit_games_empty",
+      "events_edit_games_label",
       "events_edit_heading",
       "events_edit_save",
       "events_edit_standalone_conflict",

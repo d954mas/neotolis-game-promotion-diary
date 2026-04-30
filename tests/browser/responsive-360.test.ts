@@ -403,3 +403,56 @@ describe("Plan 02.1-30 — /games/[id] redesign + StoresSection + edit-mode Remo
     "/games/[id] events feed renders no FilterChips / no DateRangeControl / no FiltersSheet (pure list per UAT-NOTES.md §4.25.B user direction) — §4.25.B (manual UAT — auth harness deferred)",
   );
 });
+
+/**
+ * Plan 02.1-38 — /events/[id]/edit multi-select Game picker at 360px
+ * (UAT-NOTES.md §5.2 — P0 round-6 gap closure).
+ *
+ * Closes the round-5 finding "/events/[id]/edit shows a single-select
+ * picker — `могу выбрать только одну игру`". Path A from UAT-NOTES.md §5.2
+ * 'Suggested fix' (cheap, ~30 LOC): swap the existing `<select bind:value={gameId}>`
+ * for a checkbox-list bound to `gameIds: string[]`. Submit sends
+ * `{gameIds: [...]}` unchanged through the existing PATCH /api/events/:id/attach
+ * endpoint (Plan 02.1-28 backend already accepts the array). User can attach
+ * an event to ≥2 games from the UI; round-5 walkthrough item 4 (multi-game
+ * visibility on /games/[id]) becomes UAT-verifiable.
+ *
+ * Path B (full AttachToGamePicker rewrite with chip removal + game search) is
+ * explicitly DEFERRED to Phase 6 polish backlog per UAT-NOTES.md §5.2 'Path A
+ * is enough to close §4.24.G'.
+ *
+ * The full end-to-end at 360px (load /events/[id]/edit, see 3 checkboxes, click
+ * 2, toggle standalone, see inline conflict + disabled Save) requires the
+ * cookie-injection auth harness still deferred to Phase 6 (same precedent as
+ * Plans 02.1-18 / 19 / 20 / 21 / 22 / 23 / 24 / 25 / 26 / 28 / 30 / 32 / 33 / 34).
+ *
+ * Stub-skipped here for grep discoverability when the harness arrives. The
+ * component-level regression guard lives in tests/integration/audit-render.test.ts
+ * (existing /events/[id]/edit SSR pattern from Plan 02.1-32) + the round-trip
+ * service-layer test in tests/integration/events-attach.test.ts (Plan 02.1-38
+ * describe block — multi-element gameIds round-trip).
+ *
+ * Manual UAT recipe (Russian, per user-MEMORY profile):
+ *   1. Create 2 games (G1, G2). Create an event with no game (lands in inbox).
+ *   2. /events/[id]/edit at 360px → see checkbox-list of {G1, G2}, both unchecked.
+ *   3. Check both → Save → return to /feed.
+ *   4. /games/G1 → event appears under G1's events list.
+ *   5. /games/G2 → event ALSO appears under G2's events list (M:N visibility).
+ *   6. /events/[id]/edit → uncheck G1 → Save → /games/G1 no longer shows the event.
+ *   7. Toggle "Mark as not game-related" ON while a checkbox is checked →
+ *      inline error appears; Save button disabled.
+ */
+describe("Plan 02.1-38 — /events/[id]/edit multi-select Game picker at 360px (UAT-NOTES.md §5.2)", () => {
+  it.skip(
+    "/events/[id]/edit at 360px renders <fieldset class='game-picker'> + 3 input[type=checkbox] (NOT a <select> for game picker) — §5.2 Path A (manual UAT — auth harness deferred to Phase 6)",
+  );
+  it.skip(
+    "/events/[id]/edit at 360px clicking 2 checkboxes builds gameIds=[a,b] in component state (each clicked checkbox.checked === true) — §5.2 Path A (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/events/[id]/edit at 360px standalone toggle ON + any checkbox checked → .conflict-error <p> visible AND .submit button has [disabled] attribute — §5.2 Path A + §4.24.C guard preserved (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/events/[id]/edit at 360px game-list scrolls vertically (no horizontal overflow) when user owns 6+ games — §5.2 Path A (manual UAT — auth harness deferred)",
+  );
+});
