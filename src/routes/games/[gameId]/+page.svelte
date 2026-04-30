@@ -1,35 +1,42 @@
 <script lang="ts">
-  // /games/[gameId] — detail view (Plan 02.1-30 redesign).
+  // /games/[gameId] — detail view (Plan 02.1-30 redesign; Plan 02.1-39
+  // round-6 three-section restructure).
   //
-  // Plan 02.1-30 RETIRES the Plan 02.1-25 oversized 2-card layout (game-
-  // header-card + events-feed-card panel cards) per UAT-NOTES.md §4.25.B
-  // user quote: "Карточки слишком большие. Часть 1 — карточки игр, стим,
-  // итч и т.д. Затем фид по игре, карточки как в feed ленте, небольшие,
-  // без фильтров и выбора даты".
+  // Plan 02.1-30 RETIRED the Plan 02.1-25 oversized 2-card layout per
+  // UAT-NOTES.md §4.25.B. Plan 02.1-39 (UAT-NOTES.md §5.3) takes the next
+  // step: the page now renders THREE labelled sections — Игра / Магазины /
+  // Лента — with each section's Edit / Add CTA collocated next to its
+  // <h2> in a `.section-header` row. Round-5 user quote (verbatim, ru):
+  // "По сути получается тут 3 части. Игра(название, описание, моя иконка)
+  // Сторы(карточки, 3 в ряд как в feed) Feed. Тоже 3 в ряд как в feed".
   //
-  // New layout (top → bottom):
-  //   1. Lean game-header section: GameCover + RenameInline + meta
-  //      (releaseDate / tags / notes) + page-level Edit toggle. NO panel
-  //      border / background / radius — the oversized card surface from
-  //      Plan 02.1-25 is GONE.
-  //   2. <StoresSection> — header 'Магазины / Stores' + + Add CTA +
-  //      SteamListingRow list (with edit-mode-only Remove × buttons).
-  //      Closes UAT-NOTES.md §4.25.C (Stores section refactor).
-  //   3. Events feed — heading + + New event link + vertical FeedCard
-  //      list grouped by date via the SAME groupEventsByDate utility as
-  //      /feed (Plan 02.1-19). NO FilterChips / DateRangeControl /
-  //      FiltersSheet — pure list per UAT-NOTES.md §4.25.B.
+  // New structure (top → bottom):
+  //   0. <PageHeader title={game.title} sticky /> — sticky title row under
+  //      AppHeader matches /feed, /games, /audit (Plan 02.1-39 §5.7).
+  //   1. <section class="game-info"> — section-header (h2 "Игра" + Edit
+  //      toggle) → GameCover + RenameInline + meta + notes.
+  //   2. <section class="stores"> — section-header (h2 "Магазины" + Edit
+  //      toggle + + Add CTA) → StoresSection (now a 3-per-row grid at
+  //      ≥900px, single column at 360px).
+  //   3. <section class="events"> — section-header (h2 "Лента" + + New
+  //      event link) → FeedCard list in a `.feedcard-grid` (3-per-row at
+  //      ≥900px, single column at <640px). /feed stays one-card-per-row
+  //      vertical (intentional per UAT-NOTES.md §5.3 'item D').
   //
-  // FeedCard reuse on /games/[gameId] is identical to /feed: the same
-  // component with no new variants. The inline 'Mark standalone' button
-  // is gated by `isInboxRow` (gameIds.length === 0), so cards on this
-  // page (gameIds.length > 0 by construction — they're attached to the
-  // current game) HIDE that affordance automatically.
+  // Plan 02.1-39 (§5.3 item E): the global page-level `editMode` from Plan
+  // 02.1-30 is split into TWO scoped toggles — `editingGame` (drives the
+  // game-info section's edit affordances; reserved for future fields like
+  // description / icon Phase 6) and `editingStores` (drives the
+  // SteamListingRow Remove × buttons inside StoresSection). Each section's
+  // edit toggle is independent so users can edit one section without
+  // accidentally enabling the other's destructive affordances.
   //
-  // Page-level edit-mode toggle (Plan 02.1-30, UAT-NOTES.md §4.25.H):
-  // mirrors Plan 02.1-22's SourceRow pattern but at the PAGE level (one
-  // toggle per page, not per row). When `editMode` is true, every
-  // SteamListingRow in StoresSection shows its × Remove button.
+  // Item B (games.description + games.icon_url + upload pipeline) is
+  // EXPLICITLY DEFERRED to Phase 6 polish backlog per UAT-NOTES.md §5.3 —
+  // requires schema changes + upload infra, not a 2.1 round-6 deliverable.
+  // The .game-info section's Edit toggle today reuses the existing
+  // RenameInline component; future Phase 6 work will hang description /
+  // icon UI off the same `editingGame` toggle.
   //
   // Privacy invariants preserved:
   //   - Loader uses tenant-scoped service calls (listEventsForGame +
@@ -49,6 +56,7 @@
   import RenameInline from "$lib/components/RenameInline.svelte";
   import StoresSection from "$lib/components/StoresSection.svelte";
   import GameCover from "$lib/components/GameCover.svelte";
+  import PageHeader from "$lib/components/PageHeader.svelte";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
   import type { GameSteamListingDto } from "$lib/server/dto.js";
   import type { PageData } from "./$types";
@@ -122,11 +130,19 @@
   // round-3 UAT continuity (Plan 02.1-32 swaps for full chip-set render).
   const gameById = $derived(new Map(allGames.map((g) => [g.id, g])));
 
-  // Plan 02.1-30 (UAT-NOTES.md §4.25.H): page-level edit-mode toggle that
-  // controls SteamListingRow Remove button visibility inside StoresSection.
-  // Single toggle per page, not per row — mirrors Plan 02.1-22 SourceRow
-  // pattern adapted to the /games/[id] surface.
-  let editMode = $state(false);
+  // Plan 02.1-39 (UAT-NOTES.md §5.3 item E): page-level edit-mode SPLIT
+  // into two scoped toggles. The Plan 02.1-30 single `editMode` $state
+  // bled the destructive Remove × affordance across sections; per-section
+  // toggles keep each section's edit surface independent. `editingGame`
+  // is reserved for the game-info section's future edit fields
+  // (description + icon upload — Phase 6 polish backlog); today it
+  // toggles a visible "Editing…" hint adjacent to RenameInline.
+  // `editingStores` drives the StoresSection's existing Remove × button
+  // visibility (mirror of Plan 02.1-30 wiring; the prop name on
+  // StoresSection / SteamListingRow stays `editMode` so component code
+  // didn't churn).
+  let editingGame = $state(false);
+  let editingStores = $state(false);
 
   // Plan 02.1-30 (UAT-NOTES.md §4.25.B): group events by date using the
   // SAME groupEventsByDate utility /feed uses (Plan 02.1-19). The events
@@ -163,13 +179,26 @@
   <span>{game.title}</span>
 </nav>
 
+<PageHeader title={game.title} sticky />
+
 <!--
-  Plan 02.1-30 (UAT-NOTES.md §4.25.B): three-section vertical layout.
-  Lean game header (no panel surface) → StoresSection → events feed.
-  The Plan 02.1-25 oversized 2-card layout (game-header-card +
-  events-feed-card panel cards) is RETIRED.
+  Plan 02.1-39 (UAT-NOTES.md §5.3): three labelled sections with
+  section-header-collocated CTAs. Игра / Магазины / Лента.
+  Items A/C/D/E from §5.3 ship; item B (description + custom icon) is
+  EXPLICITLY DEFERRED to Phase 6 polish backlog.
 -->
-<section class="game-header">
+<section class="game-info" id="section-game">
+  <header class="section-header">
+    <h2>{m.games_detail_section_game()}</h2>
+    <button
+      type="button"
+      class="section-edit"
+      onclick={() => (editingGame = !editingGame)}
+      aria-pressed={editingGame}
+    >
+      {editingGame ? m.common_close() : m.common_edit()}
+    </button>
+  </header>
   <GameCover title={game.title} listings={listings} />
   <RenameInline initial={game.title} onSave={saveRename} />
   {#if renameError}<InlineError message={m.error_server_generic()} />{/if}
@@ -186,26 +215,31 @@
   {#if game.notes}
     <p class="notes">{game.notes}</p>
   {/if}
-  <button
-    type="button"
-    class="edit-toggle"
-    onclick={() => (editMode = !editMode)}
-    aria-pressed={editMode}
-  >
-    {editMode ? m.common_close() : m.common_edit()}
-  </button>
 </section>
 
-<StoresSection
-  {listings}
-  gameId={game.id}
-  {editMode}
-  onChange={() => invalidateAll()}
-/>
+<section class="stores" id="section-stores">
+  <header class="section-header">
+    <h2>{m.games_detail_section_stores()}</h2>
+    <button
+      type="button"
+      class="section-edit"
+      onclick={() => (editingStores = !editingStores)}
+      aria-pressed={editingStores}
+    >
+      {editingStores ? m.common_close() : m.common_edit()}
+    </button>
+  </header>
+  <StoresSection
+    {listings}
+    gameId={game.id}
+    editMode={editingStores}
+    onChange={() => invalidateAll()}
+  />
+</section>
 
-<section class="events-feed">
-  <header class="events-feed-head">
-    <h2 class="events-heading">{m.games_detail_events_heading()}</h2>
+<section class="events" id="section-events">
+  <header class="section-header">
+    <h2>{m.games_detail_section_events()}</h2>
     <a class="cta-secondary" href={`/events/new?gameId=${game.id}`}>
       + {m.feed_cta_add_event()}
     </a>
@@ -217,20 +251,22 @@
       body={m.empty_feed_filtered_body()}
     />
   {:else}
-    {#each groupedEvents as group (group.date)}
-      <FeedDateGroupHeader occurredAt={group.occurredAt} />
-      {#each group.rows as ev (ev.id)}
-        <FeedCard
-          event={ev}
-          source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
-          game={ev.gameIds.length > 0
-            ? (gameById.get(ev.gameIds[0]!) ?? null)
-            : null}
-          games={allGames}
-          onChanged={() => invalidateAll()}
-        />
+    <div class="feedcard-grid">
+      {#each groupedEvents as group (group.date)}
+        <FeedDateGroupHeader occurredAt={group.occurredAt} />
+        {#each group.rows as ev (ev.id)}
+          <FeedCard
+            event={ev}
+            source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
+            game={ev.gameIds.length > 0
+              ? (gameById.get(ev.gameIds[0]!) ?? null)
+              : null}
+            games={allGames}
+            onChanged={() => invalidateAll()}
+          />
+        {/each}
       {/each}
-    {/each}
+    </div>
   {/if}
 </section>
 
@@ -246,15 +282,58 @@
     color: var(--color-accent);
     text-decoration: none;
   }
-  /* Plan 02.1-30 (UAT-NOTES.md §4.25.B): lean game header. NO panel border /
-   * background / radius — the oversized .game-header-card from Plan
-   * 02.1-25 is RETIRED. Section is a simple vertical flex column. */
-  .game-header {
+  /* Plan 02.1-39 (UAT-NOTES.md §5.3 item C/E): every section's <h2> + its
+   * Edit / Add CTAs sit in one row at the top of the section. Mirrors the
+   * pattern /feed already uses for the events-feed-head row; brings
+   * consistency across game-info / stores / events. */
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    margin-bottom: var(--space-md);
+    flex-wrap: wrap;
+  }
+  .section-header h2 {
+    margin: 0;
+    font-size: var(--font-size-heading);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--line-height-heading);
+  }
+  /* Plan 02.1-39 — section-level edit toggle. Same affordance shape as
+   * SourceRow's icon-btn (Plan 02.1-22) applied at the section level so
+   * each section's edit surface stays independent. */
+  .section-edit {
+    min-height: 44px;
+    padding: 0 var(--space-md);
+    background: transparent;
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: var(--font-size-label);
+  }
+  .section-edit[aria-pressed="true"] {
+    background: var(--color-surface);
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+  }
+  .game-info {
     display: flex;
     flex-direction: column;
     gap: var(--space-md);
-    padding: var(--space-md) 0;
+    padding: 0;
     margin-bottom: var(--space-lg);
+    min-width: 0;
+  }
+  .stores {
+    margin-bottom: var(--space-lg);
+    min-width: 0;
+  }
+  .events {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    margin-top: var(--space-lg);
     min-width: 0;
   }
   .meta {
@@ -277,45 +356,21 @@
     line-height: var(--line-height-body);
     white-space: pre-wrap;
   }
-  /* Plan 02.1-30: page-level Edit toggle. Shape mirrors SourceRow's
-   * .icon-btn but rendered at the page level controlling all
-   * SteamListingRow Remove buttons via the editMode prop. */
-  .edit-toggle {
-    align-self: flex-start;
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: transparent;
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: var(--font-size-label);
-  }
-  .edit-toggle[aria-pressed="true"] {
-    background: var(--color-surface);
-    border-color: var(--color-accent);
-    color: var(--color-accent);
-  }
-  /* Plan 02.1-30: events feed section — simple vertical column matching
-   * /feed's surface (no panel wrapper). FeedCard handles its own width. */
-  .events-feed {
-    display: flex;
-    flex-direction: column;
+  /* Plan 02.1-39 (UAT-NOTES.md §5.3 item D): FeedCards lay out in a
+   * 3-per-row grid at >=900px, falling back to single-column at <640px.
+   * /feed page does NOT get this grid (intentional per UAT-NOTES.md §5.3
+   * "item D"). The auto-fill min 280px matches /feed's grid step but the
+   * /feed media-query forces single-column below 640px while keeping the
+   * grid behavior; here we want the same. */
+  .feedcard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: var(--space-md);
-    margin-top: var(--space-lg);
-    min-width: 0;
   }
-  .events-feed-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-md);
-    flex-wrap: wrap;
-  }
-  .events-heading {
-    margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
+  @media (max-width: 639px) {
+    .feedcard-grid {
+      grid-template-columns: 1fr;
+    }
   }
   .cta-secondary {
     min-height: 44px;

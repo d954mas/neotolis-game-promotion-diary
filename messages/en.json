@@ -152,6 +152,11 @@
   "stores_empty": "No stores linked yet.",
   "games_detail_events_heading": "Events",
   "games_detail_events_empty": "No events for this game yet.",
+  "games_detail_section_events": "Events",
+  "games_detail_section_game": "Game",
+  "games_detail_section_stores": "Stores",
+  "steam_listing_open_in_steam": "Open in Steam",
+  "steam_listing_unnamed": "Untitled",
 
   "inbox_badge": "Inbox",
   "inbox_badge_tooltip": "This event isn't attached to a game yet. Use the \"Attach to game\" picker on the right.",

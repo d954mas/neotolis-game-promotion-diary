@@ -12,11 +12,30 @@
   // /api/games/:gameId/listings/:listingId → onChange() so the parent can
   // invalidateAll() and the listing disappears from the list.
   //
+  // Plan 02.1-39 (UAT-NOTES.md §5.3 item A): row swaps to a card layout
+  // (border + radius + padding; flex column) so cards lay out in
+  // StoresSection's 3-per-row grid. Round-5 user quote: "Нужно сделать
+  // игры карточками, как в feed. Нужен тип(стим) название, лейбл, дату
+  // релиза и иконку на этой карточке, и кнопку быстро перейти в стим".
+  // The card body renders, in order:
+  //   - Header row: store-type icon (Steam glyph ▶) + store-side title
+  //     (Steam game name from listing.metadata.steam.name; legacy
+  //     fallback to `App {appId}`).
+  //   - User label (from listing.label).
+  //   - Release date (from listing.metadata.steam.releaseDate / persisted
+  //     listing.releaseDate).
+  //   - "Open in Steam" deep-link CTA → https://store.steampowered.com/app/{appId}/.
+  //   - Optional × Remove button (only when editMode + gameId present).
+  //
+  // Item B (full Steam-listing edit form beyond label) is EXPLICITLY
+  // DEFERRED to Phase 6 polish backlog per UAT-NOTES.md §5.3 framing —
+  // requires a richer form component, not a 2.1 round-6 deliverable.
+  //
   // displayName: prefer the persisted `name` (Plan 02.1-25 column added in
-  // Task 1's migration 0004); fall back to `App {appId}` for legacy rows
-  // (NULL `name`) or rows added during a Steam outage. The fallback is
-  // graceful and matches the Phase 2 visual surface so users notice when
-  // the metadata fetch failed without breaking the flow.
+  // Task 1's migration 0004); fall back to m.steam_listing_unnamed() for
+  // legacy rows (NULL `name`) or rows added during a Steam outage. The
+  // fallback is graceful — users notice the metadata fetch failed without
+  // breaking the flow.
   //
   // steamUrl: `https://store.steampowered.com/app/{appId}/` — public Steam
   // store URL, no auth needed. `target="_blank"` + `rel="noopener noreferrer"`
@@ -51,7 +70,14 @@
     onChange?: () => void;
   } = $props();
 
-  const displayName = $derived(listing.name ?? `App ${listing.appId}`);
+  // Plan 02.1-39 (§5.3 item A): persisted listing.name flows through Plan
+  // 02.1-25's column. The plan-time interface notes mentioned
+  // listing.metadata?.steam?.name; the actual DTO surfaces a flat `name`
+  // field. We honor `name` and fall back to the localized "Untitled" copy
+  // so users see something readable even when the Steam fetch failed
+  // (legacy `App {appId}` fallback retired — UAT user wanted human-readable
+  // text, not opaque ids).
+  const displayName = $derived(listing.name ?? m.steam_listing_unnamed());
   const steamUrl = $derived(`https://store.steampowered.com/app/${listing.appId}/`);
 
   let confirmOpen = $state(false);
@@ -74,19 +100,34 @@
   }
 </script>
 
-<div class="row">
-  <span class="name">{displayName}</span>
+<article class="store-card">
+  <header class="store-card-header">
+    <!-- Plan 02.1-39 (UAT-NOTES.md §5.3 item A): store-type glyph at the
+         top-left of the card. Decorative ▶ stand-in for the Steam logo;
+         Phase 6 polish swaps for a real Steam SVG when the asset lands.
+         aria-hidden because the textual label "Open in Steam" below
+         carries the accessible name. -->
+    <span class="store-icon" aria-hidden="true">▶</span>
+    <h3 class="store-name">{displayName}</h3>
+  </header>
   {#if listing.label}
-    <span class="chip label">{listing.label}</span>
+    <p class="user-label">{listing.label}</p>
   {/if}
   {#if listing.releaseDate}
-    <span class="chip date">{listing.releaseDate}</span>
+    <p class="release-date">{listing.releaseDate}</p>
   {/if}
   {#if listing.apiKeyId}
-    <span class="chip linked">key linked</span>
+    <p class="key-linked-note">
+      <span class="chip linked">key linked</span>
+    </p>
   {/if}
-  <a class="open-link" href={steamUrl} target="_blank" rel="noopener noreferrer">
-    {m.steam_listing_open_link_label()}
+  <a
+    class="cta-secondary store-link"
+    href={steamUrl}
+    target="_blank"
+    rel="noopener noreferrer"
+  >
+    {m.steam_listing_open_in_steam()}
   </a>
   {#if editMode && gameId}
     <!-- Plan 02.1-30 (UAT-NOTES.md §4.25.H): Remove icon button — visible
@@ -102,7 +143,7 @@
       ×
     </button>
   {/if}
-</div>
+</article>
 
 <ConfirmDialog
   open={confirmOpen}
@@ -113,20 +154,52 @@
 />
 
 <style>
-  .row {
+  /* Plan 02.1-39 (UAT-NOTES.md §5.3 item A): card layout — border + radius
+   * + padding + flex column so each Steam listing reads as its own card
+   * inside the StoresSection grid. Replaces Plan 02.1-30's row layout. */
+  .store-card {
+    position: relative;
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: var(--space-sm);
-    align-items: center;
-    padding: var(--space-sm);
-    border-bottom: 1px solid var(--color-border);
+    padding: var(--space-md);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
     min-width: 0;
   }
-  .name {
+  .store-card-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-width: 0;
+  }
+  .store-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-body);
+    flex-shrink: 0;
+  }
+  .store-name {
+    margin: 0;
     color: var(--color-text);
+    font-size: var(--font-size-body);
     font-weight: var(--font-weight-semibold);
     word-break: break-word;
     min-width: 0;
+  }
+  .user-label,
+  .release-date {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+  }
+  .key-linked-note {
+    margin: 0;
   }
   .chip {
     font-size: var(--font-size-label);
@@ -136,8 +209,8 @@
     border-radius: 999px;
     padding: 2px var(--space-sm);
   }
-  .open-link {
-    margin-left: auto;
+  .cta-secondary.store-link {
+    align-self: flex-start;
     display: inline-flex;
     align-items: center;
     min-height: 36px;
@@ -151,14 +224,18 @@
     font-weight: var(--font-weight-semibold);
     white-space: nowrap;
   }
-  .open-link:hover {
+  .cta-secondary.store-link:hover {
     background: var(--color-accent);
     color: var(--color-accent-text, #fff);
   }
-  /* Plan 02.1-30: Remove icon button — small × that mirrors the destructive
-   * affordance from SourceRow but at icon size (tighter row layout). 44×44
-   * hit area preserved per UI-SPEC §"Touch targets". */
+  /* Plan 02.1-30 + Plan 02.1-39: Remove × button. In card layout the
+   * button floats at the top-right corner of the card so it does not
+   * compete with the user's reading flow inside the card body. 44×44 hit
+   * area preserved per UI-SPEC §"Touch targets". */
   .remove-btn {
+    position: absolute;
+    top: var(--space-xs);
+    right: var(--space-xs);
     min-width: 44px;
     min-height: 44px;
     padding: 0 var(--space-sm);

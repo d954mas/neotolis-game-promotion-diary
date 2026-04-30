@@ -1152,32 +1152,55 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     expect(src).toMatch(/source_kind_label_discord_server/);
   });
 
-  it("/games/[id]/+page.svelte renders the GAME HEADER CARD + EVENTS FEED CARD layout", async () => {
+  it("/games/[id]/+page.svelte renders the three-section layout (Plan 02.1-39 §5.3)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(
       path.resolve("src/routes/games/[gameId]/+page.svelte"),
       "utf8",
     );
-    // Two named panel cards.
-    expect(src).toMatch(/<section[^>]*class="game-header-card"/);
-    expect(src).toMatch(/<section[^>]*class="events-feed-card"/);
-    // GameCover + SteamListingRow used inside the header card.
+    // Plan 02.1-39 (UAT-NOTES.md §5.3): three labelled sections — Игра /
+    // Магазины / Лента — replace Plan 02.1-25's two-card layout AND Plan
+    // 02.1-30's intermediate "lean header + StoresSection + events-feed"
+    // shape. Each section carries an id + class prefixed by its scope so
+    // anchor links + CSS selectors stay stable.
+    expect(src).toMatch(/<section[^>]*class="game-info"[^>]*id="section-game"/);
+    expect(src).toMatch(/<section[^>]*class="stores"[^>]*id="section-stores"/);
+    expect(src).toMatch(/<section[^>]*class="events"[^>]*id="section-events"/);
+    // Each section's header row carries the section-header class + h2.
+    // The string appears 3+ times: one CSS rule + 3 markup occurrences.
+    const matches = [...src.matchAll(/section-header/g)];
+    expect(matches.length).toBeGreaterThanOrEqual(4);
+    // Sticky PageHeader (Plan 02.1-39 §5.7) sits at the top.
+    expect(src).toMatch(/<PageHeader[\s\S]*?title=\{game\.title\}/);
+    // GameCover + StoresSection used inside the page (no <SteamListingRow>
+    // direct usage — that lives inside StoresSection).
     expect(src).toMatch(/<GameCover\s/);
-    expect(src).toMatch(/<SteamListingRow\s/);
-    // Both panels styled (background var(--color-surface) + border).
+    expect(src).toMatch(/<StoresSection\s/);
+    // Plan 02.1-39 §5.3 item D: FeedCards wrapped in a feedcard-grid.
+    expect(src).toMatch(/class="feedcard-grid"/);
     expect(src).toMatch(
-      /\.game-header-card[\s\S]*?\.events-feed-card[\s\S]*?background:\s*var\(--color-surface\)/,
+      /\.feedcard-grid[\s\S]*?grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(280px/,
     );
+    // Plan 02.1-39 §5.3 item E: per-section editingGame / editingStores
+    // toggles replace the global editMode from Plan 02.1-30.
+    expect(src).toMatch(/let editingGame = \$state\(false\)/);
+    expect(src).toMatch(/let editingStores = \$state\(false\)/);
+    // Negative assertion: the obsolete two-card classes are gone.
+    expect(src).not.toMatch(/<section[^>]*class="game-header-card"/);
+    expect(src).not.toMatch(/<section[^>]*class="events-feed-card"/);
   });
 
-  it("/sources, /feed, /games each use the shared <PageHeader>", async () => {
+  it("/sources, /feed, /games, /audit each use the shared <PageHeader>", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     for (const route of [
       "src/routes/sources/+page.svelte",
       "src/routes/feed/+page.svelte",
       "src/routes/games/+page.svelte",
+      // Plan 02.1-39 (UAT-NOTES.md §5.7): /audit joins the sticky
+      // PageHeader club for cross-page consistency.
+      "src/routes/audit/+page.svelte",
     ]) {
       const src = fs.readFileSync(path.resolve(route), "utf8");
       expect(

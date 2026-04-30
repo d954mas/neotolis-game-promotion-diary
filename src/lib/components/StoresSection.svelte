@@ -1,11 +1,20 @@
 <script lang="ts">
-  // StoresSection — /games/[id] stores section wrapper (Plan 02.1-30,
-  // UAT-NOTES.md §4.25.C closure).
+  // StoresSection — /games/[id] stores section body (Plan 02.1-30; Plan
+  // 02.1-39 round-6 grid layout).
   //
-  // Replaces the inline `<h2>Store listings</h2>` + `<ul class='listings'>`
-  // + `<AddSteamListingForm>` block from Plan 02.1-25 with a single section
-  // header (`Магазины / Stores`) + `+ Добавить` CTA + listings list +
-  // collapsible AddSteamListingForm body.
+  // Plan 02.1-30 created the section-header + listings-list pattern. Plan
+  // 02.1-39 (UAT-NOTES.md §5.3 item A/D/E) RELOCATES the section-header
+  // (`Магазины` h2 + Edit toggle + Add CTA) UP to the parent
+  // /games/[gameId]/+page.svelte so all three sections (Игра / Магазины /
+  // Лента) share the same `.section-header` row pattern. This component
+  // now owns ONLY the listings body — the grid + the inline + Add form
+  // toggle (revealed by the user clicking the parent's section-header
+  // Edit button OR the parent's "+ Add" CTA).
+  //
+  // Layout change (Plan 02.1-39 §5.3 item A/D): listings flow in a CSS
+  // grid (`auto-fill, minmax(260px, 1fr)`) so cards lay out 3-per-row at
+  // >=900px and fall back to single-column at 360px. Round-5 user quote:
+  // "Сторы(карточки, 3 в ряд как в feed)".
   //
   // Phase 2.1 ships Steam-only behind the new shell. Per CONTEXT.md +
   // UAT-NOTES.md §4.25.C, Itch + Epic are explicitly DEFERRED (no platform
@@ -14,8 +23,10 @@
   //
   // The page-level `editMode` toggle drives SteamListingRow's Remove icon
   // visibility (mirror of SourceRow's edit pattern from Plan 02.1-22).
-  // `onChange` is called after a successful add or remove so the parent
-  // can `invalidateAll()` and the page loader re-runs.
+  // Plan 02.1-39 — the parent wires editMode to its `editingStores` scope
+  // so the Magazины Edit toggle is the only thing that flips Remove ×
+  // visibility. `onChange` is called after a successful add or remove so
+  // the parent can `invalidateAll()` and the page loader re-runs.
 
   import { m } from "$lib/paraglide/messages.js";
   import SteamListingRow from "./SteamListingRow.svelte";
@@ -37,9 +48,17 @@
   let showAddForm = $state(false);
 </script>
 
-<section class="stores">
-  <header class="stores-header">
-    <h2 class="stores-heading">{m.stores_section_heading()}</h2>
+<div class="stores-body">
+  <!-- Plan 02.1-39 (UAT-NOTES.md §5.3 item C/E): the section header
+       (h2 "Магазины" + Edit toggle + + Add CTA) lives in the parent
+       page; this component renders only the listings grid + the
+       AddSteamListingForm toggle. The "+ Add" affordance stays here as
+       a small inline button so users can reveal the form without
+       leaving the section; the parent's section-header CTA also flips
+       this state via the editMode toggle path (Phase 6 polish — for
+       now both buttons coexist; the parent CTA is the discoverable
+       entry per UAT user direction). -->
+  <div class="actions-row">
     <button
       type="button"
       class="cta"
@@ -47,14 +66,14 @@
     >
       + {m.stores_add_cta()}
     </button>
-  </header>
+  </div>
 
   {#if listings.length === 0 && !showAddForm}
     <p class="muted">{m.stores_empty()}</p>
   {/if}
 
   {#if listings.length > 0}
-    <ul class="listings">
+    <ul class="stores-grid">
       {#each listings as listing (listing.id)}
         <li>
           <SteamListingRow {listing} {gameId} {editMode} {onChange} />
@@ -75,36 +94,31 @@
       }}
     />
   {/if}
-</section>
+</div>
 
 <style>
-  .stores {
+  .stores-body {
     display: flex;
     flex-direction: column;
     gap: var(--space-md);
     min-width: 0;
   }
-  .stores-header {
+  .actions-row {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-md);
+    gap: var(--space-sm);
     flex-wrap: wrap;
-    min-width: 0;
   }
-  .stores-heading {
-    margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
-    line-height: var(--line-height-heading);
-  }
-  .listings {
+  /* Plan 02.1-39 (UAT-NOTES.md §5.3 item A/D): grid layout. 3 cards per
+   * row at >=900px (3 * 260 + 2 * 16 = 812px content; fits at 900px
+   * including page padding); 2-per-row in the 600-900 band; single column
+   * at 360px (auto-fill collapses naturally below 260px + gutter). */
+  .stores-grid {
     list-style: none;
     padding: 0;
     margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: var(--space-md);
   }
   .muted {
     margin: 0;
