@@ -39,7 +39,11 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { page, commands } from "@vitest/browser/context";
 
-const BASE = process.env.BROWSER_TEST_BASE_URL ?? "http://localhost:5173";
+// `process.env` is undefined in the browser context where vitest 4 + Playwright
+// run these tests. The vite preview server boots on :5173 in both CI and local
+// flows, so hard-coding the URL is correct for the test surface; if a future
+// env override is needed, vitest.config.ts can inject via `define:`.
+const BASE = "http://localhost:5173";
 
 // Public Phase 2 routes — no auth cookie needed. Both render via SvelteKit
 // SSR + client hydration; the dashboard '/' is the post-login landing
