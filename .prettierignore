@@ -24,6 +24,10 @@ docs/
 messages/
 project.inlang/
 
+# Playwright HTML reports (generated)
+playwright-report/
+test-results/
+
 # Claude Code session state — agent worktrees, settings, todos. Untracked
 # but prettier scans them by default; explicitly ignore so lint stays
 # green even when local agent state is present.
