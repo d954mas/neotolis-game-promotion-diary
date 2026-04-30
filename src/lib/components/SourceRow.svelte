@@ -156,10 +156,16 @@
     <!-- Plan 02.1-25 (UAT-NOTES.md §2.1-redesign): kind icon + text label
          rendered together so the source list is scannable. Mirrors the
          FeedCard overlay-kind pattern from Plan 02.1-23 but adapted to
-         SourceRow's row-display surface. -->
+         SourceRow's row-display surface.
+         Plan 02.1-39 round-6 polish #7 (UAT-NOTES.md §5.6 follow-up #7,
+         2026-04-30): kind label wrapped in a span so its font-size can be
+         reduced independently of the body baseline — kind is metadata,
+         displayName is the primary identifier. Mirrors FiltersSheet's
+         .source-kind-label treatment for visual consistency across the two
+         surfaces that show the kind glyph + label pattern. -->
     <span class="kind-tag">
       <SourceKindIcon kind={source.kind} />
-      {kindLabel(source.kind)}
+      <span class="kind-tag-label">{kindLabel(source.kind)}</span>
     </span>
     {#if !editing}
       <span class="display">{source.displayName ?? source.handleUrl}</span>
@@ -313,6 +319,19 @@
     gap: var(--space-xs);
     color: var(--color-text);
     font-weight: var(--font-weight-semibold);
+  }
+  /* Plan 02.1-39 round-6 polish #7 (UAT-NOTES.md §5.6 follow-up #7,
+     2026-04-30): label font-size reduced so the kind tag reads as
+     subordinate metadata next to the .display name (which keeps the body
+     16px size). User quote during round-6 UAT walking §5.6: "тип занимает
+     слишком много места. МОжно просто ютую и шрифт меньше". The labels
+     themselves shortened from "YouTube channel" / "Reddit account" / ...
+     to single-word forms in messages/en.json for the same reason.
+     FiltersSheet.source-kind-label carries the same font-size reduction
+     to keep the two surfaces visually consistent. */
+  .kind-tag-label {
+    font-size: var(--font-size-label);
+    color: var(--color-text-muted);
   }
   .display {
     color: var(--color-text);

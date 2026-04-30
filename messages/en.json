@@ -123,11 +123,11 @@
   "event_kind_label_other": "Other",
   "event_kind_label_post": "Post",
 
-  "source_kind_label_youtube_channel": "YouTube channel",
-  "source_kind_label_reddit_account": "Reddit account",
-  "source_kind_label_twitter_account": "Twitter account",
-  "source_kind_label_telegram_channel": "Telegram channel",
-  "source_kind_label_discord_server": "Discord server",
+  "source_kind_label_youtube_channel": "YouTube",
+  "source_kind_label_reddit_account": "Reddit",
+  "source_kind_label_twitter_account": "Twitter",
+  "source_kind_label_telegram_channel": "Telegram",
+  "source_kind_label_discord_server": "Discord",
 
   "source_kind_phase_reddit_account": "Phase 3 — pending Reddit OAuth",
   "source_kind_phase_twitter_account": "Out of v1 scope — Twitter API paid",

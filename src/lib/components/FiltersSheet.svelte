@@ -678,8 +678,18 @@
   }
   /* Plan 02.1-39 (UAT-NOTES.md §5.6): source row layout. The kind glyph +
    * short kind label sit before the displayName so the visual hierarchy
-   * reads "▶ YouTube channel · Cool Channel Name". Mirrors SourceRow's
-   * existing kind-tag treatment for cross-surface consistency. */
+   * reads "▶ YouTube · Cool Channel Name". Mirrors SourceRow's existing
+   * kind-tag treatment for cross-surface consistency.
+   *
+   * Plan 02.1-39 round-6 polish #7 (UAT-NOTES.md §5.6 follow-up #7,
+   * 2026-04-30): label font-size reduced to var(--font-size-label) — kind
+   * metadata is subordinate to the displayName which carries the primary
+   * identity. User quote during round-6 UAT walking §5.6: "тип занимает
+   * слишком много места. МОжно просто ютую и шрифт меньше". The labels
+   * themselves shortened from "YouTube channel" / "Reddit account" / ...
+   * to single-word forms "YouTube" / "Reddit" / ... in messages/en.json
+   * for the same reason. SourceRow.kind-tag carries the same font-size
+   * reduction to keep the two surfaces visually consistent. */
   .source-kind-tag {
     display: inline-flex;
     align-items: center;
@@ -687,6 +697,7 @@
     color: var(--color-text);
   }
   .source-kind-label {
+    font-size: var(--font-size-label);
     font-weight: var(--font-weight-semibold);
     color: var(--color-text-muted);
   }
