@@ -45,6 +45,48 @@
     await fetch("/api/me/sessions/all", { method: "POST" });
     await goto("/", { invalidateAll: true });
   }
+
+  // Plan 02.1-39 (UAT-NOTES.md §5.4 round-6 follow-up): keep the sticky-stack
+  // CSS vars in sync with the actually-rendered chrome heights.
+  //
+  // Round-6 first pass shipped static fallbacks `--app-header-height: 72px`
+  // and `--nav-height: 44px` in src/app.css. UAT user feedback (verbatim):
+  // "есть странный эффект у табов(feed, Source и тд) есть неболшой скролл,
+  // а потом оно фиксируется. Выглядит так что когда я начинаю скрол то там
+  // есть 4-5 пикселя скроад". Root cause: AppHeader's actual rendered height
+  // (padding `--space-md` × 2 + avatar 28px + brand line-height) is ~76-78px,
+  // not 72px. Nav's `top: var(--app-header-height)` therefore sat 4-5px BELOW
+  // AppHeader's bottom edge, so sticky engaged only after the user scrolled
+  // through that gap.
+  //
+  // Fix: a ResizeObserver on the rendered <header.header> and <nav.nav>
+  // pushes their `offsetHeight` (border-box, includes padding + border) onto
+  // :root as `--app-header-height` / `--nav-height`. Static fallbacks in
+  // src/app.css remain for SSR and the brief tick before this $effect runs.
+  // We query the DOM directly rather than threading `bind:this` props through
+  // AppHeader / Nav — both components always render here, and a wrapping
+  // <div bind:this> would create a new offsetParent that breaks `position:
+  // sticky` for the children.
+  $effect(() => {
+    // Read `data.user` so the effect re-runs when chrome mounts/unmounts on
+    // sign-in / sign-out — `<AppHeader>` and `<Nav>` only render under
+    // `{#if data.user}` so their DOM nodes don't exist for anonymous routes.
+    if (!data.user) return;
+    if (typeof window === "undefined") return;
+    const appHeader = document.querySelector("header.header") as HTMLElement | null;
+    const nav = document.querySelector("nav.nav") as HTMLElement | null;
+    if (!appHeader || !nav) return;
+    const root = document.documentElement;
+    const sync = (): void => {
+      root.style.setProperty("--app-header-height", `${appHeader.offsetHeight}px`);
+      root.style.setProperty("--nav-height", `${nav.offsetHeight}px`);
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(appHeader);
+    ro.observe(nav);
+    return () => ro.disconnect();
+  });
 </script>
 
 <svelte:head>

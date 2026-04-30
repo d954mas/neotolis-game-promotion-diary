@@ -62,7 +62,15 @@
    * PageHeader.sticky (top: 72px + --nav-height, z: 5). Background +
    * border-bottom already present prevent see-through during scroll.
    * z-index 9 sits one below AppHeader (10) so AppHeader still wins the
-   * visual layer if any future overlay edge case occurs. */
+   * visual layer if any future overlay edge case occurs.
+   *
+   * `--app-header-height` is a runtime measurement, not a static guess: a
+   * ResizeObserver in src/routes/+layout.svelte writes AppHeader's real
+   * `offsetHeight` to :root each layout. Round-6 follow-up — the static
+   * 72px fallback was 4-5px short of AppHeader's actual rendered height
+   * (padding × 2 + avatar/brand content), so Nav engaged sticky only
+   * AFTER the user had already scrolled through that gap. The 72px in
+   * the fallback below stays for SSR / no-JS / pre-effect first paint. */
   .nav {
     position: sticky;
     top: var(--app-header-height, 72px);

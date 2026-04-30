@@ -50,25 +50,35 @@
   --bp-tablet: 768px;
   --bp-desktop: 1024px;
 
-  /* Plan 02.1-39 (UAT-NOTES.md §5.7): single source of truth for the
-   * AppHeader-sticky offset. PageHeader.sticky reads
-   * `top: var(--app-header-height)` so its anchor stays in sync with
-   * AppHeader's computed height. Hardcoded fallback (72px) in the
-   * consuming component preserves zero visual regression in browsers
-   * without custom-property support.
+  /* Plan 02.1-39 (UAT-NOTES.md §5.7 + §5.4): single source of truth for the
+   * AppHeader-sticky and Nav-sticky offsets. PageHeader.sticky reads
+   * `top: calc(var(--app-header-height) + var(--nav-height))`; Nav reads
+   * `top: var(--app-header-height)`.
+   *
+   * IMPORTANT — these declarations are FALLBACKS, not authoritative values.
+   * src/routes/+layout.svelte runs a ResizeObserver on `header.header` and
+   * `nav.nav` and overwrites both vars on `document.documentElement` with
+   * the actual rendered `offsetHeight`. Reason (UAT-NOTES.md §5.4 round-6
+   * follow-up): the static 72px guess was 4-5px short of AppHeader's true
+   * rendered height (padding × 2 + 28px avatar + brand line-height), so
+   * Nav's sticky-engage point sat below the bottom of AppHeader and the
+   * user saw a 4-5px slip before sticky kicked in.
+   *
+   * The static fallbacks below cover three cases the runtime observer
+   * cannot:
+   *   1. SSR first paint (no DOM yet — `:root` style is applied as raw CSS).
+   *   2. The brief tick between hydration and the `$effect` running.
+   *   3. JS-disabled browsers (graceful 4-5px slip beats broken layout).
    *
    * `--page-header-height` was introduced in round-5 to anchor a sticky
    * FeedQuickNav below PageHeader; it was removed on round-6 after the
    * user reversed direction on §5.4 (tabs strip should scroll with the
    * feed, not stick). No remaining consumer needs the value.
    *
-   * Plan 02.1-39 (UAT-NOTES.md §5.4 true closure): `--nav-height` anchors
-   * <PageHeader.sticky> below the now-sticky primary <Nav>. 44px ≈ Nav
-   * item `min-height: 44px` (Nav.svelte) + the 1px border-bottom; rounding
-   * to a CSS-pixel-clean 44px keeps the offset deterministic. Sticky stack:
-   *   AppHeader (top: 0)          height: --app-header-height (72px)
-   *   Nav (top: 72px)             height: --nav-height (44px)
-   *   PageHeader.sticky (top: 72 + 44 = 116px). */
+   * Sticky stack (using runtime-measured values):
+   *   AppHeader (top: 0)          height: --app-header-height (~76-78px)
+   *   Nav (top: --app-header-h)   height: --nav-height
+   *   PageHeader.sticky (top: --app-header-h + --nav-h). */
   --app-header-height: 72px;
   --nav-height: 44px;
 }
