@@ -130,7 +130,14 @@ jobs:
       # which makes playwright launch chrome-headless-shell, NOT chromium.
       # Plain `playwright install chromium` does NOT include the headless-
       # shell binary as of v1.49+; it must be installed by name.
-      - run: pnpm dlx playwright@1.49.0 install chromium chromium-headless-shell --with-deps
+      #
+      # Version alignment: the `playwright` version in pnpm-lock.yaml
+      # resolves to 1.59.1 (transitive from @vitest/browser-playwright),
+      # which expects chromium build 1217. Earlier rounds installed
+      # binaries from playwright@1.49.0 → version skew → "Executable
+      # doesn't exist at .../chromium_headless_shell-1217/...". Install
+      # via `pnpm exec playwright` so the version matches the lockfile.
+      - run: pnpm exec playwright install chromium chromium-headless-shell --with-deps
       - run: pnpm build
       # Boot the preview server in the background and wait for it to listen.
       # `vite preview` exits when stdin closes; nohup + & detaches it from
