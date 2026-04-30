@@ -77,11 +77,7 @@ import {
 } from "../../services/events.js";
 import { parseIngestUrl } from "../../services/url-parser.js";
 import type { EventKind } from "../../integrations/data-source-adapter.js";
-import {
-  toEventDto,
-  loadGameIdsForEvent,
-  mapEventsToDtos,
-} from "../../dto.js";
+import { toEventDto, loadGameIdsForEvent, mapEventsToDtos } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
 
@@ -166,6 +162,14 @@ const createEventSchema = z
     return out;
   });
 
+// Plan 02.1-37 (UAT-NOTES.md §5.11): updateEventSchema does NOT call
+// .superRefine(youtubeUrlRequired). The create-side superRefine validates
+// the full body (which IS the full state on create), but on a PATCH the
+// body is partial — a `{url: null}` body with no `kind` field would slip
+// past the body-only check on a row whose existing kind is youtube_video.
+// The merged-state validator lives in the service layer (updateEvent in
+// src/lib/server/services/events.ts), which sees both the input AND the
+// existing row, mirroring the existing assertGameOwnedByUser pattern.
 const updateEventSchema = z
   .object({
     kind: eventKindEnum.optional(),
@@ -184,8 +188,8 @@ const updateEventSchema = z
   })
   .refine((obj) => Object.keys(obj).length > 0, {
     message: "at least one field must be supplied",
-  })
-  .superRefine(youtubeUrlRequired);
+  });
+// NOTE: NO .superRefine(youtubeUrlRequired) here — moved to service layer.
 
 // Feed query schema (RESEARCH §3.2 + Plan 02.1-15 multi-select). Multi-value
 // axes (source / kind / game) are NOT validated here because Hono's
@@ -310,12 +314,7 @@ eventsRoutes.get(
           source: sourceList && sourceList.length > 0 ? sourceList : undefined,
           kind: kindList && kindList.length > 0 ? kindList : undefined,
           show: showFilter,
-          authorIsMe:
-            q.authorIsMe === "true"
-              ? true
-              : q.authorIsMe === "false"
-                ? false
-                : undefined,
+          authorIsMe: q.authorIsMe === "true" ? true : q.authorIsMe === "false" ? false : undefined,
           // Date-only (YYYY-MM-DD) is inclusive on both ends — see /feed/+page.server.ts.
           from: q.from ? new Date(`${q.from}T00:00:00.000Z`) : undefined,
           to: q.to ? new Date(`${q.to}T23:59:59.999Z`) : undefined,
@@ -352,19 +351,14 @@ eventsRoutes.post(
   }),
   async (c) => {
     try {
-      const enriched = await enrichFromUrl(
-        c.var.userId,
-        c.req.valid("json").url,
-      );
+      const enriched = await enrichFromUrl(c.var.userId, c.req.valid("json").url);
       return c.json({
         kind: enriched.kind,
         externalId: enriched.externalId,
         title: enriched.title,
         thumbnailUrl: enriched.thumbnailUrl,
         // ISO string when set; null in 2.1 (Phase 3 fills via YouTube Data API key).
-        occurredAt: enriched.occurredAt
-          ? enriched.occurredAt.toISOString()
-          : null,
+        occurredAt: enriched.occurredAt ? enriched.occurredAt.toISOString() : null,
       });
     } catch (err) {
       return mapErr(c, err, "POST /api/events/preview-url");
@@ -434,12 +428,7 @@ eventsRoutes.patch(
 eventsRoutes.delete("/events/:id", async (c) => {
   const ctx = getAuditContext(c);
   try {
-    await softDeleteEvent(
-      ctx.userId,
-      c.req.param("id"),
-      ctx.ipAddress,
-      ctx.userAgent ?? undefined,
-    );
+    await softDeleteEvent(ctx.userId, c.req.param("id"), ctx.ipAddress, ctx.userAgent ?? undefined);
     return c.body(null, 204);
   } catch (err) {
     return mapErr(c, err, "DELETE /api/events/:id");

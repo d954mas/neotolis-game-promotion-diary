@@ -693,12 +693,58 @@ export async function updateEvent(
   if (input.kind !== undefined) assertValidKind(input.kind);
   if (input.title !== undefined) validateTitle(input.title);
 
+  // Plan 02.1-37 / UAT-NOTES.md §5.11 — load the existing row up-front so the
+  // merged-state validator below can compare input against the persisted state.
+  // Tenant scope: userId is the FIRST .where() clause; cross-tenant / missing /
+  // soft-deleted rows surface as NotFoundError → 404 at the HTTP boundary
+  // (PRIV-01 / AGENTS.md item 2). The merged-state check runs AFTER this load,
+  // so a cross-tenant PATCH never reaches the kind/url validator.
+  const [existing] = await db
+    .select()
+    .from(events)
+    .where(and(eq(events.userId, userId), eq(events.id, eventId), isNull(events.deletedAt)));
+  if (!existing) throw new NotFoundError();
+
+  // Plan 02.1-37 / UAT-NOTES.md §5.11 — merged-state validator for the
+  // kind=youtube_video → URL invariant. The route-layer schema (Plan 02.1-17
+  // superRefine) validates the request body in isolation; it returns early when
+  // the body lacks `kind`, so a PATCH like {url: null} with no kind on a row
+  // whose existing kind is youtube_video used to slip past. This service-layer
+  // check validates the MERGED state (input ∪ existing), mirroring the
+  // assertGameOwnedByUser defense-in-depth pattern. createEventSchema STILL
+  // carries its superRefine (create body IS the full state); only the update
+  // path moved.
+  //
+  // `input.url` semantics: undefined = "don't change", null = "clear url",
+  // string = "set url". The conditional treats null as a real intent to clear,
+  // distinct from undefined.
+  const mergedKind = input.kind ?? existing.kind;
+  const mergedUrl = input.url !== undefined ? input.url : existing.url;
+  if (mergedKind === "youtube_video") {
+    if (!mergedUrl) {
+      throw new AppError("url is required when kind=youtube_video", "kind_url_inconsistent", 422, {
+        event_id: eventId,
+        reason: "youtube_video_requires_url",
+      });
+    }
+    const { parseIngestUrl } = await import("./url-parser.js");
+    const parsed = parseIngestUrl(mergedUrl);
+    if (parsed.kind !== "youtube_video") {
+      throw new AppError("url is not a recognized YouTube URL", "kind_url_inconsistent", 422, {
+        event_id: eventId,
+        reason: "url_not_youtube",
+      });
+    }
+  }
+
   // Plan 02.1-28: gameIds patch flows through attachEventToGames so the
   // standalone-conflict guard fires + the per-add/per-remove audit rows
   // are written. Order: gameIds FIRST so a 422 on conflict aborts before
   // we touch the patch fields (caller sees the 422 atomically — they
   // never see a half-applied edit where title changed but gameIds
-  // refused).
+  // refused). Plan 02.1-37 ordering: the merged-state validator above runs
+  // BEFORE gameIds so a kind/url inconsistency aborts before any junction
+  // mutation (preserves "validate first; mutate after pass").
   if (input.gameIds !== undefined) {
     await attachEventToGames(userId, eventId, input.gameIds, ipAddress, userAgent);
   }

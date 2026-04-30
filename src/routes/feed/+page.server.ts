@@ -8,11 +8,8 @@ import {
 } from "$lib/server/services/events.js";
 import { listGames } from "$lib/server/services/games.js";
 import { listSources } from "$lib/server/services/data-sources.js";
-import {
-  mapEventsToDtos,
-  toGameDto,
-  toDataSourceDto,
-} from "$lib/server/dto.js";
+import { mapEventsToDtos, toGameDto, toDataSourceDto } from "$lib/server/dto.js";
+import { filterValidKinds } from "$lib/util/filter-event-kinds.js";
 
 // Plan 02.1-19 URL contract: /feed accepts ?show=any|inbox|specific +
 // ?game=A&game=B (when show=specific). The legacy ?attached=true|false is
@@ -52,7 +49,12 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   // each shape to its right SQL form (empty = no filter, 1-elem = eq,
   // N-elem = inArray).
   const sourceList = url.searchParams.getAll("source");
-  const kindList = url.searchParams.getAll("kind");
+  // Plan 02.1-37 (UAT-NOTES.md §5.13): filter unknown kinds out before they
+  // reach Drizzle's inArray(events.kind, [...]) clause. A malformed URL like
+  // /feed?kind=foo would otherwise surface as a Postgres 500 (unknown enum
+  // value). Silent drop matches the existing ?show= malformed-param fallback
+  // at lines 87-95 — defensive validation, not user-visible error.
+  const kindList = filterValidKinds(url.searchParams.getAll("kind"));
   const gameList = url.searchParams.getAll("game");
 
   const fromParam = url.searchParams.get("from");
@@ -105,7 +107,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
   const filters: FeedFilters = {
     source: sourceList.length > 0 ? sourceList : undefined,
-    kind: kindList.length > 0 ? (kindList as FeedFilters["kind"]) : undefined,
+    // Plan 02.1-37: kindList is now EventKind[] (filtered against VALID_EVENT_KINDS
+    // via filterValidKinds above), so the historical cast is no longer needed.
+    kind: kindList.length > 0 ? kindList : undefined,
     show: showFilter,
     authorIsMe:
       url.searchParams.get("authorIsMe") === "true"

@@ -1352,10 +1352,16 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     expect(body.authorIsMe).toBe(true);
   });
 
-  it("Plan 02.1-17 Task 2 Test 12: PATCH /api/events/:id changing kind=youtube_video without url → 422 'validation_failed' field='url'", async () => {
+  it("Plan 02.1-17 Task 2 Test 12 (updated by Plan 02.1-37): PATCH /api/events/:id changing kind=youtube_video without url → 422 'kind_url_inconsistent'", async () => {
     // Plan-checker round-2 P0 fix: catches a kind-change PATCH that drops the
-    // url. updateEventSchema superRefine fires on the same kind-aware rule as
-    // createEventSchema.
+    // url. Plan 02.1-37 (UAT-NOTES.md §5.11) moved the validator from the
+    // route-layer superRefine to the service layer (merged-state check). The
+    // old route-layer error was `{error: 'validation_failed', details: [...]}`;
+    // the service-layer error is `{error: 'kind_url_inconsistent', metadata}`.
+    // Both still produce a 422; the body shape is the documented contract
+    // change in Plan 02.1-37. This kind-change PATCH (kind=youtube_video,
+    // url=null) on a row whose existing url is null falls into the
+    // youtube_video_requires_url branch.
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev17t2t12-${uniq()}@test.local` });
@@ -1382,11 +1388,10 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     expect(res.status).toBe(422);
     const body = (await res.json()) as {
       error: string;
-      details: Array<{ path: string[] }>;
+      metadata?: { reason?: string };
     };
-    expect(body.error).toBe("validation_failed");
-    const fields = body.details.map((d) => d.path?.[0]);
-    expect(fields).toContain("url");
+    expect(body.error).toBe("kind_url_inconsistent");
+    expect(body.metadata?.reason).toBe("youtube_video_requires_url");
   });
 });
 
@@ -2038,5 +2043,192 @@ describe("Plan 02.1-35 — transactional integrity + inbox.dismissed clear", () 
     );
     // updatedAt still bumps on the no-op path (preserves existing contract).
     expect(row!.updatedAt.getTime()).toBeGreaterThan(updatedAtBefore.getTime());
+  });
+});
+
+/**
+ * Plan 02.1-37 — PATCH /api/events/:id youtube invariant (merged-state validator).
+ *
+ * Closes UAT-NOTES.md §5.11 (P1). The route-layer superRefine on
+ * updateEventSchema returned early when the body lacked `kind`; a PATCH like
+ * {url: null} on an existing kind=youtube_video row would slip past and the
+ * UPDATE would write url=null, leaving the row in a kind=youtube_video AND
+ * url=null state (round-4 invariant violation).
+ *
+ * Plan 02.1-37 moves the validator into the service layer so it sees BOTH
+ * the request body AND the existing row, computes the merged state, and
+ * throws AppError('kind_url_inconsistent', 422) when:
+ *   - merged.kind === 'youtube_video' AND merged.url is falsy, OR
+ *   - merged.kind === 'youtube_video' AND merged.url does not parse as
+ *     a YouTube video URL.
+ *
+ * The route-layer superRefine on createEventSchema is unchanged (create body
+ * is the full state — no partial-update problem).
+ *
+ * Privacy invariants: cross-tenant /api/events/:id PATCH still surfaces as
+ * NotFoundError → 404 (AGENTS.md item 2). The merged-state validator runs
+ * AFTER the existing-row load, so a forged eventId from another tenant
+ * never reaches it.
+ */
+describe("Plan 02.1-37 — PATCH /api/events/:id youtube invariant (merged-state validator)", () => {
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
+  it("PATCH {url: null} on kind=youtube_video event returns 422 with code=kind_url_inconsistent", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev37-t1-${uniq()}@test.local` });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "youtube_video",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+        title: "YT video",
+        url: "https://youtu.be/dQw4w9WgXcQ",
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(`/api/events/${ev.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ url: null }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as {
+      error: string;
+      metadata?: { reason?: string; event_id?: string };
+    };
+    expect(body.error).toBe("kind_url_inconsistent");
+    expect(body.metadata?.reason).toBe("youtube_video_requires_url");
+
+    // Defense-in-depth: confirm the row was NOT mutated.
+    const [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    expect(row!.url).toBe("https://youtu.be/dQw4w9WgXcQ");
+    expect(row!.kind).toBe("youtube_video");
+  });
+
+  it("PATCH {kind: 'youtube_video'} on event with non-YouTube URL returns 422", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev37-t2-${uniq()}@test.local` });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "other",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+        title: "Not yet a YT video",
+        url: "https://example.com/some-page",
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(`/api/events/${ev.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ kind: "youtube_video" }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as {
+      error: string;
+      metadata?: { reason?: string };
+    };
+    expect(body.error).toBe("kind_url_inconsistent");
+    expect(body.metadata?.reason).toBe("url_not_youtube");
+
+    // Row unchanged.
+    const [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    expect(row!.kind).toBe("other");
+  });
+
+  it("PATCH valid {url: youtube} on existing kind=youtube_video succeeds (sanity — no false-positive)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev37-t3-${uniq()}@test.local` });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "youtube_video",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+        title: "YT video",
+        url: "https://youtu.be/aaa11111111",
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(`/api/events/${ev.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ url: "https://youtu.be/bbb22222222" }),
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    expect(row!.url).toBe("https://youtu.be/bbb22222222");
+  });
+
+  it("cross-tenant PATCH /api/events/:id returns 404 (never reaches merged-state validator) — AGENTS.md item 2", async () => {
+    // PRIV-01 invariant: a forged eventId belonging to user A surfaces as 404
+    // when user B PATCHes it. The merged-state validator must NOT introduce
+    // a new path that leaks resource existence (e.g. by checking kind/url
+    // before the userId WHERE clause filters).
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const a = await seedUserDirectly({ email: `ev37-t4a-${uniq()}@test.local` });
+    const b = await seedUserDirectly({ email: `ev37-t4b-${uniq()}@test.local` });
+
+    const ev = await createEvent(
+      a.id,
+      {
+        gameIds: [],
+        kind: "youtube_video",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+        title: "User A's YT video",
+        url: "https://youtu.be/aaa11111111",
+      },
+      "127.0.0.1",
+    );
+
+    // User B PATCHes user A's event with a body that WOULD trigger the
+    // merged-state validator if scope leaked (kind=youtube_video + url=null).
+    const res = await app.request(`/api/events/${ev.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${b.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ url: null }),
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("not_found");
+    // Body MUST NOT leak resource existence via 'forbidden' / 'permission'.
+    const bodyText = JSON.stringify(body).toLowerCase();
+    expect(bodyText).not.toContain("forbidden");
+    expect(bodyText).not.toContain("permission");
+    expect(bodyText).not.toContain("kind_url_inconsistent");
   });
 });
