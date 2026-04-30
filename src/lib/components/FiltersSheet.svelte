@@ -476,26 +476,26 @@
     <!-- Plan 02.1-19: Game checkbox-list + Attached radio MERGED into a
          single Show 3-radio with a conditional games multi-select. The
          conflict between "Inbox AND specific games" is impossible by
-         construction. -->
+         construction.
+         Plan 02.1-39 round-6 polish #8 (UAT-NOTES.md §5.6 follow-up #8,
+         2026-04-30): converted from radio-button group to <select>
+         dropdown. User during UAT: "после кажлого круглого бокса пропуск
+         строки, выглядит как юудто это разные выборы. Может там через
+         раскрывающийся список, будет меньге месьта." The 4 stacked radios
+         had visible vertical gaps that read as 4 separate filters instead
+         of one mutually-exclusive choice. URL contract is unchanged
+         (?show=any|inbox|standalone|specific) — the dropdown picks the
+         AXIS, the conditional checkbox-list below still picks the GAMES
+         when showSelection === "specific". -->
     {#if schema.includes("show")}
       <fieldset class="field" data-axis="show">
         <legend class="label">{m.feed_filter_show_axis_label()}</legend>
-        <label class="toggle">
-          <input type="radio" name="show" value="any" bind:group={showSelection} />
-          {m.feed_filter_show_any()}
-        </label>
-        <label class="toggle">
-          <input type="radio" name="show" value="inbox" bind:group={showSelection} />
-          {m.feed_filter_show_inbox()}
-        </label>
-        <label class="toggle">
-          <input type="radio" name="show" value="standalone" bind:group={showSelection} />
-          {m.feed_filter_show_standalone()}
-        </label>
-        <label class="toggle">
-          <input type="radio" name="show" value="specific" bind:group={showSelection} />
-          {m.feed_filter_show_specific()}
-        </label>
+        <select class="input select" bind:value={showSelection}>
+          <option value="any">{m.feed_filter_show_any()}</option>
+          <option value="inbox">{m.feed_filter_show_inbox()}</option>
+          <option value="standalone">{m.feed_filter_show_standalone()}</option>
+          <option value="specific">{m.feed_filter_show_specific()}</option>
+        </select>
 
         {#if showSelection === "specific"}
           <input
@@ -520,20 +520,20 @@
       </fieldset>
     {/if}
 
+    <!-- Plan 02.1-39 round-6 polish #8: Author axis converted from radio
+         group to <select> for consistency with the Show axis treatment.
+         Same visual problem (vertical gaps between mutually-exclusive
+         options); same fix. URL contract unchanged (?authorIsMe=true|false
+         or omitted). Three options + "Any" → still compact as a dropdown,
+         and matching the Show pattern keeps the sheet visually uniform. -->
     {#if schema.includes("authorIsMe")}
       <fieldset class="field" data-axis="authorIsMe">
         <legend class="label">Author</legend>
-        <label class="toggle">
-          <input type="radio" name="author" value="any" bind:group={authorIsMe} /> Any
-        </label>
-        <label class="toggle">
-          <input type="radio" name="author" value="true" bind:group={authorIsMe} />
-          {m.feed_filter_author_me()}
-        </label>
-        <label class="toggle">
-          <input type="radio" name="author" value="false" bind:group={authorIsMe} />
-          {m.feed_filter_author_others()}
-        </label>
+        <select class="input select" bind:value={authorIsMe}>
+          <option value="any">Any</option>
+          <option value="true">{m.feed_filter_author_me()}</option>
+          <option value="false">{m.feed_filter_author_others()}</option>
+        </select>
       </fieldset>
     {/if}
 
@@ -647,6 +647,16 @@
     border-radius: 4px;
     font-size: var(--font-size-body);
   }
+  /* Plan 02.1-39 round-6 polish #8: native <select> styling. Reuses the
+   * .input box treatment so Show / Author dropdowns visually match the
+   * search inputs and date pickers. The native chevron is preserved
+   * (browser-default appearance) — on mobile it gives the OS picker UX
+   * the user asked for ("через раскрывающийся список, будет меньге месьта"),
+   * and on desktop it gives the standard inline dropdown. */
+  .select {
+    width: 100%;
+    cursor: pointer;
+  }
   /* Plan 02.1-21: in-sheet date axis label/input pair. */
   .input-wrap {
     display: flex;
@@ -706,13 +716,10 @@
     word-break: break-word;
     min-width: 0;
   }
-  .toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-xs);
-    font-size: var(--font-size-label);
-    min-height: 44px;
-  }
+  /* .toggle was the radio-button row layout (4 stacked label+input pairs
+   * for the Show axis, 3 for Author). Plan 02.1-39 round-6 polish #8
+   * replaced both with <select> dropdowns; the rule is removed to keep
+   * dead CSS out of the bundle. */
   .actions {
     display: flex;
     gap: var(--space-sm);

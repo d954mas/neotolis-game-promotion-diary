@@ -345,8 +345,10 @@ describe("Plan 02.1-26: FeedQuickNav at top of /feed", () => {
  * The full end-to-end browser flow at 360px (visit /feed → FeedQuickNav
  * standalone tab reads "Not game-related"; click → URL ?show=standalone;
  * FilterChips axis chip reads "Show: Not game-related"; FiltersSheet show
- * radio reads "Not game-related"; FeedCard inbox card inline button reads
- * "Mark as not game-related") requires the cookie-injection auth harness
+ * <option> reads "Not game-related" (Plan 02.1-39 round-6 polish #8 turned
+ * the radio group into a <select> dropdown — same label, same value);
+ * FeedCard inbox card inline button reads "Mark as not game-related")
+ * requires the cookie-injection auth harness
  * still deferred to Phase 6 (same precedent as Plans 02.1-18 / 19 / 20 /
  * 21 / 23 / 26). Stub-skipped here for grep discoverability when the
  * harness arrives.
@@ -364,7 +366,7 @@ describe("Plan 02.1-31: Standalone label rename — 'Not game-related'", () => {
     "FilterChips chip for show=standalone reads 'Show: Not game-related' (manual UAT — auth harness deferred)",
   );
   it.skip(
-    "FiltersSheet show fieldset radio with value='standalone' has label 'Not game-related' (manual UAT — auth harness deferred)",
+    "FiltersSheet show fieldset <option value='standalone'> has label 'Not game-related' — Plan 02.1-39 round-6 polish #8 turned this from a radio into a <select> dropdown (manual UAT — auth harness deferred)",
   );
   it.skip(
     "FeedCard inbox card inline button reads 'Mark as not game-related' — NOT 'Mark standalone' (manual UAT — auth harness deferred)",

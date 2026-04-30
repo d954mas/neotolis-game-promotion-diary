@@ -1240,7 +1240,10 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
  * standalone label:
  *   - FeedQuickNav segment via m.feed_quick_nav_standalone()
  *   - FilterChips chip via m.feed_filter_show_standalone()
- *   - FiltersSheet radio via m.feed_filter_show_standalone()
+ *   - FiltersSheet show <select> option via m.feed_filter_show_standalone()
+ *     (Plan 02.1-39 round-6 polish #8: was a radio group, now a <select>
+ *     dropdown — same Paraglide key, same value="standalone" attribute on
+ *     the option element, same load-bearing assertion on the rendered text)
  *   - FeedCard inline button via m.feed_card_mark_standalone_button()
  * Plus a positive guard that the audit-action verb names STAY as the
  * technical strings (m.audit_action_event_marked_standalone() unchanged).
@@ -1300,7 +1303,14 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
     expect(out.body).not.toMatch(/Show:\s*Standalone/);
   });
 
-  it("FiltersSheet show fieldset radio with value='standalone' renders 'Not game-related' label", async () => {
+  it("FiltersSheet show fieldset <option value='standalone'> renders 'Not game-related' label", async () => {
+    // Plan 02.1-39 round-6 polish #8 (UAT-NOTES.md §5.6 follow-up #8): the
+    // Show axis was converted from a radio-button group to a <select>
+    // dropdown for compactness. The technical state name (value="standalone")
+    // and the user-facing label (m.feed_filter_show_standalone() →
+    // "Not game-related") are unchanged — the only structural change is
+    // <input type="radio" value="standalone"> + outer <label> → <option
+    // value="standalone">label-text</option>. URL contract preserved.
     const FiltersSheet = (
       await import("../../src/lib/components/FiltersSheet.svelte")
     ).default;
@@ -1320,19 +1330,23 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
         onClose: () => {},
       },
     });
-    // The standalone radio's input value="standalone" (technical state name
-    // STAYS) is followed by the label text "Not game-related" inside its
-    // wrapping <label class="toggle">.
+    // The standalone <option> value="standalone" (technical state name
+    // STAYS) wraps the label text "Not game-related".
     expect(out.body).toMatch(/value="standalone"/);
-    // The renamed value renders as the label text.
+    // The renamed value renders as the option text.
     expect(out.body).toContain("Not game-related");
-    // The literal English "Standalone" string MUST NOT appear in the
-    // rendered radio label text.
-    const labelMatch = out.body.match(
-      /<label[^>]*class="[^"]*toggle[^"]*"[^>]*>[^<]*<input[^>]*value="standalone"[^>]*\/?>([^<]*)<\/label>/,
+    // The literal English "Standalone" string MUST NOT appear inside the
+    // standalone option's text content.
+    const optionMatch = out.body.match(
+      /<option[^>]*value="standalone"[^>]*>([\s\S]*?)<\/option>/,
     );
-    if (labelMatch) {
-      expect(labelMatch[1]!.trim()).not.toMatch(/^Standalone\b/);
+    expect(
+      optionMatch,
+      "<option value=\"standalone\"> not found in FiltersSheet SSR output",
+    ).not.toBeNull();
+    if (optionMatch) {
+      expect(optionMatch[1]!.trim()).not.toMatch(/^Standalone\b/);
+      expect(optionMatch[1]!.trim()).toBe("Not game-related");
     }
   });
 
