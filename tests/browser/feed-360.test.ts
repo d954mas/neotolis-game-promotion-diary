@@ -496,3 +496,52 @@ describe("Plan 02.1-32: /events/[id] Edit pencil top-right + Delete moved + Atta
     "FeedCard inbox row renders AttachToGamePicker with class='compact' and label='Attach' (manual UAT — auth harness deferred)",
   );
 });
+
+/**
+ * Plan 02.1-39 — round-6 UI bundle on /feed (UAT-NOTES.md §5.4 + §5.6).
+ * Closes:
+ *   §5.4 (P1) — FeedQuickNav (tabs strip below AppHeader on /feed) sticks
+ *               below AppHeader + PageHeader. The CSS rule lives in
+ *               src/lib/components/FeedQuickNav.svelte:
+ *                 position: sticky;
+ *                 top: calc(var(--app-header-height, 72px) +
+ *                          var(--page-header-height, 56px));
+ *               (asserted at the integration / structural layer via grep
+ *               in tests/integration/audit-render.test.ts when the
+ *               Plan 02.1-39 describe block lands).
+ *   §5.6 (P2) — FiltersSheet source list shows kind glyph (SourceKindIcon)
+ *               + sourceKindLabel before displayName; typeahead matches
+ *               the kind label too.
+ *
+ * The full /feed end-to-end at 360px (scroll past 5+ FeedCards →
+ * FeedQuickNav.getBoundingClientRect().top stays at calc(72 + 56)px;
+ * open FiltersSheet → assert .source-kind-tag is present in source-row;
+ * type "youtube" in typeahead → only YouTube sources remain) requires the
+ * cookie-injection auth harness still deferred to Phase 6 (same precedent
+ * as Plans 02.1-19 / 21 / 26 / 33 / 34 / 38).
+ *
+ * Manual UAT recipe (per the round-6 plan's checkpoint task):
+ *   1. /feed → scroll deep into the feed (past 5+ FeedCards).
+ *      Confirm AppHeader stays pinned at the top.
+ *      Confirm PageHeader (Feed title + Add CTA) stays pinned just below.
+ *      Confirm FeedQuickNav (All / Inbox / Standalone / per-game tabs)
+ *      stays pinned just below PageHeader.
+ *   2. /feed → click "Filters" → FiltersSheet opens. Scroll to the
+ *      "Sources" section. Confirm each source row shows a kind glyph
+ *      (e.g. YouTube ▶ icon) AND a short kind label (e.g. "YouTube
+ *      channel") BEFORE the displayName.
+ *   3. /feed → FiltersSheet → typeahead input → type "youtube" — confirm
+ *      every YouTube source remains visible (matches against the kind
+ *      label, not just the handleUrl / displayName).
+ */
+describe("Plan 02.1-39 — /feed sticky FeedQuickNav + FiltersSheet kind glyph at 360px", () => {
+  it.skip(
+    "/feed FeedQuickNav.getBoundingClientRect().top stays at calc(--app-header-height + --page-header-height) ≈ 128px after window.scrollTo(0, 400) — §5.4 (manual UAT — auth harness deferred to Phase 6)",
+  );
+  it.skip(
+    "/feed FiltersSheet source-row renders <SourceKindIcon> SVG + <span class='source-kind-label'> with sourceKindLabel(kind) text — §5.6 (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/feed FiltersSheet typeahead matches against sourceKindLabel — typing 'youtube' surfaces every YouTube source even when displayName / handleUrl don't contain that substring — §5.6 (manual UAT — auth harness deferred)",
+  );
+});

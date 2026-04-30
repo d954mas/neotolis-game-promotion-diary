@@ -456,3 +456,87 @@ describe("Plan 02.1-38 — /events/[id]/edit multi-select Game picker at 360px (
     "/events/[id]/edit at 360px game-list scrolls vertically (no horizontal overflow) when user owns 6+ games — §5.2 Path A (manual UAT — auth harness deferred)",
   );
 });
+
+/**
+ * Plan 02.1-39 — round-6 UI bundle (UAT-NOTES.md §5.3 / §5.4 / §5.5 / §5.6 /
+ * §5.7 / §5.8). Closes six round-5 findings on the same UI surface:
+ *
+ *   §5.3 (P1) — /games/[id] three-section restructure (Игра / Магазины /
+ *               Лента); section-header-collocated CTAs; StoresSection grid
+ *               layout; SteamListingRow card with Steam deep-link;
+ *               FeedCard 3-per-row grid on /games/[id] only.
+ *   §5.4 (P1) — FeedQuickNav sticky below AppHeader + PageHeader.
+ *   §5.5 (P1) — :root:has(dialog[open]) blocks mouse-wheel scroll.
+ *   §5.6 (P2) — FiltersSheet source list shows kind glyph + label.
+ *   §5.7 (P2) — PageHeader sticky on /feed, /games, /audit (was /sources only).
+ *   §5.8 (P2) — Recently-deleted CTA in PageHeader (Path A — anchor link).
+ *
+ * The full end-to-end at 360px (visit /games/[id] with 3+ events, see
+ * three labelled sections; resize to 1024px, see FeedCards 3-per-row;
+ * open FiltersSheet, dispatch wheel event on documentElement, assert
+ * scrollY unchanged; soft-delete an event, see "Recently deleted" link
+ * in PageHeader; click → page anchors to deleted-events panel) requires
+ * the cookie-injection auth harness still deferred to Phase 6 (same
+ * precedent as Plans 02.1-18 / 19 / 20 / 21 / 22 / 23 / 24 / 25 / 26 /
+ * 28 / 30 / 32 / 33 / 34 / 38).
+ *
+ * Component-level regression guards live in
+ * tests/integration/audit-render.test.ts — the Plan 02.1-25 describe
+ * block was REWRITTEN in Plan 02.1-39 to assert the new three-section
+ * structure (game-info / stores / events with id="section-game" /
+ * "section-stores" / "section-events"); the shared-PageHeader sweep was
+ * extended to include /audit. Stub-skipped placeholders here keep the
+ * end-to-end contract surface visible to the future Phase 6 task that
+ * lifts the auth harness; manual UAT (Russian, per user-MEMORY profile)
+ * covers the visible flow during Plan 02.1-10 round-6 sign-off.
+ *
+ * Manual UAT recipe (per the round-6 plan's checkpoint task):
+ *   1. /games/[id] → confirm THREE labelled sections (Игра / Магазины /
+ *      Лента); each section's Edit/Add CTA sits NEXT TO its h2.
+ *   2. /games/[id] with 3+ events at >=900px → cards lay out 3-per-row;
+ *      resize to 360px → cards collapse to single column.
+ *   3. /games/[id] Магазины section → Steam listings render as cards
+ *      (Steam icon + name + label + release date + "Open in Steam" CTA);
+ *      click the deep-link → opens https://store.steampowered.com/app/{id}
+ *      in a new tab.
+ *   4. /feed → scroll past 5+ FeedCards → AppHeader stays pinned AND
+ *      FeedQuickNav (tabs strip) stays pinned just below it.
+ *   5. /feed → scroll → PageHeader (Feed title + Add CTA) stays pinned
+ *      below AppHeader. Repeat on /games and /audit.
+ *   6. /feed → click "Filters" → FiltersSheet opens. Mouse wheel over the
+ *      backdrop (outside the sheet) → underlying page does NOT scroll.
+ *   7. /feed → FiltersSheet → "Sources" section → each source row shows a
+ *      kind glyph + short kind label before the displayName.
+ *   8. /feed → soft-delete an event → reload → "Recently deleted (1)"
+ *      link appears in PageHeader → click it → page anchors to the
+ *      DeletedEventsPanel below the feed.
+ */
+describe("Plan 02.1-39 — round-6 UI bundle (UAT-NOTES.md §5.3 / §5.4 / §5.5 / §5.6 / §5.7 / §5.8)", () => {
+  it.skip(
+    "/games/[id] renders three labelled sections (#section-game + #section-stores + #section-events) with .section-header rows — §5.3 item C/E (manual UAT — auth harness deferred to Phase 6)",
+  );
+  it.skip(
+    "/games/[id] StoresSection grid: single column at 360px viewport, 3-per-row at >=900px — §5.3 item A/D (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games/[id] FeedCard grid: .feedcard-grid resolves to >= 3 columns at 1024px viewport, single column at 360px — §5.3 item D (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games/[id] SteamListingRow renders as <article class='store-card'> with Steam icon + listing.name + listing.label + listing.releaseDate + 'Open in Steam' deep-link CTA → store.steampowered.com/app/{appId} — §5.3 item A (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "Plan 02.1-39 §5.5: :root:has(dialog[open]) overflow-hidden blocks mouse-wheel scroll over backdrop — needs evaluateScript browser command (deferred to Phase 6 with the auth harness; CSS rule asserted via grep at the integration layer + manual UAT)",
+  );
+  it.skip(
+    "/feed PageHeader stays pinned to top: var(--app-header-height) after window.scrollTo(0, 200) — §5.7 (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games PageHeader stays pinned to top: var(--app-header-height) after scroll — §5.7 (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/audit PageHeader stays pinned to top: var(--app-header-height) after scroll — §5.7 (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/feed PageHeader renders <a class='recovery-link' href='#deleted-events'> when data.deletedEvents.length > 0; clicking the link anchors to <div id='deleted-events'> — §5.8 Path A (manual UAT — auth harness deferred)",
+  );
+});
