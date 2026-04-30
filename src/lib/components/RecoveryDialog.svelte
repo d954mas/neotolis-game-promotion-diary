@@ -154,6 +154,16 @@
    * / 6px radius / 25% shadow) for visual consistency across the two
    * dialog patterns. The recovery list is variable-length (1-N items)
    * so the dialog is wider and gets a max-height + scrollable body. */
+  /* Round-6 polish #11 follow-up: native <dialog> is hidden by UA
+   * stylesheet via `display: none` UNLESS the [open] attribute is set
+   * (which showModal()/show() add automatically). Declaring `display:
+   * flex` on `.dialog` unconditionally OVERRIDES the UA hide rule and
+   * leaks the dialog into normal flow even when closed. Scope the
+   * flex display to `[open]` so the closed state stays hidden. */
+  .dialog[open] {
+    display: flex;
+    flex-direction: column;
+  }
   .dialog {
     background: var(--color-surface);
     color: var(--color-text);
@@ -168,8 +178,6 @@
      * via UA stylesheet on Chromium but Firefox does not — declare it
      * explicitly. */
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
   }
   .dialog::backdrop {
     background: rgb(0 0 0 / 50%);
