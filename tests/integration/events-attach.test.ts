@@ -60,16 +60,13 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
     const adds = await db
       .select()
       .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.userId, u.id),
-          eq(auditLog.action, "event.attached_to_game"),
-        ),
-      );
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.attached_to_game")));
     expect(adds.length).toBeGreaterThanOrEqual(1);
-    const addMeta = adds[0]!.metadata as
-      | { event_id?: string; game_id?: string; kind?: string }
-      | null;
+    const addMeta = adds[0]!.metadata as {
+      event_id?: string;
+      game_id?: string;
+      kind?: string;
+    } | null;
     expect(addMeta?.event_id).toBe(ev.id);
     expect(addMeta?.game_id).toBe(gA);
     expect(addMeta?.kind).toBe("press");
@@ -104,12 +101,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
     const adds = await db
       .select()
       .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.userId, u.id),
-          eq(auditLog.action, "event.attached_to_game"),
-        ),
-      );
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.attached_to_game")));
     // Two attached_to_game audit rows (one per added game).
     expect(adds.length).toBeGreaterThanOrEqual(2);
   });
@@ -149,17 +141,10 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
     const detaches = await db
       .select()
       .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.userId, u.id),
-          eq(auditLog.action, "event.detached_from_game"),
-        ),
-      );
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.detached_from_game")));
     // Two detached_from_game audit rows (one per removed game).
     expect(detaches.length).toBeGreaterThanOrEqual(2);
-    const gids = detaches
-      .map((a) => (a.metadata as { game_id?: string } | null)?.game_id)
-      .sort();
+    const gids = detaches.map((a) => (a.metadata as { game_id?: string } | null)?.game_id).sort();
     expect(gids).toEqual([gA, gB].sort());
   });
 
@@ -202,9 +187,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
       "127.0.0.1",
     );
     const gB = uuidv7();
-    await db
-      .insert(games)
-      .values({ id: gB, userId: userB.id, title: "B's game" });
+    await db.insert(games).values({ id: gB, userId: userB.id, title: "B's game" });
 
     let threw: unknown;
     try {
@@ -269,9 +252,9 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
     const fakeEventId = uuidv7();
 
-    await expect(
-      attachEventToGames(u.id, fakeEventId, [gA], "127.0.0.1"),
-    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(attachEventToGames(u.id, fakeEventId, [gA], "127.0.0.1")).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 
   it("Plan 02.1-28: attachEventToGames with non-existent gameId returns 404 not_found (Pitfall 4)", async () => {
@@ -288,9 +271,9 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
     );
     const fakeGameId = uuidv7();
 
-    await expect(
-      attachEventToGames(u.id, ev.id, [fakeGameId], "127.0.0.1"),
-    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(attachEventToGames(u.id, ev.id, [fakeGameId], "127.0.0.1")).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 
   it("Plan 02.1-28: attachEventToGames(non-empty) on a standalone event throws AppError 422 'standalone_conflicts_with_game'", async () => {
@@ -534,5 +517,112 @@ describe("Plan 02.1-28: PATCH /api/events/:id/attach HTTP boundary (M:N + back-c
     expect(res.status).toBe(422);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("standalone_conflicts_with_game");
+  });
+});
+
+/**
+ * Plan 02.1-35 — attachEventToGames transactional rollback.
+ *
+ * Closes UAT-NOTES.md §5.12 (P1) for attachEventToGames: the multi-step
+ * junction DELETE / INSERT + parent UPDATE must be atomic. When one INSERT
+ * in the toAdd loop throws (simulated via vi.spyOn on db.insert), the entire
+ * diff rolls back: pre-existing junction rows preserved, no partial new rows,
+ * parent events.updatedAt unchanged from before the call.
+ *
+ * Audit writes stay OUTSIDE the transaction (AGENTS.md item 4) — so an audit
+ * write following a successful junction write is a separate failure mode (not
+ * tested here; that's the existing P-X1 forensics-acceptable contract).
+ */
+import { vi } from "vitest";
+import { events } from "../../src/lib/server/db/schema/events.js";
+
+describe("Plan 02.1-35 — attachEventToGames transactional rollback", () => {
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
+  it("Plan 02.1-35: attachEventToGames rolls back diff when a junction INSERT throws — pre-existing rows preserved + updatedAt unchanged", async () => {
+    const u = await seedUserDirectly({ email: `attach35-rollback-${uniq()}@test.local` });
+    const gA = uuidv7();
+    const gB = uuidv7();
+    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
+    await db.insert(games).values({ id: gB, userId: u.id, title: "B" });
+
+    // Pre-create event with one attached game (gA).
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [gA],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Pre-attached",
+      },
+      "127.0.0.1",
+    );
+
+    // Capture pre-call state.
+    const [beforeRow] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    const updatedAtBefore = beforeRow!.updatedAt;
+    const beforeJunction = await db
+      .select({ gameId: eventGames.gameId })
+      .from(eventGames)
+      .where(and(eq(eventGames.userId, u.id), eq(eventGames.eventId, ev.id)));
+    expect(beforeJunction.map((r) => r.gameId)).toEqual([gA]);
+
+    // Wrap db.transaction so the inner tx.insert(eventGames) throws.
+    // Drizzle's tx is a separate object from db (different prototype), so
+    // spying on db.insert doesn't intercept tx.insert. Wrapping
+    // db.transaction lets us proxy the tx parameter and force the failure
+    // INSIDE the real Postgres transaction. The thrown error propagates
+    // out, the real transaction rolls back, and we observe no diff applied.
+    const realTransaction = db.transaction.bind(db);
+    const spy = vi.spyOn(db, "transaction").mockImplementation(((
+      cb: (tx: unknown) => Promise<unknown>,
+      ...rest: unknown[]
+    ) => {
+      return realTransaction(
+        async (tx: { insert: (t: unknown) => unknown }) => {
+          const proxy = new Proxy(tx, {
+            get(target, prop, receiver) {
+              if (prop === "insert") {
+                return (table: unknown) => {
+                  if (table === eventGames) {
+                    throw new Error("simulated junction INSERT failure");
+                  }
+                  return (target as { insert: (t: unknown) => unknown }).insert(table);
+                };
+              }
+              return Reflect.get(target, prop, receiver);
+            },
+          });
+          return cb(proxy);
+        },
+        ...(rest as []),
+      );
+    }) as typeof db.transaction);
+
+    try {
+      // Attempt to attach gA + gB. toAdd=[gB] — the proxy throws on the gB
+      // insert. The transaction MUST roll back any prior step in this call.
+      await expect(attachEventToGames(u.id, ev.id, [gA, gB], "127.0.0.1")).rejects.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+
+    // Junction unchanged: still exactly {gA}.
+    const afterJunction = await db
+      .select({ gameId: eventGames.gameId })
+      .from(eventGames)
+      .where(and(eq(eventGames.userId, u.id), eq(eventGames.eventId, ev.id)));
+    expect(afterJunction.map((r) => r.gameId)).toEqual([gA]);
+
+    // Parent updatedAt unchanged (the parent UPDATE inside the transaction
+    // rolled back when the INSERT threw).
+    const [afterRow] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    expect(afterRow!.updatedAt.getTime()).toBe(updatedAtBefore.getTime());
   });
 });

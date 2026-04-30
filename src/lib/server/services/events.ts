@@ -244,10 +244,7 @@ function coerceOccurredAt(value: Date | string): Date {
 
 function isPgUniqueViolation(e: unknown): boolean {
   return (
-    typeof e === "object" &&
-    e !== null &&
-    "code" in e &&
-    (e as { code: string }).code === "23505"
+    typeof e === "object" && e !== null && "code" in e && (e as { code: string }).code === "23505"
   );
 }
 
@@ -261,9 +258,7 @@ async function assertGameOwnedByUser(userId: string, gameId: string): Promise<vo
   const [row] = await db
     .select({ id: games.id })
     .from(games)
-    .where(
-      and(eq(games.userId, userId), eq(games.id, gameId), isNull(games.deletedAt)),
-    )
+    .where(and(eq(games.userId, userId), eq(games.id, gameId), isNull(games.deletedAt)))
     .limit(1);
   if (!row) throw new NotFoundError();
 }
@@ -371,50 +366,53 @@ export async function createEvent(
     // service is called; this is defense-in-depth only.
   }
 
-  let row: EventRow | undefined;
+  // Plan 02.1-35 (UAT-NOTES.md §5.12 — P1): wrap the events INSERT + junction
+  // INSERT loop in a single db.transaction so a junction-INSERT failure rolls
+  // the parent INSERT back. Validation + ownership pre-checks above are pure
+  // and stay outside. The audit write below stays OUTSIDE the transaction
+  // (AGENTS.md item 4 — audit failure must not block the business path).
+  let row: EventRow;
   try {
-    [row] = await db
-      .insert(events)
-      .values({
-        userId,
-        sourceId: input.sourceId ?? null,
-        kind: input.kind,
-        authorIsMe: input.authorIsMe ?? false,
-        occurredAt,
-        title: input.title.trim(),
-        url: input.url ?? null,
-        notes: input.notes ?? null,
-        metadata: input.metadata ?? {},
-        externalId: derivedExternalId,
-      })
-      .returning();
+    row = await db.transaction(async (tx) => {
+      const [parent] = await tx
+        .insert(events)
+        .values({
+          userId,
+          sourceId: input.sourceId ?? null,
+          kind: input.kind,
+          authorIsMe: input.authorIsMe ?? false,
+          occurredAt,
+          title: input.title.trim(),
+          url: input.url ?? null,
+          notes: input.notes ?? null,
+          metadata: input.metadata ?? {},
+          externalId: derivedExternalId,
+        })
+        .returning();
+      if (!parent) throw new Error("createEvent: INSERT returned no row");
+
+      // Plan 02.1-28: write event_games junction rows. Loop is fine for the
+      // expected size (single-digit attached games per event in typical
+      // usage); a future bulk-INSERT optimization is a one-line change if
+      // profiling surfaces the need.
+      for (const gid of targetGameIds) {
+        await tx.insert(eventGames).values({
+          userId,
+          eventId: parent.id,
+          gameId: gid,
+        });
+      }
+      return parent;
+    });
   } catch (e: unknown) {
     if (isPgUniqueViolation(e)) {
-      throw new AppError(
-        "event already exists for this source",
-        "duplicate_event",
-        409,
-        {
-          kind: input.kind,
-          source_id: input.sourceId ?? null,
-          external_id: derivedExternalId,
-        },
-      );
+      throw new AppError("event already exists for this source", "duplicate_event", 409, {
+        kind: input.kind,
+        source_id: input.sourceId ?? null,
+        external_id: derivedExternalId,
+      });
     }
     throw e;
-  }
-  if (!row) throw new Error("createEvent: INSERT returned no row");
-
-  // Plan 02.1-28: write event_games junction rows. Loop is fine for the
-  // expected size (single-digit attached games per event in typical usage);
-  // a future bulk-INSERT optimization is a one-line change if profiling
-  // surfaces the need.
-  for (const gid of targetGameIds) {
-    await db.insert(eventGames).values({
-      userId,
-      eventId: row.id,
-      gameId: gid,
-    });
   }
 
   await writeAudit({
@@ -476,14 +474,9 @@ export interface EnrichmentResult {
  *   - oEmbed 401 (private)     → AppError 'youtube_unavailable' 422
  *   - oEmbed 404 (unavailable) → AppError 'youtube_unavailable' 422
  */
-export async function enrichFromUrl(
-  userId: string,
-  url: string,
-): Promise<EnrichmentResult> {
+export async function enrichFromUrl(userId: string, url: string): Promise<EnrichmentResult> {
   const { parseIngestUrl } = await import("./url-parser.js");
-  const { fetchYoutubeOembed } = await import(
-    "../integrations/youtube-oembed.js"
-  );
+  const { fetchYoutubeOembed } = await import("../integrations/youtube-oembed.js");
 
   const parsed = parseIngestUrl(url);
 
@@ -491,11 +484,7 @@ export async function enrichFromUrl(
     throw new AppError("URL not yet supported", "unsupported_url", 422, { url });
   }
   if (parsed.kind === "reddit_deferred") {
-    throw new AppError(
-      "Reddit ingest arrives in Phase 3",
-      "reddit_pending_phase3",
-      422,
-    );
+    throw new AppError("Reddit ingest arrives in Phase 3", "reddit_pending_phase3", 422);
   }
   if (parsed.kind === "twitter_post" || parsed.kind === "telegram_post") {
     throw new AppError(
@@ -517,12 +506,9 @@ export async function enrichFromUrl(
   try {
     oembed = await fetchYoutubeOembed(parsed.canonicalUrl);
   } catch (err) {
-    throw new AppError(
-      "youtube oembed unreachable",
-      "youtube_oembed_unreachable",
-      502,
-      { cause: String((err as Error)?.message ?? err) },
-    );
+    throw new AppError("youtube oembed unreachable", "youtube_oembed_unreachable", 502, {
+      cause: String((err as Error)?.message ?? err),
+    });
   }
   if (oembed.kind === "private") {
     throw new AppError("video is private", "youtube_unavailable", 422, {
@@ -636,10 +622,7 @@ export async function createEventFromPaste(
  * caller id, so a forged cross-tenant gameId returns zero rows by
  * construction.
  */
-export async function listEventsForGame(
-  userId: string,
-  gameId: string,
-): Promise<EventRow[]> {
+export async function listEventsForGame(userId: string, gameId: string): Promise<EventRow[]> {
   await assertGameOwnedByUser(userId, gameId);
   // Drizzle's join + select-fields shape: pull the events row out of the
   // joined query so consumers continue to receive `EventRow[]` (no shape
@@ -717,13 +700,7 @@ export async function updateEvent(
   // never see a half-applied edit where title changed but gameIds
   // refused).
   if (input.gameIds !== undefined) {
-    await attachEventToGames(
-      userId,
-      eventId,
-      input.gameIds,
-      ipAddress,
-      userAgent,
-    );
+    await attachEventToGames(userId, eventId, input.gameIds, ipAddress, userAgent);
   }
 
   const patch: Partial<typeof events.$inferInsert> = { updatedAt: new Date() };
@@ -758,13 +735,7 @@ export async function updateEvent(
   const [row] = await db
     .update(events)
     .set(patch)
-    .where(
-      and(
-        eq(events.userId, userId),
-        eq(events.id, eventId),
-        isNull(events.deletedAt),
-      ),
-    )
+    .where(and(eq(events.userId, userId), eq(events.id, eventId), isNull(events.deletedAt)))
     .returning();
   if (!row) throw new NotFoundError();
 
@@ -801,13 +772,7 @@ export async function softDeleteEvent(
   const result = await db
     .update(events)
     .set({ deletedAt: new Date() })
-    .where(
-      and(
-        eq(events.userId, userId),
-        eq(events.id, eventId),
-        isNull(events.deletedAt),
-      ),
-    )
+    .where(and(eq(events.userId, userId), eq(events.id, eventId), isNull(events.deletedAt)))
     .returning({ id: events.id, kind: events.kind });
   const row = result[0];
   if (!row) throw new NotFoundError();
@@ -838,11 +803,7 @@ export async function listDeletedEvents(userId: string): Promise<EventRow[]> {
     .select()
     .from(events)
     .where(
-      and(
-        eq(events.userId, userId),
-        isNotNull(events.deletedAt),
-        gte(events.deletedAt, cutoff),
-      ),
+      and(eq(events.userId, userId), isNotNull(events.deletedAt), gte(events.deletedAt, cutoff)),
     )
     .orderBy(sql`${events.deletedAt} DESC, ${events.id} DESC`);
 }
@@ -965,16 +926,12 @@ export async function listFeedPage(
     // RESEARCH §6.2 + Plan 02.1-15 attached=false precedent: inbox view
     // excludes events whose metadata.inbox.dismissed === 'true'. Without
     // this, dismissed events would resurface in the inbox.
-    filterParts.push(
-      sql`COALESCE(${events.metadata}->'inbox'->>'dismissed', 'false') = 'false'`,
-    );
+    filterParts.push(sql`COALESCE(${events.metadata}->'inbox'->>'dismissed', 'false') = 'false'`);
     // Plan 02.1-24 (UAT-NOTES.md §6.1-redesign): inbox view ALSO excludes
     // standalone events. "Standalone" is a separate triage state — the
     // user has explicitly said the event is not related to any game, so
     // it does NOT belong in the inbox awaiting triage.
-    filterParts.push(
-      sql`COALESCE(${events.metadata}->'triage'->>'standalone', 'false') = 'false'`,
-    );
+    filterParts.push(sql`COALESCE(${events.metadata}->'triage'->>'standalone', 'false') = 'false'`);
   } else if (filters.show?.kind === "standalone") {
     // Plan 02.1-24 + 02.1-28: standalone view = events the user explicitly
     // marked "not related to any game". The junction-empty constraint is
@@ -984,9 +941,7 @@ export async function listFeedPage(
     filterParts.push(
       sql`NOT EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId})` as SQL,
     );
-    filterParts.push(
-      sql`COALESCE(${events.metadata}->'triage'->>'standalone', 'false') = 'true'`,
-    );
+    filterParts.push(sql`COALESCE(${events.metadata}->'triage'->>'standalone', 'false') = 'true'`);
   } else if (filters.show?.kind === "specific") {
     if (filters.show.gameIds.length === 1) {
       // Single-game EXISTS subquery — equivalent query plan to the legacy
@@ -1091,13 +1046,7 @@ export async function attachEventToGames(
   const [event] = await db
     .select()
     .from(events)
-    .where(
-      and(
-        eq(events.userId, userId),
-        eq(events.id, eventId),
-        isNull(events.deletedAt),
-      ),
-    )
+    .where(and(eq(events.userId, userId), eq(events.id, eventId), isNull(events.deletedAt)))
     .limit(1);
   if (!event) throw new NotFoundError();
 
@@ -1137,37 +1086,65 @@ export async function attachEventToGames(
   // 5. Compute add / remove diffs.
   const toAdd = uniqueGameIds.filter((gid) => !existingSet.has(gid));
   const toRemove = [...existingSet].filter((gid) => !targetSet.has(gid));
+  const diffNonEmpty = toAdd.length > 0 || toRemove.length > 0;
 
-  // 6. Apply DELETEs + INSERTs. No transaction wrapper required — the
-  //    diff is forward-only (a duplicate INSERT is impossible after the
-  //    existingSet check), and a partial failure leaves the junction in
-  //    a consistent state (each row is independent). If the events
-  //    UPDATE below ever fails, the junction is already a valid superset
-  //    of the requested state.
-  for (const gid of toRemove) {
-    await db
-      .delete(eventGames)
-      .where(
-        and(
-          eq(eventGames.userId, userId),
-          eq(eventGames.eventId, eventId),
-          eq(eventGames.gameId, gid),
-        ),
-      );
-  }
-  for (const gid of toAdd) {
-    await db.insert(eventGames).values({
-      userId,
-      eventId,
-      gameId: gid,
-    });
-  }
+  // 6+7. Plan 02.1-35 (UAT-NOTES.md §5.12 — P1): wrap the junction DELETE/
+  //      INSERT loops + the parent UPDATE in db.transaction so a partial
+  //      failure rolls the diff back atomically. A FK violation on INSERT
+  //      (race with another tab dropping the game between
+  //      assertGameOwnedByUser and the INSERT) used to leave the junction
+  //      half-deleted; now the rollback is automatic.
+  //
+  //      Plan 02.1-35 (UAT-NOTES.md §5.1 — P0): when the diff is non-empty
+  //      (any attach OR detach), strip the `inbox` jsonb key from the
+  //      parent's metadata so a previously-dismissed event re-engages with
+  //      the inbox triage flow. The strip uses Postgres' jsonb `-` operator
+  //      to remove the entire `inbox` key when present (cheaper + cleaner
+  //      than jsonb_set with 'false' — keeps the metadata object minimal
+  //      when dismissed was the only entry under inbox).
+  //
+  //      Audit writes (step 8 below) stay OUTSIDE the transaction
+  //      (AGENTS.md item 4 — audit failure must not block business path).
+  await db.transaction(async (tx) => {
+    for (const gid of toRemove) {
+      await tx
+        .delete(eventGames)
+        .where(
+          and(
+            eq(eventGames.userId, userId),
+            eq(eventGames.eventId, eventId),
+            eq(eventGames.gameId, gid),
+          ),
+        );
+    }
+    for (const gid of toAdd) {
+      await tx.insert(eventGames).values({
+        userId,
+        eventId,
+        gameId: gid,
+      });
+    }
 
-  // 7. Bump updatedAt on the parent event so list consumers see the change.
-  await db
-    .update(events)
-    .set({ updatedAt: new Date() })
-    .where(and(eq(events.userId, userId), eq(events.id, eventId)));
+    // Bump updatedAt on the parent event so list consumers see the change.
+    // On any non-empty junction diff, additionally strip metadata.inbox
+    // (UAT-NOTES.md §5.1) so the event re-enters the inbox triage flow if
+    // the user later detaches all games.
+    if (diffNonEmpty) {
+      await tx
+        .update(events)
+        .set({
+          updatedAt: new Date(),
+          metadata: sql`COALESCE(${events.metadata}, '{}'::jsonb) - 'inbox'`,
+        })
+        .where(and(eq(events.userId, userId), eq(events.id, eventId)));
+    } else {
+      // No-op call — preserve metadata as-is (dismissed flag survives).
+      await tx
+        .update(events)
+        .set({ updatedAt: new Date() })
+        .where(and(eq(events.userId, userId), eq(events.id, eventId)));
+    }
+  });
 
   // 8. Audit — one row per add (event.attached_to_game) and one per remove
   //    (event.detached_from_game). The {event_id, kind, game_id} payload
@@ -1192,10 +1169,16 @@ export async function attachEventToGames(
     });
   }
 
-  // Return the freshly-updated event row (parent updatedAt bumped). The
-  // caller projects via mapEventsToDtos / loadEventDto to get the DTO
-  // with the new gameIds array.
-  return { ...event, updatedAt: new Date() };
+  // Re-SELECT the parent row so the returned shape reflects the post-strip
+  // metadata (the DTO projection downstream sees the cleared inbox key).
+  // Falls back to the in-memory `event` row if the re-SELECT misses (should
+  // never happen — the parent UPDATE above succeeded inside the transaction).
+  const [refreshed] = await db
+    .select()
+    .from(events)
+    .where(and(eq(events.userId, userId), eq(events.id, eventId)))
+    .limit(1);
+  return refreshed ?? { ...event, updatedAt: new Date() };
 }
 
 /**
@@ -1268,13 +1251,7 @@ export async function dismissFromInbox(
       )`,
       updatedAt: new Date(),
     })
-    .where(
-      and(
-        eq(events.userId, userId),
-        eq(events.id, eventId),
-        isNull(events.deletedAt),
-      ),
-    )
+    .where(and(eq(events.userId, userId), eq(events.id, eventId), isNull(events.deletedAt)))
     .returning();
   if (!row) throw new NotFoundError();
 
@@ -1333,13 +1310,7 @@ export async function markStandalone(
   const [eventRow] = await db
     .select({ id: events.id })
     .from(events)
-    .where(
-      and(
-        eq(events.userId, userId),
-        eq(events.id, eventId),
-        isNull(events.deletedAt),
-      ),
-    )
+    .where(and(eq(events.userId, userId), eq(events.id, eventId), isNull(events.deletedAt)))
     .limit(1);
   if (!eventRow) throw new NotFoundError();
   const attached = await db
@@ -1381,13 +1352,7 @@ export async function markStandalone(
       )`,
       updatedAt: new Date(),
     })
-    .where(
-      and(
-        eq(events.userId, userId),
-        eq(events.id, eventId),
-        isNull(events.deletedAt),
-      ),
-    )
+    .where(and(eq(events.userId, userId), eq(events.id, eventId), isNull(events.deletedAt)))
     .returning();
   if (!row) throw new NotFoundError();
 
@@ -1432,13 +1397,7 @@ export async function unmarkStandalone(
       )`,
       updatedAt: new Date(),
     })
-    .where(
-      and(
-        eq(events.userId, userId),
-        eq(events.id, eventId),
-        isNull(events.deletedAt),
-      ),
-    )
+    .where(and(eq(events.userId, userId), eq(events.id, eventId), isNull(events.deletedAt)))
     .returning();
   if (!row) throw new NotFoundError();
 

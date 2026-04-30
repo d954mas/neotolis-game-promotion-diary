@@ -212,9 +212,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     const gameB = uuidv7();
     await db.insert(games).values({ id: gameB, userId: userB.id, title: "GB" });
 
-    await expect(listEventsForGame(userA.id, gameB)).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
+    await expect(listEventsForGame(userA.id, gameB)).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it("Plan 02.1-09: free-form event with kind=conference and gameId=null lands in inbox view", async () => {
@@ -288,34 +286,22 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
       "127.0.0.1",
     );
 
-    await updateEvent(
-      u.id,
-      ev.id,
-      { title: "Edited", notes: "added notes" },
-      "127.0.0.1",
-    );
+    await updateEvent(u.id, ev.id, { title: "Edited", notes: "added notes" }, "127.0.0.1");
     await softDeleteEvent(u.id, ev.id, "127.0.0.1");
 
-    const audits = await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.userId, u.id));
+    const audits = await db.select().from(auditLog).where(eq(auditLog.userId, u.id));
     const actions = audits.map((a) => a.action);
     expect(actions).toContain("event.created");
     expect(actions).toContain("event.edited");
     expect(actions).toContain("event.deleted");
 
     const editedEntry = audits.find((a) => a.action === "event.edited");
-    const editedMeta = editedEntry?.metadata as
-      | { event_id?: string; fields?: string[] }
-      | null;
+    const editedMeta = editedEntry?.metadata as { event_id?: string; fields?: string[] } | null;
     expect(editedMeta?.event_id).toBe(ev.id);
     expect(editedMeta?.fields).toEqual(expect.arrayContaining(["title", "notes"]));
 
     // Soft-delete idempotency: a second softDeleteEvent throws.
-    await expect(
-      softDeleteEvent(u.id, ev.id, "127.0.0.1"),
-    ).rejects.toBeInstanceOf(AppError);
+    await expect(softDeleteEvent(u.id, ev.id, "127.0.0.1")).rejects.toBeInstanceOf(AppError);
   });
 
   it("02.1-12: createEvent accepts kind='post' and persists round-trip", async () => {
@@ -408,9 +394,7 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
     expect(eventActions).toEqual(["event.created", "event.deleted", "event.restored"]);
 
     const restoredEntry = audits.find((a) => a.action === "event.restored");
-    const restoredMeta = restoredEntry?.metadata as
-      | { event_id?: string; kind?: string }
-      | null;
+    const restoredMeta = restoredEntry?.metadata as { event_id?: string; kind?: string } | null;
     expect(restoredMeta?.event_id).toBe(ev.id);
     expect(restoredMeta?.kind).toBe("talk");
   });
@@ -434,9 +418,7 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
     await softDeleteEvent(userA.id, evA.id, "127.0.0.1");
 
     // userB attempts to restore userA's deleted event — must 404 by construction.
-    await expect(
-      restoreEvent(userB.id, evA.id, "127.0.0.1"),
-    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(restoreEvent(userB.id, evA.id, "127.0.0.1")).rejects.toBeInstanceOf(NotFoundError);
 
     // A's row remains soft-deleted (NOT silently restored by the cross-tenant call).
     const [row] = await db
@@ -465,9 +447,7 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
 
     // The event was never soft-deleted — restore is a no-op-as-NotFoundError
     // (idempotency: not-yet-deleted == not findable in the deleted-events scope).
-    await expect(restoreEvent(u.id, ev.id, "127.0.0.1")).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
+    await expect(restoreEvent(u.id, ev.id, "127.0.0.1")).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it("02.1-14: restore on past-retention-window event throws NotFoundError", async () => {
@@ -476,9 +456,7 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
     await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
 
     const expiredEventId = uuidv7();
-    const pastDeleted = new Date(
-      Date.now() - (env.RETENTION_DAYS + 1) * 86_400_000,
-    );
+    const pastDeleted = new Date(Date.now() - (env.RETENTION_DAYS + 1) * 86_400_000);
     // Direct INSERT with a deleted_at older than the retention window.
     await db.insert(events).values({
       id: expiredEventId,
@@ -491,9 +469,9 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
 
     // Past-retention rows are pending Phase 6 purge; restore returns 404
     // (same null-result semantics as cross-tenant / never-deleted).
-    await expect(
-      restoreEvent(u.id, expiredEventId, "127.0.0.1"),
-    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(restoreEvent(u.id, expiredEventId, "127.0.0.1")).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 
   it("02.1-14: listDeletedEvents returns recent soft-deletes only, tenant-scoped", async () => {
@@ -772,9 +750,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
     const u = await seedUserDirectly({ email: `ev17t5-${uniq()}@test.local` });
 
     // Mock the oEmbed fetch — same pattern as Phase 2 paste-flow tests.
-    const youtubeOembed = await import(
-      "../../src/lib/server/integrations/youtube-oembed.js"
-    );
+    const youtubeOembed = await import("../../src/lib/server/integrations/youtube-oembed.js");
     const spy = vi.spyOn(youtubeOembed, "fetchYoutubeOembed").mockResolvedValue({
       kind: "ok",
       data: {
@@ -786,16 +762,11 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
     });
 
     try {
-      const result = await enrichFromUrl(
-        u.id,
-        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      );
+      const result = await enrichFromUrl(u.id, "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
       expect(result.kind).toBe("youtube_video");
       expect(result.externalId).toBe("dQw4w9WgXcQ");
       expect(result.title).toBe("Never Gonna Give You Up");
-      expect(result.thumbnailUrl).toBe(
-        "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg",
-      );
+      expect(result.thumbnailUrl).toBe("https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg");
       expect(result.occurredAt).toBeNull(); // 2.1 SKIP — Phase 3 fills via YouTube Data API key
 
       // No event row written.
@@ -808,9 +779,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
 
   it("Plan 02.1-17 Test 6: enrichFromUrl with garbage URL throws AppError 'unsupported_url' 422", async () => {
     const u = await seedUserDirectly({ email: `ev17t6-${uniq()}@test.local` });
-    await expect(
-      enrichFromUrl(u.id, "not-a-url-at-all"),
-    ).rejects.toMatchObject({
+    await expect(enrichFromUrl(u.id, "not-a-url-at-all")).rejects.toMatchObject({
       code: "unsupported_url",
       status: 422,
     });
@@ -955,12 +924,9 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
       "127.0.0.1",
     );
 
-    const res = await app.request(
-      `/api/events?show=specific&game=${gA}&game=${gB}`,
-      {
-        headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
-      },
-    );
+    const res = await app.request(`/api/events?show=specific&game=${gA}&game=${gB}`, {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { rows: Array<{ id: string }> };
     const ids = body.rows.map((r) => r.id);
@@ -1217,9 +1183,7 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     const u = await seedUserDirectly({ email: `ev17t2t7-${uniq()}@test.local` });
 
     // Mock the oEmbed fetch — same pattern as paste-flow tests.
-    const youtubeOembed = await import(
-      "../../src/lib/server/integrations/youtube-oembed.js"
-    );
+    const youtubeOembed = await import("../../src/lib/server/integrations/youtube-oembed.js");
     const spy = vi.spyOn(youtubeOembed, "fetchYoutubeOembed").mockResolvedValue({
       kind: "ok",
       data: {
@@ -1252,9 +1216,7 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
       expect(body.kind).toBe("youtube_video");
       expect(body.externalId).toBe("dQw4w9WgXcQ");
       expect(body.title).toBe("Never Gonna Give You Up");
-      expect(body.thumbnailUrl).toBe(
-        "https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg",
-      );
+      expect(body.thumbnailUrl).toBe("https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg");
       expect(body.occurredAt).toBeNull();
     } finally {
       spy.mockRestore();
@@ -1303,9 +1265,7 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     const userA = await seedUserDirectly({ email: `ev17t2t10a-${uniq()}@test.local` });
     const userB = await seedUserDirectly({ email: `ev17t2t10b-${uniq()}@test.local` });
 
-    const youtubeOembed = await import(
-      "../../src/lib/server/integrations/youtube-oembed.js"
-    );
+    const youtubeOembed = await import("../../src/lib/server/integrations/youtube-oembed.js");
     const spy = vi.spyOn(youtubeOembed, "fetchYoutubeOembed").mockResolvedValue({
       kind: "ok",
       data: {
@@ -1486,9 +1446,9 @@ describe("Plan 02.1-18: detail loader + edit + author_is_me round-trip", () => {
     await softDeleteEvent(a.id, ev.id, "127.0.0.1");
 
     // User B asks for user A's row with includeSoftDeleted=true: still 404.
-    await expect(
-      getEventById(b.id, ev.id, { includeSoftDeleted: true }),
-    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(getEventById(b.id, ev.id, { includeSoftDeleted: true })).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 
   it("Plan 02.1-18 Test 3: PATCH /api/events/:id { authorIsMe: true } persists author_is_me=true on the row", async () => {
@@ -1697,30 +1657,16 @@ describe("Plan 02.1-28 — M:N gameIds", () => {
     const adds = await db
       .select()
       .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.userId, u.id),
-          eq(auditLog.action, "event.attached_to_game"),
-        ),
-      );
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.attached_to_game")));
     const removes = await db
       .select()
       .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.userId, u.id),
-          eq(auditLog.action, "event.detached_from_game"),
-        ),
-      );
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.detached_from_game")));
     expect(adds.length).toBeGreaterThanOrEqual(1);
     expect(removes.length).toBeGreaterThanOrEqual(1);
-    const addedIds = adds.map(
-      (r) => (r.metadata as { game_id?: string } | null)?.game_id,
-    );
+    const addedIds = adds.map((r) => (r.metadata as { game_id?: string } | null)?.game_id);
     expect(addedIds).toContain(gB);
-    const removedIds = removes.map(
-      (r) => (r.metadata as { game_id?: string } | null)?.game_id,
-    );
+    const removedIds = removes.map((r) => (r.metadata as { game_id?: string } | null)?.game_id);
     expect(removedIds).toContain(gA);
   });
 });
@@ -1783,15 +1729,12 @@ describe("Plan 02.1-32 — /events/[id]/edit standalone toggle round-trip", () =
 
     // Step 2: PATCH /mark-standalone (the dedicated route the edit-form's
     // submit handler calls when the standalone toggle differs from loaded).
-    const standaloneRes = await app.request(
-      `/api/events/${ev.id}/mark-standalone`,
-      {
-        method: "PATCH",
-        headers: {
-          cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
-        },
+    const standaloneRes = await app.request(`/api/events/${ev.id}/mark-standalone`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
       },
-    );
+    });
     expect(standaloneRes.status).toBe(200);
     const standaloneBody = (await standaloneRes.json()) as {
       id: string;
@@ -1800,10 +1743,7 @@ describe("Plan 02.1-32 — /events/[id]/edit standalone toggle round-trip", () =
     expect(standaloneBody.metadata?.triage?.standalone).toBe(true);
 
     // Audit chain: event.edited (from the PATCH) then event.marked_standalone.
-    const audits = await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.userId, u.id));
+    const audits = await db.select().from(auditLog).where(eq(auditLog.userId, u.id));
     const actions = audits.map((r) => r.action);
     expect(actions).toContain("event.edited");
     expect(actions).toContain("event.marked_standalone");
@@ -1863,5 +1803,240 @@ describe("Plan 02.1-32 — /events/[id]/edit standalone toggle round-trip", () =
       headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
     });
     expect(getRes.status).toBe(404);
+  });
+});
+
+/**
+ * Plan 02.1-35 — transactional integrity + inbox.dismissed clear.
+ *
+ * Closes UAT-NOTES.md §5.1 (P0 — `metadata.inbox.dismissed=true` sticky after
+ * attach→detach) and §5.12 (P1 — `createEvent` + `attachEventToGames` perform
+ * multi-step writes without `db.transaction()`).
+ *
+ * Asserted behavior:
+ * 1. createEvent rolls back the parent events row when the junction INSERT
+ *    throws (no orphan parent).
+ * 2. attachEventToGames clears `metadata.inbox.dismissed` on any junction diff
+ *    (attach OR detach) so the event re-engages with the inbox triage flow.
+ * 3. attachEventToGames preserves metadata on a no-op call (toAdd=[],
+ *    toRemove=[]) — the strip is gated on diff > 0.
+ *
+ * The audit writes stay OUTSIDE the transaction (AGENTS.md item 4 — audit
+ * failure must not block the business path); a missing audit row on a
+ * successful junction write is a forensics-acceptable failure mode.
+ */
+describe("Plan 02.1-35 — transactional integrity + inbox.dismissed clear", () => {
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
+  it("Plan 02.1-35: createEvent rolls back parent events row when junction INSERT throws", async () => {
+    const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
+    const u = await seedUserDirectly({ email: `ev35-rollback-${uniq()}@test.local` });
+    const gA = uuidv7();
+    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
+
+    // Wrap db.transaction so the inner tx.insert(eventGames) call throws.
+    // Drizzle's tx is a separate object from db (different prototype), so
+    // spying on db.insert doesn't intercept tx.insert. Wrapping
+    // db.transaction lets us proxy the tx parameter and force the failure
+    // INSIDE the real Postgres transaction. The thrown error propagates
+    // out, the real transaction rolls back, and we observe that the
+    // parent events INSERT is gone.
+    const realTransaction = db.transaction.bind(db);
+    const spy = vi.spyOn(db, "transaction").mockImplementation(((
+      cb: (tx: unknown) => Promise<unknown>,
+      ...rest: unknown[]
+    ) => {
+      return realTransaction(
+        async (tx: { insert: (t: unknown) => unknown }) => {
+          const proxy = new Proxy(tx, {
+            get(target, prop, receiver) {
+              if (prop === "insert") {
+                return (table: unknown) => {
+                  if (table === eg) {
+                    throw new Error("simulated junction INSERT failure");
+                  }
+                  return (target as { insert: (t: unknown) => unknown }).insert(table);
+                };
+              }
+              return Reflect.get(target, prop, receiver);
+            },
+          });
+          return cb(proxy);
+        },
+        ...(rest as []),
+      );
+    }) as typeof db.transaction);
+
+    try {
+      await expect(
+        createEvent(
+          u.id,
+          {
+            gameIds: [gA],
+            kind: "press",
+            occurredAt: new Date("2026-06-01T10:00:00Z"),
+            title: "Should roll back",
+          },
+          "127.0.0.1",
+        ),
+      ).rejects.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+
+    // Assert: zero rows in events for this userId. The transaction rolled the
+    // parent INSERT back when the junction INSERT threw.
+    const rows = await db.select().from(events).where(eq(events.userId, u.id));
+    expect(rows).toHaveLength(0);
+
+    // Assert: zero junction rows.
+    const junction = await db.select().from(eg).where(eq(eg.userId, u.id));
+    expect(junction).toHaveLength(0);
+  });
+
+  it("Plan 02.1-35: attachEventToGames clears metadata.inbox.dismissed after attach (diff > 0)", async () => {
+    const { dismissFromInbox, attachEventToGames } =
+      await import("../../src/lib/server/services/events.js");
+    const u = await seedUserDirectly({ email: `ev35-clear-attach-${uniq()}@test.local` });
+    const gA = uuidv7();
+    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Inbox event",
+      },
+      "127.0.0.1",
+    );
+
+    // Step 1: dismiss from inbox → metadata.inbox.dismissed=true.
+    await dismissFromInbox(u.id, ev.id, "127.0.0.1");
+    let [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    expect((row!.metadata as { inbox?: { dismissed?: boolean } } | null)?.inbox?.dismissed).toBe(
+      true,
+    );
+
+    // Step 2: attach to a game (toAdd=[gA], diff > 0) → inbox key stripped.
+    await attachEventToGames(u.id, ev.id, [gA], "127.0.0.1");
+    [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    expect((row!.metadata as { inbox?: unknown } | null)?.inbox).toBeUndefined();
+  });
+
+  it("Plan 02.1-35: attachEventToGames clears metadata.inbox.dismissed after detach (diff > 0)", async () => {
+    const { dismissFromInbox, attachEventToGames } =
+      await import("../../src/lib/server/services/events.js");
+    const u = await seedUserDirectly({ email: `ev35-clear-detach-${uniq()}@test.local` });
+    const gA = uuidv7();
+    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
+
+    // Start with an attached event.
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [gA],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Attached",
+      },
+      "127.0.0.1",
+    );
+
+    // Detach to land in inbox (junction now empty, dismissed not yet set).
+    await attachEventToGames(u.id, ev.id, [], "127.0.0.1");
+    // Dismiss from inbox → metadata.inbox.dismissed=true.
+    await dismissFromInbox(u.id, ev.id, "127.0.0.1");
+    let [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    expect((row!.metadata as { inbox?: { dismissed?: boolean } } | null)?.inbox?.dismissed).toBe(
+      true,
+    );
+
+    // Re-attach to gA (toAdd=[gA], diff > 0) → inbox stripped.
+    await attachEventToGames(u.id, ev.id, [gA], "127.0.0.1");
+    [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    expect((row!.metadata as { inbox?: unknown } | null)?.inbox).toBeUndefined();
+
+    // Re-dismiss to set up the detach round-trip — we need the event back in inbox first.
+    await attachEventToGames(u.id, ev.id, [], "127.0.0.1");
+    await dismissFromInbox(u.id, ev.id, "127.0.0.1");
+    [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    expect((row!.metadata as { inbox?: { dismissed?: boolean } } | null)?.inbox?.dismissed).toBe(
+      true,
+    );
+
+    // Attach then detach (toAdd=[gA] then toRemove=[gA] — both diff > 0 ops strip inbox).
+    await attachEventToGames(u.id, ev.id, [gA], "127.0.0.1");
+    [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    expect((row!.metadata as { inbox?: unknown } | null)?.inbox).toBeUndefined();
+    await attachEventToGames(u.id, ev.id, [], "127.0.0.1");
+    [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    expect((row!.metadata as { inbox?: unknown } | null)?.inbox).toBeUndefined();
+  });
+
+  it("Plan 02.1-35: attachEventToGames no-op call (diff === 0) preserves metadata.inbox.dismissed", async () => {
+    const { dismissFromInbox, attachEventToGames } =
+      await import("../../src/lib/server/services/events.js");
+    const u = await seedUserDirectly({ email: `ev35-noop-${uniq()}@test.local` });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Inbox no-op",
+      },
+      "127.0.0.1",
+    );
+    await dismissFromInbox(u.id, ev.id, "127.0.0.1");
+
+    let [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    expect((row!.metadata as { inbox?: { dismissed?: boolean } } | null)?.inbox?.dismissed).toBe(
+      true,
+    );
+    const updatedAtBefore = row!.updatedAt;
+
+    // Wait a tick so we can detect the updatedAt bump even on the no-op branch.
+    await new Promise((r) => setTimeout(r, 10));
+
+    // No-op: target is the current attached set (both empty). diff === 0.
+    await attachEventToGames(u.id, ev.id, [], "127.0.0.1");
+    [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+
+    // Inbox.dismissed PRESERVED on no-op (diff===0 branch does NOT strip).
+    expect((row!.metadata as { inbox?: { dismissed?: boolean } } | null)?.inbox?.dismissed).toBe(
+      true,
+    );
+    // updatedAt still bumps on the no-op path (preserves existing contract).
+    expect(row!.updatedAt.getTime()).toBeGreaterThan(updatedAtBefore.getTime());
   });
 });
