@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Phase 02.1 PAUSED — Plan 02.1-10 round-5 UAT 2026-04-30 + external code review surfaced 13 NEW findings (3 P0 + 6 P1 + 4 P2) blocking sign-off; persisted in 02.1-10-UAT-NOTES.md round-5 section; round-6 gap-closure plans needed (recommended 02.1-35..39, 5 plans across 3 waves)
-stopped_at: Plan 02.1-10 round-5 UAT walked 17 items + ingested external review. All 8 closure plans (27-34) of round-4 SHIPPED + verified clean. P0 (3) — 5.1 metadata.inbox.dismissed sticky after attach→detach (event invisible in any filter except All), 5.2 /events/[id]/edit picker still single-select (multi-game M:N from UI impossible), 5.9 pnpm test:unit CI red (locale-dep format-feed-date + JSDoc env-scanner false positive). P1 (6) — 5.3 /games/[id] redesign incomplete (oversized cards + missing 3-section structure with collocated CTAs + store-card grid + Steam deep-link; description+icon deferred to Phase 6), 5.4 FeedQuickNav not sticky, 5.5 wheel-scroll bypasses body-scroll-lock (need :root mirror), 5.10 REDACT_PATHS missing 12 ciphertext paths (privacy floor violation), 5.11 PATCH events kind=youtube_video→URL invariant breakable on body-only validation, 5.12 createEvent + attachEventToGames multi-step writes without db.transaction. P2 (4) — 5.6 FiltersSheet source list missing kind glyph, 5.7 PageHeader sticky only on /sources (extend to /feed/games/audit), 5.8 recovery panels buried at bottom of long lists, 5.13 /feed loader kindList cast without VALID_EVENT_KINDS check. Manual UAT items 3,4,9,10,11,13,15,16,17 = PASS clean; item 8 PASS-with-nit (text "Edit" instead of pencil — P3 polish backlog). Plans 27-34 SHIPPED + verified; manual UAT + external review are the gates. Next: /clear → /gsd:plan-phase 02.1 --gaps → /gsd:execute-phase 02.1 --gaps-only → round-6 UAT → Plan 10 sign-off.
-last_updated: "2026-04-30T05:00:00.000Z"
-last_activity: 2026-04-30
+stopped_at: "Completed 02.1-36-PLAN.md (round-6 Wave 0 — UAT-NOTES.md §5.9 P0 CI-blocker + §5.10 P1 privacy-floor gaps closed; pnpm test:unit exits 0 on any host locale; REDACT_PATHS schema-introspection test enforces privacy floor by construction)"
+last_updated: "2026-04-30T05:29:07.050Z"
+last_activity: 2026-04-29
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 55
-  completed_plans: 54
+  total_plans: 60
+  completed_plans: 55
 ---
 
 # Project State
@@ -98,6 +98,7 @@ Plan: 9 of 34
 | Phase 02.1 P30 | ~14min | 3 tasks | 10 files |
 | Phase 02.1-architecture-realignment P33 | 25min | 1 tasks | 3 files |
 | Phase 02.1-architecture-realignment P32 | 23min 14s | 2 tasks | 8 files |
+| Phase 02.1-architecture-realignment P36 | ~5 min | 1 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -282,6 +283,7 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-32: Two-PATCH submit handler for /events/[id]/edit standalone toggle preserves Plan 02.1-24 audit verb forensics + lets Plan 02.1-28 conflict-guard 422 fire only on the dedicated route
 - [Phase 02.1-architecture-realignment]: Plan 02.1-32: AttachToGamePicker single→multi-select rewrite DEFERRED — round-3 single-select UX matches user direction §4.24.F (быстрый способ разбирать инбокс); compact prop + isInboxRow gate close §4.24.E/F without expanding the inline picker into multi-step UX
 - [Phase 02.1-architecture-realignment]: Plan 02.1-32: /events/[id] read-only Delete REMOVED entirely (not flag-gated) — mirrors Plan 02.1-22 SourceRow read-only/edit pattern; Delete lives only at /events/[id]/edit form footer
+- [Phase 02.1-architecture-realignment]: Plan 02.1-36: formatFeedDate locked to fixed "en" locale (brand choice, not translation target — Paraglide handles user-facing copy); env-discipline scanner strips multi-line block comments at file level (newline-preserving) so JSDoc bodies that mention process.env don't trip the tripwire (canonical project documentation per AGENTS.md); REDACT_PATHS extended with 12 Phase 2.1 ciphertext shapes (camel + snake) AND now load-bearing-enforced via schema-introspection test that scans src/lib/server/db/schema/*.ts for every bytea declaration + kek_version smallint — privacy floor (AGENTS.md item 6) enforced by construction
 
 ### Pending Todos
 
@@ -322,8 +324,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-29T17:53:42.610Z
+Last session: 2026-04-30T05:29:04.431Z
 Last Activity: 2026-04-29
-Stopped at: Completed 02.1-32-PLAN.md
+Stopped at: Completed 02.1-36-PLAN.md (round-6 Wave 0 — UAT-NOTES.md §5.9 P0 CI-blocker + §5.10 P1 privacy-floor gaps closed; pnpm test:unit exits 0 on any host locale; REDACT_PATHS schema-introspection test enforces privacy floor by construction)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md

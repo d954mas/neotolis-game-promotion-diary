@@ -69,3 +69,18 @@ Verified at task time (2026-04-29) during Plan 02.1-29 verification:
   restructured the page; the two-card structural assertions need updating
   to match the post-Plan-02.1-30 markup. Out of scope for Plan 02.1-33 —
   this is Plan 02.1-30's test-update gap.
+
+## Plan 02.1-36 — out-of-scope lint error in dev-mock-oauth.mjs
+
+Pre-existing lint error observed during Plan 02.1-36 verification (2026-04-30):
+
+- `dev-mock-oauth.mjs:26` — `'process.env' is restricted from being used`
+  (`no-restricted-properties`). The file is a development-only mock OAuth
+  server entrypoint that lives outside `src/`. The env-discipline rule fires
+  here because `dev-mock-oauth.mjs` is at the repo root and the lint config
+  scans it. Two reasonable fix paths: (a) add `dev-mock-oauth.mjs` to the
+  ESLint `no-restricted-properties` override allowlist (it's not production
+  code), or (b) route the env reads through a tiny dev-only wrapper. Out of
+  scope for Plan 02.1-36 — this plan only touches `src/lib/util/`,
+  `src/lib/server/logger.ts`, and `tests/unit/`. The error was present on
+  master before this branch (commit 9a0792e); not a regression.
