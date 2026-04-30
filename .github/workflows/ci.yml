@@ -79,15 +79,14 @@ jobs:
     # Authenticated routes are covered by the manual checkpoint in
     # 02-VALIDATION.md; this job's scope is the public-route smoke.
     #
-    # Phase 2.1 closure note (2026-04-30): browser-tests is currently
-    # `continue-on-error: true` while the chrome-headless-shell binary
-    # mismatch between vitest's playwright provider and `playwright install
-    # chromium` is debugged. Smoke (load-bearing per AGENTS.md) covers the
-    # SSR + auth happy path; browser-tests' 360px public-route coverage is
-    # nice-to-have. Phase 2.5 Ship-to-Prod work flips this back to required.
-    runs-on: ubuntu-latest
+    # ubuntu-22.04 instead of ubuntu-latest (24.04). 24.04's user-namespace +
+    # cgroup setup conflicts with playwright 1.59.1's headless chromium
+    # process model — symptom: "Browser connection was closed while running
+    # tests" during test execution despite chromium binary present and
+    # preview server alive. 22.04 has older kernel/userns layout that
+    # playwright handles cleanly.
+    runs-on: ubuntu-22.04
     needs: [lint-typecheck]
-    continue-on-error: true
     env:
       # The SvelteKit build imports server-side modules at analyse time, and
       # src/lib/server/config/env.ts (the SOLE env reader, CLAUDE.md hard
