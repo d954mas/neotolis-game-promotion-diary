@@ -202,18 +202,16 @@
 
 <style>
   .quick-nav {
-    /* Plan 02.1-39 (UAT-NOTES.md §5.4): sticky below AppHeader + PageHeader.
-     * The combined offset keeps the tabs strip pinned while the user
-     * scrolls deep into the feed (round-5 UAT user quote: "хедер сейчас
-     * липкий все ок. Но вот табы после хедера, не липкие"). Hardcoded
-     * fallbacks (72px / 56px) match AppHeader's computed height and
-     * PageHeader's previously hardcoded sticky offset — zero visual
-     * regression in browsers without custom-property support. */
-    position: sticky;
-    top: calc(var(--app-header-height, 72px) + var(--page-header-height, 56px));
-    z-index: 8;
-    background: var(--color-bg);
-    border-bottom: 1px solid var(--color-border);
+    /* Plan 02.1-39 round-6 reversal (UAT-NOTES.md §5.4): sticky was tried
+     * (round-5 made the tabs strip pin below AppHeader + PageHeader) and
+     * REMOVED on round-6 user reconsideration — the user found the double-
+     * sticky layer visually noisy and asked for the tabs to scroll with
+     * the feed. AppHeader (top: 0) and PageHeader.sticky
+     * (top: var(--app-header-height)) remain pinned and are sufficient
+     * for orientation; FeedQuickNav now lives inline above the feed list.
+     *
+     * Round-6 UAT user quote: "табы не залипают. В эвентах хотелось бы
+     * inbox all тоже не залипали, это лишнее." */
 
     display: flex;
     gap: var(--space-sm);

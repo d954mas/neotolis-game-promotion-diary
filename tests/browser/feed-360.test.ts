@@ -499,33 +499,35 @@ describe("Plan 02.1-32: /events/[id] Edit pencil top-right + Delete moved + Atta
 
 /**
  * Plan 02.1-39 — round-6 UI bundle on /feed (UAT-NOTES.md §5.4 + §5.6).
- * Closes:
- *   §5.4 (P1) — FeedQuickNav (tabs strip below AppHeader on /feed) sticks
- *               below AppHeader + PageHeader. The CSS rule lives in
- *               src/lib/components/FeedQuickNav.svelte:
- *                 position: sticky;
- *                 top: calc(var(--app-header-height, 72px) +
- *                          var(--page-header-height, 56px));
- *               (asserted at the integration / structural layer via grep
- *               in tests/integration/audit-render.test.ts when the
- *               Plan 02.1-39 describe block lands).
- *   §5.6 (P2) — FiltersSheet source list shows kind glyph (SourceKindIcon)
- *               + sourceKindLabel before displayName; typeahead matches
- *               the kind label too.
+ *
+ * §5.4 (P1) round-6 reversal — FeedQuickNav sticky behavior was added in
+ * the first pass of Plan 02.1-39 (CSS rule pinned the tabs strip below
+ * AppHeader + PageHeader) and REMOVED on round-6 user reconsideration.
+ * User quote: "табы не залипают. В эвентах хотелось бы inbox all тоже не
+ * залипали, это лишнее." The contract for round-6 onward is that
+ * FeedQuickNav scrolls with the feed; only AppHeader (top:0) and
+ * PageHeader.sticky (top: var(--app-header-height)) remain pinned. The
+ * regression-source guard lives in src/lib/components/FeedQuickNav.svelte
+ * (no `position: sticky` declaration on `.quick-nav`).
+ *
+ * §5.6 (P2) — FiltersSheet source list shows kind glyph (SourceKindIcon)
+ *             + sourceKindLabel before displayName; typeahead matches the
+ *             kind label too. Unchanged by the round-6 reversal.
  *
  * The full /feed end-to-end at 360px (scroll past 5+ FeedCards →
- * FeedQuickNav.getBoundingClientRect().top stays at calc(72 + 56)px;
- * open FiltersSheet → assert .source-kind-tag is present in source-row;
- * type "youtube" in typeahead → only YouTube sources remain) requires the
- * cookie-injection auth harness still deferred to Phase 6 (same precedent
- * as Plans 02.1-19 / 21 / 26 / 33 / 34 / 38).
+ * FeedQuickNav.getBoundingClientRect().top advances with the page —
+ * no longer pinned; open FiltersSheet → assert .source-kind-tag is
+ * present in source-row; type "youtube" in typeahead → only YouTube
+ * sources remain) requires the cookie-injection auth harness still
+ * deferred to Phase 6 (same precedent as Plans 02.1-19 / 21 / 26 / 33 /
+ * 34 / 38).
  *
- * Manual UAT recipe (per the round-6 plan's checkpoint task):
+ * Manual UAT recipe (round-6 reversal):
  *   1. /feed → scroll deep into the feed (past 5+ FeedCards).
  *      Confirm AppHeader stays pinned at the top.
  *      Confirm PageHeader (Feed title + Add CTA) stays pinned just below.
  *      Confirm FeedQuickNav (All / Inbox / Standalone / per-game tabs)
- *      stays pinned just below PageHeader.
+ *      SCROLLS AWAY with the feed content (no longer sticky).
  *   2. /feed → click "Filters" → FiltersSheet opens. Scroll to the
  *      "Sources" section. Confirm each source row shows a kind glyph
  *      (e.g. YouTube ▶ icon) AND a short kind label (e.g. "YouTube
@@ -534,9 +536,9 @@ describe("Plan 02.1-32: /events/[id] Edit pencil top-right + Delete moved + Atta
  *      every YouTube source remains visible (matches against the kind
  *      label, not just the handleUrl / displayName).
  */
-describe("Plan 02.1-39 — /feed sticky FeedQuickNav + FiltersSheet kind glyph at 360px", () => {
+describe("Plan 02.1-39 — /feed FeedQuickNav non-sticky (round-6 reversal) + FiltersSheet kind glyph at 360px", () => {
   it.skip(
-    "/feed FeedQuickNav.getBoundingClientRect().top stays at calc(--app-header-height + --page-header-height) ≈ 128px after window.scrollTo(0, 400) — §5.4 (manual UAT — auth harness deferred to Phase 6)",
+    "/feed FeedQuickNav .quick-nav has computed position !== 'sticky' after round-6 reversal — getBoundingClientRect().top advances with window.scrollTo(0, 400) (manual UAT — auth harness deferred to Phase 6) — §5.4 closed-by-reversal",
   );
   it.skip(
     "/feed FiltersSheet source-row renders <SourceKindIcon> SVG + <span class='source-kind-label'> with sourceKindLabel(kind) text — §5.6 (manual UAT — auth harness deferred)",

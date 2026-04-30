@@ -50,14 +50,18 @@
   --bp-tablet: 768px;
   --bp-desktop: 1024px;
 
-  /* Plan 02.1-39 (UAT-NOTES.md §5.4 + §5.7): single source of truth for the
-   * sticky-chrome offsets. PageHeader (top: var(--app-header-height)) and
-   * FeedQuickNav (top: calc(var(--app-header-height) + var(--page-header-height)))
-   * stay in sync with AppHeader's computed height by reading these tokens.
-   * Hardcoded fallbacks in the consuming components (72px / 56px) preserve
-   * zero visual regression in browsers without custom-property support. */
+  /* Plan 02.1-39 (UAT-NOTES.md §5.7): single source of truth for the
+   * AppHeader-sticky offset. PageHeader.sticky reads
+   * `top: var(--app-header-height)` so its anchor stays in sync with
+   * AppHeader's computed height. Hardcoded fallback (72px) in the
+   * consuming component preserves zero visual regression in browsers
+   * without custom-property support.
+   *
+   * `--page-header-height` was introduced in round-5 to anchor a sticky
+   * FeedQuickNav below PageHeader; it was removed on round-6 after the
+   * user reversed direction on §5.4 (tabs strip should scroll with the
+   * feed, not stick). No remaining consumer needs the value. */
   --app-header-height: 72px;
-  --page-header-height: 56px;
 }
 
 /* Color — light theme (default + explicit). */
