@@ -19,7 +19,7 @@
     "test": "pnpm paraglide:compile && svelte-kit sync && vitest run",
     "test:unit": "pnpm paraglide:compile && svelte-kit sync && vitest run tests/unit",
     "test:integration": "pnpm paraglide:compile && svelte-kit sync && vitest run tests/integration",
-    "test:browser": "pnpm paraglide:compile && svelte-kit sync && vitest run --project browser",
+    "test:browser": "pnpm paraglide:compile && svelte-kit sync && vitest run --project browser --no-file-parallelism",
     "playwright:install": "playwright install chromium --with-deps",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/lib/server/db/migrate.ts",
