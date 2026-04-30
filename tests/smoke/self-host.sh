@@ -251,7 +251,12 @@ docker exec smoke-app sh -c "ls -la /app/.svelte-kit/output 2>/dev/null | head -
 docker exec smoke-app sh -c "head -3 /app/build/handler.js" 2>&1 || true
 log "------------------------------------------------------"
 
-DASH_HTTP=$(curl -s -o /tmp/dash.html -w '%{http_code}' -H "cookie: $SESSION_COOKIE_A" "http://localhost:$APP_PORT/" || echo "curl-failed")
+# Phase 2.1 retired the dashboard at `/` — authenticated `/` now 303-
+# redirects to `/feed` (default landing per ROADMAP success criterion 4).
+# Use --location so curl follows the redirect; assert the resolved page
+# carries the Paraglide title literal. The HTTP-code check accepts 200
+# (final landing); the redirect itself is a transparent intermediate.
+DASH_HTTP=$(curl -sL -o /tmp/dash.html -w '%{http_code}' -H "cookie: $SESSION_COOKIE_A" "http://localhost:$APP_PORT/" || echo "curl-failed")
 DASH_HTML=$(cat /tmp/dash.html 2>/dev/null || echo "")
 log "(4) dashboard HTTP=$DASH_HTTP body-bytes=${#DASH_HTML}"
 log "----- dashboard response (first 600 chars) -----"
@@ -262,9 +267,9 @@ docker logs smoke-app 2>&1 | tail -80 || true
 log "-------------------------------------------"
 
 if [[ "$DASH_HTTP" != "200" ]] || ! echo "$DASH_HTML" | grep -q "Promotion diary"; then
-  fail "(4) dashboard did not render 'Promotion diary' (Paraglide). HTTP=$DASH_HTTP"
+  fail "(4) authenticated landing (/feed via /) did not render 'Promotion diary' (Paraglide). HTTP=$DASH_HTTP"
 fi
-log "(4) PASS — OAuth login + /api/me + dashboard renders English"
+log "(4) PASS — OAuth login + /api/me + /feed (via / redirect) renders English"
 
 # ============================================================
 # 5. Cross-tenant 404 / anonymous 401 — Phase 1 sentinel
