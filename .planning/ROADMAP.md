@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation** - Bootable image with Google OAuth, envelope encryption, tenant scoping, and self-host CI smoke test gating every PR
 - [!] **Phase 2: Ingest, Secrets, and Audit** - Games CRUD, paste-URL ingest, write-once API key storage, events timeline, owner-visible audit log *(closed gaps_found 2026-04-28 via UAT — 4 P0 architectural redesigns + 1 P0 functional gap surfaced; closure in Phase 2.1)*
-- [ ] **Phase 2.1: Architecture Realignment (INSERTED)** - Unified `data_sources` abstraction + 3-view IA (`/feed` primary nav + `/sources` + `/games/[id]`) + auto-import inbox + unified `events` table with `author_is_me` discriminator; closes the 4 P0 architectural gaps from Phase 2 UAT plus the rename/add-Steam UI gap on `/games/[id]`
+- [x] **Phase 2.1: Architecture Realignment (INSERTED)** - Unified `data_sources` abstraction + 3-view IA (`/feed` primary nav + `/sources` + `/games/[id]`) + auto-import inbox + unified `events` table with `author_is_me` discriminator; closes the 4 P0 architectural gaps from Phase 2 UAT plus the rename/add-Steam UI gap on `/games/[id]`. *Signed off 2026-04-30 after 6 UAT rounds + 30 gap-closure plans + 16 round-6 polish iterations.*
 - [ ] **Phase 3: Polling Pipeline** - Adaptive hot/warm/cold polling driven by per-kind `DataSourceAdapter`; YouTube + Reddit + Steam concrete adapters; both wishlist ingest paths
 - [ ] **Phase 4: Visualization** - Per-event charts, combined per-game timeline, and the annotated wishlist correlation chart with UX baseline
 - [ ] **Phase 5: Reddit Rules Cockpit** - Subreddit rules ingestion, structured cooldown/flair fields, curated seed for top ~10 indie subs
@@ -99,7 +99,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 02.1-07-PLAN.md — Wave 3: /feed page (default landing) + root redirect + 6 new feed components (FeedRow, AttachToGamePicker, FilterChips, FiltersSheet, InboxBadge, PollingBadge) + KindIcon extension
 - [x] 02.1-08-PLAN.md — Wave 3: /sources + /sources/new + SourceRow + SourceKindIcon + Nav update + /accounts/youtube + ChannelRow deletion
 - [x] 02.1-09-PLAN.md — Wave 3: /games/[id] rebuild (RenameInline + AddSteamListingForm + MonthHeader + curated FeedRows) + /events/new + /events/[id] stub + Settings polish (sessions list, theme blurb, ThemeToggle relocation) + AppHeader UserChip + /keys/steam empty-state copy fix + /events list deletion
-- [ ] 02.1-10-PLAN.md — Wave 4: smoke extension (Phase 2.1 unified flow + cross-tenant probes per CONTEXT D-11) + manual UAT checkpoint + VALIDATION.md sign-off
+- [x] 02.1-10-PLAN.md — Wave 4: smoke extension (Phase 2.1 unified flow + cross-tenant probes per CONTEXT D-11) + manual UAT checkpoint + VALIDATION.md sign-off (signed 2026-04-30 after 6-round UAT walked all 30 gap-closure plans + 16 round-6 polish iterations)
 - [x] 02.1-11-PLAN.md — Gap closure Wave 1: `/audit` runtime crash fix (drop dead `item.*` Paraglide refs in ActionFilter + AuditRow) + render regression test (Gaps 1 + 11)
 - [x] 02.1-12-PLAN.md — Gap closure Wave 1: forward-only migration `0001_add_post_kind` adds `post` event kind (first migration after 2.1 baseline collapse) + service / route / KindIcon / FilterChips / FiltersSheet / events-new picker (Gap 12)
 - [x] 02.1-13-PLAN.md — Gap closure Wave 1: /events/new Today/Yesterday quick buttons + date-origin explainer (Gaps 7 + 8)
@@ -121,6 +121,12 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 02.1-29-PLAN.md — Round-4 gap closure Wave 1: Steam listing service hardening — addSteamListing translates Postgres 23505 to AppError 422 'steam_listing_duplicate' with metadata payload (Path B: pre-INSERT lookup catches soft-deleted dupes; race-window catch around INSERT); closes UAT-NOTES.md §4.25.E + §4.25.G prep + §4.25.H
 - [x] 02.1-31-PLAN.md — Round-4 gap closure Wave 2: Standalone label rename — 3 user-facing Paraglide values updated ("Standalone" → "Not game-related" / "Mark standalone" → "Mark as not game-related"); URL contract / state shape / audit verb / service / schema preserved; audit log keeps technical verb 'Event marked standalone'; closes UAT-NOTES.md §4.24.A
 - [x] 02.1-33-PLAN.md — Round-4 gap closure Wave 2: SourceRow edit-mode polish — Remove visibility gated to edit-form footer (§4.22.B), Edit pencil hidden in edit mode (§4.22.C), auto_import single-source-of-truth via 3-layer negative-grep regression guard (§4.22.D), Save/Cancel/Remove footer at form bottom with section divider above (§4.22.E); pure component refactor; PATCH /api/sources/:id contract preserved
+- [x] 02.1-34-PLAN.md — Round-4 gap closure Wave 2: layout regression fixes + /audit FiltersSheet schema cleanup; FiltersSheet body-scroll-lock CSS :has() + /audit dateRange schema cleanup
+- [x] 02.1-35-PLAN.md — Round-6 Wave 0: closes round-5 §5.1 (P0 inbox.dismissed sticky) + §5.12 (P1 transactional integrity); attachEventToGames clears metadata.inbox.dismissed on diff; createEvent + attachEventToGames wrapped in db.transaction
+- [x] 02.1-36-PLAN.md — Round-6 Wave 0: closes round-5 §5.9 (P0 CI-blocker) + §5.10 (P1 privacy floor); fixed-locale formatFeedDate + JSDoc-aware env scanner; REDACT_PATHS expansion + derived-from-schema redact-coverage test
+- [x] 02.1-37-PLAN.md — Round-6 Wave 1: closes round-5 §5.11 (P1 PATCH youtube invariant) + §5.13 (P2 /feed loader kindList validation); service-layer merged-state validator + VALID_EVENT_KINDS gate
+- [x] 02.1-38-PLAN.md — Round-6 Wave 1: closes round-5 §5.2 (P0 multi-select Game picker on /events/[id]/edit, Path A checkbox-list); set-difference dirty check + canonical {gameIds: [...]} body
+- [x] 02.1-39-PLAN.md — Round-6 Wave 2: closes round-5 §5.3 + §5.4 + §5.5 + §5.6 + §5.7 + §5.8 (UI bundle: sticky chrome via single-wrapper architecture, RecoveryDialog modal cross-app pattern, /games/[gameId] redesign + games.description schema, FiltersSheet kind glyph); 16 round-6 polish iterations driven by manual UAT inlined here (each cites verbatim Russian user quote in 02.1-39-SUMMARY.md)
 **UI hint**: yes
 
 ### Phase 3: Polling Pipeline
@@ -195,7 +201,7 @@ Phases execute in numeric order: 1 → 2 → 2.1 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation | 10/10 | Complete | 2026-04-27 |
 | 2. Ingest, Secrets, and Audit | 11/11 | Gaps Found | 2026-04-28 (closure in 2.1) |
-| 2.1. Architecture Realignment (INSERTED) | 30/34 | In progress (Plans 11-16 closed round-1 UAT gaps; Plans 17-20 closed round-2 UAT gaps; Plans 21-26 closed round-3 UAT gaps from 2026-04-29; Plans 27-34 close round-4 UAT gaps from 2026-04-29 — 02.1-33 SourceRow edit-mode polish complete; Plan 10 UAT checkpoint resume after round-4 ships) | - |
+| 2.1. Architecture Realignment (INSERTED) | 34/34 | Signed off (verifier next) | 2026-04-30 — Plans 11-16 closed round-1 UAT gaps; Plans 17-20 closed round-2; Plans 21-26 closed round-3; Plans 27-34 closed round-4; Plans 35-39 closed round-5 (13 findings); Plan 39 inlined 16 round-6 polish iterations; Plan 10 sign-off paperwork closed 2026-04-30 |
 | 3. Polling Pipeline | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
 | 5. Reddit Rules Cockpit | 0/TBD | Not started | - |
