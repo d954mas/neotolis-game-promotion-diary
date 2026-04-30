@@ -88,7 +88,23 @@ export default defineConfig({
             enabled: true,
             provider: playwright(),
             headless: true,
-            instances: [{ browser: "chromium" }],
+            // Pass --no-sandbox + --disable-dev-shm-usage to chromium so
+            // headless tests can launch inside the GitHub Actions runner
+            // (Phase 2.1 round-10 CI fix). The default sandboxed launch
+            // disconnects mid-test on the ubuntu-24.04 runner with
+            // "Browser connection was closed while running tests" because
+            // the runner's user-namespace + cgroup setup blocks chromium's
+            // sandbox spawn. Both flags are standard CI-headless practice
+            // and only loosen browser sandboxing inside the test process —
+            // the production app surface is unaffected.
+            instances: [
+              {
+                browser: "chromium",
+                launch: {
+                  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+                },
+              },
+            ],
             // Custom commands that delegate to the underlying Playwright
             // page. Vitest 4's `BrowserPage` (from @vitest/browser/context)
             // is a locator surface — it doesn't expose `goto` / `evaluate`
