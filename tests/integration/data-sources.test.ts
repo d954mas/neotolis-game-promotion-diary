@@ -75,47 +75,29 @@ describe("SOURCES-01: register data sources via POST /api/sources", () => {
     });
 
     // No row was inserted.
-    const rows = await db
-      .select()
-      .from(dataSources)
-      .where(eq(dataSources.userId, userA.id));
+    const rows = await db.select().from(dataSources).where(eq(dataSources.userId, userA.id));
     expect(rows).toHaveLength(0);
   });
 
   it("Plan 02.1-04: kinds twitter_account / telegram_channel / discord_server reject with 'kind_not_yet_functional'", async () => {
     const userA = await seedUserDirectly({ email: "ds3@test.local" });
-    const rejectedKinds = [
-      "twitter_account",
-      "telegram_channel",
-      "discord_server",
-    ] as const;
+    const rejectedKinds = ["twitter_account", "telegram_channel", "discord_server"] as const;
     for (const kind of rejectedKinds) {
       await expect(
-        createSource(
-          userA.id,
-          { kind, handleUrl: `https://example.test/${kind}` },
-          "127.0.0.1",
-        ),
+        createSource(userA.id, { kind, handleUrl: `https://example.test/${kind}` }, "127.0.0.1"),
       ).rejects.toMatchObject({
         code: "kind_not_yet_functional",
         status: 422,
       });
     }
-    const rows = await db
-      .select()
-      .from(dataSources)
-      .where(eq(dataSources.userId, userA.id));
+    const rows = await db.select().from(dataSources).where(eq(dataSources.userId, userA.id));
     expect(rows).toHaveLength(0);
   });
 
   it("Plan 02.1-04: empty handle_url rejects with AppError 'validation_failed' (422)", async () => {
     const userA = await seedUserDirectly({ email: "ds4@test.local" });
     await expect(
-      createSource(
-        userA.id,
-        { kind: "youtube_channel", handleUrl: "" },
-        "127.0.0.1",
-      ),
+      createSource(userA.id, { kind: "youtube_channel", handleUrl: "" }, "127.0.0.1"),
     ).rejects.toMatchObject({ code: "validation_failed", status: 422 });
   });
 
@@ -151,12 +133,7 @@ describe("SOURCES-01: register data sources via POST /api/sources", () => {
     const audits = await db
       .select()
       .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.userId, userA.id),
-          eq(auditLog.action, "source.added"),
-        ),
-      );
+      .where(and(eq(auditLog.userId, userA.id), eq(auditLog.action, "source.added")));
     expect(audits).toHaveLength(1);
     expect(audits[0]!.ipAddress).toBe("192.0.2.7");
     expect(audits[0]!.userAgent).toBe("test-agent/1.0");
@@ -196,9 +173,7 @@ describe("SOURCES-01: register data sources via POST /api/sources", () => {
       { kind: "youtube_channel", handleUrl: "https://youtube.com/@a8" },
       "127.0.0.1",
     );
-    await expect(getSourceById(userB.id, aSource.id)).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
+    await expect(getSourceById(userB.id, aSource.id)).rejects.toBeInstanceOf(NotFoundError);
 
     // P1 invariant: the response must never carry the strings 'forbidden' or 'permission'
     // for tenant-owned resources. NotFoundError carries 'not_found'.
@@ -245,9 +220,9 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
       "127.0.0.1",
     );
     await softDeleteSource(userA.id, src.id, "127.0.0.1");
-    await expect(
-      softDeleteSource(userA.id, src.id, "127.0.0.1"),
-    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(softDeleteSource(userA.id, src.id, "127.0.0.1")).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 
   it("Plan 02.1-04: restoreSource clears deleted_at when within RETENTION_DAYS window", async () => {
@@ -284,9 +259,10 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
       .set({ deletedAt: ninetyDaysAgo })
       .where(and(eq(dataSources.userId, userA.id), eq(dataSources.id, src.id)));
 
-    await expect(
-      restoreSource(userA.id, src.id, "127.0.0.1"),
-    ).rejects.toMatchObject({ code: "retention_expired", status: 422 });
+    await expect(restoreSource(userA.id, src.id, "127.0.0.1")).rejects.toMatchObject({
+      code: "retention_expired",
+      status: 422,
+    });
   });
 
   it("Plan 02.1-04: updateSource toggling autoImport=false writes audit_action='source.toggled_auto_import' with from/to metadata", async () => {
@@ -313,12 +289,7 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     const audits = await db
       .select()
       .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.userId, userA.id),
-          eq(auditLog.action, "source.toggled_auto_import"),
-        ),
-      );
+      .where(and(eq(auditLog.userId, userA.id), eq(auditLog.action, "source.toggled_auto_import")));
     expect(audits).toHaveLength(1);
     expect(audits[0]!.metadata).toMatchObject({
       source_id: src.id,
@@ -339,21 +310,11 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
       },
       "127.0.0.1",
     );
-    await updateSource(
-      userA.id,
-      src.id,
-      { displayName: "Renamed" },
-      "127.0.0.1",
-    );
+    await updateSource(userA.id, src.id, { displayName: "Renamed" }, "127.0.0.1");
     const audits = await db
       .select()
       .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.userId, userA.id),
-          eq(auditLog.action, "source.toggled_auto_import"),
-        ),
-      );
+      .where(and(eq(auditLog.userId, userA.id), eq(auditLog.action, "source.toggled_auto_import")));
     expect(audits).toHaveLength(0);
   });
 
@@ -369,26 +330,20 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     // still be NULL — the audit fires BEFORE the UPDATE that sets it. Mirrors
     // Phase 2 removeSteamKey's forensics-order pattern: even if the UPDATE
     // later fails, the security signal lands.
-    const auditSpy = vi.spyOn(Audit, "writeAudit").mockImplementation(
-      async (entry) => {
-        if (entry.action === "source.removed") {
-          const [snapshot] = await db
-            .select()
-            .from(dataSources)
-            .where(eq(dataSources.id, src.id))
-            .limit(1);
-          expect(snapshot!.deletedAt).toBeNull();
-        }
-      },
-    );
+    const auditSpy = vi.spyOn(Audit, "writeAudit").mockImplementation(async (entry) => {
+      if (entry.action === "source.removed") {
+        const [snapshot] = await db
+          .select()
+          .from(dataSources)
+          .where(eq(dataSources.id, src.id))
+          .limit(1);
+        expect(snapshot!.deletedAt).toBeNull();
+      }
+    });
 
     await softDeleteSource(userA.id, src.id, "127.0.0.1");
 
-    expect(
-      auditSpy.mock.calls.some(
-        ([entry]) => entry.action === "source.removed",
-      ),
-    ).toBe(true);
+    expect(auditSpy.mock.calls.some(([entry]) => entry.action === "source.removed")).toBe(true);
   });
 
   it("Plan 02.1-04: cross-tenant softDeleteSource throws NotFoundError (404, never 403)", async () => {
@@ -399,9 +354,9 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
       { kind: "youtube_channel", handleUrl: "https://youtube.com/@xtA" },
       "127.0.0.1",
     );
-    await expect(
-      softDeleteSource(userB.id, aSrc.id, "127.0.0.1"),
-    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(softDeleteSource(userB.id, aSrc.id, "127.0.0.1")).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 
   it("Plan 02.1-04: cross-tenant updateSource + restoreSource throw NotFoundError", async () => {
@@ -417,9 +372,9 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     ).rejects.toBeInstanceOf(NotFoundError);
 
     await softDeleteSource(userA.id, aSrc.id, "127.0.0.1");
-    await expect(
-      restoreSource(userB.id, aSrc.id, "127.0.0.1"),
-    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(restoreSource(userB.id, aSrc.id, "127.0.0.1")).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 
   it("Plan 02.1-04: soft-deleted source can be re-added via the partial unique index (resurrect by re-create)", async () => {

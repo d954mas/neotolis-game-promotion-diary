@@ -12,9 +12,7 @@ process.env.OAUTH_CLIENT_ID ??= "test";
 process.env.OAUTH_CLIENT_SECRET ??= "test";
 process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
 
-const { encodeCursor, decodeCursor } = await import(
-  "../../src/lib/server/services/audit-read.js"
-);
+const { encodeCursor, decodeCursor } = await import("../../src/lib/server/services/audit-read.js");
 const { AppError } = await import("../../src/lib/server/services/errors.js");
 
 /**
@@ -44,8 +42,6 @@ describe("audit cursor encode/decode", () => {
     // route layer (Plan 02-08) can map cleanly to invalid_cursor.
     expect(() => decodeCursor("not-base64!@#$")).toThrow(AppError);
     expect(() => decodeCursor(Buffer.from("{}").toString("base64url"))).toThrow(AppError);
-    expect(() => decodeCursor(Buffer.from('{"at":"x"}').toString("base64url"))).toThrow(
-      AppError,
-    );
+    expect(() => decodeCursor(Buffer.from('{"at":"x"}').toString("base64url"))).toThrow(AppError);
   });
 });

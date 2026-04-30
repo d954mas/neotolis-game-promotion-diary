@@ -315,12 +315,7 @@
        primary content. -->
   {#if isInboxRow}
     <div class="picker-line">
-      <AttachToGamePicker
-        {event}
-        {games}
-        onChanged={() => onChanged?.()}
-        compact={true}
-      />
+      <AttachToGamePicker {event} {games} onChanged={() => onChanged?.()} compact={true} />
       <!-- Plan 02.1-24 (UAT-NOTES.md §6.1-redesign): inline "Mark standalone"
            triage button on inbox cards ONLY. EXPLICIT exception to the
            Plan 02.1-18 read-only-tile contract — accepted by the user

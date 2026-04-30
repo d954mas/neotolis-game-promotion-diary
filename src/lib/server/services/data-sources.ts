@@ -44,9 +44,7 @@ export type DataSourceRow = typeof dataSources.$inferSelect;
 
 // Functional kinds in Phase 2.1 (RESEARCH §5.4). The other four schema-only
 // kinds are rejected at `createSource` with a clean 422.
-const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>([
-  "youtube_channel",
-]);
+const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>(["youtube_channel"]);
 
 // Phase mapping for the 'kind_not_yet_functional' error metadata. The /sources
 // page renders the user-facing string from the response code; this map gives
@@ -92,23 +90,17 @@ const HANDLE_URL_MAX = 2048;
 
 function validateKind(kind: string): asserts kind is SourceKind {
   if (!(VALID_SOURCE_KINDS as readonly string[]).includes(kind)) {
-    throw new AppError(
-      `unknown source kind '${kind}'`,
-      "validation_failed",
-      422,
-      { field: "kind" },
-    );
+    throw new AppError(`unknown source kind '${kind}'`, "validation_failed", 422, {
+      field: "kind",
+    });
   }
 }
 
 function validateHandleUrl(handleUrl: string): void {
   if (typeof handleUrl !== "string" || handleUrl.trim().length < HANDLE_URL_MIN) {
-    throw new AppError(
-      "handle_url must be a non-empty string",
-      "validation_failed",
-      422,
-      { field: "handle_url" },
-    );
+    throw new AppError("handle_url must be a non-empty string", "validation_failed", 422, {
+      field: "handle_url",
+    });
   }
   if (handleUrl.length > HANDLE_URL_MAX) {
     throw new AppError(
@@ -176,12 +168,9 @@ export async function createSource(
       .returning();
   } catch (err) {
     if (isPgUniqueViolation(err)) {
-      throw new AppError(
-        "data source already registered",
-        "duplicate_source",
-        422,
-        { handle_url: input.handleUrl },
-      );
+      throw new AppError("data source already registered", "duplicate_source", 422, {
+        handle_url: input.handleUrl,
+      });
     }
     throw err;
   }
@@ -232,10 +221,7 @@ export async function listSources(
  * agree, so cross-tenant fetches are indistinguishable from "this id never
  * existed" by construction.
  */
-export async function getSourceById(
-  userId: string,
-  sourceId: string,
-): Promise<DataSourceRow> {
+export async function getSourceById(userId: string, sourceId: string): Promise<DataSourceRow> {
   const [row] = await db
     .select()
     .from(dataSources)
@@ -286,10 +272,7 @@ export async function updateSource(
     .returning();
   if (!row) throw new NotFoundError();
 
-  if (
-    patch.autoImport !== undefined &&
-    patch.autoImport !== existing.autoImport
-  ) {
+  if (patch.autoImport !== undefined && patch.autoImport !== existing.autoImport) {
     await writeAudit({
       userId,
       action: "source.toggled_auto_import",
@@ -387,16 +370,11 @@ export async function restoreSource(
 
   const cutoff = new Date(Date.now() - env.RETENTION_DAYS * 86_400_000);
   if (existing.deletedAt < cutoff) {
-    throw new AppError(
-      "retention window expired",
-      "retention_expired",
-      422,
-      {
-        source_id: existing.id,
-        deleted_at: existing.deletedAt.toISOString(),
-        retention_days: env.RETENTION_DAYS,
-      },
-    );
+    throw new AppError("retention window expired", "retention_expired", 422, {
+      source_id: existing.id,
+      deleted_at: existing.deletedAt.toISOString(),
+      retention_days: env.RETENTION_DAYS,
+    });
   }
 
   const [row] = await db

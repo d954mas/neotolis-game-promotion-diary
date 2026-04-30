@@ -80,10 +80,7 @@ describe("empty-state copy + Paraglide invariant (UX-03)", () => {
     // replacement lands. File-content assertion (vs SSR render) because
     // /settings/+page.svelte depends on +layout.server.ts data shape that an
     // isolated `render` call would have to mock.
-    const settingsPage = fs.readFileSync(
-      path.resolve("src/routes/settings/+page.svelte"),
-      "utf8",
-    );
+    const settingsPage = fs.readFileSync(path.resolve("src/routes/settings/+page.svelte"), "utf8");
     expect(settingsPage).toContain("/keys/steam");
     expect(settingsPage).toContain("settings_credentials_heading");
     expect(settingsPage).toContain("settings_credentials_steam_link_label");

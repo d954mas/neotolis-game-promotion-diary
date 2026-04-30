@@ -229,10 +229,7 @@ describe("Plan 02.1-28 — toEventDto with gameIds (P3 behavioural)", () => {
       updatedAt: new Date(),
       deletedAt: null,
     };
-    const dto = toEventDto(
-      fakeRow as unknown as Parameters<typeof toEventDto>[0],
-      gameIds,
-    );
+    const dto = toEventDto(fakeRow as unknown as Parameters<typeof toEventDto>[0], gameIds);
 
     expect(dto.gameIds).toEqual(["g1", "g2"]);
     // Defensive copy: mutating the result does not affect the input.
@@ -259,10 +256,7 @@ describe("Plan 02.1-28 — toEventDto with gameIds (P3 behavioural)", () => {
       updatedAt: new Date(),
       deletedAt: null,
     };
-    const dto = toEventDto(
-      fakeRow as unknown as Parameters<typeof toEventDto>[0],
-      [],
-    );
+    const dto = toEventDto(fakeRow as unknown as Parameters<typeof toEventDto>[0], []);
 
     expect(Object.keys(dto)).not.toContain("userId");
     const json = JSON.stringify(dto);
@@ -294,10 +288,7 @@ describe("Plan 02.1-28 — toEventDto with gameIds (P3 behavioural)", () => {
       updatedAt: new Date(),
       deletedAt: null,
     };
-    const dto = toEventDto(
-      fakeRow as unknown as Parameters<typeof toEventDto>[0],
-      ["g1"],
-    );
+    const dto = toEventDto(fakeRow as unknown as Parameters<typeof toEventDto>[0], ["g1"]);
 
     expect(Object.keys(dto)).not.toContain("gameId");
     expect(dto.gameIds).toEqual(["g1"]);
@@ -322,10 +313,7 @@ describe("Plan 02.1-28 — toEventDto with gameIds (P3 behavioural)", () => {
       updatedAt: new Date(),
       deletedAt: null,
     };
-    const dto = toEventDto(
-      fakeRow as unknown as Parameters<typeof toEventDto>[0],
-      [],
-    );
+    const dto = toEventDto(fakeRow as unknown as Parameters<typeof toEventDto>[0], []);
 
     expect(dto.gameIds).toEqual([]);
   });

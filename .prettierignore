@@ -23,3 +23,8 @@ docs/
 # Project metadata
 messages/
 project.inlang/
+
+# Claude Code session state — agent worktrees, settings, todos. Untracked
+# but prettier scans them by default; explicitly ignore so lint stays
+# green even when local agent state is present.
+.claude/

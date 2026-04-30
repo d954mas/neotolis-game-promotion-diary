@@ -247,11 +247,7 @@
 
     <div class="actions">
       <a class="cancel" href="/sources">{m.common_cancel()}</a>
-      <button
-        type="submit"
-        class="submit"
-        disabled={submitting || handleUrl.trim().length === 0}
-      >
+      <button type="submit" class="submit" disabled={submitting || handleUrl.trim().length === 0}>
         {m.sources_cta_save_source()}
       </button>
     </div>

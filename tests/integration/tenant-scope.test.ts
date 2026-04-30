@@ -49,9 +49,7 @@ describe("cross-tenant 404 (PRIV-01, VALIDATION 7/8/9)", () => {
   // Plan 02-08 — VALIDATION 8 lit up (Phase 1 deferred from "no writable resource").
   it("user A cannot WRITE user B resource — returns 404 (Phase 2 GAMES-01 turns this on)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
-    const { createGame, getGameById } = await import(
-      "../../src/lib/server/services/games.js"
-    );
+    const { createGame, getGameById } = await import("../../src/lib/server/services/games.js");
     const app = createApp();
     const userA = await seedUserDirectly({ email: "wA@test.local" });
     const userB = await seedUserDirectly({ email: "wB@test.local" });
@@ -82,9 +80,8 @@ describe("cross-tenant 404 (PRIV-01, VALIDATION 7/8/9)", () => {
   // Plan 02-08 — VALIDATION 9 lit up (Phase 1 deferred from "no deletable resource").
   it("user A cannot DELETE user B resource — returns 404", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
-    const { createGame, getGameByIdIncludingDeleted } = await import(
-      "../../src/lib/server/services/games.js"
-    );
+    const { createGame, getGameByIdIncludingDeleted } =
+      await import("../../src/lib/server/services/games.js");
     const app = createApp();
     const userA = await seedUserDirectly({ email: "dA@test.local" });
     const userB = await seedUserDirectly({ email: "dB@test.local" });
@@ -120,9 +117,7 @@ describe("cross-tenant 404 (PRIV-01, VALIDATION 7/8/9)", () => {
   // reads from the caller's tenant scope.
   it("Plan 02.1-17: POST /api/events/preview-url is tenant-scoped but tenant-data-free — same URL → same shape for any user", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
-    const youtubeOembed = await import(
-      "../../src/lib/server/integrations/youtube-oembed.js"
-    );
+    const youtubeOembed = await import("../../src/lib/server/integrations/youtube-oembed.js");
     const { vi } = await import("vitest");
     const spy = vi.spyOn(youtubeOembed, "fetchYoutubeOembed").mockResolvedValue({
       kind: "ok",
@@ -215,27 +210,19 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
   it("user B requests on user A's resources return 404, never 403/200", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const { createGame } = await import("../../src/lib/server/services/games.js");
-    const { createSteamKey } = await import(
-      "../../src/lib/server/services/api-keys-steam.js"
-    );
-    const { createSource } = await import(
-      "../../src/lib/server/services/data-sources.js"
-    );
-    const { createEvent, softDeleteEvent } = await import(
-      "../../src/lib/server/services/events.js"
-    );
-    const { addSteamListing } = await import(
-      "../../src/lib/server/services/game-steam-listings.js"
-    );
+    const { createSteamKey } = await import("../../src/lib/server/services/api-keys-steam.js");
+    const { createSource } = await import("../../src/lib/server/services/data-sources.js");
+    const { createEvent, softDeleteEvent } =
+      await import("../../src/lib/server/services/events.js");
+    const { addSteamListing } =
+      await import("../../src/lib/server/services/game-steam-listings.js");
     const SteamApi = await import("../../src/lib/server/integrations/steam-api.js");
     const { vi } = await import("vitest");
 
     // Mock validateSteamKey so createSteamKey doesn't hit the real Steam API.
     const validateSpy = vi.spyOn(SteamApi, "validateSteamKey").mockResolvedValue(true);
     // Mock fetchSteamAppDetails so addSteamListing doesn't hit Steam either.
-    const fetchSpy = vi
-      .spyOn(SteamApi, "fetchSteamAppDetails")
-      .mockResolvedValue(null);
+    const fetchSpy = vi.spyOn(SteamApi, "fetchSteamAppDetails").mockResolvedValue(null);
 
     try {
       const app = createApp();
@@ -409,21 +396,18 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
         };
         if (p.body) (init as { body?: string }).body = JSON.stringify(p.body);
         const res = await app.request(p.path, init);
-        expect.soft(
-          res.status,
-          `${p.method} ${p.path} should be 404 cross-tenant (got ${res.status})`,
-        ).toBe(404);
+        expect
+          .soft(res.status, `${p.method} ${p.path} should be 404 cross-tenant (got ${res.status})`)
+          .toBe(404);
         // Pitfall 4 explicit guard: cross-tenant attach must NEVER surface 500
         // from a bare PG FK rejection — assertGameOwnedByUser fires first.
-        expect.soft(
-          res.status,
-          `${p.method} ${p.path} must NOT be 500 (Pitfall 4: cross-tenant FK)`,
-        ).not.toBe(500);
+        expect
+          .soft(res.status, `${p.method} ${p.path} must NOT be 500 (Pitfall 4: cross-tenant FK)`)
+          .not.toBe(500);
         const txt = await res.text();
-        expect.soft(
-          txt,
-          `${p.method} ${p.path} body must not contain 'forbidden' or 'permission'`,
-        ).not.toMatch(/forbidden|permission/i);
+        expect
+          .soft(txt, `${p.method} ${p.path} body must not contain 'forbidden' or 'permission'`)
+          .not.toMatch(/forbidden|permission/i);
       }
 
       // Plan 02.1-14 — GET /api/events/deleted is a list endpoint, not a
@@ -435,7 +419,12 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
         method: "GET",
         headers: { cookie },
       });
-      expect.soft(deletedListRes.status, "GET /api/events/deleted must be 200 for an authenticated user").toBe(200);
+      expect
+        .soft(
+          deletedListRes.status,
+          "GET /api/events/deleted must be 200 for an authenticated user",
+        )
+        .toBe(200);
       const deletedBody = (await deletedListRes.json()) as {
         rows: Array<{ id: string }>;
       };
@@ -549,9 +538,8 @@ describe("Plan 02.1-28 — event_games cross-tenant", () => {
   it("Plan 02.1-28: GET /api/events list response from userB cursor never contains userA's gameIds in any row", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const { createGame } = await import("../../src/lib/server/services/games.js");
-    const { createEvent, attachEventToGames } = await import(
-      "../../src/lib/server/services/events.js"
-    );
+    const { createEvent, attachEventToGames } =
+      await import("../../src/lib/server/services/events.js");
     const app = createApp();
     const userA = await seedUserDirectly({ email: `p28-xt3A-${uniq()}@test.local` });
     const userB = await seedUserDirectly({ email: `p28-xt3B-${uniq()}@test.local` });

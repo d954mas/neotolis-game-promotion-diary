@@ -136,7 +136,8 @@ describe("/audit render-time guard (Plan 02.1-20 — FiltersSheet + AuditRow)", 
     // <label class="check svelte-XXXXX"><input type="checkbox"/> Visible label</label>.
     // Svelte 5 SSR adds a scoped class suffix; the regex accepts any class
     // attribute that begins with "check".
-    const labelRegex = /<label[^>]*class="check(?:\s[^"]*)?"[^>]*>[\s\S]*?<input[^>]*?\/?>\s*([^<]+?)\s*<\/label>/g;
+    const labelRegex =
+      /<label[^>]*class="check(?:\s[^"]*)?"[^>]*>[\s\S]*?<input[^>]*?\/?>\s*([^<]+?)\s*<\/label>/g;
     const labels: string[] = [];
     let match: RegExpExecArray | null;
     while ((match = labelRegex.exec(fieldsetHtml)) !== null) {
@@ -257,9 +258,7 @@ describe("Plan 02.1-21 — schema prop honored", () => {
   });
 
   it("FilterChips schema=['action'] emits ONLY the action chip (no kind/source/show/authorIsMe)", async () => {
-    const FilterChips = (
-      await import("../../src/lib/components/FilterChips.svelte")
-    ).default;
+    const FilterChips = (await import("../../src/lib/components/FilterChips.svelte")).default;
     const out = render(FilterChips, {
       props: {
         filters: {
@@ -290,9 +289,7 @@ describe("Plan 02.1-21 — schema prop honored", () => {
   });
 
   it("FilterChips schema=['kind','source','show','authorIsMe'] never emits an action chip even when filters.action is populated", async () => {
-    const FilterChips = (
-      await import("../../src/lib/components/FilterChips.svelte")
-    ).default;
+    const FilterChips = (await import("../../src/lib/components/FilterChips.svelte")).default;
     const out = render(FilterChips, {
       props: {
         filters: {
@@ -361,8 +358,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
   };
 
   it("renders class:mine on the root <article> when event.authorIsMe=true (border-left accent gate)", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: { ...baseEvent, authorIsMe: true },
@@ -372,14 +368,11 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
       },
     });
     // Svelte 5 SSR may add a scoped class suffix — match `mine` as a class token.
-    expect(out.body).toMatch(
-      /<article[^>]*class="[^"]*\bmine\b[^"]*"[^>]*>/,
-    );
+    expect(out.body).toMatch(/<article[^>]*class="[^"]*\bmine\b[^"]*"[^>]*>/);
   });
 
   it("does NOT render class:mine when event.authorIsMe=false", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: { ...baseEvent, authorIsMe: false },
@@ -388,14 +381,11 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
         games: [],
       },
     });
-    expect(out.body).not.toMatch(
-      /<article[^>]*class="[^"]*\bmine\b[^"]*"[^>]*>/,
-    );
+    expect(out.body).not.toMatch(/<article[^>]*class="[^"]*\bmine\b[^"]*"[^>]*>/);
   });
 
   it("renders the top overlay with kind label AND Mine badge text when author_is_me=true", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: { ...baseEvent, authorIsMe: true },
@@ -425,8 +415,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
   });
 
   it("renders the Inbox label inside the top overlay (NOT in the meta-line) when row is in inbox", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: {
@@ -452,8 +441,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
   });
 
   it("renders <div class='games-block'> AFTER the chips-line element when game is attached", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: { ...baseEvent, gameIds: ["g-1"] },
@@ -476,8 +464,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
   });
 
   it("does NOT render games-block when game is null", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: { ...baseEvent },
@@ -490,10 +477,8 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
   });
 
   it("renders <p class='notes'> when event.notes is non-empty (clamp class applied via CSS)", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
-    const longNote =
-      "This is a long-form note about the marketing campaign. ".repeat(10);
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
+    const longNote = "This is a long-form note about the marketing campaign. ".repeat(10);
     const out = render(FeedCard, {
       props: {
         event: { ...baseEvent, notes: longNote },
@@ -508,8 +493,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
   });
 
   it("does NOT render <p class='notes'> when event.notes is null", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: { ...baseEvent, notes: null },
@@ -522,8 +506,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
   });
 
   it("renders youtube thumbnail when kind=youtube_video AND externalId present", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: { ...baseEvent, kind: "youtube_video", externalId: "abc123" },
@@ -536,8 +519,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
   });
 
   it("renders metadata.media.url thumbnail for kind=reddit_post when media present", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: {
@@ -555,8 +537,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
   });
 
   it("falls back to KindIcon (no <img>) for kind=conference (text fallback per UAT-NOTES rules)", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: {
@@ -577,8 +558,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
   });
 
   it("Plan 02.1-18 contract preserved — no inline Edit / Delete / Open buttons", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: { ...baseEvent, gameIds: ["g-1"] },
@@ -596,8 +576,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
   });
 
   it("Plan 02.1-19 contract preserved — no inline date string on the card", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: {
@@ -632,9 +611,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
  */
 describe("Plan 02.1-26 — FeedQuickNav", () => {
   it("renders <nav class='quick-nav'> with All / Inbox / Standalone fixed tabs", async () => {
-    const FeedQuickNav = (
-      await import("../../src/lib/components/FeedQuickNav.svelte")
-    ).default;
+    const FeedQuickNav = (await import("../../src/lib/components/FeedQuickNav.svelte")).default;
     const out = render(FeedQuickNav, {
       props: {
         games: [],
@@ -663,9 +640,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
   });
 
   it("renders one tab per game (up to 5 visible) with the game id and title", async () => {
-    const FeedQuickNav = (
-      await import("../../src/lib/components/FeedQuickNav.svelte")
-    ).default;
+    const FeedQuickNav = (await import("../../src/lib/components/FeedQuickNav.svelte")).default;
     const out = render(FeedQuickNav, {
       props: {
         games: [
@@ -684,9 +659,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
   });
 
   it("Inbox tab is marked active when activeShow.kind === 'inbox'", async () => {
-    const FeedQuickNav = (
-      await import("../../src/lib/components/FeedQuickNav.svelte")
-    ).default;
+    const FeedQuickNav = (await import("../../src/lib/components/FeedQuickNav.svelte")).default;
     const out = render(FeedQuickNav, {
       props: {
         games: [],
@@ -708,9 +681,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
   });
 
   it("Standalone tab is marked active when activeShow.kind === 'standalone'", async () => {
-    const FeedQuickNav = (
-      await import("../../src/lib/components/FeedQuickNav.svelte")
-    ).default;
+    const FeedQuickNav = (await import("../../src/lib/components/FeedQuickNav.svelte")).default;
     const out = render(FeedQuickNav, {
       props: {
         games: [],
@@ -725,9 +696,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
   });
 
   it("per-game tab is marked active when activeShow.kind === 'specific' AND gameIds=[that id]", async () => {
-    const FeedQuickNav = (
-      await import("../../src/lib/components/FeedQuickNav.svelte")
-    ).default;
+    const FeedQuickNav = (await import("../../src/lib/components/FeedQuickNav.svelte")).default;
     const out = render(FeedQuickNav, {
       props: {
         games: [
@@ -750,9 +719,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
   });
 
   it("All tab is the default active when activeShow.kind === 'any' (no Show param in URL)", async () => {
-    const FeedQuickNav = (
-      await import("../../src/lib/components/FeedQuickNav.svelte")
-    ).default;
+    const FeedQuickNav = (await import("../../src/lib/components/FeedQuickNav.svelte")).default;
     const out = render(FeedQuickNav, {
       props: {
         games: [{ id: "g-1", title: "Stellar Frontier" }],
@@ -774,9 +741,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
   });
 
   it("Inbox tab href = '/feed?show=inbox' when starting from an empty URL", async () => {
-    const FeedQuickNav = (
-      await import("../../src/lib/components/FeedQuickNav.svelte")
-    ).default;
+    const FeedQuickNav = (await import("../../src/lib/components/FeedQuickNav.svelte")).default;
     const out = render(FeedQuickNav, {
       props: {
         games: [],
@@ -791,9 +756,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
   });
 
   it("All tab href preserves date / kind / source / authorIsMe params (only show + game cleared)", async () => {
-    const FeedQuickNav = (
-      await import("../../src/lib/components/FeedQuickNav.svelte")
-    ).default;
+    const FeedQuickNav = (await import("../../src/lib/components/FeedQuickNav.svelte")).default;
     const out = render(FeedQuickNav, {
       props: {
         games: [],
@@ -807,9 +770,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
     // exact param order depends on URLSearchParams iteration order; assert
     // by searching the All tab anchor for each preserved key.
     // Match the All tab anchor with a regex spanning attributes.
-    const allTabMatch = out.body.match(
-      /<a[^>]*data-tab="all"[^>]*href="([^"]+)"/,
-    );
+    const allTabMatch = out.body.match(/<a[^>]*data-tab="all"[^>]*href="([^"]+)"/);
     if (!allTabMatch) {
       throw new Error("All tab href not found");
     }
@@ -824,9 +785,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
   });
 
   it("Inbox tab href clears any pre-existing ?game=… while setting ?show=inbox", async () => {
-    const FeedQuickNav = (
-      await import("../../src/lib/components/FeedQuickNav.svelte")
-    ).default;
+    const FeedQuickNav = (await import("../../src/lib/components/FeedQuickNav.svelte")).default;
     const out = render(FeedQuickNav, {
       props: {
         games: [{ id: "g-1", title: "X" }],
@@ -835,9 +794,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
         onNavigate: () => {},
       },
     });
-    const inboxMatch = out.body.match(
-      /<a[^>]*data-tab="inbox"[^>]*href="([^"]+)"/,
-    );
+    const inboxMatch = out.body.match(/<a[^>]*data-tab="inbox"[^>]*href="([^"]+)"/);
     if (!inboxMatch) {
       throw new Error("Inbox tab href not found");
     }
@@ -847,9 +804,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
   });
 
   it("per-game tab href = '/feed?show=specific&game=<id>' (single value) when starting from empty URL", async () => {
-    const FeedQuickNav = (
-      await import("../../src/lib/components/FeedQuickNav.svelte")
-    ).default;
+    const FeedQuickNav = (await import("../../src/lib/components/FeedQuickNav.svelte")).default;
     const out = render(FeedQuickNav, {
       props: {
         games: [{ id: "g-1", title: "X" }],
@@ -858,9 +813,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
         onNavigate: () => {},
       },
     });
-    const gameMatch = out.body.match(
-      /<a[^>]*data-game-id="g-1"[^>]*href="([^"]+)"/,
-    );
+    const gameMatch = out.body.match(/<a[^>]*data-game-id="g-1"[^>]*href="([^"]+)"/);
     if (!gameMatch) {
       throw new Error("Per-game tab href not found");
     }
@@ -872,9 +825,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
   });
 
   it("'More games' dropdown does NOT render when games.length <= 5", async () => {
-    const FeedQuickNav = (
-      await import("../../src/lib/components/FeedQuickNav.svelte")
-    ).default;
+    const FeedQuickNav = (await import("../../src/lib/components/FeedQuickNav.svelte")).default;
     const out = render(FeedQuickNav, {
       props: {
         games: Array.from({ length: 5 }, (_, i) => ({
@@ -894,9 +845,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
   });
 
   it("'More games' dropdown renders with overflow games when games.length > 5", async () => {
-    const FeedQuickNav = (
-      await import("../../src/lib/components/FeedQuickNav.svelte")
-    ).default;
+    const FeedQuickNav = (await import("../../src/lib/components/FeedQuickNav.svelte")).default;
     const games = Array.from({ length: 7 }, (_, i) => ({
       id: `g-${i}`,
       title: `Game ${i}`,
@@ -926,10 +875,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
   it("the strip renders horizontally — overflow-x: auto declared in component CSS", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
-    const src = fs.readFileSync(
-      path.resolve("src/lib/components/FeedQuickNav.svelte"),
-      "utf8",
-    );
+    const src = fs.readFileSync(path.resolve("src/lib/components/FeedQuickNav.svelte"), "utf8");
     // The 360px horizontal-scroll behavior is locked in via the component
     // style declaration. The end-to-end at-360px assertion is stub-skipped in
     // tests/browser/feed-360.test.ts pending the auth harness; here we lock
@@ -954,9 +900,7 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
  */
 describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
   it("PageHeader with href CTA renders <a class='cta'> as the call-to-action", async () => {
-    const PageHeader = (
-      await import("../../src/lib/components/PageHeader.svelte")
-    ).default;
+    const PageHeader = (await import("../../src/lib/components/PageHeader.svelte")).default;
     const out = render(PageHeader, {
       props: {
         title: "Data sources",
@@ -971,18 +915,13 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     // "Хочется кнопку после заголовка". The CSS is asserted on source.
     const fs = await import("node:fs");
     const path = await import("node:path");
-    const src = fs.readFileSync(
-      path.resolve("src/lib/components/PageHeader.svelte"),
-      "utf8",
-    );
+    const src = fs.readFileSync(path.resolve("src/lib/components/PageHeader.svelte"), "utf8");
     expect(src).not.toMatch(/justify-content:\s*space-between/);
     expect(src).toMatch(/display:\s*flex/);
   });
 
   it("PageHeader with onClick CTA renders <button> instead of <a>", async () => {
-    const PageHeader = (
-      await import("../../src/lib/components/PageHeader.svelte")
-    ).default;
+    const PageHeader = (await import("../../src/lib/components/PageHeader.svelte")).default;
     const out = render(PageHeader, {
       props: {
         title: "Games",
@@ -996,9 +935,7 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
   });
 
   it("PageHeader with sticky=true adds .sticky class on the root <header>", async () => {
-    const PageHeader = (
-      await import("../../src/lib/components/PageHeader.svelte")
-    ).default;
+    const PageHeader = (await import("../../src/lib/components/PageHeader.svelte")).default;
     const out = render(PageHeader, {
       props: {
         title: "Data sources",
@@ -1010,9 +947,7 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
   });
 
   it("GameCover renders <img> with the FIRST listing's coverUrl when present", async () => {
-    const GameCover = (
-      await import("../../src/lib/components/GameCover.svelte")
-    ).default;
+    const GameCover = (await import("../../src/lib/components/GameCover.svelte")).default;
     const out = render(GameCover, {
       props: {
         title: "Portal 2",
@@ -1030,9 +965,7 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
   });
 
   it("GameCover renders gradient placeholder + initials when no listing has coverUrl", async () => {
-    const GameCover = (
-      await import("../../src/lib/components/GameCover.svelte")
-    ).default;
+    const GameCover = (await import("../../src/lib/components/GameCover.svelte")).default;
     const out = render(GameCover, {
       props: {
         title: "Stellar Frontier",
@@ -1047,9 +980,7 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
   });
 
   it("GameCover renders <img> when listings is empty AND skips placeholder when coverUrl present in any listing", async () => {
-    const GameCover = (
-      await import("../../src/lib/components/GameCover.svelte")
-    ).default;
+    const GameCover = (await import("../../src/lib/components/GameCover.svelte")).default;
     // Empty listings → placeholder.
     const empty = render(GameCover, {
       props: { title: "HADES", listings: [] },
@@ -1061,10 +992,7 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
   it("GameCover comments document the Phase 3+ deferred manual-upload path", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
-    const src = fs.readFileSync(
-      path.resolve("src/lib/components/GameCover.svelte"),
-      "utf8",
-    );
+    const src = fs.readFileSync(path.resolve("src/lib/components/GameCover.svelte"), "utf8");
     expect(src).toMatch(/TODO Phase 3\+/);
   });
 
@@ -1075,9 +1003,8 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     // is NOT rendered when name is present is INVERTED — the app id is
     // ALWAYS visible because it is technical metadata users need to
     // disambiguate listings (e.g. Portal 2 main app vs Portal 2 demo).
-    const SteamListingRow = (
-      await import("../../src/lib/components/SteamListingRow.svelte")
-    ).default;
+    const SteamListingRow = (await import("../../src/lib/components/SteamListingRow.svelte"))
+      .default;
     const out = render(SteamListingRow, {
       props: {
         listing: {
@@ -1107,9 +1034,8 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     // user direction wanted human-readable text (the appId surfaces in
     // its own line via m.steam_listing_app_id, so the fallback no longer
     // duplicates that information).
-    const SteamListingRow = (
-      await import("../../src/lib/components/SteamListingRow.svelte")
-    ).default;
+    const SteamListingRow = (await import("../../src/lib/components/SteamListingRow.svelte"))
+      .default;
     const out = render(SteamListingRow, {
       props: {
         listing: {
@@ -1132,9 +1058,8 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
   });
 
   it("SteamListingRow Open-on-Steam href targets store.steampowered.com/app/{appId}/", async () => {
-    const SteamListingRow = (
-      await import("../../src/lib/components/SteamListingRow.svelte")
-    ).default;
+    const SteamListingRow = (await import("../../src/lib/components/SteamListingRow.svelte"))
+      .default;
     const out = render(SteamListingRow, {
       props: {
         listing: {
@@ -1148,9 +1073,7 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
         },
       },
     });
-    expect(out.body).toMatch(
-      /<a[^>]*href="https:\/\/store\.steampowered\.com\/app\/1145360\/"/,
-    );
+    expect(out.body).toMatch(/<a[^>]*href="https:\/\/store\.steampowered\.com\/app\/1145360\/"/);
     expect(out.body).toMatch(/target="_blank"/);
     expect(out.body).toMatch(/rel="noopener noreferrer"/);
     // Paraglide label renders. Plan 02.1-39 §5.3 introduced
@@ -1164,20 +1087,13 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
   it("SourceRow.svelte source carries the Mine treatment CSS rule + kind label", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
-    const src = fs.readFileSync(
-      path.resolve("src/lib/components/SourceRow.svelte"),
-      "utf8",
-    );
+    const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
     // class:mine on root .row div + .row.mine border-left rule.
     expect(src).toMatch(/class:mine=\{source\.isOwnedByMe\}/);
-    expect(src).toMatch(
-      /\.row\.mine\s*\{[\s\S]*?border-left:\s*4px solid var\(--color-accent\)/,
-    );
+    expect(src).toMatch(/\.row\.mine\s*\{[\s\S]*?border-left:\s*4px solid var\(--color-accent\)/);
     // ownership-badge.mine upgraded to overlay-mine visual style (accent
     // background + accent-text).
-    expect(src).toMatch(
-      /\.ownership-badge\.mine[\s\S]*?background:\s*var\(--color-accent\)/,
-    );
+    expect(src).toMatch(/\.ownership-badge\.mine[\s\S]*?background:\s*var\(--color-accent\)/);
     // Kind label rendered next to the icon via kindLabel(SourceKind).
     expect(src).toMatch(/kindLabel/);
     expect(src).toMatch(/source_kind_label_youtube_channel/);
@@ -1190,10 +1106,7 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
   it("/games/[id]/+page.svelte renders the three-section layout (Plan 02.1-39 §5.3 + round-6 polish #13/#14b)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
-    const src = fs.readFileSync(
-      path.resolve("src/routes/games/[gameId]/+page.svelte"),
-      "utf8",
-    );
+    const src = fs.readFileSync(path.resolve("src/routes/games/[gameId]/+page.svelte"), "utf8");
     // Plan 02.1-39 (UAT-NOTES.md §5.3): three labelled sections — Игра /
     // Магазины / Лента — replace Plan 02.1-25's two-card layout AND Plan
     // 02.1-30's intermediate "lean header + StoresSection + events-feed"
@@ -1266,10 +1179,7 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     it("removes the 'Game' section heading; PageHeader carries the game title + Edit cta", async () => {
       const fs = await import("node:fs");
       const path = await import("node:path");
-      const src = fs.readFileSync(
-        path.resolve("src/routes/games/[gameId]/+page.svelte"),
-        "utf8",
-      );
+      const src = fs.readFileSync(path.resolve("src/routes/games/[gameId]/+page.svelte"), "utf8");
       const markupOnly = src.replace(/<script[\s\S]*?<\/script>/g, "");
       // The §5.3 section-header row inside <section class="game-info">
       // is gone — there's no <header class="section-header"> anywhere
@@ -1326,9 +1236,7 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
       // extract the .stores section and assert the CTA lives in its
       // <header class="section-header"> block.
       const pageMarkup = pageSrc.replace(/<script[\s\S]*?<\/script>/g, "");
-      const storesSectionMatch = pageMarkup.match(
-        /<section[^>]*class="stores"[\s\S]*?<\/section>/,
-      );
+      const storesSectionMatch = pageMarkup.match(/<section[^>]*class="stores"[\s\S]*?<\/section>/);
       expect(storesSectionMatch, "stores section must render").not.toBeNull();
       const storesSection = storesSectionMatch![0]!;
       // Section-header carries the CTA + h2.
@@ -1391,10 +1299,9 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
       "src/routes/audit/+page.svelte",
     ]) {
       const src = fs.readFileSync(path.resolve(route), "utf8");
-      expect(
-        src,
-        `${route}: imports PageHeader`,
-      ).toMatch(/import PageHeader from "\$lib\/components\/PageHeader\.svelte"/);
+      expect(src, `${route}: imports PageHeader`).toMatch(
+        /import PageHeader from "\$lib\/components\/PageHeader\.svelte"/,
+      );
       expect(src, `${route}: renders <PageHeader`).toMatch(/<PageHeader\s/);
       // The inline <header class="head"> block is gone from the markup
       // section. Strip the <script>...</script> block first so a comment
@@ -1402,10 +1309,9 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
       // markup region is whatever sits after the closing </script> tag
       // and before <style>.
       const markupOnly = src.replace(/<script[\s\S]*?<\/script>/g, "");
-      expect(
-        markupOnly,
-        `${route}: no inline <header class="head"> in markup`,
-      ).not.toMatch(/<header[^>]*class="head"/);
+      expect(markupOnly, `${route}: no inline <header class="head"> in markup`).not.toMatch(
+        /<header[^>]*class="head"/,
+      );
     }
   });
 });
@@ -1438,9 +1344,7 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
  */
 describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () => {
   it("FeedQuickNav standalone segment renders 'Not game-related' (NOT 'Standalone')", async () => {
-    const FeedQuickNav = (
-      await import("../../src/lib/components/FeedQuickNav.svelte")
-    ).default;
+    const FeedQuickNav = (await import("../../src/lib/components/FeedQuickNav.svelte")).default;
     const out = render(FeedQuickNav, {
       props: {
         games: [],
@@ -1452,9 +1356,7 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
     // The standalone tab anchor renders the renamed copy. The data-tab
     // attribute carries the lowercase technical state name (URL contract
     // preserved); the anchor's user-facing text content is the new value.
-    const standaloneTabMatch = out.body.match(
-      /<a[^>]*data-tab="standalone"[^>]*>([^<]*)<\/a>/,
-    );
+    const standaloneTabMatch = out.body.match(/<a[^>]*data-tab="standalone"[^>]*>([^<]*)<\/a>/);
     expect(
       standaloneTabMatch,
       "Standalone tab anchor not found in FeedQuickNav SSR output",
@@ -1466,9 +1368,7 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
   });
 
   it("FilterChips chip for show=standalone reads 'Show: Not game-related'", async () => {
-    const FilterChips = (
-      await import("../../src/lib/components/FilterChips.svelte")
-    ).default;
+    const FilterChips = (await import("../../src/lib/components/FilterChips.svelte")).default;
     const out = render(FilterChips, {
       props: {
         filters: {
@@ -1502,9 +1402,7 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
     // "Not game-related") are unchanged — the only structural change is
     // <input type="radio" value="standalone"> + outer <label> → <option
     // value="standalone">label-text</option>. URL contract preserved.
-    const FiltersSheet = (
-      await import("../../src/lib/components/FiltersSheet.svelte")
-    ).default;
+    const FiltersSheet = (await import("../../src/lib/components/FiltersSheet.svelte")).default;
     const out = render(FiltersSheet, {
       props: {
         filters: {
@@ -1529,12 +1427,10 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
     expect(out.body).toContain("Not game-related");
     // The literal English "Standalone" string MUST NOT appear inside the
     // standalone option's text content.
-    const optionMatch = out.body.match(
-      /<option[^>]*value="standalone"[^>]*>([\s\S]*?)<\/option>/,
-    );
+    const optionMatch = out.body.match(/<option[^>]*value="standalone"[^>]*>([\s\S]*?)<\/option>/);
     expect(
       optionMatch,
-      "<option value=\"standalone\"> not found in FiltersSheet SSR output",
+      '<option value="standalone"> not found in FiltersSheet SSR output',
     ).not.toBeNull();
     if (optionMatch) {
       expect(optionMatch[1]!.trim()).not.toMatch(/^Standalone\b/);
@@ -1543,9 +1439,7 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
   });
 
   it("FeedCard inline 'Mark standalone' button reads 'Mark as not game-related' on inbox cards", async () => {
-    const FeedCard = (
-      await import("../../src/lib/components/FeedCard.svelte")
-    ).default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     // Inbox card (gameIds=[]) with no triage.standalone marker → renders
     // the inline mark-standalone button. The button text is the renamed
     // copy.
@@ -1575,10 +1469,7 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
     const buttonMatch = out.body.match(
       /<button[^>]*class="[^"]*standalone-button[^"]*"[^>]*>([\s\S]*?)<\/button>/,
     );
-    expect(
-      buttonMatch,
-      "standalone-button not found in inbox FeedCard SSR output",
-    ).not.toBeNull();
+    expect(buttonMatch, "standalone-button not found in inbox FeedCard SSR output").not.toBeNull();
     expect(buttonMatch![1]!.trim()).toBe("Mark as not game-related");
   });
 
@@ -1590,15 +1481,9 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
     // user-facing "not game-related" copy).
     const fs = await import("node:fs");
     const path = await import("node:path");
-    const raw = JSON.parse(
-      fs.readFileSync(path.resolve("messages/en.json"), "utf8"),
-    );
-    expect(raw.audit_action_event_marked_standalone).toBe(
-      "Event marked standalone",
-    );
-    expect(raw.audit_action_event_unmarked_standalone).toBe(
-      "Event unmarked standalone",
-    );
+    const raw = JSON.parse(fs.readFileSync(path.resolve("messages/en.json"), "utf8"));
+    expect(raw.audit_action_event_marked_standalone).toBe("Event marked standalone");
+    expect(raw.audit_action_event_unmarked_standalone).toBe("Event unmarked standalone");
   });
 
   it("messages/en.json has the renamed user-facing values for the 3 standalone keys", async () => {
@@ -1606,12 +1491,8 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
     // that flips the value back to "Standalone" trips this assertion.
     const fs = await import("node:fs");
     const path = await import("node:path");
-    const raw = JSON.parse(
-      fs.readFileSync(path.resolve("messages/en.json"), "utf8"),
-    );
-    expect(raw.feed_card_mark_standalone_button).toBe(
-      "Mark as not game-related",
-    );
+    const raw = JSON.parse(fs.readFileSync(path.resolve("messages/en.json"), "utf8"));
+    expect(raw.feed_card_mark_standalone_button).toBe("Mark as not game-related");
     expect(raw.feed_filter_show_standalone).toBe("Not game-related");
     expect(raw.feed_quick_nav_standalone).toBe("Not game-related");
   });
@@ -1644,34 +1525,24 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
   it("/audit AUDIT_SCHEMA is exactly ['action'] — no 'date' axis (UAT-NOTES.md §4.21.A)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
-    const src = fs.readFileSync(
-      path.resolve("src/routes/audit/+page.svelte"),
-      "utf8",
-    );
+    const src = fs.readFileSync(path.resolve("src/routes/audit/+page.svelte"), "utf8");
     // Match the AUDIT_SCHEMA literal — the array MUST contain 'action' and
     // MUST NOT contain 'date'. The page-level DateRangeControl above
     // FilterChips is the single source of truth for date filtering on
     // /audit; the in-sheet date axis was duplicating that control.
     const match = src.match(/const AUDIT_SCHEMA\s*=\s*(\[[^\]]*\])/);
-    expect(
-      match,
-      "src/routes/audit/+page.svelte: AUDIT_SCHEMA literal not found",
-    ).not.toBeNull();
+    expect(match, "src/routes/audit/+page.svelte: AUDIT_SCHEMA literal not found").not.toBeNull();
     const literal = match![1]!;
     expect(literal).toMatch(/"action"/);
-    expect(
-      literal,
-      "AUDIT_SCHEMA still references 'date' — Plan 02.1-34 removes it",
-    ).not.toMatch(/"date"/);
+    expect(literal, "AUDIT_SCHEMA still references 'date' — Plan 02.1-34 removes it").not.toMatch(
+      /"date"/,
+    );
   });
 
   it("/feed FEED_SCHEMA does NOT include 'date' (Plan 02.1-39 round-6 polish #9 reversal of Plan 02.1-21 in-sheet date axis)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
-    const src = fs.readFileSync(
-      path.resolve("src/routes/feed/+page.svelte"),
-      "utf8",
-    );
+    const src = fs.readFileSync(path.resolve("src/routes/feed/+page.svelte"), "utf8");
     // Plan 02.1-39 round-6 polish #9 (UAT-NOTES.md §5.6 follow-up #9,
     // 2026-04-30) — user during round-6 UAT: "в фильрах в feed не нужна
     // дата, дату мы задаем до выбора фильтров." The always-visible
@@ -1683,10 +1554,7 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     // 'kind','source','show','authorIsMe' and MUST NOT contain 'date'.
     // Mirrors the Plan 02.1-34 AUDIT_SCHEMA assertion shape.
     const match = src.match(/const FEED_SCHEMA\s*=\s*(\[[^\]]*\])/);
-    expect(
-      match,
-      "src/routes/feed/+page.svelte: FEED_SCHEMA literal not found",
-    ).not.toBeNull();
+    expect(match, "src/routes/feed/+page.svelte: FEED_SCHEMA literal not found").not.toBeNull();
     const literal = match![1]!;
     expect(literal).toMatch(/"kind"/);
     expect(literal).toMatch(/"source"/);
@@ -1721,15 +1589,12 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     // all params; it MUST delete the chip-owned axes.
     const fs = await import("node:fs");
     const path = await import("node:path");
-    const src = fs.readFileSync(
-      path.resolve("src/routes/feed/+page.svelte"),
-      "utf8",
-    );
+    const src = fs.readFileSync(path.resolve("src/routes/feed/+page.svelte"), "utf8");
     // Match the clearAll function body. The closing brace of the function
     // is the next standalone `}` on its own line at the same indent as
     // `function clearAll`. Use a non-greedy capture that stops at the
     // first `\n  }\n` (two-space indent matches /feed/+page.svelte style).
-    const match = src.match(/function clearAll\(\):\s*void\s*\{([\s\S]*?)\n  \}/);
+    const match = src.match(/function clearAll\(\):\s*void\s*\{([\s\S]*?)\n {2}\}/);
     expect(
       match,
       "src/routes/feed/+page.svelte: clearAll() function body not found",
@@ -1738,7 +1603,7 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     // Old behavior MUST be gone — `?all=1` reset wiped the date range.
     expect(
       body,
-      "clearAll() still uses goto(\"/feed?all=1\") — round-6 polish #10 removes the date-wipe behavior",
+      'clearAll() still uses goto("/feed?all=1") — round-6 polish #10 removes the date-wipe behavior',
     ).not.toMatch(/goto\(["']\/feed\?all=1["']\)/);
     // Chip-owned axes MUST be deleted.
     expect(body).toMatch(/params\.delete\(["']kind["']\)/);
@@ -1796,8 +1661,7 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     // Same logic as above but starting from ?all=1 (user clicked × on
     // <DateRangeControl> for all-time view). Clear filters MUST NOT wipe
     // that — the user explicitly chose all-time, so it survives.
-    const initial =
-      "?all=1&kind=youtube_video&source=src-1&show=standalone&authorIsMe=false";
+    const initial = "?all=1&kind=youtube_video&source=src-1&show=standalone&authorIsMe=false";
     const params = new URLSearchParams(initial);
     params.delete("kind");
     params.delete("source");
@@ -1813,19 +1677,14 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
   it("FiltersSheet.svelte no longer references document.body.style.overflow in code (UAT-NOTES.md §4.22.F)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
-    const src = fs.readFileSync(
-      path.resolve("src/lib/components/FiltersSheet.svelte"),
-      "utf8",
-    );
+    const src = fs.readFileSync(path.resolve("src/lib/components/FiltersSheet.svelte"), "utf8");
     // Plan 02.1-22's imperative approach (document.body.style.overflow =
     // 'hidden' / '') is replaced by declarative CSS :has(dialog[open]) in
     // src/app.css. The component MUST NOT touch document.body.style at all
     // in CODE — drift is a regression candidate. Comments referring to the
     // historical approach are fine (and useful for reviewers); the test
     // strips // single-line and /* ... */ block comments before matching.
-    const codeOnly = src
-      .replace(/\/\/[^\n]*/g, "")
-      .replace(/\/\*[\s\S]*?\*\//g, "");
+    const codeOnly = src.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
     expect(
       codeOnly,
       "FiltersSheet.svelte still imperatively sets document.body.style.overflow — Plan 02.1-34 removes that path in favor of CSS :has()",
@@ -1841,10 +1700,9 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     // The rule must be present AND apply overflow: hidden. Whitespace
     // tolerant; the CSS minifier may collapse whitespace at build time
     // but the source contract is what we lock in here.
-    expect(
-      css,
-      "src/app.css missing body:has(dialog[open]) declarative scroll-lock rule",
-    ).toMatch(/body:has\(dialog\[open\]\)\s*\{[^}]*overflow:\s*hidden/);
+    expect(css, "src/app.css missing body:has(dialog[open]) declarative scroll-lock rule").toMatch(
+      /body:has\(dialog\[open\]\)\s*\{[^}]*overflow:\s*hidden/,
+    );
   });
 
   it("src/app.css uses overflow-x: clip on body (NOT hidden) — sticky regression-source guard (UAT-NOTES.md §4.22.A)", async () => {
@@ -1865,10 +1723,7 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     // block AND strips CSS comments — comments referring to the historical
     // approach are fine (and useful for reviewers).
     const htmlBodyBlock = css.match(/html,\s*\n?body\s*\{[\s\S]*?\}/);
-    expect(
-      htmlBodyBlock,
-      "html, body { ... } block not located in src/app.css",
-    ).not.toBeNull();
+    expect(htmlBodyBlock, "html, body { ... } block not located in src/app.css").not.toBeNull();
     const htmlBodyCodeOnly = htmlBodyBlock![0].replace(/\/\*[\s\S]*?\*\//g, "");
     expect(
       htmlBodyCodeOnly,
@@ -2083,8 +1938,7 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
   };
 
   it("Plan 02.1-32 — FeedCard with gameIds.length > 0 does NOT render AttachToGamePicker (closes §4.24.E)", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: { ...baseEvent, gameIds: ["g-1"] },
@@ -2102,8 +1956,7 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
   });
 
   it("Plan 02.1-32 — FeedCard with metadata.triage.standalone === true does NOT render AttachToGamePicker (closes §4.24.E)", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: {
@@ -2120,8 +1973,7 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
   });
 
   it("Plan 02.1-32 — FeedCard inbox row (gameIds=[], no triage flags) renders AttachToGamePicker WITH compact class (closes §4.24.F)", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte"))
-      .default;
+    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: {
@@ -2137,17 +1989,14 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
     // The picker-line is rendered (inbox row).
     expect(out.body).toMatch(/class="picker-line(?:\s[^"]*)?"/);
     // The trigger button carries the compact class.
-    expect(out.body).toMatch(
-      /<button[^>]*class="trigger(?:\s[^"]*)?\s+compact(?:\s[^"]*)?"/,
-    );
+    expect(out.body).toMatch(/<button[^>]*class="trigger(?:\s[^"]*)?\s+compact(?:\s[^"]*)?"/);
     // The compact-mode label is rendered (see messages/en.json).
     expect(out.body).toContain("Attach");
   });
 
   it("Plan 02.1-32 — AttachToGamePicker compact={true} swaps the trigger label to feed_card_attach_compact_label (closes §4.24.F)", async () => {
-    const AttachToGamePicker = (
-      await import("../../src/lib/components/AttachToGamePicker.svelte")
-    ).default;
+    const AttachToGamePicker = (await import("../../src/lib/components/AttachToGamePicker.svelte"))
+      .default;
     const out = render(AttachToGamePicker, {
       props: {
         event: { id: "ev-1", gameIds: [] as string[] },
@@ -2160,9 +2009,8 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
   });
 
   it("Plan 02.1-32 — AttachToGamePicker compact={false} (default) keeps the original 'Attach to game' label", async () => {
-    const AttachToGamePicker = (
-      await import("../../src/lib/components/AttachToGamePicker.svelte")
-    ).default;
+    const AttachToGamePicker = (await import("../../src/lib/components/AttachToGamePicker.svelte"))
+      .default;
     const out = render(AttachToGamePicker, {
       props: {
         event: { id: "ev-1", gameIds: [] as string[] },
@@ -2177,10 +2025,7 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
 
   it("Plan 02.1-32 — /events/[id]/+page.svelte renders an edit-pencil link top-right; NO Delete button (closes §4.18.A + §4.18.B)", async () => {
     const fs = await import("node:fs");
-    const src = fs.readFileSync(
-      "src/routes/events/[id]/+page.svelte",
-      "utf8",
-    );
+    const src = fs.readFileSync("src/routes/events/[id]/+page.svelte", "utf8");
     // Edit pencil link is present.
     expect(src).toMatch(/class="edit-pencil"/);
     // CSS rule for absolute positioning is present.
@@ -2195,10 +2040,7 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
 
   it("Plan 02.1-32 — /events/[id]/edit/+page.svelte ships standalone toggle + Delete button at footer (closes §4.18.A + §4.24.D)", async () => {
     const fs = await import("node:fs");
-    const src = fs.readFileSync(
-      "src/routes/events/[id]/edit/+page.svelte",
-      "utf8",
-    );
+    const src = fs.readFileSync("src/routes/events/[id]/edit/+page.svelte", "utf8");
     // Standalone toggle state + conflict guard derivation present.
     expect(src).toMatch(/editStandalone/);
     expect(src).toMatch(/standaloneConflict/);
@@ -2240,9 +2082,7 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
  */
 describe("Plan 02.1-39 round-6 polish #11 follow-up — RecoveryDialog parity across /feed, /games, /sources", () => {
   it("PageHeader renders a recovery-link <button> when deletedCount > 0 AND onOpenRecovery is provided", async () => {
-    const PageHeader = (
-      await import("../../src/lib/components/PageHeader.svelte")
-    ).default;
+    const PageHeader = (await import("../../src/lib/components/PageHeader.svelte")).default;
     const out = render(PageHeader, {
       props: {
         title: "Feed",
@@ -2263,9 +2103,7 @@ describe("Plan 02.1-39 round-6 polish #11 follow-up — RecoveryDialog parity ac
   });
 
   it("PageHeader does NOT render the recovery-link button when deletedCount is 0", async () => {
-    const PageHeader = (
-      await import("../../src/lib/components/PageHeader.svelte")
-    ).default;
+    const PageHeader = (await import("../../src/lib/components/PageHeader.svelte")).default;
     const out = render(PageHeader, {
       props: {
         title: "Games",
@@ -2279,9 +2117,7 @@ describe("Plan 02.1-39 round-6 polish #11 follow-up — RecoveryDialog parity ac
   });
 
   it("PageHeader does NOT render the recovery-link button when onOpenRecovery is omitted (defense-in-depth)", async () => {
-    const PageHeader = (
-      await import("../../src/lib/components/PageHeader.svelte")
-    ).default;
+    const PageHeader = (await import("../../src/lib/components/PageHeader.svelte")).default;
     const out = render(PageHeader, {
       props: {
         title: "Data sources",
@@ -2304,30 +2140,24 @@ describe("Plan 02.1-39 round-6 polish #11 follow-up — RecoveryDialog parity ac
       "src/routes/sources/+page.svelte",
     ]) {
       const src = fs.readFileSync(path.resolve(route), "utf8");
-      expect(
-        src,
-        `${route}: imports RecoveryDialog`,
-      ).toMatch(/import RecoveryDialog from "\$lib\/components\/RecoveryDialog\.svelte"/);
+      expect(src, `${route}: imports RecoveryDialog`).toMatch(
+        /import RecoveryDialog from "\$lib\/components\/RecoveryDialog\.svelte"/,
+      );
       expect(src, `${route}: mounts <RecoveryDialog`).toMatch(/<RecoveryDialog\s/);
       // entityType is the load-bearing discriminator — every consumer
       // must pass one of the three known values. The dialog's prop type
       // is a literal union "game" | "source" | "event"; the regex below
       // catches any of the three.
-      expect(
-        src,
-        `${route}: passes entityType="event" | "game" | "source"`,
-      ).toMatch(/entityType="(event|game|source)"/);
+      expect(src, `${route}: passes entityType="event" | "game" | "source"`).toMatch(
+        /entityType="(event|game|source)"/,
+      );
       // PageHeader receives the callback via the new prop name (round-6
       // #11 replaced recoveryAnchor with onOpenRecovery).
-      expect(
-        src,
-        `${route}: PageHeader receives onOpenRecovery callback`,
-      ).toMatch(/onOpenRecovery=\{/);
+      expect(src, `${route}: PageHeader receives onOpenRecovery callback`).toMatch(
+        /onOpenRecovery=\{/,
+      );
       // Negative: the previous Path A `recoveryAnchor=` prop is gone.
-      expect(
-        src,
-        `${route}: legacy recoveryAnchor prop removed`,
-      ).not.toMatch(/recoveryAnchor=/);
+      expect(src, `${route}: legacy recoveryAnchor prop removed`).not.toMatch(/recoveryAnchor=/);
     }
   });
 
@@ -2356,10 +2186,9 @@ describe("Plan 02.1-39 round-6 polish #11 follow-up — RecoveryDialog parity ac
       //   /feed   → <div id="deleted-events"><DeletedEventsPanel />  (already
       //             removed by c98eadf; re-asserted here to keep the parity
       //             sweep symmetric across all three pages).
-      expect(
-        markupOnly,
-        `${route}: no <details class="trash"> bottom recovery block`,
-      ).not.toMatch(/<details[^>]*class="[^"]*\btrash\b/);
+      expect(markupOnly, `${route}: no <details class="trash"> bottom recovery block`).not.toMatch(
+        /<details[^>]*class="[^"]*\btrash\b/,
+      );
       expect(
         markupOnly,
         `${route}: no <details class="deleted-sources"> bottom recovery block`,

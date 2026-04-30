@@ -49,13 +49,10 @@ export async function fetchSteamAppDetails(appId: number): Promise<SteamAppDetai
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 5000);
   try {
-    const res = await fetch(
-      `https://store.steampowered.com/api/appdetails?appids=${appId}&l=en`,
-      {
-        signal: ctrl.signal,
-        headers: { "user-agent": "neotolis-game-promotion-diary/0.1" },
-      },
-    );
+    const res = await fetch(`https://store.steampowered.com/api/appdetails?appids=${appId}&l=en`, {
+      signal: ctrl.signal,
+      headers: { "user-agent": "neotolis-game-promotion-diary/0.1" },
+    });
     if (!res.ok) {
       logger.warn({ appId, status: res.status }, "steam appdetails non-2xx");
       return null;

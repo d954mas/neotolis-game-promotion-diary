@@ -87,28 +87,15 @@
   <div class="inputs">
     <label class="input-wrap">
       <span class="input-label">{m.feed_date_range_label_from()}</span>
-      <input
-        type="date"
-        bind:value={fromVal}
-        max={toVal || undefined}
-        onchange={applyInputs}
-      />
+      <input type="date" bind:value={fromVal} max={toVal || undefined} onchange={applyInputs} />
     </label>
     <label class="input-wrap">
       <span class="input-label">{m.feed_date_range_label_to()}</span>
-      <input
-        type="date"
-        bind:value={toVal}
-        min={fromVal || undefined}
-        onchange={applyInputs}
-      />
+      <input type="date" bind:value={toVal} min={fromVal || undefined} onchange={applyInputs} />
     </label>
-    <button
-      type="button"
-      class="clear"
-      aria-label={m.feed_date_range_clear()}
-      onclick={clearRange}
-    >×</button>
+    <button type="button" class="clear" aria-label={m.feed_date_range_clear()} onclick={clearRange}
+      >×</button
+    >
   </div>
   <div class="presets">
     <button

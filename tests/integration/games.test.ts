@@ -46,7 +46,9 @@ describe("games CRUD (GAMES-01, GAMES-02)", () => {
 
     const audits = await db.select().from(auditLog).where(eq(auditLog.userId, userA.id));
     const createdAudit = audits.find(
-      (a) => a.action === "game.created" && (a.metadata as { gameId?: string } | null)?.gameId === game.id,
+      (a) =>
+        a.action === "game.created" &&
+        (a.metadata as { gameId?: string } | null)?.gameId === game.id,
     );
     expect(createdAudit).toBeDefined();
   });
@@ -101,10 +103,7 @@ describe("games CRUD (GAMES-01, GAMES-02)", () => {
       .update(gameSteamListings)
       .set({ deletedAt: earlyDeletedAt })
       .where(
-        and(
-          eq(gameSteamListings.userId, userA.id),
-          eq(gameSteamListings.id, earlyListing!.id),
-        ),
+        and(eq(gameSteamListings.userId, userA.id), eq(gameSteamListings.id, earlyListing!.id)),
       );
 
     // Now soft-delete the parent (which also cascades laterListing with the parent's marker).
@@ -209,9 +208,10 @@ describe("games CRUD (GAMES-01, GAMES-02)", () => {
       const userA = await seedUserDirectly({ email: "p14a-cap-a@test.local" });
       const game = await createGame(userA.id, { title: "Cap" }, "127.0.0.1");
       const tooLong = "x".repeat(2001);
-      await expect(
-        updateGame(userA.id, game.id, { description: tooLong }),
-      ).rejects.toMatchObject({ code: "validation_failed", status: 422 });
+      await expect(updateGame(userA.id, game.id, { description: tooLong })).rejects.toMatchObject({
+        code: "validation_failed",
+        status: 422,
+      });
       // Boundary case: exactly 2000 chars is OK.
       const exactly2000 = "y".repeat(2000);
       const ok = await updateGame(userA.id, game.id, { description: exactly2000 });

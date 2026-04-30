@@ -1,10 +1,7 @@
 import { error } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 import { getGameById, listGames } from "$lib/server/services/games.js";
-import {
-  listListings,
-  listSoftDeletedListings,
-} from "$lib/server/services/game-steam-listings.js";
+import { listListings, listSoftDeletedListings } from "$lib/server/services/game-steam-listings.js";
 import { listEventsForGame } from "$lib/server/services/events.js";
 import { listSources } from "$lib/server/services/data-sources.js";
 import {

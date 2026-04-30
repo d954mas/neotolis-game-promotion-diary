@@ -79,12 +79,7 @@ sourcesRoutes.post(
     const ctx = getAuditContext(c);
     const body = c.req.valid("json");
     try {
-      const row = await createSource(
-        ctx.userId,
-        body,
-        ctx.ipAddress,
-        ctx.userAgent ?? undefined,
-      );
+      const row = await createSource(ctx.userId, body, ctx.ipAddress, ctx.userAgent ?? undefined);
       return c.json(toDataSourceDto(row), 201);
     } catch (err) {
       return mapErr(c, err, "POST /api/sources");

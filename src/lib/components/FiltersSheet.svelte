@@ -179,9 +179,7 @@
     "press",
     "other",
   ];
-  const KIND_OPTIONS = $derived(
-    sortByLabel(FUNCTIONAL_KIND_OPTIONS, (k) => kindLabel(k)),
-  );
+  const KIND_OPTIONS = $derived(sortByLabel(FUNCTIONAL_KIND_OPTIONS, (k) => kindLabel(k)));
 
   // Plan 02.1-20: AUDIT_ACTIONS mirror for the /audit reuse. Inlined to keep
   // this client-side component out of server modules. Drift caught by
@@ -266,9 +264,7 @@
     }
   }
 
-  const ACTION_OPTIONS = $derived(
-    sortByLabel(AUDIT_ACTIONS_MIRROR, (a) => auditActionLabel(a)),
-  );
+  const ACTION_OPTIONS = $derived(sortByLabel(AUDIT_ACTIONS_MIRROR, (a) => auditActionLabel(a)));
 
   function kindLabel(k: string): string {
     switch (k) {
@@ -311,9 +307,7 @@
   );
   const filteredGames = $derived(
     games.filter(
-      (g) =>
-        gameTypeahead === "" ||
-        g.title.toLowerCase().includes(gameTypeahead.toLowerCase()),
+      (g) => gameTypeahead === "" || g.title.toLowerCase().includes(gameTypeahead.toLowerCase()),
     ),
   );
 
@@ -334,14 +328,10 @@
       // the first interactive control. Lightweight UX nice-to-have.
       if (focusAxis) {
         queueMicrotask(() => {
-          const el = dialogEl?.querySelector<HTMLElement>(
-            `[data-axis="${focusAxis}"]`,
-          );
+          const el = dialogEl?.querySelector<HTMLElement>(`[data-axis="${focusAxis}"]`);
           if (el) {
             el.scrollIntoView({ block: "nearest" });
-            const firstControl = el.querySelector<HTMLElement>(
-              "input, button, select, textarea",
-            );
+            const firstControl = el.querySelector<HTMLElement>("input, button, select, textarea");
             firstControl?.focus();
           }
         });
@@ -560,21 +550,11 @@
         <legend class="label">{m.audit_filter_date_axis_label()}</legend>
         <label class="input-wrap">
           <span class="input-label">{m.feed_date_range_label_from()}</span>
-          <input
-            type="date"
-            class="input"
-            bind:value={fromVal}
-            max={toVal || undefined}
-          />
+          <input type="date" class="input" bind:value={fromVal} max={toVal || undefined} />
         </label>
         <label class="input-wrap">
           <span class="input-label">{m.feed_date_range_label_to()}</span>
-          <input
-            type="date"
-            class="input"
-            bind:value={toVal}
-            min={fromVal || undefined}
-          />
+          <input type="date" class="input" bind:value={toVal} min={fromVal || undefined} />
         </label>
       </fieldset>
     {/if}

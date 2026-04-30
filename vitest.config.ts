@@ -144,9 +144,7 @@ export default defineConfig({
                 const ctx = context.provider.getCommandsContext(context.sessionId) as {
                   page: { evaluate: <T>(fn: () => T) => Promise<T> };
                 };
-                return ctx.page.evaluate(
-                  () => window.getComputedStyle(document.body).overflowX,
-                );
+                return ctx.page.evaluate(() => window.getComputedStyle(document.body).overflowX);
               },
             },
           },

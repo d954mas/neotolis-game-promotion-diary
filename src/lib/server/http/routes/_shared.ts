@@ -58,8 +58,7 @@ export function mapErr(c: Context, err: unknown, route: string): Response {
     // anti-pattern of parsing the human-readable message string. Empty
     // metadata stays omitted from the wire so callers without metadata
     // see the exact same {error: code} body they always have.
-    const hasMetadata =
-      err.metadata && Object.keys(err.metadata).length > 0;
+    const hasMetadata = err.metadata && Object.keys(err.metadata).length > 0;
     if (hasMetadata) {
       return c.json(
         { error: err.code, metadata: err.metadata },

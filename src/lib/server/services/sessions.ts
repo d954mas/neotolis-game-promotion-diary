@@ -46,10 +46,7 @@ export async function listSessions(userId: string): Promise<SessionRow[]> {
  * deleted (e.g. concurrent sign-out from another tab), the second call also
  * throws NotFoundError so the UI can refresh and show the up-to-date list.
  */
-export async function deleteSessionById(
-  userId: string,
-  sessionId: string,
-): Promise<void> {
+export async function deleteSessionById(userId: string, sessionId: string): Promise<void> {
   const result = await db
     .delete(session)
     .where(and(eq(session.userId, userId), eq(session.id, sessionId)))

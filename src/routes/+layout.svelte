@@ -94,10 +94,7 @@
     if (!chrome) return;
     const root = document.documentElement;
     const sync = (): void => {
-      root.style.setProperty(
-        "--chrome-height",
-        `${chrome.getBoundingClientRect().height}px`,
-      );
+      root.style.setProperty("--chrome-height", `${chrome.getBoundingClientRect().height}px`);
     };
     sync();
     const ro = new ResizeObserver(sync);

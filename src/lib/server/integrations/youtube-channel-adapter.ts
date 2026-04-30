@@ -21,9 +21,7 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
   // metadata.uploads_playlist_id, paginate by pageToken. Dedup is the
   // events service's job (UNIQUE(user_id, kind, source_id, external_id)).
   async pollContent(_source: DataSourceRow, _since: Date): Promise<RawEvent[]> {
-    throw new Error(
-      "youtube_channel.pollContent: implemented in Phase 3 alongside the worker",
-    );
+    throw new Error("youtube_channel.pollContent: implemented in Phase 3 alongside the worker");
   },
 
   // Phase 3 fills this in: googleapis videos.list batched (50 ids per call,
@@ -31,8 +29,6 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
   // spike). Source is nullable so manual-paste pollable events (CONTEXT D-05
   // / D-06) get the same treatment as source-attached events.
   async pollStats(_event: EventRow, _source: DataSourceRow | null): Promise<StatsSnapshot> {
-    throw new Error(
-      "youtube_channel.pollStats: implemented in Phase 3 alongside the worker",
-    );
+    throw new Error("youtube_channel.pollStats: implemented in Phase 3 alongside the worker");
   },
 };

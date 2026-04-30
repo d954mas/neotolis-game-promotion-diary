@@ -159,10 +159,9 @@
   );
 
   async function restoreListingFn(listingId: string): Promise<void> {
-    const res = await fetch(
-      `/api/games/${game.id}/listings/${listingId}/restore`,
-      { method: "POST" },
-    );
+    const res = await fetch(`/api/games/${game.id}/listings/${listingId}/restore`, {
+      method: "POST",
+    });
     if (res.ok || res.status === 200) {
       await invalidateAll();
       if (deletedListings.length <= 1) recoveryOpen = false;
@@ -295,19 +294,11 @@
 <section class="stores" id="section-stores">
   <header class="section-header">
     <h2>{m.games_detail_section_stores()}</h2>
-    <button
-      type="button"
-      class="cta-secondary add-store-cta"
-      onclick={() => (addStoreOpen = true)}
-    >
+    <button type="button" class="cta-secondary add-store-cta" onclick={() => (addStoreOpen = true)}>
       + {m.stores_add_cta()}
     </button>
   </header>
-  <StoresSection
-    {listings}
-    gameId={game.id}
-    onChange={() => invalidateAll()}
-  />
+  <StoresSection {listings} gameId={game.id} onChange={() => invalidateAll()} />
 </section>
 
 <section class="events" id="section-events">
@@ -319,10 +310,7 @@
   </header>
 
   {#if events.length === 0}
-    <EmptyState
-      heading={m.games_detail_events_empty()}
-      body={m.empty_feed_filtered_body()}
-    />
+    <EmptyState heading={m.games_detail_events_empty()} body={m.empty_feed_filtered_body()} />
   {:else}
     <div class="feedcard-grid">
       {#each groupedEvents as group (group.date)}
@@ -331,9 +319,7 @@
           <FeedCard
             event={ev}
             source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
-            game={ev.gameIds.length > 0
-              ? (gameById.get(ev.gameIds[0]!) ?? null)
-              : null}
+            game={ev.gameIds.length > 0 ? (gameById.get(ev.gameIds[0]!) ?? null) : null}
             games={allGames}
             onChanged={() => invalidateAll()}
           />

@@ -103,9 +103,7 @@ describe("logger redaction", () => {
         // Strip multi-line block comments (including JSDoc) at file level,
         // preserving newlines so per-line indices stay aligned with the
         // original file. Then split into lines and strip line comments.
-        const blockStripped = src.replace(/\/\*[\s\S]*?\*\//g, (m) =>
-          m.replace(/[^\n]/g, ""),
-        );
+        const blockStripped = src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ""));
         const lines = blockStripped.split(/\r?\n/);
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i]!;
@@ -145,9 +143,7 @@ export function load() {
   return { ok: true };
 }
 `;
-    const blockStripped = fixture.replace(/\/\*[\s\S]*?\*\//g, (m) =>
-      m.replace(/[^\n]/g, ""),
-    );
+    const blockStripped = fixture.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ""));
     const stripped = blockStripped
       .split(/\r?\n/)
       .map((line) => line.replace(/\/\/.*$/, ""))

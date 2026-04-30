@@ -75,8 +75,7 @@
     letter-spacing: 0.04em;
     position: sticky;
     top: calc(
-      var(--chrome-height, 116px) + var(--page-header-height, 56px) -
-        var(--sticky-overlap, 1px)
+      var(--chrome-height, 116px) + var(--page-header-height, 56px) - var(--sticky-overlap, 1px)
     );
     background: var(--color-bg);
     z-index: 1;

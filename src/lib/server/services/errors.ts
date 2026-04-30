@@ -27,12 +27,7 @@ export class AppError extends Error {
    */
   readonly metadata: Record<string, unknown>;
 
-  constructor(
-    message: string,
-    code: string,
-    status: number,
-    metadata?: Record<string, unknown>,
-  ) {
+  constructor(message: string, code: string, status: number, metadata?: Record<string, unknown>) {
     super(message);
     this.code = code;
     this.status = status;

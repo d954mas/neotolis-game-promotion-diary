@@ -409,9 +409,7 @@ export async function loadGameIdsForEvents(
   const rows = await db
     .select({ eventId: eventGames.eventId, gameId: eventGames.gameId })
     .from(eventGames)
-    .where(
-      and(eq(eventGames.userId, userId), inArray(eventGames.eventId, eventIds)),
-    );
+    .where(and(eq(eventGames.userId, userId), inArray(eventGames.eventId, eventIds)));
   const map = new Map<string, string[]>();
   for (const r of rows) {
     const existing = map.get(r.eventId) ?? [];
@@ -425,10 +423,7 @@ export async function loadGameIdsForEvents(
  * Convenience: load the gameIds for one event. Single-event detail
  * pages use this so they don't need to wrap a single id in an array.
  */
-export async function loadGameIdsForEvent(
-  userId: string,
-  eventId: string,
-): Promise<string[]> {
+export async function loadGameIdsForEvent(userId: string, eventId: string): Promise<string[]> {
   const map = await loadGameIdsForEvents(userId, [eventId]);
   return map.get(eventId) ?? [];
 }
@@ -440,10 +435,7 @@ export async function loadGameIdsForEvent(
  * call site that no longer compiles after the toEventDto signature
  * extension.
  */
-export async function mapEventsToDtos(
-  userId: string,
-  rows: EventRow[],
-): Promise<EventDto[]> {
+export async function mapEventsToDtos(userId: string, rows: EventRow[]): Promise<EventDto[]> {
   const map = await loadGameIdsForEvents(
     userId,
     rows.map((e) => e.id),

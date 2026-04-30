@@ -41,13 +41,10 @@ vi.mock("../../src/lib/server/integrations/steam-api.js", () => ({
 }));
 
 // Re-import after the mock is registered.
-const { addSteamListing, listListings } = await import(
-  "../../src/lib/server/services/game-steam-listings.js"
-);
+const { addSteamListing, listListings } =
+  await import("../../src/lib/server/services/game-steam-listings.js");
 const { toGameSteamListingDto } = await import("../../src/lib/server/dto.js");
-const { fetchSteamAppDetails } = await import(
-  "../../src/lib/server/integrations/steam-api.js"
-);
+const { fetchSteamAppDetails } = await import("../../src/lib/server/integrations/steam-api.js");
 
 describe("Plan 02.1-25 — Steam listing name persistence", () => {
   beforeEach(() => {
@@ -89,11 +86,7 @@ describe("Plan 02.1-25 — Steam listing name persistence", () => {
     const userA = await seedUserDirectly({ email: `p25-b-${sfx()}@test.local` });
     const game = await createGame(userA.id, { title: "Steam-down case" }, "127.0.0.1");
 
-    const row = await addSteamListing(
-      userA.id,
-      { gameId: game.id, appId: 99999 },
-      "127.0.0.1",
-    );
+    const row = await addSteamListing(userA.id, { gameId: game.id, appId: 99999 }, "127.0.0.1");
 
     expect(row.name).toBeNull();
     expect(row.coverUrl).toBeNull();
@@ -212,22 +205,13 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
     const userA = await seedUserDirectly({ email: `p29-2-${sfx()}@test.local` });
     const game = await createGame(userA.id, { title: "Soft-delete cycle" }, "127.0.0.1");
 
-    const first = await addSteamListing(
-      userA.id,
-      { gameId: game.id, appId: 620 },
-      "127.0.0.1",
-    );
+    const first = await addSteamListing(userA.id, { gameId: game.id, appId: 620 }, "127.0.0.1");
 
     // Soft-delete the listing directly (mirrors removeSteamListing's UPDATE).
     await db
       .update(gameSteamListings)
       .set({ deletedAt: new Date() })
-      .where(
-        and(
-          eq(gameSteamListings.userId, userA.id),
-          eq(gameSteamListings.id, first.id),
-        ),
-      );
+      .where(and(eq(gameSteamListings.userId, userA.id), eq(gameSteamListings.id, first.id)));
 
     // Re-add same (gameId, appId): the pre-INSERT lookup MUST catch the
     // soft-deleted row (Path B contract — no isNull(deletedAt) filter).
@@ -278,12 +262,7 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
     const rows = await db
       .select()
       .from(gameSteamListings)
-      .where(
-        and(
-          eq(gameSteamListings.userId, userA.id),
-          eq(gameSteamListings.appId, 620),
-        ),
-      );
+      .where(and(eq(gameSteamListings.userId, userA.id), eq(gameSteamListings.appId, 620)));
     expect(rows).toHaveLength(2);
     const gameIds = rows.map((r) => r.gameId).sort();
     expect(gameIds).toEqual([gameA.id, gameB.id].sort());
@@ -322,20 +301,13 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
     const userA = await seedUserDirectly({ email: `p29-5a-${sfx()}@test.local` });
     const userB = await seedUserDirectly({ email: `p29-5b-${sfx()}@test.local` });
     const gameA = await createGame(userA.id, { title: "A's game" }, "127.0.0.1");
-    const listing = await addSteamListing(
-      userA.id,
-      { gameId: gameA.id, appId: 730 },
-      "127.0.0.1",
-    );
+    const listing = await addSteamListing(userA.id, { gameId: gameA.id, appId: 730 }, "127.0.0.1");
 
     // userB DELETEing against userA's listingId returns 404.
-    const res = await app.request(
-      `/api/games/${gameA.id}/listings/${listing.id}`,
-      {
-        method: "DELETE",
-        headers: { cookie: `neotolis.session_token=${userB.signedSessionCookieValue}` },
-      },
-    );
+    const res = await app.request(`/api/games/${gameA.id}/listings/${listing.id}`, {
+      method: "DELETE",
+      headers: { cookie: `neotolis.session_token=${userB.signedSessionCookieValue}` },
+    });
     expect(res.status).toBe(404);
     const bodyStr = await res.text();
     expect(bodyStr).not.toMatch(/forbidden|permission/i);
@@ -344,12 +316,7 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
     const [stillThere] = await db
       .select()
       .from(gameSteamListings)
-      .where(
-        and(
-          eq(gameSteamListings.userId, userA.id),
-          eq(gameSteamListings.id, listing.id),
-        ),
-      );
+      .where(and(eq(gameSteamListings.userId, userA.id), eq(gameSteamListings.id, listing.id)));
     expect(stillThere).toBeDefined();
     expect(stillThere?.deletedAt).toBeNull();
   });
@@ -368,11 +335,7 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
     const userA = await seedUserDirectly({ email: `p39-12a-${sfx()}@test.local` });
     const userB = await seedUserDirectly({ email: `p39-12b-${sfx()}@test.local` });
     const gameA = await createGame(userA.id, { title: "A's game" }, "127.0.0.1");
-    const listing = await addSteamListing(
-      userA.id,
-      { gameId: gameA.id, appId: 730 },
-      "127.0.0.1",
-    );
+    const listing = await addSteamListing(userA.id, { gameId: gameA.id, appId: 730 }, "127.0.0.1");
 
     // userA soft-deletes the listing first (so a row is restorable).
     await db
@@ -382,13 +345,10 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
 
     // userB POSTing against userA's restore endpoint returns 404 — no
     // discrimination between "doesn't exist" and "exists but yours not".
-    const res = await app.request(
-      `/api/games/${gameA.id}/listings/${listing.id}/restore`,
-      {
-        method: "POST",
-        headers: { cookie: `neotolis.session_token=${userB.signedSessionCookieValue}` },
-      },
-    );
+    const res = await app.request(`/api/games/${gameA.id}/listings/${listing.id}/restore`, {
+      method: "POST",
+      headers: { cookie: `neotolis.session_token=${userB.signedSessionCookieValue}` },
+    });
     expect(res.status).toBe(404);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.error).toBe("not_found");
@@ -400,12 +360,7 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
     const [stillDeleted] = await db
       .select()
       .from(gameSteamListings)
-      .where(
-        and(
-          eq(gameSteamListings.userId, userA.id),
-          eq(gameSteamListings.id, listing.id),
-        ),
-      );
+      .where(and(eq(gameSteamListings.userId, userA.id), eq(gameSteamListings.id, listing.id)));
     expect(stillDeleted).toBeDefined();
     expect(stillDeleted?.deletedAt).not.toBeNull();
   });
@@ -417,21 +372,14 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
     const app = createApp();
     const userA = await seedUserDirectly({ email: `p39-12c-${sfx()}@test.local` });
     const game = await createGame(userA.id, { title: "Hosted" }, "127.0.0.1");
-    const listing = await addSteamListing(
-      userA.id,
-      { gameId: game.id, appId: 730 },
-      "127.0.0.1",
-    );
+    const listing = await addSteamListing(userA.id, { gameId: game.id, appId: 730 }, "127.0.0.1");
 
     // Listing is active (not soft-deleted) — restore must throw NotFoundError
     // (programming error: the UI should not surface this case).
-    const res = await app.request(
-      `/api/games/${game.id}/listings/${listing.id}/restore`,
-      {
-        method: "POST",
-        headers: { cookie: `neotolis.session_token=${userA.signedSessionCookieValue}` },
-      },
-    );
+    const res = await app.request(`/api/games/${game.id}/listings/${listing.id}/restore`, {
+      method: "POST",
+      headers: { cookie: `neotolis.session_token=${userA.signedSessionCookieValue}` },
+    });
     expect(res.status).toBe(404);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.error).toBe("not_found");
@@ -453,11 +401,7 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
     const app = createApp();
     const userA = await seedUserDirectly({ email: `p39-12d-${sfx()}@test.local` });
     const game = await createGame(userA.id, { title: "Hosted" }, "127.0.0.1");
-    const listing = await addSteamListing(
-      userA.id,
-      { gameId: game.id, appId: 730 },
-      "127.0.0.1",
-    );
+    const listing = await addSteamListing(userA.id, { gameId: game.id, appId: 730 }, "127.0.0.1");
 
     // Soft-delete via the existing DELETE endpoint flow (sets deletedAt).
     await db
@@ -465,13 +409,10 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
       .set({ deletedAt: new Date() })
       .where(eq(gameSteamListings.id, listing.id));
 
-    const res = await app.request(
-      `/api/games/${game.id}/listings/${listing.id}/restore`,
-      {
-        method: "POST",
-        headers: { cookie: `neotolis.session_token=${userA.signedSessionCookieValue}` },
-      },
-    );
+    const res = await app.request(`/api/games/${game.id}/listings/${listing.id}/restore`, {
+      method: "POST",
+      headers: { cookie: `neotolis.session_token=${userA.signedSessionCookieValue}` },
+    });
     expect(res.status).toBe(200);
     const dto = (await res.json()) as Record<string, unknown>;
     expect(dto.id).toBe(listing.id);
@@ -500,9 +441,8 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
         categories: [],
         raw: {},
       });
-      const { updateListing } = await import(
-        "../../src/lib/server/services/game-steam-listings.js"
-      );
+      const { updateListing } =
+        await import("../../src/lib/server/services/game-steam-listings.js");
       const userA = await seedUserDirectly({ email: `p14c-rt-${sfx()}@test.local` });
       const game = await createGame(userA.id, { title: "Label RT" }, "127.0.0.1");
       const listing = await addSteamListing(
@@ -532,12 +472,9 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
         categories: [],
         raw: {},
       });
-      const { updateListing } = await import(
-        "../../src/lib/server/services/game-steam-listings.js"
-      );
-      const { NotFoundError } = await import(
-        "../../src/lib/server/services/errors.js"
-      );
+      const { updateListing } =
+        await import("../../src/lib/server/services/game-steam-listings.js");
+      const { NotFoundError } = await import("../../src/lib/server/services/errors.js");
       const userA = await seedUserDirectly({ email: `p14c-ct-a-${sfx()}@test.local` });
       const userB = await seedUserDirectly({ email: `p14c-ct-b-${sfx()}@test.local` });
       const aGame = await createGame(userA.id, { title: "A's" }, "127.0.0.1");
@@ -569,19 +506,12 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
         categories: [],
         raw: {},
       });
-      const { updateListing } = await import(
-        "../../src/lib/server/services/game-steam-listings.js"
-      );
-      const { NotFoundError } = await import(
-        "../../src/lib/server/services/errors.js"
-      );
+      const { updateListing } =
+        await import("../../src/lib/server/services/game-steam-listings.js");
+      const { NotFoundError } = await import("../../src/lib/server/services/errors.js");
       const userA = await seedUserDirectly({ email: `p14c-sd-${sfx()}@test.local` });
       const game = await createGame(userA.id, { title: "SD" }, "127.0.0.1");
-      const listing = await addSteamListing(
-        userA.id,
-        { gameId: game.id, appId: 620 },
-        "127.0.0.1",
-      );
+      const listing = await addSteamListing(userA.id, { gameId: game.id, appId: 620 }, "127.0.0.1");
       await db
         .update(gameSteamListings)
         .set({ deletedAt: new Date() })
@@ -612,14 +542,11 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
         "127.0.0.1",
       );
       const cookie = `neotolis.session_token=${userA.signedSessionCookieValue}`;
-      const res = await app.request(
-        `/api/games/${game.id}/listings/${listing.id}`,
-        {
-          method: "PATCH",
-          headers: { cookie, "content-type": "application/json" },
-          body: JSON.stringify({ label: "New" }),
-        },
-      );
+      const res = await app.request(`/api/games/${game.id}/listings/${listing.id}`, {
+        method: "PATCH",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ label: "New" }),
+      });
       expect(res.status).toBe(200);
       const dto = (await res.json()) as Record<string, unknown>;
       expect(dto.id).toBe(listing.id);
@@ -649,14 +576,11 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
         "127.0.0.1",
       );
       const cookieB = `neotolis.session_token=${userB.signedSessionCookieValue}`;
-      const res = await app.request(
-        `/api/games/${aGame.id}/listings/${aListing.id}`,
-        {
-          method: "PATCH",
-          headers: { cookie: cookieB, "content-type": "application/json" },
-          body: JSON.stringify({ label: "intrusion" }),
-        },
-      );
+      const res = await app.request(`/api/games/${aGame.id}/listings/${aListing.id}`, {
+        method: "PATCH",
+        headers: { cookie: cookieB, "content-type": "application/json" },
+        body: JSON.stringify({ label: "intrusion" }),
+      });
       expect(res.status).toBe(404);
       const body = await res.text();
       expect(body).not.toMatch(/forbidden/i);
@@ -678,21 +602,14 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
       const app = createApp();
       const userA = await seedUserDirectly({ email: `p14c-cap-${sfx()}@test.local` });
       const game = await createGame(userA.id, { title: "Cap" }, "127.0.0.1");
-      const listing = await addSteamListing(
-        userA.id,
-        { gameId: game.id, appId: 620 },
-        "127.0.0.1",
-      );
+      const listing = await addSteamListing(userA.id, { gameId: game.id, appId: 620 }, "127.0.0.1");
       const cookie = `neotolis.session_token=${userA.signedSessionCookieValue}`;
       const tooLong = "x".repeat(101);
-      const res = await app.request(
-        `/api/games/${game.id}/listings/${listing.id}`,
-        {
-          method: "PATCH",
-          headers: { cookie, "content-type": "application/json" },
-          body: JSON.stringify({ label: tooLong }),
-        },
-      );
+      const res = await app.request(`/api/games/${game.id}/listings/${listing.id}`, {
+        method: "PATCH",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ label: tooLong }),
+      });
       expect(res.status).toBe(422);
       const body = (await res.json()) as { error?: string };
       expect(body.error).toBe("validation_failed");

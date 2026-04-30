@@ -582,7 +582,10 @@ describe("Plan 02.1-35 — attachEventToGames transactional rollback", () => {
       ...rest: unknown[]
     ) => {
       return realTransaction(
-        async (tx: { insert: (t: unknown) => unknown }) => {
+        // Cast the inner callback to Drizzle's strict PgTransaction signature.
+        // We treat tx structurally (only need .insert / Reflect.get fall-through);
+        // the Proxy preserves runtime behavior while the cast satisfies TS.
+        (async (tx: { insert: (t: unknown) => unknown }) => {
           const proxy = new Proxy(tx, {
             get(target, prop, receiver) {
               if (prop === "insert") {
@@ -597,7 +600,7 @@ describe("Plan 02.1-35 — attachEventToGames transactional rollback", () => {
             },
           });
           return cb(proxy);
-        },
+        }) as Parameters<typeof realTransaction>[0],
         ...(rest as []),
       );
     }) as typeof db.transaction);

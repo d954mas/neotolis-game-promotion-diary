@@ -148,24 +148,24 @@
     class:active={isActive("all")}
     data-tab="all"
     href={buildHref("all")}
-    onclick={(e) => handleClick("all", e)}
-  >{m.feed_quick_nav_all()}</a>
+    onclick={(e) => handleClick("all", e)}>{m.feed_quick_nav_all()}</a
+  >
 
   <a
     class="tab"
     class:active={isActive("inbox")}
     data-tab="inbox"
     href={buildHref("inbox")}
-    onclick={(e) => handleClick("inbox", e)}
-  >{m.feed_quick_nav_inbox()}</a>
+    onclick={(e) => handleClick("inbox", e)}>{m.feed_quick_nav_inbox()}</a
+  >
 
   <a
     class="tab"
     class:active={isActive("standalone")}
     data-tab="standalone"
     href={buildHref("standalone")}
-    onclick={(e) => handleClick("standalone", e)}
-  >{m.feed_quick_nav_standalone()}</a>
+    onclick={(e) => handleClick("standalone", e)}>{m.feed_quick_nav_standalone()}</a
+  >
 
   {#each visibleGames as g (g.id)}
     <a
@@ -174,8 +174,8 @@
       data-tab="game"
       data-game-id={g.id}
       href={buildHref({ game: g.id })}
-      onclick={(e) => handleClick({ game: g.id }, e)}
-    >{g.title}</a>
+      onclick={(e) => handleClick({ game: g.id }, e)}>{g.title}</a
+    >
   {/each}
 
   {#if overflowGames.length > 0}
@@ -192,8 +192,8 @@
             onclick={(e) => {
               handleClick({ game: g.id }, e);
               dropdownOpen = false;
-            }}
-          >{g.title}</a>
+            }}>{g.title}</a
+          >
         {/each}
       </div>
     </details>

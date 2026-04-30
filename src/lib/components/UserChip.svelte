@@ -32,9 +32,7 @@
   let imageBroke = $state(false);
   let panelEl: HTMLDivElement | null = $state(null);
 
-  const initial = $derived(
-    (user.email[0] ?? user.name[0] ?? "?").toUpperCase(),
-  );
+  const initial = $derived((user.email[0] ?? user.name[0] ?? "?").toUpperCase());
 
   function toggle(): void {
     menuOpen = !menuOpen;

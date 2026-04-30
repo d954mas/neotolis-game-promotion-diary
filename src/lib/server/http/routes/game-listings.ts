@@ -128,23 +128,20 @@ gameListingsRoutes.delete("/games/:gameId/listings/:listingId", async (c) => {
 // 2026-04-30): per-game listing restore. Returns the restored listing
 // DTO on 200 so the client can update the active list without a separate
 // GET roundtrip (matches the Sources restore endpoint contract).
-gameListingsRoutes.post(
-  "/games/:gameId/listings/:listingId/restore",
-  async (c) => {
-    const ctx = getAuditContext(c);
-    try {
-      const listing = await restoreListing(
-        ctx.userId,
-        c.req.param("gameId"),
-        c.req.param("listingId"),
-        ctx.ipAddress,
-      );
-      return c.json(toGameSteamListingDto(listing));
-    } catch (err) {
-      return mapErr(c, err, "POST /api/games/:gameId/listings/:listingId/restore");
-    }
-  },
-);
+gameListingsRoutes.post("/games/:gameId/listings/:listingId/restore", async (c) => {
+  const ctx = getAuditContext(c);
+  try {
+    const listing = await restoreListing(
+      ctx.userId,
+      c.req.param("gameId"),
+      c.req.param("listingId"),
+      ctx.ipAddress,
+    );
+    return c.json(toGameSteamListingDto(listing));
+  } catch (err) {
+    return mapErr(c, err, "POST /api/games/:gameId/listings/:listingId/restore");
+  }
+});
 
 gameListingsRoutes.patch(
   "/games/:gameId/listings/:listingId/key",
@@ -156,11 +153,7 @@ gameListingsRoutes.patch(
   async (c) => {
     const { apiKeyId } = c.req.valid("json");
     try {
-      const listing = await attachKeyToListing(
-        c.var.userId,
-        c.req.param("listingId"),
-        apiKeyId,
-      );
+      const listing = await attachKeyToListing(c.var.userId, c.req.param("listingId"), apiKeyId);
       return c.json(toGameSteamListingDto(listing));
     } catch (err) {
       return mapErr(c, err, "PATCH /api/games/:gameId/listings/:listingId/key");

@@ -69,11 +69,7 @@ export async function parsePasteAndCreate(
   if (parsed.kind === "reddit_deferred") {
     // CONTEXT DV-7: Reddit ingest lands in Phase 3 with poll.reddit. The route
     // layer (Plan 02.1-06) maps this to a friendly inline-info body.
-    throw new AppError(
-      "Reddit ingest arrives in Phase 3",
-      "reddit_pending_phase3",
-      422,
-    );
+    throw new AppError("Reddit ingest arrives in Phase 3", "reddit_pending_phase3", 422);
   }
 
   // Plan 02.1-28 (M:N migration): the underlying createEvent /
@@ -83,21 +79,14 @@ export async function parsePasteAndCreate(
   const gameIds = gameId === null ? [] : [gameId];
 
   if (parsed.kind === "youtube_video") {
-    const event = await createEventFromPaste(
-      userId,
-      { url: input, gameIds },
-      ipAddress,
-      userAgent,
-    );
+    const event = await createEventFromPaste(userId, { url: input, gameIds }, ipAddress, userAgent);
     return { kind: "event_created", eventId: event.id };
   }
 
   if (parsed.kind === "twitter_post") {
     // Twitter oEmbed is best-effort (Pitfall 8 / D-29). Failure is non-fatal —
     // event row still created with a URL-derived placeholder title.
-    const oembed = await fetchTwitterOembed(parsed.canonicalUrl).catch(
-      () => null,
-    );
+    const oembed = await fetchTwitterOembed(parsed.canonicalUrl).catch(() => null);
     const title = oembed?.authorName
       ? `Tweet by ${oembed.authorName}`
       : `Tweet at ${new URL(parsed.canonicalUrl).pathname}`;

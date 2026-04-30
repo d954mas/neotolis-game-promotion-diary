@@ -90,9 +90,7 @@ describe("Plan 02.1-19: feed UX rebuild — filters / scroll / grouping / layout
   it.skip(
     "FilterChips emits one chip per axis with comma-joined values (manual UAT — auth harness deferred)",
   );
-  it.skip(
-    "FilterChips × dismiss clears the entire axis (manual UAT — auth harness deferred)",
-  );
+  it.skip("FilterChips × dismiss clears the entire axis (manual UAT — auth harness deferred)");
   it.skip(
     "FiltersSheet 'Show: Inbox' hides the games multi-select (manual UAT — auth harness deferred)",
   );
@@ -102,12 +100,8 @@ describe("Plan 02.1-19: feed UX rebuild — filters / scroll / grouping / layout
   it.skip(
     "/feed renders date-group headers above each group's cards (manual UAT — auth harness deferred)",
   );
-  it.skip(
-    "/feed infinite scroll auto-appends rows on scroll (manual UAT — auth harness deferred)",
-  );
-  it.skip(
-    "/feed renders multiple columns at 1024px viewport (manual UAT — auth harness deferred)",
-  );
+  it.skip("/feed infinite scroll auto-appends rows on scroll (manual UAT — auth harness deferred)");
+  it.skip("/feed renders multiple columns at 1024px viewport (manual UAT — auth harness deferred)");
   it.skip(
     "/events/new submit → /feed shows new event without manual refresh (manual UAT — auth harness deferred)",
   );
@@ -134,9 +128,7 @@ describe("Plan 02.1-19: feed UX rebuild — filters / scroll / grouping / layout
  * the auth harness arrives.
  */
 describe("Plan 02.1-18: edit-flow rebuild via detail page", () => {
-  it.skip(
-    "FeedCard click → /events/[id] detail page (manual UAT — auth harness deferred)",
-  );
+  it.skip("FeedCard click → /events/[id] detail page (manual UAT — auth harness deferred)");
   it.skip(
     "FeedCard does NOT render Edit / Delete / Open-external buttons (manual UAT — auth harness deferred)",
   );

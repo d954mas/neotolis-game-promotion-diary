@@ -64,22 +64,10 @@
   }
 </script>
 
-<dialog
-  bind:this={dialogEl}
-  class="dialog"
-  oncancel={onDialogCancel}
-  onclick={onDialogClick}
->
+<dialog bind:this={dialogEl} class="dialog" oncancel={onDialogCancel} onclick={onDialogClick}>
   <header class="header">
     <h2 class="heading">{m.add_store_dialog_heading()}</h2>
-    <button
-      type="button"
-      class="close"
-      aria-label={m.common_close()}
-      onclick={onClose}
-    >
-      ×
-    </button>
+    <button type="button" class="close" aria-label={m.common_close()} onclick={onClose}> × </button>
   </header>
   <div class="body">
     <!--

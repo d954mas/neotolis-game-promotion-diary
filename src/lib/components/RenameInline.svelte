@@ -63,8 +63,7 @@
       await onSave(trimmed);
       editing = false;
     } catch (err) {
-      const message =
-        err instanceof Error && err.message ? err.message : m.error_server_generic();
+      const message = err instanceof Error && err.message ? err.message : m.error_server_generic();
       errorText = message;
     } finally {
       pending = false;

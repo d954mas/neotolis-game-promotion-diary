@@ -151,9 +151,7 @@
           /* ignore */
         }
         editError =
-          code === "validation_failed"
-            ? m.error_server_generic()
-            : m.error_server_generic();
+          code === "validation_failed" ? m.error_server_generic() : m.error_server_generic();
         return;
       }
       // Success — flip back to read mode + ask the parent to refresh.
@@ -225,12 +223,7 @@
     </p>
   {/if}
   {#if !editing}
-    <a
-      class="cta-secondary store-link"
-      href={steamUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-    >
+    <a class="cta-secondary store-link" href={steamUrl} target="_blank" rel="noopener noreferrer">
       {m.steam_listing_open_in_steam()}
     </a>
   {/if}
@@ -274,12 +267,7 @@
           <button type="submit" class="edit-save" disabled={saving}>
             {m.steam_listing_edit_save_cta()}
           </button>
-          <button
-            type="button"
-            class="edit-cancel"
-            onclick={cancelEdit}
-            disabled={saving}
-          >
+          <button type="button" class="edit-cancel" onclick={cancelEdit} disabled={saving}>
             {m.common_cancel()}
           </button>
           <button

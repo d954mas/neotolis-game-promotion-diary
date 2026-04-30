@@ -23,6 +23,7 @@ server.service.on("beforeTokenSigning", (token) => {
     email: EMAIL,
     email_verified: true,
     name: NAME,
+    // eslint-disable-next-line no-restricted-properties -- dev-only OAuth mock not shipped in production builds; reads OAUTH_CLIENT_ID directly because src/lib/server/config/env.ts is server-side and this file runs as a standalone CLI helper before the app boots
     aud: process.env.OAUTH_CLIENT_ID ?? "mock-client-id",
   };
 });

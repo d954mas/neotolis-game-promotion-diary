@@ -1,9 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { and, eq } from "drizzle-orm";
-import {
-  createSteamKey,
-  rotateSteamKey,
-} from "../../src/lib/server/services/api-keys-steam.js";
+import { createSteamKey, rotateSteamKey } from "../../src/lib/server/services/api-keys-steam.js";
 import { toApiKeySteamDto } from "../../src/lib/server/dto.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { apiKeysSteam } from "../../src/lib/server/db/schema/api-keys-steam.js";
@@ -56,9 +53,7 @@ describe("api_keys_steam envelope encryption (KEYS-03..06)", () => {
     // envelope-encryption guarantee made tangible. Buffers are base64'd
     // for the comparison so a substring match across encoded bytes
     // would still surface a leak.
-    const json = JSON.stringify(raw, (_k, v) =>
-      Buffer.isBuffer(v) ? v.toString("base64") : v,
-    );
+    const json = JSON.stringify(raw, (_k, v) => (Buffer.isBuffer(v) ? v.toString("base64") : v));
     expect(json).not.toContain(PLAIN);
 
     // last4 = the last 4 chars of plaintext (D-34 forensics aid).
@@ -68,11 +63,7 @@ describe("api_keys_steam envelope encryption (KEYS-03..06)", () => {
   it("02-05: KEYS-04 DTO strips ciphertext", async () => {
     validateSpy.mockResolvedValue(true);
     const userA = await seedUserDirectly({ email: "k2@test.local" });
-    await createSteamKey(
-      userA.id,
-      { label: "K", plaintext: "1234567890ABCD" },
-      "127.0.0.1",
-    );
+    await createSteamKey(userA.id, { label: "K", plaintext: "1234567890ABCD" }, "127.0.0.1");
 
     const [raw] = await db
       .select()
@@ -100,11 +91,7 @@ describe("api_keys_steam envelope encryption (KEYS-03..06)", () => {
     const PLAIN1 = "ORIGINAL-KEY-1111";
     const PLAIN2 = "ROTATED-KEY-9999";
 
-    const created = await createSteamKey(
-      userA.id,
-      { label: "K3", plaintext: PLAIN1 },
-      "127.0.0.1",
-    );
+    const created = await createSteamKey(userA.id, { label: "K3", plaintext: PLAIN1 }, "127.0.0.1");
     const [pre] = await db
       .select()
       .from(apiKeysSteam)
@@ -128,10 +115,7 @@ describe("api_keys_steam envelope encryption (KEYS-03..06)", () => {
     expect(post!.rotatedAt).not.toBeNull();
 
     // Both audit verbs landed.
-    const audits = await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.userId, userA.id));
+    const audits = await db.select().from(auditLog).where(eq(auditLog.userId, userA.id));
     expect(audits.some((a) => a.action === "key.add")).toBe(true);
     expect(audits.some((a) => a.action === "key.rotate")).toBe(true);
   });

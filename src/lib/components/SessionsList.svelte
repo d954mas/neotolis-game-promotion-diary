@@ -70,9 +70,7 @@
   }
 
   // Empty case: only the current session is active.
-  const onlyCurrent = $derived(
-    sessions.length === 1 && sessions[0]?.id === currentSessionId,
-  );
+  const onlyCurrent = $derived(sessions.length === 1 && sessions[0]?.id === currentSessionId);
 </script>
 
 {#if onlyCurrent}
@@ -82,7 +80,9 @@
     {#each sessions as s (s.id)}
       <li class="session">
         <div class="meta">
-          <time class="when" datetime={s.createdAt instanceof Date ? s.createdAt.toISOString() : s.createdAt}
+          <time
+            class="when"
+            datetime={s.createdAt instanceof Date ? s.createdAt.toISOString() : s.createdAt}
             >{fmtTimestamp(s.createdAt)}</time
           >
           <span class="ip">{s.ipAddress ?? "Unknown IP"}</span>

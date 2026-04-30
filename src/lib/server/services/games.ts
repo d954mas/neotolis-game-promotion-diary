@@ -146,11 +146,7 @@ export async function listGames(
   opts?: { includeSoftDeleted?: boolean },
 ): Promise<GameRow[]> {
   if (opts?.includeSoftDeleted) {
-    return db
-      .select()
-      .from(games)
-      .where(eq(games.userId, userId))
-      .orderBy(desc(games.createdAt));
+    return db.select().from(games).where(eq(games.userId, userId)).orderBy(desc(games.createdAt));
   }
   return db
     .select()

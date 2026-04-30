@@ -126,10 +126,7 @@
     try {
       await onSave(payload);
     } catch (err) {
-      const message =
-        err instanceof Error && err.message
-          ? err.message
-          : m.error_server_generic();
+      const message = err instanceof Error && err.message ? err.message : m.error_server_generic();
       errorText = message;
     } finally {
       pending = false;
@@ -142,12 +139,7 @@
   }
 </script>
 
-<dialog
-  bind:this={dialogEl}
-  class="dialog"
-  oncancel={onDialogCancel}
-  onclick={onDialogClick}
->
+<dialog bind:this={dialogEl} class="dialog" oncancel={onDialogCancel} onclick={onDialogClick}>
   <header class="header">
     <h2 class="heading">{m.games_edit_dialog_heading()}</h2>
     <button
@@ -188,12 +180,7 @@
     </label>
     {#if errorText}<InlineError message={errorText} />{/if}
     <footer class="actions">
-      <button
-        type="button"
-        class="cancel"
-        onclick={handleCancel}
-        disabled={pending}
-      >
+      <button type="button" class="cancel" onclick={handleCancel} disabled={pending}>
         {m.games_edit_cancel_cta()}
       </button>
       <button type="submit" class="save" disabled={pending}>

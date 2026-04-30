@@ -5,10 +5,7 @@ import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
 import * as SteamApi from "../../src/lib/server/integrations/steam-api.js";
 import { createSteamKey } from "../../src/lib/server/services/api-keys-steam.js";
 import { writeAudit } from "../../src/lib/server/audit.js";
-import {
-  listAuditPage,
-  encodeCursor,
-} from "../../src/lib/server/services/audit-read.js";
+import { listAuditPage, encodeCursor } from "../../src/lib/server/services/audit-read.js";
 import { seedUserDirectly } from "./helpers.js";
 
 /**
@@ -117,16 +114,8 @@ describe("audit IP forwarding (KEYS-06)", () => {
     // The resolved client IP (203.0.113.7 — RFC 5737 TEST-NET-3 documentation
     // range) is what the trusted-proxy middleware (Plan 01-06) hands to
     // services. Audit must record THIS value, not the raw socket peer.
-    await createSteamKey(
-      userA.id,
-      { label: "K", plaintext: "ABCD1234" },
-      "203.0.113.7",
-    );
-    const [a] = await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.userId, userA.id))
-      .limit(1);
+    await createSteamKey(userA.id, { label: "K", plaintext: "ABCD1234" }, "203.0.113.7");
+    const [a] = await db.select().from(auditLog).where(eq(auditLog.userId, userA.id)).limit(1);
     expect(a).toBeDefined();
     expect(a!.ipAddress).toBe("203.0.113.7");
   });

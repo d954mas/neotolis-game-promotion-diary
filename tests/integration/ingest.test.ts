@@ -196,9 +196,9 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
     const gameId = uuidv7();
     await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
 
-    await expect(
-      parsePasteAndCreate(u.id, gameId, "not-a-url", "127.0.0.1"),
-    ).rejects.toMatchObject({ status: 422, code: "unsupported_url" });
+    await expect(parsePasteAndCreate(u.id, gameId, "not-a-url", "127.0.0.1")).rejects.toMatchObject(
+      { status: 422, code: "unsupported_url" },
+    );
 
     const rows = await db.select().from(events).where(eq(events.userId, u.id));
     expect(rows).toHaveLength(0);
@@ -211,12 +211,7 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
     await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
 
     await expect(
-      parsePasteAndCreate(
-        u.id,
-        gameId,
-        "https://www.youtube.com/watch?v=ABC12345678",
-        "127.0.0.1",
-      ),
+      parsePasteAndCreate(u.id, gameId, "https://www.youtube.com/watch?v=ABC12345678", "127.0.0.1"),
     ).rejects.toMatchObject({ status: 502, code: "youtube_oembed_unreachable" });
 
     const rows = await db.select().from(events).where(eq(events.userId, u.id));
@@ -230,12 +225,7 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
     await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
 
     await expect(
-      parsePasteAndCreate(
-        u.id,
-        gameId,
-        "https://www.youtube.com/watch?v=ABC12345678",
-        "127.0.0.1",
-      ),
+      parsePasteAndCreate(u.id, gameId, "https://www.youtube.com/watch?v=ABC12345678", "127.0.0.1"),
     ).rejects.toMatchObject({
       status: 422,
       code: "youtube_unavailable",

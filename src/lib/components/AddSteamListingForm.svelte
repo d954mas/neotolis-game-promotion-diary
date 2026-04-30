@@ -119,9 +119,7 @@
           /* ignore body parse */
         }
         errorText =
-          code === "validation_failed"
-            ? m.ingest_error_malformed_url()
-            : m.error_server_generic();
+          code === "validation_failed" ? m.ingest_error_malformed_url() : m.error_server_generic();
         return;
       }
       value = "";

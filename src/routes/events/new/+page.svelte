@@ -146,9 +146,7 @@
           /* ignore */
         }
         errorText =
-          code === "validation_failed"
-            ? m.ingest_error_malformed_url()
-            : m.error_server_generic();
+          code === "validation_failed" ? m.ingest_error_malformed_url() : m.error_server_generic();
         return;
       }
       // Plan 02.1-19: invalidateAll() forces SvelteKit to re-run /feed's
@@ -224,13 +222,7 @@
 
     <label class="field">
       <span class="field-label">URL</span>
-      <input
-        class="input"
-        type="url"
-        bind:value={url}
-        placeholder="https://"
-        disabled={pending}
-      />
+      <input class="input" type="url" bind:value={url} placeholder="https://" disabled={pending} />
     </label>
 
     <label class="field">
@@ -250,11 +242,7 @@
 
     <div class="actions">
       <a class="cancel" href="/feed">{m.common_cancel()}</a>
-      <button
-        type="submit"
-        class="submit"
-        disabled={pending || title.trim().length === 0}
-      >
+      <button type="submit" class="submit" disabled={pending || title.trim().length === 0}>
         {m.feed_cta_add_event()}
       </button>
     </div>

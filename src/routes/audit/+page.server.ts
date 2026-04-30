@@ -64,9 +64,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const cursor = url.searchParams.get("cursor");
   const rawActions = url.searchParams.getAll("action");
   // Forgiving-GET: drop invalid entries silently rather than 422 the page.
-  const actionFilter = rawActions.filter(
-    (a): a is AuditAction => VALID_ACTIONS.has(a),
-  );
+  const actionFilter = rawActions.filter((a): a is AuditAction => VALID_ACTIONS.has(a));
 
   // Plan 02.1-21: date-range parsing mirrors /feed's pattern — date-only
   // YYYY-MM-DD inputs are inclusive on both ends. `from` becomes 00:00:00

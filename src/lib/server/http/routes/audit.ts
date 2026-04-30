@@ -47,9 +47,7 @@ auditRoutes.get(
     // in AUDIT_ACTIONS rather than 422 the request — the service layer's
     // assertValidActionFilter still catches forged values directly.
     const rawActions = c.req.queries("action") ?? [];
-    const actionFilter = rawActions.filter((a): a is AuditAction =>
-      ACTION_VALUES.has(a),
-    );
+    const actionFilter = rawActions.filter((a): a is AuditAction => ACTION_VALUES.has(a));
     try {
       const page = await listAuditPage(c.var.userId, cursor ?? null, actionFilter);
       return c.json({

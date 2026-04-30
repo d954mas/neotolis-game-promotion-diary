@@ -135,11 +135,7 @@ export async function createSteamKey(
     .where(and(eq(apiKeysSteam.userId, userId), eq(apiKeysSteam.label, input.label)))
     .limit(1);
   if (existing.length > 0) {
-    throw new AppError(
-      "a key with this label already exists",
-      "steam_key_label_exists",
-      422,
-    );
+    throw new AppError("a key with this label already exists", "steam_key_label_exists", 422);
   }
 
   await probeSteamKey(input.plaintext);
@@ -203,10 +199,7 @@ export async function listSteamKeys(userId: string): Promise<ApiKeySteamRow[]> {
  * would call `listSteamKeys` and project, OR call this and project; in
  * either case the route runs `toApiKeySteamDto` before responding.
  */
-export async function getSteamKeyById(
-  userId: string,
-  keyId: string,
-): Promise<ApiKeySteamRow> {
+export async function getSteamKeyById(userId: string, keyId: string): Promise<ApiKeySteamRow> {
   const rows = await db
     .select()
     .from(apiKeysSteam)
@@ -332,10 +325,7 @@ export async function removeSteamKey(
  * field-shape match. Callers should hand the plaintext to the Steam API
  * call and let it go out of scope immediately.
  */
-export async function decryptSteamKeyForOperator(
-  userId: string,
-  keyId: string,
-): Promise<string> {
+export async function decryptSteamKeyForOperator(userId: string, keyId: string): Promise<string> {
   const row = await getSteamKeyById(userId, keyId);
   return decryptSecret({
     secretCt: row.secretCt,

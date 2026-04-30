@@ -122,17 +122,12 @@ export async function addSteamListing(
 
   if (existing.length > 0 && existing[0]) {
     const exRow = existing[0];
-    throw new AppError(
-      "steam listing already exists",
-      "steam_listing_duplicate",
-      422,
-      {
-        gameId: input.gameId,
-        appId: input.appId,
-        existingGameId: exRow.gameId,
-        existingState: exRow.deletedAt === null ? "active" : "soft_deleted",
-      },
-    );
+    throw new AppError("steam listing already exists", "steam_listing_duplicate", 422, {
+      gameId: input.gameId,
+      appId: input.appId,
+      existingGameId: exRow.gameId,
+      existingState: exRow.deletedAt === null ? "active" : "soft_deleted",
+    });
   }
 
   const meta = await fetchSteamAppDetails(input.appId);
@@ -168,17 +163,12 @@ export async function addSteamListing(
       .returning();
   } catch (e: unknown) {
     if (isPgUniqueViolation(e)) {
-      throw new AppError(
-        "steam listing already exists",
-        "steam_listing_duplicate",
-        422,
-        {
-          gameId: input.gameId,
-          appId: input.appId,
-          existingGameId: input.gameId,
-          existingState: "active",
-        },
-      );
+      throw new AppError("steam listing already exists", "steam_listing_duplicate", 422, {
+        gameId: input.gameId,
+        appId: input.appId,
+        existingGameId: input.gameId,
+        existingState: "active",
+      });
     }
     throw e;
   }

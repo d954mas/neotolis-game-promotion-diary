@@ -28,9 +28,7 @@ export interface TwitterOembed {
  * handle null by creating the events row with a placeholder title rather than
  * surfacing the failure to the user (D-29 / Pitfall 8 best-effort contract).
  */
-export async function fetchTwitterOembed(
-  canonicalUrl: string,
-): Promise<TwitterOembed | null> {
+export async function fetchTwitterOembed(canonicalUrl: string): Promise<TwitterOembed | null> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 5000);
   try {
@@ -42,10 +40,7 @@ export async function fetchTwitterOembed(
       },
     );
     if (!res.ok) {
-      logger.warn(
-        { status: res.status, url: canonicalUrl },
-        "twitter oembed non-2xx",
-      );
+      logger.warn({ status: res.status, url: canonicalUrl }, "twitter oembed non-2xx");
       return null;
     }
     const j = (await res.json()) as Record<string, unknown>;

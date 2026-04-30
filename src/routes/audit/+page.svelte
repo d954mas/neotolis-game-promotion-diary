@@ -102,11 +102,7 @@
     return qs ? `/audit?${qs}` : "/audit";
   }
 
-  async function onApply(next: {
-    action?: string[];
-    from?: string;
-    to?: string;
-  }): Promise<void> {
+  async function onApply(next: { action?: string[]; from?: string; to?: string }): Promise<void> {
     sheetOpen = false;
     prevStack = [];
     const nextActions = next.action ?? actionFilter;
@@ -131,8 +127,7 @@
   }
 
   function onOpenSheet(focusAxis?: string): void {
-    sheetFocusAxis =
-      focusAxis === "action" ? "action" : focusAxis === "date" ? "date" : undefined;
+    sheetFocusAxis = focusAxis === "action" ? "action" : focusAxis === "date" ? "date" : undefined;
     sheetOpen = true;
   }
 
@@ -170,7 +165,7 @@
 <section class="audit">
   <PageHeader title="Audit log" sticky />
 
-  <DateRangeControl activeFilters={activeFilters} onApply={applyDateRangeAudit} />
+  <DateRangeControl {activeFilters} onApply={applyDateRangeAudit} />
 
   <FilterChips
     filters={activeFilters}
@@ -178,8 +173,8 @@
     games={[]}
     schema={AUDIT_SCHEMA}
     onDismiss={onDismissAxis}
-    onOpenSheet={onOpenSheet}
-    onClearAll={onClearAll}
+    {onOpenSheet}
+    {onClearAll}
   />
 
   {#if sheetOpen}

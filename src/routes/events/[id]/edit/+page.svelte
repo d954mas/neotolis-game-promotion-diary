@@ -214,9 +214,7 @@
           /* ignore */
         }
         errorText =
-          code === "validation_failed"
-            ? m.ingest_error_malformed_url()
-            : m.error_server_generic();
+          code === "validation_failed" ? m.ingest_error_malformed_url() : m.error_server_generic();
         return;
       }
 
@@ -228,8 +226,7 @@
       // diff), so any membership change triggers exactly one PATCH.
       const currentSet = new Set(gameIds);
       const sameSize = currentSet.size === originalGameIds.size;
-      const sameMembers =
-        sameSize && [...currentSet].every((id) => originalGameIds.has(id));
+      const sameMembers = sameSize && [...currentSet].every((id) => originalGameIds.has(id));
       if (!sameMembers) {
         const attachRes = await fetch(`/api/events/${event.id}/attach`, {
           method: "PATCH",
@@ -331,13 +328,7 @@
 
     <label class="field">
       <span class="field-label">URL</span>
-      <input
-        class="input"
-        type="url"
-        bind:value={url}
-        placeholder="https://"
-        disabled={pending}
-      />
+      <input class="input" type="url" bind:value={url} placeholder="https://" disabled={pending} />
     </label>
 
     <!-- Plan 02.1-38 (UAT-NOTES.md §5.2 — Path A): multi-select Game picker.
@@ -359,8 +350,7 @@
                   type="checkbox"
                   checked={gameIds.includes(g.id)}
                   disabled={pending}
-                  onchange={(e) =>
-                    toggleGame(g.id, (e.target as HTMLInputElement).checked)}
+                  onchange={(e) => toggleGame(g.id, (e.target as HTMLInputElement).checked)}
                 />
                 <span>{g.title}</span>
               </label>
@@ -372,12 +362,7 @@
 
     <label class="field">
       <span class="field-label">Notes</span>
-      <textarea
-        class="input textarea"
-        bind:value={notes}
-        rows="3"
-        disabled={pending}
-      ></textarea>
+      <textarea class="input textarea" bind:value={notes} rows="3" disabled={pending}></textarea>
     </label>
 
     <!-- Plan 02.1-32 (UAT-NOTES.md §4.24.D): standalone toggle. Submit
@@ -387,11 +372,7 @@
          the Save button stays disabled while the conflict is active. -->
     <fieldset class="field standalone-fieldset">
       <label class="field checkbox">
-        <input
-          type="checkbox"
-          bind:checked={editStandalone}
-          disabled={pending}
-        />
+        <input type="checkbox" bind:checked={editStandalone} disabled={pending} />
         <span class="field-label">{m.events_edit_standalone_label()}</span>
       </label>
       <p class="help muted">{m.events_edit_standalone_help()}</p>
@@ -418,12 +399,7 @@
          soft-delete + restore-within-60-days semantics. -->
     <hr class="section-divider" />
     <div class="footer-actions">
-      <button
-        type="button"
-        class="delete-button"
-        onclick={askDelete}
-        disabled={deleteBusy}
-      >
+      <button type="button" class="delete-button" onclick={askDelete} disabled={deleteBusy}>
         {m.events_edit_delete_button()}
       </button>
     </div>

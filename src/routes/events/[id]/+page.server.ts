@@ -38,9 +38,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
     // Plan 02.1-32 swaps this for a full multi-game chip render.
     const gameIds = await loadGameIdsForEvent(locals.user.id, row.id);
     const primaryGame =
-      gameIds.length > 0
-        ? (games.find((g) => g.id === gameIds[0]) ?? null)
-        : null;
+      gameIds.length > 0 ? (games.find((g) => g.id === gameIds[0]) ?? null) : null;
     return {
       event: toEventDto(row, gameIds),
       games: games.map(toGameDto),

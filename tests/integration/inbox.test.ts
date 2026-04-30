@@ -157,12 +157,7 @@ describe("INBOX-01: inbox flow + dismissal", () => {
     const audits = await db
       .select()
       .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.userId, u.id),
-          eq(auditLog.action, "event.dismissed_from_inbox"),
-        ),
-      );
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.dismissed_from_inbox")));
     expect(audits.length).toBeGreaterThanOrEqual(1);
     const meta = audits[0]!.metadata as { event_id?: string; kind?: string } | null;
     expect(meta?.event_id).toBe(ev.id);
@@ -171,7 +166,9 @@ describe("INBOX-01: inbox flow + dismissal", () => {
     expect(audits[0]!.userAgent).toBe("ua-test");
   });
 
-  it.skip("Phase 3 Plan: auto-imported events arrive with source_id != NULL AND game_id=NULL — covered in Phase 3 smoke (deferred per CONTEXT D-11)");
+  it.skip(
+    "Phase 3 Plan: auto-imported events arrive with source_id != NULL AND game_id=NULL — covered in Phase 3 smoke (deferred per CONTEXT D-11)",
+  );
 });
 
 // Plan 02.1-06 — PATCH /api/events/:id/dismiss-inbox HTTP boundary.
@@ -289,9 +286,7 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
     const audits = await db
       .select()
       .from(auditLog)
-      .where(
-        and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.marked_standalone")),
-      );
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.marked_standalone")));
     expect(audits.length).toBeGreaterThanOrEqual(1);
     const auditMeta = audits[0]!.metadata as { event_id?: string; kind?: string } | null;
     expect(auditMeta?.event_id).toBe(ev.id);
@@ -382,9 +377,7 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
     const auditsB = await db
       .select()
       .from(auditLog)
-      .where(
-        and(eq(auditLog.userId, userB.id), eq(auditLog.action, "event.marked_standalone")),
-      );
+      .where(and(eq(auditLog.userId, userB.id), eq(auditLog.action, "event.marked_standalone")));
     expect(auditsB.length).toBe(0);
 
     // userA's event is untouched (UPDATE matched 0 rows under userB's userId).
@@ -413,9 +406,7 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
     const audits = await db
       .select()
       .from(auditLog)
-      .where(
-        and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.unmarked_standalone")),
-      );
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.unmarked_standalone")));
     expect(audits.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -438,9 +429,7 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
     const audits = await db
       .select()
       .from(auditLog)
-      .where(
-        and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.marked_standalone")),
-      );
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.marked_standalone")));
     // Idempotent UPDATE → same final state; two audit rows because each
     // call writes one (matches dismissFromInbox precedent).
     expect(audits.length).toBe(2);
@@ -593,16 +582,13 @@ describe("Plan 02.1-28 — standalone conflict guard (mutual exclusion)", () => 
     const audits = await db
       .select()
       .from(auditLog)
-      .where(
-        and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.marked_standalone")),
-      );
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.marked_standalone")));
     expect(audits).toHaveLength(0);
   });
 
   it("Plan 02.1-28: attachEventToGames(non-empty) on standalone event throws AppError 422 'standalone_conflicts_with_game'; junction unchanged", async () => {
-    const { attachEventToGames: attach28 } = await import(
-      "../../src/lib/server/services/events.js"
-    );
+    const { attachEventToGames: attach28 } =
+      await import("../../src/lib/server/services/events.js");
     const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
     const u = await seedUserDirectly({ email: `inbox28-2-${uniq()}@test.local` });
     const gA = uuidv7();
@@ -644,9 +630,8 @@ describe("Plan 02.1-28 — standalone conflict guard (mutual exclusion)", () => 
     // audit rows). This is the path Plan 02.1-32 wires up to "I changed
     // my mind, this isn't standalone after all" (followed by an explicit
     // unmarkStandalone).
-    const { attachEventToGames: attach28 } = await import(
-      "../../src/lib/server/services/events.js"
-    );
+    const { attachEventToGames: attach28 } =
+      await import("../../src/lib/server/services/events.js");
     const u = await seedUserDirectly({ email: `inbox28-3-${uniq()}@test.local` });
     const ev = await createEvent(
       u.id,

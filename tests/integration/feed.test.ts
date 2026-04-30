@@ -180,11 +180,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
       "127.0.0.1",
     );
 
-    const page = await listFeedPage(
-      u.id,
-      { show: { kind: "specific", gameIds: [gameA] } },
-      null,
-    );
+    const page = await listFeedPage(u.id, { show: { kind: "specific", gameIds: [gameA] } }, null);
     expect(page.rows).toHaveLength(1);
     expect(page.rows[0]!.id).toBe(evA.id);
   });
@@ -207,11 +203,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
       },
       "127.0.0.1",
     );
-    const page = await listFeedPage(
-      u.id,
-      { show: { kind: "specific", gameIds: [] } },
-      null,
-    );
+    const page = await listFeedPage(u.id, { show: { kind: "specific", gameIds: [] } }, null);
     expect(page.rows.map((r) => r.id)).toContain(ev.id);
   });
 
@@ -253,11 +245,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
       },
       "127.0.0.1",
     );
-    const page = await listFeedPage(
-      u.id,
-      { show: { kind: "specific", gameIds: [gA, gB] } },
-      null,
-    );
+    const page = await listFeedPage(u.id, { show: { kind: "specific", gameIds: [gA, gB] } }, null);
     const ids = page.rows.map((r) => r.id);
     expect(ids).toContain(evA.id);
     expect(ids).toContain(evB.id);
@@ -570,9 +558,10 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     expect(page1.rows).toHaveLength(FEED_PAGE_SIZE);
     expect(page1.nextCursor).not.toBeNull();
     // Cursor format: base64url(JSON.stringify({at, id})). Decode round-trips.
-    const decoded = JSON.parse(
-      Buffer.from(page1.nextCursor!, "base64url").toString("utf8"),
-    ) as { at: string; id: string };
+    const decoded = JSON.parse(Buffer.from(page1.nextCursor!, "base64url").toString("utf8")) as {
+      at: string;
+      id: string;
+    };
     expect(typeof decoded.at).toBe("string");
     expect(typeof decoded.id).toBe("string");
     expect(decoded.id).toBe(page1.rows[FEED_PAGE_SIZE - 1]!.id);
@@ -642,10 +631,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
       "127.0.0.1",
     );
     // Soft-delete one row directly (avoid dependency on softDeleteEvent's audit).
-    await db
-      .update(events)
-      .set({ deletedAt: new Date() })
-      .where(eq(events.id, dead.id));
+    await db.update(events).set({ deletedAt: new Date() }).where(eq(events.id, dead.id));
 
     const page = await listFeedPage(userId, {}, null);
     const ids = page.rows.map((r) => r.id);
@@ -717,12 +703,9 @@ describe("Plan 02.1-06: GET /api/events HTTP boundary", () => {
       },
       "127.0.0.1",
     );
-    const res = await app.request(
-      `/api/events?show=specific&game=${gameId}`,
-      {
-        headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
-      },
-    );
+    const res = await app.request(`/api/events?show=specific&game=${gameId}`, {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { rows: Array<{ id: string; gameIds: string[] }> };
     expect(body.rows).toHaveLength(1);
@@ -813,8 +796,7 @@ describe("Plan 02.1-15: multi-select feed filters (OR-within-axis, AND-across-ax
   }
 
   it("Plan 02.1-15: source=[A, B] returns rows from A or B (OR within axis), excludes C", async () => {
-    const { userId, sourceA, sourceB, sourceC } =
-      await seedThreeSources("ms-feed-1@test.local");
+    const { userId, sourceA, sourceB, sourceC } = await seedThreeSources("ms-feed-1@test.local");
     const eA = await createEvent(
       userId,
       {
@@ -854,9 +836,7 @@ describe("Plan 02.1-15: multi-select feed filters (OR-within-axis, AND-across-ax
     const ids = page.rows.map((r) => r.id);
     expect(ids).toContain(eA.id);
     expect(ids).toContain(eB.id);
-    expect(page.rows.every((r) => r.sourceId === sourceA || r.sourceId === sourceB)).toBe(
-      true,
-    );
+    expect(page.rows.every((r) => r.sourceId === sourceA || r.sourceId === sourceB)).toBe(true);
   });
 
   it("Plan 02.1-15: source=[A] (single-element array) returns one row — eq() back-compat", async () => {
@@ -920,8 +900,7 @@ describe("Plan 02.1-15: multi-select feed filters (OR-within-axis, AND-across-ax
   });
 
   it("Plan 02.1-15: source=[] (empty array) is treated as no filter — returns all rows", async () => {
-    const { userId, sourceA, sourceB, sourceC } =
-      await seedThreeSources("ms-feed-4@test.local");
+    const { userId, sourceA, sourceB, sourceC } = await seedThreeSources("ms-feed-4@test.local");
     await createEvent(
       userId,
       {
@@ -1087,9 +1066,7 @@ describe("Plan 02.1-15: multi-select feed filters (OR-within-axis, AND-across-ax
       nextCursor: string | null;
     };
     expect(body.rows).toHaveLength(2);
-    expect(body.rows.every((r) => r.sourceId === sourceA || r.sourceId === sourceB)).toBe(
-      true,
-    );
+    expect(body.rows.every((r) => r.sourceId === sourceA || r.sourceId === sourceB)).toBe(true);
   });
 
   it("Plan 02.1-15: GET /api/events?source=A (single param) preserves single-value back-compat", async () => {
@@ -1203,11 +1180,7 @@ describe("Plan 02.1-24 — show.kind=standalone filter", () => {
       "127.0.0.1",
     );
 
-    const standalonePage = await listFeedPage(
-      u.id,
-      { show: { kind: "standalone" } },
-      null,
-    );
+    const standalonePage = await listFeedPage(u.id, { show: { kind: "standalone" } }, null);
     const ids = standalonePage.rows.map((r) => r.id);
     expect(ids).toContain(standaloneEv.id);
     expect(ids).not.toContain(inboxEv.id);
@@ -1294,9 +1267,7 @@ describe("Plan 02.1-26 — FeedQuickNav loader contract (data.games available)",
     const userB = await seedUserDirectly({ email: "p26-feed-b@test.local" });
 
     const userBGameId = uuidv7();
-    await db
-      .insert(games)
-      .values({ id: userBGameId, userId: userB.id, title: "User B's game" });
+    await db.insert(games).values({ id: userBGameId, userId: userB.id, title: "User B's game" });
 
     // User B creates an event attached to their game.
     await createEvent(
@@ -1374,11 +1345,7 @@ describe("Plan 02.1-28 — listFeedPage M:N show-axis", () => {
       "127.0.0.1",
     );
 
-    const page = await listFeedPage(
-      u.id,
-      { show: { kind: "specific", gameIds: [gA] } },
-      null,
-    );
+    const page = await listFeedPage(u.id, { show: { kind: "specific", gameIds: [gA] } }, null);
     const ids = page.rows.map((r) => r.id);
     expect(ids).toContain(evA.id);
     expect(ids).not.toContain(evB.id);
@@ -1455,11 +1422,7 @@ describe("Plan 02.1-28 — listFeedPage M:N show-axis", () => {
       "127.0.0.1",
     );
 
-    const page = await listFeedPage(
-      u.id,
-      { show: { kind: "specific", gameIds: [gA, gB] } },
-      null,
-    );
+    const page = await listFeedPage(u.id, { show: { kind: "specific", gameIds: [gA, gB] } }, null);
     const ids = page.rows.map((r) => r.id);
     expect(ids).toContain(evA.id);
     expect(ids).toContain(evB.id);
@@ -1485,11 +1448,7 @@ describe("Plan 02.1-28 — listFeedPage M:N show-axis", () => {
 
     // userB queries with gameIds=[A's gameId]. The subquery's userId clause
     // is userB.id; userA's junction rows don't satisfy it; result is zero.
-    const page = await listFeedPage(
-      userB.id,
-      { show: { kind: "specific", gameIds: [gA] } },
-      null,
-    );
+    const page = await listFeedPage(userB.id, { show: { kind: "specific", gameIds: [gA] } }, null);
     expect(page.rows).toHaveLength(0);
   });
 });

@@ -9,7 +9,15 @@
 // forensics aid for "which key was leaked", not a secret. Pino redact
 // does not match `last4` (verified Phase 1 plan 01-01 redact paths).
 
-import { pgTable, text, timestamp, smallint, customType, uniqueIndex, index } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  timestamp,
+  smallint,
+  customType,
+  uniqueIndex,
+  index,
+} from "drizzle-orm/pg-core";
 import { user } from "./auth.js";
 import { uuidv7 } from "../../ids.js";
 

@@ -21,10 +21,7 @@
  *
  * Does NOT mutate the input — spreads to a new array, then sorts.
  */
-export function sortByLabel<T>(
-  items: readonly T[],
-  getLabel: (item: T) => string,
-): T[] {
+export function sortByLabel<T>(items: readonly T[], getLabel: (item: T) => string): T[] {
   const collator = new Intl.Collator(undefined, { sensitivity: "base" });
   return [...items].sort((a, b) => collator.compare(getLabel(a), getLabel(b)));
 }

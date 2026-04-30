@@ -58,9 +58,7 @@
   const game = $derived(data.game as GameLite | null);
 
   const occurredIso = $derived(
-    typeof event.occurredAt === "string"
-      ? event.occurredAt
-      : event.occurredAt.toISOString(),
+    typeof event.occurredAt === "string" ? event.occurredAt : event.occurredAt.toISOString(),
   );
   const occurredHuman = $derived(
     typeof event.occurredAt === "string"
@@ -136,11 +134,7 @@
        overlay placement Plan 02.1-23 established. Hidden when the row
        is soft-deleted (Restore is the only action available there). -->
   {#if !isSoftDeleted}
-    <a
-      class="edit-pencil"
-      href={`/events/${event.id}/edit`}
-      aria-label={m.event_edit_aria_label()}
-    >
+    <a class="edit-pencil" href={`/events/${event.id}/edit`} aria-label={m.event_edit_aria_label()}>
       ✎
     </a>
   {/if}
@@ -184,12 +178,7 @@
       </a>
     {/if}
     {#if isSoftDeleted}
-      <button
-        type="button"
-        class="action primary"
-        onclick={restoreEvent}
-        disabled={restoreBusy}
-      >
+      <button type="button" class="action primary" onclick={restoreEvent} disabled={restoreBusy}>
         {m.events_detail_restore()}
       </button>
     {/if}

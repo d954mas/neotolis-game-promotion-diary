@@ -152,9 +152,7 @@ describe("theme cookie + DB persist (UX-01)", () => {
     // relocates to /settings only. We render <AppHeader> server-side and
     // assert the theme-toggle's stable selector (aria-label) is absent.
     const { render } = await import("svelte/server");
-    const AppHeader = (
-      await import("../../src/lib/components/AppHeader.svelte")
-    ).default;
+    const AppHeader = (await import("../../src/lib/components/AppHeader.svelte")).default;
     const out = render(AppHeader, {
       props: {
         user: { name: "Test", email: "test@example.com", image: null },
@@ -175,23 +173,15 @@ describe("theme cookie + DB persist (UX-01)", () => {
     // importing ThemeToggle and the AppHeader test above asserting it's gone
     // from the header). One on-disk grep verifies there's no second toggle.
     const { render } = await import("svelte/server");
-    const ThemeToggle = (
-      await import("../../src/lib/components/ThemeToggle.svelte")
-    ).default;
+    const ThemeToggle = (await import("../../src/lib/components/ThemeToggle.svelte")).default;
     const out = render(ThemeToggle, { props: { current: "system" as const } });
     const html = out.body;
     expect(html).toContain("Toggle color theme");
     // The settings page is the sole consumer in 2.1.
     const fs = await import("node:fs");
-    const settings = fs.readFileSync(
-      "src/routes/settings/+page.svelte",
-      "utf8",
-    );
+    const settings = fs.readFileSync("src/routes/settings/+page.svelte", "utf8");
     expect(settings).toContain("ThemeToggle");
-    const header = fs.readFileSync(
-      "src/lib/components/AppHeader.svelte",
-      "utf8",
-    );
+    const header = fs.readFileSync("src/lib/components/AppHeader.svelte", "utf8");
     expect(header).not.toContain("ThemeToggle");
   });
 
