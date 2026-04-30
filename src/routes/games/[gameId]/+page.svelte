@@ -62,7 +62,13 @@
   import FeedCard from "$lib/components/FeedCard.svelte";
   import FeedDateGroupHeader from "$lib/components/FeedDateGroupHeader.svelte";
   import StoresSection from "$lib/components/StoresSection.svelte";
-  import GameCover from "$lib/components/GameCover.svelte";
+  // Plan 02.1-39 round-6 polish #15: GameCover removed from this page.
+  // User during UAT: "после названия игры идет огромная картинка, мне не
+  // нравится. Она тут лишняя, она есть в карточки стора". The cover already
+  // surfaces on each SteamListingRow (Plan 02.1-39 §5.3 item A), so
+  // rendering it AGAIN at the top of /games/[gameId] is duplicate visual
+  // weight. Component file kept in src/lib/components for future reuse on
+  // /games list page or preview surfaces.
   import PageHeader from "$lib/components/PageHeader.svelte";
   import GameEditDialog from "$lib/components/GameEditDialog.svelte";
   import AddStoreDialog from "$lib/components/AddStoreDialog.svelte";
@@ -264,7 +270,6 @@
   `white-space: pre-wrap` preserves newlines typed in the textarea.
 -->
 <section class="game-info" id="section-game">
-  <GameCover title={game.title} listings={listings} />
   <div class="meta">
     {#if game.releaseTba}
       <span class="badge">{m.badge_release_tba()}</span>
