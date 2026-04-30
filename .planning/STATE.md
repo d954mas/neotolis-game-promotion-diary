@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Phase 02.1 PAUSED — Plan 02.1-10 round-5 UAT 2026-04-30 + external code review surfaced 13 NEW findings (3 P0 + 6 P1 + 4 P2) blocking sign-off; persisted in 02.1-10-UAT-NOTES.md round-5 section; round-6 gap-closure plans needed (recommended 02.1-35..39, 5 plans across 3 waves)
-stopped_at: Completed 02.1-35-PLAN.md (round-6 Wave 0 — UAT-NOTES.md §5.1 P0 inbox.dismissed-sticky + §5.12 P1 transactional integrity closed; createEvent + attachEventToGames bodies wrapped in db.transaction; metadata.inbox stripped on junction diff > 0; audit OUTSIDE transaction)
-last_updated: "2026-04-30T05:44:20.248Z"
-last_activity: 2026-04-29
+status: Ready to execute
+stopped_at: Completed 02.1-38-PLAN.md
+last_updated: "2026-04-30T06:00:23.845Z"
+last_activity: 2026-04-30
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 60
-  completed_plans: 56
+  completed_plans: 58
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.1 (architecture-realignment) — EXECUTING
-Plan: 9 of 34
+Plan: 11 of 34
 
 ## Performance Metrics
 
@@ -100,6 +100,8 @@ Plan: 9 of 34
 | Phase 02.1-architecture-realignment P32 | 23min 14s | 2 tasks | 8 files |
 | Phase 02.1-architecture-realignment P36 | ~5 min | 1 tasks | 4 files |
 | Phase 02.1-architecture-realignment P35 | ~14 min | 1 tasks | 3 files |
+| Phase 02.1-architecture-realignment P37 | ~10 min | 1 tasks | 6 files |
+| Phase 02.1-architecture-realignment P38 | 12min | 1 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -286,6 +288,9 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-32: /events/[id] read-only Delete REMOVED entirely (not flag-gated) — mirrors Plan 02.1-22 SourceRow read-only/edit pattern; Delete lives only at /events/[id]/edit form footer
 - [Phase 02.1-architecture-realignment]: Plan 02.1-36: formatFeedDate locked to fixed "en" locale (brand choice, not translation target — Paraglide handles user-facing copy); env-discipline scanner strips multi-line block comments at file level (newline-preserving) so JSDoc bodies that mention process.env don't trip the tripwire (canonical project documentation per AGENTS.md); REDACT_PATHS extended with 12 Phase 2.1 ciphertext shapes (camel + snake) AND now load-bearing-enforced via schema-introspection test that scans src/lib/server/db/schema/*.ts for every bytea declaration + kek_version smallint — privacy floor (AGENTS.md item 6) enforced by construction
 - [Phase 02.1-architecture-realignment]: Plan 02.1-35: createEvent + attachEventToGames bodies wrapped in db.transaction; metadata.inbox.dismissed cleared on any junction diff; audit writes remain OUTSIDE the transaction (AGENTS.md item 4 contract preserved); closes UAT-NOTES.md §5.1 (P0) + §5.12 (P1)
+- [Phase 02.1-architecture-realignment]: [Plan 02.1-37]: Service-layer merged-state validator pattern — when a partial-update endpoint needs to validate against the persisted state, the validator MOVES from the zod superRefine to the service. updateEvent loads existing row first, computes merged = {input ∪ existing}, validates, throws AppError before mutation. Mirrors assertGameOwnedByUser pattern; closes UAT-NOTES.md §5.11 (PATCH youtube invariant gap)
+- [Phase 02.1-architecture-realignment]: [Plan 02.1-37]: VALID_EVENT_KINDS as single source of truth — service + route + page-loader all reference the same constant via filterValidKinds helper in src/lib/util/. Closes UAT-NOTES.md §5.13 (/feed?kind=foo no longer 500s; silent drop matches existing ?show= malformed-param fallback)
+- [Phase 02.1-architecture-realignment]: Plan 02.1-38: Path A (checkbox-list, ~30 LOC) over Path B (full AttachToGamePicker rewrite — DEFERRED to Phase 6 polish backlog) for closing UAT-NOTES.md §5.2 (P0). /events/new kept single-select (out of scope per §5.2). Set-difference dirty check (order-agnostic) over deep-equality for the gameIds[] form state.
 
 ### Pending Todos
 
@@ -326,8 +331,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-30T05:44:07.634Z
-Last Activity: 2026-04-29
-Stopped at: Completed 02.1-35-PLAN.md (round-6 Wave 0 — UAT-NOTES.md §5.1 P0 inbox.dismissed-sticky + §5.12 P1 transactional integrity closed; createEvent + attachEventToGames bodies wrapped in db.transaction; metadata.inbox stripped on junction diff > 0; audit OUTSIDE transaction)
+Last session: 2026-04-30T06:00:16.812Z
+Last Activity: 2026-04-30
+Stopped at: Completed 02.1-38-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
