@@ -157,6 +157,12 @@
   "games_detail_section_stores": "Stores",
   "steam_listing_open_in_steam": "Open in Steam",
   "steam_listing_unnamed": "Untitled",
+  "steam_listing_kind_steam": "STEAM",
+  "steam_listing_app_id": "App {appId}",
+  "steam_listing_edit_aria": "Edit listing",
+  "steam_listing_cover_alt": "Cover image for {name}",
+  "stores_add_cta_after_cards": "+ Add store",
+  "games_detail_edit_cta": "Edit",
 
   "inbox_badge": "Inbox",
   "inbox_badge_tooltip": "This event isn't attached to a game yet. Use the \"Attach to game\" picker on the right.",

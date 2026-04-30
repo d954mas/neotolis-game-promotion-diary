@@ -145,19 +145,30 @@
   // round-3 UAT continuity (Plan 02.1-32 swaps for full chip-set render).
   const gameById = $derived(new Map(allGames.map((g) => [g.id, g])));
 
-  // Plan 02.1-39 (UAT-NOTES.md §5.3 item E): page-level edit-mode SPLIT
-  // into two scoped toggles. The Plan 02.1-30 single `editMode` $state
-  // bled the destructive Remove × affordance across sections; per-section
-  // toggles keep each section's edit surface independent. `editingGame`
-  // is reserved for the game-info section's future edit fields
-  // (description + icon upload — Phase 6 polish backlog); today it
-  // toggles a visible "Editing…" hint adjacent to RenameInline.
-  // `editingStores` drives the StoresSection's existing Remove × button
-  // visibility (mirror of Plan 02.1-30 wiring; the prop name on
-  // StoresSection / SteamListingRow stays `editMode` so component code
-  // didn't churn).
-  let editingGame = $state(false);
-  let editingStores = $state(false);
+  // Plan 02.1-39 round-6 polish #13 (UAT-NOTES.md §5.8 follow-up #13,
+  // 2026-04-30): the section-level edit toggles from §5.3 item E are
+  // RETIRED in favor of per-affordance edit surfaces. User during round-6
+  // UAT (verbatim, ru):
+  //   - "Заголовок game не нужно. Вот есть название. Справа от него edit."
+  //     ("The 'Game' heading isn't needed. We already have the title.
+  //      Edit is to the right of it.")
+  //   - "кнопка edit она у каждой карточки стора, мелко и отдельно"
+  //     ("the Edit button is on each store card, small and separate")
+  //
+  // The single `editingGame` toggle (which never gated anything beyond
+  // RenameInline's already-always-on inline edit affordance) is replaced
+  // by passing PageHeader an Edit CTA next to the title — toggling the
+  // EXISTING `gameInfoEditing` state which simply expands an "editing
+  // hint" today and is the future surface for description / icon UI.
+  //
+  // The `editingStores` global toggle is RETIRED — each SteamListingRow
+  // owns its own local edit-mode now, revealed by a per-card Edit button.
+  // The StoresSection no longer needs an aggregate edit toggle from the
+  // parent page; its old `editMode` prop becomes dead weight (kept on
+  // the prop API for now to avoid a churn in test surfaces, defaulted to
+  // false). Per-card Remove × visibility is gated by the card's own
+  // edit-mode state.
+  let gameInfoEditing = $state(false);
 
   // Plan 02.1-30 (UAT-NOTES.md §4.25.B): group events by date using the
   // SAME groupEventsByDate utility /feed uses (Plan 02.1-19). The events
@@ -228,8 +239,21 @@
   <span>{game.title}</span>
 </nav>
 
+<!--
+  Plan 02.1-39 round-6 polish #13 (UAT-NOTES.md §5.8 follow-up #13,
+  2026-04-30): PageHeader's `cta` prop carries the game's Edit toggle
+  next to the title, replacing the §5.3-era "Game" section <h2> + Edit
+  button row. User direction (verbatim, ru): "Заголовок game не нужно.
+  Вот есть название. Справа от него edit."
+-->
 <PageHeader
   title={game.title}
+  cta={{
+    onClick: () => {
+      gameInfoEditing = !gameInfoEditing;
+    },
+    label: gameInfoEditing ? m.common_close() : m.games_detail_edit_cta(),
+  }}
   sticky
   deletedCount={deletedListings.length}
   onOpenRecovery={() => (recoveryOpen = true)}
@@ -253,23 +277,16 @@
 {/if}
 
 <!--
-  Plan 02.1-39 (UAT-NOTES.md §5.3): three labelled sections with
-  section-header-collocated CTAs. Игра / Магазины / Лента.
-  Items A/C/D/E from §5.3 ship; item B (description + custom icon) is
-  EXPLICITLY DEFERRED to Phase 6 polish backlog.
+  Plan 02.1-39 round-6 polish #13 (UAT-NOTES.md §5.8 follow-up #13,
+  2026-04-30): three labelled sections REDUCE to two visible section
+  headers — "Game" h2 is REMOVED because the page title in PageHeader
+  already identifies the game. Edit affordance for the game moves up
+  to PageHeader's cta slot (above). Stores section keeps its <h2> per
+  user direction; the Add CTA migrates to the BOTTOM of the section
+  (after cards) — owned by StoresSection now. Per-section editingStores
+  toggle is RETIRED; per-card Edit lives inside SteamListingRow.
 -->
 <section class="game-info" id="section-game">
-  <header class="section-header">
-    <h2>{m.games_detail_section_game()}</h2>
-    <button
-      type="button"
-      class="section-edit"
-      onclick={() => (editingGame = !editingGame)}
-      aria-pressed={editingGame}
-    >
-      {editingGame ? m.common_close() : m.common_edit()}
-    </button>
-  </header>
   <GameCover title={game.title} listings={listings} />
   <RenameInline initial={game.title} onSave={saveRename} />
   {#if renameError}<InlineError message={m.error_server_generic()} />{/if}
@@ -286,24 +303,18 @@
   {#if game.notes}
     <p class="notes">{game.notes}</p>
   {/if}
+  {#if gameInfoEditing}
+    <p class="editing-hint">{m.common_edit()}…</p>
+  {/if}
 </section>
 
 <section class="stores" id="section-stores">
   <header class="section-header">
     <h2>{m.games_detail_section_stores()}</h2>
-    <button
-      type="button"
-      class="section-edit"
-      onclick={() => (editingStores = !editingStores)}
-      aria-pressed={editingStores}
-    >
-      {editingStores ? m.common_close() : m.common_edit()}
-    </button>
   </header>
   <StoresSection
     {listings}
     gameId={game.id}
-    editMode={editingStores}
     onChange={() => invalidateAll()}
   />
 </section>
@@ -354,9 +365,16 @@
     text-decoration: none;
   }
   /* Plan 02.1-39 (UAT-NOTES.md §5.3 item C/E): every section's <h2> + its
-   * Edit / Add CTAs sit in one row at the top of the section. Mirrors the
-   * pattern /feed already uses for the events-feed-head row; brings
-   * consistency across game-info / stores / events. */
+   * CTA sit in one row at the top of the section.
+   *
+   * Plan 02.1-39 round-6 polish #13 (UAT-NOTES.md §5.8 follow-up #13):
+   * the "Game" section <h2> + Edit toggle row was REMOVED — the page
+   * title in PageHeader is the primary identifier, and the Edit CTA
+   * moved up to PageHeader's cta slot. The `.section-header` rule now
+   * applies only to Stores and Events sections, both of which still
+   * carry an h2 (Stores keeps "Магазины"; Events keeps "Лента"). The
+   * Stores section's CTA migrated to the BOTTOM (after cards) — owned
+   * by StoresSection now — so the section-header here is heading-only. */
   .section-header {
     display: flex;
     align-items: center;
@@ -370,23 +388,17 @@
     font-weight: var(--font-weight-semibold);
     line-height: var(--line-height-heading);
   }
-  /* Plan 02.1-39 — section-level edit toggle. Same affordance shape as
-   * SourceRow's icon-btn (Plan 02.1-22) applied at the section level so
-   * each section's edit surface stays independent. */
-  .section-edit {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: transparent;
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: var(--font-size-label);
-  }
-  .section-edit[aria-pressed="true"] {
-    background: var(--color-surface);
-    border-color: var(--color-accent);
+  /* Plan 02.1-39 round-6 polish #13: the Edit toggle moved up to
+   * PageHeader's cta slot. Toggling sets `gameInfoEditing = true` and
+   * surfaces a tiny "Edit…" hint below the game-info section so users
+   * know edit mode is active. RenameInline already always-on edits
+   * the title; description / icon UI hangs off the same toggle in a
+   * future plan covering files/uploads. */
+  .editing-hint {
+    margin: 0;
     color: var(--color-accent);
+    font-size: var(--font-size-label);
+    font-style: italic;
   }
   .game-info {
     display: flex;

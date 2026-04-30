@@ -124,6 +124,18 @@ describe("paraglide i18n (UX-04)", () => {
     // empty state. Keys: recovery_dialog_empty, recovery_dialog_heading.
     // Net delta: +2 keys.
     //
+    // Plan 02.1-39 round-6 polish #13 (UAT-NOTES.md §5.8 follow-up #13 —
+    // /games/[id] UI redesign per user direction): adds 6 keys for the
+    // restructured page. Game heading removed (PageHeader.title is the
+    // primary identifier); Edit CTA goes next to title via PageHeader's
+    // cta prop (games_detail_edit_cta — Russian-translatable label).
+    // Stores section gets the Add CTA at the BOTTOM after cards
+    // (stores_add_cta_after_cards) and per-card Edit on each store card
+    // (steam_listing_edit_aria). Card content reordered to image + name
+    // + STEAM badge (steam_listing_kind_steam) + appId
+    // (steam_listing_app_id) — the cover image alt text (steam_listing_
+    // cover_alt) keeps screen-readers covered. Net delta: +6 keys.
+    //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
     // across renames (Phase 2 STATE.md guidance, carried forward).
     const EXPECTED_KEYS = [
@@ -285,6 +297,7 @@ describe("paraglide i18n (UX-04)", () => {
       "game_rename_cta_discard",
       "game_rename_cta_save",
       "games_cta_new_game",
+      "games_detail_edit_cta",
       "games_detail_events_empty",
       "games_detail_events_heading",
       "games_detail_section_events",
@@ -346,14 +359,19 @@ describe("paraglide i18n (UX-04)", () => {
       "sources_owned_by_other",
       "sources_status_auto_off",
       "sources_status_auto_on_pending",
+      "steam_listing_app_id",
+      "steam_listing_cover_alt",
       "steam_listing_duplicate_active_link_label",
       "steam_listing_duplicate_active_prefix",
       "steam_listing_duplicate_soft_deleted",
+      "steam_listing_edit_aria",
+      "steam_listing_kind_steam",
       "steam_listing_open_in_steam",
       "steam_listing_open_link_label",
       "steam_listing_remove_aria",
       "steam_listing_unnamed",
       "stores_add_cta",
+      "stores_add_cta_after_cards",
       "stores_empty",
       "stores_section_heading",
       "theme_label_dark",

@@ -1069,6 +1069,12 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
   });
 
   it("SteamListingRow renders the persisted name when listing.name is present", async () => {
+    // Plan 02.1-39 round-6 polish #13: the app id ALSO renders as its own
+    // line on the card now (user direction "app id" — explicit content
+    // requirement). The previous Plan 02.1-25 assertion that "App {appId}"
+    // is NOT rendered when name is present is INVERTED — the app id is
+    // ALWAYS visible because it is technical metadata users need to
+    // disambiguate listings (e.g. Portal 2 main app vs Portal 2 demo).
     const SteamListingRow = (
       await import("../../src/lib/components/SteamListingRow.svelte")
     ).default;
@@ -1086,11 +1092,21 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
       },
     });
     expect(out.body).toContain("Portal 2");
-    // The fallback "App {appId}" text is NOT rendered when name is present.
-    expect(out.body).not.toContain("App 620");
+    // Plan 02.1-39 round-6 polish #13: app id surfaces in its own muted
+    // monospace line, INDEPENDENT of the name fallback. Both Portal 2
+    // (the name) and "App 620" (the technical id) coexist on the card.
+    // Svelte adds a per-component CSS-scope hash (`svelte-XXXX`) to the
+    // class attribute, so match the prefix only.
+    expect(out.body).toContain("App 620");
+    expect(out.body).toMatch(/class="app-id\b/);
   });
 
-  it("SteamListingRow falls back to 'App {appId}' when listing.name is null", async () => {
+  it("SteamListingRow falls back to localized 'Untitled' when listing.name is null (round-6 #13)", async () => {
+    // Plan 02.1-39 round-6 polish #13: the name fallback is now
+    // m.steam_listing_unnamed() ("Untitled") rather than `App {appId}` —
+    // user direction wanted human-readable text (the appId surfaces in
+    // its own line via m.steam_listing_app_id, so the fallback no longer
+    // duplicates that information).
     const SteamListingRow = (
       await import("../../src/lib/components/SteamListingRow.svelte")
     ).default;
@@ -1107,7 +1123,12 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
         },
       },
     });
+    // Untitled is the new name fallback (m.steam_listing_unnamed).
+    expect(out.body).toContain("Untitled");
+    // App id ALSO renders as its own line via m.steam_listing_app_id.
     expect(out.body).toContain("App 99999");
+    // Svelte CSS-scope hash: match the class prefix only.
+    expect(out.body).toMatch(/class="app-id\b/);
   });
 
   it("SteamListingRow Open-on-Steam href targets store.steampowered.com/app/{appId}/", async () => {
@@ -1132,8 +1153,12 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     );
     expect(out.body).toMatch(/target="_blank"/);
     expect(out.body).toMatch(/rel="noopener noreferrer"/);
-    // Paraglide label ("Open on Steam") renders.
-    expect(out.body).toContain("Open on Steam");
+    // Paraglide label renders. Plan 02.1-39 §5.3 introduced
+    // m.steam_listing_open_in_steam() ("Open in Steam") — distinct from
+    // the Plan 02.1-25 m.steam_listing_open_link_label() ("Open on
+    // Steam") which is now unused by SteamListingRow but kept in the
+    // message catalog for any future re-use.
+    expect(out.body).toContain("Open in Steam");
   });
 
   it("SourceRow.svelte source carries the Mine treatment CSS rule + kind label", async () => {
@@ -1162,7 +1187,7 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     expect(src).toMatch(/source_kind_label_discord_server/);
   });
 
-  it("/games/[id]/+page.svelte renders the three-section layout (Plan 02.1-39 §5.3)", async () => {
+  it("/games/[id]/+page.svelte renders the three-section layout (Plan 02.1-39 §5.3 + round-6 polish #13)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(
@@ -1174,15 +1199,20 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     // 02.1-30's intermediate "lean header + StoresSection + events-feed"
     // shape. Each section carries an id + class prefixed by its scope so
     // anchor links + CSS selectors stay stable.
+    //
+    // Plan 02.1-39 round-6 polish #13 (UAT-NOTES.md §5.8 follow-up #13):
+    // the "Game" h2 + section-header row is REMOVED — game.title in
+    // PageHeader is the primary identifier. Edit moves to PageHeader's
+    // cta slot. Stores/Events sections KEEP their h2 markers.
     expect(src).toMatch(/<section[^>]*class="game-info"[^>]*id="section-game"/);
     expect(src).toMatch(/<section[^>]*class="stores"[^>]*id="section-stores"/);
     expect(src).toMatch(/<section[^>]*class="events"[^>]*id="section-events"/);
-    // Each section's header row carries the section-header class + h2.
-    // The string appears 3+ times: one CSS rule + 3 markup occurrences.
-    const matches = [...src.matchAll(/section-header/g)];
-    expect(matches.length).toBeGreaterThanOrEqual(4);
-    // Sticky PageHeader (Plan 02.1-39 §5.7) sits at the top.
+    // Sticky PageHeader (Plan 02.1-39 §5.7) sits at the top with the
+    // game's title. Round-6 #13: now also carries a `cta` prop for the
+    // game's Edit toggle — the Edit affordance moved up here from the
+    // §5.3 game-info section header.
     expect(src).toMatch(/<PageHeader[\s\S]*?title=\{game\.title\}/);
+    expect(src).toMatch(/cta=\{[\s\S]*?label:\s*gameInfoEditing/);
     // GameCover + StoresSection used inside the page (no <SteamListingRow>
     // direct usage — that lives inside StoresSection).
     expect(src).toMatch(/<GameCover\s/);
@@ -1192,13 +1222,112 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     expect(src).toMatch(
       /\.feedcard-grid[\s\S]*?grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(280px/,
     );
-    // Plan 02.1-39 §5.3 item E: per-section editingGame / editingStores
-    // toggles replace the global editMode from Plan 02.1-30.
-    expect(src).toMatch(/let editingGame = \$state\(false\)/);
-    expect(src).toMatch(/let editingStores = \$state\(false\)/);
+    // Plan 02.1-39 round-6 polish #13: the §5.3 dual-toggle (editingGame +
+    // editingStores) is REPLACED with a single `gameInfoEditing` toggle
+    // for the game's edit affordance (driven by PageHeader's cta) and
+    // per-card edit state inside SteamListingRow (driven by per-card
+    // Edit buttons). The previous editingStores toggle is GONE.
+    expect(src).toMatch(/let gameInfoEditing = \$state\(false\)/);
+    expect(src).not.toMatch(/let editingStores\s*=\s*\$state/);
+    // Negative assertion: the §5.3 "Game" section <h2> is REMOVED in
+    // round-6 #13. The game's name lives in PageHeader.title now.
+    // The `m.games_detail_section_game()` call is gone from the markup.
+    // (Strip the <script> block first so a comment mentioning the call
+    // doesn't false-match.)
+    const markupOnly = src.replace(/<script[\s\S]*?<\/script>/g, "");
+    expect(markupOnly).not.toMatch(/m\.games_detail_section_game\s*\(/);
+    // Negative assertion: the section-edit toggle markup pattern from
+    // §5.3 (per-section button[aria-pressed]) is GONE on game-info.
+    // Stores section header is heading-only — no Edit button there.
+    expect(markupOnly).not.toMatch(/onclick=\{[^}]*editingStores/);
     // Negative assertion: the obsolete two-card classes are gone.
     expect(src).not.toMatch(/<section[^>]*class="game-header-card"/);
     expect(src).not.toMatch(/<section[^>]*class="events-feed-card"/);
+  });
+
+  // Plan 02.1-39 round-6 polish #13 (UAT-NOTES.md §5.8 follow-up #13,
+  // 2026-04-30): /games/[gameId] UI redesign per user direction.
+  // Three discrete user-driven layout changes:
+  //   1. "Game" heading removed; Edit moved to PageHeader.cta.
+  //   2. Add Store CTA migrated from above the cards to AFTER the cards.
+  //   3. Per-card Edit button on each store card.
+  describe("Plan 02.1-39 round-6 polish #13 — /games/[gameId] UI redesign", () => {
+    it("removes the 'Game' section heading; PageHeader carries the game title + Edit cta", async () => {
+      const fs = await import("node:fs");
+      const path = await import("node:path");
+      const src = fs.readFileSync(
+        path.resolve("src/routes/games/[gameId]/+page.svelte"),
+        "utf8",
+      );
+      const markupOnly = src.replace(/<script[\s\S]*?<\/script>/g, "");
+      // The §5.3 section-header row inside <section class="game-info">
+      // is gone — there's no <header class="section-header"> anywhere
+      // INSIDE the game-info section markup.
+      const gameInfoMatch = markupOnly.match(
+        /<section[^>]*class="game-info"[^>]*>([\s\S]*?)<\/section>/,
+      );
+      expect(gameInfoMatch, "game-info section must render").not.toBeNull();
+      const gameInfoBody = gameInfoMatch![1]!;
+      expect(gameInfoBody).not.toMatch(/<header[^>]*class="section-header"/);
+      // PageHeader carries the cta prop pointing at gameInfoEditing.
+      expect(src).toMatch(/<PageHeader[\s\S]*?cta=\{/);
+      expect(src).toMatch(/gameInfoEditing\s*=\s*!gameInfoEditing/);
+      expect(src).toMatch(/m\.games_detail_edit_cta\(\)/);
+    });
+
+    it("StoresSection mounts the Add CTA AFTER the cards (not above them)", async () => {
+      const fs = await import("node:fs");
+      const path = await import("node:path");
+      const src = fs.readFileSync(
+        path.resolve("src/lib/components/StoresSection.svelte"),
+        "utf8",
+      );
+      const markupOnly = src.replace(/<script[\s\S]*?<\/script>/g, "");
+      // The previous .actions-row block above the grid is GONE.
+      expect(markupOnly).not.toMatch(/class="actions-row"/);
+      // The new .add-row block exists, and it appears AFTER the
+      // .stores-grid in the markup (so the natural read order is
+      // cards → Add).
+      const gridIdx = markupOnly.indexOf('class="stores-grid"');
+      const addRowIdx = markupOnly.indexOf('class="add-row"');
+      expect(gridIdx, "stores-grid must render").toBeGreaterThan(-1);
+      expect(addRowIdx, "add-row must render").toBeGreaterThan(-1);
+      expect(
+        addRowIdx,
+        "Add CTA (.add-row) must appear AFTER the stores grid in DOM order",
+      ).toBeGreaterThan(gridIdx);
+      // The CTA uses the new key targeting the after-cards layout.
+      expect(src).toMatch(/m\.stores_add_cta_after_cards\(\)/);
+      // The component no longer accepts an editMode prop — per-card
+      // edit-mode replaces it.
+      expect(src).not.toMatch(/editMode:\s*boolean/);
+    });
+
+    it("SteamListingRow renders cover image + STEAM badge + appId + per-card Edit button", async () => {
+      const fs = await import("node:fs");
+      const path = await import("node:path");
+      const src = fs.readFileSync(
+        path.resolve("src/lib/components/SteamListingRow.svelte"),
+        "utf8",
+      );
+      // Cover image rendered when listing.coverUrl is non-null.
+      expect(src).toMatch(/{#if listing\.coverUrl}/);
+      expect(src).toMatch(/<img[^>]*class="store-cover"/);
+      // STEAM badge identifies the store kind.
+      expect(src).toMatch(/class="kind-badge"/);
+      expect(src).toMatch(/m\.steam_listing_kind_steam\(\)/);
+      // App ID surfaces in muted monospace.
+      expect(src).toMatch(/class="app-id"/);
+      expect(src).toMatch(/m\.steam_listing_app_id\(\{/);
+      // Per-card Edit button replaces the section-level editMode prop.
+      // The component no longer accepts editMode at all.
+      expect(src).not.toMatch(/editMode\?:\s*boolean/);
+      // Local `editing` state owned by each card.
+      expect(src).toMatch(/let editing = \$state\(false\)/);
+      // Edit button visible when not editing; × Remove visible when editing.
+      expect(src).toMatch(/class="edit-btn"/);
+      expect(src).toMatch(/m\.steam_listing_edit_aria\(\)/);
+    });
   });
 
   it("/sources, /feed, /games, /audit each use the shared <PageHeader>", async () => {
