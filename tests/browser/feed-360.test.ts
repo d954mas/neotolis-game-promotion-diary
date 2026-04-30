@@ -610,3 +610,85 @@ describe("Plan 02.1-39 — single .sticky-chrome wrapper (true §5.4 closure, ro
     "/feed FeedQuickNav scrolls WITH the feed — getBoundingClientRect().top advances with window.scrollTo(0, 400); only .sticky-chrome + PageHeader stay pinned (manual UAT — auth harness deferred) — §5.4 closed-by-reversal preserved",
   );
 });
+
+/**
+ * Plan 02.1-39 round-6 polish follow-up #6 — Instagram / Google Sheets
+ * sticky date-section pattern on /feed and /games/[id].
+ *
+ * NEW design item, surfaced during round-6 UAT walkthrough — NOT one of
+ * the round-5 findings 5.1-5.13. User quote (ru, verbatim):
+ *
+ *   "Так и вот где feed и в других местах где будет фид и даты,
+ *    хотелось чтобы дата была всегда виджимая наверху, пока я скролю
+ *    эту дату. Так в гугл таблицах или инстаграмме сделоано"
+ *
+ *   ("On /feed and other places that have a feed with dates, I'd like
+ *    the date to always be pinned at the top while I scroll through
+ *    entries from that date. Like Google Sheets or Instagram does.")
+ *
+ * <FeedDateGroupHeader> already had `position: sticky; top: 0;` since
+ * Plan 02.1-19 — but `top: 0` placed the date header UNDER the sticky
+ * chrome (`.sticky-chrome` z:10, round-6 #5) AND the now-sticky
+ * <PageHeader> (z:5, Plan 02.1-39 §5.7), so it was never visible. Fix:
+ *   - PageHeader.svelte publishes its measured height to
+ *     `--page-header-height` via ResizeObserver (cleanup on unmount sets
+ *     it to '0px' so routes without PageHeader don't carry stale data).
+ *   - FeedDateGroupHeader.top changes from 0 to:
+ *       calc(var(--chrome-height) + var(--page-header-height) - var(--sticky-overlap))
+ *     → the date header lands at the BOTTOM of the chrome+PageHeader
+ *     stack, replaced by the next group's header as the user scrolls
+ *     past, exactly the Instagram / Google Sheets section-header pattern.
+ *
+ * Sticky stack (post-#6):
+ *   1. .sticky-chrome — top:0, z:10 (wraps AppHeader + Nav)
+ *   2. .page-header.sticky — top: calc(--chrome-height - 1px), z:5
+ *   3. .date-header — top: calc(--chrome-height + --page-header-height - 1px), z:1
+ *   4. FeedQuickNav — NOT sticky (scrolls with feed; round-6 reversal preserved)
+ *
+ * Affects /feed (src/routes/feed/+page.svelte) and /games/[gameId]
+ * (src/routes/games/[gameId]/+page.svelte) — both render
+ * <FeedDateGroupHeader> and a sticky <PageHeader> above it.
+ *
+ * Auth harness deferred to Phase 6 — same precedent as the other Plan
+ * 02.1-39 sticky-stack browser tests above. Stub-skipped here for grep
+ * discoverability when the harness arrives; manual UAT covers the visual
+ * gate via 02.1-VALIDATION.md "Manual-Only Verifications".
+ *
+ * Manual UAT recipe (Russian):
+ *   1. Открыть /feed (с минимум 2 разными датами в ленте) и сделать
+ *      hard-refresh (Ctrl+F5 / Cmd+Shift+R).
+ *   2. Прокрутить страницу вниз так, чтобы первая группа с заголовком
+ *      "TODAY" / "YESTERDAY" / "Mon D" зашла в зону под `.sticky-chrome`
+ *      и `<PageHeader>`.
+ *   3. Подтвердить, что заголовок первой группы (например "TODAY")
+ *      ОСТАЁТСЯ приклеенным сразу под PageHeader, пока на экране есть
+ *      хотя бы одна карточка из этой группы.
+ *   4. Продолжить прокрутку. Когда последняя карточка первой группы
+ *      уходит за верх экрана, заголовок следующей группы (например
+ *      "YESTERDAY") должен ВЫТОЛКНУТЬ предыдущий заголовок и занять
+ *      его место. Никаких визуальных артефактов / зазора / прыжка.
+ *   5. Повторить на /games/[id] (открыть любую игру с минимум 2 датами
+ *      в её ленте). Поведение идентичное.
+ *   6. Повторить на 90% / 110% / 125% browser zoom — никаких регрессий
+ *      (subpixel-rounding защищён 1px overlap'ом из round-6 #3).
+ */
+describe("Plan 02.1-39 round-6 #6 — FeedDateGroupHeader sticky under chrome+PageHeader stack", () => {
+  it.skip(
+    "/feed .date-header has computed position === 'sticky' and computed top === calc(--chrome-height + --page-header-height - --sticky-overlap) (~171px at default chrome 116px + page-header 56px - 1px overlap) (manual UAT — auth harness deferred to Phase 6)",
+  );
+  it.skip(
+    "/feed first .date-header stays pinned just below PageHeader after window.scrollTo(0, 600) — getBoundingClientRect().top approximates --chrome-height + --page-header-height (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/feed scrolling past the last card of the first date group replaces the sticky .date-header with the next group's header (Instagram / Google Sheets section-header pattern) (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games/[id] .date-header sticky behavior matches /feed — chrome+PageHeader+date-header three-tier stack (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "PageHeader.svelte sets document.documentElement.style.--page-header-height to its rendered getBoundingClientRect().height after mount (ResizeObserver authoritative; CSS fallback 56px overridden) (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "PageHeader unmount cleanup sets --page-header-height to '0px' so routes without PageHeader don't carry stale data (manual UAT — auth harness deferred)",
+  );
+});

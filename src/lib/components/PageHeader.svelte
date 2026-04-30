@@ -30,6 +30,42 @@
   // anchoring to `#${recoveryAnchor}`. /feed passes both when its loader
   // returns deletedEvents.length > 0; the link surfaces the soft-delete
   // recovery panel without the user scrolling past the entire feed.
+  //
+  // Plan 02.1-39 round-6 polish follow-up #6 (2026-04-30) — Instagram /
+  // Google Sheets sticky date-section pattern. After the AppHeader+Nav
+  // chrome wrapper landed (#5), the user surfaced a NEW design item during
+  // round-6 UAT (NOT a round-5 finding) — verbatim quote (ru):
+  //   "Так и вот где feed и в других местах где будет фид и даты,
+  //    хотелось чтобы дата была всегда виджимая наверху, пока я скролю
+  //    эту дату. Так в гугл таблицах или инстаграмме сделоано"
+  //   ("On /feed and other places that have a feed with dates, I'd like
+  //    the date to always be pinned at the top while I scroll through
+  //    entries from that date. Like Google Sheets or Instagram does.")
+  //
+  // <FeedDateGroupHeader> already had `position: sticky; top: 0;` declared
+  // — but `top: 0` placed it under the .sticky-chrome (z:10) AND the now-
+  // sticky PageHeader (z:5), so it was never visible. To stick at the
+  // BOTTOM of the chrome+PageHeader stack the date header needs the real
+  // PageHeader height available as a CSS variable.
+  //
+  // PageHeader now publishes its own measured height to the
+  // --page-header-height custom property on `document.documentElement` via
+  // a ResizeObserver on the rendered <header> element. FeedDateGroupHeader
+  // reads `top: calc(--chrome-height + --page-header-height - --sticky-overlap)`
+  // and lands exactly under the sticky chrome+PageHeader stack — the
+  // Instagram / Google Sheets section-header pattern.
+  //
+  // We use raw fractional `getBoundingClientRect().height` (no Math.ceil)
+  // — same lesson as round-6 #5 for the chrome wrapper. Modern browsers
+  // (Chrome 90+, Firefox 81+, Safari 16+) handle subpixel sticky `top:`
+  // correctly. The 1px `--sticky-overlap` shim absorbs DPR rounding at the
+  // chrome+PageHeader → date-header boundary.
+  //
+  // Cleanup on unmount: routes that DON'T render PageHeader (login, the
+  // landing page) must not carry stale `--page-header-height`. Setting the
+  // property to '0px' on cleanup means FeedDateGroupHeader on those routes
+  // (none today, defensive for the future) computes its `top:` against a
+  // PageHeader that isn't there.
 
   import { m } from "$lib/paraglide/messages.js";
 
@@ -46,9 +82,30 @@
     deletedCount?: number;
     recoveryAnchor?: string;
   } = $props();
+
+  let headerEl: HTMLElement | undefined = $state();
+
+  $effect(() => {
+    if (typeof window === "undefined") return;
+    if (!headerEl) return;
+    const root = document.documentElement;
+    const sync = (): void => {
+      root.style.setProperty(
+        "--page-header-height",
+        `${headerEl!.getBoundingClientRect().height}px`,
+      );
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(headerEl);
+    return () => {
+      ro.disconnect();
+      root.style.setProperty("--page-header-height", "0px");
+    };
+  });
 </script>
 
-<header class="page-header" class:sticky>
+<header class="page-header" class:sticky bind:this={headerEl}>
   <h1>{title}</h1>
   {#if cta}
     {#if cta.onClick}
