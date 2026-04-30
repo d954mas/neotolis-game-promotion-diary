@@ -253,6 +253,9 @@
 
   "page_header_recently_deleted": "Recently deleted ({count})",
 
+  "recovery_dialog_heading": "Recently deleted ({count})",
+  "recovery_dialog_empty": "Nothing to recover.",
+
   "paste_box_label": "Paste a URL",
   "paste_box_placeholder": "https://youtube.com/watch?v=…",
 

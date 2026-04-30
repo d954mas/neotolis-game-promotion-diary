@@ -13,8 +13,10 @@
   //     (auto-fill, minmax 280px) — Google Photos / Apple Photos timeline.
   //   - Sentinel <div> drives IntersectionObserver-based infinite scroll
   //     (replaces <CursorPager>).
-  //   - <DeletedEventsPanel> below the grid (Plan 02.1-14 — Gap 2; the panel
-  //     keeps its own pagination — recovery is a different mental model).
+  //   - <RecoveryDialog> modal opened from PageHeader's "Recently deleted (N)"
+  //     button (Plan 02.1-14 — Gap 2; revised Plan 02.1-39 round-6 polish #11
+  //     — anchor → modal so infinite scroll does not throw the user to a
+  //     moving target).
   //   - <EmptyState> for first-time empty + filtered-no-match cases.
   //
   // Plan 02.1-19 a11y note: infinite scroll has no JavaScript-disabled
@@ -38,13 +40,51 @@
   import FilterChips from "$lib/components/FilterChips.svelte";
   import FiltersSheet from "$lib/components/FiltersSheet.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
-  import DeletedEventsPanel from "$lib/components/DeletedEventsPanel.svelte";
+  // Plan 02.1-39 round-6 polish #11 (UAT-NOTES.md §5.8 follow-up #11,
+  // 2026-04-30): <DeletedEventsPanel> below the feed grid replaced by a
+  // <RecoveryDialog> modal opened from PageHeader's "Recently deleted (N)"
+  // button. The bottom-of-page panel broke on infinite-scroll surfaces by
+  // construction (anchor link → scroll to bottom → sentinel fires → bottom
+  // moves → user lost). The dialog decouples the recovery UI from scroll
+  // position. <DeletedEventsPanel> is now unused on /feed and removed from
+  // the imports — the soft-deleted events flow comes from the same loader
+  // (data.deletedEvents) but renders inside the modal instead.
+  import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
 
   let sheetOpen = $state(false);
+  // Plan 02.1-39 round-6 polish #11: RecoveryDialog open state. Opened by
+  // PageHeader's "Recently deleted (N)" button; closed by Escape, backdrop
+  // click, or the dialog's own close button. Auto-closes when the last
+  // recoverable item is restored (items reactively shrink to length 0).
+  let recoveryOpen = $state(false);
+
+  // Map deletedEvents (toEventDto-projected, no ciphertext) into the
+  // RecoveryDialog's generic { id, name, deletedAt } shape. The DTO
+  // contract guarantees `title` exists; `deletedAt` is the soft-delete
+  // timestamp — same field RetentionBadge consumes inside the dialog.
+  const recoveryItems = $derived(
+    data.deletedEvents.map((ev) => ({
+      id: ev.id,
+      name: ev.title,
+      deletedAt: ev.deletedAt,
+    })),
+  );
+
+  async function restoreEvent(id: string): Promise<void> {
+    const res = await fetch(`/api/events/${id}/restore`, { method: "PATCH" });
+    if (res.ok) {
+      await invalidateAll();
+      // If that was the last recoverable item, close the dialog so the
+      // user is not stuck staring at "Nothing to recover" — the parent
+      // also stops rendering the PageHeader CTA at the same time
+      // (deletedCount falls to 0).
+      if (data.deletedEvents.length <= 1) recoveryOpen = false;
+    }
+  }
   // Plan 02.1-20 widens FilterChips/FiltersSheet axis union to include
   // 'action' for /audit reuse; /feed never receives that axis (filters.action
   // is left undefined here) but the local type must match the component
@@ -164,7 +204,7 @@
     // below is what makes the omission a no-op for the date params.
     from?: string;
     to?: string;
-    action?: string[];  // unused on /feed
+    action?: string[]; // unused on /feed
   }): void {
     const params = new URLSearchParams(page.url.searchParams);
     // Sheet owns source/kind/show/authorIsMe on /feed. The 'date' axis was
@@ -315,7 +355,7 @@
     cta={{ href: "/events/new", label: m.feed_cta_add_event() }}
     sticky
     deletedCount={data.deletedEvents.length}
-    recoveryAnchor="deleted-events"
+    onOpenRecovery={() => (recoveryOpen = true)}
   />
 
   <!-- Plan 02.1-26 — FeedQuickNav: chip strip / segmented control for the
@@ -370,9 +410,7 @@
           <FeedCard
             event={row}
             source={row.sourceId ? (sourceById.get(row.sourceId) ?? null) : null}
-            game={row.gameIds.length > 0
-              ? (gameById.get(row.gameIds[0]!) ?? null)
-              : null}
+            game={row.gameIds.length > 0 ? (gameById.get(row.gameIds[0]!) ?? null) : null}
             games={data.games}
             onChanged={() => invalidateAll()}
           />
@@ -389,22 +427,25 @@
     </div>
   {/if}
 
-  <!-- Plan 02.1-14 (gap closure) — soft-delete recovery panel sits below
-       the feed grid (was: below CursorPager pre-Plan-02.1-19). The
-       component returns nothing when there are no recoverable events, so
-       it has zero footprint on the empty-feed and filtered-empty branches
-       above.
-       Plan 02.1-39 (UAT-NOTES.md §5.8 Path A): id="deleted-events" wraps
-       the panel so PageHeader's "Recently deleted (N)" link can anchor
-       here. The link only renders when data.deletedEvents.length > 0, so
-       there's a panel to scroll to whenever the link exists. -->
-  <div id="deleted-events">
-    <DeletedEventsPanel
-      deletedEvents={data.deletedEvents}
+  <!-- Plan 02.1-39 round-6 polish #11 (UAT-NOTES.md §5.8 follow-up #11):
+       <DeletedEventsPanel> at the bottom of the page is REMOVED. The
+       same recovery flow now lives in <RecoveryDialog> — a modal opened
+       from PageHeader's "Recently deleted (N)" button. The dialog
+       decouples the recovery UI from scroll position so infinite-scroll
+       does not throw the user to a moving target. The dialog only
+       mounts when data.deletedEvents.length > 0; the dialog itself
+       still defends against the empty case (renders the localized
+       empty message). -->
+  {#if data.deletedEvents.length > 0}
+    <RecoveryDialog
+      open={recoveryOpen}
+      items={recoveryItems}
+      entityType="event"
       retentionDays={data.retentionDays}
-      onChanged={() => invalidateAll()}
+      onClose={() => (recoveryOpen = false)}
+      onRestore={restoreEvent}
     />
-  </div>
+  {/if}
 
   {#if sheetOpen}
     <FiltersSheet

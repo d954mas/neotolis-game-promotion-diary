@@ -469,7 +469,9 @@ describe("Plan 02.1-38 — /events/[id]/edit multi-select Game picker at 360px (
  *   §5.5 (P1) — :root:has(dialog[open]) blocks mouse-wheel scroll.
  *   §5.6 (P2) — FiltersSheet source list shows kind glyph + label.
  *   §5.7 (P2) — PageHeader sticky on /feed, /games, /audit (was /sources only).
- *   §5.8 (P2) — Recently-deleted CTA in PageHeader (Path A — anchor link).
+ *   §5.8 (P2) — Recently-deleted CTA in PageHeader (Path A — anchor link;
+ *               revised round-6 polish #11 → modal dialog after the anchor
+ *               broke on infinite-scroll surfaces).
  *
  * The full end-to-end at 360px (visit /games/[id] with 3+ events, see
  * three labelled sections; resize to 1024px, see FeedCards 3-per-row;
@@ -508,8 +510,14 @@ describe("Plan 02.1-38 — /events/[id]/edit multi-select Game picker at 360px (
  *   7. /feed → FiltersSheet → "Sources" section → each source row shows a
  *      kind glyph + short kind label before the displayName.
  *   8. /feed → soft-delete an event → reload → "Recently deleted (1)"
- *      link appears in PageHeader → click it → page anchors to the
- *      DeletedEventsPanel below the feed.
+ *      button appears in PageHeader → click it → <RecoveryDialog> modal
+ *      opens with the event listed + Restore action. Press Escape OR
+ *      click the backdrop OR click × → modal closes and the user is
+ *      returned to their original scroll position. Click Restore → the
+ *      event is recovered, the list refreshes, and the dialog closes
+ *      automatically when the last item is restored. Replaces the
+ *      Path A anchor link (round-6 polish #11 — UAT-NOTES.md §5.8
+ *      follow-up #11; the anchor broke on infinite-scroll surfaces).
  */
 describe("Plan 02.1-39 — round-6 UI bundle (UAT-NOTES.md §5.3 / §5.4 / §5.5 / §5.6 / §5.7 / §5.8)", () => {
   it.skip(
@@ -537,6 +545,6 @@ describe("Plan 02.1-39 — round-6 UI bundle (UAT-NOTES.md §5.3 / §5.4 / §5.5
     "/audit PageHeader stays pinned to top: var(--app-header-height) after scroll — §5.7 (manual UAT — auth harness deferred)",
   );
   it.skip(
-    "/feed PageHeader renders <a class='recovery-link' href='#deleted-events'> when data.deletedEvents.length > 0; clicking the link anchors to <div id='deleted-events'> — §5.8 Path A (manual UAT — auth harness deferred)",
+    "/feed PageHeader renders <button class='recovery-link'> when data.deletedEvents.length > 0; clicking opens <RecoveryDialog> modal (Escape / backdrop / × close; restore returns to original scroll position) — §5.8 follow-up #11 (manual UAT — auth harness deferred)",
   );
 });

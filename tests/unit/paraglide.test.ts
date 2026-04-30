@@ -119,6 +119,11 @@ describe("paraglide i18n (UX-04)", () => {
     // games_detail_section_stores, page_header_recently_deleted,
     // steam_listing_open_in_steam, steam_listing_unnamed. Net delta: +6 keys.
     //
+    // Plan 02.1-39 round-6 polish #11 (UAT-NOTES.md §5.8 follow-up #11 —
+    // anchor → modal): adds 2 keys for the new <RecoveryDialog> heading +
+    // empty state. Keys: recovery_dialog_empty, recovery_dialog_heading.
+    // Net delta: +2 keys.
+    //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
     // across renames (Phase 2 STATE.md guidance, carried forward).
     const EXPECTED_KEYS = [
@@ -307,6 +312,8 @@ describe("paraglide i18n (UX-04)", () => {
       "paste_box_placeholder",
       "polling_badge_manual",
       "polling_badge_phase3_placeholder",
+      "recovery_dialog_empty",
+      "recovery_dialog_heading",
       "settings_credentials_heading",
       "settings_credentials_steam_link_label",
       "settings_cta_save",

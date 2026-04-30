@@ -31,6 +31,22 @@
   // returns deletedEvents.length > 0; the link surfaces the soft-delete
   // recovery panel without the user scrolling past the entire feed.
   //
+  // Plan 02.1-39 round-6 polish #11 (UAT-NOTES.md §5.8 follow-up #11,
+  // 2026-04-30): the anchor link broke on infinite-scroll surfaces by
+  // construction — clicking jumps to the bottom of the list, the sentinel
+  // fires, the loader appends another page, the bottom moves further down.
+  // User during round-6 UAT (verbatim, ru):
+  //   "Да но оно странно работает, оно меня кидает просто вниз страницы.
+  //    А если у меня тут бесконечная лента, то новые эвенты подгрузит и
+  //    меня снова кинет вниз? как будто нужно чтобы там оно раскрывалось
+  //    или в отдельном окне"
+  // The `recoveryAnchor: string` prop is REPLACED with `onOpenRecovery:
+  // () => void`. The "Recently deleted (N)" affordance becomes a <button>
+  // that fires a callback; the parent owns a <RecoveryDialog> modal
+  // mounted alongside <PageHeader>. The dialog decouples the recovery UI
+  // from scroll position — closing the dialog returns the user exactly
+  // where they were, so infinite-scroll surfaces work by construction.
+  //
   // Plan 02.1-39 round-6 polish follow-up #6 (2026-04-30) — Instagram /
   // Google Sheets sticky date-section pattern. After the AppHeader+Nav
   // chrome wrapper landed (#5), the user surfaced a NEW design item during
@@ -74,13 +90,13 @@
     cta,
     sticky = false,
     deletedCount,
-    recoveryAnchor,
+    onOpenRecovery,
   }: {
     title: string;
     cta?: { href?: string; label: string; onClick?: () => void };
     sticky?: boolean;
     deletedCount?: number;
-    recoveryAnchor?: string;
+    onOpenRecovery?: () => void;
   } = $props();
 
   let headerEl: HTMLElement | undefined = $state();
@@ -114,10 +130,10 @@
       <a href={cta.href} class="cta">{cta.label}</a>
     {/if}
   {/if}
-  {#if deletedCount && deletedCount > 0 && recoveryAnchor}
-    <a class="recovery-link" href={`#${recoveryAnchor}`}>
+  {#if deletedCount && deletedCount > 0 && onOpenRecovery}
+    <button type="button" class="recovery-link" onclick={onOpenRecovery}>
       {m.page_header_recently_deleted({ count: deletedCount })}
-    </a>
+    </button>
   {/if}
 </header>
 
@@ -183,11 +199,24 @@
   .cta:hover {
     filter: brightness(1.05);
   }
-  /* Plan 02.1-39 (UAT-NOTES.md §5.8 Path A): low-key text link anchoring to
-   * the in-page DeletedEventsPanel. Visually subordinate to the primary CTA
-   * (label + small + muted) so it does not compete for attention; only
-   * appears when deletedCount > 0. */
+  /* Plan 02.1-39 (UAT-NOTES.md §5.8 Path A): low-key text link surfacing
+   * the soft-delete recovery flow. Visually subordinate to the primary
+   * CTA (label + small + muted) so it does not compete for attention;
+   * only appears when deletedCount > 0.
+   *
+   * Plan 02.1-39 round-6 polish #11 (UAT-NOTES.md §5.8 follow-up #11):
+   * <a href> changed to <button onclick> — the button fires a callback
+   * that opens <RecoveryDialog> in the parent surface. Same visual
+   * treatment (text link styling) so the look does not regress; the
+   * button-shaped element is reset to a borderless transparent surface
+   * and given the same underline + muted color.
+   */
   .recovery-link {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font: inherit;
+    cursor: pointer;
     font-size: var(--font-size-label);
     color: var(--color-text-muted);
     text-decoration: underline;
