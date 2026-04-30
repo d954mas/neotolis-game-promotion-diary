@@ -77,10 +77,16 @@
    * Plan 02.1-39 (UAT-NOTES.md §5.4 + §5.7): swap the hardcoded `top: 72px`
    * for `var(--app-header-height, 72px)` so this offset shares its source
    * of truth with FeedQuickNav's sticky calc(). The 72px fallback preserves
-   * zero visual regression in browsers without custom-property support. */
+   * zero visual regression in browsers without custom-property support.
+   * Plan 02.1-39 (UAT-NOTES.md §5.4 true closure — round-6 follow-up): the
+   * primary <Nav> is now also sticky (top: --app-header-height), so this
+   * sticky <PageHeader> must anchor BELOW Nav. The offset becomes
+   * calc(--app-header-height + --nav-height); fallback 72px + 44px = 116px
+   * preserves zero visual regression. The combined sticky stack is now:
+   * AppHeader → Nav → PageHeader → (per-page content). */
   .page-header.sticky {
     position: sticky;
-    top: var(--app-header-height, 72px);
+    top: calc(var(--app-header-height, 72px) + var(--nav-height, 44px));
     z-index: 5;
     padding: var(--space-sm) 0;
     background: var(--color-bg);

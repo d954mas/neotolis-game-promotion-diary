@@ -547,3 +547,52 @@ describe("Plan 02.1-39 — /feed FeedQuickNav non-sticky (round-6 reversal) + Fi
     "/feed FiltersSheet typeahead matches against sourceKindLabel — typing 'youtube' surfaces every YouTube source even when displayName / handleUrl don't contain that substring — §5.6 (manual UAT — auth harness deferred)",
   );
 });
+
+/**
+ * Plan 02.1-39 — true §5.4 closure: primary <Nav> sticks below AppHeader.
+ *
+ * Round-5 UAT user quote: "хедер сейчас липкий все ок. Но вот табы после
+ * хедера, не липкие" — round-6 first attempt misread the quote as
+ * <FeedQuickNav> (the per-feed chip strip) and applied sticky there;
+ * commit 4717c3c reversed that misfix after the user clarified
+ * "ТАБЫ ДОЛЖНЫ — табы которые навигация по страницам" (the tabs that
+ * navigate between pages — i.e. the primary <Nav> rendered immediately
+ * under AppHeader on every authenticated page from src/routes/+layout.svelte).
+ *
+ * The CSS contract for the closure:
+ *   <Nav> .nav { position: sticky; top: var(--app-header-height, 72px); z-index: 9 }
+ *   PageHeader.sticky { top: calc(--app-header-height + --nav-height) }
+ *
+ * Manual UAT recipe (Russian):
+ *   1. Открыть /feed (или /sources, /games, /audit) при ширине ≤ 768px.
+ *   2. Прокрутить страницу вниз минимум на 600px.
+ *   3. Подтвердить, что AppHeader (полоса с логотипом + аватаром) остаётся
+ *      приклеенным к верху экрана.
+ *   4. Подтвердить, что табы Feed / Sources / Games / Settings (Nav)
+ *      ОСТАЮТСЯ приклеенными СРАЗУ под AppHeader, а не уезжают вверх.
+ *   5. Подтвердить, что PageHeader (заголовок страницы + основная CTA)
+ *      остаётся приклеенным сразу под Nav (трёхуровневый липкий стек).
+ *   6. На /feed подтвердить, что FeedQuickNav (All / Inbox / Standalone /
+ *      по-играм) ПРОКРУЧИВАЕТСЯ ВМЕСТЕ с лентой — в отличие от Nav, не
+ *      становится липким (это закрытие через откат, см. описание выше).
+ *
+ * Auth harness deferred to Phase 6 — same precedent as Plans 02.1-18 / 19 /
+ * 20 / 21 / 23 / 26 / 39 (FeedQuickNav reversal block above).
+ */
+describe("Plan 02.1-39 — primary <Nav> sticky (true §5.4 closure)", () => {
+  it.skip(
+    "/feed Nav .nav has computed position === 'sticky' and top === var(--app-header-height) — getBoundingClientRect().top stays at AppHeader-height after window.scrollTo(0, 600) (manual UAT — auth harness deferred to Phase 6) — §5.4 true closure",
+  );
+  it.skip(
+    "/sources Nav stays pinned below AppHeader on scroll — three-level sticky stack AppHeader → Nav → PageHeader (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/games Nav stays pinned below AppHeader on scroll — three-level sticky stack AppHeader → Nav → PageHeader (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/audit Nav stays pinned below AppHeader on scroll — three-level sticky stack AppHeader → Nav → PageHeader (manual UAT — auth harness deferred)",
+  );
+  it.skip(
+    "/feed FeedQuickNav scrolls WITH the feed — getBoundingClientRect().top advances with window.scrollTo(0, 400); only AppHeader + Nav + PageHeader stay pinned (manual UAT — auth harness deferred) — §5.4 closed-by-reversal preserved",
+  );
+});

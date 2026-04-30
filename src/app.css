@@ -60,8 +60,17 @@
    * `--page-header-height` was introduced in round-5 to anchor a sticky
    * FeedQuickNav below PageHeader; it was removed on round-6 after the
    * user reversed direction on §5.4 (tabs strip should scroll with the
-   * feed, not stick). No remaining consumer needs the value. */
+   * feed, not stick). No remaining consumer needs the value.
+   *
+   * Plan 02.1-39 (UAT-NOTES.md §5.4 true closure): `--nav-height` anchors
+   * <PageHeader.sticky> below the now-sticky primary <Nav>. 44px ≈ Nav
+   * item `min-height: 44px` (Nav.svelte) + the 1px border-bottom; rounding
+   * to a CSS-pixel-clean 44px keeps the offset deterministic. Sticky stack:
+   *   AppHeader (top: 0)          height: --app-header-height (72px)
+   *   Nav (top: 72px)             height: --nav-height (44px)
+   *   PageHeader.sticky (top: 72 + 44 = 116px). */
   --app-header-height: 72px;
+  --nav-height: 44px;
 }
 
 /* Color — light theme (default + explicit). */
