@@ -82,12 +82,15 @@
   --app-header-height: 72px;
   --nav-height: 44px;
 
-  /* Plan 02.1-39 round-6 follow-up #3 (UAT-NOTES.md §5.4): defensive 1px
-   * overlap between adjacent sticky tiers so subpixel rounding artifacts
-   * never produce a visible gap. AppHeader, Nav, and PageHeader.sticky all
-   * paint with matching backgrounds (`background: var(--color-surface)` /
-   * `var(--color-bg)` blended with the existing border-bottom), so a 1px
-   * overlap renders identically to no overlap — there is no visual cost.
+  /* Plan 02.1-39 round-6 polish #4: 4px (was 1px) so subpixel rounding
+   * AND browser-zoom multipliers AND scroll-time ResizeObserver lag are
+   * all absorbed. Overlap is invisible — AppHeader (z:10) paints over
+   * Nav (z:9), Nav paints over PageHeader, and all three share
+   * `background: var(--color-surface)` so even raw overlap renders the
+   * same color. User-driven bump after 1px proved insufficient at
+   * browser zoom levels other than 100% (UAT-NOTES.md §5.4 round-6
+   * follow-up #4 — user quote: "Так а почему не расширинть, там, чтобы
+   * точно перекрывало и не было видно").
    *
    * Each tier subtracts N × --sticky-overlap from its sticky `top:` calc:
    *   Nav            top: calc(--app-header-height - --sticky-overlap)
@@ -96,11 +99,13 @@
    *
    * Round-6 #2 (commit e91bd29) used `Math.ceil(getBoundingClientRect)` to
    * round each height UP. That fixed the AppHeader/Nav gap but pushed the
-   * SAME gap one tier downstream (Nav/PageHeader). Round-6 #3 (this) drops
-   * ceil entirely — raw fractional heights flow through the subpixel sticky
-   * machinery, and this 1px overlap token is the belt-and-suspenders safety
-   * net for any future browser-engine drift. */
-  --sticky-overlap: 1px;
+   * SAME gap one tier downstream (Nav/PageHeader). Round-6 #3 (435697e)
+   * dropped ceil entirely — raw fractional heights flow through the
+   * subpixel sticky machinery — and added a 1px overlap. Round-6 #4
+   * (this) widens that overlap to 4px after the gap re-appeared at
+   * non-100% zoom, where 1px is below the combined subpixel + zoom-
+   * multiplier + observer-lag delta in practice. */
+  --sticky-overlap: 4px;
 }
 
 /* Color — light theme (default + explicit). */
