@@ -139,31 +139,32 @@ jobs:
       # via `pnpm exec playwright` so the version matches the lockfile.
       - run: pnpm exec playwright install chromium chromium-headless-shell --with-deps
       - run: pnpm build
-      # Boot the preview server in the background and wait for it to listen.
-      # `vite preview` exits when stdin closes; nohup + & detaches it from
-      # the step shell. The until-loop polls /healthz-equivalent (the root
-      # page returns 200 once the server is ready).
-      - name: Boot vite preview
+      # Boot vite preview AND run browser tests in the SAME step so the
+      # background `pnpm preview` is alive during test execution. GitHub
+      # Actions kills background processes when a step ends; splitting boot
+      # and test into separate steps causes the preview server to die before
+      # the test step starts → vitest browser navigates to :5173 → connection
+      # refused → "Browser connection was closed while running tests" (round
+      # 7-12 chased this symptom in vitest config before tracing the cause
+      # to step boundaries). The trap on EXIT shuts the preview down cleanly.
+      - name: Boot vite preview + run browser tests
         run: |
           nohup pnpm preview --port 5173 --host 127.0.0.1 > vite-preview.log 2>&1 &
-          echo $! > vite-preview.pid
+          PREVIEW_PID=$!
+          trap 'kill "$PREVIEW_PID" 2>/dev/null || true' EXIT
           for _ in $(seq 1 60); do
             if curl -sf http://localhost:5173/ >/dev/null 2>&1; then
               echo "preview ready"
-              exit 0
+              break
             fi
             sleep 1
           done
-          echo "preview did not become ready within 60s"
-          cat vite-preview.log
-          exit 1
-      - run: pnpm test:browser
-      - name: Stop vite preview
-        if: always()
-        run: |
-          if [ -f vite-preview.pid ]; then
-            kill "$(cat vite-preview.pid)" 2>/dev/null || true
+          if ! curl -sf http://localhost:5173/ >/dev/null 2>&1; then
+            echo "preview did not become ready within 60s"
+            cat vite-preview.log
+            exit 1
           fi
+          pnpm test:browser
 
   smoke:
     runs-on: ubuntu-latest
