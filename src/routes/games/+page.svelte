@@ -101,6 +101,7 @@
       },
       label: m.games_cta_new_game(),
     }}
+    sticky
   />
 
   {#if showForm}

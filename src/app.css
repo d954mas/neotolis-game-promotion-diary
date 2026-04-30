@@ -49,6 +49,15 @@
   --bp-mobile: 360px; /* hard floor — UX-02 */
   --bp-tablet: 768px;
   --bp-desktop: 1024px;
+
+  /* Plan 02.1-39 (UAT-NOTES.md §5.4 + §5.7): single source of truth for the
+   * sticky-chrome offsets. PageHeader (top: var(--app-header-height)) and
+   * FeedQuickNav (top: calc(var(--app-header-height) + var(--page-header-height)))
+   * stay in sync with AppHeader's computed height by reading these tokens.
+   * Hardcoded fallbacks in the consuming components (72px / 56px) preserve
+   * zero visual regression in browsers without custom-property support. */
+  --app-header-height: 72px;
+  --page-header-height: 56px;
 }
 
 /* Color — light theme (default + explicit). */
@@ -190,7 +199,14 @@ div {
  * the native <dialog> element + showModal(). Supported in Chrome 105+,
  * Safari 15.4+, Firefox 121+ — within the project's modern-browser
  * baseline. Older browsers fall back to no scroll lock; the dialog still
- * focus-traps via showModal() so the regression is graceful. */
+ * focus-traps via showModal() so the regression is graceful.
+ *
+ * Plan 02.1-39 (UAT-NOTES.md §5.5): mirror the lock onto :root. Modern
+ * browsers' scroll root is <html>, so wheel events scroll <html> even when
+ * <body> is overflow-locked — round-5 UAT user quote "скролл работает под
+ * окном, колесико мышки". Both selectors stay because some browsers only
+ * honor :has() on the originating element if the rule lives there. */
+:root:has(dialog[open]),
 body:has(dialog[open]) {
   overflow: hidden;
 }

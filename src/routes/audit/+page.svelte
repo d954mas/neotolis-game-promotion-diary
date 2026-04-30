@@ -31,6 +31,10 @@
   import FiltersSheet from "$lib/components/FiltersSheet.svelte";
   import DateRangeControl from "$lib/components/DateRangeControl.svelte";
   import CursorPager from "$lib/components/CursorPager.svelte";
+  // Plan 02.1-39 (UAT-NOTES.md §5.7): /audit gains the shared sticky
+  // PageHeader so its title row stays pinned under AppHeader on scroll —
+  // matches /feed, /games, /sources for cross-page consistency.
+  import PageHeader from "$lib/components/PageHeader.svelte";
   import type { PageData } from "./$types";
 
   type AuditEntryDtoLocal = {
@@ -164,9 +168,7 @@
 </script>
 
 <section class="audit">
-  <header class="head">
-    <h1>Audit log</h1>
-  </header>
+  <PageHeader title="Audit log" sticky />
 
   <DateRangeControl activeFilters={activeFilters} onApply={applyDateRangeAudit} />
 
@@ -211,18 +213,10 @@
     gap: var(--space-md);
     min-width: 0;
   }
-  .head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-md);
-    flex-wrap: wrap;
-  }
-  .head h1 {
-    margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
-  }
+  /* Plan 02.1-39 (UAT-NOTES.md §5.7): inline .head + .head h1 styles
+   * removed — replaced by the shared <PageHeader sticky> at the top of the
+   * page. PageHeader owns the title font-size + sticky offset; .audit only
+   * needs the column layout for the rest of the page chrome. */
   .rows {
     background: var(--color-surface);
     border: 1px solid var(--color-border);

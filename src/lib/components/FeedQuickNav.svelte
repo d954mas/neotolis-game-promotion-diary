@@ -202,6 +202,19 @@
 
 <style>
   .quick-nav {
+    /* Plan 02.1-39 (UAT-NOTES.md §5.4): sticky below AppHeader + PageHeader.
+     * The combined offset keeps the tabs strip pinned while the user
+     * scrolls deep into the feed (round-5 UAT user quote: "хедер сейчас
+     * липкий все ок. Но вот табы после хедера, не липкие"). Hardcoded
+     * fallbacks (72px / 56px) match AppHeader's computed height and
+     * PageHeader's previously hardcoded sticky offset — zero visual
+     * regression in browsers without custom-property support. */
+    position: sticky;
+    top: calc(var(--app-header-height, 72px) + var(--page-header-height, 56px));
+    z-index: 8;
+    background: var(--color-bg);
+    border-bottom: 1px solid var(--color-border);
+
     display: flex;
     gap: var(--space-sm);
     flex-wrap: nowrap;

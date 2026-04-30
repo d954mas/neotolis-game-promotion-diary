@@ -45,13 +45,10 @@
   import SourceKindIcon from "./SourceKindIcon.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import InlineError from "./InlineError.svelte";
-
-  type SourceKind =
-    | "youtube_channel"
-    | "reddit_account"
-    | "twitter_account"
-    | "telegram_channel"
-    | "discord_server";
+  // Plan 02.1-39 (UAT-NOTES.md §5.6): kindLabel extracted to a shared
+  // helper so SourceRow and FiltersSheet's new kind glyph + label render
+  // resolve to the same wording. Single source of truth.
+  import { sourceKindLabel as kindLabel, type SourceKind } from "$lib/util/source-kind-label.js";
 
   type DataSourceDto = {
     id: string;
@@ -64,27 +61,6 @@
   };
 
   let { source }: { source: DataSourceDto } = $props();
-
-  // Plan 02.1-25 (UAT-NOTES.md §2.1-redesign): kind icon + TEXT label
-  // rendered together so users can scan the source list and see "YouTube
-  // channel" / "Reddit account" / etc. at a glance. User quote: "И еще
-  // писать тип и иконку типа". The 5 source_kind_label_* keys already
-  // existed in messages/en.json (Plan 02.1-08); this plan adds the
-  // visible inline rendering.
-  function kindLabel(k: SourceKind): string {
-    switch (k) {
-      case "youtube_channel":
-        return m.source_kind_label_youtube_channel();
-      case "reddit_account":
-        return m.source_kind_label_reddit_account();
-      case "twitter_account":
-        return m.source_kind_label_twitter_account();
-      case "telegram_channel":
-        return m.source_kind_label_telegram_channel();
-      case "discord_server":
-        return m.source_kind_label_discord_server();
-    }
-  }
 
   let editing = $state(false);
   // Hold the rename buffer in plain state — when the edit form opens we

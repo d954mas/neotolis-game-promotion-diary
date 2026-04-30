@@ -37,6 +37,16 @@
 
   import { m } from "$lib/paraglide/messages.js";
   import { sortByLabel } from "$lib/util/sort-kinds.js";
+  // Plan 02.1-39 (UAT-NOTES.md §5.6): source list shows a kind glyph + short
+  // kind label adjacent to displayName. Reuses SourceKindIcon (Plan 02.1-08)
+  // and the shared sourceKindLabel helper (Plan 02.1-39 — extracted from
+  // SourceRow). Round-5 UAT user quote: "вижу в фильтрах источники.
+  // Хотелось бы еще там видеть тип источника(ютуб)".
+  import SourceKindIcon from "./SourceKindIcon.svelte";
+  import {
+    sourceKindLabel,
+    type SourceKind as DataSourceKind,
+  } from "$lib/util/source-kind-label.js";
 
   type ShowFilter =
     | { kind: "any" }
@@ -63,7 +73,17 @@
     // so the action checkbox state can survive a re-render.
     action?: string[];
   };
-  type SourceOption = { id: string; displayName: string | null; handleUrl: string };
+  // Plan 02.1-39 (UAT-NOTES.md §5.6): kind extends SourceOption so the
+  // source-list rendering can show a kind glyph + short label adjacent to
+  // displayName, AND so the typeahead filter matches against the kind label.
+  // The DataSourceDto already exposes kind (src/lib/server/dto.ts:217); the
+  // /feed loader maps it through (verified at plan time — see below).
+  type SourceOption = {
+    id: string;
+    displayName: string | null;
+    handleUrl: string;
+    kind: DataSourceKind;
+  };
   type GameOption = { id: string; title: string };
 
   let {
@@ -259,14 +279,19 @@
     }
   }
 
+  // Plan 02.1-39 (UAT-NOTES.md §5.6): typeahead also matches against the
+  // localized kind label so a search for "youtube" / "ютуб" surfaces every
+  // YouTube source even when displayName / handleUrl don't contain that
+  // literal substring.
   const filteredSources = $derived(
-    sources.filter(
-      (s) =>
-        sourceTypeahead === "" ||
-        (s.displayName ?? s.handleUrl)
-          .toLowerCase()
-          .includes(sourceTypeahead.toLowerCase()),
-    ),
+    sources.filter((s) => {
+      if (sourceTypeahead === "") return true;
+      const q = sourceTypeahead.toLowerCase();
+      return (
+        (s.displayName ?? s.handleUrl).toLowerCase().includes(q) ||
+        sourceKindLabel(s.kind).toLowerCase().includes(q)
+      );
+    }),
   );
   const filteredGames = $derived(
     games.filter(
@@ -408,13 +433,22 @@
         />
         <div class="checklist">
           {#each filteredSources as s (s.id)}
+            <!-- Plan 02.1-39 (UAT-NOTES.md §5.6): kind glyph + label appear
+                 BEFORE the displayName so users can scan the source list at
+                 a glance. Mirrors SourceRow's existing kind-tag pattern from
+                 Plan 02.1-25 — same SourceKindIcon + same sourceKindLabel
+                 helper for visual + textual consistency. -->
             <label class="check">
               <input
                 type="checkbox"
                 checked={sourceSelected.has(s.id)}
                 onchange={() => (sourceSelected = toggle(sourceSelected, s.id))}
               />
-              {s.displayName ?? s.handleUrl}
+              <span class="source-kind-tag">
+                <SourceKindIcon kind={s.kind} />
+                <span class="source-kind-label">{sourceKindLabel(s.kind)}</span>
+              </span>
+              <span class="source-name">{s.displayName ?? s.handleUrl}</span>
             </label>
           {/each}
         </div>
@@ -641,6 +675,25 @@
     font-size: var(--font-size-label);
     min-height: 32px;
     cursor: pointer;
+  }
+  /* Plan 02.1-39 (UAT-NOTES.md §5.6): source row layout. The kind glyph +
+   * short kind label sit before the displayName so the visual hierarchy
+   * reads "▶ YouTube channel · Cool Channel Name". Mirrors SourceRow's
+   * existing kind-tag treatment for cross-surface consistency. */
+  .source-kind-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    color: var(--color-text);
+  }
+  .source-kind-label {
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-muted);
+  }
+  .source-name {
+    color: var(--color-text);
+    word-break: break-word;
+    min-width: 0;
   }
   .toggle {
     display: inline-flex;

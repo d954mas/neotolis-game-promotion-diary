@@ -19,16 +19,32 @@
   // The sticky positioning behavior previously inlined in /sources is
   // available via an opt-in `sticky` prop — set when the consumer needs the
   // header to stay anchored under <AppHeader> while a long list scrolls.
-  // The default is non-sticky to match /feed and /games defaults.
+  // Plan 02.1-39 (UAT-NOTES.md §5.7): /feed, /games, /audit set sticky too
+  // for UX consistency — every list page's title row + CTA stays pinned
+  // under AppHeader instead of scrolling away. Single CSS variable
+  // `--app-header-height` on :root replaces the hardcoded `top: 72px` so
+  // the offset has one source of truth in src/app.css.
+  //
+  // Plan 02.1-39 (UAT-NOTES.md §5.8 Path A): optional `deletedCount` +
+  // `recoveryAnchor` props render an inline "Recently deleted (N)" link
+  // anchoring to `#${recoveryAnchor}`. /feed passes both when its loader
+  // returns deletedEvents.length > 0; the link surfaces the soft-delete
+  // recovery panel without the user scrolling past the entire feed.
+
+  import { m } from "$lib/paraglide/messages.js";
 
   let {
     title,
     cta,
     sticky = false,
+    deletedCount,
+    recoveryAnchor,
   }: {
     title: string;
     cta?: { href?: string; label: string; onClick?: () => void };
     sticky?: boolean;
+    deletedCount?: number;
+    recoveryAnchor?: string;
   } = $props();
 </script>
 
@@ -41,6 +57,11 @@
       <a href={cta.href} class="cta">{cta.label}</a>
     {/if}
   {/if}
+  {#if deletedCount && deletedCount > 0 && recoveryAnchor}
+    <a class="recovery-link" href={`#${recoveryAnchor}`}>
+      {m.page_header_recently_deleted({ count: deletedCount })}
+    </a>
+  {/if}
 </header>
 
 <style>
@@ -51,11 +72,15 @@
     flex-wrap: wrap;
   }
   /* Plan 02.1-25 (sticky variant — preserves Plan 02.1-22 §2.2-bug closure):
-   * `top: 72px` anchors under the global AppHeader (sticky top:0); background
-   * fill + padding prevent scrolled content from bleeding through. */
+   * anchors under the global AppHeader (sticky top:0); background fill +
+   * padding prevent scrolled content from bleeding through.
+   * Plan 02.1-39 (UAT-NOTES.md §5.4 + §5.7): swap the hardcoded `top: 72px`
+   * for `var(--app-header-height, 72px)` so this offset shares its source
+   * of truth with FeedQuickNav's sticky calc(). The 72px fallback preserves
+   * zero visual regression in browsers without custom-property support. */
   .page-header.sticky {
     position: sticky;
-    top: 72px;
+    top: var(--app-header-height, 72px);
     z-index: 5;
     padding: var(--space-sm) 0;
     background: var(--color-bg);
@@ -82,5 +107,17 @@
   }
   .cta:hover {
     filter: brightness(1.05);
+  }
+  /* Plan 02.1-39 (UAT-NOTES.md §5.8 Path A): low-key text link anchoring to
+   * the in-page DeletedEventsPanel. Visually subordinate to the primary CTA
+   * (label + small + muted) so it does not compete for attention; only
+   * appears when deletedCount > 0. */
+  .recovery-link {
+    font-size: var(--font-size-label);
+    color: var(--color-text-muted);
+    text-decoration: underline;
+  }
+  .recovery-link:hover {
+    color: var(--color-text);
   }
 </style>

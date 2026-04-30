@@ -112,6 +112,13 @@ describe("paraglide i18n (UX-04)", () => {
     // empty-state hint (events_edit_games_label, events_edit_games_empty).
     // Net delta: +2 keys.
     //
+    // Plan 02.1-39 (round-6 gap closure — UAT-NOTES.md §5.3/5.4/5.5/5.6/5.7/5.8
+    // round-6 UI bundle): adds 6 keys for the /games/[id] three-section
+    // restructure + Steam-listing card with deep-link + PageHeader recovery
+    // CTA. Keys: games_detail_section_events, games_detail_section_game,
+    // games_detail_section_stores, page_header_recently_deleted,
+    // steam_listing_open_in_steam, steam_listing_unnamed. Net delta: +6 keys.
+    //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
     // across renames (Phase 2 STATE.md guidance, carried forward).
     const EXPECTED_KEYS = [
@@ -292,6 +299,7 @@ describe("paraglide i18n (UX-04)", () => {
       "login_button",
       "login_continue",
       "login_page_title",
+      "page_header_recently_deleted",
       "paste_box_label",
       "paste_box_placeholder",
       "polling_badge_manual",

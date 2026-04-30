@@ -246,6 +246,8 @@
   "toast_deleted": "Deleted.",
   "toast_restored": "Restored.",
 
+  "page_header_recently_deleted": "Recently deleted ({count})",
+
   "paste_box_label": "Paste a URL",
   "paste_box_placeholder": "https://youtube.com/watch?v=…",
 

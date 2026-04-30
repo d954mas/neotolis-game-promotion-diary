@@ -263,6 +263,9 @@
   <PageHeader
     title="Feed"
     cta={{ href: "/events/new", label: m.feed_cta_add_event() }}
+    sticky
+    deletedCount={data.deletedEvents.length}
+    recoveryAnchor="deleted-events"
   />
 
   <!-- Plan 02.1-26 — FeedQuickNav: chip strip / segmented control for the
@@ -340,12 +343,18 @@
        the feed grid (was: below CursorPager pre-Plan-02.1-19). The
        component returns nothing when there are no recoverable events, so
        it has zero footprint on the empty-feed and filtered-empty branches
-       above. -->
-  <DeletedEventsPanel
-    deletedEvents={data.deletedEvents}
-    retentionDays={data.retentionDays}
-    onChanged={() => invalidateAll()}
-  />
+       above.
+       Plan 02.1-39 (UAT-NOTES.md §5.8 Path A): id="deleted-events" wraps
+       the panel so PageHeader's "Recently deleted (N)" link can anchor
+       here. The link only renders when data.deletedEvents.length > 0, so
+       there's a panel to scroll to whenever the link exists. -->
+  <div id="deleted-events">
+    <DeletedEventsPanel
+      deletedEvents={data.deletedEvents}
+      retentionDays={data.retentionDays}
+      onChanged={() => invalidateAll()}
+    />
+  </div>
 
   {#if sheetOpen}
     <FiltersSheet
