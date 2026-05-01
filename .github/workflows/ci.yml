@@ -219,7 +219,12 @@ jobs:
       # Cloudflare-only header references appear in src/. The two patterns below are the
       # initial guardrails; future plans extend the list (e.g. analytics beacons, admin
       # email allowlists). Files under .planning/, docs/, and .git/ are not scanned.
-      - name: SaaS-leak grep (D-14)
+      #
+      # Phase 02.2 D-30 extensions: hard-coded support email (must come from
+      # SUPPORT_EMAIL env var, except templated public route folders + env.ts default)
+      # and APP_MODE === 'saas' branching (forbidden anywhere — self-host parity per
+      # AGENTS.md Privacy & multi-tenancy invariant 8).
+      - name: SaaS-leak grep (D-14, D-30)
         run: |
           set -euo pipefail
           # 1) Hard-coded SaaS-only strings must never appear in src/.
@@ -240,6 +245,70 @@ jobs:
             echo "::error::CF-Connecting-IP referenced outside trusted-proxy module"
             exit 1
           fi
+          # 3) Hard-coded support email must come from SUPPORT_EMAIL env var. The only
+          # legal occurrences in src/ are templated public route folders (privacy/terms/
+          # about) where the email is rendered from `data.supportEmail`, and env.ts
+          # default-comment text. Anything else means a self-host operator can't override
+          # without code-edit (D-30 / D-S4).
+          if grep -rn --include='*.ts' --include='*.svelte' \
+              'neotolis\.games@gmail\.com' src/ 2>/dev/null \
+              | grep -v -E '^src/routes/privacy/|^src/routes/terms/|^src/routes/about/|^src/lib/server/config/env\.ts:'; then
+            echo "::error::hardcoded support email found outside templated public routes (D-30)"
+            exit 1
+          fi
+          # 4) APP_MODE === 'saas' branching is forbidden anywhere in src/ (AGENTS.md
+          # Privacy & multi-tenancy invariant 8: "No code path branches on APP_MODE").
+          # Self-host parity is identical to SaaS behavior; configuration differs via
+          # env vars, behavior never branches.
+          if grep -rn --include='*.ts' \
+              "APP_MODE === 'saas'" src/ 2>/dev/null; then
+            echo "::error::APP_MODE === 'saas' branching found in src/ (D-30, self-host parity)"
+            exit 1
+          fi
 
       - name: Run self-host smoke test
         run: bash tests/smoke/self-host.sh
+
+  # D-21 / D-24 / D-S1: Build the production image and publish to public GHCR after
+  # every gate passes on master. Self-host operators pull the same image the author
+  # runs in production. Image visibility flip private→public is a one-time UI step
+  # documented in docs/deploy/install.md (Plan 02.2-08).
+  #
+  # PR builds DO NOT push (image is built inside the smoke job's `docker build` step
+  # for the smoke test; this job only runs on master push and only after smoke +
+  # browser-tests are green, so the image content is identical to what smoke verified).
+  docker-build-publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [lint-typecheck, unit-integration, smoke, browser-tests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract metadata for tags + labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/neotolis-diary
+          tags: |
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=master,enable={{is_default_branch}}
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
