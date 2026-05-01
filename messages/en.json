@@ -80,6 +80,10 @@
   "audit_action_event_marked_standalone": "Event marked standalone",
   "audit_action_event_restored": "Event restored",
   "audit_action_event_unmarked_standalone": "Event unmarked standalone",
+  "audit_action_account_deleted": "Account deleted",
+  "audit_action_account_restored": "Account restored",
+  "audit_action_account_exported": "Account exported",
+  "audit_action_quota_limit_hit": "Quota limit hit",
 
   "audit_filter_action_axis_label": "Action",
   "audit_filter_date_axis_label": "Date range",

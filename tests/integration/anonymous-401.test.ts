@@ -79,6 +79,12 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     "/api/games/:gameId/events",
     // Phase 2 — audit
     "/api/audit",
+    // Phase 02.2 — account export / soft-delete / restore (D-16). Routes do
+    // not exist yet (Plan 02.2-03 lands them); entries below are reserved.
+    // Uncomment after Plan 02.2-03 lands the routes:
+    //   { method: "GET", path: "/api/me/export" },
+    //   { method: "DELETE", path: "/api/me/account" },
+    //   { method: "POST", path: "/api/me/account/restore" },
   ];
 
   it("every /api/* route except /api/auth/* refuses anonymous with 401", async () => {

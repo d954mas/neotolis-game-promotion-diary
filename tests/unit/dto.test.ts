@@ -318,3 +318,16 @@ describe("Plan 02.1-28 — toEventDto with gameIds (P3 behavioural)", () => {
     expect(dto.gameIds).toEqual([]);
   });
 });
+
+// Phase 02.2 Wave 0 placeholder — closed by Plan 02.2-03 (in-app account
+// export envelope per CONTEXT D-16 + AGENTS §5). The export endpoint composes
+// every per-entity DTO projection into one JSON envelope; ciphertext columns
+// MUST NOT cross the wire even though the underlying rows carry them.
+// Plan 02.2-03 lands the live exportAccountJson() service + these
+// behavioural tests against its output.
+describe("account export envelope ciphertext strip (Phase 02.2 D-16)", () => {
+  it.skip("Plan 02.2-03: exportAccountJson envelope contains no secret_ct field anywhere", () => {});
+  it.skip("Plan 02.2-03: exportAccountJson envelope contains no wrapped_dek field anywhere", () => {});
+  it.skip("Plan 02.2-03: exportAccountJson envelope contains no kek_version field anywhere", () => {});
+  it.skip("Plan 02.2-03: exportAccountJson envelope contains no googleSub / refreshToken / accessToken / idToken anywhere", () => {});
+});

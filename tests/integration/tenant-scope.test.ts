@@ -590,3 +590,13 @@ describe("Plan 02.1-28 — event_games cross-tenant", () => {
     expect(allGameIds).not.toContain(gA.id);
   });
 });
+
+// Phase 02.2 Wave 0 placeholder — closed by Plan 02.2-03 (in-app account
+// export / soft-delete / restore per CONTEXT D-16). The /api/me/account/*
+// routes have no :userId path parameter — they operate on c.var.userId only,
+// so cross-tenant access is impossible by construction. The Plan 02.2-03
+// executor flips these to live tests asserting that contract behaviourally.
+describe("Phase 02.2 cross-tenant invariants for /api/me/account routes", () => {
+  it.skip("Plan 02.2-03: GET /api/me/export for User A does NOT contain any User B rows", () => {});
+  it.skip("Plan 02.2-03: account routes have no :userId path parameter — cross-tenant impossible by construction", () => {});
+});

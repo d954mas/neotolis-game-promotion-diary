@@ -71,6 +71,18 @@
         return m.audit_action_source_toggled_auto_import();
       case "theme.changed":
         return m.audit_action_theme_changed();
+      // Phase 02.2 (D-11 / D-16) — account export / soft-delete / restore +
+      // per-user abuse-quota tripwire. Keys land in messages/en.json
+      // alongside the AUDIT_ACTIONS const additions (lock-step contract per
+      // src/lib/server/audit/actions.ts header).
+      case "account.deleted":
+        return m.audit_action_account_deleted();
+      case "account.restored":
+        return m.audit_action_account_restored();
+      case "account.exported":
+        return m.audit_action_account_exported();
+      case "quota.limit_hit":
+        return m.audit_action_quota_limit_hit();
       default:
         return action;
     }

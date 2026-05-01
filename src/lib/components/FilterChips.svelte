@@ -152,6 +152,16 @@
         return m.audit_action_source_toggled_auto_import();
       case "theme.changed":
         return m.audit_action_theme_changed();
+      // Phase 02.2 (D-11 / D-16) — see AuditRow.svelte for the lock-step
+      // contract; same 4 verbs land here for the /audit chip strip reuse.
+      case "account.deleted":
+        return m.audit_action_account_deleted();
+      case "account.restored":
+        return m.audit_action_account_restored();
+      case "account.exported":
+        return m.audit_action_account_exported();
+      case "quota.limit_hit":
+        return m.audit_action_quota_limit_hit();
       default:
         return a;
     }

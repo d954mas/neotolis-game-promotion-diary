@@ -417,8 +417,14 @@ describe("Plan 02.1-27 — event_games + steam listing unique swap (0005 + 0006 
       // Sanity: prior verbs from Plans 14 + 24 still present.
       expect(values).toContain("event.attached_to_game");
       expect(values).toContain("event.marked_standalone");
-      // Total post-Plan-27: 22 (post-Plan-24) + 1 (event.detached_from_game) = 23.
-      expect(values).toHaveLength(23);
+      // Phase 02.2 Plan 02.2-01 (migration 0008) extended the enum with 4
+      // new verbs: account.deleted, account.restored, account.exported,
+      // quota.limit_hit. Total post-Plan-02.2-01: 23 (post-Plan-27) + 4 = 27.
+      expect(values).toContain("account.deleted");
+      expect(values).toContain("account.restored");
+      expect(values).toContain("account.exported");
+      expect(values).toContain("quota.limit_hit");
+      expect(values).toHaveLength(27);
     } finally {
       await pool.end();
     }
