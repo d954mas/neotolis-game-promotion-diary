@@ -105,6 +105,10 @@ Plan: Not started
 
 ## Accumulated Context
 
+### Roadmap Evolution
+
+- Phase 02.2 inserted after Phase 02 (chronologically after 02.1): ship-to-prod (URGENT) — pre-Phase-3 deploy work so user can dogfood the SaaS before polling pipeline lands
+
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.

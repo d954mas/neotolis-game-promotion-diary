@@ -73,6 +73,16 @@ Decimal phases appear between their surrounding integers in numeric order.
 **UI hint**: yes
 **Phase 2 closure note (2026-04-28)**: phase verdict `gaps_found`. UAT surfaced 4 P0 architectural redesigns (data_sources unified abstraction / 3-view feed-first IA / auto-import inbox flow / unified events table with author_is_me) plus 1 P0 functional gap (rename + add-Steam UI missing on `/games/[id]`). Closure delegated to Phase 2.1 (INSERTED below); see PROJECT.md "Architecture" section + 4 todos in `.planning/todos/pending/2026-04-28-{data-sources-unified-model,three-views-feed-sources-games,channel-to-inbox-auto-import-flow,rethink-items-vs-events-architecture}.md`.
 
+### Phase 02.2: ship-to-prod (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Requirements**: TBD
+**Depends on:** Phase 2
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 02.2 to break down)
+
 ### Phase 2.1: Architecture Realignment
 *INSERTED — gap closure from Phase 2 UAT (2026-04-28)*
 
