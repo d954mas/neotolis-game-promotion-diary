@@ -90,8 +90,8 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 
 ### Quota Dashboard (QUOTA)
 
-- [ ] **QUOTA-01**: For each per-user API key, the user can see today's usage vs. quota — YouTube units used / 10,000, Reddit requests used in the last hour
-- [ ] **QUOTA-02**: When usage crosses 80% of available quota, the dashboard surfaces a visible warning and pauses non-essential cold polling for that key
+- [x] **QUOTA-01**: For each per-user API key, the user can see today's usage vs. quota — YouTube units used / 10,000, Reddit requests used in the last hour
+- [x] **QUOTA-02**: When usage crosses 80% of available quota, the dashboard surfaces a visible warning and pauses non-essential cold polling for that key
 
 ### UX Baseline (UX)
 

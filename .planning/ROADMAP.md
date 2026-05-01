@@ -78,11 +78,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Goal:** Get the Phase 2.1 codebase running on the author's production infrastructure (aeza VPS) as the canonical SaaS instance with open Google-OAuth signup. Brings forward PRIV-03/PRIV-04 baseline (in-app data export + account deletion) from Phase 6 because open signup makes email-only GDPR awkward. Ships Privacy/ToS/About pages, per-user abuse quotas, deploy templates (docker-compose.prod.yml + nginx + scripts), GHCR build-publish CI job, and operational runbooks. Per D-PRE: phase delivers code + docs + scripts only — manual VPS provisioning is a separate operator task done AFTER sign-off.
 **Requirements**: D-08..D-32 + D-22a, D-25a, D-25b, D-PRE, D-S1..D-S4 (decision IDs from 02.2-CONTEXT.md); brought-forward baseline of PRIV-03 (export), PRIV-04 (deletion), QUOTA-01/02 (per-user limits)
 **Depends on:** Phase 2.1
-**Plans:** 1/8 plans executed
+**Plans:** 2/8 plans executed
 
 Plans:
 - [x] 02.2-01-PLAN.md — Wave 0: forward-only migration 0008 (user.deleted_at + 4 audit verbs) + env.ts schema extensions (SUPPORT_EMAIL + 3 quota limits + IMAGE_TAG + DOMAIN) + 9 placeholder test files
-- [ ] 02.2-02-PLAN.md — Wave 1: services/quota.ts (assertQuota guard) wired into createGame/createSource/createEvent + 7 quota integration tests live
+- [x] 02.2-02-PLAN.md — Wave 1: services/quota.ts (assertQuota guard) wired into createGame/createSource/createEvent + 7 quota integration tests live
 - [ ] 02.2-03-PLAN.md — Wave 1: services/account.ts (softDeleteAccount, restoreAccount, exportAccountJson) + routes/account.ts (3 endpoints) + 17 placeholder tests live (account 11 + dto 4 + tenant-scope 2) + 3 anonymous-401 entries activated
 - [ ] 02.2-04-PLAN.md — Wave 2: /settings/account UI + AccountDeletedBanner + ConfirmDialog Type-DELETE variant + /login disclaimer + auth-gated noindex meta + 21 Paraglide keys + 3 browser tests
 - [ ] 02.2-05-PLAN.md — Wave 1: /privacy + /terms + /about public routes with SUPPORT_EMAIL injection + ~40 Paraglide keys + 8 integration tests live

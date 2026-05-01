@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: "Completed 02.2-01-PLAN.md (Wave 0 foundation: migration 0008 + 6 env vars + 4 audit verbs + 37 placeholder tests + lock-step closure)"
-last_updated: "2026-05-01T09:17:18.364Z"
+stopped_at: "Completed 02.2-02-PLAN.md (per-user abuse quotas: services/quota.ts + 3 wires + 7 live integration tests)"
+last_updated: "2026-05-01T09:29:59.610Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 68
-  completed_plans: 61
+  completed_plans: 62
 ---
 
 # Project State
@@ -103,6 +103,9 @@ Plan: 2 of 8
 | Phase 02.1-architecture-realignment P37 | ~10 min | 1 tasks | 6 files |
 | Phase 02.1-architecture-realignment P38 | 12min | 1 tasks | 5 files |
 | Phase 02.2-ship-to-prod P01 | 70min | 2 tasks | 22 files |
+| Phase 02.2-ship-to-prod P07 | 3min | 1 tasks | 1 files |
+| Phase 02.2-ship-to-prod P06 | ~5min | 3 tasks | 13 files |
+| Phase 02.2-ship-to-prod P02 | 9min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -299,6 +302,10 @@ Recent decisions affecting current work:
 - [Phase 02.2]: Plan 02.2-01: Wave 0 lock-step closure for AUDIT_ACTIONS additions — adding 4 new audit verbs (account.deleted/restored/exported, quota.limit_hit) requires matching Paraglide message keys + AuditRow/FilterChips/FiltersSheet switch cases + paraglide.test.ts EXPECTED_KEYS expansion + migrate.test.ts length-assertion update; documented as the contract in audit/actions.ts header (Pitfall 6 mirror)
 - [Phase 02.2]: Plan 02.2-01: tests/unit/env.test.ts created NEW (Rule 3 deviation — plan said extend a non-existent file). VALIDATION D-32 row explicitly allows 'NEW or extend'. The 6 Phase 02.2-01 tests are LIVE not it.skip since the env schema additions land in this plan
 - [Phase 02.2]: Plan 02.2-01: anonymous-401.test.ts reserved entries are commented out instead of added live — vacuous-pass toContain guard would fail if /api/me/export were in MUST_BE_PROTECTED before Plan 02.2-03 mounts the route. Comment carries 'uncomment after Plan 02.2-03' so the executor finds it via grep
+- [Phase 02.2]: Plan 02.2-07: SaaS-leak grep step name updated from 'D-14' to 'D-14, D-30' to cite both authoritative decisions when failures fire — single step extension chosen over parallel step (option-1)
+- [Phase 02.2]: Plan 02.2-07: GHCR publish-only-on-master pattern locked — PR builds DO NOT push (smoke job already runs docker build inline); only master pushes after smoke + browser-tests green trigger publish; uses GITHUB_TOKEN with packages: write (no PAT, no leaked secret)
+- [Phase 02.2-ship-to-prod]: Plan 02.2-06: docker-compose.prod.yml + nginx/* + scripts/* + Dockerfile GHCR labels + 12 live unit tests; selfhost.yml UNCHANGED (D-31)
+- [Phase 02.2-ship-to-prod]: Plan 02.2-02: services/quota.ts assertQuota guard wires into 3 create paths (games / data_sources / events) BEFORE any DB read or write; soft-delete exclusion is per-kind (games/data_sources filter deletedAt; events_per_day rate cap does not); rolling-24h reset semantics for events; PUTOFF Phase 3 marker for auto-import quota throttle (defer not throw)
 
 ### Pending Todos
 
@@ -339,8 +346,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-01T09:17:18.360Z
+Last session: 2026-05-01T09:29:59.606Z
 Last Activity: 2026-05-01
-Stopped at: Completed 02.2-01-PLAN.md (Wave 0 foundation: migration 0008 + 6 env vars + 4 audit verbs + 37 placeholder tests + lock-step closure)
+Stopped at: Completed 02.2-02-PLAN.md (per-user abuse quotas: services/quota.ts + 3 wires + 7 live integration tests)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
