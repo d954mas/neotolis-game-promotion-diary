@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Executing Phase 02.2
-stopped_at: Phase 02.2 context gathered
-last_updated: "2026-05-01T08:58:06.963Z"
+status: Ready to execute
+stopped_at: "Completed 02.2-01-PLAN.md (Wave 0 foundation: migration 0008 + 6 env vars + 4 audit verbs + 37 placeholder tests + lock-step closure)"
+last_updated: "2026-05-01T09:17:18.364Z"
 last_activity: 2026-05-01
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 68
-  completed_plans: 60
+  completed_plans: 61
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.2 (ship-to-prod) — EXECUTING
-Plan: 1 of 8
+Plan: 2 of 8
 
 ## Performance Metrics
 
@@ -102,6 +102,7 @@ Plan: 1 of 8
 | Phase 02.1-architecture-realignment P35 | ~14 min | 1 tasks | 3 files |
 | Phase 02.1-architecture-realignment P37 | ~10 min | 1 tasks | 6 files |
 | Phase 02.1-architecture-realignment P38 | 12min | 1 tasks | 5 files |
+| Phase 02.2-ship-to-prod P01 | 70min | 2 tasks | 22 files |
 
 ## Accumulated Context
 
@@ -295,6 +296,9 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: [Plan 02.1-37]: Service-layer merged-state validator pattern — when a partial-update endpoint needs to validate against the persisted state, the validator MOVES from the zod superRefine to the service. updateEvent loads existing row first, computes merged = {input ∪ existing}, validates, throws AppError before mutation. Mirrors assertGameOwnedByUser pattern; closes UAT-NOTES.md §5.11 (PATCH youtube invariant gap)
 - [Phase 02.1-architecture-realignment]: [Plan 02.1-37]: VALID_EVENT_KINDS as single source of truth — service + route + page-loader all reference the same constant via filterValidKinds helper in src/lib/util/. Closes UAT-NOTES.md §5.13 (/feed?kind=foo no longer 500s; silent drop matches existing ?show= malformed-param fallback)
 - [Phase 02.1-architecture-realignment]: Plan 02.1-38: Path A (checkbox-list, ~30 LOC) over Path B (full AttachToGamePicker rewrite — DEFERRED to Phase 6 polish backlog) for closing UAT-NOTES.md §5.2 (P0). /events/new kept single-select (out of scope per §5.2). Set-difference dirty check (order-agnostic) over deep-equality for the gameIds[] form state.
+- [Phase 02.2]: Plan 02.2-01: Wave 0 lock-step closure for AUDIT_ACTIONS additions — adding 4 new audit verbs (account.deleted/restored/exported, quota.limit_hit) requires matching Paraglide message keys + AuditRow/FilterChips/FiltersSheet switch cases + paraglide.test.ts EXPECTED_KEYS expansion + migrate.test.ts length-assertion update; documented as the contract in audit/actions.ts header (Pitfall 6 mirror)
+- [Phase 02.2]: Plan 02.2-01: tests/unit/env.test.ts created NEW (Rule 3 deviation — plan said extend a non-existent file). VALIDATION D-32 row explicitly allows 'NEW or extend'. The 6 Phase 02.2-01 tests are LIVE not it.skip since the env schema additions land in this plan
+- [Phase 02.2]: Plan 02.2-01: anonymous-401.test.ts reserved entries are commented out instead of added live — vacuous-pass toContain guard would fail if /api/me/export were in MUST_BE_PROTECTED before Plan 02.2-03 mounts the route. Comment carries 'uncomment after Plan 02.2-03' so the executor finds it via grep
 
 ### Pending Todos
 
@@ -335,8 +339,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-01T07:23:28.334Z
+Last session: 2026-05-01T09:17:18.360Z
 Last Activity: 2026-05-01
-Stopped at: Phase 02.2 context gathered
-Resume file: .planning/phases/02.2-ship-to-prod/02.2-CONTEXT.md
+Stopped at: Completed 02.2-01-PLAN.md (Wave 0 foundation: migration 0008 + 6 env vars + 4 audit verbs + 37 placeholder tests + lock-step closure)
+Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
