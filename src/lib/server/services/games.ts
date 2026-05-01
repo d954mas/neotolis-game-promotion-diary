@@ -47,6 +47,7 @@ import { gameSteamListings } from "../db/schema/game-steam-listings.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
+import { assertQuota } from "./quota.js";
 
 export type GameRow = typeof games.$inferSelect;
 
@@ -114,6 +115,7 @@ export async function createGame(
   input: CreateGameInput,
   ipAddress: string,
 ): Promise<GameRow> {
+  await assertQuota(userId, "games", ipAddress);
   validateTitle(input.title);
   const [row] = await db
     .insert(games)

@@ -72,6 +72,7 @@ import type { EventKind } from "../integrations/data-source-adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
+import { assertQuota } from "./quota.js";
 import { encodeCursor, decodeCursor } from "./audit-read.js";
 
 export type EventRow = typeof events.$inferSelect;
@@ -330,6 +331,11 @@ export async function createEvent(
   ipAddress: string,
   userAgent?: string,
 ): Promise<EventRow> {
+  // PUTOFF Phase 3: auto-import path must catch quota_exceeded and defer the
+  // polling job, not throw. For Phase 2.2 only the user-facing path exists
+  // (manual paste + manual create); when the polling adapter lands in Phase 3,
+  // hitting the events_per_day quota should THROTTLE (defer the job), NOT throw.
+  await assertQuota(userId, "events_per_day", ipAddress);
   assertValidKind(input.kind);
   validateTitle(input.title);
   const occurredAt = coerceOccurredAt(input.occurredAt);

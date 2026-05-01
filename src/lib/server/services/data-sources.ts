@@ -38,6 +38,7 @@ import type { SourceKind } from "../integrations/data-source-adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
+import { assertQuota } from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
 
 export type DataSourceRow = typeof dataSources.$inferSelect;
@@ -140,6 +141,7 @@ export async function createSource(
   ipAddress: string,
   userAgent?: string,
 ): Promise<DataSourceRow> {
+  await assertQuota(userId, "data_sources", ipAddress);
   validateKind(input.kind);
   validateHandleUrl(input.handleUrl);
   if (!FUNCTIONAL_KINDS.has(input.kind)) {
