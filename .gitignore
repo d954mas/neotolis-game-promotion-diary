@@ -8,3 +8,5 @@ src/lib/paraglide/
 .env.local
 coverage/
 .DS_Store
+.claude/
+*.stackdump
