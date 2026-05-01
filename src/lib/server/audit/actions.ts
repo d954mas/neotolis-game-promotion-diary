@@ -70,6 +70,14 @@ export const AUDIT_ACTIONS = [
   "source.toggled_auto_import",
   // Phase 2
   "theme.changed",
+  // Phase 02.2 (D-11 / D-16): in-app account export, soft-delete, restore +
+  // per-user abuse-quota tripwire. Forward-only migration
+  // 0008_add_user_soft_delete_and_account_audit_actions.sql lands the pgEnum
+  // additions.
+  "account.deleted",
+  "account.restored",
+  "account.exported",
+  "quota.limit_hit",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

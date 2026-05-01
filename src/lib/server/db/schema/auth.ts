@@ -25,6 +25,12 @@ export const user = pgTable("user", {
   themePreference: text("theme_preference").notNull().default("system"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  // Phase 02.2 D-16: soft-delete the entire account, with cascade to user-owned
+  // children (games, data_sources, events, api_keys_steam) via the same
+  // captured timestamp the cascade uses. NULL == active. Restore (within
+  // RETENTION_DAYS) reverses ONLY children whose deletedAt === user.deletedAt.
+  // audit_log is INSERT-only (AGENTS §4) and is never cascaded.
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
 export const session = pgTable("session", {

@@ -58,6 +58,32 @@ const RawSchema = z.object({
     .enum(["true", "false"])
     .optional()
     .transform((v) => (v === undefined ? undefined : v === "true")),
+
+  // Phase 02.2 D-32 / D-S4: support contact email shown on /privacy, /terms,
+  // /about, footer. Self-host operators MUST configure for GDPR compliance.
+  // Empty default preserves self-host parity (D-31) — boot succeeds with empty
+  // value; pages render "support email not configured" placeholder via
+  // Paraglide message picker.
+  SUPPORT_EMAIL: z.string().default(""),
+
+  // Phase 02.2 D-11: per-user abuse limits (active rows; soft-deleted excluded).
+  // Defaults are indie-friendly; operators may raise via .env.
+  LIMIT_GAMES_PER_USER: z.coerce.number().int().positive().default(50),
+  LIMIT_SOURCES_PER_USER: z.coerce.number().int().positive().default(50),
+  // Rolling 24h limit on event creation (NOT calendar-day reset).
+  LIMIT_EVENTS_PER_DAY: z.coerce.number().int().positive().default(500),
+
+  // Phase 02.2 D-24: image tag override for docker-compose.prod.yml. The
+  // application code never reads this directly (compose substitutes it at
+  // boot via ${IMAGE_TAG:-latest}); we accept it in the schema so .env files
+  // including IMAGE_TAG=<sha> for rollback do not fail zod parse.
+  IMAGE_TAG: z.string().default("latest"),
+
+  // Phase 02.2 D-04: production domain for nginx server_name + OAuth redirect.
+  // Empty default preserves self-host parity; SaaS prod sets to registered
+  // CF domain. Application code does not read this directly (BETTER_AUTH_URL
+  // already carries the canonical URL); we accept it so prod .env passes zod.
+  DOMAIN: z.string().default(""),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -136,6 +162,13 @@ export const env = {
   KEK_CURRENT_VERSION: raw.KEK_CURRENT_VERSION,
   KEK_VERSIONS: kekVersions,
   BETTER_AUTH_SECURE_COOKIES: raw.BETTER_AUTH_SECURE_COOKIES,
+  // Phase 02.2 additions (D-11, D-32, D-S4, D-24, D-04)
+  SUPPORT_EMAIL: raw.SUPPORT_EMAIL,
+  LIMIT_GAMES_PER_USER: raw.LIMIT_GAMES_PER_USER,
+  LIMIT_SOURCES_PER_USER: raw.LIMIT_SOURCES_PER_USER,
+  LIMIT_EVENTS_PER_DAY: raw.LIMIT_EVENTS_PER_DAY,
+  IMAGE_TAG: raw.IMAGE_TAG,
+  DOMAIN: raw.DOMAIN,
 } as const;
 
 export type Env = typeof env;
