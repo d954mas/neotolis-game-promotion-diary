@@ -24,6 +24,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/lib/server/db/migrate.ts",
     "db:check": "drizzle-kit check",
+    "deploy": "bash scripts/deploy.sh",
+    "deploy:rollback": "bash scripts/deploy-rollback.sh",
     "start": "node build/server.js"
   },
   "dependencies": {
@@ -64,6 +66,8 @@
     "eslint-plugin-tenant-scope": "link:./eslint-plugin-tenant-scope",
     "globals": "^15.0.0",
     "@playwright/test": "^1.49.0",
+    "@types/js-yaml": "4.0.9",
+    "js-yaml": "4.1.0",
     "oauth2-mock-server": "^7.2.0",
     "pino-pretty": "^11.3.0",
     "playwright": "^1.49.0",

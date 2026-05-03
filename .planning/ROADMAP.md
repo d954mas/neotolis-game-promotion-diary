@@ -86,7 +86,7 @@ Plans:
 - [ ] 02.2-03-PLAN.md — Wave 1: services/account.ts (softDeleteAccount, restoreAccount, exportAccountJson) + routes/account.ts (3 endpoints) + 17 placeholder tests live (account 11 + dto 4 + tenant-scope 2) + 3 anonymous-401 entries activated
 - [ ] 02.2-04-PLAN.md — Wave 2: /settings/account UI + AccountDeletedBanner + ConfirmDialog Type-DELETE variant + /login disclaimer + auth-gated noindex meta + 21 Paraglide keys + 3 browser tests
 - [ ] 02.2-05-PLAN.md — Wave 1: /privacy + /terms + /about public routes with SUPPORT_EMAIL injection + ~40 Paraglide keys + 8 integration tests live
-- [ ] 02.2-06-PLAN.md — Wave 1: docker-compose.prod.yml + nginx/{nginx.conf.template,cf-ips.conf,refresh-cf-ips.sh} + scripts/{deploy.sh,deploy-rollback.sh,backup.sh} + Dockerfile GHCR labels + 12 unit tests live
+- [x] 02.2-06-PLAN.md — Wave 1: docker-compose.prod.yml + nginx/{nginx.conf.template,cf-ips.conf,refresh-cf-ips.sh} + scripts/{deploy.sh,deploy-rollback.sh,backup.sh} + Dockerfile GHCR labels + 12 unit tests live
 - [ ] 02.2-07-PLAN.md — Wave 1: .github/workflows/ci.yml docker-build-publish job + extended SaaS-leak grep (D-30)
 - [ ] 02.2-08-PLAN.md — Wave 3: docs/deploy/install.md (7-section runbook with 10-step Russian UAT) + docs/self-host/backups.md + .env.example finalization
 
