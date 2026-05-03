@@ -150,9 +150,24 @@ describe("paraglide i18n (UX-04)", () => {
     // section-header CTA which uses the existing stores_add_cta key).
     // Net delta: +11 -1 = +10 keys.
     //
+    // Plan 02.2-05 (public /privacy /terms /about pages per CONTEXT
+    // D-09 / D-10 / D-14 / D-S4): adds 57 keys across three new public
+    // routes + ~40 Paraglide message keys. Privacy: 28 keys (title +
+    // last-updated + 13 section title/body pairs). Terms: 22 keys
+    // (title + last-updated + 10 section title/body pairs). About: 7
+    // keys (title + intro + repo link + canonical-instance label +
+    // privacy/terms link labels + footer contact). Net delta: +57 keys.
+    //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
     // across renames (Phase 2 STATE.md guidance, carried forward).
     const EXPECTED_KEYS = [
+      "about_canonical_instance_label",
+      "about_footer_contact",
+      "about_intro_body",
+      "about_links_privacy",
+      "about_links_terms",
+      "about_repo_link_label",
+      "about_title",
       "add_store_dialog_heading",
       "app_title",
       "appheader_account_menu_aria",
@@ -351,6 +366,34 @@ describe("paraglide i18n (UX-04)", () => {
       "paste_box_placeholder",
       "polling_badge_manual",
       "polling_badge_phase3_placeholder",
+      "privacy_last_updated",
+      "privacy_section_changes_body",
+      "privacy_section_changes_title",
+      "privacy_section_children_body",
+      "privacy_section_children_title",
+      "privacy_section_complaints_body",
+      "privacy_section_complaints_title",
+      "privacy_section_contact_body",
+      "privacy_section_contact_title",
+      "privacy_section_cookies_body",
+      "privacy_section_cookies_title",
+      "privacy_section_data_collected_body",
+      "privacy_section_data_collected_title",
+      "privacy_section_lawful_basis_body",
+      "privacy_section_lawful_basis_title",
+      "privacy_section_processors_body",
+      "privacy_section_processors_title",
+      "privacy_section_retention_body",
+      "privacy_section_retention_title",
+      "privacy_section_rights_body",
+      "privacy_section_rights_title",
+      "privacy_section_security_body",
+      "privacy_section_security_title",
+      "privacy_section_storage_body",
+      "privacy_section_storage_title",
+      "privacy_section_who_we_are_body",
+      "privacy_section_who_we_are_title",
+      "privacy_title",
       "recovery_dialog_empty",
       "recovery_dialog_heading",
       "settings_credentials_heading",
@@ -402,6 +445,28 @@ describe("paraglide i18n (UX-04)", () => {
       "stores_add_cta",
       "stores_empty",
       "stores_section_heading",
+      "terms_last_updated",
+      "terms_section_acceptable_use_body",
+      "terms_section_acceptable_use_title",
+      "terms_section_account_body",
+      "terms_section_account_title",
+      "terms_section_changes_body",
+      "terms_section_changes_title",
+      "terms_section_contact_body",
+      "terms_section_contact_title",
+      "terms_section_early_access_body",
+      "terms_section_early_access_title",
+      "terms_section_limits_body",
+      "terms_section_limits_title",
+      "terms_section_open_source_body",
+      "terms_section_open_source_title",
+      "terms_section_service_description_body",
+      "terms_section_service_description_title",
+      "terms_section_termination_body",
+      "terms_section_termination_title",
+      "terms_section_warranty_body",
+      "terms_section_warranty_title",
+      "terms_title",
       "theme_label_dark",
       "theme_label_light",
       "theme_label_system",
