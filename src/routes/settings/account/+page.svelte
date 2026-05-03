@@ -14,7 +14,7 @@
   // pattern; layered with the 60-day grace for two layers of mistake
   // protection).
 
-  import { goto, invalidateAll } from "$app/navigation";
+  import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
@@ -74,41 +74,15 @@
     }
   }
 
-  async function handleRestoreFromBanner(): Promise<void> {
-    // Mounted via /settings/account ONLY when data.user.deletedAt is set —
-    // restoring from this page is the same call the banner makes from any
-    // auth-gated route. Keep both call sites in sync.
-    await fetch("/api/me/account/restore", { method: "POST" });
-    await invalidateAll();
-  }
+  // Restore CTA lives in <AccountDeletedBanner> mounted by src/routes/+layout.svelte
+  // — it surfaces on every auth-gated page when deletedAt is set. Inlining a
+  // second restore button on /settings/account would render two CTAs side-by-side.
 
   const isDeleted = $derived(data.user?.deletedAt != null);
 </script>
 
 <section class="account">
   <h1>{m.settings_account_title()}</h1>
-
-  {#if isDeleted}
-    <article class="block restore-block">
-      <h2>{m.account_deleted_banner_title()}</h2>
-      <p class="muted">
-        {m.account_deleted_banner_days_left({
-          days: Math.max(
-            0,
-            data.retentionDays -
-              Math.floor(
-                (Date.now() - new Date(data.user!.deletedAt!).getTime()) / (24 * 60 * 60 * 1000),
-              ),
-          ),
-        })}
-      </p>
-      <div class="actions">
-        <button type="button" class="restore" onclick={handleRestoreFromBanner}>
-          {m.account_deleted_banner_restore_button()}
-        </button>
-      </div>
-    </article>
-  {/if}
 
   <article class="block">
     <h2>{m.settings_account_section_export_title()}</h2>
@@ -181,9 +155,6 @@
   .block.danger {
     border-color: var(--color-destructive);
   }
-  .block.restore-block {
-    border-color: var(--color-accent);
-  }
   .block h2 {
     margin: 0;
     font-size: var(--font-size-body);
@@ -202,8 +173,7 @@
     margin-top: var(--space-sm);
   }
   .export,
-  .delete,
-  .restore {
+  .delete {
     min-height: 44px;
     padding: 0 var(--space-md);
     border-radius: 4px;
@@ -228,10 +198,5 @@
   .delete:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-  }
-  .restore {
-    background: var(--color-accent);
-    color: #fff;
-    border: 1px solid var(--color-accent);
   }
 </style>
