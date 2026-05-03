@@ -353,5 +353,27 @@
   "about_canonical_instance_label": "Canonical SaaS instance",
   "about_links_privacy": "Privacy Policy",
   "about_links_terms": "Terms of Service",
-  "about_footer_contact": "Contact: {supportEmail}"
+  "about_footer_contact": "Contact: {supportEmail}",
+
+  "settings_account_title": "Account",
+  "settings_account_link": "Account",
+  "settings_account_section_export_title": "Export your data",
+  "settings_account_section_export_blurb": "Download every record we have for your account as a single JSON file (Article 20 — Data Portability).",
+  "settings_account_export_button": "Export my data",
+  "settings_account_export_in_progress": "Preparing your export…",
+  "settings_account_export_failed": "Export failed. Please try again.",
+  "settings_account_section_danger_title": "Danger zone",
+  "settings_account_grace_explainer": "Deleting your account starts a {days}-day grace period. During that window you can restore everything from this page.",
+  "settings_account_delete_button": "Delete my account",
+  "settings_account_delete_confirm_title": "Delete account?",
+  "settings_account_delete_confirm_body": "This will soft-delete your account. You can restore within {days} days. After that, your data is permanently purged.",
+  "settings_account_delete_failed": "Delete failed. Please try again.",
+  "account_deleted_banner_title": "Account scheduled for deletion",
+  "account_deleted_banner_days_left": "{days} days left to restore",
+  "account_deleted_banner_restore_button": "Restore my account",
+  "account_deleted_banner_permanent_delete_button": "Permanently delete now",
+  "account_deleted_banner_permanent_delete_confirm": "This is irreversible. Type DELETE to confirm.",
+  "confirm_dialog_type_delete_label": "Type DELETE to confirm",
+  "confirm_dialog_type_delete_placeholder": "DELETE",
+  "login_early_access_disclaimer": "Early access. Auto-import from registered sources arrives in a future release; manual paste works now."
 }
