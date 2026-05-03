@@ -219,7 +219,7 @@ Phases execute in numeric order: 1 → 2 → 2.1 → 2.2 → 3 → 4 → 5 → 6
 | 1. Foundation | 10/10 | Complete | 2026-04-27 |
 | 2. Ingest, Secrets, and Audit | 11/11 | Gaps Found | 2026-04-28 (closure in 2.1) |
 | 2.1. Architecture Realignment (INSERTED) | 34/34 | Signed off (verifier next) | 2026-04-30 — Plans 11-16 closed round-1 UAT gaps; Plans 17-20 closed round-2; Plans 21-26 closed round-3; Plans 27-34 closed round-4; Plans 35-39 closed round-5 (13 findings); Plan 39 inlined 16 round-6 polish iterations; Plan 10 sign-off paperwork closed 2026-04-30 |
-| 2.2. Ship to Prod (INSERTED) | 0/8 | Planned | - |
+| 2.2. Ship to Prod (INSERTED) | 8/8 | Complete | 2026-05-04 — production deploy artifacts (compose / nginx / scripts / GHCR CI) + GDPR baseline (export / soft-delete / restore) + per-user quotas (race-free + pool-deadlock-safe). 5 HUMAN-UAT items pending live VPS validation per D-PRE. |
 | 3. Polling Pipeline | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
 | 5. Reddit Rules Cockpit | 0/TBD | Not started | - |
