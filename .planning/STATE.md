@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: "Completed 02.2-02-PLAN.md (per-user abuse quotas: services/quota.ts + 3 wires + 7 live integration tests)"
-last_updated: "2026-05-01T09:29:59.610Z"
-last_activity: 2026-05-01
+stopped_at: Completed 02.2-03-PLAN.md (parallel-execution wave 1)
+last_updated: "2026-05-03T17:11:10.517Z"
+last_activity: 2026-05-03
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 68
-  completed_plans: 62
+  completed_plans: 64
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.2 (ship-to-prod) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 
 ## Performance Metrics
 
@@ -106,6 +106,8 @@ Plan: 2 of 8
 | Phase 02.2-ship-to-prod P07 | 3min | 1 tasks | 1 files |
 | Phase 02.2-ship-to-prod P06 | ~5min | 3 tasks | 13 files |
 | Phase 02.2-ship-to-prod P02 | 9min | 2 tasks | 5 files |
+| Phase 02.2-ship-to-prod P03 | 10min | 2 tasks | 9 files |
+| Phase 02.2-ship-to-prod P05 | 25min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -306,6 +308,9 @@ Recent decisions affecting current work:
 - [Phase 02.2]: Plan 02.2-07: GHCR publish-only-on-master pattern locked — PR builds DO NOT push (smoke job already runs docker build inline); only master pushes after smoke + browser-tests green trigger publish; uses GITHUB_TOKEN with packages: write (no PAT, no leaked secret)
 - [Phase 02.2-ship-to-prod]: Plan 02.2-06: docker-compose.prod.yml + nginx/* + scripts/* + Dockerfile GHCR labels + 12 live unit tests; selfhost.yml UNCHANGED (D-31)
 - [Phase 02.2-ship-to-prod]: Plan 02.2-02: services/quota.ts assertQuota guard wires into 3 create paths (games / data_sources / events) BEFORE any DB read or write; soft-delete exclusion is per-kind (games/data_sources filter deletedAt; events_per_day rate cap does not); rolling-24h reset semantics for events; PUTOFF Phase 3 marker for auto-import quota throttle (defer not throw)
+- [Phase 02.2]: api_keys_steam HARD-deleted on softDeleteAccount (no deletedAt column; D-14 hard-delete semantics; envelope-encrypted secrets gone immediately on user request)
+- [Phase 02.2]: Account routes have no :userId path parameter — operate on c.var.userId only; cross-tenant access impossible by construction (structural test asserts via Hono routes introspection)
+- [Phase 02.2-ship-to-prod]: Plan 02.2-05: SSR-render integration tests via svelte/server (audit-render.test.ts pattern) instead of full app.request — fast, no DB dependency, asserts rendered HTML contract directly.
 
 ### Pending Todos
 
@@ -346,8 +351,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-01T09:29:59.606Z
-Last Activity: 2026-05-01
-Stopped at: Completed 02.2-02-PLAN.md (per-user abuse quotas: services/quota.ts + 3 wires + 7 live integration tests)
+Last session: 2026-05-03T17:10:37.728Z
+Last Activity: 2026-05-03
+Stopped at: Completed 02.2-03-PLAN.md (parallel-execution wave 1)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
