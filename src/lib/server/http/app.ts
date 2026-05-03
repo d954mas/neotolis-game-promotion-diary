@@ -16,6 +16,7 @@ import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { proxyTrust } from "./middleware/proxy-trust.js";
 import { tenantScope } from "./middleware/tenant.js";
+import { accountState } from "./middleware/account-state.js";
 import { meRoutes } from "./routes/me.js";
 import { sessionRoutes } from "./routes/sessions.js";
 // Phase 2 (Plan 02-08) sub-routers — every Phase 2 service surface gets
@@ -93,6 +94,12 @@ export function createApp(): Hono<AppContext> {
   // c.var.sessionId set. Pattern 3 (404 not 403) is enforced one layer deeper
   // by service functions (see src/lib/server/services/errors.ts).
   app.use("/api/*", tenantScope);
+
+  // Account-state guard (Phase 02.2 — Codex P1.2 fix): a soft-deleted account
+  // (user.deleted_at IS NOT NULL) can sign back in via Google OAuth during the
+  // grace window. Block all writes from that session except restore / export /
+  // sign-out / read-self. See middleware/account-state.ts for the allowlist.
+  app.use("/api/*", accountState);
 
   // /api routes — Phase 1 + Phase 2 + Phase 2.1 (Plan 02.1-06).
   app.route("/api", meRoutes);
