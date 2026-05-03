@@ -27,6 +27,8 @@ import { apiKeysSteamRoutes } from "./routes/api-keys-steam.js";
 import { eventsRoutes } from "./routes/events.js";
 import { auditRoutes } from "./routes/audit.js";
 import { meThemeRoutes } from "./routes/me-theme.js";
+// Phase 02.2 (Plan 02.2-03) — in-app account export / soft-delete / restore.
+import { accountRoutes } from "./routes/account.js";
 import { auth } from "../../auth.js";
 import { migrationsApplied } from "../db/migrate.js";
 import { pool } from "../db/client.js";
@@ -112,6 +114,8 @@ export function createApp(): Hono<AppContext> {
   app.route("/api", eventsRoutes);
   app.route("/api", auditRoutes);
   app.route("/api", meThemeRoutes);
+  // Phase 02.2 — /api/me/export, DELETE /api/me/account, POST /api/me/account/restore
+  app.route("/api", accountRoutes);
 
   return app;
 }

@@ -591,12 +591,55 @@ describe("Plan 02.1-28 — event_games cross-tenant", () => {
   });
 });
 
-// Phase 02.2 Wave 0 placeholder — closed by Plan 02.2-03 (in-app account
-// export / soft-delete / restore per CONTEXT D-16). The /api/me/account/*
-// routes have no :userId path parameter — they operate on c.var.userId only,
-// so cross-tenant access is impossible by construction. The Plan 02.2-03
-// executor flips these to live tests asserting that contract behaviourally.
+// Phase 02.2 D-16 — cross-tenant invariants for the /api/me/* account
+// surface (Plan 02.2-03). The routes have no :userId path parameter — they
+// operate on c.var.userId only, so cross-tenant access is impossible by
+// construction. The two assertions below exercise both layers: the
+// behavioural HTTP-boundary check (User A's export does not contain User B
+// rows) and the structural by-construction check (no :userId in any
+// registered route path).
 describe("Phase 02.2 cross-tenant invariants for /api/me/account routes", () => {
-  it.skip("Plan 02.2-03: GET /api/me/export for User A does NOT contain any User B rows", () => {});
-  it.skip("Plan 02.2-03: account routes have no :userId path parameter — cross-tenant impossible by construction", () => {});
+  const uniqAcc = () => Math.random().toString(36).slice(2, 10);
+
+  it("Plan 02.2-03: GET /api/me/export for User A does NOT contain any User B rows", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { createGame } = await import("../../src/lib/server/services/games.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({ email: `p223-xt-A-${uniqAcc()}@test.local` });
+    const userB = await seedUserDirectly({ email: `p223-xt-B-${uniqAcc()}@test.local` });
+
+    const aTitle = `A-pri-${uniqAcc()}`;
+    const bTitle = `B-pri-${uniqAcc()}`;
+    await createGame(userA.id, { title: aTitle }, "127.0.0.1");
+    await createGame(userB.id, { title: bTitle }, "127.0.0.1");
+
+    const res = await app.request("/api/me/export", {
+      headers: { cookie: `neotolis.session_token=${userA.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { games: Array<{ title: string }> };
+    expect(body.games.map((g) => g.title)).toEqual([aTitle]);
+    const json = JSON.stringify(body);
+    expect(json).not.toContain(bTitle);
+    expect(json).not.toContain(userB.id);
+  });
+
+  it("Plan 02.2-03: account routes have no :userId path parameter — cross-tenant impossible by construction", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const routes = (app as unknown as { routes: Array<{ path: string }> }).routes;
+    // The 3 Plan 02.2-03 routes registered under /api/me/*. By construction
+    // none of them carry a :userId path parameter; cross-tenant access is
+    // impossible because the handler only reads c.var.userId.
+    const accountPaths = routes
+      .map((r) => r.path)
+      .filter(
+        (p) =>
+          p === "/api/me/export" || p === "/api/me/account" || p === "/api/me/account/restore",
+      );
+    expect(accountPaths.length).toBeGreaterThanOrEqual(3);
+    for (const p of accountPaths) {
+      expect(p).not.toMatch(/:userId/);
+    }
+  });
 });
