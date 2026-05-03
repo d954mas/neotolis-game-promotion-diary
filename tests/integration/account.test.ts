@@ -165,10 +165,7 @@ describe("account export / soft-delete / restore (Phase 02.2)", () => {
     // semantics; AGENTS-INV-3 soft-cascade text in the plan was advisory
     // and adapted to schema reality — see commit message for Rule 3
     // deviation rationale).
-    const keysAfter = await db
-      .select()
-      .from(apiKeysSteam)
-      .where(eq(apiKeysSteam.userId, userA.id));
+    const keysAfter = await db.select().from(apiKeysSteam).where(eq(apiKeysSteam.userId, userA.id));
     expect(keysAfter).toHaveLength(0);
 
     // audit_log NOT cascaded (AGENTS.md §4 INSERT-only invariant).
@@ -268,9 +265,8 @@ describe("account export / soft-delete / restore (Phase 02.2)", () => {
     const userA = await seedUserDirectly({ email: `restore-audit-${uniq()}@test.local` });
     // Soft-delete via service (skip HTTP since we want to retain ability to
     // call restore — DELETE clears the session).
-    const { softDeleteAccount, restoreAccount } = await import(
-      "../../src/lib/server/services/account.js"
-    );
+    const { softDeleteAccount, restoreAccount } =
+      await import("../../src/lib/server/services/account.js");
     await softDeleteAccount(userA.id, "127.0.0.1");
     await restoreAccount(userA.id, "127.0.0.1");
 

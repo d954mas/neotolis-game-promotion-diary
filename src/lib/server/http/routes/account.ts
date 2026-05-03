@@ -7,11 +7,7 @@
 // All 3 routes are added to MUST_BE_PROTECTED in tests/integration/anonymous-401.test.ts.
 
 import { Hono } from "hono";
-import {
-  softDeleteAccount,
-  restoreAccount,
-  exportAccountJson,
-} from "../../services/account.js";
+import { softDeleteAccount, restoreAccount, exportAccountJson } from "../../services/account.js";
 import { mapErr, type RouteVars } from "./_shared.js";
 
 export const accountRoutes = new Hono<RouteVars>();

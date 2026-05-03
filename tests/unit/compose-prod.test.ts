@@ -62,7 +62,9 @@ describe("docker-compose.prod.yml structural invariants (Phase 02.2)", () => {
     const compose = yaml.load(content) as Compose;
     for (const name of ["app", "worker", "scheduler"] as const) {
       const svc = compose.services[name];
-      expect(svc?.image, `${name} should have image`).toMatch(/^ghcr\.io\/d954mas\/neotolis-diary:/);
+      expect(svc?.image, `${name} should have image`).toMatch(
+        /^ghcr\.io\/d954mas\/neotolis-diary:/,
+      );
       expect(svc?.build, `${name} must NOT have build:.`).toBeUndefined();
     }
   });

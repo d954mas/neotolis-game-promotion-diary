@@ -69,10 +69,7 @@ type AboutData = {
   domain: string;
 };
 
-function renderHtml<TData>(
-  Component: unknown,
-  data: TData,
-): string {
+function renderHtml<TData>(Component: unknown, data: TData): string {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return render(Component as any, { props: { data } as any }).body;
 }

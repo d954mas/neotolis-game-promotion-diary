@@ -125,11 +125,7 @@ export async function restoreAccount(userId: string, ipAddress: string): Promise
 
     const ageDays = (Date.now() - markerTs.getTime()) / (1000 * 60 * 60 * 24);
     if (ageDays > env.RETENTION_DAYS) {
-      throw new AppError(
-        "account_purge_window_expired",
-        "account_purge_window_expired",
-        410,
-      );
+      throw new AppError("account_purge_window_expired", "account_purge_window_expired", 410);
     }
 
     await tx.update(user).set({ deletedAt: null }).where(eq(user.id, userId));
@@ -146,9 +142,7 @@ export async function restoreAccount(userId: string, ipAddress: string): Promise
     await tx
       .update(gameSteamListings)
       .set({ deletedAt: null })
-      .where(
-        and(eq(gameSteamListings.userId, userId), eq(gameSteamListings.deletedAt, markerTs)),
-      );
+      .where(and(eq(gameSteamListings.userId, userId), eq(gameSteamListings.deletedAt, markerTs)));
     await tx
       .update(dataSources)
       .set({ deletedAt: null })

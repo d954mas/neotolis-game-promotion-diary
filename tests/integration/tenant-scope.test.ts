@@ -634,8 +634,7 @@ describe("Phase 02.2 cross-tenant invariants for /api/me/account routes", () => 
     const accountPaths = routes
       .map((r) => r.path)
       .filter(
-        (p) =>
-          p === "/api/me/export" || p === "/api/me/account" || p === "/api/me/account/restore",
+        (p) => p === "/api/me/export" || p === "/api/me/account" || p === "/api/me/account/restore",
       );
     expect(accountPaths.length).toBeGreaterThanOrEqual(3);
     for (const p of accountPaths) {
