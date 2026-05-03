@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to plan
-stopped_at: Completed 02.1-38-PLAN.md
-last_updated: "2026-04-30T14:57:03.769Z"
-last_activity: 2026-04-30
+stopped_at: "Completed 02.2-08-PLAN.md (Phase 02.2 complete: 8/8 plans)"
+last_updated: "2026-05-03T20:13:19.498Z"
+last_activity: 2026-05-03
 progress:
-  total_phases: 7
-  completed_phases: 3
-  total_plans: 60
-  completed_plans: 60
+  total_phases: 8
+  completed_phases: 4
+  total_plans: 68
+  completed_plans: 68
 ---
 
 # Project State
@@ -20,7 +20,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Replace messy Google Sheets / markdown files with a structured, secure, query-friendly diary so an indie developer can see — at a glance — which promotion actions actually moved the needle on wishlists and engagement.
-**Current focus:** Phase 02.1 — architecture-realignment
+**Current focus:** Phase 02.2 — ship-to-prod
 
 ## Current Position
 
@@ -102,8 +102,20 @@ Plan: Not started
 | Phase 02.1-architecture-realignment P35 | ~14 min | 1 tasks | 3 files |
 | Phase 02.1-architecture-realignment P37 | ~10 min | 1 tasks | 6 files |
 | Phase 02.1-architecture-realignment P38 | 12min | 1 tasks | 5 files |
+| Phase 02.2-ship-to-prod P01 | 70min | 2 tasks | 22 files |
+| Phase 02.2-ship-to-prod P07 | 3min | 1 tasks | 1 files |
+| Phase 02.2-ship-to-prod P06 | ~5min | 3 tasks | 13 files |
+| Phase 02.2-ship-to-prod P02 | 9min | 2 tasks | 5 files |
+| Phase 02.2-ship-to-prod P03 | 10min | 2 tasks | 9 files |
+| Phase 02.2-ship-to-prod P05 | 25min | 2 tasks | 8 files |
+| Phase 02.2 P04 | 10min | 2 tasks | 13 files |
+| Phase 02.2-ship-to-prod P08 | ~7min | 2 tasks | 3 files |
 
 ## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 02.2 inserted after Phase 02 (chronologically after 02.1): ship-to-prod (URGENT) — pre-Phase-3 deploy work so user can dogfood the SaaS before polling pipeline lands
 
 ### Decisions
 
@@ -291,6 +303,20 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: [Plan 02.1-37]: Service-layer merged-state validator pattern — when a partial-update endpoint needs to validate against the persisted state, the validator MOVES from the zod superRefine to the service. updateEvent loads existing row first, computes merged = {input ∪ existing}, validates, throws AppError before mutation. Mirrors assertGameOwnedByUser pattern; closes UAT-NOTES.md §5.11 (PATCH youtube invariant gap)
 - [Phase 02.1-architecture-realignment]: [Plan 02.1-37]: VALID_EVENT_KINDS as single source of truth — service + route + page-loader all reference the same constant via filterValidKinds helper in src/lib/util/. Closes UAT-NOTES.md §5.13 (/feed?kind=foo no longer 500s; silent drop matches existing ?show= malformed-param fallback)
 - [Phase 02.1-architecture-realignment]: Plan 02.1-38: Path A (checkbox-list, ~30 LOC) over Path B (full AttachToGamePicker rewrite — DEFERRED to Phase 6 polish backlog) for closing UAT-NOTES.md §5.2 (P0). /events/new kept single-select (out of scope per §5.2). Set-difference dirty check (order-agnostic) over deep-equality for the gameIds[] form state.
+- [Phase 02.2]: Plan 02.2-01: Wave 0 lock-step closure for AUDIT_ACTIONS additions — adding 4 new audit verbs (account.deleted/restored/exported, quota.limit_hit) requires matching Paraglide message keys + AuditRow/FilterChips/FiltersSheet switch cases + paraglide.test.ts EXPECTED_KEYS expansion + migrate.test.ts length-assertion update; documented as the contract in audit/actions.ts header (Pitfall 6 mirror)
+- [Phase 02.2]: Plan 02.2-01: tests/unit/env.test.ts created NEW (Rule 3 deviation — plan said extend a non-existent file). VALIDATION D-32 row explicitly allows 'NEW or extend'. The 6 Phase 02.2-01 tests are LIVE not it.skip since the env schema additions land in this plan
+- [Phase 02.2]: Plan 02.2-01: anonymous-401.test.ts reserved entries are commented out instead of added live — vacuous-pass toContain guard would fail if /api/me/export were in MUST_BE_PROTECTED before Plan 02.2-03 mounts the route. Comment carries 'uncomment after Plan 02.2-03' so the executor finds it via grep
+- [Phase 02.2]: Plan 02.2-07: SaaS-leak grep step name updated from 'D-14' to 'D-14, D-30' to cite both authoritative decisions when failures fire — single step extension chosen over parallel step (option-1)
+- [Phase 02.2]: Plan 02.2-07: GHCR publish-only-on-master pattern locked — PR builds DO NOT push (smoke job already runs docker build inline); only master pushes after smoke + browser-tests green trigger publish; uses GITHUB_TOKEN with packages: write (no PAT, no leaked secret)
+- [Phase 02.2-ship-to-prod]: Plan 02.2-06: docker-compose.prod.yml + nginx/* + scripts/* + Dockerfile GHCR labels + 12 live unit tests; selfhost.yml UNCHANGED (D-31)
+- [Phase 02.2-ship-to-prod]: Plan 02.2-02: services/quota.ts assertQuota guard wires into 3 create paths (games / data_sources / events) BEFORE any DB read or write; soft-delete exclusion is per-kind (games/data_sources filter deletedAt; events_per_day rate cap does not); rolling-24h reset semantics for events; PUTOFF Phase 3 marker for auto-import quota throttle (defer not throw)
+- [Phase 02.2]: api_keys_steam HARD-deleted on softDeleteAccount (no deletedAt column; D-14 hard-delete semantics; envelope-encrypted secrets gone immediately on user request)
+- [Phase 02.2]: Account routes have no :userId path parameter — operate on c.var.userId only; cross-tenant access impossible by construction (structural test asserts via Hono routes introspection)
+- [Phase 02.2-ship-to-prod]: Plan 02.2-05: SSR-render integration tests via svelte/server (audit-render.test.ts pattern) instead of full app.request — fast, no DB dependency, asserts rendered HTML contract directly.
+- [Phase 02.2]: Auth-gated noindex via inverse-allowlist in src/routes/+layout.svelte (PUBLIC_INDEXABLE_PATHS Set: /, /login, /privacy, /terms, /about) — avoided a SvelteKit (app)/ route-group restructure
+- [Phase 02.2]: ConfirmDialog requireText prop is the Type-DELETE variant; backward compatible (null/undefined default = no behaviour change for existing callers)
+- [Phase 02.2]: Permanent-delete-now CTA HIDDEN in 2.2 (purge endpoint ships in Phase 3 purge worker; PUTOFF marker in AccountDeletedBanner.svelte)
+- [Phase 02.2-ship-to-prod]: Plan 02.2-08 ships operational runbooks: docs/deploy/install.md (727 lines, 7 sections including 10-step Russian UAT) walks blank aeza VPS to green prod deploy; docs/self-host/backups.md (289 lines, 7 sections) covers opt-in S3-compatible backups for R2/B2/Wasabi/AWS/MinIO/local-only; .env.example finalized with POSTGRES_PASSWORD documented (Rule 2 auto-add) + 8 install.md cross-references
 
 ### Pending Todos
 
@@ -331,8 +357,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-30T06:00:16.812Z
-Last Activity: 2026-04-30
-Stopped at: Completed 02.1-38-PLAN.md
+Last session: 2026-05-03T17:45:50.358Z
+Last Activity: 2026-05-03
+Stopped at: Completed 02.2-08-PLAN.md (Phase 02.2 complete: 8/8 plans)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md

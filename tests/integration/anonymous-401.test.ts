@@ -79,6 +79,14 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     "/api/games/:gameId/events",
     // Phase 2 — audit
     "/api/audit",
+    // Phase 02.2 — account export / soft-delete / restore (D-16). Plan 02.2-03
+    // landed the routes (services/account.ts + routes/account.ts mounted under
+    // /api/*). The string list here is the path-only pattern Hono registers
+    // when mountin the sub-router; the per-route 401 assertions below cover
+    // the method-specific behaviour.
+    "/api/me/export",
+    "/api/me/account",
+    "/api/me/account/restore",
   ];
 
   it("every /api/* route except /api/auth/* refuses anonymous with 401", async () => {
@@ -227,6 +235,27 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     const res = await app.request("/api/events/fixture-id/unmark-standalone", {
       method: "PATCH",
     });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  // Plan 02.2-03 — explicit per-route anonymous-401 assertions for the new
+  // /api/me/* account-export-delete-restore surface (AGENTS.md §3 — vacuous-pass
+  // sweep + explicit per-route assertions, both layers required).
+  it("Plan 02.2-03: anonymous GET /api/me/export returns 401 unauthorized", async () => {
+    const res = await app.request("/api/me/export");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.2-03: anonymous DELETE /api/me/account returns 401 unauthorized", async () => {
+    const res = await app.request("/api/me/account", { method: "DELETE" });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 02.2-03: anonymous POST /api/me/account/restore returns 401 unauthorized", async () => {
+    const res = await app.request("/api/me/account/restore", { method: "POST" });
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });

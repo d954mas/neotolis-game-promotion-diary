@@ -13,9 +13,33 @@
   import { page } from "$app/state";
   import AppHeader from "$lib/components/AppHeader.svelte";
   import Nav from "$lib/components/Nav.svelte";
+  import AccountDeletedBanner from "$lib/components/AccountDeletedBanner.svelte";
   import { signOut } from "$lib/auth-client";
   import type { Snippet } from "svelte";
   import type { LayoutData } from "./$types";
+
+  // Plan 02.2-04 (D-12 / D-13 — auth-gated noindex). Public routes that must
+  // stay indexable are /login, /privacy, /terms, /about. EVERY other route
+  // emits <meta name="robots" content="noindex,nofollow"> in the rendered
+  // HTML head (search engines avoid private dashboards even if they crawl
+  // a leaked URL). The list below mirrors the inverse of +layout.server.ts
+  // PROTECTED_PATHS by enumerating the public pages explicitly — adding a
+  // new public page anywhere requires updating both the public list here
+  // AND the absence of an entry in PROTECTED_PATHS, so drift surfaces in
+  // code review (no shared constant: the noindex contract is decoupled
+  // from the redirect contract by design — a public page can still be
+  // indexable while serving auth-aware UI, e.g. dashboard `/`).
+  //
+  // The dashboard `/` (root) is currently a public landing surface that
+  // renders different content for signed-in vs anonymous users. It is
+  // intentionally indexable (the public landing page IS the SEO surface).
+  const PUBLIC_INDEXABLE_PATHS: ReadonlySet<string> = new Set([
+    "/",
+    "/login",
+    "/privacy",
+    "/terms",
+    "/about",
+  ]);
 
   let { data, children }: { data: LayoutData; children: Snippet } = $props();
 
@@ -34,6 +58,16 @@
     if (p.startsWith("/audit")) return "audit";
     if (p.startsWith("/settings")) return "settings";
     return "feed";
+  });
+
+  // D-13: emit noindex on every page that is NOT in the public-indexable
+  // allowlist above. The check uses pathname startsWith for the root `/`
+  // exact match (so `/feed` is NOT matched as `/`) and exact-match for the
+  // 4 public pages.
+  const isPublicIndexable = $derived.by((): boolean => {
+    const p = page.url.pathname;
+    if (p === "/") return true;
+    return PUBLIC_INDEXABLE_PATHS.has(p);
   });
 
   async function handleSignOut(): Promise<void> {
@@ -105,6 +139,9 @@
 
 <svelte:head>
   <title>{m.app_title()}</title>
+  {#if !isPublicIndexable}
+    <meta name="robots" content="noindex,nofollow" />
+  {/if}
 </svelte:head>
 
 <!--
@@ -130,6 +167,15 @@
       />
       <Nav active={navActive} />
     </div>
+    {#if data.user.deletedAt}
+      <!-- Plan 02.2-04 (D-15 / D-16): the soft-deleted user is signed back in
+           (e.g. via Google OAuth from a different device) and still has a
+           viable session — the banner gives them a one-click restore CTA
+           plus the days-remaining countdown. The banner sits BELOW the
+           sticky chrome so it scrolls away with normal page content rather
+           than competing with AppHeader for the top-pinned slot. -->
+      <AccountDeletedBanner deletedAt={data.user.deletedAt} retentionDays={data.retentionDays} />
+    {/if}
   {/if}
 
   <main>

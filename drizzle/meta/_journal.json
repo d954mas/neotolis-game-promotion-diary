@@ -57,6 +57,20 @@
       "when": 1777564800000,
       "tag": "0007_add_games_description",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777626146567,
+      "tag": "0008_add_user_soft_delete_and_account_audit_actions",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1777837814107,
+      "tag": "0009_add_events_user_created_at_index",
+      "breakpoints": true
     }
   ]
 }

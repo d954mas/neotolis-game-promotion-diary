@@ -73,6 +73,23 @@ Decimal phases appear between their surrounding integers in numeric order.
 **UI hint**: yes
 **Phase 2 closure note (2026-04-28)**: phase verdict `gaps_found`. UAT surfaced 4 P0 architectural redesigns (data_sources unified abstraction / 3-view feed-first IA / auto-import inbox flow / unified events table with author_is_me) plus 1 P0 functional gap (rename + add-Steam UI missing on `/games/[id]`). Closure delegated to Phase 2.1 (INSERTED below); see PROJECT.md "Architecture" section + 4 todos in `.planning/todos/pending/2026-04-28-{data-sources-unified-model,three-views-feed-sources-games,channel-to-inbox-auto-import-flow,rethink-items-vs-events-architecture}.md`.
 
+### Phase 02.2: ship-to-prod (INSERTED)
+
+**Goal:** Get the Phase 2.1 codebase running on the author's production infrastructure (aeza VPS) as the canonical SaaS instance with open Google-OAuth signup. Brings forward PRIV-03/PRIV-04 baseline (in-app data export + account deletion) from Phase 6 because open signup makes email-only GDPR awkward. Ships Privacy/ToS/About pages, per-user abuse quotas, deploy templates (docker-compose.prod.yml + nginx + scripts), GHCR build-publish CI job, and operational runbooks. Per D-PRE: phase delivers code + docs + scripts only — manual VPS provisioning is a separate operator task done AFTER sign-off.
+**Requirements**: D-08..D-32 + D-22a, D-25a, D-25b, D-PRE, D-S1..D-S4 (decision IDs from 02.2-CONTEXT.md); brought-forward baseline of PRIV-03 (export), PRIV-04 (deletion), QUOTA-01/02 (per-user limits)
+**Depends on:** Phase 2.1
+**Plans:** 8/8 plans complete
+
+Plans:
+- [x] 02.2-01-PLAN.md — Wave 0: forward-only migration 0008 (user.deleted_at + 4 audit verbs) + env.ts schema extensions (SUPPORT_EMAIL + 3 quota limits + IMAGE_TAG + DOMAIN) + 9 placeholder test files
+- [x] 02.2-02-PLAN.md — Wave 1: services/quota.ts (assertQuota guard) wired into createGame/createSource/createEvent + 7 quota integration tests live
+- [x] 02.2-03-PLAN.md — Wave 1: services/account.ts (softDeleteAccount, restoreAccount, exportAccountJson) + routes/account.ts (3 endpoints) + 17 placeholder tests live (account 11 + dto 4 + tenant-scope 2) + 3 anonymous-401 entries activated
+- [x] 02.2-04-PLAN.md — Wave 2: /settings/account UI + AccountDeletedBanner + ConfirmDialog Type-DELETE variant + /login disclaimer + auth-gated noindex meta + 21 Paraglide keys + 3 browser tests
+- [x] 02.2-05-PLAN.md — Wave 1: /privacy + /terms + /about public routes with SUPPORT_EMAIL injection + ~40 Paraglide keys + 8 integration tests live
+- [x] 02.2-06-PLAN.md — Wave 1: docker-compose.prod.yml + nginx/{nginx.conf.template,cf-ips.conf,refresh-cf-ips.sh} + scripts/{deploy.sh,deploy-rollback.sh,backup.sh} + Dockerfile GHCR labels + 12 unit tests live
+- [x] 02.2-07-PLAN.md — Wave 1: .github/workflows/ci.yml docker-build-publish job + extended SaaS-leak grep (D-30)
+- [x] 02.2-08-PLAN.md — Wave 3: docs/deploy/install.md (7-section runbook with 10-step Russian UAT) + docs/self-host/backups.md + .env.example finalization
+
 ### Phase 2.1: Architecture Realignment
 *INSERTED — gap closure from Phase 2 UAT (2026-04-28)*
 
@@ -195,13 +212,14 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 2.1 → 3 → 4 → 5 → 6
+Phases execute in numeric order: 1 → 2 → 2.1 → 2.2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 10/10 | Complete | 2026-04-27 |
 | 2. Ingest, Secrets, and Audit | 11/11 | Gaps Found | 2026-04-28 (closure in 2.1) |
 | 2.1. Architecture Realignment (INSERTED) | 34/34 | Signed off (verifier next) | 2026-04-30 — Plans 11-16 closed round-1 UAT gaps; Plans 17-20 closed round-2; Plans 21-26 closed round-3; Plans 27-34 closed round-4; Plans 35-39 closed round-5 (13 findings); Plan 39 inlined 16 round-6 polish iterations; Plan 10 sign-off paperwork closed 2026-04-30 |
+| 2.2. Ship to Prod (INSERTED) | 8/8 | Complete | 2026-05-04 — production deploy artifacts (compose / nginx / scripts / GHCR CI) + GDPR baseline (export / soft-delete / restore) + per-user quotas (race-free + pool-deadlock-safe). 5 HUMAN-UAT items pending live VPS validation per D-PRE. |
 | 3. Polling Pipeline | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
 | 5. Reddit Rules Cockpit | 0/TBD | Not started | - |

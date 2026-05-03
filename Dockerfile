@@ -44,6 +44,11 @@ RUN pnpm prune --prod
 
 # ---------- runtime stage ----------
 FROM node:22-alpine AS runtime
+# OCI image labels (D-21 / Plan 02.2-06). These tie the GHCR image to the
+# source repo so a self-host operator can `docker inspect` and trace back
+# to the code. No runtime effect.
+LABEL org.opencontainers.image.source="https://github.com/d954mas/neotolis-diary"
+LABEL org.opencontainers.image.licenses="MIT"
 WORKDIR /app
 # Non-root user (D-22). UID 10001 is well above the alpine reserved range (<1000) and the
 # typical container UID grab-bag (1000–9999) so it doesn't collide with host bind-mounts.

@@ -1,0 +1,92 @@
+# Production compose template (D-S2). Lives alongside docker-compose.selfhost.yml
+# but is NOT smoke-gated. The selfhost.yml stays the published self-host file
+# (D-31); this is the author-instance variant.
+#
+# Differences from selfhost.yml:
+#   - image from GHCR (not build:.)
+#   - nginx service (terminates HTTP from CF; CF terminates TLS)
+#   - restart: unless-stopped on every service (D-22a)
+#   - log driver json-file with rotation (D-27)
+#   - env_file: .env (vs literal inline values)
+#   - POSTGRES_PASSWORD via env file (D-03)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: neotolis
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  app:
+    image: ghcr.io/d954mas/neotolis-diary:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_ROLE: app
+      APP_MODE: selfhost
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/neotolis
+      PORT: 3000
+    depends_on:
+      postgres: { condition: service_healthy }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  worker:
+    image: ghcr.io/d954mas/neotolis-diary:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_ROLE: worker
+      APP_MODE: selfhost
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/neotolis
+    depends_on:
+      postgres: { condition: service_healthy }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  scheduler:
+    image: ghcr.io/d954mas/neotolis-diary:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_ROLE: scheduler
+      APP_MODE: selfhost
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/neotolis
+    depends_on:
+      postgres: { condition: service_healthy }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./nginx/cf-ips.conf:/etc/nginx/cf-ips.conf:ro
+    environment:
+      DOMAIN: ${DOMAIN}
+    depends_on:
+      - app
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  pg_data: {}

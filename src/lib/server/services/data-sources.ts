@@ -38,6 +38,7 @@ import type { SourceKind } from "../integrations/data-source-adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
+import { withQuotaGuard } from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
 
 export type DataSourceRow = typeof dataSources.$inferSelect;
@@ -151,21 +152,27 @@ export async function createSource(
     );
   }
 
+  // Race-free, deadlock-safe quota path (Codex P2.1 + post-fix). withQuotaGuard
+  // takes a per-user advisory lock, runs the count + INSERT in one tx, and
+  // emits the quota.limit_hit audit AFTER the tx releases its pool connection.
   let row: DataSourceRow | undefined;
   try {
-    [row] = await db
-      .insert(dataSources)
-      .values({
-        userId,
-        kind: input.kind,
-        handleUrl: input.handleUrl,
-        channelId: input.channelId ?? null,
-        displayName: input.displayName ?? null,
-        isOwnedByMe: input.isOwnedByMe ?? true,
-        autoImport: input.autoImport ?? true,
-        metadata: input.metadata ?? {},
-      })
-      .returning();
+    row = await withQuotaGuard(userId, "data_sources", ipAddress, async (tx) => {
+      const [r] = await tx
+        .insert(dataSources)
+        .values({
+          userId,
+          kind: input.kind,
+          handleUrl: input.handleUrl,
+          channelId: input.channelId ?? null,
+          displayName: input.displayName ?? null,
+          isOwnedByMe: input.isOwnedByMe ?? true,
+          autoImport: input.autoImport ?? true,
+          metadata: input.metadata ?? {},
+        })
+        .returning();
+      return r;
+    });
   } catch (err) {
     if (isPgUniqueViolation(err)) {
       throw new AppError("data source already registered", "duplicate_source", 422, {

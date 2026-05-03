@@ -12,7 +12,19 @@ Replace messy Google Sheets / markdown files with a structured, secure, query-fr
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] **Google OAuth login (the only auth method in MVP)** — *Phase 1 (foundation), Phase 2 (production wiring), Phase 02.2 (OAuth Client setup + verification submission contract)*. `emailAndPassword: { enabled: false }` enforced in `src/lib/auth.ts`; CI smoke job exercises the OAuth dance against `oauth2-mock-server`.
+- [x] **Privacy: data is private to its owner — no public dashboards** — *Phase 1 + Phase 2 + Phase 02.2*. Tenant-scope ESLint rule + cross-tenant integration test + anonymous-401 sweep all green; `/privacy` `/terms` `/about` are content pages with no user data.
+- [x] **Per-user encrypted API key storage** — *Phase 2 (envelope encryption shipped); Phase 02.2 (DTO discipline lock — `to<Entity>Dto` strips ciphertext at projection layer)*. Behavioral test in `tests/unit/dto.test.ts` asserts the strip happens at runtime, not just at type-check time.
+- [x] **Envelope encryption for stored secrets (KEK in env, DEK per row); write-once secret UI** — *Phase 2*. Phase 02.2 keeps the contract via projection discipline.
+- [x] **User-visible audit log** — *Phase 2 (initial vocabulary); Phase 02.2 (4 new verbs: `account.deleted` / `account.restored` / `account.exported` / `quota.limit_hit`)*. INSERT-only enforced in `src/lib/server/audit.ts`.
+- [x] **English-only UI (i18n-ready structure)** — *Phase 02.2*. Paraglide JS 2 EXPECTED_KEYS lock-step closure (every code change touching copy must add the key + its UI switch case).
+- [x] **Open-source repo with MIT license + self-host docs (Docker compose + env-var config)** — *Phase 02.2*. `docs/deploy/install.md` (727 lines, 7 sections, 10-step Russian UAT) + `docs/self-host/backups.md` (provider-agnostic R2 / B2 / Wasabi / S3 / MinIO).
+- [x] **Deployable to a small VPS (aeza) behind Cloudflare Free tier (TLS, DDoS, WAF) with optional Cloudflare Tunnel for hidden origin** — *Phase 02.2*. `docker-compose.prod.yml` + `nginx/nginx.conf.template` + `scripts/{deploy,deploy-rollback,backup}.sh` + GHCR build-publish CI job. Live deploy to aeza is a post-sign-off operator task per D-PRE.
+- [x] **Trusted-proxy header handling** — *Phase 1 (`src/lib/server/proxy-trust.ts` + CVE-2026-27700 mitigation); Phase 02.2 (CF IP list + nginx real_ip rewrite)*.
+
+**Phase 02.2 brings forward from Phase 6:**
+- [x] **In-app GDPR baseline** — Article 15 export (GET `/api/me/export`), Article 17 soft-delete with 60-day grace (DELETE `/api/me/account`), restore window (POST `/api/me/account/restore`).
+- [x] **Per-user abuse quotas** — 50 games + 50 sources + 500 events/day (rolling 24h). Race-free + pool-deadlock-safe via per-user `pg_advisory_xact_lock` + post-tx audit emission.
 
 ### Active
 
@@ -158,4 +170,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-28 after Phase 2 UAT — folded in 4 P0 architectural redesigns (data_sources / 3-view IA / auto-import inbox / unified events table)*
+*Last updated: 2026-05-04 after Phase 02.2 (ship-to-prod) — production deploy artifacts + GDPR baseline (export / soft-delete / restore) + per-user quotas + 9 validated requirements moved Active → Validated.*

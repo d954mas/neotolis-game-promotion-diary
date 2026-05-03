@@ -218,6 +218,25 @@ describe("Phase 2.1 baseline schema migration (Plan 02.1-01)", () => {
     }
   });
 
+  // Phase 02.2 review (post-fix #4): composite index on (user_id, created_at DESC)
+  // for events_per_day quota count. Migration 0009.
+  it("adds the events_user_created_at_idx index (Codex post-fix #4)", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const result = await pool.query<{ indexname: string; indexdef: string }>(
+        `select indexname, indexdef from pg_indexes where tablename='events' and indexname='events_user_created_at_idx'`,
+      );
+      expect(result.rows.length).toBe(1);
+      // Verify the index shape: btree on (user_id, created_at DESC).
+      const indexdef = result.rows[0]!.indexdef;
+      expect(indexdef).toMatch(/btree/i);
+      expect(indexdef).toMatch(/user_id/);
+      expect(indexdef).toMatch(/created_at\s+DESC/i);
+    } finally {
+      await pool.end();
+    }
+  });
+
   it("data_sources carries kind / is_owned_by_me / auto_import / metadata / deleted_at", async () => {
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
@@ -417,8 +436,14 @@ describe("Plan 02.1-27 — event_games + steam listing unique swap (0005 + 0006 
       // Sanity: prior verbs from Plans 14 + 24 still present.
       expect(values).toContain("event.attached_to_game");
       expect(values).toContain("event.marked_standalone");
-      // Total post-Plan-27: 22 (post-Plan-24) + 1 (event.detached_from_game) = 23.
-      expect(values).toHaveLength(23);
+      // Phase 02.2 Plan 02.2-01 (migration 0008) extended the enum with 4
+      // new verbs: account.deleted, account.restored, account.exported,
+      // quota.limit_hit. Total post-Plan-02.2-01: 23 (post-Plan-27) + 4 = 27.
+      expect(values).toContain("account.deleted");
+      expect(values).toContain("account.restored");
+      expect(values).toContain("account.exported");
+      expect(values).toContain("quota.limit_hit");
+      expect(values).toHaveLength(27);
     } finally {
       await pool.end();
     }

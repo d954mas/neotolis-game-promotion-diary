@@ -27,16 +27,51 @@ describe("DTO discipline (PITFALL P3)", () => {
       emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
+      deletedAt: null,
     } as unknown as Parameters<typeof toUserDto>[0];
 
     const dto = toUserDto(fakeUser);
-    expect(dto).toEqual({ id: "u-1", email: "a@b.test", name: "A", image: null });
+    // Plan 02.2-04: deletedAt added to UserDto for the AccountDeletedBanner
+    // conditional in src/routes/+layout.svelte. Active accounts have null;
+    // soft-deleted accounts carry the timestamp. Not a ciphertext column —
+    // does not violate AGENTS §5 secret-strip invariant.
+    expect(dto).toEqual({ id: "u-1", email: "a@b.test", name: "A", image: null, deletedAt: null });
     expect(dto).not.toHaveProperty("googleSub");
     expect(dto).not.toHaveProperty("refreshToken");
     expect(dto).not.toHaveProperty("accessToken");
     expect(dto).not.toHaveProperty("idToken");
     expect(dto).not.toHaveProperty("password");
     expect(dto).not.toHaveProperty("emailVerified");
+  });
+
+  it("Plan 02.2-04: toUserDto exposes deletedAt for the soft-deleted state", () => {
+    // The AccountDeletedBanner in src/routes/+layout.svelte conditions on
+    // `data.user?.deletedAt` — the projection MUST forward the timestamp
+    // when set so the banner can compute days-left and render the restore
+    // CTA. The 02.2-03 export envelope test below continues to verify
+    // ciphertext-shaped fields stay stripped.
+    const deletedAt = new Date("2026-04-01T00:00:00Z");
+    const fakeUser = {
+      id: "u-2",
+      email: "deleted@b.test",
+      name: "B",
+      image: null,
+      googleSub: "gsub-still-secret",
+      refreshToken: "r-still-secret",
+      accessToken: "a-still-secret",
+      idToken: "i-still-secret",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt,
+    } as unknown as Parameters<typeof toUserDto>[0];
+
+    const dto = toUserDto(fakeUser);
+    expect(dto.deletedAt).toEqual(deletedAt);
+    // Sanity: the secret-shaped fields stay stripped even when deletedAt
+    // is set (the AGENTS §5 invariant is unaffected).
+    expect(dto).not.toHaveProperty("googleSub");
+    expect(dto).not.toHaveProperty("refreshToken");
   });
 
   it("toSessionDto omits the session token (=cookie value)", () => {
@@ -316,5 +351,123 @@ describe("Plan 02.1-28 — toEventDto with gameIds (P3 behavioural)", () => {
     const dto = toEventDto(fakeRow as unknown as Parameters<typeof toEventDto>[0], []);
 
     expect(dto.gameIds).toEqual([]);
+  });
+});
+
+// Phase 02.2 D-16 — the export envelope (services/account.ts exportAccountJson)
+// composes per-entity DTO projections into one JSON envelope. Ciphertext
+// columns MUST NOT cross the wire even though the underlying rows carry
+// them (AGENTS.md §5 — DTO projection is the runtime barrier). The
+// HTTP-boundary integration assertion lives in tests/integration/account.test.ts
+// (envelope strip test); the four assertions below are the unit-layer
+// projection-invariant guards over the two projection functions that own
+// the secret-shaped fields the envelope risks leaking: toApiKeySteamDto
+// (ciphertext columns from api_keys_steam) and toUserDto (PII / OAuth
+// tokens that Better Auth's account table holds). If a future contributor
+// extends either projection in a way that leaks one of these field names,
+// this test fails loudly at unit-test time without booting Postgres.
+describe("account export envelope ciphertext strip (Phase 02.2 D-16)", () => {
+  it("Plan 02.2-03: exportAccountJson envelope contains no secret_ct field anywhere", () => {
+    const fakeRow = {
+      id: "k1",
+      userId: "u1",
+      label: "L",
+      last4: "WXYZ",
+      secretCt: Buffer.from([1, 2, 3]),
+      secretIv: Buffer.from([4, 5, 6]),
+      secretTag: Buffer.from([7, 8, 9]),
+      wrappedDek: Buffer.from([10, 11, 12]),
+      dekIv: Buffer.from([13, 14, 15]),
+      dekTag: Buffer.from([16, 17, 18]),
+      kekVersion: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      rotatedAt: null,
+    };
+    const dto = toApiKeySteamDto(fakeRow as Parameters<typeof toApiKeySteamDto>[0]);
+    const json = JSON.stringify(dto);
+    expect(json).not.toMatch(/secret_ct|secretCt/);
+  });
+
+  it("Plan 02.2-03: exportAccountJson envelope contains no wrapped_dek field anywhere", () => {
+    const fakeRow = {
+      id: "k2",
+      userId: "u1",
+      label: "L",
+      last4: "WXYZ",
+      secretCt: Buffer.from([1, 2, 3]),
+      secretIv: Buffer.from([4, 5, 6]),
+      secretTag: Buffer.from([7, 8, 9]),
+      wrappedDek: Buffer.from([10, 11, 12]),
+      dekIv: Buffer.from([13, 14, 15]),
+      dekTag: Buffer.from([16, 17, 18]),
+      kekVersion: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      rotatedAt: null,
+    };
+    const dto = toApiKeySteamDto(fakeRow as Parameters<typeof toApiKeySteamDto>[0]);
+    const json = JSON.stringify(dto);
+    expect(json).not.toMatch(/wrapped_dek|wrappedDek|dek_iv|dekIv|dek_tag|dekTag/);
+  });
+
+  it("Plan 02.2-03: exportAccountJson envelope contains no kek_version field anywhere", () => {
+    const fakeRow = {
+      id: "k3",
+      userId: "u1",
+      label: "L",
+      last4: "WXYZ",
+      secretCt: Buffer.from([1]),
+      secretIv: Buffer.from([2]),
+      secretTag: Buffer.from([3]),
+      wrappedDek: Buffer.from([4]),
+      dekIv: Buffer.from([5]),
+      dekTag: Buffer.from([6]),
+      kekVersion: 7,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      rotatedAt: null,
+    };
+    const dto = toApiKeySteamDto(fakeRow as Parameters<typeof toApiKeySteamDto>[0]);
+    const json = JSON.stringify(dto);
+    expect(json).not.toMatch(/kek_version|kekVersion/);
+    // Sanity: the literal int 7 might appear by coincidence elsewhere; the
+    // assertion above is the load-bearing one (the field name is the
+    // tripwire, not the value).
+  });
+
+  it("Plan 02.2-03: exportAccountJson envelope contains no googleSub / refreshToken / accessToken / idToken anywhere", () => {
+    // toUserDto is the projection that owns the PII/OAuth-token strip.
+    // The Better Auth `account` table carries the OAuth tokens; the user
+    // row does not, but the User type literal in dto.ts carries timestamps
+    // and an emailVerified flag the export must not leak. The assertion
+    // here cross-checks the projection literally rather than relying on
+    // schema type erasure.
+    const fakeRow = {
+      id: "u1",
+      email: "a@b.test",
+      name: "A",
+      image: null,
+      // PII / OAuth fields the projection MUST drop:
+      googleSub: "leak-google-sub",
+      refreshToken: "leak-refresh",
+      accessToken: "leak-access",
+      idToken: "leak-id",
+      emailVerified: true,
+      themePreference: "system",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: null,
+    } as unknown as Parameters<typeof toUserDto>[0];
+    const dto = toUserDto(fakeRow);
+    const json = JSON.stringify(dto);
+    expect(json).not.toMatch(/googleSub|google_sub/);
+    expect(json).not.toMatch(/refreshToken|refresh_token/);
+    expect(json).not.toMatch(/accessToken|access_token/);
+    expect(json).not.toMatch(/idToken|id_token/);
+    expect(json).not.toContain("leak-google-sub");
+    expect(json).not.toContain("leak-refresh");
+    expect(json).not.toContain("leak-access");
+    expect(json).not.toContain("leak-id");
   });
 });

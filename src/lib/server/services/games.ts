@@ -47,6 +47,7 @@ import { gameSteamListings } from "../db/schema/game-steam-listings.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
+import { withQuotaGuard } from "./quota.js";
 
 export type GameRow = typeof games.$inferSelect;
 
@@ -115,19 +116,27 @@ export async function createGame(
   ipAddress: string,
 ): Promise<GameRow> {
   validateTitle(input.title);
-  const [row] = await db
-    .insert(games)
-    .values({
-      userId,
-      title: input.title.trim(),
-      notes: input.notes ?? "",
-    })
-    .returning();
-  if (!row) {
-    // Should be unreachable — Postgres INSERT ... RETURNING * either succeeds
-    // with one row or throws. Defensive in case of driver-layer surprise.
-    throw new Error("createGame: INSERT returned no row");
-  }
+
+  // Race-free, deadlock-safe quota path (Codex P2.1 + post-fix). withQuotaGuard
+  // takes a per-user advisory lock, runs the count + INSERT in one tx, and
+  // emits the quota.limit_hit audit AFTER the tx releases its pool connection.
+  const row = await withQuotaGuard(userId, "games", ipAddress, async (tx) => {
+    const [r] = await tx
+      .insert(games)
+      .values({
+        userId,
+        title: input.title.trim(),
+        notes: input.notes ?? "",
+      })
+      .returning();
+    if (!r) {
+      // Should be unreachable — Postgres INSERT ... RETURNING * either succeeds
+      // with one row or throws. Defensive in case of driver-layer surprise.
+      throw new Error("createGame: INSERT returned no row");
+    }
+    return r;
+  });
+
   await writeAudit({
     userId,
     action: "game.created",
