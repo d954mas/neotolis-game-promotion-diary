@@ -550,10 +550,10 @@ line. Same script + same crontab line work for self-host operators.
 
 | Failure | Recovery | ETA |
 |---------|----------|-----|
-| VPS deletion (aeza account closed, etc.) | Provision new VPS following §1 + §4. Restore latest backup: `rclone copy r2:diary-backups/<latest>.sql.gz /tmp/` then `docker exec -i diary_postgres pg_restore -U postgres -d neotolis -c < /tmp/<latest>.sql.gz`. Update DNS A record to new IP. | ~30 min |
+| VPS deletion (aeza account closed, etc.) | Provision new VPS following §1 + §4. Restore latest backup: `rclone copy r2:diary-backups/<latest>.sql.gz /tmp/` then `gunzip -c /tmp/<latest>.sql.gz \| docker compose -f /opt/diary/docker-compose.prod.yml exec -T postgres pg_restore -U postgres -d neotolis -c`. Update DNS A record to new IP. | ~30 min |
 | Cloudflare outage (rare) | No VPS action needed — UptimeRobot will alert; CF restores within minutes; users will see "Cloudflare error" page in the meantime. | external |
 | Deploy interrupted (network drop mid-`docker compose pull`) | Re-run `pnpm deploy`. Idempotent — `pull` is incremental, `up -d` is a no-op if containers are already on the target image. | ~1 min |
-| Data corruption (e.g. a buggy migration on master, caught in prod after merge) | Restore from latest R2 backup using the **admin** R2 token from the operator's workstation (see §2 step 8): download via rclone, `pg_restore -d neotolis -c`. Then `pnpm deploy:rollback <previous-sha>` to pin to the last-good code. | ~15 min |
+| Data corruption (e.g. a buggy migration on master, caught in prod after merge) | Restore from latest R2 backup using the **admin** R2 token from the operator's workstation (see §2 step 8): `rclone copy r2:diary-backups/<latest>.sql.gz /tmp/` then `gunzip -c /tmp/<latest>.sql.gz \| docker compose -f /opt/diary/docker-compose.prod.yml exec -T postgres pg_restore -U postgres -d neotolis -c`. Then `pnpm deploy:rollback <previous-sha>` to pin to the last-good code. | ~15 min |
 | OAuth verification revoked by Google | Resubmit per §3 step 5. Users will see the unverified-app warning again until reapproved. App functions normally otherwise. | weeks |
 
 ---

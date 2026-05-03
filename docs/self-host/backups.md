@@ -204,7 +204,12 @@ inline:
 ```
 
 The script defaults are `RCLONE_REMOTE=r2`, `RCLONE_BUCKET=diary-backups`,
-`PG_CONTAINER=diary_postgres`.
+`COMPOSE_FILE=/opt/diary/docker-compose.prod.yml`. The Postgres container is
+resolved via `docker compose exec -T postgres ...` against `COMPOSE_FILE`,
+so the script is independent of compose project naming and works without a
+`container_name:` override (Codex post-fix #1). Self-host operators on a
+non-standard install path set `COMPOSE_FILE=/path/to/docker-compose.yml`
+inline in the cron line.
 
 ## §5 — Verify
 
@@ -244,8 +249,13 @@ rclone copy r2:diary-backups/<date>.sql.gz /tmp/
 cd /opt/diary
 docker compose -f docker-compose.prod.yml stop app worker scheduler
 
-# 3. Restore (DESTRUCTIVE — replaces current DB content)
-gunzip -c /tmp/<date>.sql.gz | docker exec -i diary_postgres pg_restore -U postgres -d neotolis -c
+# 3. Restore (DESTRUCTIVE — replaces current DB content). Resolve the
+#    Postgres container via `docker compose exec` instead of `docker exec
+#    <name>` — Compose generates the runtime container name from the
+#    project + service + index, and `compose exec` looks up the service
+#    independently of that name (Codex post-fix #1).
+gunzip -c /tmp/<date>.sql.gz \
+  | docker compose -f docker-compose.prod.yml exec -T postgres pg_restore -U postgres -d neotolis -c
 
 # 4. Restart the app + worker + scheduler
 docker compose -f docker-compose.prod.yml up -d
