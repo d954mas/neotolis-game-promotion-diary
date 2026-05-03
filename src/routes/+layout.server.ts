@@ -53,7 +53,15 @@ export const load: LayoutServerLoad = async ({ locals, url, cookies, request }) 
   // Reconcile cookie ↔ DB. Default to whatever themeHandle resolved (cookie
   // value if valid, "system" otherwise). Then, when authenticated, see
   // whether the DB disagrees.
+  //
+  // The same SELECT pulls user.deletedAt — Phase 02.2 review (Codex P1.1)
+  // flagged that deletedAt arrives via Better Auth's getSession passthrough
+  // only because @better-auth/drizzle-adapter currently issues an unprojected
+  // SELECT *. That's fragile: future projection would silently break the
+  // restore banner. Reading from `user` directly here makes deletedAt
+  // load-bearing and authoritative regardless of adapter behaviour.
   let theme: "light" | "dark" | "system" = locals.theme;
+  let deletedAt: Date | null = null;
 
   if (locals.user) {
     const cookieTheme = cookies.get("__theme");
@@ -61,11 +69,12 @@ export const load: LayoutServerLoad = async ({ locals, url, cookies, request }) 
       cookieTheme !== undefined && (VALID_THEMES as Set<string>).has(cookieTheme);
 
     const [row] = await db
-      .select({ themePreference: user.themePreference })
+      .select({ themePreference: user.themePreference, deletedAt: user.deletedAt })
       .from(user)
       .where(eq(user.id, locals.user.id))
       .limit(1);
     const dbTheme = row?.themePreference ?? "system";
+    deletedAt = row?.deletedAt ?? null;
 
     if (cookieThemeValid && cookieTheme !== dbTheme) {
       // Cookie wins (D-40). Write the cookie value back to the DB so the
@@ -92,8 +101,13 @@ export const load: LayoutServerLoad = async ({ locals, url, cookies, request }) 
     }
   }
 
+  // Authoritative deletedAt overrides whatever locals.user carried (if
+  // anything). This is what AccountDeletedBanner reads via data.user.deletedAt
+  // in src/routes/+layout.svelte and src/routes/settings/account/+page.svelte.
+  const userPayload = locals.user ? { ...locals.user, deletedAt } : null;
+
   return {
-    user: locals.user ?? null,
+    user: userPayload,
     theme,
     retentionDays: env.RETENTION_DAYS,
   };
