@@ -46,6 +46,15 @@ export interface UserDto {
   email: string;
   name: string;
   image: string | null;
+  // Phase 02.2-04: deletedAt exposed for the AccountDeletedBanner conditional
+  // mounted in src/routes/+layout.svelte. Cleared (NULL) means the account is
+  // active; non-null means the user soft-deleted their account and the banner
+  // should render with the restore CTA. Plan 02.2-03's exportAccountJson
+  // envelope-strip test in tests/unit/dto.test.ts continues to pass — deletedAt
+  // is a timestamp, NOT a ciphertext column, so the AGENTS §5 secret-strip
+  // invariant is unaffected (verified: googleSub / refreshToken / accessToken /
+  // idToken / kek_version still asserted absent).
+  deletedAt: Date | string | null;
 }
 
 export function toUserDto(u: User): UserDto {
@@ -54,6 +63,10 @@ export function toUserDto(u: User): UserDto {
     email: u.email,
     name: u.name,
     image: u.image,
+    // Phase 02.2-04: deletedAt exposed for /settings/account banner; export
+    // envelope test in tests/unit/dto.test.ts asserts ciphertext-only fields
+    // are stripped.
+    deletedAt: u.deletedAt ?? null,
   };
 }
 

@@ -27,16 +27,51 @@ describe("DTO discipline (PITFALL P3)", () => {
       emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
+      deletedAt: null,
     } as unknown as Parameters<typeof toUserDto>[0];
 
     const dto = toUserDto(fakeUser);
-    expect(dto).toEqual({ id: "u-1", email: "a@b.test", name: "A", image: null });
+    // Plan 02.2-04: deletedAt added to UserDto for the AccountDeletedBanner
+    // conditional in src/routes/+layout.svelte. Active accounts have null;
+    // soft-deleted accounts carry the timestamp. Not a ciphertext column —
+    // does not violate AGENTS §5 secret-strip invariant.
+    expect(dto).toEqual({ id: "u-1", email: "a@b.test", name: "A", image: null, deletedAt: null });
     expect(dto).not.toHaveProperty("googleSub");
     expect(dto).not.toHaveProperty("refreshToken");
     expect(dto).not.toHaveProperty("accessToken");
     expect(dto).not.toHaveProperty("idToken");
     expect(dto).not.toHaveProperty("password");
     expect(dto).not.toHaveProperty("emailVerified");
+  });
+
+  it("Plan 02.2-04: toUserDto exposes deletedAt for the soft-deleted state", () => {
+    // The AccountDeletedBanner in src/routes/+layout.svelte conditions on
+    // `data.user?.deletedAt` — the projection MUST forward the timestamp
+    // when set so the banner can compute days-left and render the restore
+    // CTA. The 02.2-03 export envelope test below continues to verify
+    // ciphertext-shaped fields stay stripped.
+    const deletedAt = new Date("2026-04-01T00:00:00Z");
+    const fakeUser = {
+      id: "u-2",
+      email: "deleted@b.test",
+      name: "B",
+      image: null,
+      googleSub: "gsub-still-secret",
+      refreshToken: "r-still-secret",
+      accessToken: "a-still-secret",
+      idToken: "i-still-secret",
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt,
+    } as unknown as Parameters<typeof toUserDto>[0];
+
+    const dto = toUserDto(fakeUser);
+    expect(dto.deletedAt).toEqual(deletedAt);
+    // Sanity: the secret-shaped fields stay stripped even when deletedAt
+    // is set (the AGENTS §5 invariant is unaffected).
+    expect(dto).not.toHaveProperty("googleSub");
+    expect(dto).not.toHaveProperty("refreshToken");
   });
 
   it("toSessionDto omits the session token (=cookie value)", () => {
