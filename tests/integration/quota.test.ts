@@ -18,11 +18,13 @@ import { seedUserDirectly } from "./helpers.js";
 // implementing plan, and each implementing plan fills in the body.
 //
 // Quota guard contract (services/quota.ts):
-//   - createGame   -> assertQuota(userId, "games", ipAddress)
-//   - createSource -> assertQuota(userId, "data_sources", ipAddress)
-//   - createEvent  -> assertQuota(userId, "events_per_day", ipAddress)
+//   - createGame   -> withQuotaGuard(userId, "games", ipAddress, ...)
+//   - createSource -> withQuotaGuard(userId, "data_sources", ipAddress, ...)
+//   - createEvent  -> withQuotaGuard(userId, "events_per_day", ipAddress, ...)
 // On exceedance: throws AppError 429 quota_exceeded with metadata
-// {kind, limit, current}; writeAudit fires `quota.limit_hit` BEFORE the throw.
+// {kind, limit, current}; writeAudit fires `quota.limit_hit` AFTER the tx
+// releases its pool connection (Codex post-P2.1 deadlock fix — see header
+// in services/quota.ts).
 // Soft-deleted rows excluded from games / data_sources counts; events use
 // rolling 24h (createdAt >= now - 24h).
 
@@ -225,9 +227,9 @@ describe("per-user abuse quotas (Phase 02.2)", () => {
   // Phase 02.2 review (Codex P2.1): the quota guard must be race-free under
   // concurrent same-user requests. Before the fix, count() ran outside the
   // INSERT's transaction so two requests at limit-1 both saw "limit-1" and
-  // both INSERTed, ending at limit+1. The fix wraps takeUserQuotaLock +
-  // assertQuota + INSERT in one db.transaction; the per-user advisory lock
-  // serializes concurrent same-user requests on the lock key.
+  // both INSERTed, ending at limit+1. The fix (withQuotaGuard) wraps the
+  // per-user advisory lock + count + INSERT in one db.transaction; same-user
+  // concurrent requests serialize on the lock key.
   //
   // Test contract: at limit-1, fire 5 createGame calls in parallel via
   // Promise.allSettled. Exactly ONE must succeed; the rest must reject with
@@ -271,4 +273,60 @@ describe("per-user abuse quotas (Phase 02.2)", () => {
     const active = await db.select({ id: games.id }).from(games).where(eq(games.userId, userA.id));
     expect(active.length).toBe(limit);
   });
+
+  // Phase 02.2 review (Codex post-P2.1 deadlock fix): when the quota fires,
+  // the audit row MUST be emitted AFTER the surrounding transaction releases
+  // its pool connection. Otherwise N concurrent over-limit same-user requests
+  // (where N >= pool max) deadlock — every tx-held connection waits for an
+  // audit-write connection that the pool can never provide.
+  //
+  // This test fires more concurrent over-limit requests than the app pool's
+  // `max` (10 — see db/client.ts POOL_MAX_BY_ROLE.app). Pre-fix this hung
+  // indefinitely. Post-fix it completes promptly because the audit-write
+  // happens in `finally` AFTER `db.transaction` resolves and the connection
+  // is back in the pool.
+  it("Plan 02.2-02 (Codex post-fix): N>pool over-limit concurrent requests do NOT deadlock the pool", async () => {
+    const userA = await seedUserDirectly({
+      email: `quota-pool-deadlock-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const limit = env.LIMIT_GAMES_PER_USER;
+
+    // Seed at exactly the limit so every concurrent request is over-limit
+    // and every one of them takes the audit-write path. Pre-fix this would
+    // exhaust the connection pool waiting on audit connections.
+    const seedRows = Array.from({ length: limit }, (_, i) => ({
+      userId: userA.id,
+      title: `seed-${i}`,
+    }));
+    await db.insert(games).values(seedRows);
+
+    // 12 concurrent over-limit requests. Pool max for `app` role is 10, so
+    // the pre-fix design would have at least 2 of these starve indefinitely
+    // on the audit-write connection while holding the tx connection.
+    const N = 12;
+    const results = await Promise.allSettled(
+      Array.from({ length: N }, (_, i) =>
+        createGame(userA.id, { title: `over-limit-${i}` }, "127.0.0.1"),
+      ),
+    );
+
+    // All N requests REJECTED (we're already at the limit) — none hung.
+    expect(results.filter((r) => r.status === "rejected")).toHaveLength(N);
+    for (const r of results) {
+      expect((r as PromiseRejectedResult).reason).toBeInstanceOf(AppError);
+      expect((r as PromiseRejectedResult).reason).toMatchObject({
+        code: "quota_exceeded",
+        status: 429,
+      });
+    }
+
+    // Every request that hit the limit should have written ONE audit row.
+    // (Independent fresh-connection writes — they don't contend with each
+    // other or with the tx connections.)
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.userId, userA.id), eq(auditLog.action, "quota.limit_hit")));
+    expect(audits.length).toBe(N);
+  }, 30_000);
 });

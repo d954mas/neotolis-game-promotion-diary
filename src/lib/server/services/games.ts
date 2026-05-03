@@ -47,7 +47,7 @@ import { gameSteamListings } from "../db/schema/game-steam-listings.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { assertQuota, takeUserQuotaLock } from "./quota.js";
+import { withQuotaGuard } from "./quota.js";
 
 export type GameRow = typeof games.$inferSelect;
 
@@ -117,11 +117,10 @@ export async function createGame(
 ): Promise<GameRow> {
   validateTitle(input.title);
 
-  // Race-free quota path (Codex P2.1): take per-user advisory lock, then
-  // count + INSERT in the same tx. The lock auto-releases on COMMIT/ROLLBACK.
-  const row = await db.transaction(async (tx) => {
-    await takeUserQuotaLock(tx, userId);
-    await assertQuota(userId, "games", ipAddress, tx);
+  // Race-free, deadlock-safe quota path (Codex P2.1 + post-fix). withQuotaGuard
+  // takes a per-user advisory lock, runs the count + INSERT in one tx, and
+  // emits the quota.limit_hit audit AFTER the tx releases its pool connection.
+  const row = await withQuotaGuard(userId, "games", ipAddress, async (tx) => {
     const [r] = await tx
       .insert(games)
       .values({

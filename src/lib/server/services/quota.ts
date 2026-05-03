@@ -1,28 +1,30 @@
 // Phase 02.2 D-11: per-user abuse quotas.
 //
-// Service-layer guard for the 3 create paths most subject to abuse:
-//   - createGame   -> takeUserQuotaLock + assertQuota(tx, userId, "games", ipAddress)
-//   - createSource -> takeUserQuotaLock + assertQuota(tx, userId, "data_sources", ipAddress)
-//   - createEvent  -> takeUserQuotaLock + assertQuota(tx, userId, "events_per_day", ipAddress)
+// Canonical entry point for the 3 create paths most subject to abuse:
+//   - createGame   -> withQuotaGuard(userId, "games", ipAddress, async tx => INSERT)
+//   - createSource -> withQuotaGuard(userId, "data_sources", ipAddress, async tx => INSERT)
+//   - createEvent  -> withQuotaGuard(userId, "events_per_day", ipAddress, async tx => INSERT)
 //
-// Race-free contract (Phase 02.2 review — Codex P2.1 fix):
-//   The 3 create paths wrap COUNT + INSERT in a single db.transaction and
-//   take a per-user xact-scope advisory lock first via takeUserQuotaLock.
-//   Two concurrent requests at limit-1 from the same user serialize on the
-//   lock; one wins (count = limit-1, INSERT, commit, lock released), the
-//   other loses (count = limit, throw 429). Cross-user concurrency is NOT
-//   blocked — the lock key is hashtext(userId).
+// Race-free contract (Codex P2.1):
+//   withQuotaGuard wraps takeUserQuotaLock + count + caller-INSERT in one
+//   db.transaction. Same-user concurrent requests serialize on the per-user
+//   pg_advisory_xact_lock; cross-user concurrency is unaffected (lock key is
+//   hashtext(userId)).
 //
-// Audit-on-throw semantics:
-//   When assertQuota throws 429, writeAudit("quota.limit_hit") runs against
-//   the top-level `db` connection (NOT the surrounding tx) so the tripwire
-//   row is committed even though the transaction rolls back. This is by
-//   design — the audit log is the abuse-detection signal; rolling it back
-//   on quota refusal would defeat the point.
+// Pool-deadlock-safe audit (Codex post-fix review):
+//   When the quota fires, the AppError throw bubbles out of the transaction.
+//   ROLLBACK runs, the connection returns to the pool, and ONLY THEN does the
+//   `finally` block write the audit row via the top-level `db`. If audit were
+//   written from inside the transaction (via `db`, not `tx`), it would need a
+//   second pool connection while the tx still holds its first; with pool
+//   max=10, ten concurrent over-limit same-user requests would each hold one
+//   tx connection waiting for the audit connection that the pool can never
+//   provide → permanent deadlock. The finally pattern releases first, audits
+//   second.
 //
-// On exceedance, throws AppError 429 quota_exceeded with structured
-// metadata. mapErr in routes/_shared.ts forwards the metadata to the
-// HTTP response body verbatim — no new route-level mapping needed.
+// Why audit survives rollback anyway: writeAudit runs OUTSIDE the rolled-back
+// transaction on a fresh connection, so the audit row is committed
+// independently. The abuse-detection signal isn't lost.
 //
 // Reset semantics for events_per_day: rolling 24h (NOT calendar-day-server-time).
 // Avoids midnight cliff: a user posting 499 at 23:59 + 1 at 00:01 still hits
@@ -47,9 +49,8 @@ import { AppError } from "./errors.js";
 export type QuotaKind = "games" | "data_sources" | "events_per_day";
 
 // Drizzle transaction parameter type — `tx` inside `db.transaction(async tx =>
-// {...})`. Same surface as `DB` for `select`/`execute`/`insert`, so we accept
-// either via Pick to keep the contract minimal.
-type DbOrTx = DB | Parameters<Parameters<DB["transaction"]>[0]>[0];
+// {...})`. Same surface as `DB` for `select`/`execute`/`insert`.
+export type DbOrTx = DB | Parameters<Parameters<DB["transaction"]>[0]>[0];
 
 const LIMITS: Record<QuotaKind, number> = {
   games: env.LIMIT_GAMES_PER_USER,
@@ -82,54 +83,63 @@ async function currentCount(dbCtx: DbOrTx, userId: string, kind: QuotaKind): Pro
 }
 
 /**
- * Take a per-user, xact-scoped Postgres advisory lock. Released automatically
- * on COMMIT or ROLLBACK (no manual unlock). Serializes only same-user requests
- * that hold this lock — cross-user concurrency is unaffected.
+ * Run `fn(tx)` inside a per-user-locked transaction with a quota check
+ * upfront. On quota hit: throws AppError 429 `quota_exceeded`; the audit
+ * row is written AFTER the transaction releases its connection (Codex
+ * post-fix review — see header).
  *
- * Must be called BEFORE assertQuota inside the same db.transaction. Otherwise
- * the count + insert is racy (Codex P2.1 finding).
+ * Race-free under same-user concurrency: pg_advisory_xact_lock(hashtext(userId))
+ * serializes the count + INSERT pair. Cross-user concurrency is unaffected.
+ *
+ * Caller passes `fn(tx)` that runs INSIDE the transaction after the quota
+ * passes — typically the INSERT and any junction inserts that must roll
+ * back together. `fn`-thrown errors propagate normally; only `quota_exceeded`
+ * triggers the post-rollback audit emission.
  */
-export async function takeUserQuotaLock(tx: DbOrTx, userId: string): Promise<void> {
-  // hashtext returns int4 → cast to bigint for pg_advisory_xact_lock(bigint).
-  // The cast is stable across Postgres versions; collisions are 1/2^32 and
-  // benign (a colliding user pair would just briefly serialize each other).
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${userId})::bigint)`);
-}
-
-/**
- * Throws AppError 429 quota_exceeded when the user has reached the limit.
- * Writes a quota.limit_hit audit event (on `db`, not on `dbCtx`) when the
- * guard fires so the tripwire survives the surrounding tx rollback.
- *
- * Pass a transaction handle for the race-free path: the create-side caller
- * wraps takeUserQuotaLock + assertQuota + INSERT in one db.transaction.
- *
- * Tenant-scope contract: every Drizzle query inside this function filters
- * `eq(<table>.userId, userId)` (AGENTS.md §1). The custom ESLint rule
- * eslint-plugin-tenant-scope/no-unfiltered-tenant-query flags drift.
- */
-export async function assertQuota(
+export async function withQuotaGuard<T>(
   userId: string,
   kind: QuotaKind,
   ipAddress: string,
-  dbCtx: DbOrTx = db,
-): Promise<void> {
-  const limit = LIMITS[kind];
-  const current = await currentCount(dbCtx, userId, kind);
-  if (current >= limit) {
-    // Audit on `db` (NOT dbCtx) so the row commits even when the surrounding
-    // tx rolls back. Audit log is the abuse-detection signal — rolling it
-    // back on quota refusal would defeat the point.
-    await writeAudit({
-      userId,
-      action: "quota.limit_hit",
-      ipAddress,
-      metadata: { kind, limit, current },
+  fn: (tx: DbOrTx) => Promise<T>,
+): Promise<T> {
+  // Capture the metadata the audit needs IF the guard fires; the audit
+  // itself runs in `finally` after the tx releases its pool connection.
+  let quotaHitMetadata: { kind: QuotaKind; limit: number; current: number } | null = null;
+
+  try {
+    return await db.transaction(async (tx) => {
+      // hashtext returns int4 → cast to bigint for pg_advisory_xact_lock(bigint).
+      // The cast is stable across Postgres versions; collisions are 1/2^32 and
+      // benign (a colliding user pair would just briefly serialize each other).
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${userId})::bigint)`);
+
+      const limit = LIMITS[kind];
+      const current = await currentCount(tx, userId, kind);
+      if (current >= limit) {
+        // DO NOT call writeAudit from inside the tx — see header for the
+        // pool-deadlock rationale. Capture metadata, throw, audit in finally.
+        quotaHitMetadata = { kind, limit, current };
+        throw new AppError(`quota_exceeded: ${kind} ${current}/${limit}`, "quota_exceeded", 429, {
+          kind,
+          limit,
+          current,
+        });
+      }
+
+      return await fn(tx);
     });
-    throw new AppError(`quota_exceeded: ${kind} ${current}/${limit}`, "quota_exceeded", 429, {
-      kind,
-      limit,
-      current,
-    });
+  } finally {
+    // Reached AFTER db.transaction has fully resolved (commit or rollback);
+    // the connection is back in the pool. Safe to acquire a fresh connection
+    // for the audit insert. If `fn` threw a non-quota error, quotaHitMetadata
+    // is null and this is a no-op.
+    if (quotaHitMetadata !== null) {
+      await writeAudit({
+        userId,
+        action: "quota.limit_hit",
+        ipAddress,
+        metadata: quotaHitMetadata,
+      });
+    }
   }
 }

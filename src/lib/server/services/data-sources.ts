@@ -38,7 +38,7 @@ import type { SourceKind } from "../integrations/data-source-adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { assertQuota, takeUserQuotaLock } from "./quota.js";
+import { withQuotaGuard } from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
 
 export type DataSourceRow = typeof dataSources.$inferSelect;
@@ -152,13 +152,12 @@ export async function createSource(
     );
   }
 
-  // Race-free quota path (Codex P2.1): per-user advisory lock + count + INSERT
-  // in one tx. Lock auto-releases on COMMIT/ROLLBACK.
+  // Race-free, deadlock-safe quota path (Codex P2.1 + post-fix). withQuotaGuard
+  // takes a per-user advisory lock, runs the count + INSERT in one tx, and
+  // emits the quota.limit_hit audit AFTER the tx releases its pool connection.
   let row: DataSourceRow | undefined;
   try {
-    row = await db.transaction(async (tx) => {
-      await takeUserQuotaLock(tx, userId);
-      await assertQuota(userId, "data_sources", ipAddress, tx);
+    row = await withQuotaGuard(userId, "data_sources", ipAddress, async (tx) => {
       const [r] = await tx
         .insert(dataSources)
         .values({

@@ -72,7 +72,7 @@ import type { EventKind } from "../integrations/data-source-adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { assertQuota, takeUserQuotaLock } from "./quota.js";
+import { withQuotaGuard } from "./quota.js";
 import { encodeCursor, decodeCursor } from "./audit-read.js";
 
 export type EventRow = typeof events.$inferSelect;
@@ -336,8 +336,8 @@ export async function createEvent(
   // (manual paste + manual create); when the polling adapter lands in Phase 3,
   // hitting the events_per_day quota should THROTTLE (defer the job), NOT throw.
   //
-  // Quota is now checked INSIDE the tx below (Codex P2.1 race fix) — see the
-  // `takeUserQuotaLock + assertQuota(...tx)` block. Pure validation stays here.
+  // Quota is checked INSIDE the withQuotaGuard tx below (Codex P2.1 race fix
+  // + post-fix pool-deadlock fix). Pure validation stays here.
   assertValidKind(input.kind);
   validateTitle(input.title);
   const occurredAt = coerceOccurredAt(input.occurredAt);
@@ -374,20 +374,17 @@ export async function createEvent(
     // service is called; this is defense-in-depth only.
   }
 
-  // Plan 02.1-35 (UAT-NOTES.md §5.12 — P1): wrap the events INSERT + junction
-  // INSERT loop in a single db.transaction so a junction-INSERT failure rolls
-  // the parent INSERT back. Validation + ownership pre-checks above are pure
-  // and stay outside. The audit write below stays OUTSIDE the transaction
-  // (AGENTS.md item 4 — audit failure must not block the business path).
+  // Plan 02.1-35 (UAT-NOTES.md §5.12 — P1): the events INSERT + junction
+  // INSERT loop run in a single tx so a junction-INSERT failure rolls the
+  // parent INSERT back. Validation + ownership pre-checks above are pure and
+  // stay outside. withQuotaGuard wraps that tx with the per-user advisory
+  // lock + quota check (Codex P2.1) and emits the quota.limit_hit audit
+  // AFTER the tx releases its pool connection (Codex post-fix). The
+  // event.created audit below also stays OUTSIDE the tx (AGENTS.md item 4 —
+  // audit failure must not block the business path).
   let row: EventRow;
   try {
-    row = await db.transaction(async (tx) => {
-      // Race-free quota path (Codex P2.1): per-user advisory lock + count
-      // happens INSIDE the tx so two concurrent requests at limit-1 from the
-      // same user serialize on the lock. Lock auto-releases on COMMIT/ROLLBACK.
-      await takeUserQuotaLock(tx, userId);
-      await assertQuota(userId, "events_per_day", ipAddress, tx);
-
+    row = await withQuotaGuard(userId, "events_per_day", ipAddress, async (tx) => {
       const [parent] = await tx
         .insert(events)
         .values({
