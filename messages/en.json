@@ -371,6 +371,8 @@
   "account_deleted_banner_title": "Account scheduled for deletion",
   "account_deleted_banner_days_left": "{days} days left to restore",
   "account_deleted_banner_restore_button": "Restore my account",
+  "account_deleted_banner_restore_failed": "Restore failed. Please try again.",
+  "account_deleted_banner_restore_expired": "Grace window expired — your account is being permanently deleted and can no longer be restored.",
   "account_deleted_banner_permanent_delete_button": "Permanently delete now",
   "account_deleted_banner_permanent_delete_confirm": "This is irreversible. Type DELETE to confirm.",
   "confirm_dialog_type_delete_label": "Type DELETE to confirm",

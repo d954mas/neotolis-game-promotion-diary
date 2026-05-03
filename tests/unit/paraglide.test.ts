@@ -172,6 +172,8 @@ describe("paraglide i18n (UX-04)", () => {
       "account_deleted_banner_permanent_delete_button",
       "account_deleted_banner_permanent_delete_confirm",
       "account_deleted_banner_restore_button",
+      "account_deleted_banner_restore_expired",
+      "account_deleted_banner_restore_failed",
       "account_deleted_banner_title",
       "add_store_dialog_heading",
       "app_title",

@@ -28,6 +28,7 @@
   } = $props();
 
   let pending = $state(false);
+  let restoreError = $state<string | null>(null);
 
   // daysLeft = max(0, retentionDays - daysSince(deletedAt)). Date math via
   // milliseconds — Date arithmetic is forgiving across timezones because the
@@ -43,11 +44,24 @@
   async function handleRestore(): Promise<void> {
     if (pending) return;
     pending = true;
+    restoreError = null;
     try {
-      await fetch("/api/me/account/restore", { method: "POST" });
+      const res = await fetch("/api/me/account/restore", { method: "POST" });
+      if (res.status === 410) {
+        // Grace window expired (account.ts:127 throws AppError 410). Hard-purge
+        // is now in flight or imminent — the user cannot restore.
+        restoreError = m.account_deleted_banner_restore_expired();
+        return;
+      }
+      if (!res.ok) {
+        restoreError = m.account_deleted_banner_restore_failed();
+        return;
+      }
       // invalidateAll re-runs the +layout.server.ts load → user.deletedAt is
       // null after restoreAccount → the parent's {#if} hides this banner.
       await invalidateAll();
+    } catch {
+      restoreError = m.account_deleted_banner_restore_failed();
     } finally {
       pending = false;
     }
@@ -64,6 +78,9 @@
       {m.account_deleted_banner_restore_button()}
     </button>
   </div>
+  {#if restoreError}
+    <p class="error" role="status">{restoreError}</p>
+  {/if}
 </aside>
 
 <style>
@@ -114,5 +131,12 @@
   .restore:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  .error {
+    flex: 1 1 100%;
+    margin: 0;
+    padding: var(--space-xs) 0 0 0;
+    color: var(--color-destructive);
+    font-size: var(--font-size-label);
   }
 </style>
