@@ -78,7 +78,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Goal:** Get the Phase 2.1 codebase running on the author's production infrastructure (aeza VPS) as the canonical SaaS instance with open Google-OAuth signup. Brings forward PRIV-03/PRIV-04 baseline (in-app data export + account deletion) from Phase 6 because open signup makes email-only GDPR awkward. Ships Privacy/ToS/About pages, per-user abuse quotas, deploy templates (docker-compose.prod.yml + nginx + scripts), GHCR build-publish CI job, and operational runbooks. Per D-PRE: phase delivers code + docs + scripts only — manual VPS provisioning is a separate operator task done AFTER sign-off.
 **Requirements**: D-08..D-32 + D-22a, D-25a, D-25b, D-PRE, D-S1..D-S4 (decision IDs from 02.2-CONTEXT.md); brought-forward baseline of PRIV-03 (export), PRIV-04 (deletion), QUOTA-01/02 (per-user limits)
 **Depends on:** Phase 2.1
-**Plans:** 7/8 plans executed
+**Plans:** 8/8 plans complete
 
 Plans:
 - [x] 02.2-01-PLAN.md — Wave 0: forward-only migration 0008 (user.deleted_at + 4 audit verbs) + env.ts schema extensions (SUPPORT_EMAIL + 3 quota limits + IMAGE_TAG + DOMAIN) + 9 placeholder test files
@@ -88,7 +88,7 @@ Plans:
 - [x] 02.2-05-PLAN.md — Wave 1: /privacy + /terms + /about public routes with SUPPORT_EMAIL injection + ~40 Paraglide keys + 8 integration tests live
 - [x] 02.2-06-PLAN.md — Wave 1: docker-compose.prod.yml + nginx/{nginx.conf.template,cf-ips.conf,refresh-cf-ips.sh} + scripts/{deploy.sh,deploy-rollback.sh,backup.sh} + Dockerfile GHCR labels + 12 unit tests live
 - [x] 02.2-07-PLAN.md — Wave 1: .github/workflows/ci.yml docker-build-publish job + extended SaaS-leak grep (D-30)
-- [ ] 02.2-08-PLAN.md — Wave 3: docs/deploy/install.md (7-section runbook with 10-step Russian UAT) + docs/self-host/backups.md + .env.example finalization
+- [x] 02.2-08-PLAN.md — Wave 3: docs/deploy/install.md (7-section runbook with 10-step Russian UAT) + docs/self-host/backups.md + .env.example finalization
 
 ### Phase 2.1: Architecture Realignment
 *INSERTED — gap closure from Phase 2 UAT (2026-04-28)*

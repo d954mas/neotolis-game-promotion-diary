@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 02.2-04-PLAN.md
-last_updated: "2026-05-03T17:34:54.315Z"
+stopped_at: "Completed 02.2-08-PLAN.md (Phase 02.2 complete: 8/8 plans)"
+last_updated: "2026-05-03T17:45:50.361Z"
 last_activity: 2026-05-03
 progress:
   total_phases: 8
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 68
-  completed_plans: 67
+  completed_plans: 68
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 02.2 (ship-to-prod) — EXECUTING
-Plan: 7 of 8
+Plan: 8 of 8
 
 ## Performance Metrics
 
@@ -109,6 +109,7 @@ Plan: 7 of 8
 | Phase 02.2-ship-to-prod P03 | 10min | 2 tasks | 9 files |
 | Phase 02.2-ship-to-prod P05 | 25min | 2 tasks | 8 files |
 | Phase 02.2 P04 | 10min | 2 tasks | 13 files |
+| Phase 02.2-ship-to-prod P08 | ~7min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -315,6 +316,7 @@ Recent decisions affecting current work:
 - [Phase 02.2]: Auth-gated noindex via inverse-allowlist in src/routes/+layout.svelte (PUBLIC_INDEXABLE_PATHS Set: /, /login, /privacy, /terms, /about) — avoided a SvelteKit (app)/ route-group restructure
 - [Phase 02.2]: ConfirmDialog requireText prop is the Type-DELETE variant; backward compatible (null/undefined default = no behaviour change for existing callers)
 - [Phase 02.2]: Permanent-delete-now CTA HIDDEN in 2.2 (purge endpoint ships in Phase 3 purge worker; PUTOFF marker in AccountDeletedBanner.svelte)
+- [Phase 02.2-ship-to-prod]: Plan 02.2-08 ships operational runbooks: docs/deploy/install.md (727 lines, 7 sections including 10-step Russian UAT) walks blank aeza VPS to green prod deploy; docs/self-host/backups.md (289 lines, 7 sections) covers opt-in S3-compatible backups for R2/B2/Wasabi/AWS/MinIO/local-only; .env.example finalized with POSTGRES_PASSWORD documented (Rule 2 auto-add) + 8 install.md cross-references
 
 ### Pending Todos
 
@@ -355,8 +357,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-03T17:34:54.311Z
+Last session: 2026-05-03T17:45:50.358Z
 Last Activity: 2026-05-03
-Stopped at: Completed 02.2-04-PLAN.md
+Stopped at: Completed 02.2-08-PLAN.md (Phase 02.2 complete: 8/8 plans)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
