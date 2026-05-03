@@ -98,6 +98,14 @@ export const events = pgTable(
       sql`${t.occurredAt} DESC`,
       sql`${t.id} DESC`,
     ),
+    // Phase 02.2 review (post-fix): events_per_day quota counts rows where
+    // userId = ? AND createdAt >= now()-24h. The (userId, occurredAt) index
+    // above is wrong shape — occurredAt is the user-meaningful timestamp,
+    // createdAt is the wall-clock INSERT time the quota window keys off of.
+    // Without this index Postgres index-seeks userId then row-fetch-filters
+    // createdAt; on a heavy user (10k+ events) every quota check pays the
+    // tail-row scan. ~28 bytes/row × 18k rows/active-year ≈ 0.5MB/user — cheap.
+    userCreatedAtIdx: index("events_user_created_at_idx").on(t.userId, sql`${t.createdAt} DESC`),
     userSourceIdx: index("events_user_source_idx").on(t.userId, t.sourceId),
     // Dedup auto-imported events — only enforced where both source_id and
     // external_id are present (manual paste leaves source_id NULL; some
