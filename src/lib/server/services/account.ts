@@ -156,6 +156,14 @@ export async function restoreAccount(userId: string, ipAddress: string): Promise
   await writeAudit({ userId, action: "account.restored", ipAddress });
 }
 
+// PUTOFF Phase 6 — streaming export. Current implementation pulls every
+// user-owned row into memory and serializes one envelope object via c.json.
+// At Phase 02.2 limits (50 games + 50 sources + 500 events/day) the worst
+// case for an active user-year is ~18k events ≈ 5-10 MB JSON — fine for a
+// 2 GB VPS. Switch to a cursor-streaming JSON writer (e.g. JSONStream) when
+// EITHER LIMIT_EVENTS_PER_DAY rises above ~1000 OR per-user total events
+// crosses ~50k. Smoke-test heuristic: if exportAccountJson p95 latency on a
+// real user starts to dominate the request, that's the trigger.
 export async function exportAccountJson(
   userId: string,
   ipAddress: string,
