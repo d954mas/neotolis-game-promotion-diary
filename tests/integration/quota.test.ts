@@ -221,4 +221,54 @@ describe("per-user abuse quotas (Phase 02.2)", () => {
       current: limit,
     });
   });
+
+  // Phase 02.2 review (Codex P2.1): the quota guard must be race-free under
+  // concurrent same-user requests. Before the fix, count() ran outside the
+  // INSERT's transaction so two requests at limit-1 both saw "limit-1" and
+  // both INSERTed, ending at limit+1. The fix wraps takeUserQuotaLock +
+  // assertQuota + INSERT in one db.transaction; the per-user advisory lock
+  // serializes concurrent same-user requests on the lock key.
+  //
+  // Test contract: at limit-1, fire 5 createGame calls in parallel via
+  // Promise.allSettled. Exactly ONE must succeed; the rest must reject with
+  // AppError quota_exceeded. After all settle, active-games count = limit
+  // (NOT limit+4).
+  it("Plan 02.2-02 (Codex P2.1): concurrent createGame at limit-1 stays at limit, never exceeds (advisory-lock contract)", async () => {
+    const userA = await seedUserDirectly({
+      email: `quota-race-g-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const limit = env.LIMIT_GAMES_PER_USER;
+
+    // Seed the user to exactly limit-1 active games.
+    const seedRows = Array.from({ length: limit - 1 }, (_, i) => ({
+      userId: userA.id,
+      title: `seed-${i}`,
+    }));
+    await db.insert(games).values(seedRows);
+
+    // Fire 5 concurrent createGame requests. The advisory lock + tx inside
+    // createGame forces them to serialize per-user; only the first wins.
+    const N_CONCURRENT = 5;
+    const results = await Promise.allSettled(
+      Array.from({ length: N_CONCURRENT }, (_, i) =>
+        createGame(userA.id, { title: `race-${i}` }, "127.0.0.1"),
+      ),
+    );
+
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(N_CONCURRENT - 1);
+    for (const r of rejected) {
+      expect((r as PromiseRejectedResult).reason).toBeInstanceOf(AppError);
+      expect((r as PromiseRejectedResult).reason).toMatchObject({
+        code: "quota_exceeded",
+        status: 429,
+      });
+    }
+
+    // DB invariant: exactly `limit` active games — not limit+1, not limit+N.
+    const active = await db.select({ id: games.id }).from(games).where(eq(games.userId, userA.id));
+    expect(active.length).toBe(limit);
+  });
 });

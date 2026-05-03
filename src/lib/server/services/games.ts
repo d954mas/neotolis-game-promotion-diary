@@ -47,7 +47,7 @@ import { gameSteamListings } from "../db/schema/game-steam-listings.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { assertQuota } from "./quota.js";
+import { assertQuota, takeUserQuotaLock } from "./quota.js";
 
 export type GameRow = typeof games.$inferSelect;
 
@@ -115,21 +115,29 @@ export async function createGame(
   input: CreateGameInput,
   ipAddress: string,
 ): Promise<GameRow> {
-  await assertQuota(userId, "games", ipAddress);
   validateTitle(input.title);
-  const [row] = await db
-    .insert(games)
-    .values({
-      userId,
-      title: input.title.trim(),
-      notes: input.notes ?? "",
-    })
-    .returning();
-  if (!row) {
-    // Should be unreachable — Postgres INSERT ... RETURNING * either succeeds
-    // with one row or throws. Defensive in case of driver-layer surprise.
-    throw new Error("createGame: INSERT returned no row");
-  }
+
+  // Race-free quota path (Codex P2.1): take per-user advisory lock, then
+  // count + INSERT in the same tx. The lock auto-releases on COMMIT/ROLLBACK.
+  const row = await db.transaction(async (tx) => {
+    await takeUserQuotaLock(tx, userId);
+    await assertQuota(userId, "games", ipAddress, tx);
+    const [r] = await tx
+      .insert(games)
+      .values({
+        userId,
+        title: input.title.trim(),
+        notes: input.notes ?? "",
+      })
+      .returning();
+    if (!r) {
+      // Should be unreachable — Postgres INSERT ... RETURNING * either succeeds
+      // with one row or throws. Defensive in case of driver-layer surprise.
+      throw new Error("createGame: INSERT returned no row");
+    }
+    return r;
+  });
+
   await writeAudit({
     userId,
     action: "game.created",

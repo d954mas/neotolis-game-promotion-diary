@@ -38,7 +38,7 @@ import type { SourceKind } from "../integrations/data-source-adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { assertQuota } from "./quota.js";
+import { assertQuota, takeUserQuotaLock } from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
 
 export type DataSourceRow = typeof dataSources.$inferSelect;
@@ -141,7 +141,6 @@ export async function createSource(
   ipAddress: string,
   userAgent?: string,
 ): Promise<DataSourceRow> {
-  await assertQuota(userId, "data_sources", ipAddress);
   validateKind(input.kind);
   validateHandleUrl(input.handleUrl);
   if (!FUNCTIONAL_KINDS.has(input.kind)) {
@@ -153,21 +152,28 @@ export async function createSource(
     );
   }
 
+  // Race-free quota path (Codex P2.1): per-user advisory lock + count + INSERT
+  // in one tx. Lock auto-releases on COMMIT/ROLLBACK.
   let row: DataSourceRow | undefined;
   try {
-    [row] = await db
-      .insert(dataSources)
-      .values({
-        userId,
-        kind: input.kind,
-        handleUrl: input.handleUrl,
-        channelId: input.channelId ?? null,
-        displayName: input.displayName ?? null,
-        isOwnedByMe: input.isOwnedByMe ?? true,
-        autoImport: input.autoImport ?? true,
-        metadata: input.metadata ?? {},
-      })
-      .returning();
+    row = await db.transaction(async (tx) => {
+      await takeUserQuotaLock(tx, userId);
+      await assertQuota(userId, "data_sources", ipAddress, tx);
+      const [r] = await tx
+        .insert(dataSources)
+        .values({
+          userId,
+          kind: input.kind,
+          handleUrl: input.handleUrl,
+          channelId: input.channelId ?? null,
+          displayName: input.displayName ?? null,
+          isOwnedByMe: input.isOwnedByMe ?? true,
+          autoImport: input.autoImport ?? true,
+          metadata: input.metadata ?? {},
+        })
+        .returning();
+      return r;
+    });
   } catch (err) {
     if (isPgUniqueViolation(err)) {
       throw new AppError("data source already registered", "duplicate_source", 422, {

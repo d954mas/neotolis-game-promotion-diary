@@ -72,7 +72,7 @@ import type { EventKind } from "../integrations/data-source-adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { assertQuota } from "./quota.js";
+import { assertQuota, takeUserQuotaLock } from "./quota.js";
 import { encodeCursor, decodeCursor } from "./audit-read.js";
 
 export type EventRow = typeof events.$inferSelect;
@@ -335,7 +335,9 @@ export async function createEvent(
   // polling job, not throw. For Phase 2.2 only the user-facing path exists
   // (manual paste + manual create); when the polling adapter lands in Phase 3,
   // hitting the events_per_day quota should THROTTLE (defer the job), NOT throw.
-  await assertQuota(userId, "events_per_day", ipAddress);
+  //
+  // Quota is now checked INSIDE the tx below (Codex P2.1 race fix) — see the
+  // `takeUserQuotaLock + assertQuota(...tx)` block. Pure validation stays here.
   assertValidKind(input.kind);
   validateTitle(input.title);
   const occurredAt = coerceOccurredAt(input.occurredAt);
@@ -380,6 +382,12 @@ export async function createEvent(
   let row: EventRow;
   try {
     row = await db.transaction(async (tx) => {
+      // Race-free quota path (Codex P2.1): per-user advisory lock + count
+      // happens INSIDE the tx so two concurrent requests at limit-1 from the
+      // same user serialize on the lock. Lock auto-releases on COMMIT/ROLLBACK.
+      await takeUserQuotaLock(tx, userId);
+      await assertQuota(userId, "events_per_day", ipAddress, tx);
+
       const [parent] = await tx
         .insert(events)
         .values({
