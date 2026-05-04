@@ -18,3 +18,6 @@ playwright-report/
 # volume mount has a binding path on a fresh clone.
 nginx/certs/origin.pem
 nginx/certs/origin.key
+
+# Local scratch — `git diff > diff.txt` for ad-hoc review, never committed.
+diff.txt
