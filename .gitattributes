@@ -1,0 +1,22 @@
+# Shell scripts MUST keep LF line endings on every platform.
+#
+# Why: bash on Windows (Git for Windows / WSL / Cygwin) fails with
+# "Input/output error" when shebang line is `#!/usr/bin/env bash\r\n`
+# instead of `#!/usr/bin/env bash\n`. The shebang gets parsed as
+# `env bash\r` (with trailing CR) which doesn't exist as an executable.
+# This bit Issue #16 — operator on Windows tried `bash scripts/deploy.sh`
+# and got `/bin/bash: scripts/deploy.sh: Input/output error`.
+#
+# `text eol=lf` overrides any `core.autocrlf=true` global git config
+# the operator might have on Windows. Files are stored LF in the repo
+# AND checked out LF on every platform.
+scripts/*.sh text eol=lf
+nginx/*.sh text eol=lf
+nginx/nginx.conf.template text eol=lf
+
+# Server-side configs read by Linux daemons — also LF-only.
+docker-compose*.yml text eol=lf
+
+# Markdown: leave to the operator's preference (most editors handle
+# both fine). No `eol` directive here — Git's default text handling
+# applies (auto convert on Windows checkout if `core.autocrlf=true`).
