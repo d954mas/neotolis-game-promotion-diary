@@ -15,7 +15,7 @@
   // for purely structural strings. A future i18n pass adds nav_* keys; the
   // pattern stays the same.
 
-  type ActiveKey = "feed" | "sources" | "games" | "events" | "audit" | "settings";
+  type ActiveKey = "feed" | "sources" | "games" | "events" | "audit" | "settings" | "about";
 
   let { active }: { active: ActiveKey } = $props();
 
@@ -24,6 +24,7 @@
     { key: "sources", href: "/sources", label: "Sources" },
     { key: "games", href: "/games", label: "Games" },
     { key: "settings", href: "/settings", label: "Settings" },
+    { key: "about", href: "/about", label: "About" },
   ];
 
   let activeEl: HTMLAnchorElement | null = $state(null);
