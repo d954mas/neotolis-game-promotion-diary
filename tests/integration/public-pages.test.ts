@@ -36,9 +36,11 @@ process.env.SUPPORT_EMAIL ??= "test-support@example.com";
 const PrivacyPage = (await import("../../src/routes/privacy/+page.svelte")).default;
 const TermsPage = (await import("../../src/routes/terms/+page.svelte")).default;
 const AboutPage = (await import("../../src/routes/about/+page.svelte")).default;
+const RootPage = (await import("../../src/routes/+page.svelte")).default;
 const { load: privacyLoad } = await import("../../src/routes/privacy/+page.server.js");
 const { load: termsLoad } = await import("../../src/routes/terms/+page.server.js");
 const { load: aboutLoad } = await import("../../src/routes/about/+page.server.js");
+const { load: rootLoad } = await import("../../src/routes/+page.server.js");
 const { env } = await import("../../src/lib/server/config/env.js");
 
 // SvelteKit's PageServerLoad type returns `void | object` because in the
@@ -56,6 +58,20 @@ async function runLoad<Shape>(fn: unknown, event: unknown = undefined): Promise<
 }
 
 const anonymousAboutEvent = { parent: async () => ({ user: null }) };
+
+// Codex PR #15 follow-up: root `/` is the new canonical landing for
+// anonymous (renders the same content via shared <AboutContent>); for
+// signed-in users it 303-redirects to /feed. The mock event passes both
+// `locals` (load checks `locals.user`) and `parent` (load merges in
+// layout user).
+const anonymousRootEvent = {
+  locals: { user: null },
+  parent: async () => ({ user: null }),
+};
+const authedRootEvent = {
+  locals: { user: { id: "u1", email: "x@example.com", name: null } },
+  parent: async () => ({ user: { id: "u1", email: "x@example.com", name: null } }),
+};
 
 type PrivacyData = {
   supportEmail: string;
@@ -143,6 +159,57 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
     expect(html).toContain("https://github.com/d954mas/neotolis-game-promotion-diary");
   });
 
+  it("Codex PR #15 follow-up: GET / for anonymous returns 200 with the same landing content as /about", async () => {
+    // SEO: root must serve 200 with the marketing landing for anonymous,
+    // not redirect. /about is now an alias rendering the same shared
+    // <AboutContent> component; rel=canonical on both pages points to /.
+    const data = await runLoad<AboutData>(rootLoad, anonymousRootEvent);
+    expect(data.supportEmail).toBe("test-support@example.com");
+    const html = renderHtml(RootPage, data);
+    // Same magic phrase as /about — confirms shared component path.
+    expect(html).toContain("https://github.com/d954mas/neotolis-game-promotion-diary");
+    expect(html).toContain("test-support@example.com");
+  });
+
+  it("Codex PR #15 follow-up: GET / for signed-in user 303-redirects to /feed", async () => {
+    // Authenticated users hitting / should never see the marketing
+    // landing; the load throws redirect(303, '/feed') before returning
+    // any data. SvelteKit's redirect() throws an object with
+    // { status, location } that the runtime turns into a Location header.
+    await expect(runLoad(rootLoad, authedRootEvent)).rejects.toMatchObject({
+      status: 303,
+      location: "/feed",
+    });
+  });
+
+  it("Codex PR #15 follow-up: AboutContent renders rel=canonical pointing to /", async () => {
+    // Both / and /about render <link rel="canonical" href="https://${DOMAIN}/" />
+    // (or "/" if DOMAIN unset). This tells search engines / is the
+    // canonical landing and /about is a duplicate alias.
+    //
+    // The canonical link is inside <svelte:head>, so we read it from
+    // render(...).head, not .body.
+    const data = await runLoad<AboutData>(rootLoad, anonymousRootEvent);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = render(RootPage as any, { props: { data } as any });
+    const head = result.head;
+    if (data.domain) {
+      expect(head).toContain(`<link rel="canonical" href="https://${data.domain}/"`);
+    } else {
+      expect(head).toContain('<link rel="canonical" href="/"');
+    }
+    // Negative: canonical MUST point at bare `/`, never at `/about`.
+    expect(head).not.toMatch(/rel="canonical"[^>]*href="[^"]*\/about"/);
+
+    // Symmetry — /about should emit the same canonical pointing to /,
+    // not to /about itself (otherwise it'd self-canonicalize and Google
+    // would index both as primaries).
+    const aboutData = await runLoad<AboutData>(aboutLoad, anonymousAboutEvent);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const aboutResult = render(AboutPage as any, { props: { data: aboutData } as any });
+    expect(aboutResult.head).not.toMatch(/rel="canonical"[^>]*href="[^"]*\/about"/);
+  });
+
   it("Plan 02.2-05: GET /about renders SUPPORT_EMAIL value from server-side load", async () => {
     const data = await runLoad<AboutData>(aboutLoad, anonymousAboutEvent);
     expect(data.supportEmail).toBe("test-support@example.com");
@@ -150,7 +217,7 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
     expect(html).toContain("test-support@example.com");
   });
 
-  it("Plan 02.2-05: anonymous user can access /privacy, /terms, /about without auth (200 not 401)", async () => {
+  it("Plan 02.2-05: anonymous user can access /, /privacy, /terms, /about without auth (200 not 401)", async () => {
     // The auth-gate for SvelteKit pages lives in src/routes/+layout.server.ts's
     // PROTECTED_PATHS allowlist. Public pages MUST NOT appear there — if
     // they did, anonymous requests would hit the redirect(303 → /login)
@@ -161,6 +228,10 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
     const protectedMatch = layoutSource.match(/PROTECTED_PATHS[^=]*=\s*\[([\s\S]*?)\]/);
     expect(protectedMatch, "PROTECTED_PATHS array not found in +layout.server.ts").not.toBeNull();
     const protectedBlock = protectedMatch![1]!;
+    // Codex PR #15 follow-up: / now serves the marketing landing for
+    // anonymous and is NOT in PROTECTED_PATHS (it never was, but locking
+    // the negative assertion since the route is now load-bearing for SEO).
+    expect(protectedBlock).not.toMatch(/["']\/["']/);
     expect(protectedBlock).not.toMatch(/["']\/privacy["']/);
     expect(protectedBlock).not.toMatch(/["']\/terms["']/);
     expect(protectedBlock).not.toMatch(/["']\/about["']/);
@@ -172,8 +243,10 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
     const privacyData = await runLoad<PrivacyData>(privacyLoad);
     const termsData = await runLoad<TermsData>(termsLoad);
     const aboutData = await runLoad<AboutData>(aboutLoad, anonymousAboutEvent);
+    const rootData = await runLoad<AboutData>(rootLoad, anonymousRootEvent);
     expect(() => renderHtml(PrivacyPage, privacyData)).not.toThrow();
     expect(() => renderHtml(TermsPage, termsData)).not.toThrow();
     expect(() => renderHtml(AboutPage, aboutData)).not.toThrow();
+    expect(() => renderHtml(RootPage, rootData)).not.toThrow();
   });
 });

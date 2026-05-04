@@ -1,5 +1,6 @@
 import type { PageServerLoad } from "./$types.js";
 import { redirect } from "@sveltejs/kit";
+import { env } from "$lib/server/config/env.js";
 
 /**
  * Root `/` server loader.
@@ -7,17 +8,24 @@ import { redirect } from "@sveltejs/kit";
  * Authenticated users → 303 redirect to /feed (the primary daily workspace
  * per Phase 2.1 default-route swap, RESEARCH §3.6).
  *
- * Anonymous users → 303 redirect to /about (post-deploy fix #5 — issue
- * #14 follow-up). /about is now the discovery hub: rich product
- * description + Sign in CTA + links to /privacy and /terms. This replaces
- * the Phase 1 placeholder that lived at `/` for anonymous; the marketing
- * surface lives at /about so search engines can index it under a stable
- * URL and the homepage doesn't carry product-marketing content that
- * search engines were unsure how to rank.
+ * Anonymous users → render the marketing landing in-place. Codex PR #15
+ * follow-up: previously this redirected to /about, which made search
+ * engines index /about as the canonical landing instead of /. Now `/`
+ * serves 200 with the same content `<AboutContent>` renders on /about,
+ * and `<link rel="canonical" href="/">` on both pages tells Google to
+ * pick `/` as the canonical URL.
+ *
+ * The data shape matches /about/+page.server.ts so AboutContent can be
+ * shared between the two routes without per-page branches.
  */
-export const load: PageServerLoad = async ({ locals }) => {
+export const load: PageServerLoad = async ({ locals, parent }) => {
   if (locals.user) {
     throw redirect(303, "/feed");
   }
-  throw redirect(303, "/about");
+  const parentData = await parent();
+  return {
+    supportEmail: env.SUPPORT_EMAIL,
+    domain: env.DOMAIN,
+    user: parentData.user,
+  };
 };

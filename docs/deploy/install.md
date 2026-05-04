@@ -693,9 +693,18 @@ memory: "Russian for technical conversations + UAT step-by-step"). Запуск�
       Ожидать: 51-й вызов возвращает 429 с body
       `{error:"quota_exceeded", metadata:{kind:"games", limit:50, current:50}}`.
       Открыть `/audit` — есть событие `quota.limit_hit`.
-- [ ] **Шаг 4 — Privacy/Terms/About:** Открыть `/privacy`, `/terms`,
-      `/about`. Ожидать: 200 на каждой странице, контактный email =
-      `SUPPORT_EMAIL` из `.env`, на `/about` есть ссылка на GitHub-репозиторий.
+- [ ] **Шаг 4 — Public pages + canonical landing:** Выйти из аккаунта.
+      Открыть `/`, `/about`, `/privacy`, `/terms`. Ожидать:
+      - `/` (анонимно) → 200, рендерится маркетинговый лендинг (hero +
+        "How it works" 3 шага + GitHub link). В исходном HTML —
+        `<link rel="canonical" href="https://<DOMAIN>/">`.
+      - `/about` → 200, тот же контент (alias через shared
+        `AboutContent.svelte`); canonical всё равно указывает на `/`.
+      - `/privacy`, `/terms` → 200, контактный email = `SUPPORT_EMAIL`.
+      Залогиниться, открыть `/` ещё раз. Ожидать: 303 → `/feed`
+      (signed-in users никогда не видят маркетинг на root — Codex PR #15
+      follow-up). Открыть `/about` залогиненным — 200, тот же контент,
+      но без CTA "Continue with Google" (он скрыт `{#if !data.user}`).
 - [ ] **Шаг 5 — Экспорт:** Открыть `/settings`, в блоке Account нажать
       "Export my data". Ожидать: скачивается `diary-export-YYYY-MM-DD.json`.
       Открыть и проверить: есть ключи `exported_at`, `user`, `games`,
