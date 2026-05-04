@@ -671,18 +671,20 @@ memory: "Russian for technical conversations + UAT step-by-step"). Запуск�
 - [ ] **Шаг 4 — Privacy/Terms/About:** Открыть `/privacy`, `/terms`,
       `/about`. Ожидать: 200 на каждой странице, контактный email =
       `SUPPORT_EMAIL` из `.env`, на `/about` есть ссылка на GitHub-репозиторий.
-- [ ] **Шаг 5 — Экспорт:** В `/settings/account` нажать "Export my data".
-      Ожидать: скачивается `diary-export-YYYY-MM-DD.json`. Открыть и
-      проверить: есть ключи `exported_at`, `user`, `games`, `data_sources`,
-      `events`, `api_keys_steam`, `audit_log`. НЕТ литеральных подстрок
-      `secret_ct`, `wrapped_dek`, `googleSub`, `refreshToken`, `accessToken`,
-      `idToken` (`grep -E '(secret_ct|wrapped_dek|googleSub|refreshToken|accessToken|idToken)' diary-export-*.json` должен ничего не находить).
-- [ ] **Шаг 6 — Удаление + восстановление:** В `/settings/account` нажать
-      "Delete my account". Подтвердить через "Type DELETE" dialog. Ожидать
-      200, redirect на `/login`. Попытка вернуться в `/feed` со старой
-      cookie → 401. Зайти заново через "Continue with Google" — ожидать
-      banner "Account scheduled for deletion in 60 days." Нажать "Restore
-      my account". Ожидать: банер исчезает, все игры из шага 2 возвращены.
+- [ ] **Шаг 5 — Экспорт:** Открыть `/settings`, в блоке Account нажать
+      "Export my data". Ожидать: скачивается `diary-export-YYYY-MM-DD.json`.
+      Открыть и проверить: есть ключи `exported_at`, `user`, `games`,
+      `data_sources`, `events`, `api_keys_steam`, `audit_log`. НЕТ
+      литеральных подстрок `secret_ct`, `wrapped_dek`, `googleSub`,
+      `refreshToken`, `accessToken`, `idToken`
+      (`grep -E '(secret_ct|wrapped_dek|googleSub|refreshToken|accessToken|idToken)' diary-export-*.json` должен ничего не находить).
+- [ ] **Шаг 6 — Удаление + восстановление:** Открыть `/settings`, в блоке
+      Account → секция Danger zone нажать "Delete my account". Подтвердить
+      через "Type DELETE" dialog. Ожидать 200, redirect на `/login`.
+      Попытка вернуться в `/feed` со старой cookie → 401. Зайти заново
+      через "Continue with Google" — ожидать banner "Account scheduled
+      for deletion in 60 days." Нажать "Restore my account". Ожидать:
+      банер исчезает, все игры из шага 2 возвращены.
 - [ ] **Шаг 7 — UptimeRobot:** Подождать 5 минут после первого деплоя.
       Проверить, что monitor показывает зелёный, Telegram-бот не
       алертит, email-уведомлений нет.
@@ -788,15 +790,6 @@ in `src/` (Pitfall 9). The CI grep step in
 The smoke gate boots `docker-compose.selfhost.yml` with no
 SaaS-specific env vars — anything that doesn't work in selfhost.yml
 fails the gate.
-
-### Privacy Policy claim "OAuth tokens encrypted at rest" doesn't match reality
-
-In Phase 02.2, only `api_keys_*` tables (Phase 2 envelope-encryption) are
-truly encrypted at rest. Better Auth's `account.refresh_token` /
-`access_token` / `id_token` are stored as `text` (plaintext, TLS in
-transit). Privacy Policy in `/privacy` accurately discloses this; do
-not "improve" the wording without first encrypting the underlying
-schema (Phase 6 territory).
 
 ### Build-time env placeholders showing in `docker history`
 

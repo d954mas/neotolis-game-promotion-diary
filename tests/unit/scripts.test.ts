@@ -59,7 +59,11 @@ describe("deploy + backup scripts syntax + invariants (Phase 02.2)", () => {
   // origin (CF Full Strict mode connects via HTTPS only). This locks the
   // ssl_certificate / ssl_certificate_key directives + the 443 listener
   // so a future revert can't reintroduce the 521 trap.
-  it("Plan 02.2-06 (issue #14): nginx.conf.template listens on 443 with Origin CA cert directives", () => {
+  //
+  // Codex PR #15 P1 follow-up: TLS 1.3 only (TLSv1.2 dropped per project
+  // constraint "TLS 1.3 + HSTS"); port 80 emits only a 301 redirect (NO
+  // application data over plaintext HTTP — port 80 is bounced to HTTPS).
+  it("Plan 02.2-06 (issue #14): nginx.conf.template listens on 443 with Origin CA cert directives + TLS 1.3 only + port 80 redirect", () => {
     const content = readFileSync("nginx/nginx.conf.template", "utf-8");
     expect(content, "must listen on 443 ssl").toMatch(/listen\s+443\s+ssl;/);
     expect(content, "must enable http2").toMatch(/http2\s+on;/);
@@ -69,6 +73,17 @@ describe("deploy + backup scripts syntax + invariants (Phase 02.2)", () => {
     expect(content, "must reference origin.key at the canonical mounted path").toMatch(
       /ssl_certificate_key\s+\/etc\/nginx\/certs\/origin\.key;/,
     );
-    expect(content, "must restrict to TLSv1.2/1.3").toMatch(/ssl_protocols\s+TLSv1\.2\s+TLSv1\.3;/);
+    // Constraint: TLS 1.3 only — `ssl_protocols TLSv1.3;` exact match,
+    // explicitly NOT `TLSv1.2 TLSv1.3` (which would re-allow 1.2).
+    expect(content, "must restrict to TLSv1.3 only").toMatch(/ssl_protocols\s+TLSv1\.3;/);
+    expect(content, "must NOT allow TLSv1.2").not.toMatch(/ssl_protocols\s+[^;]*TLSv1\.2/);
+    // Port 80 must be a redirect-only server block — listen 80 followed
+    // by `return 301 https://...` with no proxy_pass / location block in
+    // between. We assert both substrings present and (defensive) that the
+    // 443 server block is the one with proxy_pass to the app.
+    expect(content, "port 80 server must exist").toMatch(/listen\s+80(\s+default_server)?;/);
+    expect(content, "port 80 server must redirect to HTTPS").toMatch(
+      /return\s+301\s+https:\/\/\$host\$request_uri;/,
+    );
   });
 });

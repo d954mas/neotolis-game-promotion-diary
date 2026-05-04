@@ -45,11 +45,17 @@ const { env } = await import("../../src/lib/server/config/env.js");
 // general case a load fn may return nothing (and merge with parent). For
 // these three env-only loaders we always return an object with known
 // fields — `runLoad` narrows the return type via the explicit Shape param.
-async function runLoad<Shape>(fn: unknown): Promise<Shape> {
+//
+// Issue #14 follow-up: /about's load now consumes `parent()` to read the
+// layout's `user` field (anonymous CTA gating). Tests pass a mock event
+// with `parent` returning `{ user: null }` to simulate anonymous SSR.
+async function runLoad<Shape>(fn: unknown, event: unknown = undefined): Promise<Shape> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result = await (fn as any)(undefined);
+  const result = await (fn as any)(event);
   return result as Shape;
 }
+
+const anonymousAboutEvent = { parent: async () => ({ user: null }) };
 
 type PrivacyData = {
   supportEmail: string;
@@ -67,6 +73,7 @@ type TermsData = {
 type AboutData = {
   supportEmail: string;
   domain: string;
+  user: { id: string; email: string; name: string | null } | null;
 };
 
 function renderHtml<TData>(Component: unknown, data: TData): string {
@@ -128,7 +135,7 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
   });
 
   it("Plan 02.2-05: GET /about returns 200 and contains GitHub repo link", async () => {
-    const data = await runLoad<AboutData>(aboutLoad);
+    const data = await runLoad<AboutData>(aboutLoad, anonymousAboutEvent);
     const html = renderHtml(AboutPage, data);
     // Issue #14 post-deploy fix: the actual repo lives at
     // github.com/d954mas/neotolis-game-promotion-diary; the older form
@@ -137,7 +144,7 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
   });
 
   it("Plan 02.2-05: GET /about renders SUPPORT_EMAIL value from server-side load", async () => {
-    const data = await runLoad<AboutData>(aboutLoad);
+    const data = await runLoad<AboutData>(aboutLoad, anonymousAboutEvent);
     expect(data.supportEmail).toBe("test-support@example.com");
     const html = renderHtml(AboutPage, data);
     expect(html).toContain("test-support@example.com");
@@ -164,7 +171,7 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
     // omission + load-without-auth-context succeeding — both held above.
     const privacyData = await runLoad<PrivacyData>(privacyLoad);
     const termsData = await runLoad<TermsData>(termsLoad);
-    const aboutData = await runLoad<AboutData>(aboutLoad);
+    const aboutData = await runLoad<AboutData>(aboutLoad, anonymousAboutEvent);
     expect(() => renderHtml(PrivacyPage, privacyData)).not.toThrow();
     expect(() => renderHtml(TermsPage, termsData)).not.toThrow();
     expect(() => renderHtml(AboutPage, aboutData)).not.toThrow();

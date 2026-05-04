@@ -7,8 +7,12 @@
 # are correct (defense-in-depth) and the application's middleware has been
 # audited to be idempotent under repeated rewrites (Phase 1 Plan 01-04).
 #
-# Port 80 stays open for direct probes (curl localhost/healthz on the VPS),
-# but Cloudflare always connects to origin via 443 under Full Strict mode.
+# Port 80 carries NO application data — it only emits a permanent redirect
+# to https://. The constraint is "TLS 1.3 + HSTS, plain HTTP only behind a
+# TLS-terminating proxy"; CF connects to origin via 443 in Full Strict mode,
+# so origin's port 80 is purely a "you should not be here on plain HTTP"
+# signal for direct-IP probes and operator typos. TLS 1.3 only on 443
+# (TLSv1.2 dropped per Codex P1 review of PR #15).
 #
 # `${DOMAIN}` is substituted by nginx's envsubst-on-startup behavior when
 # this file is mounted at /etc/nginx/templates/default.conf.template (the
@@ -30,8 +34,17 @@ limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/s;
 # Hide nginx version from response headers
 server_tokens off;
 
+# Port 80 — permanent redirect to HTTPS. No application data is ever served
+# over plaintext HTTP from origin; this server block exists only so that a
+# user typing `http://${DOMAIN}` (or hitting the IP on :80 directly) gets
+# bounced to HTTPS. Local probes follow the redirect: `curl -kL http://localhost/healthz`.
 server {
-    listen 80;
+    listen 80 default_server;
+    server_name _;
+    return 301 https://$host$request_uri;
+}
+
+server {
     listen 443 ssl;
     http2 on;
     server_name ${DOMAIN};
@@ -42,7 +55,7 @@ server {
     # Mounted from ./nginx/certs on the VPS via docker-compose.prod.yml.
     ssl_certificate /etc/nginx/certs/origin.pem;
     ssl_certificate_key /etc/nginx/certs/origin.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_protocols TLSv1.3;
     ssl_prefer_server_ciphers off;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
