@@ -17,6 +17,7 @@
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
   import SessionsList from "$lib/components/SessionsList.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import InlineError from "$lib/components/InlineError.svelte";
   import { signOut } from "$lib/auth-client";
   import type { PageData } from "./$types";
 
@@ -35,6 +36,14 @@
 
   let confirmSignOutAllOpen = $state(false);
 
+  // Account-management state (merged from former /settings/account route).
+  let exportInProgress = $state(false);
+  let exportError = $state<string | null>(null);
+  let confirmDeleteOpen = $state(false);
+  let deleteInProgress = $state(false);
+  let deleteError = $state<string | null>(null);
+  const isDeleted = $derived(data.user?.deletedAt != null);
+
   async function handleSignOut(): Promise<void> {
     await signOut();
     await goto("/", { invalidateAll: true });
@@ -44,6 +53,45 @@
     confirmSignOutAllOpen = false;
     await fetch("/api/me/sessions/all", { method: "POST" });
     await goto("/", { invalidateAll: true });
+  }
+
+  async function handleExport(): Promise<void> {
+    if (exportInProgress) return;
+    exportInProgress = true;
+    exportError = null;
+    try {
+      const res = await fetch("/api/me/export", { method: "GET" });
+      if (!res.ok) throw new Error(`export_failed_${res.status}`);
+      const blob = await res.blob();
+      const today = new Date().toISOString().slice(0, 10);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `diary-export-${today}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch {
+      exportError = m.settings_account_export_failed();
+    } finally {
+      exportInProgress = false;
+    }
+  }
+
+  async function handleDeleteConfirm(): Promise<void> {
+    if (deleteInProgress) return;
+    deleteInProgress = true;
+    deleteError = null;
+    try {
+      const res = await fetch("/api/me/account", { method: "DELETE" });
+      if (!res.ok) throw new Error(`delete_failed_${res.status}`);
+      confirmDeleteOpen = false;
+      await goto("/login", { invalidateAll: true });
+    } catch {
+      deleteError = m.settings_account_delete_failed();
+      deleteInProgress = false;
+    }
   }
 </script>
 
@@ -77,6 +125,43 @@
         {m.sign_out_all_devices()}
       </button>
     </div>
+
+    <div class="sub-section">
+      <h3>{m.settings_account_section_export_title()}</h3>
+      <p class="muted">{m.settings_account_section_export_blurb()}</p>
+      <div class="actions">
+        <button type="button" class="export" onclick={handleExport} disabled={exportInProgress}>
+          {exportInProgress
+            ? m.settings_account_export_in_progress()
+            : m.settings_account_export_button()}
+        </button>
+      </div>
+      {#if exportError}
+        <InlineError message={exportError} />
+      {/if}
+    </div>
+
+    {#if !isDeleted}
+      <div class="sub-section danger-zone">
+        <h3>{m.settings_account_section_danger_title()}</h3>
+        <p class="muted">
+          {m.settings_account_grace_explainer({ days: data.retentionDays })}
+        </p>
+        <div class="actions">
+          <button
+            type="button"
+            class="delete"
+            onclick={() => (confirmDeleteOpen = true)}
+            disabled={deleteInProgress}
+          >
+            {m.settings_account_delete_button()}
+          </button>
+        </div>
+        {#if deleteError}
+          <InlineError message={deleteError} />
+        {/if}
+      </div>
+    {/if}
   </article>
 
   <article class="block">
@@ -122,6 +207,15 @@
   confirmLabel={m.sign_out_all_devices()}
   onConfirm={handleSignOutAllConfirm}
   onCancel={() => (confirmSignOutAllOpen = false)}
+/>
+
+<ConfirmDialog
+  open={confirmDeleteOpen}
+  message={m.settings_account_delete_confirm_body({ days: data.retentionDays })}
+  confirmLabel={m.settings_account_delete_button()}
+  requireText="DELETE"
+  onConfirm={handleDeleteConfirm}
+  onCancel={() => (confirmDeleteOpen = false)}
 />
 
 <style>
@@ -198,6 +292,47 @@
     color: var(--color-destructive);
     border-color: var(--color-destructive);
   }
+  .sub-section {
+    margin-top: var(--space-md);
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--color-border);
+  }
+  .sub-section h3 {
+    margin: 0 0 var(--space-xs);
+    font-size: var(--font-size-body);
+    font-weight: var(--font-weight-semibold);
+  }
+  .sub-section.danger-zone h3 {
+    color: var(--color-destructive);
+  }
+  .export,
+  .delete {
+    min-height: 44px;
+    padding: 0 var(--space-md);
+    border-radius: 4px;
+    font-size: var(--font-size-body);
+    font-weight: var(--font-weight-semibold);
+    cursor: pointer;
+  }
+  .export {
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+  }
+  .export:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .delete {
+    background: var(--color-surface);
+    color: var(--color-destructive);
+    border: 1px solid var(--color-destructive);
+  }
+  .delete:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  /* removed: .block.danger no longer used (Delete is now a sub-section) */
   .badge {
     display: inline-block;
     width: fit-content;

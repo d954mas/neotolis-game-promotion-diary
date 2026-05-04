@@ -5,10 +5,14 @@
   // and links to /privacy + /terms + the GitHub repo + the deploy runbook.
   // SUPPORT_EMAIL injected from env (D-30 — never hardcoded).
   import { m } from "$lib/paraglide/messages.js";
+  import { signIn } from "$lib/auth-client";
   let { data } = $props();
   const footerCtx = {
     supportEmail: data.supportEmail || "(support email not configured)",
   };
+  function handleSignIn() {
+    void signIn.oauth2({ providerId: "google", callbackURL: "/feed" });
+  }
 </script>
 
 <svelte:head>
@@ -19,6 +23,13 @@
   <header class="hero">
     <h1>{m.about_title()}</h1>
     <p class="tagline">{m.about_hero_tagline()}</p>
+    {#if !data.user}
+      <p class="hero-cta">
+        <button type="button" class="cta-button" onclick={handleSignIn}>
+          {m.login_continue()}
+        </button>
+      </p>
+    {/if}
   </header>
 
   <section>
@@ -48,7 +59,7 @@
     <h2>{m.about_section_open_source_title()}</h2>
     <p>{m.about_section_open_source_body()}</p>
     <p>
-      <a class="cta-link" href="https://github.com/d954mas/neotolis-diary">
+      <a class="cta-link" href="https://github.com/d954mas/neotolis-game-promotion-diary">
         {m.about_repo_link_label()}
       </a>
     </p>
@@ -65,7 +76,7 @@
     <p>
       <a
         class="cta-link"
-        href="https://github.com/d954mas/neotolis-diary/blob/master/docs/deploy/install.md"
+        href="https://github.com/d954mas/neotolis-game-promotion-diary/blob/master/docs/deploy/install.md"
       >
         {m.about_section_self_host_runbook_link()}
       </a>
@@ -102,10 +113,31 @@
     font-weight: var(--font-weight-semibold);
   }
   .hero .tagline {
-    margin: 0;
+    margin: 0 0 var(--space-lg);
     color: var(--color-text-muted);
     font-size: 1.15rem;
     line-height: 1.5;
+  }
+  .hero-cta {
+    margin: 0;
+  }
+  .cta-button {
+    display: inline-block;
+    padding: var(--space-sm) var(--space-lg);
+    background: var(--color-accent);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    text-decoration: none;
+    font-weight: var(--font-weight-semibold);
+    font-size: 1rem;
+    min-height: 44px;
+    line-height: 28px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .cta-button:hover {
+    opacity: 0.9;
   }
   section {
     margin-bottom: calc(var(--space-xl) * 1.5);

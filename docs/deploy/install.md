@@ -401,7 +401,7 @@ unrestricted key.
 ```bash
 sudo mkdir -p /opt/diary
 sudo chown deploy:deploy /opt/diary
-git clone https://github.com/d954mas/neotolis-diary.git /opt/diary
+git clone https://github.com/d954mas/neotolis-game-promotion-diary.git /opt/diary
 cd /opt/diary
 ```
 

@@ -11,7 +11,7 @@
 </script>
 
 <h1>{m.login_page_title()}</h1>
-<button onclick={() => signIn.social({ provider: "google", callbackURL: "/" })}>
+<button onclick={() => signIn.oauth2({ providerId: "google", callbackURL: "/" })}>
   {m.login_continue()}
 </button>
 <p class="disclaimer">{m.login_early_access_disclaimer()}</p>

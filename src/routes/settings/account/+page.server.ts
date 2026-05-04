@@ -2,27 +2,18 @@ import type { PageServerLoad } from "./$types";
 import { redirect } from "@sveltejs/kit";
 
 /**
- * /settings/account loader (Plan 02.2-04).
+ * /settings/account → 301 redirect to /settings.
  *
- * Hosts the Export + Delete UI for D-15 / D-16 (account portability +
- * soft-delete with 60-day grace). The endpoint surface itself ships in
- * Plan 02.2-03; this loader is a pure pass-through over the parent layout's
- * shared data — `user` (with the new `deletedAt` projection from
- * toUserDto) and `retentionDays` (sourced from env.RETENTION_DAYS via the
- * root +layout.server.ts pass-through).
+ * Phase 02.2 originally split account-management UI (Export + Delete) into
+ * a separate `/settings/account` route. UAT feedback: the page was
+ * undiscoverable from `/settings`, and splitting "Account info" from
+ * "Account actions" across two URLs confused users.
  *
- * env-discipline (CLAUDE.md / AGENTS.md): only src/lib/server/config/env.ts
- * may read process.env. RETENTION_DAYS comes from the layout pass-through;
- * this loader does NOT read env directly.
+ * The Export + Delete UI moved INTO `/settings` (the existing Account
+ * block). This route preserves the old URL as a 301 redirect so any
+ * external bookmarks / links the operator shared still land on the right
+ * page.
  */
-export const load: PageServerLoad = async ({ parent, locals, url }) => {
-  if (!locals.user) {
-    throw redirect(303, `/login?next=${encodeURIComponent(url.pathname)}`);
-  }
-  const { user, theme, retentionDays } = await parent();
-  return {
-    user,
-    theme,
-    retentionDays,
-  };
+export const load: PageServerLoad = async () => {
+  throw redirect(301, "/settings");
 };
