@@ -47,13 +47,19 @@ action; this is the cheapest defense-in-depth control on a VPS.
 ufw default deny incoming
 ufw default allow outgoing
 ufw limit 22/tcp                  # rate-limit ssh (UFW's built-in: 6/min/source)
-ufw allow 80/tcp
 ufw allow 443/tcp
 ufw enable
 ```
 
 UFW's `limit` profile mitigates SSH brute-force at the network layer
 (orthogonal to fail2ban's application-layer detection in step 5).
+
+**Why only port 443 (no port 80):** Constraint "TLS 1.3 + HSTS, plain HTTP
+only behind a TLS-terminating proxy" interpreted strictly — origin never
+serves plaintext HTTP at all. Cloudflare connects to origin via 443 in
+Full (Strict) mode (§2 Step 4), and CF's "Always Use HTTPS" rule (§2
+Step 4.4) bounces user-typed `http://` at the edge before it could ever
+reach origin. Origin port 80 is never used → no hole in UFW for it.
 
 ### Step 3 — Non-root deploy user
 
@@ -222,9 +228,9 @@ We use **Full (Strict)** with a Cloudflare-issued Origin CA cert. The cert
 is valid only inside CF's network (it's NOT a public CA cert), so direct
 origin access from the public internet sees an "untrusted certificate"
 warning — but the public internet should never reach the origin directly
-because UFW blocks everything except 80/443 and the only legitimate
-connections to those ports come from Cloudflare's IP ranges (validated by
-nginx's `set_real_ip_from` from `nginx/cf-ips.conf`).
+because UFW blocks everything except 443 (port 80 is fully closed per §1
+Step 2) and the only legitimate connections to 443 come from Cloudflare's
+IP ranges (validated by nginx's `set_real_ip_from` from `nginx/cf-ips.conf`).
 
 #### 4.1 — Generate the Origin CA cert in CF dashboard
 
@@ -268,6 +274,20 @@ After ~30 seconds for edge propagation, `https://<DOMAIN>/` will route
 through CF → HTTPS (port 443) → nginx (port 443 with Origin CA cert).
 Direct probes from the VPS (`curl -k https://localhost/healthz`) work
 too — `-k` skips local trust because the Origin CA cert is private to CF.
+
+#### 4.4 — Enable "Always Use HTTPS" at the edge
+
+CF dashboard → SSL/TLS → **Edge Certificates** → toggle **Always Use HTTPS**
+to **ON**.
+
+**Why:** Origin nginx no longer listens on port 80 at all (UFW closes it
+per §1 Step 2; nginx.conf.template has no `listen 80` directive; nginx
+container does NOT publish port 80 in docker-compose.prod.yml). HTTP→HTTPS
+redirect is delegated entirely to Cloudflare's edge: a user typing
+`http://<DOMAIN>` triggers a 301 from CF before any request reaches
+origin. This is the strict reading of the project constraint "TLS 1.3 +
+HSTS, plain HTTP only behind a TLS-terminating proxy" — origin never
+participates in plaintext HTTP, even just to redirect.
 
 ### Step 5 — Page Rule: bypass cache for `/api/*`
 

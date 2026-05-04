@@ -92,14 +92,25 @@ describe("docker-compose.prod.yml structural invariants (Phase 02.2)", () => {
     }
   });
 
-  // Post-deploy fix #2 (issue #14): nginx must listen on both 80 (direct
-  // probes) and 443 (Cloudflare Full Strict mode connects via HTTPS only).
-  // The Origin CA cert is mounted from ./nginx/certs as a read-only volume.
-  it("Plan 02.2-06 (issue #14): nginx exposes ports 80 AND 443 with cert volume mounted", () => {
+  // Post-deploy fix #2 (issue #14): nginx exposes only 443 (Cloudflare Full
+  // Strict mode connects via HTTPS only). Origin port 80 is closed at every
+  // layer — UFW (§1 Step 2), compose ports (this assertion), and
+  // nginx.conf.template (no `listen 80`). HTTP→HTTPS redirect is delegated
+  // to Cloudflare's "Always Use HTTPS" rule at the edge (§2 Step 4.4).
+  //
+  // Codex PR #15 P1 follow-up — strict reading of constraint "plain HTTP
+  // only behind a TLS-terminating proxy" interpreted as "origin never
+  // participates in plaintext HTTP, even just to redirect".
+  it("Plan 02.2-06 (issue #14): nginx exposes ONLY port 443 (no port 80) with cert volume mounted", () => {
     const content = readFileSync(composePath, "utf-8");
     const compose = yaml.load(content) as Compose;
     const nginx = compose.services.nginx;
-    expect(nginx?.ports ?? [], "nginx ports").toEqual(expect.arrayContaining(["80:80", "443:443"]));
+    const ports = nginx?.ports ?? [];
+    expect(ports, "nginx must expose 443").toEqual(expect.arrayContaining(["443:443"]));
+    expect(ports, "nginx must NOT expose port 80 — CF handles HTTP→HTTPS redirect").not.toEqual(
+      expect.arrayContaining(["80:80"]),
+    );
+    expect(ports, "nginx must NOT expose port 80 in any form").not.toContain("80");
     expect(nginx?.volumes ?? [], "nginx volumes").toEqual(
       expect.arrayContaining(["./nginx/certs:/etc/nginx/certs:ro"]),
     );
