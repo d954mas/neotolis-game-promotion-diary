@@ -11,7 +11,9 @@ interface ComposeService {
   image?: string;
   build?: unknown;
   restart?: string;
+  ports?: string[];
   volumes?: string[];
+  environment?: Record<string, string>;
   logging?: { driver?: string; options?: Record<string, string> };
 }
 
@@ -74,5 +76,43 @@ describe("docker-compose.prod.yml structural invariants (Phase 02.2)", () => {
     const compose = yaml.load(content) as Compose;
     expect(compose.services.postgres?.volumes ?? []).toContain("pg_data:/var/lib/postgresql/data");
     expect(compose.volumes).toHaveProperty("pg_data");
+  });
+
+  // Post-deploy fix #1 (issue #14): the production image does NOT bundle
+  // pino-pretty (dev dependency). When NODE_ENV is unset or set to
+  // 'development', logger.ts loads pino-pretty and the container crash-loops.
+  // Hard-pin NODE_ENV: production in the environment block of every service
+  // that runs the app image so operator-side .env mistakes don't surface.
+  it("Plan 02.2-06 (issue #14): app/worker/scheduler hard-pin NODE_ENV: production in environment block", () => {
+    const content = readFileSync(composePath, "utf-8");
+    const compose = yaml.load(content) as Compose;
+    for (const name of ["app", "worker", "scheduler"] as const) {
+      const env = compose.services[name]?.environment ?? {};
+      expect(env.NODE_ENV, `${name} should hard-pin NODE_ENV: production`).toBe("production");
+    }
+  });
+
+  // Post-deploy fix #2 (issue #14): nginx exposes only 443 (Cloudflare Full
+  // Strict mode connects via HTTPS only). Origin port 80 is closed at every
+  // layer — UFW (§1 Step 2), compose ports (this assertion), and
+  // nginx.conf.template (no `listen 80`). HTTP→HTTPS redirect is delegated
+  // to Cloudflare's "Always Use HTTPS" rule at the edge (§2 Step 4.4).
+  //
+  // Codex PR #15 P1 follow-up — strict reading of constraint "plain HTTP
+  // only behind a TLS-terminating proxy" interpreted as "origin never
+  // participates in plaintext HTTP, even just to redirect".
+  it("Plan 02.2-06 (issue #14): nginx exposes ONLY port 443 (no port 80) with cert volume mounted", () => {
+    const content = readFileSync(composePath, "utf-8");
+    const compose = yaml.load(content) as Compose;
+    const nginx = compose.services.nginx;
+    const ports = nginx?.ports ?? [];
+    expect(ports, "nginx must expose 443").toEqual(expect.arrayContaining(["443:443"]));
+    expect(ports, "nginx must NOT expose port 80 — CF handles HTTP→HTTPS redirect").not.toEqual(
+      expect.arrayContaining(["80:80"]),
+    );
+    expect(ports, "nginx must NOT expose port 80 in any form").not.toContain("80");
+    expect(nginx?.volumes ?? [], "nginx volumes").toEqual(
+      expect.arrayContaining(["./nginx/certs:/etc/nginx/certs:ro"]),
+    );
   });
 });

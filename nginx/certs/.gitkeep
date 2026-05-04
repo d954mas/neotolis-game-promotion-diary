@@ -1,0 +1,11 @@
+# Cloudflare Origin CA cert + key live here on the VPS.
+#
+# Operator generates origin.pem + origin.key in CF dashboard → SSL/TLS →
+# Origin Server (see docs/deploy/install.md §2 step 4) and saves them to
+# this directory. docker-compose.prod.yml mounts the directory into the
+# nginx container as /etc/nginx/certs:ro.
+#
+# This .gitkeep keeps the empty directory tracked so the volume mount in
+# docker-compose.prod.yml has a path to bind to on a fresh git clone.
+# Actual cert files (origin.pem / origin.key) are .gitignored — they are
+# secrets and live only on the VPS.

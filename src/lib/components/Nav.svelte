@@ -1,21 +1,25 @@
 <script lang="ts">
-  // Nav — six-destination horizontal navigation. Auto-scrolls the active
-  // item into view on mobile (UI-SPEC §"Layout & Responsive Contract" —
-  // no hamburger menu, only 6 destinations all visible by overflow scroll).
+  // Nav — horizontal navigation. Auto-scrolls the active item into view on
+  // mobile (UI-SPEC §"Layout & Responsive Contract" — no hamburger menu).
   //
-  // Phase 2.1 reshuffle (UI-SPEC §"<Nav>" delta): six destinations REPLACE
-  // the Phase 2 set. New order: Feed (default landing) · Sources · Games ·
-  // Events · Audit · Settings. Removed: the Phase 2 per-platform accounts
-  // entry (replaced by Sources — its route is physically gone) and the
-  // Phase 2 top-level Keys entry (folds under Settings sub-nav per
-  // Phase 2.1 polish — Plan 02.1-09 owns the Settings sub-nav layout).
+  // Phase 2.1 reshuffle (UI-SPEC §"<Nav>" delta): replaced the Phase 2 set
+  // with Feed · Sources · Games · Settings (4 visible items in `items[]`).
+  // Phase 02.2 (Plan 02.2-05 follow-up, Issue #14): added "About" as the 5th
+  // visible item so anonymous landings + signed-in users can discover the
+  // public landing page. ActiveKey also includes "events" and "audit" as
+  // type-only members — they're highlightable from /events and /audit
+  // routes but intentionally NOT in `items[]` (deep-link only, fold under
+  // Settings sub-nav per Phase 2.1 polish — Plan 02.1-09).
+  // Removed in Phase 2.1: the Phase 2 per-platform accounts entry (Sources
+  // replaces it — its route is physically gone) and the Phase 2 top-level
+  // Keys entry (folds under Settings).
   //
   // Nav labels are intentionally English literals here — Paraglide nav-label
   // keys are not in the Phase 2.1 keyset and would balloon the dictionary
   // for purely structural strings. A future i18n pass adds nav_* keys; the
   // pattern stays the same.
 
-  type ActiveKey = "feed" | "sources" | "games" | "events" | "audit" | "settings";
+  type ActiveKey = "feed" | "sources" | "games" | "events" | "audit" | "settings" | "about";
 
   let { active }: { active: ActiveKey } = $props();
 
@@ -24,6 +28,7 @@
     { key: "sources", href: "/sources", label: "Sources" },
     { key: "games", href: "/games", label: "Games" },
     { key: "settings", href: "/settings", label: "Settings" },
+    { key: "about", href: "/about", label: "About" },
   ];
 
   let activeEl: HTMLAnchorElement | null = $state(null);

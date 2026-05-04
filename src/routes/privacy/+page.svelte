@@ -22,6 +22,7 @@
 </svelte:head>
 
 <main class="legal-page">
+  <p class="back-link"><a href="/about">{m.legal_back_to_about()}</a></p>
   <h1>{m.privacy_title()}</h1>
   <p class="last-updated">{m.privacy_last_updated({ date: data.lastUpdated })}</p>
 
@@ -81,5 +82,9 @@
     color: var(--color-muted, #666);
     font-size: 0.9em;
     margin-top: 0;
+  }
+  .back-link {
+    margin: 0 0 var(--space-md);
+    font-size: var(--font-size-label);
   }
 </style>

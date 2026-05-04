@@ -54,4 +54,36 @@ describe("deploy + backup scripts syntax + invariants (Phase 02.2)", () => {
   it("Plan 02.2-06: nginx/refresh-cf-ips.sh syntax-validates via `bash -n`", () => {
     expect(() => execSync("bash -n nginx/refresh-cf-ips.sh", { stdio: "pipe" })).not.toThrow();
   });
+
+  // Post-deploy fix #2 (issue #14): nginx config must terminate HTTPS on
+  // origin (CF Full Strict mode connects via HTTPS only). This locks the
+  // ssl_certificate / ssl_certificate_key directives + the 443 listener
+  // so a future revert can't reintroduce the 521 trap.
+  //
+  // Codex PR #15 P1 follow-up (strict): TLS 1.3 only (TLSv1.2 dropped per
+  // project constraint "TLS 1.3 + HSTS"); origin nginx does NOT listen on
+  // port 80 at all — HTTP→HTTPS redirect is handled by Cloudflare "Always
+  // Use HTTPS" rule at the edge (install.md §2 Step 4.4). UFW closes
+  // port 80 (§1 Step 2), compose does not publish 80, nginx does not
+  // listen on 80 — three layers of defense in depth.
+  it("Plan 02.2-06 (issue #14): nginx.conf.template listens on 443 only with Origin CA cert + TLS 1.3 only, NO listen 80", () => {
+    const content = readFileSync("nginx/nginx.conf.template", "utf-8");
+    expect(content, "must listen on 443 ssl").toMatch(/listen\s+443\s+ssl;/);
+    expect(content, "must enable http2").toMatch(/http2\s+on;/);
+    expect(content, "must reference origin.pem at the canonical mounted path").toMatch(
+      /ssl_certificate\s+\/etc\/nginx\/certs\/origin\.pem;/,
+    );
+    expect(content, "must reference origin.key at the canonical mounted path").toMatch(
+      /ssl_certificate_key\s+\/etc\/nginx\/certs\/origin\.key;/,
+    );
+    // Constraint: TLS 1.3 only — `ssl_protocols TLSv1.3;` exact match,
+    // explicitly NOT `TLSv1.2 TLSv1.3` (which would re-allow 1.2).
+    expect(content, "must restrict to TLSv1.3 only").toMatch(/ssl_protocols\s+TLSv1\.3;/);
+    expect(content, "must NOT allow TLSv1.2").not.toMatch(/ssl_protocols\s+[^;]*TLSv1\.2/);
+    // Strict reading of constraint: nginx does not listen on port 80.
+    // CF "Always Use HTTPS" rule handles HTTP→HTTPS redirect at the edge.
+    expect(content, "nginx must NOT listen on port 80 — CF handles HTTP→HTTPS").not.toMatch(
+      /listen\s+80\b/,
+    );
+  });
 });

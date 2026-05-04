@@ -1,0 +1,244 @@
+<script lang="ts">
+  // Shared marketing content rendered by both `/+page.svelte` (anonymous
+  // canonical landing) and `/about/+page.svelte` (alias kept for backward
+  // compat + Nav About tab + back-links from /privacy /terms).
+  //
+  // Codex PR #15 follow-up: the previous shape was `/` → 303 → `/about`
+  // for anonymous, which is non-standard SEO (search engines indexed
+  // /about as the landing instead of /). This component lets both URLs
+  // render identical content; `<link rel="canonical">` points both to
+  // `/`, so Google treats `/` as the canonical landing and `/about` as
+  // an alias.
+  //
+  // The "Sign in with Google" CTA in the hero is gated by `!data.user`
+  // so signed-in users opening `/about` directly (via Nav) don't see a
+  // sign-in button they don't need. Signed-in users on `/` are redirected
+  // to `/feed` upstream in `/+page.server.ts` and never see this content.
+  import { m } from "$lib/paraglide/messages.js";
+  import { signIn } from "$lib/auth-client";
+
+  type AboutData = {
+    supportEmail: string;
+    domain: string;
+    user: { id: string; email: string; name: string | null } | null;
+  };
+
+  let { data }: { data: AboutData } = $props();
+
+  const footerCtx = {
+    supportEmail: data.supportEmail || "(support email not configured)",
+  };
+
+  function handleSignIn() {
+    void signIn.oauth2({ providerId: "google", callbackURL: "/feed" });
+  }
+</script>
+
+<svelte:head>
+  <title>{m.about_title()}</title>
+  {#if data.domain}
+    <link rel="canonical" href="https://{data.domain}/" />
+  {:else}
+    <link rel="canonical" href="/" />
+  {/if}
+</svelte:head>
+
+<main class="about-page">
+  <header class="hero">
+    <h1>{m.about_title()}</h1>
+    <p class="tagline">{m.about_hero_tagline()}</p>
+    {#if !data.user}
+      <p class="hero-cta">
+        <button type="button" class="cta-button" onclick={handleSignIn}>
+          {m.login_continue()}
+        </button>
+      </p>
+    {/if}
+  </header>
+
+  <section>
+    <h2>{m.about_section_what_is_it_title()}</h2>
+    <p>{m.about_section_what_is_it_body()}</p>
+  </section>
+
+  <section>
+    <h2>{m.about_section_how_it_works_title()}</h2>
+    <ol class="steps">
+      <li>
+        <h3>{m.about_section_how_it_works_step_1_title()}</h3>
+        <p>{m.about_section_how_it_works_step_1_body()}</p>
+      </li>
+      <li>
+        <h3>{m.about_section_how_it_works_step_2_title()}</h3>
+        <p>{m.about_section_how_it_works_step_2_body()}</p>
+      </li>
+      <li>
+        <h3>{m.about_section_how_it_works_step_3_title()}</h3>
+        <p>{m.about_section_how_it_works_step_3_body()}</p>
+      </li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>{m.about_section_open_source_title()}</h2>
+    <p>{m.about_section_open_source_body()}</p>
+    <p>
+      <a class="cta-link" href="https://github.com/d954mas/neotolis-game-promotion-diary">
+        {m.about_repo_link_label()}
+      </a>
+    </p>
+  </section>
+
+  <section>
+    <h2>{m.about_section_privacy_title()}</h2>
+    <p>{m.about_section_privacy_body()}</p>
+  </section>
+
+  <section>
+    <h2>{m.about_section_self_host_title()}</h2>
+    <p>{m.about_section_self_host_body()}</p>
+    <p>
+      <a
+        class="cta-link"
+        href="https://github.com/d954mas/neotolis-game-promotion-diary/blob/master/docs/deploy/install.md"
+      >
+        {m.about_section_self_host_runbook_link()}
+      </a>
+    </p>
+  </section>
+
+  <footer class="legal-footer">
+    <strong>{m.about_footer_links_label()}</strong>
+    <ul>
+      <li><a href="/privacy">{m.about_links_privacy()}</a></li>
+      <li><a href="/terms">{m.about_links_terms()}</a></li>
+      {#if data.domain}
+        <li><a href="https://{data.domain}">{m.about_canonical_instance_label()}</a></li>
+      {/if}
+    </ul>
+    <p class="contact">{m.about_footer_contact(footerCtx)}</p>
+  </footer>
+</main>
+
+<style>
+  .about-page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: var(--space-xl) var(--space-md);
+    line-height: var(--line-height-body);
+  }
+  .hero {
+    margin-bottom: calc(var(--space-xl) * 2);
+    text-align: center;
+  }
+  .hero h1 {
+    margin: 0 0 var(--space-sm);
+    font-size: 2.4rem;
+    font-weight: var(--font-weight-semibold);
+  }
+  .hero .tagline {
+    margin: 0 0 var(--space-lg);
+    color: var(--color-text-muted);
+    font-size: 1.15rem;
+    line-height: 1.5;
+  }
+  .hero-cta {
+    margin: 0;
+  }
+  .cta-button {
+    display: inline-block;
+    padding: var(--space-sm) var(--space-lg);
+    background: var(--color-accent);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    text-decoration: none;
+    font-weight: var(--font-weight-semibold);
+    font-size: 1rem;
+    min-height: 44px;
+    line-height: 28px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .cta-button:hover {
+    opacity: 0.9;
+  }
+  section {
+    margin-bottom: calc(var(--space-xl) * 1.5);
+  }
+  section h2 {
+    margin: 0 0 var(--space-md);
+    font-size: 1.5rem;
+    font-weight: var(--font-weight-semibold);
+    border-bottom: 1px solid var(--color-border);
+    padding-bottom: var(--space-xs);
+  }
+  section p {
+    margin: 0 0 var(--space-md);
+  }
+  .steps {
+    counter-reset: step;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .steps li {
+    margin-bottom: var(--space-lg);
+    padding-left: calc(var(--space-xl) + var(--space-sm));
+    position: relative;
+    counter-increment: step;
+  }
+  .steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    background: var(--color-accent);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: var(--font-weight-semibold);
+  }
+  .steps h3 {
+    margin: 0 0 var(--space-xs);
+    font-size: 1.1rem;
+    font-weight: var(--font-weight-semibold);
+  }
+  .steps p {
+    margin: 0;
+  }
+  .cta-link {
+    display: inline-block;
+    margin-top: var(--space-xs);
+  }
+  .legal-footer {
+    margin-top: calc(var(--space-xl) * 2);
+    padding-top: var(--space-lg);
+    border-top: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+  }
+  .legal-footer strong {
+    display: block;
+    margin-bottom: var(--space-sm);
+    color: var(--color-text);
+  }
+  .legal-footer ul {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 var(--space-md);
+    display: flex;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+  }
+  .legal-footer ul li {
+    margin: 0;
+  }
+  .legal-footer .contact {
+    margin: 0;
+  }
+</style>

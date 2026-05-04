@@ -4,11 +4,14 @@
 #
 # Differences from selfhost.yml:
 #   - image from GHCR (not build:.)
-#   - nginx service (terminates HTTP from CF; CF terminates TLS)
+#   - nginx service with HTTPS termination via Cloudflare Origin CA cert
+#     (Full Strict mode — see docs/deploy/install.md §2 step 7)
 #   - restart: unless-stopped on every service (D-22a)
 #   - log driver json-file with rotation (D-27)
 #   - env_file: .env (vs literal inline values)
 #   - POSTGRES_PASSWORD via env file (D-03)
+#   - NODE_ENV: production hard-pinned in `environment:` so operator-side
+#     .env mistakes don't crash-loop the app on pino-pretty (post-deploy fix #1)
 
 services:
   postgres:
@@ -34,6 +37,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      NODE_ENV: production
       APP_ROLE: app
       APP_MODE: selfhost
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/neotolis
@@ -49,6 +53,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      NODE_ENV: production
       APP_ROLE: worker
       APP_MODE: selfhost
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/neotolis
@@ -63,6 +68,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      NODE_ENV: production
       APP_ROLE: scheduler
       APP_MODE: selfhost
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/neotolis
@@ -76,10 +82,16 @@ services:
     image: nginx:alpine
     restart: unless-stopped
     ports:
-      - "80:80"
+      # Origin only listens on 443 — port 80 is closed (UFW §1 Step 2,
+      # nginx.conf.template has no `listen 80`). HTTP→HTTPS redirect is
+      # handled by Cloudflare's "Always Use HTTPS" rule at the edge.
+      # Strict reading of constraint "plain HTTP only behind a
+      # TLS-terminating proxy" — origin never participates in plaintext.
+      - "443:443"
     volumes:
       - ./nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
       - ./nginx/cf-ips.conf:/etc/nginx/cf-ips.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
     environment:
       DOMAIN: ${DOMAIN}
     depends_on:
