@@ -19,7 +19,7 @@ service container — no production-secrets dependency).
 - [ ] GitHub account with admin access to the `d954mas/neotolis-diary` repo (needed for GHCR package-visibility flip)
 - [ ] A Google account that will own the production OAuth Client (the OAuth Console "support email" is shown to every signing-in user)
 - [ ] An SSH keypair on the operator's workstation (`ssh-keygen -t ed25519` if you don't already have one); the public key goes onto the VPS in §1, the private key never leaves the workstation
-- [ ] Local `pnpm` + `wrangler` installed for the rollback script (§5) and R2 bucket-lock setup (§2 step 7)
+- [ ] Local `wrangler` installed for R2 bucket-lock setup (§2 step 7) — `npm i -g wrangler`
 
 If any of the above is missing, stop and fix it first — the runbook below assumes they are in place.
 
@@ -156,24 +156,27 @@ postgres, nginx, AND the backup cron — comes back without operator
 action after an unexpected reboot. See §6 step 8 for the verification
 procedure.
 
-### Restricted SSH key for the deploy user
+### SSH key for the deploy user
 
-The `deploy` user's `authorized_keys` line uses a `command="..."`
-restriction so that any inbound SSH session ONLY runs the deploy command.
-This is the key `pnpm deploy` (§5) uses.
-
-Paste this verbatim into `/home/deploy/.ssh/authorized_keys` (substitute
-your own ed25519 public key):
+Paste your ed25519 public key into `/home/deploy/.ssh/authorized_keys`:
 
 ```
-command="cd /opt/diary && docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... author@local
+ssh-ed25519 AAAA... author@local
 ```
 
-Two-key model: the **restricted** key for `pnpm deploy`; a **second
-unrestricted** key for the operator's debugging SSH and `pnpm
-deploy:rollback` (which needs to edit `.env` before running compose). Keep
-the unrestricted key on a separate workstation account so a compromised
-deploy key cannot escalate.
+This is the key you use for `ssh deploy@<DOMAIN>` to run the manual
+deploy / rollback steps in §5. A normal unrestricted key — the deploy
+flow is fully manual (you SSH in, run `git pull`, run `docker compose`),
+so no `command="..."` restriction is needed.
+
+**Optional automation (not recommended for v0.1):** the repo also ships
+`scripts/deploy.sh` + `scripts/deploy-rollback.sh` which can SSH-trigger
+deploys non-interactively via a `command="..."`-restricted key. These
+were the original Phase 02.2 plan, but real-world deploys revealed two
+papercuts: the restricted command did NOT include `git pull`, and pnpm
+v7+ reserved `pnpm deploy` so you'd need `pnpm run deploy`. The §5
+manual runbook supersedes both scripts. Use the manual runbook unless
+you're explicitly wiring up CI-driven deploys.
 
 ---
 
@@ -569,32 +572,120 @@ sign in with the operator's Google account. Run UAT steps 1–7 from §6.
 
 ## §5 — Ongoing operations
 
-### Deploy
+### Deploy a new master commit
 
-From the operator's workstation:
-
-```bash
-DEPLOY_HOST=<DOMAIN> pnpm deploy
-```
-
-The `pnpm deploy` script SSHes via the restricted `command="..."` key,
-which runs `docker compose pull && up -d` on the VPS. Then it polls
-`/healthz` and exits non-zero if the new build is unhealthy (rolling-back
-is then a manual decision — see Rollback below).
-
-### Rollback
+After PR merges to master, CI builds and pushes the image to GHCR
+(tagged with the commit SHA + `latest`). Deploy it to the VPS by
+running these commands manually on the server:
 
 ```bash
-DEPLOY_HOST=<DOMAIN> pnpm deploy:rollback <previous-git-sha>
+ssh deploy@<DOMAIN>
+cd /opt/diary
 ```
 
-The script SSHes via the **unrestricted** key, sed-edits `IMAGE_TAG=<sha>`
-into `/opt/diary/.env`, then runs `docker compose pull` + `up -d`. Within
-~30 seconds the stack is back on the previous image. Verify with
-`/healthz`.
+```bash
+# 1. Pull the latest tree — compose YAML, nginx config, scripts.
+#    --ff-only refuses if local has diverged (safer than plain pull).
+git pull origin master --ff-only
+```
 
-Recover the previous SHA from `git log --oneline master | head -5` (every
-master push triggers a tagged GHCR build).
+```bash
+# 2. Pull the new image and recreate containers.
+sudo docker compose -f docker-compose.prod.yml pull
+sudo docker compose -f docker-compose.prod.yml up -d
+```
+
+```bash
+# 3. Verify on the server.
+sudo docker compose -f docker-compose.prod.yml ps
+curl -k https://localhost/healthz
+exit
+```
+
+External smoke check from your workstation:
+```bash
+curl -I https://<DOMAIN>/
+curl  https://<DOMAIN>/healthz
+```
+
+**Why both `git pull` and `docker compose pull`:** the docker image
+carries the application code, but `docker-compose.prod.yml` and
+`nginx/nginx.conf.template` are read **from the filesystem** (mounted
+into containers). Skipping `git pull` deploys the new image with old
+config — port mappings, env vars, nginx directives all stay stale.
+Both layers must move together.
+
+### Rollback to an earlier commit
+
+If master breaks something, roll back to a known-good SHA. Find it
+from `git log --oneline master | head -10` on your workstation, then:
+
+```bash
+ssh deploy@<DOMAIN>
+cd /opt/diary
+```
+
+```bash
+# 1. Checkout the previous commit (detached HEAD — we'll roll forward later).
+git fetch origin
+git checkout --detach <previous-sha>      # e.g. 0357be5
+```
+
+```bash
+# 2. Pin IMAGE_TAG in .env so docker compose pulls the matching image.
+#    GHCR keeps the per-SHA tag forever, so this works for any past commit.
+sudo sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=<previous-sha>/" /opt/diary/.env
+```
+
+```bash
+# 3. Pull the matching image and recreate containers.
+sudo docker compose -f docker-compose.prod.yml pull
+sudo docker compose -f docker-compose.prod.yml up -d
+```
+
+```bash
+# 4. Verify.
+curl -k https://localhost/healthz
+exit
+```
+
+Within ~30 seconds the stack is back on the previous image **and**
+the previous compose / nginx config (since `git checkout` rolled the
+filesystem too). Both layers moved together.
+
+### Roll forward (after a rollback) back to master HEAD
+
+```bash
+ssh deploy@<DOMAIN>
+cd /opt/diary
+```
+
+```bash
+git checkout master
+git pull origin master --ff-only
+sudo sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=latest/" /opt/diary/.env
+sudo docker compose -f docker-compose.prod.yml pull
+sudo docker compose -f docker-compose.prod.yml up -d
+curl -k https://localhost/healthz
+exit
+```
+
+### Common deploy issues
+
+- **`git pull` refuses with "Your local changes would be overwritten"** —
+  inspect with `git status` + `git diff`. Tracked files shouldn't have
+  manual edits on the VPS. Stash them: `git stash push -m "vps-edits"`,
+  then pull, then `git stash list` keeps your edits in case you need
+  them back.
+
+- **Container fails to start with "pino-pretty" error** — `NODE_ENV` not
+  set to `production`. Compose now hard-pins it (post-deploy fix #1),
+  so this should be resolved on master HEAD. If you see it on a rolled-
+  back commit older than that fix, set `NODE_ENV=production` in `.env`.
+
+- **`502 Bad Gateway` after deploy** — nginx config changed but nginx
+  container wasn't recreated. Force-recreate just nginx:
+  `sudo docker compose -f docker-compose.prod.yml up -d --force-recreate nginx`.
 
 ### Backup verification (monthly)
 
@@ -664,8 +755,8 @@ line. Same script + same crontab line work for self-host operators.
 |---------|----------|-----|
 | VPS deletion (aeza account closed, etc.) | Provision new VPS following §1 + §4. Restore latest backup: `rclone copy r2:diary-backups/<latest>.sql.gz /tmp/` then `gunzip -c /tmp/<latest>.sql.gz \| docker compose -f /opt/diary/docker-compose.prod.yml exec -T postgres pg_restore -U postgres -d neotolis -c`. Update DNS A record to new IP. | ~30 min |
 | Cloudflare outage (rare) | No VPS action needed — UptimeRobot will alert; CF restores within minutes; users will see "Cloudflare error" page in the meantime. | external |
-| Deploy interrupted (network drop mid-`docker compose pull`) | Re-run `pnpm deploy`. Idempotent — `pull` is incremental, `up -d` is a no-op if containers are already on the target image. | ~1 min |
-| Data corruption (e.g. a buggy migration on master, caught in prod after merge) | Restore from latest R2 backup using the **admin** R2 token from the operator's workstation (see §2 step 8): `rclone copy r2:diary-backups/<latest>.sql.gz /tmp/` then `gunzip -c /tmp/<latest>.sql.gz \| docker compose -f /opt/diary/docker-compose.prod.yml exec -T postgres pg_restore -U postgres -d neotolis -c`. Then `pnpm deploy:rollback <previous-sha>` to pin to the last-good code. | ~15 min |
+| Deploy interrupted (network drop mid-`docker compose pull`) | Re-run the §5 deploy steps from the start (`git pull` is idempotent, `docker compose pull` is incremental, `up -d` is a no-op if containers are already on target). | ~1 min |
+| Data corruption (e.g. a buggy migration on master, caught in prod after merge) | Restore from latest R2 backup using the **admin** R2 token from the operator's workstation (see §2 step 8): `rclone copy r2:diary-backups/<latest>.sql.gz /tmp/` then `gunzip -c /tmp/<latest>.sql.gz \| docker compose -f /opt/diary/docker-compose.prod.yml exec -T postgres pg_restore -U postgres -d neotolis -c`. Then follow §5 Rollback runbook with the last-good SHA to pin both git tree and image. | ~15 min |
 | OAuth verification revoked by Google | Resubmit per §3 step 5. Users will see the unverified-app warning again until reapproved. App functions normally otherwise. | weeks |
 
 ---
@@ -674,7 +765,7 @@ line. Same script + same crontab line work for self-host operators.
 
 Этот блок — единственный раздел рунбука на русском (per AGENTS.md USER
 memory: "Russian for technical conversations + UAT step-by-step"). Запускается
-автором после первого деплоя, плюс выборочно после каждого `pnpm deploy`.
+автором после первого деплоя, плюс выборочно после каждого деплоя через §5 runbook.
 
 - [ ] **Шаг 1 — Регистрация:** Открыть `https://<DOMAIN>/login`. Нажать
       "Continue with Google". Авторизоваться. Ожидать: попасть на `/feed`.
@@ -733,10 +824,11 @@ memory: "Russian for technical conversations + UAT step-by-step"). Запуск�
         (<size> bytes)` за сегодня.
       - `rclone ls r2:diary-backups | tail -5` — есть `<сегодня>.sql.gz`.
 - [ ] **Шаг 10 — Rollback:** Выкатить новый деплой через push в master,
-      дождаться `docker-build-publish` job, потом откатить:
-      `pnpm deploy:rollback <previous-sha>`. Ожидать: смена `IMAGE_TAG`
-      в `/opt/diary/.env`, `docker compose pull` + `up -d`, `/healthz`
-      200 в течение 30 секунд.
+      дождаться `docker-build-publish` job, потом откатить по §5
+      Rollback runbook (`git checkout --detach <previous-sha>` +
+      `sed IMAGE_TAG` + `docker compose pull` + `up -d`). Ожидать:
+      `/healthz` возвращает 200 в течение 30 секунд, в браузере
+      виден старый код.
 
 Каждый шаг помечается галочкой после успешного прохождения. Если хотя бы
 один шаг не прошёл — Phase 02.2 не подписан, фикс приоритетный.
