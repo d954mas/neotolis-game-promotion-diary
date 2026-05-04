@@ -471,8 +471,13 @@ Fill in:
 | `LIMIT_SOURCES_PER_USER` | leave default `50` |
 | `LIMIT_EVENTS_PER_DAY` | leave default `500` |
 | `IMAGE_TAG` | `latest` (rollback overwrites this — see §5) |
-| `NODE_ENV` | `production` — `docker-compose.prod.yml` already pins this in the `environment:` block of every service, but setting it here too keeps `.env` reviews honest. The dev default `development` triggers `pino-pretty` (dev-only dependency, not in prod image) and crash-loops the app. |
 | `BETTER_AUTH_SECURE_COOKIES` | leave unset for direct-TLS; or `false` if testing behind a non-TLS reverse proxy |
+
+**NODE_ENV is NOT in this table on purpose.** `docker-compose.prod.yml`
+hard-pins `NODE_ENV: production` in the `environment:` block of every
+service that runs the app image (post-deploy fix #1, issue #14). This
+override beats anything in `.env`, so operators don't need to set it
+manually. If you set it in `.env` anyway it's harmless — just redundant.
 
 Set restrictive perms:
 
