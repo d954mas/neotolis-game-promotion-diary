@@ -130,10 +130,10 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
   it("Plan 02.2-05: GET /about returns 200 and contains GitHub repo link", async () => {
     const data = await runLoad<AboutData>(aboutLoad);
     const html = renderHtml(AboutPage, data);
-    // The canonical GitHub repo URL is the project-credibility marker
-    // for /about (per RESEARCH §6 about page structure + Plan acceptance
-    // criterion "https://github.com/d954mas/neotolis-diary").
-    expect(html).toContain("https://github.com/d954mas/neotolis-diary");
+    // Issue #14 post-deploy fix: the actual repo lives at
+    // github.com/d954mas/neotolis-game-promotion-diary; the older form
+    // `neotolis-diary` was a docker-package-name confusion that 404s.
+    expect(html).toContain("https://github.com/d954mas/neotolis-game-promotion-diary");
   });
 
   it("Plan 02.2-05: GET /about renders SUPPORT_EMAIL value from server-side load", async () => {
