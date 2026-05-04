@@ -11,7 +11,9 @@ interface ComposeService {
   image?: string;
   build?: unknown;
   restart?: string;
+  ports?: string[];
   volumes?: string[];
+  environment?: Record<string, string>;
   logging?: { driver?: string; options?: Record<string, string> };
 }
 
@@ -74,5 +76,32 @@ describe("docker-compose.prod.yml structural invariants (Phase 02.2)", () => {
     const compose = yaml.load(content) as Compose;
     expect(compose.services.postgres?.volumes ?? []).toContain("pg_data:/var/lib/postgresql/data");
     expect(compose.volumes).toHaveProperty("pg_data");
+  });
+
+  // Post-deploy fix #1 (issue #14): the production image does NOT bundle
+  // pino-pretty (dev dependency). When NODE_ENV is unset or set to
+  // 'development', logger.ts loads pino-pretty and the container crash-loops.
+  // Hard-pin NODE_ENV: production in the environment block of every service
+  // that runs the app image so operator-side .env mistakes don't surface.
+  it("Plan 02.2-06 (issue #14): app/worker/scheduler hard-pin NODE_ENV: production in environment block", () => {
+    const content = readFileSync(composePath, "utf-8");
+    const compose = yaml.load(content) as Compose;
+    for (const name of ["app", "worker", "scheduler"] as const) {
+      const env = compose.services[name]?.environment ?? {};
+      expect(env.NODE_ENV, `${name} should hard-pin NODE_ENV: production`).toBe("production");
+    }
+  });
+
+  // Post-deploy fix #2 (issue #14): nginx must listen on both 80 (direct
+  // probes) and 443 (Cloudflare Full Strict mode connects via HTTPS only).
+  // The Origin CA cert is mounted from ./nginx/certs as a read-only volume.
+  it("Plan 02.2-06 (issue #14): nginx exposes ports 80 AND 443 with cert volume mounted", () => {
+    const content = readFileSync(composePath, "utf-8");
+    const compose = yaml.load(content) as Compose;
+    const nginx = compose.services.nginx;
+    expect(nginx?.ports ?? [], "nginx ports").toEqual(expect.arrayContaining(["80:80", "443:443"]));
+    expect(nginx?.volumes ?? [], "nginx volumes").toEqual(
+      expect.arrayContaining(["./nginx/certs:/etc/nginx/certs:ro"]),
+    );
   });
 });

@@ -207,15 +207,67 @@ The orange cloud is mandatory — it's what gives you free TLS, DDoS
 shield, and edge cache. Without it, you'd have to install certbot and
 manage cert rotation yourself.
 
-### Step 4 — SSL/TLS settings — Full
+### Step 4 — SSL/TLS settings — Full (Strict) + Origin CA cert
 
-CF dashboard → SSL/TLS → Overview → set encryption mode to **Full**.
+Cloudflare's encryption mode controls how CF talks to origin. Per CF docs:
 
-With Full, Cloudflare → origin is plain HTTP (matches our nginx `listen
-80;`). With Full (Strict), the origin would need a valid TLS cert — that's
-extra runbook effort with no security gain inside CF's network. **Do not**
-use Flexible (it leaks plaintext from CF to origin even when the user
-typed `https://`).
+| Mode | CF → Origin | Our compatibility |
+|------|-------------|-------------------|
+| Off | HTTP only | ❌ no TLS for users |
+| Flexible | HTTP | ❌ leaks plaintext between CF and origin even when the user typed `https://` |
+| Full | HTTPS, any cert (self-signed OK) | ⚠ requires HTTPS on origin |
+| **Full (Strict)** | **HTTPS, valid cert (CF Origin CA accepted)** | ✅ **what we use** — defense-in-depth on the CF↔origin hop |
+
+We use **Full (Strict)** with a Cloudflare-issued Origin CA cert. The cert
+is valid only inside CF's network (it's NOT a public CA cert), so direct
+origin access from the public internet sees an "untrusted certificate"
+warning — but the public internet should never reach the origin directly
+because UFW blocks everything except 80/443 and the only legitimate
+connections to those ports come from Cloudflare's IP ranges (validated by
+nginx's `set_real_ip_from` from `nginx/cf-ips.conf`).
+
+#### 4.1 — Generate the Origin CA cert in CF dashboard
+
+CF dashboard → `<DOMAIN>` → SSL/TLS → **Origin Server** → **Create Certificate**.
+
+| Field | Value |
+|-------|-------|
+| Hostnames | `<DOMAIN>` AND `*.<DOMAIN>` (wildcard for future subdomains) |
+| Key type | RSA (2048) |
+| Validity | 15 years (default) |
+
+CF will reveal **Origin Certificate** (PEM, starts with `-----BEGIN CERTIFICATE-----`)
+and **Private Key** (PEM, starts with `-----BEGIN PRIVATE KEY-----`)
+**ONCE** — do not close the page until both are copied.
+
+#### 4.2 — Save the cert to the VPS
+
+On the VPS (assuming `/opt/diary` already exists from §4 step 2):
+
+```bash
+sudo mkdir -p /opt/diary/nginx/certs
+sudo nano /opt/diary/nginx/certs/origin.pem    # paste the Origin Certificate, save
+sudo nano /opt/diary/nginx/certs/origin.key    # paste the Private Key, save
+sudo chmod 644 /opt/diary/nginx/certs/origin.pem
+sudo chmod 600 /opt/diary/nginx/certs/origin.key
+sudo chown -R deploy:deploy /opt/diary/nginx/certs/
+```
+
+The cert files are mounted into the nginx container by
+`docker-compose.prod.yml`'s `nginx.volumes` block as `/etc/nginx/certs:ro`.
+`nginx.conf.template` references them via `ssl_certificate
+/etc/nginx/certs/origin.pem` + `ssl_certificate_key
+/etc/nginx/certs/origin.key`.
+
+#### 4.3 — Switch CF SSL/TLS to Full (Strict)
+
+CF dashboard → SSL/TLS → **Overview** → set encryption mode to
+**Full (Strict)**.
+
+After ~30 seconds for edge propagation, `https://<DOMAIN>/` will route
+through CF → HTTPS (port 443) → nginx (port 443 with Origin CA cert).
+Direct probes from the VPS (`curl -k https://localhost/healthz`) work
+too — `-k` skips local trust because the Origin CA cert is private to CF.
 
 ### Step 5 — Page Rule: bypass cache for `/api/*`
 
@@ -283,13 +335,25 @@ hostname, no trailing slash, no path).
 
 ### Step 3 — Authorized redirect URIs
 
-Add: `https://<DOMAIN>/api/auth/callback/google` — **EXACTLY** that URI,
-no trailing slash, no http (Pitfall 3 — trailing-slash divergence breaks
-login silently with `redirect_uri_mismatch`).
+Add: `https://<DOMAIN>/api/auth/oauth2/callback/google` — **EXACTLY**
+that URI, no trailing slash, no http (Pitfall 3 — trailing-slash
+divergence or wrong path segment breaks login silently with
+`redirect_uri_mismatch`).
 
-This must match what Better Auth sends. The default `OAUTH_PROVIDER_ID=google`
-in `src/lib/server/config/env.ts` produces the path
-`/api/auth/callback/google`.
+⚠ Note the **`/oauth2/`** segment between `/auth/` and `/callback/`. This
+is the format Better Auth's `genericOAuth` plugin generates (see
+`src/lib/auth.ts`). Better Auth's *built-in* `socialProviders.google`
+uses `/api/auth/callback/google` instead, but we use the generic
+plugin so `OAUTH_DISCOVERY_URL` works for self-host operators pointing
+at any OIDC IdP. The `/oauth2/` prefix is plugin-specific, not
+self-host-specific — every install (SaaS or self-host) registers this
+exact path.
+
+The default `OAUTH_PROVIDER_ID=google` in
+`src/lib/server/config/env.ts` produces the path segment `google` at
+the end. Change `OAUTH_PROVIDER_ID` only if you point at a non-Google
+IdP — and then also change the redirect URI in your IdP's console
+accordingly (e.g. `/api/auth/oauth2/callback/keycloak`).
 
 ### Step 4 — Copy credentials into VPS .env
 
@@ -387,6 +451,7 @@ Fill in:
 | `LIMIT_SOURCES_PER_USER` | leave default `50` |
 | `LIMIT_EVENTS_PER_DAY` | leave default `500` |
 | `IMAGE_TAG` | `latest` (rollback overwrites this — see §5) |
+| `NODE_ENV` | `production` — `docker-compose.prod.yml` already pins this in the `environment:` block of every service, but setting it here too keeps `.env` reviews honest. The dev default `development` triggers `pino-pretty` (dev-only dependency, not in prod image) and crash-loops the app. |
 | `BETTER_AUTH_SECURE_COOKIES` | leave unset for direct-TLS; or `false` if testing behind a non-TLS reverse proxy |
 
 Set restrictive perms:
@@ -394,6 +459,28 @@ Set restrictive perms:
 ```bash
 chmod 600 .env
 ```
+
+⚠️ **Critical — no inline comments after `=`.** docker-compose's env_file
+directive may include trailing comment text as part of the variable's
+value. The classic trap:
+
+```
+COOKIE_DOMAIN=                  # optional; needed only for SaaS subdomain cookies
+```
+
+becomes a Set-Cookie header with literal `Domain=# optional; needed only
+for SaaS subdomain cookies` — the browser silently rejects the cookie,
+OAuth state is lost, every login fails with `state_mismatch` (issue #14).
+
+Verify your `.env` has no inline comments on variable lines:
+
+```bash
+grep -E "^[A-Z_]+=.*#" /opt/diary/.env
+```
+
+If this command outputs anything, edit `.env` and move every inline
+comment to its own line above the variable. Then `docker compose -f
+docker-compose.prod.yml --env-file .env down && up -d` to apply.
 
 ### Step 5 — GHCR image visibility flip
 
@@ -638,19 +725,26 @@ Symptom: `docker pull ghcr.io/d954mas/neotolis-diary:latest` returns
 
 ### Sporadic OAuth login failures ("invalid state token")
 
-Cloudflare's edge cache may serve a stale `/api/auth/callback/google`
-response (Pitfall 2). Fix: ensure §2 step 5 Page Rule (`URL pattern:
-<DOMAIN>/api/*` → `Cache Level = Bypass`) is in place. Verify with
-`curl -I https://<DOMAIN>/api/health` — response should NOT carry
-`cf-cache-status: HIT`.
+Cloudflare's edge cache may serve a stale
+`/api/auth/oauth2/callback/google` response (Pitfall 2). Fix: ensure §2
+step 5 Page Rule (`URL pattern: <DOMAIN>/api/*` → `Cache Level = Bypass`)
+is in place. Verify with `curl -I https://<DOMAIN>/api/health` — response
+should NOT carry `cf-cache-status: HIT`.
 
 ### "Error: redirect_uri_mismatch" on first login
 
 The redirect URI in Google Cloud Console doesn't EXACTLY match what
-Better Auth sends (Pitfall 3). Trailing slash, http vs https, port number
-all matter. Re-verify §3 step 3: the Authorized redirect URI must be
-`https://<DOMAIN>/api/auth/callback/google` (no trailing slash, https not
-http, no port).
+Better Auth sends (Pitfall 3). Trailing slash, http vs https, port number,
+and **the `/oauth2/` path segment** all matter. Re-verify §3 step 3: the
+Authorized redirect URI must be
+`https://<DOMAIN>/api/auth/oauth2/callback/google` (no trailing slash,
+https not http, no port, with `/oauth2/` segment between `/auth/` and
+`/callback/`).
+
+The most common form of this error: console has the older
+`/api/auth/callback/google` (without `/oauth2/`) — that path is what
+Better Auth's built-in `socialProviders.google` uses, NOT what our
+`genericOAuth` plugin uses. Update the console entry.
 
 ### Account-delete: stale tabs still show authenticated UI for ~seconds
 

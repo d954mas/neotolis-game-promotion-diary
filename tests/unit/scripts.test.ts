@@ -54,4 +54,21 @@ describe("deploy + backup scripts syntax + invariants (Phase 02.2)", () => {
   it("Plan 02.2-06: nginx/refresh-cf-ips.sh syntax-validates via `bash -n`", () => {
     expect(() => execSync("bash -n nginx/refresh-cf-ips.sh", { stdio: "pipe" })).not.toThrow();
   });
+
+  // Post-deploy fix #2 (issue #14): nginx config must terminate HTTPS on
+  // origin (CF Full Strict mode connects via HTTPS only). This locks the
+  // ssl_certificate / ssl_certificate_key directives + the 443 listener
+  // so a future revert can't reintroduce the 521 trap.
+  it("Plan 02.2-06 (issue #14): nginx.conf.template listens on 443 with Origin CA cert directives", () => {
+    const content = readFileSync("nginx/nginx.conf.template", "utf-8");
+    expect(content, "must listen on 443 ssl").toMatch(/listen\s+443\s+ssl;/);
+    expect(content, "must enable http2").toMatch(/http2\s+on;/);
+    expect(content, "must reference origin.pem at the canonical mounted path").toMatch(
+      /ssl_certificate\s+\/etc\/nginx\/certs\/origin\.pem;/,
+    );
+    expect(content, "must reference origin.key at the canonical mounted path").toMatch(
+      /ssl_certificate_key\s+\/etc\/nginx\/certs\/origin\.key;/,
+    );
+    expect(content, "must restrict to TLSv1.2/1.3").toMatch(/ssl_protocols\s+TLSv1\.2\s+TLSv1\.3;/);
+  });
 });

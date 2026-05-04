@@ -12,3 +12,9 @@ playwright-report/
 .DS_Store
 .claude/
 *.stackdump
+
+# Operator-side secrets — generated in CF dashboard, saved on VPS only.
+# nginx/certs/ directory is tracked via .gitkeep so the docker-compose
+# volume mount has a binding path on a fresh clone.
+nginx/certs/origin.pem
+nginx/certs/origin.key
