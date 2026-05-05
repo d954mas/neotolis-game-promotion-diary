@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0-10-PLAN.md (parallel Wave 3)
-last_updated: "2026-05-05T20:36:08.465Z"
+stopped_at: Completed 03.0-09-PLAN.md (parallel Wave 3)
+last_updated: "2026-05-05T20:46:54.151Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 82
-  completed_plans: 77
+  completed_plans: 78
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0 (polling-pipeline-plumbing-youtube) — EXECUTING
-Plan: 9 of 14
+Plan: 10 of 14
 
 ## Performance Metrics
 
@@ -119,6 +119,7 @@ Plan: 9 of 14
 | Phase 03.0-polling-pipeline-plumbing-youtube P08 | ~7 min | 2 tasks | 7 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P07 | 11min | 3 tasks | 10 files |
 | Phase 03.0 P10 | 5m | 1 tasks | 2 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P09 | 30 min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -352,6 +353,9 @@ Recent decisions affecting current work:
 - [Phase 03.0]: Plan 10: read author_url from event.metadata (set by enrichFromUrl) instead of duplicating the oEmbed call — saves one HTTP roundtrip per paste
 - [Phase 03.0]: Plan 10: per-shape singletonKey strategy — UC id for /channel/UC… URLs, full URL for /@handle and /c/customname (handler resolves canonical UC id at handler-time)
 - [Phase 03.0]: Plan 10: fire-and-forget enqueue — try/catch swallows pg-boss / DB errors so the user-facing paste never returns 502 from a backfill failure
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-09: Pattern A scheduler-tick queue separation chosen over Pattern B (marker payload) — cron schedules send empty {} to scheduler.tick.{active,cold} queues; worker subscribes and dispatches per-event POLL_ACTIVE/POLL_COLD jobs. Keeps scheduler container thin (cron-fire only), routes DB-touching enqueue logic to worker pool
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-09: channel-context-backfill runs 3 quota units total (channels.list + playlistItems.list + videos.list) — Rule 2 deviation from plan's stated 2 units; the videos.list batched call is required to seed real counters in youtube_video_snapshots so VIZ-01 chart-loader doesn't render empty on first paste. Idempotency preserved via ON CONFLICT DO NOTHING
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-09: SCHEDULER_TICK_ACTIVE / SCHEDULER_TICK_COLD added to QUEUES const so declareAllQueues auto-creates them at boot — without these entries, boss.send to those queue names would silently lose jobs (Phase 1 D-Q1 pitfall, pg-boss v10 createQueue requirement)
 
 ### Pending Todos
 
@@ -393,8 +397,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-05T20:36:08.461Z
+Last session: 2026-05-05T20:46:54.146Z
 Last Activity: 2026-05-05
-Stopped at: Completed 03.0-10-PLAN.md (parallel Wave 3)
+Stopped at: Completed 03.0-09-PLAN.md (parallel Wave 3)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
