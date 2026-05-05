@@ -24,8 +24,9 @@
 //     never hold a DB tx across HTTP).
 
 // env.ts loader — runs before any value-import on the adapter (which itself
-// imports env.ts at module load). Mirrors the pattern used in
-// audit-cursor.test.ts / proxy-trust.test.ts.
+// imports env.ts at module load). Mirrors the dynamic-import + vi.resetModules
+// pattern used in tests/unit/youtube-quota-tracker.test.ts so each test sees
+// a fresh env parse with the per-suite SERVICE_YOUTUBE_API_KEYS / base URL.
 import { randomBytes } from "node:crypto";
 process.env.DATABASE_URL ??= "postgres://test:test@localhost:5432/test";
 process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
@@ -39,10 +40,27 @@ process.env.YOUTUBE_API_BASE_URL = "https://yt-mock.test/youtube/v3";
 // Stub a single operator key so pickKeyForJob() returns non-null.
 process.env.SERVICE_YOUTUBE_API_KEYS = "test-operator-key-A";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { youtubeChannelAdapter } from "../../src/lib/server/integrations/youtube-channel-adapter.js";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import type { youtubeChannelAdapter as YoutubeChannelAdapterT } from "../../src/lib/server/integrations/youtube-channel-adapter.js";
 
 type FetchFn = typeof fetch;
+type Adapter = typeof YoutubeChannelAdapterT;
+
+/** Dynamic-import the adapter with the env values currently set in process.env.
+ *  vi.resetModules() forces env.ts to re-parse so the adapter's module-level
+ *  env reads pick up our test values. APP_KEK_BASE64 must be re-seeded because
+ *  env.ts scrubs it after parse (PITFALL P2 mitigation #4). */
+async function loadAdapter(): Promise<Adapter> {
+  vi.resetModules();
+  process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
+  const mod = await import("../../src/lib/server/integrations/youtube-channel-adapter.js");
+  return mod.youtubeChannelAdapter;
+}
+
+let youtubeChannelAdapter: Adapter;
+beforeAll(async () => {
+  youtubeChannelAdapter = await loadAdapter();
+});
 
 interface MockResponse {
   status: number;
@@ -106,7 +124,9 @@ function makeVideosListResponse(ids: string[], opts?: { duration?: string; viewC
   };
 }
 
-function makePlaylistItemsResponse(items: Array<{ videoId: string; publishedAt: string; title?: string }>) {
+function makePlaylistItemsResponse(
+  items: Array<{ videoId: string; publishedAt: string; title?: string }>,
+) {
   return {
     kind: "youtube#playlistItemListResponse",
     items: items.map((it) => ({
@@ -142,9 +162,9 @@ describe("youtubeChannelAdapter.pollStats — batching + alignment", () => {
     const snaps = await youtubeChannelAdapter.pollStats(events, null);
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].url.pathname).toMatch(/\/videos$/);
-    expect(calls[0].url.searchParams.get("id")?.split(",")).toHaveLength(50);
-    expect(calls[0].url.searchParams.get("part")).toBe("snippet,statistics,contentDetails");
+    expect(calls[0]!.url.pathname).toMatch(/\/videos$/);
+    expect(calls[0]!.url.searchParams.get("id")?.split(",")).toHaveLength(50);
+    expect(calls[0]!.url.searchParams.get("part")).toBe("snippet,statistics,contentDetails");
     expect(snaps).toHaveLength(50);
   });
 
@@ -159,8 +179,8 @@ describe("youtubeChannelAdapter.pollStats — batching + alignment", () => {
     const snaps = await youtubeChannelAdapter.pollStats(events, null);
 
     expect(calls).toHaveLength(2);
-    expect(calls[0].url.searchParams.get("id")?.split(",")).toHaveLength(50);
-    expect(calls[1].url.searchParams.get("id")?.split(",")).toHaveLength(25);
+    expect(calls[0]!.url.searchParams.get("id")?.split(",")).toHaveLength(50);
+    expect(calls[1]!.url.searchParams.get("id")?.split(",")).toHaveLength(25);
     expect(snaps).toHaveLength(75);
   });
 
@@ -175,9 +195,9 @@ describe("youtubeChannelAdapter.pollStats — batching + alignment", () => {
 
     const [snap] = await youtubeChannelAdapter.pollStats(events, null);
 
-    expect(snap.status).toBe("ok");
-    expect(snap.metrics?.view_count).toBe(1234567890);
-    expect(typeof snap.metrics?.view_count).toBe("number");
+    expect(snap!.status).toBe("ok");
+    expect(snap!.metrics?.view_count).toBe(1234567890);
+    expect(typeof snap!.metrics?.view_count).toBe("number");
   });
 
   it("Test 4: videoId not in response.items → snapshot.status === 'not_found' for that index", async () => {
@@ -196,9 +216,9 @@ describe("youtubeChannelAdapter.pollStats — batching + alignment", () => {
     const snaps = await youtubeChannelAdapter.pollStats(events, null);
 
     expect(snaps).toHaveLength(3);
-    expect(snaps[0].status).toBe("ok");
-    expect(snaps[1].status).toBe("not_found");
-    expect(snaps[2].status).toBe("ok");
+    expect(snaps[0]!.status).toBe("ok");
+    expect(snaps[1]!.status).toBe("not_found");
+    expect(snaps[2]!.status).toBe("ok");
   });
 });
 
@@ -214,7 +234,7 @@ describe("youtubeChannelAdapter.pollStats — error mapping", () => {
 
     const [snap] = await youtubeChannelAdapter.pollStats(events, null);
 
-    expect(snap.status).toBe("rate_limited");
+    expect(snap!.status).toBe("rate_limited");
   });
 
   it("Test 6: 403 forbidden (any other reason) → all snapshots status='auth_error'", async () => {
@@ -228,7 +248,7 @@ describe("youtubeChannelAdapter.pollStats — error mapping", () => {
 
     const [snap] = await youtubeChannelAdapter.pollStats(events, null);
 
-    expect(snap.status).toBe("auth_error");
+    expect(snap!.status).toBe("auth_error");
   });
 
   it("Test 7: 404 → all snapshots status='not_found'", async () => {
@@ -237,20 +257,18 @@ describe("youtubeChannelAdapter.pollStats — error mapping", () => {
 
     const [snap] = await youtubeChannelAdapter.pollStats(events, null);
 
-    expect(snap.status).toBe("not_found");
+    expect(snap!.status).toBe("not_found");
   });
 });
 
 describe("youtubeChannelAdapter.pollStats — quotaUser fairness param", () => {
   it("Test 8: quotaUser=hash(userId) param present (16 hex chars)", async () => {
     const events = [{ id: "e1", userId: fakeUserId, externalId: "v1" }];
-    const calls = installFetchMock([
-      { status: 200, body: makeVideosListResponse(["v1"]) },
-    ]);
+    const calls = installFetchMock([{ status: 200, body: makeVideosListResponse(["v1"]) }]);
 
     await youtubeChannelAdapter.pollStats(events, null);
 
-    const quotaUser = calls[0].url.searchParams.get("quotaUser");
+    const quotaUser = calls[0]!.url.searchParams.get("quotaUser");
     expect(quotaUser).toBeTruthy();
     expect(quotaUser).toMatch(/^[0-9a-f]{16}$/);
   });
@@ -268,8 +286,8 @@ describe("youtubeChannelAdapter.pollStats — Shorts detection (D-NEW)", () => {
 
     const [snap] = await youtubeChannelAdapter.pollStats(events, null);
 
-    expect(snap.metadata?.duration_seconds).toBe(15);
-    expect(snap.metadata?.is_short).toBe(true);
+    expect(snap!.metadata?.duration_seconds).toBe(15);
+    expect(snap!.metadata?.is_short).toBe(true);
   });
 
   it("Test 10: duration='PT4M13S' (253s > 60s) → metadata.is_short=false", async () => {
@@ -283,8 +301,8 @@ describe("youtubeChannelAdapter.pollStats — Shorts detection (D-NEW)", () => {
 
     const [snap] = await youtubeChannelAdapter.pollStats(events, null);
 
-    expect(snap.metadata?.duration_seconds).toBe(253);
-    expect(snap.metadata?.is_short).toBe(false);
+    expect(snap!.metadata?.duration_seconds).toBe(253);
+    expect(snap!.metadata?.is_short).toBe(false);
   });
 
   it("Test 10b: duration='PT1M' (60s, boundary) → is_short=true", async () => {
@@ -298,8 +316,8 @@ describe("youtubeChannelAdapter.pollStats — Shorts detection (D-NEW)", () => {
 
     const [snap] = await youtubeChannelAdapter.pollStats(events, null);
 
-    expect(snap.metadata?.duration_seconds).toBe(60);
-    expect(snap.metadata?.is_short).toBe(true);
+    expect(snap!.metadata?.duration_seconds).toBe(60);
+    expect(snap!.metadata?.is_short).toBe(true);
   });
 });
 
@@ -312,9 +330,7 @@ describe("youtubeChannelAdapter.pollContent — playlistItems.list", () => {
       { videoId: "new1", publishedAt: "2026-04-02T08:00:00Z" }, // after
       { videoId: "new2", publishedAt: "2026-04-15T08:00:00Z" }, // after
     ];
-    const calls = installFetchMock([
-      { status: 200, body: makePlaylistItemsResponse(items) },
-    ]);
+    const calls = installFetchMock([{ status: 200, body: makePlaylistItemsResponse(items) }]);
 
     const events = await youtubeChannelAdapter.pollContent(
       {
@@ -326,10 +342,10 @@ describe("youtubeChannelAdapter.pollContent — playlistItems.list", () => {
     );
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].url.pathname).toMatch(/\/playlistItems$/);
-    expect(calls[0].url.searchParams.get("playlistId")).toBe("PLABC");
-    expect(calls[0].url.searchParams.get("part")).toBe("snippet");
-    expect(calls[0].url.searchParams.get("maxResults")).toBe("50");
+    expect(calls[0]!.url.pathname).toMatch(/\/playlistItems$/);
+    expect(calls[0]!.url.searchParams.get("playlistId")).toBe("PLABC");
+    expect(calls[0]!.url.searchParams.get("part")).toBe("snippet");
+    expect(calls[0]!.url.searchParams.get("maxResults")).toBe("50");
     expect(events.map((e) => e.externalId)).toEqual(["new1", "new2"]);
   });
 
@@ -349,15 +365,13 @@ describe("youtubeChannelAdapter.pollContent — playlistItems.list", () => {
     );
 
     expect(events).toHaveLength(1);
-    expect(events[0].occurredAt).toBeInstanceOf(Date);
-    expect(events[0].occurredAt.toISOString()).toBe("2026-05-01T10:00:00.000Z");
-    expect(events[0].url).toBe("https://www.youtube.com/watch?v=newvid");
+    expect(events[0]!.occurredAt).toBeInstanceOf(Date);
+    expect(events[0]!.occurredAt.toISOString()).toBe("2026-05-01T10:00:00.000Z");
+    expect(events[0]!.url).toBe("https://www.youtube.com/watch?v=newvid");
   });
 
   it("Test 13: pollContent with empty playlist → returns []", async () => {
-    installFetchMock([
-      { status: 200, body: makePlaylistItemsResponse([]) },
-    ]);
+    installFetchMock([{ status: 200, body: makePlaylistItemsResponse([]) }]);
 
     const events = await youtubeChannelAdapter.pollContent(
       { id: "src1", userId: fakeUserId, metadata: { uploadsPlaylistId: "PLABC" } },
@@ -384,14 +398,12 @@ describe("youtubeChannelAdapter.pollStats — AbortController timeout", () => {
     // (the timeout machinery is exercised via the call-shape contract, and the
     // actual 30s fire is verified by reading the source for setTimeout(30_000)).
     const events = [{ id: "e1", userId: fakeUserId, externalId: "v1" }];
-    const calls = installFetchMock([
-      { status: 200, body: makeVideosListResponse(["v1"]) },
-    ]);
+    const calls = installFetchMock([{ status: 200, body: makeVideosListResponse(["v1"]) }]);
 
     await youtubeChannelAdapter.pollStats(events, null);
 
-    expect(calls[0].signal).toBeDefined();
-    expect(calls[0].signal).toBeInstanceOf(AbortSignal);
+    expect(calls[0]!.signal).toBeDefined();
+    expect(calls[0]!.signal).toBeInstanceOf(AbortSignal);
   });
 });
 
