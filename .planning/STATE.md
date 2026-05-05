@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0-13-PLAN.md build (Tasks 1-3); Task 4 Wave 4 manual UAT pending (cross-plan checkpoint coordinated by orchestrator alongside plans 11 and 12)
-last_updated: "2026-05-05T21:00:19.220Z"
+stopped_at: Completed 03.0-12-PLAN.md (parallel Wave 4)
+last_updated: "2026-05-05T21:04:48.342Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 82
-  completed_plans: 79
+  completed_plans: 80
 ---
 
 # Project State
@@ -121,6 +121,7 @@ Plan: 10 of 14
 | Phase 03.0 P10 | 5m | 1 tasks | 2 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P09 | 30 min | 3 tasks | 16 files |
 | Phase 03.0 P13 | ~7 min | 3 tasks | 6 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P12 | 9min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -358,6 +359,8 @@ Recent decisions affecting current work:
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-09: channel-context-backfill runs 3 quota units total (channels.list + playlistItems.list + videos.list) — Rule 2 deviation from plan's stated 2 units; the videos.list batched call is required to seed real counters in youtube_video_snapshots so VIZ-01 chart-loader doesn't render empty on first paste. Idempotency preserved via ON CONFLICT DO NOTHING
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-09: SCHEDULER_TICK_ACTIVE / SCHEDULER_TICK_COLD added to QUEUES const so declareAllQueues auto-creates them at boot — without these entries, boss.send to those queue names would silently lose jobs (Phase 1 D-Q1 pitfall, pg-boss v10 createQueue requirement)
 - [Phase 03.0]: Plan 13 (admin /quota page): /admin/+layout.server.ts is a deliberate no-op — allowlist gate stays at /api/admin/* middleware (Plan 07) so there's a single source of truth for who sees /admin/*. SvelteKit page loader fetches /api/admin/quota via fetch() helper (NOT direct service import) to keep the gate in one place; on 404 throws SvelteKit error(404) rendering the standard 404 page (admin-deny indistinguishable from URL-not-found per D-16 self-host parity).
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 12: AccountDeletedBanner Permanent-delete-now CTA un-hidden (DV-6); ConfirmDialog Type-DELETE + speedbump pattern reused verbatim from Phase 02.2 D-S3
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 12: BackfillPicker.svelte ships with 5 presets (default 30d); /sources/new conditionally renders + collapses with auto_import=true gate; createSource enqueues YOUTUBE_CHANNEL_CONTEXT_BACKFILL with singletonKey=source-{id}
 
 ### Pending Todos
 
@@ -399,8 +402,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-05T21:00:19.215Z
+Last session: 2026-05-05T21:04:48.261Z
 Last Activity: 2026-05-05
-Stopped at: Completed 03.0-13-PLAN.md build (Tasks 1-3); Task 4 Wave 4 manual UAT pending (cross-plan checkpoint coordinated by orchestrator alongside plans 11 and 12)
+Stopped at: Completed 03.0-12-PLAN.md (parallel Wave 4)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
