@@ -8,6 +8,8 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 
 > **2026-04-28 — Phase 2.1 Architecture Realignment.** Phase 2 UAT surfaced 4 P0 architectural redesigns that change the v1 data model and IA. Per-platform channel tables collapse into a unified `data_sources` registry; `tracked_youtube_videos` collapses into a unified `events` table with an `author_is_me` discriminator; primary navigation becomes a chronological `/feed` over the events table, with `/sources` for source config and `/games/[id]` for the per-game curated view. REQ-IDs touched by this realignment are reframed in-place (terminology aligned with the new model — see notes inline below); 4 new REQ-IDs are added in the "Phase 2.1 Realignment Additions" section. Authoritative narrative lives in PROJECT.md "Architecture" section + ROADMAP Phase 2.1 detail.
 
+> **2026-05-05 — Phase 3.0 reframing.** KEYS-01, POLL-01, POLL-03, POLL-05 reframed under the service-level YouTube + Active/Cold/Frozen tier model. See `.planning/phases/03.0-polling-pipeline-plumbing-youtube/03.0-CONTEXT.md` decisions D-05, D-06, D-13, DV-1, DV-2, DV-3.
+
 ---
 
 ## v1 Requirements

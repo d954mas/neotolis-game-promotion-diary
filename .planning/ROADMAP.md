@@ -178,7 +178,25 @@ Plans:
   - **Wave 4** — UI polish: live `<PollingBadge>` (Active/Cold/Frozen/Unavailable states with refresh icon + 5min cooldown), `/admin/quota` SvelteKit page, `<AccountDeletedBanner>` Permanent-delete-now CTA activation. **Manual UAT checkpoint** after Wave 4.
   - **Wave 5** — smoke extension (mock YouTube + cron tick assertions + admin parity), 03.0-VERIFICATION.md sign-off.
 
-**Plans**: TBD (target ~12–15 atomic plans based on Wave breakdown; gap closure adds in round-N pattern per Phase 2.1 precedent if UAT surfaces issues)
+**Plans**: 14 plans
+
+**Plan list**:
+- [ ] 03.0-01-PLAN.md — Wave 0: Spike (live videos.list quota verification, CONTEXT D-02 hard gate) + forward-only migration 0010_phase03_baseline (3 public-data tables + 2 partial indexes + 5 audit verbs + pgboss queue cleanup) + queues registry rewrite (POLL_ACTIVE rename + 3 new queues) + env additions (SERVICE_YOUTUBE_API_KEYS / ADMIN_EMAIL_ALLOWLIST / YOUTUBE_API_BASE_URL) + ESLint TENANT_TABLES allowlist extension + DTOs + .env.example
+- [ ] 03.0-02-PLAN.md — Wave 0: PROJECT.md / REQUIREMENTS.md doc updates (DV-1 per-platform key model split + reframing notes) + ~42 new Paraglide keys (UI-SPEC verbatim) + 17 placeholder test files (named-plan it.skip per Phase 2.1 precedent) + anonymous-401 / tenant-scope sweep extensions
+- [ ] 03.0-03-PLAN.md — Wave 1: services/tier-resolver.ts (single source of truth — Pitfall 7) + services/youtube-quota-tracker.ts (round-robin + UPSERT counter + 80%/95% threshold gate + idempotent audit transition + todayPacific helper)
+- [ ] 03.0-04-PLAN.md — Wave 1: services/youtube-snapshot-writer.ts (idempotent two-phase write tx) + services/refresh-poll.ts (5-min cooldown gate + AppError 429) + quota.ts events_per_day source_id IS NULL filter (DV-5) + events.ts duplicate_event 23505 mapping (D-15)
+- [ ] 03.0-05-PLAN.md — Wave 1: services/purge-account.ts (FK-ordered cascade in single tx + idempotent + audit row outside tx + listPurgeEligibleUsers helper for cron path)
+- [ ] 03.0-06-PLAN.md — Wave 1: integrations/youtube-channel-adapter.ts real implementation replacing Phase 2.1 STUB (videos.list batched + playlistItems.list + zod-validated responses + AbortController 30s + quotaUser hash + Shorts detection)
+- [ ] 03.0-07-PLAN.md — Wave 2: http/middleware/admin.ts env-allowlist gate (404 not 403) + GET /api/admin/quota route + services/admin-quota-read.ts (cross-tenant audit aggregation, allowlist-gated) + DTOs + sweep extensions activated
+- [ ] 03.0-08-PLAN.md — Wave 2: POST /api/events/:id/refresh-poll route (with Retry-After header) + DELETE /api/me/account/purge route (Permanent-delete-now CTA path) + sweep activations
+- [ ] 03.0-09-PLAN.md — Wave 3: 6 pg-boss worker handlers (poll-active / poll-cold / poll-user / channel-context-backfill / quota-reset / purge-daily) using v10 array-handler shape; src/scheduler/enqueue.ts (tier-resolver + throttle gate); 4 boss.schedule cron registrations (tz America/Los_Angeles for quota_reset + purge.daily)
+- [ ] 03.0-10-PLAN.md — Wave 3: services/ingest.ts triggers YOUTUBE_CHANNEL_CONTEXT_BACKFILL on first paste of unknown channel (idempotent via pg-boss singletonKey)
+- [ ] 03.0-11-PLAN.md — Wave 4: PollingBadge.svelte live state rewrite (5 variants per UI-SPEC) + RefreshNowButton.svelte new component (44×44 hit area, 5min cooldown, prefers-reduced-motion compliance) + tests/browser/polling-badge.test.ts
+- [ ] 03.0-12-PLAN.md — Wave 4: AccountDeletedBanner.svelte Permanent-delete-now CTA un-hidden (DV-6) + BackfillPicker.svelte new component (5 presets, default 30d, conditional helper) + /sources/new conditional render + data-sources.ts createSource enqueue
+- [ ] 03.0-13-PLAN.md — Wave 4: /admin/+layout.svelte admin shell + /admin/quota/+page.svelte composition + QuotaKeyTable.svelte (4 cols, status pills, stacked < 600px) + QuotaAuditList.svelte (last 50 service entries) + manual UAT checkpoint after Wave 4
+- [ ] 03.0-14-PLAN.md — Wave 5: tests/smoke/lib/youtube-mock.{mjs,sh} mock reverse-proxy + tests/smoke/self-host.sh extended (cron registration + snapshot write + admin parity ×2 + SIGTERM 60s drain) + CI env propagation + 03.0-VERIFICATION.md phase verdict sign-off
+**UI hint**: yes
+
 
 ### Phase 3.1: Reddit Adapter
 *DECIMAL SPLIT — scope split decided during /gsd:discuss-phase 03 on 2026-05-05.*
