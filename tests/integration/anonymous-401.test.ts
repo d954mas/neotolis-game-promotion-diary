@@ -87,6 +87,20 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     "/api/me/export",
     "/api/me/account",
     "/api/me/account/restore",
+    // Plan 03.0-02 (Wave 0) — pre-declared route allowlist for Phase 3.0
+    // Wave 2 routes. The strings are commented out because the routes
+    // are not yet mounted; the sweep's toContain guard would fail with
+    // "expected protectedPaths to contain '/api/admin/quota'" if the
+    // entries were live before the route file ships. The corresponding
+    // it.skip blocks below carry the load-bearing assertion contract;
+    // each one names the activating plan so a grep flips it on at the
+    // right moment.
+    //
+    //   uncomment after Plan 03.0-08 lands the route mount:
+    //     "/api/events/:id/refresh-poll",
+    //     "/api/me/account/purge",
+    //   uncomment after Plan 03.0-07 lands the route mount:
+    //     "/api/admin/quota",
   ];
 
   it("every /api/* route except /api/auth/* refuses anonymous with 401", async () => {
@@ -259,6 +273,16 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
+
+  // Phase 3.0 Wave 0 placeholder — Plan 03.0-02 pre-declares the load-
+  // bearing anonymous-401 contract for the Wave 2 + Wave 1 routes that
+  // ship later in the phase. Each it.skip names the activating plan;
+  // grep `Plan 03.0-` to flip them on. The corresponding entries in
+  // MUST_BE_PROTECTED stay commented out until the route mounts (see
+  // the allowlist comment above).
+  it.skip("POST /api/events/:id/refresh-poll without session → 401 — activated in Plan 03.0-08", () => {});
+  it.skip("DELETE /api/me/account/purge without session → 401 — activated in Plan 03.0-08", () => {});
+  it.skip("GET /api/admin/quota without session → 401 (NOT 404 — auth gate fires before allowlist gate) — activated in Plan 03.0-07", () => {});
 
   it("AUTH-01: /api/me with valid session returns 200 + UserDto", async () => {
     const { seedUserDirectly } = await import("./helpers.js");

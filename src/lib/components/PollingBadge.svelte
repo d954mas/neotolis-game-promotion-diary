@@ -1,6 +1,7 @@
 <script lang="ts">
   // PollingBadge — Phase-2.1 placeholder for the per-event polling-tier
-  // surface that Phase 3 lands (POLL-05 "Hot/Warm/Cold/Stale").
+  // surface that Phase 3 lands (POLL-05 reframed Phase 3.0: 3-tier
+  // Active / Cold / Frozen + Unavailable).
   //
   // CONTEXT D-05 (unified contract — overrides UI-SPEC FLAG): rendered for
   // every event whose `kind ∈ {youtube_video, reddit_post}` AND
@@ -10,9 +11,17 @@
   // Hidden for non-pollable kinds (`conference`, `talk`, `press`, `other`,
   // `twitter_post`, `telegram_post`, `discord_drop`).
   //
-  // Phase 3 will replace the placeholder logic with real per-tier text
-  // ("Hot · last polled 2h ago", etc.); the component contract survives the
-  // transition (one `<PollingBadge>` element, two phases of behavior).
+  // Phase 3.0 Plan 02 retired the `polling_badge_phase3_placeholder` key
+  // ("Phase 3 will start polling") in the Paraglide dictionary — it was
+  // the Phase 2.1 stub copy and UI-SPEC §Copywriting Contract REMOVED
+  // explicitly drops it. The never-polled-yet branch falls back to
+  // `polling_badge_manual` ("Manual entry — no polling") per UI-SPEC's
+  // retention note for that key. Plan 03.0-11 lands the live tier-
+  // driven rewrite (Active / Cold / Frozen / Unavailable / Throttled
+  // variants) — this component will become a thin call site over the
+  // tier resolver at that point. Until then, the badge keeps its
+  // Phase-2.1 contract (one element, role="status") but with non-
+  // deprecated copy.
   //
   // Accessibility (UI-SPEC §"Accessibility Floor delta"): role="status" so
   // screen readers announce the badge when it appears.
@@ -45,7 +54,7 @@
 
 {#if visible}
   <span class="polling-badge" role="status">
-    {m.polling_badge_phase3_placeholder()}
+    {m.polling_badge_manual()}
   </span>
 {/if}
 

@@ -32,3 +32,26 @@ describe("youtubeChannelAdapter (Phase 2.1 STUB)", () => {
     );
   });
 });
+
+// Phase 3.0 Wave 0 placeholder — assertions activate in Plan 03.0-06.
+// Plan 03.0-06 replaces the Phase 2.1 STUB methods with real
+// videos.list / playlistItems.list adapters. The contract:
+// - pollContent uses uploads_playlist_id from data_sources.metadata to
+//   page playlistItems.list (1 unit per page) and returns RawEvent[].
+// - pollStats batches up to 50 video ids into ONE videos.list call (1
+//   unit total — the 50× saving that gates the entire phase per
+//   CONTEXT D-02).
+// - error mapping: 403 quotaExceeded → status:rate_limited (worker
+//   defers + scheduler pauses); 403 forbidden → status:auth_error
+//   (event tier flips to Unavailable); 404 → status:not_found (same).
+// - quotaUser=hash(userId) param sent on every call so YouTube's
+//   per-user fairness gate splits the operator's quota evenly across
+//   tenants instead of letting one whale starve the others.
+describe("youtube-channel-adapter live impl (Plan 03.0-06)", () => {
+  it.skip("pollContent issues playlistItems.list and returns RawEvent[] — activated in Plan 03.0-06", () => {});
+  it.skip("pollStats issues videos.list batched (50 ids) for 1 unit — activated in Plan 03.0-06", () => {});
+  it.skip("pollStats maps 403 quotaExceeded → status:rate_limited — activated in Plan 03.0-06", () => {});
+  it.skip("pollStats maps 403 forbidden → status:auth_error — activated in Plan 03.0-06", () => {});
+  it.skip("pollStats maps 404 → status:not_found — activated in Plan 03.0-06", () => {});
+  it.skip("pollStats sends quotaUser=hash(userId) param — activated in Plan 03.0-06", () => {});
+});

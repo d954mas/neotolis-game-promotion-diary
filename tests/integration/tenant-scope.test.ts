@@ -642,3 +642,22 @@ describe("Phase 02.2 cross-tenant invariants for /api/me/account routes", () => 
     }
   });
 });
+
+// Phase 3.0 Wave 0 placeholder — Plan 03.0-02 pre-declares the cross-
+// tenant probes for the Wave 2 routes that ship later in the phase.
+// Each it.skip names the activating plan; grep `Plan 03.0-` to flip on.
+//
+// Two of these probes assert the canonical CLAUDE.md §Privacy invariant
+// 2 (cross-tenant returns 404, never 403); the /admin/quota probe
+// asserts the same status (404) for a non-allowlisted user — the gate
+// is the env allowlist, not row ownership, so the contract is "the
+// existence of the route doesn't leak". /api/me/account/purge has no
+// :userId path parameter (Plan 02.2-03 precedent — account routes
+// operate on c.var.userId only); the cross-tenant probe is therefore
+// a contract pin ("the shape of the route can't accidentally grow a
+// :userId param") rather than a behavioural assertion.
+describe("Plan 03.0-02 — Phase 3.0 cross-tenant probes (placeholder)", () => {
+  it.skip("cross-tenant POST /api/events/:id/refresh-poll → 404 — activated in Plan 03.0-08", () => {});
+  it.skip("cross-tenant DELETE /api/me/account/purge — N/A (account-self only) — activated in Plan 03.0-08", () => {});
+  it.skip("GET /api/admin/quota for non-allowlisted user → 404 (matches anonymous; allowlist is the gate) — activated in Plan 03.0-07", () => {});
+});
