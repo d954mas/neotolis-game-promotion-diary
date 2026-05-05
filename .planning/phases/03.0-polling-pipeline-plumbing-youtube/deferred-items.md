@@ -80,3 +80,34 @@ the cross-plan rationale.
 
 **No action needed.** The file is now committed under Plan 11; Plan 13's
 +page.svelte resolves the import correctly.
+
+## From Plan 03.0-14 execution (Wave 5 — smoke extension)
+
+### 3. Pre-existing repo-wide Prettier drift (172 files)
+
+**Found during:** Plan 14 Task 2 lint verification.
+
+**Issue:** `pnpm lint` runs `eslint . && prettier --check .` and the
+`prettier --check .` step reports 172 files with style issues. The
+issues are pre-existing — `git stash && pnpm prettier --check .` on
+master `HEAD` before Plan 14's changes shows the same 172-file
+warning count (verified 2026-05-06).
+
+**Plan 14 files are clean.** Confirmed via
+`pnpm prettier --check tests/smoke/lib/youtube-mock.mjs eslint.config.js
+.github/workflows/ci.yml` → "All matched files use Prettier code style!"
+
+**Out of scope for Plan 14** per the executor scope-boundary rule (only
+fix issues caused by the current plan). The 172 files span every wave of
+Phase 1+2+2.1+2.2+3.0 and are accumulated drift from before Prettier
+was wired into CI lockstep.
+
+**Recommended closure:** one chore PR running `pnpm prettier --write .`
+across the whole tree, reviewed in isolation so the diff is purely
+mechanical formatting. Best done at a phase-boundary moment when no
+Wave is in flight.
+
+**No action needed for Plan 14.** Smoke gate, ESLint, and TypeScript
+all pass; the lint script's exit code surfaces a pre-existing
+Prettier-baseline issue that is not load-bearing for the Phase 3.0
+verdict.

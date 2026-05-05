@@ -451,4 +451,34 @@ source "$(dirname "$0")/lib/phase21-flow.sh"
 phase21_unified_flow "http://localhost:$APP_PORT" "$SESSION_COOKIE_A" "$SESSION_COOKIE_B"
 log "=== Phase 2.1 smoke extension PASSED ==="
 
-log "ALL SMOKE ASSERTIONS PASSED (Phase 1 + Phase 2 + Phase 2.1 scope)"
+# ============================================================
+# Phase 3.0 — polling pipeline + admin parity (Plan 03.0-14)
+# ============================================================
+# The full assertion chain lives in tests/smoke/lib/phase30-flow.sh
+# (sourced below). Summary of what it covers:
+#
+#   1. Boots tests/smoke/lib/youtube-mock.{mjs,sh} as a node http stub
+#      on a free port; exports YOUTUBE_API_BASE_URL pointing at it.
+#   2. Re-launches smoke-worker + smoke-scheduler with the Phase 3.0
+#      env (SERVICE_YOUTUBE_API_KEYS=mock-key, ADMIN_EMAIL_ALLOWLIST="").
+#   3. Asserts the 4 Phase 3.0 cron schedules registered in
+#      pgboss.schedule (scheduler.tick.active / .cold,
+#      youtube.quota_reset, purge.daily).
+#   4. Creates a kind=youtube_video event + drives /api/events/:id/refresh-poll
+#      so the worker drains a real poll.user job through the mock;
+#      asserts the youtube_video_snapshots row + events.last_polled_at
+#      land within 60s.
+#   5. Asserts /api/admin/quota and /admin/quota HTML page both return
+#      404 with empty ADMIN_EMAIL_ALLOWLIST (D-16 self-host parity gate).
+#   6. SIGTERMs smoke-worker; asserts 60s graceful drain (D-22 inherited).
+#
+# All YouTube HTTP traffic is intercepted by youtube-mock — NO live
+# YouTube API calls in CI (Pitfall G — recorded fixtures rejected; the
+# Wave 0 spike on 2026-05-06 covers schema-shape validation).
+log "=== Phase 3.0 smoke extension ==="
+# shellcheck source=tests/smoke/lib/phase30-flow.sh
+source "$(dirname "$0")/lib/phase30-flow.sh"
+phase30_polling_smoke "http://localhost:$APP_PORT" "$SESSION_COOKIE_A"
+log "=== Phase 3.0 smoke extension PASSED ==="
+
+log "ALL SMOKE ASSERTIONS PASSED (Phase 1 + Phase 2 + Phase 2.1 + Phase 3.0 scope)"

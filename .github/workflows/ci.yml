@@ -195,6 +195,19 @@ jobs:
       # a self-host operator does behind a TLS-terminating reverse proxy that
       # speaks plain HTTP to the app container.
       BETTER_AUTH_SECURE_COOKIES: 'false'
+      # Phase 3.0 Plan 14 — polling pipeline smoke env. The smoke harness
+      # (tests/smoke/lib/phase30-flow.sh) injects these onto the smoke-worker
+      # and smoke-scheduler containers so:
+      #   - SERVICE_YOUTUBE_API_KEYS=mock-key  → quota tracker has a key to
+      #     round-robin over (real keys never enter CI).
+      #   - ADMIN_EMAIL_ALLOWLIST=""           → /admin/quota returns 404 by
+      #     construction (D-16 self-host parity gate). The smoke harness
+      #     asserts both /api/admin/quota and /admin/quota HTML are 404.
+      #   - YOUTUBE_API_BASE_URL is set dynamically inside the script after
+      #     the youtube-mock helper allocates a free port (cannot be static
+      #     here; documented for operator readability).
+      SERVICE_YOUTUBE_API_KEYS: mock-key
+      ADMIN_EMAIL_ALLOWLIST: ''
       CI: 'true'
     steps:
       - uses: actions/checkout@v4

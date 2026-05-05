@@ -110,8 +110,17 @@ export default [
     rules: { "no-restricted-properties": "off" },
   },
   // Tests legitimately read/manipulate process.env to drive env-config behavior.
+  // .mjs covers smoke-gate fixtures (e.g. tests/smoke/lib/youtube-mock.mjs from
+  // Plan 03.0-14) which run as standalone Node processes outside the app
+  // bundle and read process.env to take their PORT from the smoke harness.
   {
-    files: ["tests/**/*.ts", "tests/**/*.js", "vitest.config.ts", "tests/setup.ts"],
+    files: [
+      "tests/**/*.ts",
+      "tests/**/*.js",
+      "tests/**/*.mjs",
+      "vitest.config.ts",
+      "tests/setup.ts",
+    ],
     rules: { "no-restricted-properties": "off" },
   },
   prettier,
