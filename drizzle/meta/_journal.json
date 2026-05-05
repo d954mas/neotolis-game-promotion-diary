@@ -78,6 +78,13 @@
       "when": 1778010011588,
       "tag": "0010_phase03_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1778097600000,
+      "tag": "0011_drop_audit_log_user_fk",
+      "breakpoints": true
     }
   ]
 }

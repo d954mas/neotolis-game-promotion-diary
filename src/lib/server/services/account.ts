@@ -1,5 +1,13 @@
 // Phase 02.2 D-15 / D-16: account export + soft-delete + restore.
 //
+// Phase 3.0 Plan 05 — purgeAccount lives in services/purge-account.ts; this
+// module remains the entry point for soft-delete / restore / export. The
+// re-exports at the bottom of the file make `import { purgeAccount } from
+// '../services/account.js'` and `import { purgeAccount } from
+// '../services/purge-account.js'` both work — Plan 08 (DELETE
+// /api/me/account/purge) and Plan 09 (purge.daily worker) pick whichever
+// matches the surrounding import style.
+//
 // Soft-cascade clones Phase 2 D-23 from services/games.ts:
 //   - capture ONE Date once
 //   - mark user.deleted_at + cascade to user-owned tables that carry
@@ -199,3 +207,10 @@ export async function exportAccountJson(
 
   return envelope;
 }
+
+// Phase 3.0 Plan 05 — purgeAccount + listPurgeEligibleUsers re-exports so
+// `import { purgeAccount } from '../services/account.js'` keeps Plan 08 +
+// Plan 09 importers ergonomic alongside softDeleteAccount / restoreAccount.
+// The implementation lives in services/purge-account.ts.
+export { purgeAccount, listPurgeEligibleUsers } from "./purge-account.js";
+export type { PurgeOptions, PurgeResult, PurgeRowCounts } from "./purge-account.js";

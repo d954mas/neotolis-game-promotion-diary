@@ -1,0 +1,38 @@
+-- Phase 3.0 Plan 05 — drop audit_log.user_id → user(id) FK so the purge
+-- worker can write a `purge.completed` audit row that survives the user
+-- DELETE in the same logical operation.
+--
+-- Background: Phase 1 baseline declared the FK as ON DELETE CASCADE so a
+-- legacy hard-delete would garbage-collect a user's audit rows. Phase 02.2
+-- replaced hard-delete with soft-delete (D-15 / D-16) and audit_log was
+-- never cascaded thereafter (account.deleted writes an audit row BEFORE the
+-- user.deletedAt UPDATE; restore + export audit similarly under the still-
+-- present user_id). Phase 3.0 Plan 05 introduces the FIRST hard-DELETE path
+-- on the user table (the 60-day-grace purge worker + Permanent-delete-now
+-- CTA). With the FK still present, two outcomes are both wrong:
+--
+--   1. Write audit BEFORE the cascade tx — the cascade then DELETEs the
+--      audit row (FK is ON DELETE CASCADE). The purge.completed row is
+--      gone, defeating the audit-INSERT-only invariant (AGENTS.md §4) for
+--      this verb.
+--   2. Write audit AFTER the cascade tx — the FK rejects the INSERT (the
+--      user row no longer exists). writeAudit catches the error and logs
+--      it; we end up with a silent audit drop on every successful purge.
+--
+-- Both options violate the invariant. The only correct fix is to drop the
+-- FK so audit_log.user_id is a plain text column whose value lives on
+-- past the user it references. Cross-tenant audit cursor invariant (P19) is
+-- preserved by the existing (user_id, created_at) and (user_id, action,
+-- created_at) indexes — they stay; pagination is unchanged. Open Question 4
+-- in 03.0-RESEARCH.md is resolved by this migration: every purge writes
+-- ONE audit row scoped to the purged user_id, and that row remains queryable
+-- by admins via the cross-tenant aggregation in /admin/quota.
+--
+-- Forward-only; no down migration. Drizzle's ALTER TABLE ... DROP CONSTRAINT
+-- is a single statement on a small table (audit_log is < 1M rows in any
+-- realistic deployment), so no concurrent-DDL guard is needed.
+--
+-- IF EXISTS guard: matches the migration runner's idempotency contract — a
+-- partially-applied retry must succeed, not raise "constraint does not exist".
+
+ALTER TABLE "audit_log" DROP CONSTRAINT IF EXISTS "audit_log_user_id_user_id_fk";
