@@ -24,7 +24,7 @@ import { auth } from "../../../auth.js";
 import { logger } from "../../logger.js";
 
 export const tenantScope: MiddlewareHandler<{
-  Variables: { userId: string; sessionId: string };
+  Variables: { userId: string; sessionId: string; userEmail: string };
 }> = async (c, next) => {
   const result = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!result) {
@@ -32,6 +32,12 @@ export const tenantScope: MiddlewareHandler<{
   }
   c.set("userId", result.user.id);
   c.set("sessionId", result.session.id);
+  // Phase 3.0 Plan 07: surface email for the admin-allowlist middleware
+  // (mounted on /api/admin/* after tenantScope). Better Auth's getSession
+  // already returns email on the result.user projection (it's a non-secret
+  // field — UserDto exposes it too); reading it here avoids a second DB
+  // round-trip in the admin gate.
+  c.set("userEmail", result.user.email);
   logger.debug({ userId: result.user.id, route: c.req.path }, "tenant-scope: authed");
   return next();
 };
