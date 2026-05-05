@@ -462,7 +462,6 @@ Fill in:
 | `DOMAIN` | the registered domain from §2 step 2 |
 | `SUPPORT_EMAIL` | the operator's Google contact email (shown on `/privacy`, `/terms`, `/about`, footer) |
 | `BETTER_AUTH_URL` | `https://<DOMAIN>` |
-| `DATABASE_URL` | `postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/neotolis` |
 | `OAUTH_CLIENT_ID` | from §3 step 4 |
 | `OAUTH_CLIENT_SECRET` | from §3 step 4 |
 | `APP_KEK_BASE64` | from §4 step 3 |
@@ -475,6 +474,20 @@ Fill in:
 | `LIMIT_EVENTS_PER_DAY` | leave default `500` |
 | `IMAGE_TAG` | `latest` (rollback overwrites this — see §5) |
 | `BETTER_AUTH_SECURE_COOKIES` | leave unset for direct-TLS; or `false` if testing behind a non-TLS reverse proxy |
+
+**DATABASE_URL is NOT in this table on purpose.** It's used only by `pnpm
+dev` for local development. On prod, `docker-compose.prod.yml` builds
+`DATABASE_URL` itself in each service's `environment:` block via
+`postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/neotolis`
+substitution from `.env`. If you copied `.env.example` and kept the
+`DATABASE_URL=...${POSTGRES_PASSWORD}...` line, **delete it** — the
+forward reference (DATABASE_URL on line 9 of .env, POSTGRES_PASSWORD on
+line ~126) breaks Compose's top-down `.env` interpolation and emits
+4× "POSTGRES_PASSWORD variable is not set" warnings on every Compose
+invocation. The running app gets the right URL anyway because
+`environment:` overrides `env_file`, but the noise hides future real
+failures. Verify with: `docker compose -f docker-compose.prod.yml config
+2>&1 | grep -i warning` should be empty after deletion.
 
 **NODE_ENV is NOT in this table on purpose.** `docker-compose.prod.yml`
 hard-pins `NODE_ENV: production` in the `environment:` block of every
@@ -916,6 +929,33 @@ in `src/` (Pitfall 9). The CI grep step in
 The smoke gate boots `docker-compose.selfhost.yml` with no
 SaaS-specific env vars — anything that doesn't work in selfhost.yml
 fails the gate.
+
+### `docker compose` warns "POSTGRES_PASSWORD variable is not set" but everything works
+
+Pre-Phase-3 papercut. Operator copied `.env.example` to `.env` and
+kept the `DATABASE_URL=postgres://...:${POSTGRES_PASSWORD}@...` line.
+That's a forward reference: `DATABASE_URL` is on line 9, `POSTGRES_PASSWORD`
+on line ~126. Compose interpolates `.env` top-down, so when it hits
+line 9, `${POSTGRES_PASSWORD}` is empty → 4× warning per invocation
+(once per `${POSTGRES_PASSWORD}` reference in the compose YAML).
+
+Running app is unaffected — `environment:` block in compose overrides
+`env_file`, so the actual containers get the right `DATABASE_URL` with
+the password substituted at compose-YAML interpolation time (after
+`.env` finishes loading).
+
+**Fix:** delete `DATABASE_URL=...` line from `.env`. It's only used
+by `pnpm dev`. On prod, compose builds it.
+
+```bash
+cd /opt/diary
+sudo sed -i '/^DATABASE_URL=/d' .env
+docker compose -f docker-compose.prod.yml config 2>&1 | grep -i warning
+# should be empty now
+```
+
+`.env.example` post-Phase-02.2-close-out has a comment block above
+`DATABASE_URL=` warning operators about exactly this trap.
 
 ### Build-time env placeholders showing in `docker history`
 
