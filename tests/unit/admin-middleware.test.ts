@@ -27,10 +27,14 @@ process.env.OAUTH_CLIENT_ID ??= "test";
 process.env.OAUTH_CLIENT_SECRET ??= "test";
 process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
 
+type HarnessVars = {
+  Variables: { userId: string; sessionId: string; userEmail: string };
+};
+
 async function buildHarnessApp(opts: {
   allowlist: string;
   userEmail: string | null;
-}): Promise<Hono> {
+}): Promise<Hono<HarnessVars>> {
   // Re-parse env.ts with the desired allowlist value.
   const saved: Record<string, string | undefined> = {
     ADMIN_EMAIL_ALLOWLIST: process.env.ADMIN_EMAIL_ALLOWLIST,
@@ -46,7 +50,7 @@ async function buildHarnessApp(opts: {
   );
   const { NotFoundError } = await import("../../src/lib/server/services/errors.js");
 
-  const app = new Hono();
+  const app = new Hono<HarnessVars>();
   // Synthetic tenantScope-equivalent that sets userEmail without going through
   // Better Auth (the unit under test is the allowlist gate; the
   // tenantScope→adminAllowlist composition is exercised in the integration

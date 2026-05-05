@@ -565,3 +565,24 @@ export function toYoutubeChannelMetadataCacheDto(
     updatedAt: r.updatedAt,
   };
 }
+
+// ---- Phase 3.0 Plan 07 — admin-quota DTOs ----
+//
+// Re-export from the service layer so callers can import the projection types
+// + functions from a single barrel (`dto.ts`) consistent with the rest of the
+// Phase 2/3 DTO discipline. The shapes themselves live in
+// `services/admin-quota-read.ts` because they're computed from the row plus
+// the threshold constants exported by `services/youtube-quota-tracker.ts` —
+// keeping them next to the loader avoids a cross-module dance for the
+// pctOfDaily / status derivation.
+//
+// No ciphertext-strip semantics: youtube_service_quota_usage carries no
+// secret-shaped fields, and the cross-tenant audit projection intentionally
+// surfaces only verb + metadata + time (user_id omitted; see admin-quota-read.ts).
+
+export {
+  type QuotaKeyRow,
+  type ServiceAuditEntry,
+  toQuotaKeyRow,
+  toServiceAuditEntry,
+} from "./services/admin-quota-read.js";
