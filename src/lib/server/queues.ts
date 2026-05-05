@@ -54,6 +54,14 @@ export const QUEUES = {
   PURGE_DAILY: "purge.daily",
   YOUTUBE_QUOTA_RESET: "youtube.quota_reset",
   YOUTUBE_CHANNEL_CONTEXT_BACKFILL: "youtube.channel_context_backfill",
+  // Phase 3.0 Plan 09 — scheduler-tick queues (Pattern A from plan, recommended).
+  // The cron schedules send empty {} jobs to these tick queues; the worker
+  // subscribes and the handler calls enqueueActivePolls / enqueueColdPolls,
+  // which then issues real per-event jobs to POLL_ACTIVE / POLL_COLD.
+  // This separation keeps the scheduler-vs-worker contract clean: cron drives
+  // ticks; ticks drive enqueue logic; enqueue logic drives real jobs.
+  SCHEDULER_TICK_ACTIVE: "scheduler.tick.active",
+  SCHEDULER_TICK_COLD: "scheduler.tick.cold",
 } as const satisfies Record<string, string>;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
