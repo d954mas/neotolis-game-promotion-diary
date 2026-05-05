@@ -158,6 +158,24 @@ describe("paraglide i18n (UX-04)", () => {
     // keys (title + intro + repo link + canonical-instance label +
     // privacy/terms link labels + footer contact). Net delta: +57 keys.
     //
+    // Plan 03.0-02 (Wave 0 — doc + Paraglide + test scaffolds): adds 42
+    // keys for the Phase 3.0 PollingBadge live state (5 polling_badge_*
+    // copy variants — hot / cold-yesterday / cold-days-ago / frozen /
+    // unavailable / throttled), the refresh-now affordance (5
+    // polling_refresh_now_* variants — aria / cooldown-tooltip / pending /
+    // done / error), the operator /admin/quota page (16 admin_quota_* +
+    // admin_layout_* keys for title / intro / table cols / status pills /
+    // empty states), the AccountDeletedBanner Permanent-delete-now CTA
+    // (2 account_deleted_banner_permanent_delete_* variants — failed /
+    // pending — see DV-6), and the BackfillPicker initial-import widget
+    // (11 backfill_picker_* keys — section title / blurb / 5 preset
+    // labels / 2 cost labels / 2 helper variants). REMOVES the now-orphan
+    // polling_badge_phase3_placeholder key (the Phase 2.1 placeholder
+    // string "Phase 3 will start polling" — UI-SPEC retires it under
+    // §Copywriting Contract REMOVED). polling_badge_manual is RETAINED
+    // — UI-SPEC keeps it for the never-polled-yet edge case. Net delta:
+    // +42 keys, -1 key.
+    //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
     // across renames (Phase 2 STATE.md guidance, carried forward).
     const EXPECTED_KEYS = [
@@ -189,11 +207,31 @@ describe("paraglide i18n (UX-04)", () => {
       "account_deleted_banner_days_left",
       "account_deleted_banner_permanent_delete_button",
       "account_deleted_banner_permanent_delete_confirm",
+      "account_deleted_banner_permanent_delete_failed",
+      "account_deleted_banner_permanent_delete_pending",
       "account_deleted_banner_restore_button",
       "account_deleted_banner_restore_expired",
       "account_deleted_banner_restore_failed",
       "account_deleted_banner_title",
       "add_store_dialog_heading",
+      "admin_layout_breadcrumb",
+      "admin_layout_breadcrumb_aria",
+      "admin_quota_audit_empty_body",
+      "admin_quota_audit_empty_heading",
+      "admin_quota_keys_empty_body",
+      "admin_quota_keys_empty_heading",
+      "admin_quota_load_failed",
+      "admin_quota_page_intro",
+      "admin_quota_page_title",
+      "admin_quota_section_audit_title",
+      "admin_quota_section_keys_title",
+      "admin_quota_status_80_throttle",
+      "admin_quota_status_95_throttle",
+      "admin_quota_status_ok",
+      "admin_quota_table_col_key_id",
+      "admin_quota_table_col_pct_of_daily",
+      "admin_quota_table_col_status",
+      "admin_quota_table_col_units_used",
       "app_title",
       "appheader_account_menu_aria",
       "audit_action_account_deleted",
@@ -226,6 +264,17 @@ describe("paraglide i18n (UX-04)", () => {
       "audit_action_user_signup",
       "audit_filter_action_axis_label",
       "audit_filter_date_axis_label",
+      "backfill_picker_helper_1d",
+      "backfill_picker_helper_default",
+      "backfill_picker_preset_1d_label",
+      "backfill_picker_preset_30d_label",
+      "backfill_picker_preset_7d_label",
+      "backfill_picker_preset_90d_label",
+      "backfill_picker_preset_cost_everything",
+      "backfill_picker_preset_cost_low",
+      "backfill_picker_preset_everything_label",
+      "backfill_picker_section_blurb",
+      "backfill_picker_section_title",
       "badge_purge_in_days",
       "badge_purge_in_days_warning",
       "badge_release_tba",
@@ -398,8 +447,18 @@ describe("paraglide i18n (UX-04)", () => {
       "page_header_recently_deleted",
       "paste_box_label",
       "paste_box_placeholder",
+      "polling_badge_cold_days_ago",
+      "polling_badge_cold_yesterday",
+      "polling_badge_frozen",
+      "polling_badge_hot",
       "polling_badge_manual",
-      "polling_badge_phase3_placeholder",
+      "polling_badge_throttled",
+      "polling_badge_unavailable",
+      "polling_refresh_now_aria",
+      "polling_refresh_now_cooldown_tooltip",
+      "polling_refresh_now_done",
+      "polling_refresh_now_error",
+      "polling_refresh_now_pending",
       "privacy_last_updated",
       "privacy_section_changes_body",
       "privacy_section_changes_title",
@@ -533,6 +592,34 @@ describe("paraglide i18n (UX-04)", () => {
   it("removes Phase 2 audit_action_item_* keys (dead after enum rename)", () => {
     expect(enMessages).not.toHaveProperty("audit_action_item_created");
     expect(enMessages).not.toHaveProperty("audit_action_item_deleted");
+  });
+
+  it("Plan 03.0-02: PollingBadge + refresh-now + admin /quota copy lands the UI-SPEC verbatim strings", () => {
+    // UI-SPEC §Copywriting Contract — these literals must match exactly.
+    // Drift here means the badge / page now renders different copy than
+    // the design contract; UI-SPEC has the EXACT strings as the source of
+    // truth. The test is structural-AND-content (keyset assertion above
+    // catches missing keys; this catches accidental copy drift).
+    const m = enMessages as Record<string, string>;
+    // PollingBadge five live variants (Active / Cold ×2 / Frozen / Unavailable + Throttled).
+    expect(m.polling_badge_hot).toBe("Hot · checked {hoursAgo}h ago");
+    expect(m.polling_badge_cold_yesterday).toBe("Cold · yesterday");
+    expect(m.polling_badge_cold_days_ago).toBe("Cold · {daysAgo}d ago");
+    expect(m.polling_badge_frozen).toBe("Frozen · refresh to update");
+    expect(m.polling_badge_unavailable).toBe("Unavailable · last seen {daysAgo}d ago");
+    expect(m.polling_badge_throttled).toBe("Throttled — operator quota");
+    // Admin-quota status pills (the load-bearing copy on /admin/quota).
+    expect(m.admin_quota_status_80_throttle).toBe("80% throttle — Cold paused");
+    expect(m.admin_quota_status_95_throttle).toBe("95% throttle — Active paused");
+    // BackfillPicker default-helper copy (the load-bearing nudge text on
+    // the source-creation form).
+    expect(m.backfill_picker_helper_default).toBe(
+      "30 days fits most active devlogs without spending much quota.",
+    );
+  });
+
+  it("Plan 03.0-02: deprecated polling_badge_phase3_placeholder key is removed (UI-SPEC §Copywriting Contract REMOVED)", () => {
+    expect(enMessages).not.toHaveProperty("polling_badge_phase3_placeholder");
   });
 
   it("UX-04 invariant: project.inlang/settings.json has baseLocale=en and a single locale in MVP (D-17)", () => {
