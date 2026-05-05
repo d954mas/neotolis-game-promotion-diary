@@ -8,14 +8,16 @@ Six phases derived from the architecture's locked 6-tier build order. Phase 1 la
 
 **Phase Numbering:**
 - Integer phases (1, 2, 3): Planned milestone work
-- Decimal phases (1.1, 2.1): Urgent insertions (marked with INSERTED)
+- Decimal phases: used for either (a) urgent insertions discovered during execution (marked INSERTED — Phase 2.1, 2.2), or (b) scope splits decided during /gsd:discuss-phase when a planned phase is too large for one atomic delivery (marked DECIMAL SPLIT — Phase 3.0/3.1/3.2)
 
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation** - Bootable image with Google OAuth, envelope encryption, tenant scoping, and self-host CI smoke test gating every PR
 - [!] **Phase 2: Ingest, Secrets, and Audit** - Games CRUD, paste-URL ingest, write-once API key storage, events timeline, owner-visible audit log *(closed gaps_found 2026-04-28 via UAT — 4 P0 architectural redesigns + 1 P0 functional gap surfaced; closure in Phase 2.1)*
 - [x] **Phase 2.1: Architecture Realignment (INSERTED)** - Unified `data_sources` abstraction + 3-view IA (`/feed` primary nav + `/sources` + `/games/[id]`) + auto-import inbox + unified `events` table with `author_is_me` discriminator; closes the 4 P0 architectural gaps from Phase 2 UAT plus the rename/add-Steam UI gap on `/games/[id]`. *Signed off 2026-04-30 after 6 UAT rounds + 30 gap-closure plans + 16 round-6 polish iterations.*
-- [ ] **Phase 3: Polling Pipeline** - Adaptive hot/warm/cold polling driven by per-kind `DataSourceAdapter`; YouTube + Reddit + Steam concrete adapters; both wishlist ingest paths
+- [ ] **Phase 3.0: Polling Pipeline — Plumbing + YouTube (DECIMAL SPLIT)** - Active/Cold/Frozen tiers driven by per-kind `DataSourceAdapter`; YouTube concrete adapter with **service-level quota model** (operator's `SERVICE_YOUTUBE_API_KEYS` env, shared `youtube_video_snapshots`); channel auto-import + per-event stats polling + refresh-now + channel context backfill; purge worker (closes Phase 02.2 PUTOFF + GDPR Art. 17 60d grace); admin panel `/admin/quota` (env allowlist gated)
+- [ ] **Phase 3.1: Reddit Adapter (DECIMAL SPLIT)** - Reddit OAuth (per-user BYO app credentials), KEYS-02, INGEST-01 Reddit URL ingest, reddit_account adapter, subreddit-rules-prep metadata stamping; per-user 429 surfacing
+- [ ] **Phase 3.2: Steam Wishlist (DECIMAL SPLIT)** - Three wishlist ingest paths (manual entry / CSV upload / Steam Web API auto-fetch), wishlist_snapshots schema, per-game wishlist UX
 - [ ] **Phase 4: Visualization** - Per-event charts, combined per-game timeline, and the annotated wishlist correlation chart with UX baseline
 - [ ] **Phase 5: Reddit Rules Cockpit** - Subreddit rules ingestion, structured cooldown/flair fields, curated seed for top ~10 indie subs
 - [ ] **Phase 6: Trust and Self-Host Parity Polish** - Export, account deletion, quota dashboard, deploy parity, KEK-rotation runbook, OSS release
@@ -146,28 +148,55 @@ Plans:
 - [x] 02.1-39-PLAN.md — Round-6 Wave 2: closes round-5 §5.3 + §5.4 + §5.5 + §5.6 + §5.7 + §5.8 (UI bundle: sticky chrome via single-wrapper architecture, RecoveryDialog modal cross-app pattern, /games/[gameId] redesign + games.description schema, FiltersSheet kind glyph); 16 round-6 polish iterations driven by manual UAT inlined here (each cites verbatim Russian user quote in 02.1-39-SUMMARY.md)
 **UI hint**: yes
 
-### Phase 3: Polling Pipeline
-**Goal**: Adaptive polling worker pool actually fetches metrics through the per-kind `DataSourceAdapter` interface defined in Phase 2.1. pg-boss queues, scheduler, three concrete adapters (YouTube + Reddit + Steam wishlist), and the two wishlist ingest paths land together because they are co-dependent and pitfall-dense (P4–P9, P11). Snapshots accumulate in `event_stats_snapshots` so Phase 4 has data to chart.
-**Depends on**: Phase 2.1
-**Requirements**: POLL-01, POLL-02, POLL-03, POLL-04, POLL-05, POLL-06, WISH-01, WISH-02, WISH-03, KEYS-01, KEYS-02, INGEST-01 *(KEYS-01, KEYS-02, INGEST-01 deferred from Phase 2 per CONTEXT.md DV-1/DV-7 — land alongside their respective poll adapters)*
-**Spike (gate at phase start, MEDIUM-confidence area)**:
-  - One live authenticated `GET /r/IndieDev/about/rules.json` to confirm the JSON schema (raw rule text vs. structured `cooldown_days`/`flair_required` fields). Locks the `subreddit_rules` table shape used downstream in Phase 5.
-  - Confirm batched `videos.list` quota math: a single `videos.list?id=v1,v2,...,v50&part=snippet,statistics` call returns 50 videos for 1 quota unit (the 50× saving over per-video calls). Validate against current YouTube Data API v3 documentation and a real call before committing the worker design.
+### Phase 3.0: Polling Pipeline — Plumbing + YouTube
+*DECIMAL SPLIT — scope split decided during /gsd:discuss-phase 03 on 2026-05-05; original "Phase 3: Polling Pipeline" was too co-dependent for one atomic delivery (3 adapters + 2 wishlist paths + Reddit OAuth = 30+ plans). Split per /gsd:discuss-phase D-01.*
+
+**Goal**: Land the polling-pipeline plumbing (pg-boss adaptive queues + scheduler tier resolver + worker pool with SIGTERM-graceful drain) and the YouTube concrete `DataSourceAdapter` end-to-end. Adopt **service-level quota model** for YouTube (one operator-owned `SERVICE_YOUTUBE_API_KEYS` env list with round-robin + per-key tracking; shared `youtube_video_snapshots` cache by `video_id` regardless of which user's event references it) — **deviates from PROJECT.md "Per-user API keys" for YouTube only** (Reddit + Steam stay per-user; see PROJECT.md Key Decisions split). Includes refresh-now affordance, channel context backfill on first paste of unknown channel, soft-deleted-row purge worker (closes Phase 02.2 PUTOFF + GDPR Art. 17 60-day grace), and an env-allowlist-gated `/admin/quota` panel for operator visibility into the shared quota envelope.
+**Depends on**: Phase 2.2
+**Requirements**: POLL-01..06 (refined per Active/Cold/Frozen tiers + service-level YouTube quota model), INGEST-02..04 polling integration (already shipped Phase 2.1; this completes the poll path), VIZ-01 data layer (`youtube_video_snapshots` immutable time-series for Phase 4 chart consumption), PRIV-04 closure (purge worker completes the documented soft-delete → purge two-stage), KEYS-01 *reframed* (per-user YouTube API key override **DEFERRED to Phase 6** — Phase 3.0 ships service-level only; per-user override lands when `>=1 power user trips 95% of operator's quota` trigger fires).
+**Spike (gate as Wave 0 Task #1 of 03.0-PLAN.md)**:
+  - Confirm batched `videos.list` quota math against live YouTube Data API v3: `videos.list?id=v1,v2,...,v50&part=snippet,statistics` returns 50 videos for **1 quota unit** (50× saving over per-video calls). One live call with operator's API key + `quotaUser` parameter, response logged in 03.0-RESEARCH.md as verified fact before worker design proceeds.
 **Success Criteria** (what must be TRUE):
-  1. After a user adds a Reddit post or YouTube video event (via manual paste or auto-import from a registered `data_source`), a stats snapshot is recorded within ~30 minutes, and the per-event polling badge in the UI reads "Hot — checked Xm ago"; an event older than 24h reads "Warm — every 6h", older than 30 days reads "Cold — daily", and one with no successful poll in >48h reads "Stale"
-  2. A 5,000-event cold backlog never blocks a fresh hot poll: hot, warm, cold, and on-demand "refresh now" each have separate pg-boss queues with their own concurrency caps (4/2/1/2), and a user-triggered refresh executes ahead of scheduled work
-  3. When a per-user API key returns 429 / quota-exhausted, the affected job defers with backoff, the condition is surfaced visibly to that user (not silently retried forever), and other users' jobs are unaffected
-  4. Every successful poll appends an immutable row to `event_stats_snapshots` (`event_id`, `polled_at`, `metric_key`, `metric_value`); the live `events` row carries only `last_polled_at` and `last_poll_status` — chart history is never mutated, which is what enables the Phase 4 differentiator
-  5. The user can record a wishlist count manually for a date, upload a Steamworks `Wishlists.csv` and see daily counts imported, or — if a Steam Web API key is configured — the daily worker auto-fetches the wishlist count without any user action
-  6. Operator runs `docker compose up -d` to redeploy and no in-flight poll is lost: workers honor SIGTERM with a configurable grace period (default 60s), pg-boss drains, snapshot inserts are idempotent on `(event_id, polled_at, metric_key)`, and audit log records the shutdown event
-  7. *(Deferred from Phase 2)* User saves a YouTube Data API v3 key (envelope-encrypted at rest); the key is consumed by the `youtube_channel` adapter. User authorizes Reddit via OAuth (per-user, BYO Reddit app credentials) and rotates / revokes at any time; the credentials are consumed by the `reddit_account` adapter.
-  8. *(Deferred from Phase 2)* User pastes a Reddit post URL on a game and an event of `kind=reddit_post` is created; ingest validates against Reddit API; on success the event enters the polling pipeline alongside YouTube videos via the same generic worker loop.
-  9. **Auto-import via DataSourceAdapter** *(promoted from Phase 2.1 todo):* When a `data_source` of `kind=youtube_channel` has `auto_import=true`, the `youtube_channel` adapter polls `playlistItems.list` against the channel's uploads playlist and inserts new events with `source_id` set + `game_id=NULL` (inbox); user attaches via the `/feed` "Attach" picker. Quota math validated against the spike (1 unit per 50-video page).
-  10. *Phase 3 smoke extension (per Phase 1 DEPLOY-05 scope deferral, 2026-04-27):* CI self-host smoke test additionally enqueues and processes a poll-stub job end-to-end, asserting `event_stats_snapshots` records an immutable row and the worker drains on SIGTERM.
+  1. After a user adds a YouTube event (via manual paste or auto-import from registered `data_source`), a stats snapshot is recorded within ~30 minutes; PollingBadge reads `Hot · checked Xh ago` for events 0–24h old (by `occurred_at`), `Cold · yesterday` for events 1–28d, `Frozen · refresh to update` for events >28d. ROADMAP "stale" terminology of original Phase 3 is RETIRED — Frozen replaces it with deterministic age-based semantics; transient errors get `Unavailable · last seen Xd ago` per `last_poll_status` (`not_found` / `private` / `auth_error`).
+  2. Cold/Frozen backlog never blocks fresh Active polls: separate pg-boss queues `poll.hot` (Active 0–24h) / `poll.cold` (Cold 1–28d) / `poll.user` (refresh-now); each has its own concurrency cap; user-triggered refresh executes ahead of scheduled work. Frozen tier never enqueues automatically.
+  3. **Service-level YouTube quota throttle** (replaces original "per-user 429 surfacing" for YouTube only): `youtube_service_quota_usage(date_pacific, api_key_id, estimated_units)` table tracks today's spend per operator key (round-robined from `SERVICE_YOUTUBE_API_KEYS` comma-separated env). When daily quota approaches 80% on any key, scheduler pauses Cold polling + auto-import for that key (Active polling + refresh-now continue); 95% pauses everything. State surfaced in `/admin/quota` for users in `ADMIN_EMAIL_ALLOWLIST` env (default empty = 404). Reset cron at midnight Pacific Time. Per-user 429 surfacing for Reddit + Steam — Phase 3.1 / 3.2.
+  4. Every successful poll appends an immutable row to **`youtube_video_snapshots`** (`video_id`, `polled_at`, `view_count`, `like_count`, `comment_count`); the live `events` row carries only `last_polled_at` and `last_poll_status`. Snapshot table has NO `user_id` column — data is shared across all tenants by `video_id` (public YouTube data, ESLint tenant-scope allowlist extension with explicit comment). Phase 4 chart loader: `SELECT FROM youtube_video_snapshots WHERE video_id = e.external_id JOIN events e WHERE e.user_id = $userId`. Idempotency: `(video_id, polled_at, metric_key)` UNIQUE with `polled_at` truncated to minute (worker retries within same minute = no-op via INSERT ON CONFLICT DO NOTHING).
+  5. User registers a YouTube channel via `/sources/new` with `auto_import=true`; **one-time backfill picker** (5 presets: 1 / 7 / 30 / 90 days / Everything; default 30) imports videos to inbox; subsequent auto-import polling (every 6h, incremental from `last_polled_at`) inserts new videos. Manual paste of any YouTube URL creates an event with `source_id=NULL`; if oEmbed `author_url` matches a registered owned-by-me data_source, `author_is_me` inherits true. Manual paste does NOT auto-create a `data_source` row.
+  6. **Channel context backfill** (one-time per channel): when user pastes a video from a YouTube channel not in `youtube_channel_metadata_cache`, worker enqueues a one-shot job — `playlistItems.list` last 50 videos (1 unit) + batched `videos.list` snapshot (1 unit) → cached for Phase 4 chart median context computation. Subsequent paste from same channel = cache hit, no extra quota.
+  7. **Refresh-now** affordance: per-event icon button on `<PollingBadge>` for any pollable event (`kind ∈ {youtube_video}` AND `last_polled_at IS NOT NULL` OR Frozen). Click → POST `/api/events/:id/refresh-poll` → enqueues to `poll.user` queue with priority above scheduled work. Rate-limit: 1 click per event per 5 minutes; persisted in `events.metadata.last_user_refresh_at`; subsequent click within window returns 429 `too_many_refreshes` with retry-after metadata; UI disables button + tooltip "Wait Xm".
+  8. Operator runs `docker compose up -d` to redeploy and no in-flight poll is lost: workers honor SIGTERM with a 60s graceful drain (Phase 1 D-22 inherited); pg-boss state persists to Postgres; partial index `idx_events_last_polled_at WHERE last_polled_at IS NOT NULL` (deferred from Phase 2.1 per ROADMAP deferred items) lands in 03.0 baseline migration.
+  9. **Purge worker** (closes Phase 2 D-25 + Phase 02.2 `AccountDeletedBanner` PUTOFF + GDPR Art. 17 60-day grace contractual closure): pg-boss daily cron `0 4 * * *` (4 AM PT, after backup at 3) hard-deletes user/games/data_sources/events/api_keys_steam rows with `deleted_at < now()-RETENTION_DAYS`. Audit `purge.completed` with `metadata.row_counts`. **Permanent-delete-now** CTA in `AccountDeletedBanner.svelte` activated (was hidden in 02.2): calls same `purgeAccount(userId)` service immediately for that user — no waiting 60 days. Type-DELETE confirm dialog gating preserved.
+  10. **Admin panel** `/admin/*` gated on `c.var.userEmail in env.ADMIN_EMAIL_ALLOWLIST` (comma-separated emails, empty default = `""` → all admin routes return 404). Phase 3.0 ships exactly one page: `/admin/quota` showing today's `youtube_service_quota_usage` per key + last 50 service-level audit entries (`quota.service_throttled`, `purge.completed`, etc.). Self-host parity preserved by construction: smoke gate boots image with empty allowlist → asserts `/admin/quota` returns 404. Phase 6 expands `/admin/*` shell with per-user QUOTA-01 dashboards.
+  11. **events_per_day quota EXCLUDES auto-import** (refines Phase 02.2 D-11): `withQuotaGuard('events_per_day')` `currentCount` filter adds `source_id IS NULL`. Auto-import worker bypasses `withQuotaGuard` entirely. Closes Phase 02.2 PUTOFF "auto-import quota throttle defer-not-throw" via the simpler exclusion approach (no defer queue needed).
+  12. *Phase 3.0 smoke extension (per Phase 1 DEPLOY-05 scope deferral, 2026-04-27):* CI self-host smoke test enqueues and processes a poll-stub job end-to-end through a **mock YouTube reverse-proxy** (`tests/smoke/lib/youtube-mock.sh` — nock-style HTTP stub for `videos.list` / `playlistItems.list`); asserts immutable row in `youtube_video_snapshots`, `events.last_polled_at` populated, worker drains on SIGTERM, scheduler registers all Phase 3.0 cron expressions, `/admin/*` returns 404 with empty `ADMIN_EMAIL_ALLOWLIST` (parity assertion). NO live YouTube API in CI.
 
-**Phase 3 deferred items (filed by Plan 02-03 W-4):**
-  - TODO: add partial index `idx_events_last_polled_at` `WHERE last_polled_at IS NOT NULL` on `events`. Deferred from Phase 2.1 because the unified events table inserts NULL on every row until the polling worker lands — the index would be bloat over an all-NULL column. Add it in the migration that lands the first `DataSourceAdapter` worker. Use raw SQL in a companion migration if Drizzle 0.45's `.where(sql\`...\`)` on `index()` does not emit cleanly for the locked version. *(Originally filed against `tracked_youtube_videos.last_polled_at`; rebased onto `events.last_polled_at` after Phase 2.1 unification.)*
+**Wave breakdown** (per CONTEXT D-04, "5 waves with UAT checkpoints" / Phase 2.1 style):
+  - **Wave 0** — spike (Task #1: live `videos.list` batched quota validation), 0001_phase03_baseline migration (`youtube_video_snapshots` + `youtube_channel_metadata_cache` + `youtube_service_quota_usage` + `idx_events_last_polled_at` + dedup partial unique index `events_user_kind_ext_active_unq` + audit verb additions: `quota.service_throttled` / `purge.completed` / `auto_import.deferred` / `poll.failed` / `event.poll_refreshed`), ESLint TENANT_TABLES update (allowlist `youtube_video_snapshots` / `youtube_channel_metadata_cache` / `youtube_service_quota_usage` as non-tenant-scoped public-data tables — explicit comment), placeholder test files, `SERVICE_YOUTUBE_API_KEYS` + `ADMIN_EMAIL_ALLOWLIST` env additions, REQUIREMENTS.md + PROJECT.md doc updates per CONTEXT D-03 / D-NEW.
+  - **Wave 1** — services: `youtube-quota-tracker.ts`, `youtube-snapshot-writer.ts`, `tier-resolver.ts` (single source of truth, Pitfall 7 mitigation), `purge-account.ts` (extracted from Phase 02.2 `services/account.ts` shared backbone), `youtube-channel-adapter.ts` real implementation replacing the Phase 2.1 STUB.
+  - **Wave 2** — HTTP routes: POST `/api/events/:id/refresh-poll`, DELETE `/api/me/account/purge` (Permanent-delete-now), GET `/api/admin/quota` (admin-allowlist gated); admin middleware; tenant-scope + anonymous-401 sweep extensions.
+  - **Wave 3** — pg-boss workers + scheduler cron registrations (`youtube.poll.active` `0 */6 * * *`, `youtube.poll.cold` `0 5 * * *`, `youtube.quota_reset` `0 0 * * *`, `purge.daily` `0 4 * * *`, `youtube.channel_context_backfill` user-triggered queue), worker boot subscribes to all `poll.*` queues.
+  - **Wave 4** — UI polish: live `<PollingBadge>` (Active/Cold/Frozen/Unavailable states with refresh icon + 5min cooldown), `/admin/quota` SvelteKit page, `<AccountDeletedBanner>` Permanent-delete-now CTA activation. **Manual UAT checkpoint** after Wave 4.
+  - **Wave 5** — smoke extension (mock YouTube + cron tick assertions + admin parity), 03.0-VERIFICATION.md sign-off.
 
+**Plans**: TBD (target ~12–15 atomic plans based on Wave breakdown; gap closure adds in round-N pattern per Phase 2.1 precedent if UAT surfaces issues)
+
+### Phase 3.1: Reddit Adapter
+*DECIMAL SPLIT — scope split decided during /gsd:discuss-phase 03 on 2026-05-05.*
+
+**Goal**: Land the Reddit concrete `DataSourceAdapter` (per-user OAuth model — distinct from Phase 3.0's service-level YouTube path), plus deferred Phase 2 items KEYS-02 (Reddit OAuth flow) and INGEST-01 (Reddit URL paste creates `kind=reddit_post` event). Stamp subreddit metadata at ingest time so Phase 5 (Reddit Rules Cockpit) has the data layer ready.
+**Depends on**: Phase 3.0 (pg-boss plumbing, tier resolver, snapshot writer pattern, refresh-now infrastructure, admin panel shell)
+**Requirements**: KEYS-02, INGEST-01, POLL-* Reddit-specific extensions (per-user 429 surfacing path)
+**Spike (gate at phase start)**: One live authenticated `GET /r/IndieDev/about/rules.json` to confirm the JSON schema (raw rule text vs. structured `cooldown_days` / `flair_required` fields). Locks the `subreddit_rules` table shape used downstream in Phase 5.
+**Success Criteria**: TBD via /gsd:discuss-phase 3.1
+**Plans**: TBD
+
+### Phase 3.2: Steam Wishlist
+*DECIMAL SPLIT — scope split decided during /gsd:discuss-phase 03 on 2026-05-05.*
+
+**Goal**: Three wishlist ingest paths (manual entry, Steamworks `Wishlists.csv` upload, Steam Web API auto-fetch when key present). `wishlist_snapshots` schema (per-game per-day). Per-game wishlist UX surface.
+**Depends on**: Phase 3.0 (pg-boss plumbing, scheduler), Phase 2 (Steam Web API key envelope encryption)
+**Requirements**: WISH-01, WISH-02, WISH-03
+**Success Criteria**: TBD via /gsd:discuss-phase 3.2
 **Plans**: TBD
 
 ### Phase 4: Visualization
@@ -212,7 +241,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 2.1 → 2.2 → 3 → 4 → 5 → 6
+Phases execute in numeric order: 1 → 2 → 2.1 → 2.2 → 3.0 → 3.1 → 3.2 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -220,7 +249,9 @@ Phases execute in numeric order: 1 → 2 → 2.1 → 2.2 → 3 → 4 → 5 → 6
 | 2. Ingest, Secrets, and Audit | 11/11 | Gaps Found | 2026-04-28 (closure in 2.1) |
 | 2.1. Architecture Realignment (INSERTED) | 34/34 | Signed off (verifier next) | 2026-04-30 — Plans 11-16 closed round-1 UAT gaps; Plans 17-20 closed round-2; Plans 21-26 closed round-3; Plans 27-34 closed round-4; Plans 35-39 closed round-5 (13 findings); Plan 39 inlined 16 round-6 polish iterations; Plan 10 sign-off paperwork closed 2026-04-30 |
 | 2.2. Ship to Prod (INSERTED) | 8/8 | Complete | 2026-05-04 — production deploy artifacts (compose / nginx / scripts / GHCR CI) + GDPR baseline (export / soft-delete / restore) + per-user quotas (race-free + pool-deadlock-safe). 5 HUMAN-UAT items pending live VPS validation per D-PRE. |
-| 3. Polling Pipeline | 0/TBD | Not started | - |
+| 3.0. Polling Pipeline — Plumbing + YouTube (DECIMAL SPLIT) | 0/TBD | Context captured 2026-05-05 | - |
+| 3.1. Reddit Adapter (DECIMAL SPLIT) | 0/TBD | Not started | - |
+| 3.2. Steam Wishlist (DECIMAL SPLIT) | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
 | 5. Reddit Rules Cockpit | 0/TBD | Not started | - |
 | 6. Trust and Self-Host Parity Polish | 0/TBD | Not started | - |
