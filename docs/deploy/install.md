@@ -480,14 +480,15 @@ dev` for local development. On prod, `docker-compose.prod.yml` builds
 `DATABASE_URL` itself in each service's `environment:` block via
 `postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/neotolis`
 substitution from `.env`. If you copied `.env.example` and kept the
-`DATABASE_URL=...${POSTGRES_PASSWORD}...` line, **delete it** — the
-forward reference (DATABASE_URL on line 9 of .env, POSTGRES_PASSWORD on
-line ~126) breaks Compose's top-down `.env` interpolation and emits
-4× "POSTGRES_PASSWORD variable is not set" warnings on every Compose
-invocation. The running app gets the right URL anyway because
-`environment:` overrides `env_file`, but the noise hides future real
-failures. Verify with: `docker compose -f docker-compose.prod.yml config
-2>&1 | grep -i warning` should be empty after deletion.
+`DATABASE_URL=...${POSTGRES_PASSWORD}...` line, **either delete it OR
+move POSTGRES_PASSWORD above it** — otherwise the forward reference
+(DATABASE_URL on line 9 of .env, POSTGRES_PASSWORD on line ~126) breaks
+Compose's top-down `.env` interpolation and emits 4× "POSTGRES_PASSWORD
+variable is not set" warnings on every Compose invocation. The running
+app gets the right URL anyway because `environment:` overrides
+`env_file`, but the noise hides future real failures. See §7 FAQ for
+both fix paths. Verify with: `docker compose -f docker-compose.prod.yml
+config 2>&1 | grep -i warning` should be empty after the fix.
 
 **NODE_ENV is NOT in this table on purpose.** `docker-compose.prod.yml`
 hard-pins `NODE_ENV: production` in the `environment:` block of every
@@ -944,18 +945,37 @@ Running app is unaffected — `environment:` block in compose overrides
 the password substituted at compose-YAML interpolation time (after
 `.env` finishes loading).
 
-**Fix:** delete `DATABASE_URL=...` line from `.env`. It's only used
-by `pnpm dev`. On prod, compose builds it.
+**Fix — pick one.** Both eliminate the warning:
 
+**Option A — delete DATABASE_URL line from .env** (cleanest for prod):
+DATABASE_URL is only needed by `pnpm dev` for local development. On
+prod, compose builds it from `${POSTGRES_PASSWORD}` in each service's
+`environment:` block.
 ```bash
 cd /opt/diary
 sudo sed -i '/^DATABASE_URL=/d' .env
+```
+
+**Option B — move POSTGRES_PASSWORD line above DATABASE_URL line**
+(keep DATABASE_URL in .env if any non-compose tooling reads it
+directly):
+```bash
+cd /opt/diary
+sudo cp .env .env.bak
+PWLINE=$(grep '^POSTGRES_PASSWORD=' .env)
+sudo sed -i "/^POSTGRES_PASSWORD=/d" .env
+sudo sed -i "1i ${PWLINE}" .env
+sudo head -3 .env  # verify POSTGRES_PASSWORD is now line 1
+```
+
+After either fix, verify:
+```bash
 docker compose -f docker-compose.prod.yml config 2>&1 | grep -i warning
 # should be empty now
 ```
 
 `.env.example` post-Phase-02.2-close-out has a comment block above
-`DATABASE_URL=` warning operators about exactly this trap.
+`DATABASE_URL=` documenting the trap and both fixes.
 
 ### Build-time env placeholders showing in `docker history`
 
