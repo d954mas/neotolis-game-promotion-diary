@@ -64,9 +64,7 @@ describe("Plan 03.0-12 — createSource backfillWindow → YOUTUBE_CHANNEL_CONTE
     expect(src.kind).toBe("youtube_channel");
     expect(src.autoImport).toBe(true);
 
-    const enqueues = sentJobs.filter(
-      (j) => j.queue === "youtube.channel_context_backfill",
-    );
+    const enqueues = sentJobs.filter((j) => j.queue === "youtube.channel_context_backfill");
     expect(enqueues).toHaveLength(1);
     const job = enqueues[0]!;
     expect(job.data).toMatchObject({
@@ -76,9 +74,7 @@ describe("Plan 03.0-12 — createSource backfillWindow → YOUTUBE_CHANNEL_CONTE
       backfillWindow: "90d",
     });
     // singletonKey scopes the dedup window to this source row.
-    expect((job.options as { singletonKey?: string }).singletonKey).toBe(
-      `source-${src.id}`,
-    );
+    expect((job.options as { singletonKey?: string }).singletonKey).toBe(`source-${src.id}`);
   });
 
   it("kind=youtube_channel + autoImport=true + no backfillWindow → defaults to '30d'", async () => {
@@ -93,9 +89,7 @@ describe("Plan 03.0-12 — createSource backfillWindow → YOUTUBE_CHANNEL_CONTE
       "127.0.0.1",
     );
 
-    const enqueues = sentJobs.filter(
-      (j) => j.queue === "youtube.channel_context_backfill",
-    );
+    const enqueues = sentJobs.filter((j) => j.queue === "youtube.channel_context_backfill");
     expect(enqueues).toHaveLength(1);
     expect(enqueues[0]!.data).toMatchObject({ backfillWindow: "30d" });
   });
@@ -114,17 +108,12 @@ describe("Plan 03.0-12 — createSource backfillWindow → YOUTUBE_CHANNEL_CONTE
     );
 
     expect(src.autoImport).toBe(false);
-    const enqueues = sentJobs.filter(
-      (j) => j.queue === "youtube.channel_context_backfill",
-    );
+    const enqueues = sentJobs.filter((j) => j.queue === "youtube.channel_context_backfill");
     expect(enqueues).toHaveLength(0);
 
     // Source row still created — the BackfillPicker is a UX nicety, not
     // a precondition for source creation.
-    const rows = await db
-      .select()
-      .from(dataSources)
-      .where(eq(dataSources.id, src.id));
+    const rows = await db.select().from(dataSources).where(eq(dataSources.id, src.id));
     expect(rows).toHaveLength(1);
   });
 
@@ -165,9 +154,7 @@ describe("Plan 03.0-12 — createSource backfillWindow → YOUTUBE_CHANNEL_CONTE
     });
     expect(res.status).toBe(201);
 
-    const enqueues = sentJobs.filter(
-      (j) => j.queue === "youtube.channel_context_backfill",
-    );
+    const enqueues = sentJobs.filter((j) => j.queue === "youtube.channel_context_backfill");
     expect(enqueues).toHaveLength(1);
     expect(enqueues[0]!.data).toMatchObject({ backfillWindow: "7d" });
   });

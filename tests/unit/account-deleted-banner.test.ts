@@ -44,14 +44,10 @@ vi.mock("$lib/auth-client", () => ({
 }));
 
 const { render } = await import("svelte/server");
-const AccountDeletedBanner = (
-  await import("../../src/lib/components/AccountDeletedBanner.svelte")
-).default;
+const AccountDeletedBanner = (await import("../../src/lib/components/AccountDeletedBanner.svelte"))
+  .default;
 
-const SOURCE_PATH = resolve(
-  __dirname,
-  "../../src/lib/components/AccountDeletedBanner.svelte",
-);
+const SOURCE_PATH = resolve(__dirname, "../../src/lib/components/AccountDeletedBanner.svelte");
 const sourceText = readFileSync(SOURCE_PATH, "utf8");
 
 describe("Plan 03.0-12 — AccountDeletedBanner Permanent-delete-now CTA (DV-6)", () => {
@@ -82,7 +78,7 @@ describe("Plan 03.0-12 — AccountDeletedBanner Permanent-delete-now CTA (DV-6)"
     expect(out.body).toMatch(/class="[^"]*\bpurge-cta\b[^"]*"/);
   });
 
-  it("the component source imports ConfirmDialog and uses requireText=\"DELETE\" isIrreversible={true} (D-S3 pattern)", () => {
+  it('the component source imports ConfirmDialog and uses requireText="DELETE" isIrreversible={true} (D-S3 pattern)', () => {
     expect(sourceText).toContain("ConfirmDialog");
     expect(sourceText).toContain('requireText="DELETE"');
     expect(sourceText).toContain("isIrreversible={true}");

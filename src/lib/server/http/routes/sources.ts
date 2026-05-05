@@ -42,6 +42,13 @@ const sourceKindEnum = z.enum([
   "discord_server",
 ]);
 
+// Phase 03.0-12 (D-09) — initial-backfill window field. Defaults applied
+// at the service layer (createSource picks '30d' when undefined), not here:
+// keeping the field truly optional at the HTTP boundary mirrors the
+// BackfillPicker's UI gate (the field is only POSTed when the picker is
+// rendered, which happens iff kind=youtube_channel + autoImport).
+const backfillWindowEnum = z.enum(["1d", "7d", "30d", "90d", "everything"]);
+
 const createSourceSchema = z.object({
   kind: sourceKindEnum,
   handleUrl: z.string().url(),
@@ -50,6 +57,7 @@ const createSourceSchema = z.object({
   isOwnedByMe: z.boolean().optional(),
   autoImport: z.boolean().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  backfillWindow: backfillWindowEnum.optional(),
 });
 
 const updateSourceSchema = z

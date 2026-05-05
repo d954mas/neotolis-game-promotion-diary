@@ -120,12 +120,7 @@
     <button type="button" class="restore" disabled={pending} onclick={handleRestore}>
       {m.account_deleted_banner_restore_button()}
     </button>
-    <button
-      type="button"
-      class="purge-cta"
-      disabled={purgePending}
-      onclick={openPurgeConfirm}
-    >
+    <button type="button" class="purge-cta" disabled={purgePending} onclick={openPurgeConfirm}>
       {purgePending
         ? m.account_deleted_banner_permanent_delete_pending()
         : m.account_deleted_banner_permanent_delete_button()}

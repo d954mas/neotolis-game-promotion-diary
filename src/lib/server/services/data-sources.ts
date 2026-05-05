@@ -40,6 +40,16 @@ import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { withQuotaGuard } from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
+import { getBoss } from "../queue-client.js";
+import { QUEUES } from "../queues.js";
+import { logger } from "../logger.js";
+
+// Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — initial-backfill window
+// presets accepted by createSource for kind=youtube_channel + autoImport.
+// Plan 09's worker handler reads `job.data.backfillWindow` to size the
+// snapshot-seeding window; an undefined value falls back to '30d' which
+// matches the BackfillPicker default-selected preset.
+export type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "everything";
 
 export type DataSourceRow = typeof dataSources.$inferSelect;
 
@@ -78,6 +88,11 @@ export interface CreateSourceInput {
   isOwnedByMe?: boolean;
   autoImport?: boolean;
   metadata?: Record<string, unknown>;
+  // Phase 03.0-12 (D-09) — only meaningful when kind === 'youtube_channel'
+  // AND autoImport === true. Other kind/auto-import combinations silently
+  // skip the enqueue path; the field is preserved on the row only via
+  // `metadata` if the caller chooses to (this service does not stamp it).
+  backfillWindow?: BackfillWindow;
 }
 
 export interface UpdateSourcePatch {
@@ -192,6 +207,46 @@ export async function createSource(
     userAgent,
     metadata: { source_id: row.id, kind: row.kind, handle_url: row.handleUrl },
   });
+
+  // Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — when the new source is
+  // a YouTube channel with auto-import ON, enqueue ONE channel-context
+  // backfill job carrying the user's chosen window. Plan 09's handler
+  // (worker/handlers/youtube-channel-context-backfill.ts) reads
+  // `job.data.backfillWindow` and seeds the snapshot table accordingly.
+  //
+  // Idempotent via `singletonKey: source-{row.id}` — a duplicate INSERT
+  // can't reach this point (PG 23505 maps to duplicate_source above), but
+  // a retried request that lands on the same row id (race-window edge)
+  // gets coalesced by pg-boss.
+  //
+  // Fire-and-forget: pg-boss / DB errors are logged at WARN. The created
+  // source row is the load-bearing return value; backfill enqueue is a
+  // nice-to-have that the user can re-trigger by re-toggling auto-import
+  // (PATCH /api/sources/:id) if it ever silently fails.
+  if (row.kind === "youtube_channel" && row.autoImport) {
+    const backfillWindow: BackfillWindow = input.backfillWindow ?? "30d";
+    try {
+      const boss = await getBoss();
+      await boss.send(
+        QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL,
+        {
+          sourceId: row.id,
+          userId,
+          handleUrl: row.handleUrl,
+          backfillWindow,
+        },
+        { singletonKey: `source-${row.id}` },
+      );
+    } catch (err) {
+      logger.warn(
+        {
+          sourceId: row.id,
+          err: String((err as Error)?.message ?? err),
+        },
+        "channel-context-backfill enqueue on createSource failed; ignoring",
+      );
+    }
+  }
 
   return row;
 }

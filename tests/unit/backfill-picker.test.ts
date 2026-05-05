@@ -29,16 +29,11 @@ vi.mock("$app/navigation", () => ({
   invalidateAll: vi.fn(),
 }));
 
-const SOURCE_PATH = resolve(
-  __dirname,
-  "../../src/lib/components/BackfillPicker.svelte",
-);
+const SOURCE_PATH = resolve(__dirname, "../../src/lib/components/BackfillPicker.svelte");
 const sourceText = readFileSync(SOURCE_PATH, "utf8");
 
 const { render } = await import("svelte/server");
-const BackfillPicker = (
-  await import("../../src/lib/components/BackfillPicker.svelte")
-).default;
+const BackfillPicker = (await import("../../src/lib/components/BackfillPicker.svelte")).default;
 
 describe("Plan 03.0-12 — BackfillPicker (D-09)", () => {
   it("renders 5 radio rows with the literal preset labels", () => {

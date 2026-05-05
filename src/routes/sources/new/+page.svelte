@@ -24,6 +24,7 @@
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "$lib/components/InlineError.svelte";
+  import BackfillPicker from "$lib/components/BackfillPicker.svelte";
   import type { PageData } from "./$types";
 
   type SourceKind =
@@ -73,12 +74,32 @@
   let submitting = $state(false);
   let formError = $state<string | null>(null);
 
+  // Phase 03.0-12 (D-09) — initial-backfill window for YouTube channels.
+  // Defaults to '30d' (UI-SPEC BackfillPicker default-selected preset).
+  // The picker is conditionally rendered ONLY when the chosen kind is
+  // 'youtube_channel' AND auto-import is ON; toggling either off collapses
+  // the picker AND resets the value to '30d'. The reset is what the
+  // server expects (createSource defaults undefined → '30d' but resetting
+  // here keeps the form-state clean if the user toggles back on).
+  type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "everything";
+  let backfillWindow = $state<BackfillWindow>("30d");
+  const showPicker = $derived(selectedKind === "youtube_channel" && autoImport);
+
   // When ownership flips to "tracking" (someone else's), default auto_import
   // to OFF — Phase 3's polling worker should not run against a blogger
   // channel until the user explicitly opts in.
   $effect(() => {
     if (!isOwnedByMe && autoImport === initialAutoImport) {
       autoImport = false;
+    }
+  });
+
+  // Picker collapse → reset value (UI-SPEC §"Interaction Contracts → BackfillPicker
+  // interaction": "Toggling auto_import off OR switching kind collapses the
+  // picker AND resets its value to '30d'").
+  $effect(() => {
+    if (!showPicker && backfillWindow !== "30d") {
+      backfillWindow = "30d";
     }
   });
 
@@ -137,6 +158,11 @@
           displayName: displayName.trim() || null,
           isOwnedByMe,
           autoImport,
+          // Only include the field when the picker would have been visible —
+          // otherwise the server applies its default ('30d'). Mirrors
+          // UI-SPEC §"BackfillPicker interaction": chosen value is included
+          // in /api/sources POST when kind=youtube_channel AND auto_import=true.
+          ...(showPicker ? { backfillWindow } : {}),
         }),
       });
       if (res.status === 201 || res.status === 200) {
@@ -240,6 +266,11 @@
       <input type="checkbox" bind:checked={autoImport} />
       <span>Auto-import (Phase 3 will start polling)</span>
     </label>
+
+    {#if showPicker}
+      <hr class="picker-separator" />
+      <BackfillPicker bind:value={backfillWindow} />
+    {/if}
 
     {#if formError}
       <InlineError message={formError} />
@@ -357,6 +388,14 @@
     gap: var(--space-sm);
     color: var(--color-text-muted);
     font-size: var(--font-size-label);
+  }
+  /* UI-SPEC §"/sources/new second step layout": horizontal rule between
+     the kind/owner/auto-import fields and the conditional BackfillPicker.
+     Collapses with the picker — no orphan separator. */
+  .picker-separator {
+    border: 0;
+    border-top: 1px solid var(--color-border);
+    margin: 0;
   }
   .actions {
     display: flex;
