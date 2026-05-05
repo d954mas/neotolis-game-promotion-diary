@@ -355,6 +355,10 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
     notes: null as string | null,
     metadata: null as unknown,
     lastPolledAt: null as Date | null,
+    // Plan 03.0-11: PollingBadge live-state rewrite extends EventDtoLite
+    // with lastPollStatus (D-12 unavailable override). Test fixtures get
+    // null since these tests don't exercise the polling tier.
+    lastPollStatus: null as string | null,
   };
 
   it("renders class:mine on the root <article> when event.authorIsMe=true (border-left accent gate)", async () => {
@@ -1463,6 +1467,8 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
           notes: null,
           metadata: null,
           lastPolledAt: null,
+          // Plan 03.0-11: lastPollStatus added to EventDtoLite.
+          lastPollStatus: null,
         },
         source: null,
         game: null,
@@ -1940,6 +1946,10 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
     notes: null as string | null,
     metadata: null as unknown,
     lastPolledAt: null as Date | null,
+    // Plan 03.0-11: PollingBadge live-state rewrite extends EventDtoLite
+    // with lastPollStatus (D-12 unavailable override). Test fixtures get
+    // null since these tests don't exercise the polling tier.
+    lastPollStatus: null as string | null,
   };
 
   it("Plan 02.1-32 — FeedCard with gameIds.length > 0 does NOT render AttachToGamePicker (closes §4.24.E)", async () => {

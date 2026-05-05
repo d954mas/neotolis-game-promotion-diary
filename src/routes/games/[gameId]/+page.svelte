@@ -102,6 +102,10 @@
     authorIsMe: boolean;
     metadata: unknown;
     lastPolledAt: Date | string | null;
+    // Plan 03.0-11: PollingBadge live state needs lastPollStatus to apply
+    // the D-12 'unavailable' override. toEventDto already projects this
+    // column on every event row; the local type just needs to surface it.
+    lastPollStatus: string | null;
     externalId: string | null;
     notes: string | null;
   };

@@ -102,6 +102,10 @@
     notes: string | null;
     metadata: unknown;
     lastPolledAt: Date | string | null;
+    // Plan 03.0-11 — PollingBadge live state needs lastPollStatus to apply
+    // the D-12 'unavailable' override (not_found / private / auth_error).
+    // toEventDto already projects this column (added in Phase 2.1 schema).
+    lastPollStatus: string | null;
   };
   type SourceLite = {
     id: string;
@@ -228,9 +232,18 @@
     }
   }
 
+  // Plan 03.0-11: PollingBadge live-state rewrite extends the prop shape.
+  // Pass the full event slice the badge needs to resolve tier + variant +
+  // refresh-now visibility. metadata is normalized to a plain object (the
+  // EventDtoLite type carries it as unknown — toEventDto returns Record-shaped
+  // jsonb already, but a safe coerce here keeps the badge's prop shape strict).
   const pollingForBadge = $derived({
+    id: event.id,
     kind: event.kind,
-    lastPolledAt: event.lastPolledAt as Date | string | null,
+    occurredAt: event.occurredAt,
+    lastPolledAt: event.lastPolledAt,
+    lastPollStatus: event.lastPollStatus,
+    metadata: (event.metadata ?? null) as Record<string, unknown> | null,
   });
 </script>
 
