@@ -25,11 +25,26 @@
 // Throws AppError 422 (unsupported_url / youtube_unavailable /
 // reddit_pending_phase3) or AppError 502 (youtube_oembed_unreachable) for the
 // failure modes.
+//
+// Phase 3.0 Plan 10 (CONTEXT D-14) — channel-context backfill trigger.
+// After the youtube_video event row is created, if the URL's channel is NOT
+// yet in `youtube_channel_metadata_cache`, enqueue ONE
+// YOUTUBE_CHANNEL_CONTEXT_BACKFILL job (idempotent via pg-boss singletonKey
+// = the extracted channelId). The handler that resolves uploads_playlist_id
+// + populates the cache lives in Plan 03.0-09. The trigger is fire-and-forget:
+// any error enqueueing is logged + swallowed so the user-facing paste still
+// returns 201.
 
+import { eq } from "drizzle-orm";
 import { parseIngestUrl } from "./url-parser.js";
 import { fetchTwitterOembed } from "../integrations/twitter-oembed.js";
 import { createEvent, createEventFromPaste } from "./events.js";
 import { AppError } from "./errors.js";
+import { db } from "../db/client.js";
+import { youtubeChannelMetadataCache } from "../db/schema/youtube-channel-metadata-cache.js";
+import { QUEUES } from "../queues.js";
+import { getBoss } from "../queue-client.js";
+import { logger } from "../logger.js";
 
 export type IngestResult = { kind: "event_created"; eventId: string };
 
@@ -80,6 +95,25 @@ export async function parsePasteAndCreate(
 
   if (parsed.kind === "youtube_video") {
     const event = await createEventFromPaste(userId, { url: input, gameIds }, ipAddress, userAgent);
+
+    // Phase 3.0 Plan 10 / CONTEXT D-14 — channel-context backfill trigger.
+    //
+    // The event row's metadata.author_url was populated by enrichFromUrl
+    // (events.ts) from the oEmbed response. We extract the YouTube channelId
+    // and, if it's NOT already in youtube_channel_metadata_cache, enqueue a
+    // one-time YOUTUBE_CHANNEL_CONTEXT_BACKFILL job. pg-boss's singletonKey
+    // dedups concurrent pastes from the same channel.
+    //
+    // Fire-and-forget: any failure here is logged and swallowed. The backfill
+    // is a quality-of-Phase-4-charts enhancement (median context for the
+    // user's "compare with other videos on the channel" use case) — it must
+    // never block the user-facing paste UX.
+    const eventMeta = (event.metadata ?? {}) as { author_url?: unknown };
+    const authorUrl = typeof eventMeta.author_url === "string" ? eventMeta.author_url : "";
+    if (authorUrl !== "") {
+      await maybeEnqueueChannelContextBackfill(userId, authorUrl);
+    }
+
     return { kind: "event_created", eventId: event.id };
   }
 
@@ -122,4 +156,97 @@ export async function parsePasteAndCreate(
     userAgent,
   );
   return { kind: "event_created", eventId: event.id };
+}
+
+/**
+ * D-14 — extract a stable identifier from a YouTube oEmbed `author_url` and,
+ * if the channel is not yet in `youtube_channel_metadata_cache`, enqueue ONE
+ * YOUTUBE_CHANNEL_CONTEXT_BACKFILL job. Idempotent across concurrent pastes
+ * via pg-boss `singletonKey` = the extracted channelId.
+ *
+ * YouTube oEmbed `author_url` shapes observed in the wild:
+ *   - https://www.youtube.com/channel/UCabcDEFghi…  (canonical UC channelId)
+ *   - https://www.youtube.com/@handle               (handle URL — UC id resolved
+ *                                                    server-side by the
+ *                                                    backfill handler via
+ *                                                    channels.list?forHandle=)
+ *   - https://www.youtube.com/c/customname          (legacy custom URL — same
+ *                                                    treatment as @handle)
+ *
+ * For the canonical /channel/UC… shape we extract the UC id directly and use
+ * it as both the cache lookup key AND the singletonKey. For /@handle and /c/
+ * shapes we cannot resolve the UC id without a Data API call — so we use the
+ * full author_url as the singletonKey + cache lookup key. Cache misses on
+ * /@handle URLs always fall through to the backfill handler, which resolves
+ * the real channelId via `channels.list` + populates the cache. Subsequent
+ * pastes of the same handle hit the cache and skip the enqueue.
+ *
+ * Fire-and-forget: pg-boss / DB errors are logged at WARN and swallowed. The
+ * paste flow itself returns 201 regardless of backfill enqueue outcome.
+ */
+async function maybeEnqueueChannelContextBackfill(
+  userId: string,
+  authorUrl: string,
+): Promise<void> {
+  try {
+    const channelId = extractChannelIdFromAuthorUrl(authorUrl);
+    if (channelId === null) return;
+
+    // Cache lookup against the public-data table (no user_id — see schema
+    // module header). A row exists if a previous paste of any tenant's video
+    // from this channel already triggered the backfill handler successfully.
+    const cached = await db
+      .select({ channelId: youtubeChannelMetadataCache.channelId })
+      .from(youtubeChannelMetadataCache)
+      .where(eq(youtubeChannelMetadataCache.channelId, channelId))
+      .limit(1);
+    if (cached.length > 0) return;
+
+    const boss = await getBoss();
+    await boss.send(
+      QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL,
+      { channelId, userId },
+      {
+        // pg-boss coalesces same-singletonKey jobs in the dedup window;
+        // singletonHours: 24 means a second paste from the same channel
+        // within 24h while the backfill is in flight (or already completed
+        // but the cache row hasn't been written for any reason) does NOT
+        // double-enqueue.
+        singletonKey: channelId,
+        singletonHours: 24,
+      },
+    );
+  } catch (err) {
+    logger.warn(
+      { authorUrl, err: String((err as Error)?.message ?? err) },
+      "channel-context-backfill enqueue failed; ignoring (non-blocking)",
+    );
+  }
+}
+
+/**
+ * Extract a stable channel identifier from a YouTube oEmbed `author_url`.
+ *
+ * Returns:
+ *   - the UC… channelId for /channel/UC… URLs (24-char canonical id);
+ *   - the trimmed authorUrl itself for /@handle and /c/customname URLs
+ *     (used as the singletonKey + cache lookup key — the backfill handler
+ *     resolves the canonical UC id and writes it into the cache);
+ *   - null for URLs that don't match either shape (silent skip — backfill
+ *     is best-effort).
+ */
+function extractChannelIdFromAuthorUrl(authorUrl: string): string | null {
+  const m = /\/channel\/(UC[A-Za-z0-9_-]{20,})/.exec(authorUrl);
+  if (m !== null) return m[1] ?? null;
+  // /@handle or /c/customname — use the URL as the singletonKey identifier.
+  // Validate it's a YouTube URL with a non-empty path so we don't enqueue
+  // backfill jobs for garbage author_urls.
+  try {
+    const u = new URL(authorUrl);
+    if (u.hostname !== "www.youtube.com" && u.hostname !== "youtube.com") return null;
+    if (u.pathname === "" || u.pathname === "/") return null;
+    return authorUrl;
+  } catch {
+    return null;
+  }
 }
