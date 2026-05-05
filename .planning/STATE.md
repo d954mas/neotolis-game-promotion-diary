@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0-03-PLAN.md (tier-resolver + youtube-quota-tracker; Wave 1 parallel-race deviation documented)
-last_updated: "2026-05-05T20:05:42.650Z"
+stopped_at: Completed 03.0-04 snapshot-writer + refresh-poll + quota-fix plan (Wave 1 parallel)
+last_updated: "2026-05-05T20:08:14.697Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 82
-  completed_plans: 73
+  completed_plans: 74
 ---
 
 # Project State
@@ -115,6 +115,7 @@ Plan: 6 of 14
 | Phase 03.0-polling-pipeline-plumbing-youtube P05 | 10m | 1 tasks | 7 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P06 | 12 min | 1 tasks | 3 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P03 | ~25min | 2 tasks | 5 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P04 | 12 min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -337,6 +338,9 @@ Recent decisions affecting current work:
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: tier-resolver.ts is the single source of truth for tier resolution (Pitfall 7); inlining boundary literals elsewhere is a P0 review block
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: youtube-quota-tracker uses two-layer audit idempotency (in-memory Set + audit_log lookup) — handles container restart at the natural midnight-Pacific boundary
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Test file split: pure-function cases stay in tests/unit/; DB-touching cases moved to tests/integration/youtube-quota-tracker.test.ts (quota.test.ts precedent)
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 04: Lazy-import youtube-quota-tracker from snapshot-writer to defuse parallel-agent coordination on shared branch
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 04: Constraint-name-keyed 23505 translation in events.createEvent (events_user_kind_ext_active_unq -> 422; events_user_kind_source_ext_unq keeps 409 for back-compat)
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 04: queue-client.getBoss singleton for the APP role - HTTP routes share one pg-boss instance per process
 
 ### Pending Todos
 
@@ -378,8 +382,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-05T20:05:25.109Z
+Last session: 2026-05-05T20:08:13.915Z
 Last Activity: 2026-05-05
-Stopped at: Completed 03.0-03-PLAN.md (tier-resolver + youtube-quota-tracker; Wave 1 parallel-race deviation documented)
+Stopped at: Completed 03.0-04 snapshot-writer + refresh-poll + quota-fix plan (Wave 1 parallel)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
