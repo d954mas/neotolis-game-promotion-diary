@@ -381,12 +381,131 @@ describe("purgeAccount service (Plan 03.0-05)", () => {
   });
 });
 
-// Plan 02 placeholders — kept for the route layer, activated in Plan 03.0-08.
-// The service contract above is the load-bearing assertion; Plan 08 wires
-// the HTTP boundary on top.
+// Phase 3.0 Plan 08 — DELETE /api/me/account/purge route activation.
+//
+// The Permanent-delete-now CTA path (DV-6 / D-NEW Purge worker). The route
+// operates on c.var.userId only — there is NO :userId path parameter (the
+// account-routes precedent from Plan 02.2-03), so cross-tenant access is
+// impossible by construction. Calls purgeAccount({ignoreRetention: true})
+// from the Plan 05 service so it works whether or not the user has been
+// soft-deleted (the soft-deleted variant is the primary CTA target;
+// active-user purge is allowed too — the user is permitted to nuke their
+// account immediately without going through the soft-delete tripwire).
+//
+// The HTTP boundary tests below complement Plan 05's service-layer suite.
+// The cascade-correctness invariants are owned by the service tests; these
+// tests assert the wire format, the auth gate, the audit row presence, and
+// the post-purge session invalidation contract.
 describe("account purge route (Plan 03.0-08)", () => {
-  it.skip("DELETE /api/me/account/purge hard-deletes user/games/data_sources/events/api_keys_steam rows — activated in Plan 03.0-08", () => {});
-  it.skip("audit purge.completed row written under purged user_id with metadata.row_counts — activated in Plan 03.0-08", () => {});
-  it.skip("cross-tenant target → 404 (account routes have no :userId path param; cross-tenant impossible by construction) — activated in Plan 03.0-08", () => {});
-  it.skip("anonymous → 401 — activated in Plan 03.0-08", () => {});
+  const uniq = (): string => Math.random().toString(36).slice(2, 10);
+
+  it("Plan 03.0-08: DELETE /api/me/account/purge hard-deletes user rows for an active user (CTA path, ignoreRetention=true)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ap-active-${uniq()}@test.local` });
+    const game = await createGame(u.id, { title: `G-${uniq()}` }, "127.0.0.1");
+
+    const res = await app.request("/api/me/account/purge", {
+      method: "DELETE",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      purged: boolean;
+      rowCounts?: { user?: number; games?: number };
+    };
+    expect(body.purged).toBe(true);
+    expect(body.rowCounts?.user).toBe(1);
+    expect(body.rowCounts?.games).toBe(1);
+
+    // User + game are hard-deleted from the DB.
+    const u1 = await db.select().from(userTable).where(eq(userTable.id, u.id));
+    expect(u1).toHaveLength(0);
+    const g1 = await db.select().from(games).where(eq(games.id, game.id));
+    expect(g1).toHaveLength(0);
+  });
+
+  it("Plan 03.0-08: DELETE /api/me/account/purge works for a soft-deleted user (CTA target — bypasses 60d gate)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ap-soft-${uniq()}@test.local` });
+    // Mark user as soft-deleted via direct DB write (mimics the post-soft-
+    // delete state where Better Auth re-issued a session on the next sign-in).
+    await db
+      .update(userTable)
+      .set({ deletedAt: new Date(Date.now() - 24 * 60 * 60 * 1000) })
+      .where(eq(userTable.id, u.id));
+
+    const res = await app.request("/api/me/account/purge", {
+      method: "DELETE",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { purged: boolean };
+    expect(body.purged).toBe(true);
+
+    // User is gone — would be 0 rows.
+    const u1 = await db.select().from(userTable).where(eq(userTable.id, u.id));
+    expect(u1).toHaveLength(0);
+  });
+
+  it("Plan 03.0-08: after 200 purge, subsequent /api/me request with the same session cookie returns 401 (session cascade-deleted)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ap-sess-${uniq()}@test.local` });
+
+    const purgeRes = await app.request("/api/me/account/purge", {
+      method: "DELETE",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(purgeRes.status).toBe(200);
+
+    // Same cookie, fresh request — session gone (purgeAccount cascaded
+    // session DELETE in the same tx that deleted the user row).
+    const meRes = await app.request("/api/me", {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(meRes.status).toBe(401);
+    expect(await meRes.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 03.0-08: audit purge.completed row written under purged user_id with metadata.row_counts (HTTP-layer)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ap-audit-${uniq()}@test.local` });
+    await createGame(u.id, { title: `G-${uniq()}` }, "127.0.0.1");
+
+    const res = await app.request("/api/me/account/purge", {
+      method: "DELETE",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "purge.completed")));
+    expect(audits).toHaveLength(1);
+    const meta = audits[0]!.metadata as {
+      row_counts?: { user?: number; games?: number };
+      ignore_retention?: boolean;
+      purged_at?: string;
+    } | null;
+    expect(meta?.row_counts?.user).toBe(1);
+    expect(meta?.row_counts?.games).toBe(1);
+    expect(meta?.ignore_retention).toBe(true);
+    expect(typeof meta?.purged_at).toBe("string");
+  });
+
+  it("Plan 03.0-08: anonymous DELETE /api/me/account/purge → 401 unauthorized", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+
+    const res = await app.request("/api/me/account/purge", { method: "DELETE" });
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
 });

@@ -22,6 +22,16 @@
 //   - POST   /api/me/sessions/all     — let the user sign out from everywhere
 //   - GET    /api/me                  — read self so the layout banner can
 //                                       compute days-remaining
+//   - DELETE /api/me/account/purge    — Phase 3.0 Plan 08 — Permanent-delete-
+//                                       now CTA on AccountDeletedBanner.
+//                                       MUST work for soft-deleted users
+//                                       (that IS the user state this CTA
+//                                       targets). The route calls
+//                                       purgeAccount({ignoreRetention: true})
+//                                       and the cascade hard-deletes the user
+//                                       row in the same tx, so any subsequent
+//                                       request's session lookup will fail
+//                                       and return 401 (intended logout).
 //
 // Anything else returns 423 Locked with {error: "account_pending_deletion",
 // deletedAt: <iso>}. 423 is RFC 4918 Locked — semantically the right code for
@@ -39,6 +49,8 @@ const ALLOWED_WHEN_DELETED = new Set<string>([
   "GET /api/me/export",
   "POST /api/me/sessions/all",
   "GET /api/me",
+  // Phase 3.0 Plan 08 — CTA path for soft-deleted users: bypass retention.
+  "DELETE /api/me/account/purge",
 ]);
 
 export const accountState: MiddlewareHandler<{
