@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0-02-PLAN.md (Wave 0 doc updates + Paraglide keys + 17 placeholder test files)
-last_updated: "2026-05-05T19:15:38.450Z"
+stopped_at: Completed 03.0-01-PLAN.md (Phase 3.0 baseline schema + cross-cutting boundary updates)
+last_updated: "2026-05-05T19:49:31.179Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 82
-  completed_plans: 69
+  completed_plans: 70
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0 (polling-pipeline-plumbing-youtube) — EXECUTING
-Plan: 2 of 14
+Plan: 3 of 14
 
 ## Performance Metrics
 
@@ -111,6 +111,7 @@ Plan: 2 of 14
 | Phase 02.2 P04 | 10min | 2 tasks | 13 files |
 | Phase 02.2-ship-to-prod P08 | ~7min | 2 tasks | 3 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P02 | ~14min | 3 tasks | 23 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P01 | 9 min | 3 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -321,6 +322,10 @@ Recent decisions affecting current work:
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-02: Phase 2.1 named-plan it.skip pattern carried into Phase 3.0 — every it.skip suffix names the activating plan ('— activated in Plan 03.0-NN'); 17 placeholder test files + 69 named-plan stubs land in Wave 0 so Wave 1+ plans drop into existing files instead of creating new ones
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-02: MUST_BE_PROTECTED entries pre-declared as comments (Plan 02.2-01 precedent) — live entries in the allowlist would trip the sweep's vacuous-pass toContain guard before the route mounts; the corresponding it.skip blocks ARE live so a grep flips them on at the right plan. Three-layer sweep contract for new authenticated routes: comment + it.skip + per-route assertion (CLAUDE.md Privacy invariant 3)
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-02: polling_badge_phase3_placeholder retired (UI-SPEC Copywriting Contract REMOVED) — PollingBadge.svelte switched to polling_badge_manual ('Manual entry — no polling') for the never-polled-yet branch until Plan 03.0-11 lands the live tier-driven rewrite. polling_badge_manual is intentionally retained per UI-SPEC for this edge case
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-01: ALTER TYPE ADD VALUE IF NOT EXISTS guards on all 5 audit verbs (drizzle-kit emits unconditional; hand-edited to match Plan 02.2-01/02.1-27/02.1-12 idempotency precedent for advisory-locked retry safety)
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-01: pgboss legacy queue cleanup gated on schema existence (DO BEGIN IF EXISTS information_schema.schemata) — pgboss schema is created at boss.start() runtime, not migrate time; unconditional DELETE would break fresh test DBs
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-01: events_user_kind_ext_active_unq added ALONGSIDE existing events_user_kind_source_ext_unq (not replacement) — different semantics (refresh-poll idempotency vs auto-import dedup); both partial indexes retained
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-01: YouTube videos.list quota VERIFIED at 1 unit/call regardless of 50-id batch (operator spike 2026-05-06, delta=8 across 8 HTTP 200 calls); 8000 units/day yields 400000 video updates/day theoretical ceiling. Phase 3.0 worker design proceeds as planned
 
 ### Pending Todos
 
@@ -361,8 +366,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-05T19:15:38.446Z
+Last session: 2026-05-05T19:49:14.604Z
 Last Activity: 2026-05-05
-Stopped at: Completed 03.0-02-PLAN.md (Wave 0 doc updates + Paraglide keys + 17 placeholder test files)
+Stopped at: Completed 03.0-01-PLAN.md (Phase 3.0 baseline schema + cross-cutting boundary updates)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md

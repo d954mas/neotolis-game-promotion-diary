@@ -181,7 +181,7 @@ Plans:
 **Plans**: 14 plans
 
 **Plan list**:
-- [ ] 03.0-01-PLAN.md — Wave 0: Spike (live videos.list quota verification, CONTEXT D-02 hard gate) + forward-only migration 0010_phase03_baseline (3 public-data tables + 2 partial indexes + 5 audit verbs + pgboss queue cleanup) + queues registry rewrite (POLL_ACTIVE rename + 3 new queues) + env additions (SERVICE_YOUTUBE_API_KEYS / ADMIN_EMAIL_ALLOWLIST / YOUTUBE_API_BASE_URL) + ESLint TENANT_TABLES allowlist extension + DTOs + .env.example
+- [x] 03.0-01-PLAN.md — Wave 0: Spike (live videos.list quota verification, CONTEXT D-02 hard gate) + forward-only migration 0010_phase03_baseline (3 public-data tables + 2 partial indexes + 5 audit verbs + pgboss queue cleanup) + queues registry rewrite (POLL_ACTIVE rename + 3 new queues) + env additions (SERVICE_YOUTUBE_API_KEYS / ADMIN_EMAIL_ALLOWLIST / YOUTUBE_API_BASE_URL) + ESLint TENANT_TABLES allowlist extension + DTOs + .env.example
 - [x] 03.0-02-PLAN.md — Wave 0: PROJECT.md / REQUIREMENTS.md doc updates (DV-1 per-platform key model split + reframing notes) + ~42 new Paraglide keys (UI-SPEC verbatim) + 17 placeholder test files (named-plan it.skip per Phase 2.1 precedent) + anonymous-401 / tenant-scope sweep extensions
 - [ ] 03.0-03-PLAN.md — Wave 1: services/tier-resolver.ts (single source of truth — Pitfall 7) + services/youtube-quota-tracker.ts (round-robin + UPSERT counter + 80%/95% threshold gate + idempotent audit transition + todayPacific helper)
 - [ ] 03.0-04-PLAN.md — Wave 1: services/youtube-snapshot-writer.ts (idempotent two-phase write tx) + services/refresh-poll.ts (5-min cooldown gate + AppError 429) + quota.ts events_per_day source_id IS NULL filter (DV-5) + events.ts duplicate_event 23505 mapping (D-15)
