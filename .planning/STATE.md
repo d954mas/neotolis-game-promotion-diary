@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0-08-PLAN.md (refresh-poll + purge routes; Wave 2 parallel with 03.0-07)
-last_updated: "2026-05-05T20:21:06.323Z"
+stopped_at: Completed 03.0-07 admin-middleware-and-quota-route plan (Wave 2 parallel)
+last_updated: "2026-05-05T20:25:14.262Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 82
-  completed_plans: 75
+  completed_plans: 76
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0 (polling-pipeline-plumbing-youtube) — EXECUTING
-Plan: 7 of 14
+Plan: 8 of 14
 
 ## Performance Metrics
 
@@ -117,6 +117,7 @@ Plan: 7 of 14
 | Phase 03.0-polling-pipeline-plumbing-youtube P03 | ~25min | 2 tasks | 5 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P04 | 12 min | 3 tasks | 10 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P08 | ~7 min | 2 tasks | 7 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P07 | 11min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -344,6 +345,9 @@ Recent decisions affecting current work:
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 04: queue-client.getBoss singleton for the APP role - HTTP routes share one pg-boss instance per process
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 08: account-state ALLOWED_WHEN_DELETED extended with DELETE /api/me/account/purge — the CTA's primary audience IS the soft-deleted user pressing the AccountDeletedBanner; without exemption the route would 423 for the exact users it targets
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 08: Retry-After header set in route handler (not in mapErr) for 429 too_many_refreshes — mapErr translates JSON body, not headers; UI-SPEC contract drives Plan 11 RefreshNowButton cooldown countdown without round-tripping metadata
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-07: Direct c.json 404 from middleware (NOT throw NotFoundError) — matches tenantScope 401 + accountState 423 pattern; avoids needing global Hono onError handler
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-07: Extend tenantScope to set c.var.userEmail from Better Auth session (zero added DB cost; avoids second round-trip in admin allowlist gate)
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-07: Cross-tenant audit aggregation justified inline (eslint-disable + -- comment) — allowlist gate is the security property; non-allowlisted users return 404 before loader runs
 
 ### Pending Todos
 
@@ -385,8 +389,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-05T20:21:06.318Z
+Last session: 2026-05-05T20:25:14.258Z
 Last Activity: 2026-05-05
-Stopped at: Completed 03.0-08-PLAN.md (refresh-poll + purge routes; Wave 2 parallel with 03.0-07)
+Stopped at: Completed 03.0-07 admin-middleware-and-quota-route plan (Wave 2 parallel)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
