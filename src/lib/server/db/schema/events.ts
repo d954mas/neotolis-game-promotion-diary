@@ -113,5 +113,21 @@ export const events = pgTable(
     userKindSourceExtUnq: uniqueIndex("events_user_kind_source_ext_unq")
       .on(t.userId, t.kind, t.sourceId, t.externalId)
       .where(sql`${t.sourceId} IS NOT NULL AND ${t.externalId} IS NOT NULL`),
+    // Phase 3.0 Plan 01 — partial index covering the polling worker's
+    // due-row scan (`SELECT ... FROM events WHERE last_polled_at IS NOT NULL
+    // AND last_polled_at < now() - interval ...`). Partial keeps the index
+    // narrow on a Phase 2.1 baseline where every row has last_polled_at = NULL.
+    eventsLastPolledAtIdx: index("idx_events_last_polled_at")
+      .on(t.lastPolledAt)
+      .where(sql`${t.lastPolledAt} IS NOT NULL`),
+    // Phase 3.0 Plan 01 — replaces the (user_id, kind, source_id, external_id)
+    // dedup unique with a stricter (user_id, kind, external_id) variant for
+    // refresh-poll idempotency. Manual paste leaves source_id NULL but a
+    // refresh-poll re-fetch must collide with the manual row when external_id
+    // matches. Partial WHERE keeps the index off NULL external_ids and off
+    // soft-deleted rows so a deleted row can be re-imported as a new event.
+    eventsUserKindExtActiveUnq: uniqueIndex("events_user_kind_ext_active_unq")
+      .on(t.userId, t.kind, t.externalId)
+      .where(sql`${t.externalId} IS NOT NULL AND ${t.deletedAt} IS NULL`),
   }),
 );

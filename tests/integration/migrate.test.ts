@@ -512,3 +512,199 @@ describe("Phase 2.1 forward-only migrations (Plan 02.1-24)", () => {
     }
   });
 });
+
+// Plan 03.0-01: forward-only migration `0010_phase03_baseline` lands the three
+// new public-data tables (youtube_video_snapshots / youtube_channel_metadata_cache
+// / youtube_service_quota_usage), two new partial indexes on `events`, and 5 new
+// audit_action enum verbs (quota.service_throttled, purge.completed,
+// auto_import.deferred, poll.failed, event.poll_refreshed). pgboss legacy queue
+// rows ('poll.hot', 'poll.warm') are also cleaned up, gated on schema existence
+// (pgboss schema is created at boss.start() runtime, not migrate time — so the
+// DELETE is conditional and idempotent).
+describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
+  beforeAll(async () => {
+    await runMigrations();
+  });
+
+  it("creates the youtube_video_snapshots table (no user_id — public data, D-07)", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const tableRes = await pool.query<{ tablename: string }>(
+        `select tablename from pg_tables where schemaname='public' and tablename='youtube_video_snapshots'`,
+      );
+      expect(tableRes.rows.length).toBe(1);
+      // Public-data invariant: NO user_id column. ESLint allowlist mirror.
+      const userIdRes = await pool.query<{ column_name: string }>(
+        `select column_name from information_schema.columns
+         where table_name='youtube_video_snapshots' and column_name='user_id'`,
+      );
+      expect(userIdRes.rows.length).toBe(0);
+      // bigint counters for popular videos > 2^31 (RESEARCH.md schema).
+      const colRes = await pool.query<{ column_name: string; data_type: string }>(
+        `select column_name, data_type from information_schema.columns
+         where table_name='youtube_video_snapshots' order by ordinal_position`,
+      );
+      const cols = new Map(colRes.rows.map((r) => [r.column_name, r.data_type]));
+      expect(cols.get("view_count")).toBe("bigint");
+      expect(cols.get("like_count")).toBe("bigint");
+      expect(cols.get("comment_count")).toBe("bigint");
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("creates the youtube_channel_metadata_cache table keyed on channel_id (no user_id)", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const tableRes = await pool.query<{ tablename: string }>(
+        `select tablename from pg_tables where schemaname='public' and tablename='youtube_channel_metadata_cache'`,
+      );
+      expect(tableRes.rows.length).toBe(1);
+      const userIdRes = await pool.query<{ column_name: string }>(
+        `select column_name from information_schema.columns
+         where table_name='youtube_channel_metadata_cache' and column_name='user_id'`,
+      );
+      expect(userIdRes.rows.length).toBe(0);
+      // channel_id is the PK.
+      const pkRes = await pool.query<{ column_name: string }>(
+        `select kcu.column_name
+         from information_schema.table_constraints tc
+         join information_schema.key_column_usage kcu
+           on tc.constraint_name = kcu.constraint_name
+          and tc.table_name = kcu.table_name
+         where tc.table_name='youtube_channel_metadata_cache'
+           and tc.constraint_type='PRIMARY KEY'`,
+      );
+      expect(pkRes.rows.map((r) => r.column_name)).toEqual(["channel_id"]);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("creates the youtube_service_quota_usage table with composite PK (date_pacific, api_key_id)", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const tableRes = await pool.query<{ tablename: string }>(
+        `select tablename from pg_tables where schemaname='public' and tablename='youtube_service_quota_usage'`,
+      );
+      expect(tableRes.rows.length).toBe(1);
+      const userIdRes = await pool.query<{ column_name: string }>(
+        `select column_name from information_schema.columns
+         where table_name='youtube_service_quota_usage' and column_name='user_id'`,
+      );
+      expect(userIdRes.rows.length).toBe(0);
+      // Composite PK columns in order: date_pacific, api_key_id.
+      const pkRes = await pool.query<{ column_name: string; ordinal_position: number }>(
+        `select kcu.column_name, kcu.ordinal_position
+         from information_schema.table_constraints tc
+         join information_schema.key_column_usage kcu
+           on tc.constraint_name = kcu.constraint_name
+          and tc.table_name = kcu.table_name
+         where tc.table_name='youtube_service_quota_usage'
+           and tc.constraint_type='PRIMARY KEY'
+         order by kcu.ordinal_position`,
+      );
+      expect(pkRes.rows.map((r) => r.column_name)).toEqual(["date_pacific", "api_key_id"]);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("creates the idx_events_last_polled_at partial index (WHERE last_polled_at IS NOT NULL)", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const result = await pool.query<{ indexname: string; indexdef: string }>(
+        `select indexname, indexdef from pg_indexes
+         where tablename='events' and indexname='idx_events_last_polled_at'`,
+      );
+      expect(result.rows.length).toBe(1);
+      const def = result.rows[0]!.indexdef;
+      expect(def).toMatch(/last_polled_at/);
+      expect(def).toMatch(/where/i);
+      expect(def).toMatch(/last_polled_at\s+is\s+not\s+null/i);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("creates the events_user_kind_ext_active_unq partial unique index (WHERE external_id IS NOT NULL AND deleted_at IS NULL)", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const result = await pool.query<{ indexname: string; indexdef: string }>(
+        `select indexname, indexdef from pg_indexes
+         where tablename='events' and indexname='events_user_kind_ext_active_unq'`,
+      );
+      expect(result.rows.length).toBe(1);
+      const def = result.rows[0]!.indexdef;
+      expect(def).toMatch(/unique/i);
+      expect(def).toMatch(/user_id/);
+      expect(def).toMatch(/kind/);
+      expect(def).toMatch(/external_id/);
+      expect(def).toMatch(/where/i);
+      expect(def).toMatch(/external_id\s+is\s+not\s+null/i);
+      expect(def).toMatch(/deleted_at\s+is\s+null/i);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("audit_action enum extended with 5 new Phase 3.0 verbs", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const result = await pool.query<{ enumlabel: string }>(
+        `select enumlabel from pg_enum
+         where enumtypid = 'public.audit_action'::regtype
+         order by enumsortorder`,
+      );
+      const values = result.rows.map((r) => r.enumlabel);
+      expect(values).toContain("quota.service_throttled");
+      expect(values).toContain("purge.completed");
+      expect(values).toContain("auto_import.deferred");
+      expect(values).toContain("poll.failed");
+      expect(values).toContain("event.poll_refreshed");
+      // Sanity: prior verbs still present.
+      expect(values).toContain("quota.limit_hit");
+      expect(values).toContain("event.detached_from_game");
+      // 27 (post-Plan-02.2-01) + 5 (Plan 03.0-01) = 32.
+      expect(values).toHaveLength(32);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("INSERT into youtube_video_snapshots is idempotent on (video_id, polled_at) — ON CONFLICT DO NOTHING no-ops", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const polledAt = new Date("2026-05-06T12:00:00Z");
+      const insert = async () =>
+        pool.query(
+          `insert into youtube_video_snapshots (id, video_id, polled_at, view_count, like_count, comment_count)
+           values ($1, $2, $3, $4, $5, $6)
+           on conflict (video_id, polled_at) do nothing`,
+          ["01HX0000000000000000000001", "dQw4w9WgXcQ", polledAt, 100, 10, 5],
+        );
+      const first = await insert();
+      expect(first.rowCount).toBe(1);
+      // Same (video_id, polled_at) — duplicate must silently no-op.
+      const second = await insert();
+      expect(second.rowCount).toBe(0);
+      const countRes = await pool.query<{ count: string }>(
+        `select count(*)::text as count from youtube_video_snapshots
+         where video_id='dQw4w9WgXcQ' and polled_at=$1`,
+        [polledAt],
+      );
+      expect(countRes.rows[0]?.count).toBe("1");
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("_journal.json carries idx=10 (0010_phase03_baseline) entry", async () => {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const journalPath = path.resolve(process.cwd(), "drizzle/meta/_journal.json");
+    const journal = JSON.parse(await fs.readFile(journalPath, "utf8"));
+    const tags = journal.entries.map((e: { idx: number; tag: string }) => `${e.idx}:${e.tag}`);
+    expect(tags).toContain("10:0010_phase03_baseline");
+  });
+});
