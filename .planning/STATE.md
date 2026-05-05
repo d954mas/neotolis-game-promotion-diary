@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0-07 admin-middleware-and-quota-route plan (Wave 2 parallel)
-last_updated: "2026-05-05T20:25:14.262Z"
+stopped_at: Completed 03.0-10-PLAN.md (parallel Wave 3)
+last_updated: "2026-05-05T20:36:08.465Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 82
-  completed_plans: 76
+  completed_plans: 77
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0 (polling-pipeline-plumbing-youtube) — EXECUTING
-Plan: 8 of 14
+Plan: 9 of 14
 
 ## Performance Metrics
 
@@ -118,6 +118,7 @@ Plan: 8 of 14
 | Phase 03.0-polling-pipeline-plumbing-youtube P04 | 12 min | 3 tasks | 10 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P08 | ~7 min | 2 tasks | 7 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P07 | 11min | 3 tasks | 10 files |
+| Phase 03.0 P10 | 5m | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -348,6 +349,9 @@ Recent decisions affecting current work:
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-07: Direct c.json 404 from middleware (NOT throw NotFoundError) — matches tenantScope 401 + accountState 423 pattern; avoids needing global Hono onError handler
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-07: Extend tenantScope to set c.var.userEmail from Better Auth session (zero added DB cost; avoids second round-trip in admin allowlist gate)
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-07: Cross-tenant audit aggregation justified inline (eslint-disable + -- comment) — allowlist gate is the security property; non-allowlisted users return 404 before loader runs
+- [Phase 03.0]: Plan 10: read author_url from event.metadata (set by enrichFromUrl) instead of duplicating the oEmbed call — saves one HTTP roundtrip per paste
+- [Phase 03.0]: Plan 10: per-shape singletonKey strategy — UC id for /channel/UC… URLs, full URL for /@handle and /c/customname (handler resolves canonical UC id at handler-time)
+- [Phase 03.0]: Plan 10: fire-and-forget enqueue — try/catch swallows pg-boss / DB errors so the user-facing paste never returns 502 from a backfill failure
 
 ### Pending Todos
 
@@ -389,8 +393,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-05T20:25:14.258Z
+Last session: 2026-05-05T20:36:08.461Z
 Last Activity: 2026-05-05
-Stopped at: Completed 03.0-07 admin-middleware-and-quota-route plan (Wave 2 parallel)
+Stopped at: Completed 03.0-10-PLAN.md (parallel Wave 3)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
