@@ -13,7 +13,19 @@
 //   3. Renders the actions in alphabetical-by-translated-label order
 //      (sortByLabel locked-in via the rendered HTML output).
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// Phase 3.0 Plan 11 — FeedCard now indirectly imports $app/navigation via
+// PollingBadge → RefreshNowButton (the Plan 11 live-state rewrite added
+// the inline refresh affordance). The SSR-render path never invokes the
+// real navigation helpers; mock with no-op stubs so the static import
+// resolves at module load. Pattern lifted from
+// tests/unit/account-deleted-banner.test.ts.
+vi.mock("$app/navigation", () => ({
+  goto: vi.fn(),
+  invalidateAll: vi.fn(),
+}));
+
 import { render } from "svelte/server";
 import AuditRow from "../../src/lib/components/AuditRow.svelte";
 import FiltersSheet from "../../src/lib/components/FiltersSheet.svelte";
