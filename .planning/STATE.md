@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
 stopped_at: Completed 03.0-03-PLAN.md (tier-resolver + youtube-quota-tracker; Wave 1 parallel-race deviation documented)
-last_updated: "2026-05-05T20:05:34.258Z"
+last_updated: "2026-05-05T20:05:42.650Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 10
@@ -374,6 +374,7 @@ Recent decisions affecting current work:
 - Phase 3 spike: confirm Reddit `/about/rules.json` returns raw rules only (not structured cooldown/flair fields) before locking `subreddit_rules` table — gates Phase 5
 - Phase 3 spike: confirm batched `videos.list` quota math against live YouTube Data API v3 before committing the worker design
 - Phase 4: monitor LayerChart 2.x Svelte 5 beta stability at phase start; ECharts fallback documented and ready
+- Wave 1 parallel-execution race: Plan 03.0-04 agent committed youtube-quota-tracker.ts content under refresh-poll commit message (9e49ad9); Plan 03.0-03's commit (835ed04) carries Task 2 message but actually contains Plan 05's purge-account work. Functional code intact; only commit-message-to-file routing affected
 
 ## Session Continuity
 
