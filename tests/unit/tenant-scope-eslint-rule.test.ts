@@ -39,6 +39,13 @@ tester.run("no-unfiltered-tenant-query", rule, {
     `db.select().from(dataSources).where(and(eq(dataSources.userId, userId), eq(dataSources.id, sid)))`,
     // Phase 2.1 dataSources update with userId filter (mirrors Phase 2 single-loop chain walker)
     `tx.update(dataSources).set({autoImport:true}).where(and(eq(dataSources.userId, userId), eq(dataSources.id, sid)))`,
+    // Phase 3.0 Plan 01 — public-data tables (allowlisted): unfiltered queries are
+    // legitimate because the row is shared across all tenants by video_id /
+    // channel_id / date_pacific (CONTEXT D-07 / D-13 / D-14). No userId column
+    // exists on these tables; requiring a userId filter would force a useless join.
+    `db.select().from(youtubeVideoSnapshots).where(eq(youtubeVideoSnapshots.videoId, 'abc'))`,
+    `db.select().from(youtubeChannelMetadataCache).where(eq(youtubeChannelMetadataCache.channelId, 'UC123'))`,
+    `db.update(youtubeServiceQuotaUsage).set({estimatedUnits:5}).where(eq(youtubeServiceQuotaUsage.apiKeyId, 'k'))`,
   ],
   invalid: [
     {

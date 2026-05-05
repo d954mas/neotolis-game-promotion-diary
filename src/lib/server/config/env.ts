@@ -84,6 +84,48 @@ const RawSchema = z.object({
   // CF domain. Application code does not read this directly (BETTER_AUTH_URL
   // already carries the canonical URL); we accept it so prod .env passes zod.
   DOMAIN: z.string().default(""),
+
+  // ---- Phase 3.0 (D-06 / D-13 / D-16 + smoke) — polling-pipeline plumbing ----
+
+  // Comma-separated operator-owned YouTube Data API v3 keys. The polling
+  // worker rotates across this set when the per-key 10k units/day ceiling
+  // is approached (Plan 03.0-03). Empty default ⇒ auto-import + scheduled
+  // polling are disabled (smoke + self-host parity preserved by construction).
+  // Stored plaintext in env (not envelope-encrypted) — these are the
+  // operator's own keys, not user secrets; existing pino redact paths cover
+  // the field name `apiKey` and the YouTube response surface.
+  SERVICE_YOUTUBE_API_KEYS: z
+    .string()
+    .default("")
+    .transform((s) =>
+      s
+        .split(",")
+        .map((k) => k.trim())
+        .filter(Boolean),
+    ),
+
+  // Comma-separated admin user emails (case-insensitive — Plan 03.0-07
+  // admin middleware lowercases + trims before lookup). Empty default ⇒
+  // /admin/* returns 404 for everyone (self-host parity preserved by
+  // construction — no admin UI exists for self-host operators by default).
+  // Changes require a container restart (parsed once at boot).
+  ADMIN_EMAIL_ALLOWLIST: z
+    .string()
+    .default("")
+    .transform(
+      (s) =>
+        new Set(
+          s
+            .split(",")
+            .map((e) => e.trim().toLowerCase())
+            .filter(Boolean),
+        ),
+    ),
+
+  // YouTube Data API v3 base URL. Production default = the official
+  // endpoint; the smoke-gate harness overrides to a mock reverse-proxy URL
+  // (Plan 03.0-14). Validated as a URL by zod so a typo fails fast at boot.
+  YOUTUBE_API_BASE_URL: z.string().url().default("https://www.googleapis.com/youtube/v3"),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -169,6 +211,10 @@ export const env = {
   LIMIT_EVENTS_PER_DAY: raw.LIMIT_EVENTS_PER_DAY,
   IMAGE_TAG: raw.IMAGE_TAG,
   DOMAIN: raw.DOMAIN,
+  // Phase 3.0 additions (D-06 / D-13 / D-16 + smoke override)
+  SERVICE_YOUTUBE_API_KEYS: raw.SERVICE_YOUTUBE_API_KEYS,
+  ADMIN_EMAIL_ALLOWLIST: raw.ADMIN_EMAIL_ALLOWLIST,
+  YOUTUBE_API_BASE_URL: raw.YOUTUBE_API_BASE_URL,
 } as const;
 
 export type Env = typeof env;

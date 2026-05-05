@@ -19,6 +19,8 @@ import type {
   events,
 } from "./db/schema/index.js";
 import type { auditLog } from "./db/schema/audit-log.js";
+import type { youtubeVideoSnapshots } from "./db/schema/youtube-video-snapshots.js";
+import type { youtubeChannelMetadataCache } from "./db/schema/youtube-channel-metadata-cache.js";
 
 type User = typeof user.$inferSelect;
 type Session = typeof session.$inferSelect;
@@ -489,5 +491,77 @@ export function toAuditEntryDto(r: AuditEntryRow): AuditEntryDto {
     userAgent: r.userAgent,
     metadata: r.metadata,
     createdAt: r.createdAt,
+  };
+}
+
+// ---- Phase 3.0 Plan 01 — public-data DTOs ----
+//
+// These tables carry no `user_id` column (CONTEXT D-07 / D-14) and no
+// secret-shaped fields, so the projection functions are existence-only:
+// they enumerate every column the response wire format includes so a
+// future column addition forces a review touchpoint rather than auto-
+// leaking. Mirrors the discipline established for tenant-owned tables
+// without the strip semantics (nothing to strip).
+
+type YoutubeVideoSnapshotRow = typeof youtubeVideoSnapshots.$inferSelect;
+type YoutubeChannelMetadataCacheRow = typeof youtubeChannelMetadataCache.$inferSelect;
+
+/**
+ * YoutubeVideoSnapshotDto — DTO for `youtube_video_snapshots` rows.
+ *
+ * Public-data table. Worker writes one row per successful refresh-poll;
+ * counters are bigint (mode: 'number' on the Drizzle side, JS number on
+ * the wire). Chart endpoints read from this table; no projection-layer
+ * strip is required.
+ */
+export interface YoutubeVideoSnapshotDto {
+  id: string;
+  videoId: string;
+  polledAt: Date;
+  viewCount: number | null;
+  likeCount: number | null;
+  commentCount: number | null;
+  createdAt: Date;
+}
+
+export function toYoutubeVideoSnapshotDto(r: YoutubeVideoSnapshotRow): YoutubeVideoSnapshotDto {
+  return {
+    id: r.id,
+    videoId: r.videoId,
+    polledAt: r.polledAt,
+    viewCount: r.viewCount,
+    likeCount: r.likeCount,
+    commentCount: r.commentCount,
+    createdAt: r.createdAt,
+  };
+}
+
+/**
+ * YoutubeChannelMetadataCacheDto — DTO for `youtube_channel_metadata_cache`
+ * rows.
+ *
+ * Public-data cache. The Plan 03.0-10 channel-context-backfill worker
+ * populates this on first paste of a video from an unknown channel; the
+ * row is shared across all tenants who paste videos from the same channel.
+ */
+export interface YoutubeChannelMetadataCacheDto {
+  channelId: string;
+  uploadsPlaylistId: string;
+  channelTitle: string | null;
+  lastBackfillAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export function toYoutubeChannelMetadataCacheDto(
+  r: YoutubeChannelMetadataCacheRow,
+): YoutubeChannelMetadataCacheDto {
+  return {
+    channelId: r.channelId,
+    uploadsPlaylistId: r.uploadsPlaylistId,
+    channelTitle: r.channelTitle,
+    lastBackfillAt: r.lastBackfillAt,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
   };
 }

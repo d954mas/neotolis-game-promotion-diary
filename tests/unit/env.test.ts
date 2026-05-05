@@ -94,3 +94,49 @@ describe("Phase 02.2 env additions (D-32)", () => {
     });
   });
 });
+
+describe("Phase 3.0 env additions (Plan 03.0-01)", () => {
+  it("SERVICE_YOUTUBE_API_KEYS empty default ⇒ empty array (smoke parity)", async () => {
+    await withEnv({ SERVICE_YOUTUBE_API_KEYS: undefined }, (env) => {
+      expect(env.SERVICE_YOUTUBE_API_KEYS).toEqual([]);
+      expect(Array.isArray(env.SERVICE_YOUTUBE_API_KEYS)).toBe(true);
+    });
+  });
+
+  it("SERVICE_YOUTUBE_API_KEYS comma-splits, trims, drops empties", async () => {
+    await withEnv({ SERVICE_YOUTUBE_API_KEYS: "  AIza-one  , AIza-two,, AIza-three " }, (env) => {
+      expect(env.SERVICE_YOUTUBE_API_KEYS).toEqual(["AIza-one", "AIza-two", "AIza-three"]);
+    });
+  });
+
+  it("ADMIN_EMAIL_ALLOWLIST empty default ⇒ empty Set (self-host parity, /admin returns 404 for all)", async () => {
+    await withEnv({ ADMIN_EMAIL_ALLOWLIST: undefined }, (env) => {
+      expect(env.ADMIN_EMAIL_ALLOWLIST).toBeInstanceOf(Set);
+      expect(env.ADMIN_EMAIL_ALLOWLIST.size).toBe(0);
+    });
+  });
+
+  it("ADMIN_EMAIL_ALLOWLIST lowercases + trims emails into a Set", async () => {
+    await withEnv(
+      { ADMIN_EMAIL_ALLOWLIST: " Admin@Neotolis.dev , ops@neotolis.dev , Admin@Neotolis.dev " },
+      (env) => {
+        expect(env.ADMIN_EMAIL_ALLOWLIST.has("admin@neotolis.dev")).toBe(true);
+        expect(env.ADMIN_EMAIL_ALLOWLIST.has("ops@neotolis.dev")).toBe(true);
+        // Set dedupes the case-variant duplicate.
+        expect(env.ADMIN_EMAIL_ALLOWLIST.size).toBe(2);
+      },
+    );
+  });
+
+  it("YOUTUBE_API_BASE_URL defaults to the official endpoint", async () => {
+    await withEnv({ YOUTUBE_API_BASE_URL: undefined }, (env) => {
+      expect(env.YOUTUBE_API_BASE_URL).toBe("https://www.googleapis.com/youtube/v3");
+    });
+  });
+
+  it("YOUTUBE_API_BASE_URL accepts a smoke-mock override URL", async () => {
+    await withEnv({ YOUTUBE_API_BASE_URL: "http://localhost:9999/youtube/v3" }, (env) => {
+      expect(env.YOUTUBE_API_BASE_URL).toBe("http://localhost:9999/youtube/v3");
+    });
+  });
+});

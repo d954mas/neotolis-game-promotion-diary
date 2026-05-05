@@ -65,6 +65,25 @@ const ALLOWLIST_TABLES = new Set([
   "session", // Better Auth core
   "account", // Better Auth core
   "verification", // Better Auth core
+  // Phase 3.0 Plan 01 — public external data, no tenant scope.
+  //
+  // These tables hold YouTube public-data shared across tenants by video_id
+  // / channel_id (D-07 / D-14) and operator-side quota counters keyed on
+  // (date_pacific, api_key_id) (D-13). The events table that REFERENCES
+  // this data remains tenant-owned (events.user_id) — the snapshot / cache
+  // / quota rows themselves are public statistics or operator-side state.
+  // Anyone with `events.external_id = X` for video X sees the same view
+  // count history. Re-validating tenant scope on these tables would force
+  // a useless join.
+  //
+  // The allowlist entries here are explicit-intent documentation: queries
+  // against these identifiers do not currently trip the rule (they're not
+  // in TENANT_TABLES) but if a future refactor accidentally adds them to
+  // TENANT_TABLES, the allowlist is the explicit override that keeps the
+  // public-data semantic legible to reviewers.
+  "youtubeVideoSnapshots",
+  "youtubeChannelMetadataCache",
+  "youtubeServiceQuotaUsage",
 ]);
 
 export default ESLintUtils.RuleCreator.withoutDocs({
