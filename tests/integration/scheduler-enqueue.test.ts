@@ -9,7 +9,6 @@
 // capture sent jobs in an array and assert the queue + payload shape.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { eq } from "drizzle-orm";
 
 const sentJobs: Array<{
   queue: string;
@@ -37,18 +36,10 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
-const { youtubeServiceQuotaUsage } = await import(
-  "../../src/lib/server/db/schema/youtube-service-quota-usage.js"
-);
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
-const {
-  resetThrottleState,
-  todayPacific,
-  hashApiKeyId,
-} = await import("../../src/lib/server/services/youtube-quota-tracker.js");
-const { enqueueActivePolls, enqueueColdPolls } = await import(
-  "../../src/scheduler/enqueue.js"
-);
+const { resetThrottleState } =
+  await import("../../src/lib/server/services/youtube-quota-tracker.js");
+const { enqueueActivePolls, enqueueColdPolls } = await import("../../src/scheduler/enqueue.js");
 const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
@@ -92,9 +83,7 @@ describe("scheduler enqueue (Plan 03.0-09)", () => {
     expect(result.eventsCovered).toBeGreaterThanOrEqual(1);
     const activeJobs = sentJobs.filter((j) => j.queue === "poll.active");
     expect(activeJobs.length).toBeGreaterThanOrEqual(1);
-    const allEventIds = activeJobs.flatMap(
-      (j) => (j.data as { eventIds: string[] }).eventIds,
-    );
+    const allEventIds = activeJobs.flatMap((j) => (j.data as { eventIds: string[] }).eventIds);
     expect(allEventIds).toContain(eventId);
   });
 
@@ -109,9 +98,7 @@ describe("scheduler enqueue (Plan 03.0-09)", () => {
     expect(result.skipped).toBe(false);
     const coldJobs = sentJobs.filter((j) => j.queue === "poll.cold");
     expect(coldJobs.length).toBeGreaterThanOrEqual(1);
-    const allEventIds = coldJobs.flatMap(
-      (j) => (j.data as { eventIds: string[] }).eventIds,
-    );
+    const allEventIds = coldJobs.flatMap((j) => (j.data as { eventIds: string[] }).eventIds);
     expect(allEventIds).toContain(eventId);
   });
 

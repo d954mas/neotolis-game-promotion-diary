@@ -101,7 +101,11 @@ async function fetchWithTimeout(url: URL, timeoutMs = 30_000): Promise<Response>
 
 export async function handleChannelContextBackfill(job: {
   id: string;
-  data: { channelId: string; userId: string; backfillWindow?: "1d" | "7d" | "30d" | "90d" | "everything" };
+  data: {
+    channelId: string;
+    userId: string;
+    backfillWindow?: "1d" | "7d" | "30d" | "90d" | "everything";
+  };
 }): Promise<void> {
   const { channelId, userId } = job.data;
   if (!channelId || !userId) {

@@ -27,9 +27,8 @@ vi.mock("../../src/lib/server/integrations/youtube-channel-adapter.js", () => ({
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { youtubeVideoSnapshots } = await import(
-  "../../src/lib/server/db/schema/youtube-video-snapshots.js"
-);
+const { youtubeVideoSnapshots } =
+  await import("../../src/lib/server/db/schema/youtube-video-snapshots.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { handlePollActive } = await import("../../src/worker/handlers/poll-active.js");
 const { seedUserDirectly } = await import("./helpers.js");

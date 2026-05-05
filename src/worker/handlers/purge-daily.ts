@@ -17,10 +17,7 @@
 // The purge.completed audit row is written by purgeAccount itself — no
 // audit work in this handler.
 
-import {
-  listPurgeEligibleUsers,
-  purgeAccount,
-} from "../../lib/server/services/purge-account.js";
+import { listPurgeEligibleUsers, purgeAccount } from "../../lib/server/services/purge-account.js";
 import { logger } from "../../lib/server/logger.js";
 
 export async function handlePurgeDaily(job: { id: string; data: object }): Promise<void> {

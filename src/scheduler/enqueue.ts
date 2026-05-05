@@ -212,9 +212,7 @@ export async function enqueueColdPolls(now: Date = new Date()): Promise<EnqueueR
       ),
     );
 
-  const coldRows = rows.filter(
-    (r) => resolveTier(r.occurredAt, r.lastPollStatus, now) === "cold",
-  );
+  const coldRows = rows.filter((r) => resolveTier(r.occurredAt, r.lastPollStatus, now) === "cold");
 
   const sourceIds = Array.from(
     new Set(coldRows.map((r) => r.sourceId).filter((s): s is string => s !== null)),

@@ -56,15 +56,25 @@ export async function startScheduler(): Promise<void> {
 
   // youtube.quota_reset — midnight Pacific. YouTube's daily quota resets
   // at this boundary (Pitfall D). tz handles PDT/PST transitions.
-  await boss.schedule(QUEUES.YOUTUBE_QUOTA_RESET, "0 0 * * *", {}, {
-    tz: "America/Los_Angeles",
-  });
+  await boss.schedule(
+    QUEUES.YOUTUBE_QUOTA_RESET,
+    "0 0 * * *",
+    {},
+    {
+      tz: "America/Los_Angeles",
+    },
+  );
 
   // purge.daily — 4 AM Pacific (after backup at 03:00 Pacific). Plan 05's
   // listPurgeEligibleUsers + purgeAccount cascade.
-  await boss.schedule(QUEUES.PURGE_DAILY, "0 4 * * *", {}, {
-    tz: "America/Los_Angeles",
-  });
+  await boss.schedule(
+    QUEUES.PURGE_DAILY,
+    "0 4 * * *",
+    {},
+    {
+      tz: "America/Los_Angeles",
+    },
+  );
 
   logger.info(
     {

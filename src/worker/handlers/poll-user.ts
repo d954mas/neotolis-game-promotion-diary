@@ -102,5 +102,4 @@ export async function handlePollUser(job: {
     logger.error({ jobId: job.id, eventId, err }, "poll-user: writeSnapshot threw");
     throw err; // Single-event handler: rethrow so pg-boss retries per queue policy.
   }
-
 }
