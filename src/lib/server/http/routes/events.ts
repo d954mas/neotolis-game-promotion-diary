@@ -75,6 +75,8 @@ import {
   VALID_EVENT_KINDS,
   type ShowFilter,
 } from "../../services/events.js";
+import { requestRefreshPoll } from "../../services/refresh-poll.js";
+import { AppError } from "../../services/errors.js";
 import { parseIngestUrl } from "../../services/url-parser.js";
 import type { EventKind } from "../../integrations/data-source-adapter.js";
 import { toEventDto, loadGameIdsForEvent, mapEventsToDtos } from "../../dto.js";
@@ -537,5 +539,49 @@ eventsRoutes.patch("/events/:id/unmark-standalone", async (c) => {
     return c.json(toEventDto(ev, gameIds));
   } catch (err) {
     return mapErr(c, err, "PATCH /api/events/:id/unmark-standalone");
+  }
+});
+
+// Phase 3.0 Plan 08 — POST /api/events/:id/refresh-poll. User-side affordance
+// for "refresh this event's stats right now" (CONTEXT D-10). Calls the Plan 04
+// service which enforces the 5-minute cooldown via events.metadata.last_user_
+// refresh_at, gates non-pollable kinds + missing external_id, and enqueues to
+// poll.user with a per-minute singletonKey + priority 10.
+//
+// Error mapping (via mapErr — service throws typed errors):
+//   - NotFoundError              → 404 {error: "not_found"}      (PRIV-01 cross-tenant)
+//   - AppError "too_many_refreshes" → 429 + Retry-After header from
+//                                       err.metadata.retryAfterSeconds
+//                                       (UI-SPEC interaction contract: client
+//                                       reads Retry-After to drive the
+//                                       cooldown countdown affordance)
+//   - AppError "event_not_pollable"     → 422
+//   - AppError "event_no_external_id"   → 422
+//
+// On 200 the body is `{enqueued: true, queue: "poll.user", eventId}`.
+// Plan 03.0-11 (RefreshNowButton) consumes this contract: after a 200 it
+// disables the button for 5 minutes; after a 429 it reads Retry-After to
+// drive the same countdown without round-tripping the metadata payload.
+eventsRoutes.post("/events/:id/refresh-poll", async (c) => {
+  const ctx = getAuditContext(c);
+  try {
+    const result = await requestRefreshPoll(
+      ctx.userId,
+      c.req.param("id"),
+      ctx.ipAddress,
+      ctx.userAgent ?? undefined,
+    );
+    return c.json(result);
+  } catch (err) {
+    // Set Retry-After header for 429 from metadata.retryAfterSeconds before
+    // deferring to the shared error mapper. mapErr's metadata-forwarding path
+    // covers the JSON body shape; the header is a separate UI contract.
+    if (err instanceof AppError && err.code === "too_many_refreshes") {
+      const retryAfterSeconds = err.metadata.retryAfterSeconds;
+      if (typeof retryAfterSeconds === "number") {
+        c.header("Retry-After", String(retryAfterSeconds));
+      }
+    }
+    return mapErr(c, err, "POST /api/events/:id/refresh-poll");
   }
 });

@@ -643,21 +643,83 @@ describe("Phase 02.2 cross-tenant invariants for /api/me/account routes", () => 
   });
 });
 
-// Phase 3.0 Wave 0 placeholder — Plan 03.0-02 pre-declares the cross-
-// tenant probes for the Wave 2 routes that ship later in the phase.
-// Each it.skip names the activating plan; grep `Plan 03.0-` to flip on.
+// Phase 3.0 Plan 03.0-08 — cross-tenant probes for the Wave 2 routes
+// that ship in this plan. CLAUDE.md §Privacy invariant 2: cross-tenant
+// returns 404, never 403. /api/me/account/purge has no :userId path
+// parameter (Plan 02.2-03 precedent — account routes operate on
+// c.var.userId only); the cross-tenant probe is therefore a structural
+// pin ("the shape of the route can't accidentally grow a :userId
+// param") rather than a behavioural assertion.
 //
-// Two of these probes assert the canonical CLAUDE.md §Privacy invariant
-// 2 (cross-tenant returns 404, never 403); the /admin/quota probe
-// asserts the same status (404) for a non-allowlisted user — the gate
-// is the env allowlist, not row ownership, so the contract is "the
-// existence of the route doesn't leak". /api/me/account/purge has no
-// :userId path parameter (Plan 02.2-03 precedent — account routes
-// operate on c.var.userId only); the cross-tenant probe is therefore
-// a contract pin ("the shape of the route can't accidentally grow a
-// :userId param") rather than a behavioural assertion.
-describe("Plan 03.0-02 — Phase 3.0 cross-tenant probes (placeholder)", () => {
-  it.skip("cross-tenant POST /api/events/:id/refresh-poll → 404 — activated in Plan 03.0-08", () => {});
-  it.skip("cross-tenant DELETE /api/me/account/purge — N/A (account-self only) — activated in Plan 03.0-08", () => {});
+// pg-boss is mocked so the cross-tenant test doesn't need a live boss —
+// the assertion is on the 404 short-circuit BEFORE any enqueue.
+describe("Plan 03.0-08 — refresh-poll + account/purge cross-tenant", () => {
+  it("Plan 03.0-08: cross-tenant POST /api/events/:id/refresh-poll → 404", async () => {
+    const { vi } = await import("vitest");
+    vi.doMock("../../src/lib/server/queue-client.js", async (importOriginal) => {
+      const actual = (await importOriginal()) as Record<string, unknown>;
+      return {
+        ...actual,
+        getBoss: async () => ({ send: async () => "mock-job-id" }),
+      };
+    });
+    try {
+      const { createApp } = await import("../../src/lib/server/http/app.js");
+      const { db } = await import("../../src/lib/server/db/client.js");
+      const { events } = await import("../../src/lib/server/db/schema/events.js");
+      const { uuidv7 } = await import("../../src/lib/server/ids.js");
+      const app = createApp();
+      const userA = await seedUserDirectly({ email: "rp-xt-A@test.local" });
+      const userB = await seedUserDirectly({ email: "rp-xt-B@test.local" });
+
+      // Seed an event owned by user A.
+      const id = uuidv7();
+      await db.insert(events).values({
+        id,
+        userId: userA.id,
+        kind: "youtube_video",
+        authorIsMe: false,
+        occurredAt: new Date(),
+        title: "A's video",
+        url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        externalId: "dQw4w9WgXcQ",
+        metadata: {},
+      });
+
+      // User B hits A's event /refresh-poll → 404 (NotFoundError, not 403).
+      const res = await app.request(`/api/events/${id}/refresh-poll`, {
+        method: "POST",
+        headers: { cookie: `neotolis.session_token=${userB.signedSessionCookieValue}` },
+      });
+      expect(res.status).toBe(404);
+      const text = await res.text();
+      expect(text).not.toMatch(/forbidden|permission/i);
+      expect(JSON.parse(text)).toEqual({ error: "not_found" });
+    } finally {
+      const { vi: viCleanup } = await import("vitest");
+      viCleanup.doUnmock("../../src/lib/server/queue-client.js");
+    }
+  });
+
+  it("Plan 03.0-08: account/purge route has no :userId path parameter — cross-tenant impossible by construction", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const routes = (app as unknown as { routes: Array<{ path: string }> }).routes;
+    // The /api/me/account/purge route registers under /api/me/account/* and
+    // operates on c.var.userId only. By construction it carries no :userId
+    // path parameter; cross-tenant access is impossible because the handler
+    // never reads a tenant-id from the URL.
+    const purgePath = routes.map((r) => r.path).find((p) => p === "/api/me/account/purge");
+    expect(purgePath).toBeDefined();
+    expect(purgePath!).not.toMatch(/:userId/);
+  });
+});
+
+// Phase 3.0 Plan 03.0-07 placeholder — admin/quota cross-tenant assertion
+// activates when the route lands. The "non-allowlisted user → 404" contract
+// is structurally distinct from the row-ownership 404 above (the gate is
+// the env allowlist, not tenant ownership), but the wire format is
+// identical: existence doesn't leak.
+describe("Plan 03.0-07 — admin/quota cross-tenant placeholder", () => {
   it.skip("GET /api/admin/quota for non-allowlisted user → 404 (matches anonymous; allowlist is the gate) — activated in Plan 03.0-07", () => {});
 });
