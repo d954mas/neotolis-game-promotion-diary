@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Executing Phase 03.0
-stopped_at: Phase 3.0 UI-SPEC approved
-last_updated: "2026-05-05T16:50:23.196Z"
+status: Ready to execute
+stopped_at: Completed 03.0-02-PLAN.md (Wave 0 doc updates + Paraglide keys + 17 placeholder test files)
+last_updated: "2026-05-05T19:15:38.450Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 82
-  completed_plans: 68
+  completed_plans: 69
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0 (polling-pipeline-plumbing-youtube) — EXECUTING
-Plan: 1 of 14
+Plan: 2 of 14
 
 ## Performance Metrics
 
@@ -110,6 +110,7 @@ Plan: 1 of 14
 | Phase 02.2-ship-to-prod P05 | 25min | 2 tasks | 8 files |
 | Phase 02.2 P04 | 10min | 2 tasks | 13 files |
 | Phase 02.2-ship-to-prod P08 | ~7min | 2 tasks | 3 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P02 | ~14min | 3 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -317,6 +318,9 @@ Recent decisions affecting current work:
 - [Phase 02.2]: ConfirmDialog requireText prop is the Type-DELETE variant; backward compatible (null/undefined default = no behaviour change for existing callers)
 - [Phase 02.2]: Permanent-delete-now CTA HIDDEN in 2.2 (purge endpoint ships in Phase 3 purge worker; PUTOFF marker in AccountDeletedBanner.svelte)
 - [Phase 02.2-ship-to-prod]: Plan 02.2-08 ships operational runbooks: docs/deploy/install.md (727 lines, 7 sections including 10-step Russian UAT) walks blank aeza VPS to green prod deploy; docs/self-host/backups.md (289 lines, 7 sections) covers opt-in S3-compatible backups for R2/B2/Wasabi/AWS/MinIO/local-only; .env.example finalized with POSTGRES_PASSWORD documented (Rule 2 auto-add) + 8 install.md cross-references
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-02: Phase 2.1 named-plan it.skip pattern carried into Phase 3.0 — every it.skip suffix names the activating plan ('— activated in Plan 03.0-NN'); 17 placeholder test files + 69 named-plan stubs land in Wave 0 so Wave 1+ plans drop into existing files instead of creating new ones
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-02: MUST_BE_PROTECTED entries pre-declared as comments (Plan 02.2-01 precedent) — live entries in the allowlist would trip the sweep's vacuous-pass toContain guard before the route mounts; the corresponding it.skip blocks ARE live so a grep flips them on at the right plan. Three-layer sweep contract for new authenticated routes: comment + it.skip + per-route assertion (CLAUDE.md Privacy invariant 3)
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-02: polling_badge_phase3_placeholder retired (UI-SPEC Copywriting Contract REMOVED) — PollingBadge.svelte switched to polling_badge_manual ('Manual entry — no polling') for the never-polled-yet branch until Plan 03.0-11 lands the live tier-driven rewrite. polling_badge_manual is intentionally retained per UI-SPEC for this edge case
 
 ### Pending Todos
 
@@ -357,8 +361,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-05T15:07:29.702Z
+Last session: 2026-05-05T19:15:38.446Z
 Last Activity: 2026-05-05
-Stopped at: Phase 3.0 UI-SPEC approved
-Resume file: .planning/phases/03.0-polling-pipeline-plumbing-youtube/03.0-UI-SPEC.md
+Stopped at: Completed 03.0-02-PLAN.md (Wave 0 doc updates + Paraglide keys + 17 placeholder test files)
+Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
