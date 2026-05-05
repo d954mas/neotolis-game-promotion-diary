@@ -45,10 +45,7 @@ async function buildHarnessApp(opts: {
   // before each fresh import so zod's required-string check passes.
   process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
 
-  const { adminAllowlist } = await import(
-    "../../src/lib/server/http/middleware/admin.js"
-  );
-  const { NotFoundError } = await import("../../src/lib/server/services/errors.js");
+  const { adminAllowlist } = await import("../../src/lib/server/http/middleware/admin.js");
 
   const app = new Hono<HarnessVars>();
   // Synthetic tenantScope-equivalent that sets userEmail without going through
@@ -61,12 +58,6 @@ async function buildHarnessApp(opts: {
   });
   app.use("*", adminAllowlist);
   app.get("/", (c) => c.json({ ok: true }));
-  app.onError((err, c) => {
-    if (err instanceof NotFoundError) {
-      return c.json({ error: "not_found" }, 404);
-    }
-    return c.json({ error: "internal_server_error" }, 500);
-  });
 
   // Restore the saved env after the harness's bound import is captured.
   for (const [k, v] of Object.entries(saved)) {

@@ -99,8 +99,9 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     // Plan 03.0-08 — refresh-poll + account/purge mounts shipped:
     "/api/events/:id/refresh-poll",
     "/api/me/account/purge",
-    //   uncomment after Plan 03.0-07 lands the route mount:
-    //     "/api/admin/quota",
+    // Plan 03.0-07 — admin /quota route mounted under /api/admin/* (env-allowlist
+    // gated; auth gate fires first so anonymous → 401 before allowlist sees it).
+    "/api/admin/quota",
   ];
 
   it("every /api/* route except /api/auth/* refuses anonymous with 401", async () => {
@@ -293,9 +294,17 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  // Phase 3.0 Plan 03.0-07 — pre-declared admin-quota anonymous-401 stub.
-  // Activates when /api/admin/quota lands in Plan 03.0-07.
-  it.skip("GET /api/admin/quota without session → 401 (NOT 404 — auth gate fires before allowlist gate) — activated in Plan 03.0-07", () => {});
+  // Phase 3.0 Plan 03.0-07 — admin-quota anonymous-401 ACTIVATED. The auth
+  // gate (tenantScope mounted on /api/* globally) fires BEFORE the allowlist
+  // gate (adminAllowlist mounted on /api/admin/*), so an anonymous request
+  // gets 401 from tenantScope and never reaches the allowlist check. The
+  // sweep above also covers the path; this explicit assertion is the
+  // load-bearing per-route check (AGENTS.md §3 both layers).
+  it("Plan 03.0-07: anonymous GET /api/admin/quota returns 401 (auth gate fires before allowlist gate)", async () => {
+    const res = await app.request("/api/admin/quota");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
 
   it("AUTH-01: /api/me with valid session returns 200 + UserDto", async () => {
     const { seedUserDirectly } = await import("./helpers.js");

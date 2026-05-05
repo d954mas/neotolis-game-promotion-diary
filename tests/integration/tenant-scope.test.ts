@@ -715,11 +715,33 @@ describe("Plan 03.0-08 — refresh-poll + account/purge cross-tenant", () => {
   });
 });
 
-// Phase 3.0 Plan 03.0-07 placeholder — admin/quota cross-tenant assertion
-// activates when the route lands. The "non-allowlisted user → 404" contract
-// is structurally distinct from the row-ownership 404 above (the gate is
-// the env allowlist, not tenant ownership), but the wire format is
-// identical: existence doesn't leak.
-describe("Plan 03.0-07 — admin/quota cross-tenant placeholder", () => {
-  it.skip("GET /api/admin/quota for non-allowlisted user → 404 (matches anonymous; allowlist is the gate) — activated in Plan 03.0-07", () => {});
+// Phase 3.0 Plan 03.0-07 — admin/quota cross-allowlist assertion ACTIVATED.
+// The "non-allowlisted user → 404" contract is structurally distinct from
+// the row-ownership 404 above (the gate is the env allowlist, not tenant
+// ownership), but the wire format is identical: existence doesn't leak.
+//
+// AGENTS.md AP-4 — body MUST NOT contain "forbidden" / "permission". The
+// adminAllowlist middleware matches the wire format mapErr emits for
+// NotFoundError, so callers cannot distinguish "you're not in the allowlist"
+// from "this URL has no resource for you" — that's the contract.
+describe("Plan 03.0-07 — admin/quota cross-allowlist", () => {
+  it("Plan 03.0-07: GET /api/admin/quota for non-allowlisted user → 404 (matches anonymous; allowlist is the gate)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    // The integration test process boots with ADMIN_EMAIL_ALLOWLIST empty by
+    // default (env.ts default is empty Set), so any authenticated user is
+    // non-allowlisted by construction. Seed a normal user and probe.
+    const u = await seedUserDirectly({
+      email: `p07-nonallow-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const res = await app.request("/api/admin/quota", {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body).toEqual({ error: "not_found" });
+    // AGENTS.md AP-4: response body MUST NOT leak "forbidden" / "permission".
+    const bodyStr = JSON.stringify(body);
+    expect(bodyStr).not.toMatch(/forbidden|permission/i);
+  });
 });

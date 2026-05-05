@@ -107,9 +107,7 @@ export async function loadAdminQuotaPage(): Promise<{
  * /admin/quota. Computes pctOfDaily + status using the SAME thresholds the
  * scheduler uses (single source of truth — youtube-quota-tracker.ts exports).
  */
-export function toQuotaKeyRow(
-  row: typeof youtubeServiceQuotaUsage.$inferSelect,
-): QuotaKeyRow {
+export function toQuotaKeyRow(row: typeof youtubeServiceQuotaUsage.$inferSelect): QuotaKeyRow {
   const u = row.estimatedUnits;
   // 1 decimal — multiply by 1000, round, divide by 10. Float-safe at quota
   // scale (worst case: 99_999 / 10_000 * 100 = 999.99 → rounded 1000.0).
@@ -139,9 +137,7 @@ export function toQuotaKeyRow(
  * triggered this purge?") add the field explicitly with the same review
  * touchpoint discipline as the rest of dto.ts.
  */
-export function toServiceAuditEntry(
-  row: typeof auditLog.$inferSelect,
-): ServiceAuditEntry {
+export function toServiceAuditEntry(row: typeof auditLog.$inferSelect): ServiceAuditEntry {
   return {
     id: row.id,
     createdAt: row.createdAt,

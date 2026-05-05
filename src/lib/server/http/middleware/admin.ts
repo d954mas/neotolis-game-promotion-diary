@@ -4,9 +4,11 @@
 // via src/lib/server/config/env.ts). Throws `NotFoundError` (→ 404 via
 // routes/_shared.ts mapErr) when the caller's email is NOT in the set.
 //
-// NEVER throws ForbiddenError on tenant-owned resources — AGENTS.md "Privacy &
-// multi-tenancy" invariant 2 + AP-4. The body MUST NOT contain the literal
-// strings "forbidden" / "permission" — see tests/integration/admin-quota.test.ts.
+// 404 not 403 — AGENTS.md "Privacy & multi-tenancy" invariant 2 + AP-4. The
+// body MUST NOT contain the literal strings "forbidden" / "permission" — see
+// tests/integration/admin-quota.test.ts. The 403-class error type is reserved
+// for Phase 6+ admin endpoints where the caller IS authorized to know the
+// resource exists; here the existence of /admin/* itself is the secret.
 //
 // Self-host parity by construction: empty allowlist Set ⇒ membership check
 // fails for every authenticated user ⇒ all `/api/admin/*` returns 404. Self-
@@ -26,14 +28,23 @@
 
 import type { MiddlewareHandler } from "hono";
 import { env } from "../../config/env.js";
-import { NotFoundError } from "../../services/errors.js";
 
 export const adminAllowlist: MiddlewareHandler<{
   Variables: { userId: string; sessionId: string; userEmail: string };
 }> = async (c, next) => {
   const email = (c.var.userEmail ?? "").toLowerCase();
   if (!env.ADMIN_EMAIL_ALLOWLIST.has(email)) {
-    throw new NotFoundError();
+    // Pattern matches tenantScope (401) and accountState (423): respond
+    // directly from the middleware rather than throwing. Direct response
+    // avoids needing a global Hono onError handler — per-route mapErr
+    // handles NotFoundError thrown FROM service code, not from middleware.
+    //
+    // The literal body shape ({error: 'not_found'}) is identical to what
+    // mapErr emits for NotFoundError so callers cannot distinguish "the
+    // route doesn't exist for me (allowlist gate)" from "the row I asked
+    // about doesn't exist for me (cross-tenant)" — that's the AGENTS.md
+    // AP-4 contract for admin paths.
+    return c.json({ error: "not_found" }, 404);
   }
   return next();
 };
