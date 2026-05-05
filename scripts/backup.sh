@@ -37,6 +37,14 @@ COMPOSE_FILE="${COMPOSE_FILE:-/opt/diary/docker-compose.prod.yml}"
 exec 200>"$LOCK"
 flock -n 200 || { echo "[$(date -u)] backup already running, skipping"; exit 0; }
 
+# cd to the compose file's directory so docker compose auto-loads .env
+# (compose looks for .env in CWD, not next to the compose file). Without
+# this, cron runs from / and emits 4× "POSTGRES_PASSWORD variable is not
+# set" warnings per invocation — backup still succeeds because exec enters
+# an already-running postgres container, but the noise masks future real
+# failures. Issue #18.
+cd "$(dirname "$COMPOSE_FILE")"
+
 echo "[$(date -u)] starting backup ${DATE}"
 
 # pg_dump runs INSIDE the postgres compose service (no postgresql-client
