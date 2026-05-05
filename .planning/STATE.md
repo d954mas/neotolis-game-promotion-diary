@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0-06-PLAN.md
-last_updated: "2026-05-05T20:05:08.166Z"
+stopped_at: Completed 03.0-03-PLAN.md (tier-resolver + youtube-quota-tracker; Wave 1 parallel-race deviation documented)
+last_updated: "2026-05-05T20:05:34.258Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 10
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0 (polling-pipeline-plumbing-youtube) — EXECUTING
-Plan: 5 of 14
+Plan: 6 of 14
 
 ## Performance Metrics
 
@@ -114,6 +114,7 @@ Plan: 5 of 14
 | Phase 03.0-polling-pipeline-plumbing-youtube P01 | 9 min | 3 tasks | 18 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P05 | 10m | 1 tasks | 7 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P06 | 12 min | 1 tasks | 3 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P03 | ~25min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -333,6 +334,9 @@ Recent decisions affecting current work:
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 05: 4 it.skip stubs (Plan 08 route layer) preserved unchanged; 10 NEW service-layer tests added under separate describe block — Plan 02 SUMMARY documented those stubs as 'Plan 03.0-08 fills.'
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Inlined pickKeyForJob + hashApiKeyId in youtube-channel-adapter.ts as a cross-plan transition contract; Plan 03.0-03 landed the canonical home in commit 835ed04 between this plan's RED and GREEN phases — swap is a one-line follow-up commit (tracked in SUMMARY).
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: DataSourceAdapter interface evolution: pollStats batched signature (PollableEvent[]→StatsSnapshot[]); StatsSnapshot.metrics optional + new metadata field (Shorts duration_seconds/is_short); SnapshotStatus exported as named type. Verified safe — only consumers were the test file + adapter itself.
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: tier-resolver.ts is the single source of truth for tier resolution (Pitfall 7); inlining boundary literals elsewhere is a P0 review block
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: youtube-quota-tracker uses two-layer audit idempotency (in-memory Set + audit_log lookup) — handles container restart at the natural midnight-Pacific boundary
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Test file split: pure-function cases stay in tests/unit/; DB-touching cases moved to tests/integration/youtube-quota-tracker.test.ts (quota.test.ts precedent)
 
 ### Pending Todos
 
@@ -373,8 +377,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-05T20:05:08.161Z
+Last session: 2026-05-05T20:05:25.109Z
 Last Activity: 2026-05-05
-Stopped at: Completed 03.0-06-PLAN.md
+Stopped at: Completed 03.0-03-PLAN.md (tier-resolver + youtube-quota-tracker; Wave 1 parallel-race deviation documented)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
