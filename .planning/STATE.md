@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0-12-PLAN.md (parallel Wave 4)
-last_updated: "2026-05-05T21:04:48.342Z"
+stopped_at: Completed 03.0-11-PLAN.md (Wave 4 parallel)
+last_updated: "2026-05-05T21:09:32.713Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 82
-  completed_plans: 80
+  completed_plans: 81
 ---
 
 # Project State
@@ -122,6 +122,7 @@ Plan: 10 of 14
 | Phase 03.0-polling-pipeline-plumbing-youtube P09 | 30 min | 3 tasks | 16 files |
 | Phase 03.0 P13 | ~7 min | 3 tasks | 6 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P12 | 9min | 2 tasks | 9 files |
+| Phase 03.0 P11 | 16m | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -361,6 +362,8 @@ Recent decisions affecting current work:
 - [Phase 03.0]: Plan 13 (admin /quota page): /admin/+layout.server.ts is a deliberate no-op — allowlist gate stays at /api/admin/* middleware (Plan 07) so there's a single source of truth for who sees /admin/*. SvelteKit page loader fetches /api/admin/quota via fetch() helper (NOT direct service import) to keep the gate in one place; on 404 throws SvelteKit error(404) rendering the standard 404 page (admin-deny indistinguishable from URL-not-found per D-16 self-host parity).
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 12: AccountDeletedBanner Permanent-delete-now CTA un-hidden (DV-6); ConfirmDialog Type-DELETE + speedbump pattern reused verbatim from Phase 02.2 D-S3
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 12: BackfillPicker.svelte ships with 5 presets (default 30d); /sources/new conditionally renders + collapses with auto_import=true gate; createSource enqueues YOUTUBE_CHANNEL_CONTEXT_BACKFILL with singletonKey=source-{id}
+- [Phase 03.0]: Plan 11: Mirror tier-resolver inline in PollingBadge.svelte (Pitfall 7) — paired with tests/unit/tier-resolver-client-mirror.test.ts to guard against drift; cheaper than refactoring tier-resolver out of $lib/server/.
+- [Phase 03.0]: Plan 11: Browser-mode test moved from tests/browser/ to tests/integration/ (Rule 3 deviation) — vitest browser mode's vite import-analysis can't resolve $app/navigation transitive import; integration project Node env handles vi.mock correctly. Same path Plan 03.0-12 took for AccountDeletedBanner.
 
 ### Pending Todos
 
@@ -402,8 +405,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-05T21:04:48.261Z
+Last session: 2026-05-05T21:09:31.829Z
 Last Activity: 2026-05-05
-Stopped at: Completed 03.0-12-PLAN.md (parallel Wave 4)
+Stopped at: Completed 03.0-11-PLAN.md (Wave 4 parallel)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
