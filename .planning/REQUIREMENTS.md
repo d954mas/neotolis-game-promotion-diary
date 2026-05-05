@@ -32,7 +32,7 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 
 ### Secrets & Per-User API Keys (KEYS)
 
-- [ ] **KEYS-01**: User can paste a YouTube Data API v3 key into settings; the key is encrypted at rest with envelope encryption (KEK from env, DEK per row) before being persisted
+- [ ] **KEYS-01**: User can paste a YouTube Data API v3 key into settings; the key is encrypted at rest with envelope encryption (KEK from env, DEK per row) before being persisted *(reframed Phase 3.0: service-level operator keys via `SERVICE_YOUTUBE_API_KEYS` env; per-user override deferred to Phase 6 trigger ≥1 power user trips 95% of operator quota — see ROADMAP Phase 3.0 detail)*
 - [ ] **KEYS-02**: User can authorize Reddit via OAuth (per-user, BYO Reddit app credentials) and rotate or revoke at any time
 - [x] **KEYS-03**: User can optionally paste a Steam Web API key; the wishlist tracker works without it (manual entry / CSV path remains available)
 - [x] **KEYS-04**: After saving, every secret displays as `••••••••XYZW` (last 4 characters only); the plaintext is never returned to the browser
@@ -48,11 +48,11 @@ This document is the v1 contract. Every requirement here is a hypothesis until s
 
 ### Polling Engine (POLL)
 
-- [ ] **POLL-01**: A scheduler enqueues poll jobs on adaptive tiers — `hot` (item <24h old, 30–60 min cadence), `warm` (item 1–30 days old, 4×/day), `cold` (item >30 days old, 1×/day)
+- [ ] **POLL-01**: A scheduler enqueues poll jobs on adaptive tiers — `hot` (item <24h old, 30–60 min cadence), `warm` (item 1–30 days old, 4×/day), `cold` (item >30 days old, 1×/day) *(reframed Phase 3.0: 3-tier Active 0–24h / Cold 1–28d / Frozen >28d + per-event `last_poll_status` for transient errors; original Hot/Warm/Cold + Stale 4-tier model RETIRED per CONTEXT DV-2)*
 - [ ] **POLL-02**: A worker pool consumes jobs across separate concurrency lanes per tier; cold backlogs cannot starve hot polling
-- [ ] **POLL-03**: Workers honor per-user API key rate limits; a 429 / quota-exhausted response defers the job with backoff and surfaces the condition to the user
+- [ ] **POLL-03**: Workers honor per-user API key rate limits; a 429 / quota-exhausted response defers the job with backoff and surfaces the condition to the user *(reframed Phase 3.0 for YouTube: service-level throttle visible only via `/admin/quota`; per-user 429 surfacing remains scope for Reddit (Phase 3.1) + Steam (Phase 3.2). DV-3.)*
 - [x] **POLL-04**: Each successful poll appends an immutable row to `event_stats_snapshots` (`event_id`, `polled_at`, `metric_key`, `metric_value`); the live `events` row carries only `last_polled_at` and `last_poll_status` *(reframed Phase 2.1: tracked_items + metric_snapshots → events + event_stats_snapshots; same chart-history-is-immutable invariant)*
-- [x] **POLL-05**: Each event in `/feed` and on `/games/[id]` displays a polling status badge — "Hot — checked Xm ago" / "Warm — every 6h" / "Cold — daily" / "Stale" (no successful poll in >48h) *(reframed Phase 2.1: per-tracked-item badge → per-event badge in feed and curated views)*
+- [x] **POLL-05**: Each event in `/feed` and on `/games/[id]` displays a polling status badge — "Hot · checked Xh ago / Cold · yesterday / Frozen · refresh to update / Unavailable · last seen Xd ago" *(reframed Phase 2.1: per-tracked-item badge → per-event badge in feed and curated views; reframed Phase 3.0 per CONTEXT D-NEW PollingBadge copy)*
 - [ ] **POLL-06**: Workers shut down gracefully on SIGTERM (configurable grace period) so deploys do not lose in-flight jobs
 
 ### Wishlist Tracking (WISH)
@@ -169,7 +169,7 @@ Each REQ-ID maps to exactly one phase. Coverage: 54/54 v1 requirements.
 | GAMES-04b | Superseded by SOURCES-01 |
 | GAMES-04c | Superseded by SOURCES-01 |
 | GAMES-04d | Superseded by SOURCES-01 |
-| KEYS-01 | Phase 3 |
+| KEYS-01 | Phase 3.0 (reframed; per-user override deferred Phase 6) |
 | KEYS-02 | Phase 3 |
 | KEYS-03 | Phase 2 |
 | KEYS-04 | Phase 2 |
