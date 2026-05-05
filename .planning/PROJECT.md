@@ -26,6 +26,17 @@ Replace messy Google Sheets / markdown files with a structured, secure, query-fr
 - [x] **In-app GDPR baseline** — Article 15 export (GET `/api/me/export`), Article 17 soft-delete with 60-day grace (DELETE `/api/me/account`), restore window (POST `/api/me/account/restore`).
 - [x] **Per-user abuse quotas** — 50 games + 50 sources + 500 events/day (rolling 24h). Race-free + pool-deadlock-safe via per-user `pg_advisory_xact_lock` + post-tx audit emission.
 
+**Phase 3.0 (polling-pipeline-plumbing-youtube) validates:**
+- [x] **Background job queue + scheduler architecture** — pg-boss queues + 4 cron schedules (Active poll 6h UTC, Cold poll 5am UTC, quota_reset midnight PT, purge.daily 4am PT). Worker subscribes to all Phase 3.0 queues with `APP_ROLE=worker`.
+- [x] **Adaptive polling worker** (YouTube only — Reddit + others land in 3.1+) — Active/Cold/Frozen tier resolver (`src/lib/server/services/tier-resolver.ts`) is single source of truth; worker handlers read tier and skip Frozen/Stale; Refresh Now button bypasses cooldown for any single source.
+- [x] **YouTube `DataSourceAdapter` real implementation** — replaces Phase 2.1 STUB. Native fetch (no `googleapis` npm), batched `playlistItems.list` + `videos.list` with `quotaUser` parameter, 1 unit per call (VERIFIED 2026-05-06 spike against operator's API key — 8 calls = 8 units exactly).
+- [x] **YouTube service-level quota model** — `youtube_service_quota_usage` table tracks per-key per-day usage; round-robin key picker; 80% soft-warn pauses Cold + auto-import, 95% hard-stop pauses everything until midnight reset; admin `/admin/quota` dashboard reads usage + audit tail.
+- [x] **Immutable per-event snapshot time-series** — `youtube_video_snapshots` no-user_id (public-data semantics) cache; idempotent `youtube-snapshot-writer` with two-phase tx; events row never mutated, charts source from snapshot history.
+- [x] **Channel-context backfill on first paste** — paste a YouTube URL whose channel is NOT in `youtube_channel_metadata_cache` → enqueue one-time `YOUTUBE_CHANNEL_CONTEXT_BACKFILL` job. Subsequent paste from same channel = cache hit, no extra quota burn.
+- [x] **GDPR Article 17 close** — `purgeAccount(userId)` is the shared backbone for both the immediate-purge route (`DELETE /api/me/account/purge`) AND the daily purge cron worker. Idempotent. Audit `purge.completed` writes 1 row per purged user_id (NOT operator's user_id) with `metadata.row_counts`. Migration 0011 dropped `audit_log → user(id)` FK so audit rows survive their referent.
+- [x] **Admin `/admin/quota` page** — env-allowlist gate (`ADMIN_EMAIL_ALLOWLIST`); cross-tenant returns 404 not 403 for non-allowlisted; today's usage + per-key breakdown + audit tail. (Manual UAT pending — see `03.0-HUMAN-UAT.md`.)
+- [x] **Polling UI surfaces** — live `PollingBadge` (5 variants: Hot/Cold/Frozen/Manual/Throttled), `RefreshNowButton` with 5-min cooldown, `AccountDeletedBanner` "Permanent delete now" CTA, `BackfillPicker` (1d/7d/30d/90d/everything) on `/sources/new` for YouTube + auto_import. (Visual UAT pending.)
+
 ### Active
 
 - [ ] Google OAuth login (the only auth method in MVP)
