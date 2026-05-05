@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0-01-PLAN.md (Phase 3.0 baseline schema + cross-cutting boundary updates)
-last_updated: "2026-05-05T19:49:31.179Z"
+stopped_at: Completed 03.0-06-PLAN.md
+last_updated: "2026-05-05T20:05:08.166Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 82
-  completed_plans: 70
+  completed_plans: 73
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0 (polling-pipeline-plumbing-youtube) — EXECUTING
-Plan: 3 of 14
+Plan: 5 of 14
 
 ## Performance Metrics
 
@@ -112,6 +112,8 @@ Plan: 3 of 14
 | Phase 02.2-ship-to-prod P08 | ~7min | 2 tasks | 3 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P02 | ~14min | 3 tasks | 23 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P01 | 9 min | 3 tasks | 18 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P05 | 10m | 1 tasks | 7 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P06 | 12 min | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -326,6 +328,11 @@ Recent decisions affecting current work:
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-01: pgboss legacy queue cleanup gated on schema existence (DO BEGIN IF EXISTS information_schema.schemata) — pgboss schema is created at boss.start() runtime, not migrate time; unconditional DELETE would break fresh test DBs
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-01: events_user_kind_ext_active_unq added ALONGSIDE existing events_user_kind_source_ext_unq (not replacement) — different semantics (refresh-poll idempotency vs auto-import dedup); both partial indexes retained
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-01: YouTube videos.list quota VERIFIED at 1 unit/call regardless of 50-id batch (operator spike 2026-05-06, delta=8 across 8 HTTP 200 calls); 8000 units/day yields 400000 video updates/day theoretical ceiling. Phase 3.0 worker design proceeds as planned
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 05: drop audit_log -> user FK in migration 0011 so purge.completed audit row survives the user delete (AGENTS §4 INSERT-only invariant + Open Question 4 resolution)
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 05: cascade order api_keys_steam -> event_games -> events -> game_steam_listings -> data_sources -> games -> session -> user; event_games BEFORE events for accurate row-count probe (cascade-collateral counts are invisible to .returning())
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 05: 4 it.skip stubs (Plan 08 route layer) preserved unchanged; 10 NEW service-layer tests added under separate describe block — Plan 02 SUMMARY documented those stubs as 'Plan 03.0-08 fills.'
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Inlined pickKeyForJob + hashApiKeyId in youtube-channel-adapter.ts as a cross-plan transition contract; Plan 03.0-03 landed the canonical home in commit 835ed04 between this plan's RED and GREEN phases — swap is a one-line follow-up commit (tracked in SUMMARY).
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: DataSourceAdapter interface evolution: pollStats batched signature (PollableEvent[]→StatsSnapshot[]); StatsSnapshot.metrics optional + new metadata field (Shorts duration_seconds/is_short); SnapshotStatus exported as named type. Verified safe — only consumers were the test file + adapter itself.
 
 ### Pending Todos
 
@@ -366,8 +373,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-05T19:49:14.604Z
+Last session: 2026-05-05T20:05:08.161Z
 Last Activity: 2026-05-05
-Stopped at: Completed 03.0-01-PLAN.md (Phase 3.0 baseline schema + cross-cutting boundary updates)
+Stopped at: Completed 03.0-06-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
