@@ -250,6 +250,19 @@ function isPgUniqueViolation(e: unknown): boolean {
 }
 
 /**
+ * Extract the constraint name from a Postgres unique-violation. The shape
+ * differs across pg drivers / versions: `node-pg` exposes `constraint`,
+ * older drivers use `constraint_name`. Returns null when neither is set.
+ */
+function pgUniqueViolationConstraint(e: unknown): string | null {
+  if (typeof e !== "object" || e === null) return null;
+  const obj = e as { constraint?: unknown; constraint_name?: unknown };
+  if (typeof obj.constraint === "string") return obj.constraint;
+  if (typeof obj.constraint_name === "string") return obj.constraint_name;
+  return null;
+}
+
+/**
  * Pitfall 4 mitigation: verify gameId ownership BEFORE INSERT/UPDATE.
  * Throws NotFoundError on miss / cross-tenant — the HTTP boundary translates
  * to 404 (NOT 500 from a bare PG FK error). Soft-deleted games count as
@@ -417,6 +430,26 @@ export async function createEvent(
     });
   } catch (e: unknown) {
     if (isPgUniqueViolation(e)) {
+      const constraint = pgUniqueViolationConstraint(e);
+      // Phase 3.0 Plan 04 (D-15): the new `events_user_kind_ext_active_unq`
+      // partial unique index (Plan 01) keys off (user_id, kind, external_id)
+      // WHERE external_id IS NOT NULL AND deleted_at IS NULL. Manual-paste
+      // collisions hit this constraint (source_id is NULL on manual paste,
+      // so the older `events_user_kind_source_ext_unq` index — partial WHERE
+      // source_id IS NOT NULL — does not catch them). The new constraint
+      // surfaces as 422 with metadata.url so the route layer (Plan 03.0-08)
+      // can render a user-facing toast pointing back at the duplicate row.
+      if (constraint === "events_user_kind_ext_active_unq") {
+        throw new AppError("event already exists for this URL", "duplicate_event", 422, {
+          kind: input.kind,
+          external_id: derivedExternalId,
+          url: input.url ?? null,
+        });
+      }
+      // Pre-existing auto-import dedup constraint preserved at 409 — the
+      // auto-import worker (Plan 03.0-09) catches and silently skips, so the
+      // user-facing surface never sees this code. Keeping 409 here avoids
+      // breaking any back-compat caller that already discriminates by status.
       throw new AppError("event already exists for this source", "duplicate_event", 409, {
         kind: input.kind,
         source_id: input.sourceId ?? null,

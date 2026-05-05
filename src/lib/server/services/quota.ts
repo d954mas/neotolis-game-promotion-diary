@@ -74,11 +74,26 @@ async function currentCount(dbCtx: DbOrTx, userId: string, kind: QuotaKind): Pro
     return Number(r?.c ?? 0);
   }
   // events_per_day — rolling 24h count.
+  //
+  // Phase 3.0 Plan 04 — DV-5: the events_per_day cap models the human-time
+  // budget for manual creates. Auto-import (rows where source_id IS NOT NULL)
+  // is excluded from the count entirely; a registered YouTube channel that
+  // posts 50 videos in one day must not burn the user's manual-paste budget.
+  // The auto-import worker (Plan 03.0-09) bypasses withQuotaGuard altogether;
+  // this filter is the defense-in-depth guarantee that ANY service that DOES
+  // route an auto-import write through withQuotaGuard still excludes those
+  // rows from the rate cap.
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const [r] = await dbCtx
     .select({ c: count() })
     .from(events)
-    .where(and(eq(events.userId, userId), gte(events.createdAt, since)));
+    .where(
+      and(
+        eq(events.userId, userId),
+        gte(events.createdAt, since),
+        isNull(events.sourceId), // DV-5: human-driven creates only
+      ),
+    );
   return Number(r?.c ?? 0);
 }
 
