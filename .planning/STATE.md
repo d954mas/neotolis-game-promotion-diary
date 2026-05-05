@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0-11-PLAN.md (Wave 4 parallel)
-last_updated: "2026-05-05T21:09:32.713Z"
+stopped_at: Completed 03.0-14-PLAN.md (Wave 5 smoke + verification sign-off)
+last_updated: "2026-05-05T21:33:58.996Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 10
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 82
-  completed_plans: 81
+  completed_plans: 82
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0 (polling-pipeline-plumbing-youtube) — EXECUTING
-Plan: 10 of 14
+Plan: 11 of 14
 
 ## Performance Metrics
 
@@ -123,6 +123,7 @@ Plan: 10 of 14
 | Phase 03.0 P13 | ~7 min | 3 tasks | 6 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P12 | 9min | 2 tasks | 9 files |
 | Phase 03.0 P11 | 16m | 3 tasks | 9 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P14 | ~13min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -364,6 +365,9 @@ Recent decisions affecting current work:
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 12: BackfillPicker.svelte ships with 5 presets (default 30d); /sources/new conditionally renders + collapses with auto_import=true gate; createSource enqueues YOUTUBE_CHANNEL_CONTEXT_BACKFILL with singletonKey=source-{id}
 - [Phase 03.0]: Plan 11: Mirror tier-resolver inline in PollingBadge.svelte (Pitfall 7) — paired with tests/unit/tier-resolver-client-mirror.test.ts to guard against drift; cheaper than refactoring tier-resolver out of $lib/server/.
 - [Phase 03.0]: Plan 11: Browser-mode test moved from tests/browser/ to tests/integration/ (Rule 3 deviation) — vitest browser mode's vite import-analysis can't resolve $app/navigation transitive import; integration project Node env handles vi.mock correctly. Same path Plan 03.0-12 took for AccountDeletedBanner.
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 14: Smoke gate uses POST /api/events/:id/refresh-poll to drive a real poll.user round-trip through the youtube-mock — exercises auth gate + tenant scope + service + queue enqueue + worker drain + snapshot write as a single assertion, deterministic (no waiting for a 6h scheduler tick)
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 14: phase-NN-flow.sh extraction pattern — each phase ships tests/smoke/lib/phaseNN-flow.sh with a single phaseNN_<descriptor>() function; the parent self-host.sh sources + calls. Phase 2.1 phase21-flow.sh is the precedent; Phase 3.0 phase30-flow.sh continues it; Phase 3.1 / 3.2 will follow without rebase pressure on the parent harness
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 14: VERIFICATION.md verdict signed-off-pending-ci-and-uat — executor produces the doc with the 12-criteria checklist + per-plan map + spike result + smoke gate table populated; the human flips verdict: signed-off after the CI smoke run is green AND the deferred 13-step manual UAT (HUMAN-UAT.md) closes
 
 ### Pending Todos
 
@@ -405,8 +409,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-05T21:09:31.829Z
+Last session: 2026-05-05T21:33:58.991Z
 Last Activity: 2026-05-05
-Stopped at: Completed 03.0-11-PLAN.md (Wave 4 parallel)
+Stopped at: Completed 03.0-14-PLAN.md (Wave 5 smoke + verification sign-off)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md

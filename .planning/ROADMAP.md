@@ -194,7 +194,7 @@ Plans:
 - [x] 03.0-11-PLAN.md — Wave 4: PollingBadge.svelte live state rewrite (5 variants per UI-SPEC) + RefreshNowButton.svelte new component (44×44 hit area, 5min cooldown, prefers-reduced-motion compliance) + tests/browser/polling-badge.test.ts
 - [x] 03.0-12-PLAN.md — Wave 4: AccountDeletedBanner.svelte Permanent-delete-now CTA un-hidden (DV-6) + BackfillPicker.svelte new component (5 presets, default 30d, conditional helper) + /sources/new conditional render + data-sources.ts createSource enqueue
 - [x] 03.0-13-PLAN.md — Wave 4: /admin/+layout.svelte admin shell + /admin/quota/+page.svelte composition + QuotaKeyTable.svelte (4 cols, status pills, stacked < 600px) + QuotaAuditList.svelte (last 50 service entries) + manual UAT checkpoint after Wave 4
-- [ ] 03.0-14-PLAN.md — Wave 5: tests/smoke/lib/youtube-mock.{mjs,sh} mock reverse-proxy + tests/smoke/self-host.sh extended (cron registration + snapshot write + admin parity ×2 + SIGTERM 60s drain) + CI env propagation + 03.0-VERIFICATION.md phase verdict sign-off
+- [x] 03.0-14-PLAN.md — Wave 5: tests/smoke/lib/youtube-mock.{mjs,sh} mock reverse-proxy + tests/smoke/self-host.sh extended (cron registration + snapshot write + admin parity ×2 + SIGTERM 60s drain) + CI env propagation + 03.0-VERIFICATION.md phase verdict sign-off
 **UI hint**: yes
 
 
@@ -267,7 +267,7 @@ Phases execute in numeric order: 1 → 2 → 2.1 → 2.2 → 3.0 → 3.1 → 3.2
 | 2. Ingest, Secrets, and Audit | 11/11 | Gaps Found | 2026-04-28 (closure in 2.1) |
 | 2.1. Architecture Realignment (INSERTED) | 34/34 | Signed off (verifier next) | 2026-04-30 — Plans 11-16 closed round-1 UAT gaps; Plans 17-20 closed round-2; Plans 21-26 closed round-3; Plans 27-34 closed round-4; Plans 35-39 closed round-5 (13 findings); Plan 39 inlined 16 round-6 polish iterations; Plan 10 sign-off paperwork closed 2026-04-30 |
 | 2.2. Ship to Prod (INSERTED) | 8/8 | Complete | 2026-05-04 — production deploy artifacts (compose / nginx / scripts / GHCR CI) + GDPR baseline (export / soft-delete / restore) + per-user quotas (race-free + pool-deadlock-safe). 5 HUMAN-UAT items pending live VPS validation per D-PRE. |
-| 3.0. Polling Pipeline — Plumbing + YouTube (DECIMAL SPLIT) | 0/TBD | Context captured 2026-05-05 | - |
+| 3.0. Polling Pipeline — Plumbing + YouTube (DECIMAL SPLIT) | 14/14 | Build complete; pending CI smoke + manual UAT | 2026-05-06 — see 03.0-VERIFICATION.md (verdict: signed-off-pending-ci-and-uat) |
 | 3.1. Reddit Adapter (DECIMAL SPLIT) | 0/TBD | Not started | - |
 | 3.2. Steam Wishlist (DECIMAL SPLIT) | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
