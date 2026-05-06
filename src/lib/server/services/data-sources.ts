@@ -252,7 +252,7 @@ export async function createSource(
       const isSoftDeleted = existing[0].deletedAt !== null;
       throw new AppError(
         isSoftDeleted
-          ? `You previously tracked "${niceName}" — restore it on /sources.`
+          ? `You previously deleted "${niceName}". Open /sources, click "Recently deleted", and press Restore — that brings back the source plus all its history.`
           : `You already track "${niceName}"`,
         isSoftDeleted ? "duplicate_source_soft_deleted" : "duplicate_source",
         409,
