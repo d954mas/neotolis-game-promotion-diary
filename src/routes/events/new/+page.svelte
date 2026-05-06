@@ -107,15 +107,29 @@
     }
   }
 
-  function isYoutubeUrl(u: string): boolean {
+  // True only for a fully-formed YouTube watch URL (or share URL or short
+  // form) — not just a youtube.com hostname. Drives whether the "Get from
+  // YouTube" button is rendered at all. Reusing the parser logic keeps the
+  // client-side detection in lock-step with the server-side route's
+  // expectations: if `isYoutubeWatchUrl(u)` is true here, the route's
+  // parseYoutubeVideoId() will accept the same URL.
+  function isYoutubeWatchUrl(u: string): boolean {
     try {
       const p = new URL(u);
-      return /(^|\.)youtube\.com$/i.test(p.hostname) || p.hostname === "youtu.be";
+      const host = p.hostname.toLowerCase();
+      if (host === "youtu.be") return p.pathname.length > 1;
+      if (host === "youtube.com" || host === "www.youtube.com" || host === "m.youtube.com") {
+        if (p.pathname === "/watch" && p.searchParams.get("v")) return true;
+        const seg = p.pathname.split("/").filter(Boolean);
+        if (seg.length >= 2 && (seg[0] === "shorts" || seg[0] === "embed")) return true;
+      }
+      return false;
     } catch {
       return false;
     }
   }
-  const canFetch = $derived(isYoutubeUrl(url.trim()) && !fetching && !pending);
+  const isYoutube = $derived(isYoutubeWatchUrl(url.trim()));
+  const canFetch = $derived(isYoutube && !fetching && !pending);
 
   function setToday(): void {
     occurredAt = new Date().toISOString().slice(0, 10);
@@ -303,15 +317,17 @@
           placeholder="https://"
           disabled={pending}
         />
-        <button
-          type="button"
-          class="fetch-btn"
-          onclick={fetchFromYouTube}
-          disabled={!canFetch}
-          title={m.events_new_youtube_fetch_title()}
-        >
-          {fetching ? m.events_new_youtube_fetch_loading() : m.events_new_youtube_fetch_button()}
-        </button>
+        {#if isYoutube}
+          <button
+            type="button"
+            class="fetch-btn"
+            onclick={fetchFromYouTube}
+            disabled={!canFetch}
+            title={m.events_new_youtube_fetch_title()}
+          >
+            {fetching ? m.events_new_youtube_fetch_loading() : m.events_new_youtube_fetch_button()}
+          </button>
+        {/if}
       </div>
       {#if fetchInfo}
         <small class="fetch-info">{fetchInfo}</small>
