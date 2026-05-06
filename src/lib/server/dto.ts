@@ -233,6 +233,14 @@ export interface DataSourceDto {
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
+  // Phase 3.0 post-build (UAT 2026-05-06): the YouTube channel's title as
+  // returned by channels.list — distinct from `displayName` (which is the
+  // user's own label for this tracking record). The /feed loader populates
+  // this via JOIN with youtube_channel_metadata_cache when channelId is set.
+  // Null for non-YouTube kinds, for YouTube sources whose channel hasn't
+  // been resolved yet, and for any DTO projected outside the /feed loader
+  // (other call sites just pass it through unchanged).
+  channelTitle: string | null;
 }
 
 export function toDataSourceDto(r: DataSourceRow): DataSourceDto {
@@ -248,6 +256,7 @@ export function toDataSourceDto(r: DataSourceRow): DataSourceDto {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     deletedAt: r.deletedAt,
+    channelTitle: null,
   };
 }
 

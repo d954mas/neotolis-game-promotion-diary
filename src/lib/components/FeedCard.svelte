@@ -119,6 +119,11 @@
     id: string;
     displayName: string | null;
     handleUrl: string;
+    // Phase 3.0 post-build (UAT 2026-05-06): real YouTube channel title
+    // from the public-data cache. Distinct from displayName (the user's
+    // own label for this tracking row). When both are set and differ, the
+    // card renders both — channel chip + source chip.
+    channelTitle?: string | null;
   };
   type GameLite = {
     id: string;
@@ -312,7 +317,12 @@
 
     {#if source}
       <div class="chips-line">
-        <span class="chip">{source.displayName ?? source.handleUrl}</span>
+        {#if source.channelTitle}
+          <span class="chip chip-channel" title="YouTube channel">{source.channelTitle}</span>
+        {/if}
+        <span class="chip" title="My source label"
+          >{source.displayName ?? source.handleUrl}</span
+        >
       </div>
     {/if}
 

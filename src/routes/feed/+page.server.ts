@@ -12,6 +12,7 @@ import { mapEventsToDtos, toGameDto, toDataSourceDto } from "$lib/server/dto.js"
 import { filterValidKinds } from "$lib/util/filter-event-kinds.js";
 import { db } from "$lib/server/db/client.js";
 import { youtubeVideoSnapshots } from "$lib/server/db/schema/youtube-video-snapshots.js";
+import { youtubeChannelMetadataCache } from "$lib/server/db/schema/youtube-channel-metadata-cache.js";
 import { sql, inArray } from "drizzle-orm";
 
 // Plan 02.1-19 URL contract: /feed accepts ?show=any|inbox|specific +
@@ -185,11 +186,34 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     }
   }
 
+  // Phase 3.0 post-build: enrich source DTOs with the YouTube channel_title
+  // from cache so the feed card can show the real channel name alongside
+  // the user's own displayName. One batched lookup keyed on every distinct
+  // channelId across all loaded sources.
+  const sourceDtos = sourceRows.map(toDataSourceDto);
+  const channelIds = sourceDtos
+    .map((s) => s.channelId)
+    .filter((c): c is string => c !== null);
+  if (channelIds.length > 0) {
+    const cacheRows = await db
+      .select({
+        channelId: youtubeChannelMetadataCache.channelId,
+        channelTitle: youtubeChannelMetadataCache.channelTitle,
+      })
+      .from(youtubeChannelMetadataCache)
+      .where(inArray(youtubeChannelMetadataCache.channelId, channelIds));
+    const titleByChannel = new Map<string, string | null>();
+    for (const r of cacheRows) titleByChannel.set(r.channelId, r.channelTitle);
+    for (const s of sourceDtos) {
+      if (s.channelId) s.channelTitle = titleByChannel.get(s.channelId) ?? null;
+    }
+  }
+
   return {
     rows: rowDtos,
     nextCursor: page.nextCursor,
     games: gameRows.map(toGameDto),
-    sources: sourceRows.map(toDataSourceDto),
+    sources: sourceDtos,
     // Plan 02.1-14 (preserved): listDeletedEvents flows through the loader
     // so /feed renders the soft-delete recovery panel without a second
     // round-trip. retentionDays continues to come from the layout
