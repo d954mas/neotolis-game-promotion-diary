@@ -1,17 +1,21 @@
 // Phase 03.0 Plan 12 — BackfillPicker (D-09 / UI-SPEC §"Component inventory").
 //
-// Post-build UX revision (2026-05-06): radio group → <select> dropdown,
-// quota-cost hints removed (operator concern, not user concern), 'Everything'
-// label → '1 year'.
+// Post-build UX revision (2026-05-06): radio group → <select> → pill-button
+// row matching DateRangeControl on /feed (same visual language for "pick a
+// time window" across the app). Quota-cost hints stay removed (operator
+// concern). Per-preset helper text spells out BOTH limits — date cutoff +
+// 1000-event cap.
 //
 // SSR-render coverage (this file):
-//   - Test 1: <select> with 5 <option>s carrying the literal labels
-//             '1 day' / '7 days' / '30 days' / '90 days' / '1 year'.
-//   - Test 2: Initial render with value='30d' — that <option> is selected.
-//   - Test 3: Helper paragraph renders the default copy when value is '30d'.
-//   - Test 4: A11y — <label>-wrapped <select> with the legend "Initial backfill".
-//   - Test 5: <select name="backfill_window"> so a non-JS form post sends it.
-//   - Test 6: Source references the conditional helper Paraglide keys.
+//   - Test 1: 6 pill <button>s with the literal labels
+//             '1 day' / '7 days' / '30 days' / '90 days' / '1 year' / 'All'.
+//   - Test 2: Initial render with value='30d' — that button is aria-pressed.
+//   - Test 3: Helper paragraph renders the per-preset copy when value='30d'
+//             (and includes the literal "1000 events" string so the cap is
+//             visible on screen).
+//   - Test 4: A11y — section legend "Initial backfill" + role=group on the
+//             button row carrying an aria-label.
+//   - Test 5: Source references the per-preset helper Paraglide keys.
 
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
@@ -29,49 +33,55 @@ const { render } = await import("svelte/server");
 const BackfillPicker = (await import("../../src/lib/components/BackfillPicker.svelte")).default;
 
 describe("Plan 03.0-12 — BackfillPicker (D-09)", () => {
-  it("renders a <select> with 6 <option>s carrying the literal preset labels", () => {
+  it("renders 6 pill <button>s carrying the literal preset labels", () => {
     const out = render(BackfillPicker, { props: { value: "30d" } });
-    expect(out.body).toContain("<select");
     expect(out.body).toContain("1 day");
     expect(out.body).toContain("7 days");
     expect(out.body).toContain("30 days");
     expect(out.body).toContain("90 days");
     expect(out.body).toContain("1 year");
-    expect(out.body).toContain("Everything");
-    const options = out.body.match(/<option[^>]*value="/g) ?? [];
-    expect(options.length).toBe(6);
+    expect(out.body).toContain("All");
+    // The button row carries six type=button elements (one per preset).
+    const buttons = out.body.match(/<button[^>]*type="button"/g) ?? [];
+    expect(buttons.length).toBe(6);
   });
 
-  it("default-selects '30d' on initial render", () => {
+  it("default-selects '30d' on initial render (aria-pressed=true on the matching button)", () => {
     const out = render(BackfillPicker, { props: { value: "30d" } });
-    // Svelte 5 emits selected on the matching <option> when bind:value matches.
-    expect(out.body).toMatch(/<option[^>]*value="30d"[^>]*selected/);
+    // The 30d button is the only one carrying aria-pressed="true".
+    const pressed = out.body.match(/aria-pressed="true"/g) ?? [];
+    expect(pressed.length).toBe(1);
+    // And the active button is the one labeled "30 days".
+    expect(out.body).toMatch(/<button[^>]*aria-pressed="true"[^>]*>\s*30 days\s*</);
   });
 
-  it("renders the default helper paragraph when value='30d'", () => {
+  it("renders the per-preset helper paragraph when value='30d' (mentions 1000-event cap)", () => {
     const out = render(BackfillPicker, { props: { value: "30d" } });
-    expect(out.body).toContain("Imports up to 1000 most-recent videos");
+    expect(out.body).toContain("Last 30 days");
+    expect(out.body).toContain("1000 events");
   });
 
-  it("renders the section title 'Initial backfill'", () => {
+  it("renders the section title 'Initial backfill' and a role=group with aria-label", () => {
     const out = render(BackfillPicker, { props: { value: "30d" } });
     expect(out.body).toContain("Initial backfill");
+    expect(out.body).toMatch(/role="group"[^>]*aria-label="Initial backfill window"/);
   });
 
-  it("uses name='backfill_window' on the <select> (non-JS form post field)", () => {
-    const out = render(BackfillPicker, { props: { value: "30d" } });
-    expect(out.body).toMatch(/<select[^>]*name="backfill_window"/);
-  });
-
-  it("source references the conditional helper Paraglide keys (helper_1d + helper_default)", () => {
+  it("source references the per-preset helper Paraglide keys", () => {
     expect(sourceText).toContain("backfill_picker_helper_1d");
-    expect(sourceText).toContain("backfill_picker_helper_default");
+    expect(sourceText).toContain("backfill_picker_helper_7d");
+    expect(sourceText).toContain("backfill_picker_helper_30d");
+    expect(sourceText).toContain("backfill_picker_helper_90d");
+    expect(sourceText).toContain("backfill_picker_helper_1y");
+    expect(sourceText).toContain("backfill_picker_helper_everything");
     expect(sourceText).toContain("backfill_picker_section_title");
     expect(sourceText).toContain("backfill_picker_section_blurb");
   });
 
-  it("source no longer references the deprecated quota cost Paraglide keys", () => {
-    // UX revision 2026-05-06 — quota cost is operator concern, not user concern.
+  it("source no longer references the deprecated quota cost / default-helper Paraglide keys", () => {
+    // UX revision 2026-05-06 — quota cost is operator concern; default-helper
+    // collapsed into per-preset helpers.
     expect(sourceText).not.toContain("backfill_picker_preset_cost");
+    expect(sourceText).not.toContain("backfill_picker_helper_default");
   });
 });

@@ -265,7 +265,11 @@ describe("paraglide i18n (UX-04)", () => {
       "audit_filter_action_axis_label",
       "audit_filter_date_axis_label",
       "backfill_picker_helper_1d",
-      "backfill_picker_helper_default",
+      "backfill_picker_helper_1y",
+      "backfill_picker_helper_30d",
+      "backfill_picker_helper_7d",
+      "backfill_picker_helper_90d",
+      "backfill_picker_helper_everything",
       "backfill_picker_preset_1d_label",
       "backfill_picker_preset_30d_label",
       "backfill_picker_preset_7d_label",
@@ -630,11 +634,18 @@ describe("paraglide i18n (UX-04)", () => {
     // Admin-quota status pills (the load-bearing copy on /admin/quota).
     expect(m.admin_quota_status_80_throttle).toBe("80% throttle — Cold paused");
     expect(m.admin_quota_status_95_throttle).toBe("95% throttle — Active paused");
-    // BackfillPicker default-helper copy (the load-bearing nudge text on
-    // the source-creation form).
-    expect(m.backfill_picker_helper_default).toBe(
-      "Imports up to 1000 most-recent videos within the chosen window.",
+    // BackfillPicker per-preset helper copy (the load-bearing nudge text
+    // on the source-creation form). Each preset has its own helper line
+    // since both the date cutoff AND the 1000-event cap apply at once;
+    // spelling them out per-preset avoids the "selected window" jargon
+    // that confused users on 2026-05-06.
+    expect(m.backfill_picker_helper_30d).toBe(
+      "Last 30 days, up to 1000 events added to your feed.",
     );
+    expect(m.backfill_picker_helper_everything).toBe(
+      "Channel history, up to 1000 most recent events added to your feed.",
+    );
+    expect(m.backfill_picker_preset_everything_label).toBe("All");
   });
 
   it("Plan 03.0-02: deprecated polling_badge_phase3_placeholder key is removed (UI-SPEC §Copywriting Contract REMOVED)", () => {

@@ -1,13 +1,15 @@
 <script lang="ts">
   // BackfillPicker — initial-backfill window selector for new YouTube channel
-  // sources. Compact dropdown rather than radio group: 5 presets fit on one
-  // line and the form already has enough vertical surface (UX feedback,
-  // 2026-05-06).
+  // sources. Pill-button row matches DateRangeControl on /feed (UX feedback,
+  // 2026-05-06): same visual language across the app for "pick a time
+  // window".
   //
-  // Quota cost hint removed — that's an operator concern surfaced on /admin,
-  // not user-facing. The user picks a window; the operator's worker handles
-  // quota safely (current handler hard-caps at 50 most-recent videos
-  // regardless of window — bounded by construction).
+  // Helper text per preset spells out BOTH limits — date cutoff AND the
+  // 1000-event cap baked into the worker (MAX_PAGES × PAGE_SIZE in
+  // youtube-channel-context-backfill.ts). Both apply at once; whichever
+  // hits first stops the import. For typical indie channels the cap is
+  // not load-bearing — the date cutoff exits first. The cap matters only
+  // for huge back-catalogs where 'All' is selected.
   //
   // Conditional rendering — the parent (/sources/new) only renders this
   // component when kind === 'youtube_channel' AND auto_import === true;
@@ -30,20 +32,38 @@
     { id: "everything", label: m.backfill_picker_preset_everything_label },
   ];
 
-  const helperText = $derived(
-    value === "1d" ? m.backfill_picker_helper_1d() : m.backfill_picker_helper_default(),
-  );
+  const helperText = $derived.by(() => {
+    switch (value) {
+      case "1d":
+        return m.backfill_picker_helper_1d();
+      case "7d":
+        return m.backfill_picker_helper_7d();
+      case "30d":
+        return m.backfill_picker_helper_30d();
+      case "90d":
+        return m.backfill_picker_helper_90d();
+      case "1y":
+        return m.backfill_picker_helper_1y();
+      case "everything":
+        return m.backfill_picker_helper_everything();
+    }
+  });
 </script>
 
 <div class="backfill-picker">
-  <label class="row">
-    <span class="legend">{m.backfill_picker_section_title()}</span>
-    <select name="backfill_window" bind:value class="select">
-      {#each presets as preset (preset.id)}
-        <option value={preset.id}>{preset.label()}</option>
-      {/each}
-    </select>
-  </label>
+  <span class="legend">{m.backfill_picker_section_title()}</span>
+  <div class="presets" role="group" aria-label="Initial backfill window">
+    {#each presets as preset (preset.id)}
+      <button
+        type="button"
+        class="preset"
+        aria-pressed={value === preset.id}
+        onclick={() => (value = preset.id)}
+      >
+        {preset.label()}
+      </button>
+    {/each}
+  </div>
   <p class="blurb">{m.backfill_picker_section_blurb()}</p>
   <small class="helper">{helperText}</small>
 </div>
@@ -56,28 +76,30 @@
     flex-direction: column;
     gap: var(--space-sm);
   }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-    flex-wrap: wrap;
-  }
   .legend {
     font-weight: var(--font-weight-semibold);
     font-size: var(--font-size-body);
   }
-  .select {
-    font-size: var(--font-size-body);
-    padding: var(--space-xs) var(--space-sm);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    background: var(--color-bg);
-    color: var(--color-text);
-    min-height: 36px;
-    min-width: 140px;
-    cursor: pointer;
+  .presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
   }
-  .select:focus-visible {
+  .preset {
+    min-height: 44px;
+    padding: 0 var(--space-md);
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: var(--font-size-label);
+  }
+  .preset[aria-pressed="true"] {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+  }
+  .preset:focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: 1px;
   }
