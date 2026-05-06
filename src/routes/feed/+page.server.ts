@@ -10,6 +10,9 @@ import { listGames } from "$lib/server/services/games.js";
 import { listSources } from "$lib/server/services/data-sources.js";
 import { mapEventsToDtos, toGameDto, toDataSourceDto } from "$lib/server/dto.js";
 import { filterValidKinds } from "$lib/util/filter-event-kinds.js";
+import { db } from "$lib/server/db/client.js";
+import { youtubeVideoSnapshots } from "$lib/server/db/schema/youtube-video-snapshots.js";
+import { sql, inArray } from "drizzle-orm";
 
 // Plan 02.1-19 URL contract: /feed accepts ?show=any|inbox|specific +
 // ?game=A&game=B (when show=specific). The legacy ?attached=true|false is
@@ -140,6 +143,48 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     mapEventsToDtos(userId, page.rows),
     mapEventsToDtos(userId, deletedRows),
   ]);
+
+  // Phase 3.0 post-build (UAT 2026-05-06): attach the latest YouTube stats
+  // snapshot to each youtube_video event in the feed. Single batched DISTINCT
+  // ON query — one DB round-trip regardless of page size. The snapshot table
+  // is public-data (no userId scope) so we filter only by external_id; the
+  // events list itself is already userId-scoped at listFeedPage.
+  const youtubeExternalIds = rowDtos
+    .filter((r) => r.kind === "youtube_video" && r.externalId !== null)
+    .map((r) => r.externalId as string);
+  if (youtubeExternalIds.length > 0) {
+    const snapshots = await db
+      .select({
+        videoId: youtubeVideoSnapshots.videoId,
+        polledAt: youtubeVideoSnapshots.polledAt,
+        viewCount: youtubeVideoSnapshots.viewCount,
+        likeCount: youtubeVideoSnapshots.likeCount,
+        commentCount: youtubeVideoSnapshots.commentCount,
+      })
+      .from(youtubeVideoSnapshots)
+      .where(inArray(youtubeVideoSnapshots.videoId, youtubeExternalIds))
+      .orderBy(youtubeVideoSnapshots.videoId, sql`${youtubeVideoSnapshots.polledAt} DESC`);
+    const latest = new Map<
+      string,
+      { viewCount: number; likeCount: number; commentCount: number; polledAt: Date }
+    >();
+    for (const s of snapshots) {
+      if (!latest.has(s.videoId)) {
+        latest.set(s.videoId, {
+          viewCount: s.viewCount ?? 0,
+          likeCount: s.likeCount ?? 0,
+          commentCount: s.commentCount ?? 0,
+          polledAt: s.polledAt,
+        });
+      }
+    }
+    for (const r of rowDtos) {
+      if (r.kind === "youtube_video" && r.externalId) {
+        r.stats = latest.get(r.externalId) ?? null;
+      }
+    }
+  }
+
   return {
     rows: rowDtos,
     nextCursor: page.nextCursor,

@@ -369,6 +369,13 @@ export interface EventDto {
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
+  // Phase 3.0 post-build addition (UAT 2026-05-06): latest stats snapshot
+  // for the event, when one is available. Currently populated by the
+  // /feed loader for kind=youtube_video events only — joins the most-recent
+  // youtube_video_snapshots row by external_id. Other kinds + events without
+  // a snapshot row return null. UI consumers (FeedCard) render an inline
+  // view-count line when present.
+  stats: { viewCount: number; likeCount: number; commentCount: number; polledAt: Date } | null;
 }
 
 /**
@@ -401,6 +408,7 @@ export function toEventDto(r: EventRow, gameIds: string[]): EventDto {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     deletedAt: r.deletedAt,
+    stats: null,
   };
 }
 

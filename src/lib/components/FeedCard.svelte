@@ -70,7 +70,6 @@
   import { m } from "$lib/paraglide/messages.js";
   import KindIcon from "./KindIcon.svelte";
   import AttachToGamePicker from "./AttachToGamePicker.svelte";
-  import PollingBadge from "./PollingBadge.svelte";
 
   type EventKind =
     | "youtube_video"
@@ -106,6 +105,15 @@
     // the D-12 'unavailable' override (not_found / private / auth_error).
     // toEventDto already projects this column (added in Phase 2.1 schema).
     lastPollStatus: string | null;
+    // Phase 3.0 post-build (UAT 2026-05-06): latest snapshot stats for
+    // youtube_video events. Null when no snapshot exists yet (newly-pasted
+    // event before first poll, or non-youtube kinds).
+    stats?: {
+      viewCount: number;
+      likeCount: number;
+      commentCount: number;
+      polledAt: Date | string;
+    } | null;
   };
   type SourceLite = {
     id: string;
@@ -232,19 +240,16 @@
     }
   }
 
-  // Plan 03.0-11: PollingBadge live-state rewrite extends the prop shape.
-  // Pass the full event slice the badge needs to resolve tier + variant +
-  // refresh-now visibility. metadata is normalized to a plain object (the
-  // EventDtoLite type carries it as unknown — toEventDto returns Record-shaped
-  // jsonb already, but a safe coerce here keeps the badge's prop shape strict).
-  const pollingForBadge = $derived({
-    id: event.id,
-    kind: event.kind,
-    occurredAt: event.occurredAt,
-    lastPolledAt: event.lastPolledAt,
-    lastPollStatus: event.lastPollStatus,
-    metadata: (event.metadata ?? null) as Record<string, unknown> | null,
-  });
+  // Phase 3.0 post-build (UAT 2026-05-06): PollingBadge removed from feed
+  // cards — tier vocabulary ("Cold", "Frozen") is internal scheduler state,
+  // not user-facing. The live state shows up only in the per-event detail
+  // view alongside the refresh-now button. /feed cards now surface the load-
+  // bearing user metric instead: latest YouTube view / like / comment count.
+  function formatStat(n: number): string {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    return String(n);
+  }
 </script>
 
 <article
@@ -295,14 +300,15 @@
       <p class="notes">{event.notes}</p>
     {/if}
 
-    <div class="meta-line">
-      <!-- Plan 02.1-19: inline date display REMOVED — the
-           <FeedDateGroupHeader> above each card group is the date label.
-           Plan 02.1-23: kind label + Inbox indicator moved into the top
-           overlay. Mine moved into the overlay too. Only <PollingBadge>
-           remains in this row. -->
-      <PollingBadge event={pollingForBadge} />
-    </div>
+    {#if event.kind === "youtube_video" && event.stats}
+      <div class="stats-line">
+        <span class="stat">{formatStat(event.stats.viewCount)} views</span>
+        <span class="sep">·</span>
+        <span class="stat">{formatStat(event.stats.likeCount)} likes</span>
+        <span class="sep">·</span>
+        <span class="stat">{formatStat(event.stats.commentCount)} comments</span>
+      </div>
+    {/if}
 
     {#if source}
       <div class="chips-line">
@@ -493,6 +499,22 @@
     gap: var(--space-sm);
     font-size: var(--font-size-label);
     color: var(--color-text-muted);
+  }
+  /* Phase 3.0 post-build: latest snapshot stats line for youtube_video cards. */
+  .stats-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: var(--font-size-label);
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .stats-line .stat {
+    white-space: nowrap;
+  }
+  .stats-line .sep {
+    opacity: 0.5;
   }
   .chips-line {
     display: flex;
