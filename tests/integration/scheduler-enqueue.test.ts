@@ -35,6 +35,7 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
+const { youtubeVideos } = await import("../../src/lib/server/db/schema/youtube-videos.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { resetThrottleState } =
@@ -44,25 +45,39 @@ const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
-async function insertEvent(
+// Per-video refactor (2026-05-06): the scheduler keys tier on
+// youtube_videos.published_at + last_poll_status, NOT events.occurred_at.
+// Test fixtures must seed BOTH tables.
+async function insertEventWithVideo(
   userId: string,
-  occurredAt: Date,
-  overrides: Partial<typeof events.$inferInsert> = {},
-): Promise<string> {
+  publishedAt: Date,
+  options: {
+    eventOverrides?: Partial<typeof events.$inferInsert>;
+    videoOverrides?: Partial<typeof youtubeVideos.$inferInsert>;
+  } = {},
+): Promise<{ eventId: string; videoId: string }> {
   const id = uuidv7();
+  const videoId = `fix_${uniq()}`;
+  await db.insert(youtubeVideos).values({
+    videoId,
+    title: "scheduled poll fixture",
+    publishedAt,
+    fetchedAt: new Date(),
+    ...options.videoOverrides,
+  });
   await db.insert(events).values({
     id,
     userId,
     kind: "youtube_video",
     authorIsMe: false,
-    occurredAt,
+    occurredAt: publishedAt,
     title: "scheduled poll fixture",
-    url: "https://www.youtube.com/watch?v=fixture",
-    externalId: `fix_${uniq()}`,
+    url: `https://www.youtube.com/watch?v=${videoId}`,
+    externalId: videoId,
     metadata: {},
-    ...overrides,
+    ...options.eventOverrides,
   });
-  return id;
+  return { eventId: id, videoId };
 }
 
 beforeEach(() => {
@@ -70,73 +85,80 @@ beforeEach(() => {
   resetThrottleState();
 });
 
-describe("scheduler enqueue (Plan 03.0-09)", () => {
-  it("Plan 03.0-09: enqueueActivePolls picks Active-tier events (occurredAt < 24h) and sends to POLL_ACTIVE", async () => {
+describe("scheduler enqueue (Plan 03.0-09 + per-video refactor)", () => {
+  it("enqueueActivePolls picks Active-tier videos (publishedAt < 24h) and sends videoIds to POLL_ACTIVE", async () => {
     const u = await seedUserDirectly({ email: `sch-active-${uniq()}@test.local` });
     const now = new Date("2026-05-05T12:00:00Z");
-    // 12 hours ago — within Active window.
-    const eventId = await insertEvent(u.id, new Date(now.getTime() - 12 * 60 * 60 * 1000));
+    const { videoId } = await insertEventWithVideo(
+      u.id,
+      new Date(now.getTime() - 12 * 60 * 60 * 1000),
+    );
 
     const result = await enqueueActivePolls(now);
 
     expect(result.skipped).toBe(false);
-    expect(result.eventsCovered).toBeGreaterThanOrEqual(1);
+    expect(result.videosCovered).toBeGreaterThanOrEqual(1);
     const activeJobs = sentJobs.filter((j) => j.queue === "poll.active");
     expect(activeJobs.length).toBeGreaterThanOrEqual(1);
-    const allEventIds = activeJobs.flatMap((j) => (j.data as { eventIds: string[] }).eventIds);
-    expect(allEventIds).toContain(eventId);
+    const allVideoIds = activeJobs.flatMap((j) => (j.data as { videoIds: string[] }).videoIds);
+    expect(allVideoIds).toContain(videoId);
   });
 
-  it("Plan 03.0-09: enqueueColdPolls picks Cold-tier events (24h-28d) and sends to POLL_COLD", async () => {
+  it("enqueueColdPolls picks Cold-tier videos (24h-28d) and sends videoIds to POLL_COLD", async () => {
     const u = await seedUserDirectly({ email: `sch-cold-${uniq()}@test.local` });
     const now = new Date("2026-05-05T12:00:00Z");
-    // 5 days ago — within Cold window.
-    const eventId = await insertEvent(u.id, new Date(now.getTime() - 5 * 86_400_000));
+    const { videoId } = await insertEventWithVideo(
+      u.id,
+      new Date(now.getTime() - 5 * 86_400_000),
+    );
 
     const result = await enqueueColdPolls(now);
 
     expect(result.skipped).toBe(false);
     const coldJobs = sentJobs.filter((j) => j.queue === "poll.cold");
     expect(coldJobs.length).toBeGreaterThanOrEqual(1);
-    const allEventIds = coldJobs.flatMap((j) => (j.data as { eventIds: string[] }).eventIds);
-    expect(allEventIds).toContain(eventId);
+    const allVideoIds = coldJobs.flatMap((j) => (j.data as { videoIds: string[] }).videoIds);
+    expect(allVideoIds).toContain(videoId);
   });
 
-  it("Plan 03.0-09: Frozen events (occurredAt > 28d) are NOT enqueued by enqueueColdPolls or enqueueActivePolls", async () => {
+  it("Frozen videos (publishedAt > 28d) are NOT enqueued by enqueueColdPolls or enqueueActivePolls", async () => {
     const u = await seedUserDirectly({ email: `sch-frozen-${uniq()}@test.local` });
     const now = new Date("2026-05-05T12:00:00Z");
-    // 35 days ago — past Cold cutoff (28d), so Frozen.
-    const eventId = await insertEvent(u.id, new Date(now.getTime() - 35 * 86_400_000));
+    const { videoId } = await insertEventWithVideo(
+      u.id,
+      new Date(now.getTime() - 35 * 86_400_000),
+    );
 
     await enqueueActivePolls(now);
     await enqueueColdPolls(now);
 
-    const allSentEventIds = sentJobs.flatMap((j) => {
-      const data = j.data as { eventIds?: string[] };
-      return data.eventIds ?? [];
+    const allSentVideoIds = sentJobs.flatMap((j) => {
+      const data = j.data as { videoIds?: string[] };
+      return data.videoIds ?? [];
     });
-    expect(allSentEventIds).not.toContain(eventId);
+    expect(allSentVideoIds).not.toContain(videoId);
   });
 
-  it("Plan 03.0-09: Unavailable events (last_poll_status='not_found') are NOT enqueued", async () => {
+  it("Unavailable videos (last_poll_status='not_found') are NOT enqueued", async () => {
     const u = await seedUserDirectly({ email: `sch-unavail-${uniq()}@test.local` });
     const now = new Date("2026-05-05T12:00:00Z");
-    // 12 hours ago — would be Active by age, but last_poll_status overrides.
-    const eventId = await insertEvent(u.id, new Date(now.getTime() - 12 * 60 * 60 * 1000), {
-      lastPollStatus: "not_found",
-    });
+    const { videoId } = await insertEventWithVideo(
+      u.id,
+      new Date(now.getTime() - 12 * 60 * 60 * 1000),
+      { videoOverrides: { lastPollStatus: "not_found" } },
+    );
 
     await enqueueActivePolls(now);
     await enqueueColdPolls(now);
 
-    const allSentEventIds = sentJobs.flatMap((j) => {
-      const data = j.data as { eventIds?: string[] };
-      return data.eventIds ?? [];
+    const allSentVideoIds = sentJobs.flatMap((j) => {
+      const data = j.data as { videoIds?: string[] };
+      return data.videoIds ?? [];
     });
-    expect(allSentEventIds).not.toContain(eventId);
+    expect(allSentVideoIds).not.toContain(videoId);
   });
 
-  it("Plan 03.0-09: auto_import=false data_sources are skipped (manual paste with source_id=NULL still polls)", async () => {
+  it("auto_import=false data_sources are skipped (manual paste with source_id=NULL still polls)", async () => {
     const u = await seedUserDirectly({ email: `sch-autoimp-${uniq()}@test.local` });
     const now = new Date("2026-05-05T12:00:00Z");
 
@@ -153,21 +175,25 @@ describe("scheduler enqueue (Plan 03.0-09)", () => {
     });
 
     // Auto-import event (source_id set, auto_import=false → SKIP).
-    const skippedId = await insertEvent(u.id, new Date(now.getTime() - 6 * 60 * 60 * 1000), {
-      sourceId: noAutoSourceId,
-    });
+    const { videoId: skippedVideoId } = await insertEventWithVideo(
+      u.id,
+      new Date(now.getTime() - 6 * 60 * 60 * 1000),
+      { eventOverrides: { sourceId: noAutoSourceId } },
+    );
     // Manual paste event (source_id NULL → ALWAYS pollable).
-    const pastedId = await insertEvent(u.id, new Date(now.getTime() - 6 * 60 * 60 * 1000), {
-      sourceId: null,
-    });
+    const { videoId: pastedVideoId } = await insertEventWithVideo(
+      u.id,
+      new Date(now.getTime() - 6 * 60 * 60 * 1000),
+      { eventOverrides: { sourceId: null } },
+    );
 
     await enqueueActivePolls(now);
 
-    const allSentEventIds = sentJobs.flatMap((j) => {
-      const data = j.data as { eventIds?: string[] };
-      return data.eventIds ?? [];
+    const allSentVideoIds = sentJobs.flatMap((j) => {
+      const data = j.data as { videoIds?: string[] };
+      return data.videoIds ?? [];
     });
-    expect(allSentEventIds).toContain(pastedId);
-    expect(allSentEventIds).not.toContain(skippedId);
+    expect(allSentVideoIds).toContain(pastedVideoId);
+    expect(allSentVideoIds).not.toContain(skippedVideoId);
   });
 });

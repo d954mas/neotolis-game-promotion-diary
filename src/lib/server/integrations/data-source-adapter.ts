@@ -95,8 +95,20 @@ export interface PollableSource {
 export interface DataSourceAdapter {
   readonly kind: SourceKind;
   pollContent(source: PollableSource, since: Date): Promise<RawEvent[]>;
+  /**
+   * User-driven stats polling (Refresh now button). quotaUser fingerprint is
+   * derived from userId inside the adapter (per-user burst-shaper bucket).
+   */
   pollStats(
     events: PollableEvent[],
     source: { id: string; userId: string } | null,
   ): Promise<StatsSnapshot[]>;
+  /**
+   * Service-driven stats polling (poll-active / poll-cold cron tick).
+   * Per-video, not per-event — multiple tenants referencing one video share
+   * the same HTTP. quotaUser is a constant per tier ("neotolis-svc-active"
+   * or "neotolis-svc-cold") so Google's burst-shaper buckets service polls
+   * away from user-driven Refresh now polls.
+   */
+  pollStatsByVideoId(videoIds: string[], quotaUser: string): Promise<StatsSnapshot[]>;
 }

@@ -194,11 +194,16 @@ describe("refresh-poll cooldown service (Plan 03.0-04)", () => {
   it("Plan 03.0-04: Frozen-age (28d+) youtube_video — refresh STILL permitted (CONTEXT D-10)", async () => {
     sentJobs.length = 0;
     const u = await seedUserDirectly({ email: `rp-frozen-${uniq()}@test.local` });
-    // 30 days old — well past the 28-day Frozen boundary.
+    // 30 days old — well past the 28-day Frozen boundary. Per-video refactor
+    // (2026-05-06): polling state on youtube_videos, not events. The event
+    // itself just references external_id; the youtube_videos row carries
+    // tier inputs (publishedAt + lastPollStatus). Test setup leaves the
+    // youtube_videos row absent — refresh-poll service handles missing
+    // youtube_videos by treating it as the 'pending' tier path; for this
+    // particular test we only assert the cooldown layer (5min window),
+    // which fires before any tier check.
     const ev = await insertEvent(u.id, {
       occurredAt: new Date(Date.now() - 30 * 86_400_000),
-      lastPolledAt: new Date(Date.now() - 30 * 86_400_000),
-      lastPollStatus: "ok",
     });
 
     // D-10: tier resolver gates the SCHEDULER's automatic enqueue path; the

@@ -163,8 +163,22 @@ async function classifyError(resp: Response): Promise<SnapshotStatus> {
   return "auth_error";
 }
 
-/** videos.list batched call. Up to 50 video ids per call (1 quota unit). */
-async function pollStatsBatch(videoIds: string[], userId: string): Promise<StatsSnapshot[]> {
+/**
+ * videos.list batched call. Up to 50 video ids per call (1 quota unit).
+ *
+ * `quotaUser` is the literal string sent on the URL — caller decides whether
+ * it's a per-user fingerprint (poll-user — `youtubeQuotaUser(userId)`) or a
+ * service-tier constant (poll-active / poll-cold — "neotolis-svc-active").
+ * This module does not pick the policy; it just sends what it's given.
+ *
+ * Phase 3.0 post-build refactor (2026-05-06): the function signature took
+ * `userId` and computed quotaUser internally, which forced poll-active /
+ * poll-cold to group by userId even though their HTTP traffic is service-
+ * level. The new shape lets per-video service polls call this directly
+ * with a constant fingerprint, and the user-driven poll-user still passes
+ * a per-user value. One function, two policies, caller's choice.
+ */
+async function pollStatsBatch(videoIds: string[], quotaUser: string): Promise<StatsSnapshot[]> {
   if (videoIds.length === 0) return [];
   if (videoIds.length > 50) throw new Error("videos.list batch limit is 50");
 
@@ -183,7 +197,7 @@ async function pollStatsBatch(videoIds: string[], userId: string): Promise<Stats
   url.searchParams.set("id", videoIds.join(","));
   url.searchParams.set("part", "snippet,statistics,contentDetails");
   url.searchParams.set("key", picked.apiKey);
-  url.searchParams.set("quotaUser", youtubeQuotaUser(userId));
+  url.searchParams.set("quotaUser", quotaUser);
 
   const resp = await fetchWithTimeout(url);
 
@@ -271,14 +285,16 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
       .filter((e) => e.occurredAt.getTime() > sinceMs);
   },
 
-  /** Stats polling — batched up to 50 ids per videos.list call (1 unit each).
+  /** Stats polling — user-driven path (Refresh now button → poll-user worker).
    *  Caller passes events of `kind=youtube_video`; source MAY be null (manual
    *  paste D-11). Returns StatsSnapshot[] aligned to input order.
    *
-   *  Conservative batching: groups by userId so quotaUser is correct per call.
-   *  In service-level Phase 3.0, events from different users may share a
-   *  single batch only if they happen to arrive in the same enqueue tick;
-   *  typically a worker call is single-user. */
+   *  Per-user quotaUser fingerprint: the user initiated this action, so
+   *  Google's burst-shaper should track it under that user's bucket. Distinct
+   *  from pollStatsByVideoId which uses a service-tier constant fingerprint.
+   *
+   *  Groups by userId in case a future caller batches across users; for the
+   *  current single-event poll-user path the loop fires once. */
   async pollStats(
     eventsBatch: PollableEvent[],
     _source: { id: string; userId: string } | null,
@@ -298,7 +314,7 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
       for (let i = 0; i < evs.length; i += 50) {
         const chunk = evs.slice(i, i + 50);
         const ids = chunk.map((e) => e.externalId);
-        const snapshots = await pollStatsBatch(ids, userId);
+        const snapshots = await pollStatsBatch(ids, youtubeQuotaUser(userId));
         for (let j = 0; j < chunk.length; j++) {
           const ev = chunk[j]!;
           const snap = snapshots[j]!;
@@ -315,5 +331,32 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
           status: "auth_error" as const,
         },
     );
+  },
+
+  /**
+   * Stats polling — service-driven path (poll-active / poll-cold workers).
+   *
+   * Per-video, not per-event. The scheduler hands a flat list of videoIds
+   * (already deduplicated across tenants); the adapter chunks it into ≤50
+   * batches and issues one HTTP per batch with the caller-supplied
+   * quotaUser fingerprint. quotaUser here is the service-tier constant
+   * ("neotolis-svc-active" or "neotolis-svc-cold") — Google's burst-shaper
+   * tracks all service polls in one bucket per tier, distinct from
+   * user-driven Refresh now polls (per-user fingerprint via pollStats).
+   *
+   * Returns StatsSnapshot[] aligned to input order.
+   */
+  async pollStatsByVideoId(
+    videoIds: string[],
+    quotaUser: string,
+  ): Promise<StatsSnapshot[]> {
+    if (videoIds.length === 0) return [];
+    const result: StatsSnapshot[] = [];
+    for (let i = 0; i < videoIds.length; i += 50) {
+      const chunk = videoIds.slice(i, i + 50);
+      const snapshots = await pollStatsBatch(chunk, quotaUser);
+      for (const snap of snapshots) result.push(snap);
+    }
+    return result;
   },
 };

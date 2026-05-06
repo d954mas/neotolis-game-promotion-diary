@@ -1,21 +1,20 @@
-// Phase 3.0 Plan 09 — Cold-tier poll handler.
+// Phase 3.0 Plan 09 + post-build refactor (2026-05-06) — Cold-tier poll handler.
 //
-// Identical pipeline to poll-active.ts: receives `{ eventIds: string[] }`
-// jobs, runs the two-phase tx pattern (Pitfall 5), calls the same adapter
-// + snapshot-writer chain. Differentiation is at the QUEUE level (concurrency
-// cap, scheduler-tick frequency), NOT in handler logic.
+// Identical pipeline to poll-active.ts: receives `{ videoIds: string[] }`
+// jobs, polls each video once via youtubeChannelAdapter.pollStatsByVideoId,
+// writes snapshots + youtube_videos UPDATE per result. Differentiation is
+// at the QUEUE level (concurrency cap, scheduler-tick frequency), NOT in
+// handler logic.
 //
 // Why two handlers if the logic is identical? Concurrency budget and cron
 // frequency. Cold queue is shaped for a once-daily sweep at low concurrency
 // (batchSize=1) so it cannot starve Active queue's 6-hour budget. A unified
 // handler would still need queue-aware concurrency caps; the duplication
-// makes the topology obvious in src/worker/index.ts. If the logic ever
-// diverges (Plan 03.1 reddit polling adds a tier-specific quota policy),
-// this is the natural place for the divergence.
+// makes the topology obvious in src/worker/index.ts. quotaUser fingerprint
+// is "neotolis-svc-cold" (distinct from active so Google's burst-shaper
+// keeps the two ticks in different buckets — they should never overlap in
+// time, but a constant-string fingerprint per tier is the cleanest contract).
 
-import { sql, and, inArray, isNull, isNotNull } from "drizzle-orm";
-import { db } from "../../lib/server/db/client.js";
-import { events } from "../../lib/server/db/schema/events.js";
 import { youtubeChannelAdapter } from "../../lib/server/integrations/youtube-channel-adapter.js";
 import { writeSnapshot } from "../../lib/server/services/youtube-snapshot-writer.js";
 import {
@@ -24,69 +23,41 @@ import {
 } from "../../lib/server/services/youtube-quota-tracker.js";
 import { logger } from "../../lib/server/logger.js";
 
+const QUOTA_USER_COLD = "neotolis-svc-cold";
+
 export async function handlePollCold(job: {
   id: string;
-  data: { eventIds: string[] };
+  data: { videoIds: string[] };
 }): Promise<void> {
-  const { eventIds } = job.data;
-  if (!eventIds || eventIds.length === 0) {
-    logger.debug({ jobId: job.id }, "poll-cold: empty eventIds, skipping");
-    return;
-  }
-
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- batch worker, see poll-active.ts for the same rationale.
-  const rows = await db
-    .select({
-      id: events.id,
-      userId: events.userId,
-      externalId: events.externalId,
-    })
-    .from(events)
-    .where(
-      and(
-        inArray(events.id, eventIds),
-        isNull(events.deletedAt),
-        isNotNull(events.externalId),
-        sql`${events.kind} = 'youtube_video'`,
-      ),
-    );
-
-  const pollable = rows.filter((r) => r.externalId !== null) as {
-    id: string;
-    userId: string;
-    externalId: string;
-  }[];
-  if (pollable.length === 0) {
-    logger.debug({ jobId: job.id, requested: eventIds.length }, "poll-cold: no pollable events");
+  const { videoIds } = job.data;
+  if (!videoIds || videoIds.length === 0) {
+    logger.debug({ jobId: job.id }, "poll-cold: empty videoIds, skipping");
     return;
   }
 
   const picked = pickKeyForJob();
   if (!picked) {
     logger.warn(
-      { jobId: job.id, batchSize: pollable.length },
-      "poll-cold: SERVICE_YOUTUBE_API_KEYS empty; events will degrade to auth_error",
+      { jobId: job.id, batchSize: videoIds.length },
+      "poll-cold: SERVICE_YOUTUBE_API_KEYS empty; videos will degrade to auth_error",
     );
   }
 
-  const snapshots = await youtubeChannelAdapter.pollStats(
-    pollable.map((p) => ({ id: p.id, userId: p.userId, externalId: p.externalId })),
-    null,
-  );
+  const snapshots = await youtubeChannelAdapter.pollStatsByVideoId(videoIds, QUOTA_USER_COLD);
 
   // Quota counter inflation fix — see poll-active.ts header for rationale.
-  // 1 unit per batched videos.list call, charged on first event only.
+  // 1 unit per batched videos.list call, charged on first billable video only.
   const billable = picked && snapshots.some((s) => s.status !== "auth_error");
   let rateLimitedSeen = false;
   let chargedOnce = false;
-  for (let i = 0; i < pollable.length; i++) {
-    const ev = pollable[i]!;
+  for (let i = 0; i < videoIds.length; i++) {
+    const videoId = videoIds[i]!;
     const snap = snapshots[i]!;
-    const unitsThisEvent = billable && !chargedOnce && snap.status !== "auth_error" ? 1 : 0;
-    if (unitsThisEvent === 1) chargedOnce = true;
+    const unitsThisVideo = billable && !chargedOnce && snap.status !== "auth_error" ? 1 : 0;
+    if (unitsThisVideo === 1) chargedOnce = true;
     try {
       await writeSnapshot({
-        videoId: ev.externalId,
+        videoId,
         metrics:
           snap.status === "ok" && snap.metrics
             ? {
@@ -96,12 +67,12 @@ export async function handlePollCold(job: {
               }
             : null,
         apiKeyId: picked?.apiKeyId ?? "no-key",
-        unitsUsed: unitsThisEvent,
+        unitsUsed: unitsThisVideo,
         status: snap.status,
       });
     } catch (err) {
       logger.error(
-        { jobId: job.id, eventId: ev.id, err },
+        { jobId: job.id, videoId, err },
         "poll-cold: writeSnapshot threw; continuing batch",
       );
     }

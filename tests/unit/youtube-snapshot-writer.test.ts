@@ -12,23 +12,25 @@ process.env.OAUTH_CLIENT_ID ??= "test";
 process.env.OAUTH_CLIENT_SECRET ??= "test";
 process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
 
-// Phase 3.0 Plan 04 — youtube-snapshot-writer is a thin orchestrator: it does
-// not encode any business logic beyond "wrap 3 ops in one tx". The unit-test
-// surface verifies STRUCTURAL invariants of the tx callback rather than DB
-// state (DB-state tests live in integration/poll-worker-tx-boundary.test.ts).
+// Phase 3.0 Plan 04 + post-build refactor (2026-05-06) — youtube-snapshot-
+// writer is a thin orchestrator: it does not encode any business logic
+// beyond "wrap 3 ops in one tx". The unit-test surface verifies STRUCTURAL
+// invariants of the tx callback rather than DB state (DB-state tests live
+// in integration/poll-worker-tx-boundary.test.ts).
 //
 // What we verify here:
 //   - one db.transaction() call per writeSnapshot()
-//   - status='ok' inside that tx: insert(snapshot) + update(events) + incrementUsage()
-//   - status!='ok': skips the snapshot insert, still updates events + increments quota
-//   - the events update WHERE clause is tenant-scoped via userId (so the
-//     ESLint tenant-scope rule sees a userId clause and the runtime filter
-//     refuses cross-tenant writes by construction).
+//   - status='ok' inside that tx: insert(youtube_video_snapshots) +
+//     update(youtube_videos last_polled_at + last_poll_status='ok' +
+//     poll_failure_count=0) + incrementUsage()
+//   - status!='ok': skips the snapshot insert, still updates youtube_videos
+//     (last_poll_status set; poll_failure_count incremented via SQL
+//     expression) and increments quota
+//   - the youtube_videos UPDATE WHERE clause references video_id (the PK).
+//     PUBLIC-DATA TABLE — no userId filter (videos are tenant-agnostic).
 //   - the snapshot insert uses date_trunc('minute', now()) for polled_at +
 //     ON CONFLICT DO NOTHING (idempotency on retry within the same minute).
 
-// Mock db.transaction to capture the callback's behavior. The mock tx exposes
-// insert / update with chainable spies so each call can be inspected.
 const insertCalls: Array<{ table: unknown; values: unknown; conflict: boolean }> = [];
 const updateCalls: Array<{ table: unknown; set: unknown; whereSql: string }> = [];
 let txCount = 0;
@@ -40,9 +42,6 @@ function collectColumnNames(root: unknown): string[] {
     if (v === null || typeof v !== "object") return;
     if (seen.has(v as object)) return;
     seen.add(v as object);
-    // Drizzle PgColumn instances carry a `name` string with the snake_case
-    // column identifier ("user_id", "id"). Collect those as the
-    // structural fingerprint for the tenant-scope assertion.
     const maybeName = (v as { name?: unknown }).name;
     if (typeof maybeName === "string") out.push(maybeName);
     for (const k of Object.keys(v as object)) {
@@ -76,8 +75,6 @@ vi.mock("../../src/lib/server/db/client.js", () => {
         return Promise.resolve();
       },
       onConflictDoUpdate() {
-        // incrementUsage uses ON CONFLICT DO UPDATE; record so test can verify
-        // the quota counter was upserted.
         if (pending?.kind === "insert") {
           insertCalls.push({ table: pending.table, values: pendingValues, conflict: true });
           pending = null;
@@ -98,10 +95,6 @@ vi.mock("../../src/lib/server/db/client.js", () => {
           updateCalls.push({
             table: pending.table,
             set: pendingSet,
-            // Drizzle SQL chunks contain circular table↔column references; we
-            // only need to surface column NAMES that appear in the clause for
-            // the structural-tenant-scope assertion. Walk the structure with a
-            // visited-set and collect any string fields named "name".
             whereSql: collectColumnNames(clause).join(","),
           });
           pending = null;
@@ -143,9 +136,9 @@ const { writeSnapshot } = await import(
 const { youtubeVideoSnapshots } = await import(
   "../../src/lib/server/db/schema/youtube-video-snapshots.js"
 );
-const { events } = await import("../../src/lib/server/db/schema/events.js");
+const { youtubeVideos } = await import("../../src/lib/server/db/schema/youtube-videos.js");
 
-describe("youtube-snapshot-writer (Plan 03.0-04)", () => {
+describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
   beforeEach(() => {
     insertCalls.length = 0;
     updateCalls.length = 0;
@@ -153,11 +146,9 @@ describe("youtube-snapshot-writer (Plan 03.0-04)", () => {
     txCount = 0;
   });
 
-  it("Plan 03.0-04: writeSnapshot status='ok' inserts snapshot row with polled_at truncated to minute", async () => {
+  it("status='ok' inserts snapshot row with polled_at truncated to minute", async () => {
     await writeSnapshot({
       videoId: "VID-ok",
-      eventId: "evt-1",
-      userId: "user-1",
       metrics: { view_count: 100, like_count: 10, comment_count: 5 },
       apiKeyId: "key-abc",
       unitsUsed: 1,
@@ -177,19 +168,15 @@ describe("youtube-snapshot-writer (Plan 03.0-04)", () => {
     expect(v.viewCount).toBe(100);
     expect(v.likeCount).toBe(10);
     expect(v.commentCount).toBe(5);
-    // polledAt is a Drizzle SQL chunk (sql`date_trunc('minute', now())`).
-    // Stringify the chunks so the assertion is robust to internal shape.
     const polledAtSerialized = JSON.stringify(v.polledAt);
     expect(polledAtSerialized).toContain("date_trunc");
     expect(polledAtSerialized).toContain("minute");
     expect(polledAtSerialized).toContain("now()");
   });
 
-  it("Plan 03.0-04: writeSnapshot status='ok' uses ON CONFLICT DO NOTHING (idempotent retry within same minute)", async () => {
+  it("status='ok' uses ON CONFLICT DO NOTHING (idempotent retry within same minute)", async () => {
     await writeSnapshot({
       videoId: "VID-retry",
-      eventId: "evt-2",
-      userId: "user-2",
       metrics: { view_count: 1, like_count: 1, comment_count: 1 },
       apiKeyId: "key-r",
       unitsUsed: 1,
@@ -199,14 +186,8 @@ describe("youtube-snapshot-writer (Plan 03.0-04)", () => {
     const snapshotInsert = insertCalls.find((c) => c.table === youtubeVideoSnapshots);
     expect(snapshotInsert).toBeDefined();
     expect(snapshotInsert!.conflict).toBe(true);
-    // Calling twice in the same "minute" exercises the ON CONFLICT path at
-    // the DB level — covered structurally here (both calls hit the same
-    // mock chain with onConflictDoNothing) and behaviorally in the
-    // integration suite once a live Postgres is available.
     await writeSnapshot({
       videoId: "VID-retry",
-      eventId: "evt-2",
-      userId: "user-2",
       metrics: { view_count: 1, like_count: 1, comment_count: 1 },
       apiKeyId: "key-r",
       unitsUsed: 1,
@@ -219,29 +200,30 @@ describe("youtube-snapshot-writer (Plan 03.0-04)", () => {
     expect(allRetryInserts.every((c) => c.conflict)).toBe(true);
   });
 
-  it("Plan 03.0-04: writeSnapshot status='ok' updates events.last_polled_at to now() and last_poll_status to 'ok'", async () => {
+  it("status='ok' updates youtube_videos.last_polled_at to now() and last_poll_status='ok' and resets poll_failure_count=0", async () => {
     await writeSnapshot({
       videoId: "VID-up",
-      eventId: "evt-3",
-      userId: "user-3",
       metrics: { view_count: 1, like_count: 0, comment_count: 0 },
       apiKeyId: "key-u",
       unitsUsed: 1,
       status: "ok",
     });
 
-    const eventsUpdate = updateCalls.find((c) => c.table === events);
-    expect(eventsUpdate).toBeDefined();
-    const setPatch = eventsUpdate!.set as { lastPolledAt: Date; lastPollStatus: string };
+    const videosUpdate = updateCalls.find((c) => c.table === youtubeVideos);
+    expect(videosUpdate).toBeDefined();
+    const setPatch = videosUpdate!.set as {
+      lastPolledAt: Date;
+      lastPollStatus: string;
+      pollFailureCount: number | unknown;
+    };
     expect(setPatch.lastPolledAt).toBeInstanceOf(Date);
     expect(setPatch.lastPollStatus).toBe("ok");
+    expect(setPatch.pollFailureCount).toBe(0);
   });
 
-  it("Plan 03.0-04: writeSnapshot status='not_found' updates events.last_poll_status but does NOT insert snapshot row", async () => {
+  it("status='not_found' updates youtube_videos.last_poll_status but does NOT insert snapshot row", async () => {
     await writeSnapshot({
       videoId: "VID-404",
-      eventId: "evt-4",
-      userId: "user-4",
       metrics: null,
       apiKeyId: "key-n",
       unitsUsed: 1,
@@ -255,19 +237,17 @@ describe("youtube-snapshot-writer (Plan 03.0-04)", () => {
     );
     expect(snapshotInsert).toBeUndefined();
 
-    const eventsUpdate = updateCalls.find((c) => c.table === events);
-    expect(eventsUpdate).toBeDefined();
-    expect((eventsUpdate!.set as { lastPollStatus: string }).lastPollStatus).toBe("not_found");
+    const videosUpdate = updateCalls.find((c) => c.table === youtubeVideos);
+    expect(videosUpdate).toBeDefined();
+    expect((videosUpdate!.set as { lastPollStatus: string }).lastPollStatus).toBe("not_found");
   });
 
-  it("Plan 03.0-04: writeSnapshot status='private' / 'auth_error' update events.last_poll_status accordingly", async () => {
+  it("status='private' / 'auth_error' / 'rate_limited' update youtube_videos.last_poll_status accordingly + increment poll_failure_count via SQL expression", async () => {
     for (const status of ["private", "auth_error", "rate_limited"] as const) {
       insertCalls.length = 0;
       updateCalls.length = 0;
       await writeSnapshot({
         videoId: `VID-${status}`,
-        eventId: `evt-${status}`,
-        userId: "user-x",
         metrics: null,
         apiKeyId: "key-x",
         unitsUsed: 1,
@@ -275,17 +255,24 @@ describe("youtube-snapshot-writer (Plan 03.0-04)", () => {
       });
       const snapshotInsert = insertCalls.find((c) => c.table === youtubeVideoSnapshots);
       expect(snapshotInsert).toBeUndefined();
-      const eventsUpdate = updateCalls.find((c) => c.table === events);
-      expect(eventsUpdate).toBeDefined();
-      expect((eventsUpdate!.set as { lastPollStatus: string }).lastPollStatus).toBe(status);
+      const videosUpdate = updateCalls.find((c) => c.table === youtubeVideos);
+      expect(videosUpdate).toBeDefined();
+      const setPatch = videosUpdate!.set as {
+        lastPollStatus: string;
+        pollFailureCount: unknown;
+      };
+      expect(setPatch.lastPollStatus).toBe(status);
+      // Non-ok statuses pass a SQL `<col> + 1` expression (Drizzle SQL chunk)
+      // — not a literal number. Walk for the column name reference (the
+      // Drizzle SQL chunk graph is circular so JSON.stringify can't be used).
+      const failureCols = collectColumnNames(setPatch.pollFailureCount);
+      expect(failureCols).toContain("poll_failure_count");
     }
   });
 
-  it("Plan 03.0-04: writeSnapshot increments youtube_service_quota_usage in same tx (incrementUsage receives tx)", async () => {
+  it("increments youtube_service_quota_usage in same tx (incrementUsage receives tx)", async () => {
     await writeSnapshot({
       videoId: "VID-q",
-      eventId: "evt-q",
-      userId: "user-q",
       metrics: { view_count: 1, like_count: 1, comment_count: 1 },
       apiKeyId: "key-q-sha8",
       unitsUsed: 7,
@@ -298,12 +285,10 @@ describe("youtube-snapshot-writer (Plan 03.0-04)", () => {
     expect(incrementCalls[0]!.hasTx).toBe(true);
   });
 
-  it("Plan 03.0-04: writeSnapshot wraps all 3 ops in a single db.transaction call", async () => {
+  it("wraps all 3 ops in a single db.transaction call", async () => {
     txCount = 0;
     await writeSnapshot({
       videoId: "VID-tx",
-      eventId: "evt-tx",
-      userId: "user-tx",
       metrics: { view_count: 1, like_count: 1, comment_count: 1 },
       apiKeyId: "key-tx",
       unitsUsed: 1,
@@ -312,31 +297,24 @@ describe("youtube-snapshot-writer (Plan 03.0-04)", () => {
     expect(txCount).toBe(1);
   });
 
-  it("Plan 03.0-04: writeSnapshot events update is tenant-scoped (userId in WHERE clause)", async () => {
-    // Defense-in-depth structural assertion: the events update WHERE clause
-    // must reference the userId column AND the events.id column. The
-    // ESLint tenant-scope rule (eslint-plugin-tenant-scope/no-unfiltered-
-    // tenant-query) guards this at lint time; this test guards it at runtime
-    // via the serialized clause shape.
+  it("youtube_videos UPDATE keys on video_id (no tenant filter — public-data table)", async () => {
+    // Per-video refactor (2026-05-06): polling state moved to youtube_videos
+    // which is PUBLIC-DATA (no user_id column). The tenant-scope rule
+    // explicitly allowlists this table; the WHERE clause keys on the video_id
+    // PK only. Multiple tenants referencing this video share one row.
     await writeSnapshot({
-      videoId: "VID-tenant",
-      eventId: "evt-tenant",
-      userId: "user-tenant-42",
+      videoId: "VID-shared",
       metrics: { view_count: 1, like_count: 1, comment_count: 1 },
       apiKeyId: "key-tenant",
       unitsUsed: 1,
       status: "ok",
     });
 
-    const eventsUpdate = updateCalls.find((c) => c.table === events);
-    expect(eventsUpdate).toBeDefined();
-    // The Drizzle and()/eq() chunk includes the column reference for both
-    // events.id and events.userId — once serialized the clause text contains
-    // the underlying column names ("user_id", "id"). The userId VALUE flows
-    // through a parameter placeholder rather than the literal text, which is
-    // expected; the structural guard checks the column reference exists.
-    const cols = eventsUpdate!.whereSql.split(",");
-    expect(cols).toContain("user_id");
-    expect(cols).toContain("id");
+    const videosUpdate = updateCalls.find((c) => c.table === youtubeVideos);
+    expect(videosUpdate).toBeDefined();
+    const cols = videosUpdate!.whereSql.split(",");
+    expect(cols).toContain("video_id");
+    // No userId — youtube_videos has no user_id column.
+    expect(cols).not.toContain("user_id");
   });
 });

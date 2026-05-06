@@ -67,13 +67,13 @@ export async function startWorker(): Promise<void> {
   // single job). Each handler iterates and awaits per-job sequentially.
   await boss.work(QUEUES.POLL_ACTIVE, { batchSize: 4 }, async (jobs) => {
     for (const job of jobs) {
-      await handlePollActive(job as { id: string; data: { eventIds: string[] } });
+      await handlePollActive(job as { id: string; data: { videoIds: string[] } });
     }
   });
 
   await boss.work(QUEUES.POLL_COLD, { batchSize: 1 }, async (jobs) => {
     for (const job of jobs) {
-      await handlePollCold(job as { id: string; data: { eventIds: string[] } });
+      await handlePollCold(job as { id: string; data: { videoIds: string[] } });
     }
   });
 
