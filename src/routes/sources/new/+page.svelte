@@ -207,6 +207,12 @@
         formError = m.sources_error_no_youtube_keys();
         return;
       }
+      if (res.status === 422 && body.error === "validation_failed") {
+        // Generic 422 — most commonly "URL doesn't parse as a YouTube
+        // channel / handle / video URL" from createSource.
+        formError = m.sources_error_not_a_youtube_url();
+        return;
+      }
       formError = m.error_server_generic();
     } catch {
       formError = m.error_network();

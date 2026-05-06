@@ -542,6 +542,7 @@ describe("paraglide i18n (UX-04)", () => {
       "sources_error_duplicate_channel",
       "sources_error_kind_not_yet_functional",
       "sources_error_no_youtube_keys",
+      "sources_error_not_a_youtube_url",
       "sources_error_video_not_found",
       "sources_error_youtube_unreachable",
       "sources_kind_disabled_tooltip",

@@ -185,7 +185,19 @@ export async function createSource(
   let resolvedChannelId = input.channelId ?? null;
   if (input.kind === "youtube_channel" && resolvedChannelId === null) {
     const parsed = parseYoutubeChannelUrl(input.handleUrl);
-    if (parsed?.kind === "channelId") {
+    // Phase 3.0 post-build (UAT 2026-05-06): reject URLs that don't point
+    // at a YouTube channel / handle / video. Operator pasted naked
+    // youtube.com/ and localhost:5173/feed and got ghost rows with
+    // channel_id=NULL — better to fail visibly so the user fixes the URL.
+    if (parsed === null) {
+      throw new AppError(
+        "Paste a YouTube channel URL (e.g. https://www.youtube.com/@handle or /channel/UC… or any video URL).",
+        "validation_failed",
+        422,
+        { handle_url: input.handleUrl },
+      );
+    }
+    if (parsed.kind === "channelId") {
       resolvedChannelId = parsed.value;
       canonicalHandleUrl = `https://www.youtube.com/channel/${parsed.value}`;
     } else if (parsed?.kind === "videoId") {
