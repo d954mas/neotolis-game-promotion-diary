@@ -75,11 +75,6 @@
   function applyInputs(): void {
     onApply({ from: fromVal || undefined, to: toVal || undefined });
   }
-  function clearRange(): void {
-    fromVal = "";
-    toVal = "";
-    onApply({ all: true });
-  }
 </script>
 
 <div class="date-range" role="group" aria-label="Date range">
@@ -92,9 +87,6 @@
       <span class="input-label">{m.feed_date_range_label_to()}</span>
       <input type="date" bind:value={toVal} min={fromVal || undefined} onchange={applyInputs} />
     </label>
-    <button type="button" class="clear" aria-label={m.feed_date_range_clear()} onclick={clearRange}
-      >×</button
-    >
   </div>
   <div class="presets">
     <button

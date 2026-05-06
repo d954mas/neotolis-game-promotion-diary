@@ -293,6 +293,7 @@
   "events_new_date_today": "Today",
   "events_new_date_yesterday": "Yesterday",
   "events_new_url_required": "A YouTube URL is required for YouTube video events.",
+  "events_new_date_in_past_hint": "⚠ This date is {daysAgo} days ago — confirm it's correct.",
   "events_new_youtube_fetch_button": "Get from YouTube",
   "events_new_youtube_fetch_title": "Load title and description from YouTube",
   "events_new_youtube_fetch_loading": "Loading…",
@@ -303,7 +304,6 @@
   "events_new_youtube_fetch_err_no_keys": "Operator hasn't configured YouTube API key — fetch disabled",
   "events_new_youtube_fetch_err_network": "Network error",
   "events_new_youtube_fetch_err_generic": "Failed to fetch metadata",
-  "events_new_date_outside_window_warning": "⚠ This date is {daysAgo} days ago. /feed shows only the last 30 days by default — switch to 'All time' in /feed or you won't see this event.",
 
   "feed_row_edit_aria": "Edit event",
   "feed_row_delete_aria": "Delete event",

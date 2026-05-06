@@ -294,9 +294,9 @@
         {@const daysAgo = Math.floor(
           (Date.now() - new Date(occurredAt).getTime()) / 86_400_000,
         )}
-        {#if daysAgo > 30}
+        {#if daysAgo > 0}
           <small class="date-hint warn">
-            {m.events_new_date_outside_window_warning({ daysAgo: String(daysAgo) })}
+            {m.events_new_date_in_past_hint({ daysAgo: String(daysAgo) })}
           </small>
         {/if}
       {/if}

@@ -351,7 +351,7 @@ describe("paraglide i18n (UX-04)", () => {
       "events_new_author_is_me",
       "events_new_date_today",
       "events_new_date_yesterday",
-      "events_new_date_outside_window_warning",
+      "events_new_date_in_past_hint",
       "events_new_url_required",
       "events_new_youtube_fetch_button",
       "events_new_youtube_fetch_cached",
