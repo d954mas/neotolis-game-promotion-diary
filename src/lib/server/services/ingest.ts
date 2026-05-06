@@ -203,17 +203,32 @@ async function maybeEnqueueChannelContextBackfill(
     if (cached.length > 0) return;
 
     const boss = await getBoss();
+    // Phase 3.0 post-build (UAT 2026-05-06) — BUG-3 partial mitigation.
+    //
+    // For /channel/UC… URLs the cache lookup above (youtubeChannels by
+    // channel_id PK) hits cleanly, so this enqueue path runs at most once
+    // per channel ever. For /@handle / /c/legacy URLs `extractChannelId…`
+    // returns the URL string itself as the singletonKey: the cache-lookup
+    // never hits (cache stores UC… PK, not handle URLs), so the enqueue
+    // would re-fire every 24h on each paste of any video from that handle —
+    // burning 9 quota units monthly per channel for nothing.
+    //
+    // The proper fix is a `youtube_channels.handle_aliases jsonb[]` column
+    // (or a separate alias table) populated by the worker after it resolves
+    // the handle → UC. Schema change deferred to a follow-up todo.
+    //
+    // Mitigation here: bump singleton dedup from 24h → 30d for handle URLs.
+    // The handle-keyed singleton still skips re-enqueues for a month;
+    // worst-case wasted cost is ~9 units per channel per 30 days, not per
+    // 24 hours. The 24h dedup stays for UC URLs because they hit the cache
+    // first and never reach this branch in steady state anyway.
+    const isUcId = /^UC[A-Za-z0-9_-]{20,}$/.test(channelId);
     await boss.send(
       QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL,
       { channelId, userId },
       {
-        // pg-boss coalesces same-singletonKey jobs in the dedup window;
-        // singletonHours: 24 means a second paste from the same channel
-        // within 24h while the backfill is in flight (or already completed
-        // but the cache row hasn't been written for any reason) does NOT
-        // double-enqueue.
         singletonKey: channelId,
-        singletonHours: 24,
+        singletonHours: isUcId ? 24 : 24 * 30,
       },
     );
   } catch (err) {
