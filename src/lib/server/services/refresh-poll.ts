@@ -35,6 +35,7 @@
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { events } from "../db/schema/events.js";
+import { youtubeVideos } from "../db/schema/youtube-videos.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { writeAudit } from "../audit.js";
 import { QUEUES } from "../queues.js";
@@ -84,6 +85,28 @@ export async function requestRefreshPoll(
       "event_no_external_id",
       422,
       { event_id: eventId, kind: event.kind },
+    );
+  }
+
+  // 3a. Per-video refactor (2026-05-06) — 'pending' tier gate.
+  //     If channel-context-backfill has not yet run for this external_id,
+  //     youtube_videos may not have a row yet, OR its publishedAt may be
+  //     NULL. Either way the tier is 'pending' and a manual poll would
+  //     race the in-flight backfill (which will populate stats anyway).
+  //     Reject with 422 — the user can retry once badge transitions.
+  // PUBLIC-DATA TABLE — keyed on PK only, no userId filter.
+  const videoRows = await db
+    .select({ publishedAt: youtubeVideos.publishedAt })
+    .from(youtubeVideos)
+    .where(eq(youtubeVideos.videoId, event.externalId))
+    .limit(1);
+  const videoRow = videoRows[0];
+  if (!videoRow || videoRow.publishedAt === null) {
+    throw new AppError(
+      "video metadata not yet available; backfill in progress",
+      "pending_backfill",
+      422,
+      { event_id: eventId, external_id: event.externalId },
     );
   }
 

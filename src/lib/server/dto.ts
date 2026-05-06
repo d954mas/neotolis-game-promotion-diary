@@ -10,6 +10,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { eventGames } from "./db/schema/event-games.js";
+import { youtubeVideos } from "./db/schema/youtube-videos.js";
 import type { user, session } from "./db/schema/auth.js";
 import type {
   games,
@@ -496,11 +497,64 @@ export async function loadGameIdsForEvent(userId: string, eventId: string): Prom
  * extension.
  */
 export async function mapEventsToDtos(userId: string, rows: EventRow[]): Promise<EventDto[]> {
-  const map = await loadGameIdsForEvents(
-    userId,
-    rows.map((e) => e.id),
+  const [gameIdsMap, videoMap] = await Promise.all([
+    loadGameIdsForEvents(
+      userId,
+      rows.map((e) => e.id),
+    ),
+    loadVideoDataForEvents(rows),
+  ]);
+  return rows.map((e) =>
+    toEventDto(e, gameIdsMap.get(e.id) ?? [], videoMap.get(e.externalId ?? "") ?? null),
   );
-  return rows.map((e) => toEventDto(e, map.get(e.id) ?? []));
+}
+
+/**
+ * Per-video refactor (2026-05-06) — batched JOIN loader for the polling
+ * state that lives on `youtube_videos`. Returns Map<external_id, videoData>
+ * for all youtube_video events in the input list. Skips events with no
+ * external_id (manual `other` entries) and non-youtube_video kinds.
+ *
+ * PUBLIC-DATA TABLE — no userId filter (videos are tenant-agnostic).
+ * The eslint-tenant-scope rule allowlists this via the schema's "no tenant
+ * scope" header comment. The DTO projection at toEventDto's third arg is
+ * how this data reaches the UI; the JOIN here is the load path.
+ */
+export async function loadVideoDataForEvents(
+  rows: EventRow[],
+): Promise<
+  Map<string, { publishedAt: Date | null; lastPolledAt: Date | null; lastPollStatus: string | null }>
+> {
+  const externalIds = Array.from(
+    new Set(
+      rows
+        .filter((r) => r.kind === "youtube_video" && r.externalId !== null)
+        .map((r) => r.externalId!),
+    ),
+  );
+  const map = new Map<
+    string,
+    { publishedAt: Date | null; lastPolledAt: Date | null; lastPollStatus: string | null }
+  >();
+  if (externalIds.length === 0) return map;
+  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- youtube_videos is PUBLIC-DATA (CONTEXT D-07): no user_id column, identical across all tenants who reference the same external_id. Lookup is keyed on the PK only.
+  const videoRows = await db
+    .select({
+      videoId: youtubeVideos.videoId,
+      publishedAt: youtubeVideos.publishedAt,
+      lastPolledAt: youtubeVideos.lastPolledAt,
+      lastPollStatus: youtubeVideos.lastPollStatus,
+    })
+    .from(youtubeVideos)
+    .where(inArray(youtubeVideos.videoId, externalIds));
+  for (const v of videoRows) {
+    map.set(v.videoId, {
+      publishedAt: v.publishedAt,
+      lastPolledAt: v.lastPolledAt,
+      lastPollStatus: v.lastPollStatus,
+    });
+  }
+  return map;
 }
 
 /**
