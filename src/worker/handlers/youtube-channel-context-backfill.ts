@@ -458,26 +458,46 @@ export async function handleChannelContextBackfill(job: {
       .limit(1);
     authorIsMe = sourceRow[0]?.isOwnedByMe ?? false;
 
+    // Auto-import idempotency: pre-insert SELECT instead of relying on the
+    // (user_id, kind, external_id) unique that was dropped in migration 0013.
+    // For each discovered video — if this user already has ANY event for that
+    // external_id (auto-imported or manual paste), skip the insert. Step 7
+    // below will bump lastPolledAt on the existing row(s). New videos land
+    // as fresh events. The user can still manually create additional events
+    // for the same video via the future "add another note" UI flow (the
+    // schema now allows it; the worker is intentionally idempotent for
+    // discovery, not user-driven duplication).
+    const existing = await db
+      .select({ externalId: events.externalId })
+      .from(events)
+      .where(
+        and(
+          eq(events.userId, userId),
+          sql`${events.kind} = 'youtube_video'`,
+          sql`${events.externalId} IN (${sql.join(
+            collected.map((c) => sql`${c.videoId}`),
+            sql`, `,
+          )})`,
+          isNotNull(events.externalId),
+          isNull(events.deletedAt),
+        ),
+      );
+    const existingIds = new Set(existing.map((r) => r.externalId).filter((x): x is string => !!x));
+
     for (const c of collected) {
-      await db
-        .insert(events)
-        .values({
-          userId,
-          sourceId,
-          kind: "youtube_video",
-          authorIsMe,
-          occurredAt: new Date(c.publishedAt),
-          title: c.title,
-          url: `https://www.youtube.com/watch?v=${c.videoId}`,
-          externalId: c.videoId,
-          lastPolledAt: now,
-          lastPollStatus: "ok",
-        })
-        .onConflictDoUpdate({
-          target: [events.userId, events.kind, events.externalId],
-          targetWhere: sql`${events.externalId} IS NOT NULL AND ${events.deletedAt} IS NULL`,
-          set: { lastPolledAt: now, lastPollStatus: "ok", updatedAt: now },
-        });
+      if (existingIds.has(c.videoId)) continue;
+      await db.insert(events).values({
+        userId,
+        sourceId,
+        kind: "youtube_video",
+        authorIsMe,
+        occurredAt: new Date(c.publishedAt),
+        title: c.title,
+        url: `https://www.youtube.com/watch?v=${c.videoId}`,
+        externalId: c.videoId,
+        lastPolledAt: now,
+        lastPollStatus: "ok",
+      });
     }
   }
 

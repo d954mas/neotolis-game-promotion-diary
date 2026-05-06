@@ -120,14 +120,22 @@ export const events = pgTable(
     eventsLastPolledAtIdx: index("idx_events_last_polled_at")
       .on(t.lastPolledAt)
       .where(sql`${t.lastPolledAt} IS NOT NULL`),
-    // Phase 3.0 Plan 01 — replaces the (user_id, kind, source_id, external_id)
-    // dedup unique with a stricter (user_id, kind, external_id) variant for
-    // refresh-poll idempotency. Manual paste leaves source_id NULL but a
-    // refresh-poll re-fetch must collide with the manual row when external_id
-    // matches. Partial WHERE keeps the index off NULL external_ids and off
-    // soft-deleted rows so a deleted row can be re-imported as a new event.
-    eventsUserKindExtActiveUnq: uniqueIndex("events_user_kind_ext_active_unq")
-      .on(t.userId, t.kind, t.externalId)
-      .where(sql`${t.externalId} IS NOT NULL AND ${t.deletedAt} IS NULL`),
+    // Phase 3.0 post-build (UAT 2026-05-06) — the unique
+    // (user_id, kind, external_id) partial index that Phase 3.0 Plan 01
+    // introduced has been DROPPED in migration 0012. Original intent ("one
+    // event per user per external video — paste-twice updates existing")
+    // collides with the operator's actual use case: a single review video
+    // covering 5 different games warrants 5 separate events, each with
+    // its own attached game and notes. Idempotency for the auto-import
+    // worker is now enforced via an explicit pre-insert SELECT in the
+    // handler. Duplicate-detection on manual paste is a UI concern (offer
+    // "add another note" vs "view existing") — to be wired in the
+    // /events/[id] detail-view phase.
+    //
+    // The plan-time dedup unique above (eventsUserKindSourceExtUnq, partial
+    // WHERE source_id IS NOT NULL) remains in place. That one only fires
+    // when the auto-import worker mistakenly tries to insert a video twice
+    // for the SAME source — a worker bug, not user intent. Manual paste
+    // leaves source_id NULL so it never trips there.
   }),
 );

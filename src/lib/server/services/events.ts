@@ -431,20 +431,22 @@ export async function createEvent(
   } catch (e: unknown) {
     if (isPgUniqueViolation(e)) {
       const constraint = pgUniqueViolationConstraint(e);
-      // Phase 3.0 Plan 04 (D-15): the new `events_user_kind_ext_active_unq`
-      // partial unique index (Plan 01) keys off (user_id, kind, external_id)
-      // WHERE external_id IS NOT NULL AND deleted_at IS NULL. Manual-paste
-      // collisions hit this constraint (source_id is NULL on manual paste,
-      // so the older `events_user_kind_source_ext_unq` index — partial WHERE
-      // source_id IS NOT NULL — does not catch them). The new constraint
-      // surfaces as 422 with metadata.url so the route layer (Plan 03.0-08)
-      // can render a user-facing toast pointing back at the duplicate row.
+      // Phase 3.0 post-build (UAT 2026-05-06): the (user_id, kind, external_id)
+      // unique index was DROPPED in migration 0013. The constraint had blocked
+      // the operator's actual workflow ("one review video covers 5 games →
+      // I want 5 events with different game attachments + different notes").
+      // Duplicate-on-paste detection becomes a UI concern: the future "you
+      // already have this video — add another note?" flow lives on the
+      // /events/[id] detail view. This branch becomes dead code post-0013;
+      // kept as a safety guard against accidental re-introduction of the
+      // constraint and as a documented historical link.
       if (constraint === "events_user_kind_ext_active_unq") {
-        throw new AppError("event already exists for this URL", "duplicate_event", 422, {
-          kind: input.kind,
-          external_id: derivedExternalId,
-          url: input.url ?? null,
-        });
+        throw new AppError(
+          "event already exists for this URL (legacy constraint — should be impossible after migration 0013)",
+          "duplicate_event",
+          422,
+          { kind: input.kind, external_id: derivedExternalId, url: input.url ?? null },
+        );
       }
       // Pre-existing auto-import dedup constraint preserved at 409 — the
       // auto-import worker (Plan 03.0-09) catches and silently skips, so the

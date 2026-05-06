@@ -1,0 +1,1 @@
+DROP INDEX "events_user_kind_ext_active_unq";
