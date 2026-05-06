@@ -71,12 +71,10 @@
         body: JSON.stringify({ url: url.trim() }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        if (res.status === 422) errorText = "Это не похоже на YouTube URL";
-        else if (res.status === 404) errorText = "Видео не найдено на YouTube";
-        else if (res.status === 503)
-          errorText = "Оператор не настроил YouTube API key — fetch отключён";
-        else errorText = body.error ?? "Ошибка fetch metadata";
+        if (res.status === 422) errorText = m.events_new_youtube_fetch_err_invalid_url();
+        else if (res.status === 404) errorText = m.events_new_youtube_fetch_err_not_found();
+        else if (res.status === 503) errorText = m.events_new_youtube_fetch_err_no_keys();
+        else errorText = m.events_new_youtube_fetch_err_generic();
         return;
       }
       const meta = (await res.json()) as {
@@ -99,9 +97,11 @@
       }
       // Force kind to youtube_video — they pasted a YouTube URL.
       kind = "youtube_video";
-      fetchInfo = meta.cached ? "Загружено из кэша (0 quota)" : "Загружено с YouTube (1 quota)";
+      fetchInfo = meta.cached
+        ? m.events_new_youtube_fetch_cached()
+        : m.events_new_youtube_fetch_fresh();
     } catch (e) {
-      errorText = "Сетевая ошибка";
+      errorText = m.events_new_youtube_fetch_err_network();
     } finally {
       fetching = false;
     }
@@ -282,9 +282,7 @@
         )}
         {#if daysAgo > 30}
           <small class="date-hint warn">
-            ⚠ Видео опубликовано {daysAgo} дн. назад. /feed по умолчанию показывает
-            только последние 30 дней — переключите в /feed на «All time», иначе не
-            увидите это событие.
+            {m.events_new_youtube_published_warning({ daysAgo: String(daysAgo) })}
           </small>
         {/if}
       {/if}
@@ -310,9 +308,9 @@
           class="fetch-btn"
           onclick={fetchFromYouTube}
           disabled={!canFetch}
-          title="Загрузить заголовок и описание из YouTube"
+          title={m.events_new_youtube_fetch_title()}
         >
-          {fetching ? "Загрузка…" : "Получить из YouTube"}
+          {fetching ? m.events_new_youtube_fetch_loading() : m.events_new_youtube_fetch_button()}
         </button>
       </div>
       {#if fetchInfo}
