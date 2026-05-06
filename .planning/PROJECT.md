@@ -143,7 +143,8 @@ Core data abstractions (post-Phase-2.1):
 - **`games`** — per-tenant game cards. Identity unit for the per-game curated view.
 - **`data_sources`** — per-tenant registry of where content comes from. One row per (user, source) — kind enum (`youtube_channel`, `reddit_account`, `twitter_account`, `telegram_channel`, `discord_server`, forward-compat extensions). Carries `is_owned_by_me` (mine vs someone else's), `auto_import` (pull content automatically vs passive registration only), per-platform `metadata` jsonb (e.g. `uploads_playlist_id`, `last_polled_at`). Stats columns and time-series live elsewhere — this table is identity + config.
 - **`events`** — single timeline table. Every promotion artifact is an event regardless of platform: `kind` (per-platform enum), `author_is_me` (the user's natural discriminator), nullable `source_id` (NULL when manually pasted), nullable `game_id` (NULL when in inbox awaiting attachment), `occurred_at`, `url`, `title`, per-kind `metadata` jsonb. Replaces the Phase 2 `tracked_youtube_videos` + `events` split.
-- **`event_stats_snapshots`** (Phase 3) — immutable time-series of per-event metrics (`event_id`, `polled_at`, `metric_key`, `metric_value`). Charts source from this; the live `events` row is never mutated.
+- **`youtube_videos`** (Phase 3.0) — public-data cache for YouTube video metadata (no `user_id` column; identical across tenants). Carries the snippet (title / description / channel id / channel title / published_at) AND the polling state (`last_polled_at` / `last_poll_status` / `poll_failure_count`). Multiple events for one video share one row. Tier classification (Active/Cold/Frozen/Pending/Unavailable) keys on `published_at`, not on `events.occurred_at` — a "I logged a promo today for a year-old video" paste correctly resolves to Cold/Frozen instead of Active.
+- **`youtube_video_snapshots`** (Phase 3.0) — public-data immutable time-series of per-video metrics (`video_id`, `polled_at`, `view_count`, `like_count`, `comment_count`). One row per video per polling minute; UNIQUE `(video_id, polled_at)` makes within-minute retries idempotent. Charts source from this; events row is never mutated.
 - **`api_keys_*`** — per-tenant encrypted credentials (envelope encryption: KEK from env, DEK per row). Steam in Phase 2 (per-publisher data). Reddit OAuth (3 ciphertext columns per row: client_id / client_secret / refresh_token) in Phase 3.1. YouTube — **NO per-tenant table in Phase 3.0**: service-level operator key from env (`SERVICE_YOUTUBE_API_KEYS`); per-user `api_keys_youtube` override deferred to Phase 6 (trigger: ≥1 power user trips 95% of operator's daily quota). Phase 3.0 ships only `api_keys_steam` (Phase 2). `api_keys_reddit` lands in Phase 3.1. NO `api_keys_youtube` table — YouTube uses operator-owned service-level keys (`SERVICE_YOUTUBE_API_KEYS` env, plaintext).
 - **`audit_log`** — INSERT-only, tenant-relative cursor-paginated audit trail.
 
@@ -153,17 +154,30 @@ Three views over the events table:
 - **`/sources`** — data source registry. Add/remove, toggle auto-import, see polling status. Configuration, not content.
 - **`/games/[id]`** — per-game curated view. Same data filtered to `events WHERE game_id = :id`, grouped by month. Useful for retrospectives and post-mortems.
 
-Polling architecture (Phase 3+) is one generic worker driven by per-kind `DataSourceAdapter`:
+Polling architecture (Phase 3+) is one generic worker driven by per-kind `DataSourceAdapter`. Per-video refactor (2026-05-06): the adapter exposes BOTH a per-event `pollStats` (used for user-driven Refresh now where per-user quotaUser fingerprint is correct) AND a per-video `pollStatsByVideoId` (used for service-driven scheduler ticks where one HTTP serves all tenants referencing the same video):
 
 ```typescript
 interface DataSourceAdapter {
   kind: SourceKind;
   pollContent(source: DataSource, since: Date): Promise<RawEvent[]>;  // imports new events
-  pollStats(event: Event): Promise<StatsSnapshot>;                    // updates time-series
+  pollStats(events: PollableEvent[], source): Promise<StatsSnapshot[]>;  // user-driven, per-user quotaUser
+  pollStatsByVideoId(videoIds: string[], quotaUser: string): Promise<StatsSnapshot[]>;  // service-driven, constant quotaUser per tier
 }
 ```
 
-Adding a new platform = implementing one adapter + adding a kind to the enum. Schema migrations are not required per platform.
+Scheduler picks UNIQUE `external_id` values across all tenants (selectDistinct + JOIN on `youtube_videos`), tier-resolves by `published_at`, and enqueues batches of `videoIds`. Workers issue ONE HTTP per ≤50-id batch; `writeSnapshot` updates the public-data `youtube_videos` row (single source of truth for polling state) plus appends one `youtube_video_snapshots` row. With multiple events for the same video — within one user OR across tenants — only one HTTP fires per polling cycle.
+
+Tier resolution (`src/lib/server/services/tier-resolver.ts`) is the single source of truth. Tier inputs are `(publishedAt, lastPollStatus, now)`:
+
+- `publishedAt IS NULL` → `'pending'` (channel-context-backfill in flight; refresh-poll rejects 'pending' to avoid racing the in-flight backfill)
+- `age < 24h` → `'active'` (scheduler polls every 6h)
+- `24h ≤ age < 28d` → `'cold'` (scheduler polls daily)
+- `age ≥ 28d` → `'frozen'` (no automatic polling; manual Refresh now still works)
+- `lastPollStatus IN ('not_found','private','auth_error')` → `'unavailable'` (override regardless of age)
+
+Recovery for 'unavailable' videos: a weekly rehab cron (Sunday 4 AM Pacific) re-polls up to 50 videos with `last_poll_status IN ('not_found','private')` AND `poll_failure_count < 5`. The failure-count cap prevents infinite quota burn on truly-deleted videos; manual Refresh now bypasses the cap (user intent overrides).
+
+Adding a new platform = implementing one adapter + adding a kind to the enum. Schema migrations may add a per-platform public-data table (analogous to `youtube_videos`) for platforms whose stats time-series benefits from JOIN-by-external_id; events stays platform-agnostic.
 
 Two ingestion paths coexist by design (nullable `source_id`):
 
@@ -190,4 +204,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-05 after /gsd:discuss-phase 03 — split monolithic Phase 3 into Phase 3.0 / 3.1 / 3.2 (DECIMAL SPLIT); revised API-quota Key Decision to per-platform (YouTube service-level, Reddit/Steam per-user); API-quota narrative bullet rewritten; Architecture `api_keys_*` clause clarified for YouTube exception. Earlier: 2026-05-04 after Phase 02.2 (ship-to-prod) — production deploy artifacts + GDPR baseline + per-user quotas + 9 validated requirements moved Active → Validated.*
+*Last updated: 2026-05-06 after Phase 3.0 post-build refactor — moved polling state from per-event copies on `events` to per-video columns on `youtube_videos`; tier classification now keyed on video age (publishedAt), not event age (occurred_at); scheduler dedups by external_id (one HTTP per video per tier-tick); new `'pending'` tier for the brief channel-context-backfill window; weekly rehab cron with poll_failure_count cap recovers privacy-unflipped videos. Earlier: 2026-05-05 after /gsd:discuss-phase 03 — split monolithic Phase 3 into Phase 3.0 / 3.1 / 3.2 (DECIMAL SPLIT); revised API-quota Key Decision to per-platform (YouTube service-level, Reddit/Steam per-user). 2026-05-04 after Phase 02.2 (ship-to-prod) — production deploy artifacts + GDPR baseline + per-user quotas + 9 validated requirements moved Active → Validated.*
