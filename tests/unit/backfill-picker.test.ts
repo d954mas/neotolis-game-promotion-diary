@@ -29,7 +29,7 @@ const { render } = await import("svelte/server");
 const BackfillPicker = (await import("../../src/lib/components/BackfillPicker.svelte")).default;
 
 describe("Plan 03.0-12 — BackfillPicker (D-09)", () => {
-  it("renders a <select> with 5 <option>s carrying the literal preset labels", () => {
+  it("renders a <select> with 6 <option>s carrying the literal preset labels", () => {
     const out = render(BackfillPicker, { props: { value: "30d" } });
     expect(out.body).toContain("<select");
     expect(out.body).toContain("1 day");
@@ -37,8 +37,9 @@ describe("Plan 03.0-12 — BackfillPicker (D-09)", () => {
     expect(out.body).toContain("30 days");
     expect(out.body).toContain("90 days");
     expect(out.body).toContain("1 year");
+    expect(out.body).toContain("Everything");
     const options = out.body.match(/<option[^>]*value="/g) ?? [];
-    expect(options.length).toBe(5);
+    expect(options.length).toBe(6);
   });
 
   it("default-selects '30d' on initial render", () => {
@@ -49,7 +50,7 @@ describe("Plan 03.0-12 — BackfillPicker (D-09)", () => {
 
   it("renders the default helper paragraph when value='30d'", () => {
     const out = render(BackfillPicker, { props: { value: "30d" } });
-    expect(out.body).toContain("Imports up to 50 most-recent videos");
+    expect(out.body).toContain("Imports up to 1000 most-recent videos");
   });
 
   it("renders the section title 'Initial backfill'", () => {

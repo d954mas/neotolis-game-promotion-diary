@@ -269,6 +269,7 @@ describe("paraglide i18n (UX-04)", () => {
       "backfill_picker_preset_1d_label",
       "backfill_picker_preset_30d_label",
       "backfill_picker_preset_7d_label",
+      "backfill_picker_preset_1y_label",
       "backfill_picker_preset_90d_label",
       "backfill_picker_preset_everything_label",
       "backfill_picker_section_blurb",
@@ -612,7 +613,7 @@ describe("paraglide i18n (UX-04)", () => {
     // BackfillPicker default-helper copy (the load-bearing nudge text on
     // the source-creation form).
     expect(m.backfill_picker_helper_default).toBe(
-      "Imports up to 50 most-recent videos within the chosen window.",
+      "Imports up to 1000 most-recent videos within the chosen window.",
     );
   });
 

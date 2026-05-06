@@ -17,7 +17,7 @@
 
   import { m } from "$lib/paraglide/messages.js";
 
-  type Preset = "1d" | "7d" | "30d" | "90d" | "everything";
+  type Preset = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
 
   let { value = $bindable<Preset>("30d") }: { value?: Preset } = $props();
 
@@ -26,6 +26,7 @@
     { id: "7d", label: m.backfill_picker_preset_7d_label },
     { id: "30d", label: m.backfill_picker_preset_30d_label },
     { id: "90d", label: m.backfill_picker_preset_90d_label },
+    { id: "1y", label: m.backfill_picker_preset_1y_label },
     { id: "everything", label: m.backfill_picker_preset_everything_label },
   ];
 

@@ -91,7 +91,7 @@ export async function startWorker(): Promise<void> {
           data: {
             channelId: string;
             userId: string;
-            backfillWindow?: "1d" | "7d" | "30d" | "90d" | "everything";
+            backfillWindow?: "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
           };
         },
       );

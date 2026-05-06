@@ -6,15 +6,18 @@
 // youtube_video_snapshots table with the last 50 videos so the user's chart
 // loader has historical context immediately.
 //
-// Quota cost: TOTAL 2 units guaranteed for the cache row + uploads list.
-//   - channels.list                 1 unit  → uploadsPlaylistId + channelTitle
-//   - playlistItems.list (50 ids)   1 unit  → 50 video ids + publishedAt
-//   - videos.list (50 ids batched)  1 unit  → snapshot rows for the 50 videos
+// Quota cost: 1 (channels.list) + N (playlistItems pages, 1≤N≤MAX_PAGES) +
+// M (videos.list batches of ≤50 ids each, 1≤M≤MAX_PAGES). Hard upper bound:
+// 1 + 4 + 4 = 9 units per backfill. Actual cost depends on backfillWindow:
+//   - "1d" / "7d" with low-volume channel: typically 3 units (1+1+1)
+//   - "30d" / "90d" with active channel: typically 5–7 units
+//   - "everything" or huge channel: capped at 9 units (200 video ceiling)
 //
-// (Plan acceptance criteria states 2 units; the third call — videos.list — is
-// optional and gated on whether the user has the backfill window > 1 day.
-// For the MVP all three calls run in series since the chart-loader contract
-// expects snapshot rows for the playlist's existing videos.)
+// The pagination loop walks playlistItems pages newest→oldest and stops on
+// the first page whose oldest item crosses the cutoff (uploads playlists
+// are sorted publishedAt DESC). For "everything" there is no cutoff but the
+// MAX_PAGES bound still applies — VIZ-01's chart-loader doesn't need a
+// channel's full history, just its visible recency.
 //
 // Idempotency: youtube_channel_metadata_cache UPSERT on channel_id PK
 // (Plan 01); a re-run of this handler for the same channel is a no-op at the
@@ -58,6 +61,7 @@ const CHANNELS_LIST_RESPONSE = z.object({
 
 const PLAYLIST_ITEMS_LIST_RESPONSE = z.object({
   kind: z.literal("youtube#playlistItemListResponse"),
+  nextPageToken: z.string().optional(),
   items: z.array(
     z.object({
       snippet: z.object({
@@ -72,6 +76,28 @@ const PLAYLIST_ITEMS_LIST_RESPONSE = z.object({
     }),
   ),
 });
+
+// Map UI backfill-window preset → cutoff (or null for "everything"). Uploads
+// playlists are sorted publishedAt DESC, so we walk pages from newest down
+// and stop the first time we cross the cutoff.
+const WINDOW_DAYS: Record<"1d" | "7d" | "30d" | "90d" | "1y", number> = {
+  "1d": 1,
+  "7d": 7,
+  "30d": 30,
+  "90d": 90,
+  "1y": 365,
+};
+
+// Hard upper bound on pages walked (covers the "active channel + everything"
+// case where no cutoff is ever crossed). 20 pages × 50 videos = 1000 videos =
+// 20 quota units for playlistItems.list. Combined with 20 batched videos.list
+// calls (1 unit each) and the upfront channels.list (1 unit), total quota
+// cost per backfill is bounded at 41 units (~0.4% of a 10000 daily envelope).
+// For channels with >1000 videos that an operator wants to fully ingest,
+// this becomes a follow-up: a per-source "continue backfill" job that picks
+// up from the last walked pageToken — out of scope for the MVP.
+const MAX_PAGES = 20;
+const PAGE_SIZE = 50;
 
 const VIDEOS_LIST_RESPONSE = z.object({
   kind: z.literal("youtube#videoListResponse"),
@@ -104,7 +130,7 @@ export async function handleChannelContextBackfill(job: {
   data: {
     channelId: string;
     userId: string;
-    backfillWindow?: "1d" | "7d" | "30d" | "90d" | "everything";
+    backfillWindow?: "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
   };
 }): Promise<void> {
   const { channelId, userId } = job.data;
@@ -173,51 +199,104 @@ export async function handleChannelContextBackfill(job: {
       },
     });
 
-  // 3. playlistItems.list — 1 quota unit. Last 50 videos for snapshot seeding.
-  const playlistUrl = new URL(`${env.YOUTUBE_API_BASE_URL}/playlistItems`);
-  playlistUrl.searchParams.set("playlistId", uploadsPlaylistId);
-  playlistUrl.searchParams.set("part", "snippet");
-  playlistUrl.searchParams.set("maxResults", "50");
-  playlistUrl.searchParams.set("key", picked.apiKey);
-  playlistUrl.searchParams.set("quotaUser", hashApiKeyId(userId));
+  // 3. playlistItems.list — paginated walk of the uploads playlist, filtered
+  //    by `backfillWindow` cutoff. 1 quota unit per page. Stops on first page
+  //    crossing cutoff (uploads playlists are sorted publishedAt DESC) or at
+  //    MAX_PAGES (4 = 200 video hard cap). For "everything", no cutoff but
+  //    same MAX_PAGES bound.
+  const window = job.data.backfillWindow ?? "30d";
+  const cutoff: Date | null =
+    window === "everything" ? null : new Date(now.getTime() - WINDOW_DAYS[window] * 86_400_000);
+  const collected: { videoId: string; publishedAt: string }[] = [];
+  let pageToken: string | undefined;
+  let stopReason: "no_more_pages" | "cutoff_crossed" | "hard_cap" = "no_more_pages";
 
-  const playlistResp = await fetchWithTimeout(playlistUrl);
-  await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
-  if (!playlistResp.ok) {
-    logger.warn(
-      { jobId: job.id, channelId, status: playlistResp.status },
-      "channel-context-backfill: playlistItems.list non-2xx; cache row written but no snapshots seeded",
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const playlistUrl = new URL(`${env.YOUTUBE_API_BASE_URL}/playlistItems`);
+    playlistUrl.searchParams.set("playlistId", uploadsPlaylistId);
+    playlistUrl.searchParams.set("part", "snippet");
+    playlistUrl.searchParams.set("maxResults", String(PAGE_SIZE));
+    playlistUrl.searchParams.set("key", picked.apiKey);
+    playlistUrl.searchParams.set("quotaUser", hashApiKeyId(userId));
+    if (pageToken) playlistUrl.searchParams.set("pageToken", pageToken);
+
+    const playlistResp = await fetchWithTimeout(playlistUrl);
+    await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+    if (!playlistResp.ok) {
+      logger.warn(
+        { jobId: job.id, channelId, status: playlistResp.status, page },
+        "channel-context-backfill: playlistItems.list non-2xx; partial seed",
+      );
+      break;
+    }
+    const playlistJson = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await playlistResp.json());
+
+    let crossedCutoffOnThisPage = false;
+    for (const it of playlistJson.items) {
+      const publishedAt = new Date(it.snippet.publishedAt);
+      if (cutoff !== null && publishedAt < cutoff) {
+        crossedCutoffOnThisPage = true;
+        break;
+      }
+      collected.push({
+        videoId: it.snippet.resourceId.videoId,
+        publishedAt: it.snippet.publishedAt,
+      });
+    }
+
+    if (crossedCutoffOnThisPage) {
+      stopReason = "cutoff_crossed";
+      break;
+    }
+    if (!playlistJson.nextPageToken) {
+      stopReason = "no_more_pages";
+      break;
+    }
+    if (page === MAX_PAGES - 1) {
+      stopReason = "hard_cap";
+      break;
+    }
+    pageToken = playlistJson.nextPageToken;
+  }
+
+  if (collected.length === 0) {
+    logger.info(
+      { jobId: job.id, channelId, window, stopReason },
+      "channel-context-backfill: no videos in window",
     );
     return;
   }
-  const playlistJson = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await playlistResp.json());
-  const videoIds = playlistJson.items.map((it) => it.snippet.resourceId.videoId);
-  if (videoIds.length === 0) {
-    logger.info({ jobId: job.id, channelId }, "channel-context-backfill: no videos in playlist");
-    return;
-  }
 
-  // 4. videos.list (1 batched call ≤50 ids) — 1 quota unit.
-  const videosUrl = new URL(`${env.YOUTUBE_API_BASE_URL}/videos`);
-  videosUrl.searchParams.set("id", videoIds.join(","));
-  videosUrl.searchParams.set("part", "statistics");
-  videosUrl.searchParams.set("key", picked.apiKey);
-  videosUrl.searchParams.set("quotaUser", hashApiKeyId(userId));
+  const videoIds = collected.map((c) => c.videoId);
 
-  const videosResp = await fetchWithTimeout(videosUrl);
-  await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
-  if (!videosResp.ok) {
-    logger.warn(
-      { jobId: job.id, channelId, status: videosResp.status },
-      "channel-context-backfill: videos.list non-2xx; cache row written but no snapshots seeded",
-    );
-    return;
+  // 4. videos.list — batched in chunks of 50 (one quota unit per chunk).
+  //    Sequential to keep quota accounting simple and pg-boss singleton-key
+  //    contention bounded.
+  const allItems: z.infer<typeof VIDEOS_LIST_RESPONSE>["items"] = [];
+  for (let i = 0; i < videoIds.length; i += 50) {
+    const chunk = videoIds.slice(i, i + 50);
+    const videosUrl = new URL(`${env.YOUTUBE_API_BASE_URL}/videos`);
+    videosUrl.searchParams.set("id", chunk.join(","));
+    videosUrl.searchParams.set("part", "statistics");
+    videosUrl.searchParams.set("key", picked.apiKey);
+    videosUrl.searchParams.set("quotaUser", hashApiKeyId(userId));
+
+    const videosResp = await fetchWithTimeout(videosUrl);
+    await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+    if (!videosResp.ok) {
+      logger.warn(
+        { jobId: job.id, channelId, status: videosResp.status, batch: i / 50 },
+        "channel-context-backfill: videos.list non-2xx; partial seed",
+      );
+      continue;
+    }
+    const videosJson = VIDEOS_LIST_RESPONSE.parse(await videosResp.json());
+    allItems.push(...videosJson.items);
   }
-  const videosJson = VIDEOS_LIST_RESPONSE.parse(await videosResp.json());
 
   // 5. INSERT snapshot rows. ON CONFLICT DO NOTHING on (video_id, polled_at)
   //    UNIQUE — re-run within the same minute is a no-op at row level.
-  for (const item of videosJson.items) {
+  for (const item of allItems) {
     const stats = item.statistics;
     if (!stats) continue;
     await db
@@ -252,7 +331,14 @@ export async function handleChannelContextBackfill(job: {
     );
 
   logger.info(
-    { jobId: job.id, channelId, userId, videoCount: videoIds.length },
+    {
+      jobId: job.id,
+      channelId,
+      userId,
+      window,
+      stopReason,
+      videoCount: videoIds.length,
+    },
     "channel-context-backfill: complete",
   );
 }

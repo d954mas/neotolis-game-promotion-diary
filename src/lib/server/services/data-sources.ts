@@ -49,7 +49,7 @@ import { logger } from "../logger.js";
 // Plan 09's worker handler reads `job.data.backfillWindow` to size the
 // snapshot-seeding window; an undefined value falls back to '30d' which
 // matches the BackfillPicker default-selected preset.
-export type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "everything";
+export type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
 
 export type DataSourceRow = typeof dataSources.$inferSelect;
 

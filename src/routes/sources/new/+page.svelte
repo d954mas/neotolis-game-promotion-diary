@@ -81,7 +81,7 @@
   // the picker AND resets the value to '30d'. The reset is what the
   // server expects (createSource defaults undefined → '30d' but resetting
   // here keeps the form-state clean if the user toggles back on).
-  type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "everything";
+  type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
   let backfillWindow = $state<BackfillWindow>("30d");
   const showPicker = $derived(selectedKind === "youtube_channel" && autoImport);
 
