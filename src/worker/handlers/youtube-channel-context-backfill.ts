@@ -336,7 +336,7 @@ export async function handleChannelContextBackfill(job: {
   const window = job.data.backfillWindow ?? "30d";
   const cutoff: Date | null =
     window === "everything" ? null : new Date(now.getTime() - WINDOW_DAYS[window] * 86_400_000);
-  const collected: { videoId: string; publishedAt: string }[] = [];
+  const collected: { videoId: string; publishedAt: string; title: string }[] = [];
   let pageToken: string | undefined;
   let stopReason: "no_more_pages" | "cutoff_crossed" | "hard_cap" = "no_more_pages";
 
@@ -370,6 +370,7 @@ export async function handleChannelContextBackfill(job: {
       collected.push({
         videoId: it.snippet.resourceId.videoId,
         publishedAt: it.snippet.publishedAt,
+        title: it.snippet.title,
       });
     }
 
@@ -440,9 +441,50 @@ export async function handleChannelContextBackfill(job: {
       .onConflictDoNothing();
   }
 
-  // 6. Mark events.last_polled_at on ANY events the user owns matching these
-  //    video ids — so the polling badge shows fresh state right after paste.
-  //    Tenant-scoped via userId; idempotent on re-run.
+  // 6. Auto-import event creation. When this backfill was triggered by
+  //    /sources/new (sourceId provided + handleUrl path), the user expects
+  //    each discovered video to surface in /feed. Read author_is_me from
+  //    the parent data_source — its is_owned_by_me flag determines whether
+  //    these events count as the user's own posts (Mine) or as tracked
+  //    coverage (Tracking). For the ingest paste path (sourceId NOT provided)
+  //    the event is already created by the ingest service, so we skip this
+  //    block and only step 7 below refreshes its lastPolledAt timestamp.
+  let authorIsMe = false;
+  if (sourceId) {
+    const sourceRow = await db
+      .select({ isOwnedByMe: dataSources.isOwnedByMe })
+      .from(dataSources)
+      .where(eq(dataSources.id, sourceId))
+      .limit(1);
+    authorIsMe = sourceRow[0]?.isOwnedByMe ?? false;
+
+    for (const c of collected) {
+      await db
+        .insert(events)
+        .values({
+          userId,
+          sourceId,
+          kind: "youtube_video",
+          authorIsMe,
+          occurredAt: new Date(c.publishedAt),
+          title: c.title,
+          url: `https://www.youtube.com/watch?v=${c.videoId}`,
+          externalId: c.videoId,
+          lastPolledAt: now,
+          lastPollStatus: "ok",
+        })
+        .onConflictDoUpdate({
+          target: [events.userId, events.kind, events.externalId],
+          targetWhere: sql`${events.externalId} IS NOT NULL AND ${events.deletedAt} IS NULL`,
+          set: { lastPolledAt: now, lastPollStatus: "ok", updatedAt: now },
+        });
+    }
+  }
+
+  // 7. For the ingest-paste path (or any pre-existing event the user owns
+  //    matching one of these video ids), bump last_polled_at to "now" so the
+  //    polling badge shows fresh state. Idempotent on re-run; the source-
+  //    backed events already had their timestamps set by the upsert above.
   await db
     .update(events)
     .set({ lastPolledAt: now, lastPollStatus: "ok" })
