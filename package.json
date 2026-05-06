@@ -10,6 +10,7 @@
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "vite dev",
+    "dev:mock-oauth": "node scripts/dev-mock-oauth.mjs",
     "build": "pnpm paraglide:compile && svelte-kit sync && vite build && tsup",
     "preview": "vite preview",
     "paraglide:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide",
