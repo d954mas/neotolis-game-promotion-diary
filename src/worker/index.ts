@@ -89,8 +89,10 @@ export async function startWorker(): Promise<void> {
         job as {
           id: string;
           data: {
-            channelId: string;
             userId: string;
+            channelId?: string;
+            handleUrl?: string;
+            sourceId?: string;
             backfillWindow?: "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
           };
         },

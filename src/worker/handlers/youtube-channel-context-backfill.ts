@@ -35,6 +35,7 @@ import { db } from "../../lib/server/db/client.js";
 import { youtubeChannelMetadataCache } from "../../lib/server/db/schema/youtube-channel-metadata-cache.js";
 import { youtubeVideoSnapshots } from "../../lib/server/db/schema/youtube-video-snapshots.js";
 import { events } from "../../lib/server/db/schema/events.js";
+import { dataSources } from "../../lib/server/db/schema/data-sources.js";
 import {
   pickKeyForJob,
   hashApiKeyId,
@@ -125,19 +126,83 @@ async function fetchWithTimeout(url: URL, timeoutMs = 30_000): Promise<Response>
   }
 }
 
+// Parse a YouTube channel URL into either a direct channelId (UC*) or a handle
+// (@something). Returns { kind: "channelId", value } when the URL points
+// straight at a /channel/UC… identifier, or { kind: "handle", value: "@xxx" }
+// for /@handle and /c/legacy and /user/legacy URLs (the latter two also
+// resolve via the channels.list?forHandle= path on YouTube's side).
+//
+// Returns null for unparseable URLs — handler logs+skips, source row stays
+// channelId=NULL until the user re-toggles auto-import.
+function parseHandleUrl(url: string): { kind: "channelId" | "handle"; value: string } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (!/(^|\.)youtube\.com$/i.test(parsed.hostname)) return null;
+
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  if (segments.length === 0) return null;
+
+  const first = segments[0];
+  if (!first) return null;
+
+  // /channel/UCxxxxx — direct channelId.
+  if (first === "channel" && segments[1]) {
+    return { kind: "channelId", value: segments[1] };
+  }
+  // /@handle — modern handle URL.
+  if (first.startsWith("@")) {
+    return { kind: "handle", value: first };
+  }
+  // /c/customname or /user/legacyname — resolvable via forHandle (YouTube
+  // accepts a bare name — no @ — alongside @-prefixed handles).
+  if ((first === "c" || first === "user") && segments[1]) {
+    return { kind: "handle", value: segments[1] };
+  }
+  return null;
+}
+
+const CHANNELS_LIST_FOR_HANDLE_RESPONSE = z.object({
+  kind: z.literal("youtube#channelListResponse"),
+  items: z.array(
+    z.object({
+      id: z.string(),
+      snippet: z.object({ title: z.string() }).optional(),
+      contentDetails: z
+        .object({
+          relatedPlaylists: z.object({ uploads: z.string() }),
+        })
+        .optional(),
+    }),
+  ),
+});
+
+// Phase 3.0 unified backfill job shape. Either { channelId } (ingest paste
+// flow — Plan 10 already knows the channelId from the parsed video URL) or
+// { handleUrl, sourceId } (createSource flow — Plan 12 only knows the URL the
+// user typed). Handler resolves handle→channelId in the second case using a
+// channels.list?forHandle= call (1 quota unit) and persists the resolved
+// channelId back to data_sources so subsequent polls skip the resolution.
 export async function handleChannelContextBackfill(job: {
   id: string;
   data: {
-    channelId: string;
     userId: string;
+    channelId?: string;
+    handleUrl?: string;
+    sourceId?: string;
     backfillWindow?: "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
   };
 }): Promise<void> {
-  const { channelId, userId } = job.data;
-  if (!channelId || !userId) {
+  const { userId, handleUrl, sourceId } = job.data;
+  let channelId = job.data.channelId;
+
+  if (!userId || (!channelId && !handleUrl)) {
     logger.warn(
-      { jobId: job.id, channelId, userId },
-      "channel-context-backfill: missing channelId or userId",
+      { jobId: job.id, channelId, userId, handleUrl },
+      "channel-context-backfill: missing userId AND (channelId OR handleUrl)",
     );
     return;
   }
@@ -145,8 +210,72 @@ export async function handleChannelContextBackfill(job: {
   const picked = pickKeyForJob();
   if (!picked) {
     logger.warn(
-      { jobId: job.id, channelId },
+      { jobId: job.id, channelId, handleUrl },
       "channel-context-backfill: SERVICE_YOUTUBE_API_KEYS empty; skipping",
+    );
+    return;
+  }
+
+  // 0. Resolve handleUrl → channelId if needed (createSource flow). Handle
+  //    URLs come in 4 shapes:
+  //      - https://www.youtube.com/channel/UCxxx  → direct channelId
+  //      - https://www.youtube.com/@handle         → forHandle lookup
+  //      - https://www.youtube.com/c/legacy        → forHandle lookup
+  //      - https://www.youtube.com/user/legacy     → forHandle lookup
+  if (!channelId && handleUrl) {
+    const parsed = parseHandleUrl(handleUrl);
+    if (!parsed) {
+      logger.warn(
+        { jobId: job.id, handleUrl },
+        "channel-context-backfill: handleUrl does not parse to a youtube channel; skipping",
+      );
+      return;
+    }
+    if (parsed.kind === "channelId") {
+      channelId = parsed.value;
+    } else {
+      // forHandle resolution — 1 quota unit.
+      const lookupUrl = new URL(`${env.YOUTUBE_API_BASE_URL}/channels`);
+      lookupUrl.searchParams.set("forHandle", parsed.value);
+      lookupUrl.searchParams.set("part", "snippet,contentDetails");
+      lookupUrl.searchParams.set("key", picked.apiKey);
+      lookupUrl.searchParams.set("quotaUser", hashApiKeyId(userId));
+
+      const lookupResp = await fetchWithTimeout(lookupUrl);
+      await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+      if (!lookupResp.ok) {
+        logger.warn(
+          { jobId: job.id, handle: parsed.value, status: lookupResp.status },
+          "channel-context-backfill: forHandle lookup non-2xx; skipping",
+        );
+        return;
+      }
+      const lookupJson = CHANNELS_LIST_FOR_HANDLE_RESPONSE.parse(await lookupResp.json());
+      const item = lookupJson.items[0];
+      if (!item) {
+        logger.warn(
+          { jobId: job.id, handle: parsed.value },
+          "channel-context-backfill: forHandle lookup returned no channel; skipping",
+        );
+        return;
+      }
+      channelId = item.id;
+    }
+    // Persist resolved channelId back to data_sources so re-toggles skip
+    // resolution. NULL→non-NULL only — never overwrite a stored value with a
+    // different one (would mask a renamed channel; out of scope for MVP).
+    if (sourceId && channelId) {
+      await db
+        .update(dataSources)
+        .set({ channelId })
+        .where(and(eq(dataSources.id, sourceId), isNull(dataSources.channelId)));
+    }
+  }
+
+  if (!channelId) {
+    logger.warn(
+      { jobId: job.id, handleUrl },
+      "channel-context-backfill: failed to resolve channelId; skipping",
     );
     return;
   }
