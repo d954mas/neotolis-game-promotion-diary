@@ -219,6 +219,39 @@ export async function createSource(
     // resolved channel_id back to data_sources.
   }
 
+  // Phase 3.0 post-build (UAT 2026-05-06): if we resolved channel_id
+  // synchronously and an ACTIVE source already tracks that channel for
+  // this user, transparently UPDATE its handle_url to the canonical URL
+  // and return that existing row instead of throwing 409. The operator
+  // pasted a different /watch URL of the same channel — they meant
+  // "track this channel" not "create a duplicate", so no error makes
+  // sense. Soft-deleted sources are NOT auto-restored — that's an
+  // explicit user action via /sources.
+  if (resolvedChannelId) {
+    const existing = await db
+      .select()
+      .from(dataSources)
+      .where(
+        and(
+          eq(dataSources.userId, userId),
+          eq(dataSources.channelId, resolvedChannelId),
+          isNull(dataSources.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (existing[0]) {
+      if (existing[0].handleUrl !== canonicalHandleUrl) {
+        const [updated] = await db
+          .update(dataSources)
+          .set({ handleUrl: canonicalHandleUrl, updatedAt: new Date() })
+          .where(eq(dataSources.id, existing[0].id))
+          .returning();
+        return updated ?? existing[0];
+      }
+      return existing[0];
+    }
+  }
+
   // Race-free, deadlock-safe quota path (Codex P2.1 + post-fix). withQuotaGuard
   // takes a per-user advisory lock, runs the count + INSERT in one tx, and
   // emits the quota.limit_hit audit AFTER the tx releases its pool connection.
@@ -242,9 +275,18 @@ export async function createSource(
     });
   } catch (err) {
     if (isPgUniqueViolation(err)) {
-      throw new AppError("data source already registered", "duplicate_source", 422, {
-        handle_url: input.handleUrl,
-      });
+      // Channel-id branch above caught most "same channel" cases
+      // synchronously. This branch fires for /@handle / /c/ / /user/ URLs
+      // where channelId resolution is deferred to the worker — duplicate
+      // by handle_url alone (e.g. operator pasted the exact same /@handle
+      // URL twice). Surface the handle_url so the operator can spot it
+      // in /sources.
+      throw new AppError(
+        "You already track this YouTube channel",
+        "duplicate_source",
+        422,
+        { handle_url: canonicalHandleUrl },
+      );
     }
     throw err;
   }

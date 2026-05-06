@@ -58,6 +58,10 @@
     isOwnedByMe: boolean;
     autoImport: boolean;
     deletedAt: Date | string | null;
+    // Phase 3.0 post-build (UAT 2026-05-06): real YouTube channel title
+    // from the youtube_channels cache. Shown as a chip alongside the user's
+    // own displayName so /sources displays both names.
+    channelTitle?: string | null;
   };
 
   let { source }: { source: DataSourceDto } = $props();
@@ -179,6 +183,9 @@
     </span>
     {#if !editing}
       <span class="display">{source.displayName ?? source.handleUrl}</span>
+      {#if source.channelTitle && source.channelTitle !== source.displayName}
+        <span class="channel-title" title="YouTube channel name">{source.channelTitle}</span>
+      {/if}
     {/if}
     <span class="ownership-badge" class:mine={source.isOwnedByMe}>
       {source.isOwnedByMe ? m.sources_owned_by_me() : m.sources_owned_by_other()}
@@ -357,6 +364,19 @@
     font-weight: var(--font-weight-semibold);
     word-break: break-word;
     min-width: 0;
+  }
+  /* Phase 3.0 post-build: real YouTube channel title shown alongside the
+   * user's own displayName, in the muted secondary tone. Same visual idea
+   * as FeedCard's channel chip — surfaces the cache row from
+   * youtube_channels so /sources is honest about what each tracking
+   * record points at. */
+  .channel-title {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+    padding: 2px var(--space-sm);
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    white-space: nowrap;
   }
   /* Plan 02.1-33: edit-form replaces the previous .rename inline strip.
      The form is now its own row in the .row column flex with a fields
