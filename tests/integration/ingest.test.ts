@@ -427,13 +427,13 @@ describe("Plan 03.0-10: channel-context backfill trigger (CONTEXT D-14)", () => 
     await parsePasteAndCreate(
       u.id,
       null,
-      "https://www.youtube.com/watch?v=p10dbl001abc",
+      "https://www.youtube.com/watch?v=p10dbl001ab",
       "127.0.0.1",
     );
     await parsePasteAndCreate(
       u.id,
       null,
-      "https://www.youtube.com/watch?v=p10dbl002abc",
+      "https://www.youtube.com/watch?v=p10dbl002ab",
       "127.0.0.1",
     );
 
@@ -478,7 +478,7 @@ describe("Plan 03.0-10: channel-context backfill trigger (CONTEXT D-14)", () => 
     await parsePasteAndCreate(
       u.id,
       null,
-      "https://www.youtube.com/watch?v=p10hit001abc",
+      "https://www.youtube.com/watch?v=p10hit001ab",
       "127.0.0.1",
     );
 
@@ -522,7 +522,7 @@ describe("Plan 03.0-10: channel-context backfill trigger (CONTEXT D-14)", () => 
     await parsePasteAndCreate(
       u.id,
       null,
-      "https://www.youtube.com/watch?v=p10noa001abc",
+      "https://www.youtube.com/watch?v=p10noa001ab",
       "127.0.0.1",
     );
 

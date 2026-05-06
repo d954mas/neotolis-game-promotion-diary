@@ -34,6 +34,7 @@ const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
+const { youtubeVideos } = await import("../../src/lib/server/db/schema/youtube-videos.js");
 const { incrementUsage, resetThrottleState, todayPacific, hashApiKeyId } =
   await import("../../src/lib/server/services/youtube-quota-tracker.js");
 const { enqueueActivePolls, enqueueColdPolls } = await import("../../src/scheduler/enqueue.js");
@@ -41,17 +42,29 @@ const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
+// Per-video refactor (2026-05-06): scheduler tier-resolves on
+// youtube_videos.published_at (the video's age), not events.occurred_at.
+// Each fixture seeds BOTH tables so the scheduler's JOIN finds the
+// publishedAt that drives Active/Cold tier classification.
 async function insertActiveEvent(userId: string): Promise<string> {
   const id = uuidv7();
+  const externalId = `thr_${uniq()}`;
+  const publishedAt = new Date(Date.now() - 6 * 60 * 60 * 1000);
+  await db.insert(youtubeVideos).values({
+    videoId: externalId,
+    title: "throttle test event",
+    publishedAt,
+    fetchedAt: new Date(),
+  });
   await db.insert(events).values({
     id,
     userId,
     kind: "youtube_video",
     authorIsMe: false,
-    occurredAt: new Date(Date.now() - 6 * 60 * 60 * 1000),
+    occurredAt: publishedAt,
     title: "throttle test event",
-    url: "https://www.youtube.com/watch?v=fixture",
-    externalId: `thr_${uniq()}`,
+    url: `https://www.youtube.com/watch?v=${externalId}`,
+    externalId,
     metadata: {},
   });
   return id;
@@ -59,15 +72,23 @@ async function insertActiveEvent(userId: string): Promise<string> {
 
 async function insertColdEvent(userId: string): Promise<string> {
   const id = uuidv7();
+  const externalId = `thr_${uniq()}`;
+  const publishedAt = new Date(Date.now() - 5 * 86_400_000);
+  await db.insert(youtubeVideos).values({
+    videoId: externalId,
+    title: "throttle test event (cold)",
+    publishedAt,
+    fetchedAt: new Date(),
+  });
   await db.insert(events).values({
     id,
     userId,
     kind: "youtube_video",
     authorIsMe: false,
-    occurredAt: new Date(Date.now() - 5 * 86_400_000),
+    occurredAt: publishedAt,
     title: "throttle test event (cold)",
-    url: "https://www.youtube.com/watch?v=fixture",
-    externalId: `thr_${uniq()}`,
+    url: `https://www.youtube.com/watch?v=${externalId}`,
+    externalId,
     metadata: {},
   });
   return id;

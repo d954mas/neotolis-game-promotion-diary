@@ -214,6 +214,12 @@
     "account.restored",
     "account.exported",
     "quota.limit_hit",
+    // Phase 3.0 baseline (migration 0010) — polling pipeline audit verbs.
+    "quota.service_throttled",
+    "purge.completed",
+    "auto_import.deferred",
+    "poll.failed",
+    "event.poll_refreshed",
   ] as const;
 
   function auditActionLabel(a: string): string {
@@ -274,6 +280,17 @@
         return m.audit_action_account_exported();
       case "quota.limit_hit":
         return m.audit_action_quota_limit_hit();
+      // Phase 3.0 baseline (migration 0010).
+      case "quota.service_throttled":
+        return m.audit_action_quota_service_throttled();
+      case "purge.completed":
+        return m.audit_action_purge_completed();
+      case "auto_import.deferred":
+        return m.audit_action_auto_import_deferred();
+      case "poll.failed":
+        return m.audit_action_poll_failed();
+      case "event.poll_refreshed":
+        return m.audit_action_event_poll_refreshed();
       default:
         return a;
     }

@@ -84,6 +84,11 @@
   "audit_action_account_restored": "Account restored",
   "audit_action_account_exported": "Account exported",
   "audit_action_quota_limit_hit": "Quota limit hit",
+  "audit_action_quota_service_throttled": "Service quota throttled",
+  "audit_action_purge_completed": "Account purged",
+  "audit_action_auto_import_deferred": "Auto-import deferred",
+  "audit_action_poll_failed": "Poll failed",
+  "audit_action_event_poll_refreshed": "Event poll refreshed",
 
   "audit_filter_action_axis_label": "Action",
   "audit_filter_date_axis_label": "Date range",
