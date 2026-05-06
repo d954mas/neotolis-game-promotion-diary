@@ -169,19 +169,6 @@ export async function createSource(
     );
   }
 
-  // Phase 3.0 post-build (UAT 2026-05-06): auto_import requires
-  // is_owned_by_me=true. Polling someone else's channel automatically is
-  // out of scope for v1 — manual paste of /watch URLs is the supported
-  // path for "tracking" sources. Quota envelope stays predictable.
-  if (input.autoImport === true && input.isOwnedByMe === false) {
-    throw new AppError(
-      "auto_import requires is_owned_by_me=true",
-      "validation_failed",
-      422,
-      { kind: input.kind, autoImport: true, isOwnedByMe: false },
-    );
-  }
-
   // Phase 3.0 post-build (UAT 2026-05-06): canonicalize the handle_url
   // for kind=youtube_channel sources BEFORE insert. Operators routinely
   // paste any YouTube URL (watch?v=…, /shorts/ID, youtu.be/ID, /@handle,
@@ -407,24 +394,6 @@ export async function updateSource(
 ): Promise<DataSourceRow> {
   const existing = await getSourceById(userId, sourceId);
   if (existing.deletedAt !== null) throw new NotFoundError();
-
-  // Phase 3.0 post-build (UAT 2026-05-06): same constraint as createSource —
-  // auto_import requires is_owned_by_me=true. Block enabling auto_import on
-  // a tracking source via PATCH. Compute the effective post-PATCH state
-  // first so that a single PATCH that flips ownership tracking AND clears
-  // autoImport in the same payload is allowed.
-  const nextIsOwnedByMe =
-    patch.isOwnedByMe !== undefined ? patch.isOwnedByMe : existing.isOwnedByMe;
-  const nextAutoImport =
-    patch.autoImport !== undefined ? patch.autoImport : existing.autoImport;
-  if (nextAutoImport === true && nextIsOwnedByMe === false) {
-    throw new AppError(
-      "auto_import requires is_owned_by_me=true",
-      "validation_failed",
-      422,
-      { sourceId, autoImport: true, isOwnedByMe: false },
-    );
-  }
 
   const update: Partial<typeof dataSources.$inferInsert> = {
     updatedAt: new Date(),

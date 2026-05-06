@@ -80,12 +80,9 @@
   // payload alongside displayName when the user saves.
   let editAutoImport = $state(false);
   // Phase 3.0 post-build (UAT 2026-05-06): is_owned_by_me is now editable
-  // inline. Lock-stepped with editAutoImport — flipping mine→tracking
-  // auto-resets autoImport to false (the backend enforces 422 otherwise).
+  // inline. Independent from auto_import — the operator chose to keep
+  // auto-poll available for tracking channels too in v1, so no lock-step.
   let editIsOwnedByMe = $state(false);
-  $effect(() => {
-    if (!editIsOwnedByMe && editAutoImport) editAutoImport = false;
-  });
   let confirmingRemove = $state(false);
   let mutating = $state(false);
   let rowError = $state<string | null>(null);
@@ -247,13 +244,9 @@
         <input type="checkbox" bind:checked={editIsOwnedByMe} />
         <span>This is my own channel</span>
       </label>
-      <label class="checkbox-row" class:disabled={!editIsOwnedByMe}>
-        <input
-          type="checkbox"
-          bind:checked={editAutoImport}
-          disabled={!editIsOwnedByMe}
-        />
-        <span>Auto-import (only for my channels)</span>
+      <label class="checkbox-row">
+        <input type="checkbox" bind:checked={editAutoImport} />
+        <span>Auto-import</span>
       </label>
 
       <!-- Plan 02.1-33 (UAT-NOTES.md §4.22.E): section divider above the
