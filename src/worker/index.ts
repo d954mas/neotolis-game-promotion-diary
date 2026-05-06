@@ -43,6 +43,7 @@ import { handlePollUser } from "./handlers/poll-user.js";
 import { handleChannelContextBackfill } from "./handlers/youtube-channel-context-backfill.js";
 import { handleQuotaReset } from "./handlers/youtube-quota-reset.js";
 import { handlePurgeDaily } from "./handlers/purge-daily.js";
+import { handleRehabUnavailable } from "./handlers/rehab-unavailable.js";
 import { enqueueActivePolls, enqueueColdPolls } from "../scheduler/enqueue.js";
 
 export async function startWorker(): Promise<void> {
@@ -109,6 +110,15 @@ export async function startWorker(): Promise<void> {
   await boss.work(QUEUES.PURGE_DAILY, { batchSize: 1 }, async (jobs) => {
     for (const job of jobs) {
       await handlePurgeDaily(job as { id: string; data: object });
+    }
+  });
+
+  // Phase 3.0 post-build refactor (2026-05-06) — weekly rehab cron.
+  // Recovers videos that came back from private/unavailable. See handler
+  // for the failure-count cap rationale.
+  await boss.work(QUEUES.YOUTUBE_REHAB_UNAVAILABLE, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) {
+      await handleRehabUnavailable(job as { id: string });
     }
   });
 

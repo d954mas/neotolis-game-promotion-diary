@@ -76,6 +76,20 @@ export async function startScheduler(): Promise<void> {
     },
   );
 
+  // Phase 3.0 post-build refactor (2026-05-06) — weekly rehab tick at
+  // Sunday 4 AM Pacific (after the daily purge). Polls up to 50
+  // unavailable videos with poll_failure_count < 5 to detect privacy
+  // unflip. See worker/handlers/rehab-unavailable.ts for the failure-
+  // count cap rationale.
+  await boss.schedule(
+    QUEUES.YOUTUBE_REHAB_UNAVAILABLE,
+    "0 4 * * 0",
+    {},
+    {
+      tz: "America/Los_Angeles",
+    },
+  );
+
   logger.info(
     {
       schedules: [
@@ -84,6 +98,7 @@ export async function startScheduler(): Promise<void> {
         QUEUES.SCHEDULER_TICK_COLD,
         QUEUES.YOUTUBE_QUOTA_RESET,
         QUEUES.PURGE_DAILY,
+        QUEUES.YOUTUBE_REHAB_UNAVAILABLE,
       ],
     },
     "scheduler registered Phase 3.0 cron schedules",

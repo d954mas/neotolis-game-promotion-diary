@@ -54,6 +54,12 @@ export const QUEUES = {
   PURGE_DAILY: "purge.daily",
   YOUTUBE_QUOTA_RESET: "youtube.quota_reset",
   YOUTUBE_CHANNEL_CONTEXT_BACKFILL: "youtube.channel_context_backfill",
+  // Phase 3.0 post-build refactor (2026-05-06) — weekly cron polls
+  // youtube_videos rows with last_poll_status IN ('not_found','private')
+  // and poll_failure_count < 5. Recovers videos that came back from
+  // private → public without requiring user manual refresh. Failure
+  // count cap (5) prevents infinite quota burn on truly-deleted videos.
+  YOUTUBE_REHAB_UNAVAILABLE: "youtube.rehab_unavailable",
   // Phase 3.0 Plan 09 — scheduler-tick queues (Pattern A from plan, recommended).
   // The cron schedules send empty {} jobs to these tick queues; the worker
   // subscribes and the handler calls enqueueActivePolls / enqueueColdPolls,
