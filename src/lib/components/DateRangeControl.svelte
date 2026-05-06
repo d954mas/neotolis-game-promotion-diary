@@ -53,8 +53,8 @@
   // Match the supplied range against the four presets. "Custom" returns null
   // (no preset highlighted). The "default" 30-day window matches "month"
   // because the page-server emits the same from / to values for both.
-  const activePreset = $derived.by((): "today" | "week" | "month" | "year" | null => {
-    if (activeFilters.all) return null;
+  const activePreset = $derived.by((): "today" | "week" | "month" | "all" | null => {
+    if (activeFilters.all) return "all";
     const today = todayIso();
     const from = activeFilters.from;
     const to = activeFilters.to;
@@ -62,16 +62,15 @@
     if (from === today && to === today) return "today";
     if (from === daysAgoIso(7) && to === today) return "week";
     if (from === daysAgoIso(30) && to === today) return "month";
-    if (from === daysAgoIso(365) && to === today) return "year";
     return null;
   });
 
-  function applyPreset(p: "today" | "week" | "month" | "year"): void {
+  function applyPreset(p: "today" | "week" | "month" | "all"): void {
     const today = todayIso();
     if (p === "today") onApply({ from: today, to: today });
     else if (p === "week") onApply({ from: daysAgoIso(7), to: today });
     else if (p === "month") onApply({ from: daysAgoIso(30), to: today });
-    else onApply({ from: daysAgoIso(365), to: today });
+    else onApply({ all: true });
   }
   function applyInputs(): void {
     onApply({ from: fromVal || undefined, to: toVal || undefined });
@@ -125,10 +124,10 @@
     <button
       type="button"
       class="preset"
-      aria-pressed={activePreset === "year"}
-      onclick={() => applyPreset("year")}
+      aria-pressed={activePreset === "all"}
+      onclick={() => applyPreset("all")}
     >
-      {m.feed_date_range_year()}
+      {m.feed_date_range_all_time()}
     </button>
   </div>
 </div>

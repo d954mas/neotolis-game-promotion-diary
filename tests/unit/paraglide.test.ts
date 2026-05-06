@@ -367,6 +367,7 @@ describe("paraglide i18n (UX-04)", () => {
       "feed_chip_axis_source",
       "feed_cta_add_event",
       "feed_cta_new_event",
+      "feed_date_range_all_time",
       "feed_date_range_clear",
       "feed_date_range_label_from",
       "feed_date_range_label_to",

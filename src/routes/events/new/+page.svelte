@@ -56,6 +56,7 @@
   // Phase 3.0 post-build (UAT 2026-05-06) — "Get from YouTube" button state.
   let fetching = $state(false);
   let fetchInfo = $state<string | null>(null);
+  let videoPublishedAt = $state<string | null>(null);
 
   async function fetchFromYouTube(): Promise<void> {
     if (fetching) return;
@@ -87,8 +88,14 @@
       // Pre-fill: don't overwrite a title the user already typed.
       if (!title.trim()) title = meta.title;
       if (meta.description && !notes.trim()) notes = meta.description;
-      if (meta.publishedAt) {
-        occurredAt = meta.publishedAt.slice(0, 10);
+      // Auto-fill occurredAt from publishedAt — the user-meaningful timestamp
+      // for a YouTube video event IS its upload date. The hint below the
+      // date input warns when that's outside the /feed default 30-day window
+      // so the user knows to flip "All time" if they expect to see the new
+      // event right away.
+      videoPublishedAt = meta.publishedAt ? meta.publishedAt.slice(0, 10) : null;
+      if (videoPublishedAt) {
+        occurredAt = videoPublishedAt;
       }
       // Force kind to youtube_video — they pasted a YouTube URL.
       kind = "youtube_video";
@@ -269,6 +276,18 @@
         required
         disabled={pending}
       />
+      {#if videoPublishedAt}
+        {@const daysAgo = Math.floor(
+          (Date.now() - new Date(videoPublishedAt).getTime()) / 86_400_000,
+        )}
+        {#if daysAgo > 30}
+          <small class="date-hint warn">
+            ⚠ Видео опубликовано {daysAgo} дн. назад. /feed по умолчанию показывает
+            только последние 30 дней — переключите в /feed на «All time», иначе не
+            увидите это событие.
+          </small>
+        {/if}
+      {/if}
     </div>
 
     <label class="field checkbox">
