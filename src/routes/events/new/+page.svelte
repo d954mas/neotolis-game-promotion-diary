@@ -56,7 +56,6 @@
   // Phase 3.0 post-build (UAT 2026-05-06) — "Get from YouTube" button state.
   let fetching = $state(false);
   let fetchInfo = $state<string | null>(null);
-  let videoPublishedAt = $state<string | null>(null);
 
   async function fetchFromYouTube(): Promise<void> {
     if (fetching) return;
@@ -87,13 +86,11 @@
       if (!title.trim()) title = meta.title;
       if (meta.description && !notes.trim()) notes = meta.description;
       // Auto-fill occurredAt from publishedAt — the user-meaningful timestamp
-      // for a YouTube video event IS its upload date. The hint below the
-      // date input warns when that's outside the /feed default 30-day window
-      // so the user knows to flip "All time" if they expect to see the new
-      // event right away.
-      videoPublishedAt = meta.publishedAt ? meta.publishedAt.slice(0, 10) : null;
-      if (videoPublishedAt) {
-        occurredAt = videoPublishedAt;
+      // for a YouTube video event IS its upload date. The "in the past" hint
+      // under the date input fires generically when occurredAt != today, so
+      // we don't need a separate "videoPublishedAt" piece of state here.
+      if (meta.publishedAt) {
+        occurredAt = meta.publishedAt.slice(0, 10);
       }
       // Force kind to youtube_video — they pasted a YouTube URL.
       kind = "youtube_video";
