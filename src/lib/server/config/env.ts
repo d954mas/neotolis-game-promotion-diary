@@ -190,7 +190,22 @@ if (!kekVersions.has(raw.KEK_CURRENT_VERSION)) {
 //   2. import handler.js → bundled env.ts parses process.env successfully
 //   3. server.ts calls scrubKekFromEnv() once startup is complete
 export function scrubKekFromEnv(): void {
-  delete process.env.APP_KEK_BASE64;
+  // eslint-disable-next-line no-restricted-properties -- env.ts is the SOLE
+  // legitimate process.env reader (D-24); scrub is the inverse — clearing
+  // the secret fields after they've been parsed into the env-singleton so a
+  // later console.log(process.env) at runtime can't leak them. Phase 3.0
+  // post-build (UAT 2026-05-06) extends scrub coverage past the original
+  // KEK-only list per reviewer's BUG-5 — every credential/secret env var
+  // landed via the schema is wiped. Pino redact still covers logger output;
+  // this is the second layer for direct process.env reads.
+  const SECRET_KEYS = [
+    "APP_KEK_BASE64",
+    "BETTER_AUTH_SECRET",
+    "OAUTH_CLIENT_SECRET",
+    "SERVICE_YOUTUBE_API_KEYS",
+    "DATABASE_URL", // contains the postgres password
+  ];
+  for (const k of SECRET_KEYS) delete process.env[k];
   for (let v = 2; v <= 9; v++) {
     delete process.env[`APP_KEK_V${v}_BASE64`];
   }

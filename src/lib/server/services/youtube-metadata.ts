@@ -203,7 +203,13 @@ export async function fetchVideoMetadataByUrl(
   apiUrl.searchParams.set("quotaUser", quotaUserId(userId));
 
   const resp = await fetchWithTimeout(apiUrl);
-  await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+  // Charge quota only on a 2xx — Google bills 0 units for 4xx/5xx that
+  // never reached the videos.list endpoint successfully (reviewer's
+  // P2 #10). Counter staying clean on errors avoids spurious throttle
+  // trips when the operator's key is wrong / rate-limited.
+  if (resp.ok) {
+    await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+  }
   if (!resp.ok) {
     logger.warn(
       { videoId, status: resp.status },
