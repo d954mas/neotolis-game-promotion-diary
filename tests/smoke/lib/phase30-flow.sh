@@ -57,6 +57,14 @@ phase30_polling_smoke() {
   # to assert /admin/quota returns 404 by construction with no allowlist
   # set (D-16 self-host parity invariant). Setting it to a real email
   # would defeat the assertion.
+  # The Phase 1 step (2)+(3) stops the smoke-worker / smoke-scheduler
+  # containers but does NOT `docker rm` them — the names remain reserved
+  # by the stopped containers. `docker run --name <name>` on a reserved
+  # name fails with a conflict. Remove the leftover stopped containers
+  # before re-creating them with the Phase 3.0 env. `|| true` covers the
+  # idempotent case where they were already removed.
+  docker rm -f smoke-worker smoke-scheduler 2>/dev/null || true
+
   log "(P3.0) booting smoke-worker (Phase 3.0 env)"
   # shellcheck disable=SC2046
   docker run -d --name smoke-worker --network host \
