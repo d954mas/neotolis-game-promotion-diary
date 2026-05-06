@@ -16,8 +16,15 @@ import { z } from "zod";
 // dotenv silently no-ops and `process.env` is populated by docker. Keeping
 // this in the SOLE env.ts reader (D-24) so we don't sprinkle dotenv calls
 // across the codebase.
+//
+// Test isolation: vitest sets NODE_ENV=test before module load. We skip
+// .env.local in that case so per-test withEnv() / withYoutubeKeys() helpers
+// can stub process.env without local-machine secrets bleeding through.
 loadDotenv();
-loadDotenv({ path: ".env.local", override: true });
+// eslint-disable-next-line no-restricted-properties -- dotenv probe BEFORE we parse env; this is the boot-time gate that decides whether to layer .env.local. See D-24.
+if (process.env.NODE_ENV !== "test") {
+  loadDotenv({ path: ".env.local", override: true });
+}
 
 const RawSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),

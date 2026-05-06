@@ -1,23 +1,13 @@
 <script lang="ts">
-  // BackfillPicker — radio group for the YouTube channel registration
-  // initial-backfill window (UI-SPEC §"Component inventory" + D-09).
+  // BackfillPicker — initial-backfill window selector for new YouTube channel
+  // sources. Compact dropdown rather than radio group: 5 presets fit on one
+  // line and the form already has enough vertical surface (UX feedback,
+  // 2026-05-06).
   //
-  // 5 presets: 1 day / 7 days / 30 days (default) / 90 days / Everything.
-  // Each row carries a quota-cost hint:
-  //   1d / 7d / 30d / 90d → ≈ 1 quota unit
-  //   Everything          → up to ≈ 20 quota units (one-time)
-  //
-  // Helper paragraph below the radio group switches based on the currently-
-  // selected preset:
-  //   - 1d  → "Picks up only new content from this moment — past videos
-  //           won't be imported."
-  //   - 30d / 7d / 90d / everything → "30 days fits most active devlogs
-  //           without spending much quota."
-  //
-  // The picker is a fieldset+legend so the radio group reads as one
-  // accessible name ("Initial backfill"), not five separate widgets.
-  // Each <label> wraps its <input type="radio"> so the entire 44px row
-  // is the click target on mobile (UI-SPEC §"Spacing Scale" exception).
+  // Quota cost hint removed — that's an operator concern surfaced on /admin,
+  // not user-facing. The user picks a window; the operator's worker handles
+  // quota safely (current handler hard-caps at 50 most-recent videos
+  // regardless of window — bounded by construction).
   //
   // Conditional rendering — the parent (/sources/new) only renders this
   // component when kind === 'youtube_channel' AND auto_import === true;
@@ -31,38 +21,12 @@
 
   let { value = $bindable<Preset>("30d") }: { value?: Preset } = $props();
 
-  type PresetRow = {
-    id: Preset;
-    label: () => string;
-    cost: () => string;
-  };
-
-  const presets: PresetRow[] = [
-    {
-      id: "1d",
-      label: m.backfill_picker_preset_1d_label,
-      cost: m.backfill_picker_preset_cost_low,
-    },
-    {
-      id: "7d",
-      label: m.backfill_picker_preset_7d_label,
-      cost: m.backfill_picker_preset_cost_low,
-    },
-    {
-      id: "30d",
-      label: m.backfill_picker_preset_30d_label,
-      cost: m.backfill_picker_preset_cost_low,
-    },
-    {
-      id: "90d",
-      label: m.backfill_picker_preset_90d_label,
-      cost: m.backfill_picker_preset_cost_low,
-    },
-    {
-      id: "everything",
-      label: m.backfill_picker_preset_everything_label,
-      cost: m.backfill_picker_preset_cost_everything,
-    },
+  const presets: { id: Preset; label: () => string }[] = [
+    { id: "1d", label: m.backfill_picker_preset_1d_label },
+    { id: "7d", label: m.backfill_picker_preset_7d_label },
+    { id: "30d", label: m.backfill_picker_preset_30d_label },
+    { id: "90d", label: m.backfill_picker_preset_90d_label },
+    { id: "everything", label: m.backfill_picker_preset_everything_label },
   ];
 
   const helperText = $derived(
@@ -70,81 +34,60 @@
   );
 </script>
 
-<fieldset class="backfill-picker">
-  <legend class="legend">{m.backfill_picker_section_title()}</legend>
+<div class="backfill-picker">
+  <label class="row">
+    <span class="legend">{m.backfill_picker_section_title()}</span>
+    <select name="backfill_window" bind:value class="select">
+      {#each presets as preset (preset.id)}
+        <option value={preset.id}>{preset.label()}</option>
+      {/each}
+    </select>
+  </label>
   <p class="blurb">{m.backfill_picker_section_blurb()}</p>
-  <div class="presets" role="presentation">
-    {#each presets as preset (preset.id)}
-      <label class="preset-row" class:selected={value === preset.id}>
-        <input type="radio" name="backfill_window" value={preset.id} bind:group={value} />
-        <span class="preset-label">{preset.label()}</span>
-        <span class="preset-cost">{preset.cost()}</span>
-      </label>
-    {/each}
-  </div>
   <small class="helper">{helperText}</small>
-</fieldset>
+</div>
 
 <style>
   .backfill-picker {
-    border: none;
     padding: var(--space-md) 0;
     margin: 0;
-  }
-  .legend {
-    font-weight: var(--font-weight-semibold);
-    font-size: var(--font-size-body);
-    padding: 0;
-  }
-  .blurb {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
-    margin: var(--space-xs) 0 var(--space-md);
-  }
-  .presets {
     display: flex;
     flex-direction: column;
     gap: var(--space-sm);
   }
-  /* UI-SPEC §"Spacing Scale" exception — 44px tap row on mobile. The
-     <label> wraps the <input> so the entire row receives clicks. The
-     three-column grid keeps the cost hint right-aligned across rows. */
-  .preset-row {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
+  .row {
+    display: flex;
     align-items: center;
-    gap: var(--space-sm);
-    min-height: 44px;
-    padding: 0 var(--space-sm);
-    cursor: pointer;
-    border-radius: 4px;
-    border: 1px solid var(--color-border);
-    background: var(--color-bg);
+    gap: var(--space-md);
+    flex-wrap: wrap;
   }
-  .preset-row.selected {
-    border-color: var(--color-accent);
-    /* UI-SPEC §"Color → Accent (10%) — new surfaces": the selected radio
-       reads as locked-in, matching the form's Save source CTA visually. */
-    outline: 1px solid var(--color-accent);
-    outline-offset: -1px;
-  }
-  .preset-row input[type="radio"] {
-    width: 18px;
-    height: 18px;
-    cursor: pointer;
-  }
-  .preset-label {
+  .legend {
+    font-weight: var(--font-weight-semibold);
     font-size: var(--font-size-body);
-    color: var(--color-text);
   }
-  .preset-cost {
+  .select {
+    font-size: var(--font-size-body);
+    padding: var(--space-xs) var(--space-sm);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    min-height: 36px;
+    min-width: 140px;
+    cursor: pointer;
+  }
+  .select:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+  .blurb {
     color: var(--color-text-muted);
     font-size: var(--font-size-label);
+    margin: 0;
   }
   .helper {
     color: var(--color-text-muted);
     font-size: var(--font-size-label);
-    margin-top: var(--space-sm);
     display: block;
   }
 </style>

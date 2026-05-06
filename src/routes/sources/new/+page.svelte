@@ -264,7 +264,7 @@
 
     <label class="toggle">
       <input type="checkbox" bind:checked={autoImport} />
-      <span>Auto-import (Phase 3 will start polling)</span>
+      <span>Auto-import (poll every 6 hours)</span>
     </label>
 
     {#if showPicker}
