@@ -609,31 +609,32 @@ export async function handleChannelContextBackfill(job: {
         title: c.title,
         url: `https://www.youtube.com/watch?v=${c.videoId}`,
         externalId: c.videoId,
-        lastPolledAt: now,
-        lastPollStatus: "ok",
       });
     }
   }
 
-  // 7. For the ingest-paste path (or any pre-existing event the user owns
-  //    matching one of these video ids), bump last_polled_at to "now" so the
-  //    polling badge shows fresh state. Idempotent on re-run; the source-
-  //    backed events already had their timestamps set by the upsert above.
-  await db
-    .update(events)
-    .set({ lastPolledAt: now, lastPollStatus: "ok" })
-    .where(
-      and(
-        eq(events.userId, userId),
-        sql`${events.kind} = 'youtube_video'`,
-        sql`${events.externalId} IN (${sql.join(
+  // 7. Phase 3.0 post-build refactor (2026-05-06): polling state lives on
+  //    youtube_videos now, not on events. The youtube_videos UPSERT in step
+  //    5a already wrote {title, description, channel_*, published_at,
+  //    fetched_at} for every collected video. We extend it here by stamping
+  //    last_polled_at + last_poll_status='ok' on those rows so the tier
+  //    resolver classifies them as Active/Cold/Frozen (not 'pending') as
+  //    soon as the backfill completes. PUBLIC-DATA TABLE — no userId filter.
+  if (videoIds.length > 0) {
+    await db
+      .update(youtubeVideos)
+      .set({
+        lastPolledAt: now,
+        lastPollStatus: "ok",
+        pollFailureCount: 0,
+      })
+      .where(
+        sql`${youtubeVideos.videoId} IN (${sql.join(
           videoIds.map((vid) => sql`${vid}`),
           sql`, `,
         )})`,
-        isNotNull(events.externalId),
-        isNull(events.deletedAt),
-      ),
-    );
+      );
+  }
 
   logger.info(
     {

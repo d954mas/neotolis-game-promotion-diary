@@ -373,6 +373,19 @@ export interface EventDto {
   notes: string | null;
   metadata: unknown;
   externalId: string | null;
+  // Phase 3.0 post-build refactor (2026-05-06) — polling state migrated
+  // from per-event copies on `events` to per-video columns on
+  // `youtube_videos`. The DTO field names stay for UI compatibility (PollingBadge
+  // and FeedCard read these names); the loader sources them via JOIN on
+  // external_id. Multiple events for the same video share the same values
+  // by construction.
+  //   - publishedAt — youtube_videos.published_at; NULL while
+  //     channel-context-backfill has not yet run for this external_id
+  //     (the 'pending' tier window).
+  //   - lastPolledAt — youtube_videos.last_polled_at; null on freshly
+  //     ingested events whose video has not been polled yet.
+  //   - lastPollStatus — youtube_videos.last_poll_status; null on the same.
+  publishedAt: Date | null;
   lastPolledAt: Date | null;
   lastPollStatus: string | null;
   createdAt: Date;
@@ -398,8 +411,22 @@ export interface EventDto {
  * mutating the array doesn't leak back to the source. Tests in
  * tests/unit/dto.test.ts verify the strip happens at runtime even
  * when the input row literal carries userId.
+ *
+ * Phase 3.0 post-build refactor (2026-05-06): polling state moved off
+ * events. Optional `videoData` carries the joined youtube_videos columns;
+ * loaders that JOIN pass it, others pass null and the DTO carries null
+ * polling fields (UI handles missing data gracefully — PollingBadge falls
+ * back to a generic Manual variant).
  */
-export function toEventDto(r: EventRow, gameIds: string[]): EventDto {
+export function toEventDto(
+  r: EventRow,
+  gameIds: string[],
+  videoData: {
+    publishedAt: Date | null;
+    lastPolledAt: Date | null;
+    lastPollStatus: string | null;
+  } | null = null,
+): EventDto {
   return {
     id: r.id,
     gameIds: [...gameIds],
@@ -412,8 +439,9 @@ export function toEventDto(r: EventRow, gameIds: string[]): EventDto {
     notes: r.notes,
     metadata: r.metadata,
     externalId: r.externalId,
-    lastPolledAt: r.lastPolledAt,
-    lastPollStatus: r.lastPollStatus,
+    publishedAt: videoData?.publishedAt ?? null,
+    lastPolledAt: videoData?.lastPolledAt ?? null,
+    lastPollStatus: videoData?.lastPollStatus ?? null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     deletedAt: r.deletedAt,

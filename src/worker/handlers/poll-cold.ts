@@ -87,8 +87,6 @@ export async function handlePollCold(job: {
     try {
       await writeSnapshot({
         videoId: ev.externalId,
-        eventId: ev.id,
-        userId: ev.userId,
         metrics:
           snap.status === "ok" && snap.metrics
             ? {

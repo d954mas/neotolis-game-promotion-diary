@@ -1,19 +1,27 @@
-// Phase 3.0 Plan 03 — assertions activated.
+// Phase 3.0 Plan 03 + post-build refactor (2026-05-06) — assertions
+// activated.
 //
-// tier-resolver is the single source of truth for the Active / Cold /
-// Frozen / Unavailable bucket of an event (CONTEXT DV-2 — Pitfall 7
-// avoidance: no tier logic in any other service / route / Svelte
-// component). Boundary tests are the load-bearing guard against drift in
-// the cutoffs.
+// tier-resolver is the single source of truth for the Pending / Active /
+// Cold / Frozen / Unavailable bucket of a YouTube video (CONTEXT DV-2 —
+// Pitfall 7 avoidance: no tier logic in any other service / route /
+// Svelte component). Boundary tests are the load-bearing guard against
+// drift in the cutoffs.
 //
-// Boundaries (D-05):
+// Per-video refactor (2026-05-06): tier is keyed on VIDEO age (publishedAt
+// from youtube_videos), not EVENT age. New 'pending' tier covers the
+// window between event creation and channel-context-backfill completion
+// (NULL publishedAt).
+//
+// Tiers (D-05):
+//   - publishedAt IS NULL  → 'pending'
 //   - age <  24h           → 'active'
 //   - age >= 24h && < 28d  → 'cold'
 //   - age >= 28d           → 'frozen'
 //
-// last_poll_status overrides (D-12) — irrespective of age:
+// lastPollStatus overrides (D-12) — irrespective of age:
 //   - 'not_found' / 'private' / 'auth_error' → 'unavailable'
-//   - any other value (including 'ok', null) → falls through to age rule
+//   - any other value (including 'ok', 'rate_limited', null) → falls
+//     through to age rule
 import { describe, test, expect } from "vitest";
 
 import {
@@ -35,8 +43,18 @@ describe("resolveTier — boundary table (D-05)", () => {
     ["cold boundary high (27d23h59m59s999ms ago)", ago(27 * 86_400_000 + 86_399_999), "cold"],
     ["frozen boundary (28d ago)", ago(28 * 86_400_000), "frozen"],
     ["frozen boundary +1m (28d1m ago)", ago(28 * 86_400_000 + 60_000), "frozen"],
-  ] as const)("%s", (_label, occurred, expected) => {
-    expect(resolveTier(occurred, null, NOW)).toBe(expected);
+  ] as const)("%s", (_label, published, expected) => {
+    expect(resolveTier(published, null, NOW)).toBe(expected);
+  });
+});
+
+describe("resolveTier — pending tier (NULL publishedAt)", () => {
+  test("publishedAt=null → 'pending' regardless of lastPollStatus", () => {
+    expect(resolveTier(null, null, NOW)).toBe("pending");
+    expect(resolveTier(null, "ok", NOW)).toBe("pending");
+    // 'pending' wins over even the unavailable overrides — we have no data
+    // to classify yet, the not_found could be a transient backfill miss.
+    expect(resolveTier(null, "not_found", NOW)).toBe("pending");
   });
 });
 

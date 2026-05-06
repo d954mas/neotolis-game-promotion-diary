@@ -1,10 +1,14 @@
-// Phase 3.0 Plan 04 — idempotent snapshot writer (POLL-04 + Pitfall 5).
+// Phase 3.0 Plan 04 + post-build refactor (2026-05-06) — idempotent
+// per-video snapshot writer.
 //
 // Atomic across 3 ops in a single short db.transaction:
 //   1. INSERT row in youtube_video_snapshots with polled_at = date_trunc('minute', now())
 //      — UNIQUE (video_id, polled_at) ON CONFLICT DO NOTHING makes within-the-minute
 //      retries no-op at the row level (idempotent at retry boundary).
-//   2. UPDATE events.last_polled_at + last_poll_status (tenant-scoped via userId).
+//   2. UPDATE youtube_videos.last_polled_at + last_poll_status + poll_failure_count
+//      keyed on video_id. PUBLIC-DATA — no userId filter (multiple tenants share
+//      one row). poll_failure_count increments on non-ok statuses so the rehab
+//      cron's exit gate can fire at >= 5; resets to 0 on 'ok'.
 //   3. UPSERT youtube_service_quota_usage += unitsUsed (per-key per-day counter,
 //      via youtube-quota-tracker.incrementUsage with `tx` so the counter cannot
 //      disagree with the work that consumed quota).
@@ -14,30 +18,21 @@
 // HTTP request). This service expects the metrics + status as already-resolved
 // inputs.
 //
-// Tenant scope (Privacy invariant 1): the `events` UPDATE filter MUST include
-// `eq(events.userId, args.userId)` — events is a tenant-owned table and the
-// custom ESLint rule `tenant-scope/no-unfiltered-tenant-query` enforces the
-// userId clause. The `youtubeVideoSnapshots` and `youtubeServiceQuotaUsage`
-// tables are explicitly public-data / operator-scoped and ESLint-allowlisted
-// in Plan 01.
+// Per-video refactor (2026-05-06): the events row is NOT updated here anymore.
+// Polling state lives on youtube_videos; the /feed loader JOINs back to expose
+// last_polled_at + last_poll_status to the UI.
 
-import { sql, eq, and } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { youtubeVideoSnapshots } from "../db/schema/youtube-video-snapshots.js";
-import { events } from "../db/schema/events.js";
+import { youtubeVideos } from "../db/schema/youtube-videos.js";
 
-// Lazy-import the quota tracker so this module loads even when Plan 03
-// (which creates youtube-quota-tracker.ts on the same Phase 3.0 branch in
-// parallel) has not yet merged its file. Once both plans land on the
-// branch, the dynamic import resolves the same `incrementUsage` symbol the
-// plan's <key_links> contract names. Tests use `vi.mock(...)` against the
-// resolved path; the dynamic import respects the mock the same way a
-// static import would (Vitest hoists module mocks before any execution).
+// Lazy-import the quota tracker — historical from Plan 04. Kept dynamic because
+// Vitest's module mock contract uses the resolved path; dynamic imports
+// respect vi.mock the same as static imports.
 async function incrementUsage(args: {
   apiKeyId: string;
   units: number;
-  // Drizzle transaction parameter — narrow type kept local so this module
-  // does not transitively pull a tracker type that may not yet exist.
   tx: unknown;
 }): Promise<void> {
   const tracker = (await import("./youtube-quota-tracker.js")) as {
@@ -57,25 +52,18 @@ async function incrementUsage(args: {
 export type SnapshotStatus = "ok" | "not_found" | "private" | "auth_error" | "rate_limited";
 
 export interface WriteSnapshotArgs {
-  /** events.external_id — the YouTube videoId. */
+  /** youtube_videos.video_id — keys the public-data UPDATE + snapshot INSERT. */
   videoId: string;
-  /** events.id — the row to update last_polled_at on. */
-  eventId: string;
-  /**
-   * events.user_id — required so the events UPDATE filter is tenant-scoped
-   * (Privacy invariant 1; ESLint tenant-scope rule trips otherwise).
-   */
-  userId: string;
   /**
    * Resolved metrics from the upstream API. NULL when status !== 'ok' (no
-   * snapshot row inserted in that case; only the events row updates).
+   * snapshot row inserted in that case; only the youtube_videos row updates).
    */
   metrics: { view_count: number; like_count: number; comment_count: number } | null;
   /** sha-8 from the quota tracker — identifies which API key burned units. */
   apiKeyId: string;
   /** Units consumed by the upstream call (1 per videos.list call per VERIFIED FACT). */
   unitsUsed: number;
-  /** Outcome label written to events.last_poll_status. */
+  /** Outcome label written to youtube_videos.last_poll_status. */
   status: SnapshotStatus;
 }
 
@@ -98,19 +86,24 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
         .onConflictDoNothing();
     }
 
-    // 2. Events update — tenant-scoped via userId.
-    //    last_polled_at advances on every status (not just 'ok') so the
-    //    scheduler doesn't re-pick the same row immediately on a transient
-    //    failure; last_poll_status carries the failure mode the tier
-    //    resolver later interprets ('not_found' / 'private' / 'auth_error'
-    //    → Unavailable tier per D-12).
+    // 2. youtube_videos UPDATE — public-data, single source of truth for
+    //    polling state across all tenants who reference this video.
+    //    poll_failure_count increments on non-ok, resets on ok. The
+    //    rehab-unavailable cron's exit gate fires at >= 5.
+    //    PUBLIC-DATA TABLE — no userId filter (videos are tenant-agnostic).
+    //    ESLint tenant-scope rule allowlists youtubeVideos via the schema's
+    //    "no tenant scope" header comment.
     await tx
-      .update(events)
+      .update(youtubeVideos)
       .set({
         lastPolledAt: new Date(),
         lastPollStatus: args.status,
+        pollFailureCount:
+          args.status === "ok"
+            ? 0
+            : sql`${youtubeVideos.pollFailureCount} + 1`,
       })
-      .where(and(eq(events.id, args.eventId), eq(events.userId, args.userId)));
+      .where(eq(youtubeVideos.videoId, args.videoId));
 
     // 3. Quota counter — UPSERT inside the same tx so the counter cannot
     //    disagree with the snapshot row about units consumed. Pass `tx`
