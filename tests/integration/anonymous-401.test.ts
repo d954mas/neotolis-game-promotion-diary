@@ -102,6 +102,10 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     // Plan 03.0-07 — admin /quota route mounted under /api/admin/* (env-allowlist
     // gated; auth gate fires first so anonymous → 401 before allowlist sees it).
     "/api/admin/quota",
+    // Phase 3.0 post-build (UAT 2026-05-06) — /events/new "Get from YouTube"
+    // button calls this. Authenticated only; anonymous → 401 from tenantScope
+    // before the videos.list lookup ever fires.
+    "/api/youtube/fetch-metadata",
   ];
 
   it("every /api/* route except /api/auth/* refuses anonymous with 401", async () => {
@@ -302,6 +306,19 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
   // load-bearing per-route check (AGENTS.md §3 both layers).
   it("Plan 03.0-07: anonymous GET /api/admin/quota returns 401 (auth gate fires before allowlist gate)", async () => {
     const res = await app.request("/api/admin/quota");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  // Phase 3.0 post-build (UAT 2026-05-06) — /api/youtube/fetch-metadata gate.
+  // Powers the "Get from YouTube" button on /events/new; tenantScope must
+  // refuse anonymous BEFORE the videos.list lookup ever fires.
+  it("post-build: anonymous POST /api/youtube/fetch-metadata returns 401 unauthorized", async () => {
+    const res = await app.request("/api/youtube/fetch-metadata", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: "https://www.youtube.com/watch?v=jNQXAC9IVRw" }),
+    });
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });

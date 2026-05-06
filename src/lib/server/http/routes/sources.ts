@@ -47,7 +47,7 @@ const sourceKindEnum = z.enum([
 // keeping the field truly optional at the HTTP boundary mirrors the
 // BackfillPicker's UI gate (the field is only POSTed when the picker is
 // rendered, which happens iff kind=youtube_channel + autoImport).
-const backfillWindowEnum = z.enum(["1d", "7d", "30d", "90d", "everything"]);
+const backfillWindowEnum = z.enum(["1d", "7d", "30d", "90d", "1y", "everything"]);
 
 const createSourceSchema = z.object({
   kind: sourceKindEnum,
