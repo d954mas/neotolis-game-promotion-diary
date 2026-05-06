@@ -53,6 +53,62 @@
   let authorIsMe = $state(false);
   let pending = $state(false);
   let errorText = $state<string | null>(null);
+  // Phase 3.0 post-build (UAT 2026-05-06) — "Get from YouTube" button state.
+  let fetching = $state(false);
+  let fetchInfo = $state<string | null>(null);
+
+  async function fetchFromYouTube(): Promise<void> {
+    if (fetching) return;
+    if (!url.trim()) return;
+    fetching = true;
+    fetchInfo = null;
+    errorText = null;
+    try {
+      const res = await fetch("/api/youtube/fetch-metadata", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: url.trim() }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        if (res.status === 422) errorText = "Это не похоже на YouTube URL";
+        else if (res.status === 404) errorText = "Видео не найдено на YouTube";
+        else if (res.status === 503)
+          errorText = "Оператор не настроил YouTube API key — fetch отключён";
+        else errorText = body.error ?? "Ошибка fetch metadata";
+        return;
+      }
+      const meta = (await res.json()) as {
+        title: string;
+        description: string | null;
+        publishedAt: string | null;
+        cached: boolean;
+      };
+      // Pre-fill: don't overwrite a title the user already typed.
+      if (!title.trim()) title = meta.title;
+      if (meta.description && !notes.trim()) notes = meta.description;
+      if (meta.publishedAt) {
+        occurredAt = meta.publishedAt.slice(0, 10);
+      }
+      // Force kind to youtube_video — they pasted a YouTube URL.
+      kind = "youtube_video";
+      fetchInfo = meta.cached ? "Загружено из кэша (0 quota)" : "Загружено с YouTube (1 quota)";
+    } catch (e) {
+      errorText = "Сетевая ошибка";
+    } finally {
+      fetching = false;
+    }
+  }
+
+  function isYoutubeUrl(u: string): boolean {
+    try {
+      const p = new URL(u);
+      return /(^|\.)youtube\.com$/i.test(p.hostname) || p.hostname === "youtu.be";
+    } catch {
+      return false;
+    }
+  }
+  const canFetch = $derived(isYoutubeUrl(url.trim()) && !fetching && !pending);
 
   function setToday(): void {
     occurredAt = new Date().toISOString().slice(0, 10);
@@ -220,10 +276,30 @@
       <span class="field-label">{m.events_new_author_is_me()}</span>
     </label>
 
-    <label class="field">
+    <div class="field">
       <span class="field-label">URL</span>
-      <input class="input" type="url" bind:value={url} placeholder="https://" disabled={pending} />
-    </label>
+      <div class="url-row">
+        <input
+          class="input"
+          type="url"
+          bind:value={url}
+          placeholder="https://"
+          disabled={pending}
+        />
+        <button
+          type="button"
+          class="fetch-btn"
+          onclick={fetchFromYouTube}
+          disabled={!canFetch}
+          title="Загрузить заголовок и описание из YouTube"
+        >
+          {fetching ? "Загрузка…" : "Получить из YouTube"}
+        </button>
+      </div>
+      {#if fetchInfo}
+        <small class="fetch-info">{fetchInfo}</small>
+      {/if}
+    </div>
 
     <label class="field">
       <span class="field-label">Game (optional — leave empty to drop in inbox)</span>

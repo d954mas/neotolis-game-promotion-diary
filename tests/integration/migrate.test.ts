@@ -514,7 +514,7 @@ describe("Phase 2.1 forward-only migrations (Plan 02.1-24)", () => {
 });
 
 // Plan 03.0-01: forward-only migration `0010_phase03_baseline` lands the three
-// new public-data tables (youtube_video_snapshots / youtube_channel_metadata_cache
+// new public-data tables (youtube_video_snapshots / youtube_channels
 // / youtube_service_quota_usage), two new partial indexes on `events`, and 5 new
 // audit_action enum verbs (quota.service_throttled, purge.completed,
 // auto_import.deferred, poll.failed, event.poll_refreshed). pgboss legacy queue
@@ -553,16 +553,16 @@ describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
     }
   });
 
-  it("creates the youtube_channel_metadata_cache table keyed on channel_id (no user_id)", async () => {
+  it("creates the youtube_channels table keyed on channel_id (no user_id)", async () => {
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const tableRes = await pool.query<{ tablename: string }>(
-        `select tablename from pg_tables where schemaname='public' and tablename='youtube_channel_metadata_cache'`,
+        `select tablename from pg_tables where schemaname='public' and tablename='youtube_channels'`,
       );
       expect(tableRes.rows.length).toBe(1);
       const userIdRes = await pool.query<{ column_name: string }>(
         `select column_name from information_schema.columns
-         where table_name='youtube_channel_metadata_cache' and column_name='user_id'`,
+         where table_name='youtube_channels' and column_name='user_id'`,
       );
       expect(userIdRes.rows.length).toBe(0);
       // channel_id is the PK.
@@ -572,7 +572,7 @@ describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
          join information_schema.key_column_usage kcu
            on tc.constraint_name = kcu.constraint_name
           and tc.table_name = kcu.table_name
-         where tc.table_name='youtube_channel_metadata_cache'
+         where tc.table_name='youtube_channels'
            and tc.constraint_type='PRIMARY KEY'`,
       );
       expect(pkRes.rows.map((r) => r.column_name)).toEqual(["channel_id"]);

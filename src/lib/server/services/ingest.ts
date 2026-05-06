@@ -41,7 +41,7 @@ import { fetchTwitterOembed } from "../integrations/twitter-oembed.js";
 import { createEvent, createEventFromPaste } from "./events.js";
 import { AppError } from "./errors.js";
 import { db } from "../db/client.js";
-import { youtubeChannelMetadataCache } from "../db/schema/youtube-channel-metadata-cache.js";
+import { youtubeChannels } from "../db/schema/youtube-channels.js";
 import { QUEUES } from "../queues.js";
 import { getBoss } from "../queue-client.js";
 import { logger } from "../logger.js";
@@ -196,9 +196,9 @@ async function maybeEnqueueChannelContextBackfill(
     // module header). A row exists if a previous paste of any tenant's video
     // from this channel already triggered the backfill handler successfully.
     const cached = await db
-      .select({ channelId: youtubeChannelMetadataCache.channelId })
-      .from(youtubeChannelMetadataCache)
-      .where(eq(youtubeChannelMetadataCache.channelId, channelId))
+      .select({ channelId: youtubeChannels.channelId })
+      .from(youtubeChannels)
+      .where(eq(youtubeChannels.channelId, channelId))
       .limit(1);
     if (cached.length > 0) return;
 

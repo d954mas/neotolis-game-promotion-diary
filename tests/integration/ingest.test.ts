@@ -34,7 +34,7 @@ import { db } from "../../src/lib/server/db/client.js";
 import { events } from "../../src/lib/server/db/schema/events.js";
 import { dataSources } from "../../src/lib/server/db/schema/data-sources.js";
 import { games } from "../../src/lib/server/db/schema/games.js";
-import { youtubeChannelMetadataCache } from "../../src/lib/server/db/schema/youtube-channel-metadata-cache.js";
+import { youtubeChannels } from "../../src/lib/server/db/schema/youtube-channels.js";
 import * as YT from "../../src/lib/server/integrations/youtube-oembed.js";
 import * as TW from "../../src/lib/server/integrations/twitter-oembed.js";
 import { uuidv7 } from "../../src/lib/server/ids.js";
@@ -348,7 +348,7 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
  * Phase 3.0 Plan 10 — Channel-context backfill trigger (CONTEXT D-14).
  *
  * When the user pastes a YouTube URL via the manual-paste flow and the URL's
- * channel is NOT yet in `youtube_channel_metadata_cache`, ingest enqueues ONE
+ * channel is NOT yet in `youtube_channels`, ingest enqueues ONE
  * `YOUTUBE_CHANNEL_CONTEXT_BACKFILL` job (idempotent via pg-boss singletonKey).
  * Subsequent paste from the same channel = cache hit, no extra quota burn.
  *
@@ -455,7 +455,7 @@ describe("Plan 03.0-10: channel-context backfill trigger (CONTEXT D-14)", () => 
     expect(k1).toBe(k2);
   });
 
-  it("Test 3: paste where channel IS already in youtube_channel_metadata_cache → event created; ZERO enqueue (zero extra quota)", async () => {
+  it("Test 3: paste where channel IS already in youtube_channels → event created; ZERO enqueue (zero extra quota)", async () => {
     ytSpy.mockResolvedValue({
       kind: "ok",
       data: {
@@ -468,7 +468,7 @@ describe("Plan 03.0-10: channel-context backfill trigger (CONTEXT D-14)", () => 
     const u = await seedUserDirectly({ email: "p10-hit@test.local" });
 
     // Pre-seed the cache for this channel.
-    await db.insert(youtubeChannelMetadataCache).values({
+    await db.insert(youtubeChannels).values({
       channelId: "UCcache0123cache0123cach",
       uploadsPlaylistId: "UUcache0123cache0123cach",
       channelTitle: "Cached Dev Channel",

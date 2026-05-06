@@ -92,6 +92,20 @@
       "when": 1778061120176,
       "tag": "0012_drop_events_user_kind_ext_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1778062956075,
+      "tag": "0013_add_youtube_videos",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1778063021460,
+      "tag": "0014_rename_youtube_channel_metadata_cache",
+      "breakpoints": true
     }
   ]
 }

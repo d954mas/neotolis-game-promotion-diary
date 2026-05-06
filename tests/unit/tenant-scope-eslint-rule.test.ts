@@ -44,7 +44,7 @@ tester.run("no-unfiltered-tenant-query", rule, {
     // channel_id / date_pacific (CONTEXT D-07 / D-13 / D-14). No userId column
     // exists on these tables; requiring a userId filter would force a useless join.
     `db.select().from(youtubeVideoSnapshots).where(eq(youtubeVideoSnapshots.videoId, 'abc'))`,
-    `db.select().from(youtubeChannelMetadataCache).where(eq(youtubeChannelMetadataCache.channelId, 'UC123'))`,
+    `db.select().from(youtubeChannels).where(eq(youtubeChannels.channelId, 'UC123'))`,
     `db.update(youtubeServiceQuotaUsage).set({estimatedUnits:5}).where(eq(youtubeServiceQuotaUsage.apiKeyId, 'k'))`,
   ],
   invalid: [

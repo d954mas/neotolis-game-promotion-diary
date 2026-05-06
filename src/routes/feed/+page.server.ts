@@ -12,7 +12,7 @@ import { mapEventsToDtos, toGameDto, toDataSourceDto } from "$lib/server/dto.js"
 import { filterValidKinds } from "$lib/util/filter-event-kinds.js";
 import { db } from "$lib/server/db/client.js";
 import { youtubeVideoSnapshots } from "$lib/server/db/schema/youtube-video-snapshots.js";
-import { youtubeChannelMetadataCache } from "$lib/server/db/schema/youtube-channel-metadata-cache.js";
+import { youtubeChannels } from "$lib/server/db/schema/youtube-channels.js";
 import { sql, inArray } from "drizzle-orm";
 
 // Plan 02.1-19 URL contract: /feed accepts ?show=any|inbox|specific +
@@ -204,11 +204,11 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   if (channelIds.length > 0) {
     const cacheRows = await db
       .select({
-        channelId: youtubeChannelMetadataCache.channelId,
-        channelTitle: youtubeChannelMetadataCache.channelTitle,
+        channelId: youtubeChannels.channelId,
+        channelTitle: youtubeChannels.channelTitle,
       })
-      .from(youtubeChannelMetadataCache)
-      .where(inArray(youtubeChannelMetadataCache.channelId, channelIds));
+      .from(youtubeChannels)
+      .where(inArray(youtubeChannels.channelId, channelIds));
     const titleByChannel = new Map<string, string | null>();
     for (const r of cacheRows) titleByChannel.set(r.channelId, r.channelTitle);
     for (const s of sourceDtos) {

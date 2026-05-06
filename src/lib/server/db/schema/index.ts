@@ -17,6 +17,7 @@ export * from "./games.js";
 // Phase 3.0 Plan 01 — public-data tables (no user_id columns; ESLint
 // TENANT_TABLES allowlist mirrors). One module per table per RESEARCH.md
 // "Architecture Patterns" — keeps drizzle-kit's schema scan unambiguous.
-export * from "./youtube-channel-metadata-cache.js";
+export * from "./youtube-channels.js";
 export * from "./youtube-service-quota-usage.js";
 export * from "./youtube-video-snapshots.js";
+export * from "./youtube-videos.js";

@@ -82,8 +82,13 @@ const ALLOWLIST_TABLES = new Set([
   // TENANT_TABLES, the allowlist is the explicit override that keeps the
   // public-data semantic legible to reviewers.
   "youtubeVideoSnapshots",
-  "youtubeChannelMetadataCache",
+  "youtubeChannels",
   "youtubeServiceQuotaUsage",
+  // Phase 3.0 post-build (UAT 2026-05-06): public-data cache for video
+  // metadata (title / description / channel info). Same semantics as
+  // youtubeChannelMetadataCache — keyed on video_id, no user_id, shared
+  // across all tenants who ever reference this video.
+  "youtubeVideos",
 ]);
 
 export default ESLintUtils.RuleCreator.withoutDocs({

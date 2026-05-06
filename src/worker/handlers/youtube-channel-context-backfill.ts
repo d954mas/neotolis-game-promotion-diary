@@ -32,8 +32,9 @@
 import { sql, and, eq, isNull, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../lib/server/db/client.js";
-import { youtubeChannelMetadataCache } from "../../lib/server/db/schema/youtube-channel-metadata-cache.js";
+import { youtubeChannels } from "../../lib/server/db/schema/youtube-channels.js";
 import { youtubeVideoSnapshots } from "../../lib/server/db/schema/youtube-video-snapshots.js";
+import { youtubeVideos } from "../../lib/server/db/schema/youtube-videos.js";
 import { events } from "../../lib/server/db/schema/events.js";
 import { dataSources } from "../../lib/server/db/schema/data-sources.js";
 import {
@@ -105,6 +106,20 @@ const VIDEOS_LIST_RESPONSE = z.object({
   items: z.array(
     z.object({
       id: z.string(),
+      // Phase 3.0 post-build: snippet now travels alongside statistics so
+      // the same 1-quota-unit batched call seeds youtube_video_metadata_cache
+      // with title/description/channel info. Saves the /events/new "Get
+      // from YouTube" button from a redundant call when the video has
+      // already been backfilled.
+      snippet: z
+        .object({
+          title: z.string(),
+          description: z.string().optional(),
+          channelId: z.string().optional(),
+          channelTitle: z.string().optional(),
+          publishedAt: z.string().optional(),
+        })
+        .optional(),
       statistics: z
         .object({
           viewCount: z.string().optional(),
@@ -311,7 +326,7 @@ export async function handleChannelContextBackfill(job: {
   // 2. UPSERT youtube_channel_metadata_cache.
   const now = new Date();
   await db
-    .insert(youtubeChannelMetadataCache)
+    .insert(youtubeChannels)
     .values({
       channelId,
       uploadsPlaylistId,
@@ -319,7 +334,7 @@ export async function handleChannelContextBackfill(job: {
       lastBackfillAt: now,
     })
     .onConflictDoUpdate({
-      target: youtubeChannelMetadataCache.channelId,
+      target: youtubeChannels.channelId,
       set: {
         uploadsPlaylistId,
         channelTitle,
@@ -407,7 +422,7 @@ export async function handleChannelContextBackfill(job: {
     const chunk = videoIds.slice(i, i + 50);
     const videosUrl = new URL(`${env.YOUTUBE_API_BASE_URL}/videos`);
     videosUrl.searchParams.set("id", chunk.join(","));
-    videosUrl.searchParams.set("part", "statistics");
+    videosUrl.searchParams.set("part", "snippet,statistics");
     videosUrl.searchParams.set("key", picked.apiKey);
     videosUrl.searchParams.set("quotaUser", hashApiKeyId(userId));
 
@@ -424,8 +439,42 @@ export async function handleChannelContextBackfill(job: {
     allItems.push(...videosJson.items);
   }
 
-  // 5. INSERT snapshot rows. ON CONFLICT DO NOTHING on (video_id, polled_at)
-  //    UNIQUE — re-run within the same minute is a no-op at row level.
+  // 5a. UPSERT youtube_video_metadata_cache (Phase 3.0 post-build,
+  //     UAT 2026-05-06). One row per video, no time-series — title /
+  //     description / channel only. The snippet half of videos.list lands
+  //     here so the /events/new "Get from YouTube" button can read it
+  //     for free on a re-paste of the same video.
+  for (const item of allItems) {
+    const sn = item.snippet;
+    if (!sn) continue;
+    const publishedAt = sn.publishedAt ? new Date(sn.publishedAt) : null;
+    await db
+      .insert(youtubeVideos)
+      .values({
+        videoId: item.id,
+        title: sn.title,
+        description: sn.description ?? null,
+        channelId: sn.channelId ?? null,
+        channelTitle: sn.channelTitle ?? null,
+        publishedAt,
+        fetchedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: youtubeVideos.videoId,
+        set: {
+          title: sn.title,
+          description: sn.description ?? null,
+          channelId: sn.channelId ?? null,
+          channelTitle: sn.channelTitle ?? null,
+          publishedAt,
+          fetchedAt: now,
+          updatedAt: now,
+        },
+      });
+  }
+
+  // 5b. INSERT snapshot rows. ON CONFLICT DO NOTHING on (video_id, polled_at)
+  //     UNIQUE — re-run within the same minute is a no-op at row level.
   for (const item of allItems) {
     const stats = item.statistics;
     if (!stats) continue;

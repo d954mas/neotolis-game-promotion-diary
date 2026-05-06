@@ -20,7 +20,7 @@ import type {
 } from "./db/schema/index.js";
 import type { auditLog } from "./db/schema/audit-log.js";
 import type { youtubeVideoSnapshots } from "./db/schema/youtube-video-snapshots.js";
-import type { youtubeChannelMetadataCache } from "./db/schema/youtube-channel-metadata-cache.js";
+import type { youtubeChannels } from "./db/schema/youtube-channels.js";
 
 type User = typeof user.$inferSelect;
 type Session = typeof session.$inferSelect;
@@ -521,7 +521,7 @@ export function toAuditEntryDto(r: AuditEntryRow): AuditEntryDto {
 // without the strip semantics (nothing to strip).
 
 type YoutubeVideoSnapshotRow = typeof youtubeVideoSnapshots.$inferSelect;
-type YoutubeChannelMetadataCacheRow = typeof youtubeChannelMetadataCache.$inferSelect;
+type YoutubeChannelMetadataCacheRow = typeof youtubeChannels.$inferSelect;
 
 /**
  * YoutubeVideoSnapshotDto — DTO for `youtube_video_snapshots` rows.
