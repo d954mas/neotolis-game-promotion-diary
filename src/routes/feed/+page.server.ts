@@ -133,7 +133,14 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const [page, gameRows, sourceRows, deletedRows] = await Promise.all([
     listFeedPage(userId, filters, cursor),
     listGames(userId),
-    listSources(userId),
+    // Phase 3.0 post-build (UAT 2026-05-06): include soft-deleted sources
+    // so the feed card can still resolve channelTitle / displayName for
+    // events whose parent source the user has removed. Without this, events
+    // backed by a now-deleted source render with no source chip — confusing
+    // because the events themselves remain in /feed (events are not cascaded
+    // when sources go soft-deleted; the user's own historical metadata stays
+    // intact). The UI may surface a "(removed)" suffix on the chip later.
+    listSources(userId, { includeDeleted: true }),
     listDeletedEvents(userId),
   ]);
 
