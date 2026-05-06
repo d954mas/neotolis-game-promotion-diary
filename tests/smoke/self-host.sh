@@ -461,12 +461,13 @@ log "=== Phase 2.1 smoke extension PASSED ==="
 #      on a free port; exports YOUTUBE_API_BASE_URL pointing at it.
 #   2. Re-launches smoke-worker + smoke-scheduler with the Phase 3.0
 #      env (SERVICE_YOUTUBE_API_KEYS=mock-key, ADMIN_EMAIL_ALLOWLIST="").
-#   3. Asserts the 4 Phase 3.0 cron schedules registered in
+#   3. Asserts the 5 Phase 3.0 cron schedules registered in
 #      pgboss.schedule (scheduler.tick.active / .cold,
-#      youtube.quota_reset, purge.daily).
+#      youtube.quota_reset, purge.daily, youtube.rehab_unavailable —
+#      the rehab cron landed in the per-video refactor 2026-05-06).
 #   4. Creates a kind=youtube_video event + drives /api/events/:id/refresh-poll
 #      so the worker drains a real poll.user job through the mock;
-#      asserts the youtube_video_snapshots row + events.last_polled_at
+#      asserts the youtube_video_snapshots row + youtube_videos.last_polled_at
 #      land within 60s.
 #   5. Asserts /api/admin/quota and /admin/quota HTML page both return
 #      404 with empty ADMIN_EMAIL_ALLOWLIST (D-16 self-host parity gate).

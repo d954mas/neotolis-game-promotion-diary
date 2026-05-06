@@ -21,7 +21,7 @@
 #      02.1-17 auto-derives the external_id from the URL); calls POST
 #      /api/events/:id/refresh-poll so the worker drains a real
 #      poll.user job through the mock; waits up to 60s for the
-#      youtube_video_snapshots row + events.last_polled_at to land.
+#      youtube_video_snapshots row + youtube_videos.last_polled_at to land.
 #   6. Asserts /api/admin/quota and /admin/quota return 404 with the
 #      empty allowlist (D-16 self-host parity gate by construction).
 #   7. SIGTERMs smoke-worker and asserts it drains within 60s
@@ -105,18 +105,20 @@ phase30_polling_smoke() {
   fi
   log "(P3.0) worker + scheduler ready"
 
-  # ----- 3. Assert the four Phase 3.0 cron schedules registered -----
+  # ----- 3. Assert the five Phase 3.0 cron schedules registered -----
   # pg-boss persists `boss.schedule(name, cronExpr, ...)` rows into
   # pgboss.schedule on each scheduler boot (idempotent). We query through
   # the smoke-app container's pg pool so this works on any runner that
   # has docker but not psql.
   #
-  # Expected names (src/scheduler/index.ts, Plan 03.0-09 Pattern A):
-  #   - scheduler.tick.active   (cron 0 */6 * * *)
-  #   - scheduler.tick.cold     (cron 0 5 * * *)
-  #   - youtube.quota_reset     (cron 0 0 * * *, tz=America/Los_Angeles)
-  #   - purge.daily             (cron 0 4 * * *, tz=America/Los_Angeles)
-  log "(P3.0) asserting 4 cron schedules in pgboss.schedule"
+  # Expected names (src/scheduler/index.ts):
+  #   - scheduler.tick.active        (cron 0 */6 * * *)        Plan 03.0-09 Pattern A
+  #   - scheduler.tick.cold          (cron 0 5 * * *)          Plan 03.0-09 Pattern A
+  #   - youtube.quota_reset          (cron 0 0 * * *, tz=PT)   daily quota reset
+  #   - purge.daily                  (cron 0 4 * * *, tz=PT)   GDPR purge worker
+  #   - youtube.rehab_unavailable    (cron 0 4 * * 0, tz=PT)   weekly rehab cron
+  #     (per-video refactor 2026-05-06 — recovers privacy-unflipped videos)
+  log "(P3.0) asserting 5 cron schedules in pgboss.schedule"
   local schedules
   schedules=$(docker exec smoke-app node -e '
     import("./node_modules/pg/lib/index.js").then(async ({ Client }) => {
@@ -131,12 +133,12 @@ phase30_polling_smoke() {
   log "----- pgboss.schedule names -----"
   echo "$schedules"
   log "---------------------------------"
-  for expected in "scheduler.tick.active" "scheduler.tick.cold" "youtube.quota_reset" "purge.daily"; do
+  for expected in "scheduler.tick.active" "scheduler.tick.cold" "youtube.quota_reset" "purge.daily" "youtube.rehab_unavailable"; do
     if ! echo "$schedules" | grep -qx "$expected"; then
       fail "(P3.0) pgboss.schedule missing entry for '$expected'"
     fi
   done
-  log "(P3.0) PASS — all 4 cron schedules registered"
+  log "(P3.0) PASS — all 5 cron schedules registered"
 
   # ----- 4. Create a youtube_video event + drive a refresh-now poll -----
   # POST /api/events with kind=youtube_video and a real-shaped YouTube URL
@@ -165,6 +167,28 @@ phase30_polling_smoke() {
     fail "(P3.0) POST /api/events did not return an event id"
   fi
   log "(P3.0) created eventId=$event_id"
+
+  # Per-video refactor (2026-05-06): refresh-poll's pending-tier gate
+  # rejects (422 'pending_backfill') any video whose youtube_videos row has
+  # NULL publishedAt — channel-context-backfill normally fills that row
+  # within seconds of paste, but the smoke flow uses a mocked YouTube API
+  # that may not exercise the full channels.list + playlistItems.list
+  # discovery path. Pre-seed the youtube_videos row directly so the
+  # pending-tier gate sees a populated publishedAt and the smoke
+  # round-trip exercises the actual poll-user → snapshot path.
+  log "(P3.0) pre-seeding youtube_videos row for mock-video-0 (skip pending tier)"
+  docker exec smoke-app node -e '
+    import("./node_modules/pg/lib/index.js").then(async ({ Client }) => {
+      const c = new Client({ connectionString: process.env.DATABASE_URL });
+      await c.connect();
+      try {
+        await c.query(
+          "INSERT INTO youtube_videos (video_id, title, published_at, fetched_at) VALUES ($1, $2, $3, NOW()) ON CONFLICT (video_id) DO NOTHING",
+          ["mock-video-0", "Smoke gate mock video", "2026-05-05T12:00:00.000Z"],
+        );
+      } finally { await c.end(); }
+    }).catch((e) => { console.error(e); process.exit(1); });
+  ' >/dev/null || fail "(P3.0) youtube_videos pre-seed failed"
 
   log "(P3.0) POST /api/events/$event_id/refresh-poll (enqueues poll.user)"
   local refresh_body
@@ -206,27 +230,30 @@ phase30_polling_smoke() {
   fi
   log "(P3.0) PASS — snapshot row written"
 
-  # Confirm events.last_polled_at populated AND last_poll_status='ok'.
+  # Confirm youtube_videos.last_polled_at populated AND last_poll_status='ok'.
+  # Per-video refactor (2026-05-06): polling state moved off events to
+  # youtube_videos (single source of truth per video). The refresh-poll
+  # service updates the youtube_videos row keyed on external_id.
   local poll_state
   poll_state=$(docker exec smoke-app node -e '
     import("./node_modules/pg/lib/index.js").then(async ({ Client }) => {
       const c = new Client({ connectionString: process.env.DATABASE_URL });
       await c.connect();
       try {
-        const r = await c.query("SELECT last_polled_at IS NOT NULL AS polled, last_poll_status FROM events WHERE id = $1", [process.argv[1]]);
+        const r = await c.query("SELECT last_polled_at IS NOT NULL AS polled, last_poll_status, poll_failure_count FROM youtube_videos WHERE video_id = $1", ["mock-video-0"]);
         if (r.rowCount === 0) { console.log("missing"); return; }
         console.log(JSON.stringify(r.rows[0]));
       } finally { await c.end(); }
     }).catch((e) => { console.error(e); process.exit(1); });
-  ' "$event_id" 2>&1)
-  log "(P3.0) events row state: $poll_state"
+  ' 2>&1)
+  log "(P3.0) youtube_videos row state: $poll_state"
   if ! echo "$poll_state" | grep -q '"polled":true'; then
-    fail "(P3.0) events.last_polled_at not populated for $event_id"
+    fail "(P3.0) youtube_videos.last_polled_at not populated for mock-video-0"
   fi
   if ! echo "$poll_state" | grep -q '"last_poll_status":"ok"'; then
-    fail "(P3.0) events.last_poll_status not 'ok' for $event_id (got: $poll_state)"
+    fail "(P3.0) youtube_videos.last_poll_status not 'ok' for mock-video-0 (got: $poll_state)"
   fi
-  log "(P3.0) PASS — events.last_polled_at + last_poll_status='ok'"
+  log "(P3.0) PASS — youtube_videos.last_polled_at + last_poll_status='ok'"
 
   # ----- 5. Admin parity — empty ADMIN_EMAIL_ALLOWLIST → 404 by construction -----
   # /api/admin/quota: Plan 03.0-07 ships adminAllowlist middleware that
