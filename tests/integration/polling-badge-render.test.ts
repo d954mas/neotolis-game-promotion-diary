@@ -56,17 +56,20 @@ type EventForBadge = {
   id: string;
   kind: string;
   occurredAt: Date | string;
+  publishedAt: Date | string | null;
   lastPolledAt: Date | string | null;
   lastPollStatus: string | null;
   metadata: Record<string, unknown> | null;
 };
 
 function mkEvent(overrides: Partial<EventForBadge> = {}): EventForBadge {
+  // Per-video refactor (2026-05-06): tier resolves on publishedAt.
+  // Default mirrors the old occurredAt-driven Active tier (12h-old).
   return {
     id: "evt-1",
     kind: "youtube_video",
-    // Default: 12h-old event, polled 1h ago, OK status.
     occurredAt: ago(12 * 3_600_000),
+    publishedAt: ago(12 * 3_600_000),
     lastPolledAt: ago(3_600_000),
     lastPollStatus: "ok",
     metadata: null,
@@ -85,30 +88,31 @@ describe("PollingBadge — live state (Plan 03.0-11)", () => {
     expect(out.body).toMatch(/polling-badge--active/);
   });
 
-  it("Cold tier (5d occurred, 30h polled): renders Cold variant", () => {
+  it("Cold tier (5d published, 30h polled): renders Cold variant", () => {
     const ev = mkEvent({
       occurredAt: ago(5 * 86_400_000),
+      publishedAt: ago(5 * 86_400_000),
       lastPolledAt: ago(30 * 3_600_000),
     });
     const out = render(PollingBadge, { props: { event: ev } });
     expect(out.body).toMatch(/Cold/);
-    // Should be one of cold-yesterday or cold-days-ago.
     expect(out.body).toMatch(/polling-badge--cold-(yesterday|days-ago)/);
   });
 
-  it("Cold tier (5d occurred, 24h polled): renders 'Cold · yesterday'", () => {
-    // daysSincePoll ~= 1 → cold-yesterday branch.
+  it("Cold tier (5d published, 24h polled): renders 'Cold · yesterday'", () => {
     const ev = mkEvent({
       occurredAt: ago(5 * 86_400_000),
+      publishedAt: ago(5 * 86_400_000),
       lastPolledAt: ago(86_400_000),
     });
     const out = render(PollingBadge, { props: { event: ev } });
     expect(out.body).toMatch(/yesterday/);
   });
 
-  it("Frozen tier (30d occurred, 30d polled): renders 'Frozen · refresh to update' + refresh button", () => {
+  it("Frozen tier (30d published, 30d polled): renders 'Frozen · refresh to update' + refresh button", () => {
     const ev = mkEvent({
       occurredAt: ago(30 * 86_400_000),
+      publishedAt: ago(30 * 86_400_000),
       lastPolledAt: ago(30 * 86_400_000),
     });
     const out = render(PollingBadge, { props: { event: ev } });
@@ -154,6 +158,7 @@ describe("PollingBadge — live state (Plan 03.0-11)", () => {
     const ev = mkEvent({
       lastPolledAt: null,
       occurredAt: ago(3_600_000),
+      publishedAt: ago(3_600_000),
     });
     const out = render(PollingBadge, { props: { event: ev } });
     expect(out.body).toMatch(/Manual entry/);
@@ -201,20 +206,35 @@ describe("PollingBadge — live state (Plan 03.0-11)", () => {
   it("color rule: Frozen variant gets a dashed border (rendered as polling-badge--frozen modifier)", () => {
     const ev = mkEvent({
       occurredAt: ago(30 * 86_400_000),
+      publishedAt: ago(30 * 86_400_000),
       lastPolledAt: ago(30 * 86_400_000),
     });
     const out = render(PollingBadge, { props: { event: ev } });
     expect(out.body).toMatch(/polling-badge--frozen/);
   });
 
-  it("Pitfall H: ISO-string occurredAt + lastPolledAt are coerced to Date before tier resolution", () => {
+  it("Pitfall H: ISO-string publishedAt + lastPolledAt are coerced to Date before tier resolution", () => {
     const ev = mkEvent({
       occurredAt: ago(12 * 3_600_000).toISOString(),
+      publishedAt: ago(12 * 3_600_000).toISOString(),
       lastPolledAt: ago(3_600_000).toISOString(),
     });
     // Should still pick the Active variant — coercion succeeded.
     const out = render(PollingBadge, { props: { event: ev } });
     expect(out.body).toMatch(/Hot/);
     expect(out.body).toMatch(/polling-badge--active/);
+  });
+
+  it("Pending tier: publishedAt=null renders 'Pending · fetching video info…' + HIDES refresh", () => {
+    // Per-video refactor (2026-05-06): backfill in flight, no publishedAt
+    // yet. Brief window between event creation and channel-context-backfill
+    // completion. Refresh-poll service rejects 'pending' with 422; UI hides
+    // the button to avoid the dead click.
+    const ev = mkEvent({ publishedAt: null, lastPolledAt: null });
+    const out = render(PollingBadge, { props: { event: ev } });
+    expect(out.body).toMatch(/Pending/);
+    expect(out.body).toMatch(/fetching/);
+    expect(out.body).toMatch(/polling-badge--pending/);
+    expect(out.body).not.toMatch(/class="refresh-now/);
   });
 });

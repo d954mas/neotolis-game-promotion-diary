@@ -63,14 +63,22 @@
   const TIER_BOUNDARY_COLD_MS = 28 * 86_400_000; // 28d
   const UNAVAILABLE_POLL_STATUSES: readonly string[] = ["not_found", "private", "auth_error"];
 
-  type Tier = "active" | "cold" | "frozen" | "unavailable";
+  type Tier = "pending" | "active" | "cold" | "frozen" | "unavailable";
 
   // MIRRORS services/tier-resolver.ts; Pitfall 7 — keep in sync.
-  function resolveTier(occurredAt: Date, lastPollStatus: string | null, now: Date): Tier {
+  // Per-video refactor (2026-05-06): tier keyed on publishedAt (the video's
+  // age), not occurredAt (the event's age). NULL publishedAt → 'pending'
+  // (channel-context-backfill in flight; show "Pending..." badge).
+  function resolveTier(
+    publishedAt: Date | null,
+    lastPollStatus: string | null,
+    now: Date,
+  ): Tier {
+    if (publishedAt === null) return "pending";
     if (lastPollStatus !== null && UNAVAILABLE_POLL_STATUSES.includes(lastPollStatus)) {
       return "unavailable";
     }
-    const ageMs = now.getTime() - occurredAt.getTime();
+    const ageMs = now.getTime() - publishedAt.getTime();
     if (ageMs < TIER_BOUNDARY_ACTIVE_MS) return "active";
     if (ageMs < TIER_BOUNDARY_COLD_MS) return "cold";
     return "frozen";
@@ -80,6 +88,11 @@
     id: string;
     kind: string;
     occurredAt: Date | string;
+    // Per-video refactor (2026-05-06): publishedAt drives tier resolution.
+    // Optional so callers that haven't yet plumbed the youtube_videos JOIN
+    // (older surfaces, stale fixtures) keep compiling. undefined → null
+    // in the $derived coercion below → 'pending' tier.
+    publishedAt?: Date | string | null;
     lastPolledAt: Date | string | null;
     lastPollStatus: string | null;
     metadata: Record<string, unknown> | null;
@@ -91,8 +104,12 @@
   const POLLABLE_KINDS = ["youtube_video"];
 
   // Defensive Date coercion (Pitfall H).
-  const occurredAt = $derived(
-    typeof event.occurredAt === "string" ? new Date(event.occurredAt) : event.occurredAt,
+  const publishedAt = $derived(
+    event.publishedAt == null
+      ? null
+      : typeof event.publishedAt === "string"
+        ? new Date(event.publishedAt)
+        : event.publishedAt,
   );
   const lastPolledAt = $derived(
     event.lastPolledAt == null
@@ -108,10 +125,11 @@
   // enough for the user-facing copy.
   const now = $derived(new Date());
 
-  const tier: Tier = $derived(resolveTier(occurredAt, event.lastPollStatus, now));
+  const tier: Tier = $derived(resolveTier(publishedAt, event.lastPollStatus, now));
 
   // Variant resolution per UI-SPEC §"Interaction Contracts → Variant resolution".
   type Variant =
+    | "pending"
     | "active"
     | "cold-yesterday"
     | "cold-days-ago"
@@ -120,6 +138,7 @@
     | "manual";
 
   const variant: Variant = $derived.by((): Variant => {
+    if (tier === "pending") return "pending";
     if (tier === "unavailable") return "unavailable";
     if (lastPolledAt === null && tier === "active") return "manual";
     if (tier === "active") return "active";
@@ -134,8 +153,12 @@
 
   // Refresh-now visibility: D-10 — only for events with a successful prior
   // poll OR Frozen tier (where the user can rescue an old event).
+  // 'pending' tier hides refresh — backfill is in flight, manual poll
+  // would race it. Refresh-poll service rejects 'pending' with 422 anyway.
   const refreshVisible = $derived(
-    POLLABLE_KINDS.includes(event.kind) && (lastPolledAt !== null || tier === "frozen"),
+    POLLABLE_KINDS.includes(event.kind) &&
+      tier !== "pending" &&
+      (lastPolledAt !== null || tier === "frozen"),
   );
 
   // Copy resolution.
@@ -147,6 +170,8 @@
       ? Math.max(1, Math.round((now.getTime() - lastPolledAt.getTime()) / 86_400_000))
       : 0;
     switch (variant) {
+      case "pending":
+        return m.polling_badge_pending();
       case "active":
         return m.polling_badge_hot({ hoursAgo });
       case "cold-yesterday":
@@ -250,6 +275,19 @@
     color: var(--color-text-muted);
   }
   .polling-badge--manual .polling-badge__icon {
+    color: var(--color-text-muted);
+  }
+
+  /* Pending · fetching video info — neutral icon, muted text, dotted
+     border to signal a transient "data on the way" state (distinct from
+     dashed Frozen/Manual which are stable end-states). The badge clears
+     within seconds of paste once channel-context-backfill writes the
+     youtube_videos row. */
+  .polling-badge--pending {
+    border: 1px dotted var(--color-border);
+    color: var(--color-text-muted);
+  }
+  .polling-badge--pending .polling-badge__icon {
     color: var(--color-text-muted);
   }
 </style>

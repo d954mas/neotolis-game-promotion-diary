@@ -100,10 +100,14 @@
     externalId: string | null;
     notes: string | null;
     metadata: unknown;
+    // Per-video refactor (2026-05-06): publishedAt + lastPolledAt +
+    // lastPollStatus all source from the youtube_videos JOIN in the
+    // /feed loader (mapEventsToDtos → loadVideoDataForEvents). Null on
+    // fresh events whose channel-context-backfill has not yet completed
+    // ('pending' tier window). Optional so test fixtures and non-feed
+    // surfaces can omit it; PollingBadge handles undefined as null.
+    publishedAt?: Date | string | null;
     lastPolledAt: Date | string | null;
-    // Plan 03.0-11 — PollingBadge live state needs lastPollStatus to apply
-    // the D-12 'unavailable' override (not_found / private / auth_error).
-    // toEventDto already projects this column (added in Phase 2.1 schema).
     lastPollStatus: string | null;
     // Phase 3.0 post-build (UAT 2026-05-06): latest snapshot stats for
     // youtube_video events. Null when no snapshot exists yet (newly-pasted

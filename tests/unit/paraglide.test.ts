@@ -467,6 +467,7 @@ describe("paraglide i18n (UX-04)", () => {
       "polling_badge_frozen",
       "polling_badge_hot",
       "polling_badge_manual",
+      "polling_badge_pending",
       "polling_badge_throttled",
       "polling_badge_unavailable",
       "polling_refresh_now_aria",

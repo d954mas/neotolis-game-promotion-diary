@@ -187,6 +187,7 @@
   "polling_badge_cold_yesterday": "Cold · yesterday",
   "polling_badge_cold_days_ago": "Cold · {daysAgo}d ago",
   "polling_badge_frozen": "Frozen · refresh to update",
+  "polling_badge_pending": "Pending · fetching video info…",
   "polling_badge_unavailable": "Unavailable · last seen {daysAgo}d ago",
   "polling_badge_throttled": "Throttled — operator quota",
   "polling_badge_manual": "Manual entry — no polling",

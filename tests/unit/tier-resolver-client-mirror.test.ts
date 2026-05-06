@@ -37,13 +37,18 @@ const MIRROR_TIER_BOUNDARY_ACTIVE_MS = 86_400_000;
 const MIRROR_TIER_BOUNDARY_COLD_MS = 28 * 86_400_000;
 const MIRROR_UNAVAILABLE_POLL_STATUSES: readonly string[] = ["not_found", "private", "auth_error"];
 
-type Tier = "active" | "cold" | "frozen" | "unavailable";
+type Tier = "pending" | "active" | "cold" | "frozen" | "unavailable";
 
-function mirrorResolveTier(occurredAt: Date, lastPollStatus: string | null, now: Date): Tier {
+function mirrorResolveTier(
+  publishedAt: Date | null,
+  lastPollStatus: string | null,
+  now: Date,
+): Tier {
+  if (publishedAt === null) return "pending";
   if (lastPollStatus !== null && MIRROR_UNAVAILABLE_POLL_STATUSES.includes(lastPollStatus)) {
     return "unavailable";
   }
-  const ageMs = now.getTime() - occurredAt.getTime();
+  const ageMs = now.getTime() - publishedAt.getTime();
   if (ageMs < MIRROR_TIER_BOUNDARY_ACTIVE_MS) return "active";
   if (ageMs < MIRROR_TIER_BOUNDARY_COLD_MS) return "cold";
   return "frozen";
@@ -70,7 +75,10 @@ describe("tier-resolver client mirror — boundary constants", () => {
 
 describe("tier-resolver client mirror — identical results across battery", () => {
   // Boundary battery — every literal from tests/unit/tier-resolver.test.ts.
-  const battery: Array<[string, Date, string | null]> = [
+  const battery: Array<[string, Date | null, string | null]> = [
+    ["pending: publishedAt=null", null, null],
+    ["pending: publishedAt=null + status='ok' still pending", null, "ok"],
+    ["pending: publishedAt=null + status='not_found' still pending", null, "not_found"],
     ["active boundary low (0ms ago)", ago(0), null],
     ["active boundary high (23h59m59s999ms ago)", ago(86_399_999), null],
     ["cold boundary low (24h ago)", ago(86_400_000), null],
@@ -87,9 +95,9 @@ describe("tier-resolver client mirror — identical results across battery", () 
     ["non-override 'ok' at frozen", ago(30 * 86_400_000), "ok"],
   ];
 
-  test.each(battery)("%s → mirror === canonical", (_label, occurred, status) => {
-    const canonical = canonicalResolveTier(occurred, status, NOW);
-    const mirror = mirrorResolveTier(occurred, status, NOW);
+  test.each(battery)("%s → mirror === canonical", (_label, published, status) => {
+    const canonical = canonicalResolveTier(published, status, NOW);
+    const mirror = mirrorResolveTier(published, status, NOW);
     expect(mirror).toBe(canonical);
   });
 });
