@@ -32,7 +32,7 @@
 // audit row is written OUTSIDE any tx (Phase 02.2 pool-deadlock-safe pattern;
 // audit failures must not break the user-facing path — see audit.ts header).
 
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { events } from "../db/schema/events.js";
 import { AppError, NotFoundError } from "./errors.js";
@@ -116,12 +116,41 @@ export async function requestRefreshPoll(
   // 5. Persist last_user_refresh_at BEFORE enqueueing so a crash mid-enqueue
   //    still honors the cooldown on the next attempt. Eager-write pattern
   //    matches Phase 02.2 quota's "claim the slot, then do the work".
-  //    Tenant-scoped UPDATE — userId in WHERE (PRIV-01 + ESLint tenant-scope).
-  const updatedMeta = { ...meta, last_user_refresh_at: now.toISOString() };
-  await db
+  //
+  //    Phase 3.0 post-build (UAT 2026-05-06) — atomic write:
+  //    1) Use Postgres `||` jsonb merge so we don't clobber other metadata
+  //       fields (`inbox.dismissed`, `triage.standalone`, etc.) that a
+  //       parallel write may have set between our SELECT and our UPDATE.
+  //       The write is idempotent for `last_user_refresh_at` and partial
+  //       for everything else.
+  //    2) Add a cutoff predicate on the WHERE so two concurrent requests
+  //       can't both pass the cooldown gate: only one will see the
+  //       still-stale (or null) timestamp and the UPDATE for the other
+  //       returns 0 rows. The 0-rows path treats the slot as "lost" and
+  //       throws the same 429 as the in-window check above.
+  const cutoffIso = new Date(now.getTime() - COOLDOWN_MS).toISOString();
+  const updateRes = await db
     .update(events)
-    .set({ metadata: updatedMeta })
-    .where(and(eq(events.id, eventId), eq(events.userId, userId)));
+    .set({
+      metadata: sql`${events.metadata} || jsonb_build_object('last_user_refresh_at', ${now.toISOString()})`,
+    })
+    .where(
+      and(
+        eq(events.id, eventId),
+        eq(events.userId, userId),
+        sql`(${events.metadata} ->> 'last_user_refresh_at') IS NULL OR (${events.metadata} ->> 'last_user_refresh_at') < ${cutoffIso}`,
+      ),
+    )
+    .returning({ id: events.id });
+  if (updateRes.length === 0) {
+    // A concurrent refresh-poll won the race. Same response as if we'd
+    // detected the cooldown above; the user retries after the window.
+    throw new AppError("refresh-poll cooldown active", "too_many_refreshes", 429, {
+      minutesLeft: 1,
+      retryAfterSeconds: 60,
+      event_id: eventId,
+    });
+  }
 
   // 6. Enqueue with singletonKey scoped to per-minute window. pg-boss v10
   //    coalesces same-singletonKey jobs across the dedup window, preventing
