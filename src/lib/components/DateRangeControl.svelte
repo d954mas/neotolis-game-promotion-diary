@@ -78,16 +78,6 @@
 </script>
 
 <div class="date-range" role="group" aria-label="Date range">
-  <div class="inputs">
-    <label class="input-wrap">
-      <span class="input-label">{m.feed_date_range_label_from()}</span>
-      <input type="date" bind:value={fromVal} max={toVal || undefined} onchange={applyInputs} />
-    </label>
-    <label class="input-wrap">
-      <span class="input-label">{m.feed_date_range_label_to()}</span>
-      <input type="date" bind:value={toVal} min={fromVal || undefined} onchange={applyInputs} />
-    </label>
-  </div>
   <div class="presets">
     <button
       type="button"
@@ -122,13 +112,25 @@
       {m.feed_date_range_all_time()}
     </button>
   </div>
+  <div class="inputs">
+    <label class="input-wrap">
+      <span class="input-label">{m.feed_date_range_label_from()}</span>
+      <input type="date" bind:value={fromVal} max={toVal || undefined} onchange={applyInputs} />
+    </label>
+    <label class="input-wrap">
+      <span class="input-label">{m.feed_date_range_label_to()}</span>
+      <input type="date" bind:value={toVal} min={fromVal || undefined} onchange={applyInputs} />
+    </label>
+  </div>
 </div>
 
 <style>
   .date-range {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
+    flex-direction: row;
+    align-items: end;
+    gap: var(--space-md);
+    flex-wrap: wrap;
   }
   .inputs {
     display: flex;
@@ -153,20 +155,6 @@
     border: 1px solid var(--color-border);
     border-radius: 4px;
     background: var(--color-bg);
-    color: var(--color-text);
-  }
-  .clear {
-    min-width: 44px;
-    min-height: 44px;
-    padding: 0;
-    background: transparent;
-    color: var(--color-text-muted);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    cursor: pointer;
-  }
-  .clear:hover {
     color: var(--color-text);
   }
   .presets {
