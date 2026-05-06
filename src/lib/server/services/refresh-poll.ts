@@ -155,13 +155,20 @@ export async function requestRefreshPoll(
   const updateRes = await db
     .update(events)
     .set({
-      metadata: sql`${events.metadata} || jsonb_build_object('last_user_refresh_at', ${now.toISOString()})`,
+      // Cast to ::text — `jsonb_build_object`'s value parameter is variadic
+      // "any" so PG cannot infer the placeholder type without a hint.
+      metadata: sql`${events.metadata} || jsonb_build_object('last_user_refresh_at', ${now.toISOString()}::text)`,
     })
     .where(
       and(
         eq(events.id, eventId),
         eq(events.userId, userId),
-        sql`(${events.metadata} ->> 'last_user_refresh_at') IS NULL OR (${events.metadata} ->> 'last_user_refresh_at') < ${cutoffIso}`,
+        // Wrap the OR explicitly: drizzle's `and()` injects AND between
+        // its arguments, so a bare `A IS NULL OR A < cutoff` term ends up
+        // as `(prev AND prev2 AND A IS NULL) OR A < cutoff` — wrong shape.
+        // Cast $cutoff to text so PG can infer parameter type when the
+        // left side is the jsonb `->>` extraction.
+        sql`((${events.metadata} ->> 'last_user_refresh_at') IS NULL OR (${events.metadata} ->> 'last_user_refresh_at') < ${cutoffIso}::text)`,
       ),
     )
     .returning({ id: events.id });

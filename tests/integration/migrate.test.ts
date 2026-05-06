@@ -90,13 +90,22 @@ describe("Phase 2.1 baseline schema migration (Plan 02.1-01)", () => {
     }
   });
 
-  it("drops the youtube_channels table", async () => {
+  it("youtube_channels table EXISTS (Phase 3.0 reintroduced via migration 0014 rename — youtube_channel_metadata_cache → youtube_channels)", async () => {
+    // Phase 2.1 baseline (migration 0000) DROPPED the legacy
+    // youtube_channels table from the v1 schema. Phase 3.0 post-build
+    // (migration 0014, 2026-05-06) RENAMED youtube_channel_metadata_cache
+    // (from migration 0010) to youtube_channels — the "_metadata_cache"
+    // suffix was a misnomer; this IS the local copy of public YouTube
+    // channel data, not a regeneratable cache. After the rename, the
+    // youtube_channels table is BACK in the schema, but with a different
+    // column shape from the legacy v1 table (channel_id PK +
+    // uploads_playlist_id, not the v1 game_id FK shape).
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const result = await pool.query<{ tablename: string }>(
         `select tablename from pg_tables where schemaname='public' and tablename='youtube_channels'`,
       );
-      expect(result.rows.length).toBe(0);
+      expect(result.rows.length).toBe(1);
     } finally {
       await pool.end();
     }
@@ -193,14 +202,20 @@ describe("Phase 2.1 baseline schema migration (Plan 02.1-01)", () => {
     // The Plan 02.1-27 describe block below asserts the column is gone.
   });
 
-  it("adds events.author_is_me / source_id / last_polled_at / last_poll_status columns", async () => {
+  it("adds events.author_is_me / source_id columns", async () => {
+    // Per-video refactor (migration 0016, 2026-05-06): events.last_polled_at
+    // and last_poll_status were DROPPED from this table — polling state now
+    // lives on youtube_videos (one source of truth per video). The
+    // assertions below cover what events still owns: tenant + relation +
+    // discriminator columns. youtube_videos.last_polled_at coverage lives
+    // in the per-video describe block further down.
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const result = await pool.query<{ column_name: string }>(
         `select column_name from information_schema.columns where table_name='events' and column_name in ('author_is_me','source_id','last_polled_at','last_poll_status')`,
       );
       const cols = result.rows.map((r) => r.column_name).sort();
-      expect(cols).toEqual(["author_is_me", "last_poll_status", "last_polled_at", "source_id"]);
+      expect(cols).toEqual(["author_is_me", "source_id"]);
     } finally {
       await pool.end();
     }
@@ -438,12 +453,20 @@ describe("Plan 02.1-27 — event_games + steam listing unique swap (0005 + 0006 
       expect(values).toContain("event.marked_standalone");
       // Phase 02.2 Plan 02.2-01 (migration 0008) extended the enum with 4
       // new verbs: account.deleted, account.restored, account.exported,
-      // quota.limit_hit. Total post-Plan-02.2-01: 23 (post-Plan-27) + 4 = 27.
+      // quota.limit_hit. Phase 3.0 baseline (migration 0010) added 5 more:
+      // quota.service_throttled, purge.completed, auto_import.deferred,
+      // poll.failed, event.poll_refreshed.
+      // Total post-Plan-3.0-baseline: 23 (post-Plan-27) + 4 (0008) + 5 (0010) = 32.
       expect(values).toContain("account.deleted");
       expect(values).toContain("account.restored");
       expect(values).toContain("account.exported");
       expect(values).toContain("quota.limit_hit");
-      expect(values).toHaveLength(27);
+      expect(values).toContain("quota.service_throttled");
+      expect(values).toContain("purge.completed");
+      expect(values).toContain("auto_import.deferred");
+      expect(values).toContain("poll.failed");
+      expect(values).toContain("event.poll_refreshed");
+      expect(values).toHaveLength(32);
     } finally {
       await pool.end();
     }
@@ -610,39 +633,46 @@ describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
     }
   });
 
-  it("creates the idx_events_last_polled_at partial index (WHERE last_polled_at IS NOT NULL)", async () => {
+  it("creates the idx_youtube_videos_published_at partial index (WHERE published_at IS NOT NULL)", async () => {
+    // Per-video refactor (migration 0016, 2026-05-06): the partial index on
+    // events.last_polled_at was DROPPED alongside the column. Tier-driven
+    // SELECT queries now JOIN events to youtube_videos and filter on
+    // youtube_videos.published_at — the partial index here narrows the
+    // working set to videos whose channel-context-backfill has populated
+    // metadata (NULL published_at = 'pending' tier; not pollable).
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const result = await pool.query<{ indexname: string; indexdef: string }>(
         `select indexname, indexdef from pg_indexes
-         where tablename='events' and indexname='idx_events_last_polled_at'`,
+         where tablename='youtube_videos' and indexname='idx_youtube_videos_published_at'`,
       );
       expect(result.rows.length).toBe(1);
       const def = result.rows[0]!.indexdef;
-      expect(def).toMatch(/last_polled_at/);
+      expect(def).toMatch(/published_at/);
       expect(def).toMatch(/where/i);
-      expect(def).toMatch(/last_polled_at\s+is\s+not\s+null/i);
+      expect(def).toMatch(/published_at\s+is\s+not\s+null/i);
     } finally {
       await pool.end();
     }
   });
 
-  it("creates the events_user_kind_ext_active_unq partial unique index (WHERE external_id IS NOT NULL AND deleted_at IS NULL)", async () => {
+  it("does NOT carry the events_user_kind_ext_active_unq index (DROPPED in migration 0012)", async () => {
+    // Phase 3.0 post-build (migration 0012, 2026-05-06): the partial unique
+    // (user_id, kind, external_id) index was DROPPED. UAT direction —
+    // operator wants to log multiple promotion events for the same video
+    // (e.g. "Released video X" + "Promo stream for X" + "Reddit post for
+    // X" — same external_id, three diary entries). Auto-import idempotency
+    // moved to a pre-INSERT SELECT in the worker. The
+    // events_user_kind_source_ext_unq index (in this baseline) still
+    // catches accidental double-inserts on the AUTO-IMPORT path; manual
+    // paste is intentionally permissive.
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
-      const result = await pool.query<{ indexname: string; indexdef: string }>(
-        `select indexname, indexdef from pg_indexes
+      const result = await pool.query<{ indexname: string }>(
+        `select indexname from pg_indexes
          where tablename='events' and indexname='events_user_kind_ext_active_unq'`,
       );
-      expect(result.rows.length).toBe(1);
-      const def = result.rows[0]!.indexdef;
-      expect(def).toMatch(/unique/i);
-      expect(def).toMatch(/user_id/);
-      expect(def).toMatch(/kind/);
-      expect(def).toMatch(/external_id/);
-      expect(def).toMatch(/where/i);
-      expect(def).toMatch(/external_id\s+is\s+not\s+null/i);
-      expect(def).toMatch(/deleted_at\s+is\s+null/i);
+      expect(result.rows.length).toBe(0);
     } finally {
       await pool.end();
     }

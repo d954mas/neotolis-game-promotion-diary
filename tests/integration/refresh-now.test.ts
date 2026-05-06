@@ -38,17 +38,32 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
+const { youtubeVideos } = await import("../../src/lib/server/db/schema/youtube-videos.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { createApp } = await import("../../src/lib/server/http/app.js");
 const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
+// Per-video refactor (2026-05-06): refresh-poll's pending-tier gate
+// requires a youtube_videos row with non-null publishedAt. Test fixtures
+// must seed both events AND youtube_videos. Each call mints a unique
+// external_id so the youtube_videos PK doesn't collide across cases.
 async function insertEvent(
   userId: string,
   overrides: Partial<typeof events.$inferInsert> = {},
 ): Promise<typeof events.$inferSelect> {
   const id = uuidv7();
+  const externalId = (overrides.externalId ?? `vid_${uniq()}`) as string;
+  await db
+    .insert(youtubeVideos)
+    .values({
+      videoId: externalId,
+      title: "test event",
+      publishedAt: new Date("2026-05-01T10:00:00Z"),
+      fetchedAt: new Date(),
+    })
+    .onConflictDoNothing();
   const [row] = await db
     .insert(events)
     .values({
@@ -58,8 +73,8 @@ async function insertEvent(
       authorIsMe: false,
       occurredAt: new Date("2026-05-01T10:00:00Z"),
       title: "test event",
-      url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      externalId: "dQw4w9WgXcQ",
+      url: `https://www.youtube.com/watch?v=${externalId}`,
+      externalId,
       metadata: {},
       ...overrides,
     })
