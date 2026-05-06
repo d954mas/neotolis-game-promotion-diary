@@ -85,16 +85,12 @@
   let backfillWindow = $state<BackfillWindow>("30d");
   const showPicker = $derived(selectedKind === "youtube_channel" && autoImport);
 
-  // When ownership flips to "tracking", soft-default auto_import to OFF
-  // (only on the initial transition, after which the user controls it).
-  // Both checkboxes remain independently editable — auto_import is allowed
-  // for tracking channels too (operator chose "auto-poll any channel" as
-  // the v1 stance during UAT 2026-05-06).
-  $effect(() => {
-    if (!isOwnedByMe && autoImport === initialAutoImport) {
-      autoImport = false;
-    }
-  });
+  // No auto-link between is_owned_by_me and auto_import. Operator's UAT
+  // direction 2026-05-06: "Оно доступна всем не только моим каналам".
+  // Both checkboxes are fully independent — the user toggles each on its
+  // own. The earlier "soft-default reset" effect had a self-resetting bug
+  // (autoImport === initialAutoImport could become true again after user
+  // re-checked, causing the effect to re-fire and uncheck it).
 
   // Picker collapse → reset value (UI-SPEC §"Interaction Contracts → BackfillPicker
   // interaction": "Toggling auto_import off OR switching kind collapses the
