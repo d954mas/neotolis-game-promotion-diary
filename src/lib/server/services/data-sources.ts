@@ -189,17 +189,15 @@ export async function createSource(
       resolvedChannelId = parsed.value;
       canonicalHandleUrl = `https://www.youtube.com/channel/${parsed.value}`;
     } else if (parsed?.kind === "videoId") {
-      try {
-        const meta = await fetchVideoMetadataByUrl(input.handleUrl, userId);
-        if (meta.channelId) {
-          resolvedChannelId = meta.channelId;
-          canonicalHandleUrl = `https://www.youtube.com/channel/${meta.channelId}`;
-        }
-      } catch (e) {
-        logger.warn(
-          { err: String((e as Error)?.message ?? e), url: input.handleUrl },
-          "createSource: video → channel resolve failed; storing /watch URL as-is",
-        );
+      // Phase 3.0 post-build (UAT 2026-05-06): let fetch failures propagate
+      // (404 video not found, 502 upstream, 503 missing keys). Earlier draft
+      // swallowed errors and created a source with channelId=NULL — UX bug:
+      // user pasted a truncated/typo'd URL and got a "ghost" source that
+      // could never poll. Better to fail visibly so the user fixes the URL.
+      const meta = await fetchVideoMetadataByUrl(input.handleUrl, userId);
+      if (meta.channelId) {
+        resolvedChannelId = meta.channelId;
+        canonicalHandleUrl = `https://www.youtube.com/channel/${meta.channelId}`;
       }
     }
     // /@handle and /c/, /user/ legacy URLs: leave as-is for now. Worker

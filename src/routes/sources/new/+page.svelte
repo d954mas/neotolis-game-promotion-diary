@@ -199,6 +199,18 @@
         formError = m.sources_error_duplicate_channel({ channelName });
         return;
       }
+      if (res.status === 404 && body.error === "not_found") {
+        formError = m.sources_error_video_not_found();
+        return;
+      }
+      if (res.status === 502 && body.error === "upstream_error") {
+        formError = m.sources_error_youtube_unreachable();
+        return;
+      }
+      if (res.status === 503 && body.error === "service_unavailable") {
+        formError = m.sources_error_no_youtube_keys();
+        return;
+      }
       formError = m.error_server_generic();
     } catch {
       formError = m.error_network();
