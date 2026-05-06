@@ -555,10 +555,14 @@ export async function handleChannelContextBackfill(job: {
   //    block and only step 7 below refreshes its lastPolledAt timestamp.
   let authorIsMe = false;
   if (sourceId) {
+    // Tenant-scoped lookup — Pattern 1. The job payload pairs sourceId
+    // with userId; even though pg-boss won't deliver a malformed job,
+    // the eq(userId) filter is the load-bearing guarantee that we never
+    // read another tenant's source row.
     const sourceRow = await db
       .select({ isOwnedByMe: dataSources.isOwnedByMe })
       .from(dataSources)
-      .where(eq(dataSources.id, sourceId))
+      .where(and(eq(dataSources.id, sourceId), eq(dataSources.userId, userId)))
       .limit(1);
     authorIsMe = sourceRow[0]?.isOwnedByMe ?? false;
 

@@ -73,10 +73,16 @@ export async function handlePollCold(job: {
     null,
   );
 
+  // Quota counter inflation fix — see poll-active.ts header for rationale.
+  // 1 unit per batched videos.list call, charged on first event only.
+  const billable = picked && snapshots.some((s) => s.status !== "auth_error");
   let rateLimitedSeen = false;
+  let chargedOnce = false;
   for (let i = 0; i < pollable.length; i++) {
     const ev = pollable[i]!;
     const snap = snapshots[i]!;
+    const unitsThisEvent = billable && !chargedOnce && snap.status !== "auth_error" ? 1 : 0;
+    if (unitsThisEvent === 1) chargedOnce = true;
     try {
       await writeSnapshot({
         videoId: ev.externalId,
@@ -91,7 +97,7 @@ export async function handlePollCold(job: {
               }
             : null,
         apiKeyId: picked?.apiKeyId ?? "no-key",
-        unitsUsed: picked && snap.status !== "auth_error" ? 1 : 0,
+        unitsUsed: unitsThisEvent,
         status: snap.status,
       });
     } catch (err) {

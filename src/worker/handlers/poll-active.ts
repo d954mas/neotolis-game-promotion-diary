@@ -104,10 +104,21 @@ export async function handlePollActive(job: {
   // (snapshot INSERT ON CONFLICT DO NOTHING + events UPDATE tenant-scoped +
   // quota UPSERT chained). On rate_limited from the adapter, mark the
   // throttle transition idempotently per (date_pacific, state).
+  // Phase 3.0 post-build (UAT 2026-05-06) — quota counter inflation fix.
+  // Adapter does ONE batched videos.list call per pollStats() invocation
+  // (1 quota unit regardless of batch size up to 50 — VERIFIED via spike).
+  // writeSnapshot used to charge 1 unit per event = 50× over-count for a
+  // 50-event batch. Now we pay the unit on the FIRST event only;
+  // subsequent events pass 0. Counter sum = actual API cost.
+  // (auth_error / no-key paths still charge 0 — adapter never billed.)
+  const billable = picked && snapshots.some((s) => s.status !== "auth_error");
   let rateLimitedSeen = false;
+  let chargedOnce = false;
   for (let i = 0; i < pollable.length; i++) {
     const ev = pollable[i]!;
     const snap = snapshots[i]!;
+    const unitsThisEvent = billable && !chargedOnce && snap.status !== "auth_error" ? 1 : 0;
+    if (unitsThisEvent === 1) chargedOnce = true;
     try {
       await writeSnapshot({
         videoId: ev.externalId,
@@ -122,9 +133,7 @@ export async function handlePollActive(job: {
               }
             : null,
         apiKeyId: picked?.apiKeyId ?? "no-key",
-        // Auth-error / no-key paths consume zero quota (the HTTP call either
-        // didn't happen or failed before the videos.list endpoint billed us).
-        unitsUsed: picked && snap.status !== "auth_error" ? 1 : 0,
+        unitsUsed: unitsThisEvent,
         status: snap.status,
       });
     } catch (err) {
