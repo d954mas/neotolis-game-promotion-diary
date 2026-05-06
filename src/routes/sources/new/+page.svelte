@@ -85,11 +85,13 @@
   let backfillWindow = $state<BackfillWindow>("30d");
   const showPicker = $derived(selectedKind === "youtube_channel" && autoImport);
 
-  // When ownership flips to "tracking" (someone else's), default auto_import
-  // to OFF — Phase 3's polling worker should not run against a blogger
-  // channel until the user explicitly opts in.
+  // Phase 3.0 post-build (UAT 2026-05-06): auto_import requires "my channel"
+  // — backend enforces with 422. UI keeps the two checkboxes in lock-step
+  // by always resetting auto_import when ownership flips to tracking, AND
+  // disabling the auto_import checkbox so the user can't re-toggle it on
+  // until they re-claim ownership.
   $effect(() => {
-    if (!isOwnedByMe && autoImport === initialAutoImport) {
+    if (!isOwnedByMe && autoImport) {
       autoImport = false;
     }
   });
@@ -262,9 +264,9 @@
       <span>{m.sources_owned_by_me()} (this is my own channel/account)</span>
     </label>
 
-    <label class="toggle">
-      <input type="checkbox" bind:checked={autoImport} />
-      <span>Auto-import (poll every 6 hours)</span>
+    <label class="toggle" class:disabled={!isOwnedByMe}>
+      <input type="checkbox" bind:checked={autoImport} disabled={!isOwnedByMe} />
+      <span>Auto-import (poll every 6 hours) — only for my channels</span>
     </label>
 
     {#if showPicker}
@@ -388,6 +390,10 @@
     gap: var(--space-sm);
     color: var(--color-text-muted);
     font-size: var(--font-size-label);
+  }
+  .toggle.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
   /* UI-SPEC §"/sources/new second step layout": horizontal rule between
      the kind/owner/auto-import fields and the conditional BackfillPicker.

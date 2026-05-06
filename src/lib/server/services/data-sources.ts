@@ -43,6 +43,7 @@ import { isPgUniqueViolation } from "../db/postgres-errors.js";
 import { getBoss } from "../queue-client.js";
 import { QUEUES } from "../queues.js";
 import { logger } from "../logger.js";
+import { parseYoutubeChannelUrl, fetchVideoMetadataByUrl } from "./youtube-metadata.js";
 
 // Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — initial-backfill window
 // presets accepted by createSource for kind=youtube_channel + autoImport.
@@ -98,6 +99,7 @@ export interface CreateSourceInput {
 export interface UpdateSourcePatch {
   displayName?: string | null;
   autoImport?: boolean;
+  isOwnedByMe?: boolean;
   metadata?: Record<string, unknown>;
 }
 
@@ -167,6 +169,56 @@ export async function createSource(
     );
   }
 
+  // Phase 3.0 post-build (UAT 2026-05-06): auto_import requires
+  // is_owned_by_me=true. Polling someone else's channel automatically is
+  // out of scope for v1 — manual paste of /watch URLs is the supported
+  // path for "tracking" sources. Quota envelope stays predictable.
+  if (input.autoImport === true && input.isOwnedByMe === false) {
+    throw new AppError(
+      "auto_import requires is_owned_by_me=true",
+      "validation_failed",
+      422,
+      { kind: input.kind, autoImport: true, isOwnedByMe: false },
+    );
+  }
+
+  // Phase 3.0 post-build (UAT 2026-05-06): canonicalize the handle_url
+  // for kind=youtube_channel sources BEFORE insert. Operators routinely
+  // paste any YouTube URL (watch?v=…, /shorts/ID, youtu.be/ID, /@handle,
+  // /channel/UC…). Resolving every variant to the canonical channel URL
+  // (and pre-setting channel_id) means:
+  //   - The (user_id, handle_url) unique catches duplicates on the second
+  //     paste of the same channel via a different video URL.
+  //   - The worker takes the fast path on backfill (no resolve step, no
+  //     extra quota unit).
+  // Cache-first via fetchVideoMetadataByUrl so a re-paste of a known video
+  // is zero quota.
+  let canonicalHandleUrl = input.handleUrl;
+  let resolvedChannelId = input.channelId ?? null;
+  if (input.kind === "youtube_channel" && resolvedChannelId === null) {
+    const parsed = parseYoutubeChannelUrl(input.handleUrl);
+    if (parsed?.kind === "channelId") {
+      resolvedChannelId = parsed.value;
+      canonicalHandleUrl = `https://www.youtube.com/channel/${parsed.value}`;
+    } else if (parsed?.kind === "videoId") {
+      try {
+        const meta = await fetchVideoMetadataByUrl(input.handleUrl, userId);
+        if (meta.channelId) {
+          resolvedChannelId = meta.channelId;
+          canonicalHandleUrl = `https://www.youtube.com/channel/${meta.channelId}`;
+        }
+      } catch (e) {
+        logger.warn(
+          { err: String((e as Error)?.message ?? e), url: input.handleUrl },
+          "createSource: video → channel resolve failed; storing /watch URL as-is",
+        );
+      }
+    }
+    // /@handle and /c/, /user/ legacy URLs: leave as-is for now. Worker
+    // will resolve on first backfill (1 quota unit) and persist the
+    // resolved channel_id back to data_sources.
+  }
+
   // Race-free, deadlock-safe quota path (Codex P2.1 + post-fix). withQuotaGuard
   // takes a per-user advisory lock, runs the count + INSERT in one tx, and
   // emits the quota.limit_hit audit AFTER the tx releases its pool connection.
@@ -178,8 +230,8 @@ export async function createSource(
         .values({
           userId,
           kind: input.kind,
-          handleUrl: input.handleUrl,
-          channelId: input.channelId ?? null,
+          handleUrl: canonicalHandleUrl,
+          channelId: resolvedChannelId,
           displayName: input.displayName ?? null,
           isOwnedByMe: input.isOwnedByMe ?? true,
           autoImport: input.autoImport ?? true,
@@ -314,11 +366,30 @@ export async function updateSource(
   const existing = await getSourceById(userId, sourceId);
   if (existing.deletedAt !== null) throw new NotFoundError();
 
+  // Phase 3.0 post-build (UAT 2026-05-06): same constraint as createSource —
+  // auto_import requires is_owned_by_me=true. Block enabling auto_import on
+  // a tracking source via PATCH. Compute the effective post-PATCH state
+  // first so that a single PATCH that flips ownership tracking AND clears
+  // autoImport in the same payload is allowed.
+  const nextIsOwnedByMe =
+    patch.isOwnedByMe !== undefined ? patch.isOwnedByMe : existing.isOwnedByMe;
+  const nextAutoImport =
+    patch.autoImport !== undefined ? patch.autoImport : existing.autoImport;
+  if (nextAutoImport === true && nextIsOwnedByMe === false) {
+    throw new AppError(
+      "auto_import requires is_owned_by_me=true",
+      "validation_failed",
+      422,
+      { sourceId, autoImport: true, isOwnedByMe: false },
+    );
+  }
+
   const update: Partial<typeof dataSources.$inferInsert> = {
     updatedAt: new Date(),
   };
   if (patch.displayName !== undefined) update.displayName = patch.displayName;
   if (patch.autoImport !== undefined) update.autoImport = patch.autoImport;
+  if (patch.isOwnedByMe !== undefined) update.isOwnedByMe = patch.isOwnedByMe;
   if (patch.metadata !== undefined) update.metadata = patch.metadata;
 
   const [row] = await db

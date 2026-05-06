@@ -64,6 +64,7 @@ const updateSourceSchema = z
   .object({
     displayName: z.string().min(1).max(120).nullable().optional(),
     autoImport: z.boolean().optional(),
+    isOwnedByMe: z.boolean().optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
   })
   .refine((obj) => Object.keys(obj).length > 0, {

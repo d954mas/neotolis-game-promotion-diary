@@ -75,6 +75,13 @@
   // opens (mirrors editName seeding). Sent in the PATCH /api/sources/:id
   // payload alongside displayName when the user saves.
   let editAutoImport = $state(false);
+  // Phase 3.0 post-build (UAT 2026-05-06): is_owned_by_me is now editable
+  // inline. Lock-stepped with editAutoImport — flipping mine→tracking
+  // auto-resets autoImport to false (the backend enforces 422 otherwise).
+  let editIsOwnedByMe = $state(false);
+  $effect(() => {
+    if (!editIsOwnedByMe && editAutoImport) editAutoImport = false;
+  });
   let confirmingRemove = $state(false);
   let mutating = $state(false);
   let rowError = $state<string | null>(null);
@@ -93,6 +100,7 @@
   function openEdit(): void {
     editName = source.displayName ?? "";
     editAutoImport = source.autoImport;
+    editIsOwnedByMe = source.isOwnedByMe;
     editing = true;
   }
 
@@ -100,6 +108,7 @@
     editing = false;
     editName = source.displayName ?? "";
     editAutoImport = source.autoImport;
+    editIsOwnedByMe = source.isOwnedByMe;
   }
 
   async function saveSourceEdit(e: Event): Promise<void> {
@@ -117,6 +126,7 @@
         body: JSON.stringify({
           displayName: editName.trim() || null,
           autoImport: editAutoImport,
+          isOwnedByMe: editIsOwnedByMe,
         }),
       });
       if (!res.ok) {
@@ -227,8 +237,16 @@
            anywhere in this component; the negative-grep assertions in the
            audit-render integration test enforce that contract. -->
       <label class="checkbox-row">
-        <input type="checkbox" bind:checked={editAutoImport} />
-        <span>Auto-import</span>
+        <input type="checkbox" bind:checked={editIsOwnedByMe} />
+        <span>This is my own channel</span>
+      </label>
+      <label class="checkbox-row" class:disabled={!editIsOwnedByMe}>
+        <input
+          type="checkbox"
+          bind:checked={editAutoImport}
+          disabled={!editIsOwnedByMe}
+        />
+        <span>Auto-import (only for my channels)</span>
       </label>
 
       <!-- Plan 02.1-33 (UAT-NOTES.md §4.22.E): section divider above the
