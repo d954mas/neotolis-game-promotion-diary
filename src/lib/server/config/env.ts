@@ -7,8 +7,17 @@
 // The `eslint-disable-next-line no-restricted-properties` comments below are
 // the ONLY approved exceptions to the project-wide ban on `process.env` access.
 
-import "dotenv/config";
+import { config as loadDotenv } from "dotenv";
 import { z } from "zod";
+
+// Load `.env` first, then layer `.env.local` on top with override. Mirrors
+// vite's standard convention (.env shared, .env.local for per-machine
+// overrides — gitignored). In production containers neither file exists;
+// dotenv silently no-ops and `process.env` is populated by docker. Keeping
+// this in the SOLE env.ts reader (D-24) so we don't sprinkle dotenv calls
+// across the codebase.
+loadDotenv();
+loadDotenv({ path: ".env.local", override: true });
 
 const RawSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
