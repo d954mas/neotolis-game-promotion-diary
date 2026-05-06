@@ -15,7 +15,7 @@
 // now())` at insert time so two retries inside the same minute collapse to
 // one row. Counts are bigint (popular videos exceed 2^31) per RESEARCH.md.
 
-import { pgTable, text, bigint, timestamp, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { pgTable, text, bigint, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { uuidv7 } from "../../ids.js";
 
 export const youtubeVideoSnapshots = pgTable(
@@ -32,15 +32,12 @@ export const youtubeVideoSnapshots = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    // (video_id, polled_at DESC) covers chart reads ("show last N points
-    // for video X"). Postgres serves DESC scans equally well from a
-    // forward btree, but the explicit DESC here matches Drizzle convention
-    // for cursor indexes and documents query intent for future readers.
-    videoPolledIdx: index("youtube_video_snapshots_video_id_polled_at_idx").on(
-      t.videoId,
-      t.polledAt,
-    ),
-    // Idempotency guard for Plan 03.0-04 retries — see file header.
+    // (video_id, polled_at) — UNIQUE index doubles as both the idempotency
+    // guard for Plan 03.0-04's INSERT ON CONFLICT DO NOTHING retries AND
+    // the read index the chart loader scans for "show last N points for
+    // video X". A non-unique sibling on the same columns shipped in the
+    // 0010 baseline alongside this; migration 0015 dropped it (paid two
+    // B-tree updates per snapshot insert for no extra read coverage).
     videoPolledUnq: uniqueIndex("youtube_video_snapshots_video_polled_unq").on(
       t.videoId,
       t.polledAt,

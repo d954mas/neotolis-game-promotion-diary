@@ -95,8 +95,25 @@ export default [
   // tables that omit the mandatory `userId` filter. It is the lint-time
   // half of the two-layer Pattern 1 defense (the integration test
   // `tests/integration/tenant-scope.test.ts` is the runtime half).
+  //
+  // Phase 3.0 post-build (UAT 2026-05-06): glob extended to cover worker
+  // handlers, the scheduler, and SvelteKit page server-loaders. Original
+  // glob (`services/**`) missed `youtube-channel-context-backfill.ts`'s
+  // data_sources query without a userId filter — caught by manual review,
+  // not by lint, which left the project one refactor away from a leak.
+  // Sites that intentionally bypass the rule (cross-tenant scheduler
+  // fan-out, admin cross-tenant audit aggregation) must carry a
+  // justified disable directive per the project rule contract.
   {
-    files: ["src/lib/server/services/**/*.ts", "src/lib/server/services/**/*.tsx"],
+    files: [
+      "src/lib/server/services/**/*.ts",
+      "src/lib/server/services/**/*.tsx",
+      "src/lib/server/http/**/*.ts",
+      "src/worker/**/*.ts",
+      "src/scheduler/**/*.ts",
+      "src/routes/**/+page.server.ts",
+      "src/routes/**/+layout.server.ts",
+    ],
     plugins: {
       "tenant-scope": tenantScope,
     },

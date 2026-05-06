@@ -338,7 +338,13 @@ export async function handleChannelContextBackfill(job: {
       await db
         .update(dataSources)
         .set({ channelId })
-        .where(and(eq(dataSources.id, sourceId), isNull(dataSources.channelId)));
+        .where(
+          and(
+            eq(dataSources.id, sourceId),
+            eq(dataSources.userId, userId),
+            isNull(dataSources.channelId),
+          ),
+        );
     }
   }
 

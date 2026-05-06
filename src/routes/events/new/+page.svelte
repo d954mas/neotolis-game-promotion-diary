@@ -97,7 +97,7 @@
       fetchInfo = meta.cached
         ? m.events_new_youtube_fetch_cached()
         : m.events_new_youtube_fetch_fresh();
-    } catch (e) {
+    } catch {
       errorText = m.events_new_youtube_fetch_err_network();
     } finally {
       fetching = false;

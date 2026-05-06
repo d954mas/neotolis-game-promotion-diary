@@ -34,6 +34,7 @@ export async function handlePollCold(job: {
     return;
   }
 
+  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- batch worker, see poll-active.ts for the same rationale.
   const rows = await db
     .select({
       id: events.id,

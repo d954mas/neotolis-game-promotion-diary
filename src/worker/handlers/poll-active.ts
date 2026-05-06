@@ -51,6 +51,7 @@ export async function handlePollActive(job: {
   // Phase A — short SELECT (no FOR UPDATE). Filter to youtube_video kind +
   // not soft-deleted + has externalId. Other kinds slip through if the
   // scheduler enqueued them by mistake; we filter here as defense-in-depth.
+  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- batch worker. Job carries pre-vetted eventIds compiled by the scheduler from cross-tenant SELECT (one batch can cover multiple users). Per-event writeSnapshot downstream uses each row's own userId for the tenant-scoped UPDATE.
   const rows = await db
     .select({
       id: events.id,

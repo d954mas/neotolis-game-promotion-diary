@@ -63,7 +63,11 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
   const fromParam = url.searchParams.get("from");
   const toParam = url.searchParams.get("to");
-  const allParam = url.searchParams.get("all");
+  // `?all=1` was the legacy escape hatch for the 30-day default window.
+  // Phase 3.0 post-build retired the implicit window; this read is preserved
+  // only for analytics symmetry. Underscore-prefixed to satisfy
+  // no-unused-vars; remove when /feed history confirms no tooling reads it.
+  const _allParam = url.searchParams.get("all");
 
   // Phase 3.0 post-build (UAT 2026-05-06): default is now All-time. The
   // 30-day implicit window from Plan 02.1-15 Gap 9 was confusing — a fresh

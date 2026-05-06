@@ -25,7 +25,7 @@
 // pasted a URL with intent. Auto-import (events.source_id IS NOT NULL)
 // requires data_sources.auto_import = true on the parent source.
 
-import { sql, and, eq, gt, isNotNull, isNull, lte, or } from "drizzle-orm";
+import { sql, and, gt, isNotNull, isNull, lte } from "drizzle-orm";
 import { db } from "../lib/server/db/client.js";
 import { events } from "../lib/server/db/schema/events.js";
 import { dataSources } from "../lib/server/db/schema/data-sources.js";
@@ -94,6 +94,7 @@ export async function enqueueActivePolls(now: Date = new Date()): Promise<Enqueu
   // deleted, occurredAt within the Active window. JS resolveTier filter
   // refines below.
   const cutoff = new Date(now.getTime() - TIER_BOUNDARY_ACTIVE_MS);
+  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- scheduler fan-out is service-wide by design (Plan 03.0-09 §"scheduler tick" — one cron tick batches eligible events across ALL tenants into POLL_ACTIVE jobs). Per-event writeSnapshot downstream uses each row's own userId for the tenant-scoped UPDATE.
   const rows = await db
     .select({
       id: events.id,
@@ -125,6 +126,7 @@ export async function enqueueActivePolls(now: Date = new Date()): Promise<Enqueu
   );
   const autoImportSourceIds = new Set<string>();
   if (sourceIds.length > 0) {
+    // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- scheduler fan-out (Active branch); auto_import gate is service-wide.
     const sourceRows = await db
       .select({ id: dataSources.id, autoImport: dataSources.autoImport })
       .from(dataSources)
@@ -193,6 +195,7 @@ export async function enqueueColdPolls(now: Date = new Date()): Promise<EnqueueR
   const activeCutoff = new Date(now.getTime() - TIER_BOUNDARY_ACTIVE_MS);
   const coldCutoff = new Date(now.getTime() - TIER_BOUNDARY_COLD_MS);
   // Cold window: occurredAt is between (now - 28d) and (now - 24h).
+  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- scheduler fan-out, see enqueueActivePolls above for the same rationale.
   const rows = await db
     .select({
       id: events.id,
@@ -219,6 +222,7 @@ export async function enqueueColdPolls(now: Date = new Date()): Promise<EnqueueR
   );
   const autoImportSourceIds = new Set<string>();
   if (sourceIds.length > 0) {
+    // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- scheduler fan-out (Cold branch), see Active above.
     const sourceRows = await db
       .select({ id: dataSources.id, autoImport: dataSources.autoImport })
       .from(dataSources)
@@ -268,7 +272,3 @@ export async function enqueueColdPolls(now: Date = new Date()): Promise<EnqueueR
   };
 }
 
-// Imports retained for tree-shake clarity; `or` and `eq` may be used by
-// future variants of the SQL window.
-void or;
-void eq;
