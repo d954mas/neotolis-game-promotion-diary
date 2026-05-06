@@ -17,7 +17,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import {
   pickKeyForJob,
-  quotaUserId,
+  youtubeQuotaUser,
   incrementUsage,
 } from "./youtube-quota-tracker.js";
 import { db } from "../db/client.js";
@@ -200,7 +200,7 @@ export async function fetchVideoMetadataByUrl(
   apiUrl.searchParams.set("id", videoId);
   apiUrl.searchParams.set("part", "snippet");
   apiUrl.searchParams.set("key", picked.apiKey);
-  apiUrl.searchParams.set("quotaUser", quotaUserId(userId));
+  apiUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
   const resp = await fetchWithTimeout(apiUrl);
   // Charge quota only on a 2xx — Google bills 0 units for 4xx/5xx that

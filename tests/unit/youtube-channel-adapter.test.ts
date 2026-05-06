@@ -262,15 +262,14 @@ describe("youtubeChannelAdapter.pollStats — error mapping", () => {
 });
 
 describe("youtubeChannelAdapter.pollStats — quotaUser fairness param", () => {
-  it("Test 8: quotaUser=quotaUserId(userId) param present (8 hex chars — fairness shard)", async () => {
+  it("Test 8: quotaUser=youtubeQuotaUser(userId) param present (8 hex chars — fairness shard)", async () => {
     // Phase 3.0 post-build (UAT 2026-05-06): adapter now imports the
-    // canonical quotaUserId helper from youtube-quota-tracker (8-hex
-    // sha256(userId)) instead of the inline 16-hex implementation. Shape
-    // change is intentional — the adapter and the tracker now agree on
-    // the per-user fairness-shard hash, so the apiKeyId stored in
-    // youtube_service_quota_usage matches what the adapter uses on the
-    // wire. The 8-vs-16 chars is opaque to YouTube; both work as a
-    // stable per-user shard.
+    // canonical youtubeQuotaUser helper from youtube-quota-tracker (8-hex
+    // sha256(userId)) instead of the inline 16-hex implementation. The
+    // adapter and the tracker now agree on the per-user fairness-shard
+    // hash. 8 vs 16 chars is opaque to YouTube; both work as a stable
+    // per-user shard. (Function renamed from quotaUserId on
+    // 2026-05-06 to make YouTube-specificity explicit in the call site.)
     const events = [{ id: "e1", userId: fakeUserId, externalId: "v1" }];
     const calls = installFetchMock([{ status: 200, body: makeVideosListResponse(["v1"]) }]);
 

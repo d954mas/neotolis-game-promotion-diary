@@ -17,7 +17,7 @@
 //     for two-endpoint use).
 //   - AbortController.timeout(30_000) on every call (Pitfall 5 — never hold
 //     a DB tx across HTTP).
-//   - quotaUser=quotaUserId(userId) parameter on every call (Google's
+//   - quotaUser=youtubeQuotaUser(userId) parameter on every call (Google's
 //     per-end-user fairness gate — RESEARCH.md OQ#5 / Pattern 4 — splits
 //     the operator's quota evenly across tenants instead of letting one
 //     whale starve the others).
@@ -42,7 +42,7 @@
 //   - 404                                      → status:'not_found'
 //   - other 4xx/5xx                            → status:'auth_error' (placeholder; caller logs + retries)
 
-import { pickKeyForJob, quotaUserId } from "../services/youtube-quota-tracker.js";
+import { pickKeyForJob, youtubeQuotaUser } from "../services/youtube-quota-tracker.js";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { logger } from "../logger.js";
@@ -183,7 +183,7 @@ async function pollStatsBatch(videoIds: string[], userId: string): Promise<Stats
   url.searchParams.set("id", videoIds.join(","));
   url.searchParams.set("part", "snippet,statistics,contentDetails");
   url.searchParams.set("key", picked.apiKey);
-  url.searchParams.set("quotaUser", quotaUserId(userId));
+  url.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
   const resp = await fetchWithTimeout(url);
 
@@ -250,7 +250,7 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
     url.searchParams.set("part", "snippet");
     url.searchParams.set("maxResults", "50");
     url.searchParams.set("key", picked.apiKey);
-    url.searchParams.set("quotaUser", quotaUserId(source.userId));
+    url.searchParams.set("quotaUser", youtubeQuotaUser(source.userId));
 
     const resp = await fetchWithTimeout(url);
     if (!resp.ok) {

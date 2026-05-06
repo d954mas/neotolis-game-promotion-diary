@@ -94,17 +94,35 @@ export function hashApiKeyId(apiKey: string): string {
 }
 
 /**
- * Phase 3.0 post-build (UAT 2026-05-06) — separate function for the
- * `quotaUser` URL parameter. Distinct from hashApiKeyId on purpose:
- *   - hashApiKeyId(apiKey)  → 8-hex stored as row identifier in
- *                             youtube_service_quota_usage.
- *   - quotaUserId(userId)   → 8-hex sent on the `quotaUser` query param
- *                             so Google's per-user fairness shard is
- *                             stable across requests for the same user.
- * Same hash function, different inputs, different semantic. Reviewer's
- * call: don't reuse one name for two concepts.
+ * Compute the value to send on the `quotaUser` URL parameter for every
+ * YouTube Data API request — Google's anti-burst rate-limiter shard key.
+ *
+ * NOT a per-user quota allocation. The 10000 units/day envelope is shared
+ * across all our users on the operator's keys; this function is purely
+ * for Google's short-burst rate limiter, NOT for our daily-budget tracking.
+ *
+ * What it's for: Google groups concurrent API requests by fingerprint
+ * (IP + API key + optional `quotaUser`) into one short-burst token bucket.
+ * Without `quotaUser`, 50 concurrent worker pollings from our single
+ * backend IP look like ONE greedy client and Google 403s half of them
+ * with `userRateLimitExceeded` — even though we're nowhere near the
+ * daily envelope. Sending `quotaUser=<stable per-user hash>` makes
+ * Google see 50 distinct fingerprints, so each user's burst is shaped
+ * independently and the daily envelope is the only ceiling that matters.
+ *
+ * Where it's substituted: caller side. Every YouTube Data API URL we
+ * build (worker handlers poll-active / poll-cold / channel-context-
+ * backfill, services/youtube-metadata, integrations/youtube-channel-
+ * adapter) calls this helper and sets `?quotaUser=<value>` on the URL.
+ *
+ * Properties:
+ *   - Stable across requests for the same user (deterministic sha-256).
+ *   - Privacy-safe: 8 hex of sha-256 doesn't leak the userId.
+ *   - Distinct from hashApiKeyId(apiKey) which produces the row-identifier
+ *     for OUR `youtube_service_quota_usage` table — same hash function,
+ *     different input, different downstream system.
  */
-export function quotaUserId(userId: string): string {
+export function youtubeQuotaUser(userId: string): string {
   return createHash("sha256").update(userId).digest("hex").slice(0, 8);
 }
 
