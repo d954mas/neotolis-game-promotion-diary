@@ -512,6 +512,8 @@ describe("paraglide i18n (UX-04)", () => {
       "settings_account_section_danger_title",
       "settings_account_section_export_blurb",
       "settings_account_section_export_title",
+      "settings_account_section_purge_now_blurb",
+      "settings_account_section_purge_now_title",
       "settings_account_title",
       "settings_credentials_heading",
       "settings_credentials_steam_link_label",

@@ -6,20 +6,14 @@
   // which checks `data.user?.deletedAt`. The banner itself is render-only;
   // it never decides on its own whether to show.
   //
-  // Phase 03.0-12 (DV-6 activation): the "Permanently delete now" CTA that
-  // shipped HIDDEN in Phase 02.2-04 is now VISIBLE alongside the existing
-  // Restore button. Click → ConfirmDialog (Type-DELETE + speedbump, Phase
-  // 02.2 D-S3 pattern reused verbatim) → DELETE /api/me/account/purge →
-  // signOut() + goto('/', {invalidateAll: true}) per UI-SPEC §"Interaction
-  // Contracts → AccountDeletedBanner". The endpoint cascades session rows
-  // out in the same tx, so any subsequent request with the pre-purge
-  // cookie returns 401 — the explicit signOut() is belt-and-suspenders for
-  // Better Auth's client-side state.
+  // Phase 3.0 post-build (UAT 2026-05-06): the "Permanently delete now"
+  // CTA was REMOVED from the banner per operator decision. Banner stays
+  // simple — just a Restore button. Immediate-purge UI moved to
+  // /settings under an "Advanced" disclosure to reduce the footgun risk
+  // of a destructive button living next to Restore on every page.
 
-  import { goto, invalidateAll } from "$app/navigation";
-  import { signOut } from "$lib/auth-client";
+  import { invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
-  import ConfirmDialog from "./ConfirmDialog.svelte";
 
   let {
     deletedAt,
@@ -31,13 +25,6 @@
 
   let pending = $state(false);
   let restoreError = $state<string | null>(null);
-
-  // Phase 03.0-12 — Permanent-delete-now CTA state. Mirrors the restore-
-  // pending / restore-error pattern above so the banner has a consistent
-  // shape for both buttons.
-  let purgeConfirmOpen = $state(false);
-  let purgePending = $state(false);
-  let purgeError = $state<string | null>(null);
 
   // daysLeft = max(0, retentionDays - daysSince(deletedAt)). Date math via
   // milliseconds — Date arithmetic is forgiving across timezones because the
@@ -76,39 +63,6 @@
     }
   }
 
-  function openPurgeConfirm(): void {
-    if (purgePending) return;
-    purgeError = null;
-    purgeConfirmOpen = true;
-  }
-
-  function cancelPurgeConfirm(): void {
-    purgeConfirmOpen = false;
-  }
-
-  async function handlePurgeConfirm(): Promise<void> {
-    if (purgePending) return;
-    purgePending = true;
-    purgeError = null;
-    purgeConfirmOpen = false;
-    try {
-      const res = await fetch("/api/me/account/purge", { method: "DELETE" });
-      if (!res.ok) {
-        purgeError = m.account_deleted_banner_permanent_delete_failed();
-        return;
-      }
-      // 200 response: client-side signOut() (clears Better Auth session
-      // state) + redirect to / via goto with invalidateAll: true so the
-      // root loader re-runs against the now-purged session (which 401s
-      // server-side; the layout treats anonymous as the public landing).
-      await signOut();
-      await goto("/", { invalidateAll: true });
-    } catch {
-      purgeError = m.account_deleted_banner_permanent_delete_failed();
-    } finally {
-      purgePending = false;
-    }
-  }
 </script>
 
 <aside class="banner" role="alert" aria-live="polite">
@@ -120,29 +74,11 @@
     <button type="button" class="restore" disabled={pending} onclick={handleRestore}>
       {m.account_deleted_banner_restore_button()}
     </button>
-    <button type="button" class="purge-cta" disabled={purgePending} onclick={openPurgeConfirm}>
-      {purgePending
-        ? m.account_deleted_banner_permanent_delete_pending()
-        : m.account_deleted_banner_permanent_delete_button()}
-    </button>
   </div>
   {#if restoreError}
     <p class="error" role="status">{restoreError}</p>
   {/if}
-  {#if purgeError}
-    <p class="error" role="status">{purgeError}</p>
-  {/if}
 </aside>
-
-<ConfirmDialog
-  open={purgeConfirmOpen}
-  message={m.account_deleted_banner_permanent_delete_confirm()}
-  confirmLabel={m.account_deleted_banner_permanent_delete_button()}
-  isIrreversible={true}
-  requireText="DELETE"
-  onConfirm={handlePurgeConfirm}
-  onCancel={cancelPurgeConfirm}
-/>
 
 <style>
   .banner {
@@ -191,25 +127,6 @@
     cursor: pointer;
   }
   .restore:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  /* Phase 03.0-12 — Permanent-delete-now CTA. Destructive fill matches the
-     ConfirmDialog confirm button (var(--color-destructive)) — UI-SPEC
-     §Color → Destructive new surfaces. 44px min height matches the existing
-     Restore CTA so both buttons share the row visually. */
-  .purge-cta {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-destructive);
-    color: #fff;
-    border: 1px solid var(--color-destructive);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
-    cursor: pointer;
-  }
-  .purge-cta:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
