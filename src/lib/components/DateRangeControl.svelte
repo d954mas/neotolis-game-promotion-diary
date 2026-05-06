@@ -78,22 +78,24 @@
 </script>
 
 <div class="date-range" role="group" aria-label="Date range">
+  <div class="inputs">
+    <label class="input-wrap">
+      <span class="input-label">{m.feed_date_range_label_from()}</span>
+      <input type="date" bind:value={fromVal} max={toVal || undefined} onchange={applyInputs} />
+    </label>
+    <label class="input-wrap">
+      <span class="input-label">{m.feed_date_range_label_to()}</span>
+      <input type="date" bind:value={toVal} min={fromVal || undefined} onchange={applyInputs} />
+    </label>
+  </div>
   <div class="presets">
     <button
       type="button"
       class="preset"
-      aria-pressed={activePreset === "today"}
-      onclick={() => applyPreset("today")}
+      aria-pressed={activePreset === "all"}
+      onclick={() => applyPreset("all")}
     >
-      {m.feed_date_range_today()}
-    </button>
-    <button
-      type="button"
-      class="preset"
-      aria-pressed={activePreset === "week"}
-      onclick={() => applyPreset("week")}
-    >
-      {m.feed_date_range_week()}
+      {m.feed_date_range_all_time()}
     </button>
     <button
       type="button"
@@ -106,21 +108,19 @@
     <button
       type="button"
       class="preset"
-      aria-pressed={activePreset === "all"}
-      onclick={() => applyPreset("all")}
+      aria-pressed={activePreset === "week"}
+      onclick={() => applyPreset("week")}
     >
-      {m.feed_date_range_all_time()}
+      {m.feed_date_range_week()}
     </button>
-  </div>
-  <div class="inputs">
-    <label class="input-wrap">
-      <span class="input-label">{m.feed_date_range_label_from()}</span>
-      <input type="date" bind:value={fromVal} max={toVal || undefined} onchange={applyInputs} />
-    </label>
-    <label class="input-wrap">
-      <span class="input-label">{m.feed_date_range_label_to()}</span>
-      <input type="date" bind:value={toVal} min={fromVal || undefined} onchange={applyInputs} />
-    </label>
+    <button
+      type="button"
+      class="preset"
+      aria-pressed={activePreset === "today"}
+      onclick={() => applyPreset("today")}
+    >
+      {m.feed_date_range_today()}
+    </button>
   </div>
 </div>
 
