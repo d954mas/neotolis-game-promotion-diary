@@ -141,28 +141,52 @@ async function fetchWithTimeout(url: URL, timeoutMs = 30_000): Promise<Response>
   }
 }
 
-// Parse a YouTube channel URL into either a direct channelId (UC*) or a handle
-// (@something). Returns { kind: "channelId", value } when the URL points
-// straight at a /channel/UC… identifier, or { kind: "handle", value: "@xxx" }
-// for /@handle and /c/legacy and /user/legacy URLs (the latter two also
-// resolve via the channels.list?forHandle= path on YouTube's side).
+// Parse a YouTube URL into one of three shapes the handler can resolve:
+//   - {kind: "channelId"} — straight at a /channel/UC… identifier (zero
+//     extra quota; we already have the channel id we need).
+//   - {kind: "handle"}    — /@handle, /c/legacy, /user/legacy. Resolves via
+//     channels.list?forHandle=… (1 unit).
+//   - {kind: "videoId"}   — /watch?v=…, /shorts/…, /embed/…, youtu.be/…
+//     The URL points at a video; we fetch videos.list?part=snippet to learn
+//     the video's channelId, then continue from there (1 unit). User-friendly:
+//     pasting any YouTube URL into /sources/new works.
 //
-// Returns null for unparseable URLs — handler logs+skips, source row stays
-// channelId=NULL until the user re-toggles auto-import.
-function parseHandleUrl(url: string): { kind: "channelId" | "handle"; value: string } | null {
+// Returns null only for non-YouTube hosts or unparseable strings.
+function parseHandleUrl(
+  url: string,
+): { kind: "channelId" | "handle" | "videoId"; value: string } | null {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
     return null;
   }
-  if (!/(^|\.)youtube\.com$/i.test(parsed.hostname)) return null;
+  const host = parsed.hostname.toLowerCase();
+
+  // youtu.be/ID — short share URL, video.
+  if (host === "youtu.be") {
+    const id = parsed.pathname.replace(/^\//, "").split("/")[0];
+    return id ? { kind: "videoId", value: id } : null;
+  }
+
+  if (!/(^|\.)youtube\.com$/i.test(host)) return null;
+
+  // /watch?v=ID — full watch URL, video.
+  if (parsed.pathname === "/watch") {
+    const v = parsed.searchParams.get("v");
+    return v ? { kind: "videoId", value: v } : null;
+  }
 
   const segments = parsed.pathname.split("/").filter(Boolean);
   if (segments.length === 0) return null;
 
   const first = segments[0];
   if (!first) return null;
+
+  // /shorts/ID and /embed/ID — also videos.
+  if ((first === "shorts" || first === "embed") && segments[1]) {
+    return { kind: "videoId", value: segments[1] };
+  }
 
   // /channel/UCxxxxx — direct channelId.
   if (first === "channel" && segments[1]) {
@@ -248,6 +272,37 @@ export async function handleChannelContextBackfill(job: {
     }
     if (parsed.kind === "channelId") {
       channelId = parsed.value;
+    } else if (parsed.kind === "videoId") {
+      // /watch, /shorts, /embed, youtu.be — user pasted a video URL into
+      // the source registration form. Resolve via videos.list?part=snippet
+      // (1 quota unit) → snippet.channelId. More user-friendly than
+      // rejecting; users routinely paste any YouTube URL when adding a
+      // channel.
+      const videoUrl = new URL(`${env.YOUTUBE_API_BASE_URL}/videos`);
+      videoUrl.searchParams.set("id", parsed.value);
+      videoUrl.searchParams.set("part", "snippet");
+      videoUrl.searchParams.set("key", picked.apiKey);
+      videoUrl.searchParams.set("quotaUser", hashApiKeyId(userId));
+
+      const videoResp = await fetchWithTimeout(videoUrl);
+      await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+      if (!videoResp.ok) {
+        logger.warn(
+          { jobId: job.id, videoId: parsed.value, status: videoResp.status },
+          "channel-context-backfill: videos.list lookup non-2xx; skipping",
+        );
+        return;
+      }
+      const videoJson = VIDEOS_LIST_RESPONSE.parse(await videoResp.json());
+      const v = videoJson.items[0];
+      if (!v || !v.snippet?.channelId) {
+        logger.warn(
+          { jobId: job.id, videoId: parsed.value },
+          "channel-context-backfill: videos.list lookup returned no channelId; skipping",
+        );
+        return;
+      }
+      channelId = v.snippet.channelId;
     } else {
       // forHandle resolution — 1 quota unit.
       const lookupUrl = new URL(`${env.YOUTUBE_API_BASE_URL}/channels`);
