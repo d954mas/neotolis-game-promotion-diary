@@ -290,13 +290,13 @@
         required
         disabled={pending}
       />
-      {#if videoPublishedAt}
+      {#if occurredAt}
         {@const daysAgo = Math.floor(
-          (Date.now() - new Date(videoPublishedAt).getTime()) / 86_400_000,
+          (Date.now() - new Date(occurredAt).getTime()) / 86_400_000,
         )}
         {#if daysAgo > 30}
           <small class="date-hint warn">
-            {m.events_new_youtube_published_warning({ daysAgo: String(daysAgo) })}
+            {m.events_new_date_outside_window_warning({ daysAgo: String(daysAgo) })}
           </small>
         {/if}
       {/if}
