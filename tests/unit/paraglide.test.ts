@@ -539,6 +539,7 @@ describe("paraglide i18n (UX-04)", () => {
       "sources_cta_new_source",
       "sources_cta_save_source",
       "sources_error_duplicate",
+      "sources_error_duplicate_channel",
       "sources_error_kind_not_yet_functional",
       "sources_kind_disabled_tooltip",
       "sources_owned_by_me",

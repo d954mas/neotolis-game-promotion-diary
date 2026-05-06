@@ -183,8 +183,20 @@
         formError = m.sources_error_kind_not_yet_functional({ kind: kindLabel, phase });
         return;
       }
-      if (res.status === 422 && body.error === "duplicate_source") {
-        formError = m.sources_error_duplicate();
+      if (
+        (res.status === 422 || res.status === 409) &&
+        body.error === "duplicate_source"
+      ) {
+        const md = body.metadata as
+          | {
+              channel_title?: string | null;
+              display_name?: string | null;
+              handle_url?: string | null;
+            }
+          | undefined;
+        const channelName =
+          md?.channel_title ?? md?.display_name ?? md?.handle_url ?? "this channel";
+        formError = m.sources_error_duplicate_channel({ channelName });
         return;
       }
       formError = m.error_server_generic();

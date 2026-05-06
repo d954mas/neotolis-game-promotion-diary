@@ -44,6 +44,7 @@ import { getBoss } from "../queue-client.js";
 import { QUEUES } from "../queues.js";
 import { logger } from "../logger.js";
 import { parseYoutubeChannelUrl, fetchVideoMetadataByUrl } from "./youtube-metadata.js";
+import { youtubeChannels } from "../db/schema/youtube-channels.js";
 
 // Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — initial-backfill window
 // presets accepted by createSource for kind=youtube_channel + autoImport.
@@ -206,14 +207,14 @@ export async function createSource(
     // resolved channel_id back to data_sources.
   }
 
-  // Phase 3.0 post-build (UAT 2026-05-06): if we resolved channel_id
+  // Phase 3.0 post-build (UAT 2026-05-06): when channel_id is resolved
   // synchronously and an ACTIVE source already tracks that channel for
-  // this user, transparently UPDATE its handle_url to the canonical URL
-  // and return that existing row instead of throwing 409. The operator
-  // pasted a different /watch URL of the same channel — they meant
-  // "track this channel" not "create a duplicate", so no error makes
-  // sense. Soft-deleted sources are NOT auto-restored — that's an
-  // explicit user action via /sources.
+  // this user, throw a clear 409 with the channel title in the message.
+  // Operator's UAT direction: "и мы можем же в ошибку название канала?".
+  // Silent transparent update was confusing — the operator pasted a URL
+  // and got nothing visible back; explicit error is more honest.
+  // Soft-deleted sources are not considered duplicates here — operator
+  // explicitly removed them, so re-creating a fresh row is fine.
   if (resolvedChannelId) {
     const existing = await db
       .select()
@@ -227,15 +228,29 @@ export async function createSource(
       )
       .limit(1);
     if (existing[0]) {
-      if (existing[0].handleUrl !== canonicalHandleUrl) {
-        const [updated] = await db
-          .update(dataSources)
-          .set({ handleUrl: canonicalHandleUrl, updatedAt: new Date() })
-          .where(eq(dataSources.id, existing[0].id))
-          .returning();
-        return updated ?? existing[0];
-      }
-      return existing[0];
+      // Look up the channel title from the cache so the error message
+      // names the channel rather than just echoing back the URL the user
+      // pasted (which they already know).
+      const cacheRow = await db
+        .select({ channelTitle: youtubeChannels.channelTitle })
+        .from(youtubeChannels)
+        .where(eq(youtubeChannels.channelId, resolvedChannelId))
+        .limit(1);
+      const channelTitle = cacheRow[0]?.channelTitle ?? null;
+      const niceName =
+        channelTitle ?? existing[0].displayName ?? existing[0].handleUrl;
+      throw new AppError(
+        `You already track "${niceName}"`,
+        "duplicate_source",
+        409,
+        {
+          handle_url: existing[0].handleUrl,
+          source_id: existing[0].id,
+          channel_id: resolvedChannelId,
+          channel_title: channelTitle,
+          display_name: existing[0].displayName,
+        },
+      );
     }
   }
 
