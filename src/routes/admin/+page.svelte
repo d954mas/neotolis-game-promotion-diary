@@ -1,11 +1,13 @@
 <script lang="ts">
-  // Phase 3.0 Plan 13 — /admin/quota page.
+  // Phase 3.0 Plan 13 — /admin page. (Originally /admin/quota; flattened
+  // to /admin per post-build feedback — one page hosts every admin tool.)
   //
   // Composes <PageHeader> + 2 sections (QuotaKeyTable + QuotaAuditList) per
-  // UI-SPEC §"Layout & Responsive Contract → /admin/quota page". All copy
-  // sourced from messages/en.json (Plan 03.0-02 admin_quota_* keys); zero
-  // inline English. Loader returns the response shape from
-  // GET /api/admin/quota: { today, keys, audit }.
+  // UI-SPEC §"Layout & Responsive Contract → /admin page". All copy sourced
+  // from messages/en.json (Plan 03.0-02 admin_quota_* keys); zero inline
+  // English. Loader returns the response shape from GET /api/admin/quota:
+  // { today, keys, audit }. Future admin tools land as additional <section>
+  // siblings on this same page.
   //
   // Page <title> via <svelte:head> per Plan 02.1-39 §5.7 cross-page sticky
   // PageHeader pattern; admin pages inherit the sticky behavior since the
