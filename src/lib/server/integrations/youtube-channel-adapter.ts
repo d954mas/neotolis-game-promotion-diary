@@ -17,7 +17,7 @@
 //     for two-endpoint use).
 //   - AbortController.timeout(30_000) on every call (Pitfall 5 — never hold
 //     a DB tx across HTTP).
-//   - quotaUser=hashApiKeyId(userId) parameter on every call (Google's
+//   - quotaUser=quotaUserId(userId) parameter on every call (Google's
 //     per-end-user fairness gate — RESEARCH.md OQ#5 / Pattern 4 — splits
 //     the operator's quota evenly across tenants instead of letting one
 //     whale starve the others).
@@ -42,7 +42,7 @@
 //   - 404                                      → status:'not_found'
 //   - other 4xx/5xx                            → status:'auth_error' (placeholder; caller logs + retries)
 
-import { createHash } from "node:crypto";
+import { pickKeyForJob, quotaUserId } from "../services/youtube-quota-tracker.js";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { logger } from "../logger.js";
@@ -55,40 +55,14 @@ import type {
   StatsSnapshot,
 } from "./data-source-adapter.js";
 
-// ---- Inlined minimal pickKeyForJob + hashApiKeyId (cross-plan transition) ----
-//
-// Plan 03.0-03 (running in parallel with this plan in Wave 1) will provide
-// canonical implementations in `services/youtube-quota-tracker.ts` that add
-// per-key 80%/95% throttle gates + round-robin rotation + UPSERT counter
-// against `youtube_service_quota_usage`. Until that plan lands and is merged,
-// this file ships a minimal contract: round-robin across the env-configured
-// keys (no quota gating), and SHA-256-based 16-hex-char hashing for the
-// `quotaUser` parameter. When 03.0-03 ships, this block is replaced with
-// `import { pickKeyForJob, hashApiKeyId } from "../services/youtube-quota-tracker.js"`.
-
-interface PickedKey {
-  apiKey: string;
-  apiKeyId: string;
-}
-
-let roundRobinCursor = 0;
-
-function pickKeyForJob(): PickedKey | null {
-  const keys = env.SERVICE_YOUTUBE_API_KEYS;
-  if (keys.length === 0) return null;
-  const idx = roundRobinCursor++ % keys.length;
-  const apiKey = keys[idx]!;
-  // apiKeyId is the first 16 hex chars of SHA-256(apiKey) — stable across
-  // restarts, never logs the plaintext, and matches the (planned) Plan 03.0-03
-  // identifier shape for `youtube_service_quota_usage.api_key_id`.
-  const apiKeyId = createHash("sha256").update(apiKey).digest("hex").slice(0, 16);
-  return { apiKey, apiKeyId };
-}
-
-/** Per-tenant quotaUser hash. 16 hex chars from SHA-256(userId). */
-function hashApiKeyId(userId: string): string {
-  return createHash("sha256").update(userId).digest("hex").slice(0, 16);
-}
+// Plan 03.0-03's canonical pickKeyForJob + hashApiKeyId are imported above
+// (services/youtube-quota-tracker.ts). The Wave-1-cross-plan inline copies
+// were removed in the post-build review sweep — they had divergent state
+// (separate roundRobinCursor module variable + different hash length) that
+// caused the apiKeyId stored in youtube_service_quota_usage by the worker
+// to NOT match the apiKeyId the adapter produced. With one key in the
+// envelope this was masked; with two keys the counter rows would never
+// settle on a stable pair.
 
 // ---- Zod schemas — defense against API drift ----
 
@@ -209,7 +183,7 @@ async function pollStatsBatch(videoIds: string[], userId: string): Promise<Stats
   url.searchParams.set("id", videoIds.join(","));
   url.searchParams.set("part", "snippet,statistics,contentDetails");
   url.searchParams.set("key", picked.apiKey);
-  url.searchParams.set("quotaUser", hashApiKeyId(userId));
+  url.searchParams.set("quotaUser", quotaUserId(userId));
 
   const resp = await fetchWithTimeout(url);
 
@@ -276,7 +250,7 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
     url.searchParams.set("part", "snippet");
     url.searchParams.set("maxResults", "50");
     url.searchParams.set("key", picked.apiKey);
-    url.searchParams.set("quotaUser", hashApiKeyId(source.userId));
+    url.searchParams.set("quotaUser", quotaUserId(source.userId));
 
     const resp = await fetchWithTimeout(url);
     if (!resp.ok) {

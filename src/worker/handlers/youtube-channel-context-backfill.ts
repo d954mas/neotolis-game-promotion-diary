@@ -39,7 +39,7 @@ import { events } from "../../lib/server/db/schema/events.js";
 import { dataSources } from "../../lib/server/db/schema/data-sources.js";
 import {
   pickKeyForJob,
-  hashApiKeyId,
+  quotaUserId,
   incrementUsage,
 } from "../../lib/server/services/youtube-quota-tracker.js";
 import { env } from "../../lib/server/config/env.js";
@@ -282,7 +282,7 @@ export async function handleChannelContextBackfill(job: {
       videoUrl.searchParams.set("id", parsed.value);
       videoUrl.searchParams.set("part", "snippet");
       videoUrl.searchParams.set("key", picked.apiKey);
-      videoUrl.searchParams.set("quotaUser", hashApiKeyId(userId));
+      videoUrl.searchParams.set("quotaUser", quotaUserId(userId));
 
       const videoResp = await fetchWithTimeout(videoUrl);
       await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
@@ -309,7 +309,7 @@ export async function handleChannelContextBackfill(job: {
       lookupUrl.searchParams.set("forHandle", parsed.value);
       lookupUrl.searchParams.set("part", "snippet,contentDetails");
       lookupUrl.searchParams.set("key", picked.apiKey);
-      lookupUrl.searchParams.set("quotaUser", hashApiKeyId(userId));
+      lookupUrl.searchParams.set("quotaUser", quotaUserId(userId));
 
       const lookupResp = await fetchWithTimeout(lookupUrl);
       await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
@@ -355,7 +355,7 @@ export async function handleChannelContextBackfill(job: {
   channelsUrl.searchParams.set("id", channelId);
   channelsUrl.searchParams.set("part", "snippet,contentDetails");
   channelsUrl.searchParams.set("key", picked.apiKey);
-  channelsUrl.searchParams.set("quotaUser", hashApiKeyId(userId));
+  channelsUrl.searchParams.set("quotaUser", quotaUserId(userId));
 
   const channelsResp = await fetchWithTimeout(channelsUrl);
   await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
@@ -416,7 +416,7 @@ export async function handleChannelContextBackfill(job: {
     playlistUrl.searchParams.set("part", "snippet");
     playlistUrl.searchParams.set("maxResults", String(PAGE_SIZE));
     playlistUrl.searchParams.set("key", picked.apiKey);
-    playlistUrl.searchParams.set("quotaUser", hashApiKeyId(userId));
+    playlistUrl.searchParams.set("quotaUser", quotaUserId(userId));
     if (pageToken) playlistUrl.searchParams.set("pageToken", pageToken);
 
     const playlistResp = await fetchWithTimeout(playlistUrl);
@@ -479,7 +479,7 @@ export async function handleChannelContextBackfill(job: {
     videosUrl.searchParams.set("id", chunk.join(","));
     videosUrl.searchParams.set("part", "snippet,statistics");
     videosUrl.searchParams.set("key", picked.apiKey);
-    videosUrl.searchParams.set("quotaUser", hashApiKeyId(userId));
+    videosUrl.searchParams.set("quotaUser", quotaUserId(userId));
 
     const videosResp = await fetchWithTimeout(videosUrl);
     await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });

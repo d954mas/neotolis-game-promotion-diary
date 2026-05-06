@@ -94,6 +94,21 @@ export function hashApiKeyId(apiKey: string): string {
 }
 
 /**
+ * Phase 3.0 post-build (UAT 2026-05-06) — separate function for the
+ * `quotaUser` URL parameter. Distinct from hashApiKeyId on purpose:
+ *   - hashApiKeyId(apiKey)  → 8-hex stored as row identifier in
+ *                             youtube_service_quota_usage.
+ *   - quotaUserId(userId)   → 8-hex sent on the `quotaUser` query param
+ *                             so Google's per-user fairness shard is
+ *                             stable across requests for the same user.
+ * Same hash function, different inputs, different semantic. Reviewer's
+ * call: don't reuse one name for two concepts.
+ */
+export function quotaUserId(userId: string): string {
+  return createHash("sha256").update(userId).digest("hex").slice(0, 8);
+}
+
+/**
  * D-13 — round-robin pick across SERVICE_YOUTUBE_API_KEYS. Returns null if
  * the env list is empty (auto-import + scheduled polling disabled — caller
  * decides what to do; typical handling is `auto_import.deferred` audit + skip).

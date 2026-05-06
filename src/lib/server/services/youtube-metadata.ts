@@ -17,7 +17,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import {
   pickKeyForJob,
-  hashApiKeyId,
+  quotaUserId,
   incrementUsage,
 } from "./youtube-quota-tracker.js";
 import { db } from "../db/client.js";
@@ -200,7 +200,7 @@ export async function fetchVideoMetadataByUrl(
   apiUrl.searchParams.set("id", videoId);
   apiUrl.searchParams.set("part", "snippet");
   apiUrl.searchParams.set("key", picked.apiKey);
-  apiUrl.searchParams.set("quotaUser", hashApiKeyId(userId));
+  apiUrl.searchParams.set("quotaUser", quotaUserId(userId));
 
   const resp = await fetchWithTimeout(apiUrl);
   await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
