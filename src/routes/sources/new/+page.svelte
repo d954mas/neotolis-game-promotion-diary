@@ -181,7 +181,8 @@
       }
       if (
         (res.status === 422 || res.status === 409) &&
-        body.error === "duplicate_source"
+        (body.error === "duplicate_source" ||
+          body.error === "duplicate_source_soft_deleted")
       ) {
         const md = body.metadata as
           | {
@@ -192,7 +193,10 @@
           | undefined;
         const channelName =
           md?.channel_title ?? md?.display_name ?? md?.handle_url ?? "this channel";
-        formError = m.sources_error_duplicate_channel({ channelName });
+        formError =
+          body.error === "duplicate_source_soft_deleted"
+            ? m.sources_error_duplicate_channel_soft_deleted({ channelName })
+            : m.sources_error_duplicate_channel({ channelName });
         return;
       }
       if (res.status === 404 && body.error === "not_found") {

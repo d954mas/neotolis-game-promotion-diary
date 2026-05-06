@@ -218,13 +218,16 @@ export async function createSource(
   }
 
   // Phase 3.0 post-build (UAT 2026-05-06): when channel_id is resolved
-  // synchronously and an ACTIVE source already tracks that channel for
-  // this user, throw a clear 409 with the channel title in the message.
-  // Operator's UAT direction: "и мы можем же в ошибку название канала?".
-  // Silent transparent update was confusing — the operator pasted a URL
-  // and got nothing visible back; explicit error is more honest.
-  // Soft-deleted sources are not considered duplicates here — operator
-  // explicitly removed them, so re-creating a fresh row is fine.
+  // synchronously and a source already tracks that channel for this user
+  // (active OR soft-deleted), throw a clear 409 naming the channel.
+  // Distinct error codes per state so the form can render the right
+  // copy:
+  //   - active match     → "duplicate_source"           ("you already track X")
+  //   - soft-deleted     → "duplicate_source_soft_deleted" ("you used to
+  //                          track X — restore on /sources")
+  // Operator's UAT direction 2026-05-06: "по ошибке не очевидно что он
+  // есть и что он просто удалён" — the soft-deleted case was hitting the
+  // generic PG-unique 422 below, which didn't mention the channel name.
   if (resolvedChannelId) {
     const existing = await db
       .select()
@@ -233,14 +236,11 @@ export async function createSource(
         and(
           eq(dataSources.userId, userId),
           eq(dataSources.channelId, resolvedChannelId),
-          isNull(dataSources.deletedAt),
         ),
       )
+      .orderBy(dataSources.deletedAt) // active row first if both exist
       .limit(1);
     if (existing[0]) {
-      // Look up the channel title from the cache so the error message
-      // names the channel rather than just echoing back the URL the user
-      // pasted (which they already know).
       const cacheRow = await db
         .select({ channelTitle: youtubeChannels.channelTitle })
         .from(youtubeChannels)
@@ -249,9 +249,12 @@ export async function createSource(
       const channelTitle = cacheRow[0]?.channelTitle ?? null;
       const niceName =
         channelTitle ?? existing[0].displayName ?? existing[0].handleUrl;
+      const isSoftDeleted = existing[0].deletedAt !== null;
       throw new AppError(
-        `You already track "${niceName}"`,
-        "duplicate_source",
+        isSoftDeleted
+          ? `You previously tracked "${niceName}" — restore it on /sources.`
+          : `You already track "${niceName}"`,
+        isSoftDeleted ? "duplicate_source_soft_deleted" : "duplicate_source",
         409,
         {
           handle_url: existing[0].handleUrl,
@@ -259,6 +262,7 @@ export async function createSource(
           channel_id: resolvedChannelId,
           channel_title: channelTitle,
           display_name: existing[0].displayName,
+          soft_deleted: isSoftDeleted,
         },
       );
     }

@@ -540,6 +540,7 @@ describe("paraglide i18n (UX-04)", () => {
       "sources_cta_save_source",
       "sources_error_duplicate",
       "sources_error_duplicate_channel",
+      "sources_error_duplicate_channel_soft_deleted",
       "sources_error_kind_not_yet_functional",
       "sources_error_no_youtube_keys",
       "sources_error_not_a_youtube_url",
