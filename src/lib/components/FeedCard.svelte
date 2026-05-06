@@ -324,9 +324,7 @@
         {#if source.channelTitle}
           <span class="chip chip-channel" title="YouTube channel">{source.channelTitle}</span>
         {/if}
-        <span class="chip" title="My source label"
-          >{source.displayName ?? source.handleUrl}</span
-        >
+        <span class="chip" title="My source label">{source.displayName ?? source.handleUrl}</span>
       </div>
     {/if}
 

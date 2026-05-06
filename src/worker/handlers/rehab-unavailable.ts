@@ -41,9 +41,10 @@ const QUOTA_USER_REHAB = "neotolis-svc-rehab";
 
 export async function handleRehabUnavailable(job: { id: string }): Promise<void> {
   // PUBLIC-DATA TABLE — no userId filter (videos are tenant-agnostic).
-  // ESLint tenant-scope rule allowlists youtube_videos via the schema's
-  // "no tenant scope" header comment.
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- youtube_videos is PUBLIC-DATA (CONTEXT D-07): no user_id column. Cron walks the cross-tenant unavailable pool by design.
+  // The tenant-scope rule's TENANT_TABLES allowlist excludes youtube_videos
+  // (its schema header carries the explicit "public external data, no
+  // tenant scope" comment that the rule walks for) so no disable directive
+  // is needed here — the rule recognises the table is public-data.
   const candidates = await db
     .select({
       videoId: youtubeVideos.videoId,

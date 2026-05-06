@@ -36,11 +36,7 @@ async function incrementUsage(args: {
   tx: unknown;
 }): Promise<void> {
   const tracker = (await import("./youtube-quota-tracker.js")) as {
-    incrementUsage: (a: {
-      apiKeyId: string;
-      units: number;
-      tx?: unknown;
-    }) => Promise<void>;
+    incrementUsage: (a: { apiKeyId: string; units: number; tx?: unknown }) => Promise<void>;
   };
   await tracker.incrementUsage({
     apiKeyId: args.apiKeyId,
@@ -98,10 +94,7 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
       .set({
         lastPolledAt: new Date(),
         lastPollStatus: args.status,
-        pollFailureCount:
-          args.status === "ok"
-            ? 0
-            : sql`${youtubeVideos.pollFailureCount} + 1`,
+        pollFailureCount: args.status === "ok" ? 0 : sql`${youtubeVideos.pollFailureCount} + 1`,
       })
       .where(eq(youtubeVideos.videoId, args.videoId));
 

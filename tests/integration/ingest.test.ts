@@ -497,12 +497,7 @@ describe("Plan 03.0-10: channel-context backfill trigger (CONTEXT D-14)", () => 
     });
     const u = await seedUserDirectly({ email: "p10-tw@test.local" });
 
-    await parsePasteAndCreate(
-      u.id,
-      null,
-      "https://twitter.com/AnnaIndie/status/9999",
-      "127.0.0.1",
-    );
+    await parsePasteAndCreate(u.id, null, "https://twitter.com/AnnaIndie/status/9999", "127.0.0.1");
 
     const rows = await db.select().from(events).where(eq(events.userId, u.id));
     expect(rows).toHaveLength(1);

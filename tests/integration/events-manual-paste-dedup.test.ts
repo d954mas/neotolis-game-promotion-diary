@@ -92,10 +92,7 @@ describe("events manual-paste dedup (Plan 03.0-04, D-15)", () => {
     // Soft-delete the first row directly (bypasses softDelete service for
     // test setup speed; the partial index treats deleted_at IS NOT NULL as
     // invisible regardless of how the deletion was performed).
-    await db
-      .update(events)
-      .set({ deletedAt: new Date() })
-      .where(eq(events.id, first.id));
+    await db.update(events).set({ deletedAt: new Date() }).where(eq(events.id, first.id));
 
     // Re-paste — must succeed (the partial index excludes the soft-deleted row).
     const second = await createEvent(

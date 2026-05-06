@@ -130,12 +130,9 @@ vi.mock("../../src/lib/server/services/youtube-quota-tracker.js", () => ({
   },
 }));
 
-const { writeSnapshot } = await import(
-  "../../src/lib/server/services/youtube-snapshot-writer.js"
-);
-const { youtubeVideoSnapshots } = await import(
-  "../../src/lib/server/db/schema/youtube-video-snapshots.js"
-);
+const { writeSnapshot } = await import("../../src/lib/server/services/youtube-snapshot-writer.js");
+const { youtubeVideoSnapshots } =
+  await import("../../src/lib/server/db/schema/youtube-video-snapshots.js");
 const { youtubeVideos } = await import("../../src/lib/server/db/schema/youtube-videos.js");
 
 describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
@@ -194,7 +191,9 @@ describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
       status: "ok",
     });
     const allRetryInserts = insertCalls.filter(
-      (c) => c.table === youtubeVideoSnapshots && (c.values as { videoId?: string }).videoId === "VID-retry",
+      (c) =>
+        c.table === youtubeVideoSnapshots &&
+        (c.values as { videoId?: string }).videoId === "VID-retry",
     );
     expect(allRetryInserts.length).toBe(2);
     expect(allRetryInserts.every((c) => c.conflict)).toBe(true);

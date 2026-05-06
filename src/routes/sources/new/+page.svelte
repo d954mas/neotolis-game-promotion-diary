@@ -181,8 +181,7 @@
       }
       if (
         (res.status === 422 || res.status === 409) &&
-        (body.error === "duplicate_source" ||
-          body.error === "duplicate_source_soft_deleted")
+        (body.error === "duplicate_source" || body.error === "duplicate_source_soft_deleted")
       ) {
         const md = body.metadata as
           | {

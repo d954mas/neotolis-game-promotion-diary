@@ -15,11 +15,7 @@
 
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import {
-  pickKeyForJob,
-  youtubeQuotaUser,
-  incrementUsage,
-} from "./youtube-quota-tracker.js";
+import { pickKeyForJob, youtubeQuotaUser, incrementUsage } from "./youtube-quota-tracker.js";
 import { db } from "../db/client.js";
 import { youtubeVideos } from "../db/schema/youtube-videos.js";
 import { env } from "../config/env.js";
@@ -211,10 +207,7 @@ export async function fetchVideoMetadataByUrl(
     await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
   }
   if (!resp.ok) {
-    logger.warn(
-      { videoId, status: resp.status },
-      "youtube-metadata: videos.list non-2xx",
-    );
+    logger.warn({ videoId, status: resp.status }, "youtube-metadata: videos.list non-2xx");
     throw new AppError("YouTube API error", "upstream_error", 502, {
       videoId,
       status: resp.status,

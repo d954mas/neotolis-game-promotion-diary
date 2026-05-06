@@ -62,7 +62,6 @@
       pending = false;
     }
   }
-
 </script>
 
 <aside class="banner" role="alert" aria-live="polite">

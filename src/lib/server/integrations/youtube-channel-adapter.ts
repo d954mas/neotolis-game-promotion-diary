@@ -346,10 +346,7 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
    *
    * Returns StatsSnapshot[] aligned to input order.
    */
-  async pollStatsByVideoId(
-    videoIds: string[],
-    quotaUser: string,
-  ): Promise<StatsSnapshot[]> {
+  async pollStatsByVideoId(videoIds: string[], quotaUser: string): Promise<StatsSnapshot[]> {
     if (videoIds.length === 0) return [];
     const result: StatsSnapshot[] = [];
     for (let i = 0; i < videoIds.length; i += 50) {

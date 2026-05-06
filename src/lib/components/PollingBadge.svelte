@@ -69,11 +69,7 @@
   // Per-video refactor (2026-05-06): tier keyed on publishedAt (the video's
   // age), not occurredAt (the event's age). NULL publishedAt → 'pending'
   // (channel-context-backfill in flight; show "Pending..." badge).
-  function resolveTier(
-    publishedAt: Date | null,
-    lastPollStatus: string | null,
-    now: Date,
-  ): Tier {
+  function resolveTier(publishedAt: Date | null, lastPollStatus: string | null, now: Date): Tier {
     if (publishedAt === null) return "pending";
     if (lastPollStatus !== null && UNAVAILABLE_POLL_STATUSES.includes(lastPollStatus)) {
       return "unavailable";

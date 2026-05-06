@@ -232,12 +232,7 @@ export async function createSource(
     const existing = await db
       .select()
       .from(dataSources)
-      .where(
-        and(
-          eq(dataSources.userId, userId),
-          eq(dataSources.channelId, resolvedChannelId),
-        ),
-      )
+      .where(and(eq(dataSources.userId, userId), eq(dataSources.channelId, resolvedChannelId)))
       .orderBy(dataSources.deletedAt) // active row first if both exist
       .limit(1);
     if (existing[0]) {
@@ -247,8 +242,7 @@ export async function createSource(
         .where(eq(youtubeChannels.channelId, resolvedChannelId))
         .limit(1);
       const channelTitle = cacheRow[0]?.channelTitle ?? null;
-      const niceName =
-        channelTitle ?? existing[0].displayName ?? existing[0].handleUrl;
+      const niceName = channelTitle ?? existing[0].displayName ?? existing[0].handleUrl;
       const isSoftDeleted = existing[0].deletedAt !== null;
       throw new AppError(
         isSoftDeleted
@@ -297,12 +291,9 @@ export async function createSource(
       // by handle_url alone (e.g. operator pasted the exact same /@handle
       // URL twice). Surface the handle_url so the operator can spot it
       // in /sources.
-      throw new AppError(
-        "You already track this YouTube channel",
-        "duplicate_source",
-        422,
-        { handle_url: canonicalHandleUrl },
-      );
+      throw new AppError("You already track this YouTube channel", "duplicate_source", 422, {
+        handle_url: canonicalHandleUrl,
+      });
     }
     throw err;
   }

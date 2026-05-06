@@ -523,7 +523,10 @@ export async function mapEventsToDtos(userId: string, rows: EventRow[]): Promise
 export async function loadVideoDataForEvents(
   rows: EventRow[],
 ): Promise<
-  Map<string, { publishedAt: Date | null; lastPolledAt: Date | null; lastPollStatus: string | null }>
+  Map<
+    string,
+    { publishedAt: Date | null; lastPolledAt: Date | null; lastPollStatus: string | null }
+  >
 > {
   const externalIds = Array.from(
     new Set(
@@ -537,7 +540,11 @@ export async function loadVideoDataForEvents(
     { publishedAt: Date | null; lastPolledAt: Date | null; lastPollStatus: string | null }
   >();
   if (externalIds.length === 0) return map;
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- youtube_videos is PUBLIC-DATA (CONTEXT D-07): no user_id column, identical across all tenants who reference the same external_id. Lookup is keyed on the PK only.
+  // youtube_videos is PUBLIC-DATA (CONTEXT D-07) — no user_id column,
+  // identical across tenants. Lookup is keyed on the PK only. The
+  // tenant-scope rule isn't applied to dto.ts (file outside the rule's
+  // glob — services/http/worker/scheduler/page-loaders), so no disable
+  // directive is needed; the discipline is documented inline instead.
   const videoRows = await db
     .select({
       videoId: youtubeVideos.videoId,

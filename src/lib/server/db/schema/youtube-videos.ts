@@ -76,9 +76,7 @@ export const youtubeVideos = pgTable(
     // so the cron's SELECT stays cheap as the cache grows.
     rehabIdx: index("idx_youtube_videos_rehab")
       .on(t.lastPolledAt)
-      .where(
-        sql`${t.lastPollStatus} IN ('not_found', 'private') AND ${t.pollFailureCount} < 5`,
-      ),
+      .where(sql`${t.lastPollStatus} IN ('not_found', 'private') AND ${t.pollFailureCount} < 5`),
   }),
 );
 

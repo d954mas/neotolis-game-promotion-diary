@@ -197,9 +197,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   // the user's own displayName. One batched lookup keyed on every distinct
   // channelId across all loaded sources.
   const sourceDtos = sourceRows.map(toDataSourceDto);
-  const channelIds = sourceDtos
-    .map((s) => s.channelId)
-    .filter((c): c is string => c !== null);
+  const channelIds = sourceDtos.map((s) => s.channelId).filter((c): c is string => c !== null);
   if (channelIds.length > 0) {
     const cacheRows = await db
       .select({

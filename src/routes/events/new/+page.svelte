@@ -288,9 +288,7 @@
         disabled={pending}
       />
       {#if occurredAt}
-        {@const daysAgo = Math.floor(
-          (Date.now() - new Date(occurredAt).getTime()) / 86_400_000,
-        )}
+        {@const daysAgo = Math.floor((Date.now() - new Date(occurredAt).getTime()) / 86_400_000)}
         {#if daysAgo > 0}
           <small class="date-hint warn">
             {m.events_new_date_in_past_hint({ daysAgo: String(daysAgo) })}

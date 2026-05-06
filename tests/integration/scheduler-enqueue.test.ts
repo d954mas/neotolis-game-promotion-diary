@@ -107,10 +107,7 @@ describe("scheduler enqueue (Plan 03.0-09 + per-video refactor)", () => {
   it("enqueueColdPolls picks Cold-tier videos (24h-28d) and sends videoIds to POLL_COLD", async () => {
     const u = await seedUserDirectly({ email: `sch-cold-${uniq()}@test.local` });
     const now = new Date("2026-05-05T12:00:00Z");
-    const { videoId } = await insertEventWithVideo(
-      u.id,
-      new Date(now.getTime() - 5 * 86_400_000),
-    );
+    const { videoId } = await insertEventWithVideo(u.id, new Date(now.getTime() - 5 * 86_400_000));
 
     const result = await enqueueColdPolls(now);
 
@@ -124,10 +121,7 @@ describe("scheduler enqueue (Plan 03.0-09 + per-video refactor)", () => {
   it("Frozen videos (publishedAt > 28d) are NOT enqueued by enqueueColdPolls or enqueueActivePolls", async () => {
     const u = await seedUserDirectly({ email: `sch-frozen-${uniq()}@test.local` });
     const now = new Date("2026-05-05T12:00:00Z");
-    const { videoId } = await insertEventWithVideo(
-      u.id,
-      new Date(now.getTime() - 35 * 86_400_000),
-    );
+    const { videoId } = await insertEventWithVideo(u.id, new Date(now.getTime() - 35 * 86_400_000));
 
     await enqueueActivePolls(now);
     await enqueueColdPolls(now);
