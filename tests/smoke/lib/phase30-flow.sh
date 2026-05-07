@@ -128,7 +128,8 @@ phase30_polling_smoke() {
   local schedules_rc
   set +e
   schedules=$(docker exec smoke-app node -e '
-    import("./node_modules/pg/lib/index.js").then(async ({ Client }) => {
+    import("./node_modules/pg/lib/index.js").then(async (pgMod) => {
+      const Client = (pgMod.default && pgMod.default.Client) || pgMod.Client;
       const c = new Client({ connectionString: process.env.DATABASE_URL });
       await c.connect();
       try {
@@ -194,7 +195,8 @@ phase30_polling_smoke() {
   # round-trip exercises the actual poll-user → snapshot path.
   log "(P3.0) pre-seeding youtube_videos row for mock-video-0 (skip pending tier)"
   docker exec smoke-app node -e '
-    import("./node_modules/pg/lib/index.js").then(async ({ Client }) => {
+    import("./node_modules/pg/lib/index.js").then(async (pgMod) => {
+      const Client = (pgMod.default && pgMod.default.Client) || pgMod.Client;
       const c = new Client({ connectionString: process.env.DATABASE_URL });
       await c.connect();
       try {
@@ -224,7 +226,8 @@ phase30_polling_smoke() {
   for _ in $(seq 1 60); do
     local found
     found=$(docker exec smoke-app node -e '
-      import("./node_modules/pg/lib/index.js").then(async ({ Client }) => {
+      import("./node_modules/pg/lib/index.js").then(async (pgMod) => {
+      const Client = (pgMod.default && pgMod.default.Client) || pgMod.Client;
         const c = new Client({ connectionString: process.env.DATABASE_URL });
         await c.connect();
         try {
@@ -252,7 +255,8 @@ phase30_polling_smoke() {
   # service updates the youtube_videos row keyed on external_id.
   local poll_state
   poll_state=$(docker exec smoke-app node -e '
-    import("./node_modules/pg/lib/index.js").then(async ({ Client }) => {
+    import("./node_modules/pg/lib/index.js").then(async (pgMod) => {
+      const Client = (pgMod.default && pgMod.default.Client) || pgMod.Client;
       const c = new Client({ connectionString: process.env.DATABASE_URL });
       await c.connect();
       try {
