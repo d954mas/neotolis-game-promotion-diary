@@ -38,7 +38,7 @@ const VIDEOS_RESPONSE = {
   pageInfo: { totalResults: 50, resultsPerPage: 50 },
   items: Array.from({ length: 50 }, (_, i) => ({
     kind: "youtube#video",
-    id: `mock-video-${i}`,
+    id: `mockvideo${String(i).padStart(2, "0")}`,
     snippet: {
       publishedAt: new Date(Date.now() - i * 86_400_000).toISOString(),
       channelId: "UCmockchannel0123456789ab",
@@ -66,10 +66,10 @@ const PLAYLIST_ITEMS_RESPONSE = {
       publishedAt: new Date(Date.now() - i * 86_400_000).toISOString(),
       channelId: "UCmockchannel0123456789ab",
       title: `Mock Upload ${i}`,
-      resourceId: { kind: "youtube#video", videoId: `mock-video-${i}` },
+      resourceId: { kind: "youtube#video", videoId: `mockvideo${String(i).padStart(2, "0")}` },
     },
     contentDetails: {
-      videoId: `mock-video-${i}`,
+      videoId: `mockvideo${String(i).padStart(2, "0")}`,
       videoPublishedAt: new Date(Date.now() - i * 86_400_000).toISOString(),
     },
   })),

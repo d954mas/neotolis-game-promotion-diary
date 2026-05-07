@@ -159,7 +159,7 @@ phase30_polling_smoke() {
 
   # ----- 4. Create a youtube_video event + drive a refresh-now poll -----
   # POST /api/events with kind=youtube_video and a real-shaped YouTube URL
-  # so the createEvent service auto-derives external_id="mock-video-0"
+  # so the createEvent service auto-derives external_id="mockvideo00"
   # (Plan 02.1-17 enrichment path). The worker's videos.list call will
   # hit `http://localhost:$YOUTUBE_MOCK_PORT/videos` (intercepted by our
   # stub) and write a snapshot row.
@@ -175,7 +175,7 @@ phase30_polling_smoke() {
   create_body=$(curl -sS -X POST "$app_url/api/events" \
     -H "cookie: $session_cookie" \
     -H "content-type: application/json" \
-    -d '{"kind":"youtube_video","url":"https://www.youtube.com/watch?v=mock-video-0","title":"Smoke gate mock video","occurredAt":"2026-05-05T12:00:00.000Z"}')
+    -d '{"kind":"youtube_video","url":"https://www.youtube.com/watch?v=mockvideo00","title":"Smoke gate mock video","occurredAt":"2026-05-05T12:00:00.000Z"}')
   local event_id
   event_id=$(echo "$create_body" | jq -r '.id // empty' 2>/dev/null || true)
   if [[ -z "$event_id" || "$event_id" == "null" ]]; then
@@ -193,7 +193,7 @@ phase30_polling_smoke() {
   # discovery path. Pre-seed the youtube_videos row directly so the
   # pending-tier gate sees a populated publishedAt and the smoke
   # round-trip exercises the actual poll-user → snapshot path.
-  log "(P3.0) pre-seeding youtube_videos row for mock-video-0 (skip pending tier)"
+  log "(P3.0) pre-seeding youtube_videos row for mockvideo00 (skip pending tier)"
   docker exec smoke-app node -e '
     import("./node_modules/pg/lib/index.js").then(async (pgMod) => {
       const Client = (pgMod.default && pgMod.default.Client) || pgMod.Client;
@@ -202,7 +202,7 @@ phase30_polling_smoke() {
       try {
         await c.query(
           "INSERT INTO youtube_videos (video_id, title, published_at, fetched_at) VALUES ($1, $2, $3, NOW()) ON CONFLICT (video_id) DO NOTHING",
-          ["mock-video-0", "Smoke gate mock video", "2026-05-05T12:00:00.000Z"],
+          ["mockvideo00", "Smoke gate mock video", "2026-05-05T12:00:00.000Z"],
         );
       } finally { await c.end(); }
     }).catch((e) => { console.error(e); process.exit(1); });
@@ -231,7 +231,7 @@ phase30_polling_smoke() {
         const c = new Client({ connectionString: process.env.DATABASE_URL });
         await c.connect();
         try {
-          const r = await c.query("SELECT 1 FROM youtube_video_snapshots WHERE video_id = $1 LIMIT 1", ["mock-video-0"]);
+          const r = await c.query("SELECT 1 FROM youtube_video_snapshots WHERE video_id = $1 LIMIT 1", ["mockvideo00"]);
           console.log(r.rowCount > 0 ? "yes" : "no");
         } finally { await c.end(); }
       }).catch((e) => { console.error(e); process.exit(1); });
@@ -245,7 +245,7 @@ phase30_polling_smoke() {
   if [[ "$snapshot_present" != "true" ]]; then
     log "----- smoke-worker logs (last 80) -----"
     docker logs smoke-worker 2>&1 | tail -80 || true
-    fail "(P3.0) youtube_video_snapshots row never appeared for video_id=mock-video-0"
+    fail "(P3.0) youtube_video_snapshots row never appeared for video_id=mockvideo00"
   fi
   log "(P3.0) PASS — snapshot row written"
 
@@ -260,7 +260,7 @@ phase30_polling_smoke() {
       const c = new Client({ connectionString: process.env.DATABASE_URL });
       await c.connect();
       try {
-        const r = await c.query("SELECT last_polled_at IS NOT NULL AS polled, last_poll_status, poll_failure_count FROM youtube_videos WHERE video_id = $1", ["mock-video-0"]);
+        const r = await c.query("SELECT last_polled_at IS NOT NULL AS polled, last_poll_status, poll_failure_count FROM youtube_videos WHERE video_id = $1", ["mockvideo00"]);
         if (r.rowCount === 0) { console.log("missing"); return; }
         console.log(JSON.stringify(r.rows[0]));
       } finally { await c.end(); }
@@ -268,10 +268,10 @@ phase30_polling_smoke() {
   ' 2>&1)
   log "(P3.0) youtube_videos row state: $poll_state"
   if ! echo "$poll_state" | grep -q '"polled":true'; then
-    fail "(P3.0) youtube_videos.last_polled_at not populated for mock-video-0"
+    fail "(P3.0) youtube_videos.last_polled_at not populated for mockvideo00"
   fi
   if ! echo "$poll_state" | grep -q '"last_poll_status":"ok"'; then
-    fail "(P3.0) youtube_videos.last_poll_status not 'ok' for mock-video-0 (got: $poll_state)"
+    fail "(P3.0) youtube_videos.last_poll_status not 'ok' for mockvideo00 (got: $poll_state)"
   fi
   log "(P3.0) PASS — youtube_videos.last_polled_at + last_poll_status='ok'"
 
