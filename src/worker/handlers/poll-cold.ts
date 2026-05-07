@@ -35,19 +35,43 @@ export async function handlePollCold(job: {
     return;
   }
 
+  // Pre-resolve and thread through (see PickedKey jsdoc on
+  // data-source-adapter.ts) — keeps the worker's quota row keyed under
+  // the same apiKeyId the adapter actually used for the HTTP.
   const picked = pickKeyForJob();
   if (!picked) {
     logger.warn(
       { jobId: job.id, batchSize: videoIds.length },
       "poll-cold: SERVICE_YOUTUBE_API_KEYS empty; videos will degrade to auth_error",
     );
+    for (const videoId of videoIds) {
+      try {
+        await writeSnapshot({
+          videoId,
+          metrics: null,
+          apiKeyId: "no-key",
+          unitsUsed: 0,
+          status: "auth_error",
+        });
+      } catch (err) {
+        logger.error(
+          { jobId: job.id, videoId, err },
+          "poll-cold: writeSnapshot threw on no-key path; continuing",
+        );
+      }
+    }
+    return;
   }
 
-  const snapshots = await youtubeChannelAdapter.pollStatsByVideoId(videoIds, QUOTA_USER_COLD);
+  const snapshots = await youtubeChannelAdapter.pollStatsByVideoId(
+    videoIds,
+    QUOTA_USER_COLD,
+    picked,
+  );
 
   // Quota counter inflation fix — see poll-active.ts header for rationale.
   // 1 unit per batched videos.list call, charged on first billable video only.
-  const billable = picked && snapshots.some((s) => s.status !== "auth_error");
+  const billable = snapshots.some((s) => s.status !== "auth_error");
   let rateLimitedSeen = false;
   let chargedOnce = false;
   for (let i = 0; i < videoIds.length; i++) {
@@ -66,7 +90,7 @@ export async function handlePollCold(job: {
                 comment_count: snap.metrics.comment_count ?? 0,
               }
             : null,
-        apiKeyId: picked?.apiKeyId ?? "no-key",
+        apiKeyId: picked.apiKeyId,
         unitsUsed: unitsThisVideo,
         status: snap.status,
       });
@@ -79,7 +103,7 @@ export async function handlePollCold(job: {
     if (snap.status === "rate_limited") rateLimitedSeen = true;
   }
 
-  if (rateLimitedSeen && picked) {
+  if (rateLimitedSeen) {
     try {
       await markThrottleTransition({
         state: "ninetyfive",

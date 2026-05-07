@@ -60,22 +60,48 @@ export async function handlePollActive(job: {
     return;
   }
 
-  // Pre-resolve the API key for this batch so all videos share the same
-  // apiKeyId in the writeSnapshot call. The adapter's round-robin still
-  // moves forward inside; the per-video quota row is consistent for this
-  // batch — the apiKeyId picked at handler start is the one charged.
+  // Pre-resolve the API key for this batch and thread it through the
+  // adapter — see PickedKey jsdoc on data-source-adapter.ts. With one key
+  // in env this matches the previous behavior; with N≥2 keys this is the
+  // load-bearing fix that keeps the youtube_service_quota_usage row keyed
+  // under the same apiKeyId the adapter actually used for the HTTP.
   const picked = pickKeyForJob();
   if (!picked) {
+    // env.SERVICE_YOUTUBE_API_KEYS empty — short-circuit to auth_error
+    // snapshots without invoking the adapter. Self-host parity: a self-
+    // hoster who never sets the env var gets a graceful no-op rather than
+    // an exception.
     logger.warn(
       { jobId: job.id, batchSize: videoIds.length },
       "poll-active: SERVICE_YOUTUBE_API_KEYS empty; videos will degrade to auth_error",
     );
+    for (const videoId of videoIds) {
+      try {
+        await writeSnapshot({
+          videoId,
+          metrics: null,
+          apiKeyId: "no-key",
+          unitsUsed: 0,
+          status: "auth_error",
+        });
+      } catch (err) {
+        logger.error(
+          { jobId: job.id, videoId, err },
+          "poll-active: writeSnapshot threw on no-key path; continuing",
+        );
+      }
+    }
+    return;
   }
 
   // Phase A — HTTP call (OUTSIDE any tx). The adapter handles the ≤50-id
   // boundary, error mapping, Shorts detection, and the quotaUser fairness
   // param. Returns StatsSnapshot[] aligned to input order.
-  const snapshots = await youtubeChannelAdapter.pollStatsByVideoId(videoIds, QUOTA_USER_ACTIVE);
+  const snapshots = await youtubeChannelAdapter.pollStatsByVideoId(
+    videoIds,
+    QUOTA_USER_ACTIVE,
+    picked,
+  );
 
   // Phase B — writeSnapshot per result. Each call opens its own short tx
   // (snapshot INSERT ON CONFLICT DO NOTHING + youtube_videos UPDATE +
@@ -87,7 +113,7 @@ export async function handlePollActive(job: {
   // billable video; subsequent videos pass unitsUsed=0. Counter sum =
   // actual API cost. (auth_error / no-key paths still charge 0 — adapter
   // never billed.)
-  const billable = picked && snapshots.some((s) => s.status !== "auth_error");
+  const billable = snapshots.some((s) => s.status !== "auth_error");
   let rateLimitedSeen = false;
   let chargedOnce = false;
   for (let i = 0; i < videoIds.length; i++) {
@@ -106,7 +132,7 @@ export async function handlePollActive(job: {
                 comment_count: snap.metrics.comment_count ?? 0,
               }
             : null,
-        apiKeyId: picked?.apiKeyId ?? "no-key",
+        apiKeyId: picked.apiKeyId,
         unitsUsed: unitsThisVideo,
         status: snap.status,
       });
@@ -119,7 +145,7 @@ export async function handlePollActive(job: {
     if (snap.status === "rate_limited") rateLimitedSeen = true;
   }
 
-  if (rateLimitedSeen && picked) {
+  if (rateLimitedSeen) {
     // Best-effort. The tracker's own state-transition guard makes this
     // idempotent — multiple calls within the same (date_pacific, state)
     // collapse to one audit row.

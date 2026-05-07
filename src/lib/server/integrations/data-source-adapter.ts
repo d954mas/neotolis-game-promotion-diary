@@ -92,23 +92,50 @@ export interface PollableSource {
   metadata: Record<string, unknown>;
 }
 
+/**
+ * PickedKey — adapter callers pre-pick a key from the quota tracker and
+ * thread it down. Without this, the adapter would call `pickKeyForJob`
+ * internally per chunk and drift the round-robin index against the
+ * caller's tracking — counter rows in `youtube_service_quota_usage` would
+ * end up keyed under the caller's pick while the actual HTTP burned a
+ * different key (visible only with N≥2 keys; silent at indie scale).
+ *
+ * Threading the pick through the call chain ties one batch to one key:
+ * a 100-video batch fans out into 2 chunks but both HTTP calls hit the
+ * same key, the same counter row updates, and the operator's
+ * /admin/quota dashboard reflects predictable round-robin balance.
+ */
+export interface PickedKey {
+  apiKey: string;
+  apiKeyId: string;
+}
+
 export interface DataSourceAdapter {
   readonly kind: SourceKind;
   pollContent(source: PollableSource, since: Date): Promise<RawEvent[]>;
   /**
-   * User-driven stats polling (Refresh now button). quotaUser fingerprint is
-   * derived from userId inside the adapter (per-user burst-shaper bucket).
+   * User-driven stats polling (Refresh now button). quotaUser fingerprint
+   * is derived from userId inside the adapter (per-user burst-shaper
+   * bucket). Caller pre-picks a key from `pickKeyForJob` and threads it
+   * through; adapter never picks on its own (avoids round-robin drift —
+   * see PickedKey jsdoc).
    */
   pollStats(
     events: PollableEvent[],
     source: { id: string; userId: string } | null,
+    picked: PickedKey,
   ): Promise<StatsSnapshot[]>;
   /**
    * Service-driven stats polling (poll-active / poll-cold cron tick).
-   * Per-video, not per-event — multiple tenants referencing one video share
-   * the same HTTP. quotaUser is a constant per tier ("neotolis-svc-active"
-   * or "neotolis-svc-cold") so Google's burst-shaper buckets service polls
-   * away from user-driven Refresh now polls.
+   * Per-video, not per-event — multiple tenants referencing one video
+   * share the same HTTP. quotaUser is a constant per tier
+   * ("neotolis-svc-active" or "neotolis-svc-cold") so Google's
+   * burst-shaper buckets service polls away from user-driven Refresh now
+   * polls. Caller threads the pre-picked key (see PickedKey jsdoc).
    */
-  pollStatsByVideoId(videoIds: string[], quotaUser: string): Promise<StatsSnapshot[]>;
+  pollStatsByVideoId(
+    videoIds: string[],
+    quotaUser: string,
+    picked: PickedKey,
+  ): Promise<StatsSnapshot[]>;
 }

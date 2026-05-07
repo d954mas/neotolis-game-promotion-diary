@@ -296,7 +296,12 @@ export async function handleChannelContextBackfill(job: {
       videoUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
       const videoResp = await fetchWithTimeout(videoUrl);
-      await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+      // Charge quota only on a 2xx — Google bills 0 units for 4xx/5xx.
+      // Mirror of services/youtube-metadata.ts and prevents counter
+      // drift / spurious throttle when the operator's key is misconfigured.
+      if (videoResp.ok) {
+        await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+      }
       if (!videoResp.ok) {
         logger.warn(
           { jobId: job.id, videoId: parsed.value, status: videoResp.status },
@@ -323,7 +328,10 @@ export async function handleChannelContextBackfill(job: {
       lookupUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
       const lookupResp = await fetchWithTimeout(lookupUrl);
-      await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+      // Charge quota only on a 2xx — Google bills 0 units for 4xx/5xx.
+      if (lookupResp.ok) {
+        await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+      }
       if (!lookupResp.ok) {
         logger.warn(
           { jobId: job.id, handle: parsed.value, status: lookupResp.status },
@@ -375,7 +383,10 @@ export async function handleChannelContextBackfill(job: {
   channelsUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
   const channelsResp = await fetchWithTimeout(channelsUrl);
-  await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+  // Charge quota only on a 2xx — Google bills 0 units for 4xx/5xx.
+  if (channelsResp.ok) {
+    await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+  }
   if (!channelsResp.ok) {
     logger.warn(
       { jobId: job.id, channelId, status: channelsResp.status },
@@ -463,7 +474,10 @@ export async function handleChannelContextBackfill(job: {
     if (pageToken) playlistUrl.searchParams.set("pageToken", pageToken);
 
     const playlistResp = await fetchWithTimeout(playlistUrl);
-    await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+    // Charge quota only on a 2xx — Google bills 0 units for 4xx/5xx.
+    if (playlistResp.ok) {
+      await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+    }
     if (!playlistResp.ok) {
       logger.warn(
         { jobId: job.id, channelId, status: playlistResp.status, page },
@@ -525,7 +539,10 @@ export async function handleChannelContextBackfill(job: {
     videosUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
     const videosResp = await fetchWithTimeout(videosUrl);
-    await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+    // Charge quota only on a 2xx — Google bills 0 units for 4xx/5xx.
+    if (videosResp.ok) {
+      await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+    }
     if (!videosResp.ok) {
       logger.warn(
         { jobId: job.id, channelId, status: videosResp.status, batch: i / 50 },
@@ -609,21 +626,38 @@ export async function handleChannelContextBackfill(job: {
       .limit(1);
     authorIsMe = sourceRow[0]?.isOwnedByMe ?? false;
 
-    // Auto-import idempotency: pre-insert SELECT instead of relying on the
-    // (user_id, kind, external_id) unique that was dropped in migration 0013.
-    // For each discovered video — if this user already has ANY event for that
-    // external_id (auto-imported or manual paste), skip the insert. Step 7
-    // below will bump lastPolledAt on the existing row(s). New videos land
-    // as fresh events. The user can still manually create additional events
-    // for the same video via the future "add another note" UI flow (the
-    // schema now allows it; the worker is intentionally idempotent for
-    // discovery, not user-driven duplication).
+    // Auto-import idempotency: pre-insert SELECT scoped by `sourceId`.
+    //
+    // Phase 3.0 post-build review (2026-05-07): pre-fix, the SELECT skipped
+    // any user/external_id match regardless of sourceId, which silently
+    // dropped backfill writes when:
+    //   - the user previously manually pasted the same video (sourceId=NULL
+    //     — backfill saw it and skipped, source page showed "0 imported"),
+    //   - a different source already auto-imported the same video (rare,
+    //     requires two sources pointing at the same upstream channel).
+    //
+    // Schema unique `events_user_kind_source_ext_unq` already permits
+    // multiple rows for the same external_id when sourceId differs — it
+    // ONLY blocks duplicate inserts within a single source. Scoping the
+    // pre-insert SELECT to match makes backfill honest:
+    //   - A re-run of THIS source's backfill is idempotent (sourceId-scoped
+    //     SELECT finds existing → skip).
+    //   - Cross-source double-import is preserved (different sourceId →
+    //     SELECT misses → INSERT proceeds → schema unique permits).
+    //   - Manual paste events (sourceId=NULL) live in their own world and
+    //     never collide with auto-import (sourceId-scoped SELECT excludes
+    //     them by construction).
+    //
+    // Defense in depth: even if a race causes the SELECT to miss a
+    // concurrent INSERT, the partial UNIQUE on (user_id, kind, source_id,
+    // external_id) WHERE source_id IS NOT NULL catches it at DB-level.
     const existing = await db
       .select({ externalId: events.externalId })
       .from(events)
       .where(
         and(
           eq(events.userId, userId),
+          eq(events.sourceId, sourceId),
           sql`${events.kind} = 'youtube_video'`,
           sql`${events.externalId} IN (${sql.join(
             collected.map((c) => sql`${c.videoId}`),

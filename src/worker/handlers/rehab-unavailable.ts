@@ -71,14 +71,19 @@ export async function handleRehabUnavailable(job: { id: string }): Promise<void>
       { jobId: job.id, batchSize: videoIds.length },
       "rehab-unavailable: SERVICE_YOUTUBE_API_KEYS empty; videos remain unavailable",
     );
+    return;
   }
 
-  const snapshots = await youtubeChannelAdapter.pollStatsByVideoId(videoIds, QUOTA_USER_REHAB);
+  const snapshots = await youtubeChannelAdapter.pollStatsByVideoId(
+    videoIds,
+    QUOTA_USER_REHAB,
+    picked,
+  );
 
   // Charge 1 unit per batched call (videos.list batches up to 50 ids in one
   // HTTP). REHAB_BATCH_LIMIT=50 fits in one call → 1 unit per tick.
   // Charge on first billable video; subsequent videos pass 0.
-  const billable = picked && snapshots.some((s) => s.status !== "auth_error");
+  const billable = snapshots.some((s) => s.status !== "auth_error");
   let chargedOnce = false;
   let recoveredCount = 0;
   for (let i = 0; i < videoIds.length; i++) {
@@ -98,7 +103,7 @@ export async function handleRehabUnavailable(job: { id: string }): Promise<void>
                 comment_count: snap.metrics.comment_count ?? 0,
               }
             : null,
-        apiKeyId: picked?.apiKeyId ?? "no-key",
+        apiKeyId: picked.apiKeyId,
         unitsUsed: unitsThisVideo,
         status: snap.status,
       });

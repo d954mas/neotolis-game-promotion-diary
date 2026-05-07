@@ -144,6 +144,12 @@ function makePlaylistItemsResponse(
 }
 
 const fakeUserId = "user-test-123";
+// Post-build review (2026-05-07): adapter signatures take a pre-resolved
+// PickedKey from the caller (worker / route layer) instead of picking
+// internally — see PickedKey jsdoc in data-source-adapter.ts. Tests
+// supply this fixture; the API key string is never asserted on the wire
+// (it is sent in the URL `key=` parameter; tests only assert presence).
+const fakePicked = { apiKey: "test-operator-key-A", apiKeyId: "fakekey0" };
 
 // ----- Tests -----
 
@@ -159,7 +165,7 @@ describe("youtubeChannelAdapter.pollStats — batching + alignment", () => {
     const events = ids.map((id) => ({ id: `e-${id}`, userId: fakeUserId, externalId: id }));
     const calls = installFetchMock([{ status: 200, body: makeVideosListResponse(ids) }]);
 
-    const snaps = await youtubeChannelAdapter.pollStats(events, null);
+    const snaps = await youtubeChannelAdapter.pollStats(events, null, fakePicked);
 
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url.pathname).toMatch(/\/videos$/);
@@ -176,7 +182,7 @@ describe("youtubeChannelAdapter.pollStats — batching + alignment", () => {
       { status: 200, body: makeVideosListResponse(ids.slice(50)) },
     ]);
 
-    const snaps = await youtubeChannelAdapter.pollStats(events, null);
+    const snaps = await youtubeChannelAdapter.pollStats(events, null, fakePicked);
 
     expect(calls).toHaveLength(2);
     expect(calls[0]!.url.searchParams.get("id")?.split(",")).toHaveLength(50);
@@ -193,7 +199,7 @@ describe("youtubeChannelAdapter.pollStats — batching + alignment", () => {
       },
     ]);
 
-    const [snap] = await youtubeChannelAdapter.pollStats(events, null);
+    const [snap] = await youtubeChannelAdapter.pollStats(events, null, fakePicked);
 
     expect(snap!.status).toBe("ok");
     expect(snap!.metrics?.view_count).toBe(1234567890);
@@ -213,7 +219,7 @@ describe("youtubeChannelAdapter.pollStats — batching + alignment", () => {
       },
     ]);
 
-    const snaps = await youtubeChannelAdapter.pollStats(events, null);
+    const snaps = await youtubeChannelAdapter.pollStats(events, null, fakePicked);
 
     expect(snaps).toHaveLength(3);
     expect(snaps[0]!.status).toBe("ok");
@@ -232,7 +238,7 @@ describe("youtubeChannelAdapter.pollStats — error mapping", () => {
       },
     ]);
 
-    const [snap] = await youtubeChannelAdapter.pollStats(events, null);
+    const [snap] = await youtubeChannelAdapter.pollStats(events, null, fakePicked);
 
     expect(snap!.status).toBe("rate_limited");
   });
@@ -246,7 +252,7 @@ describe("youtubeChannelAdapter.pollStats — error mapping", () => {
       },
     ]);
 
-    const [snap] = await youtubeChannelAdapter.pollStats(events, null);
+    const [snap] = await youtubeChannelAdapter.pollStats(events, null, fakePicked);
 
     expect(snap!.status).toBe("auth_error");
   });
@@ -255,7 +261,7 @@ describe("youtubeChannelAdapter.pollStats — error mapping", () => {
     const events = [{ id: "e1", userId: fakeUserId, externalId: "v1" }];
     installFetchMock([{ status: 404, body: { error: { code: 404 } } }]);
 
-    const [snap] = await youtubeChannelAdapter.pollStats(events, null);
+    const [snap] = await youtubeChannelAdapter.pollStats(events, null, fakePicked);
 
     expect(snap!.status).toBe("not_found");
   });
@@ -273,7 +279,7 @@ describe("youtubeChannelAdapter.pollStats — quotaUser fairness param", () => {
     const events = [{ id: "e1", userId: fakeUserId, externalId: "v1" }];
     const calls = installFetchMock([{ status: 200, body: makeVideosListResponse(["v1"]) }]);
 
-    await youtubeChannelAdapter.pollStats(events, null);
+    await youtubeChannelAdapter.pollStats(events, null, fakePicked);
 
     const quotaUser = calls[0]!.url.searchParams.get("quotaUser");
     expect(quotaUser).toBeTruthy();
@@ -291,7 +297,7 @@ describe("youtubeChannelAdapter.pollStats — Shorts detection (D-NEW)", () => {
       },
     ]);
 
-    const [snap] = await youtubeChannelAdapter.pollStats(events, null);
+    const [snap] = await youtubeChannelAdapter.pollStats(events, null, fakePicked);
 
     expect(snap!.metadata?.duration_seconds).toBe(15);
     expect(snap!.metadata?.is_short).toBe(true);
@@ -306,7 +312,7 @@ describe("youtubeChannelAdapter.pollStats — Shorts detection (D-NEW)", () => {
       },
     ]);
 
-    const [snap] = await youtubeChannelAdapter.pollStats(events, null);
+    const [snap] = await youtubeChannelAdapter.pollStats(events, null, fakePicked);
 
     expect(snap!.metadata?.duration_seconds).toBe(253);
     expect(snap!.metadata?.is_short).toBe(false);
@@ -321,7 +327,7 @@ describe("youtubeChannelAdapter.pollStats — Shorts detection (D-NEW)", () => {
       },
     ]);
 
-    const [snap] = await youtubeChannelAdapter.pollStats(events, null);
+    const [snap] = await youtubeChannelAdapter.pollStats(events, null, fakePicked);
 
     expect(snap!.metadata?.duration_seconds).toBe(60);
     expect(snap!.metadata?.is_short).toBe(true);
@@ -407,7 +413,7 @@ describe("youtubeChannelAdapter.pollStats — AbortController timeout", () => {
     const events = [{ id: "e1", userId: fakeUserId, externalId: "v1" }];
     const calls = installFetchMock([{ status: 200, body: makeVideosListResponse(["v1"]) }]);
 
-    await youtubeChannelAdapter.pollStats(events, null);
+    await youtubeChannelAdapter.pollStats(events, null, fakePicked);
 
     expect(calls[0]!.signal).toBeDefined();
     expect(calls[0]!.signal).toBeInstanceOf(AbortSignal);
@@ -428,7 +434,7 @@ describe("youtubeChannelAdapter.pollStats — env-key absence", () => {
     // For now: assert the contract via an alternative path — if the eventsBatch
     // is empty, the adapter returns [] without calling fetch (a related no-op
     // contract pin).
-    const snaps = await youtubeChannelAdapter.pollStats([], null);
+    const snaps = await youtubeChannelAdapter.pollStats([], null, fakePicked);
     expect(snaps).toEqual([]);
   });
 });

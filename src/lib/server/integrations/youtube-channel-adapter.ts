@@ -48,6 +48,7 @@ import { env } from "../config/env.js";
 import { logger } from "../logger.js";
 import type {
   DataSourceAdapter,
+  PickedKey,
   PollableEvent,
   PollableSource,
   RawEvent,
@@ -171,28 +172,23 @@ async function classifyError(resp: Response): Promise<SnapshotStatus> {
  * service-tier constant (poll-active / poll-cold — "neotolis-svc-active").
  * This module does not pick the policy; it just sends what it's given.
  *
- * Phase 3.0 post-build refactor (2026-05-06): the function signature took
- * `userId` and computed quotaUser internally, which forced poll-active /
- * poll-cold to group by userId even though their HTTP traffic is service-
- * level. The new shape lets per-video service polls call this directly
- * with a constant fingerprint, and the user-driven poll-user still passes
- * a per-user value. One function, two policies, caller's choice.
+ * `picked` is the pre-resolved key from the caller's `pickKeyForJob` — see
+ * the PickedKey jsdoc on data-source-adapter.ts. The adapter no longer
+ * picks on its own (post-build review 2026-05-07): without threading,
+ * the worker would advance roundRobinIdx once at handler start AND the
+ * adapter would advance it again per chunk, leaving the
+ * youtube_service_quota_usage row keyed under the worker's pick while
+ * the actual HTTP burned the adapter's pick.
  */
-async function pollStatsBatch(videoIds: string[], quotaUser: string): Promise<StatsSnapshot[]> {
+async function pollStatsBatch(
+  videoIds: string[],
+  quotaUser: string,
+  picked: PickedKey,
+): Promise<StatsSnapshot[]> {
   if (videoIds.length === 0) return [];
   if (videoIds.length > 50) throw new Error("videos.list batch limit is 50");
 
-  const picked = pickKeyForJob();
   const now = new Date();
-  if (!picked) {
-    // env.SERVICE_YOUTUBE_API_KEYS empty — degrade to auth_error so the caller
-    // persists last_poll_status='auth_error' and the user sees the Unavailable
-    // badge until the operator adds a key. This preserves self-host parity:
-    // a self-hoster who never sets the env var gets a graceful no-op rather
-    // than a thrown exception in the worker handler.
-    return videoIds.map(() => ({ polledAt: now, status: "auth_error" as const }));
-  }
-
   const url = new URL(`${env.YOUTUBE_API_BASE_URL}/videos`);
   url.searchParams.set("id", videoIds.join(","));
   url.searchParams.set("part", "snippet,statistics,contentDetails");
@@ -298,6 +294,7 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
   async pollStats(
     eventsBatch: PollableEvent[],
     _source: { id: string; userId: string } | null,
+    picked: PickedKey,
   ): Promise<StatsSnapshot[]> {
     if (eventsBatch.length === 0) return [];
 
@@ -314,7 +311,7 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
       for (let i = 0; i < evs.length; i += 50) {
         const chunk = evs.slice(i, i + 50);
         const ids = chunk.map((e) => e.externalId);
-        const snapshots = await pollStatsBatch(ids, youtubeQuotaUser(userId));
+        const snapshots = await pollStatsBatch(ids, youtubeQuotaUser(userId), picked);
         for (let j = 0; j < chunk.length; j++) {
           const ev = chunk[j]!;
           const snap = snapshots[j]!;
@@ -346,12 +343,16 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
    *
    * Returns StatsSnapshot[] aligned to input order.
    */
-  async pollStatsByVideoId(videoIds: string[], quotaUser: string): Promise<StatsSnapshot[]> {
+  async pollStatsByVideoId(
+    videoIds: string[],
+    quotaUser: string,
+    picked: PickedKey,
+  ): Promise<StatsSnapshot[]> {
     if (videoIds.length === 0) return [];
     const result: StatsSnapshot[] = [];
     for (let i = 0; i < videoIds.length; i += 50) {
       const chunk = videoIds.slice(i, i + 50);
-      const snapshots = await pollStatsBatch(chunk, quotaUser);
+      const snapshots = await pollStatsBatch(chunk, quotaUser, picked);
       for (const snap of snapshots) result.push(snap);
     }
     return result;
