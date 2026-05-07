@@ -218,16 +218,18 @@ async function maybeEnqueueChannelContextBackfill(
     // Belt-and-suspenders: even with handle_aliases closing the steady-
     // state cache miss, a backfill that crashes BEFORE writing the alias
     // leaves no cache entry behind. Singleton dedup catches concurrent
-    // re-pastes within the window. UC URLs always hit the PK cache after
-    // the first successful backfill so 24h is plenty; handle URLs get a
-    // wider 30-day window as a safety net for failed-backfill scenarios.
-    const isUcId = /^UC[A-Za-z0-9_-]{20,}$/.test(channelId);
+    // re-pastes within the window. 24h applies to BOTH UC and handle URLs
+    // (post-build review 2026-05-07): handle_aliases now closes the
+    // steady-state cache miss for handle URLs too, so the previous wider
+    // 30-day window for handle URLs is no longer needed and would just
+    // blackout failed-backfill recovery for a month — operator visibility
+    // wins over a paranoid quota safety net.
     await boss.send(
       QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL,
       { channelId, userId },
       {
         singletonKey: channelId,
-        singletonHours: isUcId ? 24 : 24 * 30,
+        singletonHours: 24,
       },
     );
   } catch (err) {

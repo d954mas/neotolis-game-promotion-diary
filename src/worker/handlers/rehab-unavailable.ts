@@ -28,7 +28,7 @@
 // Per-tick HTTP volume is bounded at ~50/week so burst is irrelevant
 // at our scale.
 
-import { sql, and, inArray, lt } from "drizzle-orm";
+import { sql, and, lt } from "drizzle-orm";
 import { db } from "../../lib/server/db/client.js";
 import { youtubeVideos } from "../../lib/server/db/schema/youtube-videos.js";
 import { youtubeChannelAdapter } from "../../lib/server/integrations/youtube-channel-adapter.js";
@@ -124,6 +124,4 @@ export async function handleRehabUnavailable(job: { id: string }): Promise<void>
     { jobId: job.id, candidates: videoIds.length, recovered: recoveredCount },
     "rehab-unavailable: tick complete",
   );
-
-  void inArray; // keep import alive for future per-batch filter tightening
 }

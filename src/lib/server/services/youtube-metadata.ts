@@ -57,50 +57,11 @@ export interface FetchedVideoMetadata {
 //   https://www.youtube.com/embed/ID
 // Returns null for any other shape (the route returns 422; the form keeps
 // the URL but doesn't auto-fill).
-// Parse any YouTube URL into one of three shapes the resolver can handle:
-//   {kind: "channelId"} — direct /channel/UC… URL (no resolve needed).
-//   {kind: "handle"}    — /@handle, /c/legacy, /user/legacy (forHandle lookup).
-//   {kind: "videoId"}   — /watch?v=…, /shorts/…, /embed/…, youtu.be/…
-//                         (videos.list?part=snippet → snippet.channelId).
-// Returns null for non-YouTube hosts. Mirrors the worker handler's
-// parseHandleUrl (worker keeps its local copy until that path is deduped).
-export function parseYoutubeChannelUrl(
-  url: string,
-): { kind: "channelId" | "handle" | "videoId"; value: string } | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return null;
-  }
-  const host = parsed.hostname.toLowerCase();
-  if (host === "youtu.be") {
-    const id = parsed.pathname.replace(/^\//, "").split("/")[0];
-    return id ? { kind: "videoId", value: id } : null;
-  }
-  if (!/(^|\.)youtube\.com$/i.test(host)) return null;
-  if (parsed.pathname === "/watch") {
-    const v = parsed.searchParams.get("v");
-    return v ? { kind: "videoId", value: v } : null;
-  }
-  const segments = parsed.pathname.split("/").filter(Boolean);
-  if (segments.length === 0) return null;
-  const first = segments[0];
-  if (!first) return null;
-  if ((first === "shorts" || first === "embed") && segments[1]) {
-    return { kind: "videoId", value: segments[1] };
-  }
-  if (first === "channel" && segments[1]) {
-    return { kind: "channelId", value: segments[1] };
-  }
-  if (first.startsWith("@")) {
-    return { kind: "handle", value: first };
-  }
-  if ((first === "c" || first === "user") && segments[1]) {
-    return { kind: "handle", value: segments[1] };
-  }
-  return null;
-}
+// YouTube URL parsing moved to services/youtube-url.ts in the post-build
+// review sweep. Re-export under the original name so /sources/new and
+// data-sources.createSource keep working without churn at every callsite.
+// New code should import from `./youtube-url.js` directly.
+export { parseYoutubeUrl as parseYoutubeChannelUrl } from "./youtube-url.js";
 
 export function parseYoutubeVideoId(url: string): string | null {
   let parsed: URL;

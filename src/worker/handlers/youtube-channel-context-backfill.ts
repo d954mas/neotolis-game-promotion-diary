@@ -43,6 +43,7 @@ import {
   incrementUsage,
 } from "../../lib/server/services/youtube-quota-tracker.js";
 import { env } from "../../lib/server/config/env.js";
+import { parseYoutubeUrl } from "../../lib/server/services/youtube-url.js";
 import { logger } from "../../lib/server/logger.js";
 
 // Zod schemas for the three endpoints — defense against API drift.
@@ -141,68 +142,8 @@ async function fetchWithTimeout(url: URL, timeoutMs = 30_000): Promise<Response>
   }
 }
 
-// Parse a YouTube URL into one of three shapes the handler can resolve:
-//   - {kind: "channelId"} — straight at a /channel/UC… identifier (zero
-//     extra quota; we already have the channel id we need).
-//   - {kind: "handle"}    — /@handle, /c/legacy, /user/legacy. Resolves via
-//     channels.list?forHandle=… (1 unit).
-//   - {kind: "videoId"}   — /watch?v=…, /shorts/…, /embed/…, youtu.be/…
-//     The URL points at a video; we fetch videos.list?part=snippet to learn
-//     the video's channelId, then continue from there (1 unit). User-friendly:
-//     pasting any YouTube URL into /sources/new works.
-//
-// Returns null only for non-YouTube hosts or unparseable strings.
-function parseHandleUrl(
-  url: string,
-): { kind: "channelId" | "handle" | "videoId"; value: string } | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return null;
-  }
-  const host = parsed.hostname.toLowerCase();
-
-  // youtu.be/ID — short share URL, video.
-  if (host === "youtu.be") {
-    const id = parsed.pathname.replace(/^\//, "").split("/")[0];
-    return id ? { kind: "videoId", value: id } : null;
-  }
-
-  if (!/(^|\.)youtube\.com$/i.test(host)) return null;
-
-  // /watch?v=ID — full watch URL, video.
-  if (parsed.pathname === "/watch") {
-    const v = parsed.searchParams.get("v");
-    return v ? { kind: "videoId", value: v } : null;
-  }
-
-  const segments = parsed.pathname.split("/").filter(Boolean);
-  if (segments.length === 0) return null;
-
-  const first = segments[0];
-  if (!first) return null;
-
-  // /shorts/ID and /embed/ID — also videos.
-  if ((first === "shorts" || first === "embed") && segments[1]) {
-    return { kind: "videoId", value: segments[1] };
-  }
-
-  // /channel/UCxxxxx — direct channelId.
-  if (first === "channel" && segments[1]) {
-    return { kind: "channelId", value: segments[1] };
-  }
-  // /@handle — modern handle URL.
-  if (first.startsWith("@")) {
-    return { kind: "handle", value: first };
-  }
-  // /c/customname or /user/legacyname — resolvable via forHandle (YouTube
-  // accepts a bare name — no @ — alongside @-prefixed handles).
-  if ((first === "c" || first === "user") && segments[1]) {
-    return { kind: "handle", value: segments[1] };
-  }
-  return null;
-}
+// YouTube URL parsing moved to services/youtube-url.ts in the post-build
+// review sweep — see that module's header for the rationale.
 
 const CHANNELS_LIST_FOR_HANDLE_RESPONSE = z.object({
   kind: z.literal("youtube#channelListResponse"),
@@ -273,7 +214,7 @@ export async function handleChannelContextBackfill(job: {
   //      - https://www.youtube.com/c/legacy        → forHandle lookup
   //      - https://www.youtube.com/user/legacy     → forHandle lookup
   if (!channelId && handleUrl) {
-    const parsed = parseHandleUrl(handleUrl);
+    const parsed = parseYoutubeUrl(handleUrl);
     if (!parsed) {
       logger.warn(
         { jobId: job.id, handleUrl },
