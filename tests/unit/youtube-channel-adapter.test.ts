@@ -285,6 +285,27 @@ describe("youtubeChannelAdapter.pollStats — quotaUser fairness param", () => {
     expect(quotaUser).toBeTruthy();
     expect(quotaUser).toMatch(/^[0-9a-f]{8}$/);
   });
+
+  it("Test 8a: URL `key=` matches the threaded PickedKey.apiKey (regression test for post-build review bug 2 — double-pick drift)", async () => {
+    // Pre-fix the adapter called pickKeyForJob() internally inside
+    // pollStatsBatch, which would have advanced the round-robin index
+    // independently from the worker's pre-pick. The HTTP would burn the
+    // adapter's pick while writeSnapshot stored the worker's pick in
+    // youtube_service_quota_usage — invisible at indie scale (1 key) but
+    // the entire /admin/quota dashboard would mis-attribute units the
+    // moment the operator added a second key.
+    //
+    // Post-fix the adapter is FORCED to use whatever the caller threads
+    // through. This test pins the contract by passing a unique value
+    // that could not match any env-resolved key.
+    const events = [{ id: "e1", userId: fakeUserId, externalId: "v1" }];
+    const customPicked = { apiKey: "CUSTOM-KEY-XYZ-not-in-env", apiKeyId: "custom01" };
+    const calls = installFetchMock([{ status: 200, body: makeVideosListResponse(["v1"]) }]);
+
+    await youtubeChannelAdapter.pollStats(events, null, customPicked);
+
+    expect(calls[0]!.url.searchParams.get("key")).toBe("CUSTOM-KEY-XYZ-not-in-env");
+  });
 });
 
 describe("youtubeChannelAdapter.pollStats — Shorts detection (D-NEW)", () => {

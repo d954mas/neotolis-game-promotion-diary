@@ -592,6 +592,14 @@ export async function handleChannelContextBackfill(job: {
     // Defense in depth: even if a race causes the SELECT to miss a
     // concurrent INSERT, the partial UNIQUE on (user_id, kind, source_id,
     // external_id) WHERE source_id IS NOT NULL catches it at DB-level.
+    //
+    // REGRESSION RISK: the `eq(events.sourceId, sourceId)` filter is
+    // load-bearing. A future reader who removes it (thinking
+    // "just one event per video") will silently re-introduce the bug
+    // where a user's manual paste blocks the auto-import event for the
+    // same video. Integration test pinning this is filed as
+    // .planning/todos/pending/2026-05-07-channel-context-backfill-handler-integration-test.md
+    // (the existing test infra does not cover the handler holistically).
     const existing = await db
       .select({ externalId: events.externalId })
       .from(events)
