@@ -127,6 +127,20 @@
       "when": 1778160000000,
       "tag": "0017_youtube_channels_handle_aliases",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1778240000000,
+      "tag": "0018_youtube_metadata_fetch_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778250000000,
+      "tag": "0019_audit_log_insert_only_trigger",
+      "breakpoints": true
     }
   ]
 }

@@ -502,7 +502,7 @@ export async function mapEventsToDtos(userId: string, rows: EventRow[]): Promise
       userId,
       rows.map((e) => e.id),
     ),
-    loadVideoDataForEvents(rows),
+    loadVideoDataForEvents(userId, rows),
   ]);
   return rows.map((e) =>
     toEventDto(e, gameIdsMap.get(e.id) ?? [], videoMap.get(e.externalId ?? "") ?? null),
@@ -515,12 +515,17 @@ export async function mapEventsToDtos(userId: string, rows: EventRow[]): Promise
  * for all youtube_video events in the input list. Skips events with no
  * external_id (manual `other` entries) and non-youtube_video kinds.
  *
- * PUBLIC-DATA TABLE — no userId filter (videos are tenant-agnostic).
- * The eslint-tenant-scope rule allowlists this via the schema's "no tenant
- * scope" header comment. The DTO projection at toEventDto's third arg is
- * how this data reaches the UI; the JOIN here is the load path.
+ * PUBLIC-DATA TABLE — no userId filter on the youtube_videos query (the
+ * table is tenant-agnostic per CONTEXT D-07). However, the function takes
+ * `userId` and filters input rows to that tenant before extracting
+ * external_ids — defense-in-depth (post-build review 2026-05-07): callers
+ * are tenant-scoped today, but a future refactor that hands a cross-tenant
+ * EventRow[] to this function would silently load video data for rows the
+ * caller had no business reading. Symmetrical with loadGameIdsForEvents
+ * which already takes userId for the same reason.
  */
 export async function loadVideoDataForEvents(
+  userId: string,
   rows: EventRow[],
 ): Promise<
   Map<
@@ -531,7 +536,9 @@ export async function loadVideoDataForEvents(
   const externalIds = Array.from(
     new Set(
       rows
-        .filter((r) => r.kind === "youtube_video" && r.externalId !== null)
+        .filter(
+          (r) => r.userId === userId && r.kind === "youtube_video" && r.externalId !== null,
+        )
         .map((r) => r.externalId!),
     ),
   );

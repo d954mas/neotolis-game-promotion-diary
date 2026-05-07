@@ -18,9 +18,11 @@ import { eq } from "drizzle-orm";
 import { pickKeyForJob, youtubeQuotaUser, incrementUsage } from "./youtube-quota-tracker.js";
 import { db } from "../db/client.js";
 import { youtubeVideos } from "../db/schema/youtube-videos.js";
+import { youtubeMetadataFetchLog } from "../db/schema/youtube-metadata-fetch-log.js";
 import { env } from "../config/env.js";
 import { AppError } from "./errors.js";
 import { logger } from "../logger.js";
+import { withQuotaGuard } from "./quota.js";
 
 const VIDEOS_LIST_RESPONSE = z.object({
   kind: z.literal("youtube#videoListResponse"),
@@ -115,16 +117,20 @@ async function fetchWithTimeout(url: URL, timeoutMs = 10_000): Promise<Response>
 export async function fetchVideoMetadataByUrl(
   url: string,
   userId: string,
+  ipAddress: string,
 ): Promise<FetchedVideoMetadata & { cached: boolean }> {
   const videoId = parseYoutubeVideoId(url);
   if (!videoId) {
     throw new AppError("not a YouTube video URL", "validation_failed", 422, { url });
   }
 
-  // Cache hit path — 0 quota burn. Phase 3.0 post-build cache table is the
-  // single source of truth for "we already know about this video". Backfill
-  // handler keeps it warm when channel-context backfills run; this branch
-  // also catches the case where the user pastes the same URL twice.
+  // Cache hit path — 0 quota burn AND no per-user rate-limit gate. Phase
+  // 3.0 post-build cache table is the single source of truth for "we
+  // already know about this video". Backfill handler keeps it warm when
+  // channel-context backfills run; this branch also catches the case
+  // where the user pastes the same URL twice. Cache hits are free —
+  // they don't ping Google, don't burn the operator's envelope, and
+  // don't count against the user's youtube_metadata_fetches_per_day cap.
   const cached = await db
     .select()
     .from(youtubeVideos)
@@ -143,6 +149,22 @@ export async function fetchVideoMetadataByUrl(
     };
   }
 
+  // Cache miss → real Google call. Two-phase pattern (Pitfall 5 — never
+  // hold a tx across an HTTP call):
+  //
+  //   Phase A (inside withQuotaGuard tx): claim the slot — count + INSERT
+  //     a row into youtube_metadata_fetch_log. The pg_advisory_xact_lock
+  //     on userId serializes concurrent claims so the cap is race-safe.
+  //     Eager-write semantics: the slot is consumed regardless of whether
+  //     the upstream call later succeeds. This prevents an attacker from
+  //     bypassing the cap via deliberately-failing requests (paste 1000
+  //     bad URLs in a loop → all 1000 get 422/404 from Google → without
+  //     eager-write, none of them count against the user's 50/day cap).
+  //
+  //   Phase B (outside tx): HTTP call to YouTube. Slow operations live
+  //     here so the tx-boundary stays under 50ms.
+  //
+  //   Phase C (no tx — single statement): UPSERT youtube_videos cache.
   const picked = pickKeyForJob();
   if (!picked) {
     throw new AppError(
@@ -153,6 +175,12 @@ export async function fetchVideoMetadataByUrl(
     );
   }
 
+  // Phase A — claim slot under per-user lock.
+  await withQuotaGuard(userId, "youtube_metadata_fetches_per_day", ipAddress, async (tx) => {
+    await tx.insert(youtubeMetadataFetchLog).values({ userId });
+  });
+
+  // Phase B — HTTP call OUTSIDE any tx.
   const apiUrl = new URL(`${env.YOUTUBE_API_BASE_URL}/videos`);
   apiUrl.searchParams.set("id", videoId);
   apiUrl.searchParams.set("part", "snippet");
@@ -160,10 +188,7 @@ export async function fetchVideoMetadataByUrl(
   apiUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
   const resp = await fetchWithTimeout(apiUrl);
-  // Charge quota only on a 2xx — Google bills 0 units for 4xx/5xx that
-  // never reached the videos.list endpoint successfully (reviewer's
-  // P2 #10). Counter staying clean on errors avoids spurious throttle
-  // trips when the operator's key is wrong / rate-limited.
+  // Charge quota only on a 2xx — Google bills 0 units for 4xx/5xx.
   if (resp.ok) {
     await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
   }
@@ -181,8 +206,9 @@ export async function fetchVideoMetadataByUrl(
     throw new AppError("video not found on YouTube", "not_found", 404, { videoId });
   }
 
-  // Write-through to cache so the next paste of this URL (by anyone) is a
-  // hit. UPSERT on video_id PK; no tenant scope on the cache row.
+  // Phase C — write-through to cache so the next paste of this URL (by
+  // anyone) is a hit. UPSERT on video_id PK; no tenant scope on the
+  // cache row (public-data table).
   const publishedAtDate = item.snippet.publishedAt ? new Date(item.snippet.publishedAt) : null;
   const now = new Date();
   await db

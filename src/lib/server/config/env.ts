@@ -88,6 +88,12 @@ const RawSchema = z.object({
   LIMIT_SOURCES_PER_USER: z.coerce.number().int().positive().default(50),
   // Rolling 24h limit on event creation (NOT calendar-day reset).
   LIMIT_EVENTS_PER_DAY: z.coerce.number().int().positive().default(500),
+  // Phase 3.0 post-build review (2026-05-07) — per-user cap on cache-miss
+  // YouTube metadata fetches ("Get from YouTube" button on /events/new).
+  // Closes the operator-quota burn loop the scripted-loop attacker could
+  // exploit on /api/youtube/fetch-metadata. 50/day default; cache hits
+  // don't count. Operator can raise via .env if their users need more.
+  LIMIT_YOUTUBE_METADATA_FETCHES_PER_DAY: z.coerce.number().int().positive().default(50),
 
   // Phase 02.2 D-24: image tag override for docker-compose.prod.yml. The
   // application code never reads this directly (compose substitutes it at
@@ -240,6 +246,7 @@ export const env = {
   LIMIT_GAMES_PER_USER: raw.LIMIT_GAMES_PER_USER,
   LIMIT_SOURCES_PER_USER: raw.LIMIT_SOURCES_PER_USER,
   LIMIT_EVENTS_PER_DAY: raw.LIMIT_EVENTS_PER_DAY,
+  LIMIT_YOUTUBE_METADATA_FETCHES_PER_DAY: raw.LIMIT_YOUTUBE_METADATA_FETCHES_PER_DAY,
   IMAGE_TAG: raw.IMAGE_TAG,
   DOMAIN: raw.DOMAIN,
   // Phase 3.0 additions (D-06 / D-13 / D-16 + smoke override)

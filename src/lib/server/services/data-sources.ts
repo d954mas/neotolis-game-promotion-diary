@@ -206,7 +206,7 @@ export async function createSource(
       // swallowed errors and created a source with channelId=NULL — UX bug:
       // user pasted a truncated/typo'd URL and got a "ghost" source that
       // could never poll. Better to fail visibly so the user fixes the URL.
-      const meta = await fetchVideoMetadataByUrl(input.handleUrl, userId);
+      const meta = await fetchVideoMetadataByUrl(input.handleUrl, userId, ipAddress);
       if (meta.channelId) {
         resolvedChannelId = meta.channelId;
         canonicalHandleUrl = `https://www.youtube.com/channel/${meta.channelId}`;

@@ -45,7 +45,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
     // Per-video refactor (2026-05-06): load polling state from
     // youtube_videos for kind=youtube_video events. PollingBadge consumes
     // publishedAt + lastPollStatus + lastPolledAt via the EventDto.
-    const videoMap = await loadVideoDataForEvents([row]);
+    const videoMap = await loadVideoDataForEvents(locals.user.id, [row]);
     const videoData = row.externalId ? (videoMap.get(row.externalId) ?? null) : null;
     const primaryGame =
       gameIds.length > 0 ? (games.find((g) => g.id === gameIds[0]) ?? null) : null;

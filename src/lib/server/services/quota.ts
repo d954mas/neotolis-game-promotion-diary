@@ -42,11 +42,16 @@ import { db, type DB } from "../db/client.js";
 import { games } from "../db/schema/games.js";
 import { dataSources } from "../db/schema/data-sources.js";
 import { events } from "../db/schema/events.js";
+import { youtubeMetadataFetchLog } from "../db/schema/youtube-metadata-fetch-log.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError } from "./errors.js";
 
-export type QuotaKind = "games" | "data_sources" | "events_per_day";
+export type QuotaKind =
+  | "games"
+  | "data_sources"
+  | "events_per_day"
+  | "youtube_metadata_fetches_per_day";
 
 // Drizzle transaction parameter type — `tx` inside `db.transaction(async tx =>
 // {...})`. Same surface as `DB` for `select`/`execute`/`insert`.
@@ -56,6 +61,12 @@ const LIMITS: Record<QuotaKind, number> = {
   games: env.LIMIT_GAMES_PER_USER,
   data_sources: env.LIMIT_SOURCES_PER_USER,
   events_per_day: env.LIMIT_EVENTS_PER_DAY,
+  // Per-user 24h cap on cache-miss YouTube metadata fetches (the
+  // "Get from YouTube" button on /events/new). Closes the operator-quota
+  // burn-loop a scripted-loop caller could otherwise exploit on the
+  // /api/youtube/fetch-metadata route. 50/day is the same indie-friendly
+  // shape as games / data_sources caps; cache hits don't count.
+  youtube_metadata_fetches_per_day: env.LIMIT_YOUTUBE_METADATA_FETCHES_PER_DAY,
 };
 
 async function currentCount(dbCtx: DbOrTx, userId: string, kind: QuotaKind): Promise<number> {
@@ -71,6 +82,21 @@ async function currentCount(dbCtx: DbOrTx, userId: string, kind: QuotaKind): Pro
       .select({ c: count() })
       .from(dataSources)
       .where(and(eq(dataSources.userId, userId), isNull(dataSources.deletedAt)));
+    return Number(r?.c ?? 0);
+  }
+  if (kind === "youtube_metadata_fetches_per_day") {
+    // Rolling 24h count of cache-miss "Get from YouTube" button clicks.
+    // Cache hits never insert here, so they don't count.
+    const sinceMfl = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [r] = await dbCtx
+      .select({ c: count() })
+      .from(youtubeMetadataFetchLog)
+      .where(
+        and(
+          eq(youtubeMetadataFetchLog.userId, userId),
+          gte(youtubeMetadataFetchLog.fetchedAt, sinceMfl),
+        ),
+      );
     return Number(r?.c ?? 0);
   }
   // events_per_day — rolling 24h count.
