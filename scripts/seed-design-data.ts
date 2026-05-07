@@ -455,18 +455,34 @@ async function main(): Promise<void> {
   }
 
   // ─── audit_log ────────────────────────────────────────────────────────────
-  const auditEntries: Array<{ action: typeof auditLog.$inferInsert.action; days: number; meta: Record<string, unknown> }> = [
+  const auditEntries: Array<{
+    action: typeof auditLog.$inferInsert.action;
+    days: number;
+    meta: Record<string, unknown>;
+  }> = [
     { action: "user.signup", days: 60, meta: {} },
     { action: "session.signin", days: 60, meta: { ip: "127.0.0.1" } },
     { action: "game.created", days: 58, meta: { game_title: "Neotolis: Last Light" } },
     { action: "game.created", days: 50, meta: { game_title: "Dungeon Tactics" } },
-    { action: "source.added", days: 47, meta: { kind: "youtube_channel", display_name: "Neotolis Games" } },
+    {
+      action: "source.added",
+      days: 47,
+      meta: { kind: "youtube_channel", display_name: "Neotolis Games" },
+    },
     { action: "source.added", days: 45, meta: { kind: "reddit_account" } },
     { action: "event.created", days: 45, meta: { kind: "youtube_video" } },
     { action: "event.attached_to_game", days: 45, meta: { game_title: "Neotolis: Last Light" } },
-    { action: "event.poll_refreshed", days: 30, meta: { external_id: "dQw4w9WgXcQ", view_count: 16000 } },
+    {
+      action: "event.poll_refreshed",
+      days: 30,
+      meta: { external_id: "dQw4w9WgXcQ", view_count: 16000 },
+    },
     { action: "theme.changed", days: 25, meta: { theme: "dark" } },
-    { action: "source.toggled_auto_import", days: 18, meta: { kind: "youtube_channel", auto_import: true } },
+    {
+      action: "source.toggled_auto_import",
+      days: 18,
+      meta: { kind: "youtube_channel", auto_import: true },
+    },
     { action: "event.created", days: 12, meta: { kind: "reddit_post" } },
     { action: "event.dismissed_from_inbox", days: 8, meta: {} },
     { action: "event.edited", days: 5, meta: { kind: "telegram_post" } },

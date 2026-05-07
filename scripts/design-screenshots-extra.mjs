@@ -17,7 +17,9 @@ await mkdir(OUT_DIR, { recursive: true });
 
 const pg = new Client({ connectionString: "postgres://postgres:postgres@localhost:5432/neotolis" });
 await pg.connect();
-const game = (await pg.query("SELECT id FROM games WHERE deleted_at IS NULL ORDER BY created_at LIMIT 1")).rows[0];
+const game = (
+  await pg.query("SELECT id FROM games WHERE deleted_at IS NULL ORDER BY created_at LIMIT 1")
+).rows[0];
 await pg.end();
 
 const mobileTargets = [

@@ -21,6 +21,18 @@
 import { describe, it, expect, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
+// Phase 3.0 post-build review (2026-05-07): worker handlers short-circuit
+// to status='auth_error' without invoking the adapter when
+// pickKeyForJob() returns null. Mock pickKeyForJob to return a fixture
+// so this suite reaches the mocked adapter under test.
+vi.mock("../../src/lib/server/services/youtube-quota-tracker.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    pickKeyForJob: () => ({ apiKey: "test-key-paste-then-poll", apiKeyId: "ptp00001" }),
+  };
+});
+
 const adapterMock = {
   pollStatsByVideoId: vi.fn(),
 };

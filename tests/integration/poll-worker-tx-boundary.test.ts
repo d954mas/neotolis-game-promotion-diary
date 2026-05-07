@@ -15,6 +15,22 @@
 import { describe, it, expect, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
+// Phase 3.0 post-build review (2026-05-07): worker handlers now require
+// pickKeyForJob() to return a non-null PickedKey — the no-key path
+// short-circuits without invoking the adapter (matches production
+// self-host parity for the env.SERVICE_YOUTUBE_API_KEYS-empty case).
+// Mock pickKeyForJob to return a fixture so this suite reaches the
+// adapter mock under test. ESM hoisting prevents seeding env at module
+// top from being picked up by env.ts; mocking the picker directly is
+// the same approach the existing adapter tests use for env-control.
+vi.mock("../../src/lib/server/services/youtube-quota-tracker.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    pickKeyForJob: () => ({ apiKey: "test-key-tx-boundary", apiKeyId: "txbound1" }),
+  };
+});
+
 const adapterMock = {
   pollStatsByVideoId: vi.fn(),
 };
