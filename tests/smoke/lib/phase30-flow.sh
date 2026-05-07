@@ -119,7 +119,14 @@ phase30_polling_smoke() {
   #   - youtube.rehab_unavailable    (cron 0 4 * * 0, tz=PT)   weekly rehab cron
   #     (per-video refactor 2026-05-06 — recovers privacy-unflipped videos)
   log "(P3.0) asserting 5 cron schedules in pgboss.schedule"
+  # Avoid `local foo=$(cmd)` — `local` swallows the inner command's exit
+  # code, but `set -e` then trips when the assignment expression itself
+  # is evaluated as part of pipeline state, exiting the script silently
+  # without running the diagnostic block. Capture under `set +e`, then
+  # restore + log explicitly so any failure surfaces in the CI log.
   local schedules
+  local schedules_rc
+  set +e
   schedules=$(docker exec smoke-app node -e '
     import("./node_modules/pg/lib/index.js").then(async ({ Client }) => {
       const c = new Client({ connectionString: process.env.DATABASE_URL });
@@ -130,9 +137,18 @@ phase30_polling_smoke() {
       } finally { await c.end(); }
     }).catch((e) => { console.error(e); process.exit(1); });
   ' 2>&1)
-  log "----- pgboss.schedule names -----"
+  schedules_rc=$?
+  set -e
+  log "----- pgboss.schedule names (exit=$schedules_rc) -----"
   echo "$schedules"
   log "---------------------------------"
+  if [ "$schedules_rc" -ne 0 ]; then
+    log "----- smoke-scheduler logs (last 80 lines) -----"
+    docker logs smoke-scheduler 2>&1 | tail -80 || true
+    log "----- smoke-app logs (last 50 lines) -----"
+    docker logs smoke-app 2>&1 | tail -50 || true
+    fail "(P3.0) docker exec smoke-app node (pgboss.schedule readback) exited $schedules_rc"
+  fi
   for expected in "scheduler.tick.active" "scheduler.tick.cold" "youtube.quota_reset" "purge.daily" "youtube.rehab_unavailable"; do
     if ! echo "$schedules" | grep -qx "$expected"; then
       fail "(P3.0) pgboss.schedule missing entry for '$expected'"
