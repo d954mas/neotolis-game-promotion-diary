@@ -224,7 +224,13 @@ export async function getThrottleState(now: Date = new Date()): Promise<Throttle
  */
 export async function markThrottleTransition(args: {
   state: "eighty" | "ninetyfive";
-  apiKeyId: string;
+  // Optional: a real 8-char SHA-8 of the API key that triggered the
+  // detection (worker-context — we know which key was just used).
+  // The scheduler-tick path sees the threshold cross via the AGGREGATE
+  // counter across all keys, so it has no single key to attribute —
+  // omit the field rather than emit a synthetic placeholder. Audit
+  // metadata stays honest about the source.
+  apiKeyId?: string;
   estimatedUnits: number;
 }): Promise<void> {
   const datePacific = todayPacific();
@@ -278,7 +284,11 @@ export async function markThrottleTransition(args: {
     metadata: {
       date_pacific: datePacific,
       state: args.state,
-      api_key_id: args.apiKeyId,
+      // Omit api_key_id entirely when the caller has no specific key to
+      // attribute (scheduler-tick path). A literal "scheduler-tick" string
+      // would be synthetic noise — admins reading /admin/quota would
+      // mistake it for a hashed key id.
+      ...(args.apiKeyId !== undefined ? { api_key_id: args.apiKeyId } : {}),
       estimated_units: args.estimatedUnits,
     },
   });

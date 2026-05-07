@@ -164,8 +164,12 @@ export async function enqueueActivePolls(now: Date = new Date()): Promise<Enqueu
   if (throttle === "eighty") {
     try {
       await markThrottleTransition({
+        // Scheduler-tick context: the 80% threshold was detected via the
+        // aggregate cross-key counter, not a per-key 4xx response. We have
+        // no specific apiKeyId to attribute — omit the field rather than
+        // emit a synthetic "scheduler-tick" placeholder. The audit row
+        // still lands; only metadata.api_key_id is absent.
         state: "eighty",
-        apiKeyId: "scheduler-tick",
         estimatedUnits: THROTTLE_EIGHTY_THRESHOLD,
       });
     } catch (err) {

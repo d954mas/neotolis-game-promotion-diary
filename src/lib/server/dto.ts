@@ -536,9 +536,7 @@ export async function loadVideoDataForEvents(
   const externalIds = Array.from(
     new Set(
       rows
-        .filter(
-          (r) => r.userId === userId && r.kind === "youtube_video" && r.externalId !== null,
-        )
+        .filter((r) => r.userId === userId && r.kind === "youtube_video" && r.externalId !== null)
         .map((r) => r.externalId!),
     ),
   );

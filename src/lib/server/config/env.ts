@@ -21,7 +21,10 @@ import { z } from "zod";
 // .env.local in that case so per-test withEnv() / withYoutubeKeys() helpers
 // can stub process.env without local-machine secrets bleeding through.
 loadDotenv();
-// eslint-disable-next-line no-restricted-properties -- dotenv probe BEFORE we parse env; this is the boot-time gate that decides whether to layer .env.local. See D-24.
+// dotenv probe BEFORE we parse env; this is the boot-time gate that
+// decides whether to layer .env.local (D-24). env.ts is the single
+// legitimate process.env reader, so the no-restricted-properties rule
+// does not apply here.
 if (process.env.NODE_ENV !== "test") {
   loadDotenv({ path: ".env.local", override: true });
 }
@@ -196,14 +199,15 @@ if (!kekVersions.has(raw.KEK_CURRENT_VERSION)) {
 //   2. import handler.js → bundled env.ts parses process.env successfully
 //   3. server.ts calls scrubKekFromEnv() once startup is complete
 export function scrubKekFromEnv(): void {
-  // eslint-disable-next-line no-restricted-properties -- env.ts is the SOLE
-  // legitimate process.env reader (D-24); scrub is the inverse — clearing
-  // the secret fields after they've been parsed into the env-singleton so a
-  // later console.log(process.env) at runtime can't leak them. Phase 3.0
-  // post-build (UAT 2026-05-06) extends scrub coverage past the original
-  // KEK-only list per reviewer's BUG-5 — every credential/secret env var
-  // landed via the schema is wiped. Pino redact still covers logger output;
-  // this is the second layer for direct process.env reads.
+  // env.ts is the SOLE legitimate process.env reader (D-24); scrub is the
+  // inverse — clearing the secret fields after they've been parsed into
+  // the env-singleton so a later console.log(process.env) at runtime
+  // can't leak them. Phase 3.0 post-build (UAT 2026-05-06) extends scrub
+  // coverage past the original KEK-only list per reviewer's BUG-5 —
+  // every credential/secret env var landed via the schema is wiped.
+  // Pino redact still covers logger output; this is the second layer
+  // for direct process.env reads. The no-restricted-properties rule
+  // does not apply inside env.ts.
   const SECRET_KEYS = [
     "APP_KEK_BASE64",
     "BETTER_AUTH_SECRET",

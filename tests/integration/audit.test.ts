@@ -338,10 +338,7 @@ describe("audit_log INSERT-only invariant (migration 0019)", () => {
 
     let caught: unknown = null;
     try {
-      await db
-        .update(auditLog)
-        .set({ ipAddress: "0.0.0.0" })
-        .where(eq(auditLog.userId, u.id));
+      await db.update(auditLog).set({ ipAddress: "0.0.0.0" }).where(eq(auditLog.userId, u.id));
     } catch (err) {
       caught = err;
     }
