@@ -22,17 +22,38 @@
 // `last_backfill_at` lets the worker decide whether to refresh the row
 // (e.g. user pastes a stale upload from 6 months ago and the channel's
 // playlist needs a re-walk). NULL = never backfilled.
+//
+// `handle_aliases` (Phase 3.0 post-build, 2026-05-07) tracks every
+// handle / legacy URL that resolved to this UC id. Backfill worker
+// appends the resolved-from URL after channels.list?forHandle returns
+// the UC id; ingest's cache lookup widens with `= ANY(handle_aliases)`
+// so any future paste of the same handle URL hits the row directly.
+// This permanently closes the handle-URL cache miss documented in
+// the Phase 3.0 build-phase code review (bug-3).
 
-import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, index } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
-export const youtubeChannels = pgTable("youtube_channels", {
-  channelId: text("channel_id").primaryKey(),
-  uploadsPlaylistId: text("uploads_playlist_id").notNull(),
-  channelTitle: text("channel_title"),
-  lastBackfillAt: timestamp("last_backfill_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const youtubeChannels = pgTable(
+  "youtube_channels",
+  {
+    channelId: text("channel_id").primaryKey(),
+    uploadsPlaylistId: text("uploads_playlist_id").notNull(),
+    channelTitle: text("channel_title"),
+    lastBackfillAt: timestamp("last_backfill_at", { withTimezone: true }),
+    handleAliases: text("handle_aliases")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // GIN index supports `= ANY(handle_aliases)` membership lookups in
+    // the ingest cache check without a seq scan.
+    handleAliasesIdx: index("idx_youtube_channels_handle_aliases").using("gin", t.handleAliases),
+  }),
+);
 
 export type YoutubeChannel = typeof youtubeChannels.$inferSelect;
 export type NewYoutubeChannel = typeof youtubeChannels.$inferInsert;

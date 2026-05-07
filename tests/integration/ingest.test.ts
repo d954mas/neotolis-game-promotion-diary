@@ -489,6 +489,47 @@ describe("Plan 03.0-10: channel-context backfill trigger (CONTEXT D-14)", () => 
     expect(enqueues).toHaveLength(0);
   });
 
+  it("Test 3a: paste where channel matches a handle_aliases entry → event created; ZERO enqueue (handle-URL cache hit)", async () => {
+    // Phase 3.0 post-build (2026-05-07) — handle-URL cache miss closure.
+    // ingest extracts the raw handle URL as channelId for /@… inputs.
+    // Backfill worker resolves the URL → UC and writes the URL into
+    // handle_aliases on the existing UC row. This test pins the
+    // ingest-side payoff: a paste that matches a row's handle_aliases
+    // entry hits the cache and skips the enqueue, just like a UC PK match.
+    ytSpy.mockResolvedValue({
+      kind: "ok",
+      data: {
+        title: "Aliased handle video",
+        authorName: "Handle Dev",
+        authorUrl: "https://www.youtube.com/@handle-dev",
+        thumbnailUrl: "",
+      },
+    });
+    const u = await seedUserDirectly({ email: "p10-alias@test.local" });
+
+    // Pre-seed the cache: UC row with the handle URL recorded as an alias.
+    await db.insert(youtubeChannels).values({
+      channelId: "UCalias01alias01alias01a",
+      uploadsPlaylistId: "UUalias01alias01alias01a",
+      channelTitle: "Handle Dev Channel",
+      lastBackfillAt: new Date(),
+      handleAliases: ["https://www.youtube.com/@handle-dev"],
+    });
+
+    await parsePasteAndCreate(
+      u.id,
+      null,
+      "https://www.youtube.com/watch?v=p10ali001ab",
+      "127.0.0.1",
+    );
+
+    const rows = await db.select().from(events).where(eq(events.userId, u.id));
+    expect(rows).toHaveLength(1);
+
+    const enqueues = sentJobs.filter((j) => j.queue === "youtube.channel_context_backfill");
+    expect(enqueues).toHaveLength(0);
+  });
+
   it("Test 4: non-YouTube paste (Twitter) → ZERO channel-context enqueue (no false positives on other kinds)", async () => {
     twSpy.mockResolvedValue({
       authorName: "Anna Indie",

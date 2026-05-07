@@ -35,7 +35,7 @@
 // any error enqueueing is logged + swallowed so the user-facing paste still
 // returns 201.
 
-import { eq } from "drizzle-orm";
+import { eq, or, sql } from "drizzle-orm";
 import { parseIngestUrl } from "./url-parser.js";
 import { fetchTwitterOembed } from "../integrations/twitter-oembed.js";
 import { createEvent, createEventFromPaste } from "./events.js";
@@ -195,33 +195,32 @@ async function maybeEnqueueChannelContextBackfill(
     // Cache lookup against the public-data table (no user_id — see schema
     // module header). A row exists if a previous paste of any tenant's video
     // from this channel already triggered the backfill handler successfully.
+    //
+    // Phase 3.0 post-build (2026-05-07) — bug-3 closure: extend the
+    // lookup with `= ANY(handle_aliases)` so handle/legacy URL paste hits
+    // its UC row through the alias array. Backfill worker writes the
+    // resolved-from URL into handle_aliases after channels.list?forHandle
+    // returns the UC id; subsequent pastes of the same handle URL find
+    // the row directly here, no enqueue, no quota.
     const cached = await db
       .select({ channelId: youtubeChannels.channelId })
       .from(youtubeChannels)
-      .where(eq(youtubeChannels.channelId, channelId))
+      .where(
+        or(
+          eq(youtubeChannels.channelId, channelId),
+          sql`${channelId} = ANY(${youtubeChannels.handleAliases})`,
+        ),
+      )
       .limit(1);
     if (cached.length > 0) return;
 
     const boss = await getBoss();
-    // Phase 3.0 post-build (UAT 2026-05-06) — BUG-3 partial mitigation.
-    //
-    // For /channel/UC… URLs the cache lookup above (youtubeChannels by
-    // channel_id PK) hits cleanly, so this enqueue path runs at most once
-    // per channel ever. For /@handle / /c/legacy URLs `extractChannelId…`
-    // returns the URL string itself as the singletonKey: the cache-lookup
-    // never hits (cache stores UC… PK, not handle URLs), so the enqueue
-    // would re-fire every 24h on each paste of any video from that handle —
-    // burning 9 quota units monthly per channel for nothing.
-    //
-    // The proper fix is a `youtube_channels.handle_aliases jsonb[]` column
-    // (or a separate alias table) populated by the worker after it resolves
-    // the handle → UC. Schema change deferred to a follow-up todo.
-    //
-    // Mitigation here: bump singleton dedup from 24h → 30d for handle URLs.
-    // The handle-keyed singleton still skips re-enqueues for a month;
-    // worst-case wasted cost is ~9 units per channel per 30 days, not per
-    // 24 hours. The 24h dedup stays for UC URLs because they hit the cache
-    // first and never reach this branch in steady state anyway.
+    // Belt-and-suspenders: even with handle_aliases closing the steady-
+    // state cache miss, a backfill that crashes BEFORE writing the alias
+    // leaves no cache entry behind. Singleton dedup catches concurrent
+    // re-pastes within the window. UC URLs always hit the PK cache after
+    // the first successful backfill so 24h is plenty; handle URLs get a
+    // wider 30-day window as a safety net for failed-backfill scenarios.
     const isUcId = /^UC[A-Za-z0-9_-]{20,}$/.test(channelId);
     await boss.send(
       QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL,

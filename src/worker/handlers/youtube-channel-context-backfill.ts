@@ -237,6 +237,17 @@ export async function handleChannelContextBackfill(job: {
 }): Promise<void> {
   const { userId, handleUrl, sourceId } = job.data;
   let channelId = job.data.channelId;
+  // Phase 3.0 post-build (2026-05-07): track the alias input that triggered
+  // this backfill. After resolving handle/legacy/video URL → UC id we write
+  // the alias into youtube_channels.handle_aliases so the next ingest paste
+  // of the same alias hits the cache directly. Captured BEFORE resolution
+  // because `channelId` is reassigned to the UC id mid-flow.
+  //   - From ingest path: job.data.channelId may be the raw URL string
+  //     ("https://youtube.com/@handle") when ingest could not extract a UC
+  //     id; that string is the alias to record on the resolved row.
+  //   - From createSource path: job.data.handleUrl carries the user's
+  //     pasted URL; same alias treatment.
+  const aliasInputCandidate = handleUrl ?? job.data.channelId ?? null;
 
   if (!userId || (!channelId && !handleUrl)) {
     logger.warn(
@@ -403,6 +414,32 @@ export async function handleChannelContextBackfill(job: {
         updatedAt: now,
       },
     });
+
+  // 2a. Append the resolved-from URL to handle_aliases (Phase 3.0 post-build,
+  //     2026-05-07). Fixes the handle-URL cache miss documented in the
+  //     build-phase code review (bug-3): ingest's cache lookup now widens
+  //     with `OR $key = ANY(handle_aliases)`, so any future paste of the
+  //     same handle URL hits the row directly — no enqueue, no quota.
+  //     Skip writes when:
+  //       - aliasInputCandidate is null (no input URL captured);
+  //       - the alias equals the resolved channelId (UC-only path: already
+  //         covered by the PK lookup, no alias needed);
+  //       - the alias is already in the array (`!= ALL` predicate keeps
+  //         the column free of duplicates without a SELECT round-trip).
+  if (aliasInputCandidate && aliasInputCandidate !== channelId) {
+    await db
+      .update(youtubeChannels)
+      .set({
+        handleAliases: sql`array_append(${youtubeChannels.handleAliases}, ${aliasInputCandidate})`,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(youtubeChannels.channelId, channelId),
+          sql`${aliasInputCandidate} != ALL(${youtubeChannels.handleAliases})`,
+        ),
+      );
+  }
 
   // 3. playlistItems.list — paginated walk of the uploads playlist, filtered
   //    by `backfillWindow` cutoff. 1 quota unit per page. Stops on first page

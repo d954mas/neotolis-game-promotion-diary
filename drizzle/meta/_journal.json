@@ -120,6 +120,13 @@
       "when": 1778090000000,
       "tag": "0016_per_video_polling_state",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1778160000000,
+      "tag": "0017_youtube_channels_handle_aliases",
+      "breakpoints": true
     }
   ]
 }
