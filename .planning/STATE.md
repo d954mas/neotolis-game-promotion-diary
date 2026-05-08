@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0.1-07 — per-kind queue topology + scheduler refactor
-last_updated: "2026-05-08T16:47:39.787Z"
+stopped_at: Completed 03.0.1-08-observability-rate-budget-and-error-taxonomy-PLAN.md
+last_updated: "2026-05-08T17:14:37.373Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 12
   completed_phases: 5
   total_plans: 93
-  completed_plans: 89
+  completed_plans: 90
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0.1 (source-plugin-architecture) — EXECUTING
-Plan: 8 of 11
+Plan: 9 of 11
 
 ## Performance Metrics
 
@@ -131,6 +131,7 @@ Plan: 8 of 11
 | Phase 03.0.1-source-plugin-architecture P05 | ~8 min 1 s | 1 tasks | 16 files |
 | Phase 03.0.1-source-plugin-architecture P06 | ~6 min 49 s | 1 tasks | 7 files |
 | Phase 03.0.1 P07 | 7 minutes | 2 tasks | 21 files |
+| Phase 03.0.1 P08 | ~25min | 2 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -392,6 +393,7 @@ Recent decisions affecting current work:
 - [Phase 03.0.1]: DO $$ schema-existence guard added to migration 0021 (matches 0010_phase03_baseline.sql precedent — required for fresh test DBs where pgboss has not booted)
 - [Phase 03.0.1]: Tier-eligibility computation moved INTO handlePollActive/Cold (not a thin scheduler layer): collocates the tier-window cutoff + selectEligibleVideoIds + Phase A HTTP + Phase B writeSnapshot in one file per tier. scheduler/enqueue.ts deleted.
 - [Phase 03.0.1]: pg-boss v11+ key-based multiple-schedule-per-queue collapses Active+Cold cron schedules onto youtube.poll.cron with {key:'active'} and {key:'cold'} (RESEARCH.md OQ#2). Single subscription, tier-tagged payloads.
+- [Phase 03.0.1]: Plan 08: D-13 needs_reconnect/last_error_at/last_error_kind columns added via forward-only migration 0022. observability stub replaced with real getDailyStats/getRecentAudit. RateLimiterMemory reservoirs (cron 8000pts/user 2000pts) consume per ctx.origin BEFORE fetch. AdapterError 5-category taxonomy throws on every error path in chargedFetch. admin-quota-read kind-decoupled via getAdapter(youtube_channel).observability.
 
 ### Pending Todos
 
@@ -434,8 +436,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-08T16:47:31.506Z
+Last session: 2026-05-08T17:14:28.114Z
 Last Activity: 2026-05-08
-Stopped at: Completed 03.0.1-07 — per-kind queue topology + scheduler refactor
+Stopped at: Completed 03.0.1-08-observability-rate-budget-and-error-taxonomy-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
