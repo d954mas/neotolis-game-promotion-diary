@@ -30,7 +30,7 @@ beforeAll(async () => {
 afterAll(async () => {
   // Clean up the singleton between test files so other suites get fresh state.
   try {
-    await boss.stop({ wait: true, graceful: false, timeout: 5_000 });
+    await boss.stop({ graceful: false, timeout: 5_000 });
   } catch {
     /* swallow stop errors — boss may already be stopping */
   }

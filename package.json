@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.11",
+    "node": ">=22.12",
     "pnpm": ">=9"
   },
   "packageManager": "pnpm@9.15.0",
@@ -42,7 +42,7 @@
     "hono": "4.12.15",
     "ipaddr.js": "^2.3.0",
     "pg": "8.20.0",
-    "pg-boss": "10.4.2",
+    "pg-boss": "12.18.2",
     "pino": "^9.5.0",
     "rate-limiter-flexible": "^5.0.0",
     "svelte": "^5.55.5",

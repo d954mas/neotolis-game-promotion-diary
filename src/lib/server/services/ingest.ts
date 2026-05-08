@@ -242,7 +242,7 @@ async function maybeEnqueueChannelContextBackfill(
         : { handleUrl: parsed.value, userId };
     await boss.send(QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL, payload, {
       singletonKey: parsed.value,
-      singletonHours: 24,
+      singletonSeconds: 86_400,
     });
   } catch (err) {
     logger.warn(

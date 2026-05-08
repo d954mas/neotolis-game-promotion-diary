@@ -1,13 +1,12 @@
 // pg-boss queue registry — single source of truth for queue names.
 //
-// RESEARCH.md "Phase-1-specific pitfall: pg-boss queue declaration drift" —
 // pg-boss v10+ requires every queue to be created via `boss.createQueue()`
 // before any `send()` or `work()` call. Forgetting to declare a queue causes
 // silent loss-on-send. We mitigate by:
 //   1. Centralizing every queue name in `QUEUES` (this module is the only
 //      place the strings appear).
 //   2. Exposing `declareAllQueues(boss)` so worker boot calls one function
-//      and gets every Phase 1+ queue declared idempotently.
+//      and gets every queue declared idempotently.
 //
 // Open Question Q1 (MEDIUM confidence) recommended declaring all four poll
 // queues plus `internal.healthcheck` from Phase 1 even though Phase 1 runs
@@ -39,9 +38,9 @@
 // Migration `0010_phase03_baseline.sql` cleans up the now-retired
 // 'poll.hot' / 'poll.warm' rows on the next deploy.
 //
-// We don't import pg-boss types directly here. RESEARCH.md flagged 10.x vs
-// 12.x type drift; accepting a `MinimalBoss` interface keeps this module
-// future-proof against pg-boss type churn.
+// We don't import pg-boss types directly here. The `MinimalBoss` interface
+// keeps this module decoupled from pg-boss's full type surface — useful for
+// testability and for future major-version churn.
 
 export const QUEUES = {
   // Phase 1 + 02.2 — preserved.

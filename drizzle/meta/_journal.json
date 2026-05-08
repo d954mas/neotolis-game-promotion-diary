@@ -141,6 +141,13 @@
       "when": 1778250000000,
       "tag": "0019_audit_log_insert_only_trigger",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1778250100000,
+      "tag": "0020_pg_boss_v12",
+      "breakpoints": true
     }
   ]
 }
