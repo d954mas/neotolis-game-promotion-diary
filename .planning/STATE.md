@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0.1-09-ui-dual-tree-PLAN.md
-last_updated: "2026-05-08T17:24:03.300Z"
+stopped_at: Completed 03.0.1-10-refresh-content-endpoint-and-ui-button-PLAN.md
+last_updated: "2026-05-08T17:39:48.290Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 12
   completed_phases: 5
   total_plans: 93
-  completed_plans: 91
+  completed_plans: 92
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0.1 (source-plugin-architecture) — EXECUTING
-Plan: 10 of 11
+Plan: 11 of 11
 
 ## Performance Metrics
 
@@ -133,6 +133,7 @@ Plan: 10 of 11
 | Phase 03.0.1 P07 | 7 minutes | 2 tasks | 21 files |
 | Phase 03.0.1 P08 | ~25min | 2 tasks | 16 files |
 | Phase 03.0.1 P09 | ~5 minutes | 1 tasks | 8 files |
+| Phase 03.0.1-source-plugin-architecture P10 | ~9 min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -397,6 +398,9 @@ Recent decisions affecting current work:
 - [Phase 03.0.1]: Plan 08: D-13 needs_reconnect/last_error_at/last_error_kind columns added via forward-only migration 0022. observability stub replaced with real getDailyStats/getRecentAudit. RateLimiterMemory reservoirs (cron 8000pts/user 2000pts) consume per ctx.origin BEFORE fetch. AdapterError 5-category taxonomy throws on every error path in chargedFetch. admin-quota-read kind-decoupled via getAdapter(youtube_channel).observability.
 - [Phase 03.0.1]: Plan 09: Registry-UI cast at registration boundary (youtubeUiServer as unknown as AdapterUiServer) — same pattern as registry.ts; per-kind narrow type meets generic surface only at the Map literal.
 - [Phase 03.0.1]: Plan 09: FeedCard.svelte UNCHANGED — EventCard.svelte exists as TESTED contract; /feed migration deferred to Phase 03.1 when Reddit lands and there are multiple kinds to dispatch between (CONTEXT.md philosophy: three concrete callers earn an abstraction).
+- [Phase 03.0.1-source-plugin-architecture]: Plan 10: backfill handler does direct INSERT (NOT createEvent through services/events.ts) — withQuotaGuard is a USER-input throttle, not appropriate for system-emitted refresh-content jobs. Mirrors channel-context-backfill direct-INSERT pattern; idempotency via pre-INSERT SELECT scoped by (userId, sourceId, externalId) + DB-level partial UNIQUE.
+- [Phase 03.0.1-source-plugin-architecture]: Plan 10: backfillSource real impl lives in ./index.ts (the barrel) NOT ./adapter.ts — matches Plans 05/07 doctrine. The Plan 03 throwing stub in adapter.ts STAYS as a bypass-the-barrel safety net; production callers go through the barrel where the spread+override pattern wires the real impl.
+- [Phase 03.0.1-source-plugin-architecture]: Plan 10: writeAudit fires AFTER the enqueue (not BEFORE per D-32 forensics ordering). Audit metadata REQUIRES result.queue + result.jobId which only the adapter knows. Trade-off accepted — writeAudit never throws, singletonKey makes re-click dedup-safe, security signal forensics need is 'user X requested refresh on Y at T'.
 
 ### Pending Todos
 
@@ -439,8 +443,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-08T17:24:03.295Z
+Last session: 2026-05-08T17:39:34.347Z
 Last Activity: 2026-05-08
-Stopped at: Completed 03.0.1-09-ui-dual-tree-PLAN.md
+Stopped at: Completed 03.0.1-10-refresh-content-endpoint-and-ui-button-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
