@@ -31,7 +31,7 @@
 // `softDeleteSource` writes `source.removed` BEFORE the soft-delete UPDATE
 // so the security signal lands even if the UPDATE later fails.
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { dataSources } from "../db/schema/data-sources.js";
 import type { SourceKind } from "../integrations/data-source-adapter.js";
@@ -229,67 +229,80 @@ export async function createSource(
   // есть и что он просто удалён" — the soft-deleted case was hitting the
   // generic PG-unique 422 below, which didn't mention the channel name.
   if (resolvedChannelId) {
+    // Fetch ALL rows for (userId, channelId), then explicitly classify in
+    // JS. Three-state logic that is easier to read than to encode in SQL
+    // ordering, and bulletproof against further drift like the bugs the
+    // 4th and 5th review passes caught:
+    //
+    //   1. Active row exists                        → duplicate_source
+    //   2. Any tombstone within RETENTION_DAYS      → duplicate_source_soft_deleted
+    //   3. Only past-retention tombstones (or none) → fall through, allow new INSERT
+    //
+    // History of this gate (post-build review trail):
+    //   - Original: ORDER BY deleted_at ASC LIMIT 1, comment "active first if
+    //     both exist". WRONG — Postgres ASC defaults to NULLS LAST, so a
+    //     tombstone won the limit when both rows existed.
+    //   - Third pass: relax for past-retention tombstone so a user can
+    //     re-add a channel after the Restore window closes (the deadlock
+    //     between retention_expired and duplicate_source_soft_deleted).
+    //   - Fourth pass: catch the wrong-NULL-position bug — switched to
+    //     ASC NULLS FIRST so active wins. Still missed the multi-tombstone
+    //     case below.
+    //   - Fifth pass (this): pick OLDEST tombstone (ASC) was wrong if a
+    //     newer within-retention tombstone also existed — the old one
+    //     would mark pastRetention=true and bypass the gate even though
+    //     Restore on the newer one would still work. Switched to
+    //     fetch-all + classify so the policy reads top-to-bottom in one
+    //     place.
+    //
+    // The partial unique on (user_id, handle_url) WHERE deleted_at IS NULL
+    // catches handle-level dupes at the DB layer; this gate adds channel-
+    // level dupe detection (one channel can be referenced by multiple
+    // handle URLs — /channel/UC… vs /@handle vs short link). Orphan
+    // tombstones stay in data_sources for active users; purge.daily only
+    // sweeps tombstones owned by purged accounts.
     const existing = await db
       .select()
       .from(dataSources)
-      .where(and(eq(dataSources.userId, userId), eq(dataSources.channelId, resolvedChannelId)))
-      // Active row (deleted_at IS NULL) MUST be preferred over any
-      // tombstone. Postgres' default ASC ordering on a nullable column
-      // puts NULL LAST — so the previous comment "active row first" was
-      // false; the query returned the tombstone when both rows existed.
-      // Fixed in fifth-pass review 2026-05-08: explicit NULLS FIRST so an
-      // existing active source for this channel always wins the .limit(1).
-      // Without this, a flow that already produced one active source plus
-      // an expired tombstone (e.g. third-pass fix's "re-add past retention"
-      // path) could be re-tested and the gate would observe ONLY the
-      // tombstone, mark pastRetention=true, skip the duplicate check, and
-      // create a SECOND active source for the same channel under a
-      // different handle_url (the partial unique on (user_id, handle_url)
-      // WHERE deleted_at IS NULL would not catch it).
-      .orderBy(sql`${dataSources.deletedAt} ASC NULLS FIRST`)
-      .limit(1);
-    if (existing[0]) {
-      // Past retention → tombstone exists but the row is no longer
-      // recoverable via Restore (retention_expired error). Skip the
-      // duplicate gate so the user can re-add the channel without being
-      // stuck in a deadlock between Restore (retention_expired) and
-      // re-add (duplicate_source_soft_deleted). The partial unique on
-      // (user_id, handle_url) WHERE deleted_at IS NULL allows the new
-      // INSERT. Active duplicates and within-retention tombstones still
-      // throw — the recoverable-via-Restore path is unchanged. Note: the
-      // orphan tombstone row stays in data_sources for active users
-      // (purge.daily worker only sweeps tombstones owned by purged
-      // users, not soft-deleted rows of active users — Plan 09 may
-      // grow a separate sweeper if accumulation becomes a real cost).
-      const isSoftDeleted = existing[0].deletedAt !== null;
-      const pastRetention =
-        isSoftDeleted &&
-        existing[0].deletedAt!.getTime() < Date.now() - env.RETENTION_DAYS * 86_400_000;
-      if (!pastRetention) {
-        const cacheRow = await db
-          .select({ channelTitle: youtubeChannels.channelTitle })
-          .from(youtubeChannels)
-          .where(eq(youtubeChannels.channelId, resolvedChannelId))
-          .limit(1);
-        const channelTitle = cacheRow[0]?.channelTitle ?? null;
-        const niceName = channelTitle ?? existing[0].displayName ?? existing[0].handleUrl;
-        throw new AppError(
-          isSoftDeleted
-            ? `You previously deleted "${niceName}". Open /sources, click "Recently deleted", and press Restore — that brings back the source plus all its history.`
-            : `You already track "${niceName}"`,
-          isSoftDeleted ? "duplicate_source_soft_deleted" : "duplicate_source",
-          409,
-          {
-            handle_url: existing[0].handleUrl,
-            source_id: existing[0].id,
-            channel_id: resolvedChannelId,
-            channel_title: channelTitle,
-            display_name: existing[0].displayName,
-            soft_deleted: isSoftDeleted,
-          },
-        );
-      }
+      .where(and(eq(dataSources.userId, userId), eq(dataSources.channelId, resolvedChannelId)));
+
+    const active = existing.find((r) => r.deletedAt === null);
+    const cutoffMs = Date.now() - env.RETENTION_DAYS * 86_400_000;
+    const recentTombstone = active
+      ? null
+      : (existing
+          .filter((r) => r.deletedAt !== null && r.deletedAt.getTime() >= cutoffMs)
+          // Newest first so the error metadata names the most recent
+          // soft-delete (the row Restore would target on /sources).
+          .sort((a, b) => b.deletedAt!.getTime() - a.deletedAt!.getTime())[0] ?? null);
+
+    const blockingRow = active ?? recentTombstone;
+    if (blockingRow) {
+      const cacheRow = await db
+        .select({ channelTitle: youtubeChannels.channelTitle })
+        .from(youtubeChannels)
+        .where(eq(youtubeChannels.channelId, resolvedChannelId))
+        .limit(1);
+      const channelTitle = cacheRow[0]?.channelTitle ?? null;
+      const niceName = channelTitle ?? blockingRow.displayName ?? blockingRow.handleUrl;
+      const isSoftDeleted = blockingRow.deletedAt !== null;
+      throw new AppError(
+        isSoftDeleted
+          ? `You previously deleted "${niceName}". Open /sources, click "Recently deleted", and press Restore — that brings back the source plus all its history.`
+          : `You already track "${niceName}"`,
+        isSoftDeleted ? "duplicate_source_soft_deleted" : "duplicate_source",
+        409,
+        {
+          handle_url: blockingRow.handleUrl,
+          source_id: blockingRow.id,
+          channel_id: resolvedChannelId,
+          channel_title: channelTitle,
+          display_name: blockingRow.displayName,
+          soft_deleted: isSoftDeleted,
+        },
+      );
     }
+    // Past-retention-only tombstones (or none) — fall through to INSERT.
   }
 
   // Race-free, deadlock-safe quota path (Codex P2.1 + post-fix). withQuotaGuard

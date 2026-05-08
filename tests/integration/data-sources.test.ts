@@ -367,6 +367,82 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     });
   });
 
+  it("post-build review 2026-05-08 (6th pass): newer within-retention tombstone blocks re-add even when an older expired tombstone exists for the same channel", async () => {
+    // Regression for the sixth-pass review's finding. Pre-fix, the gate
+    // ordered tombstones by deleted_at ASC NULLS FIRST and took .limit(1)
+    // — so when both a >60d-old AND a <60d-old tombstone existed for the
+    // same channel, the OLD one won the limit, the gate marked
+    // pastRetention=true, and the user could re-add the channel even
+    // though the recent tombstone was still recoverable via Restore.
+    // Result: a Restore-on-the-recent then a re-add could land two
+    // active sources for the same channel under different handle_urls
+    // (the partial unique on handle_url would not catch the divergent
+    // URLs).
+    //
+    // Fixed in the same pass: the gate now fetches ALL rows for
+    // (userId, channelId) and explicitly checks (a) any active row →
+    // duplicate_source, (b) any within-retention tombstone →
+    // duplicate_source_soft_deleted, (c) only past-retention tombstones
+    // → fall through. This test pins (b) when (c)-shape rows ALSO exist.
+    const userC = await seedUserDirectly({
+      email: `ds-mixed-tombstones-${Math.random().toString(36).slice(2, 8)}@test.local`,
+    });
+    const channelId = "UCmixed01mixed01mixed01mix";
+
+    // Old tombstone (past retention).
+    const oldSrc = await createSource(
+      userC.id,
+      {
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/channel/${channelId}-old`,
+        channelId,
+      },
+      "127.0.0.1",
+    );
+    await db
+      .update(dataSources)
+      .set({ deletedAt: new Date(Date.now() - 90 * 86_400_000) })
+      .where(and(eq(dataSources.userId, userC.id), eq(dataSources.id, oldSrc.id)));
+
+    // Recent tombstone (within retention).
+    const recentSrc = await createSource(
+      userC.id,
+      {
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/channel/${channelId}-recent`,
+        channelId,
+      },
+      "127.0.0.1",
+    );
+    await db
+      .update(dataSources)
+      .set({ deletedAt: new Date(Date.now() - 5 * 86_400_000) })
+      .where(and(eq(dataSources.userId, userC.id), eq(dataSources.id, recentSrc.id)));
+
+    // Re-add MUST fail — the recent tombstone is still recoverable via
+    // Restore, so the gate should redirect the user there. Pre-fix, the
+    // OLD tombstone won the .limit(1) ordering and the gate fell through.
+    await expect(
+      createSource(
+        userC.id,
+        {
+          kind: "youtube_channel",
+          handleUrl: `https://www.youtube.com/channel/${channelId}-v3`,
+          channelId,
+        },
+        "127.0.0.1",
+      ),
+    ).rejects.toMatchObject({
+      code: "duplicate_source_soft_deleted",
+      status: 409,
+      metadata: expect.objectContaining({
+        // Error names the recent tombstone (the one Restore would
+        // target), not the old one.
+        source_id: recentSrc.id,
+      }),
+    });
+  });
+
   it("Plan 02.1-04: updateSource toggling autoImport=false writes audit_action='source.toggled_auto_import' with from/to metadata", async () => {
     const userA = await seedUserDirectly({ email: "ds13@test.local" });
     const src = await createSource(
