@@ -530,6 +530,59 @@ describe("Plan 03.0-10: channel-context backfill trigger (CONTEXT D-14)", () => 
     expect(enqueues).toHaveLength(0);
   });
 
+  it("Test 3b: paste of YouTube URL with author_url pointing at /@handle (cache miss) → enqueues with HANDLE_URL field, NOT channelId (P1 fix 2026-05-08)", async () => {
+    // Regression for the third-pass review's #1 finding. Pre-fix, the
+    // ingest extractor returned the full /@handle URL as a string and
+    // the caller stuffed it into the job's channelId field. The worker's
+    // resolution branch (`if (!channelId && handleUrl)`) skipped because
+    // channelId was truthy (the URL string), so it called channels.list?
+    // id=<full URL> → no items → silent failure. Every @handle backfill
+    // from the ingest path was dead code for months without anyone
+    // noticing.
+    //
+    // The fix made extractChannelIdFromAuthorUrl return a discriminated
+    // union {kind:'channelId'|'handleUrl',value} and the caller routes
+    // value into the matching job-payload field. This test pins that
+    // routing: an @handle authorUrl MUST land in handleUrl, never in
+    // channelId. If the routing regresses, the worker's resolution
+    // branch will silently skip again — there is no other observable
+    // signal at the ingest layer.
+    ytSpy.mockResolvedValue({
+      kind: "ok",
+      data: {
+        title: "Handle paste (cache miss)",
+        authorName: "Handle Dev",
+        authorUrl: "https://www.youtube.com/@handle-regress-3b",
+        thumbnailUrl: "",
+      },
+    });
+    const u = await seedUserDirectly({ email: "p10-handle-miss@test.local" });
+
+    // No cache row + no handle_aliases entry → cache miss → enqueue path.
+    await parsePasteAndCreate(
+      u.id,
+      null,
+      "https://www.youtube.com/watch?v=p10hnd001ab",
+      "127.0.0.1",
+    );
+
+    const enqueues = sentJobs.filter((j) => j.queue === "youtube.channel_context_backfill");
+    expect(enqueues).toHaveLength(1);
+    const job = enqueues[0]!;
+
+    // Load-bearing assertion: handleUrl is the carrier; channelId is absent.
+    expect(job.data).toMatchObject({
+      handleUrl: "https://www.youtube.com/@handle-regress-3b",
+      userId: u.id,
+    });
+    expect((job.data as Record<string, unknown>).channelId).toBeUndefined();
+
+    // singletonKey contains the handle URL so pg-boss dedups concurrent
+    // pastes of the same handle.
+    const opts = job.options as { singletonKey?: string };
+    expect(opts.singletonKey).toBe("https://www.youtube.com/@handle-regress-3b");
+  });
+
   it("Test 4: non-YouTube paste (Twitter) → ZERO channel-context enqueue (no false positives on other kinds)", async () => {
     twSpy.mockResolvedValue({
       authorName: "Anna Indie",
