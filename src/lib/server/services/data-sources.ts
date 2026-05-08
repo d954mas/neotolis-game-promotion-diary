@@ -44,7 +44,7 @@ import { getBoss } from "../queue-client.js";
 import { QUEUES } from "../queues.js";
 import { logger } from "../logger.js";
 import { parseYoutubeChannelUrl, fetchVideoMetadataByUrl } from "./youtube-metadata.js";
-import { youtubeChannels } from "../db/schema/youtube-channels.js";
+import { youtubeChannels } from "../db/schema/index.js";
 
 // Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — initial-backfill window
 // presets accepted by createSource for kind=youtube_channel + autoImport.

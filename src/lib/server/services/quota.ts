@@ -42,7 +42,7 @@ import { db, type DbOrTx, type Tx } from "../db/client.js";
 import { games } from "../db/schema/games.js";
 import { dataSources } from "../db/schema/data-sources.js";
 import { events } from "../db/schema/events.js";
-import { youtubeMetadataFetchLog } from "../db/schema/youtube-metadata-fetch-log.js";
+import { youtubeMetadataFetchLog } from "../db/schema/index.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError } from "./errors.js";

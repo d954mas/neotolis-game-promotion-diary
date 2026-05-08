@@ -26,7 +26,7 @@
 
 import { sql } from "drizzle-orm";
 import { db } from "../../lib/server/db/client.js";
-import { youtubeServiceQuotaUsage } from "../../lib/server/db/schema/youtube-service-quota-usage.js";
+import { youtubeServiceQuotaUsage } from "../../lib/server/db/schema/index.js";
 import { resetThrottleState } from "../../lib/server/services/youtube-quota-tracker.js";
 import { logger } from "../../lib/server/logger.js";
 

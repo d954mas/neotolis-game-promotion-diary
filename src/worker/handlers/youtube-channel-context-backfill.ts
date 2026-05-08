@@ -32,9 +32,11 @@
 import { sql, and, eq, isNull, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../lib/server/db/client.js";
-import { youtubeChannels } from "../../lib/server/db/schema/youtube-channels.js";
-import { youtubeVideoSnapshots } from "../../lib/server/db/schema/youtube-video-snapshots.js";
-import { youtubeVideos } from "../../lib/server/db/schema/youtube-videos.js";
+import {
+  youtubeChannels,
+  youtubeVideoSnapshots,
+  youtubeVideos,
+} from "../../lib/server/db/schema/index.js";
 import { events } from "../../lib/server/db/schema/events.js";
 import { dataSources } from "../../lib/server/db/schema/data-sources.js";
 import {

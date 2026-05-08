@@ -11,8 +11,7 @@ import { listSources } from "$lib/server/services/data-sources.js";
 import { mapEventsToDtos, toGameDto, toDataSourceDto } from "$lib/server/dto.js";
 import { filterValidKinds } from "$lib/util/filter-event-kinds.js";
 import { db } from "$lib/server/db/client.js";
-import { youtubeVideoSnapshots } from "$lib/server/db/schema/youtube-video-snapshots.js";
-import { youtubeChannels } from "$lib/server/db/schema/youtube-channels.js";
+import { youtubeVideoSnapshots, youtubeChannels } from "$lib/server/db/schema/index.js";
 import { sql, inArray } from "drizzle-orm";
 
 // Plan 02.1-19 URL contract: /feed accepts ?show=any|inbox|specific +

@@ -34,7 +34,7 @@ import { db } from "../../src/lib/server/db/client.js";
 import { events } from "../../src/lib/server/db/schema/events.js";
 import { dataSources } from "../../src/lib/server/db/schema/data-sources.js";
 import { games } from "../../src/lib/server/db/schema/games.js";
-import { youtubeChannels } from "../../src/lib/server/db/schema/youtube-channels.js";
+import { youtubeChannels } from "../../src/lib/server/db/schema/index.js";
 import * as YT from "../../src/lib/server/integrations/youtube-oembed.js";
 import * as TW from "../../src/lib/server/integrations/twitter-oembed.js";
 import { uuidv7 } from "../../src/lib/server/ids.js";

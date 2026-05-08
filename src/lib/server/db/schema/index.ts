@@ -14,11 +14,10 @@ export * from "./event-games.js";
 export * from "./events.js";
 export * from "./game-steam-listings.js";
 export * from "./games.js";
-// Phase 3.0 Plan 01 — public-data tables (no user_id columns; ESLint
-// TENANT_TABLES allowlist mirrors). One module per table per RESEARCH.md
-// "Architecture Patterns" — keeps drizzle-kit's schema scan unambiguous.
-export * from "./youtube-channels.js";
-export * from "./youtube-metadata-fetch-log.js";
-export * from "./youtube-service-quota-usage.js";
-export * from "./youtube-video-snapshots.js";
-export * from "./youtube-videos.js";
+// Phase 03.0.1 Plan 02 — YouTube schemas relocated to per-source folder
+// per D-14. Re-exported here so existing call sites
+// (`import { youtubeVideos } from "$lib/server/db/schema/index.js"`)
+// continue to compile without edit. The 5 youtube-*.ts files in this
+// directory were moved via `git mv` to
+// src/lib/sources/youtube/server/schema/.
+export * from "$lib/sources/youtube/server/schema/index.js";

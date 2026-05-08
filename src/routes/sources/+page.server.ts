@@ -2,7 +2,7 @@ import type { PageServerLoad } from "./$types";
 import { listSources } from "$lib/server/services/data-sources.js";
 import { toDataSourceDto } from "$lib/server/dto.js";
 import { db } from "$lib/server/db/client.js";
-import { youtubeChannels } from "$lib/server/db/schema/youtube-channels.js";
+import { youtubeChannels } from "$lib/server/db/schema/index.js";
 import { inArray } from "drizzle-orm";
 
 /**

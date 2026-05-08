@@ -42,7 +42,7 @@
 import { sql, and, gt, isNotNull, isNull, lte, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { events } from "../db/schema/events.js";
-import { youtubeVideos } from "../db/schema/youtube-videos.js";
+import { youtubeVideos } from "../db/schema/index.js";
 import { resolveTier } from "./tier-resolver.js";
 
 /**

@@ -24,8 +24,7 @@
 
 import { sql, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { youtubeVideoSnapshots } from "../db/schema/youtube-video-snapshots.js";
-import { youtubeVideos } from "../db/schema/youtube-videos.js";
+import { youtubeVideoSnapshots, youtubeVideos } from "../db/schema/index.js";
 
 // Lazy-import the quota tracker — historical from Plan 04. Kept dynamic because
 // Vitest's module mock contract uses the resolved path; dynamic imports

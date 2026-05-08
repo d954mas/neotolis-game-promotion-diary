@@ -16,7 +16,7 @@
 // one row. Counts are bigint (popular videos exceed 2^31) per RESEARCH.md.
 
 import { pgTable, text, bigint, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
-import { uuidv7 } from "../../ids.js";
+import { uuidv7 } from "$lib/server/ids.js";
 
 export const youtubeVideoSnapshots = pgTable(
   "youtube_video_snapshots",

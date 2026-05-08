@@ -30,7 +30,7 @@
 
 import { sql, and, lt } from "drizzle-orm";
 import { db } from "../../lib/server/db/client.js";
-import { youtubeVideos } from "../../lib/server/db/schema/youtube-videos.js";
+import { youtubeVideos } from "../../lib/server/db/schema/index.js";
 import { youtubeChannelAdapter } from "../../lib/server/integrations/youtube-channel-adapter.js";
 import { writeSnapshot } from "../../lib/server/services/youtube-snapshot-writer.js";
 import { pickKeyForJob } from "../../lib/server/services/youtube-quota-tracker.js";

@@ -10,7 +10,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { eventGames } from "./db/schema/event-games.js";
-import { youtubeVideos } from "./db/schema/youtube-videos.js";
+import { youtubeVideos } from "./db/schema/index.js";
 import type { user, session } from "./db/schema/auth.js";
 import type {
   games,
@@ -20,8 +20,7 @@ import type {
   events,
 } from "./db/schema/index.js";
 import type { auditLog } from "./db/schema/audit-log.js";
-import type { youtubeVideoSnapshots } from "./db/schema/youtube-video-snapshots.js";
-import type { youtubeChannels } from "./db/schema/youtube-channels.js";
+import type { youtubeVideoSnapshots, youtubeChannels } from "./db/schema/index.js";
 
 type User = typeof user.$inferSelect;
 type Session = typeof session.$inferSelect;

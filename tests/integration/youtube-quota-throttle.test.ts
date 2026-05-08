@@ -34,7 +34,7 @@ const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
-const { youtubeVideos } = await import("../../src/lib/server/db/schema/youtube-videos.js");
+const { youtubeVideos } = await import("../../src/lib/server/db/schema/index.js");
 const { incrementUsage, resetThrottleState, todayPacific, hashApiKeyId } =
   await import("../../src/lib/server/services/youtube-quota-tracker.js");
 const { enqueueActivePolls, enqueueColdPolls } = await import("../../src/scheduler/enqueue.js");

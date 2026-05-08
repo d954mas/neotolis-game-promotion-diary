@@ -35,7 +35,7 @@
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { events } from "../db/schema/events.js";
-import { youtubeVideos } from "../db/schema/youtube-videos.js";
+import { youtubeVideos } from "../db/schema/index.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { writeAudit } from "../audit.js";
 import { QUEUES } from "../queues.js";

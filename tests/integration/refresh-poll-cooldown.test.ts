@@ -33,7 +33,7 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { youtubeVideos } = await import("../../src/lib/server/db/schema/youtube-videos.js");
+const { youtubeVideos } = await import("../../src/lib/server/db/schema/index.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { AppError, NotFoundError } = await import("../../src/lib/server/services/errors.js");

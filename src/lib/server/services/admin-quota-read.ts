@@ -29,7 +29,7 @@
 
 import { desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { youtubeServiceQuotaUsage } from "../db/schema/youtube-service-quota-usage.js";
+import { youtubeServiceQuotaUsage } from "../db/schema/index.js";
 import { auditLog } from "../db/schema/audit-log.js";
 import type { AuditAction } from "../audit/actions.js";
 import {

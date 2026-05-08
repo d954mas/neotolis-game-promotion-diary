@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { sql, and, eq } from "drizzle-orm";
 import { db } from "../../src/lib/server/db/client.js";
-import { youtubeServiceQuotaUsage } from "../../src/lib/server/db/schema/youtube-service-quota-usage.js";
+import { youtubeServiceQuotaUsage } from "../../src/lib/server/db/schema/index.js";
 import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
 import {
   incrementUsage,

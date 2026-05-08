@@ -18,7 +18,7 @@
 
 import { pgTable, text, timestamp, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { user } from "./auth.js";
+import { user } from "$lib/server/db/schema/auth.js";
 
 export const youtubeMetadataFetchLog = pgTable(
   "youtube_metadata_fetch_log",
