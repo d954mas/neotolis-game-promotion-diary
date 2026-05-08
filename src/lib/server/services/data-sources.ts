@@ -602,6 +602,44 @@ export async function restoreSource(
 }
 
 /**
+ * Phase 03.0.1 Plan 08 (D-13) — flip the AdapterError surface columns when
+ * an adapter throws AdapterError of category operator-issue / permanent /
+ * not-found against this source.
+ *
+ * Pattern 1 (tenant scope): userId is the first non-optional argument and
+ * the UPDATE's WHERE clause filters on `eq(dataSources.userId, userId)`.
+ * The custom ESLint rule `tenant-scope/no-unfiltered-tenant-query` walks
+ * for this filter; cross-tenant misuse is a compile-time block.
+ *
+ * Idempotency: a second call for the same source overwrites lastErrorAt /
+ * lastErrorKind with the newer values. needsReconnect stays true (no path
+ * downshifts it inside this helper — operator-side reconnect lands in
+ * Phase 6+).
+ *
+ * Cross-tenant 404 NOT used: this is a system-emitted UPDATE invoked by
+ * worker handlers that have already loaded job data; the userId+sourceId
+ * pair is trusted (pg-boss persisted it). If the source is missing or
+ * cross-tenant the UPDATE simply matches zero rows — no throw, no
+ * accidental side effect (write-success is best-effort here; the worker
+ * still swallows the AdapterError per its category contract).
+ */
+export async function markSourceNeedsReconnect(
+  userId: string,
+  sourceId: string,
+  errorKind: "rate-limited" | "not-found" | "permanent" | "operator-issue",
+): Promise<void> {
+  await db
+    .update(dataSources)
+    .set({
+      needsReconnect: true,
+      lastErrorAt: new Date(),
+      lastErrorKind: errorKind,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
+}
+
+/**
  * INGEST-03 author_is_me inheritance — given an oEmbed `author_url` parsed
  * from a pasted YouTube video URL, return the matching active YouTube
  * channel data_source for `userId` (if any).

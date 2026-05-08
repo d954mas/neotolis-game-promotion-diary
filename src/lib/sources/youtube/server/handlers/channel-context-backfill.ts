@@ -44,6 +44,8 @@ import { chargedFetch } from "../http.js";
 import { env } from "$lib/server/config/env.js";
 import { parseYoutubeUrl } from "../url.js";
 import { logger } from "$lib/server/logger.js";
+import { AdapterError } from "$lib/sources/errors.js";
+import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
 
 // Zod schemas for the three endpoints — defense against API drift.
 const CHANNELS_LIST_RESPONSE = z.object({
@@ -171,6 +173,52 @@ export async function handleChannelContextBackfill(job: {
     backfillWindow?: "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
   };
 }): Promise<void> {
+  // Plan 08 (D-13) AdapterError envelope. The body throws AdapterError on
+  // upstream non-2xx; route by category:
+  //   - rate-limited → re-throw (pg-boss retries with retryAfterMs)
+  //   - operator-issue / permanent → mark source needs_reconnect and swallow
+  //     (the operator must intervene; pg-boss retries are pointless)
+  //   - not-found → swallow (the channel/video is gone; the source itself
+  //     may be fine — we don't flag it)
+  //   - transient → re-throw (pg-boss retries with backoff)
+  // Cron-context handler: only flips needs_reconnect when sourceId is in
+  // the job payload (createSource flow). Ingest-flow jobs (channelId-only)
+  // don't carry a sourceId, so non-transient errors there log+swallow.
+  try {
+    await handleChannelContextBackfillImpl(job);
+  } catch (err) {
+    if (err instanceof AdapterError) {
+      const { userId: uId, sourceId: sId } = job.data;
+      if (err.category === "rate-limited" || err.category === "transient") {
+        logger.info(
+          { jobId: job.id, category: err.category, retryAfterMs: err.retryAfterMs },
+          "channel-context-backfill: AdapterError → pg-boss retry",
+        );
+        throw err;
+      }
+      if ((err.category === "operator-issue" || err.category === "permanent") && uId && sId) {
+        await markSourceNeedsReconnect(uId, sId, err.category);
+      }
+      logger.warn(
+        { jobId: job.id, category: err.category, sourceId: sId, userId: uId },
+        "channel-context-backfill: AdapterError swallowed (worker won't retry)",
+      );
+      return;
+    }
+    throw err;
+  }
+}
+
+async function handleChannelContextBackfillImpl(job: {
+  id: string;
+  data: {
+    userId: string;
+    channelId?: string;
+    handleUrl?: string;
+    sourceId?: string;
+    backfillWindow?: "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
+  };
+}): Promise<void> {
   const { userId, handleUrl, sourceId } = job.data;
   let channelId = job.data.channelId;
   // Phase 3.0 post-build (2026-05-07): track the alias input that triggered
@@ -234,9 +282,10 @@ export async function handleChannelContextBackfill(job: {
       const videoResp = await chargedFetch(videoUrl, picked, 1, {
         jobId: job.id,
         videoId: parsed.value,
+        origin: "cron",
         logTag: "channel-context-backfill: videos.list lookup",
       });
-      if (!videoResp.ok) return;
+      if (!videoResp.ok) return; // Plan 08: chargedFetch throws on non-2xx; this is dead-code defense — caught by the outer try/catch.
       const videoJson = VIDEOS_LIST_RESPONSE.parse(await videoResp.json());
       const v = videoJson.items[0];
       if (!v || !v.snippet?.channelId) {
@@ -258,9 +307,10 @@ export async function handleChannelContextBackfill(job: {
       const lookupResp = await chargedFetch(lookupUrl, picked, 1, {
         jobId: job.id,
         handle: parsed.value,
+        origin: "cron",
         logTag: "channel-context-backfill: forHandle lookup",
       });
-      if (!lookupResp.ok) return;
+      if (!lookupResp.ok) return; // dead-code defense — chargedFetch throws on non-2xx in Plan 08.
       const lookupJson = CHANNELS_LIST_FOR_HANDLE_RESPONSE.parse(await lookupResp.json());
       const item = lookupJson.items[0];
       if (!item) {
@@ -307,9 +357,10 @@ export async function handleChannelContextBackfill(job: {
   const channelsResp = await chargedFetch(channelsUrl, picked, 1, {
     jobId: job.id,
     channelId,
+    origin: "cron",
     logTag: "channel-context-backfill: channels.list",
   });
-  if (!channelsResp.ok) return;
+  if (!channelsResp.ok) return; // dead-code defense — chargedFetch throws on non-2xx in Plan 08.
   const channelsJson = CHANNELS_LIST_RESPONSE.parse(await channelsResp.json());
   const channelItem = channelsJson.items[0];
   const uploadsPlaylistId = channelItem?.contentDetails?.relatedPlaylists?.uploads;
@@ -393,9 +444,10 @@ export async function handleChannelContextBackfill(job: {
       jobId: job.id,
       channelId,
       page,
+      origin: "cron",
       logTag: "channel-context-backfill: playlistItems.list",
     });
-    if (!playlistResp.ok) break;
+    if (!playlistResp.ok) break; // dead-code defense — chargedFetch throws on non-2xx in Plan 08.
     const playlistJson = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await playlistResp.json());
 
     let crossedCutoffOnThisPage = false;
@@ -453,9 +505,10 @@ export async function handleChannelContextBackfill(job: {
       jobId: job.id,
       channelId,
       batch: i / 50,
+      origin: "cron",
       logTag: "channel-context-backfill: videos.list",
     });
-    if (!videosResp.ok) continue;
+    if (!videosResp.ok) continue; // dead-code defense — chargedFetch throws on non-2xx in Plan 08.
     const videosJson = VIDEOS_LIST_RESPONSE.parse(await videosResp.json());
     allItems.push(...videosJson.items);
   }

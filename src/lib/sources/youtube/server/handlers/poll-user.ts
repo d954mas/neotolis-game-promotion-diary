@@ -24,8 +24,57 @@ import { youtubeAdapter as youtubeChannelAdapter } from "../index.js";
 import { writeSnapshot } from "../snapshots.js";
 import { pickKeyForJob } from "../quota.js";
 import { logger } from "$lib/server/logger.js";
+import { AdapterError } from "$lib/sources/errors.js";
+import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
 
 export async function handlePollUser(job: {
+  id: string;
+  data: { eventId: string; userId: string };
+}): Promise<void> {
+  // Plan 08 (D-13) AdapterError envelope. Same routing contract as
+  // channel-context-backfill — see that file's handler header for the
+  // category-by-category rationale. poll-user runs in user-driven origin;
+  // sourceId is resolved from the event row when AdapterError fires
+  // against an auto-imported event (events.source_id IS NOT NULL); manual-
+  // paste events have source_id=NULL and we just log+swallow without
+  // flipping any source's needs_reconnect (no source to flip).
+  try {
+    await handlePollUserImpl(job);
+  } catch (err) {
+    if (err instanceof AdapterError) {
+      if (err.category === "rate-limited" || err.category === "transient") {
+        logger.info(
+          { jobId: job.id, category: err.category, retryAfterMs: err.retryAfterMs },
+          "poll-user: AdapterError → pg-boss retry",
+        );
+        throw err;
+      }
+      // operator-issue / permanent / not-found → load the event to find
+      // sourceId, then conditionally flip needs_reconnect.
+      const { eventId, userId } = job.data;
+      if (eventId && userId && (err.category === "operator-issue" || err.category === "permanent")) {
+        // Tenant-scoped lookup — Pattern 1.
+        const evRows = await db
+          .select({ sourceId: events.sourceId })
+          .from(events)
+          .where(and(eq(events.id, eventId), eq(events.userId, userId)))
+          .limit(1);
+        const sId = evRows[0]?.sourceId ?? null;
+        if (sId) {
+          await markSourceNeedsReconnect(userId, sId, err.category);
+        }
+      }
+      logger.warn(
+        { jobId: job.id, category: err.category, eventId: job.data.eventId },
+        "poll-user: AdapterError swallowed (worker won't retry)",
+      );
+      return;
+    }
+    throw err;
+  }
+}
+
+async function handlePollUserImpl(job: {
   id: string;
   data: { eventId: string; userId: string };
 }): Promise<void> {

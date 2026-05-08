@@ -21,6 +21,7 @@ import { db } from "$lib/server/db/client.js";
 import { youtubeVideos, youtubeMetadataFetchLog } from "$lib/server/db/schema/index.js";
 import { env } from "$lib/server/config/env.js";
 import { AppError } from "$lib/server/services/errors.js";
+import { AdapterError } from "$lib/sources/errors.js";
 // withQuotaGuard is the cross-source events_per_day per-user abuse quota —
 // distinct from the YouTube operator-side per-key counter exported by ./quota.js
 // in this folder. Disambiguated via the $lib path.
@@ -180,21 +181,40 @@ export async function fetchVideoMetadataByUrl(
   apiUrl.searchParams.set("key", picked.apiKey);
   apiUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
-  // chargedFetch: charge-on-Response + 403-quotaExceeded throttle audit
-  // emission. The 10s timeout matches the previous local fetchWithTimeout
-  // — this is a user-facing form path, not a worker-internal call.
-  const resp = await chargedFetch(
-    apiUrl,
-    picked,
-    1,
-    { videoId, logTag: "youtube-metadata: videos.list" },
-    10_000,
-  );
-  if (!resp.ok) {
-    throw new AppError("YouTube API error", "upstream_error", 502, {
-      videoId,
-      status: resp.status,
-    });
+  // chargedFetch (Plan 08): charge + reservoir consume + AdapterError on
+  // non-2xx. The 10s timeout matches the previous local fetchWithTimeout —
+  // this is a user-facing form path, not a worker-internal call.
+  // origin='user' so this fetch consumes from the user reservoir (20% pool)
+  // instead of cron (80%) — keeps the user-driven envelope distinct from
+  // worker-driven backfills (D-09).
+  //
+  // AdapterError taxonomy translation: this user-facing path predates
+  // AdapterError and the form expects AppError(502 / 404 / 503). Translate
+  // the throw rather than ripple AdapterError into the route layer — the
+  // form copy / status code is part of the user-facing contract that the
+  // /api/youtube/fetch-metadata route handler maps to UX strings.
+  let resp: Response;
+  try {
+    resp = await chargedFetch(
+      apiUrl,
+      picked,
+      1,
+      { videoId, origin: "user", logTag: "youtube-metadata: videos.list" },
+      10_000,
+    );
+  } catch (err) {
+    if (err instanceof AdapterError) {
+      // rate-limited / operator-issue / transient → 502 upstream_error to
+      // preserve the existing form UX. not-found → 404 (video missing).
+      if (err.category === "not-found") {
+        throw new AppError("video not found on YouTube", "not_found", 404, { videoId });
+      }
+      throw new AppError("YouTube API error", "upstream_error", 502, {
+        videoId,
+        category: err.category,
+      });
+    }
+    throw err;
   }
 
   const json = VIDEOS_LIST_RESPONSE.parse(await resp.json());

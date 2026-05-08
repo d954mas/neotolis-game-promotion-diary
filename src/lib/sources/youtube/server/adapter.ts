@@ -41,13 +41,14 @@
 
 import { pickKeyForJob, youtubeQuotaUser } from "./quota.js";
 import { chargedFetch, fetchWithTimeout } from "./http.js";
+import { youtubeObservability } from "./observability.js";
 import { youtubeParseUrl } from "./url.js";
+import { AdapterError } from "$lib/sources/errors.js";
 import { z } from "zod";
 import { env } from "$lib/server/config/env.js";
 import { logger } from "$lib/server/logger.js";
 import type {
   AdapterContext,
-  AdapterObservability,
   DataSourceAdapter,
   EventKind,
   MinimalBoss,
@@ -281,11 +282,33 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
     url.searchParams.set("key", picked.apiKey);
     url.searchParams.set("quotaUser", youtubeQuotaUser(source.userId));
 
-    const resp = await chargedFetch(url, picked, 1, {
-      sourceId: source.id,
-      logTag: "youtube-adapter: playlistItems.list",
-    });
-    if (!resp.ok) return [];
+    // Plan 08: chargedFetch throws AdapterError on non-2xx. pollContent
+    // (auto-import path) does NOT have a SnapshotStatus contract — bail with
+    // an empty array on any error category rather than ripple AdapterError
+    // into auto-import's caller (which today doesn't exist; auto-import
+    // lands as a future worker handler). Translate-and-bail keeps the
+    // legacy pre-Plan-08 contract intact for whoever wires the auto-import
+    // worker; that worker can revisit AdapterError-raise behavior when
+    // ready. origin='cron' — pollContent is invoked by scheduler-driven
+    // auto-import, never by user-driven Refresh-now.
+    let resp: Response;
+    try {
+      resp = await chargedFetch(url, picked, 1, {
+        sourceId: source.id,
+        origin: "cron",
+        logTag: "youtube-adapter: playlistItems.list",
+      });
+    } catch (err) {
+      if (err instanceof AdapterError) {
+        logger.warn(
+          { sourceId: source.id, userId: source.userId, category: err.category },
+          "pollContent: AdapterError → empty result",
+        );
+        return [];
+      }
+      throw err;
+    }
+    if (!resp.ok) return []; // dead-code defense — chargedFetch throws on non-2xx in Plan 08.
     const json = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await resp.json());
     const sinceMs = since.getTime();
     return json.items
@@ -400,23 +423,13 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
   parseUrl(url: string): ParsedUrl | null {
     return youtubeParseUrl(url);
   },
-  observability: {
-    auth: {
-      kind: "operator-static-key",
-      requiresUserSetup: false,
-      // Plan 08 reads env.SERVICE_YOUTUBE_API_KEYS.length > 0; stubbed true
-      // to keep the contract surface honest pre-implementation.
-      isOperatorConfigured: true,
-    },
-    quota: {
-      getDailyStats: async () => {
-        throw notYetImplemented("08", "observability.quota.getDailyStats");
-      },
-      getRecentAudit: async () => {
-        throw notYetImplemented("08", "observability.quota.getRecentAudit");
-      },
-    },
-  } satisfies AdapterObservability,
+  // Plan 08 LIVE: observability is the real implementation imported from
+  // ./observability.js. Pre-Plan-08 this was a stub object whose quota.*
+  // methods threw notYetImplemented; Plan 08 replaces with the real read
+  // surface (getDailyStats reads youtube_service_quota_usage; getRecentAudit
+  // reads audit_log filtered to YouTube actions). isOperatorConfigured is
+  // computed from env.SERVICE_YOUTUBE_API_KEYS.length > 0 at module load.
+  observability: youtubeObservability,
   // Plan 05 lands the real registerQueues in ./index.ts (the barrel
   // spreads this object and OVERRIDES this method). Keeping a stub here
   // would be a redundant safety net that masks the override; removing it

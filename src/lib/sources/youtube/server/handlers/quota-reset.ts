@@ -28,12 +28,26 @@ import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { youtubeServiceQuotaUsage } from "$lib/server/db/schema/index.js";
 import { resetThrottleState } from "../quota.js";
+import { resetReservoirs, reconcileReservoirsOnBoot } from "../http.js";
 import { logger } from "$lib/server/logger.js";
 
 export async function handleQuotaReset(job: { id: string; data: object }): Promise<void> {
   // 1. Clear in-process state (Set + round-robin + cached operator id).
   resetThrottleState();
   logger.info({ jobId: job.id }, "youtube quota reset — module state cleared");
+
+  // 1a. Phase 03.0.1 Plan 08 — reset the in-memory reservoirs to empty,
+  //     then reconcile against the persistent counter. RateLimiterMemory's
+  //     24h sliding window may not align exactly with the YouTube reset
+  //     boundary (Pacific midnight); resetting + reconciling on the cron
+  //     tick keeps drift bounded so tomorrow's first request sees a
+  //     reservoir consistent with today's already-zero counter.
+  try {
+    await resetReservoirs();
+    await reconcileReservoirsOnBoot();
+  } catch (err) {
+    logger.warn({ jobId: job.id, err }, "youtube quota reset: reservoir reset/reconcile failed");
+  }
 
   // 2. Optional housekeeping — trim rows older than 7 days. Safe DELETE
   //    with a stable WHERE; date_pacific is text in 'YYYY-MM-DD' format

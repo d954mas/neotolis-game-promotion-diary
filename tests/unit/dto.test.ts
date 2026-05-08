@@ -189,6 +189,10 @@ describe("toDataSourceDto strips userId (P3 behavioural)", () => {
       createdAt: new Date("2026-04-27T00:00:00Z"),
       updatedAt: new Date("2026-04-27T00:00:00Z"),
       deletedAt,
+      // Phase 03.0.1 Plan 08 (D-13) — AdapterError surface columns.
+      needsReconnect: false,
+      lastErrorAt: null,
+      lastErrorKind: null,
     };
     const dto = toDataSourceDto(fakeRow as Parameters<typeof toDataSourceDto>[0]);
 
@@ -203,7 +207,12 @@ describe("toDataSourceDto strips userId (P3 behavioural)", () => {
       "id",
       "isOwnedByMe",
       "kind",
+      // Phase 03.0.1 Plan 08 (D-13) — AdapterError surface fields. Operational
+      // metadata; non-secret. The /sources/[id] page renders banners from these.
+      "lastErrorAt",
+      "lastErrorKind",
       "metadata",
+      "needsReconnect",
       "updatedAt",
     ]);
     expect(dto.deletedAt).toEqual(deletedAt);
@@ -212,6 +221,9 @@ describe("toDataSourceDto strips userId (P3 behavioural)", () => {
     expect(dto.displayName).toBeNull();
     expect(dto.isOwnedByMe).toBe(false);
     expect(dto.autoImport).toBe(false);
+    expect(dto.needsReconnect).toBe(false);
+    expect(dto.lastErrorAt).toBeNull();
+    expect(dto.lastErrorKind).toBeNull();
   });
 
   it("02.1-04: coerces null/undefined metadata to empty object", () => {

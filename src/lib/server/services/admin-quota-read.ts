@@ -27,7 +27,7 @@
 //   (Plan 03 — $lib/sources/youtube/server/quota.ts). Re-import here so the magic literals
 //   exist in only one place.
 
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { youtubeServiceQuotaUsage } from "../db/schema/index.js";
 import { auditLog } from "../db/schema/audit-log.js";
@@ -37,6 +37,7 @@ import {
   THROTTLE_NINETYFIVE_THRESHOLD,
   todayPacific,
 } from "$lib/sources/youtube/server/quota.js";
+import { getAdapter } from "$lib/sources/registry.js";
 
 export interface QuotaKeyRow {
   /** sha-8 hash of the operator's API key — stable identifier across boots. */
@@ -78,15 +79,39 @@ export async function loadAdminQuotaPage(): Promise<{
   audit: ServiceAuditEntry[];
 }> {
   const today = todayPacific();
+  const now = new Date();
 
-  // Per-key usage rows for today only. youtube_service_quota_usage is in
-  // ESLint's allowlist (operator-side, no tenant scope) — no inline disable
-  // required.
-  const usageRows = await db
-    .select()
-    .from(youtubeServiceQuotaUsage)
-    .where(eq(youtubeServiceQuotaUsage.datePacific, today));
+  // Phase 03.0.1 Plan 08 (D-08) — kind-decoupled key read via the adapter's
+  // observability surface. Pre-Plan-08 this loader queried
+  // youtube_service_quota_usage directly; Plan 08 routes through
+  // getAdapter("youtube_channel").observability.quota.getDailyStats so the
+  // /admin/quota page is decoupled from YouTube-specific schema. Adding
+  // Reddit / Twitter etc. in Phase 03.1+ extends this loader by iterating
+  // adapters that surface observability, not by editing kind-specific reads.
+  //
+  // The `keys` projection still uses the existing { apiKeyId,
+  // estimatedUnits, pctOfDaily (0-100 percent), status } shape for backward
+  // compatibility with the /admin route + UI; the observability stats
+  // surface returns a richer shape (unitsUsed total / dailyLimit / pct
+  // fraction / throttleState) that we adapt at projection time. The
+  // existing tests/integration/admin-quota.test.ts assertions hold.
+  const stats = await getAdapter("youtube_channel").observability.quota.getDailyStats(now);
 
+  // Per-key projection — convert observability stats.keys[] to QuotaKeyRow[].
+  // The keys array carries one entry per apiKeyId with today's estimatedUnits;
+  // status thresholds match the scheduler (THROTTLE_*_THRESHOLD constants).
+  const keyRows: QuotaKeyRow[] = (stats.keys ?? []).map((k) =>
+    toQuotaKeyRowFromObservability(k.apiKeyId, k.unitsUsed),
+  );
+
+  // Audit aggregation is intentionally CROSS-SOURCE — it surfaces
+  // purge.completed / auto_import.deferred / poll.failed (cross-cutting
+  // verbs not owned by any single adapter) alongside quota.service_throttled
+  // (YouTube-specific). The adapter's observability.quota.getRecentAudit
+  // only carries YouTube-specific verbs by D-08 contract; aggregating
+  // here keeps the operator's "what crossed our system today" pane
+  // complete. The eslint-disable below is the same security justification
+  // as pre-Plan-08 — admin allowlist is the gate, not row-level userId.
   // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- /admin/quota is allowlist-gated; cross-tenant audit aggregation is the intended operator view (CONTEXT D-16 / DV-3 / Open Question 4 in 03.0-RESEARCH.md). Adding a userId filter here would defeat the operator's signal pane (purges, quota transitions, adapter deferrals all live across tenants).
   const auditRows = await db
     .select()
@@ -97,8 +122,34 @@ export async function loadAdminQuotaPage(): Promise<{
 
   return {
     today,
-    keys: usageRows.map(toQuotaKeyRow),
+    keys: keyRows,
     audit: auditRows.map(toServiceAuditEntry),
+  };
+}
+
+/**
+ * Plan 08 — convert an observability key entry { apiKeyId, unitsUsed } to
+ * the legacy QuotaKeyRow shape (pctOfDaily as 0-100 percent + status pill).
+ * The observability surface returns the richer shape (fraction + verbose
+ * throttleState); the /admin/quota wire format stays as the legacy
+ * percent + 'ok'|'80_throttle'|'95_throttle' pill for backward
+ * compatibility with the integration test + UI.
+ */
+function toQuotaKeyRowFromObservability(apiKeyId: string, unitsUsed: number): QuotaKeyRow {
+  // 1 decimal — multiply by 1000, round, divide by 10. Float-safe at quota
+  // scale (worst case: 99_999 / 10_000 * 100 = 999.99 → rounded 1000.0).
+  const pct = Math.round((unitsUsed / 10_000) * 1000) / 10;
+  const status: QuotaKeyRow["status"] =
+    unitsUsed >= THROTTLE_NINETYFIVE_THRESHOLD
+      ? "95_throttle"
+      : unitsUsed >= THROTTLE_EIGHTY_THRESHOLD
+        ? "80_throttle"
+        : "ok";
+  return {
+    apiKeyId,
+    estimatedUnits: unitsUsed,
+    pctOfDaily: pct,
+    status,
   };
 }
 
