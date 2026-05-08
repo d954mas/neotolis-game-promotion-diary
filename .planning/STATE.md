@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0.1-03-move-adapter-and-http-PLAN.md
-last_updated: "2026-05-08T15:43:52.133Z"
+stopped_at: Completed 03.0.1-04-move-youtube-services-PLAN.md
+last_updated: "2026-05-08T15:59:42.812Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 12
   completed_phases: 5
   total_plans: 93
-  completed_plans: 85
+  completed_plans: 86
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0.1 (source-plugin-architecture) — EXECUTING
-Plan: 4 of 11
+Plan: 5 of 11
 
 ## Performance Metrics
 
@@ -127,6 +127,7 @@ Plan: 4 of 11
 | Phase 03.0.1-source-plugin-architecture P01 | 4min 44s | 2 tasks | 12 files |
 | Phase 03.0.1-source-plugin-architecture P02 | 12min | 1 tasks | 32 files |
 | Phase 03.0.1 P03 | ~11min | 1 tasks | 20 files |
+| Phase 03.0.1 P04 | ~9 min 44 s | 1 tasks | 28 files |
 
 ## Accumulated Context
 
@@ -378,6 +379,9 @@ Recent decisions affecting current work:
 - [Phase 03.0.1-source-plugin-architecture]: [Phase 03.0.1]: Plan 02 — route per-file YouTube schema consumers through cross-source barrel $lib/server/db/schema/index.js (rather than the new per-source path) — minimal churn keeps existing call sites compiling without the per-file aliases the plan didn't anticipate
 - [Phase 03.0.1-source-plugin-architecture]: [Phase 03.0.1]: Plan 02 — drizzle.config.ts schema field migrated from string to array (Pattern 6 / Option A glob); per-source schemas auto-discovered from src/lib/sources/*/server/schema/*.ts; no SQL drift (table identity unchanged)
 - [Phase 03.0.1]: Plan 03 reconciled the widened DataSourceAdapter contract — PickedKey + quotaUser stay on v0.1 method signatures (preserves verbatim behavior); Thick-adapter D-06 picking-inside refactor deferred to Plan 04/08
+- [Phase 03.0.1]: Plan 04: extended tenant-scope ESLint glob to src/lib/sources/**/server/** (Rule 3 fix) — relocated quota.ts retains its lint-time guard on the audit_log defense-in-depth query
+- [Phase 03.0.1]: Plan 04: per-source folder is the home for kind-internal services (quota counter, snapshot writer, URL helper, metadata fetcher); cross-source services that orchestrate ACROSS kinds (refresh-poll, ingest, tier-resolver, poll-eligibility, purge-account, url-parser) STAY at $lib/server/services/
+- [Phase 03.0.1]: Plan 04: naming-collision disambiguation via $lib paths — TWO quota.ts files now exist; metadata.ts imports $lib/sources/youtube/server/quota.js (YouTube per-key counter) AND $lib/server/services/quota.js (cross-source events_per_day) with inline comment
 
 ### Pending Todos
 
@@ -420,8 +424,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-08T15:43:52.128Z
+Last session: 2026-05-08T15:59:42.807Z
 Last Activity: 2026-05-08
-Stopped at: Completed 03.0.1-03-move-adapter-and-http-PLAN.md
+Stopped at: Completed 03.0.1-04-move-youtube-services-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
