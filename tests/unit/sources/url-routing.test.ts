@@ -1,5 +1,7 @@
-import { describe, it, expect, test } from "vitest";
+import { describe, it, expect } from "vitest";
 import { detectFutureKind } from "$lib/sources/future-kinds.js";
+import { parseAnyUrl } from "$lib/sources/url.js";
+import { allAdapters } from "$lib/sources/registry.js";
 
 describe("detectFutureKind — Phase 03.0.1 RESEARCH.md SOTA divergence #3 (Reddit deferral preservation)", () => {
   it("reddit.com → 'reddit_post'", () => {
@@ -25,10 +27,55 @@ describe("detectFutureKind — Phase 03.0.1 RESEARCH.md SOTA divergence #3 (Redd
   });
 });
 
-describe("parseAnyUrl — D-15 first-match-wins (Wave 0 scaffold; Plan 06 flips live)", () => {
-  test.todo("youtube.com URL → first registered adapter (youtube) returns ParsedUrl — flips live in Plan 06");
-  test.todo("twitter.com URL → no adapter matches → kind: 'unsupported' — flips live in Plan 06");
-  test.todo("reddit.com URL → no adapter matches → kind: 'unsupported' (services/ingest.ts then maps to reddit_pending_phase3 via detectFutureKind) — flips live in Plan 06");
-  test.todo("malformed input → kind: 'unsupported' — flips live in Plan 06");
-  test.todo("registration order = priority: youtube before reddit means youtube wins on ambiguous host — flips live in Plan 06 (with Reddit adapter unavailable today this is hypothetical)");
+describe("parseAnyUrl — D-15 first-match-wins iterate-registry", () => {
+  it("registry has at least one adapter (precondition for first-match-wins)", () => {
+    expect(allAdapters.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("youtube.com /watch?v=<id> → kind: 'youtube_video' with externalId", () => {
+    const r = parseAnyUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    expect(r.kind).toBe("youtube_video");
+    expect((r as { externalId: string }).externalId).toBe("dQw4w9WgXcQ");
+  });
+
+  it("youtu.be/<id> → kind: 'youtube_video' with externalId", () => {
+    const r = parseAnyUrl("https://youtu.be/abc123XYZ");
+    expect(r.kind).toBe("youtube_video");
+    expect((r as { externalId: string }).externalId).toBe("abc123XYZ");
+  });
+
+  it("m.youtube.com/watch?v=<id> → kind: 'youtube_video'", () => {
+    const r = parseAnyUrl("https://m.youtube.com/watch?v=xyz");
+    expect(r.kind).toBe("youtube_video");
+  });
+
+  it("youtube.com/shorts/<id> → kind: 'youtube_video' (Shorts)", () => {
+    const r = parseAnyUrl("https://www.youtube.com/shorts/abc");
+    expect(r.kind).toBe("youtube_video");
+  });
+
+  it("youtube.com/embed/<id> → kind: 'youtube_video'", () => {
+    const r = parseAnyUrl("https://www.youtube.com/embed/abc");
+    expect(r.kind).toBe("youtube_video");
+  });
+
+  it("twitter.com URL → kind: 'unsupported' (no adapter for twitter in 03.0.1)", () => {
+    expect(parseAnyUrl("https://twitter.com/x/status/123").kind).toBe("unsupported");
+  });
+
+  it("reddit.com URL → kind: 'unsupported' (registry layer; ingest.ts maps to reddit_pending_phase3)", () => {
+    expect(parseAnyUrl("https://reddit.com/r/IndieDev").kind).toBe("unsupported");
+  });
+
+  it("malformed input → kind: 'unsupported'", () => {
+    expect(parseAnyUrl("not a url").kind).toBe("unsupported");
+  });
+
+  it("youtube.com/channel/<id> → kind: 'unsupported' (channels are not events)", () => {
+    expect(parseAnyUrl("https://www.youtube.com/channel/UCxyz").kind).toBe("unsupported");
+  });
+
+  it("youtube.com/@handle → kind: 'unsupported' (handles are not events)", () => {
+    expect(parseAnyUrl("https://www.youtube.com/@somecreator").kind).toBe("unsupported");
+  });
 });
