@@ -8,17 +8,24 @@
 //     for (const job of jobs) await handler(job);
 //   });
 //
-// Phase 03.0.1 Plan 05 — adapter-driven queue registration.
+// Phase 03.0.1 Plan 05 — adapter-driven queue registration. Each per-source
+// adapter owns its own queues; bootstrap iterates the registry and calls
+// `adapter.registerQueues(boss)`. Adding Reddit (Phase 03.1) is a
+// single-line registry entry — no edit here.
 //
-// Each per-source adapter owns its own queues; bootstrap iterates the
-// registry and calls `adapter.registerQueues(boss)`. Adding Reddit
-// (Phase 03.1) is a single-line registry entry — no edit here.
+// Phase 03.0.1 Plan 07 — the two scheduler.tick.* subscriptions are
+// RETIRED. Pre-Plan-07 (Pattern A from Phase 03.0 Plan 09) the cron sent
+// empty {} jobs to scheduler.tick.{active,cold} queues that the worker
+// drained by calling enqueueActivePolls / enqueueColdPolls (which then
+// enqueued real per-event poll.active / poll.cold jobs). Plan 07 collapses
+// that hop: the cron schedule sends tier-tagged jobs DIRECTLY to
+// youtube.poll.cron, the poll-cron handler reads job.data.tier and
+// dispatches inline. No more scheduler-tick → enqueue → real-job indirection.
 //
-// Cross-source / non-per-kind queues are subscribed directly in this
-// file because they apply regardless of source kind:
+// Cross-source / non-per-kind queues are subscribed directly in this file
+// because they apply regardless of source kind:
 //   - INTERNAL_HEALTHCHECK              (Phase 1)
 //   - PURGE_DAILY                       (cross-tenant FK-cascade purge)
-//   - SCHEDULER_TICK_ACTIVE / _COLD     (cron→enqueue dispatch — Pattern A)
 //
 // SIGTERM drain inherited from Phase 1 stopBoss (60s graceful) + pool.end.
 
@@ -30,7 +37,6 @@ import { scrubKekFromEnv } from "../lib/server/config/env.js";
 
 import { allAdapters } from "../lib/sources/registry.js";
 import { handlePurgeDaily } from "./handlers/purge-daily.js";
-import { enqueueActivePolls, enqueueColdPolls } from "../scheduler/enqueue.js";
 
 export async function startWorker(): Promise<void> {
   const boss = await createBoss();
@@ -68,31 +74,11 @@ export async function startWorker(): Promise<void> {
     }
   });
 
-  // Scheduler-tick subscriptions (Pattern A — Phase 3.0 Plan 09).
-  // The scheduler boots the cron schedules; we boot the consumers. Each
-  // tick triggers the corresponding enqueue function, which then sends
-  // real per-event jobs to POLL_ACTIVE / POLL_COLD. These are
-  // cross-source dispatch ticks (the enqueue functions themselves
-  // resolve per-kind work via the tier resolver) so they live here, not
-  // in any one adapter's registerQueues.
-  await boss.work(QUEUES.SCHEDULER_TICK_ACTIVE, { batchSize: 1 }, async (jobs) => {
-    for (const _job of jobs) {
-      try {
-        await enqueueActivePolls();
-      } catch (err) {
-        logger.error({ err }, "scheduler.tick.active: enqueueActivePolls threw");
-      }
-    }
-  });
-  await boss.work(QUEUES.SCHEDULER_TICK_COLD, { batchSize: 1 }, async (jobs) => {
-    for (const _job of jobs) {
-      try {
-        await enqueueColdPolls();
-      } catch (err) {
-        logger.error({ err }, "scheduler.tick.cold: enqueueColdPolls threw");
-      }
-    }
-  });
+  // Phase 03.0.1 Plan 07 — scheduler.tick.* subscriptions RETIRED.
+  // The cron schedule (registered in src/scheduler/index.ts via each
+  // adapter.scheduleCronTicks) now sends tier-tagged jobs directly to
+  // youtube.poll.cron; the poll-cron handler dispatches by tier. The
+  // intermediate scheduler-tick → enqueue → per-event-job hop is gone.
 
   // D-15 smoke assertion #2 — exact string `worker ready` on stdout.
   logger.info({ role: "worker" }, "worker ready");

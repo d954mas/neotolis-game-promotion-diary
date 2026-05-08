@@ -377,17 +377,21 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
     return result;
   },
 
-  // ---- Phase 03.0.1 widened-interface — Plan 06 LIVE / others stubbed ----
+  // ---- Phase 03.0.1 widened-interface — Plans 05/06/07 LIVE / others stubbed ----
   //
   // Real implementations land in:
   //   - parseUrl: Plan 06 — LIVE (delegates to ./url.ts youtubeParseUrl).
   //   - observability: Plan 08 (observability API + reservoir + needs_reconnect schema)
-  //   - registerQueues: Plan 05 — REAL impl lives in ./index.ts (the barrel
-  //     spreads this object and OVERRIDES registerQueues with a real
+  //   - registerQueues: Plan 05 — LIVE — REAL impl lives in ./index.ts (the
+  //     barrel spreads this object and OVERRIDES registerQueues with a real
   //     implementation so consumers always receive the wired-up adapter).
   //     The stub here is a lower-priority fallback for the contract type;
   //     the barrel is the single composition point that workers import.
-  //   - scheduleCronTicks: Plan 07
+  //   - scheduleCronTicks: Plan 07 — LIVE — REAL impl lives in ./index.ts
+  //     (same barrel-override pattern as registerQueues). Registers
+  //     youtube.poll.cron (key=active|cold), youtube.quota_reset, and
+  //     youtube.rehab schedules per pg-boss v11+ key-based multiple-
+  //     schedule-per-queue.
   //   - backfillSource: Plan 10 (refresh-content endpoint + backfill.user queue)
   //
   // Stubs throw rather than return defaults so premature use surfaces loudly.
@@ -427,8 +431,14 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
       "youtubeChannelAdapter.registerQueues fallback hit — import youtubeAdapter from $lib/sources/youtube/server/index.js (the barrel composes the real registerQueues).",
     );
   },
-  scheduleCronTicks: async (_boss: MinimalBoss) => {
-    throw notYetImplemented("07", "scheduleCronTicks");
+  // Plan 07 lands the real scheduleCronTicks in ./index.ts (the barrel
+  // spreads this object and OVERRIDES this method, same pattern as
+  // registerQueues). This stub catches imports that bypass the barrel.
+  scheduleCronTicks: async (boss: MinimalBoss): Promise<void> => {
+    void boss;
+    throw new Error(
+      "youtubeChannelAdapter.scheduleCronTicks fallback hit — import youtubeAdapter from $lib/sources/youtube/server/index.js (the barrel composes the real scheduleCronTicks).",
+    );
   },
   backfillSource: async (_source: PollableSource, _ctx: AdapterContext) => {
     throw notYetImplemented("10", "backfillSource");

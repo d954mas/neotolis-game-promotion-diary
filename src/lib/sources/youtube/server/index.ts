@@ -3,73 +3,89 @@
 // The internal modules (adapter, http, schema, handlers) are wired
 // together inside this folder; consumers see only the adapter export.
 //
-// Phase 03.0.1 Plan 05 — registerQueues lands as a REAL implementation
-// here, OVERRIDING the throwing stub in ./adapter.ts. The stub remains
-// in adapter.ts because the DataSourceAdapter contract requires every
-// adapter object to expose every method (ContractError-loud is better
-// than silently-undefined for premature use); the barrel composes the
-// final adapter object that consumers actually receive.
+// Phase 03.0.1 Plan 07 — per-kind queue topology landed (D-10..D-12).
+// Queue rename map (Plan 05 → Plan 07):
+//   poll.active                       → youtube.poll.cron (key=active)
+//   poll.cold                         → youtube.poll.cron (key=cold)
+//   poll.user                         → youtube.poll.user
+//   (NEW)                             → youtube.backfill.user (Plan 10)
+//   youtube.rehab_unavailable         → youtube.rehab (D-11 brevity)
+//   youtube.quota_reset               → unchanged
+//   youtube.channel_context_backfill  → unchanged
 //
-// Queue NAMES are unchanged in this plan — poll.active / poll.cold /
-// poll.user / youtube.channel_context_backfill / youtube.quota_reset /
-// youtube.rehab_unavailable. The per-kind queue topology rename
-// (youtube.poll.cron with key-based schedule split, youtube.poll.user,
-// youtube.backfill.user) lands in Plan 07.
+// Two scheduler.tick.* queues from Phase 03.0 Plan 09 are RETIRED here —
+// collapsed into the youtube.poll.cron schedule via boss.schedule({key})
+// per pg-boss v11+ multiple-schedules-per-queue. The poll-cron handler
+// (./handlers/poll-cron.ts) reads job.data.tier and dispatches to
+// handlePollActive / handlePollCold; the scheduler-tick → enqueue.ts hop
+// is gone. Migration drizzle/0021_phase03_01_per_kind_queue_topology.sql
+// cleans up the orphan pgboss.* rows.
 //
-// Cross-source / non-per-kind queues (purge.daily, internal.healthcheck)
-// are NOT registered here — they stay in src/worker/index.ts because
-// they apply across all sources, not just YouTube.
+// scheduleCronTicks is the REAL implementation — replaces the Plan 03
+// throwing stub in ./adapter.ts. Cross-source crons (purge.daily,
+// internal.healthcheck) stay in src/scheduler/index.ts because they
+// apply across all sources, not just YouTube.
 //
-// batchSize values mirror the existing src/worker/index.ts subscriptions
-// pre-Plan 05 (Phase 3.0 Plan 09 contract):
-//   POLL_ACTIVE                       batchSize=4
-//   POLL_COLD                         batchSize=1
-//   POLL_USER                         batchSize=2
+// batchSize values mirror the Phase 03.0 Plan 09 / Plan 05 contract:
+//   YOUTUBE_POLL_CRON                 batchSize=4 (Active concurrency)
+//   YOUTUBE_POLL_USER                 batchSize=2
+//   YOUTUBE_BACKFILL_USER             batchSize=1 (Plan 10 wires the handler)
 //   YOUTUBE_CHANNEL_CONTEXT_BACKFILL  batchSize=1
 //   YOUTUBE_QUOTA_RESET               batchSize=1
-//   YOUTUBE_REHAB_UNAVAILABLE         batchSize=1
+//   YOUTUBE_REHAB                     batchSize=1
+//
+// The poll-cron handler internally distinguishes Active (cron every 6h,
+// throttle skip on ninetyfive) vs Cold (cron daily 5am PT, throttle skip
+// on eighty AND ninetyfive) via the tier-tagged payload. Cold's
+// effectively-once-daily concurrency is shaped by the cron schedule, not
+// by a separate queue's batchSize.
 
 import type { DataSourceAdapter, MinimalBoss } from "$lib/sources/adapter.js";
 import { QUEUES } from "$lib/server/queues.js";
 import { youtubeChannelAdapter } from "./adapter.js";
-import { handlePollActive } from "./handlers/poll-active.js";
-import { handlePollCold } from "./handlers/poll-cold.js";
+import { handlePollCron } from "./handlers/poll-cron.js";
 import { handlePollUser } from "./handlers/poll-user.js";
 import { handleRehabUnavailable } from "./handlers/rehab-unavailable.js";
 import { handleChannelContextBackfill } from "./handlers/channel-context-backfill.js";
 import { handleQuotaReset } from "./handlers/quota-reset.js";
+// youtube.backfill.user handler lands in Plan 10 (refresh-content endpoint).
+// Until then the queue is declared (so boss.send works idempotently from
+// future call sites being prototyped) but no worker subscribes to drain it.
 
 async function registerQueues(boss: MinimalBoss): Promise<void> {
   // pg-boss v10+ requires createQueue before send/work — idempotent on
   // every boot. queues.ts.declareAllQueues() is still called at worker
-  // bootstrap time for cross-source queues; this function declares the
-  // YouTube-specific queues again (idempotent) so the adapter's
+  // bootstrap time for the cross-source roster; this function declares
+  // the YouTube-specific queues again (idempotent) so the adapter's
   // registration is self-contained — Reddit/Twitter adapters follow the
   // same pattern in Phase 03.1+.
-  await boss.createQueue(QUEUES.POLL_ACTIVE);
-  await boss.createQueue(QUEUES.POLL_COLD);
-  await boss.createQueue(QUEUES.POLL_USER);
-  await boss.createQueue(QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL);
+  await boss.createQueue(QUEUES.YOUTUBE_POLL_CRON);
+  await boss.createQueue(QUEUES.YOUTUBE_POLL_USER);
+  await boss.createQueue(QUEUES.YOUTUBE_BACKFILL_USER);
   await boss.createQueue(QUEUES.YOUTUBE_QUOTA_RESET);
-  await boss.createQueue(QUEUES.YOUTUBE_REHAB_UNAVAILABLE);
+  await boss.createQueue(QUEUES.YOUTUBE_REHAB);
+  await boss.createQueue(QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL);
 
-  await boss.work(QUEUES.POLL_ACTIVE, { batchSize: 4 }, async (jobs) => {
+  // youtube.poll.cron — Active+Cold collapsed via tier-tagged payload.
+  // batchSize=4 matches Phase 03.0 POLL_ACTIVE concurrency (Cold's daily
+  // cadence keeps it from saturating the budget regardless).
+  await boss.work(QUEUES.YOUTUBE_POLL_CRON, { batchSize: 4 }, async (jobs) => {
     for (const job of jobs) {
-      await handlePollActive(job as { id: string; data: { videoIds: string[] } });
+      await handlePollCron(
+        job as { id?: string; data: { tier: "active" | "cold" } & Record<string, unknown> },
+      );
     }
   });
 
-  await boss.work(QUEUES.POLL_COLD, { batchSize: 1 }, async (jobs) => {
-    for (const job of jobs) {
-      await handlePollCold(job as { id: string; data: { videoIds: string[] } });
-    }
-  });
-
-  await boss.work(QUEUES.POLL_USER, { batchSize: 2 }, async (jobs) => {
+  await boss.work(QUEUES.YOUTUBE_POLL_USER, { batchSize: 2 }, async (jobs) => {
     for (const job of jobs) {
       await handlePollUser(job as { id: string; data: { eventId: string; userId: string } });
     }
   });
+
+  // YOUTUBE_BACKFILL_USER subscription lands in Plan 10 once the handler
+  // exists. Declaring the queue here (above) is forward-compat scaffold
+  // so the topology is locked in this plan.
 
   await boss.work(QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL, { batchSize: 1 }, async (jobs) => {
     for (const job of jobs) {
@@ -94,21 +110,77 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
     }
   });
 
-  await boss.work(QUEUES.YOUTUBE_REHAB_UNAVAILABLE, { batchSize: 1 }, async (jobs) => {
+  await boss.work(QUEUES.YOUTUBE_REHAB, { batchSize: 1 }, async (jobs) => {
     for (const job of jobs) {
       await handleRehabUnavailable(job as { id: string });
     }
   });
 }
 
+/**
+ * Plan 07 — REAL implementation (replaces the Plan 03 throwing stub in
+ * ./adapter.ts). Registers the YouTube-specific cron schedules:
+ *
+ *   - youtube.poll.cron, key=active — every 6 hours UTC default. Sends
+ *     `{ tier: "active" }` payload; the poll-cron handler dispatches.
+ *   - youtube.poll.cron, key=cold   — daily 5am Pacific. Sends
+ *     `{ tier: "cold" }` payload.
+ *   - youtube.quota_reset           — midnight Pacific (YouTube's daily
+ *     quota reset boundary).
+ *   - youtube.rehab                 — weekly Sunday 4am Pacific (recovers
+ *     privacy-unflipped videos; ~50 ids/week).
+ *
+ * Cross-source crons (purge.daily, internal.healthcheck) stay in
+ * src/scheduler/index.ts — they apply across all sources, not just
+ * YouTube. Plan 07 src/scheduler/index.ts iterates allAdapters and calls
+ * adapter.scheduleCronTicks(boss) for each per-kind set.
+ *
+ * Pacific-time schedules use `tz: "America/Los_Angeles"` so DST
+ * transitions are handled by pg-boss; the active tier's "every 6 hours"
+ * cron is left as UTC default per Phase 03.0's existing precedent
+ * (operator can revisit if the time-of-day shift matters at higher
+ * volumes).
+ */
+async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
+  // Active tier — every 6 hours UTC (preserves Phase 03.0 cadence).
+  await boss.schedule(
+    QUEUES.YOUTUBE_POLL_CRON,
+    "0 */6 * * *",
+    { tier: "active" },
+    { key: "active" },
+  );
+  // Cold tier — daily 5am Pacific.
+  await boss.schedule(
+    QUEUES.YOUTUBE_POLL_CRON,
+    "0 5 * * *",
+    { tier: "cold" },
+    { key: "cold", tz: "America/Los_Angeles" },
+  );
+  // Quota reset — midnight Pacific.
+  await boss.schedule(
+    QUEUES.YOUTUBE_QUOTA_RESET,
+    "0 0 * * *",
+    {},
+    { tz: "America/Los_Angeles" },
+  );
+  // Rehab — weekly Sunday 4am Pacific.
+  await boss.schedule(
+    QUEUES.YOUTUBE_REHAB,
+    "0 4 * * 0",
+    {},
+    { tz: "America/Los_Angeles" },
+  );
+}
+
 // youtubeAdapter — composes the per-source adapter consumers see.
 // Spread `youtubeChannelAdapter` (every other method: pollContent /
-// pollStats / pollStatsByVideoId / parseUrl-stub / observability-stub /
-// scheduleCronTicks-stub / backfillSource-stub / canRefreshPoll) with
-// registerQueues OVERRIDDEN here as a real implementation. The stub in
-// adapter.ts stays so consumers reading the type definition see the
-// contract surface; the barrel is the runtime composition point.
+// pollStats / pollStatsByVideoId / parseUrl / observability /
+// backfillSource-stub / canRefreshPoll) with registerQueues +
+// scheduleCronTicks OVERRIDDEN here as real implementations. The stubs
+// in adapter.ts stay for typecheck-loud failure if a consumer imports
+// adapter.ts directly instead of going through this barrel.
 export const youtubeAdapter: DataSourceAdapter = {
   ...youtubeChannelAdapter,
   registerQueues,
+  scheduleCronTicks,
 };

@@ -1,26 +1,30 @@
 // APP_ROLE=scheduler entrypoint.
 //
 // Phase 1 shipped a no-op stub registering only the internal.healthcheck
-// schedule. Phase 3.0 Plan 09 promotes the scheduler to a thin cron-fire
-// loop that registers FOUR additional schedules:
+// schedule. Phase 3.0 Plan 09 promoted the scheduler to a thin cron-fire
+// loop that registered the YouTube-specific cron schedules directly here.
 //
-//   - youtube.poll.active  '0 */6 * * *'                — every 6 hours UTC
-//   - youtube.poll.cold    '0 5 * * *'                  — 5 AM UTC daily
-//   - youtube.quota_reset  '0 0 * * *' tz=America/Los_Angeles — midnight Pacific
-//   - purge.daily          '0 4 * * *' tz=America/Los_Angeles — 4 AM Pacific
+// Phase 03.0.1 Plan 07 — adapter-driven cron registration (D-10..D-12).
+// The scheduler now iterates `allAdapters` from src/lib/sources/registry.ts
+// and calls `adapter.scheduleCronTicks(boss)` for each per-kind set. Adding
+// Reddit (Phase 03.1) means adding the adapter to the registry; the
+// scheduler edits to zero.
 //
-// Pitfall D: youtube.quota_reset and purge.daily MUST run in Pacific time —
-// YouTube's quota reset is at midnight Pacific (not UTC), and the daily
-// backup at 03:00 Pacific must precede the purge at 04:00 Pacific so
-// soft-deleted accounts being hard-deleted are still in the night's backup.
-// pg-boss schedule options.tz handles DST transitions.
+// Each adapter owns the schedules for its per-kind queues:
+//   - youtubeAdapter.scheduleCronTicks registers:
+//       youtube.poll.cron (key=active, every 6h UTC)
+//       youtube.poll.cron (key=cold, daily 5am Pacific)
+//       youtube.quota_reset (daily midnight Pacific)
+//       youtube.rehab (weekly Sun 4am Pacific)
 //
-// Plan 09 Pattern A: the active + cold poll cron schedules send empty
-// jobs to scheduler.tick.{active,cold} queues; the WORKER process owns
-// the consumers (src/worker/index.ts) which call enqueueActivePolls /
-// enqueueColdPolls and dispatch real per-event jobs to POLL_ACTIVE /
-// POLL_COLD. This split keeps the scheduler container thin (no DB-touching
-// logic) and ensures the enqueue path runs on the worker pool.
+// Cross-source / non-per-kind schedules stay in this file because they
+// apply regardless of source kind:
+//   - internal.healthcheck (every 5 minutes)
+//   - purge.daily (4 AM Pacific — after backup at 03:00 Pacific so soft-
+//     deleted accounts being hard-deleted are still in the night's backup)
+//
+// Pitfall D: tz-aware Pacific schedules MUST use the {tz} option so
+// pg-boss handles DST transitions — never hard-code the UTC offset.
 //
 // SIGTERM drain inherited from Phase 1 stopBoss + pool.end.
 
@@ -29,6 +33,7 @@ import { pool } from "../lib/server/db/client.js";
 import { logger } from "../lib/server/logger.js";
 import { QUEUES } from "../lib/server/queues.js";
 import { scrubKekFromEnv } from "../lib/server/config/env.js";
+import { allAdapters } from "../lib/sources/registry.js";
 
 export async function startScheduler(): Promise<void> {
   const boss = await createBoss();
@@ -42,66 +47,39 @@ export async function startScheduler(): Promise<void> {
     throw err;
   }
 
-  // Phase 3.0 Plan 09 — register the 4 new cron schedules. boss.schedule
-  // is idempotent (same name → update); safe on every scheduler boot.
+  // Phase 03.0.1 Plan 07 — per-kind cron schedules owned by each adapter.
+  // Iterate registration order from registry.ts (currently just youtube;
+  // Reddit / Twitter / Telegram / Discord queue here in Phase 03.1+).
+  for (const adapter of allAdapters) {
+    try {
+      await adapter.scheduleCronTicks(boss);
+    } catch (err) {
+      logger.error(
+        { err, kind: adapter.kind },
+        "failed to register adapter scheduleCronTicks",
+      );
+      throw err;
+    }
+  }
 
-  // youtube.poll.active — every 6 hours UTC default (operator can revisit
-  // to a tz-aware schedule if needed). Sends empty {} to scheduler.tick.active;
-  // the worker subscribes and dispatches per-event POLL_ACTIVE jobs.
-  await boss.schedule(QUEUES.SCHEDULER_TICK_ACTIVE, "0 */6 * * *", {});
-
-  // youtube.poll.cold — once per day at 5 AM UTC. Cold tier is the first
-  // thing to give up on heavy days (throttle 'eighty' pauses it).
-  await boss.schedule(QUEUES.SCHEDULER_TICK_COLD, "0 5 * * *", {});
-
-  // youtube.quota_reset — midnight Pacific. YouTube's daily quota resets
-  // at this boundary (Pitfall D). tz handles PDT/PST transitions.
-  await boss.schedule(
-    QUEUES.YOUTUBE_QUOTA_RESET,
-    "0 0 * * *",
-    {},
-    {
-      tz: "America/Los_Angeles",
-    },
-  );
+  // Cross-source / non-per-kind schedules — apply across all sources.
 
   // purge.daily — 4 AM Pacific (after backup at 03:00 Pacific). Plan 05's
   // listPurgeEligibleUsers + purgeAccount cascade.
-  await boss.schedule(
-    QUEUES.PURGE_DAILY,
-    "0 4 * * *",
-    {},
-    {
-      tz: "America/Los_Angeles",
-    },
-  );
-
-  // Phase 3.0 post-build refactor (2026-05-06) — weekly rehab tick at
-  // Sunday 4 AM Pacific (after the daily purge). Polls up to 50
-  // unavailable videos with poll_failure_count < 5 to detect privacy
-  // unflip. See $lib/sources/youtube/server/handlers/rehab-unavailable.ts
-  // for the failure-count cap rationale.
-  await boss.schedule(
-    QUEUES.YOUTUBE_REHAB_UNAVAILABLE,
-    "0 4 * * 0",
-    {},
-    {
-      tz: "America/Los_Angeles",
-    },
-  );
+  await boss.schedule(QUEUES.PURGE_DAILY, "0 4 * * *", {}, { tz: "America/Los_Angeles" });
 
   logger.info(
     {
       schedules: [
         QUEUES.INTERNAL_HEALTHCHECK,
-        QUEUES.SCHEDULER_TICK_ACTIVE,
-        QUEUES.SCHEDULER_TICK_COLD,
-        QUEUES.YOUTUBE_QUOTA_RESET,
+        // Per-kind schedules registered by adapter.scheduleCronTicks above
+        // — the names are owned by each per-source barrel; we don't
+        // enumerate them here to keep the source of truth in one place.
+        ...allAdapters.map((a) => `<${a.kind} adapter>`),
         QUEUES.PURGE_DAILY,
-        QUEUES.YOUTUBE_REHAB_UNAVAILABLE,
       ],
     },
-    "scheduler registered Phase 3.0 cron schedules",
+    "scheduler registered cron schedules (adapter-driven)",
   );
 
   // D-15 smoke assertion #3 — exact string `scheduler ready` on stdout.

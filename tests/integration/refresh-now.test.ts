@@ -97,12 +97,12 @@ describe("refresh-now route (Plan 03.0-08)", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body).toEqual({ enqueued: true, queue: "poll.user", eventId: ev.id });
+    expect(body).toEqual({ enqueued: true, queue: "youtube.poll.user", eventId: ev.id });
 
     // pg-boss send was called.
     expect(sentJobs.length).toBeGreaterThanOrEqual(1);
     const lastSend = sentJobs[sentJobs.length - 1]!;
-    expect(lastSend.queue).toBe("poll.user");
+    expect(lastSend.queue).toBe("youtube.poll.user");
     expect(lastSend.data).toMatchObject({
       eventId: ev.id,
       userId: u.id,

@@ -34,14 +34,19 @@ vi.mock("../../src/lib/sources/youtube/server/quota.js", async (importOriginal) 
 const adapterMock = {
   pollStatsByVideoId: vi.fn(),
 };
-vi.mock("../../src/lib/sources/youtube/server/index.js", () => ({
-  youtubeAdapter: {
-    kind: "youtube_channel" as const,
-    pollContent: vi.fn(),
-    pollStats: vi.fn(),
-    pollStatsByVideoId: (...args: unknown[]) => adapterMock.pollStatsByVideoId(...args),
-  },
-}));
+// Phase 03.0.1 Plan 07 — handlePollActive imports from ../adapter.js
+// directly (the barrel ../index.js was the pre-Plan-07 import path; Plan 07
+// avoids the circular barrel→handlers→barrel path by going to adapter.js).
+vi.mock("../../src/lib/sources/youtube/server/adapter.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    youtubeChannelAdapter: {
+      ...(actual.youtubeChannelAdapter as Record<string, unknown>),
+      pollStatsByVideoId: (...args: unknown[]) => adapterMock.pollStatsByVideoId(...args),
+    },
+  };
+});
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
@@ -58,10 +63,16 @@ const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
 async function insertEventAndVideo(userId: string, externalId: string): Promise<string> {
   const id = uuidv7();
+  // Phase 03.0.1 Plan 07: handlePollActive now enumerates eligible videos
+  // itself via selectEligibleVideoIds, keyed on youtube_videos.published_at
+  // landing inside the Active-tier window (age < 24h). Seed with publishedAt
+  // 12h ago (relative to the live clock) so the seeded video falls in the
+  // Active tier regardless of when the test runs.
+  const recentPublishedAt = new Date(Date.now() - 12 * 60 * 60 * 1000);
   await db.insert(youtubeVideos).values({
     videoId: externalId,
     title: "tx-boundary test",
-    publishedAt: new Date("2026-05-05T12:00:00Z"),
+    publishedAt: recentPublishedAt,
     fetchedAt: new Date(),
   });
   await db.insert(events).values({
@@ -69,7 +80,7 @@ async function insertEventAndVideo(userId: string, externalId: string): Promise<
     userId,
     kind: "youtube_video",
     authorIsMe: false,
-    occurredAt: new Date("2026-05-05T12:00:00Z"),
+    occurredAt: recentPublishedAt,
     title: "tx-boundary test",
     url: `https://www.youtube.com/watch?v=${externalId}`,
     externalId,
@@ -84,19 +95,22 @@ describe("poll worker tx boundary (Plan 03.0-09 + per-video refactor)", () => {
     const externalId = `vid_${uniq()}`;
     await insertEventAndVideo(u.id, externalId);
 
-    adapterMock.pollStatsByVideoId.mockImplementation(async () => {
+    // Return one snapshot per requested videoId — Plan 07's handlePollActive
+    // enumerates eligibility itself so it may pass multiple videoIds (any
+    // other Active-tier videos in the test DB from sibling tests). We map
+    // every requested id to a viewCount=42 snapshot; the assertion below
+    // narrows to the seeded externalId via WHERE.
+    adapterMock.pollStatsByVideoId.mockImplementation(async (videoIds: string[]) => {
       await new Promise((r) => setTimeout(r, 100));
-      return [
-        {
-          polledAt: new Date(),
-          status: "ok" as const,
-          metrics: { view_count: 42, like_count: 1, comment_count: 0 },
-        },
-      ];
+      return videoIds.map(() => ({
+        polledAt: new Date(),
+        status: "ok" as const,
+        metrics: { view_count: 42, like_count: 1, comment_count: 0 },
+      }));
     });
 
     const handlerStart = Date.now();
-    await handlePollActive({ id: "test-job", data: { videoIds: [externalId] } });
+    await handlePollActive({ id: "test-job", data: { tier: "active" } });
     const handlerEnd = Date.now();
     const totalMs = handlerEnd - handlerStart;
 
@@ -128,7 +142,7 @@ describe("poll worker tx boundary (Plan 03.0-09 + per-video refactor)", () => {
 
     let concurrentSelectMs = -1;
     let selectCompletedAt = 0;
-    adapterMock.pollStatsByVideoId.mockImplementation(async () => {
+    adapterMock.pollStatsByVideoId.mockImplementation(async (videoIds: string[]) => {
       // Concurrent SELECT during the simulated HTTP wait. If the youtube_videos
       // row were locked in a tx, this SELECT would block until the lock
       // released; it should complete in single-digit ms.
@@ -142,17 +156,16 @@ describe("poll worker tx boundary (Plan 03.0-09 + per-video refactor)", () => {
       expect(concRows).toHaveLength(1);
 
       await new Promise((r) => setTimeout(r, 200));
-      return [
-        {
-          polledAt: new Date(),
-          status: "ok" as const,
-          metrics: { view_count: 7, like_count: 0, comment_count: 0 },
-        },
-      ];
+      // One snapshot per requested videoId — see sibling test header note.
+      return videoIds.map(() => ({
+        polledAt: new Date(),
+        status: "ok" as const,
+        metrics: { view_count: 7, like_count: 0, comment_count: 0 },
+      }));
     });
 
     const handlerStart = Date.now();
-    await handlePollActive({ id: "test-job-conc", data: { videoIds: [externalId] } });
+    await handlePollActive({ id: "test-job-conc", data: { tier: "active" } });
     const handlerEnd = Date.now();
 
     expect(concurrentSelectMs).toBeGreaterThanOrEqual(0);

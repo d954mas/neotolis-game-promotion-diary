@@ -105,20 +105,31 @@ phase30_polling_smoke() {
   fi
   log "(P3.0) worker + scheduler ready"
 
-  # ----- 3. Assert the five Phase 3.0 cron schedules registered -----
+  # ----- 3. Assert the Phase 03.0.1 Plan 07 cron schedules registered -----
   # pg-boss persists `boss.schedule(name, cronExpr, ...)` rows into
   # pgboss.schedule on each scheduler boot (idempotent). We query through
   # the smoke-app container's pg pool so this works on any runner that
   # has docker but not psql.
   #
-  # Expected names (src/scheduler/index.ts):
-  #   - scheduler.tick.active        (cron 0 */6 * * *)        Plan 03.0-09 Pattern A
-  #   - scheduler.tick.cold          (cron 0 5 * * *)          Plan 03.0-09 Pattern A
-  #   - youtube.quota_reset          (cron 0 0 * * *, tz=PT)   daily quota reset
-  #   - purge.daily                  (cron 0 4 * * *, tz=PT)   GDPR purge worker
-  #   - youtube.rehab_unavailable    (cron 0 4 * * 0, tz=PT)   weekly rehab cron
-  #     (per-video refactor 2026-05-06 — recovers privacy-unflipped videos)
-  log "(P3.0) asserting 5 cron schedules in pgboss.schedule"
+  # Phase 03.0.1 Plan 07 — per-kind queue topology rename. Expected schedules:
+  #   - youtube.poll.cron (key=active)  (cron 0 */6 * * *)        Active tier
+  #   - youtube.poll.cron (key=cold)    (cron 0 5 * * *, tz=PT)   Cold tier
+  #   - youtube.quota_reset             (cron 0 0 * * *, tz=PT)   daily quota reset
+  #   - purge.daily                     (cron 0 4 * * *, tz=PT)   GDPR purge worker
+  #   - youtube.rehab                   (cron 0 4 * * 0, tz=PT)   weekly rehab cron
+  #
+  # The two retired Phase 03.0 Plan 09 names (scheduler.tick.active /
+  # scheduler.tick.cold) collapsed into youtube.poll.cron via pg-boss v11+
+  # key-based multiple-schedule-per-queue. The retired youtube.rehab_unavailable
+  # name was renamed to youtube.rehab (D-11 brevity). Migration
+  # drizzle/0021_phase03_01_per_kind_queue_topology.sql cleans up the
+  # orphan pgboss.schedule rows.
+  #
+  # Two key=active and key=cold schedules share the queue name 'youtube.poll.cron'
+  # — the SELECT below returns one row per (name,key) so we use grep -c >=1
+  # for the cron name (vs. an exact match) and check both keys appear in the
+  # accompanying key column where present.
+  log "(P3.0) asserting Plan 07 cron schedules in pgboss.schedule"
   # Avoid `local foo=$(cmd)` — `local` swallows the inner command's exit
   # code, but `set -e` then trips when the assignment expression itself
   # is evaluated as part of pipeline state, exiting the script silently
@@ -150,12 +161,21 @@ phase30_polling_smoke() {
     docker logs smoke-app 2>&1 | tail -50 || true
     fail "(P3.0) docker exec smoke-app node (pgboss.schedule readback) exited $schedules_rc"
   fi
-  for expected in "scheduler.tick.active" "scheduler.tick.cold" "youtube.quota_reset" "purge.daily" "youtube.rehab_unavailable"; do
+  for expected in "youtube.poll.cron" "youtube.quota_reset" "purge.daily" "youtube.rehab"; do
     if ! echo "$schedules" | grep -qx "$expected"; then
       fail "(P3.0) pgboss.schedule missing entry for '$expected'"
     fi
   done
-  log "(P3.0) PASS — all 5 cron schedules registered"
+  # youtube.poll.cron carries TWO schedules (key=active + key=cold) per
+  # pg-boss v11+ multiple-schedule-per-queue. Verify the second occurrence
+  # exists by counting — exactly one queue should appear with name=
+  # youtube.poll.cron AND there should be ≥ 2 rows for it.
+  local poll_cron_count
+  poll_cron_count=$(echo "$schedules" | grep -cx "youtube.poll.cron" || true)
+  if [ "$poll_cron_count" -lt 2 ]; then
+    fail "(P3.0) pgboss.schedule has $poll_cron_count youtube.poll.cron rows, expected >=2 (key=active + key=cold)"
+  fi
+  log "(P3.0) PASS — Plan 07 cron schedules registered (youtube.poll.cron x2 + 3 other)"
 
   # ----- 4. Create a youtube_video event + drive a refresh-now poll -----
   # POST /api/events with kind=youtube_video and a real-shaped YouTube URL
@@ -164,7 +184,7 @@ phase30_polling_smoke() {
   # hit `http://localhost:$YOUTUBE_MOCK_PORT/videos` (intercepted by our
   # stub) and write a snapshot row.
   #
-  # The refresh-poll route enqueues to QUEUES.POLL_USER which is one of
+  # The refresh-poll route enqueues to QUEUES.YOUTUBE_POLL_USER which is one of
   # the worker subscriptions registered by Plan 03.0-09. We use the
   # refresh-now route instead of the scheduler tick because:
   #   - it's deterministic (no waiting for a 6-hour cron tick)

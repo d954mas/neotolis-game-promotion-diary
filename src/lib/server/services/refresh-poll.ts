@@ -1,6 +1,7 @@
 // Phase 3.0 Plan 04 — refresh-poll service (CONTEXT D-10).
 //
-// User-driven "Refresh now" button enqueues an upstream poll on `poll.user`
+// User-driven "Refresh now" button enqueues an upstream poll on
+// `youtube.poll.user` (Phase 03.0.1 Plan 07 — was `poll.user` pre-rename)
 // with a 5-minute cooldown gate. The cooldown is per-event and persisted in
 // `events.metadata.last_user_refresh_at` (eager-write; survives container
 // restart so the next attempt still honors it). Frozen-tier events ARE
@@ -45,7 +46,7 @@ const COOLDOWN_MS = 5 * 60 * 1000;
 
 export interface RefreshPollResult {
   enqueued: true;
-  queue: "poll.user";
+  queue: "youtube.poll.user";
   eventId: string;
 }
 
@@ -189,7 +190,7 @@ export async function requestRefreshPoll(
   const boss = await getBoss();
   const minuteKey = now.toISOString().slice(0, 16); // 'YYYY-MM-DDTHH:MM'
   await boss.send(
-    QUEUES.POLL_USER,
+    QUEUES.YOUTUBE_POLL_USER,
     { eventId, userId, externalId: event.externalId, kind: event.kind },
     {
       singletonKey: `${eventId}-${minuteKey}`,
@@ -212,5 +213,5 @@ export async function requestRefreshPoll(
     },
   });
 
-  return { enqueued: true, queue: "poll.user", eventId };
+  return { enqueued: true, queue: "youtube.poll.user", eventId };
 }

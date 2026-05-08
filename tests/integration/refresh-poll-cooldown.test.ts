@@ -87,7 +87,7 @@ describe("refresh-poll cooldown service (Plan 03.0-04)", () => {
     sentJobs.length = 0;
   });
 
-  it("Plan 03.0-04: requestRefreshPoll on a fresh event enqueues poll.user + sets metadata.last_user_refresh_at", async () => {
+  it("Plan 03.0-04: requestRefreshPoll on a fresh event enqueues youtube.poll.user + sets metadata.last_user_refresh_at", async () => {
     sentJobs.length = 0;
     const u = await seedUserDirectly({ email: `rp-fresh-${uniq()}@test.local` });
     const ev = await insertEvent(u.id);
@@ -96,7 +96,7 @@ describe("refresh-poll cooldown service (Plan 03.0-04)", () => {
     const result = await requestRefreshPoll(u.id, ev.id, "127.0.0.1");
     const after = Date.now();
 
-    expect(result).toEqual({ enqueued: true, queue: "poll.user", eventId: ev.id });
+    expect(result).toEqual({ enqueued: true, queue: "youtube.poll.user", eventId: ev.id });
 
     // Metadata.last_user_refresh_at written within the call's window.
     const [row] = await db.select().from(events).where(eq(events.id, ev.id));
@@ -108,7 +108,7 @@ describe("refresh-poll cooldown service (Plan 03.0-04)", () => {
 
     // pg-boss send was called with the right queue + payload.
     const lastSend = sentJobs[sentJobs.length - 1]!;
-    expect(lastSend.queue).toBe("poll.user");
+    expect(lastSend.queue).toBe("youtube.poll.user");
     expect(lastSend.data).toMatchObject({
       eventId: ev.id,
       userId: u.id,
