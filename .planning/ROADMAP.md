@@ -198,6 +198,16 @@ Plans:
 **UI hint**: yes
 
 
+### Phase 03.0.1: source plugin architecture (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Requirements**: TBD
+**Depends on:** Phase 03.0
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 03.0.1 to break down)
+
 ### Phase 3.1: Reddit Adapter
 *DECIMAL SPLIT — scope split decided during /gsd:discuss-phase 03 on 2026-05-05.*
 

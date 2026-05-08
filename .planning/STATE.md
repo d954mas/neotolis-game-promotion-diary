@@ -130,6 +130,7 @@ Plan: Not started
 ### Roadmap Evolution
 
 - Phase 02.2 inserted after Phase 02 (chronologically after 02.1): ship-to-prod (URGENT) — pre-Phase-3 deploy work so user can dogfood the SaaS before polling pipeline lands
+- Phase 03.0.1 inserted after Phase 03.0 (2026-05-08): source plugin architecture — restructure YouTube-prefixed code into `src/lib/server/sources/youtube/` plugin folder + widen DataSourceAdapter contract (registry dispatch, AdapterContext + AdapterCredentials union) so future sources (Reddit/Twitter/Telegram/Discord) drop in as new sub-folders without editing cross-source plumbing. Prerequisite for Phase 3.1 (Reddit Adapter) — without 03.0.1, adding Reddit requires editing 4 worker handlers and copy-pasting the YouTube plumbing pattern. Also ships generic `POST /api/sources/:id/refresh-content` endpoint and SOURCE-REFERENCE.md "how to add a new source" guide.
 
 ### Decisions
 
