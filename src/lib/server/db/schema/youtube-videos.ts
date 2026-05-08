@@ -41,6 +41,18 @@
 //
 // ESLint allowlist mirror in eslint-plugin-tenant-scope/no-unfiltered-tenant-
 // query.js with the explicit "public external data, no tenant scope" comment.
+//
+// Retention contract (post-build review 2026-05-08):
+//   Rows are NEVER garbage-collected, even when the last referencing event /
+//   data_source has been deleted. Future channel-level analytics (median
+//   views per channel, total reach, video count, publishing cadence) require
+//   the FULL historical record across every video the system has ever seen.
+//   The row IS the historical record for that channel's stats — discarding
+//   orphan rows would make those analytics sparse and incorrect.
+//   At indie-scale the table is bounded by O(seen-videos): years of
+//   accumulation lands in the low single-digit GB range, comfortably within
+//   Postgres + backup budgets. If table size becomes a real problem in the
+//   future, the answer is partition or archive, NOT delete.
 
 import { pgTable, text, timestamp, integer, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
