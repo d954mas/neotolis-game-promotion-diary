@@ -30,11 +30,7 @@ import {
 import { selectEligibleVideoIds } from "$lib/server/services/poll-eligibility.js";
 import { youtubeChannelAdapter } from "../adapter.js";
 import { writeSnapshot } from "../snapshots.js";
-import {
-  pickKeyForJob,
-  markThrottleTransition,
-  getThrottleState,
-} from "../quota.js";
+import { pickKeyForJob, markThrottleTransition, getThrottleState } from "../quota.js";
 import { logger } from "$lib/server/logger.js";
 
 const QUOTA_USER_COLD = "neotolis-svc-cold";
@@ -156,10 +152,7 @@ export async function handlePollCold(job: {
         estimatedUnits: 9500,
       });
     } catch (err) {
-      logger.warn(
-        { jobId: job.id, err },
-        "poll-cold: markThrottleTransition failed",
-      );
+      logger.warn({ jobId: job.id, err }, "poll-cold: markThrottleTransition failed");
     }
   }
 

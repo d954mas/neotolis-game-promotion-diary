@@ -73,6 +73,7 @@
   "audit_action_event_detached_from_game": "Event detached from a game",
   "audit_action_theme_changed": "Theme changed",
   "audit_action_source_added": "Data source added",
+  "audit_action_source_refresh_content_requested": "Source content refresh requested",
   "audit_action_source_removed": "Data source removed",
   "audit_action_source_toggled_auto_import": "Data source auto-import toggled",
   "audit_action_event_attached_to_game": "Event attached to a game",

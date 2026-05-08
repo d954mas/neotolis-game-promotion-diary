@@ -54,10 +54,7 @@ export async function startScheduler(): Promise<void> {
     try {
       await adapter.scheduleCronTicks(boss);
     } catch (err) {
-      logger.error(
-        { err, kind: adapter.kind },
-        "failed to register adapter scheduleCronTicks",
-      );
+      logger.error({ err, kind: adapter.kind }, "failed to register adapter scheduleCronTicks");
       throw err;
     }
   }

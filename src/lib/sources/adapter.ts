@@ -128,7 +128,11 @@ export interface ParsedUrl {
 }
 
 export interface ObservabilityAuth {
-  kind: "operator-static-key" | "operator-oauth-app-only" | "scrape" | "operator-oauth-with-user-override";
+  kind:
+    | "operator-static-key"
+    | "operator-oauth-app-only"
+    | "scrape"
+    | "operator-oauth-with-user-override";
   requiresUserSetup: boolean;
   isOperatorConfigured: boolean;
 }
@@ -160,9 +164,22 @@ export interface AdapterObservability {
  *  from pg-boss major-version type drift (Phase 1 Plan 03 MinimalBoss
  *  pattern). Plan 03 widens this if youtubeAdapter needs more verbs. */
 export interface MinimalBoss {
-  work(name: string, opts: { batchSize?: number }, handler: (jobs: unknown[]) => Promise<void>): Promise<unknown>;
-  schedule(name: string, cron: string, payload?: object, options?: { tz?: string; key?: string }): Promise<unknown>;
-  send(name: string, payload: object, options?: { singletonKey?: string; priority?: number }): Promise<string | null>;
+  work(
+    name: string,
+    opts: { batchSize?: number },
+    handler: (jobs: unknown[]) => Promise<void>,
+  ): Promise<unknown>;
+  schedule(
+    name: string,
+    cron: string,
+    payload?: object,
+    options?: { tz?: string; key?: string },
+  ): Promise<unknown>;
+  send(
+    name: string,
+    payload: object,
+    options?: { singletonKey?: string; priority?: number },
+  ): Promise<string | null>;
   createQueue(name: string): Promise<unknown>;
 }
 
@@ -196,7 +213,10 @@ export interface DataSourceAdapter {
   readonly observability: AdapterObservability;
   registerQueues(boss: MinimalBoss): Promise<void>;
   scheduleCronTicks(boss: MinimalBoss): Promise<void>;
-  backfillSource(source: PollableSource, ctx: AdapterContext): Promise<{ jobId: string | null; queue: string }>;
+  backfillSource(
+    source: PollableSource,
+    ctx: AdapterContext,
+  ): Promise<{ jobId: string | null; queue: string }>;
   /** Whether this adapter can handle a refresh-poll for the given event kind. */
   canRefreshPoll?(eventKind: EventKind): boolean;
 }

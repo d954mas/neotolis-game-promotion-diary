@@ -97,6 +97,12 @@
         return m.audit_action_poll_failed();
       case "event.poll_refreshed":
         return m.audit_action_event_poll_refreshed();
+      // Phase 03.0.1 Plan 10 — POST /api/sources/:id/refresh-content endpoint.
+      // Forward-only migration 0023 lands the pgEnum addition; lock-step
+      // contract requires a Paraglide key + chip case for every AUDIT_ACTIONS
+      // value (tests/integration/audit-render.test.ts iterates the const).
+      case "source.refresh_content_requested":
+        return m.audit_action_source_refresh_content_requested();
       default:
         return action;
     }

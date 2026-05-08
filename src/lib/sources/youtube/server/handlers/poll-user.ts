@@ -52,7 +52,11 @@ export async function handlePollUser(job: {
       // operator-issue / permanent / not-found → load the event to find
       // sourceId, then conditionally flip needs_reconnect.
       const { eventId, userId } = job.data;
-      if (eventId && userId && (err.category === "operator-issue" || err.category === "permanent")) {
+      if (
+        eventId &&
+        userId &&
+        (err.category === "operator-issue" || err.category === "permanent")
+      ) {
         // Tenant-scoped lookup — Pattern 1.
         const evRows = await db
           .select({ sourceId: events.sourceId })

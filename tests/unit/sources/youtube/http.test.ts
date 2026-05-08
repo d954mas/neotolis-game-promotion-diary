@@ -15,10 +15,9 @@ import { AdapterError } from "$lib/sources/errors.js";
 // Mock the quota module so chargedFetch's incrementUsage + markThrottleTransition
 // calls don't try to hit Postgres. Each test resets the mock counters.
 vi.mock("$lib/sources/youtube/server/quota.js", async () => {
-  const actual =
-    await vi.importActual<typeof import("$lib/sources/youtube/server/quota.js")>(
-      "$lib/sources/youtube/server/quota.js",
-    );
+  const actual = await vi.importActual<typeof import("$lib/sources/youtube/server/quota.js")>(
+    "$lib/sources/youtube/server/quota.js",
+  );
   return {
     ...actual,
     incrementUsage: vi.fn(async () => {}),
@@ -62,17 +61,17 @@ describe("chargedFetch — reservoir consume + AdapterError taxonomy (Plan 08)",
       "fetch",
       vi.fn(
         async () =>
-          new Response(
-            JSON.stringify({ error: { errors: [{ reason: "quotaExceeded" }] } }),
-            { status: 403, headers: { "content-type": "application/json" } },
-          ),
+          new Response(JSON.stringify({ error: { errors: [{ reason: "quotaExceeded" }] } }), {
+            status: 403,
+            headers: { "content-type": "application/json" },
+          }),
       ),
     );
     const { chargedFetch } = await import("$lib/sources/youtube/server/http.js");
     const url = new URL("https://example.com/foo");
-    await expect(
-      chargedFetch(url, PICKED, 1, { origin: "cron", logTag: "test" }),
-    ).rejects.toThrow(AdapterError);
+    await expect(chargedFetch(url, PICKED, 1, { origin: "cron", logTag: "test" })).rejects.toThrow(
+      AdapterError,
+    );
     try {
       await chargedFetch(url, PICKED, 1, { origin: "cron", logTag: "test" });
     } catch (err) {
@@ -89,10 +88,10 @@ describe("chargedFetch — reservoir consume + AdapterError taxonomy (Plan 08)",
       "fetch",
       vi.fn(
         async () =>
-          new Response(
-            JSON.stringify({ error: { errors: [{ reason: "forbidden" }] } }),
-            { status: 403, headers: { "content-type": "application/json" } },
-          ),
+          new Response(JSON.stringify({ error: { errors: [{ reason: "forbidden" }] } }), {
+            status: 403,
+            headers: { "content-type": "application/json" },
+          }),
       ),
     );
     const { chargedFetch } = await import("$lib/sources/youtube/server/http.js");

@@ -6,9 +6,7 @@
 import type { DataSourceAdapter, SourceKind } from "./adapter.js";
 import { youtubeAdapter } from "./youtube/server/index.js";
 
-const registry = new Map<SourceKind, DataSourceAdapter>([
-  ["youtube_channel", youtubeAdapter],
-]);
+const registry = new Map<SourceKind, DataSourceAdapter>([["youtube_channel", youtubeAdapter]]);
 
 export function getAdapter(kind: SourceKind): DataSourceAdapter {
   const adapter = registry.get(kind);

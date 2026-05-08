@@ -228,10 +228,7 @@ describe("POST /api/sources/:id/refresh-content — Phase 03.0.1 Plan 10", () =>
       .select()
       .from(auditLog)
       .where(
-        and(
-          eq(auditLog.userId, u.id),
-          eq(auditLog.action, "source.refresh_content_requested"),
-        ),
+        and(eq(auditLog.userId, u.id), eq(auditLog.action, "source.refresh_content_requested")),
       );
     expect(auditRows).toHaveLength(1);
     const row = auditRows[0]!;

@@ -38,11 +38,7 @@ import type {
   ObservabilityDailyStats,
   ObservabilityAuditEntry,
 } from "$lib/sources/adapter.js";
-import {
-  THROTTLE_EIGHTY_THRESHOLD,
-  THROTTLE_NINETYFIVE_THRESHOLD,
-  todayPacific,
-} from "./quota.js";
+import { THROTTLE_EIGHTY_THRESHOLD, THROTTLE_NINETYFIVE_THRESHOLD, todayPacific } from "./quota.js";
 
 // YouTube Data API v3 default daily quota per key (verified by the Plan
 // 03.0-01 spike on 2026-05-06). The threshold constants in quota.ts

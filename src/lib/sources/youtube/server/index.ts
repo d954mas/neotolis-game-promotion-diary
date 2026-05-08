@@ -178,19 +178,9 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
     { key: "cold", tz: "America/Los_Angeles" },
   );
   // Quota reset — midnight Pacific.
-  await boss.schedule(
-    QUEUES.YOUTUBE_QUOTA_RESET,
-    "0 0 * * *",
-    {},
-    { tz: "America/Los_Angeles" },
-  );
+  await boss.schedule(QUEUES.YOUTUBE_QUOTA_RESET, "0 0 * * *", {}, { tz: "America/Los_Angeles" });
   // Rehab — weekly Sunday 4am Pacific.
-  await boss.schedule(
-    QUEUES.YOUTUBE_REHAB,
-    "0 4 * * 0",
-    {},
-    { tz: "America/Los_Angeles" },
-  );
+  await boss.schedule(QUEUES.YOUTUBE_REHAB, "0 4 * * 0", {}, { tz: "America/Los_Angeles" });
 }
 
 /**

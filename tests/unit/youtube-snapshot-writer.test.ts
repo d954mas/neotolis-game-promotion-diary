@@ -131,9 +131,8 @@ vi.mock("../../src/lib/sources/youtube/server/quota.js", () => ({
 }));
 
 const { writeSnapshot } = await import("../../src/lib/sources/youtube/server/snapshots.js");
-const { youtubeVideoSnapshots, youtubeVideos } = await import(
-  "../../src/lib/server/db/schema/index.js"
-);
+const { youtubeVideoSnapshots, youtubeVideos } =
+  await import("../../src/lib/server/db/schema/index.js");
 
 describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
   beforeEach(() => {

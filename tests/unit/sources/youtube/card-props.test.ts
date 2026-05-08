@@ -95,16 +95,12 @@ describe("getAdapterUI('youtube_channel') — Plan 09 registry-ui wiring", () =>
 
 describe("eventKindToSourceKind — Plan 09 event.kind → SourceKind bridge", () => {
   it("maps youtube_video → youtube_channel", async () => {
-    const { eventKindToSourceKind } = await import(
-      "$lib/sources/event-to-source-kind.js"
-    );
+    const { eventKindToSourceKind } = await import("$lib/sources/event-to-source-kind.js");
     expect(eventKindToSourceKind("youtube_video")).toBe("youtube_channel");
   });
 
   it("returns null for free-form kinds (post, conference, talk, press, other)", async () => {
-    const { eventKindToSourceKind } = await import(
-      "$lib/sources/event-to-source-kind.js"
-    );
+    const { eventKindToSourceKind } = await import("$lib/sources/event-to-source-kind.js");
     expect(eventKindToSourceKind("post")).toBeNull();
     expect(eventKindToSourceKind("conference")).toBeNull();
     expect(eventKindToSourceKind("talk")).toBeNull();

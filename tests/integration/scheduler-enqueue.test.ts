@@ -62,15 +62,11 @@ const { events } = await import("../../src/lib/server/db/schema/events.js");
 const { youtubeVideos } = await import("../../src/lib/server/db/schema/index.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
-const { resetThrottleState } = await import(
-  "../../src/lib/sources/youtube/server/quota.js"
-);
-const { handlePollActive } = await import(
-  "../../src/lib/sources/youtube/server/handlers/poll-active.js"
-);
-const { handlePollCold } = await import(
-  "../../src/lib/sources/youtube/server/handlers/poll-cold.js"
-);
+const { resetThrottleState } = await import("../../src/lib/sources/youtube/server/quota.js");
+const { handlePollActive } =
+  await import("../../src/lib/sources/youtube/server/handlers/poll-active.js");
+const { handlePollCold } =
+  await import("../../src/lib/sources/youtube/server/handlers/poll-cold.js");
 const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);

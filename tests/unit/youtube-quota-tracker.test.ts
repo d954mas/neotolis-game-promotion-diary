@@ -24,9 +24,7 @@ process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
 
 async function withYoutubeKeys<T>(
   raw: string | undefined,
-  fn: (
-    mod: typeof import("../../src/lib/sources/youtube/server/quota.js"),
-  ) => Promise<T> | T,
+  fn: (mod: typeof import("../../src/lib/sources/youtube/server/quota.js")) => Promise<T> | T,
 ): Promise<T> {
   const saved = process.env.SERVICE_YOUTUBE_API_KEYS;
   if (raw === undefined) {

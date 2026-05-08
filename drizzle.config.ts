@@ -9,10 +9,7 @@ import { defineConfig } from "drizzle-kit";
 // src/lib/server/db/schema/. Both globs are walked; drizzle-kit deduplicates
 // by table name (first-arg to pgTable). See 03.0.1-RESEARCH.md §Pattern 6.
 export default defineConfig({
-  schema: [
-    "./src/lib/server/db/schema/*.ts",
-    "./src/lib/sources/*/server/schema/*.ts",
-  ],
+  schema: ["./src/lib/server/db/schema/*.ts", "./src/lib/sources/*/server/schema/*.ts"],
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {

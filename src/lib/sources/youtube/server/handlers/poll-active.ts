@@ -48,9 +48,7 @@
 // that the YouTube quota wall has been hit, even though the quota tracker's
 // running counter may not yet show 9500.
 
-import {
-  TIER_BOUNDARY_ACTIVE_MS,
-} from "$lib/server/services/tier-resolver.js";
+import { TIER_BOUNDARY_ACTIVE_MS } from "$lib/server/services/tier-resolver.js";
 import { selectEligibleVideoIds } from "$lib/server/services/poll-eligibility.js";
 import { youtubeChannelAdapter } from "../adapter.js";
 import { writeSnapshot } from "../snapshots.js";
@@ -101,10 +99,7 @@ export async function handlePollActive(job: {
         estimatedUnits: THROTTLE_EIGHTY_THRESHOLD,
       });
     } catch (err) {
-      logger.warn(
-        { jobId: job.id, err },
-        "poll-active: markThrottleTransition (eighty) failed",
-      );
+      logger.warn({ jobId: job.id, err }, "poll-active: markThrottleTransition (eighty) failed");
     }
   }
 
@@ -220,10 +215,7 @@ export async function handlePollActive(job: {
         estimatedUnits: 9500,
       });
     } catch (err) {
-      logger.warn(
-        { jobId: job.id, err },
-        "poll-active: markThrottleTransition failed",
-      );
+      logger.warn({ jobId: job.id, err }, "poll-active: markThrottleTransition failed");
     }
   }
 
