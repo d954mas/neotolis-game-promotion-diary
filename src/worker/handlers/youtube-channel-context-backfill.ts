@@ -41,6 +41,7 @@ import {
   pickKeyForJob,
   youtubeQuotaUser,
   incrementUsage,
+  markThrottleTransition,
 } from "../../lib/server/services/youtube-quota-tracker.js";
 import { env } from "../../lib/server/config/env.js";
 import { parseYoutubeUrl } from "../../lib/server/services/youtube-url.js";
@@ -142,6 +143,69 @@ async function fetchWithTimeout(url: URL, timeoutMs = 30_000): Promise<Response>
   }
 }
 
+// Quota-charged YouTube fetch wrapper used by every API call this handler
+// makes. Centralises three concerns that used to be copy-pasted at five
+// callsites:
+//
+//   1. Charge `units` against the operator's youtube_service_quota_usage
+//      counter ONLY on a 2xx (Google bills 0 quota for 4xx/5xx — charging
+//      otherwise drifts the counter and may spuriously trip the 80%/95%
+//      throttle gates).
+//   2. On 403 with errors[0].reason='quotaExceeded' (the only reason
+//      Google returns for envelope exhaustion), emit a single
+//      quota.service_throttled audit row via markThrottleTransition.
+//      poll-active / poll-cold already do this via the
+//      DataSourceAdapter — backfill hit the same condition silently
+//      (P2-7 from the post-build review).
+//   3. Log a structured warn line with `ctx` so the operator's log search
+//      finds non-2xx responses by jobId / channelId.
+//
+// Returns the raw Response on 2xx so callers can `await resp.json()`
+// (we do NOT parse here — every endpoint has its own zod schema).
+// Returns null on any non-2xx so callers can shape their own
+// continue/break/return locally.
+async function chargedFetch(
+  url: URL,
+  picked: { apiKey: string; apiKeyId: string },
+  units: number,
+  ctx: Record<string, unknown> & { logTag: string },
+): Promise<Response | null> {
+  const resp = await fetchWithTimeout(url);
+  if (resp.ok) {
+    await incrementUsage({ apiKeyId: picked.apiKeyId, units });
+    return resp;
+  }
+
+  // Quota-exhaustion signal — emit the throttle audit row before bailing
+  // so /admin/quota observes the transition point. Body parse is .clone()
+  // safe — caller never reads the body on the null return path.
+  if (resp.status === 403) {
+    let reason: string | null = null;
+    try {
+      const body = (await resp.clone().json()) as {
+        error?: { errors?: { reason?: string }[] };
+      };
+      reason = body?.error?.errors?.[0]?.reason ?? null;
+    } catch {
+      reason = null;
+    }
+    if (reason === "quotaExceeded") {
+      try {
+        await markThrottleTransition({
+          state: "ninetyfive",
+          apiKeyId: picked.apiKeyId,
+          estimatedUnits: 9500,
+        });
+      } catch (err) {
+        logger.warn({ err, ...ctx }, `${ctx.logTag}: markThrottleTransition (95%) failed`);
+      }
+    }
+  }
+
+  logger.warn({ status: resp.status, ...ctx }, `${ctx.logTag}: non-2xx`);
+  return null;
+}
+
 // YouTube URL parsing moved to services/youtube-url.ts in the post-build
 // review sweep — see that module's header for the rationale.
 
@@ -236,20 +300,12 @@ export async function handleChannelContextBackfill(job: {
       videoUrl.searchParams.set("key", picked.apiKey);
       videoUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
-      const videoResp = await fetchWithTimeout(videoUrl);
-      // Charge quota only on a 2xx — Google bills 0 units for 4xx/5xx.
-      // Mirror of services/youtube-metadata.ts and prevents counter
-      // drift / spurious throttle when the operator's key is misconfigured.
-      if (videoResp.ok) {
-        await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
-      }
-      if (!videoResp.ok) {
-        logger.warn(
-          { jobId: job.id, videoId: parsed.value, status: videoResp.status },
-          "channel-context-backfill: videos.list lookup non-2xx; skipping",
-        );
-        return;
-      }
+      const videoResp = await chargedFetch(videoUrl, picked, 1, {
+        jobId: job.id,
+        videoId: parsed.value,
+        logTag: "channel-context-backfill: videos.list lookup",
+      });
+      if (!videoResp) return;
       const videoJson = VIDEOS_LIST_RESPONSE.parse(await videoResp.json());
       const v = videoJson.items[0];
       if (!v || !v.snippet?.channelId) {
@@ -268,18 +324,12 @@ export async function handleChannelContextBackfill(job: {
       lookupUrl.searchParams.set("key", picked.apiKey);
       lookupUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
-      const lookupResp = await fetchWithTimeout(lookupUrl);
-      // Charge quota only on a 2xx — Google bills 0 units for 4xx/5xx.
-      if (lookupResp.ok) {
-        await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
-      }
-      if (!lookupResp.ok) {
-        logger.warn(
-          { jobId: job.id, handle: parsed.value, status: lookupResp.status },
-          "channel-context-backfill: forHandle lookup non-2xx; skipping",
-        );
-        return;
-      }
+      const lookupResp = await chargedFetch(lookupUrl, picked, 1, {
+        jobId: job.id,
+        handle: parsed.value,
+        logTag: "channel-context-backfill: forHandle lookup",
+      });
+      if (!lookupResp) return;
       const lookupJson = CHANNELS_LIST_FOR_HANDLE_RESPONSE.parse(await lookupResp.json());
       const item = lookupJson.items[0];
       if (!item) {
@@ -323,18 +373,12 @@ export async function handleChannelContextBackfill(job: {
   channelsUrl.searchParams.set("key", picked.apiKey);
   channelsUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
-  const channelsResp = await fetchWithTimeout(channelsUrl);
-  // Charge quota only on a 2xx — Google bills 0 units for 4xx/5xx.
-  if (channelsResp.ok) {
-    await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
-  }
-  if (!channelsResp.ok) {
-    logger.warn(
-      { jobId: job.id, channelId, status: channelsResp.status },
-      "channel-context-backfill: channels.list non-2xx; skipping",
-    );
-    return;
-  }
+  const channelsResp = await chargedFetch(channelsUrl, picked, 1, {
+    jobId: job.id,
+    channelId,
+    logTag: "channel-context-backfill: channels.list",
+  });
+  if (!channelsResp) return;
   const channelsJson = CHANNELS_LIST_RESPONSE.parse(await channelsResp.json());
   const channelItem = channelsJson.items[0];
   const uploadsPlaylistId = channelItem?.contentDetails?.relatedPlaylists?.uploads;
@@ -414,18 +458,13 @@ export async function handleChannelContextBackfill(job: {
     playlistUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
     if (pageToken) playlistUrl.searchParams.set("pageToken", pageToken);
 
-    const playlistResp = await fetchWithTimeout(playlistUrl);
-    // Charge quota only on a 2xx — Google bills 0 units for 4xx/5xx.
-    if (playlistResp.ok) {
-      await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
-    }
-    if (!playlistResp.ok) {
-      logger.warn(
-        { jobId: job.id, channelId, status: playlistResp.status, page },
-        "channel-context-backfill: playlistItems.list non-2xx; partial seed",
-      );
-      break;
-    }
+    const playlistResp = await chargedFetch(playlistUrl, picked, 1, {
+      jobId: job.id,
+      channelId,
+      page,
+      logTag: "channel-context-backfill: playlistItems.list",
+    });
+    if (!playlistResp) break;
     const playlistJson = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await playlistResp.json());
 
     let crossedCutoffOnThisPage = false;
@@ -479,18 +518,13 @@ export async function handleChannelContextBackfill(job: {
     videosUrl.searchParams.set("key", picked.apiKey);
     videosUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
-    const videosResp = await fetchWithTimeout(videosUrl);
-    // Charge quota only on a 2xx — Google bills 0 units for 4xx/5xx.
-    if (videosResp.ok) {
-      await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
-    }
-    if (!videosResp.ok) {
-      logger.warn(
-        { jobId: job.id, channelId, status: videosResp.status, batch: i / 50 },
-        "channel-context-backfill: videos.list non-2xx; partial seed",
-      );
-      continue;
-    }
+    const videosResp = await chargedFetch(videosUrl, picked, 1, {
+      jobId: job.id,
+      channelId,
+      batch: i / 50,
+      logTag: "channel-context-backfill: videos.list",
+    });
+    if (!videosResp) continue;
     const videosJson = VIDEOS_LIST_RESPONSE.parse(await videosResp.json());
     allItems.push(...videosJson.items);
   }
