@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0.1-04-move-youtube-services-PLAN.md
-last_updated: "2026-05-08T15:59:42.812Z"
+stopped_at: Completed 03.0.1-05-move-handlers-and-dispatch-via-registry-PLAN.md
+last_updated: "2026-05-08T16:14:10.361Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 12
   completed_phases: 5
   total_plans: 93
-  completed_plans: 86
+  completed_plans: 87
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0.1 (source-plugin-architecture) — EXECUTING
-Plan: 5 of 11
+Plan: 6 of 11
 
 ## Performance Metrics
 
@@ -128,6 +128,7 @@ Plan: 5 of 11
 | Phase 03.0.1-source-plugin-architecture P02 | 12min | 1 tasks | 32 files |
 | Phase 03.0.1 P03 | ~11min | 1 tasks | 20 files |
 | Phase 03.0.1 P04 | ~9 min 44 s | 1 tasks | 28 files |
+| Phase 03.0.1-source-plugin-architecture P05 | ~8 min 1 s | 1 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -382,6 +383,9 @@ Recent decisions affecting current work:
 - [Phase 03.0.1]: Plan 04: extended tenant-scope ESLint glob to src/lib/sources/**/server/** (Rule 3 fix) — relocated quota.ts retains its lint-time guard on the audit_log defense-in-depth query
 - [Phase 03.0.1]: Plan 04: per-source folder is the home for kind-internal services (quota counter, snapshot writer, URL helper, metadata fetcher); cross-source services that orchestrate ACROSS kinds (refresh-poll, ingest, tier-resolver, poll-eligibility, purge-account, url-parser) STAY at $lib/server/services/
 - [Phase 03.0.1]: Plan 04: naming-collision disambiguation via $lib paths — TWO quota.ts files now exist; metadata.ts imports $lib/sources/youtube/server/quota.js (YouTube per-key counter) AND $lib/server/services/quota.js (cross-source events_per_day) with inline comment
+- [Phase 03.0.1-source-plugin-architecture]: Plan 05: Spread + override in barrel (vs. inlining registerQueues into adapter.ts) — adapter.ts handler-free + barrel composes live adapter via {...youtubeChannelAdapter, registerQueues}; resolves potential import cycle (handlers import barrel → barrel imports handlers + adapter; adapter has zero handler imports)
+- [Phase 03.0.1-source-plugin-architecture]: Plan 05: registerQueues stub in adapter.ts upgraded from notYetImplemented to a fallback-error message — satisfies plan's grep zero-match acceptance AND preserves 'incorrect import surfaces loudly' invariant when consumers bypass the barrel
+- [Phase 03.0.1-source-plugin-architecture]: Plan 05: queue NAMES unchanged this plan (per CONTEXT D-11) — Plan 07 owns the per-kind topology rename to youtube.poll.cron / youtube.poll.user / youtube.backfill.user. Plan 05 stays mechanical (handlers move + adapter owns its registration + worker iterates) so smoke-gated polling-pipeline behavior is byte-identical
 
 ### Pending Todos
 
@@ -424,8 +428,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-08T15:59:42.807Z
+Last session: 2026-05-08T16:14:10.356Z
 Last Activity: 2026-05-08
-Stopped at: Completed 03.0.1-04-move-youtube-services-PLAN.md
+Stopped at: Completed 03.0.1-05-move-handlers-and-dispatch-via-registry-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
