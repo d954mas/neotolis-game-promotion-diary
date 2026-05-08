@@ -15,13 +15,13 @@
 
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { pickKeyForJob, youtubeQuotaUser, incrementUsage } from "./youtube-quota-tracker.js";
+import { pickKeyForJob, youtubeQuotaUser } from "./youtube-quota-tracker.js";
+import { chargedFetch } from "../integrations/youtube-http.js";
 import { db } from "../db/client.js";
 import { youtubeVideos } from "../db/schema/youtube-videos.js";
 import { youtubeMetadataFetchLog } from "../db/schema/youtube-metadata-fetch-log.js";
 import { env } from "../config/env.js";
 import { AppError } from "./errors.js";
-import { logger } from "../logger.js";
 import { withQuotaGuard } from "./quota.js";
 
 const VIDEOS_LIST_RESPONSE = z.object({
@@ -89,16 +89,6 @@ export function parseYoutubeVideoId(url: string): string | null {
     }
   }
   return null;
-}
-
-async function fetchWithTimeout(url: URL, timeoutMs = 10_000): Promise<Response> {
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    return await fetch(url, { signal: ac.signal });
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 /**
@@ -187,16 +177,17 @@ export async function fetchVideoMetadataByUrl(
   apiUrl.searchParams.set("key", picked.apiKey);
   apiUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
-  const resp = await fetchWithTimeout(apiUrl);
-  // Charge quota on EVERY response (post-build review 2026-05-08).
-  // Google's quota guide: "all API requests, including invalid requests,
-  // incur at least a one-point quota cost." Charging only on 2xx
-  // under-counted and tripped the 80%/95% throttle gates later than the
-  // operator's real envelope. Network failures (no Response object) get
-  // zero — fetchWithTimeout would have thrown above.
-  await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
+  // chargedFetch: charge-on-Response + 403-quotaExceeded throttle audit
+  // emission. The 10s timeout matches the previous local fetchWithTimeout
+  // — this is a user-facing form path, not a worker-internal call.
+  const resp = await chargedFetch(
+    apiUrl,
+    picked,
+    1,
+    { videoId, logTag: "youtube-metadata: videos.list" },
+    10_000,
+  );
   if (!resp.ok) {
-    logger.warn({ videoId, status: resp.status }, "youtube-metadata: videos.list non-2xx");
     throw new AppError("YouTube API error", "upstream_error", 502, {
       videoId,
       status: resp.status,

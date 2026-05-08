@@ -40,9 +40,8 @@ import { dataSources } from "../../lib/server/db/schema/data-sources.js";
 import {
   pickKeyForJob,
   youtubeQuotaUser,
-  incrementUsage,
-  markThrottleTransition,
 } from "../../lib/server/services/youtube-quota-tracker.js";
+import { chargedFetch } from "../../lib/server/integrations/youtube-http.js";
 import { env } from "../../lib/server/config/env.js";
 import { parseYoutubeUrl } from "../../lib/server/services/youtube-url.js";
 import { logger } from "../../lib/server/logger.js";
@@ -133,86 +132,10 @@ const VIDEOS_LIST_RESPONSE = z.object({
   ),
 });
 
-async function fetchWithTimeout(url: URL, timeoutMs = 30_000): Promise<Response> {
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    return await fetch(url, { signal: ac.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// Quota-charged YouTube fetch wrapper used by every API call this handler
-// makes. Centralises three concerns that used to be copy-pasted at five
-// callsites:
-//
-//   1. Charge `units` against the operator's youtube_service_quota_usage
-//      counter on EVERY response (post-build review 2026-05-08): Google's
-//      quota guide states "all API requests, including invalid requests,
-//      incur at least a one-point quota cost." 4xx and 5xx responses
-//      consume quota the same as 2xx; the only zero-cost case is a
-//      network failure that never returns a Response object.
-//      The earlier 2xx-only gate under-counted and made the 80%/95%
-//      throttle gates trip later than the operator's real envelope.
-//      Auth-error 401 IS still charged here (the underlying poll
-//      handlers separately suppress the unit for auth_error via the
-//      adapter's status mapping; backfill has no equivalent suppression
-//      and falls back to the conservative "charge always" rule).
-//   2. On 403 with errors[0].reason='quotaExceeded' (the only reason
-//      Google returns for envelope exhaustion), emit a single
-//      quota.service_throttled audit row via markThrottleTransition.
-//      poll-active / poll-cold already do this via the
-//      DataSourceAdapter — backfill hit the same condition silently
-//      (P2-7 from the post-build review).
-//   3. Log a structured warn line with `ctx` so the operator's log search
-//      finds non-2xx responses by jobId / channelId.
-//
-// Returns the raw Response on 2xx so callers can `await resp.json()`
-// (we do NOT parse here — every endpoint has its own zod schema).
-// Returns null on any non-2xx so callers can shape their own
-// continue/break/return locally.
-async function chargedFetch(
-  url: URL,
-  picked: { apiKey: string; apiKeyId: string },
-  units: number,
-  ctx: Record<string, unknown> & { logTag: string },
-): Promise<Response | null> {
-  const resp = await fetchWithTimeout(url);
-  // Charge BEFORE the ok-branch: quota is consumed regardless of status.
-  await incrementUsage({ apiKeyId: picked.apiKeyId, units });
-
-  if (resp.ok) return resp;
-
-  // Quota-exhaustion signal — emit the throttle audit row before bailing
-  // so /admin/quota observes the transition point. Body parse is .clone()
-  // safe — caller never reads the body on the null return path.
-  if (resp.status === 403) {
-    let reason: string | null = null;
-    try {
-      const body = (await resp.clone().json()) as {
-        error?: { errors?: { reason?: string }[] };
-      };
-      reason = body?.error?.errors?.[0]?.reason ?? null;
-    } catch {
-      reason = null;
-    }
-    if (reason === "quotaExceeded") {
-      try {
-        await markThrottleTransition({
-          state: "ninetyfive",
-          apiKeyId: picked.apiKeyId,
-          estimatedUnits: 9500,
-        });
-      } catch (err) {
-        logger.warn({ err, ...ctx }, `${ctx.logTag}: markThrottleTransition (95%) failed`);
-      }
-    }
-  }
-
-  logger.warn({ status: resp.status, ...ctx }, `${ctx.logTag}: non-2xx`);
-  return null;
-}
+// fetchWithTimeout + chargedFetch moved to integrations/youtube-http.ts
+// (post-build review 2026-05-08) so youtube-metadata.ts and
+// youtube-channel-adapter.ts share the same charge-on-Response +
+// throttle-audit-on-403-quotaExceeded contract.
 
 // YouTube URL parsing moved to services/youtube-url.ts in the post-build
 // review sweep — see that module's header for the rationale.
@@ -313,7 +236,7 @@ export async function handleChannelContextBackfill(job: {
         videoId: parsed.value,
         logTag: "channel-context-backfill: videos.list lookup",
       });
-      if (!videoResp) return;
+      if (!videoResp.ok) return;
       const videoJson = VIDEOS_LIST_RESPONSE.parse(await videoResp.json());
       const v = videoJson.items[0];
       if (!v || !v.snippet?.channelId) {
@@ -337,7 +260,7 @@ export async function handleChannelContextBackfill(job: {
         handle: parsed.value,
         logTag: "channel-context-backfill: forHandle lookup",
       });
-      if (!lookupResp) return;
+      if (!lookupResp.ok) return;
       const lookupJson = CHANNELS_LIST_FOR_HANDLE_RESPONSE.parse(await lookupResp.json());
       const item = lookupJson.items[0];
       if (!item) {
@@ -386,7 +309,7 @@ export async function handleChannelContextBackfill(job: {
     channelId,
     logTag: "channel-context-backfill: channels.list",
   });
-  if (!channelsResp) return;
+  if (!channelsResp.ok) return;
   const channelsJson = CHANNELS_LIST_RESPONSE.parse(await channelsResp.json());
   const channelItem = channelsJson.items[0];
   const uploadsPlaylistId = channelItem?.contentDetails?.relatedPlaylists?.uploads;
@@ -472,7 +395,7 @@ export async function handleChannelContextBackfill(job: {
       page,
       logTag: "channel-context-backfill: playlistItems.list",
     });
-    if (!playlistResp) break;
+    if (!playlistResp.ok) break;
     const playlistJson = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await playlistResp.json());
 
     let crossedCutoffOnThisPage = false;
@@ -532,7 +455,7 @@ export async function handleChannelContextBackfill(job: {
       batch: i / 50,
       logTag: "channel-context-backfill: videos.list",
     });
-    if (!videosResp) continue;
+    if (!videosResp.ok) continue;
     const videosJson = VIDEOS_LIST_RESPONSE.parse(await videosResp.json());
     allItems.push(...videosJson.items);
   }

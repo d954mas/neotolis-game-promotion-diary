@@ -43,6 +43,7 @@
 //   - other 4xx/5xx                            → status:'auth_error' (placeholder; caller logs + retries)
 
 import { pickKeyForJob, youtubeQuotaUser } from "../services/youtube-quota-tracker.js";
+import { fetchWithTimeout } from "./youtube-http.js";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { logger } from "../logger.js";
@@ -134,15 +135,16 @@ function durationToSeconds(iso: string): number {
   return Number(h ?? 0) * 3600 + Number(m ?? 0) * 60 + Number(s ?? 0);
 }
 
-async function fetchWithTimeout(url: URL, timeoutMs = 30_000): Promise<Response> {
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), timeoutMs);
-  try {
-    return await fetch(url, { signal: ac.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
+// fetchWithTimeout moved to integrations/youtube-http.ts (post-build
+// review 2026-05-08) so backfill + metadata + this adapter share one
+// timeout helper. The adapter intentionally does NOT use the higher-
+// level chargedFetch wrapper: quota counter increments are owned by
+// the writeSnapshot path (per-video unitsUsed accounting), and
+// throttle-audit emission is owned by the poll handlers via the
+// SnapshotStatus contract ("rate_limited" → caller calls
+// markThrottleTransition). Routing the adapter through chargedFetch
+// would double-charge (adapter +1 then writeSnapshot +1) — the lower-
+// level fetchWithTimeout is the right primitive here.
 
 /** Map a non-2xx response to a SnapshotStatus. The body is read once; we tolerate
  *  malformed JSON by falling through to 'auth_error' (placeholder for 4xx/5xx
