@@ -323,6 +323,12 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
         },
         { method: "DELETE", path: `/api/sources/${source.id}` },
         { method: "POST", path: `/api/sources/${source.id}/restore` },
+        // Phase 03.0.1 Plan 10 — refresh-content endpoint cross-tenant probe.
+        // Dispatches via getAdapter(source.kind).backfillSource; the
+        // getSourceById fast-path throws NotFoundError BEFORE any enqueue,
+        // so this assertion does not need a pg-boss mock — the 404 short-
+        // circuits before getBoss() is ever called.
+        { method: "POST", path: `/api/sources/${source.id}/refresh-content` },
         // api keys (steam)
         { method: "GET", path: `/api/api-keys/steam/${key.id}` },
         {
@@ -712,6 +718,51 @@ describe("Plan 03.0-08 — refresh-poll + account/purge cross-tenant", () => {
     const purgePath = routes.map((r) => r.path).find((p) => p === "/api/me/account/purge");
     expect(purgePath).toBeDefined();
     expect(purgePath!).not.toMatch(/:userId/);
+  });
+});
+
+// Phase 03.0.1 Plan 10 — refresh-content cross-tenant. Beyond the matrix
+// row above (which uses expect.soft over many probes), this dedicated
+// describe pins the wire format so any future refactor that drifts into
+// 403 / "forbidden" body trips a single, named test rather than a soft
+// assertion buried in the matrix.
+describe("Plan 03.0.1-10 — POST /api/sources/:id/refresh-content cross-tenant", () => {
+  it("Plan 03.0.1-10: cross-tenant POST /api/sources/:id/refresh-content returns 404, body never contains 'forbidden' or 'permission'", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { createSource } = await import("../../src/lib/server/services/data-sources.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({
+      email: `p10-rc-A-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const userB = await seedUserDirectly({
+      email: `p10-rc-B-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+
+    // userA owns a youtube_channel source. Use a /channel/UC… handle URL so
+    // createSource skips the videos.list lookup (no quota / no network needed
+    // in the test) — the canonicalizer parses /channel/UC… synchronously.
+    const sourceA = await createSource(
+      userA.id,
+      {
+        kind: "youtube_channel",
+        handleUrl: "https://www.youtube.com/channel/UCxAlmEhsZRrIvI1F6m7UqGw",
+        isOwnedByMe: true,
+        autoImport: false,
+      },
+      "127.0.0.1",
+    );
+
+    // user B hits user A's source /refresh-content → 404, NOT 403, body never
+    // contains 'forbidden' / 'permission' (AGENTS.md invariant 2).
+    const res = await app.request(`/api/sources/${sourceA.id}/refresh-content`, {
+      method: "POST",
+      headers: { cookie: `neotolis.session_token=${userB.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(404);
+    const text = await res.text();
+    expect(text.toLowerCase()).not.toContain("forbidden");
+    expect(text.toLowerCase()).not.toContain("permission");
+    expect(JSON.parse(text)).toEqual({ error: "not_found" });
   });
 });
 

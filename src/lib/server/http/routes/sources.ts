@@ -33,6 +33,9 @@ import {
 import { toDataSourceDto } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
+import { writeAudit } from "../../audit.js";
+import { AppError, NotFoundError } from "../../services/errors.js";
+import { getAdapter } from "$lib/sources/registry.js";
 
 const sourceKindEnum = z.enum([
   "youtube_channel",
@@ -186,5 +189,85 @@ sourcesRoutes.post("/sources/:id/restore", async (c) => {
     return c.json(toDataSourceDto(row));
   } catch (err) {
     return mapErr(c, err, "POST /api/sources/:id/restore");
+  }
+});
+
+// Phase 03.0.1 Plan 10 — POST /api/sources/:id/refresh-content (D-NEW).
+//
+// User-facing payoff of the Wave 0-8 refactor: the "Pull new content" button
+// on /sources/[id] fires this endpoint, which dispatches via the registry to
+// the per-kind adapter's backfillSource. For YouTube the adapter enqueues a
+// youtube.backfill.user job (singletonKey-deduped to ~5min). Adding refresh
+// for Reddit (Phase 03.1) requires zero edits here — only the Reddit
+// adapter's backfillSource implementation.
+//
+// AGENTS.md invariants:
+//   1. Tenant scoping — getSourceById(userId, params.id) is the entry point;
+//      no unfiltered query.
+//   2. Cross-tenant 404 not 403 — getSourceById throws NotFoundError on miss
+//      OR cross-tenant; mapErr translates to {error:'not_found'} status 404.
+//      Body never contains "forbidden" / "permission" (tenant-scope test
+//      pins the wire format).
+//   3. Anonymous-401 sweep — extended in tests/integration/anonymous-401.test.ts
+//      MUST_BE_PROTECTED with this route's path pattern.
+//   4. Audit INSERT-only — writeAudit fires after the enqueue with action
+//      "source.refresh_content_requested" (forward-only migration 0023
+//      added the enum value).
+//
+// 422 path: getAdapter throws on unregistered kinds. We re-throw as
+// AppError('kind_not_yet_functional', 422) so mapErr emits a clean wire
+// format the UI can localize via Paraglide. Phase 2.1's createSource gates
+// non-functional kinds out at write time, so in practice the only way a
+// row's kind is unregistered here is during the per-phase rollout window
+// (e.g. /sources page rendered a reddit_account row created via direct
+// schema insert in tests).
+sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
+  const ctx = getAuditContext(c);
+  try {
+    const source = await getSourceById(ctx.userId, c.req.param("id"));
+    if (source.deletedAt !== null) {
+      // Soft-deleted source — surface as 404 (matches GET /sources/:id /
+      // PATCH /sources/:id pattern: tombstone is invisible to the
+      // non-restore mutations).
+      throw new NotFoundError();
+    }
+
+    let adapter;
+    try {
+      adapter = getAdapter(source.kind);
+    } catch {
+      throw new AppError(
+        `kind '${source.kind}' is not yet functional`,
+        "kind_not_yet_functional",
+        422,
+        { kind: source.kind },
+      );
+    }
+
+    const result = await adapter.backfillSource(
+      {
+        id: source.id,
+        userId: source.userId,
+        metadata: (source.metadata ?? {}) as Record<string, unknown>,
+      },
+      { userId: ctx.userId, origin: "user" },
+    );
+
+    await writeAudit({
+      userId: ctx.userId,
+      action: "source.refresh_content_requested",
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent ?? undefined,
+      metadata: {
+        source_id: source.id,
+        kind: source.kind,
+        queue: result.queue,
+        job_id: result.jobId,
+      },
+    });
+
+    return c.json({ enqueued: true, queue: result.queue, jobId: result.jobId }, 202);
+  } catch (err) {
+    return mapErr(c, err, "POST /api/sources/:id/refresh-content");
   }
 });

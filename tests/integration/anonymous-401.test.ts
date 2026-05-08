@@ -62,6 +62,10 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     "/api/sources",
     "/api/sources/:id",
     "/api/sources/:id/restore",
+    // Phase 03.0.1 Plan 10 — refresh-content endpoint ("Pull new content"
+    // button on /sources/[id]). Dispatches via registry to per-kind
+    // backfillSource; YouTube enqueues into youtube.backfill.user.
+    "/api/sources/:id/refresh-content",
     // Phase 2 + 2.1 — events (extended with feed + attach + dismiss-inbox +
     // Plan 02.1-14 gap closure: restore + deleted-list +
     // Plan 02.1-17 gap closure: preview-url)
@@ -198,6 +202,14 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
 
   it("Plan 02.1-06: anonymous POST /api/sources/:id/restore returns 401 unauthorized", async () => {
     const res = await app.request("/api/sources/fixture-id/restore", {
+      method: "POST",
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 03.0.1-10: anonymous POST /api/sources/:id/refresh-content returns 401 unauthorized", async () => {
+    const res = await app.request("/api/sources/fixture-id/refresh-content", {
       method: "POST",
     });
     expect(res.status).toBe(401);
