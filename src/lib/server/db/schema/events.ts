@@ -15,9 +15,12 @@
 // Used together with `(user_id, kind, source_id)` to dedup auto-imported events.
 // NULL for events without a stable external id (some manual `other` entries).
 //
-// last_polled_at / last_poll_status: Phase 3 worker writes these. NULL on every
-// row inserted in Phase 2.1. Phase 3 also adds `event_stats_snapshots` for the
-// immutable per-event time-series.
+// Polling state DOES NOT live here. Phase 3.0 post-build refactor (2026-05-06)
+// moved `last_polled_at` + `last_poll_status` to `youtube_videos` — they are
+// properties of the video, not of the user-logged event. Multiple events for
+// the same external_id (one user logging "Released video X" + "Streamed promo
+// for X" + "Reddit post for X") share polling state via JOIN on external_id.
+// See PROJECT.md "Architecture" section for the per-video polling model.
 
 import {
   pgTable,
@@ -80,8 +83,6 @@ export const events = pgTable(
       .notNull()
       .default(sql`'{}'::jsonb`),
     externalId: text("external_id"),
-    lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
-    lastPollStatus: text("last_poll_status"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -113,5 +114,27 @@ export const events = pgTable(
     userKindSourceExtUnq: uniqueIndex("events_user_kind_source_ext_unq")
       .on(t.userId, t.kind, t.sourceId, t.externalId)
       .where(sql`${t.sourceId} IS NOT NULL AND ${t.externalId} IS NOT NULL`),
+    // Phase 3.0 post-build refactor (2026-05-06) — the partial index on
+    // events.last_polled_at is GONE. Polling-state queries go through
+    // youtube_videos now (one row per video, JOINed on external_id from
+    // events). Migration 0016 dropped both the column and the index.
+    //
+    // Phase 3.0 post-build (UAT 2026-05-06) — the unique
+    // (user_id, kind, external_id) partial index that Phase 3.0 Plan 01
+    // introduced has been DROPPED in migration 0012. Original intent ("one
+    // event per user per external video — paste-twice updates existing")
+    // collides with the operator's actual use case: a single review video
+    // covering 5 different games warrants 5 separate events, each with
+    // its own attached game and notes. Idempotency for the auto-import
+    // worker is now enforced via an explicit pre-insert SELECT in the
+    // handler. Duplicate-detection on manual paste is a UI concern (offer
+    // "add another note" vs "view existing") — to be wired in the
+    // /events/[id] detail-view phase.
+    //
+    // The plan-time dedup unique above (eventsUserKindSourceExtUnq, partial
+    // WHERE source_id IS NOT NULL) remains in place. That one only fires
+    // when the auto-import worker mistakenly tries to insert a video twice
+    // for the SAME source — a worker bug, not user intent. Manual paste
+    // leaves source_id NULL so it never trips there.
   }),
 );

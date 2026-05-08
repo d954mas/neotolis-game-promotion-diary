@@ -1,19 +1,28 @@
-// APP_ROLE=scheduler entrypoint. REPLACES the Plan 06 stub at this same path.
+// APP_ROLE=scheduler entrypoint.
 //
-// D-01 locks `src/scheduler/index.ts` as the canonical scheduler module
-// location. Plan 06 shipped a no-op stub at this same path; this plan
-// promotes it to a real pg-boss-backed scheduler that prints
-// `scheduler ready` (the literal string Plan 10's smoke test greps for —
-// D-15 assertion #3).
+// Phase 1 shipped a no-op stub registering only the internal.healthcheck
+// schedule. Phase 3.0 Plan 09 promotes the scheduler to a thin cron-fire
+// loop that registers FOUR additional schedules:
 //
-// Phase 1 has NO real cron schedules. Phase 3 lands the adaptive polling
-// cron expressions (POLL-01..06). What we MUST get right today:
-//   - boot pg-boss with the locked 10.x API
-//   - declare every queue (Phase-1 pitfall mitigation; same as worker)
-//   - register at least ONE schedule so the cron loop is proven alive —
-//     `internal.healthcheck` every 5 minutes is the marker
-//   - print `scheduler ready` to stdout for Plan 10's grep-based assertion
-//   - honor SIGTERM with pg-boss graceful drain + pg.Pool drain (D-22)
+//   - youtube.poll.active  '0 */6 * * *'                — every 6 hours UTC
+//   - youtube.poll.cold    '0 5 * * *'                  — 5 AM UTC daily
+//   - youtube.quota_reset  '0 0 * * *' tz=America/Los_Angeles — midnight Pacific
+//   - purge.daily          '0 4 * * *' tz=America/Los_Angeles — 4 AM Pacific
+//
+// Pitfall D: youtube.quota_reset and purge.daily MUST run in Pacific time —
+// YouTube's quota reset is at midnight Pacific (not UTC), and the daily
+// backup at 03:00 Pacific must precede the purge at 04:00 Pacific so
+// soft-deleted accounts being hard-deleted are still in the night's backup.
+// pg-boss schedule options.tz handles DST transitions.
+//
+// Plan 09 Pattern A: the active + cold poll cron schedules send empty
+// jobs to scheduler.tick.{active,cold} queues; the WORKER process owns
+// the consumers (src/worker/index.ts) which call enqueueActivePolls /
+// enqueueColdPolls and dispatch real per-event jobs to POLL_ACTIVE /
+// POLL_COLD. This split keeps the scheduler container thin (no DB-touching
+// logic) and ensures the enqueue path runs on the worker pool.
+//
+// SIGTERM drain inherited from Phase 1 stopBoss + pool.end.
 
 import { createBoss, stopBoss } from "../lib/server/queue-client.js";
 import { pool } from "../lib/server/db/client.js";
@@ -21,29 +30,11 @@ import { logger } from "../lib/server/logger.js";
 import { QUEUES } from "../lib/server/queues.js";
 import { scrubKekFromEnv } from "../lib/server/config/env.js";
 
-/**
- * Boot the pg-boss scheduler, declare queues, register the healthcheck cron,
- * and idle until SIGTERM. The export name `startScheduler` matches what
- * `src/server.ts` imports — the Plan 06 stub had the same export so the
- * dispatcher does not need to be touched.
- */
 export async function startScheduler(): Promise<void> {
   const boss = await createBoss();
-  // P2 KEK scrub: same as worker — scheduler has no bundled second copy of
-  // env.ts, so it's safe to scrub immediately. See env.ts header.
   scrubKekFromEnv();
 
-  // pg-boss 10.x `schedule(queueName, cronExpression, data?, options?)`
-  // registers a recurring enqueue against the named queue. The schedule
-  // entry is persistent — pg-boss survives restart and resumes scheduling
-  // from the schedules table.
-  //
-  // Phase 1 ships ONE schedule: `internal.healthcheck` every 5 minutes.
-  // It proves the scheduler loop is alive and exercises the same code path
-  // Phase 3 will use for poll cron expressions. If the cron syntax or the
-  // queue name is invalid, schedule() throws — we log loudly and re-throw
-  // so the container exits non-zero (faster failure than a silent never-
-  // scheduled cron).
+  // Phase 1 — internal healthcheck schedule preserved.
   try {
     await boss.schedule(QUEUES.INTERNAL_HEALTHCHECK, "*/5 * * * *");
   } catch (err) {
@@ -51,14 +42,73 @@ export async function startScheduler(): Promise<void> {
     throw err;
   }
 
+  // Phase 3.0 Plan 09 — register the 4 new cron schedules. boss.schedule
+  // is idempotent (same name → update); safe on every scheduler boot.
+
+  // youtube.poll.active — every 6 hours UTC default (operator can revisit
+  // to a tz-aware schedule if needed). Sends empty {} to scheduler.tick.active;
+  // the worker subscribes and dispatches per-event POLL_ACTIVE jobs.
+  await boss.schedule(QUEUES.SCHEDULER_TICK_ACTIVE, "0 */6 * * *", {});
+
+  // youtube.poll.cold — once per day at 5 AM UTC. Cold tier is the first
+  // thing to give up on heavy days (throttle 'eighty' pauses it).
+  await boss.schedule(QUEUES.SCHEDULER_TICK_COLD, "0 5 * * *", {});
+
+  // youtube.quota_reset — midnight Pacific. YouTube's daily quota resets
+  // at this boundary (Pitfall D). tz handles PDT/PST transitions.
+  await boss.schedule(
+    QUEUES.YOUTUBE_QUOTA_RESET,
+    "0 0 * * *",
+    {},
+    {
+      tz: "America/Los_Angeles",
+    },
+  );
+
+  // purge.daily — 4 AM Pacific (after backup at 03:00 Pacific). Plan 05's
+  // listPurgeEligibleUsers + purgeAccount cascade.
+  await boss.schedule(
+    QUEUES.PURGE_DAILY,
+    "0 4 * * *",
+    {},
+    {
+      tz: "America/Los_Angeles",
+    },
+  );
+
+  // Phase 3.0 post-build refactor (2026-05-06) — weekly rehab tick at
+  // Sunday 4 AM Pacific (after the daily purge). Polls up to 50
+  // unavailable videos with poll_failure_count < 5 to detect privacy
+  // unflip. See worker/handlers/rehab-unavailable.ts for the failure-
+  // count cap rationale.
+  await boss.schedule(
+    QUEUES.YOUTUBE_REHAB_UNAVAILABLE,
+    "0 4 * * 0",
+    {},
+    {
+      tz: "America/Los_Angeles",
+    },
+  );
+
+  logger.info(
+    {
+      schedules: [
+        QUEUES.INTERNAL_HEALTHCHECK,
+        QUEUES.SCHEDULER_TICK_ACTIVE,
+        QUEUES.SCHEDULER_TICK_COLD,
+        QUEUES.YOUTUBE_QUOTA_RESET,
+        QUEUES.PURGE_DAILY,
+        QUEUES.YOUTUBE_REHAB_UNAVAILABLE,
+      ],
+    },
+    "scheduler registered Phase 3.0 cron schedules",
+  );
+
   // D-15 smoke assertion #3 — exact string `scheduler ready` on stdout.
-  // Mirror the worker's dual emission: structured log for production
-  // observability, raw console.log for Plan 10's grep contract.
   logger.info({ role: "scheduler" }, "scheduler ready");
   console.log("scheduler ready");
 
-  // D-22 graceful shutdown. Same shape as the worker — drain pg-boss first
-  // (which stops emitting new scheduled enqueues), then drain the pg.Pool.
+  // D-22 graceful shutdown.
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "scheduler received shutdown signal");
     try {
@@ -80,8 +130,6 @@ export async function startScheduler(): Promise<void> {
     void shutdown("SIGINT");
   });
 
-  // Scheduler idles forever — pg-boss owns the cron loop. Block on a
-  // never-resolving promise so the Node process stays alive until SIGTERM.
   return new Promise<void>(() => {
     /* never resolves — process lives until SIGTERM */
   });

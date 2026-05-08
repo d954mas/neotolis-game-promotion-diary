@@ -195,6 +195,7 @@ describe("toDataSourceDto strips userId (P3 behavioural)", () => {
     expect(Object.keys(dto).sort()).toEqual([
       "autoImport",
       "channelId",
+      "channelTitle",
       "createdAt",
       "deletedAt",
       "displayName",

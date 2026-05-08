@@ -90,13 +90,22 @@ describe("Phase 2.1 baseline schema migration (Plan 02.1-01)", () => {
     }
   });
 
-  it("drops the youtube_channels table", async () => {
+  it("youtube_channels table EXISTS (Phase 3.0 reintroduced via migration 0014 rename — youtube_channel_metadata_cache → youtube_channels)", async () => {
+    // Phase 2.1 baseline (migration 0000) DROPPED the legacy
+    // youtube_channels table from the v1 schema. Phase 3.0 post-build
+    // (migration 0014, 2026-05-06) RENAMED youtube_channel_metadata_cache
+    // (from migration 0010) to youtube_channels — the "_metadata_cache"
+    // suffix was a misnomer; this IS the local copy of public YouTube
+    // channel data, not a regeneratable cache. After the rename, the
+    // youtube_channels table is BACK in the schema, but with a different
+    // column shape from the legacy v1 table (channel_id PK +
+    // uploads_playlist_id, not the v1 game_id FK shape).
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const result = await pool.query<{ tablename: string }>(
         `select tablename from pg_tables where schemaname='public' and tablename='youtube_channels'`,
       );
-      expect(result.rows.length).toBe(0);
+      expect(result.rows.length).toBe(1);
     } finally {
       await pool.end();
     }
@@ -193,14 +202,20 @@ describe("Phase 2.1 baseline schema migration (Plan 02.1-01)", () => {
     // The Plan 02.1-27 describe block below asserts the column is gone.
   });
 
-  it("adds events.author_is_me / source_id / last_polled_at / last_poll_status columns", async () => {
+  it("adds events.author_is_me / source_id columns", async () => {
+    // Per-video refactor (migration 0016, 2026-05-06): events.last_polled_at
+    // and last_poll_status were DROPPED from this table — polling state now
+    // lives on youtube_videos (one source of truth per video). The
+    // assertions below cover what events still owns: tenant + relation +
+    // discriminator columns. youtube_videos.last_polled_at coverage lives
+    // in the per-video describe block further down.
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const result = await pool.query<{ column_name: string }>(
         `select column_name from information_schema.columns where table_name='events' and column_name in ('author_is_me','source_id','last_polled_at','last_poll_status')`,
       );
       const cols = result.rows.map((r) => r.column_name).sort();
-      expect(cols).toEqual(["author_is_me", "last_poll_status", "last_polled_at", "source_id"]);
+      expect(cols).toEqual(["author_is_me", "source_id"]);
     } finally {
       await pool.end();
     }
@@ -438,12 +453,20 @@ describe("Plan 02.1-27 — event_games + steam listing unique swap (0005 + 0006 
       expect(values).toContain("event.marked_standalone");
       // Phase 02.2 Plan 02.2-01 (migration 0008) extended the enum with 4
       // new verbs: account.deleted, account.restored, account.exported,
-      // quota.limit_hit. Total post-Plan-02.2-01: 23 (post-Plan-27) + 4 = 27.
+      // quota.limit_hit. Phase 3.0 baseline (migration 0010) added 5 more:
+      // quota.service_throttled, purge.completed, auto_import.deferred,
+      // poll.failed, event.poll_refreshed.
+      // Total post-Plan-3.0-baseline: 23 (post-Plan-27) + 4 (0008) + 5 (0010) = 32.
       expect(values).toContain("account.deleted");
       expect(values).toContain("account.restored");
       expect(values).toContain("account.exported");
       expect(values).toContain("quota.limit_hit");
-      expect(values).toHaveLength(27);
+      expect(values).toContain("quota.service_throttled");
+      expect(values).toContain("purge.completed");
+      expect(values).toContain("auto_import.deferred");
+      expect(values).toContain("poll.failed");
+      expect(values).toContain("event.poll_refreshed");
+      expect(values).toHaveLength(32);
     } finally {
       await pool.end();
     }
@@ -510,5 +533,208 @@ describe("Phase 2.1 forward-only migrations (Plan 02.1-24)", () => {
     } finally {
       await pool.end();
     }
+  });
+});
+
+// Plan 03.0-01: forward-only migration `0010_phase03_baseline` lands the three
+// new public-data tables (youtube_video_snapshots / youtube_channels
+// / youtube_service_quota_usage), two new partial indexes on `events`, and 5 new
+// audit_action enum verbs (quota.service_throttled, purge.completed,
+// auto_import.deferred, poll.failed, event.poll_refreshed). pgboss legacy queue
+// rows ('poll.hot', 'poll.warm') are also cleaned up, gated on schema existence
+// (pgboss schema is created at boss.start() runtime, not migrate time — so the
+// DELETE is conditional and idempotent).
+describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
+  beforeAll(async () => {
+    await runMigrations();
+  });
+
+  it("creates the youtube_video_snapshots table (no user_id — public data, D-07)", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const tableRes = await pool.query<{ tablename: string }>(
+        `select tablename from pg_tables where schemaname='public' and tablename='youtube_video_snapshots'`,
+      );
+      expect(tableRes.rows.length).toBe(1);
+      // Public-data invariant: NO user_id column. ESLint allowlist mirror.
+      const userIdRes = await pool.query<{ column_name: string }>(
+        `select column_name from information_schema.columns
+         where table_name='youtube_video_snapshots' and column_name='user_id'`,
+      );
+      expect(userIdRes.rows.length).toBe(0);
+      // bigint counters for popular videos > 2^31 (RESEARCH.md schema).
+      const colRes = await pool.query<{ column_name: string; data_type: string }>(
+        `select column_name, data_type from information_schema.columns
+         where table_name='youtube_video_snapshots' order by ordinal_position`,
+      );
+      const cols = new Map(colRes.rows.map((r) => [r.column_name, r.data_type]));
+      expect(cols.get("view_count")).toBe("bigint");
+      expect(cols.get("like_count")).toBe("bigint");
+      expect(cols.get("comment_count")).toBe("bigint");
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("creates the youtube_channels table keyed on channel_id (no user_id)", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const tableRes = await pool.query<{ tablename: string }>(
+        `select tablename from pg_tables where schemaname='public' and tablename='youtube_channels'`,
+      );
+      expect(tableRes.rows.length).toBe(1);
+      const userIdRes = await pool.query<{ column_name: string }>(
+        `select column_name from information_schema.columns
+         where table_name='youtube_channels' and column_name='user_id'`,
+      );
+      expect(userIdRes.rows.length).toBe(0);
+      // channel_id is the PK.
+      const pkRes = await pool.query<{ column_name: string }>(
+        `select kcu.column_name
+         from information_schema.table_constraints tc
+         join information_schema.key_column_usage kcu
+           on tc.constraint_name = kcu.constraint_name
+          and tc.table_name = kcu.table_name
+         where tc.table_name='youtube_channels'
+           and tc.constraint_type='PRIMARY KEY'`,
+      );
+      expect(pkRes.rows.map((r) => r.column_name)).toEqual(["channel_id"]);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("creates the youtube_service_quota_usage table with composite PK (date_pacific, api_key_id)", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const tableRes = await pool.query<{ tablename: string }>(
+        `select tablename from pg_tables where schemaname='public' and tablename='youtube_service_quota_usage'`,
+      );
+      expect(tableRes.rows.length).toBe(1);
+      const userIdRes = await pool.query<{ column_name: string }>(
+        `select column_name from information_schema.columns
+         where table_name='youtube_service_quota_usage' and column_name='user_id'`,
+      );
+      expect(userIdRes.rows.length).toBe(0);
+      // Composite PK columns in order: date_pacific, api_key_id.
+      const pkRes = await pool.query<{ column_name: string; ordinal_position: number }>(
+        `select kcu.column_name, kcu.ordinal_position
+         from information_schema.table_constraints tc
+         join information_schema.key_column_usage kcu
+           on tc.constraint_name = kcu.constraint_name
+          and tc.table_name = kcu.table_name
+         where tc.table_name='youtube_service_quota_usage'
+           and tc.constraint_type='PRIMARY KEY'
+         order by kcu.ordinal_position`,
+      );
+      expect(pkRes.rows.map((r) => r.column_name)).toEqual(["date_pacific", "api_key_id"]);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("creates the idx_youtube_videos_published_at partial index (WHERE published_at IS NOT NULL)", async () => {
+    // Per-video refactor (migration 0016, 2026-05-06): the partial index on
+    // events.last_polled_at was DROPPED alongside the column. Tier-driven
+    // SELECT queries now JOIN events to youtube_videos and filter on
+    // youtube_videos.published_at — the partial index here narrows the
+    // working set to videos whose channel-context-backfill has populated
+    // metadata (NULL published_at = 'pending' tier; not pollable).
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const result = await pool.query<{ indexname: string; indexdef: string }>(
+        `select indexname, indexdef from pg_indexes
+         where tablename='youtube_videos' and indexname='idx_youtube_videos_published_at'`,
+      );
+      expect(result.rows.length).toBe(1);
+      const def = result.rows[0]!.indexdef;
+      expect(def).toMatch(/published_at/);
+      expect(def).toMatch(/where/i);
+      expect(def).toMatch(/published_at\s+is\s+not\s+null/i);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("does NOT carry the events_user_kind_ext_active_unq index (DROPPED in migration 0012)", async () => {
+    // Phase 3.0 post-build (migration 0012, 2026-05-06): the partial unique
+    // (user_id, kind, external_id) index was DROPPED. UAT direction —
+    // operator wants to log multiple promotion events for the same video
+    // (e.g. "Released video X" + "Promo stream for X" + "Reddit post for
+    // X" — same external_id, three diary entries). Auto-import idempotency
+    // moved to a pre-INSERT SELECT in the worker. The
+    // events_user_kind_source_ext_unq index (in this baseline) still
+    // catches accidental double-inserts on the AUTO-IMPORT path; manual
+    // paste is intentionally permissive.
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const result = await pool.query<{ indexname: string }>(
+        `select indexname from pg_indexes
+         where tablename='events' and indexname='events_user_kind_ext_active_unq'`,
+      );
+      expect(result.rows.length).toBe(0);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("audit_action enum extended with 5 new Phase 3.0 verbs", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const result = await pool.query<{ enumlabel: string }>(
+        `select enumlabel from pg_enum
+         where enumtypid = 'public.audit_action'::regtype
+         order by enumsortorder`,
+      );
+      const values = result.rows.map((r) => r.enumlabel);
+      expect(values).toContain("quota.service_throttled");
+      expect(values).toContain("purge.completed");
+      expect(values).toContain("auto_import.deferred");
+      expect(values).toContain("poll.failed");
+      expect(values).toContain("event.poll_refreshed");
+      // Sanity: prior verbs still present.
+      expect(values).toContain("quota.limit_hit");
+      expect(values).toContain("event.detached_from_game");
+      // 27 (post-Plan-02.2-01) + 5 (Plan 03.0-01) = 32.
+      expect(values).toHaveLength(32);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("INSERT into youtube_video_snapshots is idempotent on (video_id, polled_at) — ON CONFLICT DO NOTHING no-ops", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
+    try {
+      const polledAt = new Date("2026-05-06T12:00:00Z");
+      const insert = async () =>
+        pool.query(
+          `insert into youtube_video_snapshots (id, video_id, polled_at, view_count, like_count, comment_count)
+           values ($1, $2, $3, $4, $5, $6)
+           on conflict (video_id, polled_at) do nothing`,
+          ["01HX0000000000000000000001", "dQw4w9WgXcQ", polledAt, 100, 10, 5],
+        );
+      const first = await insert();
+      expect(first.rowCount).toBe(1);
+      // Same (video_id, polled_at) — duplicate must silently no-op.
+      const second = await insert();
+      expect(second.rowCount).toBe(0);
+      const countRes = await pool.query<{ count: string }>(
+        `select count(*)::text as count from youtube_video_snapshots
+         where video_id='dQw4w9WgXcQ' and polled_at=$1`,
+        [polledAt],
+      );
+      expect(countRes.rows[0]?.count).toBe("1");
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("_journal.json carries idx=10 (0010_phase03_baseline) entry", async () => {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const journalPath = path.resolve(process.cwd(), "drizzle/meta/_journal.json");
+    const journal = JSON.parse(await fs.readFile(journalPath, "utf8"));
+    const tags = journal.entries.map((e: { idx: number; tag: string }) => `${e.idx}:${e.tag}`);
+    expect(tags).toContain("10:0010_phase03_baseline");
   });
 });

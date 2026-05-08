@@ -17,6 +17,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { proxyTrust } from "./middleware/proxy-trust.js";
 import { tenantScope } from "./middleware/tenant.js";
 import { accountState } from "./middleware/account-state.js";
+import { adminAllowlist } from "./middleware/admin.js";
 import { meRoutes } from "./routes/me.js";
 import { sessionRoutes } from "./routes/sessions.js";
 // Phase 2 (Plan 02-08) sub-routers — every Phase 2 service surface gets
@@ -30,6 +31,9 @@ import { auditRoutes } from "./routes/audit.js";
 import { meThemeRoutes } from "./routes/me-theme.js";
 // Phase 02.2 (Plan 02.2-03) — in-app account export / soft-delete / restore.
 import { accountRoutes } from "./routes/account.js";
+// Phase 3.0 Plan 07 — admin /quota dashboard endpoint (env-allowlist gated).
+import { adminQuotaRouter } from "./routes/admin/quota.js";
+import { youtubeMetadataRoutes } from "./routes/youtube-metadata.js";
 import { auth } from "../../auth.js";
 import { migrationsApplied } from "../db/migrate.js";
 import { pool } from "../db/client.js";
@@ -123,6 +127,21 @@ export function createApp(): Hono<AppContext> {
   app.route("/api", meThemeRoutes);
   // Phase 02.2 — /api/me/export, DELETE /api/me/account, POST /api/me/account/restore
   app.route("/api", accountRoutes);
+
+  // Phase 3.0 post-build (UAT 2026-05-06) — POST /api/youtube/fetch-metadata.
+  // On-demand metadata lookup for the /events/new "Get from YouTube" button.
+  // Cache-first (zero quota on hit); fallback to videos.list?part=snippet
+  // (1 quota unit on miss). Tenant-scoped via the shared auth chain above.
+  app.route("/api", youtubeMetadataRoutes);
+
+  // Phase 3.0 Plan 07 — admin allowlist gate. Order matters: tenantScope (auth)
+  // already mounted globally on /api/* above, then adminAllowlist (env-allowlist)
+  // here on /api/admin/*, then the route group. Anonymous → 401 from tenantScope
+  // (auth gate fires first); non-allowlisted authenticated → 404 from
+  // adminAllowlist (NOT 403 — AGENTS.md invariant 2 / AP-4); allowlisted →
+  // adminQuotaRouter handler runs.
+  app.use("/api/admin/*", adminAllowlist);
+  app.route("/api/admin", adminQuotaRouter);
 
   return app;
 }

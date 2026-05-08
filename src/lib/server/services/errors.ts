@@ -13,6 +13,28 @@
 // mitigation. Code review enforces this; the response body is also asserted
 // to never contain the literal strings "forbidden" / "permission" by
 // tests/integration/tenant-scope.test.ts.
+//
+// Phase 3.0 Plan 04 — new AppError codes consumed by refresh-poll +
+// manual-paste dedup (no behaviour change to AppError itself; codes are
+// untyped strings). Registered here for grep-traceability only — the route
+// layer (Plan 03.0-08) maps each code to its Paraglide message:
+//
+//   - 'too_many_refreshes'      → 429 — refresh-poll within 5-min cooldown
+//                                   (CONTEXT D-10); metadata carries
+//                                   minutesLeft + retryAfterSeconds.
+//   - 'duplicate_event'         → 422 — manual paste hits the partial
+//                                   unique events_user_kind_ext_active_unq
+//                                   (CONTEXT D-15). The pre-existing
+//                                   auto-import dedup constraint
+//                                   events_user_kind_source_ext_unq still
+//                                   maps to 409 'duplicate_event' for
+//                                   back-compat; the route layer surfaces
+//                                   both via the same Paraglide key.
+//   - 'event_not_pollable'      → 422 — refresh-poll on a kind not in
+//                                   { youtube_video } (Phase 3.0 ships
+//                                   YouTube only; Phase 3.1 lands reddit_post).
+//   - 'event_no_external_id'    → 422 — refresh-poll on a row without an
+//                                   external_id (legacy pre-Plan 02.1-17).
 
 export class AppError extends Error {
   readonly code: string;

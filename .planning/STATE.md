@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to plan
-stopped_at: "Phase 02.2 SHIPPED to prod 2026-05-04 (PR #15 + #17 merged + deployed; UAT 9/10 verified live; Step 10 Rollback deferred as optional)"
-last_updated: "2026-05-05T10:35:00.000Z"
+stopped_at: Completed 03.0-14-PLAN.md (Wave 5 smoke + verification sign-off)
+last_updated: "2026-05-05T21:35:54.132Z"
 last_activity: 2026-05-05
 progress:
-  total_phases: 8
-  completed_phases: 4
-  total_plans: 68
-  completed_plans: 68
+  total_phases: 10
+  completed_phases: 5
+  total_plans: 82
+  completed_plans: 82
 ---
 
 # Project State
@@ -20,11 +20,11 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Replace messy Google Sheets / markdown files with a structured, secure, query-friendly diary so an indie developer can see — at a glance — which promotion actions actually moved the needle on wishlists and engagement.
-**Current focus:** Phase 02.2 — ship-to-prod
+**Current focus:** Phase 03.0 — polling-pipeline-plumbing-youtube
 
 ## Current Position
 
-Phase: 3
+Phase: 3.1
 Plan: Not started
 
 ## Performance Metrics
@@ -110,12 +110,27 @@ Plan: Not started
 | Phase 02.2-ship-to-prod P05 | 25min | 2 tasks | 8 files |
 | Phase 02.2 P04 | 10min | 2 tasks | 13 files |
 | Phase 02.2-ship-to-prod P08 | ~7min | 2 tasks | 3 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P02 | ~14min | 3 tasks | 23 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P01 | 9 min | 3 tasks | 18 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P05 | 10m | 1 tasks | 7 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P06 | 12 min | 1 tasks | 3 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P03 | ~25min | 2 tasks | 5 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P04 | 12 min | 3 tasks | 10 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P08 | ~7 min | 2 tasks | 7 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P07 | 11min | 3 tasks | 10 files |
+| Phase 03.0 P10 | 5m | 1 tasks | 2 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P09 | 30 min | 3 tasks | 16 files |
+| Phase 03.0 P13 | ~7 min | 3 tasks | 6 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P12 | 9min | 2 tasks | 9 files |
+| Phase 03.0 P11 | 16m | 3 tasks | 9 files |
+| Phase 03.0-polling-pipeline-plumbing-youtube P14 | ~13min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
 ### Roadmap Evolution
 
 - Phase 02.2 inserted after Phase 02 (chronologically after 02.1): ship-to-prod (URGENT) — pre-Phase-3 deploy work so user can dogfood the SaaS before polling pipeline lands
+- Phase 03.0.1 inserted after Phase 03.0 (2026-05-08): source plugin architecture — restructure YouTube-prefixed code into `src/lib/server/sources/youtube/` plugin folder + widen DataSourceAdapter contract (registry dispatch, AdapterContext + AdapterCredentials union) so future sources (Reddit/Twitter/Telegram/Discord) drop in as new sub-folders without editing cross-source plumbing. Prerequisite for Phase 3.1 (Reddit Adapter) — without 03.0.1, adding Reddit requires editing 4 worker handlers and copy-pasting the YouTube plumbing pattern. Also ships generic `POST /api/sources/:id/refresh-content` endpoint and SOURCE-REFERENCE.md "how to add a new source" guide.
 
 ### Decisions
 
@@ -317,6 +332,43 @@ Recent decisions affecting current work:
 - [Phase 02.2]: ConfirmDialog requireText prop is the Type-DELETE variant; backward compatible (null/undefined default = no behaviour change for existing callers)
 - [Phase 02.2]: Permanent-delete-now CTA HIDDEN in 2.2 (purge endpoint ships in Phase 3 purge worker; PUTOFF marker in AccountDeletedBanner.svelte)
 - [Phase 02.2-ship-to-prod]: Plan 02.2-08 ships operational runbooks: docs/deploy/install.md (727 lines, 7 sections including 10-step Russian UAT) walks blank aeza VPS to green prod deploy; docs/self-host/backups.md (289 lines, 7 sections) covers opt-in S3-compatible backups for R2/B2/Wasabi/AWS/MinIO/local-only; .env.example finalized with POSTGRES_PASSWORD documented (Rule 2 auto-add) + 8 install.md cross-references
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-02: Phase 2.1 named-plan it.skip pattern carried into Phase 3.0 — every it.skip suffix names the activating plan ('— activated in Plan 03.0-NN'); 17 placeholder test files + 69 named-plan stubs land in Wave 0 so Wave 1+ plans drop into existing files instead of creating new ones
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-02: MUST_BE_PROTECTED entries pre-declared as comments (Plan 02.2-01 precedent) — live entries in the allowlist would trip the sweep's vacuous-pass toContain guard before the route mounts; the corresponding it.skip blocks ARE live so a grep flips them on at the right plan. Three-layer sweep contract for new authenticated routes: comment + it.skip + per-route assertion (CLAUDE.md Privacy invariant 3)
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-02: polling_badge_phase3_placeholder retired (UI-SPEC Copywriting Contract REMOVED) — PollingBadge.svelte switched to polling_badge_manual ('Manual entry — no polling') for the never-polled-yet branch until Plan 03.0-11 lands the live tier-driven rewrite. polling_badge_manual is intentionally retained per UI-SPEC for this edge case
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-01: ALTER TYPE ADD VALUE IF NOT EXISTS guards on all 5 audit verbs (drizzle-kit emits unconditional; hand-edited to match Plan 02.2-01/02.1-27/02.1-12 idempotency precedent for advisory-locked retry safety)
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-01: pgboss legacy queue cleanup gated on schema existence (DO BEGIN IF EXISTS information_schema.schemata) — pgboss schema is created at boss.start() runtime, not migrate time; unconditional DELETE would break fresh test DBs
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-01: events_user_kind_ext_active_unq added ALONGSIDE existing events_user_kind_source_ext_unq (not replacement) — different semantics (refresh-poll idempotency vs auto-import dedup); both partial indexes retained
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-01: YouTube videos.list quota VERIFIED at 1 unit/call regardless of 50-id batch (operator spike 2026-05-06, delta=8 across 8 HTTP 200 calls); 8000 units/day yields 400000 video updates/day theoretical ceiling. Phase 3.0 worker design proceeds as planned
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 05: drop audit_log -> user FK in migration 0011 so purge.completed audit row survives the user delete (AGENTS §4 INSERT-only invariant + Open Question 4 resolution)
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 05: cascade order api_keys_steam -> event_games -> events -> game_steam_listings -> data_sources -> games -> session -> user; event_games BEFORE events for accurate row-count probe (cascade-collateral counts are invisible to .returning())
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 05: 4 it.skip stubs (Plan 08 route layer) preserved unchanged; 10 NEW service-layer tests added under separate describe block — Plan 02 SUMMARY documented those stubs as 'Plan 03.0-08 fills.'
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Inlined pickKeyForJob + hashApiKeyId in youtube-channel-adapter.ts as a cross-plan transition contract; Plan 03.0-03 landed the canonical home in commit 835ed04 between this plan's RED and GREEN phases — swap is a one-line follow-up commit (tracked in SUMMARY).
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: DataSourceAdapter interface evolution: pollStats batched signature (PollableEvent[]→StatsSnapshot[]); StatsSnapshot.metrics optional + new metadata field (Shorts duration_seconds/is_short); SnapshotStatus exported as named type. Verified safe — only consumers were the test file + adapter itself.
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: tier-resolver.ts is the single source of truth for tier resolution (Pitfall 7); inlining boundary literals elsewhere is a P0 review block
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: youtube-quota-tracker uses two-layer audit idempotency (in-memory Set + audit_log lookup) — handles container restart at the natural midnight-Pacific boundary
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Test file split: pure-function cases stay in tests/unit/; DB-touching cases moved to tests/integration/youtube-quota-tracker.test.ts (quota.test.ts precedent)
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 04: Lazy-import youtube-quota-tracker from snapshot-writer to defuse parallel-agent coordination on shared branch
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 04: Constraint-name-keyed 23505 translation in events.createEvent (events_user_kind_ext_active_unq -> 422; events_user_kind_source_ext_unq keeps 409 for back-compat)
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 04: queue-client.getBoss singleton for the APP role - HTTP routes share one pg-boss instance per process
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 08: account-state ALLOWED_WHEN_DELETED extended with DELETE /api/me/account/purge — the CTA's primary audience IS the soft-deleted user pressing the AccountDeletedBanner; without exemption the route would 423 for the exact users it targets
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 08: Retry-After header set in route handler (not in mapErr) for 429 too_many_refreshes — mapErr translates JSON body, not headers; UI-SPEC contract drives Plan 11 RefreshNowButton cooldown countdown without round-tripping metadata
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-07: Direct c.json 404 from middleware (NOT throw NotFoundError) — matches tenantScope 401 + accountState 423 pattern; avoids needing global Hono onError handler
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-07: Extend tenantScope to set c.var.userEmail from Better Auth session (zero added DB cost; avoids second round-trip in admin allowlist gate)
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-07: Cross-tenant audit aggregation justified inline (eslint-disable + -- comment) — allowlist gate is the security property; non-allowlisted users return 404 before loader runs
+- [Phase 03.0]: Plan 10: read author_url from event.metadata (set by enrichFromUrl) instead of duplicating the oEmbed call — saves one HTTP roundtrip per paste
+- [Phase 03.0]: Plan 10: per-shape singletonKey strategy — UC id for /channel/UC… URLs, full URL for /@handle and /c/customname (handler resolves canonical UC id at handler-time)
+- [Phase 03.0]: Plan 10: fire-and-forget enqueue — try/catch swallows pg-boss / DB errors so the user-facing paste never returns 502 from a backfill failure
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-09: Pattern A scheduler-tick queue separation chosen over Pattern B (marker payload) — cron schedules send empty {} to scheduler.tick.{active,cold} queues; worker subscribes and dispatches per-event POLL_ACTIVE/POLL_COLD jobs. Keeps scheduler container thin (cron-fire only), routes DB-touching enqueue logic to worker pool
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-09: channel-context-backfill runs 3 quota units total (channels.list + playlistItems.list + videos.list) — Rule 2 deviation from plan's stated 2 units; the videos.list batched call is required to seed real counters in youtube_video_snapshots so VIZ-01 chart-loader doesn't render empty on first paste. Idempotency preserved via ON CONFLICT DO NOTHING
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 03.0-09: SCHEDULER_TICK_ACTIVE / SCHEDULER_TICK_COLD added to QUEUES const so declareAllQueues auto-creates them at boot — without these entries, boss.send to those queue names would silently lose jobs (Phase 1 D-Q1 pitfall, pg-boss v10 createQueue requirement)
+- [Phase 03.0]: Plan 13 (admin /quota page): /admin/+layout.server.ts is a deliberate no-op — allowlist gate stays at /api/admin/* middleware (Plan 07) so there's a single source of truth for who sees /admin/*. SvelteKit page loader fetches /api/admin/quota via fetch() helper (NOT direct service import) to keep the gate in one place; on 404 throws SvelteKit error(404) rendering the standard 404 page (admin-deny indistinguishable from URL-not-found per D-16 self-host parity).
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 12: AccountDeletedBanner Permanent-delete-now CTA un-hidden (DV-6); ConfirmDialog Type-DELETE + speedbump pattern reused verbatim from Phase 02.2 D-S3
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 12: BackfillPicker.svelte ships with 5 presets (default 30d); /sources/new conditionally renders + collapses with auto_import=true gate; createSource enqueues YOUTUBE_CHANNEL_CONTEXT_BACKFILL with singletonKey=source-{id}
+- [Phase 03.0]: Plan 11: Mirror tier-resolver inline in PollingBadge.svelte (Pitfall 7) — paired with tests/unit/tier-resolver-client-mirror.test.ts to guard against drift; cheaper than refactoring tier-resolver out of $lib/server/.
+- [Phase 03.0]: Plan 11: Browser-mode test moved from tests/browser/ to tests/integration/ (Rule 3 deviation) — vitest browser mode's vite import-analysis can't resolve $app/navigation transitive import; integration project Node env handles vi.mock correctly. Same path Plan 03.0-12 took for AccountDeletedBanner.
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 14: Smoke gate uses POST /api/events/:id/refresh-poll to drive a real poll.user round-trip through the youtube-mock — exercises auth gate + tenant scope + service + queue enqueue + worker drain + snapshot write as a single assertion, deterministic (no waiting for a 6h scheduler tick)
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 14: phase-NN-flow.sh extraction pattern — each phase ships tests/smoke/lib/phaseNN-flow.sh with a single phaseNN_<descriptor>() function; the parent self-host.sh sources + calls. Phase 2.1 phase21-flow.sh is the precedent; Phase 3.0 phase30-flow.sh continues it; Phase 3.1 / 3.2 will follow without rebase pressure on the parent harness
+- [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 14: VERIFICATION.md verdict signed-off-pending-ci-and-uat — executor produces the doc with the 12-criteria checklist + per-plan map + spike result + smoke gate table populated; the human flips verdict: signed-off after the CI smoke run is green AND the deferred 13-step manual UAT (HUMAN-UAT.md) closes
 
 ### Pending Todos
 
@@ -348,17 +400,19 @@ Recent decisions affecting current work:
 - [Phase 02.1-architecture-realignment]: Plan 02.1-16 deviation (Rule 2): EventDtoLocal in /games/[gameId]/+page.svelte missing externalId — extended local type to surface the field already projected by toEventDto so FeedCard's thumbnail prop type-checks
 - [Phase 02.1-architecture-realignment]: Plan 02.1-16: HARD CONTRACT preserved on /feed/+page.svelte during FeedRow→FeedCard swap — Plan 14's <DeletedEventsPanel> + Plan 15's <DateRangeControl> + multi-select <FilterChips>/<FiltersSheet> blocks intact, verified via grep guard before edit
 - [Phase 02.1-architecture-realignment]: Plan 02.1-10 Task 1 (smoke unified flow + cross-tenant probes) verified ALREADY-SHIPPED at commit dd71efb (2026-04-28, shipped during original Plan-10 first-pass before round-2 UAT batch redirected execution to Plans 11-20). bash -n PASS on tests/smoke/self-host.sh + tests/smoke/lib/phase21-flow.sh; all plan acceptance-criteria literal substrings present (/api/sources×6, /api/events×14, /attach×7, /api/games/×3, gameId×12, sourceId×9, 404×9, forbidden|permission×5). Continuation agent picks up at Task 2 (manual UAT checkpoint, 9 items) → Task 3 (VALIDATION.md sign-off + SUMMARY.md).
+- [Phase 03.0 post-build refactor 2026-05-06]: Per-video polling architecture — events.last_polled_at + last_poll_status DROPPED via migration 0016; youtube_videos gains last_polled_at + last_poll_status + poll_failure_count + indexes. Tier classification keys on youtube_videos.published_at, NOT events.occurred_at — fixes "I logged a promo today for a year-old video" misclassifying as Active. Scheduler selectDistinct external_id JOIN youtube_videos; workers receive { videoIds }; one HTTP per ≤50-id batch (multiple events for one video share polling). New 'pending' tier handles the brief window between event creation and channel-context-backfill completion. quotaUser becomes per-tier constant ("neotolis-svc-active" / "-cold" / "-rehab") for service polls; per-user fingerprint reserved for user-driven Refresh now. Weekly rehab-unavailable cron polls up to 50 'not_found' / 'private' videos with poll_failure_count < 5 — recovers privacy-unflipped videos without user action. Manual Refresh now bypasses the failure-count cap. PollingBadge gains 'pending' variant with dotted border + RefreshNow hidden. Migration is a clean DROP/ADD on prod (Phase 2.2 never wrote to events.last_polled_at).
 
 ### Blockers/Concerns
 
 - Phase 3 spike: confirm Reddit `/about/rules.json` returns raw rules only (not structured cooldown/flair fields) before locking `subreddit_rules` table — gates Phase 5
 - Phase 3 spike: confirm batched `videos.list` quota math against live YouTube Data API v3 before committing the worker design
 - Phase 4: monitor LayerChart 2.x Svelte 5 beta stability at phase start; ECharts fallback documented and ready
+- Wave 1 parallel-execution race: Plan 03.0-04 agent committed youtube-quota-tracker.ts content under refresh-poll commit message (9e49ad9); Plan 03.0-03's commit (835ed04) carries Task 2 message but actually contains Plan 05's purge-account work. Functional code intact; only commit-message-to-file routing affected
 
 ## Session Continuity
 
-Last session: 2026-05-03T17:45:50.358Z
-Last Activity: 2026-05-03
-Stopped at: Completed 02.2-08-PLAN.md (Phase 02.2 complete: 8/8 plans)
+Last session: 2026-05-05T21:33:58.991Z
+Last Activity: 2026-05-05
+Stopped at: Completed 03.0-14-PLAN.md (Wave 5 smoke + verification sign-off)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md

@@ -10,6 +10,10 @@ import { listGames } from "$lib/server/services/games.js";
 import { listSources } from "$lib/server/services/data-sources.js";
 import { mapEventsToDtos, toGameDto, toDataSourceDto } from "$lib/server/dto.js";
 import { filterValidKinds } from "$lib/util/filter-event-kinds.js";
+import { db } from "$lib/server/db/client.js";
+import { youtubeVideoSnapshots } from "$lib/server/db/schema/youtube-video-snapshots.js";
+import { youtubeChannels } from "$lib/server/db/schema/youtube-channels.js";
+import { sql, inArray } from "drizzle-orm";
 
 // Plan 02.1-19 URL contract: /feed accepts ?show=any|inbox|specific +
 // ?game=A&game=B (when show=specific). The legacy ?attached=true|false is
@@ -59,22 +63,21 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
   const fromParam = url.searchParams.get("from");
   const toParam = url.searchParams.get("to");
-  const allParam = url.searchParams.get("all");
+  // `?all=1` was the legacy escape hatch for the 30-day default window.
+  // Phase 3.0 post-build retired the implicit window; this read is preserved
+  // only for analytics symmetry. Underscore-prefixed to satisfy
+  // no-unused-vars; remove when /feed history confirms no tooling reads it.
+  const _allParam = url.searchParams.get("all");
 
-  // Plan 02.1-15 Gap 9: when neither from/to nor all=1 is set, default the
-  // window to the last 30 days. The default surfaces in `activeFilters` so
-  // the chip strip shows a "Last 30 days (default)" chip the user can
-  // dismiss — dismissing navigates to ?all=1 (opt-out). When the user picks
-  // any explicit from / to, those win.
-  let fromForFilter = fromParam ?? undefined;
-  let toForFilter = toParam ?? undefined;
-  if (fromForFilter === undefined && toForFilter === undefined && allParam !== "1") {
-    const today = new Date();
-    const thirtyDaysAgo = new Date(today);
-    thirtyDaysAgo.setUTCDate(today.getUTCDate() - 30);
-    fromForFilter = thirtyDaysAgo.toISOString().slice(0, 10);
-    toForFilter = today.toISOString().slice(0, 10);
-  }
+  // Phase 3.0 post-build (UAT 2026-05-06): default is now All-time. The
+  // 30-day implicit window from Plan 02.1-15 Gap 9 was confusing — a fresh
+  // YouTube backfill of a channel often surfaces older uploads, and the
+  // implicit cap silently hid them. Cursor pagination already protects from
+  // rendering huge lists, so dropping the default cap is safe. `?all=1`
+  // remains a no-op for backward compatibility (any old links keep working).
+  // Explicit from/to params still win when the user picks a range.
+  const fromForFilter = fromParam ?? undefined;
+  const toForFilter = toParam ?? undefined;
 
   // Date-only inputs (YYYY-MM-DD) are inclusive on both ends — `from` becomes
   // 00:00:00 UTC of that day (start), `to` becomes 23:59:59.999 UTC (end).
@@ -129,7 +132,14 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const [page, gameRows, sourceRows, deletedRows] = await Promise.all([
     listFeedPage(userId, filters, cursor),
     listGames(userId),
-    listSources(userId),
+    // Phase 3.0 post-build (UAT 2026-05-06): include soft-deleted sources
+    // so the feed card can still resolve channelTitle / displayName for
+    // events whose parent source the user has removed. Without this, events
+    // backed by a now-deleted source render with no source chip — confusing
+    // because the events themselves remain in /feed (events are not cascaded
+    // when sources go soft-deleted; the user's own historical metadata stays
+    // intact). The UI may surface a "(removed)" suffix on the chip later.
+    listSources(userId, { includeDeleted: true }),
     listDeletedEvents(userId),
   ]);
 
@@ -140,11 +150,74 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     mapEventsToDtos(userId, page.rows),
     mapEventsToDtos(userId, deletedRows),
   ]);
+
+  // Phase 3.0 post-build (UAT 2026-05-06): attach the latest YouTube stats
+  // snapshot to each youtube_video event in the feed. Single batched DISTINCT
+  // ON query — one DB round-trip regardless of page size. The snapshot table
+  // is public-data (no userId scope) so we filter only by external_id; the
+  // events list itself is already userId-scoped at listFeedPage.
+  const youtubeExternalIds = rowDtos
+    .filter((r) => r.kind === "youtube_video" && r.externalId !== null)
+    .map((r) => r.externalId as string);
+  if (youtubeExternalIds.length > 0) {
+    const snapshots = await db
+      .select({
+        videoId: youtubeVideoSnapshots.videoId,
+        polledAt: youtubeVideoSnapshots.polledAt,
+        viewCount: youtubeVideoSnapshots.viewCount,
+        likeCount: youtubeVideoSnapshots.likeCount,
+        commentCount: youtubeVideoSnapshots.commentCount,
+      })
+      .from(youtubeVideoSnapshots)
+      .where(inArray(youtubeVideoSnapshots.videoId, youtubeExternalIds))
+      .orderBy(youtubeVideoSnapshots.videoId, sql`${youtubeVideoSnapshots.polledAt} DESC`);
+    const latest = new Map<
+      string,
+      { viewCount: number; likeCount: number; commentCount: number; polledAt: Date }
+    >();
+    for (const s of snapshots) {
+      if (!latest.has(s.videoId)) {
+        latest.set(s.videoId, {
+          viewCount: s.viewCount ?? 0,
+          likeCount: s.likeCount ?? 0,
+          commentCount: s.commentCount ?? 0,
+          polledAt: s.polledAt,
+        });
+      }
+    }
+    for (const r of rowDtos) {
+      if (r.kind === "youtube_video" && r.externalId) {
+        r.stats = latest.get(r.externalId) ?? null;
+      }
+    }
+  }
+
+  // Phase 3.0 post-build: enrich source DTOs with the YouTube channel_title
+  // from cache so the feed card can show the real channel name alongside
+  // the user's own displayName. One batched lookup keyed on every distinct
+  // channelId across all loaded sources.
+  const sourceDtos = sourceRows.map(toDataSourceDto);
+  const channelIds = sourceDtos.map((s) => s.channelId).filter((c): c is string => c !== null);
+  if (channelIds.length > 0) {
+    const cacheRows = await db
+      .select({
+        channelId: youtubeChannels.channelId,
+        channelTitle: youtubeChannels.channelTitle,
+      })
+      .from(youtubeChannels)
+      .where(inArray(youtubeChannels.channelId, channelIds));
+    const titleByChannel = new Map<string, string | null>();
+    for (const r of cacheRows) titleByChannel.set(r.channelId, r.channelTitle);
+    for (const s of sourceDtos) {
+      if (s.channelId) s.channelTitle = titleByChannel.get(s.channelId) ?? null;
+    }
+  }
+
   return {
     rows: rowDtos,
     nextCursor: page.nextCursor,
     games: gameRows.map(toGameDto),
-    sources: sourceRows.map(toDataSourceDto),
+    sources: sourceDtos,
     // Plan 02.1-14 (preserved): listDeletedEvents flows through the loader
     // so /feed renders the soft-delete recovery panel without a second
     // round-trip. retentionDays continues to come from the layout
@@ -170,11 +243,13 @@ export const load: PageServerLoad = async ({ locals, url }) => {
       authorIsMe: filters.authorIsMe,
       from: filters.from ? filters.from.toISOString().slice(0, 10) : undefined,
       to: filters.to ? filters.to.toISOString().slice(0, 10) : undefined,
-      // Default-flag (Gap 9): the UI uses this to render the date chip as
-      // "default" (dismissable via ?all=1) rather than user-applied. True
-      // only when no from/to/all params were supplied.
-      defaultDateRange: fromParam === null && toParam === null && allParam !== "1",
-      all: allParam === "1",
+      // Phase 3.0 post-build (UAT 2026-05-06): the implicit 30-day
+      // default window from Plan 02.1-15 Gap 9 was retired. /feed now
+      // defaults to All-time. defaultDateRange always false here so the
+      // FilterChips strip never renders the "Last 30 days (default)"
+      // chip; `all` is true whenever the user hasn't picked a from/to.
+      defaultDateRange: false,
+      all: fromParam === null && toParam === null,
     },
   };
 };

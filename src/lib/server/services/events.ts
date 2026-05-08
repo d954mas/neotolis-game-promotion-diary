@@ -250,6 +250,19 @@ function isPgUniqueViolation(e: unknown): boolean {
 }
 
 /**
+ * Extract the constraint name from a Postgres unique-violation. The shape
+ * differs across pg drivers / versions: `node-pg` exposes `constraint`,
+ * older drivers use `constraint_name`. Returns null when neither is set.
+ */
+function pgUniqueViolationConstraint(e: unknown): string | null {
+  if (typeof e !== "object" || e === null) return null;
+  const obj = e as { constraint?: unknown; constraint_name?: unknown };
+  if (typeof obj.constraint === "string") return obj.constraint;
+  if (typeof obj.constraint_name === "string") return obj.constraint_name;
+  return null;
+}
+
+/**
  * Pitfall 4 mitigation: verify gameId ownership BEFORE INSERT/UPDATE.
  * Throws NotFoundError on miss / cross-tenant — the HTTP boundary translates
  * to 404 (NOT 500 from a bare PG FK error). Soft-deleted games count as
@@ -417,6 +430,28 @@ export async function createEvent(
     });
   } catch (e: unknown) {
     if (isPgUniqueViolation(e)) {
+      const constraint = pgUniqueViolationConstraint(e);
+      // Phase 3.0 post-build (UAT 2026-05-06): the (user_id, kind, external_id)
+      // unique index was DROPPED in migration 0013. The constraint had blocked
+      // the operator's actual workflow ("one review video covers 5 games →
+      // I want 5 events with different game attachments + different notes").
+      // Duplicate-on-paste detection becomes a UI concern: the future "you
+      // already have this video — add another note?" flow lives on the
+      // /events/[id] detail view. This branch becomes dead code post-0013;
+      // kept as a safety guard against accidental re-introduction of the
+      // constraint and as a documented historical link.
+      if (constraint === "events_user_kind_ext_active_unq") {
+        throw new AppError(
+          "event already exists for this URL (legacy constraint — should be impossible after migration 0013)",
+          "duplicate_event",
+          422,
+          { kind: input.kind, external_id: derivedExternalId, url: input.url ?? null },
+        );
+      }
+      // Pre-existing auto-import dedup constraint preserved at 409 — the
+      // auto-import worker (Plan 03.0-09) catches and silently skips, so the
+      // user-facing surface never sees this code. Keeping 409 here avoids
+      // breaking any back-compat caller that already discriminates by status.
       throw new AppError("event already exists for this source", "duplicate_event", 409, {
         kind: input.kind,
         source_id: input.sourceId ?? null,

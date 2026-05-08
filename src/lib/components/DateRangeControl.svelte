@@ -53,8 +53,8 @@
   // Match the supplied range against the four presets. "Custom" returns null
   // (no preset highlighted). The "default" 30-day window matches "month"
   // because the page-server emits the same from / to values for both.
-  const activePreset = $derived.by((): "today" | "week" | "month" | "year" | null => {
-    if (activeFilters.all) return null;
+  const activePreset = $derived.by((): "today" | "week" | "month" | "all" | null => {
+    if (activeFilters.all) return "all";
     const today = todayIso();
     const from = activeFilters.from;
     const to = activeFilters.to;
@@ -62,24 +62,18 @@
     if (from === today && to === today) return "today";
     if (from === daysAgoIso(7) && to === today) return "week";
     if (from === daysAgoIso(30) && to === today) return "month";
-    if (from === daysAgoIso(365) && to === today) return "year";
     return null;
   });
 
-  function applyPreset(p: "today" | "week" | "month" | "year"): void {
+  function applyPreset(p: "today" | "week" | "month" | "all"): void {
     const today = todayIso();
     if (p === "today") onApply({ from: today, to: today });
     else if (p === "week") onApply({ from: daysAgoIso(7), to: today });
     else if (p === "month") onApply({ from: daysAgoIso(30), to: today });
-    else onApply({ from: daysAgoIso(365), to: today });
+    else onApply({ all: true });
   }
   function applyInputs(): void {
     onApply({ from: fromVal || undefined, to: toVal || undefined });
-  }
-  function clearRange(): void {
-    fromVal = "";
-    toVal = "";
-    onApply({ all: true });
   }
 </script>
 
@@ -93,26 +87,15 @@
       <span class="input-label">{m.feed_date_range_label_to()}</span>
       <input type="date" bind:value={toVal} min={fromVal || undefined} onchange={applyInputs} />
     </label>
-    <button type="button" class="clear" aria-label={m.feed_date_range_clear()} onclick={clearRange}
-      >×</button
-    >
   </div>
   <div class="presets">
     <button
       type="button"
       class="preset"
-      aria-pressed={activePreset === "today"}
-      onclick={() => applyPreset("today")}
+      aria-pressed={activePreset === "all"}
+      onclick={() => applyPreset("all")}
     >
-      {m.feed_date_range_today()}
-    </button>
-    <button
-      type="button"
-      class="preset"
-      aria-pressed={activePreset === "week"}
-      onclick={() => applyPreset("week")}
-    >
-      {m.feed_date_range_week()}
+      {m.feed_date_range_all_time()}
     </button>
     <button
       type="button"
@@ -125,10 +108,18 @@
     <button
       type="button"
       class="preset"
-      aria-pressed={activePreset === "year"}
-      onclick={() => applyPreset("year")}
+      aria-pressed={activePreset === "week"}
+      onclick={() => applyPreset("week")}
     >
-      {m.feed_date_range_year()}
+      {m.feed_date_range_week()}
+    </button>
+    <button
+      type="button"
+      class="preset"
+      aria-pressed={activePreset === "today"}
+      onclick={() => applyPreset("today")}
+    >
+      {m.feed_date_range_today()}
     </button>
   </div>
 </div>
@@ -136,8 +127,10 @@
 <style>
   .date-range {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
+    flex-direction: row;
+    align-items: end;
+    gap: var(--space-md);
+    flex-wrap: wrap;
   }
   .inputs {
     display: flex;
@@ -162,20 +155,6 @@
     border: 1px solid var(--color-border);
     border-radius: 4px;
     background: var(--color-bg);
-    color: var(--color-text);
-  }
-  .clear {
-    min-width: 44px;
-    min-height: 44px;
-    padding: 0;
-    background: transparent;
-    color: var(--color-text-muted);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    cursor: pointer;
-  }
-  .clear:hover {
     color: var(--color-text);
   }
   .presets {

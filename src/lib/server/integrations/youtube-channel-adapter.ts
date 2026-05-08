@@ -1,34 +1,375 @@
-// youtube_channel adapter — Phase 2.1 STUB.
+// youtube_channel adapter — Phase 3.0 Plan 06 LIVE impl.
 //
-// Ships the DataSourceAdapter shape so Wave 1 services have a contract to
-// compile against. Phase 3 fills in pollContent / pollStats alongside the
-// polling worker; both methods throw the documented "implemented in Phase 3"
-// error so any Wave 1 caller that accidentally invokes them fails loudly
-// instead of silently returning nothing.
+// Replaces the Phase 2.1 STUB. Implements DataSourceAdapter via two YouTube
+// Data API v3 endpoints:
+//
+//   - playlistItems.list?playlistId=<uploadsPlaylistId>&part=snippet
+//     &maxResults=50  (1 quota unit per call) — used by pollContent for
+//     backfill + auto-import. Filters response items to publishedAt > since.
+//
+//   - videos.list?id=<≤50 comma-joined ids>&part=snippet,statistics,
+//     contentDetails  (1 quota unit per call regardless of batch size —
+//     VERIFIED by the Plan 03.0-01 spike on 2026-05-06; 8 calls = 8 units)
+//     — used by pollStats for per-event metrics + Shorts detection.
+//
+// HTTP discipline (per RESEARCH.md + AGENTS.md):
+//   - Native fetch (RESEARCH.md notes the `googleapis` npm package is heavy
+//     for two-endpoint use).
+//   - AbortController.timeout(30_000) on every call (Pitfall 5 — never hold
+//     a DB tx across HTTP).
+//   - quotaUser=youtubeQuotaUser(userId) parameter on every call (Google's
+//     per-end-user fairness gate — RESEARCH.md OQ#5 / Pattern 4 — splits
+//     the operator's quota evenly across tenants instead of letting one
+//     whale starve the others).
+//   - All HTTP routed through env.YOUTUBE_API_BASE_URL (smoke override,
+//     production default = https://www.googleapis.com/youtube/v3).
+//
+// Statelessness (AGENTS.md AP-3): the adapter NEVER caches user secrets and
+// never holds plaintext keys across calls. The operator's plaintext key is
+// read from env at call time via `pickKeyForJob`. Plan 03.0-03 will provide
+// the canonical `pickKeyForJob` + `hashApiKeyId` from
+// `services/youtube-quota-tracker.ts`; this file inlines minimal-contract
+// equivalents until the parallel sibling plan lands. The two helpers are
+// imported via dynamic import in a try/catch so the swap is a one-line
+// follow-up commit (Rule 3 deviation — blocking issue resolved by inlining
+// a minimal contract until the parallel plan lands).
+//
+// Error mapping (Phase 3.0 D-12 status codes):
+//   - 200 + item present in response.items     → status:'ok' + metrics + metadata
+//   - 200 + item missing from response.items   → status:'not_found' (private/deleted/embedded-disabled)
+//   - 403 with errors[].reason='quotaExceeded' → status:'rate_limited' (worker defers; scheduler pauses)
+//   - 403 any other reason                     → status:'auth_error' (event tier flips to Unavailable)
+//   - 404                                      → status:'not_found'
+//   - other 4xx/5xx                            → status:'auth_error' (placeholder; caller logs + retries)
 
+import { pickKeyForJob, youtubeQuotaUser } from "../services/youtube-quota-tracker.js";
+import { chargedFetch, fetchWithTimeout } from "./youtube-http.js";
+import { z } from "zod";
+import { env } from "../config/env.js";
+import { logger } from "../logger.js";
 import type {
   DataSourceAdapter,
-  DataSourceRow,
-  EventRow,
+  PickedKey,
+  PollableEvent,
+  PollableSource,
   RawEvent,
+  SnapshotStatus,
   StatsSnapshot,
 } from "./data-source-adapter.js";
+
+// Plan 03.0-03's canonical pickKeyForJob + hashApiKeyId are imported above
+// (services/youtube-quota-tracker.ts). The Wave-1-cross-plan inline copies
+// were removed in the post-build review sweep — they had divergent state
+// (separate roundRobinCursor module variable + different hash length) that
+// caused the apiKeyId stored in youtube_service_quota_usage by the worker
+// to NOT match the apiKeyId the adapter produced. With one key in the
+// envelope this was masked; with two keys the counter rows would never
+// settle on a stable pair.
+
+// ---- Zod schemas — defense against API drift ----
+
+const VIDEOS_LIST_RESPONSE = z.object({
+  kind: z.literal("youtube#videoListResponse"),
+  items: z.array(
+    z.object({
+      id: z.string(),
+      snippet: z
+        .object({
+          publishedAt: z.string(),
+          title: z.string(),
+          channelId: z.string(),
+        })
+        .optional(),
+      statistics: z
+        .object({
+          viewCount: z.string().optional(),
+          likeCount: z.string().optional(),
+          commentCount: z.string().optional(),
+        })
+        .optional(),
+      contentDetails: z
+        .object({
+          duration: z.string(), // ISO 8601 — "PT15S" / "PT4M13S" / "PT1H02M03S"
+        })
+        .optional(),
+    }),
+  ),
+});
+
+const PLAYLIST_ITEMS_LIST_RESPONSE = z.object({
+  kind: z.literal("youtube#playlistItemListResponse"),
+  items: z.array(
+    z.object({
+      snippet: z.object({
+        publishedAt: z.string(),
+        title: z.string(),
+        channelId: z.string(),
+        resourceId: z.object({
+          kind: z.literal("youtube#video"),
+          videoId: z.string(),
+        }),
+      }),
+    }),
+  ),
+  nextPageToken: z.string().optional(),
+});
+
+const ERROR_RESPONSE = z
+  .object({
+    error: z
+      .object({
+        errors: z.array(z.object({ reason: z.string().optional() })).optional(),
+      })
+      .optional(),
+  })
+  .partial();
+
+// ---- Helpers ----
+
+/** Parse ISO 8601 duration "PT4M13S" / "PT15S" / "PT1H2M3S" → seconds.
+ *  Returns 0 on parse failure. */
+function durationToSeconds(iso: string): number {
+  const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso);
+  if (!match) return 0;
+  const [, h, m, s] = match;
+  return Number(h ?? 0) * 3600 + Number(m ?? 0) * 60 + Number(s ?? 0);
+}
+
+// fetchWithTimeout + chargedFetch live in integrations/youtube-http.ts
+// (post-build review 2026-05-08). This adapter exposes TWO YouTube
+// methods, each with a different accounting boundary:
+//
+//   pollStatsBatch — used by poll-active / poll-cold / poll-user /
+//     rehab-unavailable, which charge quota via writeSnapshot's
+//     per-video `unitsUsed` accounting and emit throttle audits via
+//     the SnapshotStatus="rate_limited" path. This method MUST use the
+//     lower-level fetchWithTimeout — routing it through chargedFetch
+//     would double-charge (adapter +1 then writeSnapshot +1).
+//
+//   pollContent — auto-import path. No writeSnapshot equivalent at the
+//     caller side, so this method DOES use chargedFetch and accounts
+//     at the fetch boundary. (When auto-import lands as a worker
+//     handler, that handler trusts pollContent to charge.) This was
+//     surfaced by the fourth-pass review: pollContent's earlier
+//     fetchWithTimeout-only pattern would have been a future trap —
+//     auto-import quota burn would not land in
+//     youtube_service_quota_usage at all.
+//
+// classifyError stays as the SnapshotStatus mapper for pollStatsBatch's
+// caller-side audit. pollContent has no SnapshotStatus contract; it
+// just bails on non-2xx with an empty array.
+
+/** Map a non-2xx response to a SnapshotStatus. The body is read once; we tolerate
+ *  malformed JSON by falling through to 'auth_error' (placeholder for 4xx/5xx
+ *  the caller can log + retry). */
+async function classifyError(resp: Response): Promise<SnapshotStatus> {
+  if (resp.status === 404) return "not_found";
+  if (resp.status === 403) {
+    try {
+      const parsed = ERROR_RESPONSE.safeParse(await resp.json());
+      if (parsed.success) {
+        const reason = parsed.data.error?.errors?.[0]?.reason;
+        if (reason === "quotaExceeded") return "rate_limited";
+      }
+    } catch {
+      // fall through to auth_error
+    }
+    return "auth_error";
+  }
+  return "auth_error";
+}
+
+/**
+ * videos.list batched call. Up to 50 video ids per call (1 quota unit).
+ *
+ * `quotaUser` is the literal string sent on the URL — caller decides whether
+ * it's a per-user fingerprint (poll-user — `youtubeQuotaUser(userId)`) or a
+ * service-tier constant (poll-active / poll-cold — "neotolis-svc-active").
+ * This module does not pick the policy; it just sends what it's given.
+ *
+ * `picked` is the pre-resolved key from the caller's `pickKeyForJob` — see
+ * the PickedKey jsdoc on data-source-adapter.ts. The adapter no longer
+ * picks on its own (post-build review 2026-05-07): without threading,
+ * the worker would advance roundRobinIdx once at handler start AND the
+ * adapter would advance it again per chunk, leaving the
+ * youtube_service_quota_usage row keyed under the worker's pick while
+ * the actual HTTP burned the adapter's pick.
+ */
+async function pollStatsBatch(
+  videoIds: string[],
+  quotaUser: string,
+  picked: PickedKey,
+): Promise<StatsSnapshot[]> {
+  if (videoIds.length === 0) return [];
+  if (videoIds.length > 50) throw new Error("videos.list batch limit is 50");
+
+  const now = new Date();
+  const url = new URL(`${env.YOUTUBE_API_BASE_URL}/videos`);
+  url.searchParams.set("id", videoIds.join(","));
+  url.searchParams.set("part", "snippet,statistics,contentDetails");
+  url.searchParams.set("key", picked.apiKey);
+  url.searchParams.set("quotaUser", quotaUser);
+
+  const resp = await fetchWithTimeout(url);
+
+  if (!resp.ok) {
+    const status = await classifyError(resp);
+    logger.warn(
+      { status: resp.status, mappedStatus: status, batchSize: videoIds.length },
+      "videos.list non-2xx",
+    );
+    return videoIds.map(() => ({ polledAt: now, status }));
+  }
+
+  const json = VIDEOS_LIST_RESPONSE.parse(await resp.json());
+  return videoIds.map((videoId) => {
+    const item = json.items.find((i) => i.id === videoId);
+    if (!item) {
+      // Not in response — private, deleted, embedded-disabled, or never existed.
+      return { polledAt: now, status: "not_found" as const };
+    }
+    const dur = item.contentDetails?.duration
+      ? durationToSeconds(item.contentDetails.duration)
+      : undefined;
+    const snapshot: StatsSnapshot = {
+      polledAt: now,
+      status: "ok",
+      metrics: {
+        view_count: Number(item.statistics?.viewCount ?? 0),
+        like_count: Number(item.statistics?.likeCount ?? 0),
+        comment_count: Number(item.statistics?.commentCount ?? 0),
+      },
+    };
+    if (dur !== undefined) {
+      snapshot.metadata = { duration_seconds: dur, is_short: dur <= 60 };
+    }
+    return snapshot;
+  });
+}
 
 export const youtubeChannelAdapter: DataSourceAdapter = {
   kind: "youtube_channel" as const,
 
-  // Phase 3 fills this in: googleapis playlistItems.list against
-  // metadata.uploads_playlist_id, paginate by pageToken. Dedup is the
-  // events service's job (UNIQUE(user_id, kind, source_id, external_id)).
-  async pollContent(_source: DataSourceRow, _since: Date): Promise<RawEvent[]> {
-    throw new Error("youtube_channel.pollContent: implemented in Phase 3 alongside the worker");
+  /** Backfill + auto-import — playlistItems.list against uploads playlist.
+   *  1 quota unit per call. Filters to publishedAt > since. */
+  async pollContent(source: PollableSource, since: Date): Promise<RawEvent[]> {
+    const uploadsPlaylistId = (source.metadata as { uploadsPlaylistId?: string })
+      ?.uploadsPlaylistId;
+    if (!uploadsPlaylistId) {
+      // Plan 03.0-10 ingest-channel-context-trigger backfills this metadata
+      // on first paste; if the user pasted before that plan shipped (or the
+      // backfill failed), the source has no uploadsPlaylistId yet. Return
+      // empty rather than throwing — the worker logs + skips and the next
+      // backfill tick will resolve it.
+      logger.warn(
+        { sourceId: source.id, userId: source.userId },
+        "pollContent: missing uploadsPlaylistId in source.metadata; channel-context backfill required first",
+      );
+      return [];
+    }
+    const picked = pickKeyForJob();
+    if (!picked) return [];
+
+    const url = new URL(`${env.YOUTUBE_API_BASE_URL}/playlistItems`);
+    url.searchParams.set("playlistId", uploadsPlaylistId);
+    url.searchParams.set("part", "snippet");
+    url.searchParams.set("maxResults", "50");
+    url.searchParams.set("key", picked.apiKey);
+    url.searchParams.set("quotaUser", youtubeQuotaUser(source.userId));
+
+    const resp = await chargedFetch(url, picked, 1, {
+      sourceId: source.id,
+      logTag: "youtube-adapter: playlistItems.list",
+    });
+    if (!resp.ok) return [];
+    const json = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await resp.json());
+    const sinceMs = since.getTime();
+    return json.items
+      .map<RawEvent>((item) => ({
+        externalId: item.snippet.resourceId.videoId,
+        title: item.snippet.title,
+        occurredAt: new Date(item.snippet.publishedAt),
+        url: `https://www.youtube.com/watch?v=${item.snippet.resourceId.videoId}`,
+        kind: "youtube_video",
+        metadata: { channelId: item.snippet.channelId },
+      }))
+      .filter((e) => e.occurredAt.getTime() > sinceMs);
   },
 
-  // Phase 3 fills this in: googleapis videos.list batched (50 ids per call,
-  // 1 quota unit, 50× saving over per-video calls — verified by the Phase 3
-  // spike). Source is nullable so manual-paste pollable events (CONTEXT D-05
-  // / D-06) get the same treatment as source-attached events.
-  async pollStats(_event: EventRow, _source: DataSourceRow | null): Promise<StatsSnapshot> {
-    throw new Error("youtube_channel.pollStats: implemented in Phase 3 alongside the worker");
+  /** Stats polling — user-driven path (Refresh now button → poll-user worker).
+   *  Caller passes events of `kind=youtube_video`; source MAY be null (manual
+   *  paste D-11). Returns StatsSnapshot[] aligned to input order.
+   *
+   *  Per-user quotaUser fingerprint: the user initiated this action, so
+   *  Google's burst-shaper should track it under that user's bucket. Distinct
+   *  from pollStatsByVideoId which uses a service-tier constant fingerprint.
+   *
+   *  Groups by userId in case a future caller batches across users; for the
+   *  current single-event poll-user path the loop fires once. */
+  async pollStats(
+    eventsBatch: PollableEvent[],
+    _source: { id: string; userId: string } | null,
+    picked: PickedKey,
+  ): Promise<StatsSnapshot[]> {
+    if (eventsBatch.length === 0) return [];
+
+    const byUser = new Map<string, PollableEvent[]>();
+    for (const ev of eventsBatch) {
+      const list = byUser.get(ev.userId) ?? [];
+      list.push(ev);
+      byUser.set(ev.userId, list);
+    }
+
+    const byEventId = new Map<string, StatsSnapshot>();
+    for (const [userId, evs] of byUser) {
+      // Chunk into 50-id batches.
+      for (let i = 0; i < evs.length; i += 50) {
+        const chunk = evs.slice(i, i + 50);
+        const ids = chunk.map((e) => e.externalId);
+        const snapshots = await pollStatsBatch(ids, youtubeQuotaUser(userId), picked);
+        for (let j = 0; j < chunk.length; j++) {
+          const ev = chunk[j]!;
+          const snap = snapshots[j]!;
+          byEventId.set(ev.id, { ...snap, eventId: ev.id });
+        }
+      }
+    }
+
+    // Re-align to original input order.
+    return eventsBatch.map(
+      (e) =>
+        byEventId.get(e.id) ?? {
+          polledAt: new Date(),
+          status: "auth_error" as const,
+        },
+    );
+  },
+
+  /**
+   * Stats polling — service-driven path (poll-active / poll-cold workers).
+   *
+   * Per-video, not per-event. The scheduler hands a flat list of videoIds
+   * (already deduplicated across tenants); the adapter chunks it into ≤50
+   * batches and issues one HTTP per batch with the caller-supplied
+   * quotaUser fingerprint. quotaUser here is the service-tier constant
+   * ("neotolis-svc-active" or "neotolis-svc-cold") — Google's burst-shaper
+   * tracks all service polls in one bucket per tier, distinct from
+   * user-driven Refresh now polls (per-user fingerprint via pollStats).
+   *
+   * Returns StatsSnapshot[] aligned to input order.
+   */
+  async pollStatsByVideoId(
+    videoIds: string[],
+    quotaUser: string,
+    picked: PickedKey,
+  ): Promise<StatsSnapshot[]> {
+    if (videoIds.length === 0) return [];
+    const result: StatsSnapshot[] = [];
+    for (let i = 0; i < videoIds.length; i += 50) {
+      const chunk = videoIds.slice(i, i + 50);
+      const snapshots = await pollStatsBatch(chunk, quotaUser, picked);
+      for (const snap of snapshots) result.push(snap);
+    }
+    return result;
   },
 };

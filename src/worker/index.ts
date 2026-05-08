@@ -1,20 +1,35 @@
-// APP_ROLE=worker entrypoint. REPLACES the Plan 06 stub at this same path.
+// APP_ROLE=worker entrypoint.
 //
-// D-01 locks `src/worker/index.ts` as the canonical worker module location.
-// Plan 06 shipped a no-op stub at this same path; this plan promotes it to a
-// real pg-boss-backed worker that prints `worker ready` (the literal string
-// Plan 10's smoke test greps for — D-15 assertion #2).
+// Phase 1 shipped a no-op stub subscribing only to internal.healthcheck.
+// Phase 3.0 Plan 09 promotes the worker to subscribe to ALL Phase 3.0
+// queues with the pg-boss v10 array-handler shape (Pitfall A + B):
 //
-// Phase 1 has NO real job handlers. Phase 3 (POLL-01..06) lands the
-// poll.{hot,warm,cold,user} handlers. What we MUST get right today:
-//   - boot pg-boss with the locked 10.x API
-//   - declare every queue so the topology is locked from Phase 1
-//     (Open Question Q1 / Phase-1-specific pitfall mitigation)
-//   - subscribe to at least ONE queue (`internal.healthcheck`) so the worker
-//     is alive and connected — a worker that boots but has no subscriptions
-//     is effectively a silent idle that hides bugs
-//   - print `worker ready` to stdout for Plan 10's grep-based assertion
-//   - honor SIGTERM with pg-boss graceful drain + pg.Pool drain (D-22)
+//   await boss.work(name, {batchSize}, async (jobs) => {
+//     for (const job of jobs) await handler(job);
+//   });
+//
+// Six new queue subscriptions land here:
+//   - POLL_ACTIVE                       (scheduler-driven)   batchSize=4
+//   - POLL_COLD                         (scheduler-driven)   batchSize=1
+//   - POLL_USER                         (route-driven)       batchSize=2
+//   - YOUTUBE_CHANNEL_CONTEXT_BACKFILL  (paste-trigger)      batchSize=1
+//   - YOUTUBE_QUOTA_RESET               (cron-driven)        batchSize=1
+//   - PURGE_DAILY                       (cron-driven)        batchSize=1
+//
+// Plus two scheduler-tick subscriptions (Pattern A from plan 09):
+//   - SCHEDULER_TICK_ACTIVE             → calls enqueueActivePolls()
+//   - SCHEDULER_TICK_COLD               → calls enqueueColdPolls()
+//
+// The scheduler.tick.* handlers live in this worker process intentionally:
+// pg-boss schedules send empty {} jobs to those queues; we want the
+// enqueue logic to run on the worker (not the scheduler) so the scheduler
+// stays a thin cron-fire loop and the worker carries all the DB-touching
+// logic. Self-host parity preserved — worker container handles both
+// "consume real jobs" and "tick-driven enqueue dispatch".
+//
+// Existing INTERNAL_HEALTHCHECK subscription preserved unchanged.
+//
+// SIGTERM drain inherited from Phase 1 stopBoss (60s graceful) + pool.end.
 
 import { createBoss, stopBoss } from "../lib/server/queue-client.js";
 import { pool } from "../lib/server/db/client.js";
@@ -22,12 +37,15 @@ import { logger } from "../lib/server/logger.js";
 import { QUEUES } from "../lib/server/queues.js";
 import { scrubKekFromEnv } from "../lib/server/config/env.js";
 
-/**
- * Boot the pg-boss worker, declare queues, subscribe to internal.healthcheck,
- * and idle until SIGTERM. The export name `startWorker` matches what
- * `src/server.ts` imports — the Plan 06 stub had the same export so the
- * dispatcher does not need to be touched.
- */
+import { handlePollActive } from "./handlers/poll-active.js";
+import { handlePollCold } from "./handlers/poll-cold.js";
+import { handlePollUser } from "./handlers/poll-user.js";
+import { handleChannelContextBackfill } from "./handlers/youtube-channel-context-backfill.js";
+import { handleQuotaReset } from "./handlers/youtube-quota-reset.js";
+import { handlePurgeDaily } from "./handlers/purge-daily.js";
+import { handleRehabUnavailable } from "./handlers/rehab-unavailable.js";
+import { enqueueActivePolls, enqueueColdPolls } from "../scheduler/enqueue.js";
+
 export async function startWorker(): Promise<void> {
   const boss = await createBoss();
   // P2 KEK scrub: worker has no bundled second copy of env.ts (no SvelteKit
@@ -35,13 +53,7 @@ export async function startWorker(): Promise<void> {
   // resolves. See env.ts header for the rationale.
   scrubKekFromEnv();
 
-  // Phase 1 no-op handler on `internal.healthcheck`. Phase 3 replaces with
-  // real work + adds `poll.*` subscriptions.
-  //
-  // pg-boss 10.x `work(name, handler)` invokes the handler with an array of
-  // jobs (batch size = 1 by default). Acknowledgement is implicit: the
-  // promise resolves successfully → job is marked complete; throw → job is
-  // retried per the queue's retry policy (Phase 3 defines retry policy).
+  // Phase 1 — preserved.
   await boss.work(QUEUES.INTERNAL_HEALTHCHECK, async (jobs) => {
     for (const job of jobs) {
       logger.debug(
@@ -51,18 +63,93 @@ export async function startWorker(): Promise<void> {
     }
   });
 
+  // Phase 3.0 Plan 09 — subscriptions for the 6 phase queues.
+  // Pitfall A+B: pg-boss v10 array-handler shape (jobs is an array, not a
+  // single job). Each handler iterates and awaits per-job sequentially.
+  await boss.work(QUEUES.POLL_ACTIVE, { batchSize: 4 }, async (jobs) => {
+    for (const job of jobs) {
+      await handlePollActive(job as { id: string; data: { videoIds: string[] } });
+    }
+  });
+
+  await boss.work(QUEUES.POLL_COLD, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) {
+      await handlePollCold(job as { id: string; data: { videoIds: string[] } });
+    }
+  });
+
+  await boss.work(QUEUES.POLL_USER, { batchSize: 2 }, async (jobs) => {
+    for (const job of jobs) {
+      await handlePollUser(job as { id: string; data: { eventId: string; userId: string } });
+    }
+  });
+
+  await boss.work(QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) {
+      await handleChannelContextBackfill(
+        job as {
+          id: string;
+          data: {
+            userId: string;
+            channelId?: string;
+            handleUrl?: string;
+            sourceId?: string;
+            backfillWindow?: "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
+          };
+        },
+      );
+    }
+  });
+
+  await boss.work(QUEUES.YOUTUBE_QUOTA_RESET, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) {
+      await handleQuotaReset(job as { id: string; data: object });
+    }
+  });
+
+  await boss.work(QUEUES.PURGE_DAILY, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) {
+      await handlePurgeDaily(job as { id: string; data: object });
+    }
+  });
+
+  // Phase 3.0 post-build refactor (2026-05-06) — weekly rehab cron.
+  // Recovers videos that came back from private/unavailable. See handler
+  // for the failure-count cap rationale.
+  await boss.work(QUEUES.YOUTUBE_REHAB_UNAVAILABLE, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) {
+      await handleRehabUnavailable(job as { id: string });
+    }
+  });
+
+  // Scheduler-tick subscriptions (Pattern A — plan 09 recommendation).
+  // The scheduler boots the cron schedules; we boot the consumers. Each
+  // tick triggers the corresponding enqueue function, which then sends
+  // real per-event jobs to POLL_ACTIVE / POLL_COLD.
+  await boss.work(QUEUES.SCHEDULER_TICK_ACTIVE, { batchSize: 1 }, async (jobs) => {
+    for (const _job of jobs) {
+      try {
+        await enqueueActivePolls();
+      } catch (err) {
+        logger.error({ err }, "scheduler.tick.active: enqueueActivePolls threw");
+      }
+    }
+  });
+  await boss.work(QUEUES.SCHEDULER_TICK_COLD, { batchSize: 1 }, async (jobs) => {
+    for (const _job of jobs) {
+      try {
+        await enqueueColdPolls();
+      } catch (err) {
+        logger.error({ err }, "scheduler.tick.cold: enqueueColdPolls threw");
+      }
+    }
+  });
+
   // D-15 smoke assertion #2 — exact string `worker ready` on stdout.
-  // We emit BOTH a structured log line (Loki / docker logs JSON) AND a
-  // raw console.log line. Plan 10's smoke test greps for `worker ready`
-  // and does not parse JSON; the raw line is the grep target. The
-  // structured line preserves observability for production deploys.
   logger.info({ role: "worker" }, "worker ready");
   console.log("worker ready");
 
-  // D-22 graceful shutdown. SIGTERM/SIGINT drain pg-boss first (so in-flight
-  // handlers complete), THEN pool.end() (so any handler that took a Drizzle
-  // connection releases cleanly). Either drain failure logs and continues —
-  // we still want process.exit(0) so the orchestrator sees a clean stop.
+  // D-22 graceful shutdown — Phase 1 contract, preserved.
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "worker received shutdown signal");
     try {
@@ -84,8 +171,7 @@ export async function startWorker(): Promise<void> {
     void shutdown("SIGINT");
   });
 
-  // Worker idles forever — pg-boss owns the polling loop. Block on a
-  // never-resolving promise so the Node process stays alive until SIGTERM.
+  // Worker idles forever — pg-boss owns the polling loop.
   return new Promise<void>(() => {
     /* never resolves — process lives until SIGTERM */
   });

@@ -32,7 +32,7 @@
 // so the security signal lands even if the UPDATE later fails.
 
 import { and, eq, isNull } from "drizzle-orm";
-import { db } from "../db/client.js";
+import { db, type Tx } from "../db/client.js";
 import { dataSources } from "../db/schema/data-sources.js";
 import type { SourceKind } from "../integrations/data-source-adapter.js";
 import { writeAudit } from "../audit.js";
@@ -40,6 +40,18 @@ import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { withQuotaGuard } from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
+import { getBoss } from "../queue-client.js";
+import { QUEUES } from "../queues.js";
+import { logger } from "../logger.js";
+import { parseYoutubeChannelUrl, fetchVideoMetadataByUrl } from "./youtube-metadata.js";
+import { youtubeChannels } from "../db/schema/youtube-channels.js";
+
+// Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — initial-backfill window
+// presets accepted by createSource for kind=youtube_channel + autoImport.
+// Plan 09's worker handler reads `job.data.backfillWindow` to size the
+// snapshot-seeding window; an undefined value falls back to '30d' which
+// matches the BackfillPicker default-selected preset.
+export type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
 
 export type DataSourceRow = typeof dataSources.$inferSelect;
 
@@ -78,11 +90,17 @@ export interface CreateSourceInput {
   isOwnedByMe?: boolean;
   autoImport?: boolean;
   metadata?: Record<string, unknown>;
+  // Phase 03.0-12 (D-09) — only meaningful when kind === 'youtube_channel'
+  // AND autoImport === true. Other kind/auto-import combinations silently
+  // skip the enqueue path; the field is preserved on the row only via
+  // `metadata` if the caller chooses to (this service does not stamp it).
+  backfillWindow?: BackfillWindow;
 }
 
 export interface UpdateSourcePatch {
   displayName?: string | null;
   autoImport?: boolean;
+  isOwnedByMe?: boolean;
   metadata?: Record<string, unknown>;
 }
 
@@ -120,6 +138,77 @@ function validateHandleUrl(handleUrl: string): void {
 // only change is the import surface.
 
 /**
+ * Channel-level duplicate gate. MUST run inside a withQuotaGuard tx (per-
+ * user advisory lock held) — the type narrows to `Tx` so a misuse with
+ * the bare `db` handle is impossible at compile time.
+ *
+ * Why this gate exists: the DB-level partial unique covers
+ * (user_id, handle_url) WHERE deleted_at IS NULL. It does NOT cover
+ * (user_id, channel_id) — two different handle URLs that resolve to the
+ * SAME channel (e.g. /channel/UC… vs /@handle vs short link) would both
+ * INSERT cleanly. This helper closes that gap by matching on the
+ * resolved channel_id.
+ *
+ * Policy (three states, fetch-all + classify):
+ *   1. Active row for this channel exists       → duplicate_source
+ *   2. Any tombstone within RETENTION_DAYS       → duplicate_source_soft_deleted
+ *      (error metadata names the MOST RECENT recoverable tombstone — the
+ *      row Restore would target on /sources)
+ *   3. Only past-retention tombstones (or none) → fall through; caller INSERTs
+ *
+ * The fetch-all + JS classify shape is deliberate: encoding the policy in
+ * SQL ordering is fragile (NULLS LAST/FIRST + LIMIT 1 hides the actual
+ * three-state semantics). JS reads top-to-bottom and matches the spec.
+ */
+export async function assertNoChannelConflict(
+  tx: Tx,
+  userId: string,
+  resolvedChannelId: string,
+): Promise<void> {
+  const existing = await tx
+    .select()
+    .from(dataSources)
+    .where(and(eq(dataSources.userId, userId), eq(dataSources.channelId, resolvedChannelId)));
+
+  const active = existing.find((r) => r.deletedAt === null);
+  const cutoffMs = Date.now() - env.RETENTION_DAYS * 86_400_000;
+  const recentTombstone = active
+    ? null
+    : (existing
+        .filter((r) => r.deletedAt !== null && r.deletedAt.getTime() >= cutoffMs)
+        .sort((a, b) => b.deletedAt!.getTime() - a.deletedAt!.getTime())[0] ?? null);
+
+  const blockingRow = active ?? recentTombstone;
+  if (!blockingRow) return;
+
+  // youtubeChannels is a public-data table (no userId column); the
+  // ESLint allowlist for tenant-scope covers this read.
+  const cacheRow = await tx
+    .select({ channelTitle: youtubeChannels.channelTitle })
+    .from(youtubeChannels)
+    .where(eq(youtubeChannels.channelId, resolvedChannelId))
+    .limit(1);
+  const channelTitle = cacheRow[0]?.channelTitle ?? null;
+  const niceName = channelTitle ?? blockingRow.displayName ?? blockingRow.handleUrl;
+  const isSoftDeleted = blockingRow.deletedAt !== null;
+  throw new AppError(
+    isSoftDeleted
+      ? `You previously deleted "${niceName}". Open /sources, click "Recently deleted", and press Restore — that brings back the source plus all its history.`
+      : `You already track "${niceName}"`,
+    isSoftDeleted ? "duplicate_source_soft_deleted" : "duplicate_source",
+    409,
+    {
+      handle_url: blockingRow.handleUrl,
+      source_id: blockingRow.id,
+      channel_id: resolvedChannelId,
+      channel_title: channelTitle,
+      display_name: blockingRow.displayName,
+      soft_deleted: isSoftDeleted,
+    },
+  );
+}
+
+/**
  * Create a data_source for `userId`. Rejects schema-only kinds with
  * AppError(422 'kind_not_yet_functional') BEFORE any DB call (RESEARCH §5.4
  * — passive 200 would silently persist orphan rows that Phase 3+ workers
@@ -152,19 +241,79 @@ export async function createSource(
     );
   }
 
-  // Race-free, deadlock-safe quota path (Codex P2.1 + post-fix). withQuotaGuard
-  // takes a per-user advisory lock, runs the count + INSERT in one tx, and
-  // emits the quota.limit_hit audit AFTER the tx releases its pool connection.
+  // Phase 3.0 post-build (UAT 2026-05-06): canonicalize the handle_url
+  // for kind=youtube_channel sources BEFORE insert. Operators routinely
+  // paste any YouTube URL (watch?v=…, /shorts/ID, youtu.be/ID, /@handle,
+  // /channel/UC…). Resolving every variant to the canonical channel URL
+  // (and pre-setting channel_id) means:
+  //   - The (user_id, handle_url) unique catches duplicates on the second
+  //     paste of the same channel via a different video URL.
+  //   - The worker takes the fast path on backfill (no resolve step, no
+  //     extra quota unit).
+  // Cache-first via fetchVideoMetadataByUrl so a re-paste of a known video
+  // is zero quota.
+  let canonicalHandleUrl = input.handleUrl;
+  let resolvedChannelId = input.channelId ?? null;
+  if (input.kind === "youtube_channel" && resolvedChannelId === null) {
+    const parsed = parseYoutubeChannelUrl(input.handleUrl);
+    // Phase 3.0 post-build (UAT 2026-05-06): reject URLs that don't point
+    // at a YouTube channel / handle / video. Operator pasted naked
+    // youtube.com/ and localhost:5173/feed and got ghost rows with
+    // channel_id=NULL — better to fail visibly so the user fixes the URL.
+    if (parsed === null) {
+      throw new AppError(
+        "Paste a YouTube channel URL (e.g. https://www.youtube.com/@handle or /channel/UC… or any video URL).",
+        "validation_failed",
+        422,
+        { handle_url: input.handleUrl },
+      );
+    }
+    if (parsed.kind === "channelId") {
+      resolvedChannelId = parsed.value;
+      canonicalHandleUrl = `https://www.youtube.com/channel/${parsed.value}`;
+    } else if (parsed?.kind === "videoId") {
+      // Phase 3.0 post-build (UAT 2026-05-06): let fetch failures propagate
+      // (404 video not found, 502 upstream, 503 missing keys). Earlier draft
+      // swallowed errors and created a source with channelId=NULL — UX bug:
+      // user pasted a truncated/typo'd URL and got a "ghost" source that
+      // could never poll. Better to fail visibly so the user fixes the URL.
+      const meta = await fetchVideoMetadataByUrl(input.handleUrl, userId, ipAddress);
+      if (meta.channelId) {
+        resolvedChannelId = meta.channelId;
+        canonicalHandleUrl = `https://www.youtube.com/channel/${meta.channelId}`;
+      }
+    }
+    // /@handle and /c/, /user/ legacy URLs: leave as-is for now. Worker
+    // will resolve on first backfill (1 quota unit) and persist the
+    // resolved channel_id back to data_sources.
+  }
+
+  // Race-free, deadlock-safe quota path. withQuotaGuard takes a per-user
+  // advisory lock, runs the quota count + caller-INSERT in one tx, and
+  // emits the quota.limit_hit audit AFTER the tx releases its connection.
+  //
+  // Throw order inside the closure:
+  //   1. withQuotaGuard's quota check (current >= limit → quota_exceeded)
+  //   2. assertNoChannelConflict (channel-id duplicate, only when channel
+  //      is resolved synchronously — see catch block below for the
+  //      handle-only path)
+  //   3. INSERT (DB-level partial unique catches handle_url duplicates)
+  //
+  // For a tenant at quota cap with a duplicate request, quota_exceeded
+  // fires first; UX-wise the user fixes the cap, then sees the duplicate.
   let row: DataSourceRow | undefined;
   try {
     row = await withQuotaGuard(userId, "data_sources", ipAddress, async (tx) => {
+      if (resolvedChannelId) {
+        await assertNoChannelConflict(tx, userId, resolvedChannelId);
+      }
       const [r] = await tx
         .insert(dataSources)
         .values({
           userId,
           kind: input.kind,
-          handleUrl: input.handleUrl,
-          channelId: input.channelId ?? null,
+          handleUrl: canonicalHandleUrl,
+          channelId: resolvedChannelId,
           displayName: input.displayName ?? null,
           isOwnedByMe: input.isOwnedByMe ?? true,
           autoImport: input.autoImport ?? true,
@@ -175,8 +324,20 @@ export async function createSource(
     });
   } catch (err) {
     if (isPgUniqueViolation(err)) {
-      throw new AppError("data source already registered", "duplicate_source", 422, {
-        handle_url: input.handleUrl,
+      // Two duplicate-detection boundaries:
+      //   - assertNoChannelConflict (above, inside tx): catches "same
+      //     channel under different handle URLs" when channelId is
+      //     resolved synchronously (input.channelId set, OR /channel/UC…
+      //     URL parsed locally, OR /watch URL → fetchVideoMetadataByUrl
+      //     resolved). Throws AppError(409) with explicit error codes.
+      //   - This catch (DB-level partial unique on user_id + handle_url
+      //     WHERE deleted_at IS NULL): catches "exact same handle URL
+      //     twice" — e.g. /@handle pasted twice. The handle path defers
+      //     channel-id resolution to the worker, so the channel-gate
+      //     above can't see it; only the handle-level unique catches it.
+      // 422 (not 409) by Phase 2.1 precedent for raw-PG-unique paths.
+      throw new AppError("You already track this YouTube channel", "duplicate_source", 422, {
+        handle_url: canonicalHandleUrl,
       });
     }
     throw err;
@@ -192,6 +353,46 @@ export async function createSource(
     userAgent,
     metadata: { source_id: row.id, kind: row.kind, handle_url: row.handleUrl },
   });
+
+  // Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — when the new source is
+  // a YouTube channel with auto-import ON, enqueue ONE channel-context
+  // backfill job carrying the user's chosen window. Plan 09's handler
+  // (worker/handlers/youtube-channel-context-backfill.ts) reads
+  // `job.data.backfillWindow` and seeds the snapshot table accordingly.
+  //
+  // Idempotent via `singletonKey: source-{row.id}` — a duplicate INSERT
+  // can't reach this point (PG 23505 maps to duplicate_source above), but
+  // a retried request that lands on the same row id (race-window edge)
+  // gets coalesced by pg-boss.
+  //
+  // Fire-and-forget: pg-boss / DB errors are logged at WARN. The created
+  // source row is the load-bearing return value; backfill enqueue is a
+  // nice-to-have that the user can re-trigger by re-toggling auto-import
+  // (PATCH /api/sources/:id) if it ever silently fails.
+  if (row.kind === "youtube_channel" && row.autoImport) {
+    const backfillWindow: BackfillWindow = input.backfillWindow ?? "30d";
+    try {
+      const boss = await getBoss();
+      await boss.send(
+        QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL,
+        {
+          sourceId: row.id,
+          userId,
+          handleUrl: row.handleUrl,
+          backfillWindow,
+        },
+        { singletonKey: `source-${row.id}` },
+      );
+    } catch (err) {
+      logger.warn(
+        {
+          sourceId: row.id,
+          err: String((err as Error)?.message ?? err),
+        },
+        "channel-context-backfill enqueue on createSource failed; ignoring",
+      );
+    }
+  }
 
   return row;
 }
@@ -264,6 +465,7 @@ export async function updateSource(
   };
   if (patch.displayName !== undefined) update.displayName = patch.displayName;
   if (patch.autoImport !== undefined) update.autoImport = patch.autoImport;
+  if (patch.isOwnedByMe !== undefined) update.isOwnedByMe = patch.isOwnedByMe;
   if (patch.metadata !== undefined) update.metadata = patch.metadata;
 
   const [row] = await db

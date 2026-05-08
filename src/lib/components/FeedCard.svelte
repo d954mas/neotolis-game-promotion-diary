@@ -70,7 +70,6 @@
   import { m } from "$lib/paraglide/messages.js";
   import KindIcon from "./KindIcon.svelte";
   import AttachToGamePicker from "./AttachToGamePicker.svelte";
-  import PollingBadge from "./PollingBadge.svelte";
 
   type EventKind =
     | "youtube_video"
@@ -101,12 +100,34 @@
     externalId: string | null;
     notes: string | null;
     metadata: unknown;
+    // Per-video refactor (2026-05-06): publishedAt + lastPolledAt +
+    // lastPollStatus all source from the youtube_videos JOIN in the
+    // /feed loader (mapEventsToDtos → loadVideoDataForEvents). Null on
+    // fresh events whose channel-context-backfill has not yet completed
+    // ('pending' tier window). Optional so test fixtures and non-feed
+    // surfaces can omit it; PollingBadge handles undefined as null.
+    publishedAt?: Date | string | null;
     lastPolledAt: Date | string | null;
+    lastPollStatus: string | null;
+    // Phase 3.0 post-build (UAT 2026-05-06): latest snapshot stats for
+    // youtube_video events. Null when no snapshot exists yet (newly-pasted
+    // event before first poll, or non-youtube kinds).
+    stats?: {
+      viewCount: number;
+      likeCount: number;
+      commentCount: number;
+      polledAt: Date | string;
+    } | null;
   };
   type SourceLite = {
     id: string;
     displayName: string | null;
     handleUrl: string;
+    // Phase 3.0 post-build (UAT 2026-05-06): real YouTube channel title
+    // from the public-data cache. Distinct from displayName (the user's
+    // own label for this tracking row). When both are set and differ, the
+    // card renders both — channel chip + source chip.
+    channelTitle?: string | null;
   };
   type GameLite = {
     id: string;
@@ -228,10 +249,16 @@
     }
   }
 
-  const pollingForBadge = $derived({
-    kind: event.kind,
-    lastPolledAt: event.lastPolledAt as Date | string | null,
-  });
+  // Phase 3.0 post-build (UAT 2026-05-06): PollingBadge removed from feed
+  // cards — tier vocabulary ("Cold", "Frozen") is internal scheduler state,
+  // not user-facing. The live state shows up only in the per-event detail
+  // view alongside the refresh-now button. /feed cards now surface the load-
+  // bearing user metric instead: latest YouTube view / like / comment count.
+  function formatStat(n: number): string {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    return String(n);
+  }
 </script>
 
 <article
@@ -282,18 +309,22 @@
       <p class="notes">{event.notes}</p>
     {/if}
 
-    <div class="meta-line">
-      <!-- Plan 02.1-19: inline date display REMOVED — the
-           <FeedDateGroupHeader> above each card group is the date label.
-           Plan 02.1-23: kind label + Inbox indicator moved into the top
-           overlay. Mine moved into the overlay too. Only <PollingBadge>
-           remains in this row. -->
-      <PollingBadge event={pollingForBadge} />
-    </div>
+    {#if event.kind === "youtube_video" && event.stats}
+      <div class="stats-line">
+        <span class="stat">{formatStat(event.stats.viewCount)} views</span>
+        <span class="sep">·</span>
+        <span class="stat">{formatStat(event.stats.likeCount)} likes</span>
+        <span class="sep">·</span>
+        <span class="stat">{formatStat(event.stats.commentCount)} comments</span>
+      </div>
+    {/if}
 
     {#if source}
       <div class="chips-line">
-        <span class="chip">{source.displayName ?? source.handleUrl}</span>
+        {#if source.channelTitle}
+          <span class="chip chip-channel" title="YouTube channel">{source.channelTitle}</span>
+        {/if}
+        <span class="chip" title="My source label">{source.displayName ?? source.handleUrl}</span>
       </div>
     {/if}
 
@@ -480,6 +511,22 @@
     gap: var(--space-sm);
     font-size: var(--font-size-label);
     color: var(--color-text-muted);
+  }
+  /* Phase 3.0 post-build: latest snapshot stats line for youtube_video cards. */
+  .stats-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: var(--font-size-label);
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .stats-line .stat {
+    white-space: nowrap;
+  }
+  .stats-line .sep {
+    opacity: 0.5;
   }
   .chips-line {
     display: flex;

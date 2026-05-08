@@ -7,8 +7,27 @@
 // The `eslint-disable-next-line no-restricted-properties` comments below are
 // the ONLY approved exceptions to the project-wide ban on `process.env` access.
 
-import "dotenv/config";
+import { config as loadDotenv } from "dotenv";
 import { z } from "zod";
+
+// Load `.env` first, then layer `.env.local` on top with override. Mirrors
+// vite's standard convention (.env shared, .env.local for per-machine
+// overrides — gitignored). In production containers neither file exists;
+// dotenv silently no-ops and `process.env` is populated by docker. Keeping
+// this in the SOLE env.ts reader (D-24) so we don't sprinkle dotenv calls
+// across the codebase.
+//
+// Test isolation: vitest sets NODE_ENV=test before module load. We skip
+// .env.local in that case so per-test withEnv() / withYoutubeKeys() helpers
+// can stub process.env without local-machine secrets bleeding through.
+loadDotenv();
+// dotenv probe BEFORE we parse env; this is the boot-time gate that
+// decides whether to layer .env.local (D-24). env.ts is the single
+// legitimate process.env reader, so the no-restricted-properties rule
+// does not apply here.
+if (process.env.NODE_ENV !== "test") {
+  loadDotenv({ path: ".env.local", override: true });
+}
 
 const RawSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
@@ -72,6 +91,12 @@ const RawSchema = z.object({
   LIMIT_SOURCES_PER_USER: z.coerce.number().int().positive().default(50),
   // Rolling 24h limit on event creation (NOT calendar-day reset).
   LIMIT_EVENTS_PER_DAY: z.coerce.number().int().positive().default(500),
+  // Phase 3.0 post-build review (2026-05-07) — per-user cap on cache-miss
+  // YouTube metadata fetches ("Get from YouTube" button on /events/new).
+  // Closes the operator-quota burn loop the scripted-loop attacker could
+  // exploit on /api/youtube/fetch-metadata. 50/day default; cache hits
+  // don't count. Operator can raise via .env if their users need more.
+  LIMIT_YOUTUBE_METADATA_FETCHES_PER_DAY: z.coerce.number().int().positive().default(50),
 
   // Phase 02.2 D-24: image tag override for docker-compose.prod.yml. The
   // application code never reads this directly (compose substitutes it at
@@ -84,6 +109,48 @@ const RawSchema = z.object({
   // CF domain. Application code does not read this directly (BETTER_AUTH_URL
   // already carries the canonical URL); we accept it so prod .env passes zod.
   DOMAIN: z.string().default(""),
+
+  // ---- Phase 3.0 (D-06 / D-13 / D-16 + smoke) — polling-pipeline plumbing ----
+
+  // Comma-separated operator-owned YouTube Data API v3 keys. The polling
+  // worker rotates across this set when the per-key 10k units/day ceiling
+  // is approached (Plan 03.0-03). Empty default ⇒ auto-import + scheduled
+  // polling are disabled (smoke + self-host parity preserved by construction).
+  // Stored plaintext in env (not envelope-encrypted) — these are the
+  // operator's own keys, not user secrets; existing pino redact paths cover
+  // the field name `apiKey` and the YouTube response surface.
+  SERVICE_YOUTUBE_API_KEYS: z
+    .string()
+    .default("")
+    .transform((s) =>
+      s
+        .split(",")
+        .map((k) => k.trim())
+        .filter(Boolean),
+    ),
+
+  // Comma-separated admin user emails (case-insensitive — Plan 03.0-07
+  // admin middleware lowercases + trims before lookup). Empty default ⇒
+  // /admin/* returns 404 for everyone (self-host parity preserved by
+  // construction — no admin UI exists for self-host operators by default).
+  // Changes require a container restart (parsed once at boot).
+  ADMIN_EMAIL_ALLOWLIST: z
+    .string()
+    .default("")
+    .transform(
+      (s) =>
+        new Set(
+          s
+            .split(",")
+            .map((e) => e.trim().toLowerCase())
+            .filter(Boolean),
+        ),
+    ),
+
+  // YouTube Data API v3 base URL. Production default = the official
+  // endpoint; the smoke-gate harness overrides to a mock reverse-proxy URL
+  // (Plan 03.0-14). Validated as a URL by zod so a typo fails fast at boot.
+  YOUTUBE_API_BASE_URL: z.string().url().default("https://www.googleapis.com/youtube/v3"),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -132,7 +199,23 @@ if (!kekVersions.has(raw.KEK_CURRENT_VERSION)) {
 //   2. import handler.js → bundled env.ts parses process.env successfully
 //   3. server.ts calls scrubKekFromEnv() once startup is complete
 export function scrubKekFromEnv(): void {
-  delete process.env.APP_KEK_BASE64;
+  // env.ts is the SOLE legitimate process.env reader (D-24); scrub is the
+  // inverse — clearing the secret fields after they've been parsed into
+  // the env-singleton so a later console.log(process.env) at runtime
+  // can't leak them. Phase 3.0 post-build (UAT 2026-05-06) extends scrub
+  // coverage past the original KEK-only list per reviewer's BUG-5 —
+  // every credential/secret env var landed via the schema is wiped.
+  // Pino redact still covers logger output; this is the second layer
+  // for direct process.env reads. The no-restricted-properties rule
+  // does not apply inside env.ts.
+  const SECRET_KEYS = [
+    "APP_KEK_BASE64",
+    "BETTER_AUTH_SECRET",
+    "OAUTH_CLIENT_SECRET",
+    "SERVICE_YOUTUBE_API_KEYS",
+    "DATABASE_URL", // contains the postgres password
+  ];
+  for (const k of SECRET_KEYS) delete process.env[k];
   for (let v = 2; v <= 9; v++) {
     delete process.env[`APP_KEK_V${v}_BASE64`];
   }
@@ -167,8 +250,13 @@ export const env = {
   LIMIT_GAMES_PER_USER: raw.LIMIT_GAMES_PER_USER,
   LIMIT_SOURCES_PER_USER: raw.LIMIT_SOURCES_PER_USER,
   LIMIT_EVENTS_PER_DAY: raw.LIMIT_EVENTS_PER_DAY,
+  LIMIT_YOUTUBE_METADATA_FETCHES_PER_DAY: raw.LIMIT_YOUTUBE_METADATA_FETCHES_PER_DAY,
   IMAGE_TAG: raw.IMAGE_TAG,
   DOMAIN: raw.DOMAIN,
+  // Phase 3.0 additions (D-06 / D-13 / D-16 + smoke override)
+  SERVICE_YOUTUBE_API_KEYS: raw.SERVICE_YOUTUBE_API_KEYS,
+  ADMIN_EMAIL_ALLOWLIST: raw.ADMIN_EMAIL_ALLOWLIST,
+  YOUTUBE_API_BASE_URL: raw.YOUTUBE_API_BASE_URL,
 } as const;
 
 export type Env = typeof env;

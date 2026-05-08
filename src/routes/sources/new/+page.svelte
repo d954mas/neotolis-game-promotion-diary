@@ -24,6 +24,7 @@
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "$lib/components/InlineError.svelte";
+  import BackfillPicker from "$lib/components/BackfillPicker.svelte";
   import type { PageData } from "./$types";
 
   type SourceKind =
@@ -73,12 +74,30 @@
   let submitting = $state(false);
   let formError = $state<string | null>(null);
 
-  // When ownership flips to "tracking" (someone else's), default auto_import
-  // to OFF — Phase 3's polling worker should not run against a blogger
-  // channel until the user explicitly opts in.
+  // Phase 03.0-12 (D-09) — initial-backfill window for YouTube channels.
+  // Defaults to '30d' (UI-SPEC BackfillPicker default-selected preset).
+  // The picker is conditionally rendered ONLY when the chosen kind is
+  // 'youtube_channel' AND auto-import is ON; toggling either off collapses
+  // the picker AND resets the value to '30d'. The reset is what the
+  // server expects (createSource defaults undefined → '30d' but resetting
+  // here keeps the form-state clean if the user toggles back on).
+  type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
+  let backfillWindow = $state<BackfillWindow>("30d");
+  const showPicker = $derived(selectedKind === "youtube_channel" && autoImport);
+
+  // No auto-link between is_owned_by_me and auto_import. Operator's UAT
+  // direction 2026-05-06: "Оно доступна всем не только моим каналам".
+  // Both checkboxes are fully independent — the user toggles each on its
+  // own. The earlier "soft-default reset" effect had a self-resetting bug
+  // (autoImport === initialAutoImport could become true again after user
+  // re-checked, causing the effect to re-fire and uncheck it).
+
+  // Picker collapse → reset value (UI-SPEC §"Interaction Contracts → BackfillPicker
+  // interaction": "Toggling auto_import off OR switching kind collapses the
+  // picker AND resets its value to '30d'").
   $effect(() => {
-    if (!isOwnedByMe && autoImport === initialAutoImport) {
-      autoImport = false;
+    if (!showPicker && backfillWindow !== "30d") {
+      backfillWindow = "30d";
     }
   });
 
@@ -137,6 +156,11 @@
           displayName: displayName.trim() || null,
           isOwnedByMe,
           autoImport,
+          // Only include the field when the picker would have been visible —
+          // otherwise the server applies its default ('30d'). Mirrors
+          // UI-SPEC §"BackfillPicker interaction": chosen value is included
+          // in /api/sources POST when kind=youtube_channel AND auto_import=true.
+          ...(showPicker ? { backfillWindow } : {}),
         }),
       });
       if (res.status === 201 || res.status === 200) {
@@ -155,8 +179,41 @@
         formError = m.sources_error_kind_not_yet_functional({ kind: kindLabel, phase });
         return;
       }
-      if (res.status === 422 && body.error === "duplicate_source") {
-        formError = m.sources_error_duplicate();
+      if (
+        (res.status === 422 || res.status === 409) &&
+        (body.error === "duplicate_source" || body.error === "duplicate_source_soft_deleted")
+      ) {
+        const md = body.metadata as
+          | {
+              channel_title?: string | null;
+              display_name?: string | null;
+              handle_url?: string | null;
+            }
+          | undefined;
+        const channelName =
+          md?.channel_title ?? md?.display_name ?? md?.handle_url ?? "this channel";
+        formError =
+          body.error === "duplicate_source_soft_deleted"
+            ? m.sources_error_duplicate_channel_soft_deleted({ channelName })
+            : m.sources_error_duplicate_channel({ channelName });
+        return;
+      }
+      if (res.status === 404 && body.error === "not_found") {
+        formError = m.sources_error_video_not_found();
+        return;
+      }
+      if (res.status === 502 && body.error === "upstream_error") {
+        formError = m.sources_error_youtube_unreachable();
+        return;
+      }
+      if (res.status === 503 && body.error === "service_unavailable") {
+        formError = m.sources_error_no_youtube_keys();
+        return;
+      }
+      if (res.status === 422 && body.error === "validation_failed") {
+        // Generic 422 — most commonly "URL doesn't parse as a YouTube
+        // channel / handle / video URL" from createSource.
+        formError = m.sources_error_not_a_youtube_url();
         return;
       }
       formError = m.error_server_generic();
@@ -238,8 +295,13 @@
 
     <label class="toggle">
       <input type="checkbox" bind:checked={autoImport} />
-      <span>Auto-import (Phase 3 will start polling)</span>
+      <span>Auto-import (poll every 6 hours)</span>
     </label>
+
+    {#if showPicker}
+      <hr class="picker-separator" />
+      <BackfillPicker bind:value={backfillWindow} />
+    {/if}
 
     {#if formError}
       <InlineError message={formError} />
@@ -357,6 +419,18 @@
     gap: var(--space-sm);
     color: var(--color-text-muted);
     font-size: var(--font-size-label);
+  }
+  .toggle.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  /* UI-SPEC §"/sources/new second step layout": horizontal rule between
+     the kind/owner/auto-import fields and the conditional BackfillPicker.
+     Collapses with the picker — no orphan separator. */
+  .picker-separator {
+    border: 0;
+    border-top: 1px solid var(--color-border);
+    margin: 0;
   }
   .actions {
     display: flex;

@@ -44,6 +44,33 @@
   let deleteError = $state<string | null>(null);
   const isDeleted = $derived(data.user?.deletedAt != null);
 
+  // Phase 3.0 post-build (UAT 2026-05-06): immediate-purge UI moved here
+  // from the AccountDeletedBanner. Banner stays minimal (Restore only) so
+  // the destructive action isn't a one-click reach on every page.
+  let purgeConfirmOpen = $state(false);
+  let purgeInProgress = $state(false);
+  let purgeError = $state<string | null>(null);
+
+  async function handlePurgeConfirm(): Promise<void> {
+    if (purgeInProgress) return;
+    purgeInProgress = true;
+    purgeError = null;
+    purgeConfirmOpen = false;
+    try {
+      const res = await fetch("/api/me/account/purge", { method: "DELETE" });
+      if (!res.ok) {
+        purgeError = m.account_deleted_banner_permanent_delete_failed();
+        return;
+      }
+      await signOut();
+      await goto("/", { invalidateAll: true });
+    } catch {
+      purgeError = m.account_deleted_banner_permanent_delete_failed();
+    } finally {
+      purgeInProgress = false;
+    }
+  }
+
   async function handleSignOut(): Promise<void> {
     await signOut();
     await goto("/", { invalidateAll: true });
@@ -161,6 +188,24 @@
           <InlineError message={deleteError} />
         {/if}
       </div>
+    {:else}
+      <div class="sub-section danger-zone">
+        <h3>{m.settings_account_section_purge_now_title()}</h3>
+        <p class="muted">{m.settings_account_section_purge_now_blurb()}</p>
+        <div class="actions">
+          <button
+            type="button"
+            class="delete"
+            onclick={() => (purgeConfirmOpen = true)}
+            disabled={purgeInProgress}
+          >
+            {m.account_deleted_banner_permanent_delete_button()}
+          </button>
+        </div>
+        {#if purgeError}
+          <InlineError message={purgeError} />
+        {/if}
+      </div>
     {/if}
   </article>
 
@@ -216,6 +261,16 @@
   requireText="DELETE"
   onConfirm={handleDeleteConfirm}
   onCancel={() => (confirmDeleteOpen = false)}
+/>
+
+<ConfirmDialog
+  open={purgeConfirmOpen}
+  message={m.account_deleted_banner_permanent_delete_confirm()}
+  confirmLabel={m.account_deleted_banner_permanent_delete_button()}
+  isIrreversible={true}
+  requireText="DELETE"
+  onConfirm={handlePurgeConfirm}
+  onCancel={() => (purgeConfirmOpen = false)}
 />
 
 <style>

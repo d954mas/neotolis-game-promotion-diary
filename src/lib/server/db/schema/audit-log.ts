@@ -18,9 +18,21 @@
 // pgEnum defined in src/lib/server/audit/actions.ts (the single source of
 // truth for the vocabulary). A new (user_id, action, created_at) index
 // powers the action-filter dropdown in the audit UI.
+//
+// Phase 3.0 Plan 05 (migration 0011): the user_id → user(id) FK was
+// DROPPED. audit_log.user_id is now a plain text column whose value
+// outlives the user row it references. Required for the purge worker
+// (PRIV-04 / GDPR Art. 17 60-day-grace): without dropping the FK, the
+// purge.completed audit row was either cascade-deleted with the user
+// (write-before-tx) or rejected by FK-violation (write-after-tx). Either
+// outcome violates AGENTS.md §4 "audit is INSERT-only" for this verb.
+// Open Question 4 in 03.0-RESEARCH.md formalizes the contract: the purge
+// audit row is scoped to the purged user_id and remains queryable by
+// admins through the /admin/quota cross-tenant aggregation. P19 cursor
+// invariant is unchanged — the (user_id, created_at) and (user_id, action,
+// created_at) indexes still support tenant-relative pagination only.
 
 import { pgTable, text, timestamp, jsonb, index } from "drizzle-orm/pg-core";
-import { user } from "./auth.js";
 import { auditActionEnum } from "../../audit/actions.js";
 import { uuidv7 } from "../../ids.js";
 
@@ -38,9 +50,10 @@ export const auditLog = pgTable(
     id: text("id")
       .primaryKey()
       .$defaultFn(() => uuidv7()),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    // Phase 3.0 Plan 05 (migration 0011): no FK to user(id). The purge
+    // worker hard-DELETEs user rows and the audit row must survive the
+    // delete (Open Question 4 — AGENTS.md §4 INSERT-only invariant).
+    userId: text("user_id").notNull(),
     // Typed pgEnum as of Phase 2 D-32 — values defined in
     // src/lib/server/audit/actions.ts (AUDIT_ACTIONS const).
     action: auditActionEnum("action").notNull(),

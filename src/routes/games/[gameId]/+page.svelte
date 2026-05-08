@@ -101,7 +101,13 @@
     sourceId: string | null;
     authorIsMe: boolean;
     metadata: unknown;
+    publishedAt: Date | string | null;
     lastPolledAt: Date | string | null;
+    // Plan 03.0-11 + per-video refactor (2026-05-06): PollingBadge reads
+    // tier inputs from youtube_videos via the loader's JOIN. publishedAt
+    // is null until channel-context-backfill completes (PollingBadge
+    // shows 'pending' badge for that brief window).
+    lastPollStatus: string | null;
     externalId: string | null;
     notes: string | null;
   };

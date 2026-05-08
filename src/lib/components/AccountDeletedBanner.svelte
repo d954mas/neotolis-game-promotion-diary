@@ -6,15 +6,11 @@
   // which checks `data.user?.deletedAt`. The banner itself is render-only;
   // it never decides on its own whether to show.
   //
-  // Phase 2.2 PUTOFF: the "Permanently delete now" CTA listed in CONTEXT
-  // D-16 is HIDDEN in this phase — the purge endpoint does not ship until
-  // the Phase 3 purge worker. The user can either restore (the only active
-  // CTA here) OR wait out the grace window and let the Phase 3 worker do
-  // the hard delete. The PUTOFF marker carries the closing plan number.
-  //
-  // PUTOFF: re-introduce permanent-delete-now button when Phase 3 ships
-  // the purge endpoint (POST /api/me/account/purge) — see CONTEXT D-15
-  // "purged" line.
+  // Phase 3.0 post-build (UAT 2026-05-06): the "Permanently delete now"
+  // CTA was REMOVED from the banner per operator decision. Banner stays
+  // simple — just a Restore button. Immediate-purge UI moved to
+  // /settings under an "Advanced" disclosure to reduce the footgun risk
+  // of a destructive button living next to Restore on every page.
 
   import { invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
@@ -115,6 +111,7 @@
   .actions {
     display: flex;
     gap: var(--space-sm);
+    flex-wrap: wrap;
     flex-shrink: 0;
   }
   .restore {

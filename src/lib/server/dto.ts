@@ -10,6 +10,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { eventGames } from "./db/schema/event-games.js";
+import { youtubeVideos } from "./db/schema/youtube-videos.js";
 import type { user, session } from "./db/schema/auth.js";
 import type {
   games,
@@ -19,6 +20,8 @@ import type {
   events,
 } from "./db/schema/index.js";
 import type { auditLog } from "./db/schema/audit-log.js";
+import type { youtubeVideoSnapshots } from "./db/schema/youtube-video-snapshots.js";
+import type { youtubeChannels } from "./db/schema/youtube-channels.js";
 
 type User = typeof user.$inferSelect;
 type Session = typeof session.$inferSelect;
@@ -231,6 +234,14 @@ export interface DataSourceDto {
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
+  // Phase 3.0 post-build (UAT 2026-05-06): the YouTube channel's title as
+  // returned by channels.list — distinct from `displayName` (which is the
+  // user's own label for this tracking record). The /feed loader populates
+  // this via JOIN with youtube_channel_metadata_cache when channelId is set.
+  // Null for non-YouTube kinds, for YouTube sources whose channel hasn't
+  // been resolved yet, and for any DTO projected outside the /feed loader
+  // (other call sites just pass it through unchanged).
+  channelTitle: string | null;
 }
 
 export function toDataSourceDto(r: DataSourceRow): DataSourceDto {
@@ -246,6 +257,7 @@ export function toDataSourceDto(r: DataSourceRow): DataSourceDto {
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     deletedAt: r.deletedAt,
+    channelTitle: null,
   };
 }
 
@@ -362,11 +374,31 @@ export interface EventDto {
   notes: string | null;
   metadata: unknown;
   externalId: string | null;
+  // Phase 3.0 post-build refactor (2026-05-06) — polling state migrated
+  // from per-event copies on `events` to per-video columns on
+  // `youtube_videos`. The DTO field names stay for UI compatibility (PollingBadge
+  // and FeedCard read these names); the loader sources them via JOIN on
+  // external_id. Multiple events for the same video share the same values
+  // by construction.
+  //   - publishedAt — youtube_videos.published_at; NULL while
+  //     channel-context-backfill has not yet run for this external_id
+  //     (the 'pending' tier window).
+  //   - lastPolledAt — youtube_videos.last_polled_at; null on freshly
+  //     ingested events whose video has not been polled yet.
+  //   - lastPollStatus — youtube_videos.last_poll_status; null on the same.
+  publishedAt: Date | null;
   lastPolledAt: Date | null;
   lastPollStatus: string | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
+  // Phase 3.0 post-build addition (UAT 2026-05-06): latest stats snapshot
+  // for the event, when one is available. Currently populated by the
+  // /feed loader for kind=youtube_video events only — joins the most-recent
+  // youtube_video_snapshots row by external_id. Other kinds + events without
+  // a snapshot row return null. UI consumers (FeedCard) render an inline
+  // view-count line when present.
+  stats: { viewCount: number; likeCount: number; commentCount: number; polledAt: Date } | null;
 }
 
 /**
@@ -380,8 +412,22 @@ export interface EventDto {
  * mutating the array doesn't leak back to the source. Tests in
  * tests/unit/dto.test.ts verify the strip happens at runtime even
  * when the input row literal carries userId.
+ *
+ * Phase 3.0 post-build refactor (2026-05-06): polling state moved off
+ * events. Optional `videoData` carries the joined youtube_videos columns;
+ * loaders that JOIN pass it, others pass null and the DTO carries null
+ * polling fields (UI handles missing data gracefully — PollingBadge falls
+ * back to a generic Manual variant).
  */
-export function toEventDto(r: EventRow, gameIds: string[]): EventDto {
+export function toEventDto(
+  r: EventRow,
+  gameIds: string[],
+  videoData: {
+    publishedAt: Date | null;
+    lastPolledAt: Date | null;
+    lastPollStatus: string | null;
+  } | null = null,
+): EventDto {
   return {
     id: r.id,
     gameIds: [...gameIds],
@@ -394,11 +440,13 @@ export function toEventDto(r: EventRow, gameIds: string[]): EventDto {
     notes: r.notes,
     metadata: r.metadata,
     externalId: r.externalId,
-    lastPolledAt: r.lastPolledAt,
-    lastPollStatus: r.lastPollStatus,
+    publishedAt: videoData?.publishedAt ?? null,
+    lastPolledAt: videoData?.lastPolledAt ?? null,
+    lastPollStatus: videoData?.lastPollStatus ?? null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     deletedAt: r.deletedAt,
+    stats: null,
   };
 }
 
@@ -449,11 +497,76 @@ export async function loadGameIdsForEvent(userId: string, eventId: string): Prom
  * extension.
  */
 export async function mapEventsToDtos(userId: string, rows: EventRow[]): Promise<EventDto[]> {
-  const map = await loadGameIdsForEvents(
-    userId,
-    rows.map((e) => e.id),
+  const [gameIdsMap, videoMap] = await Promise.all([
+    loadGameIdsForEvents(
+      userId,
+      rows.map((e) => e.id),
+    ),
+    loadVideoDataForEvents(userId, rows),
+  ]);
+  return rows.map((e) =>
+    toEventDto(e, gameIdsMap.get(e.id) ?? [], videoMap.get(e.externalId ?? "") ?? null),
   );
-  return rows.map((e) => toEventDto(e, map.get(e.id) ?? []));
+}
+
+/**
+ * Per-video refactor (2026-05-06) — batched JOIN loader for the polling
+ * state that lives on `youtube_videos`. Returns Map<external_id, videoData>
+ * for all youtube_video events in the input list. Skips events with no
+ * external_id (manual `other` entries) and non-youtube_video kinds.
+ *
+ * PUBLIC-DATA TABLE — no userId filter on the youtube_videos query (the
+ * table is tenant-agnostic per CONTEXT D-07). However, the function takes
+ * `userId` and filters input rows to that tenant before extracting
+ * external_ids — defense-in-depth (post-build review 2026-05-07): callers
+ * are tenant-scoped today, but a future refactor that hands a cross-tenant
+ * EventRow[] to this function would silently load video data for rows the
+ * caller had no business reading. Symmetrical with loadGameIdsForEvents
+ * which already takes userId for the same reason.
+ */
+export async function loadVideoDataForEvents(
+  userId: string,
+  rows: EventRow[],
+): Promise<
+  Map<
+    string,
+    { publishedAt: Date | null; lastPolledAt: Date | null; lastPollStatus: string | null }
+  >
+> {
+  const externalIds = Array.from(
+    new Set(
+      rows
+        .filter((r) => r.userId === userId && r.kind === "youtube_video" && r.externalId !== null)
+        .map((r) => r.externalId!),
+    ),
+  );
+  const map = new Map<
+    string,
+    { publishedAt: Date | null; lastPolledAt: Date | null; lastPollStatus: string | null }
+  >();
+  if (externalIds.length === 0) return map;
+  // youtube_videos is PUBLIC-DATA (CONTEXT D-07) — no user_id column,
+  // identical across tenants. Lookup is keyed on the PK only. The
+  // tenant-scope rule isn't applied to dto.ts (file outside the rule's
+  // glob — services/http/worker/scheduler/page-loaders), so no disable
+  // directive is needed; the discipline is documented inline instead.
+  const videoRows = await db
+    .select({
+      videoId: youtubeVideos.videoId,
+      publishedAt: youtubeVideos.publishedAt,
+      lastPolledAt: youtubeVideos.lastPolledAt,
+      lastPollStatus: youtubeVideos.lastPollStatus,
+    })
+    .from(youtubeVideos)
+    .where(inArray(youtubeVideos.videoId, externalIds));
+  for (const v of videoRows) {
+    map.set(v.videoId, {
+      publishedAt: v.publishedAt,
+      lastPolledAt: v.lastPolledAt,
+      lastPollStatus: v.lastPollStatus,
+    });
+  }
+  return map;
 }
 
 /**
@@ -491,3 +604,96 @@ export function toAuditEntryDto(r: AuditEntryRow): AuditEntryDto {
     createdAt: r.createdAt,
   };
 }
+
+// ---- Phase 3.0 Plan 01 — public-data DTOs ----
+//
+// These tables carry no `user_id` column (CONTEXT D-07 / D-14) and no
+// secret-shaped fields, so the projection functions are existence-only:
+// they enumerate every column the response wire format includes so a
+// future column addition forces a review touchpoint rather than auto-
+// leaking. Mirrors the discipline established for tenant-owned tables
+// without the strip semantics (nothing to strip).
+
+type YoutubeVideoSnapshotRow = typeof youtubeVideoSnapshots.$inferSelect;
+type YoutubeChannelMetadataCacheRow = typeof youtubeChannels.$inferSelect;
+
+/**
+ * YoutubeVideoSnapshotDto — DTO for `youtube_video_snapshots` rows.
+ *
+ * Public-data table. Worker writes one row per successful refresh-poll;
+ * counters are bigint (mode: 'number' on the Drizzle side, JS number on
+ * the wire). Chart endpoints read from this table; no projection-layer
+ * strip is required.
+ */
+export interface YoutubeVideoSnapshotDto {
+  id: string;
+  videoId: string;
+  polledAt: Date;
+  viewCount: number | null;
+  likeCount: number | null;
+  commentCount: number | null;
+  createdAt: Date;
+}
+
+export function toYoutubeVideoSnapshotDto(r: YoutubeVideoSnapshotRow): YoutubeVideoSnapshotDto {
+  return {
+    id: r.id,
+    videoId: r.videoId,
+    polledAt: r.polledAt,
+    viewCount: r.viewCount,
+    likeCount: r.likeCount,
+    commentCount: r.commentCount,
+    createdAt: r.createdAt,
+  };
+}
+
+/**
+ * YoutubeChannelMetadataCacheDto — DTO for `youtube_channel_metadata_cache`
+ * rows.
+ *
+ * Public-data cache. The Plan 03.0-10 channel-context-backfill worker
+ * populates this on first paste of a video from an unknown channel; the
+ * row is shared across all tenants who paste videos from the same channel.
+ */
+export interface YoutubeChannelMetadataCacheDto {
+  channelId: string;
+  uploadsPlaylistId: string;
+  channelTitle: string | null;
+  lastBackfillAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export function toYoutubeChannelMetadataCacheDto(
+  r: YoutubeChannelMetadataCacheRow,
+): YoutubeChannelMetadataCacheDto {
+  return {
+    channelId: r.channelId,
+    uploadsPlaylistId: r.uploadsPlaylistId,
+    channelTitle: r.channelTitle,
+    lastBackfillAt: r.lastBackfillAt,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+// ---- Phase 3.0 Plan 07 — admin-quota DTOs ----
+//
+// Re-export from the service layer so callers can import the projection types
+// + functions from a single barrel (`dto.ts`) consistent with the rest of the
+// Phase 2/3 DTO discipline. The shapes themselves live in
+// `services/admin-quota-read.ts` because they're computed from the row plus
+// the threshold constants exported by `services/youtube-quota-tracker.ts` —
+// keeping them next to the loader avoids a cross-module dance for the
+// pctOfDaily / status derivation.
+//
+// No ciphertext-strip semantics: youtube_service_quota_usage carries no
+// secret-shaped fields, and the cross-tenant audit projection intentionally
+// surfaces only verb + metadata + time (user_id omitted; see admin-quota-read.ts).
+
+export {
+  type QuotaKeyRow,
+  type ServiceAuditEntry,
+  toQuotaKeyRow,
+  toServiceAuditEntry,
+} from "./services/admin-quota-read.js";

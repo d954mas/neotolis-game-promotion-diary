@@ -71,6 +71,76 @@
       "when": 1777837814107,
       "tag": "0009_add_events_user_created_at_index",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1778010011588,
+      "tag": "0010_phase03_baseline",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1778097600000,
+      "tag": "0011_drop_audit_log_user_fk",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1778061120176,
+      "tag": "0012_drop_events_user_kind_ext_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1778062956075,
+      "tag": "0013_add_youtube_videos",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1778063021460,
+      "tag": "0014_rename_youtube_channel_metadata_cache",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1778080400222,
+      "tag": "0015_drop_redundant_snapshot_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1778090000000,
+      "tag": "0016_per_video_polling_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1778160000000,
+      "tag": "0017_youtube_channels_handle_aliases",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1778240000000,
+      "tag": "0018_youtube_metadata_fetch_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778250000000,
+      "tag": "0019_audit_log_insert_only_trigger",
+      "breakpoints": true
     }
   ]
 }

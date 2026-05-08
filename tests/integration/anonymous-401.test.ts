@@ -87,6 +87,25 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     "/api/me/export",
     "/api/me/account",
     "/api/me/account/restore",
+    // Plan 03.0-02 (Wave 0) — pre-declared route allowlist for Phase 3.0
+    // Wave 2 routes. Plan 03.0-08 activates two of them (refresh-poll +
+    // account/purge). The /api/admin/quota entry stays commented out
+    // until Plan 03.0-07 lands the route mount — uncommenting before
+    // would trip the toContain guard with "expected protectedPaths to
+    // contain '/api/admin/quota'". The corresponding it.skip blocks
+    // below name the activating plan so a grep flips them on at the
+    // right moment.
+    //
+    // Plan 03.0-08 — refresh-poll + account/purge mounts shipped:
+    "/api/events/:id/refresh-poll",
+    "/api/me/account/purge",
+    // Plan 03.0-07 — admin /quota route mounted under /api/admin/* (env-allowlist
+    // gated; auth gate fires first so anonymous → 401 before allowlist sees it).
+    "/api/admin/quota",
+    // Phase 3.0 post-build (UAT 2026-05-06) — /events/new "Get from YouTube"
+    // button calls this. Authenticated only; anonymous → 401 from tenantScope
+    // before the videos.list lookup ever fires.
+    "/api/youtube/fetch-metadata",
   ];
 
   it("every /api/* route except /api/auth/* refuses anonymous with 401", async () => {
@@ -256,6 +275,50 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
 
   it("Plan 02.2-03: anonymous POST /api/me/account/restore returns 401 unauthorized", async () => {
     const res = await app.request("/api/me/account/restore", { method: "POST" });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  // Phase 3.0 Plan 03.0-08 — refresh-poll + account/purge anonymous-401
+  // assertions ACTIVATED. The vacuous-pass sweep above carries the bulk of
+  // the contract via the MUST_BE_PROTECTED allowlist; these explicit
+  // assertions are the load-bearing per-route checks (AGENTS.md §3 — both
+  // layers required).
+  it("Plan 03.0-08: anonymous POST /api/events/:id/refresh-poll returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events/fixture-id/refresh-poll", {
+      method: "POST",
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("Plan 03.0-08: anonymous DELETE /api/me/account/purge returns 401 unauthorized", async () => {
+    const res = await app.request("/api/me/account/purge", { method: "DELETE" });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  // Phase 3.0 Plan 03.0-07 — admin-quota anonymous-401 ACTIVATED. The auth
+  // gate (tenantScope mounted on /api/* globally) fires BEFORE the allowlist
+  // gate (adminAllowlist mounted on /api/admin/*), so an anonymous request
+  // gets 401 from tenantScope and never reaches the allowlist check. The
+  // sweep above also covers the path; this explicit assertion is the
+  // load-bearing per-route check (AGENTS.md §3 both layers).
+  it("Plan 03.0-07: anonymous GET /api/admin/quota returns 401 (auth gate fires before allowlist gate)", async () => {
+    const res = await app.request("/api/admin/quota");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  // Phase 3.0 post-build (UAT 2026-05-06) — /api/youtube/fetch-metadata gate.
+  // Powers the "Get from YouTube" button on /events/new; tenantScope must
+  // refuse anonymous BEFORE the videos.list lookup ever fires.
+  it("post-build: anonymous POST /api/youtube/fetch-metadata returns 401 unauthorized", async () => {
+    const res = await app.request("/api/youtube/fetch-metadata", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: "https://www.youtube.com/watch?v=jNQXAC9IVRw" }),
+    });
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });

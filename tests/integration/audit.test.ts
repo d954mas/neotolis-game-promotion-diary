@@ -306,3 +306,71 @@ describe("Plan 02.1-21: listAuditPage dateRange", () => {
     expect(out.rows.length).toBe(2);
   });
 });
+
+/**
+ * Migration 0019 — audit_log INSERT-only trigger probe.
+ *
+ * AGENTS.md §4 declares audit_log INSERT-only. The protection is two-layer:
+ *   1. Programmatic: src/lib/server/audit.ts exports only writeAudit.
+ *   2. Structural: BEFORE UPDATE / BEFORE DELETE triggers raise an
+ *      exception, regardless of role (owner included — a bare REVOKE
+ *      would be a no-op against the table owner).
+ *
+ * These probes exercise layer 2 directly. Bypass the writeAudit gate and
+ * try to mutate / delete a real audit row; the trigger MUST reject.
+ */
+describe("audit_log INSERT-only invariant (migration 0019)", () => {
+  const uniq = () => Math.random().toString(36).slice(2, 10);
+
+  // Drizzle wraps the underlying pg error in a generic "Failed query: …"
+  // outer message, so the original 'audit_log is INSERT-only …' text only
+  // appears on `error.cause`. We assert on the cause's message AND on the
+  // load-bearing outcome — the row survives the rejected mutation.
+  function expectInsertOnlyError(err: unknown): void {
+    expect(err).toBeInstanceOf(Error);
+    const cause = (err as Error & { cause?: { message?: string } }).cause;
+    expect(cause?.message ?? (err as Error).message).toMatch(/INSERT-only/);
+  }
+
+  it("UPDATE on audit_log throws via trigger", async () => {
+    const u = await seedUserDirectly({ email: `audit-trigger-u-${uniq()}@test.local` });
+    await writeAudit({ userId: u.id, action: "session.signin", ipAddress: "10.0.0.1" });
+
+    let caught: unknown = null;
+    try {
+      await db.update(auditLog).set({ ipAddress: "0.0.0.0" }).where(eq(auditLog.userId, u.id));
+    } catch (err) {
+      caught = err;
+    }
+    expectInsertOnlyError(caught);
+
+    // Row survives the rejected UPDATE — ipAddress unchanged.
+    const [row] = await db.select().from(auditLog).where(eq(auditLog.userId, u.id));
+    expect(row?.ipAddress).toBe("10.0.0.1");
+  });
+
+  it("DELETE on audit_log throws via trigger", async () => {
+    const u = await seedUserDirectly({ email: `audit-trigger-d-${uniq()}@test.local` });
+    await writeAudit({ userId: u.id, action: "session.signin", ipAddress: "10.0.0.1" });
+
+    let caught: unknown = null;
+    try {
+      await db.delete(auditLog).where(eq(auditLog.userId, u.id));
+    } catch (err) {
+      caught = err;
+    }
+    expectInsertOnlyError(caught);
+
+    // Row survives the rejected DELETE.
+    const remaining = await db.select().from(auditLog).where(eq(auditLog.userId, u.id));
+    expect(remaining.length).toBe(1);
+  });
+
+  it("INSERT on audit_log still works (trigger does not cover INSERT)", async () => {
+    const u = await seedUserDirectly({ email: `audit-trigger-i-${uniq()}@test.local` });
+    // writeAudit goes through; subsequent SELECT confirms the row landed.
+    await writeAudit({ userId: u.id, action: "session.signin", ipAddress: "10.0.0.1" });
+    const rows = await db.select().from(auditLog).where(eq(auditLog.userId, u.id));
+    expect(rows.length).toBe(1);
+  });
+});

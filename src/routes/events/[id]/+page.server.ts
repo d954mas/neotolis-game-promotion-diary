@@ -2,7 +2,12 @@ import type { PageServerLoad } from "./$types";
 import { error, redirect } from "@sveltejs/kit";
 import { getEventById } from "$lib/server/services/events.js";
 import { listGames } from "$lib/server/services/games.js";
-import { toEventDto, toGameDto, loadGameIdsForEvent } from "$lib/server/dto.js";
+import {
+  toEventDto,
+  toGameDto,
+  loadGameIdsForEvent,
+  loadVideoDataForEvents,
+} from "$lib/server/dto.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
 
 /**
@@ -37,10 +42,15 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
     // game UI affordance preserved for round-3 UAT continuity); future
     // Plan 02.1-32 swaps this for a full multi-game chip render.
     const gameIds = await loadGameIdsForEvent(locals.user.id, row.id);
+    // Per-video refactor (2026-05-06): load polling state from
+    // youtube_videos for kind=youtube_video events. PollingBadge consumes
+    // publishedAt + lastPollStatus + lastPolledAt via the EventDto.
+    const videoMap = await loadVideoDataForEvents(locals.user.id, [row]);
+    const videoData = row.externalId ? (videoMap.get(row.externalId) ?? null) : null;
     const primaryGame =
       gameIds.length > 0 ? (games.find((g) => g.id === gameIds[0]) ?? null) : null;
     return {
-      event: toEventDto(row, gameIds),
+      event: toEventDto(row, gameIds, videoData),
       games: games.map(toGameDto),
       game: primaryGame ? toGameDto(primaryGame) : null,
     };

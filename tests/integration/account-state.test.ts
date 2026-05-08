@@ -170,6 +170,52 @@ describe("account-state middleware (Phase 02.2 — Codex P1.2)", () => {
     expect(res.status).toBe(423);
   });
 
+  // Phase 03.0 Plan 12 — Permanent-delete-now CTA route integration. The
+  // banner CTA fires `DELETE /api/me/account/purge` for a soft-deleted user;
+  // the route is in account-state ALLOWED_WHEN_DELETED and bypasses the
+  // RETENTION_DAYS gate via {ignoreRetention: true}. On success the user's
+  // session rows are cascaded out, so a follow-up request with the
+  // pre-purge cookie returns 401.
+  it("Plan 03.0-12: soft-deleted account: DELETE /api/me/account/purge returns 200 and removes the user row (CTA path)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `as-purge-cta-${uniq()}@test.local` });
+    await softDeleteUser(u.id);
+
+    const res = await app.request("/api/me/account/purge", {
+      method: "DELETE",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { purged: boolean };
+    expect(body.purged).toBe(true);
+
+    // user row is gone.
+    const rows = await db.select({ id: user.id }).from(user).where(eq(user.id, u.id));
+    expect(rows).toHaveLength(0);
+
+    // A follow-up request with the pre-purge cookie has no session → 401.
+    const followup = await app.request("/api/me", {
+      method: "GET",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(followup.status).toBe(401);
+  });
+
+  it("Plan 03.0-12: active account: DELETE /api/me/account/purge also succeeds (route exempt; ignoreRetention=true)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `as-purge-active-${uniq()}@test.local` });
+
+    const res = await app.request("/api/me/account/purge", {
+      method: "DELETE",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { purged: boolean };
+    expect(body.purged).toBe(true);
+  });
+
   it("layout-load contract: deletedAt is read directly from DB (Codex P1.1)", async () => {
     // The +layout.server.ts load now SELECTs user.deletedAt explicitly rather
     // than relying on Better Auth getSession passthrough. This is the same

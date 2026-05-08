@@ -53,6 +53,80 @@
   let authorIsMe = $state(false);
   let pending = $state(false);
   let errorText = $state<string | null>(null);
+  // Phase 3.0 post-build (UAT 2026-05-06) — "Get from YouTube" button state.
+  let fetching = $state(false);
+  let fetchInfo = $state<string | null>(null);
+
+  async function fetchFromYouTube(): Promise<void> {
+    if (fetching) return;
+    if (!url.trim()) return;
+    fetching = true;
+    fetchInfo = null;
+    errorText = null;
+    try {
+      const res = await fetch("/api/youtube/fetch-metadata", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: url.trim() }),
+      });
+      if (!res.ok) {
+        if (res.status === 422) errorText = m.events_new_youtube_fetch_err_invalid_url();
+        else if (res.status === 404) errorText = m.events_new_youtube_fetch_err_not_found();
+        else if (res.status === 503) errorText = m.events_new_youtube_fetch_err_no_keys();
+        else errorText = m.events_new_youtube_fetch_err_generic();
+        return;
+      }
+      const meta = (await res.json()) as {
+        title: string;
+        description: string | null;
+        publishedAt: string | null;
+        cached: boolean;
+      };
+      // Pre-fill: don't overwrite a title the user already typed.
+      if (!title.trim()) title = meta.title;
+      if (meta.description && !notes.trim()) notes = meta.description;
+      // Auto-fill occurredAt from publishedAt — the user-meaningful timestamp
+      // for a YouTube video event IS its upload date. The "in the past" hint
+      // under the date input fires generically when occurredAt != today, so
+      // we don't need a separate "videoPublishedAt" piece of state here.
+      if (meta.publishedAt) {
+        occurredAt = meta.publishedAt.slice(0, 10);
+      }
+      // Force kind to youtube_video — they pasted a YouTube URL.
+      kind = "youtube_video";
+      fetchInfo = meta.cached
+        ? m.events_new_youtube_fetch_cached()
+        : m.events_new_youtube_fetch_fresh();
+    } catch {
+      errorText = m.events_new_youtube_fetch_err_network();
+    } finally {
+      fetching = false;
+    }
+  }
+
+  // True only for a fully-formed YouTube watch URL (or share URL or short
+  // form) — not just a youtube.com hostname. Drives whether the "Get from
+  // YouTube" button is rendered at all. Reusing the parser logic keeps the
+  // client-side detection in lock-step with the server-side route's
+  // expectations: if `isYoutubeWatchUrl(u)` is true here, the route's
+  // parseYoutubeVideoId() will accept the same URL.
+  function isYoutubeWatchUrl(u: string): boolean {
+    try {
+      const p = new URL(u);
+      const host = p.hostname.toLowerCase();
+      if (host === "youtu.be") return p.pathname.length > 1;
+      if (host === "youtube.com" || host === "www.youtube.com" || host === "m.youtube.com") {
+        if (p.pathname === "/watch" && p.searchParams.get("v")) return true;
+        const seg = p.pathname.split("/").filter(Boolean);
+        if (seg.length >= 2 && (seg[0] === "shorts" || seg[0] === "embed")) return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+  const isYoutube = $derived(isYoutubeWatchUrl(url.trim()));
+  const canFetch = $derived(isYoutube && !fetching && !pending);
 
   function setToday(): void {
     occurredAt = new Date().toISOString().slice(0, 10);
@@ -213,6 +287,14 @@
         required
         disabled={pending}
       />
+      {#if occurredAt}
+        {@const daysAgo = Math.floor((Date.now() - new Date(occurredAt).getTime()) / 86_400_000)}
+        {#if daysAgo > 0}
+          <small class="date-hint warn">
+            {m.events_new_date_in_past_hint({ daysAgo: String(daysAgo) })}
+          </small>
+        {/if}
+      {/if}
     </div>
 
     <label class="field checkbox">
@@ -220,10 +302,32 @@
       <span class="field-label">{m.events_new_author_is_me()}</span>
     </label>
 
-    <label class="field">
+    <div class="field">
       <span class="field-label">URL</span>
-      <input class="input" type="url" bind:value={url} placeholder="https://" disabled={pending} />
-    </label>
+      <div class="url-row">
+        <input
+          class="input"
+          type="url"
+          bind:value={url}
+          placeholder="https://"
+          disabled={pending}
+        />
+        {#if isYoutube}
+          <button
+            type="button"
+            class="fetch-btn"
+            onclick={fetchFromYouTube}
+            disabled={!canFetch}
+            title={m.events_new_youtube_fetch_title()}
+          >
+            {fetching ? m.events_new_youtube_fetch_loading() : m.events_new_youtube_fetch_button()}
+          </button>
+        {/if}
+      </div>
+      {#if fetchInfo}
+        <small class="fetch-info">{fetchInfo}</small>
+      {/if}
+    </div>
 
     <label class="field">
       <span class="field-label">Game (optional — leave empty to drop in inbox)</span>

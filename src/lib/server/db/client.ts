@@ -30,3 +30,7 @@ export const pool = new Pool({
 export const db = drizzle(pool, { schema });
 
 export type DB = typeof db;
+/** Inner-tx handle as Drizzle exposes it to a `.transaction(async (tx) => …)` callback. */
+export type Tx = Parameters<Parameters<DB["transaction"]>[0]>[0];
+/** Either the live db handle or an inner tx — for helpers that don't care which. */
+export type DbOrTx = DB | Tx;

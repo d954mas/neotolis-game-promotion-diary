@@ -78,6 +78,29 @@ export const AUDIT_ACTIONS = [
   "account.restored",
   "account.exported",
   "quota.limit_hit",
+  // Phase 3.0 Plan 01 — polling pipeline + purge worker + auto-import audit
+  // verbs. Forward-only migration `0010_phase03_baseline.sql` lands the
+  // pgEnum additions (one ALTER TYPE ADD VALUE per verb, IF NOT EXISTS for
+  // idempotency).
+  //
+  //   - quota.service_throttled — operator-side YouTube quota tripped (D-13).
+  //     Admin-only signal; per-user 429 is Phase 3.1/3.2 (DV-3).
+  //   - purge.completed         — Plan 03.0-05 purgeAccount worker finished
+  //     hard-deleting a soft-deleted user; written with the purged user's
+  //     own user_id (Pitfall P19 cursor invariant — RESEARCH §"Open Q4").
+  //   - auto_import.deferred    — adapter declined an auto-import tick
+  //     (e.g. quota near ceiling, source disabled mid-tick, channel cache
+  //     miss queued for backfill). Plan 03.0-04 / 03.0-06.
+  //   - poll.failed             — refresh-poll attempt errored (transient
+  //     5xx, 401 from rotated key, etc.). last_poll_status carries the
+  //     human-facing label; this audit row carries the metadata.
+  //   - event.poll_refreshed    — refresh-poll succeeded, snapshot row
+  //     written, events.last_polled_at advanced.
+  "quota.service_throttled",
+  "purge.completed",
+  "auto_import.deferred",
+  "poll.failed",
+  "event.poll_refreshed",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

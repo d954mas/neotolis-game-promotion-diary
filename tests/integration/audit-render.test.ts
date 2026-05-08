@@ -13,7 +13,19 @@
 //   3. Renders the actions in alphabetical-by-translated-label order
 //      (sortByLabel locked-in via the rendered HTML output).
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// Phase 3.0 Plan 11 — FeedCard now indirectly imports $app/navigation via
+// PollingBadge → RefreshNowButton (the Plan 11 live-state rewrite added
+// the inline refresh affordance). The SSR-render path never invokes the
+// real navigation helpers; mock with no-op stubs so the static import
+// resolves at module load. Pattern lifted from
+// tests/unit/account-deleted-banner.test.ts.
+vi.mock("$app/navigation", () => ({
+  goto: vi.fn(),
+  invalidateAll: vi.fn(),
+}));
+
 import { render } from "svelte/server";
 import AuditRow from "../../src/lib/components/AuditRow.svelte";
 import FiltersSheet from "../../src/lib/components/FiltersSheet.svelte";
@@ -355,6 +367,10 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
     notes: null as string | null,
     metadata: null as unknown,
     lastPolledAt: null as Date | null,
+    // Plan 03.0-11: PollingBadge live-state rewrite extends EventDtoLite
+    // with lastPollStatus (D-12 unavailable override). Test fixtures get
+    // null since these tests don't exercise the polling tier.
+    lastPollStatus: null as string | null,
   };
 
   it("renders class:mine on the root <article> when event.authorIsMe=true (border-left accent gate)", async () => {
@@ -1463,6 +1479,8 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
           notes: null,
           metadata: null,
           lastPolledAt: null,
+          // Plan 03.0-11: lastPollStatus added to EventDtoLite.
+          lastPollStatus: null,
         },
         source: null,
         game: null,
@@ -1940,6 +1958,10 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
     notes: null as string | null,
     metadata: null as unknown,
     lastPolledAt: null as Date | null,
+    // Plan 03.0-11: PollingBadge live-state rewrite extends EventDtoLite
+    // with lastPollStatus (D-12 unavailable override). Test fixtures get
+    // null since these tests don't exercise the polling tier.
+    lastPollStatus: null as string | null,
   };
 
   it("Plan 02.1-32 — FeedCard with gameIds.length > 0 does NOT render AttachToGamePicker (closes §4.24.E)", async () => {

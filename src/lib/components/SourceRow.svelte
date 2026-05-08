@@ -58,6 +58,10 @@
     isOwnedByMe: boolean;
     autoImport: boolean;
     deletedAt: Date | string | null;
+    // Phase 3.0 post-build (UAT 2026-05-06): real YouTube channel title
+    // from the youtube_channels cache. Shown as a chip alongside the user's
+    // own displayName so /sources displays both names.
+    channelTitle?: string | null;
   };
 
   let { source }: { source: DataSourceDto } = $props();
@@ -75,6 +79,10 @@
   // opens (mirrors editName seeding). Sent in the PATCH /api/sources/:id
   // payload alongside displayName when the user saves.
   let editAutoImport = $state(false);
+  // Phase 3.0 post-build (UAT 2026-05-06): is_owned_by_me is now editable
+  // inline. Independent from auto_import — the operator chose to keep
+  // auto-poll available for tracking channels too in v1, so no lock-step.
+  let editIsOwnedByMe = $state(false);
   let confirmingRemove = $state(false);
   let mutating = $state(false);
   let rowError = $state<string | null>(null);
@@ -93,6 +101,7 @@
   function openEdit(): void {
     editName = source.displayName ?? "";
     editAutoImport = source.autoImport;
+    editIsOwnedByMe = source.isOwnedByMe;
     editing = true;
   }
 
@@ -100,6 +109,7 @@
     editing = false;
     editName = source.displayName ?? "";
     editAutoImport = source.autoImport;
+    editIsOwnedByMe = source.isOwnedByMe;
   }
 
   async function saveSourceEdit(e: Event): Promise<void> {
@@ -117,6 +127,7 @@
         body: JSON.stringify({
           displayName: editName.trim() || null,
           autoImport: editAutoImport,
+          isOwnedByMe: editIsOwnedByMe,
         }),
       });
       if (!res.ok) {
@@ -169,6 +180,9 @@
     </span>
     {#if !editing}
       <span class="display">{source.displayName ?? source.handleUrl}</span>
+      {#if source.channelTitle && source.channelTitle !== source.displayName}
+        <span class="channel-title" title="YouTube channel name">{source.channelTitle}</span>
+      {/if}
     {/if}
     <span class="ownership-badge" class:mine={source.isOwnedByMe}>
       {source.isOwnedByMe ? m.sources_owned_by_me() : m.sources_owned_by_other()}
@@ -226,6 +240,10 @@
            no parallel <input type="text"> control bound to editAutoImport
            anywhere in this component; the negative-grep assertions in the
            audit-render integration test enforce that contract. -->
+      <label class="checkbox-row">
+        <input type="checkbox" bind:checked={editIsOwnedByMe} />
+        <span>This is my own channel</span>
+      </label>
       <label class="checkbox-row">
         <input type="checkbox" bind:checked={editAutoImport} />
         <span>Auto-import</span>
@@ -339,6 +357,19 @@
     font-weight: var(--font-weight-semibold);
     word-break: break-word;
     min-width: 0;
+  }
+  /* Phase 3.0 post-build: real YouTube channel title shown alongside the
+   * user's own displayName, in the muted secondary tone. Same visual idea
+   * as FeedCard's channel chip — surfaces the cache row from
+   * youtube_channels so /sources is honest about what each tracking
+   * record points at. */
+  .channel-title {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+    padding: 2px var(--space-sm);
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    white-space: nowrap;
   }
   /* Plan 02.1-33: edit-form replaces the previous .rename inline strip.
      The form is now its own row in the .row column flex with a fields

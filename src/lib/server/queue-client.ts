@@ -81,3 +81,39 @@ export async function stopBoss(boss: PgBoss): Promise<void> {
   await boss.stop({ wait: true, graceful: true, timeout: 60_000 });
   logger.info("pg-boss stopped");
 }
+
+// Phase 3.0 Plan 04 — process-wide boss singleton for the APP role.
+//
+// Worker / scheduler entrypoints own their own boss instance via createBoss
+// (and call stopBoss at SIGTERM). The APP role is different: HTTP handlers
+// occasionally need to enqueue jobs (refresh-poll, account-purge-now), but
+// each request booting its own boss would burn one Postgres connection per
+// request and throw on graceful shutdown when no one calls stopBoss.
+//
+// `getBoss()` lazily boots ONE boss per process, memoizes the promise, and
+// returns the same instance on every subsequent call. The first call pays
+// the boss startup cost; subsequent calls resolve synchronously from the
+// memoized promise.
+//
+// Lifecycle: the singleton lives until process exit. The hooks.server.ts
+// process-exit hook (Plan 02-08 + Phase 1 graceful-drain pattern) is the
+// only place that should call `stopBossSingleton()` — wiring is left to a
+// later plan; the unwinding-at-exit path is acceptable for now because
+// pg-boss's own pool drains on Node's process exit.
+let bossSingleton: Promise<PgBoss> | null = null;
+
+export async function getBoss(): Promise<PgBoss> {
+  if (bossSingleton === null) {
+    bossSingleton = createBoss();
+  }
+  return bossSingleton;
+}
+
+/**
+ * Reset the memoized singleton. Test-only helper — production code never
+ * calls this. Vitest test files reset between test cases so a fresh boss
+ * is booted (or the same one is reused) on demand.
+ */
+export function resetBossSingletonForTesting(): void {
+  bossSingleton = null;
+}
