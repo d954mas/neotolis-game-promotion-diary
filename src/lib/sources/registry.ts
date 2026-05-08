@@ -1,11 +1,13 @@
 // SourceRegistry — Phase 03.0.1 D-14. Map<SourceKind, DataSourceAdapter>
-// populated by explicit per-source barrel imports. Plan 01 ships an
-// EMPTY map; Plan 03 wires `youtubeChannelAdapter` once the YouTube
-// adapter is moved into sources/youtube/server/.
+// populated by explicit per-source barrel imports.
+//
+// Plan 03 wires youtube_channel; future Reddit / Twitter / Telegram /
+// Discord adapters land in Phase 03.1+ and add entries here.
 import type { DataSourceAdapter, SourceKind } from "./adapter.js";
+import { youtubeAdapter } from "./youtube/server/index.js";
 
 const registry = new Map<SourceKind, DataSourceAdapter>([
-  // Plan 03: ["youtube_channel", youtubeAdapter],
+  ["youtube_channel", youtubeAdapter],
 ]);
 
 export function getAdapter(kind: SourceKind): DataSourceAdapter {

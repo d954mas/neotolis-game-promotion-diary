@@ -36,8 +36,8 @@ vi.mock("../../src/lib/server/services/youtube-quota-tracker.js", async (importO
 const adapterMock = {
   pollStatsByVideoId: vi.fn(),
 };
-vi.mock("../../src/lib/server/integrations/youtube-channel-adapter.js", () => ({
-  youtubeChannelAdapter: {
+vi.mock("../../src/lib/sources/youtube/server/index.js", () => ({
+  youtubeAdapter: {
     kind: "youtube_channel" as const,
     pollContent: vi.fn(),
     pollStats: vi.fn(),

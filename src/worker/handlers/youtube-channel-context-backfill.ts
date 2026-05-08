@@ -43,7 +43,7 @@ import {
   pickKeyForJob,
   youtubeQuotaUser,
 } from "../../lib/server/services/youtube-quota-tracker.js";
-import { chargedFetch } from "../../lib/server/integrations/youtube-http.js";
+import { chargedFetch } from "../../lib/sources/youtube/server/http.js";
 import { env } from "../../lib/server/config/env.js";
 import { parseYoutubeUrl } from "../../lib/server/services/youtube-url.js";
 import { logger } from "../../lib/server/logger.js";
@@ -134,7 +134,7 @@ const VIDEOS_LIST_RESPONSE = z.object({
   ),
 });
 
-// fetchWithTimeout + chargedFetch moved to integrations/youtube-http.ts
+// fetchWithTimeout + chargedFetch moved to $lib/sources/youtube/server/http.ts
 // (post-build review 2026-05-08) so youtube-metadata.ts and
 // youtube-channel-adapter.ts share the same charge-on-Response +
 // throttle-audit-on-403-quotaExceeded contract.

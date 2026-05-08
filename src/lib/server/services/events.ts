@@ -68,7 +68,7 @@ import { events } from "../db/schema/events.js";
 import { eventGames } from "../db/schema/event-games.js";
 import { games } from "../db/schema/games.js";
 import { dataSources } from "../db/schema/data-sources.js";
-import type { EventKind } from "../integrations/data-source-adapter.js";
+import type { EventKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";

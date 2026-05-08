@@ -42,20 +42,25 @@
 //   - 404                                      → status:'not_found'
 //   - other 4xx/5xx                            → status:'auth_error' (placeholder; caller logs + retries)
 
-import { pickKeyForJob, youtubeQuotaUser } from "../services/youtube-quota-tracker.js";
-import { chargedFetch, fetchWithTimeout } from "./youtube-http.js";
+import { pickKeyForJob, youtubeQuotaUser } from "$lib/server/services/youtube-quota-tracker.js";
+import { chargedFetch, fetchWithTimeout } from "./http.js";
 import { z } from "zod";
-import { env } from "../config/env.js";
-import { logger } from "../logger.js";
+import { env } from "$lib/server/config/env.js";
+import { logger } from "$lib/server/logger.js";
 import type {
+  AdapterContext,
+  AdapterObservability,
   DataSourceAdapter,
+  EventKind,
+  MinimalBoss,
+  ParsedUrl,
   PickedKey,
   PollableEvent,
   PollableSource,
   RawEvent,
   SnapshotStatus,
   StatsSnapshot,
-} from "./data-source-adapter.js";
+} from "$lib/sources/adapter.js";
 
 // Plan 03.0-03's canonical pickKeyForJob + hashApiKeyId are imported above
 // (services/youtube-quota-tracker.ts). The Wave-1-cross-plan inline copies
@@ -135,7 +140,7 @@ function durationToSeconds(iso: string): number {
   return Number(h ?? 0) * 3600 + Number(m ?? 0) * 60 + Number(s ?? 0);
 }
 
-// fetchWithTimeout + chargedFetch live in integrations/youtube-http.ts
+// fetchWithTimeout + chargedFetch live in $lib/sources/youtube/server/http.ts
 // (post-build review 2026-05-08). This adapter exposes TWO YouTube
 // methods, each with a different accounting boundary:
 //
@@ -188,7 +193,7 @@ async function classifyError(resp: Response): Promise<SnapshotStatus> {
  * This module does not pick the policy; it just sends what it's given.
  *
  * `picked` is the pre-resolved key from the caller's `pickKeyForJob` — see
- * the PickedKey jsdoc on data-source-adapter.ts. The adapter no longer
+ * the PickedKey jsdoc on $lib/sources/adapter.ts. The adapter no longer
  * picks on its own (post-build review 2026-05-07): without threading,
  * the worker would advance roundRobinIdx once at handler start AND the
  * adapter would advance it again per chunk, leaving the
@@ -372,4 +377,54 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
     }
     return result;
   },
+
+  // ---- Phase 03.0.1 widened-interface stubs ----
+  //
+  // Real implementations land in:
+  //   - parseUrl: Plan 06 (URL detection iterate-registry refactor)
+  //   - observability: Plan 08 (observability API + reservoir + needs_reconnect schema)
+  //   - registerQueues / scheduleCronTicks: Plans 05 and 07
+  //   - backfillSource: Plan 10 (refresh-content endpoint + backfill.user queue)
+  //
+  // Stubs throw rather than return defaults so premature use surfaces loudly.
+  // canRefreshPoll IS implemented now because cross-source services/refresh-poll.ts
+  // will call it in Plan 06.
+  parseUrl(_url: string): ParsedUrl | null {
+    throw notYetImplemented("06", "parseUrl");
+  },
+  observability: {
+    auth: {
+      kind: "operator-static-key",
+      requiresUserSetup: false,
+      // Plan 08 reads env.SERVICE_YOUTUBE_API_KEYS.length > 0; stubbed true
+      // to keep the contract surface honest pre-implementation.
+      isOperatorConfigured: true,
+    },
+    quota: {
+      getDailyStats: async () => {
+        throw notYetImplemented("08", "observability.quota.getDailyStats");
+      },
+      getRecentAudit: async () => {
+        throw notYetImplemented("08", "observability.quota.getRecentAudit");
+      },
+    },
+  } satisfies AdapterObservability,
+  registerQueues: async (_boss: MinimalBoss) => {
+    throw notYetImplemented("05", "registerQueues");
+  },
+  scheduleCronTicks: async (_boss: MinimalBoss) => {
+    throw notYetImplemented("07", "scheduleCronTicks");
+  },
+  backfillSource: async (_source: PollableSource, _ctx: AdapterContext) => {
+    throw notYetImplemented("10", "backfillSource");
+  },
+  canRefreshPoll: (eventKind: EventKind): boolean => eventKind === "youtube_video",
 };
+
+function notYetImplemented(planNumber: string, method: string): Error {
+  return new Error(
+    `youtubeAdapter.${method} not yet implemented — landed in Plan ${planNumber}. ` +
+      `If you see this in production, an upstream caller hit the new contract surface ` +
+      `before its implementation wave. File a bug.`,
+  );
+}

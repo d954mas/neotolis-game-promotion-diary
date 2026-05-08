@@ -55,8 +55,11 @@
 // returned `Response | null` — superseded in fifth-pass review
 // 2026-05-08; the comment block above had drifted from the type.)
 
-import { incrementUsage, markThrottleTransition } from "../services/youtube-quota-tracker.js";
-import { logger } from "../logger.js";
+import {
+  incrementUsage,
+  markThrottleTransition,
+} from "$lib/server/services/youtube-quota-tracker.js";
+import { logger } from "$lib/server/logger.js";
 
 /**
  * Bare fetch with abort-on-timeout. Default 30s — covers Google's worst-

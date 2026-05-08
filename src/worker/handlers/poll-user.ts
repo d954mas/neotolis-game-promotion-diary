@@ -20,7 +20,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../../lib/server/db/client.js";
 import { events } from "../../lib/server/db/schema/events.js";
-import { youtubeChannelAdapter } from "../../lib/server/integrations/youtube-channel-adapter.js";
+import { youtubeAdapter as youtubeChannelAdapter } from "../../lib/sources/youtube/server/index.js";
 import { writeSnapshot } from "../../lib/server/services/youtube-snapshot-writer.js";
 import { pickKeyForJob } from "../../lib/server/services/youtube-quota-tracker.js";
 import { logger } from "../../lib/server/logger.js";
@@ -64,7 +64,7 @@ export async function handlePollUser(job: {
   }
 
   // Pre-resolve and thread through the adapter (see PickedKey jsdoc on
-  // data-source-adapter.ts). With one key in env this matches the
+  // $lib/sources/adapter.ts). With one key in env this matches the
   // previous behavior; with N≥2 keys this is the load-bearing fix that
   // keeps the youtube_service_quota_usage row keyed under the same
   // apiKeyId the adapter actually used.

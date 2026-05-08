@@ -41,10 +41,10 @@ process.env.YOUTUBE_API_BASE_URL = "https://yt-mock.test/youtube/v3";
 process.env.SERVICE_YOUTUBE_API_KEYS = "test-operator-key-A";
 
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { youtubeChannelAdapter as YoutubeChannelAdapterT } from "../../src/lib/server/integrations/youtube-channel-adapter.js";
+import type { youtubeAdapter as YoutubeChannelAdapterT } from "../../src/lib/sources/youtube/server/index.js";
 
 // Post-build review 2026-05-08 (4th pass): pollContent now flows through
-// chargedFetch (integrations/youtube-http.ts), which calls incrementUsage
+// chargedFetch ($lib/sources/youtube/server/http.ts), which calls incrementUsage
 // + markThrottleTransition. Both touch the DB, which these unit tests
 // neither have nor want. Stub them; pickKeyForJob / youtubeQuotaUser /
 // hashApiKeyId stay real because the test asserts on their outputs (the
@@ -70,8 +70,8 @@ type Adapter = typeof YoutubeChannelAdapterT;
 async function loadAdapter(): Promise<Adapter> {
   vi.resetModules();
   process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
-  const mod = await import("../../src/lib/server/integrations/youtube-channel-adapter.js");
-  return mod.youtubeChannelAdapter;
+  const mod = await import("../../src/lib/sources/youtube/server/index.js");
+  return mod.youtubeAdapter;
 }
 
 let youtubeChannelAdapter: Adapter;
@@ -163,7 +163,7 @@ function makePlaylistItemsResponse(
 const fakeUserId = "user-test-123";
 // Post-build review (2026-05-07): adapter signatures take a pre-resolved
 // PickedKey from the caller (worker / route layer) instead of picking
-// internally — see PickedKey jsdoc in data-source-adapter.ts. Tests
+// internally — see PickedKey jsdoc in $lib/sources/adapter.ts. Tests
 // supply this fixture; the API key string is never asserted on the wire
 // (it is sent in the URL `key=` parameter; tests only assert presence).
 const fakePicked = { apiKey: "test-operator-key-A", apiKeyId: "fakekey0" };

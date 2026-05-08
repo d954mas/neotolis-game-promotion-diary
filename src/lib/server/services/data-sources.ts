@@ -34,7 +34,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db, type Tx } from "../db/client.js";
 import { dataSources } from "../db/schema/data-sources.js";
-import type { SourceKind } from "../integrations/data-source-adapter.js";
+import type { SourceKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";

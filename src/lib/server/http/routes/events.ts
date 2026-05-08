@@ -78,7 +78,7 @@ import {
 import { requestRefreshPoll } from "../../services/refresh-poll.js";
 import { AppError } from "../../services/errors.js";
 import { parseIngestUrl } from "../../services/url-parser.js";
-import type { EventKind } from "../../integrations/data-source-adapter.js";
+import type { EventKind } from "$lib/sources/adapter.js";
 import { toEventDto, loadGameIdsForEvent, mapEventsToDtos } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";

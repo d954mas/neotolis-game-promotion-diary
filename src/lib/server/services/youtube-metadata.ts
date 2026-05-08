@@ -16,7 +16,7 @@
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { pickKeyForJob, youtubeQuotaUser } from "./youtube-quota-tracker.js";
-import { chargedFetch } from "../integrations/youtube-http.js";
+import { chargedFetch } from "$lib/sources/youtube/server/http.js";
 import { db } from "../db/client.js";
 import { youtubeVideos, youtubeMetadataFetchLog } from "../db/schema/index.js";
 import { env } from "../config/env.js";

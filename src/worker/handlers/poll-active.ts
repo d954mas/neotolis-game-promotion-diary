@@ -40,7 +40,7 @@
 // quota tracker's running counter may not yet show 9500 (response lag /
 // fairness-shard early reject).
 
-import { youtubeChannelAdapter } from "../../lib/server/integrations/youtube-channel-adapter.js";
+import { youtubeAdapter as youtubeChannelAdapter } from "../../lib/sources/youtube/server/index.js";
 import { writeSnapshot } from "../../lib/server/services/youtube-snapshot-writer.js";
 import {
   pickKeyForJob,
@@ -61,7 +61,7 @@ export async function handlePollActive(job: {
   }
 
   // Pre-resolve the API key for this batch and thread it through the
-  // adapter — see PickedKey jsdoc on data-source-adapter.ts. With one key
+  // adapter — see PickedKey jsdoc on $lib/sources/adapter.ts. With one key
   // in env this matches the previous behavior; with N≥2 keys this is the
   // load-bearing fix that keeps the youtube_service_quota_usage row keyed
   // under the same apiKeyId the adapter actually used for the HTTP.

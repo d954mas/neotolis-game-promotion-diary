@@ -15,7 +15,7 @@
 // keeps the two ticks in different buckets — they should never overlap in
 // time, but a constant-string fingerprint per tier is the cleanest contract).
 
-import { youtubeChannelAdapter } from "../../lib/server/integrations/youtube-channel-adapter.js";
+import { youtubeAdapter as youtubeChannelAdapter } from "../../lib/sources/youtube/server/index.js";
 import { writeSnapshot } from "../../lib/server/services/youtube-snapshot-writer.js";
 import {
   pickKeyForJob,
@@ -36,7 +36,7 @@ export async function handlePollCold(job: {
   }
 
   // Pre-resolve and thread through (see PickedKey jsdoc on
-  // data-source-adapter.ts) — keeps the worker's quota row keyed under
+  // $lib/sources/adapter.ts) — keeps the worker's quota row keyed under
   // the same apiKeyId the adapter actually used for the HTTP.
   const picked = pickKeyForJob();
   if (!picked) {
