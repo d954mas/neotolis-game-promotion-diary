@@ -70,6 +70,15 @@ export const dataSources = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    // Phase 03.0.1 Plan 08 — D-13 AdapterError surface. Updated by worker
+    // handlers when an AdapterError of category operator-issue / permanent /
+    // not-found is caught against this source. `transient` and
+    // `rate-limited` errors do NOT touch these columns (transient retries
+    // via pg-boss; rate-limited is a service-wide signal, not a
+    // per-source one). Migration: drizzle/0022_phase03_01_data_sources_error_columns.sql.
+    needsReconnect: boolean("needs_reconnect").notNull().default(false),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    lastErrorKind: text("last_error_kind"),
   },
   (t) => ({
     userIdIdx: index("data_sources_user_id_idx").on(t.userId),

@@ -241,6 +241,15 @@ export interface DataSourceDto {
   // been resolved yet, and for any DTO projected outside the /feed loader
   // (other call sites just pass it through unchanged).
   channelTitle: string | null;
+  // Phase 03.0.1 Plan 08 — D-13 AdapterError surface fields. Operational
+  // metadata (NOT secrets — no envelope-encryption strip applies). The
+  // /sources/[id] page renders a "Reconnect required" banner when
+  // needsReconnect=true, and a "Last error: <kind> @ <time>" badge when
+  // lastErrorAt is non-null. Future Phase 6+ adds a Reconnect CTA that
+  // resets needsReconnect once credentials are refreshed.
+  needsReconnect: boolean;
+  lastErrorAt: Date | null;
+  lastErrorKind: string | null;
 }
 
 export function toDataSourceDto(r: DataSourceRow): DataSourceDto {
@@ -257,6 +266,9 @@ export function toDataSourceDto(r: DataSourceRow): DataSourceDto {
     updatedAt: r.updatedAt,
     deletedAt: r.deletedAt,
     channelTitle: null,
+    needsReconnect: r.needsReconnect,
+    lastErrorAt: r.lastErrorAt,
+    lastErrorKind: r.lastErrorKind,
   };
 }
 
