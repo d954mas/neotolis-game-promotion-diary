@@ -38,7 +38,7 @@
 // eslint-plugin-tenant-scope/no-unfiltered-tenant-query flags drift.
 
 import { and, eq, isNull, gte, count, sql } from "drizzle-orm";
-import { db, type DB } from "../db/client.js";
+import { db, type DbOrTx, type Tx } from "../db/client.js";
 import { games } from "../db/schema/games.js";
 import { dataSources } from "../db/schema/data-sources.js";
 import { events } from "../db/schema/events.js";
@@ -52,10 +52,6 @@ export type QuotaKind =
   | "data_sources"
   | "events_per_day"
   | "youtube_metadata_fetches_per_day";
-
-// Drizzle transaction parameter type — `tx` inside `db.transaction(async tx =>
-// {...})`. Same surface as `DB` for `select`/`execute`/`insert`.
-export type DbOrTx = DB | Parameters<Parameters<DB["transaction"]>[0]>[0];
 
 const LIMITS: Record<QuotaKind, number> = {
   games: env.LIMIT_GAMES_PER_USER,
@@ -141,7 +137,7 @@ export async function withQuotaGuard<T>(
   userId: string,
   kind: QuotaKind,
   ipAddress: string,
-  fn: (tx: DbOrTx) => Promise<T>,
+  fn: (tx: Tx) => Promise<T>,
 ): Promise<T> {
   // Capture the metadata the audit needs IF the guard fires; the audit
   // itself runs in `finally` after the tx releases its pool connection.

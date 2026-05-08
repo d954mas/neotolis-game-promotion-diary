@@ -32,7 +32,7 @@
 // so the security signal lands even if the UPDATE later fails.
 
 import { and, eq, isNull } from "drizzle-orm";
-import { db } from "../db/client.js";
+import { db, type Tx } from "../db/client.js";
 import { dataSources } from "../db/schema/data-sources.js";
 import type { SourceKind } from "../integrations/data-source-adapter.js";
 import { writeAudit } from "../audit.js";
@@ -137,54 +137,35 @@ function validateHandleUrl(handleUrl: string): void {
 // The cause-chain walker shape and the depth=5 bound stay the same — the
 // only change is the import surface.
 
-// Tx-scoped reader; matches withQuotaGuard's `DbOrTx` so this helper accepts
-// either the live db handle or the inner tx. The duplicate gate calls it
-// with `tx` so the SELECT runs UNDER the per-user advisory lock and sees
-// any concurrent INSERT that landed first.
-type DbReader = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
-
 /**
- * Channel-level duplicate gate (post-build review 2026-05-08, 7th pass).
+ * Channel-level duplicate gate. MUST run inside a withQuotaGuard tx (per-
+ * user advisory lock held) — the type narrows to `Tx` so a misuse with
+ * the bare `db` handle is impossible at compile time.
  *
- * Looks up every (userId, channelId) row, classifies, and throws the
- * appropriate AppError. Uses `dbCtx` so the caller can pass a transaction
- * handle — running this UNDER the withQuotaGuard advisory lock is the
- * race-fix: two concurrent POSTs with the same channelId but different
- * handleUrls used to both pass a pre-tx check and INSERT separately,
- * because the DB-level partial unique covers (user_id, handle_url) only.
+ * Why this gate exists: the DB-level partial unique covers
+ * (user_id, handle_url) WHERE deleted_at IS NULL. It does NOT cover
+ * (user_id, channel_id) — two different handle URLs that resolve to the
+ * SAME channel (e.g. /channel/UC… vs /@handle vs short link) would both
+ * INSERT cleanly. This helper closes that gap by matching on the
+ * resolved channel_id.
  *
- * Three-state policy:
- *   1. Active row exists                        → duplicate_source
- *   2. Any tombstone within RETENTION_DAYS      → duplicate_source_soft_deleted
- *      (named after the most recent recoverable tombstone — that is the
+ * Policy (three states, fetch-all + classify):
+ *   1. Active row for this channel exists       → duplicate_source
+ *   2. Any tombstone within RETENTION_DAYS       → duplicate_source_soft_deleted
+ *      (error metadata names the MOST RECENT recoverable tombstone — the
  *      row Restore would target on /sources)
- *   3. Only past-retention tombstones (or none) → fall through (caller INSERTs)
+ *   3. Only past-retention tombstones (or none) → fall through; caller INSERTs
  *
- * History of bugs in this gate (review trail):
- *   - Original ORDER BY ASC + LIMIT 1: NULLS LAST defaulted, tombstone won
- *     over active row when both existed. Comment said the opposite.
- *   - 3rd pass: relaxed for past-retention tombstones to break the
- *     restore_expired ↔ duplicate_source_soft_deleted deadlock — but
- *     stacked on the wrong-NULL-position bug, opening an exploit where
- *     the gate was bypassed even when an active row coexisted.
- *   - 5th pass: switched to ASC NULLS FIRST so active wins. Missed the
- *     multi-tombstone case where one tombstone was past retention and
- *     another was within retention.
- *   - 6th pass: switched to fetch-all + classify in JS (this shape).
- *   - 7th pass: moved into withQuotaGuard's tx so concurrent same-channel
- *     POSTs with different handle URLs serialise on the per-user advisory
- *     lock and the second sees the first's INSERT.
- *
- * The DB-level partial unique on (user_id, handle_url) WHERE deleted_at
- * IS NULL handles the SAME-handle-URL race; this gate handles the
- * SAME-channel-different-handle-URL race that the partial unique cannot.
+ * The fetch-all + JS classify shape is deliberate: encoding the policy in
+ * SQL ordering is fragile (NULLS LAST/FIRST + LIMIT 1 hides the actual
+ * three-state semantics). JS reads top-to-bottom and matches the spec.
  */
-async function assertNoChannelConflict(
-  dbCtx: DbReader,
+export async function assertNoChannelConflict(
+  tx: Tx,
   userId: string,
   resolvedChannelId: string,
 ): Promise<void> {
-  const existing = await dbCtx
+  const existing = await tx
     .select()
     .from(dataSources)
     .where(and(eq(dataSources.userId, userId), eq(dataSources.channelId, resolvedChannelId)));
@@ -202,7 +183,7 @@ async function assertNoChannelConflict(
 
   // youtubeChannels is a public-data table (no userId column); the
   // ESLint allowlist for tenant-scope covers this read.
-  const cacheRow = await dbCtx
+  const cacheRow = await tx
     .select({ channelTitle: youtubeChannels.channelTitle })
     .from(youtubeChannels)
     .where(eq(youtubeChannels.channelId, resolvedChannelId))
@@ -307,30 +288,19 @@ export async function createSource(
     // resolved channel_id back to data_sources.
   }
 
-  // Race-free, deadlock-safe quota path (Codex P2.1 + post-fix). withQuotaGuard
-  // takes a per-user advisory lock, runs the count + INSERT in one tx, and
-  // emits the quota.limit_hit audit AFTER the tx releases its pool connection.
-  //
-  // Channel-duplicate gate moved INSIDE the lock (post-build review 2026-05-08,
-  // 7th pass): two concurrent POSTs with the same channelId but different
-  // handleUrls (e.g. /channel/UC… vs /@handle) used to slip past a pre-tx
-  // check because both saw "no rows" before either INSERTed, and the DB-level
-  // partial unique covers (user_id, handle_url) only — not (user_id,
-  // channel_id). Running the SELECT against `tx` (after the advisory lock
-  // serialises per-user) means the second request sees the first's
-  // freshly-inserted row and throws duplicate_source.
+  // Race-free, deadlock-safe quota path. withQuotaGuard takes a per-user
+  // advisory lock, runs the quota count + caller-INSERT in one tx, and
+  // emits the quota.limit_hit audit AFTER the tx releases its connection.
   //
   // Throw order inside the closure:
-  //   1. withQuotaGuard's own quota check (current >= limit → quota_exceeded)
-  //   2. assertNoChannelConflict (active row → duplicate_source;
-  //      within-retention tombstone → duplicate_source_soft_deleted;
-  //      past-retention-only or none → fall through)
-  //   3. INSERT
+  //   1. withQuotaGuard's quota check (current >= limit → quota_exceeded)
+  //   2. assertNoChannelConflict (channel-id duplicate, only when channel
+  //      is resolved synchronously — see catch block below for the
+  //      handle-only path)
+  //   3. INSERT (DB-level partial unique catches handle_url duplicates)
   //
-  // For tenants at quota cap with a duplicate request, quota_exceeded fires
-  // first — that is louder + audit-emitted, and the user fixes their cap
-  // before they see the second issue. Pre-7th-pass the duplicate fired
-  // first; the UX shift is acceptable (quota state is the bigger problem).
+  // For a tenant at quota cap with a duplicate request, quota_exceeded
+  // fires first; UX-wise the user fixes the cap, then sees the duplicate.
   let row: DataSourceRow | undefined;
   try {
     row = await withQuotaGuard(userId, "data_sources", ipAddress, async (tx) => {
@@ -354,12 +324,18 @@ export async function createSource(
     });
   } catch (err) {
     if (isPgUniqueViolation(err)) {
-      // Channel-id branch above caught most "same channel" cases
-      // synchronously. This branch fires for /@handle / /c/ / /user/ URLs
-      // where channelId resolution is deferred to the worker — duplicate
-      // by handle_url alone (e.g. operator pasted the exact same /@handle
-      // URL twice). Surface the handle_url so the operator can spot it
-      // in /sources.
+      // Two duplicate-detection boundaries:
+      //   - assertNoChannelConflict (above, inside tx): catches "same
+      //     channel under different handle URLs" when channelId is
+      //     resolved synchronously (input.channelId set, OR /channel/UC…
+      //     URL parsed locally, OR /watch URL → fetchVideoMetadataByUrl
+      //     resolved). Throws AppError(409) with explicit error codes.
+      //   - This catch (DB-level partial unique on user_id + handle_url
+      //     WHERE deleted_at IS NULL): catches "exact same handle URL
+      //     twice" — e.g. /@handle pasted twice. The handle path defers
+      //     channel-id resolution to the worker, so the channel-gate
+      //     above can't see it; only the handle-level unique catches it.
+      // 422 (not 409) by Phase 2.1 precedent for raw-PG-unique paths.
       throw new AppError("You already track this YouTube channel", "duplicate_source", 422, {
         handle_url: canonicalHandleUrl,
       });

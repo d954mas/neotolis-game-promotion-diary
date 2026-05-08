@@ -7,6 +7,7 @@ import {
   updateSource,
   softDeleteSource,
   restoreSource,
+  assertNoChannelConflict,
 } from "../../src/lib/server/services/data-sources.js";
 import { toDataSourceDto } from "../../src/lib/server/dto.js";
 import { db } from "../../src/lib/server/db/client.js";
@@ -778,5 +779,212 @@ describe("Plan 02.1-06: /api/sources HTTP boundary", () => {
     });
     expect(res.status).toBe(422);
     expect((await res.json()).error).toBe("retention_expired");
+  });
+});
+
+/**
+ * Direct state-machine tests for the channel-duplicate gate.
+ *
+ * createSource exercises the gate end-to-end (covered by tests above);
+ * this suite isolates the gate from URL parsing, withQuotaGuard, and the
+ * INSERT path so a state-machine regression surfaces with a precise
+ * error message instead of a long stack starting from
+ * `parseYoutubeChannelUrl`.
+ *
+ * The gate's contract (three states):
+ *   1. Active row exists                        → duplicate_source
+ *   2. Any tombstone within RETENTION_DAYS      → duplicate_source_soft_deleted
+ *   3. Only past-retention tombstones (or none) → fall through (no throw)
+ *
+ * The function MUST run inside a tx — the type narrows to `Tx`. We open
+ * one with db.transaction(async (tx) => …) here just to satisfy the
+ * type; the test fixtures do not require advisory-lock semantics.
+ */
+describe("assertNoChannelConflict — state machine (direct)", () => {
+  const uniq = (): string => Math.random().toString(36).slice(2, 10);
+  const CHANNEL = (): string => `UC${uniq()}${uniq()}padd0`.slice(0, 24);
+
+  async function withTx<T>(
+    fn: (tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => Promise<T>,
+  ): Promise<T> {
+    return db.transaction(fn);
+  }
+
+  it("(1) zero rows → no throw", async () => {
+    const u = await seedUserDirectly({ email: `gate-empty-${uniq()}@test.local` });
+    const channelId = CHANNEL();
+    await expect(
+      withTx((tx) => assertNoChannelConflict(tx, u.id, channelId)),
+    ).resolves.toBeUndefined();
+  });
+
+  it("(2) single active row → duplicate_source", async () => {
+    const u = await seedUserDirectly({ email: `gate-active-${uniq()}@test.local` });
+    const channelId = CHANNEL();
+    await db.insert(dataSources).values({
+      userId: u.id,
+      kind: "youtube_channel",
+      handleUrl: `https://www.youtube.com/channel/${channelId}`,
+      channelId,
+      isOwnedByMe: true,
+      autoImport: true,
+      metadata: {},
+    });
+    await expect(
+      withTx((tx) => assertNoChannelConflict(tx, u.id, channelId)),
+    ).rejects.toMatchObject({
+      code: "duplicate_source",
+      status: 409,
+    });
+  });
+
+  it("(3) single within-retention tombstone → duplicate_source_soft_deleted", async () => {
+    const u = await seedUserDirectly({ email: `gate-recent-${uniq()}@test.local` });
+    const channelId = CHANNEL();
+    await db.insert(dataSources).values({
+      userId: u.id,
+      kind: "youtube_channel",
+      handleUrl: `https://www.youtube.com/channel/${channelId}`,
+      channelId,
+      isOwnedByMe: true,
+      autoImport: true,
+      metadata: {},
+      // 5 days ago — well within default RETENTION_DAYS=60.
+      deletedAt: new Date(Date.now() - 5 * 86_400_000),
+    });
+    await expect(
+      withTx((tx) => assertNoChannelConflict(tx, u.id, channelId)),
+    ).rejects.toMatchObject({
+      code: "duplicate_source_soft_deleted",
+      status: 409,
+    });
+  });
+
+  it("(4) single past-retention tombstone → no throw", async () => {
+    const u = await seedUserDirectly({ email: `gate-past-${uniq()}@test.local` });
+    const channelId = CHANNEL();
+    await db.insert(dataSources).values({
+      userId: u.id,
+      kind: "youtube_channel",
+      handleUrl: `https://www.youtube.com/channel/${channelId}`,
+      channelId,
+      isOwnedByMe: true,
+      autoImport: true,
+      metadata: {},
+      // 90 days ago — past default RETENTION_DAYS=60.
+      deletedAt: new Date(Date.now() - 90 * 86_400_000),
+    });
+    await expect(
+      withTx((tx) => assertNoChannelConflict(tx, u.id, channelId)),
+    ).resolves.toBeUndefined();
+  });
+
+  it("(5) active + tombstone → active wins → duplicate_source", async () => {
+    const u = await seedUserDirectly({ email: `gate-both-${uniq()}@test.local` });
+    const channelId = CHANNEL();
+    // Tombstone first (recent — would block on its own).
+    await db.insert(dataSources).values({
+      userId: u.id,
+      kind: "youtube_channel",
+      handleUrl: `https://www.youtube.com/channel/${channelId}-tomb`,
+      channelId,
+      isOwnedByMe: true,
+      autoImport: true,
+      metadata: {},
+      deletedAt: new Date(Date.now() - 3 * 86_400_000),
+    });
+    // Active.
+    await db.insert(dataSources).values({
+      userId: u.id,
+      kind: "youtube_channel",
+      handleUrl: `https://www.youtube.com/channel/${channelId}-active`,
+      channelId,
+      isOwnedByMe: true,
+      autoImport: true,
+      metadata: {},
+    });
+    await expect(
+      withTx((tx) => assertNoChannelConflict(tx, u.id, channelId)),
+    ).rejects.toMatchObject({
+      code: "duplicate_source",
+      status: 409,
+    });
+  });
+
+  it("(6) recent + old tombstones → recent wins → duplicate_source_soft_deleted naming the recent row", async () => {
+    const u = await seedUserDirectly({ email: `gate-mixed-${uniq()}@test.local` });
+    const channelId = CHANNEL();
+    // Old tombstone (past retention).
+    await db.insert(dataSources).values({
+      userId: u.id,
+      kind: "youtube_channel",
+      handleUrl: `https://www.youtube.com/channel/${channelId}-old`,
+      channelId,
+      isOwnedByMe: true,
+      autoImport: true,
+      metadata: {},
+      deletedAt: new Date(Date.now() - 90 * 86_400_000),
+    });
+    // Recent tombstone (within retention).
+    const [recent] = await db
+      .insert(dataSources)
+      .values({
+        userId: u.id,
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/channel/${channelId}-recent`,
+        channelId,
+        isOwnedByMe: true,
+        autoImport: true,
+        metadata: {},
+        deletedAt: new Date(Date.now() - 5 * 86_400_000),
+      })
+      .returning();
+    await expect(
+      withTx((tx) => assertNoChannelConflict(tx, u.id, channelId)),
+    ).rejects.toMatchObject({
+      code: "duplicate_source_soft_deleted",
+      status: 409,
+      metadata: expect.objectContaining({ source_id: recent!.id }),
+    });
+  });
+
+  it("(7) only past-retention tombstones → no throw", async () => {
+    const u = await seedUserDirectly({ email: `gate-allpast-${uniq()}@test.local` });
+    const channelId = CHANNEL();
+    for (const daysAgo of [70, 90, 120]) {
+      await db.insert(dataSources).values({
+        userId: u.id,
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/channel/${channelId}-${daysAgo}`,
+        channelId,
+        isOwnedByMe: true,
+        autoImport: true,
+        metadata: {},
+        deletedAt: new Date(Date.now() - daysAgo * 86_400_000),
+      });
+    }
+    await expect(
+      withTx((tx) => assertNoChannelConflict(tx, u.id, channelId)),
+    ).resolves.toBeUndefined();
+  });
+
+  it("(8) cross-tenant: another user's row for same channelId is invisible", async () => {
+    const userA = await seedUserDirectly({ email: `gate-tcA-${uniq()}@test.local` });
+    const userB = await seedUserDirectly({ email: `gate-tcB-${uniq()}@test.local` });
+    const channelId = CHANNEL();
+    // User A has an active row for this channel.
+    await db.insert(dataSources).values({
+      userId: userA.id,
+      kind: "youtube_channel",
+      handleUrl: `https://www.youtube.com/channel/${channelId}`,
+      channelId,
+      isOwnedByMe: true,
+      autoImport: true,
+      metadata: {},
+    });
+    // User B asks the gate for the same channel — must NOT see userA's row.
+    await expect(
+      withTx((tx) => assertNoChannelConflict(tx, userB.id, channelId)),
+    ).resolves.toBeUndefined();
   });
 });
