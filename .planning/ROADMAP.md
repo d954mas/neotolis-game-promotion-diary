@@ -208,6 +208,16 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd:plan-phase 03.0.1 to break down)
 
+### Phase 03.0.2: Dependency Refresh (INSERTED)
+
+**Goal:** Bump remaining major-version deps that don't unblock 03.0.1 but accumulate as technical debt. Tracked in #23. Each major lands as its own dedicated PR per AGENTS.md "Locked stack versions" practice. In scope: ESLint 10 + plugins, TypeScript 6, pino 10, @hono/node-server 2, eslint-plugin-svelte 3 + svelte-eslint-parser 1.6, oauth2-mock-server 8, dotenv 17, pg-boss 12 (likely first, ahead of this phase). Out of scope: drizzle-orm / better-auth / pg load-bearing pins — separate dedicated PRs if/when bumped.
+**Requirements**: N/A (technical debt — no user-facing requirements)
+**Depends on:** Phase 03.0.1
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 03.0.2 to break down)
+
 ### Phase 3.1: Reddit Adapter
 *DECIMAL SPLIT — scope split decided during /gsd:discuss-phase 03 on 2026-05-05.*
 
