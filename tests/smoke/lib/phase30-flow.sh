@@ -291,18 +291,22 @@ phase30_polling_smoke() {
   fi
   log "(P3.0) PASS — /api/admin/quota → 404 (parity preserved)"
 
-  # /admin/quota (SvelteKit page) must also resolve to 404 — the page
-  # loader fetches /api/admin/quota and converts API 404 to error(404)
-  # which renders the standard SvelteKit 404 page (Plan 03.0-13 §
-  # "404 contract").
-  log "(P3.0) /admin/quota HTML page with empty allowlist must 404"
+  # /admin (SvelteKit page) must also resolve to 404 — the layout server
+  # loader (post-build review 2026-05-08) explicitly checks
+  # ADMIN_EMAIL_ALLOWLIST and throws error(404) so non-allowlisted users
+  # do NOT see the admin breadcrumb chrome that +layout.svelte would
+  # otherwise render around the child error page. Note: we test /admin
+  # (the actual page route), not /admin/quota (a non-existent nested
+  # path that would return 404 trivially regardless of any allowlist
+  # gate — vacuous-pass).
+  log "(P3.0) /admin HTML page with empty allowlist must 404"
   local admin_html_status
   admin_html_status=$(curl -s -o /dev/null -w '%{http_code}' \
-    -H "cookie: $session_cookie" "$app_url/admin/quota")
+    -H "cookie: $session_cookie" "$app_url/admin")
   if [[ "$admin_html_status" != "404" ]]; then
-    fail "(P3.0) /admin/quota HTML expected 404, got $admin_html_status"
+    fail "(P3.0) /admin HTML expected 404, got $admin_html_status"
   fi
-  log "(P3.0) PASS — /admin/quota HTML → 404"
+  log "(P3.0) PASS — /admin HTML → 404"
 
   # ----- 6. SIGTERM 60s graceful drain (Phase 1 D-22 inherited) -----
   # Phase 1 D-22 invariant: worker honors SIGTERM with up to 60s graceful

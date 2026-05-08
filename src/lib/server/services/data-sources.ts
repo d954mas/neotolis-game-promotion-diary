@@ -236,29 +236,43 @@ export async function createSource(
       .orderBy(dataSources.deletedAt) // active row first if both exist
       .limit(1);
     if (existing[0]) {
-      const cacheRow = await db
-        .select({ channelTitle: youtubeChannels.channelTitle })
-        .from(youtubeChannels)
-        .where(eq(youtubeChannels.channelId, resolvedChannelId))
-        .limit(1);
-      const channelTitle = cacheRow[0]?.channelTitle ?? null;
-      const niceName = channelTitle ?? existing[0].displayName ?? existing[0].handleUrl;
+      // Past retention → tombstone is purge-eligible (cron worker will
+      // sweep it). Skip the duplicate gate so the user can re-add the
+      // channel without being stuck in the "restore says retention_expired,
+      // re-add says duplicate_source_soft_deleted" deadlock (post-build
+      // review 2026-05-08). The partial unique index on (user_id,
+      // handle_url) WHERE deleted_at IS NULL allows the new INSERT;
+      // the orphan tombstone row eventually gets purged by Plan 09's
+      // purge.daily worker. Active duplicates and within-retention
+      // tombstones still throw — those are recoverable via Restore.
       const isSoftDeleted = existing[0].deletedAt !== null;
-      throw new AppError(
-        isSoftDeleted
-          ? `You previously deleted "${niceName}". Open /sources, click "Recently deleted", and press Restore — that brings back the source plus all its history.`
-          : `You already track "${niceName}"`,
-        isSoftDeleted ? "duplicate_source_soft_deleted" : "duplicate_source",
-        409,
-        {
-          handle_url: existing[0].handleUrl,
-          source_id: existing[0].id,
-          channel_id: resolvedChannelId,
-          channel_title: channelTitle,
-          display_name: existing[0].displayName,
-          soft_deleted: isSoftDeleted,
-        },
-      );
+      const pastRetention =
+        isSoftDeleted &&
+        existing[0].deletedAt!.getTime() < Date.now() - env.RETENTION_DAYS * 86_400_000;
+      if (!pastRetention) {
+        const cacheRow = await db
+          .select({ channelTitle: youtubeChannels.channelTitle })
+          .from(youtubeChannels)
+          .where(eq(youtubeChannels.channelId, resolvedChannelId))
+          .limit(1);
+        const channelTitle = cacheRow[0]?.channelTitle ?? null;
+        const niceName = channelTitle ?? existing[0].displayName ?? existing[0].handleUrl;
+        throw new AppError(
+          isSoftDeleted
+            ? `You previously deleted "${niceName}". Open /sources, click "Recently deleted", and press Restore — that brings back the source plus all its history.`
+            : `You already track "${niceName}"`,
+          isSoftDeleted ? "duplicate_source_soft_deleted" : "duplicate_source",
+          409,
+          {
+            handle_url: existing[0].handleUrl,
+            source_id: existing[0].id,
+            channel_id: resolvedChannelId,
+            channel_title: channelTitle,
+            display_name: existing[0].displayName,
+            soft_deleted: isSoftDeleted,
+          },
+        );
+      }
     }
   }
 

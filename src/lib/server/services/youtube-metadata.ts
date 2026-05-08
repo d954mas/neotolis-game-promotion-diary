@@ -188,10 +188,13 @@ export async function fetchVideoMetadataByUrl(
   apiUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
   const resp = await fetchWithTimeout(apiUrl);
-  // Charge quota only on a 2xx — Google bills 0 units for 4xx/5xx.
-  if (resp.ok) {
-    await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
-  }
+  // Charge quota on EVERY response (post-build review 2026-05-08).
+  // Google's quota guide: "all API requests, including invalid requests,
+  // incur at least a one-point quota cost." Charging only on 2xx
+  // under-counted and tripped the 80%/95% throttle gates later than the
+  // operator's real envelope. Network failures (no Response object) get
+  // zero — fetchWithTimeout would have thrown above.
+  await incrementUsage({ apiKeyId: picked.apiKeyId, units: 1 });
   if (!resp.ok) {
     logger.warn({ videoId, status: resp.status }, "youtube-metadata: videos.list non-2xx");
     throw new AppError("YouTube API error", "upstream_error", 502, {

@@ -189,8 +189,8 @@ async function maybeEnqueueChannelContextBackfill(
   authorUrl: string,
 ): Promise<void> {
   try {
-    const channelId = extractChannelIdFromAuthorUrl(authorUrl);
-    if (channelId === null) return;
+    const parsed = extractChannelIdFromAuthorUrl(authorUrl);
+    if (parsed === null) return;
 
     // Cache lookup against the public-data table (no user_id — see schema
     // module header). A row exists if a previous paste of any tenant's video
@@ -202,13 +202,16 @@ async function maybeEnqueueChannelContextBackfill(
     // resolved-from URL into handle_aliases after channels.list?forHandle
     // returns the UC id; subsequent pastes of the same handle URL find
     // the row directly here, no enqueue, no quota.
+    //
+    // Lookup key is the parsed value regardless of kind: for channelId we
+    // hit the PK; for handleUrl we hit the alias array.
     const cached = await db
       .select({ channelId: youtubeChannels.channelId })
       .from(youtubeChannels)
       .where(
         or(
-          eq(youtubeChannels.channelId, channelId),
-          sql`${channelId} = ANY(${youtubeChannels.handleAliases})`,
+          eq(youtubeChannels.channelId, parsed.value),
+          sql`${parsed.value} = ANY(${youtubeChannels.handleAliases})`,
         ),
       )
       .limit(1);
@@ -224,14 +227,23 @@ async function maybeEnqueueChannelContextBackfill(
     // 30-day window for handle URLs is no longer needed and would just
     // blackout failed-backfill recovery for a month — operator visibility
     // wins over a paranoid quota safety net.
-    await boss.send(
-      QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL,
-      { channelId, userId },
-      {
-        singletonKey: channelId,
-        singletonHours: 24,
-      },
-    );
+    //
+    // Discriminated payload (post-build review 2026-05-08): @handle URLs
+    // go into job.data.handleUrl (worker resolves via forHandle), UC ids
+    // go into job.data.channelId (worker calls channels.list?id directly).
+    // Previously both were stuffed into channelId — the worker's
+    // `if (!channelId && handleUrl)` resolution branch skipped because
+    // channelId was the URL string (truthy), and the subsequent
+    // channels.list?id=<full URL> returned no items, silently failing
+    // every @handle backfill from the ingest path.
+    const payload =
+      parsed.kind === "channelId"
+        ? { channelId: parsed.value, userId }
+        : { handleUrl: parsed.value, userId };
+    await boss.send(QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL, payload, {
+      singletonKey: parsed.value,
+      singletonHours: 24,
+    });
   } catch (err) {
     logger.warn(
       { authorUrl, err: String((err as Error)?.message ?? err) },
@@ -243,25 +255,40 @@ async function maybeEnqueueChannelContextBackfill(
 /**
  * Extract a stable channel identifier from a YouTube oEmbed `author_url`.
  *
- * Returns:
- *   - the UC… channelId for /channel/UC… URLs (24-char canonical id);
- *   - the trimmed authorUrl itself for /@handle and /c/customname URLs
- *     (used as the singletonKey + cache lookup key — the backfill handler
- *     resolves the canonical UC id and writes it into the cache);
- *   - null for URLs that don't match either shape (silent skip — backfill
- *     is best-effort).
+ * Returns a discriminated union so the caller routes the value into the
+ * correct backfill-job field:
+ *   - { kind: "channelId", value }: /channel/UC… URLs gave us the canonical
+ *     24-char id; the backfill worker can call channels.list?id=<UC…> directly.
+ *   - { kind: "handleUrl", value }: /@handle, /c/customname, /user/legacy —
+ *     the worker must resolve handle→channelId via channels.list?forHandle
+ *     before it can fetch uploads. value is the trimmed authorUrl itself
+ *     (the worker re-parses it).
+ *   - null: URL didn't match either shape — silent skip (backfill is best-
+ *     effort).
+ *
+ * Post-build review 2026-05-08: previously this function returned a single
+ * string and the caller put it into the job's `channelId` field. For
+ * @handle URLs, that meant `channelId = "https://www.youtube.com/@x"` —
+ * the worker's resolution branch (`if (!channelId && handleUrl)`) skipped
+ * because channelId was truthy, so it called channels.list?id=<full URL>
+ * which Google ignored, and every @handle backfill silently failed.
  */
-function extractChannelIdFromAuthorUrl(authorUrl: string): string | null {
+function extractChannelIdFromAuthorUrl(
+  authorUrl: string,
+): { kind: "channelId"; value: string } | { kind: "handleUrl"; value: string } | null {
   const m = /\/channel\/(UC[A-Za-z0-9_-]{20,})/.exec(authorUrl);
-  if (m !== null) return m[1] ?? null;
-  // /@handle or /c/customname — use the URL as the singletonKey identifier.
+  if (m !== null) {
+    const id = m[1];
+    return id ? { kind: "channelId", value: id } : null;
+  }
+  // /@handle or /c/customname — let the worker resolve via forHandle.
   // Validate it's a YouTube URL with a non-empty path so we don't enqueue
   // backfill jobs for garbage author_urls.
   try {
     const u = new URL(authorUrl);
     if (u.hostname !== "www.youtube.com" && u.hostname !== "youtube.com") return null;
     if (u.pathname === "" || u.pathname === "/") return null;
-    return authorUrl;
+    return { kind: "handleUrl", value: authorUrl };
   } catch {
     return null;
   }

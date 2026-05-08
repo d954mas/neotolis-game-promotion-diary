@@ -148,9 +148,17 @@ async function fetchWithTimeout(url: URL, timeoutMs = 30_000): Promise<Response>
 // callsites:
 //
 //   1. Charge `units` against the operator's youtube_service_quota_usage
-//      counter ONLY on a 2xx (Google bills 0 quota for 4xx/5xx — charging
-//      otherwise drifts the counter and may spuriously trip the 80%/95%
-//      throttle gates).
+//      counter on EVERY response (post-build review 2026-05-08): Google's
+//      quota guide states "all API requests, including invalid requests,
+//      incur at least a one-point quota cost." 4xx and 5xx responses
+//      consume quota the same as 2xx; the only zero-cost case is a
+//      network failure that never returns a Response object.
+//      The earlier 2xx-only gate under-counted and made the 80%/95%
+//      throttle gates trip later than the operator's real envelope.
+//      Auth-error 401 IS still charged here (the underlying poll
+//      handlers separately suppress the unit for auth_error via the
+//      adapter's status mapping; backfill has no equivalent suppression
+//      and falls back to the conservative "charge always" rule).
 //   2. On 403 with errors[0].reason='quotaExceeded' (the only reason
 //      Google returns for envelope exhaustion), emit a single
 //      quota.service_throttled audit row via markThrottleTransition.
@@ -171,10 +179,10 @@ async function chargedFetch(
   ctx: Record<string, unknown> & { logTag: string },
 ): Promise<Response | null> {
   const resp = await fetchWithTimeout(url);
-  if (resp.ok) {
-    await incrementUsage({ apiKeyId: picked.apiKeyId, units });
-    return resp;
-  }
+  // Charge BEFORE the ok-branch: quota is consumed regardless of status.
+  await incrementUsage({ apiKeyId: picked.apiKeyId, units });
+
+  if (resp.ok) return resp;
 
   // Quota-exhaustion signal — emit the throttle audit row before bailing
   // so /admin/quota observes the transition point. Body parse is .clone()

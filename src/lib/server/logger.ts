@@ -56,6 +56,16 @@ export const REDACT_PATHS = [
   "*.dekTag",
   "*.kek_version",
   "*.kekVersion",
+  // Phase 3.0 post-build review (2026-05-08) — operator's YouTube API key
+  // envelope. Lives plaintext in the parsed env-singleton (env.ts splits
+  // SERVICE_YOUTUBE_API_KEYS on comma into a string[]). scrubKekFromEnv()
+  // wipes it from process.env after boot, but the env-singleton itself
+  // retains it for the lifetime of the process — a stray
+  // logger.info({ env }) or logger.info({ config }) would otherwise leak
+  // every operator key. Both shapes covered: the env-key (uppercase
+  // snake) and the singleton field name (lowerCamel).
+  "*.SERVICE_YOUTUBE_API_KEYS",
+  "*.serviceYoutubeApiKeys",
   "req.headers.authorization",
   "req.headers.cookie",
 ];
