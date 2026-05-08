@@ -265,6 +265,105 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     });
   });
 
+  it("post-build review 2026-05-08 (4th pass): createSource with resolvedChannelId allows re-add when soft-deleted source is past RETENTION_DAYS", async () => {
+    // Regression for the third-pass review's #4 finding (deadlock loop).
+    // Before the fix, a soft-deleted source past RETENTION_DAYS hit:
+    //   - restoreSource → retention_expired (window closed)
+    //   - createSource → duplicate_source_soft_deleted (gate threw on
+    //     ANY tombstone with the same channelId, regardless of age)
+    // The user could neither restore nor re-add — UX deadlock.
+    //
+    // The fix relaxes the duplicate gate: tombstones older than
+    // RETENTION_DAYS are purge-eligible and skip the duplicate check,
+    // so a fresh INSERT lands on the partial unique
+    // (user_id, handle_url) WHERE deleted_at IS NULL. The orphan
+    // tombstone gets cleaned up by Plan 09's purge.daily worker
+    // eventually.
+    //
+    // The earlier regression test (post-build review 3rd pass) covered
+    // the handle-only path. This one specifically hits the
+    // resolvedChannelId branch, which is where the deadlock actually
+    // lived in production: the duplicate gate at data-sources.ts:235
+    // looks up by channel_id, not handle_url.
+    const userA = await seedUserDirectly({
+      email: `ds-resolved-tombstone-${Math.random().toString(36).slice(2, 8)}@test.local`,
+    });
+    const channelId = "UCresolved01resolved01reso";
+
+    // Create source with channel_id pre-resolved (no parseYoutubeChannelUrl
+    // round-trip — exercises the duplicate gate's resolved path directly).
+    const src = await createSource(
+      userA.id,
+      {
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/channel/${channelId}`,
+        channelId,
+      },
+      "127.0.0.1",
+    );
+    // Soft-delete and push deletedAt past RETENTION_DAYS (default 60).
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 86_400_000);
+    await db
+      .update(dataSources)
+      .set({ deletedAt: ninetyDaysAgo })
+      .where(and(eq(dataSources.userId, userA.id), eq(dataSources.id, src.id)));
+
+    // Re-add must succeed — past retention, the tombstone no longer
+    // blocks. The new row uses a distinct handleUrl so the partial
+    // unique on (user_id, handle_url) WHERE deleted_at IS NULL lets it
+    // through (the old row's handleUrl is still in use, but its
+    // deletedAt is non-null so the partial unique excludes it).
+    const resurrected = await createSource(
+      userA.id,
+      {
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/channel/${channelId}-v2`,
+        channelId,
+      },
+      "127.0.0.1",
+    );
+    expect(resurrected.id).not.toBe(src.id);
+    expect(resurrected.channelId).toBe(channelId);
+    expect(resurrected.deletedAt).toBeNull();
+
+    // Within-retention case still throws — paint a fresh tombstone
+    // (deletedAt = now) and verify createSource still rejects with the
+    // duplicate_source_soft_deleted error (the recoverable-via-Restore
+    // path is unchanged).
+    const userB = await seedUserDirectly({
+      email: `ds-resolved-recent-${Math.random().toString(36).slice(2, 8)}@test.local`,
+    });
+    const recentChannelId = "UCrecent01recent01recent01";
+    const recentSrc = await createSource(
+      userB.id,
+      {
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/channel/${recentChannelId}`,
+        channelId: recentChannelId,
+      },
+      "127.0.0.1",
+    );
+    await db
+      .update(dataSources)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(dataSources.userId, userB.id), eq(dataSources.id, recentSrc.id)));
+
+    await expect(
+      createSource(
+        userB.id,
+        {
+          kind: "youtube_channel",
+          handleUrl: `https://www.youtube.com/channel/${recentChannelId}-v2`,
+          channelId: recentChannelId,
+        },
+        "127.0.0.1",
+      ),
+    ).rejects.toMatchObject({
+      code: "duplicate_source_soft_deleted",
+      status: 409,
+    });
+  });
+
   it("Plan 02.1-04: updateSource toggling autoImport=false writes audit_action='source.toggled_auto_import' with from/to metadata", async () => {
     const userA = await seedUserDirectly({ email: "ds13@test.local" });
     const src = await createSource(

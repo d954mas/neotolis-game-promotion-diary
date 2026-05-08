@@ -80,16 +80,22 @@ export async function handleRehabUnavailable(job: { id: string }): Promise<void>
     picked,
   );
 
-  // Charge 1 unit per batched call (videos.list batches up to 50 ids in one
-  // HTTP). REHAB_BATCH_LIMIT=50 fits in one call → 1 unit per tick.
-  // Charge on first billable video; subsequent videos pass 0.
-  const billable = snapshots.some((s) => s.status !== "auth_error");
+  // Charge 1 unit per batched call (videos.list batches up to 50 ids in
+  // one HTTP). REHAB_BATCH_LIMIT=50 fits in one call → 1 unit per tick.
+  // Charge on the FIRST result regardless of status — Google's quota
+  // guide: "all API requests, including invalid requests, incur at least
+  // a one-point quota cost." Subsequent videos pass 0. Post-build review
+  // 2026-05-08 (fourth pass): poll-active / poll-cold / poll-user were
+  // updated to drop the `auth_error` gate; rehab-unavailable was missed
+  // in that sweep and still under-counted on every fully-failed batch.
+  // The no-key path (pickKeyForJob → null) returns BEFORE this loop and
+  // still charges 0 because no HTTP was made.
   let chargedOnce = false;
   let recoveredCount = 0;
   for (let i = 0; i < videoIds.length; i++) {
     const videoId = videoIds[i]!;
     const snap = snapshots[i]!;
-    const unitsThisVideo = billable && !chargedOnce && snap.status !== "auth_error" ? 1 : 0;
+    const unitsThisVideo = !chargedOnce ? 1 : 0;
     if (unitsThisVideo === 1) chargedOnce = true;
     if (snap.status === "ok") recoveredCount += 1;
     try {

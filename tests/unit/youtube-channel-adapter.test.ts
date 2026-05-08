@@ -43,6 +43,23 @@ process.env.SERVICE_YOUTUBE_API_KEYS = "test-operator-key-A";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { youtubeChannelAdapter as YoutubeChannelAdapterT } from "../../src/lib/server/integrations/youtube-channel-adapter.js";
 
+// Post-build review 2026-05-08 (4th pass): pollContent now flows through
+// chargedFetch (integrations/youtube-http.ts), which calls incrementUsage
+// + markThrottleTransition. Both touch the DB, which these unit tests
+// neither have nor want. Stub them; pickKeyForJob / youtubeQuotaUser /
+// hashApiKeyId stay real because the test asserts on their outputs (the
+// quotaUser fingerprint, the apiKeyId-keyed fetch URL).
+vi.mock("../../src/lib/server/services/youtube-quota-tracker.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../src/lib/server/services/youtube-quota-tracker.js")
+  >("../../src/lib/server/services/youtube-quota-tracker.js");
+  return {
+    ...actual,
+    incrementUsage: vi.fn().mockResolvedValue(undefined),
+    markThrottleTransition: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
 type FetchFn = typeof fetch;
 type Adapter = typeof YoutubeChannelAdapterT;
 

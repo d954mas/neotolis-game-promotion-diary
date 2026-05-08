@@ -43,7 +43,7 @@
 //   - other 4xx/5xx                            → status:'auth_error' (placeholder; caller logs + retries)
 
 import { pickKeyForJob, youtubeQuotaUser } from "../services/youtube-quota-tracker.js";
-import { fetchWithTimeout } from "./youtube-http.js";
+import { chargedFetch, fetchWithTimeout } from "./youtube-http.js";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { logger } from "../logger.js";
@@ -135,16 +135,29 @@ function durationToSeconds(iso: string): number {
   return Number(h ?? 0) * 3600 + Number(m ?? 0) * 60 + Number(s ?? 0);
 }
 
-// fetchWithTimeout moved to integrations/youtube-http.ts (post-build
-// review 2026-05-08) so backfill + metadata + this adapter share one
-// timeout helper. The adapter intentionally does NOT use the higher-
-// level chargedFetch wrapper: quota counter increments are owned by
-// the writeSnapshot path (per-video unitsUsed accounting), and
-// throttle-audit emission is owned by the poll handlers via the
-// SnapshotStatus contract ("rate_limited" → caller calls
-// markThrottleTransition). Routing the adapter through chargedFetch
-// would double-charge (adapter +1 then writeSnapshot +1) — the lower-
-// level fetchWithTimeout is the right primitive here.
+// fetchWithTimeout + chargedFetch live in integrations/youtube-http.ts
+// (post-build review 2026-05-08). This adapter exposes TWO YouTube
+// methods, each with a different accounting boundary:
+//
+//   pollStatsBatch — used by poll-active / poll-cold / poll-user /
+//     rehab-unavailable, which charge quota via writeSnapshot's
+//     per-video `unitsUsed` accounting and emit throttle audits via
+//     the SnapshotStatus="rate_limited" path. This method MUST use the
+//     lower-level fetchWithTimeout — routing it through chargedFetch
+//     would double-charge (adapter +1 then writeSnapshot +1).
+//
+//   pollContent — auto-import path. No writeSnapshot equivalent at the
+//     caller side, so this method DOES use chargedFetch and accounts
+//     at the fetch boundary. (When auto-import lands as a worker
+//     handler, that handler trusts pollContent to charge.) This was
+//     surfaced by the fourth-pass review: pollContent's earlier
+//     fetchWithTimeout-only pattern would have been a future trap —
+//     auto-import quota burn would not land in
+//     youtube_service_quota_usage at all.
+//
+// classifyError stays as the SnapshotStatus mapper for pollStatsBatch's
+// caller-side audit. pollContent has no SnapshotStatus contract; it
+// just bails on non-2xx with an empty array.
 
 /** Map a non-2xx response to a SnapshotStatus. The body is read once; we tolerate
  *  malformed JSON by falling through to 'auth_error' (placeholder for 4xx/5xx
@@ -264,11 +277,11 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
     url.searchParams.set("key", picked.apiKey);
     url.searchParams.set("quotaUser", youtubeQuotaUser(source.userId));
 
-    const resp = await fetchWithTimeout(url);
-    if (!resp.ok) {
-      logger.warn({ status: resp.status, sourceId: source.id }, "playlistItems.list non-2xx");
-      return [];
-    }
+    const resp = await chargedFetch(url, picked, 1, {
+      sourceId: source.id,
+      logTag: "youtube-adapter: playlistItems.list",
+    });
+    if (!resp.ok) return [];
     const json = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await resp.json());
     const sinceMs = since.getTime();
     return json.items

@@ -14,8 +14,24 @@
 //     fact via writeSnapshot's status field, while pollContent (auto-
 //     import path, currently unused) had no recovery.
 //
-// Centralising here closes the inconsistency. Every YouTube API call now
-// flows through chargedFetch, which:
+// Two helpers, two accounting boundaries:
+//
+//   chargedFetch — the canonical wrapper. Charges quota + emits throttle
+//     audit at the fetch site. Used by every YouTube API call EXCEPT
+//     pollStatsBatch (the per-event stats poller). That single exception
+//     exists because pollStatsBatch's callers (poll-active / poll-cold
+//     / poll-user / rehab-unavailable) charge via writeSnapshot's
+//     per-video `unitsUsed` accounting and emit throttle audits via the
+//     SnapshotStatus="rate_limited" status path — routing pollStatsBatch
+//     through chargedFetch would double-charge. The accounting boundary
+//     for stats polling lives at the writeSnapshot tx; the accounting
+//     boundary for everything else (backfill, metadata, auto-import via
+//     pollContent) lives at the fetch site.
+//
+//   fetchWithTimeout — the lower-level primitive. Used by pollStatsBatch
+//     (the writeSnapshot-accounted path above) and nothing else.
+//
+// chargedFetch contract:
 //
 //   1. Charges `units` against youtube_service_quota_usage on EVERY
 //      Response. Per Google's quota guide: "all API requests, including

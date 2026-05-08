@@ -308,6 +308,19 @@ phase30_polling_smoke() {
   fi
   log "(P3.0) PASS — /admin HTML → 404"
 
+  # Anonymous /admin must also 404 — fourth-pass review noted that a
+  # 303 redirect to /login leaks the area's existence (the redirect
+  # shape "/admin → /login?next=/admin" tells an unauthenticated probe
+  # that /admin is a real route). Both anonymous and authenticated-
+  # non-allowlisted callers MUST get the same URL-not-found shape.
+  log "(P3.0) /admin HTML anonymous must 404 (no cookie)"
+  local admin_html_anon_status
+  admin_html_anon_status=$(curl -s -o /dev/null -w '%{http_code}' "$app_url/admin")
+  if [[ "$admin_html_anon_status" != "404" ]]; then
+    fail "(P3.0) /admin HTML anonymous expected 404, got $admin_html_anon_status"
+  fi
+  log "(P3.0) PASS — /admin HTML anonymous → 404"
+
   # ----- 6. SIGTERM 60s graceful drain (Phase 1 D-22 inherited) -----
   # Phase 1 D-22 invariant: worker honors SIGTERM with up to 60s graceful
   # drain (boss.stop wait+graceful timeout). Phase 3.0 adds the new
