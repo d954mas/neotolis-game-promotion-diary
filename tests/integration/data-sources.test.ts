@@ -274,11 +274,14 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     // The user could neither restore nor re-add — UX deadlock.
     //
     // The fix relaxes the duplicate gate: tombstones older than
-    // RETENTION_DAYS are purge-eligible and skip the duplicate check,
-    // so a fresh INSERT lands on the partial unique
-    // (user_id, handle_url) WHERE deleted_at IS NULL. The orphan
-    // tombstone gets cleaned up by Plan 09's purge.daily worker
-    // eventually.
+    // RETENTION_DAYS skip the duplicate check, so a fresh INSERT lands
+    // on the partial unique (user_id, handle_url) WHERE deleted_at IS
+    // NULL. The orphan tombstone row stays in data_sources for active
+    // users — purge.daily only sweeps tombstones owned by purged
+    // accounts, NOT soft-deleted rows of active users. Accumulation is
+    // bounded by user behaviour (a real operator does not delete +
+    // re-add the same channel hundreds of times); if it ever becomes a
+    // real cost a separate sweeper can be added.
     //
     // The earlier regression test (post-build review 3rd pass) covered
     // the handle-only path. This one specifically hits the

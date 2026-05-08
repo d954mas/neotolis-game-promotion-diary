@@ -31,7 +31,7 @@
 // `softDeleteSource` writes `source.removed` BEFORE the soft-delete UPDATE
 // so the security signal lands even if the UPDATE later fails.
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { dataSources } from "../db/schema/data-sources.js";
 import type { SourceKind } from "../integrations/data-source-adapter.js";
@@ -233,18 +233,34 @@ export async function createSource(
       .select()
       .from(dataSources)
       .where(and(eq(dataSources.userId, userId), eq(dataSources.channelId, resolvedChannelId)))
-      .orderBy(dataSources.deletedAt) // active row first if both exist
+      // Active row (deleted_at IS NULL) MUST be preferred over any
+      // tombstone. Postgres' default ASC ordering on a nullable column
+      // puts NULL LAST — so the previous comment "active row first" was
+      // false; the query returned the tombstone when both rows existed.
+      // Fixed in fifth-pass review 2026-05-08: explicit NULLS FIRST so an
+      // existing active source for this channel always wins the .limit(1).
+      // Without this, a flow that already produced one active source plus
+      // an expired tombstone (e.g. third-pass fix's "re-add past retention"
+      // path) could be re-tested and the gate would observe ONLY the
+      // tombstone, mark pastRetention=true, skip the duplicate check, and
+      // create a SECOND active source for the same channel under a
+      // different handle_url (the partial unique on (user_id, handle_url)
+      // WHERE deleted_at IS NULL would not catch it).
+      .orderBy(sql`${dataSources.deletedAt} ASC NULLS FIRST`)
       .limit(1);
     if (existing[0]) {
-      // Past retention → tombstone is purge-eligible (cron worker will
-      // sweep it). Skip the duplicate gate so the user can re-add the
-      // channel without being stuck in the "restore says retention_expired,
-      // re-add says duplicate_source_soft_deleted" deadlock (post-build
-      // review 2026-05-08). The partial unique index on (user_id,
-      // handle_url) WHERE deleted_at IS NULL allows the new INSERT;
-      // the orphan tombstone row eventually gets purged by Plan 09's
-      // purge.daily worker. Active duplicates and within-retention
-      // tombstones still throw — those are recoverable via Restore.
+      // Past retention → tombstone exists but the row is no longer
+      // recoverable via Restore (retention_expired error). Skip the
+      // duplicate gate so the user can re-add the channel without being
+      // stuck in a deadlock between Restore (retention_expired) and
+      // re-add (duplicate_source_soft_deleted). The partial unique on
+      // (user_id, handle_url) WHERE deleted_at IS NULL allows the new
+      // INSERT. Active duplicates and within-retention tombstones still
+      // throw — the recoverable-via-Restore path is unchanged. Note: the
+      // orphan tombstone row stays in data_sources for active users
+      // (purge.daily worker only sweeps tombstones owned by purged
+      // users, not soft-deleted rows of active users — Plan 09 may
+      // grow a separate sweeper if accumulation becomes a real cost).
       const isSoftDeleted = existing[0].deletedAt !== null;
       const pastRetention =
         isSoftDeleted &&

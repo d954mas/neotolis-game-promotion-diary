@@ -46,10 +46,14 @@
 //   3. Logs a structured warn line with caller-supplied `ctx` so log
 //      search finds non-2xx by jobId / channelId / videoId / handle.
 //
-// Returns the raw Response on 2xx so callers parse with their own zod
-// schema. Returns null on non-2xx so callers shape their own
-// continue/break/return locally — no exceptions thrown for status,
-// keeping the wrapper composition-friendly.
+// Returns the Response unconditionally (never throws on status, never
+// returns null). Callers inspect `.ok` and shape their own bail —
+// backfill uses return/break/continue, the adapter classifies into a
+// SnapshotStatus, the metadata service throws AppError(502). Keeping
+// the wrapper composition-friendly: status decisions live at the
+// callsite, not in the wrapper. (Earlier draft of this contract
+// returned `Response | null` — superseded in fifth-pass review
+// 2026-05-08; the comment block above had drifted from the type.)
 
 import { incrementUsage, markThrottleTransition } from "../services/youtube-quota-tracker.js";
 import { logger } from "../logger.js";
