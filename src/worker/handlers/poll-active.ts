@@ -110,16 +110,21 @@ export async function handlePollActive(job: {
   //
   // Quota cost: ONE batched videos.list call (1 quota unit regardless of
   // batch size up to 50 — VERIFIED via spike). Charge the unit on the FIRST
-  // billable video; subsequent videos pass unitsUsed=0. Counter sum =
-  // actual API cost. (auth_error / no-key paths still charge 0 — adapter
-  // never billed.)
-  const billable = snapshots.some((s) => s.status !== "auth_error");
+  // result regardless of status; subsequent videos pass unitsUsed=0. Per
+  // Google's quota guide ("all API requests, including invalid requests,
+  // incur at least a one-point quota cost"), auth_error and other non-2xx
+  // outcomes still consume the unit because the request reached YouTube.
+  // Post-build review 2026-05-08: previously this branch suppressed the
+  // unit on auth_error, under-counting the operator's real envelope by
+  // ~1 unit per failed batch. The no-key path (pickKeyForJob → null)
+  // still charges 0 — that branch returns BEFORE this loop and never
+  // makes an HTTP request.
   let rateLimitedSeen = false;
   let chargedOnce = false;
   for (let i = 0; i < videoIds.length; i++) {
     const videoId = videoIds[i]!;
     const snap = snapshots[i]!;
-    const unitsThisVideo = billable && !chargedOnce && snap.status !== "auth_error" ? 1 : 0;
+    const unitsThisVideo = !chargedOnce ? 1 : 0;
     if (unitsThisVideo === 1) chargedOnce = true;
     try {
       await writeSnapshot({

@@ -122,7 +122,12 @@ export async function handlePollUser(job: {
             }
           : null,
       apiKeyId: picked.apiKeyId,
-      unitsUsed: snap.status !== "auth_error" ? 1 : 0,
+      // Per Google's quota guide ("all API requests, including invalid
+      // requests, incur at least a one-point quota cost") every Response
+      // costs 1 unit — including auth_error and rate_limited. The no-key
+      // path returns at line 82 before this writeSnapshot runs, charging
+      // 0 there; reaching this point means an HTTP request was made.
+      unitsUsed: 1,
       status: snap.status,
     });
   } catch (err) {

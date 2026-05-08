@@ -70,14 +70,18 @@ export async function handlePollCold(job: {
   );
 
   // Quota counter inflation fix — see poll-active.ts header for rationale.
-  // 1 unit per batched videos.list call, charged on first billable video only.
-  const billable = snapshots.some((s) => s.status !== "auth_error");
+  // 1 unit per batched videos.list call, charged on the FIRST result
+  // regardless of status (per Google's quota guide: "all API requests,
+  // including invalid requests, incur at least a one-point quota cost").
+  // Post-build review 2026-05-08: previously this branch suppressed the
+  // unit on auth_error, under-counting the operator's real envelope by
+  // ~1 unit per failed batch. The no-key path returns BEFORE this loop.
   let rateLimitedSeen = false;
   let chargedOnce = false;
   for (let i = 0; i < videoIds.length; i++) {
     const videoId = videoIds[i]!;
     const snap = snapshots[i]!;
-    const unitsThisVideo = billable && !chargedOnce && snap.status !== "auth_error" ? 1 : 0;
+    const unitsThisVideo = !chargedOnce ? 1 : 0;
     if (unitsThisVideo === 1) chargedOnce = true;
     try {
       await writeSnapshot({
