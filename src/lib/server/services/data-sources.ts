@@ -137,6 +137,96 @@ function validateHandleUrl(handleUrl: string): void {
 // The cause-chain walker shape and the depth=5 bound stay the same — the
 // only change is the import surface.
 
+// Tx-scoped reader; matches withQuotaGuard's `DbOrTx` so this helper accepts
+// either the live db handle or the inner tx. The duplicate gate calls it
+// with `tx` so the SELECT runs UNDER the per-user advisory lock and sees
+// any concurrent INSERT that landed first.
+type DbReader = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Channel-level duplicate gate (post-build review 2026-05-08, 7th pass).
+ *
+ * Looks up every (userId, channelId) row, classifies, and throws the
+ * appropriate AppError. Uses `dbCtx` so the caller can pass a transaction
+ * handle — running this UNDER the withQuotaGuard advisory lock is the
+ * race-fix: two concurrent POSTs with the same channelId but different
+ * handleUrls used to both pass a pre-tx check and INSERT separately,
+ * because the DB-level partial unique covers (user_id, handle_url) only.
+ *
+ * Three-state policy:
+ *   1. Active row exists                        → duplicate_source
+ *   2. Any tombstone within RETENTION_DAYS      → duplicate_source_soft_deleted
+ *      (named after the most recent recoverable tombstone — that is the
+ *      row Restore would target on /sources)
+ *   3. Only past-retention tombstones (or none) → fall through (caller INSERTs)
+ *
+ * History of bugs in this gate (review trail):
+ *   - Original ORDER BY ASC + LIMIT 1: NULLS LAST defaulted, tombstone won
+ *     over active row when both existed. Comment said the opposite.
+ *   - 3rd pass: relaxed for past-retention tombstones to break the
+ *     restore_expired ↔ duplicate_source_soft_deleted deadlock — but
+ *     stacked on the wrong-NULL-position bug, opening an exploit where
+ *     the gate was bypassed even when an active row coexisted.
+ *   - 5th pass: switched to ASC NULLS FIRST so active wins. Missed the
+ *     multi-tombstone case where one tombstone was past retention and
+ *     another was within retention.
+ *   - 6th pass: switched to fetch-all + classify in JS (this shape).
+ *   - 7th pass: moved into withQuotaGuard's tx so concurrent same-channel
+ *     POSTs with different handle URLs serialise on the per-user advisory
+ *     lock and the second sees the first's INSERT.
+ *
+ * The DB-level partial unique on (user_id, handle_url) WHERE deleted_at
+ * IS NULL handles the SAME-handle-URL race; this gate handles the
+ * SAME-channel-different-handle-URL race that the partial unique cannot.
+ */
+async function assertNoChannelConflict(
+  dbCtx: DbReader,
+  userId: string,
+  resolvedChannelId: string,
+): Promise<void> {
+  const existing = await dbCtx
+    .select()
+    .from(dataSources)
+    .where(and(eq(dataSources.userId, userId), eq(dataSources.channelId, resolvedChannelId)));
+
+  const active = existing.find((r) => r.deletedAt === null);
+  const cutoffMs = Date.now() - env.RETENTION_DAYS * 86_400_000;
+  const recentTombstone = active
+    ? null
+    : (existing
+        .filter((r) => r.deletedAt !== null && r.deletedAt.getTime() >= cutoffMs)
+        .sort((a, b) => b.deletedAt!.getTime() - a.deletedAt!.getTime())[0] ?? null);
+
+  const blockingRow = active ?? recentTombstone;
+  if (!blockingRow) return;
+
+  // youtubeChannels is a public-data table (no userId column); the
+  // ESLint allowlist for tenant-scope covers this read.
+  const cacheRow = await dbCtx
+    .select({ channelTitle: youtubeChannels.channelTitle })
+    .from(youtubeChannels)
+    .where(eq(youtubeChannels.channelId, resolvedChannelId))
+    .limit(1);
+  const channelTitle = cacheRow[0]?.channelTitle ?? null;
+  const niceName = channelTitle ?? blockingRow.displayName ?? blockingRow.handleUrl;
+  const isSoftDeleted = blockingRow.deletedAt !== null;
+  throw new AppError(
+    isSoftDeleted
+      ? `You previously deleted "${niceName}". Open /sources, click "Recently deleted", and press Restore — that brings back the source plus all its history.`
+      : `You already track "${niceName}"`,
+    isSoftDeleted ? "duplicate_source_soft_deleted" : "duplicate_source",
+    409,
+    {
+      handle_url: blockingRow.handleUrl,
+      source_id: blockingRow.id,
+      channel_id: resolvedChannelId,
+      channel_title: channelTitle,
+      display_name: blockingRow.displayName,
+      soft_deleted: isSoftDeleted,
+    },
+  );
+}
+
 /**
  * Create a data_source for `userId`. Rejects schema-only kinds with
  * AppError(422 'kind_not_yet_functional') BEFORE any DB call (RESEARCH §5.4
@@ -217,100 +307,36 @@ export async function createSource(
     // resolved channel_id back to data_sources.
   }
 
-  // Phase 3.0 post-build (UAT 2026-05-06): when channel_id is resolved
-  // synchronously and a source already tracks that channel for this user
-  // (active OR soft-deleted), throw a clear 409 naming the channel.
-  // Distinct error codes per state so the form can render the right
-  // copy:
-  //   - active match     → "duplicate_source"           ("you already track X")
-  //   - soft-deleted     → "duplicate_source_soft_deleted" ("you used to
-  //                          track X — restore on /sources")
-  // Operator's UAT direction 2026-05-06: "по ошибке не очевидно что он
-  // есть и что он просто удалён" — the soft-deleted case was hitting the
-  // generic PG-unique 422 below, which didn't mention the channel name.
-  if (resolvedChannelId) {
-    // Fetch ALL rows for (userId, channelId), then explicitly classify in
-    // JS. Three-state logic that is easier to read than to encode in SQL
-    // ordering, and bulletproof against further drift like the bugs the
-    // 4th and 5th review passes caught:
-    //
-    //   1. Active row exists                        → duplicate_source
-    //   2. Any tombstone within RETENTION_DAYS      → duplicate_source_soft_deleted
-    //   3. Only past-retention tombstones (or none) → fall through, allow new INSERT
-    //
-    // History of this gate (post-build review trail):
-    //   - Original: ORDER BY deleted_at ASC LIMIT 1, comment "active first if
-    //     both exist". WRONG — Postgres ASC defaults to NULLS LAST, so a
-    //     tombstone won the limit when both rows existed.
-    //   - Third pass: relax for past-retention tombstone so a user can
-    //     re-add a channel after the Restore window closes (the deadlock
-    //     between retention_expired and duplicate_source_soft_deleted).
-    //   - Fourth pass: catch the wrong-NULL-position bug — switched to
-    //     ASC NULLS FIRST so active wins. Still missed the multi-tombstone
-    //     case below.
-    //   - Fifth pass (this): pick OLDEST tombstone (ASC) was wrong if a
-    //     newer within-retention tombstone also existed — the old one
-    //     would mark pastRetention=true and bypass the gate even though
-    //     Restore on the newer one would still work. Switched to
-    //     fetch-all + classify so the policy reads top-to-bottom in one
-    //     place.
-    //
-    // The partial unique on (user_id, handle_url) WHERE deleted_at IS NULL
-    // catches handle-level dupes at the DB layer; this gate adds channel-
-    // level dupe detection (one channel can be referenced by multiple
-    // handle URLs — /channel/UC… vs /@handle vs short link). Orphan
-    // tombstones stay in data_sources for active users; purge.daily only
-    // sweeps tombstones owned by purged accounts.
-    const existing = await db
-      .select()
-      .from(dataSources)
-      .where(and(eq(dataSources.userId, userId), eq(dataSources.channelId, resolvedChannelId)));
-
-    const active = existing.find((r) => r.deletedAt === null);
-    const cutoffMs = Date.now() - env.RETENTION_DAYS * 86_400_000;
-    const recentTombstone = active
-      ? null
-      : (existing
-          .filter((r) => r.deletedAt !== null && r.deletedAt.getTime() >= cutoffMs)
-          // Newest first so the error metadata names the most recent
-          // soft-delete (the row Restore would target on /sources).
-          .sort((a, b) => b.deletedAt!.getTime() - a.deletedAt!.getTime())[0] ?? null);
-
-    const blockingRow = active ?? recentTombstone;
-    if (blockingRow) {
-      const cacheRow = await db
-        .select({ channelTitle: youtubeChannels.channelTitle })
-        .from(youtubeChannels)
-        .where(eq(youtubeChannels.channelId, resolvedChannelId))
-        .limit(1);
-      const channelTitle = cacheRow[0]?.channelTitle ?? null;
-      const niceName = channelTitle ?? blockingRow.displayName ?? blockingRow.handleUrl;
-      const isSoftDeleted = blockingRow.deletedAt !== null;
-      throw new AppError(
-        isSoftDeleted
-          ? `You previously deleted "${niceName}". Open /sources, click "Recently deleted", and press Restore — that brings back the source plus all its history.`
-          : `You already track "${niceName}"`,
-        isSoftDeleted ? "duplicate_source_soft_deleted" : "duplicate_source",
-        409,
-        {
-          handle_url: blockingRow.handleUrl,
-          source_id: blockingRow.id,
-          channel_id: resolvedChannelId,
-          channel_title: channelTitle,
-          display_name: blockingRow.displayName,
-          soft_deleted: isSoftDeleted,
-        },
-      );
-    }
-    // Past-retention-only tombstones (or none) — fall through to INSERT.
-  }
-
   // Race-free, deadlock-safe quota path (Codex P2.1 + post-fix). withQuotaGuard
   // takes a per-user advisory lock, runs the count + INSERT in one tx, and
   // emits the quota.limit_hit audit AFTER the tx releases its pool connection.
+  //
+  // Channel-duplicate gate moved INSIDE the lock (post-build review 2026-05-08,
+  // 7th pass): two concurrent POSTs with the same channelId but different
+  // handleUrls (e.g. /channel/UC… vs /@handle) used to slip past a pre-tx
+  // check because both saw "no rows" before either INSERTed, and the DB-level
+  // partial unique covers (user_id, handle_url) only — not (user_id,
+  // channel_id). Running the SELECT against `tx` (after the advisory lock
+  // serialises per-user) means the second request sees the first's
+  // freshly-inserted row and throws duplicate_source.
+  //
+  // Throw order inside the closure:
+  //   1. withQuotaGuard's own quota check (current >= limit → quota_exceeded)
+  //   2. assertNoChannelConflict (active row → duplicate_source;
+  //      within-retention tombstone → duplicate_source_soft_deleted;
+  //      past-retention-only or none → fall through)
+  //   3. INSERT
+  //
+  // For tenants at quota cap with a duplicate request, quota_exceeded fires
+  // first — that is louder + audit-emitted, and the user fixes their cap
+  // before they see the second issue. Pre-7th-pass the duplicate fired
+  // first; the UX shift is acceptable (quota state is the bigger problem).
   let row: DataSourceRow | undefined;
   try {
     row = await withQuotaGuard(userId, "data_sources", ipAddress, async (tx) => {
+      if (resolvedChannelId) {
+        await assertNoChannelConflict(tx, userId, resolvedChannelId);
+      }
       const [r] = await tx
         .insert(dataSources)
         .values({
