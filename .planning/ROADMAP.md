@@ -198,15 +198,36 @@ Plans:
 **UI hint**: yes
 
 
-### Phase 03.0.1: source plugin architecture (INSERTED)
+### Phase 03.0.1: Source Plugin Architecture (INSERTED)
+*INSERTED 2026-05-08 — restructure Phase 03.0 YouTube polling pipeline into per-source plugin folders so future sources (Reddit/Twitter/Telegram/Discord/DTF/Pikabu) drop in as new sub-folders without editing cross-source plumbing. Behavioral identity preserved (existing 03.0 tests + smoke pass UNCHANGED); structural cleanup + standardized contract.*
 
-**Goal:** [Urgent work - to be planned]
-**Requirements**: TBD
-**Depends on:** Phase 03.0
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (run /gsd:plan-phase 03.0.1 to break down)
+**Goal**: All YouTube-prefixed code moved into `src/lib/sources/youtube/{server,ui}/` with co-located schema/http/quota/snapshot/handlers/route/UI; SourceRegistry dispatches by `source.kind` via `getAdapter` / `getAdapterUI`; widened `DataSourceAdapter` contract carries credentials/quota/observability mechanics inside the adapter; standardized 5-category `AdapterError` taxonomy + observability API on every adapter; generic `POST /api/sources/:id/refresh-content` endpoint + Pull-new-content UI button on `/sources/[id]`; `SOURCE-REFERENCE.md` sections 1-7 contributor guide. Per-kind queue topology (`youtube.poll.cron` with key-based schedules + `youtube.poll.user` + `youtube.backfill.user`). Operator-only credentials everywhere (Phase 6 trigger for per-user override).
+**Depends on**: Phase 03.0
+**Requirements**: No NEW requirements. Preserves POLL-01..06, INGEST-02..04, EVENTS-01..03, SOURCES-01..02, FEED-01 BEHAVIORALLY (existing 03.0 integration + smoke tests pass UNCHANGED is the load-bearing assertion). New artifacts (refresh-content endpoint, SOURCE-REFERENCE.md, AdapterError taxonomy, observability API, parseUrl-per-adapter, per-kind queues) are CONTEXT-driven deliverables (D-01..D-17).
+**Success Criteria** (what must be TRUE):
+  1. Every existing 03.0 integration + smoke test passes UNCHANGED — behavioral identity is the load-bearing gate.
+  2. `src/lib/sources/youtube/{server,ui}/` tree exists with all YouTube-specific schema, services, http, handlers, route, and UI mappers; cross-source plumbing (events.ts, data-sources.ts, ingest.ts, refresh-poll.ts, tier-resolver.ts, poll-eligibility.ts, audit.ts, audit-read.ts, purge-account.ts) STAYS at `src/lib/server/`.
+  3. SourceRegistry dispatches via `getAdapter(kind)` / `getAdapterUI(kind)`; cross-source code never switches on `source.kind`.
+  4. Widened DataSourceAdapter interface (`parseUrl` + `observability` + `registerQueues` + `scheduleCronTicks` + `backfillSource` + `canRefreshPoll`) implemented for `youtube_channel`; Reddit/Twitter/Telegram/Discord adapters land in Phase 03.1+.
+  5. AdapterError 5-category taxonomy (`transient` / `rate-limited` / `not-found` / `permanent` / `operator-issue`) wired into chargedFetch error mapping; `data_sources.needs_reconnect` / `last_error_at` / `last_error_kind` columns updated on operator-issue / permanent / not-found.
+  6. Observability API (`auth` + `getDailyStats` + `getRecentAudit`) per adapter; `/admin/quota` reads via the API instead of querying tables directly.
+  7. Per-kind queues live: `youtube.poll.cron` (Active+Cold via pg-boss v11+ key-based schedules), `youtube.poll.user`, `youtube.backfill.user`, `youtube.quota_reset`, `youtube.rehab`, `youtube.channel_context_backfill`. Old kind-agnostic queues (`poll.active` / `poll.cold` / `poll.user` / `scheduler.tick.*`) RETIRED via forward-only migration 0021.
+  8. `POST /api/sources/:id/refresh-content` endpoint exists; AGENTS.md invariants 1-4 honored (tenant scope, cross-tenant 404, anonymous-401 sweep, audit INSERT). `/sources/[id]` SvelteKit route hosts the "Pull new content" button.
+  9. `SOURCE-REFERENCE.md` describes the SHIPPED tree (not planned); sections 1-7 per D-17.
+**Plans**: 11 plans
+**Plan list**:
+- [ ] 03.0.1-01-test-scaffold-and-foundation-PLAN.md — Wave 0: 5 NEW test files (registry / url-routing / errors / card-props / api-sources-refresh-content) + foundation interfaces (sources/adapter.ts widened, errors.ts AdapterError taxonomy, registry skeleton, card-props, future-kinds)
+- [ ] 03.0.1-02-move-youtube-schemas-PLAN.md — Wave 1: `git mv` 5 YouTube schema files into sources/youtube/server/schema/; drizzle.config glob extension; cross-source barrel re-export — pnpm db:check no-diff
+- [ ] 03.0.1-03-move-adapter-and-http-PLAN.md — Wave 2: `git mv` adapter + http into sources/youtube/server/; delete legacy data-source-adapter.ts (superseded by widened interface); register youtubeAdapter in registry; full importer migration; widened-interface stubs throw NOT_YET_IMPLEMENTED
+- [ ] 03.0.1-04-move-youtube-services-PLAN.md — Wave 3: `git mv` 4 YouTube services (quota-tracker → quota.ts; snapshot-writer → snapshots.ts; youtube-url → url.ts; youtube-metadata → metadata.ts) into sources/youtube/server/; cross-source services preserved
+- [ ] 03.0.1-05-move-handlers-and-dispatch-via-registry-PLAN.md — Wave 4: `git mv` 6 worker handlers into sources/youtube/server/handlers/; refactor src/worker/index.ts to iterate allAdapters → adapter.registerQueues; youtubeAdapter.registerQueues real impl
+- [ ] 03.0.1-06-url-detection-iterate-registry-PLAN.md — Wave 5: youtubeAdapter.parseUrl real impl; parseAnyUrl router (D-15 first-match-wins); services/url-parser.ts orchestrator wrapper preserves Reddit deferral via detectFutureKind (RESEARCH.md SOTA divergence #3); youtube-metadata Hono route relocated
+- [ ] 03.0.1-07-per-kind-queue-topology-PLAN.md — Wave 6: per-kind queue rename (youtube.poll.cron with v11+ key-based schedules collapses Active+Cold; youtube.poll.user / youtube.backfill.user / youtube.rehab); migration 0021 retires orphan pg-boss state rows; scheduler iterates allAdapters
+- [ ] 03.0.1-08-observability-rate-budget-and-error-taxonomy-PLAN.md — Wave 7: youtubeAdapter.observability real impl; rate-budget reservoir via rate-limiter-flexible RateLimiterMemory (D-09 SOTA divergence #1); AdapterError 5-category taxonomy wired into chargedFetch; migration 0022 adds data_sources error columns
+- [ ] 03.0.1-09-ui-dual-tree-PLAN.md — Wave 8: sources/youtube/ui/card-props.ts (toCardProps mapper) + ui/server.ts (server-safe split per Pitfall 7) + ui/index.ts; universal EventCard.svelte shell; registry-ui.ts wired; 8+ card-props tests flip live
+- [ ] 03.0.1-10-refresh-content-endpoint-and-ui-button-PLAN.md — Wave 9: POST /api/sources/:id/refresh-content endpoint + youtube.backfill.user handler + RefreshContentButton.svelte + /sources/[id] SvelteKit route + 6 Paraglide keys + migration 0023 (audit_action enum); 7 integration tests flip live; MUST_BE_PROTECTED + tenant-scope sweeps extended
+- [ ] 03.0.1-11-source-reference-doc-PLAN.md — Wave 10: SOURCE-REFERENCE.md sections 1-7 (Overview / Folder structure / Step-by-step / Common patterns / Anti-patterns / Testing / Phase 6 future) + ROADMAP placeholder fill-in
+**UI hint**: yes
 
 ### Phase 03.0.2: Dependency Refresh (INSERTED)
 
@@ -288,6 +309,7 @@ Phases execute in numeric order: 1 → 2 → 2.1 → 2.2 → 3.0 → 3.1 → 3.2
 | 2.1. Architecture Realignment (INSERTED) | 34/34 | Signed off (verifier next) | 2026-04-30 — Plans 11-16 closed round-1 UAT gaps; Plans 17-20 closed round-2; Plans 21-26 closed round-3; Plans 27-34 closed round-4; Plans 35-39 closed round-5 (13 findings); Plan 39 inlined 16 round-6 polish iterations; Plan 10 sign-off paperwork closed 2026-04-30 |
 | 2.2. Ship to Prod (INSERTED) | 8/8 | Complete | 2026-05-04 — production deploy artifacts (compose / nginx / scripts / GHCR CI) + GDPR baseline (export / soft-delete / restore) + per-user quotas (race-free + pool-deadlock-safe). 5 HUMAN-UAT items pending live VPS validation per D-PRE. |
 | 3.0. Polling Pipeline — Plumbing + YouTube (DECIMAL SPLIT) | 14/14 | Build complete; pending CI smoke + manual UAT | 2026-05-06 — see 03.0-VERIFICATION.md (verdict: signed-off-pending-ci-and-uat) |
+| 03.0.1. Source Plugin Architecture (INSERTED) | 0/11 | Plan list ready (run /gsd:execute-phase 03.0.1) | - |
 | 3.1. Reddit Adapter (DECIMAL SPLIT) | 0/TBD | Not started | - |
 | 3.2. Steam Wishlist (DECIMAL SPLIT) | 0/TBD | Not started | - |
 | 4. Visualization | 0/TBD | Not started | - |
