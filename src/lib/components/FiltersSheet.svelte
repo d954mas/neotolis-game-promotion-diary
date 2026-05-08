@@ -220,6 +220,8 @@
     "auto_import.deferred",
     "poll.failed",
     "event.poll_refreshed",
+    // Phase 03.0.1 Plan 10 (migration 0023) — POST /api/sources/:id/refresh-content.
+    "source.refresh_content_requested",
   ] as const;
 
   function auditActionLabel(a: string): string {
@@ -291,6 +293,9 @@
         return m.audit_action_poll_failed();
       case "event.poll_refreshed":
         return m.audit_action_event_poll_refreshed();
+      // Phase 03.0.1 Plan 10 — see AuditRow.svelte for the lock-step contract.
+      case "source.refresh_content_requested":
+        return m.audit_action_source_refresh_content_requested();
       default:
         return a;
     }
