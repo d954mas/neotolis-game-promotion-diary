@@ -1,0 +1,39 @@
+// eventKindToSourceKind — Phase 03.0.1 Plan 09 D-03 bridge.
+//
+// Events carry an EventKind (`youtube_video`, `reddit_post`, ...). The
+// per-kind UI registry is keyed by SourceKind (`youtube_channel`,
+// `reddit_account`, ...). The /feed page (and /events/[id] in Phase 03.1+)
+// passes event.kind through this helper to resolve the SourceKind, then
+// calls getAdapterUI(sourceKind).toCardProps(event).
+//
+// Free-form kinds (`post`, `conference`, `talk`, `press`, `other`) and
+// the discord case which has no v0.1 polling path return null. Callers
+// that get null fall back to a generic CardProps mapper (currently
+// inline in the rendering component; future polish can centralize it).
+import type { EventKind, SourceKind } from "./adapter.js";
+
+export function eventKindToSourceKind(eventKind: EventKind): SourceKind | null {
+  switch (eventKind) {
+    case "youtube_video":
+      return "youtube_channel";
+    case "reddit_post":
+      return "reddit_account";
+    case "twitter_post":
+      return "twitter_account";
+    case "telegram_post":
+      return "telegram_channel";
+    case "discord_drop":
+      return "discord_server";
+    // Free-form / non-pollable kinds — no source kind to dispatch to.
+    case "post":
+      return null;
+    case "conference":
+      return null;
+    case "talk":
+      return null;
+    case "press":
+      return null;
+    case "other":
+      return null;
+  }
+}
