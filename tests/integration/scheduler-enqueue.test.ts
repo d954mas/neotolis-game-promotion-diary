@@ -152,11 +152,36 @@ describe("scheduler enqueue (Plan 03.0-09 + per-video refactor)", () => {
     expect(allSentVideoIds).not.toContain(videoId);
   });
 
-  it("auto_import=false data_sources are skipped (manual paste with source_id=NULL still polls)", async () => {
-    const u = await seedUserDirectly({ email: `sch-autoimp-${uniq()}@test.local` });
+  it("stats polling is per-video — source state (deletedAt, auto_import) does NOT gate eligibility", async () => {
+    // Post-build review 2026-05-09: stats polling decouples from source
+    // state. A video with at least one alive event IS eligible regardless
+    // of whether its source is soft-deleted or has auto_import=false. The
+    // gate the scheduler USED to apply on (deletedAt, auto_import) was a
+    // legacy carry-over from the per-event design; under the per-video
+    // model (one videos.list per ≤50 ids serves all referencing tenants)
+    // it offered no quota saving — only a "freeze stats history" UX
+    // surprise after a user removed a source for declutter purposes.
+    //
+    // The auto-import path (creating new events from a channel's
+    // playlistItems) keeps its source-state gate — that lives in the
+    // future auto-import worker, not here.
+    const u = await seedUserDirectly({ email: `sch-perVideo-${uniq()}@test.local` });
     const now = new Date("2026-05-05T12:00:00Z");
 
-    // Source with auto_import = false.
+    // Source A — soft-deleted (the user removed it for declutter).
+    const softDeletedSourceId = uuidv7();
+    await db.insert(dataSources).values({
+      id: softDeletedSourceId,
+      userId: u.id,
+      kind: "youtube_channel",
+      handleUrl: "https://youtube.com/@deleted",
+      isOwnedByMe: true,
+      autoImport: true,
+      deletedAt: new Date(now.getTime() - 7 * 86_400_000), // 7d ago
+      metadata: {},
+    });
+
+    // Source B — active but auto_import=false (user disabled auto-import).
     const noAutoSourceId = uuidv7();
     await db.insert(dataSources).values({
       id: noAutoSourceId,
@@ -168,14 +193,21 @@ describe("scheduler enqueue (Plan 03.0-09 + per-video refactor)", () => {
       metadata: {},
     });
 
-    // Auto-import event (source_id set, auto_import=false → SKIP).
-    const { videoId: skippedVideoId } = await insertEventWithVideo(
+    // Three events, all in Active tier:
+    //   1. From soft-deleted source.
+    const { videoId: fromDeletedSourceVideo } = await insertEventWithVideo(
+      u.id,
+      new Date(now.getTime() - 6 * 60 * 60 * 1000),
+      { eventOverrides: { sourceId: softDeletedSourceId } },
+    );
+    //   2. From auto_import=false source.
+    const { videoId: fromNoAutoSourceVideo } = await insertEventWithVideo(
       u.id,
       new Date(now.getTime() - 6 * 60 * 60 * 1000),
       { eventOverrides: { sourceId: noAutoSourceId } },
     );
-    // Manual paste event (source_id NULL → ALWAYS pollable).
-    const { videoId: pastedVideoId } = await insertEventWithVideo(
+    //   3. Manual paste (source_id NULL).
+    const { videoId: manualPasteVideo } = await insertEventWithVideo(
       u.id,
       new Date(now.getTime() - 6 * 60 * 60 * 1000),
       { eventOverrides: { sourceId: null } },
@@ -187,7 +219,8 @@ describe("scheduler enqueue (Plan 03.0-09 + per-video refactor)", () => {
       const data = j.data as { videoIds?: string[] };
       return data.videoIds ?? [];
     });
-    expect(allSentVideoIds).toContain(pastedVideoId);
-    expect(allSentVideoIds).not.toContain(skippedVideoId);
+    expect(allSentVideoIds).toContain(fromDeletedSourceVideo);
+    expect(allSentVideoIds).toContain(fromNoAutoSourceVideo);
+    expect(allSentVideoIds).toContain(manualPasteVideo);
   });
 });
