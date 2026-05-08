@@ -682,7 +682,7 @@ export function toYoutubeChannelMetadataCacheDto(
 // + functions from a single barrel (`dto.ts`) consistent with the rest of the
 // Phase 2/3 DTO discipline. The shapes themselves live in
 // `services/admin-quota-read.ts` because they're computed from the row plus
-// the threshold constants exported by `services/youtube-quota-tracker.ts` —
+// the threshold constants exported by `$lib/sources/youtube/server/quota.ts` —
 // keeping them next to the loader avoids a cross-module dance for the
 // pctOfDaily / status derivation.
 //

@@ -21,8 +21,8 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../../lib/server/db/client.js";
 import { events } from "../../lib/server/db/schema/events.js";
 import { youtubeAdapter as youtubeChannelAdapter } from "../../lib/sources/youtube/server/index.js";
-import { writeSnapshot } from "../../lib/server/services/youtube-snapshot-writer.js";
-import { pickKeyForJob } from "../../lib/server/services/youtube-quota-tracker.js";
+import { writeSnapshot } from "../../lib/sources/youtube/server/snapshots.js";
+import { pickKeyForJob } from "../../lib/sources/youtube/server/quota.js";
 import { logger } from "../../lib/server/logger.js";
 
 export async function handlePollUser(job: {

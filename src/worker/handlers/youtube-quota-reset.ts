@@ -22,12 +22,12 @@
 // worker replicas, only one of them will process this job — the in-process
 // Set clear in the ONE replica that processes the job is sufficient because
 // the audit_log lookup in markThrottleTransition handles cross-replica
-// drift (see services/youtube-quota-tracker.ts header).
+// drift (see $lib/sources/youtube/server/quota.ts header).
 
 import { sql } from "drizzle-orm";
 import { db } from "../../lib/server/db/client.js";
 import { youtubeServiceQuotaUsage } from "../../lib/server/db/schema/index.js";
-import { resetThrottleState } from "../../lib/server/services/youtube-quota-tracker.js";
+import { resetThrottleState } from "../../lib/sources/youtube/server/quota.js";
 import { logger } from "../../lib/server/logger.js";
 
 export async function handleQuotaReset(job: { id: string; data: object }): Promise<void> {

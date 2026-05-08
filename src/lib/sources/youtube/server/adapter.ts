@@ -26,13 +26,10 @@
 //
 // Statelessness (AGENTS.md AP-3): the adapter NEVER caches user secrets and
 // never holds plaintext keys across calls. The operator's plaintext key is
-// read from env at call time via `pickKeyForJob`. Plan 03.0-03 will provide
-// the canonical `pickKeyForJob` + `hashApiKeyId` from
-// `services/youtube-quota-tracker.ts`; this file inlines minimal-contract
-// equivalents until the parallel sibling plan lands. The two helpers are
-// imported via dynamic import in a try/catch so the swap is a one-line
-// follow-up commit (Rule 3 deviation — blocking issue resolved by inlining
-// a minimal contract until the parallel plan lands).
+// read from env at call time via `pickKeyForJob`. The canonical
+// `pickKeyForJob` + `hashApiKeyId` live in `./quota.js` (relocated from
+// `services/youtube-quota-tracker.ts` in Phase 03.0.1 Plan 04 — pre-Plan 04
+// path: `$lib/server/services/youtube-quota-tracker.js`).
 //
 // Error mapping (Phase 3.0 D-12 status codes):
 //   - 200 + item present in response.items     → status:'ok' + metrics + metadata
@@ -42,7 +39,7 @@
 //   - 404                                      → status:'not_found'
 //   - other 4xx/5xx                            → status:'auth_error' (placeholder; caller logs + retries)
 
-import { pickKeyForJob, youtubeQuotaUser } from "$lib/server/services/youtube-quota-tracker.js";
+import { pickKeyForJob, youtubeQuotaUser } from "./quota.js";
 import { chargedFetch, fetchWithTimeout } from "./http.js";
 import { z } from "zod";
 import { env } from "$lib/server/config/env.js";
@@ -63,7 +60,8 @@ import type {
 } from "$lib/sources/adapter.js";
 
 // Plan 03.0-03's canonical pickKeyForJob + hashApiKeyId are imported above
-// (services/youtube-quota-tracker.ts). The Wave-1-cross-plan inline copies
+// (./quota.js — relocated in Phase 03.0.1 Plan 04 from
+// services/youtube-quota-tracker.ts). The Wave-1-cross-plan inline copies
 // were removed in the post-build review sweep — they had divergent state
 // (separate roundRobinCursor module variable + different hash length) that
 // caused the apiKeyId stored in youtube_service_quota_usage by the worker

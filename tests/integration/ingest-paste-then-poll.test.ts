@@ -25,7 +25,7 @@ import { eq } from "drizzle-orm";
 // to status='auth_error' without invoking the adapter when
 // pickKeyForJob() returns null. Mock pickKeyForJob to return a fixture
 // so this suite reaches the mocked adapter under test.
-vi.mock("../../src/lib/server/services/youtube-quota-tracker.js", async (importOriginal) => {
+vi.mock("../../src/lib/sources/youtube/server/quota.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,

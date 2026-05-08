@@ -23,7 +23,7 @@ import { eq } from "drizzle-orm";
 // adapter mock under test. ESM hoisting prevents seeding env at module
 // top from being picked up by env.ts; mocking the picker directly is
 // the same approach the existing adapter tests use for env-control.
-vi.mock("../../src/lib/server/services/youtube-quota-tracker.js", async (importOriginal) => {
+vi.mock("../../src/lib/sources/youtube/server/quota.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,

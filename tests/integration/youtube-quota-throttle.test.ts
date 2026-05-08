@@ -36,7 +36,7 @@ const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js")
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { youtubeVideos } = await import("../../src/lib/server/db/schema/index.js");
 const { incrementUsage, resetThrottleState, todayPacific, hashApiKeyId } =
-  await import("../../src/lib/server/services/youtube-quota-tracker.js");
+  await import("../../src/lib/sources/youtube/server/quota.js");
 const { enqueueActivePolls, enqueueColdPolls } = await import("../../src/scheduler/enqueue.js");
 const { seedUserDirectly } = await import("./helpers.js");
 

@@ -25,7 +25,7 @@ process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
 async function withYoutubeKeys<T>(
   raw: string | undefined,
   fn: (
-    mod: typeof import("../../src/lib/server/services/youtube-quota-tracker.js"),
+    mod: typeof import("../../src/lib/sources/youtube/server/quota.js"),
   ) => Promise<T> | T,
 ): Promise<T> {
   const saved = process.env.SERVICE_YOUTUBE_API_KEYS;
@@ -38,7 +38,7 @@ async function withYoutubeKeys<T>(
   // env.ts scrubs the KEK on first parse; re-seed before re-import.
   process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
   try {
-    const mod = await import("../../src/lib/server/services/youtube-quota-tracker.js");
+    const mod = await import("../../src/lib/sources/youtube/server/quota.js");
     return await fn(mod);
   } finally {
     if (saved === undefined) {

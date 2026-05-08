@@ -24,7 +24,7 @@
 //     '80_throttle'  when 8000 <= estimatedUnits < 9500
 //     '95_throttle'  when estimatedUnits >= THROTTLE_NINETYFIVE_THRESHOLD  (9500)
 //   The threshold constants live alongside the function that consumes them
-//   (Plan 03 — youtube-quota-tracker.ts). Re-import here so the magic literals
+//   (Plan 03 — $lib/sources/youtube/server/quota.ts). Re-import here so the magic literals
 //   exist in only one place.
 
 import { desc, eq, inArray } from "drizzle-orm";
@@ -36,7 +36,7 @@ import {
   THROTTLE_EIGHTY_THRESHOLD,
   THROTTLE_NINETYFIVE_THRESHOLD,
   todayPacific,
-} from "./youtube-quota-tracker.js";
+} from "$lib/sources/youtube/server/quota.js";
 
 export interface QuotaKeyRow {
   /** sha-8 hash of the operator's API key — stable identifier across boots. */
@@ -105,7 +105,7 @@ export async function loadAdminQuotaPage(): Promise<{
 /**
  * DTO projection for `youtube_service_quota_usage` rows surfaced on
  * /admin/quota. Computes pctOfDaily + status using the SAME thresholds the
- * scheduler uses (single source of truth — youtube-quota-tracker.ts exports).
+ * scheduler uses (single source of truth — $lib/sources/youtube/server/quota.ts exports).
  */
 export function toQuotaKeyRow(row: typeof youtubeServiceQuotaUsage.$inferSelect): QuotaKeyRow {
   const u = row.estimatedUnits;

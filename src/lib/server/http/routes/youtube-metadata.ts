@@ -23,7 +23,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
-import { fetchVideoMetadataByUrl } from "../../services/youtube-metadata.js";
+import { fetchVideoMetadataByUrl } from "$lib/sources/youtube/server/metadata.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr } from "./_shared.js";
 

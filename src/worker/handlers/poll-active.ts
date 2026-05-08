@@ -41,11 +41,11 @@
 // fairness-shard early reject).
 
 import { youtubeAdapter as youtubeChannelAdapter } from "../../lib/sources/youtube/server/index.js";
-import { writeSnapshot } from "../../lib/server/services/youtube-snapshot-writer.js";
+import { writeSnapshot } from "../../lib/sources/youtube/server/snapshots.js";
 import {
   pickKeyForJob,
   markThrottleTransition,
-} from "../../lib/server/services/youtube-quota-tracker.js";
+} from "../../lib/sources/youtube/server/quota.js";
 import { logger } from "../../lib/server/logger.js";
 
 const QUOTA_USER_ACTIVE = "neotolis-svc-active";

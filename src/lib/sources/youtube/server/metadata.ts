@@ -15,13 +15,16 @@
 
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { pickKeyForJob, youtubeQuotaUser } from "./youtube-quota-tracker.js";
-import { chargedFetch } from "$lib/sources/youtube/server/http.js";
-import { db } from "../db/client.js";
-import { youtubeVideos, youtubeMetadataFetchLog } from "../db/schema/index.js";
-import { env } from "../config/env.js";
-import { AppError } from "./errors.js";
-import { withQuotaGuard } from "./quota.js";
+import { pickKeyForJob, youtubeQuotaUser } from "./quota.js";
+import { chargedFetch } from "./http.js";
+import { db } from "$lib/server/db/client.js";
+import { youtubeVideos, youtubeMetadataFetchLog } from "$lib/server/db/schema/index.js";
+import { env } from "$lib/server/config/env.js";
+import { AppError } from "$lib/server/services/errors.js";
+// withQuotaGuard is the cross-source events_per_day per-user abuse quota —
+// distinct from the YouTube operator-side per-key counter exported by ./quota.js
+// in this folder. Disambiguated via the $lib path.
+import { withQuotaGuard } from "$lib/server/services/quota.js";
 
 const VIDEOS_LIST_RESPONSE = z.object({
   kind: z.literal("youtube#videoListResponse"),
@@ -58,11 +61,12 @@ export interface FetchedVideoMetadata {
 //   https://www.youtube.com/embed/ID
 // Returns null for any other shape (the route returns 422; the form keeps
 // the URL but doesn't auto-fill).
-// YouTube URL parsing moved to services/youtube-url.ts in the post-build
-// review sweep. Re-export under the original name so /sources/new and
+// YouTube URL parsing moved to ./url.ts (Phase 03.0.1 Plan 04 relocation;
+// previously services/youtube-url.ts in the Phase 3.0 post-build review).
+// Re-export under the original name so /sources/new and
 // data-sources.createSource keep working without churn at every callsite.
-// New code should import from `./youtube-url.js` directly.
-export { parseYoutubeUrl as parseYoutubeChannelUrl } from "./youtube-url.js";
+// New code should import from `./url.js` directly.
+export { parseYoutubeUrl as parseYoutubeChannelUrl } from "./url.js";
 
 export function parseYoutubeVideoId(url: string): string | null {
   let parsed: URL;

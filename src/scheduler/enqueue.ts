@@ -43,7 +43,7 @@ import {
   getThrottleState,
   markThrottleTransition,
   THROTTLE_EIGHTY_THRESHOLD,
-} from "../lib/server/services/youtube-quota-tracker.js";
+} from "../lib/sources/youtube/server/quota.js";
 import { selectEligibleVideoIds } from "../lib/server/services/poll-eligibility.js";
 import { QUEUES } from "../lib/server/queues.js";
 import { getBoss } from "../lib/server/queue-client.js";

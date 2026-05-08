@@ -24,7 +24,7 @@ import {
   resetThrottleState,
   todayPacific,
   hashApiKeyId,
-} from "../../src/lib/server/services/youtube-quota-tracker.js";
+} from "../../src/lib/sources/youtube/server/quota.js";
 import { seedUserDirectly } from "./helpers.js";
 
 // Module-level state (auditedTransitions Map, roundRobinIdx, cachedOperatorId)

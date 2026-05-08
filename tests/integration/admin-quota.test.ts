@@ -18,7 +18,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { writeAudit } from "../../src/lib/server/audit.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { youtubeServiceQuotaUsage } from "../../src/lib/server/db/schema/index.js";
-import { todayPacific } from "../../src/lib/server/services/youtube-quota-tracker.js";
+import { todayPacific } from "../../src/lib/sources/youtube/server/quota.js";
 import { seedUserDirectly } from "./helpers.js";
 
 const uniq = () => Math.random().toString(36).slice(2, 10);

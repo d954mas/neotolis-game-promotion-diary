@@ -20,7 +20,8 @@
 // Phase 3.0 post-build review (2026-05-07): this module replaces two
 // near-identical implementations (`parseHandleUrl` in
 // worker/handlers/youtube-channel-context-backfill.ts and
-// `parseYoutubeChannelUrl` in services/youtube-metadata.ts). Both had
+// `parseYoutubeChannelUrl` in $lib/sources/youtube/server/metadata.ts).
+// Both had
 // the same logic; keeping two copies risked drift on every new URL
 // shape (e.g. /live/ if YouTube ever ships it). One module, one truth.
 

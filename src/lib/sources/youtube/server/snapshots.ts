@@ -10,7 +10,7 @@
 //      one row). poll_failure_count increments on non-ok statuses so the rehab
 //      cron's exit gate can fire at >= 5; resets to 0 on 'ok'.
 //   3. UPSERT youtube_service_quota_usage += unitsUsed (per-key per-day counter,
-//      via youtube-quota-tracker.incrementUsage with `tx` so the counter cannot
+//      via ./quota.ts incrementUsage with `tx` so the counter cannot
 //      disagree with the work that consumed quota).
 //
 // Caller is responsible for the HTTP call (which happens OUTSIDE this tx —
@@ -23,8 +23,8 @@
 // last_polled_at + last_poll_status to the UI.
 
 import { sql, eq } from "drizzle-orm";
-import { db } from "../db/client.js";
-import { youtubeVideoSnapshots, youtubeVideos } from "../db/schema/index.js";
+import { db } from "$lib/server/db/client.js";
+import { youtubeVideoSnapshots, youtubeVideos } from "$lib/server/db/schema/index.js";
 
 // Lazy-import the quota tracker — historical from Plan 04. Kept dynamic because
 // Vitest's module mock contract uses the resolved path; dynamic imports
@@ -34,7 +34,7 @@ async function incrementUsage(args: {
   units: number;
   tx: unknown;
 }): Promise<void> {
-  const tracker = (await import("./youtube-quota-tracker.js")) as {
+  const tracker = (await import("./quota.js")) as {
     incrementUsage: (a: { apiKeyId: string; units: number; tx?: unknown }) => Promise<void>;
   };
   await tracker.incrementUsage({

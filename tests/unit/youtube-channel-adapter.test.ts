@@ -49,10 +49,10 @@ import type { youtubeAdapter as YoutubeChannelAdapterT } from "../../src/lib/sou
 // neither have nor want. Stub them; pickKeyForJob / youtubeQuotaUser /
 // hashApiKeyId stay real because the test asserts on their outputs (the
 // quotaUser fingerprint, the apiKeyId-keyed fetch URL).
-vi.mock("../../src/lib/server/services/youtube-quota-tracker.js", async () => {
+vi.mock("../../src/lib/sources/youtube/server/quota.js", async () => {
   const actual = await vi.importActual<
-    typeof import("../../src/lib/server/services/youtube-quota-tracker.js")
-  >("../../src/lib/server/services/youtube-quota-tracker.js");
+    typeof import("../../src/lib/sources/youtube/server/quota.js")
+  >("../../src/lib/sources/youtube/server/quota.js");
   return {
     ...actual,
     incrementUsage: vi.fn().mockResolvedValue(undefined),

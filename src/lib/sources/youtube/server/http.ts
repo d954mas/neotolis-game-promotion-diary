@@ -6,7 +6,7 @@
 //
 //   - youtube-channel-context-backfill.ts had a local `chargedFetch` with
 //     proper 403-quotaExceeded handling.
-//   - youtube-metadata.ts had inline incrementUsage on 2xx only and NO
+//   - $lib/sources/youtube/server/metadata.ts had inline incrementUsage on 2xx only and NO
 //     throttle-audit emission on 403.
 //   - youtube-channel-adapter.ts (pollStatsBatch / pollContent) used
 //     fetchWithTimeout + classifyError but never emitted a throttle audit
@@ -58,7 +58,7 @@
 import {
   incrementUsage,
   markThrottleTransition,
-} from "$lib/server/services/youtube-quota-tracker.js";
+} from "./quota.js";
 import { logger } from "$lib/server/logger.js";
 
 /**

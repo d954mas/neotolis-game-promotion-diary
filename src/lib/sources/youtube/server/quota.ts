@@ -13,10 +13,10 @@
 //   - `resetThrottleState`    midnight-Pacific reset hook (Plan 03.0-09 cron)
 //
 // Consumers (Plan 03.0-04 / 06 / 09):
-//   - youtube-channel-adapter   (pickKeyForJob per HTTP call)
-//   - youtube-snapshot-writer   (incrementUsage in same tx as snapshot insert)
-//   - scheduler enqueue         (getThrottleState — pause Cold/auto-import at 80%)
-//   - quota_reset cron          (resetThrottleState at 00:01 Pacific daily)
+//   - $lib/sources/youtube/server/adapter.ts    (pickKeyForJob per HTTP call)
+//   - $lib/sources/youtube/server/snapshots.ts  (incrementUsage in same tx as snapshot insert)
+//   - src/scheduler/enqueue.ts                   (getThrottleState — pause Cold/auto-import at 80%)
+//   - src/worker/handlers/youtube-quota-reset.ts (resetThrottleState at 00:01 Pacific daily)
 //
 // Pitfall D — YouTube quota resets at midnight America/Los_Angeles, which floats
 // across UTC 7h/8h depending on DST. We compute the "today" key with Intl in
@@ -36,11 +36,11 @@
 
 import { createHash } from "node:crypto";
 import { sql } from "drizzle-orm";
-import { db } from "../db/client.js";
-import { youtubeServiceQuotaUsage } from "../db/schema/index.js";
-import { auditLog } from "../db/schema/audit-log.js";
-import { user } from "../db/schema/auth.js";
-import { env } from "../config/env.js";
+import { db } from "$lib/server/db/client.js";
+import { youtubeServiceQuotaUsage } from "$lib/server/db/schema/index.js";
+import { auditLog } from "$lib/server/db/schema/audit-log.js";
+import { user } from "$lib/server/db/schema/auth.js";
+import { env } from "$lib/server/config/env.js";
 
 // Drizzle's transaction generic surface. Same pattern as services/quota.ts —
 // avoids leaking PgTransaction's huge type parameter list across the public
@@ -112,8 +112,9 @@ export function hashApiKeyId(apiKey: string): string {
  *
  * Where it's substituted: caller side. Every YouTube Data API URL we
  * build (worker handlers poll-active / poll-cold / channel-context-
- * backfill, services/youtube-metadata, integrations/youtube-channel-
- * adapter) calls this helper and sets `?quotaUser=<value>` on the URL.
+ * backfill, $lib/sources/youtube/server/metadata.ts,
+ * $lib/sources/youtube/server/adapter.ts) calls this helper and sets
+ * `?quotaUser=<value>` on the URL.
  *
  * Properties:
  *   - Stable across requests for the same user (deterministic sha-256).
@@ -264,7 +265,7 @@ export async function markThrottleTransition(args: {
 
   const operatorId = await resolveOperatorUserId();
   if (operatorId === null) {
-    const { logger } = await import("../logger.js");
+    const { logger } = await import("$lib/server/logger.js");
     logger.warn(
       { datePacific, state: args.state },
       "quota.service_throttled threshold crossed but no operator user_id resolvable",
@@ -274,7 +275,7 @@ export async function markThrottleTransition(args: {
     return;
   }
 
-  const { writeAudit } = await import("../audit.js");
+  const { writeAudit } = await import("$lib/server/audit.js");
   await writeAudit({
     userId: operatorId,
     action: "quota.service_throttled",

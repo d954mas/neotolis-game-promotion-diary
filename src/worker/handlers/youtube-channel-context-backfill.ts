@@ -42,10 +42,10 @@ import { dataSources } from "../../lib/server/db/schema/data-sources.js";
 import {
   pickKeyForJob,
   youtubeQuotaUser,
-} from "../../lib/server/services/youtube-quota-tracker.js";
+} from "../../lib/sources/youtube/server/quota.js";
 import { chargedFetch } from "../../lib/sources/youtube/server/http.js";
 import { env } from "../../lib/server/config/env.js";
-import { parseYoutubeUrl } from "../../lib/server/services/youtube-url.js";
+import { parseYoutubeUrl } from "../../lib/sources/youtube/server/url.js";
 import { logger } from "../../lib/server/logger.js";
 
 // Zod schemas for the three endpoints — defense against API drift.
@@ -135,12 +135,13 @@ const VIDEOS_LIST_RESPONSE = z.object({
 });
 
 // fetchWithTimeout + chargedFetch moved to $lib/sources/youtube/server/http.ts
-// (post-build review 2026-05-08) so youtube-metadata.ts and
-// youtube-channel-adapter.ts share the same charge-on-Response +
+// (post-build review 2026-05-08) so $lib/sources/youtube/server/metadata.ts and
+// $lib/sources/youtube/server/adapter.ts share the same charge-on-Response +
 // throttle-audit-on-403-quotaExceeded contract.
 
-// YouTube URL parsing moved to services/youtube-url.ts in the post-build
-// review sweep — see that module's header for the rationale.
+// YouTube URL parsing moved to $lib/sources/youtube/server/url.ts (Phase 03.0.1
+// Plan 04 — pre-Plan 04 path: services/youtube-url.ts) — see that module's
+// header for the rationale.
 
 const CHANNELS_LIST_FOR_HANDLE_RESPONSE = z.object({
   kind: z.literal("youtube#channelListResponse"),

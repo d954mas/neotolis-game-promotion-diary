@@ -120,7 +120,7 @@ vi.mock("../../src/lib/server/db/client.js", () => {
 
 // Mock the quota tracker so this test does not depend on plan 03 landing first.
 const incrementCalls: Array<{ apiKeyId: string; units: number; hasTx: boolean }> = [];
-vi.mock("../../src/lib/server/services/youtube-quota-tracker.js", () => ({
+vi.mock("../../src/lib/sources/youtube/server/quota.js", () => ({
   incrementUsage: async (args: { apiKeyId: string; units: number; tx?: unknown }) => {
     incrementCalls.push({
       apiKeyId: args.apiKeyId,
@@ -130,7 +130,7 @@ vi.mock("../../src/lib/server/services/youtube-quota-tracker.js", () => ({
   },
 }));
 
-const { writeSnapshot } = await import("../../src/lib/server/services/youtube-snapshot-writer.js");
+const { writeSnapshot } = await import("../../src/lib/sources/youtube/server/snapshots.js");
 const { youtubeVideoSnapshots, youtubeVideos } = await import(
   "../../src/lib/server/db/schema/index.js"
 );
