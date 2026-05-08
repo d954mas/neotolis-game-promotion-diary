@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0.1-08-observability-rate-budget-and-error-taxonomy-PLAN.md
-last_updated: "2026-05-08T17:14:37.373Z"
+stopped_at: Completed 03.0.1-09-ui-dual-tree-PLAN.md
+last_updated: "2026-05-08T17:24:03.300Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 12
   completed_phases: 5
   total_plans: 93
-  completed_plans: 90
+  completed_plans: 91
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0.1 (source-plugin-architecture) — EXECUTING
-Plan: 9 of 11
+Plan: 10 of 11
 
 ## Performance Metrics
 
@@ -132,6 +132,7 @@ Plan: 9 of 11
 | Phase 03.0.1-source-plugin-architecture P06 | ~6 min 49 s | 1 tasks | 7 files |
 | Phase 03.0.1 P07 | 7 minutes | 2 tasks | 21 files |
 | Phase 03.0.1 P08 | ~25min | 2 tasks | 16 files |
+| Phase 03.0.1 P09 | ~5 minutes | 1 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -394,6 +395,8 @@ Recent decisions affecting current work:
 - [Phase 03.0.1]: Tier-eligibility computation moved INTO handlePollActive/Cold (not a thin scheduler layer): collocates the tier-window cutoff + selectEligibleVideoIds + Phase A HTTP + Phase B writeSnapshot in one file per tier. scheduler/enqueue.ts deleted.
 - [Phase 03.0.1]: pg-boss v11+ key-based multiple-schedule-per-queue collapses Active+Cold cron schedules onto youtube.poll.cron with {key:'active'} and {key:'cold'} (RESEARCH.md OQ#2). Single subscription, tier-tagged payloads.
 - [Phase 03.0.1]: Plan 08: D-13 needs_reconnect/last_error_at/last_error_kind columns added via forward-only migration 0022. observability stub replaced with real getDailyStats/getRecentAudit. RateLimiterMemory reservoirs (cron 8000pts/user 2000pts) consume per ctx.origin BEFORE fetch. AdapterError 5-category taxonomy throws on every error path in chargedFetch. admin-quota-read kind-decoupled via getAdapter(youtube_channel).observability.
+- [Phase 03.0.1]: Plan 09: Registry-UI cast at registration boundary (youtubeUiServer as unknown as AdapterUiServer) — same pattern as registry.ts; per-kind narrow type meets generic surface only at the Map literal.
+- [Phase 03.0.1]: Plan 09: FeedCard.svelte UNCHANGED — EventCard.svelte exists as TESTED contract; /feed migration deferred to Phase 03.1 when Reddit lands and there are multiple kinds to dispatch between (CONTEXT.md philosophy: three concrete callers earn an abstraction).
 
 ### Pending Todos
 
@@ -436,8 +439,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-08T17:14:28.114Z
+Last session: 2026-05-08T17:24:03.295Z
 Last Activity: 2026-05-08
-Stopped at: Completed 03.0.1-08-observability-rate-budget-and-error-taxonomy-PLAN.md
+Stopped at: Completed 03.0.1-09-ui-dual-tree-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
