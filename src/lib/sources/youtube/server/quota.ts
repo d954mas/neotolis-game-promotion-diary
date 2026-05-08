@@ -16,7 +16,7 @@
 //   - $lib/sources/youtube/server/adapter.ts    (pickKeyForJob per HTTP call)
 //   - $lib/sources/youtube/server/snapshots.ts  (incrementUsage in same tx as snapshot insert)
 //   - src/scheduler/enqueue.ts                   (getThrottleState — pause Cold/auto-import at 80%)
-//   - src/worker/handlers/youtube-quota-reset.ts (resetThrottleState at 00:01 Pacific daily)
+//   - $lib/sources/youtube/server/handlers/quota-reset.ts (resetThrottleState at 00:01 Pacific daily)
 //
 // Pitfall D — YouTube quota resets at midnight America/Los_Angeles, which floats
 // across UTC 7h/8h depending on DST. We compute the "today" key with Intl in

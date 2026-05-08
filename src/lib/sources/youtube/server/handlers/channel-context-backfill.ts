@@ -31,22 +31,19 @@
 
 import { sql, and, eq, isNull, isNotNull } from "drizzle-orm";
 import { z } from "zod";
-import { db } from "../../lib/server/db/client.js";
+import { db } from "$lib/server/db/client.js";
 import {
   youtubeChannels,
   youtubeVideoSnapshots,
   youtubeVideos,
-} from "../../lib/server/db/schema/index.js";
-import { events } from "../../lib/server/db/schema/events.js";
-import { dataSources } from "../../lib/server/db/schema/data-sources.js";
-import {
-  pickKeyForJob,
-  youtubeQuotaUser,
-} from "../../lib/sources/youtube/server/quota.js";
-import { chargedFetch } from "../../lib/sources/youtube/server/http.js";
-import { env } from "../../lib/server/config/env.js";
-import { parseYoutubeUrl } from "../../lib/sources/youtube/server/url.js";
-import { logger } from "../../lib/server/logger.js";
+} from "$lib/server/db/schema/index.js";
+import { events } from "$lib/server/db/schema/events.js";
+import { dataSources } from "$lib/server/db/schema/data-sources.js";
+import { pickKeyForJob, youtubeQuotaUser } from "../quota.js";
+import { chargedFetch } from "../http.js";
+import { env } from "$lib/server/config/env.js";
+import { parseYoutubeUrl } from "../url.js";
+import { logger } from "$lib/server/logger.js";
 
 // Zod schemas for the three endpoints — defense against API drift.
 const CHANNELS_LIST_RESPONSE = z.object({

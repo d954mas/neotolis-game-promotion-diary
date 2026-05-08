@@ -40,13 +40,10 @@
 // quota tracker's running counter may not yet show 9500 (response lag /
 // fairness-shard early reject).
 
-import { youtubeAdapter as youtubeChannelAdapter } from "../../lib/sources/youtube/server/index.js";
-import { writeSnapshot } from "../../lib/sources/youtube/server/snapshots.js";
-import {
-  pickKeyForJob,
-  markThrottleTransition,
-} from "../../lib/sources/youtube/server/quota.js";
-import { logger } from "../../lib/server/logger.js";
+import { youtubeAdapter as youtubeChannelAdapter } from "../index.js";
+import { writeSnapshot } from "../snapshots.js";
+import { pickKeyForJob, markThrottleTransition } from "../quota.js";
+import { logger } from "$lib/server/logger.js";
 
 const QUOTA_USER_ACTIVE = "neotolis-svc-active";
 

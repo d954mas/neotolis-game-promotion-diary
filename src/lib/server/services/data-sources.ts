@@ -356,8 +356,10 @@ export async function createSource(
 
   // Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — when the new source is
   // a YouTube channel with auto-import ON, enqueue ONE channel-context
-  // backfill job carrying the user's chosen window. Plan 09's handler
-  // (worker/handlers/youtube-channel-context-backfill.ts) reads
+  // backfill job carrying the user's chosen window. The handler
+  // ($lib/sources/youtube/server/handlers/channel-context-backfill.ts —
+  // pre-Phase 03.0.1 Plan 05 path:
+  // worker/handlers/youtube-channel-context-backfill.ts) reads
   // `job.data.backfillWindow` and seeds the snapshot table accordingly.
   //
   // Idempotent via `singletonKey: source-{row.id}` — a duplicate INSERT

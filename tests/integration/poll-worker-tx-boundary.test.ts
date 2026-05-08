@@ -49,7 +49,9 @@ const { youtubeVideos, youtubeVideoSnapshots } = await import(
   "../../src/lib/server/db/schema/index.js"
 );
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
-const { handlePollActive } = await import("../../src/worker/handlers/poll-active.js");
+const { handlePollActive } = await import(
+  "../../src/lib/sources/youtube/server/handlers/poll-active.js"
+);
 const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);

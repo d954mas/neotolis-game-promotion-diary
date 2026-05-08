@@ -381,7 +381,12 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
   // Real implementations land in:
   //   - parseUrl: Plan 06 (URL detection iterate-registry refactor)
   //   - observability: Plan 08 (observability API + reservoir + needs_reconnect schema)
-  //   - registerQueues / scheduleCronTicks: Plans 05 and 07
+  //   - registerQueues: Plan 05 — REAL impl lives in ./index.ts (the barrel
+  //     spreads this object and OVERRIDES registerQueues with a real
+  //     implementation so consumers always receive the wired-up adapter).
+  //     The stub here is a lower-priority fallback for the contract type;
+  //     the barrel is the single composition point that workers import.
+  //   - scheduleCronTicks: Plan 07
   //   - backfillSource: Plan 10 (refresh-content endpoint + backfill.user queue)
   //
   // Stubs throw rather than return defaults so premature use surfaces loudly.
@@ -407,8 +412,19 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
       },
     },
   } satisfies AdapterObservability,
-  registerQueues: async (_boss: MinimalBoss) => {
-    throw notYetImplemented("05", "registerQueues");
+  // Plan 05 lands the real registerQueues in ./index.ts (the barrel
+  // spreads this object and OVERRIDES this method). Keeping a stub here
+  // would be a redundant safety net that masks the override; removing it
+  // means the only registerQueues callers see is the live one.
+  registerQueues: async (boss: MinimalBoss): Promise<void> => {
+    // The barrel ALWAYS overrides this — if execution reaches here, the
+    // adapter object was constructed without going through ./index.ts,
+    // which is a bug at the import site (consumers must import the
+    // barrel, not adapter.ts directly). Throw to surface it loudly.
+    void boss;
+    throw new Error(
+      "youtubeChannelAdapter.registerQueues fallback hit — import youtubeAdapter from $lib/sources/youtube/server/index.js (the barrel composes the real registerQueues).",
+    );
   },
   scheduleCronTicks: async (_boss: MinimalBoss) => {
     throw notYetImplemented("07", "scheduleCronTicks");

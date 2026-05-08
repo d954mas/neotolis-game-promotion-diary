@@ -25,10 +25,10 @@
 // drift (see $lib/sources/youtube/server/quota.ts header).
 
 import { sql } from "drizzle-orm";
-import { db } from "../../lib/server/db/client.js";
-import { youtubeServiceQuotaUsage } from "../../lib/server/db/schema/index.js";
-import { resetThrottleState } from "../../lib/sources/youtube/server/quota.js";
-import { logger } from "../../lib/server/logger.js";
+import { db } from "$lib/server/db/client.js";
+import { youtubeServiceQuotaUsage } from "$lib/server/db/schema/index.js";
+import { resetThrottleState } from "../quota.js";
+import { logger } from "$lib/server/logger.js";
 
 export async function handleQuotaReset(job: { id: string; data: object }): Promise<void> {
   // 1. Clear in-process state (Set + round-robin + cached operator id).
