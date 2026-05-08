@@ -101,6 +101,11 @@ export const AUDIT_ACTIONS = [
   "auto_import.deferred",
   "poll.failed",
   "event.poll_refreshed",
+  // Phase 03.0.1 Plan 10 — POST /api/sources/:id/refresh-content endpoint
+  // ("Pull new content" button on /sources/[id]). Forward-only migration
+  // 0023_phase03_01_audit_action_refresh_content.sql lands the pgEnum
+  // addition. Metadata payload: { source_id, kind, queue, job_id }.
+  "source.refresh_content_requested",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

@@ -40,17 +40,26 @@
 // effectively-once-daily concurrency is shaped by the cron schedule, not
 // by a separate queue's batchSize.
 
-import type { DataSourceAdapter, MinimalBoss } from "$lib/sources/adapter.js";
+import type {
+  AdapterContext,
+  DataSourceAdapter,
+  MinimalBoss,
+  PollableSource,
+} from "$lib/sources/adapter.js";
 import { QUEUES } from "$lib/server/queues.js";
+import { getBoss } from "$lib/server/queue-client.js";
 import { youtubeChannelAdapter } from "./adapter.js";
 import { handlePollCron } from "./handlers/poll-cron.js";
 import { handlePollUser } from "./handlers/poll-user.js";
 import { handleRehabUnavailable } from "./handlers/rehab-unavailable.js";
 import { handleChannelContextBackfill } from "./handlers/channel-context-backfill.js";
 import { handleQuotaReset } from "./handlers/quota-reset.js";
-// youtube.backfill.user handler lands in Plan 10 (refresh-content endpoint).
-// Until then the queue is declared (so boss.send works idempotently from
-// future call sites being prototyped) but no worker subscribes to drain it.
+// Phase 03.0.1 Plan 10 — youtube.backfill.user handler. Plan 07 declared the
+// queue (boss.createQueue) and left the subscription comment-only since the
+// handler did not yet exist; Plan 10 fills both the producer side
+// (backfillSource fires boss.send into this queue) and the consumer side
+// (boss.work below dispatches each job to handleBackfillUser).
+import { handleBackfillUser } from "./handlers/backfill-user.js";
 
 async function registerQueues(boss: MinimalBoss): Promise<void> {
   // pg-boss v10+ requires createQueue before send/work — idempotent on
@@ -83,9 +92,21 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
     }
   });
 
-  // YOUTUBE_BACKFILL_USER subscription lands in Plan 10 once the handler
-  // exists. Declaring the queue here (above) is forward-compat scaffold
-  // so the topology is locked in this plan.
+  // Phase 03.0.1 Plan 10 — youtube.backfill.user worker subscription.
+  // batchSize=1 mirrors channel-context-backfill (the backfill class of
+  // queues stays single-stream so two clicks on the same source don't
+  // race against each other; pg-boss singletonKey on the producer side is
+  // the dedup gate, this batch size is the backstop).
+  await boss.work(QUEUES.YOUTUBE_BACKFILL_USER, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) {
+      await handleBackfillUser(
+        job as {
+          id?: string;
+          data: { sourceId: string; userId: string; origin?: "user" | "cron" };
+        },
+      );
+    }
+  });
 
   await boss.work(QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL, { batchSize: 1 }, async (jobs) => {
     for (const job of jobs) {
@@ -172,15 +193,54 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
   );
 }
 
+/**
+ * Plan 10 — REAL backfillSource (replaces the Plan 03 throwing stub in
+ * ./adapter.ts). Fire-and-forget enqueue into youtube.backfill.user via the
+ * APP-role pg-boss singleton (`getBoss()` — same accessor that
+ * services/data-sources.ts uses to enqueue YOUTUBE_CHANNEL_CONTEXT_BACKFILL
+ * on createSource).
+ *
+ * singletonKey=`backfill-${source.id}` dedups concurrent clicks: two POSTs
+ * to /api/sources/:id/refresh-content within the pg-boss default singleton
+ * window (~5min) coalesce into one job. The second POST returns the
+ * pg-boss-supplied `null` jobId — the route still emits 202 Accepted with
+ * a null jobId so the user-facing button optimistically reflects success
+ * (the worker only needs to run once to surface new content).
+ *
+ * priority=1 puts user-initiated jobs ahead of cron-initiated polls in the
+ * same queue (D-09 user-pool reserve). The worker's batchSize=1 means
+ * priority is the only ordering knob that matters — no concurrent mixing.
+ */
+async function backfillSource(
+  source: PollableSource,
+  ctx: AdapterContext,
+): Promise<{ jobId: string | null; queue: string }> {
+  const boss = await getBoss();
+  const jobId = await boss.send(
+    QUEUES.YOUTUBE_BACKFILL_USER,
+    {
+      sourceId: source.id,
+      userId: source.userId,
+      origin: ctx.origin,
+    },
+    {
+      singletonKey: `backfill-${source.id}`,
+      priority: 1,
+    },
+  );
+  return { jobId, queue: QUEUES.YOUTUBE_BACKFILL_USER };
+}
+
 // youtubeAdapter — composes the per-source adapter consumers see.
 // Spread `youtubeChannelAdapter` (every other method: pollContent /
 // pollStats / pollStatsByVideoId / parseUrl / observability /
-// backfillSource-stub / canRefreshPoll) with registerQueues +
-// scheduleCronTicks OVERRIDDEN here as real implementations. The stubs
-// in adapter.ts stay for typecheck-loud failure if a consumer imports
-// adapter.ts directly instead of going through this barrel.
+// canRefreshPoll) with registerQueues + scheduleCronTicks + backfillSource
+// OVERRIDDEN here as real implementations. The stubs in adapter.ts stay
+// for typecheck-loud failure if a consumer imports adapter.ts directly
+// instead of going through this barrel.
 export const youtubeAdapter: DataSourceAdapter = {
   ...youtubeChannelAdapter,
   registerQueues,
   scheduleCronTicks,
+  backfillSource,
 };
