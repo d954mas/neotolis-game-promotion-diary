@@ -49,11 +49,23 @@ const sourceKindEnum = z.enum([
 // rendered, which happens iff kind=youtube_channel + autoImport).
 const backfillWindowEnum = z.enum(["1d", "7d", "30d", "90d", "1y", "everything"]);
 
+// channelId is intentionally NOT in the HTTP schema (post-build review
+// 2026-05-08, 8th pass). The service-level CreateSourceInput accepts it
+// for internal callers (tests, future server-side flows) but the public
+// HTTP boundary must derive it from handleUrl. Pre-fix, an external
+// client could POST {kind:'youtube_channel', handleUrl:'https://evil.com/x',
+// channelId:'UCfaked...'} and createSource's
+// `if (kind === 'youtube_channel' && resolvedChannelId === null)` gate
+// would skip parseYoutubeChannelUrl/canonicalization because the
+// supplied channelId was non-null — landing a row with a non-YouTube
+// URL under kind=youtube_channel. The duplicate gate and polling
+// adapters trust the kind/URL pairing; a forged channel_id breaks both.
+// The UI never sends this field (sources/new/+page.svelte uses only
+// handleUrl), so dropping it from the schema is non-breaking.
 const createSourceSchema = z.object({
   kind: sourceKindEnum,
   handleUrl: z.string().url(),
   displayName: z.string().min(1).max(120).nullable().optional(),
-  channelId: z.string().min(1).max(64).nullable().optional(),
   isOwnedByMe: z.boolean().optional(),
   autoImport: z.boolean().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),

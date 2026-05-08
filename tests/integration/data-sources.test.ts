@@ -605,6 +605,53 @@ describe("Plan 02.1-06: /api/sources HTTP boundary", () => {
     expect(body.handleUrl).toBe("https://www.youtube.com/@http-happy");
   });
 
+  it("post-build review 2026-05-08 (8th pass): POST /api/sources strips client-supplied channelId — must not bypass URL canonicalization", async () => {
+    // Regression for the eighth-pass review's finding. Pre-fix, the HTTP
+    // schema accepted an optional `channelId` and the route handler
+    // forwarded it to the service. createSource's parseYoutubeChannelUrl
+    // gate (`if (kind === 'youtube_channel' && resolvedChannelId === null)`)
+    // skipped when the supplied channelId was non-null — so a forged
+    // payload like {kind:'youtube_channel', handleUrl:'https://evil.com/x',
+    // channelId:'UCfaked...'} would land a row with a non-YouTube URL
+    // under kind=youtube_channel. The duplicate gate (post-fix) and the
+    // adapter both trust the kind/URL pairing; a forged channel_id
+    // breaks both. Fix dropped the field from the HTTP schema entirely
+    // (UI never sent it — sources/new/+page.svelte uses only handleUrl).
+    //
+    // Zod's default behaviour on extra keys is STRIP, so the route
+    // accepts the request; the proof is that the persisted row's
+    // channel_id is NOT the forged value but either NULL (handle URL
+    // path defers resolution to the worker) or the canonical UC id
+    // derived from a UC URL.
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-src-forge@test.local" });
+    const res = await app.request("/api/sources", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "youtube_channel",
+        handleUrl: "https://www.youtube.com/@no-forge-attempt",
+        displayName: "No Forge",
+        channelId: "UCfakedfakedfakedfakedfak", // 24-char shape — must be stripped
+      }),
+    });
+    expect(res.status).toBe(201);
+
+    // Read the persisted row directly so we observe what landed in the
+    // DB, not just the DTO projection.
+    const [row] = await db.select().from(dataSources).where(eq(dataSources.userId, u.id));
+    expect(row).toBeDefined();
+    // For an /@handle URL the worker resolves channel_id later — at this
+    // POST stage the column is NULL. The load-bearing assertion is
+    // simply: the FORGED value is NOT what landed.
+    expect(row!.channelId).not.toBe("UCfakedfakedfakedfakedfak");
+    expect(row!.handleUrl).toBe("https://www.youtube.com/@no-forge-attempt");
+  });
+
   it("Plan 02.1-06: POST /api/sources kind=reddit_account returns 422 kind_not_yet_functional", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
