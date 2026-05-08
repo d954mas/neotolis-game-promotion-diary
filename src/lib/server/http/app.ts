@@ -33,7 +33,7 @@ import { meThemeRoutes } from "./routes/me-theme.js";
 import { accountRoutes } from "./routes/account.js";
 // Phase 3.0 Plan 07 — admin /quota dashboard endpoint (env-allowlist gated).
 import { adminQuotaRouter } from "./routes/admin/quota.js";
-import { youtubeMetadataRoutes } from "./routes/youtube-metadata.js";
+import { youtubeMetadataRoutes } from "$lib/sources/youtube/server/route-metadata.js";
 import { auth } from "../../auth.js";
 import { migrationsApplied } from "../db/migrate.js";
 import { pool } from "../db/client.js";

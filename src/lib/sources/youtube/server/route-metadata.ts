@@ -19,13 +19,20 @@
 // rows, which a metadata-fetch never touches).
 //
 // Mount: app.route("/api/youtube", youtubeMetadataRoutes).
+//
+// Phase 03.0.1 Plan 06 — relocated from src/lib/server/http/routes/
+// youtube-metadata.ts to per-source folder
+// src/lib/sources/youtube/server/route-metadata.ts. The Hono app
+// composition (src/lib/server/http/app.ts) now imports
+// `youtubeMetadataRoutes` from `$lib/sources/youtube/server/route-metadata.js`.
+// Adding Reddit's per-source routes in Phase 03.1 follows the same pattern.
 
 import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
-import { fetchVideoMetadataByUrl } from "$lib/sources/youtube/server/metadata.js";
-import { getAuditContext } from "../middleware/audit-ip.js";
-import { mapErr } from "./_shared.js";
+import { fetchVideoMetadataByUrl } from "./metadata.js";
+import { getAuditContext } from "$lib/server/http/middleware/audit-ip.js";
+import { mapErr } from "$lib/server/http/routes/_shared.js";
 
 const fetchMetadataSchema = z.object({
   url: z.string().url(),

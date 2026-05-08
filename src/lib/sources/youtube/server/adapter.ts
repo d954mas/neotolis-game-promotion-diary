@@ -41,6 +41,7 @@
 
 import { pickKeyForJob, youtubeQuotaUser } from "./quota.js";
 import { chargedFetch, fetchWithTimeout } from "./http.js";
+import { youtubeParseUrl } from "./url.js";
 import { z } from "zod";
 import { env } from "$lib/server/config/env.js";
 import { logger } from "$lib/server/logger.js";
@@ -376,10 +377,10 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
     return result;
   },
 
-  // ---- Phase 03.0.1 widened-interface stubs ----
+  // ---- Phase 03.0.1 widened-interface — Plan 06 LIVE / others stubbed ----
   //
   // Real implementations land in:
-  //   - parseUrl: Plan 06 (URL detection iterate-registry refactor)
+  //   - parseUrl: Plan 06 — LIVE (delegates to ./url.ts youtubeParseUrl).
   //   - observability: Plan 08 (observability API + reservoir + needs_reconnect schema)
   //   - registerQueues: Plan 05 — REAL impl lives in ./index.ts (the barrel
   //     spreads this object and OVERRIDES registerQueues with a real
@@ -392,8 +393,8 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
   // Stubs throw rather than return defaults so premature use surfaces loudly.
   // canRefreshPoll IS implemented now because cross-source services/refresh-poll.ts
   // will call it in Plan 06.
-  parseUrl(_url: string): ParsedUrl | null {
-    throw notYetImplemented("06", "parseUrl");
+  parseUrl(url: string): ParsedUrl | null {
+    return youtubeParseUrl(url);
   },
   observability: {
     auth: {

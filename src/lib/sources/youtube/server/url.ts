@@ -26,6 +26,17 @@
 // Both had
 // the same logic; keeping two copies risked drift on every new URL
 // shape (e.g. /live/ if YouTube ever ships it). One module, one truth.
+//
+// Phase 03.0.1 Plan 06 — adds `youtubeParseUrl(input)` that returns the
+// generic `ParsedUrl` shape consumed by the cross-source `parseAnyUrl`
+// iterator (D-15 first-match-wins). Distinct from `parseYoutubeUrl` above
+// (channelId / handle / videoId discriminator for the channel-context
+// backfill worker): `youtubeParseUrl` returns ONLY for standalone
+// watchable items (videos / shorts / embed / youtu.be) — channels and
+// handles return null because the Phase 03.0 events table only ingests
+// `kind=youtube_video` rows.
+
+import type { ParsedUrl } from "$lib/sources/adapter.js";
 
 export type ParsedYoutubeUrl =
   | { kind: "channelId"; value: string }
@@ -83,4 +94,83 @@ export function parseYoutubeUrl(url: string): ParsedYoutubeUrl | null {
   }
 
   return null;
+}
+
+// ---- Phase 03.0.1 Plan 06: D-15 adapter contract for parseAnyUrl ----
+
+const YT_HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"]);
+
+/**
+ * D-15 contract surface (Phase 03.0.1 Plan 06): returns `ParsedUrl` for
+ * any YouTube URL we recognize as a standalone watchable item (video /
+ * short / embed / youtu.be link), null otherwise. Channel and playlist
+ * URLs return null because the Phase 03.0 data model only ingests events
+ * of `kind=youtube_video`.
+ *
+ * Distinct from `parseYoutubeUrl` above — that one decomposes a URL into
+ * the channel-context backfill triple (channelId / handle / videoId) for
+ * the backfill worker; this one is the cross-source iterator contract
+ * consumed by `parseAnyUrl` (src/lib/sources/url.ts) and the
+ * `youtubeAdapter.parseUrl` adapter method.
+ *
+ * Pitfall mitigation: hostname check FIRST (rejects e.g.
+ * `https://example.com/?v=abc` which would otherwise round-trip through
+ * the URL parser unchanged and leak a non-YouTube URL into the
+ * youtube_video kind).
+ */
+export function youtubeParseUrl(input: string): ParsedUrl | null {
+  let url: URL;
+  try {
+    url = new URL(input.trim());
+  } catch {
+    return null;
+  }
+  const host = url.hostname.toLowerCase();
+  if (!YT_HOSTS.has(host)) return null;
+
+  // youtu.be/<videoId>
+  if (host === "youtu.be") {
+    const videoId = url.pathname.replace(/^\//, "").split("/")[0];
+    if (videoId == null || videoId === "") return null;
+    return makeParsed(videoId, input);
+  }
+
+  // youtube.com /watch?v=<videoId>
+  if (url.pathname === "/watch") {
+    const v = url.searchParams.get("v");
+    if (v == null || v === "") return null;
+    return makeParsed(v, input);
+  }
+
+  // youtube.com /shorts/<videoId>
+  const shortsMatch = url.pathname.match(/^\/shorts\/([\w-]+)/);
+  if (shortsMatch && shortsMatch[1] != null) {
+    return makeParsed(shortsMatch[1], input);
+  }
+
+  // youtube.com /embed/<videoId>
+  const embedMatch = url.pathname.match(/^\/embed\/([\w-]+)/);
+  if (embedMatch && embedMatch[1] != null) {
+    return makeParsed(embedMatch[1], input);
+  }
+
+  // youtube.com /live/<videoId> — live streams have a video id like watch.
+  const liveMatch = url.pathname.match(/^\/live\/([\w-]+)/);
+  if (liveMatch && liveMatch[1] != null) {
+    return makeParsed(liveMatch[1], input);
+  }
+
+  // /channel/, /@handle, /c/, /user/, /feed/, /playlist — these are not
+  // standalone watchable events. Return null; cross-source parseAnyUrl
+  // falls through to the next adapter (or to "unsupported").
+  return null;
+}
+
+function makeParsed(videoId: string, originalInput: string): ParsedUrl {
+  const canonical = `https://www.youtube.com/watch?v=${videoId}`;
+  return {
+    kind: "youtube_video",
+    externalId: videoId,
+    metadata: { canonicalUrl: canonical, originalUrl: originalInput },
+  };
 }
