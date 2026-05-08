@@ -20,7 +20,7 @@
 //     succeeds even though the user row is gone.
 
 import { describe, it, expect, vi } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../../src/lib/server/db/client.js";
 import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
 import { user as userTable, session } from "../../src/lib/server/db/schema/auth.js";
@@ -507,5 +507,117 @@ describe("account purge route (Plan 03.0-08)", () => {
 
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+});
+
+/**
+ * Schema-reflection test for the purge cascade contract (P2-6 from
+ * post-build review).
+ *
+ * The behavioral tests above prove the CURRENT cascade works end-to-end.
+ * This test guards the FUTURE: when someone adds a new user-owned table,
+ * the cascade contract (every `user_id` column has ON DELETE CASCADE
+ * to user(id), or the table is in a documented allowlist) must hold.
+ * Without this gate, a new table with a missing FK would silently leave
+ * orphan rows after purge — and the existing fixture-based tests would
+ * not flag it because they only seed the tables they know about.
+ *
+ * The test reads `information_schema` directly so it picks up new
+ * tables automatically as the schema evolves. The two allowlists are
+ * the load-bearing exceptions:
+ *   - SURVIVES_PURGE: tables whose user_id rows MUST outlive a purge
+ *     by design (audit_log — migration 0011 dropped its FK precisely
+ *     so the purge.completed audit row survives the cascade).
+ *   - PURGE_EXPLICIT_NO_CASCADE: tables purgeAccount() handles via an
+ *     explicit DELETE inside the transaction so they do not need a
+ *     CASCADE FK. Currently empty — every explicit-DELETE table also
+ *     happens to carry a CASCADE FK. The set is here to stay flexible
+ *     if a future table is intentionally non-cascading.
+ */
+describe("purge cascade contract (schema reflection)", () => {
+  // Tables whose user_id rows are intentionally NOT cascade-deleted with
+  // the user. Adding to this set requires a written invariant explaining
+  // why the rows must survive (e.g. AGENTS.md §4 for audit_log).
+  const SURVIVES_PURGE = new Set<string>(["audit_log"]);
+
+  // Tables purgeAccount() handles via explicit DELETE in its tx. Currently
+  // every such table ALSO has a CASCADE FK (belt-and-suspenders), so this
+  // set is empty — the schema-FK check covers them. Kept for future use.
+  const PURGE_EXPLICIT_NO_CASCADE = new Set<string>([]);
+
+  it("every public.<table>.user_id column either has ON DELETE CASCADE FK to user(id) OR is in the SURVIVES_PURGE allowlist", async () => {
+    // information_schema.columns lists EVERY user_id column in public.
+    const cols = await db.execute(sql`
+      SELECT table_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND column_name = 'user_id'
+      ORDER BY table_name
+    `);
+
+    // information_schema.referential_constraints + key_column_usage joined
+    // gives us the FK constraints with their delete_rule per (table_name, column_name).
+    const fks = await db.execute(sql`
+      SELECT
+        kcu.table_name,
+        rc.delete_rule,
+        ccu.table_name AS referenced_table
+      FROM information_schema.referential_constraints rc
+      JOIN information_schema.key_column_usage kcu
+        ON kcu.constraint_schema = rc.constraint_schema
+       AND kcu.constraint_name = rc.constraint_name
+      JOIN information_schema.constraint_column_usage ccu
+        ON ccu.constraint_schema = rc.constraint_schema
+       AND ccu.constraint_name = rc.constraint_name
+      WHERE rc.constraint_schema = 'public'
+        AND kcu.column_name = 'user_id'
+    `);
+
+    const fkByTable = new Map<string, { delete_rule: string; referenced_table: string }>();
+    for (const f of fks.rows as {
+      table_name: string;
+      delete_rule: string;
+      referenced_table: string;
+    }[]) {
+      fkByTable.set(f.table_name, {
+        delete_rule: f.delete_rule,
+        referenced_table: f.referenced_table,
+      });
+    }
+
+    const violations: string[] = [];
+
+    for (const c of cols.rows as { table_name: string }[]) {
+      const t = c.table_name;
+      if (SURVIVES_PURGE.has(t)) {
+        // Allowlisted to NOT cascade. Confirm there is genuinely no FK —
+        // an accidentally re-introduced FK would defeat migration 0011's
+        // audit-survives-purge contract.
+        if (fkByTable.has(t)) {
+          violations.push(
+            `${t}: SURVIVES_PURGE expects no FK on user_id, but found ${fkByTable.get(t)!.delete_rule} FK to ${fkByTable.get(t)!.referenced_table}`,
+          );
+        }
+        continue;
+      }
+      if (PURGE_EXPLICIT_NO_CASCADE.has(t)) continue;
+
+      const fk = fkByTable.get(t);
+      if (!fk) {
+        violations.push(`${t}: user_id column has NO FK constraint (orphan after user purge)`);
+        continue;
+      }
+      if (fk.referenced_table !== "user") {
+        violations.push(
+          `${t}: user_id FK points to ${fk.referenced_table}, expected user (chain mismatch)`,
+        );
+        continue;
+      }
+      if (fk.delete_rule !== "CASCADE") {
+        violations.push(`${t}: user_id FK has delete_rule=${fk.delete_rule}, expected CASCADE`);
+      }
+    }
+
+    expect(violations).toEqual([]);
   });
 });
