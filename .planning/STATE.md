@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0.1-05-move-handlers-and-dispatch-via-registry-PLAN.md
-last_updated: "2026-05-08T16:14:10.361Z"
+stopped_at: Completed 03.0.1-06-url-detection-iterate-registry-PLAN.md
+last_updated: "2026-05-08T16:26:50.406Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 12
   completed_phases: 5
   total_plans: 93
-  completed_plans: 87
+  completed_plans: 88
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0.1 (source-plugin-architecture) — EXECUTING
-Plan: 6 of 11
+Plan: 7 of 11
 
 ## Performance Metrics
 
@@ -129,6 +129,7 @@ Plan: 6 of 11
 | Phase 03.0.1 P03 | ~11min | 1 tasks | 20 files |
 | Phase 03.0.1 P04 | ~9 min 44 s | 1 tasks | 28 files |
 | Phase 03.0.1-source-plugin-architecture P05 | ~8 min 1 s | 1 tasks | 16 files |
+| Phase 03.0.1-source-plugin-architecture P06 | ~6 min 49 s | 1 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -386,6 +387,7 @@ Recent decisions affecting current work:
 - [Phase 03.0.1-source-plugin-architecture]: Plan 05: Spread + override in barrel (vs. inlining registerQueues into adapter.ts) — adapter.ts handler-free + barrel composes live adapter via {...youtubeChannelAdapter, registerQueues}; resolves potential import cycle (handlers import barrel → barrel imports handlers + adapter; adapter has zero handler imports)
 - [Phase 03.0.1-source-plugin-architecture]: Plan 05: registerQueues stub in adapter.ts upgraded from notYetImplemented to a fallback-error message — satisfies plan's grep zero-match acceptance AND preserves 'incorrect import surfaces loudly' invariant when consumers bypass the barrel
 - [Phase 03.0.1-source-plugin-architecture]: Plan 05: queue NAMES unchanged this plan (per CONTEXT D-11) — Plan 07 owns the per-kind topology rename to youtube.poll.cron / youtube.poll.user / youtube.backfill.user. Plan 05 stays mechanical (handlers move + adapter owns its registration + worker iterates) so smoke-gated polling-pipeline behavior is byte-identical
+- [Phase 03.0.1-source-plugin-architecture]: Plan 06: youtubeParseUrl + parseYoutubeUrl coexist as 2 functions in url.ts (one for D-15 iterator, one for channel-context backfill); 11-char videoId strictness re-enforced at the public services/url-parser.ts boundary not inside youtubeParseUrl; Reddit-deferral mapping stays at orchestrator layer not in parseAnyUrl so the iterator stays pure
 
 ### Pending Todos
 
@@ -428,8 +430,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-08T16:14:10.356Z
+Last session: 2026-05-08T16:26:42.874Z
 Last Activity: 2026-05-08
-Stopped at: Completed 03.0.1-05-move-handlers-and-dispatch-via-registry-PLAN.md
+Stopped at: Completed 03.0.1-06-url-detection-iterate-registry-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
