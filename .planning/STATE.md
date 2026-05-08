@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0.1-06-url-detection-iterate-registry-PLAN.md
-last_updated: "2026-05-08T16:26:50.406Z"
+stopped_at: Completed 03.0.1-07 — per-kind queue topology + scheduler refactor
+last_updated: "2026-05-08T16:47:39.787Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 12
   completed_phases: 5
   total_plans: 93
-  completed_plans: 88
+  completed_plans: 89
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0.1 (source-plugin-architecture) — EXECUTING
-Plan: 7 of 11
+Plan: 8 of 11
 
 ## Performance Metrics
 
@@ -130,6 +130,7 @@ Plan: 7 of 11
 | Phase 03.0.1 P04 | ~9 min 44 s | 1 tasks | 28 files |
 | Phase 03.0.1-source-plugin-architecture P05 | ~8 min 1 s | 1 tasks | 16 files |
 | Phase 03.0.1-source-plugin-architecture P06 | ~6 min 49 s | 1 tasks | 7 files |
+| Phase 03.0.1 P07 | 7 minutes | 2 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -388,6 +389,9 @@ Recent decisions affecting current work:
 - [Phase 03.0.1-source-plugin-architecture]: Plan 05: registerQueues stub in adapter.ts upgraded from notYetImplemented to a fallback-error message — satisfies plan's grep zero-match acceptance AND preserves 'incorrect import surfaces loudly' invariant when consumers bypass the barrel
 - [Phase 03.0.1-source-plugin-architecture]: Plan 05: queue NAMES unchanged this plan (per CONTEXT D-11) — Plan 07 owns the per-kind topology rename to youtube.poll.cron / youtube.poll.user / youtube.backfill.user. Plan 05 stays mechanical (handlers move + adapter owns its registration + worker iterates) so smoke-gated polling-pipeline behavior is byte-identical
 - [Phase 03.0.1-source-plugin-architecture]: Plan 06: youtubeParseUrl + parseYoutubeUrl coexist as 2 functions in url.ts (one for D-15 iterator, one for channel-context backfill); 11-char videoId strictness re-enforced at the public services/url-parser.ts boundary not inside youtubeParseUrl; Reddit-deferral mapping stays at orchestrator layer not in parseAnyUrl so the iterator stays pure
+- [Phase 03.0.1]: DO $$ schema-existence guard added to migration 0021 (matches 0010_phase03_baseline.sql precedent — required for fresh test DBs where pgboss has not booted)
+- [Phase 03.0.1]: Tier-eligibility computation moved INTO handlePollActive/Cold (not a thin scheduler layer): collocates the tier-window cutoff + selectEligibleVideoIds + Phase A HTTP + Phase B writeSnapshot in one file per tier. scheduler/enqueue.ts deleted.
+- [Phase 03.0.1]: pg-boss v11+ key-based multiple-schedule-per-queue collapses Active+Cold cron schedules onto youtube.poll.cron with {key:'active'} and {key:'cold'} (RESEARCH.md OQ#2). Single subscription, tier-tagged payloads.
 
 ### Pending Todos
 
@@ -430,8 +434,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-08T16:26:42.874Z
+Last session: 2026-05-08T16:47:31.506Z
 Last Activity: 2026-05-08
-Stopped at: Completed 03.0.1-06-url-detection-iterate-registry-PLAN.md
+Stopped at: Completed 03.0.1-07 — per-kind queue topology + scheduler refactor
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
