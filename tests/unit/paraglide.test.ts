@@ -550,6 +550,14 @@ describe("paraglide i18n (UX-04)", () => {
       "sources_auto_import_on",
       "sources_cta_new_source",
       "sources_cta_save_source",
+      // Phase 03.0.1 Plan 10 — refresh-content endpoint UI ("Pull new content"
+      // button + toast variants on /sources/[id]).
+      "sources_detail_pull_new_content",
+      "sources_detail_pull_new_content_cooldown",
+      "sources_detail_pull_new_content_error",
+      "sources_detail_pull_new_content_pending",
+      "sources_detail_pull_new_content_success",
+      "sources_detail_pull_new_content_unsupported",
       "sources_error_duplicate",
       "sources_error_duplicate_channel",
       "sources_error_duplicate_channel_soft_deleted",
