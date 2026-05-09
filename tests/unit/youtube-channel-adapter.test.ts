@@ -397,7 +397,8 @@ describe("youtubeChannelAdapter.pollContent — playlistItems.list", () => {
     expect(calls[0]!.url.searchParams.get("playlistId")).toBe("PLABC");
     expect(calls[0]!.url.searchParams.get("part")).toBe("snippet");
     expect(calls[0]!.url.searchParams.get("maxResults")).toBe("50");
-    expect(events.map((e) => e.externalId)).toEqual(["new1", "new2"]);
+    expect(events.events.map((e) => e.externalId)).toEqual(["new1", "new2"]);
+    expect(events.unitsUsed).toBe(1);
   });
 
   it("Test 12: pollContent maps publishedAt string → Date object in RawEvent", async () => {
@@ -415,10 +416,11 @@ describe("youtubeChannelAdapter.pollContent — playlistItems.list", () => {
       new Date("2026-04-01T00:00:00Z"),
     );
 
-    expect(events).toHaveLength(1);
-    expect(events[0]!.occurredAt).toBeInstanceOf(Date);
-    expect(events[0]!.occurredAt.toISOString()).toBe("2026-05-01T10:00:00.000Z");
-    expect(events[0]!.url).toBe("https://www.youtube.com/watch?v=newvid");
+    expect(events.events).toHaveLength(1);
+    expect(events.events[0]!.occurredAt).toBeInstanceOf(Date);
+    expect(events.events[0]!.occurredAt.toISOString()).toBe("2026-05-01T10:00:00.000Z");
+    expect(events.events[0]!.url).toBe("https://www.youtube.com/watch?v=newvid");
+    expect(events.unitsUsed).toBe(1);
   });
 
   it("Test 13: pollContent with empty playlist → returns []", async () => {
@@ -429,7 +431,8 @@ describe("youtubeChannelAdapter.pollContent — playlistItems.list", () => {
       new Date("2026-04-01T00:00:00Z"),
     );
 
-    expect(events).toEqual([]);
+    expect(events.events).toEqual([]);
+    expect(events.unitsUsed).toBe(1);
   });
 
   it("pollContent without uploadsPlaylistId → returns [] (channel-context backfill required)", async () => {
@@ -439,7 +442,8 @@ describe("youtubeChannelAdapter.pollContent — playlistItems.list", () => {
       new Date(0),
     );
 
-    expect(events).toEqual([]);
+    expect(events.events).toEqual([]);
+    expect(events.unitsUsed).toBe(0);
   });
 });
 

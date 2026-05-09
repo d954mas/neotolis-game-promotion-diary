@@ -292,7 +292,10 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
 
   /** Backfill + auto-import — playlistItems.list against uploads playlist.
    *  1 quota unit per call. Filters to publishedAt > since. */
-  async pollContent(source: PollableSource, since: Date): Promise<RawEvent[]> {
+  async pollContent(
+    source: PollableSource,
+    since: Date,
+  ): Promise<{ events: RawEvent[]; unitsUsed: number }> {
     const uploadsPlaylistId = (source.metadata as { uploadsPlaylistId?: string })
       ?.uploadsPlaylistId;
     if (!uploadsPlaylistId) {
@@ -300,15 +303,15 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
       // on first paste; if the user pasted before that plan shipped (or the
       // backfill failed), the source has no uploadsPlaylistId yet. Return
       // empty rather than throwing — the worker logs + skips and the next
-      // backfill tick will resolve it.
+      // backfill tick will resolve it. unitsUsed=0: no HTTP made.
       logger.warn(
         { sourceId: source.id, userId: source.userId },
         "pollContent: missing uploadsPlaylistId in source.metadata; channel-context backfill required first",
       );
-      return [];
+      return { events: [], unitsUsed: 0 };
     }
     const picked = pickKeyForJob();
-    if (!picked) return [];
+    if (!picked) return { events: [], unitsUsed: 0 };
 
     const url = new URL(`${env.YOUTUBE_API_BASE_URL}/playlistItems`);
     url.searchParams.set("playlistId", uploadsPlaylistId);
@@ -326,27 +329,35 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     // worker; that worker can revisit AdapterError-raise behavior when
     // ready. origin='cron' — pollContent is invoked by scheduler-driven
     // auto-import, never by user-driven Refresh-now.
+    //
+    // unitsUsed accounting: chargedFetch charges 1 unit on EVERY Response
+    // (including non-2xx — Google's quota guide). The throw path means we
+    // didn't reach a Response; chargedFetch's pre-fetch reservoir consume
+    // also didn't actually charge the persistent counter (incrementUsage
+    // runs AFTER fetch). So throw → unitsUsed=0 is honest.
     let resp: Response;
+    let unitsUsed = 0;
     try {
       resp = await chargedFetch(url, picked, 1, {
         sourceId: source.id,
         origin: "cron",
         logTag: "youtube-adapter: playlistItems.list",
       });
+      unitsUsed = 1;
     } catch (err) {
       if (err instanceof AdapterError) {
         logger.warn(
           { sourceId: source.id, userId: source.userId, category: err.category },
           "pollContent: AdapterError → empty result",
         );
-        return [];
+        return { events: [], unitsUsed: 0 };
       }
       throw err;
     }
-    if (!resp.ok) return []; // dead-code defense — chargedFetch throws on non-2xx in Plan 08.
+    if (!resp.ok) return { events: [], unitsUsed }; // dead-code defense — chargedFetch throws on non-2xx in Plan 08.
     const json = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await resp.json());
     const sinceMs = since.getTime();
-    return json.items
+    const events = json.items
       .map<RawEvent>((item) => ({
         externalId: item.snippet.resourceId.videoId,
         title: item.snippet.title,
@@ -356,6 +367,7 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
         metadata: { channelId: item.snippet.channelId },
       }))
       .filter((e) => e.occurredAt.getTime() > sinceMs);
+    return { events, unitsUsed };
   },
 
   /** Stats polling — user-driven path (Refresh now button → poll-user worker).

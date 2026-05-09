@@ -75,7 +75,15 @@ vi.mock("../../src/lib/sources/youtube/server/adapter.js", async (importOriginal
     ...actual,
     youtubeChannelAdapterCore: {
       ...core,
-      pollContent: async () => pollContentResults.slice(),
+      // Phase 03.0.1 post-review #6 — pollContent contract returns
+      // {events, unitsUsed}. Mock always reports 1 unitsUsed (mirrors a
+      // successful single-page YouTube playlistItems.list call). Empty
+      // result still represents an HTTP request that returned 200 with
+      // no items — chargedFetch burns 1 unit on every Response.
+      pollContent: async () => ({
+        events: pollContentResults.slice(),
+        unitsUsed: 1,
+      }),
     },
   };
 });

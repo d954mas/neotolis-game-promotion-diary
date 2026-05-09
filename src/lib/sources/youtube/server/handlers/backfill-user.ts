@@ -173,9 +173,18 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
     return;
   }
 
-  let rawEvents;
+  let pollResult: {
+    events: {
+      externalId?: string;
+      occurredAt: Date;
+      title: string;
+      url: string;
+      metadata?: Record<string, unknown>;
+    }[];
+    unitsUsed: number;
+  };
   try {
-    rawEvents = await adapter.pollContent(
+    pollResult = await adapter.pollContent(
       {
         id: source.id,
         userId: source.userId,
@@ -203,7 +212,7 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
   // way back to target_since with zero new events — also legitimate complete.
   // If a future refactor decouples oldSide from the «has historical work»
   // signal, ветвь this on (oldSide !== null) explicitly to preserve intent.
-  if (rawEvents.length === 0) {
+  if (pollResult.events.length === 0) {
     await markSourceBackfillComplete(userId, source.id);
     await markSourceLastPolledAt(userId, source.id);
     await writeBackfillAudit({
@@ -212,7 +221,8 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
       sourceId: source.id,
       sourceKind: source.kind,
       userId,
-      requestsUsed: 1, // the empty-page poll itself burned 1 unit
+      // Adapter reports exact units burned (Phase 03.0.1 post-review #6).
+      requestsUsed: pollResult.unitsUsed,
       eventsInserted: 0,
     });
     logger.info(
@@ -227,7 +237,7 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
   // (Phase 3.0 post-build review 2026-05-07) — a re-click within the same
   // window is a no-op at row level, and a manual paste of the same video
   // (sourceId=NULL) doesn't block the auto-import event.
-  const externalIds = rawEvents
+  const externalIds = pollResult.events
     .map((e) => e.externalId)
     .filter((x): x is string => typeof x === "string" && x.length > 0);
   let existingIds = new Set<string>();
@@ -263,7 +273,7 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
   let inserted = 0;
   let oldestInsertedOccurredAt: Date | null = null;
 
-  for (const ev of rawEvents) {
+  for (const ev of pollResult.events) {
     if (ev.externalId && existingIds.has(ev.externalId)) continue;
     if (insertUserEvents) {
       await db.insert(events).values({
@@ -296,20 +306,20 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
 
   await markSourceLastPolledAt(userId, source.id);
 
-  // requests_used estimate: YouTube playlistItems.list returns up to 50 items
-  // per page = 1 quota unit per page. rawEvents.length / 50 (rounded up) plus
-  // 1 for the chunk that touched the cutoff. Floor at 1 — even an empty page
-  // burns 1 unit. Approximation is adequate for cap accounting; an exact
-  // tracker would require adapter API change (return units used per call).
-  const requestsUsed = Math.max(1, Math.ceil(rawEvents.length / 50));
-
+  // Phase 03.0.1 post-review #6 — exact unitsUsed from adapter. Pre-fix
+  // the worker estimated `Math.ceil(events.length / 50)` which assumed
+  // every adapter does single-page YouTube playlistItems.list (50/page).
+  // For YouTube today this estimate happens to match (single page = 1
+  // unit), but Reddit / Twitter pollContent may paginate internally and
+  // their actual page sizes differ. Trusting the adapter's reported
+  // unitsUsed makes the cap counter exact regardless of platform shape.
   await writeBackfillAudit({
     job,
     flow,
     sourceId: source.id,
     sourceKind: source.kind,
     userId,
-    requestsUsed,
+    requestsUsed: pollResult.unitsUsed,
     eventsInserted: inserted,
   });
 
@@ -319,9 +329,9 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
       sourceId,
       userId,
       flow,
-      candidates: rawEvents.length,
+      candidates: pollResult.events.length,
       inserted,
-      requestsUsed,
+      requestsUsed: pollResult.unitsUsed,
     },
     "youtube.backfill.user: complete",
   );
