@@ -724,6 +724,5 @@ export function toYoutubeChannelMetadataCacheDto(
 export {
   type QuotaKeyRow,
   type ServiceAuditEntry,
-  toQuotaKeyRow,
   toServiceAuditEntry,
 } from "./services/admin-quota-read.js";

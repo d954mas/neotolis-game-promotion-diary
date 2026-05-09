@@ -224,15 +224,27 @@ export async function withQuotaGuard<T>(
  * forward / fall-back days are handled implicitly because the calculation
  * always derives "00:00 in PT" → UTC, never +24h arithmetic.
  */
-export function pacificDayStart(now: Date = new Date()): Date {
-  // YYYY-MM-DD in PT (Plan 08 todayPacific equivalent — local copy avoids
-  // cross-source import).
-  const datePT = new Intl.DateTimeFormat("sv-SE", {
+/**
+ * Returns 'YYYY-MM-DD' in America/Los_Angeles for the given instant. sv-SE
+ * locale gives ISO-shape output without manual formatting; Intl handles DST
+ * transitions automatically.
+ *
+ * Phase 03.0.1 — promoted from YouTube-internal to shared. Operator API quotas
+ * (YouTube Data API v3) reset at midnight Pacific; per-user fair-share cap
+ * counter syncs to the same boundary; admin /admin/quota uses this date string
+ * as today's row-key.
+ */
+export function todayPacific(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("sv-SE", {
     timeZone: "America/Los_Angeles",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   }).format(now);
+}
+
+export function pacificDayStart(now: Date = new Date()): Date {
+  const datePT = todayPacific(now);
   // Get current PT UTC offset in minutes via shortOffset format.
   const offsetParts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Los_Angeles",

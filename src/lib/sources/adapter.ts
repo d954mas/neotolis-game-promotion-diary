@@ -144,7 +144,17 @@ export interface ObservabilityDailyStats {
   dailyLimit: number;
   pctOfDaily: number;
   throttleState: "ok" | "eighty" | "ninetyfive";
-  keys?: Array<{ apiKeyId: string; unitsUsed: number }>;
+  /**
+   * Per-key breakdown. `throttleState` is computed by the adapter using its
+   * own internal thresholds (YouTube: 80%/95% of 10 000 daily; future Reddit
+   * may use rolling-window thresholds). Consumers (admin /admin/quota) must
+   * NOT recompute throttleState — they trust the adapter's classification.
+   */
+  keys?: Array<{
+    apiKeyId: string;
+    unitsUsed: number;
+    throttleState: "ok" | "eighty" | "ninetyfive";
+  }>;
   costEstimateUsd?: number;
 }
 

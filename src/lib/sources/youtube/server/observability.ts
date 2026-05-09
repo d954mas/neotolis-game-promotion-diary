@@ -101,10 +101,16 @@ async function getDailyStats(date: Date): Promise<ObservabilityDailyStats> {
     dailyLimit,
     pctOfDaily,
     throttleState,
-    keys: rows.map((r) => ({
-      apiKeyId: r.apiKeyId,
-      unitsUsed: r.estimatedUnits ?? 0,
-    })),
+    keys: rows.map((r) => {
+      const u = r.estimatedUnits ?? 0;
+      const keyState: "ok" | "eighty" | "ninetyfive" =
+        u >= THROTTLE_NINETYFIVE_THRESHOLD
+          ? "ninetyfive"
+          : u >= THROTTLE_EIGHTY_THRESHOLD
+            ? "eighty"
+            : "ok";
+      return { apiKeyId: r.apiKeyId, unitsUsed: u, throttleState: keyState };
+    }),
   };
 }
 

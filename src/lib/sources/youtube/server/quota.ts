@@ -41,6 +41,9 @@ import { youtubeServiceQuotaUsage } from "$lib/server/db/schema/index.js";
 import { auditLog } from "$lib/server/db/schema/audit-log.js";
 import { user } from "$lib/server/db/schema/auth.js";
 import { env } from "$lib/server/config/env.js";
+import { todayPacific } from "$lib/server/services/quota.js";
+
+export { todayPacific };
 
 // Drizzle's transaction generic surface. Same pattern as services/quota.ts —
 // avoids leaking PgTransaction's huge type parameter list across the public
@@ -138,20 +141,6 @@ export function pickKeyForJob(): PickedKey | null {
   const apiKey = keys[roundRobinIdx % keys.length]!;
   roundRobinIdx = (roundRobinIdx + 1) % keys.length;
   return { apiKey, apiKeyId: hashApiKeyId(apiKey) };
-}
-
-/**
- * Pitfall D — YouTube quota resets at midnight America/Los_Angeles. Returns
- * 'YYYY-MM-DD' in PT. sv-SE locale gives ISO-shape output without manual
- * formatting; Intl handles DST transitions automatically.
- */
-export function todayPacific(now: Date = new Date()): string {
-  return new Intl.DateTimeFormat("sv-SE", {
-    timeZone: "America/Los_Angeles",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
 }
 
 /**
