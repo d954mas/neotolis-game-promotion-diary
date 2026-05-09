@@ -1,6 +1,12 @@
 import type { PageServerLoad } from "./$types";
 import { listSources } from "$lib/server/services/data-sources.js";
 import { toDataSourceDto } from "$lib/server/dto.js";
+import {
+  getUserQuotaUsedToday,
+  getUserQuotaLifetime,
+  nextPacificMidnight,
+} from "$lib/server/services/quota.js";
+import { allAdapters } from "$lib/sources/registry.js";
 import { db } from "$lib/server/db/client.js";
 import { youtubeChannels } from "$lib/server/db/schema/index.js";
 import { inArray } from "drizzle-orm";
@@ -15,7 +21,12 @@ import { inArray } from "drizzle-orm";
  * /feed loader.
  */
 export const load: PageServerLoad = async ({ locals }) => {
-  if (!locals.user) return { active: [], deleted: [] };
+  if (!locals.user)
+    return {
+      active: [],
+      deleted: [],
+      quotaPlatforms: [],
+    };
   const all = await listSources(locals.user.id, { includeDeleted: true });
   const dtos = all.map(toDataSourceDto);
 
@@ -35,8 +46,33 @@ export const load: PageServerLoad = async ({ locals }) => {
     }
   }
 
+  // Phase 03.0.1 — quota status per platform (today + lifetime). Banner
+  // surfaces all platforms — adding Reddit Phase 03.1+ adds a row automatically
+  // via allAdapters iteration. Each adapter declares own userQuotaCap (or
+  // omits — banner shows count + "no limit").
+  const userId = locals.user.id;
+  const resetAt = nextPacificMidnight();
+  const resetsInMs = Math.max(0, resetAt.getTime() - Date.now());
+  const quotaPlatforms = await Promise.all(
+    allAdapters.map(async (a) => {
+      const today = await getUserQuotaUsedToday(userId, a.kind);
+      const lifetime = await getUserQuotaLifetime(userId, a.kind);
+      return {
+        kind: a.kind,
+        today,
+        lifetime,
+        cap: {
+          requestsPerDay: a.observability.userQuotaCap?.requestsPerDay,
+          eventsPerDay: a.observability.userQuotaCap?.eventsPerDay,
+        },
+        resetsInMs,
+      };
+    }),
+  );
+
   return {
     active: dtos.filter((s) => s.deletedAt === null),
     deleted: dtos.filter((s) => s.deletedAt !== null),
+    quotaPlatforms,
   };
 };

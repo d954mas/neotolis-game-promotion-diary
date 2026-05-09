@@ -80,6 +80,24 @@
         await invalidateAll();
       } else if (res.status === 422) {
         toast = { kind: "err", text: m.sources_detail_pull_new_content_unsupported() };
+      } else if (res.status === 429) {
+        // Phase 03.0.1 — distinct error codes for per-axis quota exhaustion.
+        // Banner UI shows full quota state; toast gives quick feedback.
+        try {
+          const body = (await res.json()) as { error?: string };
+          if (body.error === "platform_quota_exhausted") {
+            toast = { kind: "err", text: m.sources_detail_pull_platform_quota_exhausted() };
+          } else if (body.error === "requests_quota_exhausted") {
+            toast = { kind: "err", text: m.sources_detail_pull_requests_quota_exhausted() };
+          } else if (body.error === "events_quota_exhausted") {
+            toast = { kind: "err", text: m.sources_detail_pull_events_quota_exhausted() };
+          } else {
+            // rate_limited (10/min) or unknown 429 — generic message.
+            toast = { kind: "err", text: m.sources_detail_pull_rate_limited() };
+          }
+        } catch {
+          toast = { kind: "err", text: m.sources_detail_pull_rate_limited() };
+        }
       } else {
         toast = { kind: "err", text: m.sources_detail_pull_new_content_error() };
       }

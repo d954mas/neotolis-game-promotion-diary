@@ -19,6 +19,12 @@ import type { PageServerLoad } from "./$types.js";
 import { error } from "@sveltejs/kit";
 import { getSourceById } from "$lib/server/services/data-sources.js";
 import { toDataSourceDto } from "$lib/server/dto.js";
+import {
+  getUserQuotaUsedToday,
+  getUserQuotaLifetime,
+  nextPacificMidnight,
+} from "$lib/server/services/quota.js";
+import { allAdapters } from "$lib/sources/registry.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
 
 export const load: PageServerLoad = async ({ params, locals }) => {
@@ -31,7 +37,28 @@ export const load: PageServerLoad = async ({ params, locals }) => {
     if (row.deletedAt !== null) {
       error(404);
     }
-    return { source: toDataSourceDto(row) };
+
+    // Phase 03.0.1 — quota status per platform (banner на detail page).
+    const resetAt = nextPacificMidnight();
+    const resetsInMs = Math.max(0, resetAt.getTime() - Date.now());
+    const quotaPlatforms = await Promise.all(
+      allAdapters.map(async (a) => {
+        const today = await getUserQuotaUsedToday(userId, a.kind);
+        const lifetime = await getUserQuotaLifetime(userId, a.kind);
+        return {
+          kind: a.kind,
+          today,
+          lifetime,
+          cap: {
+            requestsPerDay: a.observability.userQuotaCap?.requestsPerDay,
+            eventsPerDay: a.observability.userQuotaCap?.eventsPerDay,
+          },
+          resetsInMs,
+        };
+      }),
+    );
+
+    return { source: toDataSourceDto(row), quotaPlatforms };
   } catch (err) {
     if (err instanceof NotFoundError) {
       error(404);

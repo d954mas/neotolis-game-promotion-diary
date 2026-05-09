@@ -22,6 +22,7 @@
   // Plan 02.1-22's §2.2-bug closure (CTA reachable while a long source list
   // scrolls).
   import PageHeader from "$lib/components/PageHeader.svelte";
+  import QuotaStatusBanner from "$lib/components/QuotaStatusBanner.svelte";
   // Plan 02.1-39 round-6 polish #11 follow-up (UAT-NOTES.md §5.8 follow-up
   // #11 extension, 2026-04-30): the RecoveryDialog modal that landed on
   // /feed in c98eadf is extended to /sources too — same single recovery
@@ -116,6 +117,14 @@
     deletedCount={deleted.length}
     onOpenRecovery={() => (recoveryOpen = true)}
   />
+
+  <!-- Phase 03.0.1 — per-platform API quota banner: today's usage + lifetime
+       totals + reset countdown. Adapter declares cap → progress bar +
+       color zones; не declares → count + "no limit". Multi-platform
+       expansion is automatic when Phase 03.1 Reddit/Twitter adapters land. -->
+  {#if data.quotaPlatforms.length > 0}
+    <QuotaStatusBanner platforms={data.quotaPlatforms} />
+  {/if}
 
   {#if active.length === 0 && deleted.length === 0}
     <EmptyState
