@@ -239,4 +239,75 @@ describe("POST /api/sources/:id/refresh-content — Phase 03.0.1 Plan 10", () =>
       job_id: "mock-job-id",
     });
   });
+
+  // Phase 03.0.1 architecture cleanup — per-user rolling rate limit
+  // (REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE = 10/min). Counter source is
+  // audit_log itself: every successful POST writes a 'source.refresh_content_requested'
+  // row, the route's pre-check counts rows in the last 60s. Test:
+  //   - 10 successful POSTs → each 202, audit row written.
+  //   - 11th POST → 429 'rate_limited' (counter sees 10 prior rows).
+  it("Plan 03.0.1: per-user rolling rate limit fires after 10 POSTs/min, returns 429 'rate_limited'", async () => {
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `rc-rl-${uniq()}@test.local` });
+    const src = await seedYoutubeSource(u.id);
+
+    // Drain the budget — 10 POSTs sequentially. Each writes an audit row;
+    // the 10th leaves the counter at 10 = LIMIT. The 11th should 429.
+    for (let i = 0; i < 10; i++) {
+      const res = await app.request(`/api/sources/${src.id}/refresh-content`, {
+        method: "POST",
+        headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+      });
+      expect(res.status, `request #${i + 1} should succeed (under limit)`).toBe(202);
+    }
+
+    const denied = await app.request(`/api/sources/${src.id}/refresh-content`, {
+      method: "POST",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(denied.status).toBe(429);
+    const body = (await denied.json()) as { error: string; metadata?: Record<string, unknown> };
+    expect(body.error).toBe("rate_limited");
+    expect(body.metadata).toMatchObject({ limit: 10, window_seconds: 60 });
+
+    // Audit log shows exactly 10 rows for this user — the rate-limit denial
+    // does NOT write an audit row (would muddy the counter for forensics).
+    const rows = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(eq(auditLog.userId, u.id), eq(auditLog.action, "source.refresh_content_requested")),
+      );
+    expect(rows).toHaveLength(10);
+  });
+
+  it("Plan 03.0.1: rate limit is per-user — user A maxing out does NOT block user B", async () => {
+    const app = createApp();
+    const a = await seedUserDirectly({ email: `rc-rlA-${uniq()}@test.local` });
+    const b = await seedUserDirectly({ email: `rc-rlB-${uniq()}@test.local` });
+    const srcA = await seedYoutubeSource(a.id);
+    const srcB = await seedYoutubeSource(b.id);
+
+    // User A drains their budget.
+    for (let i = 0; i < 10; i++) {
+      const res = await app.request(`/api/sources/${srcA.id}/refresh-content`, {
+        method: "POST",
+        headers: { cookie: `neotolis.session_token=${a.signedSessionCookieValue}` },
+      });
+      expect(res.status).toBe(202);
+    }
+    // User A's 11th — denied.
+    const aDenied = await app.request(`/api/sources/${srcA.id}/refresh-content`, {
+      method: "POST",
+      headers: { cookie: `neotolis.session_token=${a.signedSessionCookieValue}` },
+    });
+    expect(aDenied.status).toBe(429);
+
+    // User B's 1st — succeeds. Tenant scope on the rate-limit query holds.
+    const bOk = await app.request(`/api/sources/${srcB.id}/refresh-content`, {
+      method: "POST",
+      headers: { cookie: `neotolis.session_token=${b.signedSessionCookieValue}` },
+    });
+    expect(bOk.status).toBe(202);
+  });
 });

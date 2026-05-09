@@ -22,6 +22,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
+import { and, count, eq, gte } from "drizzle-orm";
 import {
   createSource,
   listSources,
@@ -31,11 +32,33 @@ import {
   restoreSource,
 } from "../../services/data-sources.js";
 import { toDataSourceDto } from "../../dto.js";
+import { db } from "../../db/client.js";
+import { auditLog } from "../../db/schema/audit-log.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
 import { writeAuditStrict } from "../../audit.js";
 import { AppError, NotFoundError } from "../../services/errors.js";
 import { getAdapter } from "$lib/sources/registry.js";
+
+// Phase 03.0.1 architecture cleanup — refresh-content rate limit. Cap on
+// per-user POST /api/sources/:id/refresh-content calls in any rolling 1-min
+// window. Bounds quota burn from a user mashing the "Pull new content"
+// button across N registered sources: singletonKey already dedupes per
+// source (~5min), but a user with many sources can still queue 1 backfill
+// per source per 5min — the per-user cap pins overall throughput.
+//
+// Counter source: audit_log itself. Every successful refresh-content writes
+// `source.refresh_content_requested` with a server timestamp. A `SELECT
+// COUNT(*) WHERE userId AND action AND created_at > NOW() - 60s` is the
+// natural rate-counter — no new table, no in-memory store (which would
+// suffer the same multi-replica drift as the chargedFetch reservoir).
+//
+// Limit chosen at 10/min (one click every 6s) — generous for the "many
+// sources after a workday" UX without creating a backfill stampede if a
+// user had every source actively churning. Tunable via env if abuse
+// signal demands tightening.
+const REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE = 10;
+const REFRESH_CONTENT_RATE_WINDOW_MS = 60_000;
 
 const sourceKindEnum = z.enum([
   "youtube_channel",
@@ -229,6 +252,34 @@ sourcesRoutes.post("/sources/:id/restore", async (c) => {
 sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
   const ctx = getAuditContext(c);
   try {
+    // Phase 03.0.1 — per-user rolling rate limit (see REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE
+    // header comment for the audit_log-backed counter rationale). Runs FIRST
+    // so a user spamming the button can't even pay the getSourceById round
+    // trip cost. Anonymous → 401 already fired in tenantScope middleware,
+    // so ctx.userId is guaranteed here.
+    const since = new Date(Date.now() - REFRESH_CONTENT_RATE_WINDOW_MS);
+    const [recent] = await db
+      .select({ c: count() })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.userId, ctx.userId),
+          eq(auditLog.action, "source.refresh_content_requested"),
+          gte(auditLog.createdAt, since),
+        ),
+      );
+    if (Number(recent?.c ?? 0) >= REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE) {
+      throw new AppError(
+        `refresh-content rate limit exceeded: ${REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE}/min per user`,
+        "rate_limited",
+        429,
+        {
+          limit: REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE,
+          window_seconds: REFRESH_CONTENT_RATE_WINDOW_MS / 1000,
+        },
+      );
+    }
+
     const source = await getSourceById(ctx.userId, c.req.param("id"));
     if (source.deletedAt !== null) {
       // Soft-deleted source — surface as 404 (matches GET /sources/:id /
