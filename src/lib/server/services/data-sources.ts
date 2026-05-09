@@ -32,7 +32,7 @@
 // so the security signal lands even if the UPDATE later fails.
 
 import { and, eq, isNull } from "drizzle-orm";
-import { db, type Tx } from "../db/client.js";
+import { db, type DbOrTx, type Tx } from "../db/client.js";
 import { dataSources } from "../db/schema/data-sources.js";
 import type { SourceKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
@@ -611,6 +611,138 @@ export async function markSourceNeedsReconnect(
       updatedAt: new Date(),
     })
     .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
+}
+
+// ───── Phase 03.0.1 — backfill state machine helpers ─────
+// All four mark* helpers accept optional dbCtx (DbOrTx) so worker chunk
+// transactions can write state alongside event INSERTs atomically. Default
+// to top-level db when omitted (most callers).
+
+/**
+ * Mark "we ran a backfill action against this source just now". Updates
+ * `last_polled_at` to NOW. Called from EVERY backfill flow (initial,
+ * incremental, historical, stats_refresh, auto_passive) on success.
+ * UI displays "обновлено N часов назад" from this column.
+ */
+export async function markSourceLastPolledAt(
+  userId: string,
+  sourceId: string,
+  dbCtx: DbOrTx = db,
+): Promise<void> {
+  await dbCtx
+    .update(dataSources)
+    .set({ lastPolledAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
+}
+
+/**
+ * Move the auto-import frontier — the earliest event.occurred_at we've
+ * pulled. Worker should call ONLY when actually moving frontier deeper
+ * (oldestAt < current backfillOldestAt OR current is NULL); the helper
+ * itself does an unconditional UPDATE — caller's responsibility to gate.
+ */
+export async function markSourceBackfillFrontier(
+  userId: string,
+  sourceId: string,
+  oldestAt: Date,
+  dbCtx: DbOrTx = db,
+): Promise<void> {
+  await dbCtx
+    .update(dataSources)
+    .set({ backfillOldestAt: oldestAt, updatedAt: new Date() })
+    .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
+}
+
+/**
+ * Mark this source's backfill complete — adapter.pollContent returned an
+ * empty HTTP-200 page (platform confirmed "no more older content").
+ * Auto-backfill cron skips sources with `backfill_complete=true`. User
+ * refresh resets via `resetSourceBackfillComplete` (trust-but-verify).
+ */
+export async function markSourceBackfillComplete(
+  userId: string,
+  sourceId: string,
+  dbCtx: DbOrTx = db,
+): Promise<void> {
+  await dbCtx
+    .update(dataSources)
+    .set({ backfillComplete: true, updatedAt: new Date() })
+    .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
+}
+
+/**
+ * Reset `backfill_complete` to false. Called from POST /api/sources/:id/refresh-content
+ * BEFORE worker enqueue — gives worker a chance to re-verify completeness
+ * (recover from silent errors that may have set complete=true incorrectly).
+ * If still empty after re-check, worker re-sets to true.
+ */
+export async function resetSourceBackfillComplete(
+  userId: string,
+  sourceId: string,
+  dbCtx: DbOrTx = db,
+): Promise<void> {
+  await dbCtx
+    .update(dataSources)
+    .set({ backfillComplete: false, updatedAt: new Date() })
+    .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
+}
+
+/** Boundaries for catch-up worker. */
+export interface BackfillBoundaries {
+  /** Pull events newer than this date — "what came out since I last looked".
+   *  NULL = no events exist yet for this source; old-side pull alone covers it. */
+  newSide: Date | null;
+  /** Pull events back to this date — "fill the gap to my target window".
+   *  NULL = either backfill_complete OR frontier already at/past target. */
+  oldSide: Date | null;
+}
+
+/**
+ * Compute catch-up boundaries for a refresh action — pure function used by
+ * worker handlers to decide what pollContent calls to make.
+ *
+ * Logic:
+ *   newSide = latest event.occurred_at we have (or NULL if no events).
+ *   oldSide = backfill_target_since IF (not complete AND frontier > target).
+ *
+ * Worker:
+ *   - if newSide != null  → pollContent(source, newSide) → INSERT new events.
+ *   - if oldSide != null  → pollContent(source, oldSide) → INSERT older events
+ *                           (idempotency via externalId UNIQUE skips overlap).
+ *   - if both null         → no work needed (caught up).
+ *   - if newSide null + oldSide non-null → initial pull (no events yet, fetch
+ *                                          everything in target window).
+ *
+ * Pure — no DB query. Caller fetches `latestEventOccurredAt` separately
+ * (typically via `MAX(events.occurred_at) WHERE source_id`) and passes both.
+ */
+export function computeSinceForRefresh(
+  source: {
+    backfillOldestAt: Date | null;
+    backfillComplete: boolean;
+    backfillTargetSince: Date | null;
+  },
+  latestEventOccurredAt: Date | null,
+): BackfillBoundaries {
+  const newSide = latestEventOccurredAt;
+
+  let oldSide: Date | null = null;
+  if (!source.backfillComplete) {
+    const target = source.backfillTargetSince;
+    const frontier = source.backfillOldestAt;
+    if (target !== null) {
+      if (frontier === null) {
+        // Never pulled historical — start from target (= "all in window").
+        oldSide = target;
+      } else if (target.getTime() < frontier.getTime()) {
+        // Frontier hasn't reached target yet — gap to fill.
+        oldSide = target;
+      }
+      // else: frontier already at/past target — covered, no old-side pull.
+    }
+  }
+
+  return { newSide, oldSide };
 }
 
 /**
