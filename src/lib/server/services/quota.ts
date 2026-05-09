@@ -274,7 +274,11 @@ export async function getUserQuotaUsedToday(
   platform?: string,
 ): Promise<{ requests: number; events: number }> {
   const since = pacificDayStart();
-  const platformFilter = platform ? sql`AND metadata->>'platform' = ${platform}` : sql``;
+  // Existing audit metadata convention: `kind` carries the source kind
+  // (e.g. 'youtube_channel'). New `flow` field carries the refresh-flow
+  // discriminator (incremental/historical/stats_refresh/auto_passive/initial).
+  // Filter by `kind` for platform separation; by `flow` for capped/excluded.
+  const platformFilter = platform ? sql`AND metadata->>'kind' = ${platform}` : sql``;
   const result = await db.execute(sql`
     SELECT
       COALESCE(SUM((metadata->>'requests_used')::int), 0)::bigint AS requests,
@@ -282,7 +286,7 @@ export async function getUserQuotaUsedToday(
     FROM audit_log
     WHERE user_id = ${userId}
       AND action IN ('source.refresh_content_requested', 'event.poll_refreshed')
-      AND metadata->>'kind' IN ('incremental', 'historical', 'stats_refresh')
+      AND metadata->>'flow' IN ('incremental', 'historical', 'stats_refresh')
       AND created_at >= ${since.toISOString()}::timestamptz
       ${platformFilter}
   `);
@@ -295,7 +299,7 @@ export async function getUserQuotaUsedToday(
 
 /**
  * Per-user lifetime usage — SUM since the user's signup (no time filter).
- * Includes ALL kinds (initial + incremental + historical + stats_refresh +
+ * Includes ALL flows (initial + incremental + historical + stats_refresh +
  * auto_passive) so banner footer shows true lifetime consumption.
  *
  * Performance: indexed via (user_id, created_at desc). For users with
@@ -305,7 +309,7 @@ export async function getUserQuotaLifetime(
   userId: string,
   platform?: string,
 ): Promise<{ requests: number; events: number }> {
-  const platformFilter = platform ? sql`AND metadata->>'platform' = ${platform}` : sql``;
+  const platformFilter = platform ? sql`AND metadata->>'kind' = ${platform}` : sql``;
   const result = await db.execute(sql`
     SELECT
       COALESCE(SUM((metadata->>'requests_used')::int), 0)::bigint AS requests,
@@ -313,7 +317,7 @@ export async function getUserQuotaLifetime(
     FROM audit_log
     WHERE user_id = ${userId}
       AND action IN ('source.refresh_content_requested', 'event.poll_refreshed')
-      AND metadata->>'kind' IN ('initial', 'incremental', 'historical', 'stats_refresh', 'auto_passive')
+      AND metadata->>'flow' IN ('initial', 'incremental', 'historical', 'stats_refresh', 'auto_passive')
       ${platformFilter}
   `);
   const row = result.rows[0] as { requests: string | number; events: string | number } | undefined;

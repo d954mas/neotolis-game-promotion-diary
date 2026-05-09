@@ -674,6 +674,59 @@ async function handleChannelContextBackfillImpl(job: {
       );
   }
 
+  // Phase 03.0.1 — backfill state machine + audit metadata for cap counter.
+  // State updates only happen когда sourceId is present (createSource flow,
+  // not generic ingest path). Audit row written в both cases — ingest flow
+  // (no sourceId) gets minimal metadata (no source_id field).
+  if (sourceId) {
+    const { markSourceLastPolledAt, markSourceBackfillFrontier } =
+      await import("$lib/server/services/data-sources.js");
+    await markSourceLastPolledAt(userId, sourceId);
+    // Frontier moves to oldest occurredAt we just inserted, when applicable.
+    if (videoIds.length > 0) {
+      const oldestRow = await db
+        .select({ at: youtubeVideos.publishedAt })
+        .from(youtubeVideos)
+        .where(
+          sql`${youtubeVideos.videoId} IN (${sql.join(
+            videoIds.map((vid) => sql`${vid}`),
+            sql`, `,
+          )})`,
+        )
+        .orderBy(sql`${youtubeVideos.publishedAt} ASC NULLS LAST`)
+        .limit(1);
+      const oldest = oldestRow[0]?.at ?? null;
+      if (oldest !== null) {
+        await markSourceBackfillFrontier(userId, sourceId, oldest);
+      }
+    }
+  }
+
+  // Audit row — counted ONLY when sourceId is present (per-source cap accounting).
+  // Ingest-paste channel-context (no sourceId) is operator-side cache hydration,
+  // not user-initiated quota burn — we skip the audit row to avoid polluting cap
+  // queries with rows that have no source_id.
+  if (sourceId) {
+    const { writeAudit } = await import("$lib/server/audit.js");
+    // Estimate quota units burned: 1 (channels.list) + N pages of playlistItems
+    // + M batches of videos.list. Conservative estimate from videoIds.length.
+    const requestsUsed = 1 + Math.max(1, Math.ceil(videoIds.length / 50)) * 2;
+    await writeAudit({
+      userId,
+      action: "source.refresh_content_requested",
+      ipAddress: "0.0.0.0",
+      metadata: {
+        source_id: sourceId,
+        kind: "youtube_channel",
+        flow: "initial",
+        queue: "youtube.channel_context_backfill",
+        job_id: job.id ?? null,
+        requests_used: requestsUsed,
+        events_inserted: videoIds.length,
+      },
+    });
+  }
+
   logger.info(
     {
       jobId: job.id,

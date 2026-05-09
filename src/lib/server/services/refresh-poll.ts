@@ -210,6 +210,13 @@ export async function requestRefreshPoll(
   // 7. Audit row scoped to the event owner. Written OUTSIDE any tx (Phase
   //    02.2 pool-deadlock-safe pattern). Audit failures are swallowed by
   //    audit.ts so they never break the user-facing path.
+  //
+  // Phase 03.0.1 — extended metadata for per-user cap counter:
+  //   flow='stats_refresh' (capped) + requests_used=1 (one videos.list call,
+  //   1 quota unit) + events_inserted=0 (no new event rows; this refreshes
+  //   stats on existing event/snapshot tables).
+  // Cap query (services/quota.ts:getUserQuotaUsedToday) sums these across
+  // user-initiated capped flows (incremental + historical + stats_refresh).
   await writeAudit({
     userId,
     action: "event.poll_refreshed",
@@ -219,6 +226,9 @@ export async function requestRefreshPoll(
       event_id: eventId,
       kind: event.kind,
       external_id: event.externalId,
+      flow: "stats_refresh",
+      requests_used: 1,
+      events_inserted: 0,
     },
   });
 
