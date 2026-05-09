@@ -606,7 +606,7 @@ describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
     }
   });
 
-  it("creates the youtube_service_quota_usage table with composite PK (date_pacific, api_key_id)", async () => {
+  it("creates the youtube_service_quota_usage table with composite PK (date_pacific, api_key_id, pool_kind)", async () => {
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const tableRes = await pool.query<{ tablename: string }>(
@@ -618,7 +618,9 @@ describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
          where table_name='youtube_service_quota_usage' and column_name='user_id'`,
       );
       expect(userIdRes.rows.length).toBe(0);
-      // Composite PK columns in order: date_pacific, api_key_id.
+      // Composite PK columns in order: date_pacific, api_key_id, pool_kind.
+      // Phase 03.0.1 post-review #5: pool_kind discriminator added so
+      // reconcileReservoirsOnBoot debits each in-memory reservoir accurately.
       const pkRes = await pool.query<{ column_name: string; ordinal_position: number }>(
         `select kcu.column_name, kcu.ordinal_position
          from information_schema.table_constraints tc
@@ -629,7 +631,11 @@ describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
            and tc.constraint_type='PRIMARY KEY'
          order by kcu.ordinal_position`,
       );
-      expect(pkRes.rows.map((r) => r.column_name)).toEqual(["date_pacific", "api_key_id"]);
+      expect(pkRes.rows.map((r) => r.column_name)).toEqual([
+        "date_pacific",
+        "api_key_id",
+        "pool_kind",
+      ]);
     } finally {
       await pool.end();
     }
