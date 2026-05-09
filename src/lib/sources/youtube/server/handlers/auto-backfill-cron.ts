@@ -45,8 +45,14 @@ import { youtubeObservability } from "../observability.js";
 import type { MinimalBoss } from "$lib/sources/adapter.js";
 
 /** Cron pool usage threshold above which auto-backfill defers tick.
- *  Lower priority than cold poll (skip ≥80%) and active poll (skip ≥95%). */
-const SKIP_THRESHOLD_PCT = 50;
+ *  Lower priority than cold poll (skip ≥0.80) and active poll (skip ≥0.95).
+ *
+ *  IMPORTANT: this is a FRACTION (0..1) matching `pctOfDaily` shape returned
+ *  by `observability.quota.getDailyStats` (see adapter.ts ObservabilityDailyStats
+ *  jsdoc). Pre-fix the constant was `50` and the comparison `pctOfDaily >= 50`
+ *  never fired (max real fraction value is 1.0 < 50). Post-fix the gate
+ *  actually defers ticks when operator quota is half-spent. */
+const SKIP_THRESHOLD_FRACTION = 0.5;
 
 /** Maximum sources picked per cron tick. Each enqueues один backfill-user job;
  *  worker processes serially. Bounded picker keeps round-robin fair across
@@ -74,9 +80,9 @@ export async function handleAutoBackfillCron(
   // first under contention. Comment fix from pre-review «cron pool ≥50%»
   // wording — the actual semantics are operator-wide.
   const stats = await youtubeObservability.quota.getDailyStats(new Date());
-  if (stats.pctOfDaily >= SKIP_THRESHOLD_PCT) {
+  if (stats.pctOfDaily >= SKIP_THRESHOLD_FRACTION) {
     logger.info(
-      { jobId: job.id, pctOfDaily: stats.pctOfDaily, threshold: SKIP_THRESHOLD_PCT },
+      { jobId: job.id, pctOfDaily: stats.pctOfDaily, threshold: SKIP_THRESHOLD_FRACTION },
       "youtube.auto_backfill_cron: operator quota under load, deferring this tick",
     );
     return;
