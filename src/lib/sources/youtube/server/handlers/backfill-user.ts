@@ -83,7 +83,12 @@ interface BackfillUserJob {
 
 export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
   const { sourceId, userId } = job.data;
-  const flow: BackfillFlow = job.data.flow ?? "incremental";
+  // Phase 03.0.1 (post-review) — flow may upgrade from 'incremental' to
+  // 'historical' below if computeSinceForRefresh returns oldSide work
+  // (user expanded backfill_target_since past the frontier). Cap query
+  // counts both flows equally; the distinction is for forensic semantics
+  // ("user explicitly extended back-window vs default catch-up").
+  let flow: BackfillFlow = job.data.flow ?? "incremental";
 
   if (typeof sourceId !== "string" || typeof userId !== "string") {
     logger.warn(
@@ -139,6 +144,16 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
   const { newSide, oldSide } = computeSinceForRefresh(source, latestEventOccurredAt);
   const since = oldSide ?? newSide;
 
+  // Phase 03.0.1 (post-review) — wire 'historical' flow.
+  // When oldSide !== null, this pull goes past the frontier into user-extended
+  // back-window territory. Upgrade 'incremental' (default for refresh-content)
+  // to 'historical' so audit metadata distinguishes the two. Other flows
+  // ('auto_passive', 'initial', 'historical' if endpoint already specified it)
+  // keep their declared value.
+  if (flow === "incremental" && oldSide !== null) {
+    flow = "historical";
+  }
+
   if (since === null) {
     // Caught up — no work needed.
     await markSourceLastPolledAt(userId, source.id);
@@ -179,6 +194,15 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
   // Empty HTTP-200 success = platform confirmed no more events since `since`.
   // Mark backfill_complete so auto-cron skips this source on subsequent ticks
   // (until user explicitly resets via refresh-content trust-but-verify).
+  //
+  // INVARIANT (post-review Issue 6 — fragility flagged): empty result is
+  // safe to interpret as «backfill complete» REGARDLESS of which side
+  // computeSinceForRefresh used because oldSide===null implies «no historical
+  // work to do» (target null OR frontier already past target OR complete
+  // already true). Empty result with oldSide!==null means we walked all the
+  // way back to target_since with zero new events — also legitimate complete.
+  // If a future refactor decouples oldSide from the «has historical work»
+  // signal, ветвь this on (oldSide !== null) explicitly to preserve intent.
   if (rawEvents.length === 0) {
     await markSourceBackfillComplete(userId, source.id);
     await markSourceLastPolledAt(userId, source.id);
@@ -332,6 +356,12 @@ async function writeBackfillAudit(args: {
     metadata: {
       source_id: args.sourceId,
       kind: args.sourceKind,
+      // Phase 03.0.1 (post-review) — explicit `platform` field for cap query.
+      // For source-scoped audit verbs `kind` and `platform` carry the same
+      // value, but the cap query relies on the dedicated `platform` field
+      // to stay consistent across event-scoped verbs (event.poll_refreshed)
+      // where `kind` carries event-kind not source-kind.
+      platform: args.sourceKind,
       flow: args.flow,
       queue: "youtube.backfill.user",
       job_id: args.job.id ?? null,

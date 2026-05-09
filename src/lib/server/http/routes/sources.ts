@@ -22,7 +22,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { and, count, eq, gte } from "drizzle-orm";
+import { and, count, eq, gte, sql } from "drizzle-orm";
 import {
   createSource,
   listSources,
@@ -266,6 +266,13 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
     // trip cost. Anonymous → 401 already fired in tenantScope middleware,
     // so ctx.userId is guaranteed here.
     const since = new Date(Date.now() - REFRESH_CONTENT_RATE_WINDOW_MS);
+    // Phase 03.0.1 (post-review) — count INTENT rows only.
+    // `source.refresh_content_requested` is written twice per click:
+    //   1. INTENT — endpoint pre-enqueue (no `flow`, no `events_inserted`)
+    //   2. COMPLETION — worker post-pollContent (sets `flow` + `events_inserted`)
+    // Pre-fix the rate-limit query counted both, halving the effective window
+    // (~5 clicks/min instead of declared 10). Filtering on `flow IS NULL`
+    // matches only intent rows — exactly one per user click.
     const [recent] = await db
       .select({ c: count() })
       .from(auditLog)
@@ -274,6 +281,7 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
           eq(auditLog.userId, ctx.userId),
           eq(auditLog.action, "source.refresh_content_requested"),
           gte(auditLog.createdAt, since),
+          sql`${auditLog.metadata}->>'flow' IS NULL`,
         ),
       );
     if (Number(recent?.c ?? 0) >= REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE) {
@@ -392,6 +400,11 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
       metadata: {
         source_id: source.id,
         kind: source.kind,
+        // Phase 03.0.1 (post-review) — `platform` for cap-query consistency.
+        // Intent rows are NOT counted by the cap query (no `flow` field — see
+        // worker completion audit), but we set `platform` anyway so any
+        // future query that aggregates intent + completion stays consistent.
+        platform: source.kind,
         queue: result.queue,
         job_id: result.jobId,
       },

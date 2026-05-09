@@ -242,11 +242,14 @@ export async function getUserQuotaUsedToday(
   platform?: string,
 ): Promise<{ requests: number; events: number }> {
   const since = pacificDayStart();
-  // Existing audit metadata convention: `kind` carries the source kind
-  // (e.g. 'youtube_channel'). New `flow` field carries the refresh-flow
-  // discriminator (incremental/historical/stats_refresh/auto_passive/initial).
-  // Filter by `kind` for platform separation; by `flow` for capped/excluded.
-  const platformFilter = platform ? sql`AND metadata->>'kind' = ${platform}` : sql``;
+  // Phase 03.0.1 (post-review) — `platform` field carries source-kind
+  // explicitly. Pre-fix the query filtered on `metadata->>'kind'`, but
+  // `kind` carries different semantics across audit verbs (event.poll_refreshed
+  // wrote event-kind = 'youtube_video' while the cap query passed
+  // source-kind = 'youtube_channel' — never matched, leaked stats_refresh
+  // counts entirely). `platform` is a dedicated field across ALL capped-flow
+  // writers — see audit.ts AuditMetadata.platform jsdoc.
+  const platformFilter = platform ? sql`AND metadata->>'platform' = ${platform}` : sql``;
   const result = await db.execute(sql`
     SELECT
       COALESCE(SUM((metadata->>'requests_used')::int), 0)::bigint AS requests,

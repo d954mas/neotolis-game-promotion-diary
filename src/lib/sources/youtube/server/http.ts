@@ -246,13 +246,68 @@ export async function chargedFetch(
       context: { apiKeyId: picked.apiKeyId, status: resp.status, logTag: ctx.logTag },
     });
   }
-  // Other 4xx (401 / 400 / 429): treat as transient — give pg-boss the
-  // chance to retry rather than swallow silently. If a future call site
-  // hits a sustained 401 / 400 the operator sees retry storms in the audit
-  // and can investigate; preferable to a silent drop.
+  // Phase 03.0.1 (post-review) — explicit 4xx classification. Pre-fix all
+  // remaining 4xx fell through to `transient` which made pg-boss retry
+  // forever on permanent errors:
+  //   - 401 invalid/expired API key → operator-issue (flag needs_reconnect,
+  //     stop retrying, surface to /admin/quota)
+  //   - 429 rate-limited per-key (not the daily quota — that's 403
+  //     quotaExceeded above) → rate-limited with Retry-After backoff
+  //   - 400 bad request → permanent (caller bug; retrying same payload
+  //     will fail same way)
+  //   - other unexpected 4xx → transient (last resort fallback — surfaces
+  //     in audit so operator sees retry storms and investigates)
+  if (resp.status === 401) {
+    logger.warn(
+      { status: 401, ...ctx },
+      `${ctx.logTag}: 401 → AdapterError(operator-issue, key may be revoked)`,
+    );
+    throw new AdapterError("YouTube auth failed (401 — key invalid or revoked)", {
+      category: "operator-issue",
+      context: { apiKeyId: picked.apiKeyId, status: 401, logTag: ctx.logTag },
+    });
+  }
+  if (resp.status === 429) {
+    // Parse Retry-After (seconds OR HTTP-date). Default to 60s if missing
+    // or unparseable — gives pg-boss a sane backoff without hammering.
+    const retryAfterHeader = resp.headers.get("retry-after");
+    let retryAfterMs = 60_000;
+    if (retryAfterHeader !== null) {
+      const asInt = parseInt(retryAfterHeader, 10);
+      if (Number.isFinite(asInt) && asInt > 0) {
+        retryAfterMs = asInt * 1000;
+      } else {
+        const asDate = Date.parse(retryAfterHeader);
+        if (Number.isFinite(asDate)) {
+          retryAfterMs = Math.max(1000, asDate - Date.now());
+        }
+      }
+    }
+    logger.warn(
+      { status: 429, retryAfterMs, ...ctx },
+      `${ctx.logTag}: 429 → AdapterError(rate-limited)`,
+    );
+    throw new AdapterError("YouTube rate-limited (429)", {
+      category: "rate-limited",
+      retryAfterMs,
+      context: { apiKeyId: picked.apiKeyId, status: 429, logTag: ctx.logTag },
+    });
+  }
+  if (resp.status === 400) {
+    logger.warn(
+      { status: 400, ...ctx },
+      `${ctx.logTag}: 400 → AdapterError(permanent, request shape rejected)`,
+    );
+    throw new AdapterError("YouTube bad request (400 — caller bug)", {
+      category: "permanent",
+      context: { apiKeyId: picked.apiKeyId, status: 400, logTag: ctx.logTag },
+    });
+  }
+  // Other unexpected 4xx — last-resort transient. Audit storms surface in
+  // /admin/quota so operator can investigate.
   logger.warn(
     { status: resp.status, ...ctx },
-    `${ctx.logTag}: ${resp.status} → AdapterError(transient)`,
+    `${ctx.logTag}: ${resp.status} → AdapterError(transient, last-resort)`,
   );
   throw new AdapterError(`YouTube unexpected ${resp.status}`, {
     category: "transient",

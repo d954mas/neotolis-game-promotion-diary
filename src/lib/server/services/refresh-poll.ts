@@ -265,6 +265,12 @@ export async function requestRefreshPoll(
     metadata: {
       event_id: eventId,
       kind: event.kind,
+      // Phase 03.0.1 (post-review) — explicit source-kind for cap query
+      // (services/quota.ts filters on metadata->>'platform'). `kind` keeps
+      // event-kind for forensic semantics; `platform` carries the cap-window
+      // dimension. Pre-fix: cap query filtered on `kind` directly and missed
+      // every event.poll_refreshed row. See audit.ts AuditMetadata.platform.
+      platform: sourceKindForPoll ?? event.kind,
       external_id: event.externalId,
       flow: "stats_refresh",
       requests_used: 1,

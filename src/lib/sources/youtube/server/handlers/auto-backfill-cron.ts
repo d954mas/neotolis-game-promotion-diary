@@ -62,12 +62,22 @@ export async function handleAutoBackfillCron(
   job: AutoBackfillCronJob,
   boss: MinimalBoss,
 ): Promise<void> {
-  // Priority gate — defer tick when cron pool под нагрузкой.
+  // Priority gate — defer tick when overall operator quota under load.
+  //
+  // Phase 03.0.1 (post-review) — `pctOfDaily` aggregates ALL keys × ALL pools
+  // (cron 80% reservation + user 20% reservation hit the same
+  // `youtube_service_quota_usage` rows). The threshold being 50% means «if
+  // ANY portion of operator's daily budget is half-spent, auto-backfill
+  // cedes». This is over-cautious vs. cron-pool-only check (50% cron + 0%
+  // user is 62.5% of cron's slice, but 50% operator-wide) — that's
+  // intentional: auto-backfill is the LOWEST priority work and should yield
+  // first under contention. Comment fix from pre-review «cron pool ≥50%»
+  // wording — the actual semantics are operator-wide.
   const stats = await youtubeObservability.quota.getDailyStats(new Date());
   if (stats.pctOfDaily >= SKIP_THRESHOLD_PCT) {
     logger.info(
       { jobId: job.id, pctOfDaily: stats.pctOfDaily, threshold: SKIP_THRESHOLD_PCT },
-      "youtube.auto_backfill_cron: cron pool busy, deferring this tick",
+      "youtube.auto_backfill_cron: operator quota under load, deferring this tick",
     );
     return;
   }

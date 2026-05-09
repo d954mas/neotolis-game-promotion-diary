@@ -718,6 +718,11 @@ async function handleChannelContextBackfillImpl(job: {
       metadata: {
         source_id: sourceId,
         kind: "youtube_channel",
+        // Phase 03.0.1 (post-review) — `platform` for cap-query consistency.
+        // 'initial' flow excluded from cap by design (onboarding UX), but we
+        // set platform anyway so audit aggregation stays uniform across all
+        // refresh-related verbs.
+        platform: "youtube_channel",
         flow: "initial",
         queue: "youtube.channel_context_backfill",
         job_id: job.id ?? null,

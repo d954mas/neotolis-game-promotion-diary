@@ -46,6 +46,20 @@ export interface AuditMetadata {
   requests_used?: number;
   /** Number of rows inserted by the action (per-user cap counter axis). */
   events_inserted?: number;
+  /**
+   * Per-user fair-share cap query (services/quota.ts:getUserQuotaUsedToday)
+   * scopes by source-kind to separate per-platform cap windows. ALL audit
+   * verbs that contribute to capped flows MUST set this field to the source
+   * kind (`'youtube_channel'` etc.) regardless of whether `metadata.kind`
+   * carries event-kind or source-kind in the action's domain convention.
+   *
+   * Why a dedicated field: pre-Phase-03.0.1 follow-up review caught that
+   * `event.poll_refreshed` rows wrote `metadata.kind = event.kind` (e.g.
+   * `'youtube_video'`) while the cap query passed `'youtube_channel'` — never
+   * matched, never counted. Splitting `platform` from domain `kind` keeps
+   * each field's semantics clean and the cap counter accurate.
+   */
+  platform?: string;
   // Open shape — callers may pass additional bag fields (source_id, kind,
   // job_id, etc.). Only `flow` carries a closed enum; everything else is
   // free-form per audit-action convention.
