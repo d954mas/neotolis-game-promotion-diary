@@ -27,11 +27,12 @@ const uniq = (): string => Math.random().toString(36).slice(2, 10);
 describe("audit_log metadata.flow CHECK constraint (migration 0025)", () => {
   it("rejects raw INSERT with invalid flow value", async () => {
     const u = await seedUserDirectly({ email: `flow-bad-${uniq()}@test.local` });
-    let pgError: {
+    interface PgError {
       code?: string;
       constraint?: string;
       cause?: { code?: string; constraint?: string };
-    } | null = null;
+    }
+    let caught: PgError | null = null;
     try {
       await db.execute(sql`
         INSERT INTO audit_log (id, user_id, action, ip_address, metadata)
@@ -39,13 +40,14 @@ describe("audit_log metadata.flow CHECK constraint (migration 0025)", () => {
                 '{"flow":"autoo_passive"}'::jsonb)
       `);
     } catch (err) {
-      pgError = err as typeof pgError;
+      caught = err as PgError;
     }
     // Drizzle wraps the underlying pg error; the cause chain carries
     // PG error code 23514 (check_violation) + constraint name.
-    expect(pgError).not.toBeNull();
-    const code = pgError?.code ?? pgError?.cause?.code;
-    const constraint = pgError?.constraint ?? pgError?.cause?.constraint;
+    expect(caught).not.toBeNull();
+    const err = caught as PgError;
+    const code = err.code ?? err.cause?.code;
+    const constraint = err.constraint ?? err.cause?.constraint;
     expect(code).toBe("23514");
     expect(constraint).toBe("audit_log_metadata_flow_valid");
   });
