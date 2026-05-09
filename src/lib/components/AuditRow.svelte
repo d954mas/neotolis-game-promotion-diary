@@ -1,16 +1,16 @@
 <script lang="ts">
   // AuditRow — single row in the /audit page list (PRIV-02). Stacked layout
-  // on mobile, table-row on desktop. Renders the action chip via a
-  // Paraglide picker over the closed-list audit_log.action enum, plus
-  // metadata.last4 / metadata.kind for key.* events.
+  // on mobile, table-row on desktop. Renders the action chip via the shared
+  // auditActionLabel helper (Phase 03.0.1 architecture cleanup — pre-cleanup
+  // this file carried an 80-line switch duplicated in FilterChips +
+  // FiltersSheet; the helper is the single source of truth).
   //
   // The `action` value is one of AUDIT_ACTIONS (src/lib/server/audit/actions.ts).
-  // We accept it as a string here so this component doesn't have to import
-  // the server-side type — the chip-mapping function below covers every
-  // closed-list value and falls back to the raw string for forward
-  // compatibility.
+  // We accept it as a string so this component doesn't have to import the
+  // server-side type; auditActionLabel handles the closed-list match + raw
+  // fallback for forward compatibility.
 
-  import { m } from "$lib/paraglide/messages.js";
+  import { auditActionLabel } from "$lib/audit-labels.js";
 
   type AuditEntry = {
     id: string;
@@ -22,91 +22,6 @@
   };
 
   let { entry }: { entry: AuditEntry } = $props();
-
-  function chipLabel(action: string): string {
-    switch (action) {
-      case "session.signin":
-        return m.audit_action_session_signin();
-      case "session.signout":
-        return m.audit_action_session_signout();
-      case "session.signout_all":
-        return m.audit_action_session_signout_all();
-      case "user.signup":
-        return m.audit_action_user_signup();
-      case "key.add":
-        return m.audit_action_key_add();
-      case "key.rotate":
-        return m.audit_action_key_rotate();
-      case "key.remove":
-        return m.audit_action_key_remove();
-      case "game.created":
-        return m.audit_action_game_created();
-      case "game.deleted":
-        return m.audit_action_game_deleted();
-      case "game.restored":
-        return m.audit_action_game_restored();
-      case "event.created":
-        return m.audit_action_event_created();
-      case "event.edited":
-        return m.audit_action_event_edited();
-      case "event.deleted":
-        return m.audit_action_event_deleted();
-      case "event.attached_to_game":
-        return m.audit_action_event_attached_to_game();
-      case "event.detached_from_game":
-        return m.audit_action_event_detached_from_game();
-      case "event.dismissed_from_inbox":
-        return m.audit_action_event_dismissed_from_inbox();
-      case "event.restored":
-        return m.audit_action_event_restored();
-      case "event.marked_standalone":
-        return m.audit_action_event_marked_standalone();
-      case "event.unmarked_standalone":
-        return m.audit_action_event_unmarked_standalone();
-      case "source.added":
-        return m.audit_action_source_added();
-      case "source.removed":
-        return m.audit_action_source_removed();
-      case "source.toggled_auto_import":
-        return m.audit_action_source_toggled_auto_import();
-      case "theme.changed":
-        return m.audit_action_theme_changed();
-      // Phase 02.2 (D-11 / D-16) — account export / soft-delete / restore +
-      // per-user abuse-quota tripwire. Keys land in messages/en.json
-      // alongside the AUDIT_ACTIONS const additions (lock-step contract per
-      // src/lib/server/audit/actions.ts header).
-      case "account.deleted":
-        return m.audit_action_account_deleted();
-      case "account.restored":
-        return m.audit_action_account_restored();
-      case "account.exported":
-        return m.audit_action_account_exported();
-      case "quota.limit_hit":
-        return m.audit_action_quota_limit_hit();
-      // Phase 3.0 baseline (migration 0010) — polling pipeline audit verbs.
-      // Lock-step with src/lib/server/audit/actions.ts AUDIT_ACTIONS const
-      // additions; tests/integration/audit-render.test.ts iterates the const
-      // and trips on any missing case here.
-      case "quota.service_throttled":
-        return m.audit_action_quota_service_throttled();
-      case "purge.completed":
-        return m.audit_action_purge_completed();
-      case "auto_import.deferred":
-        return m.audit_action_auto_import_deferred();
-      case "poll.failed":
-        return m.audit_action_poll_failed();
-      case "event.poll_refreshed":
-        return m.audit_action_event_poll_refreshed();
-      // Phase 03.0.1 Plan 10 — POST /api/sources/:id/refresh-content endpoint.
-      // Forward-only migration 0023 lands the pgEnum addition; lock-step
-      // contract requires a Paraglide key + chip case for every AUDIT_ACTIONS
-      // value (tests/integration/audit-render.test.ts iterates the const).
-      case "source.refresh_content_requested":
-        return m.audit_action_source_refresh_content_requested();
-      default:
-        return action;
-    }
-  }
 
   const isKeyAction = $derived(entry.action.startsWith("key."));
   const meta = $derived(entry.metadata as Record<string, unknown> | null);
@@ -127,7 +42,7 @@
 
 <div class="row">
   <time class="when" datetime={occurredIso} title={occurredIso}>{occurredHuman}</time>
-  <span class="chip">{chipLabel(entry.action)}</span>
+  <span class="chip">{auditActionLabel(entry.action)}</span>
   {#if last4}
     <code class="last4">••••••••{last4}</code>
   {/if}

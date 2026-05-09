@@ -30,6 +30,11 @@
   import { page } from "$app/state";
   import { m } from "$lib/paraglide/messages.js";
   import FeedCard from "$lib/components/FeedCard.svelte";
+  // Phase 03.0.1 D-04 escape hatch — adapter-specific card override.
+  // Phase 03.0.1 ships no overrides (YouTube uses the universal FeedCard);
+  // Reddit / Twitter Phase 03.1+ register `cardComponent` on their
+  // sources/<kind>/ui/index.ts to opt into a custom layout.
+  import { getCardComponent } from "$lib/sources/registry-ui-client.js";
   import FeedDateGroupHeader from "$lib/components/FeedDateGroupHeader.svelte";
   import FeedQuickNav from "$lib/components/FeedQuickNav.svelte";
   // Plan 02.1-25 (UAT-NOTES.md §3.1-polish): shared PageHeader replaces the
@@ -407,7 +412,8 @@
       {#each groupedRows as group (group.date)}
         <FeedDateGroupHeader occurredAt={group.occurredAt} />
         {#each group.rows as row (row.id)}
-          <FeedCard
+          {@const Card = getCardComponent(row.kind) ?? FeedCard}
+          <Card
             event={row}
             source={row.sourceId ? (sourceById.get(row.sourceId) ?? null) : null}
             game={row.gameIds.length > 0 ? (gameById.get(row.gameIds[0]!) ?? null) : null}
