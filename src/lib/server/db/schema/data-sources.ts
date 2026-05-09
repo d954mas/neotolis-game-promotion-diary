@@ -79,6 +79,26 @@ export const dataSources = pgTable(
     needsReconnect: boolean("needs_reconnect").notNull().default(false),
     lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
     lastErrorKind: text("last_error_kind"),
+    // Phase 03.0.1 — backfill state machine. Migration:
+    // drizzle/0024_phase03_01_data_sources_backfill_state.sql.
+    //
+    //   lastPolledAt          — when we last ran any backfill action against
+    //                           this source. UI display: "обновлено 2h ago".
+    //   backfillOldestAt      — frontier — earliest event.occurred_at we have
+    //                           pulled via auto-import. NULL until first
+    //                           successful auto-import insertion.
+    //   backfillComplete      — true when pollContent returned empty HTTP-200
+    //                           (platform confirmed "no more older"). User
+    //                           refresh resets to false for re-verification.
+    //   backfillTargetSince   — absolute date — earliest boundary user wants.
+    //                           Worker passes to pollContent(source, since).
+    //                           Sentinel 1970-01-01 = "all available history".
+    //                           NULL only on legacy rows pre-migration; new
+    //                           rows always populated at create.
+    lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+    backfillOldestAt: timestamp("backfill_oldest_at", { withTimezone: true }),
+    backfillComplete: boolean("backfill_complete").notNull().default(false),
+    backfillTargetSince: timestamp("backfill_target_since", { withTimezone: true }),
   },
   (t) => ({
     userIdIdx: index("data_sources_user_id_idx").on(t.userId),
@@ -89,5 +109,12 @@ export const dataSources = pgTable(
     userHandleActiveUnq: uniqueIndex("data_sources_user_handle_active_unq")
       .on(t.userId, t.handleUrl)
       .where(sql`${t.deletedAt} IS NULL`),
+    // Phase 03.0.1 — auto-backfill cron picker. SELECT incomplete sources
+    // ORDER BY user_id, last_polled_at NULLS FIRST. Partial index keeps it
+    // tiny (only incomplete + non-deleted rows) and aligned with picker
+    // filter conditions — see auto-backfill cron handler.
+    backfillPickerIdx: index("data_sources_backfill_picker_idx")
+      .on(t.userId, t.lastPolledAt)
+      .where(sql`${t.backfillComplete} = false AND ${t.deletedAt} IS NULL`),
   }),
 );

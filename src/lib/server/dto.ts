@@ -252,6 +252,13 @@ export interface DataSourceDto {
   needsReconnect: boolean;
   lastErrorAt: Date | null;
   lastErrorKind: string | null;
+  // Phase 03.0.1 — backfill state. UI: "обновлено N часов назад" +
+  // coverage badge derived from these fields + per-user quota banner.
+  // See drizzle/0024_phase03_01_data_sources_backfill_state.sql header.
+  lastPolledAt: Date | null;
+  backfillOldestAt: Date | null;
+  backfillComplete: boolean;
+  backfillTargetSince: Date | null;
 }
 
 export function toDataSourceDto(r: DataSourceRow): DataSourceDto {
@@ -271,6 +278,10 @@ export function toDataSourceDto(r: DataSourceRow): DataSourceDto {
     needsReconnect: r.needsReconnect,
     lastErrorAt: r.lastErrorAt,
     lastErrorKind: r.lastErrorKind,
+    lastPolledAt: r.lastPolledAt,
+    backfillOldestAt: r.backfillOldestAt,
+    backfillComplete: r.backfillComplete,
+    backfillTargetSince: r.backfillTargetSince,
   };
 }
 

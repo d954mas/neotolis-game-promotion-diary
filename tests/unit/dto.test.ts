@@ -193,11 +193,21 @@ describe("toDataSourceDto strips userId (P3 behavioural)", () => {
       needsReconnect: false,
       lastErrorAt: null,
       lastErrorKind: null,
+      // Phase 03.0.1 — backfill state machine.
+      lastPolledAt: null,
+      backfillOldestAt: null,
+      backfillComplete: false,
+      backfillTargetSince: null,
     };
     const dto = toDataSourceDto(fakeRow as Parameters<typeof toDataSourceDto>[0]);
 
     expect(Object.keys(dto).sort()).toEqual([
       "autoImport",
+      // Phase 03.0.1 — backfill state machine. Operational fields; non-secret.
+      // /sources/[id] derives coverage badge + "Pull older to" target from these.
+      "backfillComplete",
+      "backfillOldestAt",
+      "backfillTargetSince",
       "channelId",
       "channelTitle",
       "createdAt",
@@ -211,6 +221,7 @@ describe("toDataSourceDto strips userId (P3 behavioural)", () => {
       // metadata; non-secret. The /sources/[id] page renders banners from these.
       "lastErrorAt",
       "lastErrorKind",
+      "lastPolledAt",
       "metadata",
       "needsReconnect",
       "updatedAt",
@@ -224,6 +235,10 @@ describe("toDataSourceDto strips userId (P3 behavioural)", () => {
     expect(dto.needsReconnect).toBe(false);
     expect(dto.lastErrorAt).toBeNull();
     expect(dto.lastErrorKind).toBeNull();
+    expect(dto.lastPolledAt).toBeNull();
+    expect(dto.backfillOldestAt).toBeNull();
+    expect(dto.backfillComplete).toBe(false);
+    expect(dto.backfillTargetSince).toBeNull();
   });
 
   it("02.1-04: coerces null/undefined metadata to empty object", () => {
