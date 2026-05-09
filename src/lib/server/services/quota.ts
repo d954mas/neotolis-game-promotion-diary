@@ -46,6 +46,9 @@ import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError } from "./errors.js";
 import { allAdapters } from "$lib/sources/registry.js";
+import { pacificDayStart, nextPacificMidnight, todayPacific } from "../dates.js";
+
+export { pacificDayStart, nextPacificMidnight, todayPacific };
 
 /**
  * Phase 03.0.1 architecture cleanup — adapter-driven quota counters.
@@ -224,53 +227,6 @@ export async function withQuotaGuard<T>(
  * forward / fall-back days are handled implicitly because the calculation
  * always derives "00:00 in PT" → UTC, never +24h arithmetic.
  */
-/**
- * Returns 'YYYY-MM-DD' in America/Los_Angeles for the given instant. sv-SE
- * locale gives ISO-shape output without manual formatting; Intl handles DST
- * transitions automatically.
- *
- * Phase 03.0.1 — promoted from YouTube-internal to shared. Operator API quotas
- * (YouTube Data API v3) reset at midnight Pacific; per-user fair-share cap
- * counter syncs to the same boundary; admin /admin/quota uses this date string
- * as today's row-key.
- */
-export function todayPacific(now: Date = new Date()): string {
-  return new Intl.DateTimeFormat("sv-SE", {
-    timeZone: "America/Los_Angeles",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-}
-
-export function pacificDayStart(now: Date = new Date()): Date {
-  const datePT = todayPacific(now);
-  // Get current PT UTC offset in minutes via shortOffset format.
-  const offsetParts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
-    timeZoneName: "shortOffset",
-  }).formatToParts(now);
-  const offsetPart = offsetParts.find((p) => p.type === "timeZoneName")?.value ?? "GMT-8";
-  const offsetMatch = offsetPart.match(/GMT([+-]\d+)/);
-  const offsetHours = offsetMatch?.[1] != null ? parseInt(offsetMatch[1], 10) : -8;
-  // Construct UTC instant for "datePT 00:00:00 in PT".
-  const utcMs = Date.parse(`${datePT}T00:00:00Z`) - offsetHours * 3600_000;
-  return new Date(utcMs);
-}
-
-/**
- * Returns 00:00 PT of the day AFTER `now`'s Pacific date — when the cap
- * window resets. UI displays "resets in {humanizeDuration(this - now)}".
- *
- * Computed via `pacificDayStart` of (now + 24h) to handle DST edges
- * correctly: spring-forward day pacific midnight is +23h after current
- * pacific midnight, fall-back is +25h. Both resolved by formatter.
- */
-export function nextPacificMidnight(now: Date = new Date()): Date {
-  const tomorrow = new Date(now.getTime() + 86_400_000);
-  return pacificDayStart(tomorrow);
-}
-
 /**
  * Per-user cap counter: SUM of audit metadata.requests_used + events_inserted
  * for the current Pacific calendar day, scoped to user-initiated capped flows

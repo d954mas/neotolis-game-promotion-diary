@@ -41,7 +41,7 @@ import { youtubeServiceQuotaUsage } from "$lib/server/db/schema/index.js";
 import { auditLog } from "$lib/server/db/schema/audit-log.js";
 import { user } from "$lib/server/db/schema/auth.js";
 import { env } from "$lib/server/config/env.js";
-import { todayPacific } from "$lib/server/services/quota.js";
+import { todayPacific } from "$lib/server/dates.js";
 
 export { todayPacific };
 
