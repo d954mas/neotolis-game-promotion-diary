@@ -373,3 +373,159 @@ Other Phase 6 items tracked in the deferred-ideas list (`.planning/phases/03.0.1
 **Maintenance.** This document describes the SHIPPED architecture as of Phase 03.0.1 (2026-05-08). When Phase 03.1 (Reddit) lands, the Reddit-specific adapter sections may surface refinements that update sections 4-6. Updates land via PR; squash-merge per AGENTS.md Workflow.
 
 **Canonical reference.** The YouTube tree (`src/lib/sources/youtube/`) IS the live reference. When this doc and the code disagree, the code wins; file a doc-update PR.
+
+---
+
+## 8. Backfill State Machine — Phase 03.0.1
+
+Each `data_sources` row carries 4 columns that drive catch-up worker logic + UI display. Migration `drizzle/0024_phase03_01_data_sources_backfill_state.sql`.
+
+| Column | Type | Semantics |
+|--------|------|-----------|
+| `last_polled_at` | `timestamptz NULL` | When we last ran any backfill action на этот source. UI displays "обновлено N часов назад". Updated по успеху ВСЕХ backfill flows (initial, incremental, historical, stats_refresh, auto_passive). |
+| `backfill_oldest_at` | `timestamptz NULL` | Frontier — earliest event.occurred_at we've successfully pulled через auto-import flows. Resume marker для catch-up. NULL until first INSERT. |
+| `backfill_complete` | `boolean NOT NULL DEFAULT false` | True когда `pollContent` returned empty HTTP-200 page (platform "no more older" confirmed). User refresh resets к false (trust-but-verify). Auto-cron skips sources with complete=true. |
+| `backfill_target_since` | `timestamptz NULL` | Absolute date — earliest boundary user wants pulled. Worker passes напрямую в `pollContent(source, since)`. Sentinel `1970-01-01` = "all available history". |
+
+**State derivation для UI:**
+
+```typescript
+function deriveCoverageBadge(s: SourceRow, quotaExhausted: boolean): Badge {
+  if (s.lastPolledAt === null) return "never_polled";
+  if (s.backfillComplete) return "caught_up";
+  if (quotaExhausted) return "quota_exhausted";
+  return "has_more";
+}
+```
+
+`quotaExhausted` derived live из quota counter (`getUserQuotaUsedToday`) — never stored, никакой sync issue.
+
+### `pollContent` contract — empty-vs-throws semantics
+
+Adapter's `pollContent(source, since): Promise<RawEvent[]>` MUST distinguish:
+
+- **HTTP 200 + `[]` (empty array)** = «API явно подтвердил: больше нет событий newer than `since`». Worker sets `backfill_complete = true`.
+- **`throw AdapterError`** = «не смогли определить» (rate-limit / network / parse failure). Worker leaves `backfill_complete` as-is; pg-boss retries.
+
+YouTube + Reddit + Twitter satisfy this naturally (their listing endpoints return distinct `{items: []}` vs HTTP 4xx/5xx). Scrape-based platforms (Telegram, Discord) MAY need a richer return type if rate-limit pages can't be distinguished from "no content"; future non-breaking extension shape:
+
+```typescript
+type PollContentResult = RawEvent[] | { events: RawEvent[]; hasMore: boolean };
+```
+
+Existing adapters keep returning array; new adapters opt into `{events, hasMore}` if needed.
+
+---
+
+## 9. Per-User Fair-Share Quota — Phase 03.0.1
+
+Two-layer cap protects (1) operator's API budget, (2) per-user fairness when one user might monopolize shared budget.
+
+### L1 Operator-side reservoir (Plan 08, existing)
+
+`chargedFetch` consumes из `RateLimiterMemory` reservoir с per-day points. Throttle states:
+
+- `< 80%` → all flows pass.
+- `≥ 80% (eighty)` → cold tier polls skip (auto-backfill также skip at ≥50% — see § 9.3).
+- `≥ 95% (ninetyfive)` → all flows skip; refresh-content endpoints return `429 platform_quota_exhausted` (system-wide signal).
+
+### L2 Per-user fair-share cap (Phase 03.0.1, NEW)
+
+Adapter declares optional cap в `observability.userQuotaCap`:
+
+```typescript
+interface AdapterUserQuotaCap {
+  requestsPerDay?: number; // API calls cap
+  eventsPerDay?: number; // items inserted cap (optional secondary)
+}
+```
+
+Both fields optional. Cap query (`services/quota.ts:getUserQuotaUsedToday`) sums `audit_log.metadata.{requests_used, events_inserted}` for the current Pacific calendar day, scoped к user-initiated capped flows. Endpoint cap-check fires `429 requests_quota_exhausted` или `429 events_quota_exhausted` с `{cap, used, reset_in_seconds}` metadata.
+
+YouTube default: `requestsPerDay: 100` (~5000 events worth at 50:1 ratio). No `eventsPerDay`. Reddit Phase 03.1+ may declare both axes (variable events-per-request).
+
+### 9.1 Audit metadata schema
+
+Worker handlers write audit row at completion с full metadata:
+
+```jsonc
+{
+  "source_id": "<uuid>",
+  "kind": "youtube_channel", // platform (= source.kind)
+  "flow": "incremental" | "historical" | "stats_refresh" | "initial" | "auto_passive",
+  "queue": "youtube.backfill.user" | "youtube.channel_context_backfill" | "youtube.poll.user",
+  "job_id": "<pg-boss job id>",
+  "requests_used": 0,
+  "events_inserted": 0
+}
+```
+
+**Cap counts only** `flow IN ('incremental', 'historical', 'stats_refresh')`:
+
+- `incremental` — refresh-content button (default catch-up).
+- `historical` — refresh-content with explicit older date (PATCH backfill_target_since + refresh).
+- `stats_refresh` — per-event refresh-card button (1 unit per call).
+
+**Excluded** (NOT counted в user cap):
+
+- `initial` — onboarding setup at createSource. UX should never thrash on cap.
+- `auto_passive` — auto-backfill cron pick. Uses cron pool reservoir, not user pool.
+
+Cron pool reservoir (Plan 08 8000 units/day) is independent of user pool (2000 units/day). Auto-backfill workers consume cron pool; user-driven actions consume user pool. Per-user cap protects user pool fairness.
+
+### 9.2 Cap window — Pacific calendar day
+
+Cap counter window: from `pacificDayStart()` (00:00 PT today) to NOW. Reset boundary: `nextPacificMidnight()`.
+
+Sync с operator's chargedFetch reservoir reset cycle (Plan 08 also Pacific calendar day). Single global cycle; UI displays "resets in {humanizeDuration(nextPacificMidnight - now)}" — works в любом user timezone.
+
+### 9.3 Auto-backfill cron priority
+
+Daily 03:00 PT cron picks incomplete sources и enqueues passive backfill:
+
+| Tier                          | Skip threshold | Why                                                                |
+| ----------------------------- | -------------- | ------------------------------------------------------------------ |
+| Active poll (every 6h)        | `≥95%`         | Stats freshness for recent videos — highest priority.              |
+| Cold poll (daily)             | `≥80%`         | Stats refresh for older videos — medium.                           |
+| Auto-backfill (daily 03:00 PT) | `≥50%`         | Historical pulling — lowest priority; cedes first under contention. |
+
+Internal каждого adapter (NOT contract) — каждая платформа tunes свои thresholds в своем handler. YouTube hard-codes 50/80/95; Reddit Phase 03.1 may use 40/70/90 due tighter Reddit rate-limits.
+
+Picker SQL (per-user round-robin fairness):
+
+```sql
+SELECT * FROM data_sources
+WHERE backfill_complete = false
+  AND deleted_at IS NULL
+ORDER BY user_id, last_polled_at NULLS FIRST
+LIMIT 50;
+```
+
+User A with 1 source vs user B with 100 sources — both get up to 1 visit per tick (LIMIT 50 = up to 50 distinct users если каждому по 1 source). User B's many sources get round-robin'd over multiple days.
+
+### 9.4 Auto-import flag respect
+
+Worker handler checks `source.auto_import` ONLY для `flow === 'auto_passive'`:
+
+| Flow                                    | Insert events для user?                                            |
+| --------------------------------------- | ------------------------------------------------------------------ |
+| `initial`, `incremental`, `historical` | ✅ ALWAYS (user-initiated, explicit click)                         |
+| `stats_refresh`                         | n/a (no new events; refreshes existing snapshots)                  |
+| `auto_passive` (cron)                  | ✅ if `source.auto_import = true`; ❌ if false (cache hydration only) |
+
+`auto_import = false` means «don't passively fill my feed»; user-driven refresh button still inserts events (explicit override).
+
+### 9.5 PATCH backfill_target_since flow
+
+User can change earliest-boundary через UI date picker:
+
+```
+PATCH /api/sources/:id  body: { backfillTargetSince: "2023-06-01T00:00:00Z" }
+```
+
+Server validates: future dates → `422 'date_must_be_past'`. Recomputes `backfill_complete`:
+
+- Если new target older than current `backfill_oldest_at` → expanding window → reset complete=false (worker will re-pull historical).
+- Если new target newer than/equal frontier → covered → keep complete state.
+
+UI flow: user picks date → PATCH → optionally clicks Refresh → POST refresh-content (catch-up worker fires). Two clicks под одним user action.
