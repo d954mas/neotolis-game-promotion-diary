@@ -33,13 +33,34 @@ import { createBoss, stopBoss } from "../lib/server/queue-client.js";
 import { pool } from "../lib/server/db/client.js";
 import { logger } from "../lib/server/logger.js";
 import { QUEUES } from "../lib/server/queues.js";
-import { scrubKekFromEnv } from "../lib/server/config/env.js";
+import { env, scrubKekFromEnv } from "../lib/server/config/env.js";
 
 import { allAdapters } from "../lib/sources/registry.js";
 import { reconcileReservoirsOnBoot } from "../lib/sources/youtube/server/http.js";
 import { handlePurgeDaily } from "./handlers/purge-daily.js";
 
 export async function startWorker(): Promise<void> {
+  // Phase 03.0.1 architecture cleanup — multi-replica safety guard.
+  // The YouTube adapter's chargedFetch reservoir uses RateLimiterMemory
+  // (per-process state). With N>1 worker replicas each holds an
+  // independent 8000-unit cron pool / 2000-unit user pool — daily quota
+  // would be N × budget, burning the operator's YouTube envelope past
+  // its 10000-unit daily cap and tripping 95% throttle prematurely.
+  //
+  // Today's compose runs 1 worker (no `replicas:` directive). Operators
+  // who scale via WORKER_REPLICA_COUNT > 1 trip this assert at boot
+  // INSTEAD of silently overshooting quota in production. Migrating
+  // away from this constraint = swap RateLimiterMemory →
+  // RateLimiterPostgres in src/lib/sources/youtube/server/http.ts
+  // (same library, persistent shared backend) and remove this guard.
+  if (env.WORKER_REPLICA_COUNT > 1) {
+    throw new Error(
+      `WORKER_REPLICA_COUNT=${env.WORKER_REPLICA_COUNT} but the YouTube reservoir is per-process. ` +
+        `Migrate src/lib/sources/youtube/server/http.ts from RateLimiterMemory to RateLimiterPostgres ` +
+        `before scaling worker replicas — otherwise the operator's YouTube quota burns N× the daily budget.`,
+    );
+  }
+
   const boss = await createBoss();
   // P2 KEK scrub: worker has no bundled second copy of env.ts (no SvelteKit
   // handler.js import), so it's safe to scrub immediately after createBoss
