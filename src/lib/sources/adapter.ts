@@ -362,6 +362,25 @@ export interface DataSourceAdapter {
   /** Whether this adapter can handle a refresh-poll for the given event kind. */
   canRefreshPoll?(eventKind: EventKind): boolean;
 
+  /**
+   * Reconcile in-process runtime state with persistent counters BEFORE the
+   * worker processes any jobs. Called once at worker bootstrap, after queue
+   * registration but before pg-boss starts dispatching.
+   *
+   * When to declare: adapters that maintain in-process rate-limit reservoirs
+   * (e.g., RateLimiterMemory) lose state on worker restart. Without
+   * reconciliation, a worker that crashed at 7000/8000 cron units re-starts
+   * with a fresh 8000-unit pool and overshoots before the next throttle
+   * threshold catches up.
+   *
+   * When to omit: adapters using only persistent state (RateLimiterPostgres,
+   * DB-backed counters) — restart loses no state.
+   *
+   * Best-effort contract: errors are logged-and-continued by the bootstrap
+   * caller. A failed reconciliation MUST NOT block worker boot.
+   */
+  reconcileRuntimeState?(): Promise<void>;
+
   /** Phase 03.0.1 D-18 — create-time adapter hooks. Cross-source createSource
    *  (services/data-sources.ts) calls these so per-source URL canonicalization
    *  + auto-import init don't live in the cross-source code. */

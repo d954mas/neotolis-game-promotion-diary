@@ -36,7 +36,6 @@ import { QUEUES } from "../lib/server/queues.js";
 import { env, scrubKekFromEnv } from "../lib/server/config/env.js";
 
 import { allAdapters } from "../lib/sources/registry.js";
-import { reconcileReservoirsOnBoot } from "../lib/sources/youtube/server/http.js";
 import { handlePurgeDaily } from "./handlers/purge-daily.js";
 
 export async function startWorker(): Promise<void> {
@@ -77,17 +76,23 @@ export async function startWorker(): Promise<void> {
     }
   });
 
-  // Phase 03.0.1 Plan 08 — reconcile in-memory rate-limit reservoirs to
-  // the persistent youtube_service_quota_usage counter BEFORE adapters
-  // register queues. RateLimiterMemory loses state across process
-  // restarts; without reconciliation a worker that crashed at 7000 cron
-  // units used would re-start with a fresh 8000-unit cron pool and
-  // briefly over-allow until the persistent counter caught the next
-  // throttle threshold. Best-effort — logs and continues on DB errors.
-  try {
-    await reconcileReservoirsOnBoot();
-  } catch (err) {
-    logger.warn({ err }, "youtube reservoirs: reconcileReservoirsOnBoot threw — continuing");
+  // Phase 03.0.1 architecture cleanup — adapter-owned runtime-state reconcile.
+  // Each adapter that maintains in-process state (e.g., RateLimiterMemory
+  // reservoirs that lose state on worker restart) declares
+  // `reconcileRuntimeState` to sync against persistent counters BEFORE jobs
+  // start dispatching. Adapters with only persistent state (DB-backed
+  // counters, RateLimiterPostgres) omit the hook. Best-effort: errors are
+  // logged-and-continued; a failed reconcile does NOT block worker boot.
+  for (const adapter of allAdapters) {
+    if (!adapter.reconcileRuntimeState) continue;
+    try {
+      await adapter.reconcileRuntimeState();
+    } catch (err) {
+      logger.warn(
+        { err, adapter: adapter.kind },
+        "adapter runtime-state reconcile threw — continuing",
+      );
+    }
   }
 
   // Phase 03.0.1 Plan 05 — per-source adapters register their own queues.

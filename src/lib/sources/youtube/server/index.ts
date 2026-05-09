@@ -60,6 +60,7 @@ import type { Hono } from "hono";
 import { QUEUES } from "$lib/server/queues.js";
 import { getBoss } from "$lib/server/queue-client.js";
 import { youtubeChannelAdapterCore } from "./adapter.js";
+import { reconcileReservoirsOnBoot } from "./http.js";
 import { handlePollCron } from "./handlers/poll-cron.js";
 import { handlePollUser } from "./handlers/poll-user.js";
 import { handleRehabUnavailable } from "./handlers/rehab-unavailable.js";
@@ -514,4 +515,9 @@ export const youtubeAdapter: DataSourceAdapter = {
   validateEventInput,
   fetchPollStateMap,
   registerRoutes,
+  // Phase 03.0.1 — sync RateLimiterMemory reservoirs with persistent
+  // youtube_service_quota_usage counter on worker boot. Adapter-owned hook
+  // replaces the cross-source `import reconcileReservoirsOnBoot from
+  // youtube/server/http.js` that worker/index.ts hardcoded pre-cleanup.
+  reconcileRuntimeState: reconcileReservoirsOnBoot,
 };
