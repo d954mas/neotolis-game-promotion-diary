@@ -327,9 +327,30 @@ export interface MinimalBoss {
 
 export interface DataSourceAdapter {
   readonly kind: SourceKind;
-  /** v0.1 surface — preserved verbatim from legacy data-source-adapter.ts.
-   *  Plan 04/08 will move credential picking INSIDE the adapter (D-06 Thick
-   *  scope); until then the caller threads PickedKey down. */
+  /**
+   * Pull events newer than `since` from the upstream platform.
+   *
+   * Empty-vs-throws contract — adapters MUST distinguish two outcomes:
+   *
+   *   - HTTP 200 + `[]` (empty array) — platform CONFIRMED there are no
+   *     events newer than `since`. Worker treats this as «backfill complete»
+   *     and sets data_sources.backfill_complete = true.
+   *
+   *   - `throw AdapterError` — adapter could NOT determine the answer
+   *     (rate-limit, network failure, parse error, auth-issue). Worker
+   *     leaves backfill_complete unchanged; pg-boss retries. NEVER return
+   *     `[]` for inability-to-fetch — that mis-signals «no more events».
+   *
+   * YouTube / Reddit / Twitter satisfy this naturally — their listing
+   * endpoints return distinct `{items: []}` vs HTTP 4xx/5xx. Scrape-based
+   * platforms (Telegram, Discord) where empty page can't be distinguished
+   * from rate-limit failure may need a richer return type — see
+   * SOURCE-REFERENCE.md §8 for the proposed `{events, hasMore}` extension.
+   *
+   * v0.1 surface — preserved verbatim from legacy data-source-adapter.ts.
+   * Plan 04/08 will move credential picking INSIDE the adapter (D-06 Thick
+   * scope); until then the caller threads PickedKey down.
+   */
   pollContent(source: PollableSource, since: Date): Promise<RawEvent[]>;
   /** User-driven stats polling (Refresh now button). quotaUser fingerprint
    *  is derived from userId inside the adapter (per-user burst-shaper

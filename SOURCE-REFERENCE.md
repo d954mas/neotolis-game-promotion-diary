@@ -444,6 +444,25 @@ Both fields optional. Cap query (`services/quota.ts:getUserQuotaUsedToday`) sums
 
 YouTube default: `requestsPerDay: 100` (~5000 events worth at 50:1 ratio). No `eventsPerDay`. Reddit Phase 03.1+ may declare both axes (variable events-per-request).
 
+### Counter vs Cap — separate concerns
+
+Two independent concepts that look similar:
+
+- **Daily counter (universal):** `getUserQuotaUsedToday(userId, kind)` returns `{requests, events}` summed from `audit_log.metadata.{requests_used, events_inserted}` for the current Pacific calendar day. Platform-agnostic — every adapter writes audit rows with the same shape; `QuotaStatusBanner.svelte` renders this for every registered platform regardless of cap declaration.
+- **Cap (optional, platform-shape):** `userQuotaCap` is an OPTIONAL declaration on the adapter. Adapters with no daily cap declare `userQuotaCap: undefined` (or omit `requestsPerDay`); banner shows the counter without progress-bar overlay (`«no limit»` label). Adapters with daily caps declare them; banner adds progress-bar.
+
+User sees daily activity for every platform — the counter is the universal observability layer. Cap is a thin progress-overlay on top.
+
+### Window-shape extensibility (deferred)
+
+`userQuotaCap` currently expresses only daily windows. Adapters with rolling-window quotas (Reddit's documented 600 requests / 10-minute rolling window) have three options when their adapter PR lands:
+
+1. **Approximate daily-equivalent** — declare `requestsPerDay: 86400` (10-min × 144 windows). User-facing display reads cleanly; strictly speaking inaccurate (rolling ≠ daily), but UX-friendly.
+2. **Declare `userQuotaCap: undefined`** — banner shows daily counter without cap overlay. Rolling cap enforcement happens at endpoint level via separate mechanism.
+3. **Extend the contract** — add a window-shape field (`{count, windowMinutes}`) to `AdapterUserQuotaCap`. Banner becomes polymorphic: «200/600 in last 10 min, resets in 7 min». Most honest, costs additional banner code.
+
+Choice deferred per AGENTS.md «3 callers earn an abstraction»: with one current declarer (YouTube daily), pre-emptive contract widening is premature. Reddit Phase 03.1 will trigger the concrete decision based on real platform requirements.
+
 ### 9.1 Audit metadata schema
 
 Worker handlers write audit row at completion с full metadata:
@@ -473,11 +492,20 @@ Worker handlers write audit row at completion с full metadata:
 
 Cron pool reservoir (Plan 08 8000 units/day) is independent of user pool (2000 units/day). Auto-backfill workers consume cron pool; user-driven actions consume user pool. Per-user cap protects user pool fairness.
 
+**Flow enum enforced two ways:**
+
+- **TypeScript** — `AuditFlow` literal union in `src/lib/server/audit.ts` types the `metadata.flow` field on every `writeAudit` call. Typo at write site fails `tsc`.
+- **PostgreSQL CHECK constraint** — `audit_log_metadata_flow_valid` (migration 0025) pins `metadata->>'flow'` to the same enum at INSERT time. Defends against raw-SQL writes and accidental drift through the open-shape `[extra: string]: unknown` index signature on `AuditMetadata`.
+
+Adding a new flow value requires (a) extending the `AuditFlow` union AND (b) a new migration that DROPs and re-ADDs the constraint with the expanded list — both in lockstep so type and DB never diverge.
+
 ### 9.2 Cap window — Pacific calendar day
 
 Cap counter window: from `pacificDayStart()` (00:00 PT today) to NOW. Reset boundary: `nextPacificMidnight()`.
 
 Sync с operator's chargedFetch reservoir reset cycle (Plan 08 also Pacific calendar day). Single global cycle; UI displays "resets in {humanizeDuration(nextPacificMidnight - now)}" — works в любом user timezone.
+
+**Operator-local TZ assumption.** Pacific midnight is hardcoded because YouTube Data API quota resets at 00:00 PT (Google's operator agreement). When other adapters land with different reset cycles (Reddit, Twitter — both UTC-day-based by docs as of Phase 03.0.1 research), they will either share this Pacific cycle (acceptable approximation — banner displays one global reset countdown) or trigger a per-platform reset boundary if user-confusion measurable. Self-host operators in non-PT timezones see the cap window drift relative to their local midnight, but the operator API budget itself resets on the platform's schedule, not the operator's wall clock — so the cap window must follow the platform, not the operator. Documented as known constraint, not a bug.
 
 ### 9.3 Auto-backfill cron priority
 

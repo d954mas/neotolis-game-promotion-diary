@@ -176,6 +176,13 @@
       "when": 1778500000000,
       "tag": "0024_phase03_01_data_sources_backfill_state",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1778600000000,
+      "tag": "0025_phase03_01_audit_metadata_flow_check",
+      "breakpoints": true
     }
   ]
 }

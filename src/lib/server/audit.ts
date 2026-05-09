@@ -21,6 +21,37 @@ import { auditLog } from "./db/schema/audit-log.js";
 import type { AuditAction } from "./audit/actions.js";
 import { logger } from "./logger.js";
 
+/**
+ * Phase 03.0.1 — `metadata.flow` discriminates which cap pool a job counts
+ * toward (services/quota.ts:getUserQuotaUsedToday filters on these values).
+ *
+ * Capped (counted in user fair-share cap query):
+ *   - 'incremental'    — refresh-content default (catch-up newer events)
+ *   - 'historical'     — refresh-content with explicit older boundary
+ *   - 'stats_refresh'  — refresh-poll endpoint (Refresh now button)
+ *
+ * Excluded (uses operator pool, not user pool):
+ *   - 'initial'        — onboarding channel-context-backfill
+ *   - 'auto_passive'   — daily auto-backfill cron pick
+ *
+ * Adding a new flow value requires (a) extending this union AND (b) adding
+ * to the audit_log CHECK constraint (drizzle/0025_audit_metadata_flow_check.sql).
+ * Both steps land in the same migration to keep type + DB in lockstep.
+ */
+export type AuditFlow = "initial" | "incremental" | "historical" | "stats_refresh" | "auto_passive";
+
+export interface AuditMetadata {
+  flow?: AuditFlow;
+  /** Bytes/units consumed by an upstream API call attributed to this audit row. */
+  requests_used?: number;
+  /** Number of rows inserted by the action (per-user cap counter axis). */
+  events_inserted?: number;
+  // Open shape — callers may pass additional bag fields (source_id, kind,
+  // job_id, etc.). Only `flow` carries a closed enum; everything else is
+  // free-form per audit-action convention.
+  [extra: string]: unknown;
+}
+
 export interface AuditEntry {
   userId: string;
   // Phase 2 D-32: typed against the AUDIT_ACTIONS const list (single source
@@ -29,7 +60,7 @@ export interface AuditEntry {
   // Resolved by Plan 06 trusted-proxy middleware (D-19). Required.
   ipAddress: string;
   userAgent?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: AuditMetadata;
 }
 
 /**

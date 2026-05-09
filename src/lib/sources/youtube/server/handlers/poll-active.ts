@@ -47,6 +47,14 @@
 // video, we call markThrottleTransition({state:'ninetyfive'}) — first signal
 // that the YouTube quota wall has been hit, even though the quota tracker's
 // running counter may not yet show 9500.
+//
+// Per-user cap audit: this handler does NOT write audit_log directly. Stats
+// quota is tracked in youtube_service_quota_usage via writeSnapshot's UPSERT
+// (operator-side counter). The user-cap counter for stats refreshes (flow=
+// 'stats_refresh') is written at endpoint enqueue time in
+// services/refresh-poll.ts (cap-counted user action: «I clicked Refresh
+// now»). The cron-driven Active/Cold tier polls themselves are operator-pool
+// work — they do NOT count against any user's daily fair-share cap.
 
 import { TIER_BOUNDARY_ACTIVE_MS } from "$lib/server/services/tier-resolver.js";
 import { selectEligibleVideoIds } from "$lib/server/services/poll-eligibility.js";

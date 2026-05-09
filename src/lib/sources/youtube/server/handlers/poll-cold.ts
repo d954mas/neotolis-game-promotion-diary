@@ -22,6 +22,11 @@
 // with a key-based schedule split (boss.schedule(...,{key:"active"|"cold"})
 // per pg-boss v11+). The poll-cron dispatcher (./poll-cron.ts) reads
 // job.data.tier and routes to handlePollActive or handlePollCold.
+//
+// Per-user cap audit: same as poll-active — this handler does NOT write
+// audit_log. Cron-driven cold polls consume the operator pool, not any
+// user's daily fair-share cap. User-cap audit for refresh-now flows is
+// written at endpoint enqueue time (services/refresh-poll.ts).
 
 import {
   TIER_BOUNDARY_ACTIVE_MS,

@@ -16,6 +16,13 @@
 // Tenant scope: events SELECT filters by (id, userId) — cross-tenant access
 // returns no row and the handler logs+skips. The route layer already gates
 // access via NotFoundError; this is defense-in-depth at the worker level.
+//
+// Per-user cap audit: this handler does NOT write audit_log. The user-cap
+// counter for «Refresh now» (flow='stats_refresh', requests_used=1) is
+// written at endpoint enqueue time in services/refresh-poll.ts:260 — that
+// row is what services/quota.ts:getUserQuotaUsedToday SUMs. Stats quota
+// itself is tracked in youtube_service_quota_usage via writeSnapshot's
+// UPSERT (operator-side counter, separate from user fair-share cap).
 
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
