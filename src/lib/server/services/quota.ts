@@ -215,6 +215,24 @@ export async function withQuotaGuard<T>(
 //   - Capped kinds:      'incremental' | 'historical' | 'stats_refresh'.
 //   - Excluded kinds:    'initial' (onboarding UX), 'auto_passive' (cron pool).
 //
+// SOFT FAIRNESS CAP — not security-grade strict.
+//   The cap-check pattern (read counter → compare → write audit) is NOT
+//   atomic. Two concurrent requests from the same user at 99/100 can both
+//   pass the gate before either writes its audit row. Result: user briefly
+//   reaches 101/100 — overshoot of 1-2 requests per Pacific day under
+//   contention.
+//
+//   Why we accept this: the cap is a FAIRNESS signal protecting shared
+//   operator budget from one user monopolizing it, not a compliance ceiling.
+//   1-2 request overshoot is irrelevant at indie scale. A strict atomic
+//   check would require pg_advisory_xact_lock(hashtext(userId)) on every
+//   refresh-content / refresh-poll click — cost-prohibitive for the
+//   security improvement gained.
+//
+//   For genuinely strict caps (events_per_day on manual creates) we DO
+//   use advisory locks via withQuotaGuard above. These per-source caps
+//   rate-limit upstream API consumption, which is intrinsically soft.
+//
 // All exported as helpers consumed by:
 //   - Endpoint cap checks (refresh-content + refresh-poll) — pre-enqueue gate.
 //   - Banner UI loaders — quota status display.

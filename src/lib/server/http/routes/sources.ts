@@ -107,11 +107,21 @@ const updateSourceSchema = z
     isOwnedByMe: z.boolean().optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
     // Phase 03.0.1 — earliest-event boundary user wants pulled.
-    // Accept ISO date string from UI (date picker / preset radio computed
-    // client-side). Coerced to Date and validated server-side в updateSource:
-    // must be in past; future dates → 422 'date_must_be_past'. Sentinel
-    // 1970-01-01 = "all available history".
-    backfillTargetSince: z.coerce.date().optional(),
+    // Accept ISO date string from UI (date picker). Coerced to Date and
+    // validated server-side in updateSource: must be in past; future dates
+    // → 422 'date_must_be_past'.
+    //
+    // Lower bound: 2005-01-01 (YouTube launch) — defensive validation.
+    // Anything older is either a fat-finger user input or the legacy migration
+    // 0024 sentinel '1970-01-01' (mapped from `metadata.backfillWindow:
+    // "everything"` preset for existing rows). The sentinel survives in
+    // legacy rows but new PATCHes can't introduce it. Rejecting < 2005 forces
+    // user input through a sane date range without exposing the sentinel as
+    // a user-pickable value.
+    backfillTargetSince: z.coerce
+      .date()
+      .min(new Date("2005-01-01T00:00:00Z"), "date too old (earliest: 2005-01-01)")
+      .optional(),
   })
   .refine((obj) => Object.keys(obj).length > 0, {
     message: "at least one field must be supplied",

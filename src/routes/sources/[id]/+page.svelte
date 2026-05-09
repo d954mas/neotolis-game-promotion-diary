@@ -101,7 +101,13 @@
   <div class="source-detail__target">
     <label class="source-detail__target-label">
       {m.source_detail_target_label()}
-      <input type="date" bind:value={targetSinceInput} max={todayISO} disabled={saving} />
+      <input
+        type="date"
+        bind:value={targetSinceInput}
+        min="2005-01-01"
+        max={todayISO}
+        disabled={saving}
+      />
     </label>
     <button type="button" onclick={saveTargetSince} disabled={saving || !targetSinceInput}>
       {m.source_detail_target_save()}

@@ -92,9 +92,17 @@ export const dataSources = pgTable(
     //                           refresh resets to false for re-verification.
     //   backfillTargetSince   — absolute date — earliest boundary user wants.
     //                           Worker passes to pollContent(source, since).
-    //                           Sentinel 1970-01-01 = "all available history".
-    //                           NULL only on legacy rows pre-migration; new
-    //                           rows always populated at create.
+    //                           Semantics:
+    //                             NULL  → no historical pull, only newer-than-
+    //                                     frontier incremental
+    //                             date  → pull until events.occurred_at >= date
+    //                             '1970-01-01'  → legacy sentinel from migration
+    //                                             0024 mapping `backfillWindow:
+    //                                             "everything"` preset; survives
+    //                                             on existing rows but new
+    //                                             PATCHes reject dates < 2005-01-01
+    //                                             (route schema validation —
+    //                                             defensive against fat-finger).
     lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
     backfillOldestAt: timestamp("backfill_oldest_at", { withTimezone: true }),
     backfillComplete: boolean("backfill_complete").notNull().default(false),
