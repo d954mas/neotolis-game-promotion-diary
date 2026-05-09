@@ -1,3 +1,9 @@
+-- ROLLBACK (forward-only by AGENTS.md, but documented for emergency):
+--   ALTER TABLE audit_log DROP CONSTRAINT audit_log_metadata_flow_valid;
+-- Existing rows are unaffected. New writes that previously would fail will
+-- succeed regardless of flow value — TypeScript still catches typos at
+-- compile time via AuditFlow union (see src/lib/server/audit.ts).
+--
 -- Phase 03.0.1 (post-review Issue 5) — defense-in-depth CHECK constraint
 -- pinning audit_log.metadata->>'flow' to the AuditFlow enum defined in
 -- src/lib/server/audit.ts. TypeScript catches typos at compile time; this

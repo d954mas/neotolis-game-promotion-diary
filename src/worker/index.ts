@@ -40,24 +40,31 @@ import { handlePurgeDaily } from "./handlers/purge-daily.js";
 
 export async function startWorker(): Promise<void> {
   // Phase 03.0.1 architecture cleanup — multi-replica safety guard.
-  // The YouTube adapter's chargedFetch reservoir uses RateLimiterMemory
-  // (per-process state). With N>1 worker replicas each holds an
-  // independent 8000-unit cron pool / 2000-unit user pool — daily quota
-  // would be N × budget, burning the operator's YouTube envelope past
-  // its 10000-unit daily cap and tripping 95% throttle prematurely.
   //
-  // Today's compose runs 1 worker (no `replicas:` directive). Operators
-  // who scale via WORKER_REPLICA_COUNT > 1 trip this assert at boot
-  // INSTEAD of silently overshooting quota in production. Migrating
-  // away from this constraint = swap RateLimiterMemory →
-  // RateLimiterPostgres in src/lib/sources/youtube/server/http.ts
-  // (same library, persistent shared backend) and remove this guard.
+  // Adapters that use in-process rate-limit state (e.g., RateLimiterMemory
+  // reservoirs) declare it via observability.usesInProcessRateLimiter.
+  // With N>1 worker replicas, each replica holds independent budgets →
+  // N × envelope burn, quota overshoot in production. The assertion lists
+  // every offending adapter so the operator knows which ones need migration
+  // to a persistent backend (RateLimiterPostgres, DB-backed counter)
+  // before scaling replicas.
+  //
+  // Pre-Phase-03.0.1-post-review the assertion hardcoded YouTube; the
+  // generic loop here surfaces every adapter that ships in-process state.
   if (env.WORKER_REPLICA_COUNT > 1) {
-    throw new Error(
-      `WORKER_REPLICA_COUNT=${env.WORKER_REPLICA_COUNT} but the YouTube reservoir is per-process. ` +
-        `Migrate src/lib/sources/youtube/server/http.ts from RateLimiterMemory to RateLimiterPostgres ` +
-        `before scaling worker replicas — otherwise the operator's YouTube quota burns N× the daily budget.`,
-    );
+    const offending = allAdapters
+      .filter((a) => a.observability.usesInProcessRateLimiter === true)
+      .map((a) => a.kind);
+    if (offending.length > 0) {
+      throw new Error(
+        `WORKER_REPLICA_COUNT=${env.WORKER_REPLICA_COUNT} but the following adapter(s) ` +
+          `use per-process rate-limit state: ${offending.join(", ")}. ` +
+          `Migrate each adapter's reservoir to a persistent backend ` +
+          `(RateLimiterPostgres or DB-backed counter) and flip ` +
+          `observability.usesInProcessRateLimiter to false before scaling worker replicas — ` +
+          `otherwise daily quota budgets burn N× the envelope.`,
+      );
+    }
   }
 
   const boss = await createBoss();

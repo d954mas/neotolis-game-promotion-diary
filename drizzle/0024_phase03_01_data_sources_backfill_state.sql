@@ -1,5 +1,15 @@
 -- Phase 03.0.1 — Backfill state machine for data_sources.
 --
+-- ROLLBACK (forward-only by AGENTS.md, but documented for emergency):
+--   ALTER TABLE data_sources DROP COLUMN last_polled_at;
+--   ALTER TABLE data_sources DROP COLUMN backfill_oldest_at;
+--   ALTER TABLE data_sources DROP COLUMN backfill_complete;
+--   ALTER TABLE data_sources DROP COLUMN backfill_target_since;
+--   DROP INDEX IF EXISTS data_sources_backfill_picker_idx;
+-- Application code reading these columns must also revert (worker handlers,
+-- DTO projections, refresh-content endpoint). v0.1 prod data is unaffected
+-- by drop — columns are application-state, not domain-data.
+--
 -- Forward-only. Adds four columns to track per-source backfill progress:
 --
 --   last_polled_at        — when we last successfully ran a backfill action

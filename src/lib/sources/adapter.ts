@@ -221,6 +221,21 @@ export interface AdapterObservability {
    *  exhaustion. When undefined, cap not enforced (usage still tracked в
    *  audit metadata для visibility но не denial). */
   userQuotaCap?: AdapterUserQuotaCap;
+  /**
+   * Phase 03.0.1 (post-review) — adapter declares whether it maintains
+   * in-process rate-limit state (e.g., RateLimiterMemory reservoirs that
+   * lose state on worker restart). Worker bootstrap iterates and refuses
+   * to start with WORKER_REPLICA_COUNT > 1 if ANY adapter sets this true,
+   * because per-process reservoirs would each hold independent budgets →
+   * N × envelope burn → quota overshoot. Pre-fix the assertion hardcoded
+   * the YouTube migration message; making it adapter-declared lets the
+   * generic worker bootstrap accumulate offending adapters and surface a
+   * truthful error message when N>1 platforms ship in-process state.
+   *
+   * When false / omitted: adapter uses persistent counters only
+   * (RateLimiterPostgres, DB-backed) — replica scaling is safe.
+   */
+  usesInProcessRateLimiter?: boolean;
 }
 
 /** Backfill window options — accepted by createSource and threaded into

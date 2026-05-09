@@ -1,6 +1,25 @@
 -- Phase 03.0.1 (post-review #5) — split quota usage by pool kind so worker-
 -- crash reconciliation can debit each in-memory reservoir accurately.
 --
+-- ROLLBACK (forward-only by AGENTS.md, but documented for emergency):
+--   ALTER TABLE youtube_service_quota_usage
+--     DROP CONSTRAINT youtube_service_quota_usage_date_pacific_api_key_id_pool_kind_pk;
+--   -- Aggregate (date_pacific, api_key_id) rows back to single per-key
+--   -- before re-adding original PK — needed if multiple pool_kind rows
+--   -- exist for the same (date, key):
+--   --   INSERT INTO youtube_service_quota_usage_tmp
+--   --   SELECT date_pacific, api_key_id, SUM(estimated_units), MAX(updated_at)
+--   --   FROM youtube_service_quota_usage GROUP BY date_pacific, api_key_id;
+--   ALTER TABLE youtube_service_quota_usage DROP COLUMN pool_kind;
+--   ALTER TABLE youtube_service_quota_usage
+--     ADD CONSTRAINT youtube_service_quota_usage_date_pacific_api_key_id_pk
+--     PRIMARY KEY (date_pacific, api_key_id);
+-- Application code (chargedFetch, incrementUsage, writeSnapshot,
+-- reconcileReservoirsOnBoot, getThrottleState, getDailyStats) must also
+-- revert to single-row-per-key shape. v0.1 prod rows pre-Phase-03.0.1
+-- ship as pool_kind='cron' so revert-without-aggregation is safe IF only
+-- legacy rows exist (no Phase 03.0.1 user-pool entries yet).
+--
 -- Pre-fix: `youtube_service_quota_usage` tracked one row per
 -- (date_pacific, api_key_id) with TOTAL units burned that day. Reservoirs
 -- (cron 80% / user 20%) are in-memory (RateLimiterMemory) so they reset on
