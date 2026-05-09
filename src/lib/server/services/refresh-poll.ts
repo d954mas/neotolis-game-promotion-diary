@@ -87,6 +87,46 @@ export async function requestRefreshPoll(
     );
   }
 
+  // Phase 03.0.1 — L1 throttle check (operator-side reservoir).
+  // System-wide signal — все users получают 429 одновременно когда operator
+  // quota approaches 95%.
+  const stats = await pollableAdapter.observability.quota.getDailyStats(new Date());
+  if (stats.throttleState === "ninetyfive") {
+    throw new AppError(
+      `platform quota exhausted at ${stats.pctOfDaily}%`,
+      "platform_quota_exhausted",
+      429,
+      { platform: sourceKindForPoll, pct_of_daily: stats.pctOfDaily },
+    );
+  }
+
+  // Phase 03.0.1 — L2 per-user fair-share cap. Refresh-card action consumes
+  // shared operator API budget; per-user cap protects fairness.
+  const cap = pollableAdapter.observability.userQuotaCap;
+  if (cap?.requestsPerDay !== undefined || cap?.eventsPerDay !== undefined) {
+    const { getUserQuotaUsedToday: getUsed, nextPacificMidnight: nextReset } =
+      await import("./quota.js");
+    const used = await getUsed(userId, sourceKindForPoll ?? undefined);
+    const resetAt = nextReset();
+    const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
+    if (cap.requestsPerDay !== undefined && used.requests >= cap.requestsPerDay) {
+      throw new AppError(
+        `daily request quota exhausted: ${used.requests}/${cap.requestsPerDay}`,
+        "requests_quota_exhausted",
+        429,
+        { cap: cap.requestsPerDay, used: used.requests, reset_in_seconds: resetInSeconds },
+      );
+    }
+    if (cap.eventsPerDay !== undefined && used.events >= cap.eventsPerDay) {
+      throw new AppError(
+        `daily events quota exhausted: ${used.events}/${cap.eventsPerDay}`,
+        "events_quota_exhausted",
+        429,
+        { cap: cap.eventsPerDay, used: used.events, reset_in_seconds: resetInSeconds },
+      );
+    }
+  }
+
   // 3. External-id gate. The poll worker keys upstream calls by external_id
   //    (YouTube videoId). A row without one cannot be polled.
   if (!event.externalId) {

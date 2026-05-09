@@ -30,7 +30,9 @@ import {
   updateSource,
   softDeleteSource,
   restoreSource,
+  resetSourceBackfillComplete,
 } from "../../services/data-sources.js";
+import { getUserQuotaUsedToday, nextPacificMidnight } from "../../services/quota.js";
 import { toDataSourceDto } from "../../dto.js";
 import { db } from "../../db/client.js";
 import { auditLog } from "../../db/schema/audit-log.js";
@@ -104,6 +106,12 @@ const updateSourceSchema = z
     autoImport: z.boolean().optional(),
     isOwnedByMe: z.boolean().optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
+    // Phase 03.0.1 — earliest-event boundary user wants pulled.
+    // Accept ISO date string from UI (date picker / preset radio computed
+    // client-side). Coerced to Date and validated server-side в updateSource:
+    // must be in past; future dates → 422 'date_must_be_past'. Sentinel
+    // 1970-01-01 = "all available history".
+    backfillTargetSince: z.coerce.date().optional(),
   })
   .refine((obj) => Object.keys(obj).length > 0, {
     message: "at least one field must be supplied",
@@ -300,6 +308,64 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
       );
     }
 
+    // Phase 03.0.1 — L1 throttle check (operator-side reservoir).
+    // When operator's YouTube quota approaches 95%, ALL users get 429 — это
+    // system-wide signal, не per-user. Banner UI на /sources показывает
+    // отдельный indicator для этого state.
+    const stats = await adapter.observability.quota.getDailyStats(new Date());
+    if (stats.throttleState === "ninetyfive") {
+      throw new AppError(
+        `platform quota exhausted: ${source.kind} at ${stats.pctOfDaily}% (system-wide)`,
+        "platform_quota_exhausted",
+        429,
+        {
+          platform: source.kind,
+          pct_of_daily: stats.pctOfDaily,
+        },
+      );
+    }
+
+    // Phase 03.0.1 — L2 per-user fair-share cap. When adapter declares
+    // userQuotaCap, check audit-log SUM против cap. Per-axis denial:
+    // requests_quota_exhausted vs events_quota_exhausted (banner UI shows
+    // distinct toast).
+    const cap = adapter.observability.userQuotaCap;
+    if (cap?.requestsPerDay !== undefined || cap?.eventsPerDay !== undefined) {
+      const used = await getUserQuotaUsedToday(ctx.userId, source.kind);
+      const resetAt = nextPacificMidnight();
+      const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
+      if (cap.requestsPerDay !== undefined && used.requests >= cap.requestsPerDay) {
+        throw new AppError(
+          `daily request quota exhausted: ${used.requests}/${cap.requestsPerDay}`,
+          "requests_quota_exhausted",
+          429,
+          {
+            cap: cap.requestsPerDay,
+            used: used.requests,
+            reset_in_seconds: resetInSeconds,
+          },
+        );
+      }
+      if (cap.eventsPerDay !== undefined && used.events >= cap.eventsPerDay) {
+        throw new AppError(
+          `daily events quota exhausted: ${used.events}/${cap.eventsPerDay}`,
+          "events_quota_exhausted",
+          429,
+          {
+            cap: cap.eventsPerDay,
+            used: used.events,
+            reset_in_seconds: resetInSeconds,
+          },
+        );
+      }
+    }
+
+    // Phase 03.0.1 — trust-but-verify. Reset backfill_complete BEFORE worker
+    // enqueue so the catch-up worker re-checks completeness. If канал ничего
+    // нового не имеет, worker re-устанавливает true. Если был silent error,
+    // user refresh даёт chance recover.
+    await resetSourceBackfillComplete(ctx.userId, source.id);
+
     const result = await adapter.backfillSource(
       {
         id: source.id,
@@ -312,6 +378,12 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
     // STRICT — failed audit returns 5xx; user retry hits singletonKey dedup
     // on the queue (no-op enqueue) and the audit INSERT retries. AGENTS.md
     // invariant 4 honored without a transactional enqueue plumbing.
+    //
+    // This is the INTENT row — written pre-completion for immediate forensics
+    // ("user X clicked refresh on source Y at time T"). Worker writes a
+    // SECOND row at completion with full metadata (events_inserted,
+    // requests_used, flow). Cap query (services/quota.ts) filters by
+    // metadata->>'flow' so it counts ONLY worker rows, not intent rows.
     await writeAuditStrict({
       userId: ctx.userId,
       action: "source.refresh_content_requested",

@@ -99,6 +99,12 @@ export interface UpdateSourcePatch {
   autoImport?: boolean;
   isOwnedByMe?: boolean;
   metadata?: Record<string, unknown>;
+  /** Phase 03.0.1 — change earliest-event boundary user wants pulled.
+   *  Worker uses this as `since` для historical catch-up; UI date picker
+   *  + preset radios send absolute Date here. Sentinel 1970-01-01 = "all
+   *  history". Server validates: no future dates, не past current frontier
+   *  (already covered case yields no-op 202 reason='already_covered'). */
+  backfillTargetSince?: Date;
 }
 
 const HANDLE_URL_MIN = 1;
@@ -443,6 +449,33 @@ export async function updateSource(
   if (patch.autoImport !== undefined) update.autoImport = patch.autoImport;
   if (patch.isOwnedByMe !== undefined) update.isOwnedByMe = patch.isOwnedByMe;
   if (patch.metadata !== undefined) update.metadata = patch.metadata;
+
+  // Phase 03.0.1 — backfill_target_since change.
+  // Validate: must be in past. Recompute backfill_complete based on new target:
+  //   - if new target ≥ current frontier (or frontier is null) → may need to
+  //     pull more historical → reset complete=false.
+  //   - if new target's older than current frontier → already covered → keep
+  //     complete state as-is.
+  if (patch.backfillTargetSince !== undefined) {
+    const now = new Date();
+    if (patch.backfillTargetSince.getTime() > now.getTime()) {
+      throw new AppError(`backfillTargetSince must be in the past`, "date_must_be_past", 422, {
+        field: "backfillTargetSince",
+      });
+    }
+    update.backfillTargetSince = patch.backfillTargetSince;
+    // Decision matrix:
+    //   target newer (closer to NOW) than frontier → "shrinking window";
+    //     existing data still satisfies, may even cover more — keep complete.
+    //   target older than frontier → "expanding window"; gap to fill → reset.
+    //   frontier null → first pull pending → reset to ensure cron picks up.
+    const frontier = existing.backfillOldestAt;
+    const expandingWindow =
+      frontier === null || patch.backfillTargetSince.getTime() < frontier.getTime();
+    if (expandingWindow) {
+      update.backfillComplete = false;
+    }
+  }
 
   const [row] = await db
     .update(dataSources)
