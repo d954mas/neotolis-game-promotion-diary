@@ -33,7 +33,7 @@ import {
 import { toDataSourceDto } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
-import { writeAudit } from "../../audit.js";
+import { writeAuditStrict } from "../../audit.js";
 import { AppError, NotFoundError } from "../../services/errors.js";
 import { getAdapter } from "$lib/sources/registry.js";
 
@@ -210,9 +210,14 @@ sourcesRoutes.post("/sources/:id/restore", async (c) => {
 //      pins the wire format).
 //   3. Anonymous-401 sweep — extended in tests/integration/anonymous-401.test.ts
 //      MUST_BE_PROTECTED with this route's path pattern.
-//   4. Audit INSERT-only — writeAudit fires after the enqueue with action
-//      "source.refresh_content_requested" (forward-only migration 0023
-//      added the enum value).
+//   4. Audit INSERT-only — writeAuditStrict fires after the enqueue with
+//      action "source.refresh_content_requested" (forward-only migration
+//      0023 added the enum value). STRICT variant: a failed audit surfaces
+//      as 5xx so the caller retries; the queue's singletonKey dedupes the
+//      re-enqueue (no-op) and the second writeAuditStrict succeeds. This
+//      preserves the audit-row-per-action contract without a transactional
+//      enqueue (which would require pushing pg-boss IDatabase plumbing
+//      through the adapter contract).
 //
 // 422 path: getAdapter throws on unregistered kinds. We re-throw as
 // AppError('kind_not_yet_functional', 422) so mapErr emits a clean wire
@@ -253,7 +258,10 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
       { userId: ctx.userId, origin: "user" },
     );
 
-    await writeAudit({
+    // STRICT — failed audit returns 5xx; user retry hits singletonKey dedup
+    // on the queue (no-op enqueue) and the audit INSERT retries. AGENTS.md
+    // invariant 4 honored without a transactional enqueue plumbing.
+    await writeAuditStrict({
       userId: ctx.userId,
       action: "source.refresh_content_requested",
       ipAddress: ctx.ipAddress,

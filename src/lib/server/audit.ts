@@ -54,3 +54,28 @@ export async function writeAudit(entry: AuditEntry): Promise<void> {
     logger.error({ err, action: entry.action, userId: entry.userId }, "audit write failed");
   }
 }
+
+/**
+ * Strict variant of writeAudit — propagates errors instead of swallowing.
+ *
+ * Use when AGENTS.md invariant 4 ("audit row pins user X requested action Y
+ * at time T") is load-bearing for the request semantics — i.e. a side effect
+ * that's already happened (queue enqueue, irreversible DB write) MUST have
+ * an accompanying audit row, and a failed audit should surface as 5xx so the
+ * caller knows to retry. Idempotent side effects (singletonKey-deduped queue
+ * sends; conditional UPDATEs) recover correctly on retry.
+ *
+ * The default `writeAudit` swallows errors because the inverse trade-off
+ * fits the login flow: a missing audit row is less disruptive than a failed
+ * sign-in. For action-pin contracts (Phase 03.0.1 refresh-content; future
+ * compliance-critical actions) the trade-off flips — use this strict form.
+ */
+export async function writeAuditStrict(entry: AuditEntry): Promise<void> {
+  await db.insert(auditLog).values({
+    userId: entry.userId,
+    action: entry.action,
+    ipAddress: entry.ipAddress,
+    userAgent: entry.userAgent ?? null,
+    metadata: entry.metadata ?? null,
+  });
+}
