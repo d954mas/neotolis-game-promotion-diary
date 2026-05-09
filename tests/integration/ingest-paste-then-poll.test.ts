@@ -46,8 +46,8 @@ vi.mock("../../src/lib/sources/youtube/server/adapter.js", async (importOriginal
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    youtubeChannelAdapter: {
-      ...(actual.youtubeChannelAdapter as Record<string, unknown>),
+    youtubeChannelAdapterCore: {
+      ...(actual.youtubeChannelAdapterCore as Record<string, unknown>),
       pollStatsByVideoId: (...args: unknown[]) => adapterMock.pollStatsByVideoId(...args),
     },
   };

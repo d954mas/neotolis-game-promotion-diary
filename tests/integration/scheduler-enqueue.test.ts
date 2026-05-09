@@ -31,8 +31,8 @@ vi.mock("../../src/lib/sources/youtube/server/adapter.js", async (importOriginal
   // contents here — only that the handler resolved the right videoIds).
   return {
     ...actual,
-    youtubeChannelAdapter: {
-      ...(actual.youtubeChannelAdapter as Record<string, unknown>),
+    youtubeChannelAdapterCore: {
+      ...(actual.youtubeChannelAdapterCore as Record<string, unknown>),
       pollStatsByVideoId: async (videoIds: string[], quotaUser: string) => {
         pollStatsCalls.push({ videoIds, quotaUser });
         return videoIds.map(() => ({

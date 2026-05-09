@@ -34,7 +34,7 @@ import { db } from "$lib/server/db/client.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { events } from "$lib/server/db/schema/events.js";
 import { logger } from "$lib/server/logger.js";
-import { youtubeChannelAdapter as adapter } from "../adapter.js";
+import { youtubeChannelAdapterCore as adapter } from "../adapter.js";
 
 interface BackfillUserJob {
   id?: string;

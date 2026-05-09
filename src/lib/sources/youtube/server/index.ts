@@ -59,7 +59,7 @@ import type { DbOrTx } from "$lib/server/db/client.js";
 import type { Hono } from "hono";
 import { QUEUES } from "$lib/server/queues.js";
 import { getBoss } from "$lib/server/queue-client.js";
-import { youtubeChannelAdapter } from "./adapter.js";
+import { youtubeChannelAdapterCore } from "./adapter.js";
 import { handlePollCron } from "./handlers/poll-cron.js";
 import { handlePollUser } from "./handlers/poll-user.js";
 import { handleRehabUnavailable } from "./handlers/rehab-unavailable.js";
@@ -464,20 +464,22 @@ const youtubeQuotaCounters: ReadonlyArray<AdapterQuotaCounter> = [
   },
 ];
 
-// youtubeAdapter — composes the per-source adapter consumers see.
-// Spread `youtubeChannelAdapter` (every other method: pollContent /
-// pollStats / pollStatsByVideoId / parseUrl / canRefreshPoll) with
-// registerQueues + scheduleCronTicks + backfillSource + observability
-// (extended with quotaCounters) + 5 cross-source create-time / event-time
-// hooks (canonicalizeOnCreate, onSourceCreated, fetchEventPreviewMetadata,
-// validateEventInput, fetchPollStateMap, registerRoutes) OVERRIDDEN here as
-// real implementations. The stubs in adapter.ts stay for typecheck-loud
-// failure if a consumer imports adapter.ts directly instead of going
-// through this barrel.
+// youtubeAdapter — composes the per-source adapter cross-source code sees.
+//
+// Phase 03.0.1 architecture cleanup: adapter.ts exports `youtubeChannelAdapterCore`
+// typed as `Pick<DataSourceAdapter, ...polling/observability/canRefreshPoll>`
+// — no throwing stubs. This barrel is the SINGLE composition point: it
+// adds infrastructure-touching methods (registerQueues / scheduleCronTicks /
+// backfillSource) and cross-source hooks (canonicalize, onSourceCreated,
+// fetchEventPreviewMetadata, validateEventInput, fetchPollStateMap,
+// registerRoutes) plus extends observability with per-source quotaCounters.
+//
+// TypeScript guarantees completeness — the `: DataSourceAdapter` annotation
+// fails the build if any contract method is missing from the spread.
 export const youtubeAdapter: DataSourceAdapter = {
-  ...youtubeChannelAdapter,
+  ...youtubeChannelAdapterCore,
   observability: {
-    ...youtubeChannelAdapter.observability,
+    ...youtubeChannelAdapterCore.observability,
     quotaCounters: youtubeQuotaCounters,
   },
   registerQueues,

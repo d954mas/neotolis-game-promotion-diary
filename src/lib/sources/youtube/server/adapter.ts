@@ -48,10 +48,8 @@ import { z } from "zod";
 import { env } from "$lib/server/config/env.js";
 import { logger } from "$lib/server/logger.js";
 import type {
-  AdapterContext,
   DataSourceAdapter,
   EventKind,
-  MinimalBoss,
   ParsedUrl,
   PickedKey,
   PollableEvent,
@@ -60,6 +58,43 @@ import type {
   SnapshotStatus,
   StatsSnapshot,
 } from "$lib/sources/adapter.js";
+
+/**
+ * youtubeChannelAdapterCore — Phase 03.0.1 architecture cleanup.
+ *
+ * Exports the YouTube adapter's *core* surface: methods that are pure
+ * polling / URL-parsing / observability — everything that's safe for
+ * any caller (handlers, tests, scheduler dispatch hint) to use directly.
+ *
+ * Infrastructure-touching methods (registerQueues / scheduleCronTicks /
+ * backfillSource) and cross-source create-time hooks (canonicalizeOnCreate /
+ * onSourceCreated / fetchEventPreviewMetadata / validateEventInput /
+ * fetchPollStateMap / registerRoutes / observability.quotaCounters) are
+ * COMPOSED in `./index.ts` to produce the full `youtubeAdapter`. Cross-source
+ * code always imports `youtubeAdapter` from the barrel — never this Core
+ * directly.
+ *
+ * The Core's TypeScript shape is `Pick<DataSourceAdapter, ...>` — TypeScript
+ * red-flags any caller that tries to invoke a non-Core method (e.g.
+ * `core.backfillSource()` — won't compile, used to throw at runtime).
+ *
+ * Why split: the previous shape exported a full `DataSourceAdapter` with
+ * registerQueues / scheduleCronTicks / backfillSource as throwing stubs;
+ * the barrel spread + override produced the live object. That made
+ * `youtubeChannelAdapter` look complete to outsiders while half its surface
+ * was a runtime trap. The split makes the Core honest at the type level
+ * and forces composition to live where it always lived (the barrel).
+ */
+type YoutubeChannelAdapterCore = Pick<
+  DataSourceAdapter,
+  | "kind"
+  | "pollContent"
+  | "pollStats"
+  | "pollStatsByVideoId"
+  | "parseUrl"
+  | "observability"
+  | "canRefreshPoll"
+>;
 
 // Plan 03.0-03's canonical pickKeyForJob + hashApiKeyId are imported above
 // (./quota.js — relocated in Phase 03.0.1 Plan 04 from
@@ -252,7 +287,7 @@ async function pollStatsBatch(
   });
 }
 
-export const youtubeChannelAdapter: DataSourceAdapter = {
+export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
   kind: "youtube_channel" as const,
 
   /** Backfill + auto-import — playlistItems.list against uploads playlist.
@@ -400,69 +435,19 @@ export const youtubeChannelAdapter: DataSourceAdapter = {
     return result;
   },
 
-  // ---- Phase 03.0.1 widened-interface — Plans 05/06/07 LIVE / others stubbed ----
-  //
-  // Real implementations land in:
-  //   - parseUrl: Plan 06 — LIVE (delegates to ./url.ts youtubeParseUrl).
-  //   - observability: Plan 08 (observability API + reservoir + needs_reconnect schema)
-  //   - registerQueues: Plan 05 — LIVE — REAL impl lives in ./index.ts (the
-  //     barrel spreads this object and OVERRIDES registerQueues with a real
-  //     implementation so consumers always receive the wired-up adapter).
-  //     The stub here is a lower-priority fallback for the contract type;
-  //     the barrel is the single composition point that workers import.
-  //   - scheduleCronTicks: Plan 07 — LIVE — REAL impl lives in ./index.ts
-  //     (same barrel-override pattern as registerQueues). Registers
-  //     youtube.poll.cron (key=active|cold), youtube.quota_reset, and
-  //     youtube.rehab schedules per pg-boss v11+ key-based multiple-
-  //     schedule-per-queue.
-  //   - backfillSource: Plan 10 (refresh-content endpoint + backfill.user queue)
-  //
-  // Stubs throw rather than return defaults so premature use surfaces loudly.
-  // canRefreshPoll IS implemented now because cross-source services/refresh-poll.ts
-  // will call it in Plan 06.
+  /** parseUrl — D-15 first-match-wins URL detection. Delegates to
+   *  ./url.ts youtubeParseUrl which is also used by the registry's
+   *  parseAnyUrl iterator. */
   parseUrl(url: string): ParsedUrl | null {
     return youtubeParseUrl(url);
   },
-  // Plan 08 LIVE: observability is the real implementation imported from
-  // ./observability.js. Pre-Plan-08 this was a stub object whose quota.*
-  // methods threw notYetImplemented; Plan 08 replaces with the real read
-  // surface (getDailyStats reads youtube_service_quota_usage; getRecentAudit
-  // reads audit_log filtered to YouTube actions). isOperatorConfigured is
-  // computed from env.SERVICE_YOUTUBE_API_KEYS.length > 0 at module load.
+  /** observability (Plan 08) — Core observability without per-adapter
+   *  quotaCounters. The barrel adds quotaCounters via spread+override so
+   *  cross-source services/quota.ts can iterate them without knowing
+   *  about youtube_metadata_fetch_log. */
   observability: youtubeObservability,
-  // Plan 05 lands the real registerQueues in ./index.ts (the barrel
-  // spreads this object and OVERRIDES this method). Keeping a stub here
-  // would be a redundant safety net that masks the override; removing it
-  // means the only registerQueues callers see is the live one.
-  registerQueues: async (boss: MinimalBoss): Promise<void> => {
-    // The barrel ALWAYS overrides this — if execution reaches here, the
-    // adapter object was constructed without going through ./index.ts,
-    // which is a bug at the import site (consumers must import the
-    // barrel, not adapter.ts directly). Throw to surface it loudly.
-    void boss;
-    throw new Error(
-      "youtubeChannelAdapter.registerQueues fallback hit — import youtubeAdapter from $lib/sources/youtube/server/index.js (the barrel composes the real registerQueues).",
-    );
-  },
-  // Plan 07 lands the real scheduleCronTicks in ./index.ts (the barrel
-  // spreads this object and OVERRIDES this method, same pattern as
-  // registerQueues). This stub catches imports that bypass the barrel.
-  scheduleCronTicks: async (boss: MinimalBoss): Promise<void> => {
-    void boss;
-    throw new Error(
-      "youtubeChannelAdapter.scheduleCronTicks fallback hit — import youtubeAdapter from $lib/sources/youtube/server/index.js (the barrel composes the real scheduleCronTicks).",
-    );
-  },
-  backfillSource: async (_source: PollableSource, _ctx: AdapterContext) => {
-    throw notYetImplemented("10", "backfillSource");
-  },
+  /** canRefreshPoll — cheap dispatch hint used by services/refresh-poll.ts
+   *  (Plan 06). YouTube returns true for kind === "youtube_video"; Reddit
+   *  (Phase 03.1) returns true for kind === "reddit_post". */
   canRefreshPoll: (eventKind: EventKind): boolean => eventKind === "youtube_video",
 };
-
-function notYetImplemented(planNumber: string, method: string): Error {
-  return new Error(
-    `youtubeAdapter.${method} not yet implemented — landed in Plan ${planNumber}. ` +
-      `If you see this in production, an upstream caller hit the new contract surface ` +
-      `before its implementation wave. File a bug.`,
-  );
-}

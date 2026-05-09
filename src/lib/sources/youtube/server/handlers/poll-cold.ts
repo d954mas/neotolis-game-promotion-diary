@@ -28,7 +28,7 @@ import {
   TIER_BOUNDARY_COLD_MS,
 } from "$lib/server/services/tier-resolver.js";
 import { selectEligibleVideoIds } from "$lib/server/services/poll-eligibility.js";
-import { youtubeChannelAdapter } from "../adapter.js";
+import { youtubeChannelAdapterCore as youtubeChannelAdapter } from "../adapter.js";
 import { writeSnapshot } from "../snapshots.js";
 import { pickKeyForJob, markThrottleTransition, getThrottleState } from "../quota.js";
 import { logger } from "$lib/server/logger.js";
