@@ -187,7 +187,11 @@ export async function chargedFetch(
   // 3. Charge the persistent counter on EVERY Response. Network failures
   //    that throw above this line (timeout / connection refused) charge 0
   //    — they never reached YouTube.
-  await incrementUsage({ apiKeyId: picked.apiKeyId, units });
+  //
+  // Phase 03.0.1 post-review #5 — attribute the charge to the same pool
+  // we consumed from above. Reconciliation reads per-pool sums to debit
+  // each in-memory reservoir accurately on worker boot.
+  await incrementUsage({ apiKeyId: picked.apiKeyId, units, poolKind: ctx.origin });
 
   // 4. Success path — return for caller-side body parse.
   if (resp.ok) return resp;
@@ -375,38 +379,59 @@ function msUntilMidnightPacific(): number {
  */
 export async function reconcileReservoirsOnBoot(): Promise<void> {
   const todayPT = todayPacific();
+  // Phase 03.0.1 post-review #5 — read per-pool sums separately so each
+  // reservoir gets debited accurately. Pre-fix the function summed across
+  // pools and dumped everything into cron — user pool reset to full on
+  // every restart, allowing user-driven actions to overshoot their daily
+  // share by up to 2000 units / Pacific day.
   const rows = await db
     .select({
+      poolKind: youtubeServiceQuotaUsage.poolKind,
       estimatedUnits: youtubeServiceQuotaUsage.estimatedUnits,
     })
     .from(youtubeServiceQuotaUsage)
     .where(eq(youtubeServiceQuotaUsage.datePacific, todayPT));
-  const totalUnitsUsedToday = rows.reduce((sum, r) => sum + (r.estimatedUnits ?? 0), 0);
-  if (totalUnitsUsedToday <= 0) {
+
+  let cronUsedToday = 0;
+  let userUsedToday = 0;
+  for (const r of rows) {
+    if (r.poolKind === "cron") cronUsedToday += r.estimatedUnits ?? 0;
+    else if (r.poolKind === "user") userUsedToday += r.estimatedUnits ?? 0;
+  }
+
+  if (cronUsedToday === 0 && userUsedToday === 0) {
     logger.info(
-      { totalUnitsUsedToday: 0, datePacific: todayPT },
+      { datePacific: todayPT },
       "youtube reservoirs: no usage today; reservoirs start fresh",
     );
     return;
   }
-  // Cap the consume at the cron reservoir's points so we don't error on
-  // RateLimiterMemory's "consumed > points" rejection — if usage exceeds
-  // the cron pool budget we just zero out the cron pool (worst case:
-  // worker that ran above the 80% cron budget mid-day; user pool starts
-  // fresh).
-  const cronConsume = Math.min(totalUnitsUsedToday, 8000);
+
+  // Cap each consume at its reservoir's points so we don't error on
+  // "consumed > points" rejection — if a pool was overshot mid-day
+  // (would only happen if a writer mis-attributed) we just zero it out.
+  const cronConsume = Math.min(cronUsedToday, 8000);
+  const userConsume = Math.min(userUsedToday, 2000);
   try {
-    await cronReservoir.consume(RESERVOIR_KEY, cronConsume);
-    logger.info(
-      { totalUnitsUsedToday, cronConsume, datePacific: todayPT },
-      "youtube reservoirs reconciled to persistent counter",
-    );
+    if (cronConsume > 0) await cronReservoir.consume(RESERVOIR_KEY, cronConsume);
   } catch (err) {
     logger.warn(
-      { err, totalUnitsUsedToday, cronConsume },
+      { err, cronUsedToday, cronConsume },
       "youtube reservoirs: cronReservoir consume failed during reconciliation",
     );
   }
+  try {
+    if (userConsume > 0) await userReservoir.consume(RESERVOIR_KEY, userConsume);
+  } catch (err) {
+    logger.warn(
+      { err, userUsedToday, userConsume },
+      "youtube reservoirs: userReservoir consume failed during reconciliation",
+    );
+  }
+  logger.info(
+    { cronUsedToday, userUsedToday, cronConsume, userConsume, datePacific: todayPT },
+    "youtube reservoirs reconciled to per-pool persistent counters",
+  );
 }
 
 /**

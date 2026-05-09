@@ -28,7 +28,7 @@
 // non-empty key exists. requiresUserSetup is false (v0.1 — Phase 6 will
 // flip this conditionally if per-user creds are supported).
 
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { youtubeServiceQuotaUsage } from "$lib/server/db/schema/index.js";
 import { auditLog } from "$lib/server/db/schema/audit-log.js";
@@ -64,13 +64,20 @@ const DAILY_LIMIT_PER_KEY = 10_000;
  */
 async function getDailyStats(date: Date): Promise<ObservabilityDailyStats> {
   const datePT = todayPacific(date);
+  // Phase 03.0.1 post-review #5 — sum across pool_kind per api_key_id.
+  // Pool split is an internal artifact; per-key throttleState compares the
+  // total against operator's per-key 10000 envelope. /admin/quota's
+  // per-key view is also total (cron + user). If a pool-aware breakdown
+  // is needed in the UI later, extend ObservabilityDailyStats.keys[]
+  // to include per-pool fields; v0.1 doesn't surface that distinction.
   const rows = await db
     .select({
       apiKeyId: youtubeServiceQuotaUsage.apiKeyId,
-      estimatedUnits: youtubeServiceQuotaUsage.estimatedUnits,
+      estimatedUnits: sql<number>`SUM(${youtubeServiceQuotaUsage.estimatedUnits})::int`,
     })
     .from(youtubeServiceQuotaUsage)
-    .where(eq(youtubeServiceQuotaUsage.datePacific, datePT));
+    .where(eq(youtubeServiceQuotaUsage.datePacific, datePT))
+    .groupBy(youtubeServiceQuotaUsage.apiKeyId);
 
   // Daily limit envelopes the operator's full key set. Empty env ⇒ at
   // least 1 in the denominator so pctOfDaily doesn't divide by zero (the

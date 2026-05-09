@@ -93,6 +93,8 @@ export async function handlePollCold(job: {
           metrics: null,
           apiKeyId: "no-key",
           unitsUsed: 0,
+          // Cold-tier polls are scheduler-driven → cron pool.
+          poolKind: "cron",
           status: "auth_error",
         });
       } catch (err) {
@@ -138,6 +140,8 @@ export async function handlePollCold(job: {
             : null,
         apiKeyId: picked.apiKeyId,
         unitsUsed: unitsThisVideo,
+        // Cold-tier polls are scheduler-driven → cron pool.
+        poolKind: "cron",
         status: snap.status,
       });
     } catch (err) {

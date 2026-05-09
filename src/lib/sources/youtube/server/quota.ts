@@ -156,6 +156,14 @@ export function pickKeyForJob(): PickedKey | null {
 export async function incrementUsage(args: {
   apiKeyId: string;
   units: number;
+  /**
+   * Phase 03.0.1 post-review #5 — which in-memory reservoir burned the
+   * units. Lets reconcileReservoirsOnBoot debit each pool accurately after
+   * a worker crash. Required (no default) — making it explicit at every
+   * call site forces the caller to think about pool attribution. Pre-fix
+   * all writes were unattributed and reconciliation guessed wrong.
+   */
+  poolKind: "cron" | "user";
   tx?: DbCtx;
 }): Promise<void> {
   const datePacific = todayPacific();
@@ -165,10 +173,15 @@ export async function incrementUsage(args: {
     .values({
       datePacific,
       apiKeyId: args.apiKeyId,
+      poolKind: args.poolKind,
       estimatedUnits: args.units,
     })
     .onConflictDoUpdate({
-      target: [youtubeServiceQuotaUsage.datePacific, youtubeServiceQuotaUsage.apiKeyId],
+      target: [
+        youtubeServiceQuotaUsage.datePacific,
+        youtubeServiceQuotaUsage.apiKeyId,
+        youtubeServiceQuotaUsage.poolKind,
+      ],
       set: {
         estimatedUnits: sql`${youtubeServiceQuotaUsage.estimatedUnits} + ${args.units}`,
         updatedAt: new Date(),
@@ -184,12 +197,20 @@ export async function incrementUsage(args: {
  */
 export async function getThrottleState(now: Date = new Date()): Promise<ThrottleState> {
   const datePacific = todayPacific(now);
+  // Phase 03.0.1 post-review #5 — sum across pool_kind per api_key_id.
+  // Threshold is per-key daily envelope (10000 units); pool split is an
+  // internal accounting artifact for reservoir reconciliation, not a
+  // throttle gate. WORST-key (max sum) wins per pre-existing semantics.
   const rows = await db
-    .select({ units: youtubeServiceQuotaUsage.estimatedUnits })
+    .select({
+      apiKeyId: youtubeServiceQuotaUsage.apiKeyId,
+      units: sql<number>`SUM(${youtubeServiceQuotaUsage.estimatedUnits})::int`,
+    })
     .from(youtubeServiceQuotaUsage)
-    .where(sql`${youtubeServiceQuotaUsage.datePacific} = ${datePacific}`);
+    .where(sql`${youtubeServiceQuotaUsage.datePacific} = ${datePacific}`)
+    .groupBy(youtubeServiceQuotaUsage.apiKeyId);
   if (rows.length === 0) return "ok";
-  const max = Math.max(...rows.map((r) => r.units));
+  const max = Math.max(...rows.map((r) => Number(r.units ?? 0)));
   if (max >= THROTTLE_NINETYFIVE_THRESHOLD) return "ninetyfive";
   if (max >= THROTTLE_EIGHTY_THRESHOLD) return "eighty";
   return "ok";

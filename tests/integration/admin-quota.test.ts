@@ -114,9 +114,9 @@ describe("admin /quota route (Plan 03.0-07)", () => {
 
     // Seed three rows at different threshold bands.
     await db.insert(youtubeServiceQuotaUsage).values([
-      { datePacific: today, apiKeyId: keyOk, estimatedUnits: 3000 },
-      { datePacific: today, apiKeyId: keyEighty, estimatedUnits: 8500 },
-      { datePacific: today, apiKeyId: keyNinetyfive, estimatedUnits: 9700 },
+      { datePacific: today, apiKeyId: keyOk, poolKind: "cron", estimatedUnits: 3000 },
+      { datePacific: today, apiKeyId: keyEighty, poolKind: "cron", estimatedUnits: 8500 },
+      { datePacific: today, apiKeyId: keyNinetyfive, poolKind: "cron", estimatedUnits: 9700 },
     ]);
 
     await withAllowlist(adminEmail, async () => {

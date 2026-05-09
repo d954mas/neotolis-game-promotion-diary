@@ -32,14 +32,21 @@ import { youtubeVideoSnapshots, youtubeVideos } from "$lib/server/db/schema/inde
 async function incrementUsage(args: {
   apiKeyId: string;
   units: number;
+  poolKind: "cron" | "user";
   tx: unknown;
 }): Promise<void> {
   const tracker = (await import("./quota.js")) as {
-    incrementUsage: (a: { apiKeyId: string; units: number; tx?: unknown }) => Promise<void>;
+    incrementUsage: (a: {
+      apiKeyId: string;
+      units: number;
+      poolKind: "cron" | "user";
+      tx?: unknown;
+    }) => Promise<void>;
   };
   await tracker.incrementUsage({
     apiKeyId: args.apiKeyId,
     units: args.units,
+    poolKind: args.poolKind,
     tx: args.tx,
   });
 }
@@ -58,6 +65,14 @@ export interface WriteSnapshotArgs {
   apiKeyId: string;
   /** Units consumed by the upstream call (1 per videos.list call per VERIFIED FACT). */
   unitsUsed: number;
+  /**
+   * Phase 03.0.1 post-review #5 — which reservoir burned the units. Worker
+   * handlers running in scheduler context (poll-active, poll-cold) pass
+   * 'cron'; user-driven handlers (poll-user — Refresh now button) pass
+   * 'user'. Required so reconcileReservoirsOnBoot can debit each pool
+   * accurately on worker restart.
+   */
+  poolKind: "cron" | "user";
   /** Outcome label written to youtube_videos.last_poll_status. */
   status: SnapshotStatus;
 }
@@ -103,6 +118,7 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
     await incrementUsage({
       apiKeyId: args.apiKeyId,
       units: args.unitsUsed,
+      poolKind: args.poolKind,
       tx,
     });
   });

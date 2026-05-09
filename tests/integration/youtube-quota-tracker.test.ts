@@ -36,7 +36,7 @@ beforeEach(() => {
 describe("incrementUsage — UPSERT counter (date_pacific, api_key_id)", () => {
   it("inserts a fresh row at units when no prior row exists", async () => {
     const apiKeyId = hashApiKeyId("test-key-fresh");
-    await incrementUsage({ apiKeyId, units: 7 });
+    await incrementUsage({ apiKeyId, units: 7, poolKind: "cron" });
 
     const today = todayPacific();
     const rows = await db
@@ -54,8 +54,8 @@ describe("incrementUsage — UPSERT counter (date_pacific, api_key_id)", () => {
 
   it("accumulates on conflict — two calls add", async () => {
     const apiKeyId = hashApiKeyId("test-key-accum");
-    await incrementUsage({ apiKeyId, units: 3 });
-    await incrementUsage({ apiKeyId, units: 5 });
+    await incrementUsage({ apiKeyId, units: 3, poolKind: "cron" });
+    await incrementUsage({ apiKeyId, units: 5, poolKind: "cron" });
 
     const today = todayPacific();
     const rows = await db
@@ -74,8 +74,8 @@ describe("incrementUsage — UPSERT counter (date_pacific, api_key_id)", () => {
   it("keeps separate counters per api_key_id within the same day", async () => {
     const idA = hashApiKeyId("key-A");
     const idB = hashApiKeyId("key-B");
-    await incrementUsage({ apiKeyId: idA, units: 100 });
-    await incrementUsage({ apiKeyId: idB, units: 200 });
+    await incrementUsage({ apiKeyId: idA, units: 100, poolKind: "cron" });
+    await incrementUsage({ apiKeyId: idB, units: 200, poolKind: "cron" });
 
     const today = todayPacific();
     const rows = await db
@@ -95,23 +95,23 @@ describe("getThrottleState — D-13 80% / 95% gate", () => {
   });
 
   it("returns 'ok' when all keys < 8000 units", async () => {
-    await incrementUsage({ apiKeyId: hashApiKeyId("k-low"), units: 7999 });
+    await incrementUsage({ apiKeyId: hashApiKeyId("k-low"), units: 7999, poolKind: "cron" });
     expect(await getThrottleState()).toBe("ok");
   });
 
   it("returns 'eighty' when any key crosses 8000", async () => {
-    await incrementUsage({ apiKeyId: hashApiKeyId("k-eighty"), units: 8000 });
+    await incrementUsage({ apiKeyId: hashApiKeyId("k-eighty"), units: 8000, poolKind: "cron" });
     expect(await getThrottleState()).toBe("eighty");
   });
 
   it("returns 'ninetyfive' when any key crosses 9500", async () => {
-    await incrementUsage({ apiKeyId: hashApiKeyId("k-95"), units: 9500 });
+    await incrementUsage({ apiKeyId: hashApiKeyId("k-95"), units: 9500, poolKind: "cron" });
     expect(await getThrottleState()).toBe("ninetyfive");
   });
 
   it("uses the WORST state across keys (one cold key + one hot key → hot wins)", async () => {
-    await incrementUsage({ apiKeyId: hashApiKeyId("k-cold"), units: 100 });
-    await incrementUsage({ apiKeyId: hashApiKeyId("k-hot"), units: 9700 });
+    await incrementUsage({ apiKeyId: hashApiKeyId("k-cold"), units: 100, poolKind: "cron" });
+    await incrementUsage({ apiKeyId: hashApiKeyId("k-hot"), units: 9700, poolKind: "cron" });
     expect(await getThrottleState()).toBe("ninetyfive");
   });
 });

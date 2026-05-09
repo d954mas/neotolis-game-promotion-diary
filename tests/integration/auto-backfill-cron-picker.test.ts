@@ -120,6 +120,7 @@ describe("auto-backfill cron picker (handleAutoBackfillCron)", () => {
     await db.insert(youtubeServiceQuotaUsage).values({
       datePacific: todayPacific(),
       apiKeyId: "test-key-defer",
+      poolKind: "cron",
       estimatedUnits: 6000,
     });
 

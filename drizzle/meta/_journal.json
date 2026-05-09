@@ -183,6 +183,13 @@
       "when": 1778600000000,
       "tag": "0025_phase03_01_audit_metadata_flow_check",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1778700000000,
+      "tag": "0026_phase03_01_quota_usage_pool_kind",
+      "breakpoints": true
     }
   ]
 }

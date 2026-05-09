@@ -147,6 +147,8 @@ export async function handlePollActive(job: {
           metrics: null,
           apiKeyId: "no-key",
           unitsUsed: 0,
+          // Active-tier polls are scheduler-driven → cron pool.
+          poolKind: "cron",
           status: "auth_error",
         });
       } catch (err) {
@@ -201,6 +203,8 @@ export async function handlePollActive(job: {
             : null,
         apiKeyId: picked.apiKeyId,
         unitsUsed: unitsThisVideo,
+        // Active-tier polls are scheduler-driven → cron pool.
+        poolKind: "cron",
         status: snap.status,
       });
     } catch (err) {

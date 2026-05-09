@@ -117,7 +117,7 @@ describe("youtube-quota-throttle on youtube.poll.cron path (Plan 03.0.1-07)", ()
 
     // Push the operator quota counter to 8000 units → state 'eighty'.
     const apiKeyId = hashApiKeyId("k-throttle-80");
-    await incrementUsage({ apiKeyId, units: 8000 });
+    await incrementUsage({ apiKeyId, units: 8000, poolKind: "cron" });
 
     await handlePollCold({ id: "test", data: { tier: "cold" } });
 
@@ -130,7 +130,7 @@ describe("youtube-quota-throttle on youtube.poll.cron path (Plan 03.0.1-07)", ()
     await insertActiveEvent(u.id);
 
     const apiKeyId = hashApiKeyId("k-throttle-80b");
-    await incrementUsage({ apiKeyId, units: 8200 });
+    await incrementUsage({ apiKeyId, units: 8200, poolKind: "cron" });
 
     await handlePollActive({ id: "test", data: { tier: "active" } });
 
@@ -144,7 +144,7 @@ describe("youtube-quota-throttle on youtube.poll.cron path (Plan 03.0.1-07)", ()
     await insertActiveEvent(u.id);
 
     const apiKeyId = hashApiKeyId("k-throttle-95");
-    await incrementUsage({ apiKeyId, units: 9500 });
+    await incrementUsage({ apiKeyId, units: 9500, poolKind: "cron" });
 
     await handlePollActive({ id: "test", data: { tier: "active" } });
 
@@ -176,7 +176,7 @@ describe("youtube-quota-throttle on youtube.poll.cron path (Plan 03.0.1-07)", ()
     const u = await seedUserDirectly({ email: `qt-emit-${uniq()}@test.local` });
     await insertActiveEvent(u.id);
     const apiKeyId = hashApiKeyId("k-emit");
-    await incrementUsage({ apiKeyId, units: 8500 });
+    await incrementUsage({ apiKeyId, units: 8500, poolKind: "cron" });
 
     // First handler tick — 'eighty' state observed; no NEW audit row
     // because the pre-seeded row blocks duplicate emission.

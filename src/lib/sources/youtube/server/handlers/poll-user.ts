@@ -140,6 +140,8 @@ async function handlePollUserImpl(job: {
         metrics: null,
         apiKeyId: "no-key",
         unitsUsed: 0,
+        // Refresh-now button is user-driven → user pool.
+        poolKind: "user",
         status: "auth_error",
       });
     } catch (err) {
@@ -188,6 +190,8 @@ async function handlePollUserImpl(job: {
       // path returns at line 82 before this writeSnapshot runs, charging
       // 0 there; reaching this point means an HTTP request was made.
       unitsUsed: 1,
+      // Refresh-now button is user-driven → user pool.
+      poolKind: "user",
       status: snap.status,
     });
   } catch (err) {

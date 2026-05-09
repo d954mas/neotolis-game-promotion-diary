@@ -111,6 +111,8 @@ export async function handleRehabUnavailable(job: { id: string }): Promise<void>
             : null,
         apiKeyId: picked.apiKeyId,
         unitsUsed: unitsThisVideo,
+        // Rehab is a weekly cron handler → cron pool.
+        poolKind: "cron",
         status: snap.status,
       });
     } catch (err) {
