@@ -200,3 +200,125 @@ export async function withQuotaGuard<T>(
     }
   }
 }
+
+// ───── Phase 03.0.1 — per-user fair-share cap window helpers ─────
+// Per-user cap on operator's API budget (separate from cross-source
+// `events_per_day` cap which targets manual creates). Sources of truth:
+//   - Cap declaration:   adapter.observability.userQuotaCap (each platform).
+//   - Counter source:    audit_log SUM (metadata.requests_used /
+//                        metadata.events_inserted).
+//   - Window:            Pacific calendar day (sync с operator's reservoir
+//                        reset cycle in chargedFetch — Plan 08).
+//   - Capped kinds:      'incremental' | 'historical' | 'stats_refresh'.
+//   - Excluded kinds:    'initial' (onboarding UX), 'auto_passive' (cron pool).
+//
+// All exported as helpers consumed by:
+//   - Endpoint cap checks (refresh-content + refresh-poll) — pre-enqueue gate.
+//   - Banner UI loaders — quota status display.
+
+/**
+ * Returns the absolute UTC instant at which the current Pacific calendar day
+ * began (00:00 PT today). Used as the cap window's lower bound.
+ *
+ * DST-aware: uses Intl.DateTimeFormat with timezone offset to compute. Spring-
+ * forward / fall-back days are handled implicitly because the calculation
+ * always derives "00:00 in PT" → UTC, never +24h arithmetic.
+ */
+export function pacificDayStart(now: Date = new Date()): Date {
+  // YYYY-MM-DD in PT (Plan 08 todayPacific equivalent — local copy avoids
+  // cross-source import).
+  const datePT = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+  // Get current PT UTC offset in minutes via shortOffset format.
+  const offsetParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    timeZoneName: "shortOffset",
+  }).formatToParts(now);
+  const offsetPart = offsetParts.find((p) => p.type === "timeZoneName")?.value ?? "GMT-8";
+  const offsetMatch = offsetPart.match(/GMT([+-]\d+)/);
+  const offsetHours = offsetMatch?.[1] != null ? parseInt(offsetMatch[1], 10) : -8;
+  // Construct UTC instant for "datePT 00:00:00 in PT".
+  const utcMs = Date.parse(`${datePT}T00:00:00Z`) - offsetHours * 3600_000;
+  return new Date(utcMs);
+}
+
+/**
+ * Returns 00:00 PT of the day AFTER `now`'s Pacific date — when the cap
+ * window resets. UI displays "resets in {humanizeDuration(this - now)}".
+ *
+ * Computed via `pacificDayStart` of (now + 24h) to handle DST edges
+ * correctly: spring-forward day pacific midnight is +23h after current
+ * pacific midnight, fall-back is +25h. Both resolved by formatter.
+ */
+export function nextPacificMidnight(now: Date = new Date()): Date {
+  const tomorrow = new Date(now.getTime() + 86_400_000);
+  return pacificDayStart(tomorrow);
+}
+
+/**
+ * Per-user cap counter: SUM of audit metadata.requests_used + events_inserted
+ * for the current Pacific calendar day, scoped to user-initiated capped flows
+ * (excludes 'initial' onboarding and 'auto_passive' cron — those use cron pool,
+ * not user pool).
+ *
+ * Filters by `metadata.platform` when supplied — Phase 03.1+ multi-platform
+ * separates Reddit cap from YouTube cap. When omitted (or undefined), counts
+ * across all platforms (used by lifetime stats).
+ */
+export async function getUserQuotaUsedToday(
+  userId: string,
+  platform?: string,
+): Promise<{ requests: number; events: number }> {
+  const since = pacificDayStart();
+  const platformFilter = platform ? sql`AND metadata->>'platform' = ${platform}` : sql``;
+  const result = await db.execute(sql`
+    SELECT
+      COALESCE(SUM((metadata->>'requests_used')::int), 0)::bigint AS requests,
+      COALESCE(SUM((metadata->>'events_inserted')::int), 0)::bigint AS events
+    FROM audit_log
+    WHERE user_id = ${userId}
+      AND action IN ('source.refresh_content_requested', 'event.poll_refreshed')
+      AND metadata->>'kind' IN ('incremental', 'historical', 'stats_refresh')
+      AND created_at >= ${since.toISOString()}::timestamptz
+      ${platformFilter}
+  `);
+  const row = result.rows[0] as { requests: string | number; events: string | number } | undefined;
+  return {
+    requests: Number(row?.requests ?? 0),
+    events: Number(row?.events ?? 0),
+  };
+}
+
+/**
+ * Per-user lifetime usage — SUM since the user's signup (no time filter).
+ * Includes ALL kinds (initial + incremental + historical + stats_refresh +
+ * auto_passive) so banner footer shows true lifetime consumption.
+ *
+ * Performance: indexed via (user_id, created_at desc). For users with
+ * thousands of audit rows still <50ms — no caching needed at current scale.
+ */
+export async function getUserQuotaLifetime(
+  userId: string,
+  platform?: string,
+): Promise<{ requests: number; events: number }> {
+  const platformFilter = platform ? sql`AND metadata->>'platform' = ${platform}` : sql``;
+  const result = await db.execute(sql`
+    SELECT
+      COALESCE(SUM((metadata->>'requests_used')::int), 0)::bigint AS requests,
+      COALESCE(SUM((metadata->>'events_inserted')::int), 0)::bigint AS events
+    FROM audit_log
+    WHERE user_id = ${userId}
+      AND action IN ('source.refresh_content_requested', 'event.poll_refreshed')
+      AND metadata->>'kind' IN ('initial', 'incremental', 'historical', 'stats_refresh', 'auto_passive')
+      ${platformFilter}
+  `);
+  const row = result.rows[0] as { requests: string | number; events: string | number } | undefined;
+  return {
+    requests: Number(row?.requests ?? 0),
+    events: Number(row?.events ?? 0),
+  };
+}
