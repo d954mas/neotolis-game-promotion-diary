@@ -41,6 +41,8 @@ import { AppError, NotFoundError } from "./errors.js";
 import { writeAudit } from "../audit.js";
 import { QUEUES } from "../queues.js";
 import { getBoss } from "../queue-client.js";
+import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
+import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
 
 const COOLDOWN_MS = 5 * 60 * 1000;
 
@@ -65,11 +67,18 @@ export async function requestRefreshPoll(
   const event = rows[0];
   if (!event) throw new NotFoundError();
 
-  // 2. Pollable-kind gate. Phase 3.0 ships YouTube only; Phase 3.1 lands
-  //    reddit_post and extends this allowlist. Other kinds (twitter_post,
-  //    telegram_post, conference, etc.) are not poll-driven by upstream APIs
-  //    so the affordance must not enqueue work that has nothing to do.
-  if (event.kind !== "youtube_video") {
+  // 2. Pollable-kind gate. Phase 03.0.1 architecture cleanup — registry-driven:
+  //    asks the adapter whose SourceKind maps to this event's kind whether it
+  //    can refresh-poll. Phase 03.1 Reddit's adapter returns true for
+  //    reddit_post; this code stays unchanged. Kinds with no adapter (event
+  //    kinds that are never poll-driven — conference, talk, press, other) and
+  //    adapters whose canRefreshPoll returns false are blocked uniformly.
+  const sourceKindForPoll = eventKindToSourceKind(event.kind);
+  const pollableAdapter =
+    sourceKindForPoll !== null && hasAdapter(sourceKindForPoll)
+      ? getAdapter(sourceKindForPoll)
+      : null;
+  if (pollableAdapter === null || pollableAdapter.canRefreshPoll?.(event.kind) !== true) {
     throw new AppError(
       `event kind '${event.kind}' is not pollable in Phase 3.0`,
       "event_not_pollable",

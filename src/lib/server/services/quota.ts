@@ -42,11 +42,22 @@ import { db, type DbOrTx, type Tx } from "../db/client.js";
 import { games } from "../db/schema/games.js";
 import { dataSources } from "../db/schema/data-sources.js";
 import { events } from "../db/schema/events.js";
-import { youtubeMetadataFetchLog } from "../db/schema/index.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError } from "./errors.js";
+import { allAdapters } from "$lib/sources/registry.js";
 
+/**
+ * Phase 03.0.1 architecture cleanup — adapter-driven quota counters.
+ *
+ * Cross-source quotas (games, data_sources, events_per_day) live here as
+ * the abuse-quota authority of record. Per-source counters
+ * (youtube_metadata_fetches_per_day, reddit_metadata_fetches_per_day in
+ * Phase 03.1, etc.) are declared by each adapter via
+ * `observability.quotaCounters[]` and looked up via
+ * `findAdapterCounter(kind)`. Adding a new per-source counter means
+ * declaring it on the adapter — quota.ts code stays unchanged.
+ */
 export type QuotaKind =
   | "games"
   | "data_sources"
@@ -62,8 +73,22 @@ const LIMITS: Record<QuotaKind, number> = {
   // burn-loop a scripted-loop caller could otherwise exploit on the
   // /api/youtube/fetch-metadata route. 50/day is the same indie-friendly
   // shape as games / data_sources caps; cache hits don't count.
+  // The COUNT logic for this kind lives in the youtube adapter's
+  // observability.quotaCounters; this LIMITS entry just declares the cap.
   youtube_metadata_fetches_per_day: env.LIMIT_YOUTUBE_METADATA_FETCHES_PER_DAY,
 };
+
+function findAdapterCounter(kind: string): {
+  count(dbCtx: DbOrTx, userId: string, since: Date): Promise<number>;
+} | null {
+  for (const adapter of allAdapters) {
+    const counters = adapter.observability.quotaCounters ?? [];
+    for (const counter of counters) {
+      if (counter.kind === kind) return counter;
+    }
+  }
+  return null;
+}
 
 async function currentCount(dbCtx: DbOrTx, userId: string, kind: QuotaKind): Promise<number> {
   if (kind === "games") {
@@ -80,20 +105,15 @@ async function currentCount(dbCtx: DbOrTx, userId: string, kind: QuotaKind): Pro
       .where(and(eq(dataSources.userId, userId), isNull(dataSources.deletedAt)));
     return Number(r?.c ?? 0);
   }
-  if (kind === "youtube_metadata_fetches_per_day") {
-    // Rolling 24h count of cache-miss "Get from YouTube" button clicks.
-    // Cache hits never insert here, so they don't count.
-    const sinceMfl = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const [r] = await dbCtx
-      .select({ c: count() })
-      .from(youtubeMetadataFetchLog)
-      .where(
-        and(
-          eq(youtubeMetadataFetchLog.userId, userId),
-          gte(youtubeMetadataFetchLog.fetchedAt, sinceMfl),
-        ),
-      );
-    return Number(r?.c ?? 0);
+  // Phase 03.0.1 architecture cleanup — per-source counters live on the
+  // adapter (e.g. youtube_metadata_fetches_per_day → youtube adapter's
+  // observability.quotaCounters). Cross-source code never knows the table.
+  // Adding Reddit's metadata-fetches counter in Phase 03.1 = declare it on
+  // the Reddit adapter; this iteration finds it without a quota.ts edit.
+  const adapterCounter = findAdapterCounter(kind);
+  if (adapterCounter !== null) {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    return adapterCounter.count(dbCtx, userId, since);
   }
   // events_per_day — rolling 24h count.
   //

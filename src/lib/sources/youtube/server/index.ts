@@ -41,11 +41,22 @@
 // by a separate queue's batchSize.
 
 import type {
+  AdapterAppContext,
   AdapterContext,
+  AdapterPollState,
+  AdapterQuotaCounter,
+  BackfillWindow,
+  CanonicalizeInput,
+  CanonicalizeResult,
+  CreateContext,
   DataSourceAdapter,
+  EventPreviewMetadata,
   MinimalBoss,
   PollableSource,
+  SourceCreatedHookSource,
 } from "$lib/sources/adapter.js";
+import type { DbOrTx } from "$lib/server/db/client.js";
+import type { Hono } from "hono";
 import { QUEUES } from "$lib/server/queues.js";
 import { getBoss } from "$lib/server/queue-client.js";
 import { youtubeChannelAdapter } from "./adapter.js";
@@ -60,6 +71,19 @@ import { handleQuotaReset } from "./handlers/quota-reset.js";
 // (backfillSource fires boss.send into this queue) and the consumer side
 // (boss.work below dispatches each job to handleBackfillUser).
 import { handleBackfillUser } from "./handlers/backfill-user.js";
+// Phase 03.0.1 architecture cleanup — adapter-driven create-time hooks +
+// preview metadata + poll-state lookup + per-source HTTP routes. Cross-source
+// services delegate via getAdapter(...) so adding Reddit (Phase 03.1) is a
+// registry entry, not a 6-file edit.
+import { fetchVideoMetadataByUrl } from "./metadata.js";
+import { parseYoutubeUrl, youtubeParseUrl } from "./url.js";
+import { fetchYoutubeOembed } from "$lib/server/integrations/youtube-oembed.js";
+import { youtubeMetadataRoutes } from "./route-metadata.js";
+import { youtubeVideos, youtubeMetadataFetchLog } from "./schema/index.js";
+import { db } from "$lib/server/db/client.js";
+import { eq, and, gte, count, inArray } from "drizzle-orm";
+import { AppError } from "$lib/server/services/errors.js";
+import { logger } from "$lib/server/logger.js";
 
 async function registerQueues(boss: MinimalBoss): Promise<void> {
   // pg-boss v10+ requires createQueue before send/work — idempotent on
@@ -221,16 +245,248 @@ async function backfillSource(
   return { jobId, queue: QUEUES.YOUTUBE_BACKFILL_USER };
 }
 
+/**
+ * Phase 03.0.1 architecture cleanup — canonicalizeOnCreate.
+ * Pulls the YouTube channel/video URL canonicalization out of
+ * services/data-sources.ts into the adapter. Logic preserved verbatim from
+ * the prior data-sources.ts:260-292 inline switch:
+ *
+ *   - /channel/UC… → resolvedExternalId = channelId, canonicalize URL.
+ *   - /watch?v=ID  → fetchVideoMetadataByUrl, dereference channelId, canonicalize.
+ *   - /@handle, /c/, /user/ → leave as-is; worker resolves on first backfill.
+ *
+ * Throws AppError 422 on URLs that don't point at a YouTube
+ * channel/handle/video — the same UX the inline code surfaced (the user
+ * pasted youtube.com/ or localhost:5173/feed; better fail visibly).
+ */
+async function canonicalizeOnCreate(
+  input: CanonicalizeInput,
+  ctx: CreateContext,
+): Promise<CanonicalizeResult> {
+  if (input.channelId != null && input.channelId !== "") {
+    return { canonicalHandleUrl: input.handleUrl, resolvedExternalId: input.channelId };
+  }
+  const parsed = parseYoutubeUrl(input.handleUrl);
+  if (parsed === null) {
+    throw new AppError(
+      "Paste a YouTube channel URL (e.g. https://www.youtube.com/@handle or /channel/UC… or any video URL).",
+      "validation_failed",
+      422,
+      { handle_url: input.handleUrl },
+    );
+  }
+  if (parsed.kind === "channelId") {
+    return {
+      canonicalHandleUrl: `https://www.youtube.com/channel/${parsed.value}`,
+      resolvedExternalId: parsed.value,
+    };
+  }
+  if (parsed.kind === "videoId") {
+    // /watch?v=… or /shorts/… — dereference channelId via videos.list.
+    // fetch failures (404, 502, 503 missing keys) propagate up as AppError —
+    // ghost rows with channel_id=NULL are worse UX than visible failure.
+    const meta = await fetchVideoMetadataByUrl(input.handleUrl, ctx.userId, ctx.ipAddress);
+    if (meta.channelId) {
+      return {
+        canonicalHandleUrl: `https://www.youtube.com/channel/${meta.channelId}`,
+        resolvedExternalId: meta.channelId,
+      };
+    }
+    return { canonicalHandleUrl: input.handleUrl, resolvedExternalId: null };
+  }
+  // parsed.kind === "handle" — /@handle, /c/legacy, /user/legacy. Leave as-is;
+  // the worker resolves channel_id on first backfill (1 quota unit) and
+  // persists it back to data_sources.
+  return { canonicalHandleUrl: input.handleUrl, resolvedExternalId: null };
+}
+
+/**
+ * Phase 03.0.1 architecture cleanup — onSourceCreated.
+ * Pulls the YOUTUBE_CHANNEL_CONTEXT_BACKFILL enqueue out of
+ * services/data-sources.ts into the adapter. Logic preserved verbatim from
+ * the prior data-sources.ts:377-400 inline switch.
+ *
+ * Fire-and-forget: pg-boss / DB errors are logged at WARN. The created
+ * source row is the load-bearing return value; backfill enqueue is a
+ * nice-to-have that the user can re-trigger by re-toggling auto-import
+ * (PATCH /api/sources/:id) if it ever silently fails.
+ */
+async function onSourceCreated(
+  source: SourceCreatedHookSource,
+  opts: { backfillWindow: BackfillWindow },
+): Promise<void> {
+  if (!source.autoImport) return;
+  try {
+    const boss = await getBoss();
+    await boss.send(
+      QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL,
+      {
+        sourceId: source.id,
+        userId: source.userId,
+        handleUrl: source.handleUrl,
+        backfillWindow: opts.backfillWindow,
+      },
+      { singletonKey: `source-${source.id}` },
+    );
+  } catch (err) {
+    logger.warn(
+      {
+        sourceId: source.id,
+        err: String((err as Error)?.message ?? err),
+      },
+      "channel-context-backfill enqueue on createSource failed; ignoring",
+    );
+  }
+}
+
+/**
+ * Phase 03.0.1 architecture cleanup — fetchEventPreviewMetadata.
+ * Pulls the YouTube oEmbed call out of services/events.ts:enrichFromUrl
+ * into the adapter. Maps YoutubeOembedResult → EventPreviewMetadata so the
+ * cross-source code never sees YouTube-specific result shapes.
+ *
+ * 5xx / network failures are caught here and translated to
+ * `{kind:'unreachable'}` — cross-source enrichFromUrl maps to AppError 502
+ * `youtube_oembed_unreachable` (legacy contract preserved).
+ */
+async function fetchEventPreviewMetadata(canonicalUrl: string): Promise<EventPreviewMetadata> {
+  let result;
+  try {
+    result = await fetchYoutubeOembed(canonicalUrl);
+  } catch (err) {
+    return { kind: "unreachable", cause: String((err as Error)?.message ?? err) };
+  }
+  if (result.kind === "private") return { kind: "private" };
+  if (result.kind === "unavailable") return { kind: "unavailable" };
+  return {
+    kind: "ok",
+    title: result.data.title,
+    authorName: result.data.authorName,
+    authorUrl: result.data.authorUrl,
+    thumbnailUrl: result.data.thumbnailUrl,
+  };
+}
+
+/**
+ * Phase 03.0.1 architecture cleanup — validateEventInput.
+ * Pulls the youtube_video URL-required validation out of services/events.ts
+ * into the adapter. Throws AppError 422 on invalid input.
+ */
+function validateEventInput(input: { kind: string; url?: string | null }): void {
+  if (input.kind !== "youtube_video") return;
+  if (!input.url) {
+    throw new AppError("url is required when kind=youtube_video", "kind_url_inconsistent", 422, {
+      reason: "youtube_video_requires_url",
+    });
+  }
+  // Use the registry's url-router parser (ParsedUrl) instead of parseYoutubeUrl
+  // (ParsedYoutubeUrl with channelId/videoId/handle discriminator). For
+  // event-input validation we want "is this a youtube_video URL" — a video,
+  // shorts, embed, or live URL. The handler-side `youtubeParseUrl` from
+  // ./url.js is the right shape (kind: "youtube_video", externalId, ...).
+  const parsed = youtubeParseUrl(input.url);
+  if (parsed === null || parsed.kind !== "youtube_video") {
+    throw new AppError("url is not a recognized YouTube URL", "kind_url_inconsistent", 422, {
+      reason: "url_not_youtube",
+    });
+  }
+}
+
+/**
+ * Phase 03.0.1 architecture cleanup — fetchPollStateMap.
+ * Pulls the youtube_videos batch lookup out of dto.ts into the adapter.
+ * Cross-source dto.ts iterates allAdapters and merges results.
+ *
+ * youtube_videos is PUBLIC-DATA (CONTEXT D-07) — no user_id column,
+ * identical across tenants. Lookup is keyed on the PK only. The userId
+ * parameter is present for contract symmetry (Reddit/Twitter adapters
+ * may have per-user poll state) but unused here.
+ */
+async function fetchPollStateMap(
+  _userId: string,
+  externalIds: readonly string[],
+): Promise<Map<string, AdapterPollState>> {
+  const map = new Map<string, AdapterPollState>();
+  if (externalIds.length === 0) return map;
+  const rows = await db
+    .select({
+      videoId: youtubeVideos.videoId,
+      publishedAt: youtubeVideos.publishedAt,
+      lastPolledAt: youtubeVideos.lastPolledAt,
+      lastPollStatus: youtubeVideos.lastPollStatus,
+    })
+    .from(youtubeVideos)
+    .where(inArray(youtubeVideos.videoId, [...externalIds]));
+  for (const r of rows) {
+    map.set(r.videoId, {
+      publishedAt: r.publishedAt,
+      lastPolledAt: r.lastPolledAt,
+      lastPollStatus: r.lastPollStatus,
+    });
+  }
+  return map;
+}
+
+/**
+ * Phase 03.0.1 architecture cleanup — registerRoutes.
+ * Pulls the direct `import { youtubeMetadataRoutes }` from http/app.ts
+ * into the adapter. Cross-source createApp() iterates allAdapters and
+ * calls registerRoutes; adding Reddit's preview-metadata endpoint in
+ * Phase 03.1 means implementing this method on the Reddit adapter, not
+ * editing http/app.ts.
+ */
+function registerRoutes(app: Hono<AdapterAppContext>): void {
+  app.route("/api", youtubeMetadataRoutes);
+}
+
+/**
+ * Phase 03.0.1 architecture cleanup — quotaCounters.
+ * Declares youtube_metadata_fetches_per_day. Cross-source services/quota.ts
+ * iterates allAdapters[*].observability.quotaCounters; adding Reddit's
+ * counters in Phase 03.1 means declaring them on the Reddit adapter, not
+ * editing the quota.ts switch.
+ */
+const youtubeQuotaCounters: ReadonlyArray<AdapterQuotaCounter> = [
+  {
+    kind: "youtube_metadata_fetches_per_day",
+    async count(dbCtx: DbOrTx, userId: string, since: Date): Promise<number> {
+      const [r] = await dbCtx
+        .select({ c: count() })
+        .from(youtubeMetadataFetchLog)
+        .where(
+          and(
+            eq(youtubeMetadataFetchLog.userId, userId),
+            gte(youtubeMetadataFetchLog.fetchedAt, since),
+          ),
+        );
+      return Number(r?.c ?? 0);
+    },
+  },
+];
+
 // youtubeAdapter — composes the per-source adapter consumers see.
 // Spread `youtubeChannelAdapter` (every other method: pollContent /
-// pollStats / pollStatsByVideoId / parseUrl / observability /
-// canRefreshPoll) with registerQueues + scheduleCronTicks + backfillSource
-// OVERRIDDEN here as real implementations. The stubs in adapter.ts stay
-// for typecheck-loud failure if a consumer imports adapter.ts directly
-// instead of going through this barrel.
+// pollStats / pollStatsByVideoId / parseUrl / canRefreshPoll) with
+// registerQueues + scheduleCronTicks + backfillSource + observability
+// (extended with quotaCounters) + 5 cross-source create-time / event-time
+// hooks (canonicalizeOnCreate, onSourceCreated, fetchEventPreviewMetadata,
+// validateEventInput, fetchPollStateMap, registerRoutes) OVERRIDDEN here as
+// real implementations. The stubs in adapter.ts stay for typecheck-loud
+// failure if a consumer imports adapter.ts directly instead of going
+// through this barrel.
 export const youtubeAdapter: DataSourceAdapter = {
   ...youtubeChannelAdapter,
+  observability: {
+    ...youtubeChannelAdapter.observability,
+    quotaCounters: youtubeQuotaCounters,
+  },
   registerQueues,
   scheduleCronTicks,
   backfillSource,
+  canonicalizeOnCreate,
+  onSourceCreated,
+  fetchEventPreviewMetadata,
+  validateEventInput,
+  fetchPollStateMap,
+  registerRoutes,
 };

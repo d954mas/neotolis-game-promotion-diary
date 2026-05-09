@@ -10,7 +10,9 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { eventGames } from "./db/schema/event-games.js";
-import { youtubeVideos } from "./db/schema/index.js";
+import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
+import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
+import type { SourceKind } from "$lib/sources/adapter.js";
 import type { user, session } from "./db/schema/auth.js";
 import type {
   games,
@@ -544,40 +546,46 @@ export async function loadVideoDataForEvents(
     { publishedAt: Date | null; lastPolledAt: Date | null; lastPollStatus: string | null }
   >
 > {
-  const externalIds = Array.from(
-    new Set(
-      rows
-        .filter((r) => r.userId === userId && r.kind === "youtube_video" && r.externalId !== null)
-        .map((r) => r.externalId!),
-    ),
-  );
-  const map = new Map<
+  // Phase 03.0.1 architecture cleanup — adapter-driven poll-state lookup.
+  //
+  // Cross-source code never queries youtube_videos / reddit_posts / etc.
+  // directly. Each adapter exposes fetchPollStateMap which knows its own
+  // table + key shape. We:
+  //   1. Group input rows by their adapter (via eventKindToSourceKind +
+  //      registry), filtering tenant + presence of externalId.
+  //   2. Call adapter.fetchPollStateMap(userId, externalIds) per adapter
+  //      that has any externalIds in this batch.
+  //   3. Merge the per-adapter Maps into one. ExternalId collisions
+  //      across adapters are unlikely (YouTube videoId vs reddit post id
+  //      have different shapes) but the merge is last-write-wins and
+  //      kind-tagged at the call site, so no data leaks.
+  //
+  // Adding a new pollable kind in Phase 03.1+ = implement
+  // fetchPollStateMap on its adapter; this code stays unchanged.
+  const merged = new Map<
     string,
     { publishedAt: Date | null; lastPolledAt: Date | null; lastPollStatus: string | null }
   >();
-  if (externalIds.length === 0) return map;
-  // youtube_videos is PUBLIC-DATA (CONTEXT D-07) — no user_id column,
-  // identical across tenants. Lookup is keyed on the PK only. The
-  // tenant-scope rule isn't applied to dto.ts (file outside the rule's
-  // glob — services/http/worker/scheduler/page-loaders), so no disable
-  // directive is needed; the discipline is documented inline instead.
-  const videoRows = await db
-    .select({
-      videoId: youtubeVideos.videoId,
-      publishedAt: youtubeVideos.publishedAt,
-      lastPolledAt: youtubeVideos.lastPolledAt,
-      lastPollStatus: youtubeVideos.lastPollStatus,
-    })
-    .from(youtubeVideos)
-    .where(inArray(youtubeVideos.videoId, externalIds));
-  for (const v of videoRows) {
-    map.set(v.videoId, {
-      publishedAt: v.publishedAt,
-      lastPolledAt: v.lastPolledAt,
-      lastPollStatus: v.lastPollStatus,
-    });
+  // Group externalIds by source-kind via eventKindToSourceKind, skipping
+  // event kinds that have no source-kind mapping (conference, talk, press,
+  // other) — those rows can never carry a poll state.
+  const idsByKind = new Map<SourceKind, Set<string>>();
+  for (const r of rows) {
+    if (r.userId !== userId || r.externalId === null) continue;
+    const sourceKind = eventKindToSourceKind(r.kind);
+    if (sourceKind === null) continue;
+    const set = idsByKind.get(sourceKind) ?? new Set<string>();
+    set.add(r.externalId);
+    idsByKind.set(sourceKind, set);
   }
-  return map;
+  for (const [sourceKind, ids] of idsByKind) {
+    if (!hasAdapter(sourceKind)) continue;
+    const adapter = getAdapter(sourceKind);
+    if (adapter.fetchPollStateMap === undefined) continue;
+    const partial = await adapter.fetchPollStateMap(userId, [...ids]);
+    for (const [k, v] of partial) merged.set(k, v);
+  }
+  return merged;
 }
 
 /**

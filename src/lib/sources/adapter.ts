@@ -32,6 +32,8 @@
 // methods just don't take it yet.
 
 import type { dataSources, events } from "$lib/server/db/schema/index.js";
+import type { DbOrTx } from "$lib/server/db/client.js";
+import type { Hono } from "hono";
 
 export type DataSourceRow = typeof dataSources.$inferSelect;
 export type EventRow = typeof events.$inferSelect;
@@ -152,13 +154,116 @@ export interface ObservabilityAuditEntry {
   metadata: Record<string, unknown>;
 }
 
+/** Per-adapter quota counter declaration — adapters expose their per-user
+ *  rolling quotas (e.g. youtube_metadata_fetches_per_day) so cross-source
+ *  services/quota.ts iterates `allAdapters[*].observability.quotaCounters`
+ *  instead of switching on a hard-coded list. Phase 03.1+ Reddit adapter
+ *  declares its own counters; quota.ts code stays unchanged.
+ *
+ *  count() receives `dbCtx: DbOrTx` so it can be invoked under the per-user
+ *  advisory lock inside withQuotaGuard's transaction (race-safe limit check).
+ *  Counters that don't need in-tx semantics can ignore the parameter and
+ *  query via the top-level `db` — but standard pattern is to pass `dbCtx`
+ *  through so concurrent same-user requests serialize correctly. */
+export interface AdapterQuotaCounter {
+  /** Quota key — must match a key in services/quota.ts QUOTA_LIMITS. */
+  kind: string;
+  /** Count rows for `userId` since `since` (typically rolling 24h window).
+   *  Uses `dbCtx` (db OR active tx) so the count joins the caller's
+   *  advisory-lock'd transaction when invoked from withQuotaGuard. */
+  count(dbCtx: DbOrTx, userId: string, since: Date): Promise<number>;
+}
+
 export interface AdapterObservability {
   auth: ObservabilityAuth;
   quota: {
     getDailyStats(date: Date): Promise<ObservabilityDailyStats>;
     getRecentAudit(limit: number): Promise<ObservabilityAuditEntry[]>;
   };
+  /** Per-adapter rolling-window quota counters (Phase 03.0.1 D-19).
+   *  Cross-source services/quota.ts iterates these to compute current
+   *  usage; new sources add their counters here, no quota.ts edit needed. */
+  quotaCounters?: ReadonlyArray<AdapterQuotaCounter>;
 }
+
+/** Backfill window options — accepted by createSource and threaded into
+ *  onSourceCreated. Forward-compatible with future adapter-specific extensions
+ *  (e.g. Reddit may add "this_subreddit_ever" — opt-in per-adapter). */
+export type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
+
+/** Result of canonicalizeOnCreate — the adapter's chance to:
+ *  - Rewrite handle_url to its canonical form (e.g. /watch?v=XYZ → /channel/UC…)
+ *  - Resolve an external id (channel_id, account_id) at create time so the
+ *    worker takes the fast path (no resolve quota burn on first backfill).
+ *
+ *  Returns the input unchanged if no canonicalization applies. */
+export interface CanonicalizeResult {
+  canonicalHandleUrl: string;
+  resolvedExternalId: string | null;
+}
+
+/** Input shape consumed by canonicalizeOnCreate. Mirrors the relevant slice
+ *  of CreateSourceInput; adapters never touch tenant-scoped fields. */
+export interface CanonicalizeInput {
+  handleUrl: string;
+  channelId?: string | null;
+}
+
+/** Context for create-time adapter hooks (canonicalizeOnCreate, validateEventInput).
+ *  Threads tenant + audit-trail context for adapters that need to write
+ *  observability rows (e.g. metadata-fetch-log on YouTube canonicalize). */
+export interface CreateContext {
+  userId: string;
+  ipAddress: string;
+}
+
+/** Post-create hook payload — minimum set the YouTube context-backfill enqueue
+ *  needs. Adapters that don't need this fields ignore them. */
+export interface SourceCreatedHookSource {
+  id: string;
+  userId: string;
+  autoImport: boolean;
+  handleUrl: string;
+  metadata: Record<string, unknown>;
+  kind: SourceKind;
+}
+
+/** Discriminated result of fetchEventPreviewMetadata — Phase 03.0.1 D-20.
+ *  Maps to the legacy YouTube oEmbed result shape (events.ts:559-568) so
+ *  the cross-source enrichFromUrl path is per-adapter without leaking
+ *  YouTube-specific error vocab into other adapters' impl. */
+export type EventPreviewMetadata =
+  | {
+      kind: "ok";
+      title: string;
+      authorName: string;
+      authorUrl: string;
+      thumbnailUrl?: string;
+      html?: string;
+    }
+  | { kind: "private" }
+  | { kind: "unavailable" }
+  | { kind: "unreachable"; cause: string };
+
+/** Live poll-state row consumed by dto.ts's per-event overlay (lastPolledAt /
+ *  lastPollStatus rendering on /feed and /audit). Adapters that don't poll
+ *  return an empty Map — the cross-source code merges per-adapter results. */
+export interface AdapterPollState {
+  publishedAt: Date | null;
+  lastPolledAt: Date | null;
+  lastPollStatus: string | null;
+}
+
+/** Hono app context type — re-exported here so adapter.registerRoutes can be
+ *  typed without making cross-source code import server-internal types. */
+export type AdapterAppContext = {
+  Variables: {
+    clientIp: string;
+    clientProto: "http" | "https";
+    userId?: string;
+    sessionId?: string;
+  };
+};
 
 /** Minimal pg-boss surface the adapter consumes — keeps the adapter decoupled
  *  from pg-boss major-version type drift (Phase 1 Plan 03 MinimalBoss
@@ -219,4 +324,51 @@ export interface DataSourceAdapter {
   ): Promise<{ jobId: string | null; queue: string }>;
   /** Whether this adapter can handle a refresh-poll for the given event kind. */
   canRefreshPoll?(eventKind: EventKind): boolean;
+
+  /** Phase 03.0.1 D-18 — create-time adapter hooks. Cross-source createSource
+   *  (services/data-sources.ts) calls these so per-source URL canonicalization
+   *  + auto-import init don't live in the cross-source code. */
+
+  /** Resolve handle_url to canonical form + extract external id, if applicable.
+   *  YouTube: parse `/watch?v=…` / `/channel/UC…` / `@handle` URLs; for video
+   *  URLs dereference the channel via fetchVideoMetadataByUrl.
+   *  Default (when not implemented): cross-source code passes input through. */
+  canonicalizeOnCreate?(input: CanonicalizeInput, ctx: CreateContext): Promise<CanonicalizeResult>;
+
+  /** Post-create side effects (auto-import init, prerequisite cache warming).
+   *  YouTube: enqueue YOUTUBE_CHANNEL_CONTEXT_BACKFILL when autoImport=true.
+   *  Default (when not implemented): no-op. Failures logged at WARN by the
+   *  adapter; never throw — fire-and-forget, the source row is the load-bearing
+   *  return value. */
+  onSourceCreated?(
+    source: SourceCreatedHookSource,
+    opts: { backfillWindow: BackfillWindow },
+  ): Promise<void>;
+
+  /** Phase 03.0.1 D-20 — adapter-driven event preview (POST /api/events/preview-url
+   *  + ingest paste flow). After URL is parsed + routed, the adapter is asked
+   *  to fetch a friendly preview (title / authorName / authorUrl).
+   *  YouTube: fetchYoutubeOembed wrapper. */
+  fetchEventPreviewMetadata?(canonicalUrl: string): Promise<EventPreviewMetadata>;
+
+  /** Phase 03.0.1 D-21 — per-adapter event-input validation. Cross-source
+   *  createEvent / updateEvent calls this when the merged event.kind matches
+   *  this adapter's source kind (via eventKindToSourceKind). YouTube: require
+   *  URL parseable as youtube_video. Throws AppError on invalid input. */
+  validateEventInput?(input: { kind: string; url?: string | null }): void;
+
+  /** Phase 03.0.1 D-22 — batch lookup of live poll-state for events of this
+   *  adapter's kinds. dto.ts's overlayPollStateOnEvents iterates allAdapters
+   *  and merges results. YouTube: SELECT publishedAt/lastPolledAt/lastPollStatus
+   *  from youtube_videos by externalId IN (…). */
+  fetchPollStateMap?(
+    userId: string,
+    externalIds: readonly string[],
+  ): Promise<Map<string, AdapterPollState>>;
+
+  /** Phase 03.0.1 D-23 — adapter-owned HTTP routes. Called once at app boot
+   *  by createApp(); the adapter mounts its routes on the shared Hono
+   *  instance. YouTube: mounts /api/youtube/fetch-metadata (preview button on
+   *  /events/new). Synchronous mount per Hono's contract. */
+  registerRoutes?(app: Hono<AdapterAppContext>): void;
 }

@@ -16,6 +16,14 @@ export function getAdapter(kind: SourceKind): DataSourceAdapter {
   return adapter;
 }
 
+/** Whether an adapter is registered for the given kind. Used by cross-source
+ *  code that needs to call optional adapter methods (validateEventInput,
+ *  fetchEventPreviewMetadata, etc.) without throwing on yet-to-be-implemented
+ *  kinds (e.g. reddit_account before Phase 03.1 lands). */
+export function hasAdapter(kind: SourceKind): boolean {
+  return registry.has(kind);
+}
+
 /** Iterating order is registration order — load-bearing for D-15
  *  first-match-wins URL routing. */
 export const allAdapters: DataSourceAdapter[] = Array.from(registry.values());

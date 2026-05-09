@@ -40,13 +40,7 @@ import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { withQuotaGuard } from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
-import { getBoss } from "../queue-client.js";
-import { QUEUES } from "../queues.js";
-import { logger } from "../logger.js";
-import {
-  parseYoutubeChannelUrl,
-  fetchVideoMetadataByUrl,
-} from "$lib/sources/youtube/server/metadata.js";
+import { getAdapter } from "$lib/sources/registry.js";
 import { youtubeChannels } from "../db/schema/index.js";
 
 // Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — initial-backfill window
@@ -255,40 +249,23 @@ export async function createSource(
   //     extra quota unit).
   // Cache-first via fetchVideoMetadataByUrl so a re-paste of a known video
   // is zero quota.
+  // Phase 03.0.1 architecture cleanup — adapter-driven canonicalize.
+  // Cross-source code never switches on `source.kind`; the adapter owns
+  // the per-source URL canonicalization (parse handle URL, dereference
+  // video URL → channelId via videos.list, leave legacy /@handle / /c/
+  // URLs to be resolved on first worker backfill). Phase 03.1 Reddit
+  // implements canonicalizeOnCreate to resolve /user/ URLs to user_id;
+  // this code stays unchanged.
   let canonicalHandleUrl = input.handleUrl;
   let resolvedChannelId = input.channelId ?? null;
-  if (input.kind === "youtube_channel" && resolvedChannelId === null) {
-    const parsed = parseYoutubeChannelUrl(input.handleUrl);
-    // Phase 3.0 post-build (UAT 2026-05-06): reject URLs that don't point
-    // at a YouTube channel / handle / video. Operator pasted naked
-    // youtube.com/ and localhost:5173/feed and got ghost rows with
-    // channel_id=NULL — better to fail visibly so the user fixes the URL.
-    if (parsed === null) {
-      throw new AppError(
-        "Paste a YouTube channel URL (e.g. https://www.youtube.com/@handle or /channel/UC… or any video URL).",
-        "validation_failed",
-        422,
-        { handle_url: input.handleUrl },
-      );
-    }
-    if (parsed.kind === "channelId") {
-      resolvedChannelId = parsed.value;
-      canonicalHandleUrl = `https://www.youtube.com/channel/${parsed.value}`;
-    } else if (parsed?.kind === "videoId") {
-      // Phase 3.0 post-build (UAT 2026-05-06): let fetch failures propagate
-      // (404 video not found, 502 upstream, 503 missing keys). Earlier draft
-      // swallowed errors and created a source with channelId=NULL — UX bug:
-      // user pasted a truncated/typo'd URL and got a "ghost" source that
-      // could never poll. Better to fail visibly so the user fixes the URL.
-      const meta = await fetchVideoMetadataByUrl(input.handleUrl, userId, ipAddress);
-      if (meta.channelId) {
-        resolvedChannelId = meta.channelId;
-        canonicalHandleUrl = `https://www.youtube.com/channel/${meta.channelId}`;
-      }
-    }
-    // /@handle and /c/, /user/ legacy URLs: leave as-is for now. Worker
-    // will resolve on first backfill (1 quota unit) and persist the
-    // resolved channel_id back to data_sources.
+  const adapter = getAdapter(input.kind);
+  if (adapter.canonicalizeOnCreate !== undefined) {
+    const result = await adapter.canonicalizeOnCreate(
+      { handleUrl: input.handleUrl, channelId: input.channelId ?? null },
+      { userId, ipAddress },
+    );
+    canonicalHandleUrl = result.canonicalHandleUrl;
+    resolvedChannelId = result.resolvedExternalId;
   }
 
   // Race-free, deadlock-safe quota path. withQuotaGuard takes a per-user
@@ -374,29 +351,23 @@ export async function createSource(
   // source row is the load-bearing return value; backfill enqueue is a
   // nice-to-have that the user can re-trigger by re-toggling auto-import
   // (PATCH /api/sources/:id) if it ever silently fails.
-  if (row.kind === "youtube_channel" && row.autoImport) {
+  // Phase 03.0.1 architecture cleanup — adapter-driven post-create hook.
+  // YouTube: enqueue YOUTUBE_CHANNEL_CONTEXT_BACKFILL when autoImport=true.
+  // Reddit (Phase 03.1): could enqueue subreddit-rules-cache prereq.
+  // Adapters that don't need a hook simply don't implement onSourceCreated.
+  if (adapter.onSourceCreated !== undefined) {
     const backfillWindow: BackfillWindow = input.backfillWindow ?? "30d";
-    try {
-      const boss = await getBoss();
-      await boss.send(
-        QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL,
-        {
-          sourceId: row.id,
-          userId,
-          handleUrl: row.handleUrl,
-          backfillWindow,
-        },
-        { singletonKey: `source-${row.id}` },
-      );
-    } catch (err) {
-      logger.warn(
-        {
-          sourceId: row.id,
-          err: String((err as Error)?.message ?? err),
-        },
-        "channel-context-backfill enqueue on createSource failed; ignoring",
-      );
-    }
+    await adapter.onSourceCreated(
+      {
+        id: row.id,
+        userId: row.userId,
+        autoImport: row.autoImport,
+        handleUrl: row.handleUrl,
+        metadata: (row.metadata ?? {}) as Record<string, unknown>,
+        kind: row.kind,
+      },
+      { backfillWindow },
+    );
   }
 
   return row;
