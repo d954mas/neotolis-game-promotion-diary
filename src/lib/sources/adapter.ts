@@ -174,6 +174,28 @@ export interface AdapterQuotaCounter {
   count(dbCtx: DbOrTx, userId: string, since: Date): Promise<number>;
 }
 
+/** Per-user fair-share cap on operator's API budget. Both axes optional —
+ *  adapter declares either, both, or neither. Capping prevents one user
+ *  from monopolizing operator's shared API quota across all tenants.
+ *
+ *  - requestsPerDay — cap on API calls (quota units). Hits when one user
+ *    has consumed their daily share of operator's API budget. Self-host
+ *    operator typically not capped (1 user); SaaS hosted instance caps
+ *    so other users get predictable share.
+ *
+ *  - eventsPerDay — cap on events INSERTed via user-initiated actions.
+ *    Optional secondary cap для platforms with high events-per-request
+ *    variance (Twitter pagination 1-100/req). YouTube has fixed 50:1
+ *    ratio so requestsPerDay alone suffices; eventsPerDay omitted.
+ *
+ *  Counter source: audit_log SUM with metadata.{requests_used, events_inserted}.
+ *  Cap kinds: 'incremental' | 'historical' | 'stats_refresh'. Excluded:
+ *  'initial' (onboarding UX) and 'auto_passive' (cron pool, not user pool). */
+export interface AdapterUserQuotaCap {
+  requestsPerDay?: number;
+  eventsPerDay?: number;
+}
+
 export interface AdapterObservability {
   auth: ObservabilityAuth;
   quota: {
@@ -184,6 +206,11 @@ export interface AdapterObservability {
    *  Cross-source services/quota.ts iterates these to compute current
    *  usage; new sources add their counters here, no quota.ts edit needed. */
   quotaCounters?: ReadonlyArray<AdapterQuotaCounter>;
+  /** Per-user fair-share cap. When present, refresh-content / refresh-poll
+   *  endpoints check usage SUM from audit_log before enqueue and 429 on
+   *  exhaustion. When undefined, cap not enforced (usage still tracked в
+   *  audit metadata для visibility но не denial). */
+  userQuotaCap?: AdapterUserQuotaCap;
 }
 
 /** Backfill window options — accepted by createSource and threaded into

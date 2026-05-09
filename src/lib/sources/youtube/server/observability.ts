@@ -175,4 +175,18 @@ export const youtubeObservability: AdapterObservability = {
     getDailyStats,
     getRecentAudit,
   },
+  // Phase 03.0.1 — per-user fair-share cap. 100 API requests/day = ~5000
+  // events worth (YouTube playlistItems.list returns 50 items/page = 1
+  // unit). 100 = 1% от operator's 10k daily quota; supports ~20 active
+  // users параллельно exhausting their cap до operator pool drained.
+  // eventsPerDay не declared — YouTube has fixed 50:1 ratio, secondary
+  // cap избыточен. Reddit Phase 03.1+ may declare both axes (variable
+  // events-per-request).
+  //
+  // Cap counts only user-initiated actions: incremental refresh +
+  // historical refresh + stats_refresh. Excluded: initial onboarding +
+  // auto_passive cron (uses cron pool, not user pool).
+  userQuotaCap: {
+    requestsPerDay: 100,
+  },
 };
