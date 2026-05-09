@@ -71,6 +71,9 @@ import { handleQuotaReset } from "./handlers/quota-reset.js";
 // (backfillSource fires boss.send into this queue) and the consumer side
 // (boss.work below dispatches each job to handleBackfillUser).
 import { handleBackfillUser } from "./handlers/backfill-user.js";
+// Phase 03.0.1 — daily auto-backfill cron picker. Skip-gates на cron pool
+// ≥50% used; enqueues backfill-user with metadata.flow='auto_passive'.
+import { handleAutoBackfillCron } from "./handlers/auto-backfill-cron.js";
 // Phase 03.0.1 architecture cleanup — adapter-driven create-time hooks +
 // preview metadata + poll-state lookup + per-source HTTP routes. Cross-source
 // services delegate via getAdapter(...) so adding Reddit (Phase 03.1) is a
@@ -98,6 +101,7 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
   await boss.createQueue(QUEUES.YOUTUBE_QUOTA_RESET);
   await boss.createQueue(QUEUES.YOUTUBE_REHAB);
   await boss.createQueue(QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL);
+  await boss.createQueue(QUEUES.YOUTUBE_AUTO_BACKFILL_CRON);
 
   // youtube.poll.cron — Active+Cold collapsed via tier-tagged payload.
   // batchSize=4 matches Phase 03.0 POLL_ACTIVE concurrency (Cold's daily
@@ -160,6 +164,15 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
       await handleRehabUnavailable(job as { id: string });
     }
   });
+
+  // Phase 03.0.1 — daily auto-backfill cron picker. batchSize=1 — single
+  // tick per day, picks ≤50 sources, enqueues passive jobs into
+  // YOUTUBE_BACKFILL_USER. Handler does the gate check (skip if pool ≥50%).
+  await boss.work(QUEUES.YOUTUBE_AUTO_BACKFILL_CRON, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) {
+      await handleAutoBackfillCron(job as { id: string; data: object }, boss);
+    }
+  });
 }
 
 /**
@@ -205,6 +218,16 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
   await boss.schedule(QUEUES.YOUTUBE_QUOTA_RESET, "0 0 * * *", {}, { tz: "America/Los_Angeles" });
   // Rehab — weekly Sunday 4am Pacific.
   await boss.schedule(QUEUES.YOUTUBE_REHAB, "0 4 * * 0", {}, { tz: "America/Los_Angeles" });
+  // Phase 03.0.1 — auto-backfill picker daily 03:00 Pacific (3h after
+  // quota reset at 00:00 PT — pool fresh, минимальный contention с
+  // active/cold poll). Handler делает gate check (skip if pool ≥50% used)
+  // и picker SELECT incomplete sources, enqueue's passive backfill jobs.
+  await boss.schedule(
+    QUEUES.YOUTUBE_AUTO_BACKFILL_CRON,
+    "0 3 * * *",
+    {},
+    { tz: "America/Los_Angeles" },
+  );
 }
 
 /**

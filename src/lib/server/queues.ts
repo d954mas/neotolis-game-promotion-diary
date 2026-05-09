@@ -59,6 +59,12 @@ export const QUEUES = {
   YOUTUBE_QUOTA_RESET: "youtube.quota_reset",
   YOUTUBE_REHAB: "youtube.rehab",
   YOUTUBE_CHANNEL_CONTEXT_BACKFILL: "youtube.channel_context_backfill",
+  // Phase 03.0.1 — daily passive backfill cron. Picker selects sources WHERE
+  // backfill_complete=false и enqueue's youtube.backfill.user with
+  // metadata.flow='auto_passive'. Skip-gates на pctOfDaily ≥ 50% (cron pool
+  // priority floor — active stats poll защищён до 95%, cold poll до 80%,
+  // auto-backfill сдаётся first при contention).
+  YOUTUBE_AUTO_BACKFILL_CRON: "youtube.auto_backfill_cron",
 } as const satisfies Record<string, string>;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
