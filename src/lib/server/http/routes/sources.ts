@@ -270,19 +270,32 @@ sourcesRoutes.post("/sources/:id/restore", async (c) => {
 sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
   const ctx = getAuditContext(c);
   try {
-    // Phase 03.0.1 — per-user rolling rate limit (see REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE
-    // header comment for the audit_log-backed counter rationale). Runs FIRST
-    // so a user spamming the button can't even pay the getSourceById round
-    // trip cost. Anonymous → 401 already fired in tenantScope middleware,
-    // so ctx.userId is guaranteed here.
-    const since = new Date(Date.now() - REFRESH_CONTENT_RATE_WINDOW_MS);
-    // Phase 03.0.1 (post-review) — count INTENT rows only.
+    // Phase 03.0.1 (post-review UAT 2026-05-10) — tenant-scoped lookup
+    // FIRST, then rate-limit gate.
+    //
+    // Pre-fix the rate-limit gate ran before getSourceById, so a user
+    // hitting the rate limit on an arbitrary (foreign or non-existent)
+    // sourceId would receive 429 instead of the canonical 404. AGENTS.md
+    // invariant 2 says cross-tenant resource access returns 404 — period.
+    // Mild ownership-disclosure: a user could probe the rate-limit error
+    // shape to distinguish «owned source, gated» from «unknown source,
+    // 404». Tenant lookup first eliminates the gap.
+    //
+    // Cost: extra getSourceById round-trip for users actively spamming
+    // the button. At indie scale that's a few queries / day at worst —
+    // acceptable trade for invariant correctness.
+    const source = await getSourceById(ctx.userId, c.req.param("id"));
+    if (source.deletedAt !== null) {
+      throw new NotFoundError();
+    }
+
+    // Per-user rolling rate limit (audit-log INTENT-only count).
     // `source.refresh_content_requested` is written twice per click:
     //   1. INTENT — endpoint pre-enqueue (no `flow`, no `events_inserted`)
     //   2. COMPLETION — worker post-pollContent (sets `flow` + `events_inserted`)
-    // Pre-fix the rate-limit query counted both, halving the effective window
-    // (~5 clicks/min instead of declared 10). Filtering on `flow IS NULL`
-    // matches only intent rows — exactly one per user click.
+    // Filtering on `flow IS NULL` matches only intent rows — exactly one
+    // per user click.
+    const since = new Date(Date.now() - REFRESH_CONTENT_RATE_WINDOW_MS);
     const [recent] = await db
       .select({ c: count() })
       .from(auditLog)
@@ -304,14 +317,6 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
           window_seconds: REFRESH_CONTENT_RATE_WINDOW_MS / 1000,
         },
       );
-    }
-
-    const source = await getSourceById(ctx.userId, c.req.param("id"));
-    if (source.deletedAt !== null) {
-      // Soft-deleted source — surface as 404 (matches GET /sources/:id /
-      // PATCH /sources/:id pattern: tombstone is invisible to the
-      // non-restore mutations).
-      throw new NotFoundError();
     }
 
     let adapter;

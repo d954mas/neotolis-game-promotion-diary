@@ -57,13 +57,14 @@ import { db } from "$lib/server/db/client.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { events } from "$lib/server/db/schema/events.js";
 import { logger } from "$lib/server/logger.js";
-import { writeAudit } from "$lib/server/audit.js";
+import { writeAuditStrict } from "$lib/server/audit.js";
 import {
   computeSinceForRefresh,
   markSourceLastPolledAt,
   markSourceBackfillFrontier,
   markSourceBackfillComplete,
   markSourceNeedsReconnect,
+  setSourceBackfillPageToken,
 } from "$lib/server/services/data-sources.js";
 import { youtubeChannelAdapterCore as adapter } from "../adapter.js";
 import { AdapterError } from "$lib/sources/errors.js";
@@ -184,6 +185,8 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
       metadata?: Record<string, unknown>;
     }[];
     unitsUsed: number;
+    nextPageToken?: string;
+    endOfPlaylist?: boolean;
   };
   try {
     pollResult = await adapter.pollContent(
@@ -289,6 +292,8 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
     // mark complete.
     if (pollResult.unitsUsed > 0) {
       await markSourceBackfillComplete(userId, source.id);
+      // Empty page = end of playlist; clear any saved cursor.
+      await setSourceBackfillPageToken(userId, source.id, null);
     }
     await markSourceLastPolledAt(userId, source.id);
     await writeBackfillAudit({
@@ -392,6 +397,20 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
     }
   }
 
+  // Phase 03.0.1 (post-review UAT 2026-05-10) — persist resume cursor.
+  // Adapter returns nextPageToken when more pages remain past MAX_PAGES;
+  // worker stores it so the next refresh-content click resumes from the
+  // saved position instead of re-fetching the same first 20 pages.
+  // endOfPlaylist || walkedPastSince → adapter returns nextPageToken=undefined,
+  // which we translate to null (clear).
+  await setSourceBackfillPageToken(userId, source.id, pollResult.nextPageToken ?? null);
+
+  // End-of-playlist = platform confirmed no more older content. Mark
+  // complete so cron picker skips this source.
+  if (pollResult.endOfPlaylist) {
+    await markSourceBackfillComplete(userId, source.id);
+  }
+
   await markSourceLastPolledAt(userId, source.id);
 
   // Phase 03.0.1 post-review #6 — exact unitsUsed from adapter. Pre-fix
@@ -447,7 +466,15 @@ async function writeBackfillAudit(args: {
   requestsUsed: number;
   eventsInserted: number;
 }): Promise<void> {
-  await writeAudit({
+  // Phase 03.0.1 (post-review UAT 2026-05-10) — STRICT audit write for the
+  // completion row. The cap counter (services/quota.ts) sums
+  // requests_used + events_inserted from this row; a swallowed insert
+  // would silently undercount user usage. Strict-write throws on failure
+  // so pg-boss retries the whole job (worker handler is idempotent on
+  // events INSERT via UNIQUE externalId, and chargedFetch's persistent
+  // counter is the authoritative quota source — caller side double-counting
+  // on retry is bounded by upstream singletonKey + the events UNIQUE).
+  await writeAuditStrict({
     userId: args.userId,
     action: "source.refresh_content_requested",
     ipAddress: "0.0.0.0",

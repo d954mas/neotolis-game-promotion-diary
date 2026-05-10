@@ -118,6 +118,11 @@
       commentCount: number;
       polledAt: Date | string;
     } | null;
+    // Phase 03.0.1 (post-review UAT 2026-05-10) — channelTitle for ALL
+    // YouTube events (auto-imported AND manual paste), enriched by /feed
+    // loader from youtube_videos cache. Used by the single-chip render
+    // below.
+    channelTitle?: string | null;
   };
   type SourceLite = {
     id: string;

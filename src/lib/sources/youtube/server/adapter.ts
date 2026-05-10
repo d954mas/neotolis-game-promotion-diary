@@ -298,7 +298,12 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     source: PollableSource,
     since: Date,
     ctx?: { origin?: "cron" | "user" },
-  ): Promise<{ events: RawEvent[]; unitsUsed: number }> {
+  ): Promise<{
+    events: RawEvent[];
+    unitsUsed: number;
+    nextPageToken?: string;
+    endOfPlaylist?: boolean;
+  }> {
     // Phase 03.0.1 (post-review UAT 2026-05-10) — uploadsPlaylistId lives
     // in youtube_channels cache (PK = channelId), NOT in data_sources.metadata.
     // Pre-fix pollContent read only source.metadata.uploadsPlaylistId which
@@ -351,12 +356,37 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     // unitsUsed = pages fetched (1 quota unit per playlistItems.list call).
     // Origin from ctx (P1 #2 fix) — user-initiated clicks consume user
     // pool, cron-driven jobs consume cron pool.
+    // Phase 03.0.1 (post-review UAT 2026-05-10) — persistent pagination
+    // cursor for «all history» backfill of channels with >MAX_PAGES×50
+    // (1000) videos. Pre-fix every refresh-content click started from
+    // page 1 — for a 5000-video channel the worker would re-fetch the
+    // same 1000 newest items every click, idempotency UNIQUE skipped
+    // them all, frontier never advanced past page 20.
+    //
+    // Resume protocol:
+    //   - Worker passes source.metadata.lastBackfillPageToken into
+    //     pollContent's source.metadata.
+    //   - Adapter uses it as starting page if present, else page 1.
+    //   - Adapter returns nextPageToken in result. Worker writes it
+    //     back to source.metadata.lastBackfillPageToken (or clears on
+    //     end-of-playlist).
+    //   - Next click resumes from saved cursor.
+    //
+    // Edge case: items between "since" cutoff and current cursor get
+    // skipped on subsequent calls. Acceptable for «all history» pull
+    // (we walk linearly back); for narrower windows the original
+    // pagination still terminates quickly enough that resume isn't
+    // needed.
     const MAX_PAGES = 20;
     const sinceMs = since.getTime();
     const collected: RawEvent[] = [];
-    let pageToken: string | undefined;
+    const initialPageToken = (source.metadata as { lastBackfillPageToken?: string })
+      ?.lastBackfillPageToken;
+    let pageToken: string | undefined = initialPageToken;
     let unitsUsed = 0;
     let walkedPastSince = false;
+    let endOfPlaylist = false;
+    let nextPageToken: string | undefined;
 
     for (let page = 0; page < MAX_PAGES; page++) {
       const url = new URL(`${env.YOUTUBE_API_BASE_URL}/playlistItems`);
@@ -374,14 +404,14 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
         page,
       });
       unitsUsed += 1;
-      if (!resp.ok) break; // dead-code defense — chargedFetch throws on non-2xx
+      if (!resp.ok) break;
       const json = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await resp.json());
 
       for (const item of json.items) {
         const occurredAt = new Date(item.snippet.publishedAt);
         if (occurredAt.getTime() <= sinceMs) {
           walkedPastSince = true;
-          continue; // skip; don't break — items can be slightly out of order
+          continue;
         }
         collected.push({
           externalId: item.snippet.resourceId.videoId,
@@ -393,15 +423,23 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
         });
       }
 
-      // Stop conditions:
-      //   - end of playlist (no nextPageToken)
-      //   - we encountered items past `since` on this page (no point
-      //     continuing — earlier pages will only have older items)
-      if (!json.nextPageToken || walkedPastSince) break;
-      pageToken = json.nextPageToken;
+      nextPageToken = json.nextPageToken;
+      if (!nextPageToken) {
+        endOfPlaylist = true;
+        break;
+      }
+      if (walkedPastSince) break;
+      pageToken = nextPageToken;
     }
 
-    return { events: collected, unitsUsed };
+    return {
+      events: collected,
+      unitsUsed,
+      // Resume marker for next call. Cleared (undefined) when we hit end-
+      // of-playlist OR walked past the «since» cutoff (target reached).
+      nextPageToken: endOfPlaylist || walkedPastSince ? undefined : nextPageToken,
+      endOfPlaylist,
+    };
   },
 
   /** Stats polling — user-driven path (Refresh now button → poll-user worker).

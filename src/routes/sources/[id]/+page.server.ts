@@ -99,15 +99,22 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       : 0;
 
     // «Pulling» state from pgboss queue — same query as /sources list
-    // but for one source.
-    const activeJobs = await db.execute<{ exists: boolean }>(sql`
+    // but for one source. Same pgboss-schema-missing guard: catch and
+    // return pulling=false on relation-not-found (fresh self-host where
+    // worker hasn't booted yet).
+    const activeJobs = await db
+      .execute<{ exists: boolean }>(
+        sql`
       SELECT EXISTS (
         SELECT 1 FROM pgboss.job
         WHERE name = 'youtube.backfill.user'
           AND state IN ('active', 'created', 'retry')
           AND data->>'sourceId' = ${dto.id}
+          AND to_regclass('pgboss.job') IS NOT NULL
       ) AS exists
-    `);
+    `,
+      )
+      .catch(() => ({ rows: [{ exists: false }] }));
     const pulling = Boolean(activeJobs.rows[0]?.exists);
 
     return { source: dto, quotaPlatforms, cooldownSec, pulling };

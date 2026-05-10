@@ -110,7 +110,8 @@ export const load: PageServerLoad = async ({ locals }) => {
           gte(auditLog.createdAt, cooldownSince),
         ),
       )
-      .groupBy(sql`metadata->>'source_id'`);
+      .groupBy(sql`metadata->>'source_id'`)
+      .catch(() => [] as { sourceId: string; latest: Date | null }[]);
     const now = Date.now();
     for (const r of recent) {
       if (r.sourceId !== null && r.latest !== null) {
@@ -129,20 +130,29 @@ export const load: PageServerLoad = async ({ locals }) => {
   // source is active/created/retry. After completion → plain countdown.
   const pullingMap = new Map<string, boolean>();
   if (sourceIds.length > 0) {
-    // Build IN list via sql.join — drizzle's sql tag doesn't auto-serialize
-    // arrays into Postgres array literals for `= ANY(...)`. Pre-fix used
-    // `ANY(${sourceIds})` which 500'd. IN (…) is the simplest workaround.
+    // Phase 03.0.1 (post-review UAT 2026-05-10) — pgboss schema guard.
+    // App role can render this page BEFORE worker/scheduler boot has
+    // initialized pgboss schema (boss.start() creates it). Migration
+    // 0020 drops the schema on baseline; on fresh self-host install the
+    // table doesn't exist until a worker comes up. to_regclass returns
+    // NULL when the relation is missing — graceful degradation: pulling
+    // state defaults to false, UI shows static refresh button.
     const idList = sql.join(
       sourceIds.map((id) => sql`${id}`),
       sql`, `,
     );
-    const active = await db.execute<{ source_id: string }>(sql`
+    const active = await db
+      .execute<{ source_id: string }>(
+        sql`
       SELECT DISTINCT data->>'sourceId' AS source_id
       FROM pgboss.job
       WHERE name = 'youtube.backfill.user'
         AND state IN ('active', 'created', 'retry')
         AND data->>'sourceId' IN (${idList})
-    `);
+        AND to_regclass('pgboss.job') IS NOT NULL
+    `,
+      )
+      .catch(() => ({ rows: [] as { source_id: string }[] }));
     for (const r of active.rows) {
       if (r.source_id) pullingMap.set(r.source_id, true);
     }

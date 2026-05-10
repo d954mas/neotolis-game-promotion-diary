@@ -556,6 +556,20 @@ export async function updateSource(
     .returning();
   if (!row) throw new NotFoundError();
 
+  // Phase 03.0.1 (post-review UAT 2026-05-10) — when target_since widens,
+  // clear any saved pagination cursor. The cursor was set during a prior
+  // walk that stopped (walkedPastSince) at the OLD target; items between
+  // OLD and NEW target on already-fetched pages were skipped (continue,
+  // not break) and won't be re-fetched if we resume from the cursor.
+  // Forcing a cursor reset makes the next refresh-content click restart
+  // the walk from page 1, picking up all items in the widened window.
+  if (
+    patch.backfillTargetSince !== undefined &&
+    update.backfillComplete === false // expandingWindow signal, computed above
+  ) {
+    await setSourceBackfillPageToken(userId, sourceId, null);
+  }
+
   if (patch.autoImport !== undefined && patch.autoImport !== existing.autoImport) {
     await writeAudit({
       userId,
@@ -784,6 +798,45 @@ export async function markSourceBackfillComplete(
     .update(dataSources)
     .set({ backfillComplete: true, updatedAt: new Date() })
     .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
+}
+
+/**
+ * Phase 03.0.1 (post-review UAT 2026-05-10) — persistent backfill pagination
+ * cursor. YouTube playlistItems pagination is uploads-DESC; deep-history
+ * channels (>1000 videos) need multiple refresh-content clicks to walk back
+ * to target_since. Adapter returns `nextPageToken` from each call; worker
+ * persists it here so the next call resumes from the saved position.
+ *
+ * Pass `null` to clear (end-of-playlist reached or walked past target).
+ *
+ * Tenant-scoped UPDATE — no cross-tenant write possible.
+ */
+export async function setSourceBackfillPageToken(
+  userId: string,
+  sourceId: string,
+  pageToken: string | null,
+  dbCtx: DbOrTx = db,
+): Promise<void> {
+  // Atomic JSON merge — preserves any other fields in metadata (e.g.
+  // adapter-specific cache keys) while updating just the cursor field.
+  // jsonb_set with create_missing=true initializes metadata if NULL.
+  if (pageToken === null) {
+    await dbCtx
+      .update(dataSources)
+      .set({
+        metadata: sql`COALESCE(${dataSources.metadata}, '{}'::jsonb) - 'lastBackfillPageToken'`,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
+  } else {
+    await dbCtx
+      .update(dataSources)
+      .set({
+        metadata: sql`jsonb_set(COALESCE(${dataSources.metadata}, '{}'::jsonb), '{lastBackfillPageToken}', to_jsonb(${pageToken}::text), true)`,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
+  }
 }
 
 /**

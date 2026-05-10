@@ -375,7 +375,26 @@ export interface DataSourceAdapter {
     source: PollableSource,
     since: Date,
     ctx?: { origin?: "cron" | "user" },
-  ): Promise<{ events: RawEvent[]; unitsUsed: number }>;
+  ): Promise<{
+    events: RawEvent[];
+    unitsUsed: number;
+    /**
+     * Optional resume cursor. Adapter that paginates internally MAY return a
+     * nextPageToken so the next pollContent call resumes from the saved
+     * position. Worker persists in source.metadata.lastBackfillPageToken
+     * and threads back through PollableSource.metadata on the next call.
+     * Undefined means «no resume needed» (single-page adapters or
+     * end-of-playlist reached).
+     */
+    nextPageToken?: string;
+    /**
+     * Adapter signaled the underlying source has no more older content
+     * (e.g., walked off end of YouTube uploads playlist). Worker uses
+     * this to set backfill_complete=true regardless of «walked past
+     * since» heuristics.
+     */
+    endOfPlaylist?: boolean;
+  }>;
   /** User-driven stats polling (Refresh now button). quotaUser fingerprint
    *  is derived from userId inside the adapter (per-user burst-shaper
    *  bucket). Caller pre-picks a key and threads it through; adapter never
