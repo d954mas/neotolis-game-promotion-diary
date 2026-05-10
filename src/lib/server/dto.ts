@@ -259,6 +259,13 @@ export interface DataSourceDto {
   backfillOldestAt: Date | null;
   backfillComplete: boolean;
   backfillTargetSince: Date | null;
+  // Phase 03.0.1 (post-review UAT) — populated by the /sources loader from
+  // a separate aggregate-events query (see sources/+page.server.ts). Null
+  // when no events exist for this source. Not part of toDataSourceDto's
+  // base projection — DTO consumers that don't need the range simply leave
+  // these undefined.
+  firstEventAt?: Date | null;
+  lastEventAt?: Date | null;
 }
 
 export function toDataSourceDto(r: DataSourceRow): DataSourceDto {

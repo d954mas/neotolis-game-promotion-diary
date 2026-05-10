@@ -36,7 +36,14 @@
   // posts") can land without a prop-shape change. Currently unused — the
   // underscore prefix matches the existing project convention for
   // intentionally-unused destructured props.
-  let { sourceId, sourceKind: _sourceKind }: { sourceId: string; sourceKind: string } = $props();
+  // Phase 03.0.1 (post-review UAT) — compact mode: icon-only button for
+  // inline placement (e.g., /sources row). Default mode = full text label
+  // for the detail page where the affordance is the primary action.
+  let {
+    sourceId,
+    sourceKind: _sourceKind,
+    compact = false,
+  }: { sourceId: string; sourceKind: string; compact?: boolean } = $props();
 
   const COOLDOWN_SEC = 300; // 5min UI cooldown to mirror singletonKey window
 
@@ -115,11 +122,23 @@
   <button
     type="button"
     class="refresh-content__button"
+    class:refresh-content__button--compact={compact}
     aria-busy={pending}
+    aria-label={compact ? m.sources_detail_pull_new_content() : undefined}
+    title={compact ? m.sources_detail_pull_new_content() : undefined}
     {disabled}
     onclick={onClick}
   >
-    {#if pending}
+    {#if compact}
+      <!-- Refresh icon (Unicode ↻ — circular arrow). Inline so no SVG asset. -->
+      {#if pending}
+        ⟳
+      {:else if cooldownSec > 0}
+        {cooldownSec}
+      {:else}
+        ↻
+      {/if}
+    {:else if pending}
       {m.sources_detail_pull_new_content_pending()}
     {:else if cooldownSec > 0}
       {m.sources_detail_pull_new_content_cooldown({ seconds: String(cooldownSec) })}
@@ -144,6 +163,13 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
+  }
+  .refresh-content__button--compact {
+    padding: 0 var(--space-sm);
+    min-width: 2rem;
+    height: 2rem;
+    font-size: 1.1rem;
+    line-height: 1;
   }
   .refresh-content__button {
     padding: var(--space-sm) var(--space-md);

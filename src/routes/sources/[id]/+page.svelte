@@ -11,7 +11,6 @@
   // button is the load-bearing affordance.
 
   import RefreshContentButton from "$lib/components/RefreshContentButton.svelte";
-  import QuotaStatusBanner from "$lib/components/QuotaStatusBanner.svelte";
   import SourceCoverageBadge from "$lib/components/SourceCoverageBadge.svelte";
   import { invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
@@ -91,9 +90,9 @@
     {quotaExhausted}
   />
 
-  {#if data.quotaPlatforms.length > 0}
-    <QuotaStatusBanner platforms={data.quotaPlatforms} />
-  {/if}
+  <!-- Phase 03.0.1 (post-review UAT) — quota banner REMOVED from detail
+       page. Quota status is per-user (cross-source); detail page is per-
+       source. Banner stays on /sources list view only. -->
 
   <!-- Phase 03.0.1 — date picker для backfill target. User changes earliest
        boundary; PATCH stores absolute date. После PATCH user отдельно жмёт

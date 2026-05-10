@@ -45,6 +45,7 @@
   import SourceKindIcon from "./SourceKindIcon.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import InlineError from "./InlineError.svelte";
+  import RefreshContentButton from "./RefreshContentButton.svelte";
   // Plan 02.1-39 (UAT-NOTES.md §5.6): kindLabel extracted to a shared
   // helper so SourceRow and FiltersSheet's new kind glyph + label render
   // resolve to the same wording. Single source of truth.
@@ -62,9 +63,39 @@
     // from the youtube_channels cache. Shown as a chip alongside the user's
     // own displayName so /sources displays both names.
     channelTitle?: string | null;
+    // Phase 03.0.1 (post-review UAT) — backfill state surfaced inline so
+    // user can see «when was this last refreshed» without opening detail.
+    lastPolledAt?: Date | string | null;
+    backfillComplete?: boolean;
+    firstEventAt?: Date | string | null;
+    lastEventAt?: Date | string | null;
   };
 
   let { source }: { source: DataSourceDto } = $props();
+
+  // Phase 03.0.1 (post-review UAT) — relative-time formatter for «Last
+  // pulled» display. Inline (no luxon dep) — minimal English-only for v0.1.
+  function formatRelativeTime(when: Date | string): string {
+    const t = typeof when === "string" ? new Date(when) : when;
+    const diffMs = Date.now() - t.getTime();
+    if (diffMs < 0) return "just now";
+    const sec = Math.floor(diffMs / 1000);
+    if (sec < 60) return "just now";
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hour = Math.floor(min / 60);
+    if (hour < 24) return `${hour}h ago`;
+    const day = Math.floor(hour / 24);
+    if (day < 30) return `${day}d ago`;
+    const month = Math.floor(day / 30);
+    return `${month}mo ago`;
+  }
+
+  // Short YYYY-MM-DD for first/last event date display.
+  function formatDateShort(when: Date | string): string {
+    const t = typeof when === "string" ? new Date(when) : when;
+    return t.toISOString().slice(0, 10);
+  }
 
   let editing = $state(false);
   // Hold the rename buffer in plain state — when the edit form opens we
@@ -98,7 +129,7 @@
   // edit-mode visibility gates (§4.22.B / §4.22.C) read straightforwardly:
   // the Edit pencil in read mode invokes openEdit; the Cancel button in
   // the edit-form footer invokes cancelEdit.
-  function openEdit(): void {
+  function _openEdit(): void {
     editName = source.displayName ?? "";
     editAutoImport = source.autoImport;
     editIsOwnedByMe = source.isOwnedByMe;
@@ -179,9 +210,19 @@
       <span class="kind-tag-label">{kindLabel(source.kind)}</span>
     </span>
     {#if !editing}
-      <span class="display">{source.displayName ?? source.handleUrl}</span>
-      {#if source.channelTitle && source.channelTitle !== source.displayName}
-        <span class="channel-title" title="YouTube channel name">{source.channelTitle}</span>
+      <!-- Phase 03.0.1 (post-review UAT) — display priority:
+           1. Real channel title (YouTube canonical name) — most useful
+              when user remembers the channel by name, not their own label.
+           2. User's displayName (their custom label).
+           3. handleUrl (fallback for channels not yet resolved).
+           Display links to /sources/[id] detail page (date picker, edit,
+           delete live there). User's custom label shown as secondary chip
+           when both present so user can still see what they typed. -->
+      <a class="display" href="/sources/{source.id}">
+        {source.channelTitle ?? source.displayName ?? source.handleUrl}
+      </a>
+      {#if source.channelTitle && source.displayName && source.channelTitle !== source.displayName}
+        <span class="channel-title" title="Your custom label">{source.displayName}</span>
       {/if}
     {/if}
     <span class="ownership-badge" class:mine={source.isOwnedByMe}>
@@ -195,32 +236,32 @@
 
   {#if !editing}
     <div class="status">
-      <span class="polling-status" role="status">
-        {source.autoImport ? m.sources_status_auto_on_pending() : m.sources_status_auto_off()}
-      </span>
-      <!-- Plan 02.1-22 (§2.4-decision option A): non-interactive pill replaces
-           the inline checkbox. The toggle moved into the edit form so a misclick
-           can't flip auto-import without going through the same PATCH path that
-           renames also use. -->
+      <!-- Phase 03.0.1 (post-review UAT) — single auto-import pill (was
+           dup'd with .polling-status saying the same thing). Last-polled
+           timestamp added inline for at-a-glance freshness. -->
       <span class="auto-pill">
         {source.autoImport ? m.sources_auto_import_on() : m.sources_auto_import_off()}
       </span>
+      <span class="last-polled" title="Last successful pull">
+        {source.lastPolledAt
+          ? `Last pulled: ${formatRelativeTime(source.lastPolledAt)}`
+          : "Never pulled"}
+      </span>
+      {#if source.firstEventAt && source.lastEventAt}
+        <span class="event-range" title="First / last event date">
+          Events: {formatDateShort(source.firstEventAt)} — {formatDateShort(source.lastEventAt)}
+        </span>
+      {/if}
     </div>
   {/if}
 
   {#if !editing}
-    <!-- Plan 02.1-33 (UAT-NOTES.md §4.22.B): read-mode .actions hosts ONLY
-         the Edit pencil. Remove moved into the edit-form footer below — its
-         visibility gate is the {#if editing} branch. -->
+    <!-- Phase 03.0.1 (post-review UAT) — refresh-content inline.
+         Edit pencil REMOVED from row — user clicks the display-name link
+         to /sources/[id] where edit (rename, auto-import toggle, delete)
+         lives. Row is now read-only except for refresh action. -->
     <div class="actions">
-      <button
-        type="button"
-        class="icon-btn edit-icon"
-        aria-label={m.common_edit()}
-        onclick={openEdit}
-      >
-        {m.common_edit()}
-      </button>
+      <RefreshContentButton sourceId={source.id} sourceKind={source.kind} compact />
     </div>
   {:else}
     <form class="edit-form" onsubmit={saveSourceEdit}>
@@ -357,6 +398,10 @@
     font-weight: var(--font-weight-semibold);
     word-break: break-word;
     min-width: 0;
+    text-decoration: none;
+  }
+  .display:hover {
+    text-decoration: underline;
   }
   /* Phase 3.0 post-build: real YouTube channel title shown alongside the
    * user's own displayName, in the muted secondary tone. Same visual idea
@@ -440,6 +485,11 @@
     flex-wrap: wrap;
   }
   .polling-status {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+  }
+  .last-polled,
+  .event-range {
     color: var(--color-text-muted);
     font-size: var(--font-size-label);
   }

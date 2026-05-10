@@ -9,7 +9,8 @@ import {
 import { allAdapters } from "$lib/sources/registry.js";
 import { db } from "$lib/server/db/client.js";
 import { youtubeChannels } from "$lib/server/db/schema/index.js";
-import { inArray } from "drizzle-orm";
+import { events } from "$lib/server/db/schema/events.js";
+import { and, eq, isNull, inArray, sql } from "drizzle-orm";
 
 /**
  * /sources loader — list the caller's data_sources, partitioned active vs
@@ -44,6 +45,40 @@ export const load: PageServerLoad = async ({ locals }) => {
     for (const s of dtos) {
       if (s.channelId) s.channelTitle = titleByChannel.get(s.channelId) ?? null;
     }
+  }
+
+  // Phase 03.0.1 (post-review UAT) — first/last event date per source.
+  // Surfaces «what's the time range we have for this source» on the row
+  // so user doesn't need to open detail to see it. Single grouped query
+  // — same as /feed's per-source date-range query.
+  const sourceIds = dtos.map((s) => s.id);
+  const eventRanges = new Map<string, { first: Date; last: Date }>();
+  if (sourceIds.length > 0) {
+    const ranges = await db
+      .select({
+        sourceId: events.sourceId,
+        first: sql<Date>`MIN(${events.occurredAt})`,
+        last: sql<Date>`MAX(${events.occurredAt})`,
+      })
+      .from(events)
+      .where(
+        and(
+          eq(events.userId, locals.user.id),
+          inArray(events.sourceId, sourceIds),
+          isNull(events.deletedAt),
+        ),
+      )
+      .groupBy(events.sourceId);
+    for (const r of ranges) {
+      if (r.sourceId !== null && r.first !== null && r.last !== null) {
+        eventRanges.set(r.sourceId, { first: r.first, last: r.last });
+      }
+    }
+  }
+  for (const s of dtos) {
+    const range = eventRanges.get(s.id);
+    s.firstEventAt = range?.first ?? null;
+    s.lastEventAt = range?.last ?? null;
   }
 
   // Phase 03.0.1 — quota status per platform (today + lifetime). Banner
