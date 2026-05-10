@@ -98,7 +98,19 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       ? Math.max(0, Math.ceil((COOLDOWN_MS - (Date.now() - recent.latest.getTime())) / 1000))
       : 0;
 
-    return { source: dto, quotaPlatforms, cooldownSec };
+    // «Pulling» state from pgboss queue — same query as /sources list
+    // but for one source.
+    const activeJobs = await db.execute<{ exists: boolean }>(sql`
+      SELECT EXISTS (
+        SELECT 1 FROM pgboss.job
+        WHERE name = 'youtube.backfill.user'
+          AND state IN ('active', 'created', 'retry')
+          AND data->>'sourceId' = ${dto.id}
+      ) AS exists
+    `);
+    const pulling = Boolean(activeJobs.rows[0]?.exists);
+
+    return { source: dto, quotaPlatforms, cooldownSec, pulling };
   } catch (err) {
     if (err instanceof NotFoundError) {
       error(404);

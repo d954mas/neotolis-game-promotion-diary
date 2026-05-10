@@ -50,11 +50,13 @@
     sourceKind: _sourceKind,
     compact = false,
     initialCooldownSec = 0,
+    pulling = false,
   }: {
     sourceId: string;
     sourceKind: string;
     compact?: boolean;
     initialCooldownSec?: number;
+    pulling?: boolean;
   } = $props();
 
   const COOLDOWN_SEC = 300; // 5min UI cooldown to mirror singletonKey window
@@ -149,12 +151,14 @@
     onclick={onClick}
   >
     {#if compact}
-      <!-- Refresh icon (Unicode ↻). Spinning class drives CSS animation
-           while pending OR while cooldown is active (worker is processing
-           the job — visual signal to user that pull is in flight). -->
+      <!-- Refresh icon (Unicode ↻). Spinning ONLY while worker is actively
+           pulling (pgboss job state in active/created/retry) OR while
+           the client-side fetch is pending. Cooldown without active pull
+           = static icon + countdown (worker finished, just rate-limit
+           gate ticking down). -->
       <span
         class="refresh-content__icon"
-        class:refresh-content__icon--spinning={pending || cooldownSec > 0}
+        class:refresh-content__icon--spinning={pending || pulling}
       >
         ↻
       </span>

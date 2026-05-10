@@ -72,7 +72,11 @@
     metadata?: Record<string, unknown> | null;
   };
 
-  let { source, cooldownSec = 0 }: { source: DataSourceDto; cooldownSec?: number } = $props();
+  let {
+    source,
+    cooldownSec = 0,
+    pulling = false,
+  }: { source: DataSourceDto; cooldownSec?: number; pulling?: boolean } = $props();
 
   const descriptionText = $derived(
     typeof source.metadata?.description === "string" && source.metadata.description.trim()
@@ -275,6 +279,7 @@
         sourceKind={source.kind}
         compact
         initialCooldownSec={cooldownSec}
+        {pulling}
       />
     </div>
   {:else}

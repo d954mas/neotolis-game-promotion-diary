@@ -120,6 +120,26 @@ export const load: PageServerLoad = async ({ locals }) => {
   }
   const cooldownBySource: Record<string, number> = Object.fromEntries(cooldownMap);
 
+  // Phase 03.0.1 (post-review UAT) — «pulling» state from pgboss queue.
+  // Pre-fix the spinner ran for the full 5min cooldown — but worker
+  // usually finishes in seconds. Now spinner reflects actual work-in-
+  // flight state: row spins ONLY while a backfill.user job for this
+  // source is active/created/retry. After completion → plain countdown.
+  const pullingMap = new Map<string, boolean>();
+  if (sourceIds.length > 0) {
+    const active = await db.execute<{ source_id: string }>(sql`
+      SELECT DISTINCT data->>'sourceId' AS source_id
+      FROM pgboss.job
+      WHERE name = 'youtube.backfill.user'
+        AND state IN ('active', 'created', 'retry')
+        AND data->>'sourceId' = ANY(${sourceIds})
+    `);
+    for (const r of active.rows) {
+      if (r.source_id) pullingMap.set(r.source_id, true);
+    }
+  }
+  const pullingBySource: Record<string, boolean> = Object.fromEntries(pullingMap);
+
   // Phase 03.0.1 — quota status per platform (today + lifetime). Banner
   // surfaces all platforms — adding Reddit Phase 03.1+ adds a row automatically
   // via allAdapters iteration. Each adapter declares own userQuotaCap (or
@@ -149,5 +169,6 @@ export const load: PageServerLoad = async ({ locals }) => {
     deleted: dtos.filter((s) => s.deletedAt !== null),
     quotaPlatforms,
     cooldownBySource,
+    pullingBySource,
   };
 };

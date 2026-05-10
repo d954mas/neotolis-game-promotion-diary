@@ -62,7 +62,12 @@
   // Stops polling once all cooldowns hit 0.
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   $effect(() => {
-    const anyActive = Object.values(data.cooldownBySource ?? {}).some((sec) => sec > 0);
+    // Live-refresh while ANY source is actively pulling (worker job in
+    // pgboss state active/created/retry) OR has cooldown remaining.
+    // Stops when both go to zero.
+    const anyPulling = Object.values(data.pullingBySource ?? {}).some(Boolean);
+    const anyCooldown = Object.values(data.cooldownBySource ?? {}).some((sec) => sec > 0);
+    const anyActive = anyPulling || anyCooldown;
     if (anyActive && pollTimer === null) {
       pollTimer = setInterval(() => {
         void invalidateAll();
@@ -164,7 +169,11 @@
     <ul class="sources-list">
       {#each active as source (source.id)}
         <li>
-          <SourceRow {source} cooldownSec={data.cooldownBySource?.[source.id] ?? 0} />
+          <SourceRow
+            {source}
+            cooldownSec={data.cooldownBySource?.[source.id] ?? 0}
+            pulling={data.pullingBySource?.[source.id] ?? false}
+          />
         </li>
       {/each}
     </ul>

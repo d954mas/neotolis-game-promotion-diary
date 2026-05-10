@@ -24,11 +24,12 @@
   // cooldown countdown ticking without manual reload.
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   $effect(() => {
-    if ((data.cooldownSec ?? 0) > 0 && pollTimer === null) {
+    const isActive = (data.cooldownSec ?? 0) > 0 || (data.pulling ?? false);
+    if (isActive && pollTimer === null) {
       pollTimer = setInterval(() => {
         void invalidateAll();
       }, 3000);
-    } else if ((data.cooldownSec ?? 0) === 0 && pollTimer !== null) {
+    } else if (!isActive && pollTimer !== null) {
       clearInterval(pollTimer);
       pollTimer = null;
     }
@@ -421,6 +422,7 @@
       sourceId={source.id}
       sourceKind={source.kind}
       initialCooldownSec={data.cooldownSec ?? 0}
+      pulling={data.pulling ?? false}
     />
   </article>
 </section>
