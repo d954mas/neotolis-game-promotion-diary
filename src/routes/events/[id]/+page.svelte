@@ -21,6 +21,7 @@
   import KindIcon from "$lib/components/KindIcon.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
+  import PollingBadge from "$lib/components/PollingBadge.svelte";
   import type { PageData } from "./$types";
 
   type EventKind =
@@ -49,6 +50,10 @@
     url: string | null;
     notes: string | null;
     deletedAt: Date | string | null;
+    publishedAt?: Date | string | null;
+    lastPolledAt?: Date | string | null;
+    lastPollStatus?: string | null;
+    externalId?: string | null;
   };
 
   type GameLite = { id: string; title: string };
@@ -155,6 +160,15 @@
         {#if isSoftDeleted}
           <span class="chip chip-deleted">Deleted</span>
         {/if}
+        <PollingBadge
+          event={{
+            id: event.id,
+            kind: event.kind,
+            publishedAt: event.publishedAt ?? null,
+            lastPolledAt: event.lastPolledAt ?? null,
+            lastPollStatus: event.lastPollStatus ?? null,
+          }}
+        />
       </div>
     </div>
   </header>

@@ -644,6 +644,26 @@ async function fetchEventStats(
     poolKind: "user",
     status: "ok",
   });
+  // Phase 03.0.1 Wave 4 (post-UAT) — write audit row so the per-user cap
+  // counter (services/quota.ts getUserQuotaUsedToday) sees this fetch.
+  // Without this row, chargedFetch deducts from the reservoir but the
+  // SUM-on-audit cap stays at 0, letting users bypass requestsPerDay
+  // by spamming /events/new pastes. Flow=stats_refresh matches the
+  // existing per-event poll-user worker semantic.
+  const { writeAudit } = await import("$lib/server/audit.js");
+  await writeAudit({
+    userId: ctx.userId,
+    action: "event.poll_refreshed",
+    ipAddress: "0.0.0.0",
+    metadata: {
+      external_id: externalId,
+      kind: "youtube_video",
+      platform: "youtube_channel",
+      flow: "stats_refresh",
+      requests_used: 1,
+      events_inserted: 0,
+    },
+  });
   return { viewCount, likeCount, commentCount };
 }
 
