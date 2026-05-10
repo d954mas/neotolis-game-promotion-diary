@@ -147,12 +147,15 @@
     onOpenRecovery={() => (recoveryOpen = true)}
   />
 
-  <!-- Phase 03.0.1 — per-platform API quota banner: today's usage + lifetime
-       totals + reset countdown. Adapter declares cap → progress bar +
-       color zones; не declares → count + "no limit". Multi-platform
-       expansion is automatic when Phase 03.1 Reddit/Twitter adapters land. -->
+  <!-- Phase 03.0.1 — per-platform API quota banner. Important info but
+       rarely needed during normal use; collapsed under a disclosure to
+       reduce noise on the list view. User opens when wanting to check
+       quota state explicitly. -->
   {#if data.quotaPlatforms.length > 0}
-    <QuotaStatusBanner platforms={data.quotaPlatforms} />
+    <details class="quota-disclosure">
+      <summary>API usage today</summary>
+      <QuotaStatusBanner platforms={data.quotaPlatforms} />
+    </details>
   {/if}
 
   {#if active.length === 0 && deleted.length === 0}
@@ -225,4 +228,20 @@
   /* Plan 02.1-39 round-6 polish #11 follow-up: .deleted-sources, .deleted-row,
    * and .restore CSS removed alongside the bottom-of-page <details> recovery
    * block. RecoveryDialog owns the surface (same component on /feed and /games). */
+  .quota-disclosure {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+  }
+  .quota-disclosure > summary {
+    padding: var(--space-sm) var(--space-md);
+    cursor: pointer;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+    font-weight: var(--font-weight-semibold);
+    user-select: none;
+  }
+  .quota-disclosure > summary:hover {
+    color: var(--color-text);
+  }
 </style>

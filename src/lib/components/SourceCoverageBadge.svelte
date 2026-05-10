@@ -40,9 +40,16 @@
   );
 </script>
 
-<span class="coverage-badge coverage-badge--{state}">
-  {label}
-</span>
+<!-- Phase 03.0.1 (post-review UAT) — «has_more» state hidden. The Refresh
+     button itself is the affordance for «more can be pulled» — surfacing
+     the same idea as a chip is redundant. Other states (never_polled,
+     caught_up, quota_exhausted) carry distinct, non-obvious info and
+     stay visible. -->
+{#if state !== "has_more"}
+  <span class="coverage-badge coverage-badge--{state}">
+    {label}
+  </span>
+{/if}
 
 <style>
   .coverage-badge {

@@ -68,6 +68,7 @@
 
   let saveError = $state<string | null>(null);
   let saving = $state(false);
+  let editingPullWindow = $state(false);
 
   // Preset buttons — each computes a target date. «All» is the sentinel
   // (1970-01-01). A preset is ENABLED only if applying it would widen
@@ -235,24 +236,29 @@
     </div>
   </header>
 
-  <!-- Pull window — preset buttons (only widening enabled) -->
+  <!-- Pull window — view + Edit toggle. Controls hidden by default. -->
   <article class="card">
     <div class="card__header">
       <h2 class="card__title">Pull window</h2>
+      {#if !editingPullWindow && !isSentinelTarget}
+        <button type="button" class="card__edit" onclick={() => (editingPullWindow = true)}>
+          Edit
+        </button>
+      {/if}
     </div>
     <p class="card__value">
-      Earliest event: <strong>{formatDateLong(currentTargetIso)}</strong>
+      Pull from: <strong>{formatDateLong(currentTargetIso)}</strong>
     </p>
-    <p class="card__hint">
-      {#if isSentinelTarget}
+    {#if isSentinelTarget}
+      <p class="card__hint">
         The pull walks back as far as the platform allows. <strong>Locked</strong> — «all history» is
         the widest possible setting.
-      {:else}
+      </p>
+    {:else if editingPullWindow}
+      <p class="card__hint">
         Pick a preset to widen the window. Narrowing is not allowed — only presets that go further
         back than the current target are enabled.
-      {/if}
-    </p>
-    {#if !isSentinelTarget}
+      </p>
       <div class="presets">
         {#each presets as preset (preset.key)}
           {@const enabled = isPresetWidening(preset) && !saving}
@@ -294,6 +300,19 @@
           Only earlier dates than the current target are allowed (server rejects narrowing).
         </p>
       </details>
+      <div class="card__actions">
+        <button
+          type="button"
+          class="btn btn--ghost"
+          onclick={() => {
+            editingPullWindow = false;
+            customExpanded = false;
+            saveError = null;
+          }}
+        >
+          Done
+        </button>
+      </div>
     {/if}
     {#if saveError}<p class="err" role="alert">{saveError}</p>{/if}
   </article>
