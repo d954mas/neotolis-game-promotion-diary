@@ -475,6 +475,34 @@ export async function createEvent(
     },
   });
 
+  // Phase 03.0.1 Wave 4 (post-UAT) — adapter-driven sync stats fetch.
+  // After ANY event create with externalId (paste flow OR direct-form
+  // submit OR preview-then-submit), ask the adapter to pull view/like
+  // counts synchronously (1 unit, user pool) so /feed shows stats
+  // immediately. Errors swallowed — the event row already exists;
+  // stats will land via cron tick if this path failed (rate-limit,
+  // auth-error). YouTube adapter implements via pollStatsByVideoId +
+  // writeSnapshot; other source kinds with no fetchEventStats are no-op.
+  if (row.externalId) {
+    const { eventKindToSourceKind } = await import("$lib/sources/event-to-source-kind.js");
+    const { getAdapter } = await import("$lib/sources/registry.js");
+    const sourceKindForStats = eventKindToSourceKind(row.kind);
+    if (sourceKindForStats !== null) {
+      try {
+        const statsAdapter = getAdapter(sourceKindForStats);
+        if (statsAdapter.fetchEventStats !== undefined) {
+          await statsAdapter.fetchEventStats(row.externalId, { userId });
+        }
+      } catch (err) {
+        const { logger } = await import("../logger.js");
+        logger.warn(
+          { eventId: row.id, externalId: row.externalId, err: String(err) },
+          "fetchEventStats failed on createEvent; UI will rely on cron polling",
+        );
+      }
+    }
+  }
+
   return row;
 }
 
@@ -656,7 +684,7 @@ export async function createEventFromPaste(
     await assertGameOwnedByUser(userId, gid);
   }
 
-  const created = await createEvent(
+  return createEvent(
     userId,
     {
       gameIds: pasteGameIds,
@@ -679,33 +707,6 @@ export async function createEventFromPaste(
     ipAddress,
     userAgent,
   );
-
-  // Phase 03.0.1 Wave 4 (post-UAT) — adapter-driven sync stats fetch.
-  // After event row is created, ask the adapter to pull view/like counts
-  // synchronously (1 unit, user pool) so /feed shows stats immediately
-  // without a follow-up «Refresh now» click. Errors swallowed — the
-  // event row already exists; stats will land via cron tick if this
-  // path failed.
-  if (created.externalId) {
-    const { eventKindToSourceKind } = await import("$lib/sources/event-to-source-kind.js");
-    const { getAdapter } = await import("$lib/sources/registry.js");
-    const sourceKindForStats = eventKindToSourceKind(enriched.kind);
-    if (sourceKindForStats !== null) {
-      const statsAdapter = getAdapter(sourceKindForStats);
-      if (statsAdapter.fetchEventStats !== undefined) {
-        try {
-          await statsAdapter.fetchEventStats(created.externalId, { userId });
-        } catch (err) {
-          const { logger } = await import("../logger.js");
-          logger.warn(
-            { eventId: created.id, externalId: created.externalId, err: String(err) },
-            "fetchEventStats failed on paste; UI will rely on cron polling",
-          );
-        }
-      }
-    }
-  }
-  return created;
 }
 
 /**
