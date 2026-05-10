@@ -298,7 +298,13 @@ export async function getUserQuotaLifetime(
   userId: string,
   platform?: string,
 ): Promise<{ requests: number; events: number }> {
-  const platformFilter = platform ? sql`AND metadata->>'kind' = ${platform}` : sql``;
+  // Phase 03.0.1 (post-review) — filter on `metadata->>'platform'` for the
+  // same reason as getUserQuotaUsedToday above. Pre-fix this query
+  // filtered on `kind` while writers populated the dedicated `platform`
+  // field, so the per-platform lifetime banner under-reported (showed 0
+  // even when today's counter was non-zero — same writer rows, two
+  // different filters).
+  const platformFilter = platform ? sql`AND metadata->>'platform' = ${platform}` : sql``;
   const result = await db.execute(sql`
     SELECT
       COALESCE(SUM((metadata->>'requests_used')::int), 0)::bigint AS requests,

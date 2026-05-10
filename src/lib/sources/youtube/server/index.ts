@@ -414,6 +414,20 @@ function validateEventInput(input: { kind: string; url?: string | null }): void 
       reason: "url_not_youtube",
     });
   }
+  // Phase 03.0.1 (post-review) — match create-path strictness. Pre-fix
+  // youtubeParseUrl accepted any non-empty path segment (e.g. /shorts/abc),
+  // so PATCH could persist a malformed URL that POST would reject via
+  // services/url-parser.ts:parseIngestUrl (which validates 11-char ids
+  // against YOUTUBE_VIDEO_ID_RE). Re-applying the same regex here closes
+  // the create-vs-update drift.
+  if (!/^[\w-]{11}$/.test(parsed.externalId)) {
+    throw new AppError(
+      "youtube video id must be exactly 11 alphanumeric characters",
+      "kind_url_inconsistent",
+      422,
+      { reason: "youtube_video_id_shape" },
+    );
+  }
 }
 
 /**

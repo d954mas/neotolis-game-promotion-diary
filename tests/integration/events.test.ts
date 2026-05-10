@@ -2159,6 +2159,54 @@ describe("Plan 02.1-37 — PATCH /api/events/:id youtube invariant (merged-state
     expect(row!.kind).toBe("other");
   });
 
+  it("PATCH {url: malformed YT (non-11-char videoId)} returns 422 — matches POST strictness", async () => {
+    // Phase 03.0.1 (post-review) — regression guard for create-vs-update
+    // strictness drift. Pre-fix:
+    //   - POST /api/events used parseIngestUrl which validated /^[\w-]{11}$/
+    //     for the 11-char YouTube videoId.
+    //   - PATCH /api/events used adapter.validateEventInput → youtubeParseUrl
+    //     which accepted any non-empty path segment.
+    // → A malformed URL POST would reject could be persisted via PATCH.
+    // Fix: validateEventInput now applies the same 11-char regex.
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev-strict-${uniq()}@test.local` });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "youtube_video",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+        title: "Initial valid",
+        url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      },
+      "127.0.0.1",
+    );
+
+    // /shorts/abc — non-11-char id. youtubeParseUrl alone accepted this;
+    // post-fix the 11-char regex gate rejects.
+    const res = await app.request(`/api/events/${ev.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ url: "https://www.youtube.com/shorts/abc" }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string; metadata?: { reason?: string } };
+    expect(body.error).toBe("kind_url_inconsistent");
+    expect(body.metadata?.reason).toBe("youtube_video_id_shape");
+
+    // Row unchanged.
+    const [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev.id)));
+    expect(row!.url).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  });
+
   it("PATCH valid {url: youtube} on existing kind=youtube_video succeeds (sanity — no false-positive)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
