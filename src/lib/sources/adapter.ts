@@ -374,6 +374,7 @@ export interface DataSourceAdapter {
   pollContent(
     source: PollableSource,
     since: Date,
+    ctx?: { origin?: "cron" | "user" },
   ): Promise<{ events: RawEvent[]; unitsUsed: number }>;
   /** User-driven stats polling (Refresh now button). quotaUser fingerprint
    *  is derived from userId inside the adapter (per-user burst-shaper

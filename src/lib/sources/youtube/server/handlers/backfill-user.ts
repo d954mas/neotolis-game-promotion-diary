@@ -193,6 +193,13 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
         metadata: (source.metadata ?? {}) as Record<string, unknown>,
       },
       since,
+      // Phase 03.0.1 (post-review P1 #2) — thread origin so the adapter's
+      // chargedFetch consumes the correct reservoir + persists pool_kind
+      // accurately. Pre-fix pollContent hardcoded 'cron' regardless of
+      // caller, scrambling user/cron pool accounting under user-initiated
+      // refresh-content. Job payload carries origin from sources.ts
+      // refresh-content endpoint ('user') vs auto-backfill cron ('cron').
+      { origin: job.data.origin ?? "cron" },
     );
   } catch (err) {
     // Phase 03.0.1 (post-review P1-1) — match channel-context-backfill's
@@ -317,9 +324,23 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
 
   const authorIsMe = source.isOwnedByMe;
   let inserted = 0;
-  let oldestInsertedOccurredAt: Date | null = null;
+  // Phase 03.0.1 (post-review P2 #4) — frontier advances from FETCHED
+  // events (not just inserted). Pre-fix auto_passive + autoImport=false
+  // sources fetched events but skipped INSERT (cache hydration only),
+  // so oldestInsertedOccurredAt stayed null and frontier never moved.
+  // The cron picker (ORDER BY last_polled_at NULLS FIRST) re-selected
+  // the same source every day, re-fetching the same window of events,
+  // burning quota with zero net progress. By tracking «oldest fetched»
+  // separately, frontier advances even when events aren't inserted —
+  // matches the «cache hydration» semantic (youtube_videos table is
+  // updated regardless of per-tenant event INSERT).
+  let oldestFetchedOccurredAt: Date | null = null;
 
   for (const ev of pollResult.events) {
+    // Frontier signal: «we have seen this event» — independent of INSERT.
+    if (oldestFetchedOccurredAt === null || ev.occurredAt < oldestFetchedOccurredAt) {
+      oldestFetchedOccurredAt = ev.occurredAt;
+    }
     if (ev.externalId && existingIds.has(ev.externalId)) continue;
     if (insertUserEvents) {
       await db.insert(events).values({
@@ -334,19 +355,17 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
         metadata: ev.metadata ?? {},
       });
       inserted += 1;
-      if (oldestInsertedOccurredAt === null || ev.occurredAt < oldestInsertedOccurredAt) {
-        oldestInsertedOccurredAt = ev.occurredAt;
-      }
     }
   }
 
-  // Update frontier — moves deeper only if oldest inserted is older than current.
-  if (oldestInsertedOccurredAt !== null) {
+  // Update frontier — race-safe via P2-1 WHERE-guard inside helper.
+  // Caller pre-check skips no-op SQL when our oldest isn't deeper.
+  if (oldestFetchedOccurredAt !== null) {
     if (
       source.backfillOldestAt === null ||
-      oldestInsertedOccurredAt.getTime() < source.backfillOldestAt.getTime()
+      oldestFetchedOccurredAt.getTime() < source.backfillOldestAt.getTime()
     ) {
-      await markSourceBackfillFrontier(userId, source.id, oldestInsertedOccurredAt);
+      await markSourceBackfillFrontier(userId, source.id, oldestFetchedOccurredAt);
     }
   }
 

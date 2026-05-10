@@ -227,6 +227,35 @@ export async function assertNoChannelConflict(
  *
  * Audit: writes `source.added` with metadata `{source_id, kind, handle_url}`.
  */
+/**
+ * Phase 03.0.1 (post-review P1/P2 #3) — convert UI preset to absolute date
+ * for backfill_target_since column. Mirrors migration 0024's mapping for
+ * existing rows so onboarding flow + legacy data agree on semantics.
+ *
+ * Sentinel '1970-01-01' is the migration-era «everything» mapping; new
+ * createSource calls produce it for the 'everything' preset. Defensive
+ * route validation (sources.ts) rejects user-pasted dates older than
+ * 2005 to prevent the sentinel being indistinguishable from legitimate
+ * input.
+ */
+function backfillWindowToDate(window: BackfillWindow): Date {
+  const now = Date.now();
+  switch (window) {
+    case "1d":
+      return new Date(now - 86_400_000);
+    case "7d":
+      return new Date(now - 7 * 86_400_000);
+    case "30d":
+      return new Date(now - 30 * 86_400_000);
+    case "90d":
+      return new Date(now - 90 * 86_400_000);
+    case "1y":
+      return new Date(now - 365 * 86_400_000);
+    case "everything":
+      return new Date("1970-01-01T00:00:00Z");
+  }
+}
+
 export async function createSource(
   userId: string,
   input: CreateSourceInput,
@@ -304,6 +333,17 @@ export async function createSource(
           isOwnedByMe: input.isOwnedByMe ?? true,
           autoImport: input.autoImport ?? true,
           metadata: input.metadata ?? {},
+          // Phase 03.0.1 (post-review P1/P2 #3) — persist user-selected
+          // backfill window as absolute date so catch-up logic
+          // (computeSinceForRefresh) has a target boundary to walk back
+          // toward. Pre-fix the createSource code threaded backfillWindow
+          // ONLY into the initial channel-context-backfill job; the column
+          // stayed NULL on new rows. computeSinceForRefresh reads NULL as
+          // «no historical pull» so subsequent catch-up tickets only pulled
+          // newer-than-frontier — silently truncating user's selected
+          // history if initial backfill hit cap (MAX_PAGES=20) before the
+          // window boundary.
+          backfillTargetSince: backfillWindowToDate(input.backfillWindow ?? "30d"),
         })
         .returning();
       return r;

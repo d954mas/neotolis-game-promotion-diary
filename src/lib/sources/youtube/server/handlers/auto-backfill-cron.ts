@@ -90,18 +90,23 @@ export async function handleAutoBackfillCron(
 
   // Picker — incomplete sources, soft-deleted excluded, per-user round-robin.
   //
-  // Phase 03.0.1 (post-review P1-3) — explicit eslint-disable. This SELECT
-  // is INTENTIONALLY cross-tenant by design (D-11 cron picker fan-out): the
-  // scheduler walks ALL users' incomplete sources to enqueue passive
+  // CROSS-TENANT BY DESIGN (D-11 scheduler fan-out). This SELECT
+  // INTENTIONALLY walks all users' incomplete sources to enqueue passive
   // backfill jobs in round-robin order. The orderBy mentions
-  // `dataSources.userId` for sort, NOT for filtering. The tenant-scope
-  // ESLint rule's regex matches the `userId` token in the chain text and
-  // currently passes — but that's incidental, not a real filter. A future
-  // tightening of the regex would silently exclude this file. Make the
-  // cross-tenant intent explicit so the disable survives linter refactors.
-  // P2-3: also exclude needsReconnect sources — broken adapters shouldn't
-  // burn cron pool on guaranteed-failing polls.
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- D-11 scheduler fan-out: cron picker is service-wide by design (selects across ALL users for round-robin enqueue). userId in orderBy is a SORT key, not a filter — semantically cross-tenant. Worker handler downstream re-applies tenant scope via getSourceById(userId, sourceId) on each enqueued job.
+  // `dataSources.userId` as a SORT key, NOT a filter — the tenant-scope
+  // ESLint rule's loose regex currently accepts this (matches `userId`
+  // anywhere in the chain text) but that's incidental.
+  //
+  // If a future tightening of the rule (require userId WITHIN .where) ever
+  // lands, this query will start failing the linter. Replace this comment
+  // with `// eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query`
+  // and KEEP this rationale intact — the worker handler downstream
+  // re-applies tenant scope via getSourceById(userId, sourceId) on each
+  // enqueued job, so cross-tenant fan-out at the picker level is the
+  // correct architectural primitive.
+  //
+  // P2-3 (post-review) — also excludes needsReconnect sources so broken
+  // adapters don't burn cron pool on guaranteed-failing polls.
   const candidates = await db
     .select({
       id: dataSources.id,

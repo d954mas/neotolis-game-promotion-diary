@@ -43,7 +43,6 @@ import { pickKeyForJob, youtubeQuotaUser } from "./quota.js";
 import { chargedFetch, fetchWithTimeout } from "./http.js";
 import { youtubeObservability } from "./observability.js";
 import { youtubeParseUrl } from "./url.js";
-import { AdapterError } from "$lib/sources/errors.js";
 import { z } from "zod";
 import { env } from "$lib/server/config/env.js";
 import { logger } from "$lib/server/logger.js";
@@ -295,6 +294,7 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
   async pollContent(
     source: PollableSource,
     since: Date,
+    ctx?: { origin?: "cron" | "user" },
   ): Promise<{ events: RawEvent[]; unitsUsed: number }> {
     const uploadsPlaylistId = (source.metadata as { uploadsPlaylistId?: string })
       ?.uploadsPlaylistId;
@@ -320,40 +320,31 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     url.searchParams.set("key", picked.apiKey);
     url.searchParams.set("quotaUser", youtubeQuotaUser(source.userId));
 
-    // Plan 08: chargedFetch throws AdapterError on non-2xx. pollContent
-    // (auto-import path) does NOT have a SnapshotStatus contract — bail with
-    // an empty array on any error category rather than ripple AdapterError
-    // into auto-import's caller (which today doesn't exist; auto-import
-    // lands as a future worker handler). Translate-and-bail keeps the
-    // legacy pre-Plan-08 contract intact for whoever wires the auto-import
-    // worker; that worker can revisit AdapterError-raise behavior when
-    // ready. origin='cron' — pollContent is invoked by scheduler-driven
-    // auto-import, never by user-driven Refresh-now.
+    // Phase 03.0.1 (post-review P1 #1) — RE-THROW AdapterError per the
+    // contract jsdoc (adapter.ts:341 «NEVER return [] for inability-to-
+    // fetch — that mis-signals «no more events»»). Pre-fix this catch
+    // contradicted the contract: 403 / 5xx / reservoir-exhaustion all
+    // returned `[]` and the worker treated empty as «backfill complete»,
+    // burying real errors and prematurely marking sources done.
+    // Worker's catch handler maps AdapterError categories to needs_reconnect
+    // / pg-boss retry / state stamp (see backfill-user.ts:195+).
+    //
+    // Phase 03.0.1 (post-review P1 #2) — pass caller's origin through. Pre-
+    // fix pollContent hardcoded origin='cron' regardless of caller, so user-
+    // initiated refresh-content clicks consumed cron reservoir (and the
+    // chargedFetch persistent counter wrote pool_kind='cron'). Reservoir
+    // budgets stayed nominally separated but factually scrambled.
     //
     // unitsUsed accounting: chargedFetch charges 1 unit on EVERY Response
-    // (including non-2xx — Google's quota guide). The throw path means we
-    // didn't reach a Response; chargedFetch's pre-fetch reservoir consume
-    // also didn't actually charge the persistent counter (incrementUsage
-    // runs AFTER fetch). So throw → unitsUsed=0 is honest.
-    let resp: Response;
-    let unitsUsed = 0;
-    try {
-      resp = await chargedFetch(url, picked, 1, {
-        sourceId: source.id,
-        origin: "cron",
-        logTag: "youtube-adapter: playlistItems.list",
-      });
-      unitsUsed = 1;
-    } catch (err) {
-      if (err instanceof AdapterError) {
-        logger.warn(
-          { sourceId: source.id, userId: source.userId, category: err.category },
-          "pollContent: AdapterError → empty result",
-        );
-        return { events: [], unitsUsed: 0 };
-      }
-      throw err;
-    }
+    // (including non-2xx — Google's quota guide). Successful chargedFetch
+    // returns Response → unitsUsed=1. Throw path propagates without
+    // touching unitsUsed (caller observes throw, not return).
+    const resp = await chargedFetch(url, picked, 1, {
+      sourceId: source.id,
+      origin: ctx?.origin ?? "cron",
+      logTag: "youtube-adapter: playlistItems.list",
+    });
+    const unitsUsed = 1;
     if (!resp.ok) return { events: [], unitsUsed }; // dead-code defense — chargedFetch throws on non-2xx in Plan 08.
     const json = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await resp.json());
     const sinceMs = since.getTime();
