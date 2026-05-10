@@ -19,8 +19,7 @@ import { eq, and, asc } from "drizzle-orm";
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { youtubeVideoSnapshots } =
-  await import("../../src/lib/server/db/schema/youtube-video-snapshots.js");
+const { youtubeVideoSnapshots } = await import("../../src/lib/server/db/schema/index.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { seedUserDirectly } = await import("./helpers.js");
 

@@ -17,8 +17,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { writeAudit } from "../../src/lib/server/audit.js";
 import { db } from "../../src/lib/server/db/client.js";
-import { youtubeServiceQuotaUsage } from "../../src/lib/server/db/schema/youtube-service-quota-usage.js";
-import { todayPacific } from "../../src/lib/server/services/youtube-quota-tracker.js";
+import { youtubeServiceQuotaUsage } from "../../src/lib/server/db/schema/index.js";
+import { todayPacific } from "../../src/lib/sources/youtube/server/quota.js";
 import { seedUserDirectly } from "./helpers.js";
 
 const uniq = () => Math.random().toString(36).slice(2, 10);
@@ -114,9 +114,9 @@ describe("admin /quota route (Plan 03.0-07)", () => {
 
     // Seed three rows at different threshold bands.
     await db.insert(youtubeServiceQuotaUsage).values([
-      { datePacific: today, apiKeyId: keyOk, estimatedUnits: 3000 },
-      { datePacific: today, apiKeyId: keyEighty, estimatedUnits: 8500 },
-      { datePacific: today, apiKeyId: keyNinetyfive, estimatedUnits: 9700 },
+      { datePacific: today, apiKeyId: keyOk, poolKind: "cron", estimatedUnits: 3000 },
+      { datePacific: today, apiKeyId: keyEighty, poolKind: "cron", estimatedUnits: 8500 },
+      { datePacific: today, apiKeyId: keyNinetyfive, poolKind: "cron", estimatedUnits: 9700 },
     ]);
 
     await withAllowlist(adminEmail, async () => {

@@ -11,8 +11,11 @@ import { listSources } from "$lib/server/services/data-sources.js";
 import { mapEventsToDtos, toGameDto, toDataSourceDto } from "$lib/server/dto.js";
 import { filterValidKinds } from "$lib/util/filter-event-kinds.js";
 import { db } from "$lib/server/db/client.js";
-import { youtubeVideoSnapshots } from "$lib/server/db/schema/youtube-video-snapshots.js";
-import { youtubeChannels } from "$lib/server/db/schema/youtube-channels.js";
+import {
+  youtubeVideoSnapshots,
+  youtubeChannels,
+  youtubeVideos,
+} from "$lib/server/db/schema/index.js";
 import { sql, inArray } from "drizzle-orm";
 
 // Plan 02.1-19 URL contract: /feed accepts ?show=any|inbox|specific +
@@ -188,6 +191,26 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     for (const r of rowDtos) {
       if (r.kind === "youtube_video" && r.externalId) {
         r.stats = latest.get(r.externalId) ?? null;
+      }
+    }
+
+    // Phase 03.0.1 (post-review UAT 2026-05-10) — channelTitle for ALL
+    // youtube_video events (auto-imported AND manual paste). Lookup via
+    // youtube_videos cache (populated by oEmbed on manual paste +
+    // channel-context-backfill on auto-import). FeedCard renders single
+    // chip with optional «auto-import» icon prefix.
+    const videoChannels = await db
+      .select({
+        videoId: youtubeVideos.videoId,
+        channelTitle: youtubeVideos.channelTitle,
+      })
+      .from(youtubeVideos)
+      .where(inArray(youtubeVideos.videoId, youtubeExternalIds));
+    const titleByVideo = new Map<string, string | null>();
+    for (const v of videoChannels) titleByVideo.set(v.videoId, v.channelTitle);
+    for (const r of rowDtos) {
+      if (r.kind === "youtube_video" && r.externalId) {
+        r.channelTitle = titleByVideo.get(r.externalId) ?? null;
       }
     }
   }

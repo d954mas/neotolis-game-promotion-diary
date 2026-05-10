@@ -45,6 +45,7 @@
   import SourceKindIcon from "./SourceKindIcon.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import InlineError from "./InlineError.svelte";
+  import RefreshContentButton from "./RefreshContentButton.svelte";
   // Plan 02.1-39 (UAT-NOTES.md §5.6): kindLabel extracted to a shared
   // helper so SourceRow and FiltersSheet's new kind glyph + label render
   // resolve to the same wording. Single source of truth.
@@ -62,9 +63,52 @@
     // from the youtube_channels cache. Shown as a chip alongside the user's
     // own displayName so /sources displays both names.
     channelTitle?: string | null;
+    // Phase 03.0.1 (post-review UAT) — backfill state surfaced inline so
+    // user can see «when was this last refreshed» without opening detail.
+    lastPolledAt?: Date | string | null;
+    backfillComplete?: boolean;
+    firstEventAt?: Date | string | null;
+    lastEventAt?: Date | string | null;
+    eventCount?: number;
+    metadata?: Record<string, unknown> | null;
   };
 
-  let { source }: { source: DataSourceDto } = $props();
+  let {
+    source,
+    cooldownSec = 0,
+    pulling = false,
+  }: { source: DataSourceDto; cooldownSec?: number; pulling?: boolean } = $props();
+
+  const descriptionText = $derived(
+    typeof source.metadata?.description === "string" && source.metadata.description.trim()
+      ? source.metadata.description
+      : "",
+  );
+
+  // Phase 03.0.1 (post-review UAT) — relative-time formatter for «Last
+  // pulled» display. Inline (no luxon dep) — minimal English-only for v0.1.
+  function formatRelativeTime(when: Date | string): string {
+    const t = typeof when === "string" ? new Date(when) : when;
+    const diffMs = Date.now() - t.getTime();
+    if (diffMs < 0) return "just now";
+    const sec = Math.floor(diffMs / 1000);
+    if (sec < 60) return "just now";
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hour = Math.floor(min / 60);
+    if (hour < 24) return `${hour}h ago`;
+    const day = Math.floor(hour / 24);
+    if (day < 30) return `${day}d ago`;
+    const month = Math.floor(day / 30);
+    return `${month}mo ago`;
+  }
+
+  // Human-readable date: "22 Feb 2026". en-GB puts day before month
+  // (Russian / European convention; matches user's expectation).
+  function formatDateShort(when: Date | string): string {
+    const t = typeof when === "string" ? new Date(when) : when;
+    return t.toLocaleDateString("en-GB", { year: "numeric", month: "short", day: "numeric" });
+  }
 
   let editing = $state(false);
   // Hold the rename buffer in plain state — when the edit form opens we
@@ -98,7 +142,7 @@
   // edit-mode visibility gates (§4.22.B / §4.22.C) read straightforwardly:
   // the Edit pencil in read mode invokes openEdit; the Cancel button in
   // the edit-form footer invokes cancelEdit.
-  function openEdit(): void {
+  function _openEdit(): void {
     editName = source.displayName ?? "";
     editAutoImport = source.autoImport;
     editIsOwnedByMe = source.isOwnedByMe;
@@ -179,48 +223,68 @@
       <span class="kind-tag-label">{kindLabel(source.kind)}</span>
     </span>
     {#if !editing}
-      <span class="display">{source.displayName ?? source.handleUrl}</span>
-      {#if source.channelTitle && source.channelTitle !== source.displayName}
-        <span class="channel-title" title="YouTube channel name">{source.channelTitle}</span>
-      {/if}
+      <!-- Phase 03.0.1 (post-review UAT 2026-05-10) — displayName chip
+           REMOVED. User's custom label was confusing alongside the canonical
+           channel title; the field itself was deprecated in onboarding (form
+           dropped displayName, replaced with optional description). Existing
+           rows keep their displayName column data for legacy compat but
+           nothing surfaces it in UI. -->
+      <a class="display" href="/sources/{source.id}">
+        {source.channelTitle ?? source.handleUrl}
+      </a>
     {/if}
     <span class="ownership-badge" class:mine={source.isOwnedByMe}>
       {source.isOwnedByMe ? m.sources_owned_by_me() : m.sources_owned_by_other()}
     </span>
   </div>
 
-  <div class="meta">
-    <code class="handle">{source.handleUrl}</code>
-  </div>
+  <!-- Phase 03.0.1 (post-review UAT 2026-05-10) — handle URL REMOVED from
+       row. Channel title is the identifier; raw URL is noise. URL still
+       lives on /sources/[id] detail page header for reference. -->
 
-  {#if !editing}
-    <div class="status">
-      <span class="polling-status" role="status">
-        {source.autoImport ? m.sources_status_auto_on_pending() : m.sources_status_auto_off()}
-      </span>
-      <!-- Plan 02.1-22 (§2.4-decision option A): non-interactive pill replaces
-           the inline checkbox. The toggle moved into the edit form so a misclick
-           can't flip auto-import without going through the same PATCH path that
-           renames also use. -->
-      <span class="auto-pill">
-        {source.autoImport ? m.sources_auto_import_on() : m.sources_auto_import_off()}
-      </span>
+  {#if descriptionText}
+    <div class="meta">
+      <p class="description">{descriptionText}</p>
     </div>
   {/if}
 
   {#if !editing}
-    <!-- Plan 02.1-33 (UAT-NOTES.md §4.22.B): read-mode .actions hosts ONLY
-         the Edit pencil. Remove moved into the edit-form footer below — its
-         visibility gate is the {#if editing} branch. -->
+    <div class="status">
+      <!-- Phase 03.0.1 (post-review UAT) — auto-import chip shown ONLY
+           when ON. Label is now just «Auto-import» (the presence of the
+           chip itself is the signal — «: On» suffix was redundant). -->
+      {#if source.autoImport}
+        <span class="auto-pill">{m.source_chip_auto_import()}</span>
+      {/if}
+      <span class="last-polled" title="Last successful pull">
+        {source.lastPolledAt
+          ? `Last pulled: ${formatRelativeTime(source.lastPolledAt)}`
+          : "Never pulled"}
+      </span>
+      {#if (source.eventCount ?? 0) > 0}
+        <span class="event-range" title="Total events · earliest — latest event date">
+          {source.eventCount}
+          {source.eventCount === 1 ? "event" : "events"}{source.firstEventAt && source.lastEventAt
+            ? ` · ${formatDateShort(source.firstEventAt)} — ${formatDateShort(source.lastEventAt)}`
+            : ""}
+        </span>
+      {/if}
+    </div>
+  {/if}
+
+  {#if !editing}
+    <!-- Phase 03.0.1 (post-review UAT) — refresh-content inline.
+         Edit pencil REMOVED from row — user clicks the display-name link
+         to /sources/[id] where edit (rename, auto-import toggle, delete)
+         lives. Row is now read-only except for refresh action. -->
     <div class="actions">
-      <button
-        type="button"
-        class="icon-btn edit-icon"
-        aria-label={m.common_edit()}
-        onclick={openEdit}
-      >
-        {m.common_edit()}
-      </button>
+      <RefreshContentButton
+        sourceId={source.id}
+        sourceKind={source.kind}
+        compact
+        initialCooldownSec={cooldownSec}
+        {pulling}
+      />
     </div>
   {:else}
     <form class="edit-form" onsubmit={saveSourceEdit}>
@@ -357,6 +421,10 @@
     font-weight: var(--font-weight-semibold);
     word-break: break-word;
     min-width: 0;
+    text-decoration: none;
+  }
+  .display:hover {
+    text-decoration: underline;
   }
   /* Phase 3.0 post-build: real YouTube channel title shown alongside the
    * user's own displayName, in the muted secondary tone. Same visual idea
@@ -433,6 +501,16 @@
     color: var(--color-text-muted);
     word-break: break-all;
   }
+  .description {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
   .status {
     display: flex;
     align-items: center;
@@ -440,6 +518,11 @@
     flex-wrap: wrap;
   }
   .polling-status {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+  }
+  .last-polled,
+  .event-range {
     color: var(--color-text-muted);
     font-size: var(--font-size-label);
   }

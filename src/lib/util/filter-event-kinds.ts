@@ -9,7 +9,7 @@
 // page-loader all share one source of truth (defense-in-depth Pitfall 6).
 
 import { VALID_EVENT_KINDS } from "$lib/server/services/events.js";
-import type { EventKind } from "$lib/server/integrations/data-source-adapter.js";
+import type { EventKind } from "$lib/sources/adapter.js";
 
 export function filterValidKinds(raw: string[]): EventKind[] {
   return raw.filter((k): k is EventKind => (VALID_EVENT_KINDS as readonly string[]).includes(k));

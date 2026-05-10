@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to plan
-stopped_at: Completed 03.0-14-PLAN.md (Wave 5 smoke + verification sign-off)
-last_updated: "2026-05-05T21:35:54.132Z"
-last_activity: 2026-05-05
+stopped_at: Completed 03.0.1-11-source-reference-doc-PLAN.md (Phase 03.0.1 phase-close)
+last_updated: "2026-05-08T17:58:15.951Z"
+last_activity: 2026-05-08
 progress:
-  total_phases: 10
-  completed_phases: 5
-  total_plans: 82
-  completed_plans: 82
+  total_phases: 12
+  completed_phases: 6
+  total_plans: 93
+  completed_plans: 93
 ---
 
 # Project State
@@ -20,11 +20,11 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Replace messy Google Sheets / markdown files with a structured, secure, query-friendly diary so an indie developer can see — at a glance — which promotion actions actually moved the needle on wishlists and engagement.
-**Current focus:** Phase 03.0 — polling-pipeline-plumbing-youtube
+**Current focus:** Phase 03.0.1 — source-plugin-architecture (COMPLETE 2026-05-08); next is Phase 03.0.2 (Dependency Refresh) — needs `/gsd:plan-phase 03.0.2` to break down.
 
 ## Current Position
 
-Phase: 3.1
+Phase: 03.0.2
 Plan: Not started
 
 ## Performance Metrics
@@ -124,6 +124,17 @@ Plan: Not started
 | Phase 03.0-polling-pipeline-plumbing-youtube P12 | 9min | 2 tasks | 9 files |
 | Phase 03.0 P11 | 16m | 3 tasks | 9 files |
 | Phase 03.0-polling-pipeline-plumbing-youtube P14 | ~13min | 3 tasks | 8 files |
+| Phase 03.0.1-source-plugin-architecture P01 | 4min 44s | 2 tasks | 12 files |
+| Phase 03.0.1-source-plugin-architecture P02 | 12min | 1 tasks | 32 files |
+| Phase 03.0.1 P03 | ~11min | 1 tasks | 20 files |
+| Phase 03.0.1 P04 | ~9 min 44 s | 1 tasks | 28 files |
+| Phase 03.0.1-source-plugin-architecture P05 | ~8 min 1 s | 1 tasks | 16 files |
+| Phase 03.0.1-source-plugin-architecture P06 | ~6 min 49 s | 1 tasks | 7 files |
+| Phase 03.0.1 P07 | 7 minutes | 2 tasks | 21 files |
+| Phase 03.0.1 P08 | ~25min | 2 tasks | 16 files |
+| Phase 03.0.1 P09 | ~5 minutes | 1 tasks | 8 files |
+| Phase 03.0.1-source-plugin-architecture P10 | ~9 min | 3 tasks | 12 files |
+| Phase 03.0.1-source-plugin-architecture P11 | ~5 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -369,6 +380,30 @@ Recent decisions affecting current work:
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 14: Smoke gate uses POST /api/events/:id/refresh-poll to drive a real poll.user round-trip through the youtube-mock — exercises auth gate + tenant scope + service + queue enqueue + worker drain + snapshot write as a single assertion, deterministic (no waiting for a 6h scheduler tick)
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 14: phase-NN-flow.sh extraction pattern — each phase ships tests/smoke/lib/phaseNN-flow.sh with a single phaseNN_<descriptor>() function; the parent self-host.sh sources + calls. Phase 2.1 phase21-flow.sh is the precedent; Phase 3.0 phase30-flow.sh continues it; Phase 3.1 / 3.2 will follow without rebase pressure on the parent harness
 - [Phase 03.0-polling-pipeline-plumbing-youtube]: Plan 14: VERIFICATION.md verdict signed-off-pending-ci-and-uat — executor produces the doc with the 12-criteria checklist + per-plan map + spike result + smoke gate table populated; the human flips verdict: signed-off after the CI smoke run is green AND the deferred 13-step manual UAT (HUMAN-UAT.md) closes
+- [Phase 03.0.1-source-plugin-architecture]: Plan 01: Co-existing widened DataSourceAdapter interface (D-16) — src/lib/sources/adapter.ts is SUPERSET of legacy src/lib/server/integrations/data-source-adapter.ts; both compile this plan; legacy deleted in Plan 03 after youtubeAdapter migrates
+- [Phase 03.0.1-source-plugin-architecture]: Plan 01: AdapterError 5-category taxonomy (D-13) ships LIVE — categoryToSnapshotStatus uses no-default switch so adding 6th category fails TypeScript compile (Phase 6 user-auth trigger)
+- [Phase 03.0.1-source-plugin-architecture]: Plan 01: Reddit deferral preservation via separate FUTURE_KIND_HOSTS map (RESEARCH.md Pattern 3 SOTA divergence) — services/ingest.ts uses detectFutureKind AFTER parseAnyUrl returns unsupported to surface 'reddit_pending_phase3' message; Phase 03.1 removes reddit_post entry when real Reddit adapter ships
+- [Phase 03.0.1-source-plugin-architecture]: [Phase 03.0.1]: Plan 02 — route per-file YouTube schema consumers through cross-source barrel $lib/server/db/schema/index.js (rather than the new per-source path) — minimal churn keeps existing call sites compiling without the per-file aliases the plan didn't anticipate
+- [Phase 03.0.1-source-plugin-architecture]: [Phase 03.0.1]: Plan 02 — drizzle.config.ts schema field migrated from string to array (Pattern 6 / Option A glob); per-source schemas auto-discovered from src/lib/sources/*/server/schema/*.ts; no SQL drift (table identity unchanged)
+- [Phase 03.0.1]: Plan 03 reconciled the widened DataSourceAdapter contract — PickedKey + quotaUser stay on v0.1 method signatures (preserves verbatim behavior); Thick-adapter D-06 picking-inside refactor deferred to Plan 04/08
+- [Phase 03.0.1]: Plan 04: extended tenant-scope ESLint glob to src/lib/sources/**/server/** (Rule 3 fix) — relocated quota.ts retains its lint-time guard on the audit_log defense-in-depth query
+- [Phase 03.0.1]: Plan 04: per-source folder is the home for kind-internal services (quota counter, snapshot writer, URL helper, metadata fetcher); cross-source services that orchestrate ACROSS kinds (refresh-poll, ingest, tier-resolver, poll-eligibility, purge-account, url-parser) STAY at $lib/server/services/
+- [Phase 03.0.1]: Plan 04: naming-collision disambiguation via $lib paths — TWO quota.ts files now exist; metadata.ts imports $lib/sources/youtube/server/quota.js (YouTube per-key counter) AND $lib/server/services/quota.js (cross-source events_per_day) with inline comment
+- [Phase 03.0.1-source-plugin-architecture]: Plan 05: Spread + override in barrel (vs. inlining registerQueues into adapter.ts) — adapter.ts handler-free + barrel composes live adapter via {...youtubeChannelAdapter, registerQueues}; resolves potential import cycle (handlers import barrel → barrel imports handlers + adapter; adapter has zero handler imports)
+- [Phase 03.0.1-source-plugin-architecture]: Plan 05: registerQueues stub in adapter.ts upgraded from notYetImplemented to a fallback-error message — satisfies plan's grep zero-match acceptance AND preserves 'incorrect import surfaces loudly' invariant when consumers bypass the barrel
+- [Phase 03.0.1-source-plugin-architecture]: Plan 05: queue NAMES unchanged this plan (per CONTEXT D-11) — Plan 07 owns the per-kind topology rename to youtube.poll.cron / youtube.poll.user / youtube.backfill.user. Plan 05 stays mechanical (handlers move + adapter owns its registration + worker iterates) so smoke-gated polling-pipeline behavior is byte-identical
+- [Phase 03.0.1-source-plugin-architecture]: Plan 06: youtubeParseUrl + parseYoutubeUrl coexist as 2 functions in url.ts (one for D-15 iterator, one for channel-context backfill); 11-char videoId strictness re-enforced at the public services/url-parser.ts boundary not inside youtubeParseUrl; Reddit-deferral mapping stays at orchestrator layer not in parseAnyUrl so the iterator stays pure
+- [Phase 03.0.1]: DO $$ schema-existence guard added to migration 0021 (matches 0010_phase03_baseline.sql precedent — required for fresh test DBs where pgboss has not booted)
+- [Phase 03.0.1]: Tier-eligibility computation moved INTO handlePollActive/Cold (not a thin scheduler layer): collocates the tier-window cutoff + selectEligibleVideoIds + Phase A HTTP + Phase B writeSnapshot in one file per tier. scheduler/enqueue.ts deleted.
+- [Phase 03.0.1]: pg-boss v11+ key-based multiple-schedule-per-queue collapses Active+Cold cron schedules onto youtube.poll.cron with {key:'active'} and {key:'cold'} (RESEARCH.md OQ#2). Single subscription, tier-tagged payloads.
+- [Phase 03.0.1]: Plan 08: D-13 needs_reconnect/last_error_at/last_error_kind columns added via forward-only migration 0022. observability stub replaced with real getDailyStats/getRecentAudit. RateLimiterMemory reservoirs (cron 8000pts/user 2000pts) consume per ctx.origin BEFORE fetch. AdapterError 5-category taxonomy throws on every error path in chargedFetch. admin-quota-read kind-decoupled via getAdapter(youtube_channel).observability.
+- [Phase 03.0.1]: Plan 09: Registry-UI cast at registration boundary (youtubeUiServer as unknown as AdapterUiServer) — same pattern as registry.ts; per-kind narrow type meets generic surface only at the Map literal.
+- [Phase 03.0.1]: Plan 09: FeedCard.svelte UNCHANGED — EventCard.svelte exists as TESTED contract; /feed migration deferred to Phase 03.1 when Reddit lands and there are multiple kinds to dispatch between (CONTEXT.md philosophy: three concrete callers earn an abstraction).
+- [Phase 03.0.1-source-plugin-architecture]: Plan 10: backfill handler does direct INSERT (NOT createEvent through services/events.ts) — withQuotaGuard is a USER-input throttle, not appropriate for system-emitted refresh-content jobs. Mirrors channel-context-backfill direct-INSERT pattern; idempotency via pre-INSERT SELECT scoped by (userId, sourceId, externalId) + DB-level partial UNIQUE.
+- [Phase 03.0.1-source-plugin-architecture]: Plan 10: backfillSource real impl lives in ./index.ts (the barrel) NOT ./adapter.ts — matches Plans 05/07 doctrine. The Plan 03 throwing stub in adapter.ts STAYS as a bypass-the-barrel safety net; production callers go through the barrel where the spread+override pattern wires the real impl.
+- [Phase 03.0.1-source-plugin-architecture]: Plan 10: writeAudit fires AFTER the enqueue (not BEFORE per D-32 forensics ordering). Audit metadata REQUIRES result.queue + result.jobId which only the adapter knows. Trade-off accepted — writeAudit never throws, singletonKey makes re-click dedup-safe, security signal forensics need is 'user X requested refresh on Y at T'.
+- [Phase 03.0.1-source-plugin-architecture]: Plan 11 (phase close): SOURCE-REFERENCE.md describes the AS-LIVE shipped tree (8 handlers including poll-cron dispatcher + poll-active + poll-cold split; ui/server.ts + ui/index.ts split per Pitfall 7; three-layer barrel-override with throwing stubs in adapter.ts and real impls in index.ts). Doc landed last per CONTEXT.md wave_strategy_guidance ("doc describes ACTUAL shipped tree, not planned"). All src/lib/sources/youtube/*.ts references verified to resolve against the working copy (path-verification grep loop, 0 missing).
+- [Phase 03.0.1-source-plugin-architecture]: Plan 11: ROADMAP fix is a 3-line patch (Plan 11 checkbox flip + progress-table row 10/11→11/11 + stale Phase 03.0.2 "10/11 plans executed" line corrected). The full Phase 03.0.1 entry (goal narrative + 11-plan list) was seeded ahead of execution; phase-close only flipped deltas to preserve prior plans' completion state.
 
 ### Pending Todos
 
@@ -411,8 +446,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-05T21:33:58.991Z
-Last Activity: 2026-05-05
-Stopped at: Completed 03.0-14-PLAN.md (Wave 5 smoke + verification sign-off)
+Last session: 2026-05-08T17:47:13.000Z
+Last Activity: 2026-05-08
+Stopped at: Completed 03.0.1-11-source-reference-doc-PLAN.md (Phase 03.0.1 phase-close)
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md

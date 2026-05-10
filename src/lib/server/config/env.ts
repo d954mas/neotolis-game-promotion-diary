@@ -151,6 +151,19 @@ const RawSchema = z.object({
   // endpoint; the smoke-gate harness overrides to a mock reverse-proxy URL
   // (Plan 03.0-14). Validated as a URL by zod so a typo fails fast at boot.
   YOUTUBE_API_BASE_URL: z.string().url().default("https://www.googleapis.com/youtube/v3"),
+
+  // Phase 03.0.1 architecture cleanup — multi-replica safety guard.
+  // YouTube adapter's chargedFetch reservoir uses RateLimiterMemory
+  // (per-process state). With N>1 worker replicas each holds an
+  // independent 8000/2000-point pool — daily quota would be N×budget,
+  // burning the operator envelope past the 10000 daily cap and tripping
+  // 95% throttle prematurely. Today's compose runs WORKER_REPLICA_COUNT=1
+  // (no replicas: directive); the worker boot asserts this until the
+  // reservoir migrates to a shared backend (RateLimiterPostgres — same
+  // library, swap one constructor). The assert is the safety floor:
+  // operators bumping replicas accidentally crash the worker boot
+  // instead of silently overshoot quota.
+  WORKER_REPLICA_COUNT: z.coerce.number().int().min(1).default(1),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -257,6 +270,7 @@ export const env = {
   SERVICE_YOUTUBE_API_KEYS: raw.SERVICE_YOUTUBE_API_KEYS,
   ADMIN_EMAIL_ALLOWLIST: raw.ADMIN_EMAIL_ALLOWLIST,
   YOUTUBE_API_BASE_URL: raw.YOUTUBE_API_BASE_URL,
+  WORKER_REPLICA_COUNT: raw.WORKER_REPLICA_COUNT,
 } as const;
 
 export type Env = typeof env;

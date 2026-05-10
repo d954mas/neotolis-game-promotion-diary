@@ -141,6 +141,69 @@
       "when": 1778250000000,
       "tag": "0019_audit_log_insert_only_trigger",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1778250100000,
+      "tag": "0020_pg_boss_v12",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1778257784643,
+      "tag": "0021_phase03_01_per_kind_queue_topology",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1778332800000,
+      "tag": "0022_phase03_01_data_sources_error_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1778420000000,
+      "tag": "0023_phase03_01_audit_action_refresh_content",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1778500000000,
+      "tag": "0024_phase03_01_data_sources_backfill_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1778600000000,
+      "tag": "0025_phase03_01_audit_metadata_flow_check",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1778700000000,
+      "tag": "0026_phase03_01_quota_usage_pool_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1778800000000,
+      "tag": "0027_phase03_01_channel_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1778900000000,
+      "tag": "0028_phase03_01_drop_data_sources_channel_state",
+      "breakpoints": true
     }
   ]
 }

@@ -1,33 +1,31 @@
 // APP_ROLE=worker entrypoint.
 //
 // Phase 1 shipped a no-op stub subscribing only to internal.healthcheck.
-// Phase 3.0 Plan 09 promotes the worker to subscribe to ALL Phase 3.0
+// Phase 3.0 Plan 09 promoted the worker to subscribe to ALL Phase 3.0
 // queues with the pg-boss v10 array-handler shape (Pitfall A + B):
 //
 //   await boss.work(name, {batchSize}, async (jobs) => {
 //     for (const job of jobs) await handler(job);
 //   });
 //
-// Six new queue subscriptions land here:
-//   - POLL_ACTIVE                       (scheduler-driven)   batchSize=4
-//   - POLL_COLD                         (scheduler-driven)   batchSize=1
-//   - POLL_USER                         (route-driven)       batchSize=2
-//   - YOUTUBE_CHANNEL_CONTEXT_BACKFILL  (paste-trigger)      batchSize=1
-//   - YOUTUBE_QUOTA_RESET               (cron-driven)        batchSize=1
-//   - PURGE_DAILY                       (cron-driven)        batchSize=1
+// Phase 03.0.1 Plan 05 — adapter-driven queue registration. Each per-source
+// adapter owns its own queues; bootstrap iterates the registry and calls
+// `adapter.registerQueues(boss)`. Adding Reddit (Phase 03.1) is a
+// single-line registry entry — no edit here.
 //
-// Plus two scheduler-tick subscriptions (Pattern A from plan 09):
-//   - SCHEDULER_TICK_ACTIVE             → calls enqueueActivePolls()
-//   - SCHEDULER_TICK_COLD               → calls enqueueColdPolls()
+// Phase 03.0.1 Plan 07 — the two scheduler.tick.* subscriptions are
+// RETIRED. Pre-Plan-07 (Pattern A from Phase 03.0 Plan 09) the cron sent
+// empty {} jobs to scheduler.tick.{active,cold} queues that the worker
+// drained by calling enqueueActivePolls / enqueueColdPolls (which then
+// enqueued real per-event poll.active / poll.cold jobs). Plan 07 collapses
+// that hop: the cron schedule sends tier-tagged jobs DIRECTLY to
+// youtube.poll.cron, the poll-cron handler reads job.data.tier and
+// dispatches inline. No more scheduler-tick → enqueue → real-job indirection.
 //
-// The scheduler.tick.* handlers live in this worker process intentionally:
-// pg-boss schedules send empty {} jobs to those queues; we want the
-// enqueue logic to run on the worker (not the scheduler) so the scheduler
-// stays a thin cron-fire loop and the worker carries all the DB-touching
-// logic. Self-host parity preserved — worker container handles both
-// "consume real jobs" and "tick-driven enqueue dispatch".
-//
-// Existing INTERNAL_HEALTHCHECK subscription preserved unchanged.
+// Cross-source / non-per-kind queues are subscribed directly in this file
+// because they apply regardless of source kind:
+//   - INTERNAL_HEALTHCHECK              (Phase 1)
+//   - PURGE_DAILY                       (cross-tenant FK-cascade purge)
 //
 // SIGTERM drain inherited from Phase 1 stopBoss (60s graceful) + pool.end.
 
@@ -35,25 +33,47 @@ import { createBoss, stopBoss } from "../lib/server/queue-client.js";
 import { pool } from "../lib/server/db/client.js";
 import { logger } from "../lib/server/logger.js";
 import { QUEUES } from "../lib/server/queues.js";
-import { scrubKekFromEnv } from "../lib/server/config/env.js";
+import { env, scrubKekFromEnv } from "../lib/server/config/env.js";
 
-import { handlePollActive } from "./handlers/poll-active.js";
-import { handlePollCold } from "./handlers/poll-cold.js";
-import { handlePollUser } from "./handlers/poll-user.js";
-import { handleChannelContextBackfill } from "./handlers/youtube-channel-context-backfill.js";
-import { handleQuotaReset } from "./handlers/youtube-quota-reset.js";
+import { allAdapters } from "../lib/sources/registry.js";
 import { handlePurgeDaily } from "./handlers/purge-daily.js";
-import { handleRehabUnavailable } from "./handlers/rehab-unavailable.js";
-import { enqueueActivePolls, enqueueColdPolls } from "../scheduler/enqueue.js";
 
 export async function startWorker(): Promise<void> {
+  // Phase 03.0.1 architecture cleanup — multi-replica safety guard.
+  //
+  // Adapters that use in-process rate-limit state (e.g., RateLimiterMemory
+  // reservoirs) declare it via observability.usesInProcessRateLimiter.
+  // With N>1 worker replicas, each replica holds independent budgets →
+  // N × envelope burn, quota overshoot in production. The assertion lists
+  // every offending adapter so the operator knows which ones need migration
+  // to a persistent backend (RateLimiterPostgres, DB-backed counter)
+  // before scaling replicas.
+  //
+  // Pre-Phase-03.0.1-post-review the assertion hardcoded YouTube; the
+  // generic loop here surfaces every adapter that ships in-process state.
+  if (env.WORKER_REPLICA_COUNT > 1) {
+    const offending = allAdapters
+      .filter((a) => a.observability.usesInProcessRateLimiter === true)
+      .map((a) => a.kind);
+    if (offending.length > 0) {
+      throw new Error(
+        `WORKER_REPLICA_COUNT=${env.WORKER_REPLICA_COUNT} but the following adapter(s) ` +
+          `use per-process rate-limit state: ${offending.join(", ")}. ` +
+          `Migrate each adapter's reservoir to a persistent backend ` +
+          `(RateLimiterPostgres or DB-backed counter) and flip ` +
+          `observability.usesInProcessRateLimiter to false before scaling worker replicas — ` +
+          `otherwise daily quota budgets burn N× the envelope.`,
+      );
+    }
+  }
+
   const boss = await createBoss();
   // P2 KEK scrub: worker has no bundled second copy of env.ts (no SvelteKit
   // handler.js import), so it's safe to scrub immediately after createBoss
   // resolves. See env.ts header for the rationale.
   scrubKekFromEnv();
 
-  // Phase 1 — preserved.
+  // Phase 1 — internal healthcheck (preserved).
   await boss.work(QUEUES.INTERNAL_HEALTHCHECK, async (jobs) => {
     for (const job of jobs) {
       logger.debug(
@@ -63,87 +83,49 @@ export async function startWorker(): Promise<void> {
     }
   });
 
-  // Phase 3.0 Plan 09 — subscriptions for the 6 phase queues.
-  // Pitfall A+B: pg-boss v10 array-handler shape (jobs is an array, not a
-  // single job). Each handler iterates and awaits per-job sequentially.
-  await boss.work(QUEUES.POLL_ACTIVE, { batchSize: 4 }, async (jobs) => {
-    for (const job of jobs) {
-      await handlePollActive(job as { id: string; data: { videoIds: string[] } });
-    }
-  });
-
-  await boss.work(QUEUES.POLL_COLD, { batchSize: 1 }, async (jobs) => {
-    for (const job of jobs) {
-      await handlePollCold(job as { id: string; data: { videoIds: string[] } });
-    }
-  });
-
-  await boss.work(QUEUES.POLL_USER, { batchSize: 2 }, async (jobs) => {
-    for (const job of jobs) {
-      await handlePollUser(job as { id: string; data: { eventId: string; userId: string } });
-    }
-  });
-
-  await boss.work(QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL, { batchSize: 1 }, async (jobs) => {
-    for (const job of jobs) {
-      await handleChannelContextBackfill(
-        job as {
-          id: string;
-          data: {
-            userId: string;
-            channelId?: string;
-            handleUrl?: string;
-            sourceId?: string;
-            backfillWindow?: "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
-          };
-        },
+  // Phase 03.0.1 architecture cleanup — adapter-owned runtime-state reconcile.
+  // Each adapter that maintains in-process state (e.g., RateLimiterMemory
+  // reservoirs that lose state on worker restart) declares
+  // `reconcileRuntimeState` to sync against persistent counters BEFORE jobs
+  // start dispatching. Adapters with only persistent state (DB-backed
+  // counters, RateLimiterPostgres) omit the hook. Best-effort: errors are
+  // logged-and-continued; a failed reconcile does NOT block worker boot.
+  for (const adapter of allAdapters) {
+    if (!adapter.reconcileRuntimeState) continue;
+    try {
+      await adapter.reconcileRuntimeState();
+    } catch (err) {
+      logger.warn(
+        { err, adapter: adapter.kind },
+        "adapter runtime-state reconcile threw — continuing",
       );
     }
-  });
+  }
 
-  await boss.work(QUEUES.YOUTUBE_QUOTA_RESET, { batchSize: 1 }, async (jobs) => {
-    for (const job of jobs) {
-      await handleQuotaReset(job as { id: string; data: object });
-    }
-  });
+  // Phase 03.0.1 Plan 05 — per-source adapters register their own queues.
+  // Each adapter calls boss.createQueue + boss.work for the queues it
+  // owns; the worker process sees them all because we iterate the
+  // registry. Order is registration order from registry.ts (currently
+  // just youtube; Reddit / Twitter / Telegram / Discord queue here in
+  // Phase 03.1+).
+  for (const adapter of allAdapters) {
+    await adapter.registerQueues(boss);
+  }
 
+  // Cross-source / non-per-kind queues — subscribed directly because
+  // they apply regardless of source kind.
+  await boss.createQueue(QUEUES.PURGE_DAILY);
   await boss.work(QUEUES.PURGE_DAILY, { batchSize: 1 }, async (jobs) => {
     for (const job of jobs) {
       await handlePurgeDaily(job as { id: string; data: object });
     }
   });
 
-  // Phase 3.0 post-build refactor (2026-05-06) — weekly rehab cron.
-  // Recovers videos that came back from private/unavailable. See handler
-  // for the failure-count cap rationale.
-  await boss.work(QUEUES.YOUTUBE_REHAB_UNAVAILABLE, { batchSize: 1 }, async (jobs) => {
-    for (const job of jobs) {
-      await handleRehabUnavailable(job as { id: string });
-    }
-  });
-
-  // Scheduler-tick subscriptions (Pattern A — plan 09 recommendation).
-  // The scheduler boots the cron schedules; we boot the consumers. Each
-  // tick triggers the corresponding enqueue function, which then sends
-  // real per-event jobs to POLL_ACTIVE / POLL_COLD.
-  await boss.work(QUEUES.SCHEDULER_TICK_ACTIVE, { batchSize: 1 }, async (jobs) => {
-    for (const _job of jobs) {
-      try {
-        await enqueueActivePolls();
-      } catch (err) {
-        logger.error({ err }, "scheduler.tick.active: enqueueActivePolls threw");
-      }
-    }
-  });
-  await boss.work(QUEUES.SCHEDULER_TICK_COLD, { batchSize: 1 }, async (jobs) => {
-    for (const _job of jobs) {
-      try {
-        await enqueueColdPolls();
-      } catch (err) {
-        logger.error({ err }, "scheduler.tick.cold: enqueueColdPolls threw");
-      }
-    }
-  });
+  // Phase 03.0.1 Plan 07 — scheduler.tick.* subscriptions RETIRED.
+  // The cron schedule (registered in src/scheduler/index.ts via each
+  // adapter.scheduleCronTicks) now sends tier-tagged jobs directly to
+  // youtube.poll.cron; the poll-cron handler dispatches by tier. The
+  // intermediate scheduler-tick → enqueue → per-event-job hop is gone.
 
   // D-15 smoke assertion #2 — exact string `worker ready` on stdout.
   logger.info({ role: "worker" }, "worker ready");

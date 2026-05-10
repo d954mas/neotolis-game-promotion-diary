@@ -18,34 +18,32 @@
 //   pitfall-7 convention.
 //
 // Threshold derivation:
-//   pctOfDaily = estimatedUnits / 10_000 * 100, rounded to 1 decimal.
-//   status:
-//     'ok'           when estimatedUnits <  THROTTLE_EIGHTY_THRESHOLD     (8000)
-//     '80_throttle'  when 8000 <= estimatedUnits < 9500
-//     '95_throttle'  when estimatedUnits >= THROTTLE_NINETYFIVE_THRESHOLD  (9500)
-//   The threshold constants live alongside the function that consumes them
-//   (Plan 03 — youtube-quota-tracker.ts). Re-import here so the magic literals
-//   exist in only one place.
+//   pctOfDaily = estimatedUnits / dailyLimit * 100, rounded to 1 decimal.
+//   status: derived from per-key `throttleState` returned by the adapter's
+//     observability surface (`getDailyStats(now).keys[].throttleState`):
+//       'ok'                    → status 'ok'
+//       'eighty'                → status '80_throttle'
+//       'ninetyfive'            → status '95_throttle'
+//   Per-platform threshold values are an adapter-internal concern — Phase 03.0.1
+//   moved them out of the cross-source admin-read surface so Reddit / Twitter
+//   adapters can use their own (e.g. rolling-window) thresholds without
+//   touching this loader.
 
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { youtubeServiceQuotaUsage } from "../db/schema/youtube-service-quota-usage.js";
 import { auditLog } from "../db/schema/audit-log.js";
 import type { AuditAction } from "../audit/actions.js";
-import {
-  THROTTLE_EIGHTY_THRESHOLD,
-  THROTTLE_NINETYFIVE_THRESHOLD,
-  todayPacific,
-} from "./youtube-quota-tracker.js";
+import { todayPacific } from "./quota.js";
+import { getAdapter } from "$lib/sources/registry.js";
 
 export interface QuotaKeyRow {
   /** sha-8 hash of the operator's API key — stable identifier across boots. */
   apiKeyId: string;
-  /** Estimated YouTube quota units consumed by this key today (Pacific). */
+  /** Estimated quota units consumed by this key today (Pacific). */
   estimatedUnits: number;
-  /** estimatedUnits / 10_000 * 100, rounded to 1 decimal. */
+  /** estimatedUnits / dailyLimit * 100, rounded to 1 decimal. */
   pctOfDaily: number;
-  /** UI status pill — driven by the same THROTTLE_*_THRESHOLD as the scheduler. */
+  /** UI status pill — translated from adapter's per-key throttleState. */
   status: "ok" | "80_throttle" | "95_throttle";
 }
 
@@ -78,15 +76,41 @@ export async function loadAdminQuotaPage(): Promise<{
   audit: ServiceAuditEntry[];
 }> {
   const today = todayPacific();
+  const now = new Date();
 
-  // Per-key usage rows for today only. youtube_service_quota_usage is in
-  // ESLint's allowlist (operator-side, no tenant scope) — no inline disable
-  // required.
-  const usageRows = await db
-    .select()
-    .from(youtubeServiceQuotaUsage)
-    .where(eq(youtubeServiceQuotaUsage.datePacific, today));
+  // Phase 03.0.1 Plan 08 (D-08) — kind-decoupled key read via the adapter's
+  // observability surface. Pre-Plan-08 this loader queried
+  // youtube_service_quota_usage directly; Plan 08 routes through
+  // getAdapter("youtube_channel").observability.quota.getDailyStats so the
+  // /admin/quota page is decoupled from YouTube-specific schema. Adding
+  // Reddit / Twitter etc. in Phase 03.1+ extends this loader by iterating
+  // adapters that surface observability, not by editing kind-specific reads.
+  //
+  // The `keys` projection still uses the existing { apiKeyId,
+  // estimatedUnits, pctOfDaily (0-100 percent), status } shape for backward
+  // compatibility with the /admin route + UI; the observability stats
+  // surface returns a richer shape (unitsUsed total / dailyLimit / pct
+  // fraction / throttleState) that we adapt at projection time. The
+  // existing tests/integration/admin-quota.test.ts assertions hold.
+  const stats = await getAdapter("youtube_channel").observability.quota.getDailyStats(now);
 
+  // Per-key projection — convert observability stats.keys[] to QuotaKeyRow[].
+  // The keys array carries one entry per apiKeyId with today's estimatedUnits
+  // AND a throttleState classification computed by the adapter (Phase 03.0.1).
+  // Cross-source admin-read no longer hardcodes thresholds — it trusts the
+  // adapter's per-key state.
+  const keyRows: QuotaKeyRow[] = (stats.keys ?? []).map((k) =>
+    toQuotaKeyRowFromObservability(k.apiKeyId, k.unitsUsed, k.throttleState, stats.dailyLimit),
+  );
+
+  // Audit aggregation is intentionally CROSS-SOURCE — it surfaces
+  // purge.completed / auto_import.deferred / poll.failed (cross-cutting
+  // verbs not owned by any single adapter) alongside quota.service_throttled
+  // (YouTube-specific). The adapter's observability.quota.getRecentAudit
+  // only carries YouTube-specific verbs by D-08 contract; aggregating
+  // here keeps the operator's "what crossed our system today" pane
+  // complete. The eslint-disable below is the same security justification
+  // as pre-Plan-08 — admin allowlist is the gate, not row-level userId.
   // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- /admin/quota is allowlist-gated; cross-tenant audit aggregation is the intended operator view (CONTEXT D-16 / DV-3 / Open Question 4 in 03.0-RESEARCH.md). Adding a userId filter here would defeat the operator's signal pane (purges, quota transitions, adapter deferrals all live across tenants).
   const auditRows = await db
     .select()
@@ -97,30 +121,43 @@ export async function loadAdminQuotaPage(): Promise<{
 
   return {
     today,
-    keys: usageRows.map(toQuotaKeyRow),
+    keys: keyRows,
     audit: auditRows.map(toServiceAuditEntry),
   };
 }
 
 /**
- * DTO projection for `youtube_service_quota_usage` rows surfaced on
- * /admin/quota. Computes pctOfDaily + status using the SAME thresholds the
- * scheduler uses (single source of truth — youtube-quota-tracker.ts exports).
+ * Convert an observability key entry { apiKeyId, unitsUsed, throttleState }
+ * to the legacy QuotaKeyRow shape (pctOfDaily as 0-100 percent + status pill).
+ *
+ * Phase 03.0.1 — `throttleState` is computed by the adapter (per-platform
+ * thresholds). This function only translates between observability shape
+ * (`'ok' | 'eighty' | 'ninetyfive'`) and admin wire-format (`'ok' |
+ * '80_throttle' | '95_throttle'`); it no longer recomputes thresholds.
+ *
+ * `dailyLimit` is the per-platform single-key budget used for the percent
+ * denominator (YouTube = 10000). Falling back to 10000 keeps the legacy wire
+ * format stable for the existing test + UI assertions.
  */
-export function toQuotaKeyRow(row: typeof youtubeServiceQuotaUsage.$inferSelect): QuotaKeyRow {
-  const u = row.estimatedUnits;
+function toQuotaKeyRowFromObservability(
+  apiKeyId: string,
+  unitsUsed: number,
+  throttleState: "ok" | "eighty" | "ninetyfive",
+  dailyLimit: number,
+): QuotaKeyRow {
   // 1 decimal — multiply by 1000, round, divide by 10. Float-safe at quota
   // scale (worst case: 99_999 / 10_000 * 100 = 999.99 → rounded 1000.0).
-  const pct = Math.round((u / 10_000) * 1000) / 10;
+  const denom = dailyLimit > 0 ? dailyLimit : 10_000;
+  const pct = Math.round((unitsUsed / denom) * 1000) / 10;
   const status: QuotaKeyRow["status"] =
-    u >= THROTTLE_NINETYFIVE_THRESHOLD
+    throttleState === "ninetyfive"
       ? "95_throttle"
-      : u >= THROTTLE_EIGHTY_THRESHOLD
+      : throttleState === "eighty"
         ? "80_throttle"
         : "ok";
   return {
-    apiKeyId: row.apiKeyId,
-    estimatedUnits: u,
+    apiKeyId,
+    estimatedUnits: unitsUsed,
     pctOfDaily: pct,
     status,
   };

@@ -109,6 +109,12 @@ export default [
       "src/lib/server/services/**/*.ts",
       "src/lib/server/services/**/*.tsx",
       "src/lib/server/http/**/*.ts",
+      // Phase 03.0.1 Plan 04: per-source server folders execute the same
+      // tenant-scope discipline as services/. Without this glob, code moved
+      // from services/youtube-* into sources/youtube/server/ would lose its
+      // lint-time guard (and existing eslint-disable-next-line directives
+      // would error with "rule definition not found").
+      "src/lib/sources/**/server/**/*.ts",
       "src/worker/**/*.ts",
       "src/scheduler/**/*.ts",
       "src/routes/**/+page.server.ts",

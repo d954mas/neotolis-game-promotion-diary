@@ -1,53 +1,56 @@
 // pg-boss client factory shared by the worker and scheduler role entrypoints.
 //
-// CLAUDE.md locks pg-boss at 10.1.10 for Phase 1 (RESEARCH.md drift table —
-// 12.x is current upstream; we are explicitly NOT chasing that for the MVP).
+// pg-boss is pinned at 12.x (load-bearing dep, dedicated PR per AGENTS.md
+// "Locked stack versions"). v12 is ESM-native — note the named import below.
 //
-// pg-boss 10.x API notes (cross-checked against RESEARCH.md):
+// pg-boss 12.x API notes:
 //   - We pass `connectionString` and let pg-boss manage its own internal pool.
-//     Sharing a `pg.Pool` with Drizzle is supported in newer versions but is
-//     fragile in 10.x and the explicit reason RESEARCH.md gave for "pg-boss on
-//     its own pool" — keeps queue traffic from contending with app/audit traffic
-//     for connections.
+//     Sharing a `pg.Pool` with Drizzle is supported but we keep them separate
+//     so queue traffic does not contend with app/audit traffic for connections.
 //   - `createQueue(name)` is idempotent and MUST be called for every queue
-//     before send/work in v10+ (this is the v9→v10 breaking change). The
-//     Phase-1-specific pitfall mitigation: declare every queue from
-//     `src/lib/server/queues.ts` on every boot via `declareAllQueues(boss)`.
+//     before send/work (v10+ requirement, unchanged in 12.x). Mitigation:
+//     declare every queue from `src/lib/server/queues.ts` on every boot via
+//     `declareAllQueues(boss)`.
 //   - `boss.stop({ wait, graceful, timeout })` is the documented graceful
-//     drain in 10.x — completes in-flight handlers up to the timeout, then
-//     hard-stops. We pair it with `pool.end()` in the role entrypoints so
-//     both pg-boss' own pool AND Drizzle's app pool drain on SIGTERM.
+//     drain — completes in-flight handlers up to the timeout, then hard-stops.
+//     We pair it with `pool.end()` in role entrypoints so both pg-boss' own
+//     pool AND Drizzle's app pool drain on SIGTERM.
+//   - v11 removed archive tables (`archiveCompletedAfterSeconds` is gone);
+//     completed jobs stay in the job table until `deleteAfterSeconds` (default
+//     7 days) elapses. v11 also unified time options under `*Seconds` —
+//     `retentionDays` / `retentionHours` / `retentionMinutes` are gone.
+//   - v12 dropped the default export — `import { PgBoss } from "pg-boss"`.
 
-import PgBoss from "pg-boss";
+import { PgBoss } from "pg-boss";
 import { env } from "./config/env.js";
 import { logger } from "./logger.js";
 import { declareAllQueues } from "./queues.js";
 
 /**
- * Create + start a pg-boss instance with all Phase 1 queues declared.
+ * Create + start a pg-boss instance with all queues declared.
  *
- * Conservative defaults; Phase 3 (POLL-01..06) will tune `max`, retention,
- * and per-queue concurrency once real polling workloads exist.
+ *   - max: 4                    → small pool; pg-boss internal connections only
+ *   - retentionSeconds: 2_592_000 → keep job history 30 days for incident debugging
  *
- *   - max: 4              → small pool; pg-boss internal connections only
- *   - retentionDays: 30   → keep job history a month for incident debugging
- *   - archiveCompletedAfterSeconds: 3600 → archive completed jobs hourly so
- *                            the active jobs table stays small
+ * v12 default `deleteAfterSeconds` (7 days) governs when completed jobs are
+ * removed from the job table — leaving it implicit unless a queue needs
+ * different retention.
  *
- * Open Question Q1 (RESEARCH.md, MEDIUM confidence) is implemented here:
- * declare all four poll queues + `internal.healthcheck` from Phase 1 even
- * though Phase 1 runs no jobs. That locks the topology so Phase 3's worker
- * lands without re-litigating queue boundaries.
+ * All queue names live in `src/lib/server/queues.ts` and are declared at boot
+ * via `declareAllQueues(boss)` (createQueue is idempotent in v10+).
  */
 export async function createBoss(): Promise<PgBoss> {
   const boss = new PgBoss({
     connectionString: env.DATABASE_URL,
     max: 4,
-    retentionDays: 30,
-    archiveCompletedAfterSeconds: 3600,
     // pg-boss creates its own schema (default: 'pgboss') and runs its
     // internal migrations on .start(). Distinct from app migrations
     // (Plan 03's runMigrations()), which target the public schema.
+    //
+    // Retention is per-queue in v12 (`QueueOptions.retentionSeconds`).
+    // We rely on v12's defaults: 14d retention for queued/retry jobs,
+    // 7d delete-after-completed. Tune per-queue in queues.ts if a
+    // specific queue needs different behaviour.
   });
 
   boss.on("error", (err) => {
@@ -69,16 +72,19 @@ export async function createBoss(): Promise<PgBoss> {
  * in CONTEXT.md; surfaces Phase 3's POLL-06 requirement that no in-flight
  * poll is lost on redeploy).
  *
- * pg-boss 10.x API: `stop({ wait, graceful, timeout })`.
- *   - wait: true     → resolve only after the boss is fully stopped
  *   - graceful: true → completes in-flight job handlers
  *   - timeout: 60_000 → hard-stop ceiling so a wedged handler cannot hang the
  *                       container indefinitely; orchestrators (Docker, k8s)
  *                       expect SIGTERM→exit within their own grace period.
+ *
+ * v12 removed the `wait` option from StopOptions — `boss.stop()` now always
+ * resolves only after the boss is fully stopped (the previous `wait: true`
+ * behaviour is the only behaviour). `close` defaults to true and tears down
+ * pg-boss's internal pool.
  */
 export async function stopBoss(boss: PgBoss): Promise<void> {
   logger.info("pg-boss draining");
-  await boss.stop({ wait: true, graceful: true, timeout: 60_000 });
+  await boss.stop({ graceful: true, timeout: 60_000 });
   logger.info("pg-boss stopped");
 }
 

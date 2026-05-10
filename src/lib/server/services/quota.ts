@@ -42,11 +42,25 @@ import { db, type DbOrTx, type Tx } from "../db/client.js";
 import { games } from "../db/schema/games.js";
 import { dataSources } from "../db/schema/data-sources.js";
 import { events } from "../db/schema/events.js";
-import { youtubeMetadataFetchLog } from "../db/schema/youtube-metadata-fetch-log.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError } from "./errors.js";
+import { allAdapters } from "$lib/sources/registry.js";
+import { pacificDayStart, nextPacificMidnight, todayPacific } from "../dates.js";
 
+export { pacificDayStart, nextPacificMidnight, todayPacific };
+
+/**
+ * Phase 03.0.1 architecture cleanup — adapter-driven quota counters.
+ *
+ * Cross-source quotas (games, data_sources, events_per_day) live here as
+ * the abuse-quota authority of record. Per-source counters
+ * (youtube_metadata_fetches_per_day, reddit_metadata_fetches_per_day in
+ * Phase 03.1, etc.) are declared by each adapter via
+ * `observability.quotaCounters[]` and looked up via
+ * `findAdapterCounter(kind)`. Adding a new per-source counter means
+ * declaring it on the adapter — quota.ts code stays unchanged.
+ */
 export type QuotaKind =
   | "games"
   | "data_sources"
@@ -62,8 +76,22 @@ const LIMITS: Record<QuotaKind, number> = {
   // burn-loop a scripted-loop caller could otherwise exploit on the
   // /api/youtube/fetch-metadata route. 50/day is the same indie-friendly
   // shape as games / data_sources caps; cache hits don't count.
+  // The COUNT logic for this kind lives in the youtube adapter's
+  // observability.quotaCounters; this LIMITS entry just declares the cap.
   youtube_metadata_fetches_per_day: env.LIMIT_YOUTUBE_METADATA_FETCHES_PER_DAY,
 };
+
+function findAdapterCounter(kind: string): {
+  count(dbCtx: DbOrTx, userId: string, since: Date): Promise<number>;
+} | null {
+  for (const adapter of allAdapters) {
+    const counters = adapter.observability.quotaCounters ?? [];
+    for (const counter of counters) {
+      if (counter.kind === kind) return counter;
+    }
+  }
+  return null;
+}
 
 async function currentCount(dbCtx: DbOrTx, userId: string, kind: QuotaKind): Promise<number> {
   if (kind === "games") {
@@ -80,20 +108,15 @@ async function currentCount(dbCtx: DbOrTx, userId: string, kind: QuotaKind): Pro
       .where(and(eq(dataSources.userId, userId), isNull(dataSources.deletedAt)));
     return Number(r?.c ?? 0);
   }
-  if (kind === "youtube_metadata_fetches_per_day") {
-    // Rolling 24h count of cache-miss "Get from YouTube" button clicks.
-    // Cache hits never insert here, so they don't count.
-    const sinceMfl = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const [r] = await dbCtx
-      .select({ c: count() })
-      .from(youtubeMetadataFetchLog)
-      .where(
-        and(
-          eq(youtubeMetadataFetchLog.userId, userId),
-          gte(youtubeMetadataFetchLog.fetchedAt, sinceMfl),
-        ),
-      );
-    return Number(r?.c ?? 0);
+  // Phase 03.0.1 architecture cleanup — per-source counters live on the
+  // adapter (e.g. youtube_metadata_fetches_per_day → youtube adapter's
+  // observability.quotaCounters). Cross-source code never knows the table.
+  // Adding Reddit's metadata-fetches counter in Phase 03.1 = declare it on
+  // the Reddit adapter; this iteration finds it without a quota.ts edit.
+  const adapterCounter = findAdapterCounter(kind);
+  if (adapterCounter !== null) {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    return adapterCounter.count(dbCtx, userId, since);
   }
   // events_per_day — rolling 24h count.
   //
@@ -179,4 +202,135 @@ export async function withQuotaGuard<T>(
       });
     }
   }
+}
+
+// ───── Phase 03.0.1 — per-user fair-share cap window helpers ─────
+// Per-user cap on operator's API budget (separate from cross-source
+// `events_per_day` cap which targets manual creates). Sources of truth:
+//   - Cap declaration:   adapter.observability.userQuotaCap (each platform).
+//   - Counter source:    audit_log SUM (metadata.requests_used /
+//                        metadata.events_inserted).
+//   - Window:            Pacific calendar day (sync с operator's reservoir
+//                        reset cycle in chargedFetch — Plan 08).
+//   - Capped kinds:      'incremental' | 'historical' | 'stats_refresh'.
+//   - Excluded kinds:    'initial' (onboarding UX), 'auto_passive' (cron pool).
+//
+// SOFT FAIRNESS CAP — not security-grade strict.
+//   The cap-check pattern (read counter → compare → write audit) is NOT
+//   atomic. Two concurrent requests from the same user at 99/100 can both
+//   pass the gate before either writes its audit row. Result: user briefly
+//   reaches 101/100 — overshoot of 1-2 requests per Pacific day under
+//   contention.
+//
+//   Why we accept this: the cap is a FAIRNESS signal protecting shared
+//   operator budget from one user monopolizing it, not a compliance ceiling.
+//   1-2 request overshoot is irrelevant at indie scale. A strict atomic
+//   check would require pg_advisory_xact_lock(hashtext(userId)) on every
+//   refresh-content / refresh-poll click — cost-prohibitive for the
+//   security improvement gained.
+//
+//   For genuinely strict caps (events_per_day on manual creates) we DO
+//   use advisory locks via withQuotaGuard above. These per-source caps
+//   rate-limit upstream API consumption, which is intrinsically soft.
+//
+// All exported as helpers consumed by:
+//   - Endpoint cap checks (refresh-content + refresh-poll) — pre-enqueue gate.
+//   - Banner UI loaders — quota status display.
+
+/**
+ * Returns the absolute UTC instant at which the current Pacific calendar day
+ * began (00:00 PT today). Used as the cap window's lower bound.
+ *
+ * DST-aware: uses Intl.DateTimeFormat with timezone offset to compute. Spring-
+ * forward / fall-back days are handled implicitly because the calculation
+ * always derives "00:00 in PT" → UTC, never +24h arithmetic.
+ */
+/**
+ * Per-user cap counter: SUM of audit metadata.requests_used + events_inserted
+ * for the current Pacific calendar day, scoped to user-initiated capped flows.
+ *
+ * Capped flows (counted in user fair-share cap):
+ *   - 'initial' — onboarding channel-context-backfill. The user explicitly
+ *     added the source; the API call burned operator budget under their
+ *     identity; it MUST count or the cap counter lies. Pre-fix this was
+ *     excluded «for UX» (don't thrash on cap during onboarding) but that's
+ *     wrong reasoning: it created a discrepancy between Today (excluded)
+ *     and Lifetime (included), confusing users about real consumption.
+ *   - 'incremental' — refresh-content button (default catch-up).
+ *   - 'historical' — refresh-content with explicit older boundary.
+ *   - 'stats_refresh' — refresh-poll endpoint (Refresh now button).
+ *
+ * Excluded flows (use the cron pool, not user pool):
+ *   - 'auto_passive' — daily auto-backfill cron pick. Cron-driven, runs
+ *     against operator's cron reservoir; per-user cap is irrelevant.
+ *
+ * Filters by `metadata.platform` when supplied — Phase 03.1+ multi-platform
+ * separates Reddit cap from YouTube cap. When omitted (or undefined), counts
+ * across all platforms (used by lifetime stats).
+ */
+export async function getUserQuotaUsedToday(
+  userId: string,
+  platform?: string,
+): Promise<{ requests: number; events: number }> {
+  const since = pacificDayStart();
+  // Phase 03.0.1 (post-review) — `platform` field carries source-kind
+  // explicitly. Pre-fix the query filtered on `metadata->>'kind'`, but
+  // `kind` carries different semantics across audit verbs (event.poll_refreshed
+  // wrote event-kind = 'youtube_video' while the cap query passed
+  // source-kind = 'youtube_channel' — never matched, leaked stats_refresh
+  // counts entirely). `platform` is a dedicated field across ALL capped-flow
+  // writers — see audit.ts AuditMetadata.platform jsdoc.
+  const platformFilter = platform ? sql`AND metadata->>'platform' = ${platform}` : sql``;
+  const result = await db.execute(sql`
+    SELECT
+      COALESCE(SUM((metadata->>'requests_used')::int), 0)::bigint AS requests,
+      COALESCE(SUM((metadata->>'events_inserted')::int), 0)::bigint AS events
+    FROM audit_log
+    WHERE user_id = ${userId}
+      AND action IN ('source.refresh_content_requested', 'event.poll_refreshed')
+      AND metadata->>'flow' IN ('initial', 'incremental', 'historical', 'stats_refresh')
+      AND created_at >= ${since.toISOString()}::timestamptz
+      ${platformFilter}
+  `);
+  const row = result.rows[0] as { requests: string | number; events: string | number } | undefined;
+  return {
+    requests: Number(row?.requests ?? 0),
+    events: Number(row?.events ?? 0),
+  };
+}
+
+/**
+ * Per-user lifetime usage — SUM since the user's signup (no time filter).
+ * Includes ALL flows (initial + incremental + historical + stats_refresh +
+ * auto_passive) so banner footer shows true lifetime consumption.
+ *
+ * Performance: indexed via (user_id, created_at desc). For users with
+ * thousands of audit rows still <50ms — no caching needed at current scale.
+ */
+export async function getUserQuotaLifetime(
+  userId: string,
+  platform?: string,
+): Promise<{ requests: number; events: number }> {
+  // Phase 03.0.1 (post-review) — filter on `metadata->>'platform'` for the
+  // same reason as getUserQuotaUsedToday above. Pre-fix this query
+  // filtered on `kind` while writers populated the dedicated `platform`
+  // field, so the per-platform lifetime banner under-reported (showed 0
+  // even when today's counter was non-zero — same writer rows, two
+  // different filters).
+  const platformFilter = platform ? sql`AND metadata->>'platform' = ${platform}` : sql``;
+  const result = await db.execute(sql`
+    SELECT
+      COALESCE(SUM((metadata->>'requests_used')::int), 0)::bigint AS requests,
+      COALESCE(SUM((metadata->>'events_inserted')::int), 0)::bigint AS events
+    FROM audit_log
+    WHERE user_id = ${userId}
+      AND action IN ('source.refresh_content_requested', 'event.poll_refreshed')
+      AND metadata->>'flow' IN ('initial', 'incremental', 'historical', 'stats_refresh', 'auto_passive')
+      ${platformFilter}
+  `);
+  const row = result.rows[0] as { requests: string | number; events: string | number } | undefined;
+  return {
+    requests: Number(row?.requests ?? 0),
+    events: Number(row?.events ?? 0),
+  };
 }

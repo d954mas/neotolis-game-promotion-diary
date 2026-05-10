@@ -31,20 +31,18 @@
 // `softDeleteSource` writes `source.removed` BEFORE the soft-delete UPDATE
 // so the security signal lands even if the UPDATE later fails.
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, count } from "drizzle-orm";
 import { db, type Tx } from "../db/client.js";
 import { dataSources } from "../db/schema/data-sources.js";
-import type { SourceKind } from "../integrations/data-source-adapter.js";
+import type { SourceKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { withQuotaGuard } from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
-import { getBoss } from "../queue-client.js";
-import { QUEUES } from "../queues.js";
-import { logger } from "../logger.js";
-import { parseYoutubeChannelUrl, fetchVideoMetadataByUrl } from "./youtube-metadata.js";
-import { youtubeChannels } from "../db/schema/youtube-channels.js";
+import { getAdapter } from "$lib/sources/registry.js";
+import { youtubeChannels } from "../db/schema/index.js";
+import { ensureChannelState } from "./channel-state.js";
 
 // Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — initial-backfill window
 // presets accepted by createSource for kind=youtube_channel + autoImport.
@@ -102,6 +100,12 @@ export interface UpdateSourcePatch {
   autoImport?: boolean;
   isOwnedByMe?: boolean;
   metadata?: Record<string, unknown>;
+  /** Phase 03.0.1 — change earliest-event boundary user wants pulled.
+   *  Worker uses this as `since` для historical catch-up; UI date picker
+   *  + preset radios send absolute Date here. Sentinel 1970-01-01 = "all
+   *  history". Server validates: no future dates, не past current frontier
+   *  (already covered case yields no-op 202 reason='already_covered'). */
+  backfillTargetSince?: Date;
 }
 
 const HANDLE_URL_MIN = 1;
@@ -224,6 +228,35 @@ export async function assertNoChannelConflict(
  *
  * Audit: writes `source.added` with metadata `{source_id, kind, handle_url}`.
  */
+/**
+ * Phase 03.0.1 (post-review P1/P2 #3) — convert UI preset to absolute date
+ * for backfill_target_since column. Mirrors migration 0024's mapping for
+ * existing rows so onboarding flow + legacy data agree on semantics.
+ *
+ * Sentinel '1970-01-01' is the migration-era «everything» mapping; new
+ * createSource calls produce it for the 'everything' preset. Defensive
+ * route validation (sources.ts) rejects user-pasted dates older than
+ * 2005 to prevent the sentinel being indistinguishable from legitimate
+ * input.
+ */
+function backfillWindowToDate(window: BackfillWindow): Date {
+  const now = Date.now();
+  switch (window) {
+    case "1d":
+      return new Date(now - 86_400_000);
+    case "7d":
+      return new Date(now - 7 * 86_400_000);
+    case "30d":
+      return new Date(now - 30 * 86_400_000);
+    case "90d":
+      return new Date(now - 90 * 86_400_000);
+    case "1y":
+      return new Date(now - 365 * 86_400_000);
+    case "everything":
+      return new Date("1970-01-01T00:00:00Z");
+  }
+}
+
 export async function createSource(
   userId: string,
   input: CreateSourceInput,
@@ -241,51 +274,73 @@ export async function createSource(
     );
   }
 
+  // Phase 03.0.1 Wave 4 (post-review P1) — cheap pre-checks BEFORE
+  // canonicalize. Pre-fix the adapter's canonicalizeOnCreate (which can
+  // call YouTube's videos.list for /watch?v= URLs) ran first, so a user
+  // hitting the source quota cap or pasting an exact-duplicate handle
+  // URL still burned operator-pool quota before the eventual rejection.
+  //
+  // Two cheap SELECTs catch the common cases:
+  //   1. Source-count cap: count user's active data_sources rows; if at
+  //      or above LIMIT_SOURCES_PER_USER, throw 429 quota_exceeded
+  //      (audit emitted by withQuotaGuard's same check below — this is
+  //      the optimistic skip).
+  //   2. Exact handle_url duplicate: SELECT by user_id + handle_url
+  //      catches "user pasted the same URL twice" without canonicalize.
+  //      Canonicalize-discovered duplicates ("two different /watch URLs
+  //      → same channel") still need the post-canonicalize path.
+  //
+  // The withQuotaGuard's atomic check is preserved as the race-safe
+  // source of truth — these pre-checks just dodge the YouTube API call
+  // for already-rejectable inputs.
+  const sourceLimit = env.LIMIT_SOURCES_PER_USER;
+  const [countRow] = await db
+    .select({ c: count() })
+    .from(dataSources)
+    .where(and(eq(dataSources.userId, userId), isNull(dataSources.deletedAt)));
+  const currentCount = Number(countRow?.c ?? 0);
+  if (currentCount >= sourceLimit) {
+    throw new AppError(
+      `data_sources quota exceeded: ${currentCount}/${sourceLimit}`,
+      "quota_exceeded",
+      429,
+      { kind: "data_sources", limit: sourceLimit, current: currentCount },
+    );
+  }
+  const [existingDup] = await db
+    .select({ id: dataSources.id })
+    .from(dataSources)
+    .where(
+      and(
+        eq(dataSources.userId, userId),
+        eq(dataSources.handleUrl, input.handleUrl),
+        isNull(dataSources.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (existingDup) {
+    throw new AppError("You already track this YouTube channel", "duplicate_source", 422, {
+      handle_url: input.handleUrl,
+    });
+  }
+
   // Phase 3.0 post-build (UAT 2026-05-06): canonicalize the handle_url
-  // for kind=youtube_channel sources BEFORE insert. Operators routinely
-  // paste any YouTube URL (watch?v=…, /shorts/ID, youtu.be/ID, /@handle,
-  // /channel/UC…). Resolving every variant to the canonical channel URL
-  // (and pre-setting channel_id) means:
-  //   - The (user_id, handle_url) unique catches duplicates on the second
-  //     paste of the same channel via a different video URL.
-  //   - The worker takes the fast path on backfill (no resolve step, no
-  //     extra quota unit).
-  // Cache-first via fetchVideoMetadataByUrl so a re-paste of a known video
-  // is zero quota.
+  // for kind=youtube_channel sources BEFORE insert. Adapter-driven —
+  // the per-source URL canonicalization (parse handle URL, dereference
+  // video URL → channelId via videos.list, leave legacy /@handle / /c/
+  // URLs to be resolved on first worker backfill). Phase 03.1 Reddit
+  // implements canonicalizeOnCreate to resolve /user/ URLs to user_id;
+  // this code stays unchanged.
   let canonicalHandleUrl = input.handleUrl;
   let resolvedChannelId = input.channelId ?? null;
-  if (input.kind === "youtube_channel" && resolvedChannelId === null) {
-    const parsed = parseYoutubeChannelUrl(input.handleUrl);
-    // Phase 3.0 post-build (UAT 2026-05-06): reject URLs that don't point
-    // at a YouTube channel / handle / video. Operator pasted naked
-    // youtube.com/ and localhost:5173/feed and got ghost rows with
-    // channel_id=NULL — better to fail visibly so the user fixes the URL.
-    if (parsed === null) {
-      throw new AppError(
-        "Paste a YouTube channel URL (e.g. https://www.youtube.com/@handle or /channel/UC… or any video URL).",
-        "validation_failed",
-        422,
-        { handle_url: input.handleUrl },
-      );
-    }
-    if (parsed.kind === "channelId") {
-      resolvedChannelId = parsed.value;
-      canonicalHandleUrl = `https://www.youtube.com/channel/${parsed.value}`;
-    } else if (parsed?.kind === "videoId") {
-      // Phase 3.0 post-build (UAT 2026-05-06): let fetch failures propagate
-      // (404 video not found, 502 upstream, 503 missing keys). Earlier draft
-      // swallowed errors and created a source with channelId=NULL — UX bug:
-      // user pasted a truncated/typo'd URL and got a "ghost" source that
-      // could never poll. Better to fail visibly so the user fixes the URL.
-      const meta = await fetchVideoMetadataByUrl(input.handleUrl, userId, ipAddress);
-      if (meta.channelId) {
-        resolvedChannelId = meta.channelId;
-        canonicalHandleUrl = `https://www.youtube.com/channel/${meta.channelId}`;
-      }
-    }
-    // /@handle and /c/, /user/ legacy URLs: leave as-is for now. Worker
-    // will resolve on first backfill (1 quota unit) and persist the
-    // resolved channel_id back to data_sources.
+  const adapter = getAdapter(input.kind);
+  if (adapter.canonicalizeOnCreate !== undefined) {
+    const result = await adapter.canonicalizeOnCreate(
+      { handleUrl: input.handleUrl, channelId: input.channelId ?? null },
+      { userId, ipAddress },
+    );
+    canonicalHandleUrl = result.canonicalHandleUrl;
+    resolvedChannelId = result.resolvedExternalId;
   }
 
   // Race-free, deadlock-safe quota path. withQuotaGuard takes a per-user
@@ -318,6 +373,17 @@ export async function createSource(
           isOwnedByMe: input.isOwnedByMe ?? true,
           autoImport: input.autoImport ?? true,
           metadata: input.metadata ?? {},
+          // Phase 03.0.1 (post-review P1/P2 #3) — persist user-selected
+          // backfill window as absolute date so catch-up logic
+          // (computeSinceForRefresh) has a target boundary to walk back
+          // toward. Pre-fix the createSource code threaded backfillWindow
+          // ONLY into the initial channel-context-backfill job; the column
+          // stayed NULL on new rows. computeSinceForRefresh reads NULL as
+          // «no historical pull» so subsequent catch-up tickets only pulled
+          // newer-than-frontier — silently truncating user's selected
+          // history if initial backfill hit cap (MAX_PAGES=20) before the
+          // window boundary.
+          backfillTargetSince: backfillWindowToDate(input.backfillWindow ?? "30d"),
         })
         .returning();
       return r;
@@ -354,10 +420,22 @@ export async function createSource(
     metadata: { source_id: row.id, kind: row.kind, handle_url: row.handleUrl },
   });
 
+  // Phase 03.0.1 Wave 2 — ensure channel state row exists for the cron
+  // picker. Without this row, the auto-backfill cron's INNER JOIN against
+  // data_source_channel_state filters out brand-new sources entirely until
+  // the first walk auto-creates the row. Idempotent — concurrent
+  // createSource calls for the same (kind, channel_id) collide on the PK
+  // and ON CONFLICT DO NOTHING absorbs.
+  if (resolvedChannelId !== null) {
+    await ensureChannelState(input.kind, resolvedChannelId);
+  }
+
   // Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — when the new source is
   // a YouTube channel with auto-import ON, enqueue ONE channel-context
-  // backfill job carrying the user's chosen window. Plan 09's handler
-  // (worker/handlers/youtube-channel-context-backfill.ts) reads
+  // backfill job carrying the user's chosen window. The handler
+  // ($lib/sources/youtube/server/handlers/channel-context-backfill.ts —
+  // pre-Phase 03.0.1 Plan 05 path:
+  // worker/handlers/youtube-channel-context-backfill.ts) reads
   // `job.data.backfillWindow` and seeds the snapshot table accordingly.
   //
   // Idempotent via `singletonKey: source-{row.id}` — a duplicate INSERT
@@ -369,29 +447,26 @@ export async function createSource(
   // source row is the load-bearing return value; backfill enqueue is a
   // nice-to-have that the user can re-trigger by re-toggling auto-import
   // (PATCH /api/sources/:id) if it ever silently fails.
-  if (row.kind === "youtube_channel" && row.autoImport) {
+  // Phase 03.0.1 architecture cleanup — adapter-driven post-create hook.
+  // YouTube: enqueue YOUTUBE_CHANNEL_CONTEXT_BACKFILL when autoImport=true.
+  // Reddit (Phase 03.1): could enqueue subreddit-rules-cache prereq.
+  // Adapters that don't need a hook simply don't implement onSourceCreated.
+  if (adapter.onSourceCreated !== undefined) {
     const backfillWindow: BackfillWindow = input.backfillWindow ?? "30d";
-    try {
-      const boss = await getBoss();
-      await boss.send(
-        QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL,
-        {
-          sourceId: row.id,
-          userId,
-          handleUrl: row.handleUrl,
-          backfillWindow,
-        },
-        { singletonKey: `source-${row.id}` },
-      );
-    } catch (err) {
-      logger.warn(
-        {
-          sourceId: row.id,
-          err: String((err as Error)?.message ?? err),
-        },
-        "channel-context-backfill enqueue on createSource failed; ignoring",
-      );
-    }
+    await adapter.onSourceCreated(
+      {
+        id: row.id,
+        userId: row.userId,
+        autoImport: row.autoImport,
+        handleUrl: row.handleUrl,
+        metadata: (row.metadata ?? {}) as Record<string, unknown>,
+        kind: row.kind,
+        channelId: row.channelId,
+        backfillTargetSince: row.backfillTargetSince,
+        isOwnedByMe: row.isOwnedByMe,
+      },
+      { backfillWindow },
+    );
   }
 
   return row;
@@ -467,6 +542,55 @@ export async function updateSource(
   if (patch.autoImport !== undefined) update.autoImport = patch.autoImport;
   if (patch.isOwnedByMe !== undefined) update.isOwnedByMe = patch.isOwnedByMe;
   if (patch.metadata !== undefined) update.metadata = patch.metadata;
+
+  // Phase 03.0.1 — backfill_target_since change.
+  // Validate: must be in past. Recompute backfill_complete based on new target:
+  //   - if new target ≥ current frontier (or frontier is null) → may need to
+  //     pull more historical → reset complete=false.
+  //   - if new target's older than current frontier → already covered → keep
+  //     complete state as-is.
+  if (patch.backfillTargetSince !== undefined) {
+    const now = new Date();
+    if (patch.backfillTargetSince.getTime() > now.getTime()) {
+      throw new AppError(`backfillTargetSince must be in the past`, "date_must_be_past", 422, {
+        field: "backfillTargetSince",
+      });
+    }
+    // Phase 03.0.1 (post-review UAT 2026-05-10 — second pass) — narrowing
+    // prohibited UNCONDITIONALLY. Pre-fix sentinel («all history» =
+    // 1970-01-01) had an «escape hatch» that allowed narrowing from
+    // sentinel to a specific date, but user feedback confirmed: «if all
+    // then all». target_since semantics: only ever moves earlier (widens)
+    // or stays — never later (narrows).
+    //
+    // Effective rules:
+    //   - current === null     → patch must be set; any past date OK.
+    //   - current === sentinel → no patch allowed (sentinel is widest;
+    //                            widening is impossible, narrowing
+    //                            prohibited). 422 'cannot_narrow_window'.
+    //   - other current        → patch must be ≤ current.
+    const currentMs = existing.backfillTargetSince?.getTime() ?? null;
+    if (currentMs !== null && patch.backfillTargetSince.getTime() > currentMs) {
+      throw new AppError(
+        `backfillTargetSince cannot move forward (would narrow window)`,
+        "cannot_narrow_window",
+        422,
+        {
+          field: "backfillTargetSince",
+          current: existing.backfillTargetSince?.toISOString(),
+          requested: patch.backfillTargetSince.toISOString(),
+        },
+      );
+    }
+    update.backfillTargetSince = patch.backfillTargetSince;
+    // Phase 03.0.1 Wave 4 — channel-scoped state machine. Per-source
+    // backfill_complete column dropped; channel-level state is now
+    // shared across subscribers. Widening one user's target_since does
+    // NOT reset the channel's complete flag — other subscribers may have
+    // narrower targets that are already satisfied. The next refresh-
+    // content click by THIS user explicitly resets channel complete via
+    // resetChannelBackfillComplete (trust-but-verify).
+  }
 
   const [row] = await db
     .update(dataSources)
@@ -598,6 +722,67 @@ export async function restoreSource(
   // Phase 6 housekeeping ticket; do NOT add ad-hoc here.
   return row;
 }
+
+/**
+ * Phase 03.0.1 Plan 08 (D-13) — flip the AdapterError surface columns when
+ * an adapter throws AdapterError of category operator-issue / permanent /
+ * not-found against this source.
+ *
+ * Pattern 1 (tenant scope): userId is the first non-optional argument and
+ * the UPDATE's WHERE clause filters on `eq(dataSources.userId, userId)`.
+ * The custom ESLint rule `tenant-scope/no-unfiltered-tenant-query` walks
+ * for this filter; cross-tenant misuse is a compile-time block.
+ *
+ * Idempotency: a second call for the same source overwrites lastErrorAt /
+ * lastErrorKind with the newer values. needsReconnect stays true (no path
+ * downshifts it inside this helper — operator-side reconnect lands in
+ * Phase 6+).
+ *
+ * Cross-tenant 404 NOT used: this is a system-emitted UPDATE invoked by
+ * worker handlers that have already loaded job data; the userId+sourceId
+ * pair is trusted (pg-boss persisted it). If the source is missing or
+ * cross-tenant the UPDATE simply matches zero rows — no throw, no
+ * accidental side effect (write-success is best-effort here; the worker
+ * still swallows the AdapterError per its category contract).
+ */
+export async function markSourceNeedsReconnect(
+  userId: string,
+  sourceId: string,
+  errorKind: "rate-limited" | "not-found" | "permanent" | "operator-issue",
+): Promise<void> {
+  await db
+    .update(dataSources)
+    .set({
+      needsReconnect: true,
+      lastErrorAt: new Date(),
+      lastErrorKind: errorKind,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
+}
+
+// ───── Phase 03.0.1 — backfill state machine helpers ─────
+// All four mark* helpers accept optional dbCtx (DbOrTx) so worker chunk
+// transactions can write state alongside event INSERTs atomically. Default
+// to top-level db when omitted (most callers).
+
+/**
+ * Mark "we ran a backfill action against this source just now". Updates
+ * `last_polled_at` to NOW. Called from EVERY backfill flow (initial,
+ * incremental, historical, stats_refresh, auto_passive) on success.
+ * UI displays "обновлено N часов назад" from this column.
+ */
+// Phase 03.0.1 Wave 4 — channel-scoped state replaced these per-source
+// helpers. See src/lib/server/services/channel-state.ts:
+//   markSourceLastPolledAt        → markChannelLastPolledAt
+//   markSourceBackfillFrontier    → markChannelBackfillFrontier
+//   markSourceBackfillComplete    → markChannelBackfillComplete
+//   setSourceBackfillPageToken    → setChannelBackfillPageToken
+//   resetSourceBackfillComplete   → resetChannelBackfillComplete
+// computeSinceForRefresh removed — channel-scoped worker passes
+// depthBoundIso explicitly per trigger context (user click → user's
+// target_since; cron auto-backfill → 1970 sentinel; cron incremental
+// → now - INCREMENTAL_WINDOW_DAYS).
 
 /**
  * INGEST-03 author_is_me inheritance — given an oEmbed `author_url` parsed

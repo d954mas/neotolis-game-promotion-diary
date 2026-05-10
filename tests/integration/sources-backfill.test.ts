@@ -4,8 +4,10 @@
 // alongside the existing /api/sources POST body. createSource (services/
 // data-sources.ts) accepts the new optional `backfillWindow` param and,
 // for kind=youtube_channel + autoImport=true sources, enqueues a
-// YOUTUBE_CHANNEL_CONTEXT_BACKFILL job carrying the window. Plan 09's
-// handler (worker/handlers/youtube-channel-context-backfill.ts) reads the
+// YOUTUBE_CHANNEL_CONTEXT_BACKFILL job carrying the window. The handler
+// ($lib/sources/youtube/server/handlers/channel-context-backfill.ts —
+// pre-Phase 03.0.1 Plan 05 path:
+// worker/handlers/youtube-channel-context-backfill.ts) reads the
 // job.data.backfillWindow field — the contract is already in place.
 //
 // We mock pg-boss the same way tests/integration/ingest.test.ts does

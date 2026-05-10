@@ -22,6 +22,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
+import { and, count, eq, gte, sql } from "drizzle-orm";
 import {
   createSource,
   listSources,
@@ -30,9 +31,36 @@ import {
   softDeleteSource,
   restoreSource,
 } from "../../services/data-sources.js";
+import { resetChannelBackfillComplete } from "../../services/channel-state.js";
+import { getUserQuotaUsedToday, nextPacificMidnight } from "../../services/quota.js";
 import { toDataSourceDto } from "../../dto.js";
+import { db } from "../../db/client.js";
+import { auditLog } from "../../db/schema/audit-log.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
+import { writeAuditStrict } from "../../audit.js";
+import { AppError, NotFoundError } from "../../services/errors.js";
+import { getAdapter } from "$lib/sources/registry.js";
+
+// Phase 03.0.1 architecture cleanup — refresh-content rate limit. Cap on
+// per-user POST /api/sources/:id/refresh-content calls in any rolling 1-min
+// window. Bounds quota burn from a user mashing the "Pull new content"
+// button across N registered sources: singletonKey already dedupes per
+// source (~5min), but a user with many sources can still queue 1 backfill
+// per source per 5min — the per-user cap pins overall throughput.
+//
+// Counter source: audit_log itself. Every successful refresh-content writes
+// `source.refresh_content_requested` with a server timestamp. A `SELECT
+// COUNT(*) WHERE userId AND action AND created_at > NOW() - 60s` is the
+// natural rate-counter — no new table, no in-memory store (which would
+// suffer the same multi-replica drift as the chargedFetch reservoir).
+//
+// Limit chosen at 10/min (one click every 6s) — generous for the "many
+// sources after a workday" UX without creating a backfill stampede if a
+// user had every source actively churning. Tunable via env if abuse
+// signal demands tightening.
+const REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE = 10;
+const REFRESH_CONTENT_RATE_WINDOW_MS = 60_000;
 
 const sourceKindEnum = z.enum([
   "youtube_channel",
@@ -78,6 +106,22 @@ const updateSourceSchema = z
     autoImport: z.boolean().optional(),
     isOwnedByMe: z.boolean().optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
+    // Phase 03.0.1 — earliest-event boundary user wants pulled.
+    // Accept ISO date string from UI (date picker / preset button). Coerced
+    // to Date and validated server-side in updateSource:
+    //   - must be in past (future dates → 422 'date_must_be_past')
+    //   - must NOT narrow window (≤ current → 422 'cannot_narrow_window')
+    //
+    // Lower bound: 1970-01-01 (the «all history» sentinel — preset button
+    // «All» on detail page submits this value). UI date picker enforces a
+    // tighter min (2005-01-01) for fat-finger protection on custom-date
+    // input; the route schema's looser bound accepts the sentinel from the
+    // preset path. Pre-fix the schema had min=2005 which rejected the
+    // sentinel — UAT bug «validation failed when I picked All».
+    backfillTargetSince: z.coerce
+      .date()
+      .min(new Date("1970-01-01T00:00:00Z"), "date too old")
+      .optional(),
   })
   .refine((obj) => Object.keys(obj).length > 0, {
     message: "at least one field must be supplied",
@@ -186,5 +230,211 @@ sourcesRoutes.post("/sources/:id/restore", async (c) => {
     return c.json(toDataSourceDto(row));
   } catch (err) {
     return mapErr(c, err, "POST /api/sources/:id/restore");
+  }
+});
+
+// Phase 03.0.1 Plan 10 — POST /api/sources/:id/refresh-content (D-NEW).
+//
+// User-facing payoff of the Wave 0-8 refactor: the "Pull new content" button
+// on /sources/[id] fires this endpoint, which dispatches via the registry to
+// the per-kind adapter's backfillSource. For YouTube the adapter enqueues a
+// youtube.backfill.user job (singletonKey-deduped to ~5min). Adding refresh
+// for Reddit (Phase 03.1) requires zero edits here — only the Reddit
+// adapter's backfillSource implementation.
+//
+// AGENTS.md invariants:
+//   1. Tenant scoping — getSourceById(userId, params.id) is the entry point;
+//      no unfiltered query.
+//   2. Cross-tenant 404 not 403 — getSourceById throws NotFoundError on miss
+//      OR cross-tenant; mapErr translates to {error:'not_found'} status 404.
+//      Body never contains "forbidden" / "permission" (tenant-scope test
+//      pins the wire format).
+//   3. Anonymous-401 sweep — extended in tests/integration/anonymous-401.test.ts
+//      MUST_BE_PROTECTED with this route's path pattern.
+//   4. Audit INSERT-only — writeAuditStrict fires after the enqueue with
+//      action "source.refresh_content_requested" (forward-only migration
+//      0023 added the enum value). STRICT variant: a failed audit surfaces
+//      as 5xx so the caller retries; the queue's singletonKey dedupes the
+//      re-enqueue (no-op) and the second writeAuditStrict succeeds. This
+//      preserves the audit-row-per-action contract without a transactional
+//      enqueue (which would require pushing pg-boss IDatabase plumbing
+//      through the adapter contract).
+//
+// 422 path: getAdapter throws on unregistered kinds. We re-throw as
+// AppError('kind_not_yet_functional', 422) so mapErr emits a clean wire
+// format the UI can localize via Paraglide. Phase 2.1's createSource gates
+// non-functional kinds out at write time, so in practice the only way a
+// row's kind is unregistered here is during the per-phase rollout window
+// (e.g. /sources page rendered a reddit_account row created via direct
+// schema insert in tests).
+sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
+  const ctx = getAuditContext(c);
+  try {
+    // Phase 03.0.1 (post-review UAT 2026-05-10) — tenant-scoped lookup
+    // FIRST, then rate-limit gate.
+    //
+    // Pre-fix the rate-limit gate ran before getSourceById, so a user
+    // hitting the rate limit on an arbitrary (foreign or non-existent)
+    // sourceId would receive 429 instead of the canonical 404. AGENTS.md
+    // invariant 2 says cross-tenant resource access returns 404 — period.
+    // Mild ownership-disclosure: a user could probe the rate-limit error
+    // shape to distinguish «owned source, gated» from «unknown source,
+    // 404». Tenant lookup first eliminates the gap.
+    //
+    // Cost: extra getSourceById round-trip for users actively spamming
+    // the button. At indie scale that's a few queries / day at worst —
+    // acceptable trade for invariant correctness.
+    const source = await getSourceById(ctx.userId, c.req.param("id"));
+    if (source.deletedAt !== null) {
+      throw new NotFoundError();
+    }
+
+    // Per-user rolling rate limit (audit-log INTENT-only count).
+    // `source.refresh_content_requested` is written twice per click:
+    //   1. INTENT — endpoint pre-enqueue (no `flow`, no `events_inserted`)
+    //   2. COMPLETION — worker post-pollContent (sets `flow` + `events_inserted`)
+    // Filtering on `flow IS NULL` matches only intent rows — exactly one
+    // per user click.
+    const since = new Date(Date.now() - REFRESH_CONTENT_RATE_WINDOW_MS);
+    const [recent] = await db
+      .select({ c: count() })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.userId, ctx.userId),
+          eq(auditLog.action, "source.refresh_content_requested"),
+          gte(auditLog.createdAt, since),
+          sql`${auditLog.metadata}->>'flow' IS NULL`,
+        ),
+      );
+    if (Number(recent?.c ?? 0) >= REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE) {
+      throw new AppError(
+        `refresh-content rate limit exceeded: ${REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE}/min per user`,
+        "rate_limited",
+        429,
+        {
+          limit: REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE,
+          window_seconds: REFRESH_CONTENT_RATE_WINDOW_MS / 1000,
+        },
+      );
+    }
+
+    let adapter;
+    try {
+      adapter = getAdapter(source.kind);
+    } catch {
+      throw new AppError(
+        `kind '${source.kind}' is not yet functional`,
+        "kind_not_yet_functional",
+        422,
+        { kind: source.kind },
+      );
+    }
+
+    // Phase 03.0.1 — L1 throttle check (operator-side reservoir).
+    // When operator's YouTube quota approaches 95%, ALL users get 429 — это
+    // system-wide signal, не per-user. Banner UI на /sources показывает
+    // отдельный indicator для этого state.
+    const stats = await adapter.observability.quota.getDailyStats(new Date());
+    if (stats.throttleState === "ninetyfive") {
+      throw new AppError(
+        `platform quota exhausted: ${source.kind} at ${stats.pctOfDaily}% (system-wide)`,
+        "platform_quota_exhausted",
+        429,
+        {
+          platform: source.kind,
+          pct_of_daily: stats.pctOfDaily,
+        },
+      );
+    }
+
+    // Phase 03.0.1 — L2 per-user fair-share cap. When adapter declares
+    // userQuotaCap, check audit-log SUM против cap. Per-axis denial:
+    // requests_quota_exhausted vs events_quota_exhausted (banner UI shows
+    // distinct toast).
+    const cap = adapter.observability.userQuotaCap;
+    if (cap?.requestsPerDay !== undefined || cap?.eventsPerDay !== undefined) {
+      const used = await getUserQuotaUsedToday(ctx.userId, source.kind);
+      const resetAt = nextPacificMidnight();
+      const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
+      if (cap.requestsPerDay !== undefined && used.requests >= cap.requestsPerDay) {
+        throw new AppError(
+          `daily request quota exhausted: ${used.requests}/${cap.requestsPerDay}`,
+          "requests_quota_exhausted",
+          429,
+          {
+            cap: cap.requestsPerDay,
+            used: used.requests,
+            reset_in_seconds: resetInSeconds,
+          },
+        );
+      }
+      if (cap.eventsPerDay !== undefined && used.events >= cap.eventsPerDay) {
+        throw new AppError(
+          `daily events quota exhausted: ${used.events}/${cap.eventsPerDay}`,
+          "events_quota_exhausted",
+          429,
+          {
+            cap: cap.eventsPerDay,
+            used: used.events,
+            reset_in_seconds: resetInSeconds,
+          },
+        );
+      }
+    }
+
+    // Phase 03.0.1 Wave 2 — channel-scoped trust-but-verify. Reset
+    // channel-level backfill_complete BEFORE worker enqueue so the
+    // catch-up walk re-checks completeness. Channel state covers ALL
+    // subscribers; one user's refresh can re-open the walk for everyone.
+    if (source.channelId) {
+      await resetChannelBackfillComplete(source.kind, source.channelId);
+    }
+
+    const result = await adapter.backfillSource(
+      {
+        id: source.id,
+        userId: source.userId,
+        // Thread channelId + backfillTargetSince into metadata so
+        // backfillSource can construct the channel-scoped job payload.
+        metadata: {
+          ...((source.metadata ?? {}) as Record<string, unknown>),
+          channelId: source.channelId,
+          backfillTargetSince: source.backfillTargetSince?.toISOString(),
+        },
+      },
+      { userId: ctx.userId, origin: "user" },
+    );
+
+    // STRICT — failed audit returns 5xx; user retry hits singletonKey dedup
+    // on the queue (no-op enqueue) and the audit INSERT retries. AGENTS.md
+    // invariant 4 honored without a transactional enqueue plumbing.
+    //
+    // This is the INTENT row — written pre-completion for immediate forensics
+    // ("user X clicked refresh on source Y at time T"). Worker writes a
+    // SECOND row at completion with full metadata (events_inserted,
+    // requests_used, flow). Cap query (services/quota.ts) filters by
+    // metadata->>'flow' so it counts ONLY worker rows, not intent rows.
+    await writeAuditStrict({
+      userId: ctx.userId,
+      action: "source.refresh_content_requested",
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent ?? undefined,
+      metadata: {
+        source_id: source.id,
+        kind: source.kind,
+        // Phase 03.0.1 (post-review) — `platform` for cap-query consistency.
+        // Intent rows are NOT counted by the cap query (no `flow` field — see
+        // worker completion audit), but we set `platform` anyway so any
+        // future query that aggregates intent + completion stays consistent.
+        platform: source.kind,
+        queue: result.queue,
+        job_id: result.jobId,
+      },
+    });
+
+    return c.json({ enqueued: true, queue: result.queue, jobId: result.jobId }, 202);
+  } catch (err) {
+    return mapErr(c, err, "POST /api/sources/:id/refresh-content");
   }
 });

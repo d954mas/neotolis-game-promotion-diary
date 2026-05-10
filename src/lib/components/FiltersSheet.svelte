@@ -53,6 +53,7 @@
 
   import { m } from "$lib/paraglide/messages.js";
   import { sortByLabel } from "$lib/util/sort-kinds.js";
+  import { auditActionLabel, AUDIT_ACTION_LIST } from "$lib/audit-labels.js";
   // Plan 02.1-39 (UAT-NOTES.md §5.6): source list shows a kind glyph + short
   // kind label adjacent to displayName. Reuses SourceKindIcon (Plan 02.1-08)
   // and the shared sourceKindLabel helper (Plan 02.1-39 — extracted from
@@ -181,122 +182,14 @@
   ];
   const KIND_OPTIONS = $derived(sortByLabel(FUNCTIONAL_KIND_OPTIONS, (k) => kindLabel(k)));
 
-  // Plan 02.1-20: AUDIT_ACTIONS mirror for the /audit reuse. Inlined to keep
-  // this client-side component out of server modules. Drift caught by
-  // tests/integration/audit-render.test.ts (Task 5) which iterates AUDIT_ACTIONS
-  // and asserts the rendered fieldset has one checkbox per action.
-  const AUDIT_ACTIONS_MIRROR = [
-    "session.signin",
-    "session.signout",
-    "session.signout_all",
-    "user.signup",
-    "key.add",
-    "key.rotate",
-    "key.remove",
-    "game.created",
-    "game.deleted",
-    "game.restored",
-    "event.created",
-    "event.edited",
-    "event.deleted",
-    "event.attached_to_game",
-    "event.detached_from_game",
-    "event.dismissed_from_inbox",
-    "event.restored",
-    "event.marked_standalone",
-    "event.unmarked_standalone",
-    "source.added",
-    "source.removed",
-    "source.toggled_auto_import",
-    "theme.changed",
-    // Phase 02.2 (D-11 / D-16) — lock-step with src/lib/server/audit/actions.ts.
-    "account.deleted",
-    "account.restored",
-    "account.exported",
-    "quota.limit_hit",
-    // Phase 3.0 baseline (migration 0010) — polling pipeline audit verbs.
-    "quota.service_throttled",
-    "purge.completed",
-    "auto_import.deferred",
-    "poll.failed",
-    "event.poll_refreshed",
-  ] as const;
+  // Phase 03.0.1 architecture cleanup — auditActionLabel + AUDIT_ACTIONS
+  // imported directly. Pre-cleanup this file carried an inline
+  // AUDIT_ACTIONS_MIRROR array AND an 80-line switch duplicated across
+  // AuditRow / FilterChips / FiltersSheet — drift caught by CI twice.
+  // Now: $lib/audit-labels.ts is the single source of truth (Record<...>
+  // gives compile-time completeness), and the const itself is the roster.
 
-  function auditActionLabel(a: string): string {
-    switch (a) {
-      case "session.signin":
-        return m.audit_action_session_signin();
-      case "session.signout":
-        return m.audit_action_session_signout();
-      case "session.signout_all":
-        return m.audit_action_session_signout_all();
-      case "user.signup":
-        return m.audit_action_user_signup();
-      case "key.add":
-        return m.audit_action_key_add();
-      case "key.rotate":
-        return m.audit_action_key_rotate();
-      case "key.remove":
-        return m.audit_action_key_remove();
-      case "game.created":
-        return m.audit_action_game_created();
-      case "game.deleted":
-        return m.audit_action_game_deleted();
-      case "game.restored":
-        return m.audit_action_game_restored();
-      case "event.created":
-        return m.audit_action_event_created();
-      case "event.edited":
-        return m.audit_action_event_edited();
-      case "event.deleted":
-        return m.audit_action_event_deleted();
-      case "event.attached_to_game":
-        return m.audit_action_event_attached_to_game();
-      case "event.detached_from_game":
-        return m.audit_action_event_detached_from_game();
-      case "event.dismissed_from_inbox":
-        return m.audit_action_event_dismissed_from_inbox();
-      case "event.restored":
-        return m.audit_action_event_restored();
-      case "event.marked_standalone":
-        return m.audit_action_event_marked_standalone();
-      case "event.unmarked_standalone":
-        return m.audit_action_event_unmarked_standalone();
-      case "source.added":
-        return m.audit_action_source_added();
-      case "source.removed":
-        return m.audit_action_source_removed();
-      case "source.toggled_auto_import":
-        return m.audit_action_source_toggled_auto_import();
-      case "theme.changed":
-        return m.audit_action_theme_changed();
-      // Phase 02.2 (D-11 / D-16) — see AuditRow.svelte for the lock-step
-      // contract; same 4 verbs land here for the FiltersSheet action axis.
-      case "account.deleted":
-        return m.audit_action_account_deleted();
-      case "account.restored":
-        return m.audit_action_account_restored();
-      case "account.exported":
-        return m.audit_action_account_exported();
-      case "quota.limit_hit":
-        return m.audit_action_quota_limit_hit();
-      // Phase 3.0 baseline (migration 0010).
-      case "quota.service_throttled":
-        return m.audit_action_quota_service_throttled();
-      case "purge.completed":
-        return m.audit_action_purge_completed();
-      case "auto_import.deferred":
-        return m.audit_action_auto_import_deferred();
-      case "poll.failed":
-        return m.audit_action_poll_failed();
-      case "event.poll_refreshed":
-        return m.audit_action_event_poll_refreshed();
-      default:
-        return a;
-    }
-  }
-
-  const ACTION_OPTIONS = $derived(sortByLabel(AUDIT_ACTIONS_MIRROR, (a) => auditActionLabel(a)));
+  const ACTION_OPTIONS = $derived(sortByLabel(AUDIT_ACTION_LIST, (a) => auditActionLabel(a)));
 
   function kindLabel(k: string): string {
     switch (k) {

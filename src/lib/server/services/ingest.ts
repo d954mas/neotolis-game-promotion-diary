@@ -41,7 +41,7 @@ import { fetchTwitterOembed } from "../integrations/twitter-oembed.js";
 import { createEvent, createEventFromPaste } from "./events.js";
 import { AppError } from "./errors.js";
 import { db } from "../db/client.js";
-import { youtubeChannels } from "../db/schema/youtube-channels.js";
+import { youtubeChannels } from "../db/schema/index.js";
 import { QUEUES } from "../queues.js";
 import { getBoss } from "../queue-client.js";
 import { logger } from "../logger.js";
@@ -242,7 +242,7 @@ async function maybeEnqueueChannelContextBackfill(
         : { handleUrl: parsed.value, userId };
     await boss.send(QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL, payload, {
       singletonKey: parsed.value,
-      singletonHours: 24,
+      singletonSeconds: 86_400,
     });
   } catch (err) {
     logger.warn(

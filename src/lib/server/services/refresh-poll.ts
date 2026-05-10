@@ -1,6 +1,7 @@
 // Phase 3.0 Plan 04 — refresh-poll service (CONTEXT D-10).
 //
-// User-driven "Refresh now" button enqueues an upstream poll on `poll.user`
+// User-driven "Refresh now" button enqueues an upstream poll on
+// `youtube.poll.user` (Phase 03.0.1 Plan 07 — was `poll.user` pre-rename)
 // with a 5-minute cooldown gate. The cooldown is per-event and persisted in
 // `events.metadata.last_user_refresh_at` (eager-write; survives container
 // restart so the next attempt still honors it). Frozen-tier events ARE
@@ -35,17 +36,20 @@
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { events } from "../db/schema/events.js";
-import { youtubeVideos } from "../db/schema/youtube-videos.js";
+import { youtubeVideos } from "../db/schema/index.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { writeAudit } from "../audit.js";
 import { QUEUES } from "../queues.js";
 import { getBoss } from "../queue-client.js";
+import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
+import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
+import { getUserQuotaUsedToday, nextPacificMidnight } from "./quota.js";
 
 const COOLDOWN_MS = 5 * 60 * 1000;
 
 export interface RefreshPollResult {
   enqueued: true;
-  queue: "poll.user";
+  queue: "youtube.poll.user";
   eventId: string;
 }
 
@@ -64,17 +68,68 @@ export async function requestRefreshPoll(
   const event = rows[0];
   if (!event) throw new NotFoundError();
 
-  // 2. Pollable-kind gate. Phase 3.0 ships YouTube only; Phase 3.1 lands
-  //    reddit_post and extends this allowlist. Other kinds (twitter_post,
-  //    telegram_post, conference, etc.) are not poll-driven by upstream APIs
-  //    so the affordance must not enqueue work that has nothing to do.
-  if (event.kind !== "youtube_video") {
+  // 2. Pollable-kind gate. Phase 03.0.1 architecture cleanup — registry-driven:
+  //    asks the adapter whose SourceKind maps to this event's kind whether it
+  //    can refresh-poll. Phase 03.1 Reddit's adapter returns true for
+  //    reddit_post; this code stays unchanged. Kinds with no adapter (event
+  //    kinds that are never poll-driven — conference, talk, press, other) and
+  //    adapters whose canRefreshPoll returns false are blocked uniformly.
+  const sourceKindForPoll = eventKindToSourceKind(event.kind);
+  const pollableAdapter =
+    sourceKindForPoll !== null && hasAdapter(sourceKindForPoll)
+      ? getAdapter(sourceKindForPoll)
+      : null;
+  if (pollableAdapter === null || pollableAdapter.canRefreshPoll?.(event.kind) !== true) {
     throw new AppError(
       `event kind '${event.kind}' is not pollable in Phase 3.0`,
       "event_not_pollable",
       422,
       { kind: event.kind, event_id: eventId },
     );
+  }
+
+  // Phase 03.0.1 — L1 throttle check (operator-side reservoir).
+  // System-wide signal — все users получают 429 одновременно когда operator
+  // quota approaches 95%.
+  const stats = await pollableAdapter.observability.quota.getDailyStats(new Date());
+  if (stats.throttleState === "ninetyfive") {
+    throw new AppError(
+      `platform quota exhausted at ${stats.pctOfDaily}%`,
+      "platform_quota_exhausted",
+      429,
+      { platform: sourceKindForPoll, pct_of_daily: stats.pctOfDaily },
+    );
+  }
+
+  // Phase 03.0.1 — L2 per-user fair-share cap. Refresh-card action consumes
+  // shared operator API budget; per-user cap protects fairness.
+  //
+  // Phase 03.0.1 (post-review P1-4) — static import. The dynamic import
+  // here was a leftover workaround from before the dates.ts refactor (eed8fb1)
+  // broke the services/quota → registry → youtube → services/quota cycle.
+  // Cycle is gone; static import is now safe and keeps the hot path
+  // predictable (no per-request module-resolution latency).
+  const cap = pollableAdapter.observability.userQuotaCap;
+  if (cap?.requestsPerDay !== undefined || cap?.eventsPerDay !== undefined) {
+    const used = await getUserQuotaUsedToday(userId, sourceKindForPoll ?? undefined);
+    const resetAt = nextPacificMidnight();
+    const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
+    if (cap.requestsPerDay !== undefined && used.requests >= cap.requestsPerDay) {
+      throw new AppError(
+        `daily request quota exhausted: ${used.requests}/${cap.requestsPerDay}`,
+        "requests_quota_exhausted",
+        429,
+        { cap: cap.requestsPerDay, used: used.requests, reset_in_seconds: resetInSeconds },
+      );
+    }
+    if (cap.eventsPerDay !== undefined && used.events >= cap.eventsPerDay) {
+      throw new AppError(
+        `daily events quota exhausted: ${used.events}/${cap.eventsPerDay}`,
+        "events_quota_exhausted",
+        429,
+        { cap: cap.eventsPerDay, used: used.events, reset_in_seconds: resetInSeconds },
+      );
+    }
   }
 
   // 3. External-id gate. The poll worker keys upstream calls by external_id
@@ -189,7 +244,7 @@ export async function requestRefreshPoll(
   const boss = await getBoss();
   const minuteKey = now.toISOString().slice(0, 16); // 'YYYY-MM-DDTHH:MM'
   await boss.send(
-    QUEUES.POLL_USER,
+    QUEUES.YOUTUBE_POLL_USER,
     { eventId, userId, externalId: event.externalId, kind: event.kind },
     {
       singletonKey: `${eventId}-${minuteKey}`,
@@ -200,6 +255,13 @@ export async function requestRefreshPoll(
   // 7. Audit row scoped to the event owner. Written OUTSIDE any tx (Phase
   //    02.2 pool-deadlock-safe pattern). Audit failures are swallowed by
   //    audit.ts so they never break the user-facing path.
+  //
+  // Phase 03.0.1 — extended metadata for per-user cap counter:
+  //   flow='stats_refresh' (capped) + requests_used=1 (one videos.list call,
+  //   1 quota unit) + events_inserted=0 (no new event rows; this refreshes
+  //   stats on existing event/snapshot tables).
+  // Cap query (services/quota.ts:getUserQuotaUsedToday) sums these across
+  // user-initiated capped flows (incremental + historical + stats_refresh).
   await writeAudit({
     userId,
     action: "event.poll_refreshed",
@@ -208,9 +270,18 @@ export async function requestRefreshPoll(
     metadata: {
       event_id: eventId,
       kind: event.kind,
+      // Phase 03.0.1 (post-review) — explicit source-kind for cap query
+      // (services/quota.ts filters on metadata->>'platform'). `kind` keeps
+      // event-kind for forensic semantics; `platform` carries the cap-window
+      // dimension. Pre-fix: cap query filtered on `kind` directly and missed
+      // every event.poll_refreshed row. See audit.ts AuditMetadata.platform.
+      platform: sourceKindForPoll ?? event.kind,
       external_id: event.externalId,
+      flow: "stats_refresh",
+      requests_used: 1,
+      events_inserted: 0,
     },
   });
 
-  return { enqueued: true, queue: "poll.user", eventId };
+  return { enqueued: true, queue: "youtube.poll.user", eventId };
 }

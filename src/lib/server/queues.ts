@@ -1,73 +1,84 @@
 // pg-boss queue registry — single source of truth for queue names.
 //
-// RESEARCH.md "Phase-1-specific pitfall: pg-boss queue declaration drift" —
 // pg-boss v10+ requires every queue to be created via `boss.createQueue()`
 // before any `send()` or `work()` call. Forgetting to declare a queue causes
 // silent loss-on-send. We mitigate by:
 //   1. Centralizing every queue name in `QUEUES` (this module is the only
 //      place the strings appear).
 //   2. Exposing `declareAllQueues(boss)` so worker boot calls one function
-//      and gets every Phase 1+ queue declared idempotently.
+//      and gets every queue declared idempotently.
 //
-// Open Question Q1 (MEDIUM confidence) recommended declaring all four poll
-// queues plus `internal.healthcheck` from Phase 1 even though Phase 1 runs
-// no jobs — that locks the topology so Phase 3's workers can land without
-// re-discussing queue boundaries.
+// Phase 03.0.1 Plan 07 — Per-kind queue topology (D-10..D-12). Kind-
+// agnostic queue names (poll.active, poll.cold, poll.user) collapse into
+// per-kind names. Cross-source queues (purge.daily, internal.healthcheck)
+// remain kind-agnostic. New sources (Reddit, Twitter, ...) add their own
+// per-kind queues here without touching cross-source ones.
 //
-// Phase 3.0 Plan 01 — DV-2 collapse. The 4-tier polling model (Hot / Warm /
-// Cold / Stale) is replaced with a 3-tier model (Active / Cold / Frozen)
-// driven by `last_poll_status` overrides. Concretely:
-//   - POLL_HOT  → renamed to POLL_ACTIVE (active = recent activity tier)
-//   - POLL_WARM → DROPPED (collapsed into Active)
-//   - POLL_COLD → carries forward unchanged
+// youtube.poll.cron carries TWO schedules via pg-boss v11+ key-based
+// multiple-schedule-per-queue (RESEARCH.md OQ#2):
+//   - key: "active" — every 6 hours (Active tier, age < 24h)
+//   - key: "cold"   — daily 5am Pacific (Cold tier, 24h <= age < 28d)
+// The poll-cron handler dispatches on job.data.tier.
 //
-// Three new queues land alongside:
-//   - PURGE_DAILY                          — Plan 03.0-05 hard-delete worker
-//                                             for users whose deleted_at is
-//                                             older than RETENTION_DAYS.
-//   - YOUTUBE_QUOTA_RESET                  — Plan 03.0-09 daily 00:01 PT cron
-//                                             that seeds the next-day row in
-//                                             youtube_service_quota_usage and
-//                                             trims rows older than ~7 days.
-//   - YOUTUBE_CHANNEL_CONTEXT_BACKFILL     — Plan 03.0-10 worker that resolves
-//                                             a channel's uploads_playlist_id
-//                                             (one channels.list call) on
-//                                             first paste of a video from
-//                                             that channel.
+// The two scheduler.tick.* queues (Pattern A from Phase 03.0 Plan 09) are
+// RETIRED — collapsed into the youtube.poll.cron schedule directly. The
+// scheduler-tick → enqueue.ts → per-event jobs hop is gone; the tier-
+// tagged job feeds the per-tier handler directly. Migration 0021 cleans
+// up the orphan pgboss.queue / pgboss.schedule / pgboss.job rows.
 //
-// pgboss persists queue declarations in pgboss.queue across restarts.
-// Migration `0010_phase03_baseline.sql` cleans up the now-retired
-// 'poll.hot' / 'poll.warm' rows on the next deploy.
+// Queue rename map (Phase 03.0 → Phase 03.0.1 Plan 07):
+//   poll.active                      → youtube.poll.cron (key=active)
+//   poll.cold                        → youtube.poll.cron (key=cold)
+//   poll.user                        → youtube.poll.user
+//   scheduler.tick.active            → (RETIRED — cron drives youtube.poll.cron)
+//   scheduler.tick.cold              → (RETIRED — cron drives youtube.poll.cron)
+//   youtube.rehab_unavailable        → youtube.rehab (D-11 brevity)
+//   youtube.quota_reset              → youtube.quota_reset (UNCHANGED)
+//   youtube.channel_context_backfill → youtube.channel_context_backfill (UNCHANGED)
+//   purge.daily                      → purge.daily (UNCHANGED — cross-source)
+//   internal.healthcheck             → internal.healthcheck (UNCHANGED)
 //
-// We don't import pg-boss types directly here. RESEARCH.md flagged 10.x vs
-// 12.x type drift; accepting a `MinimalBoss` interface keeps this module
-// future-proof against pg-boss type churn.
+// New in Plan 07: youtube.backfill.user — Plan 10 user-initiated "Pull new
+// content" backfill per source. Declared here (forward-compat scaffold) so
+// the worker subscribes to it idempotently; the Plan 10 handler lands the
+// actual subscription wire-up.
+//
+// We don't import pg-boss types directly here. The `MinimalBoss` interface
+// keeps this module decoupled from pg-boss's full type surface — useful for
+// testability and for future major-version churn.
 
 export const QUEUES = {
-  // Phase 1 + 02.2 — preserved.
-  POLL_USER: "poll.user",
-  POLL_COLD: "poll.cold",
-  INTERNAL_HEALTHCHECK: "internal.healthcheck",
-  // Phase 3.0 Plan 01 — DV-2 collapse: POLL_HOT renamed; POLL_WARM dropped.
-  POLL_ACTIVE: "poll.active",
-  // Phase 3.0 Plan 01 — D-NEW (Purge worker, Quota reset, Channel context backfill).
+  // Cross-source / non-per-kind:
   PURGE_DAILY: "purge.daily",
+  INTERNAL_HEALTHCHECK: "internal.healthcheck",
+
+  // Per-kind: youtube
+  YOUTUBE_POLL_CRON: "youtube.poll.cron",
+  YOUTUBE_POLL_USER: "youtube.poll.user",
+  /** Phase 03.0.1 Wave 2 — channel-scoped backfill. Replaces
+   *  YOUTUBE_BACKFILL_USER. Job payload carries (kind, channelKey,
+   *  triggerUserId?, depthBoundIso, flow). One walk per call;
+   *  fan-out INSERT to all active subscribers. Singleton key by
+   *  channelKey dedupes parallel triggers. */
+  YOUTUBE_BACKFILL_CHANNEL: "youtube.backfill.channel",
   YOUTUBE_QUOTA_RESET: "youtube.quota_reset",
+  YOUTUBE_REHAB: "youtube.rehab",
   YOUTUBE_CHANNEL_CONTEXT_BACKFILL: "youtube.channel_context_backfill",
-  // Phase 3.0 post-build refactor (2026-05-06) — weekly cron polls
-  // youtube_videos rows with last_poll_status IN ('not_found','private')
-  // and poll_failure_count < 5. Recovers videos that came back from
-  // private → public without requiring user manual refresh. Failure
-  // count cap (5) prevents infinite quota burn on truly-deleted videos.
-  YOUTUBE_REHAB_UNAVAILABLE: "youtube.rehab_unavailable",
-  // Phase 3.0 Plan 09 — scheduler-tick queues (Pattern A from plan, recommended).
-  // The cron schedules send empty {} jobs to these tick queues; the worker
-  // subscribes and the handler calls enqueueActivePolls / enqueueColdPolls,
-  // which then issues real per-event jobs to POLL_ACTIVE / POLL_COLD.
-  // This separation keeps the scheduler-vs-worker contract clean: cron drives
-  // ticks; ticks drive enqueue logic; enqueue logic drives real jobs.
-  SCHEDULER_TICK_ACTIVE: "scheduler.tick.active",
-  SCHEDULER_TICK_COLD: "scheduler.tick.cold",
+  // Phase 03.0.1 — daily passive backfill cron. Picker selects channels
+  // WHERE backfill_complete=false and enqueue channel-scoped backfill jobs
+  // with flow='auto_passive'. Skip-gates на pctOfDaily ≥ 50% (cron pool
+  // priority floor — active stats poll защищён до 95%, cold poll до 80%,
+  // auto-backfill сдаётся first при contention).
+  YOUTUBE_AUTO_BACKFILL_CRON: "youtube.auto_backfill_cron",
+  /** Phase 03.0.1 Wave 3 — daily INCREMENTAL cron for completed channels.
+   *  Auto-backfill cron excludes complete channels (their deep history is
+   *  done); but the channel keeps uploading new videos after completion.
+   *  This cron picks complete channels with active auto_import subscribers
+   *  and triggers a page-1-only walk (cheap: 1 unit/channel/day) to
+   *  discover new uploads. Job lands as flow='auto_passive' on
+   *  YOUTUBE_BACKFILL_CHANNEL with depthBoundIso=now-N-days bound.
+   *  Without this, completed channels go silent until manual refresh-click. */
+  YOUTUBE_INCREMENTAL_CRON: "youtube.incremental_cron",
 } as const satisfies Record<string, string>;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

@@ -68,12 +68,15 @@ import { events } from "../db/schema/events.js";
 import { eventGames } from "../db/schema/event-games.js";
 import { games } from "../db/schema/games.js";
 import { dataSources } from "../db/schema/data-sources.js";
-import type { EventKind } from "../integrations/data-source-adapter.js";
+import type { EventKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { withQuotaGuard } from "./quota.js";
+import { withQuotaGuard, getUserQuotaUsedToday } from "./quota.js";
 import { encodeCursor, decodeCursor } from "./audit-read.js";
+import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
+import { getAdapter } from "$lib/sources/registry.js";
+import { logger } from "../logger.js";
 
 export type EventRow = typeof events.$inferSelect;
 export type DataSourceRow = typeof dataSources.$inferSelect;
@@ -365,26 +368,27 @@ export async function createEvent(
     await assertGameOwnedByUser(userId, gid);
   }
 
-  // Plan 02.1-17 — opportunistic external_id derivation for kind=youtube_video.
-  // Synchronous URL parse only; oEmbed enrichment is a separate concern handled
-  // by enrichFromUrl below (and POST /api/events/preview-url). Caller-supplied
-  // externalId always wins — this branch only runs when input.externalId is
-  // null/undefined and a YouTube URL is present.
+  // Plan 02.1-17 — opportunistic external_id derivation for any event kind
+  // whose adapter knows how to parse the URL.
+  //
+  // Phase 03.0.1 architecture cleanup — replaced the kind === "youtube_video"
+  // switch with a registry-driven match: `parseAnyUrl(input.url)` returns
+  // `{kind, externalId, ...}` for whatever adapter recognized the host. If
+  // the parsed kind matches the event's kind (caller's stated intent), use
+  // its externalId; otherwise leave null. This generalizes to Reddit /
+  // Twitter / future adapters without touching this code.
+  //
+  // Caller-supplied externalId always wins — this branch only runs when
+  // input.externalId is null/undefined and a URL is present. Any URL shape
+  // mismatch is silently left as null; the route-layer superRefine catches
+  // malformed kind/URL pairs before the service is called.
   let derivedExternalId: string | null = input.externalId ?? null;
-  if (
-    input.kind === "youtube_video" &&
-    derivedExternalId == null &&
-    input.url != null &&
-    input.url !== ""
-  ) {
-    const { parseIngestUrl } = await import("./url-parser.js");
-    const parsed = parseIngestUrl(input.url);
-    if (parsed.kind === "youtube_video") {
-      derivedExternalId = parsed.videoId;
+  if (derivedExternalId == null && input.url != null && input.url !== "") {
+    const { parseAnyUrl } = await import("$lib/sources/url.js");
+    const parsed = parseAnyUrl(input.url);
+    if (parsed !== null && parsed.kind === input.kind) {
+      derivedExternalId = parsed.externalId;
     }
-    // Any other shape (unsupported / reddit_deferred / etc.) — leave null.
-    // The route-layer superRefine catches malformed YouTube URLs before
-    // service is called; this is defense-in-depth only.
   }
 
   // Plan 02.1-35 (UAT-NOTES.md §5.12 — P1): the events INSERT + junction
@@ -474,6 +478,70 @@ export async function createEvent(
     },
   });
 
+  // Phase 03.0.1 Wave 4 (post-UAT) — adapter-driven sync stats fetch.
+  // After ANY event create with externalId, ask the adapter to pull
+  // view/like counts synchronously (1 unit, user pool) so /feed shows
+  // stats immediately. Errors swallowed — event row already exists;
+  // stats will land via cron tick if this path failed.
+  //
+  // Cap check FIRST. fetchEventStats writes an audit row with
+  // flow=stats_refresh which counts toward the per-user requestsPerDay
+  // cap. Without a pre-check, a user at 100/100 could push to 101 by
+  // pasting a new event — letting them silently bypass the cap.
+  // Pre-check: if used >= cap, skip stats fetch and let cron pick up
+  // the polling later (no user-visible error — paste still succeeds).
+  if (row.externalId) {
+    const sourceKindForStats = eventKindToSourceKind(row.kind);
+    if (sourceKindForStats !== null) {
+      try {
+        const statsAdapter = getAdapter(sourceKindForStats);
+        if (statsAdapter.fetchEventStats !== undefined) {
+          const cap = statsAdapter.observability.userQuotaCap;
+          let allow = true;
+          if (cap?.requestsPerDay !== undefined) {
+            const used = await getUserQuotaUsedToday(userId, sourceKindForStats);
+            if (used.requests >= cap.requestsPerDay) {
+              logger.info(
+                {
+                  eventId: row.id,
+                  externalId: row.externalId,
+                  used: used.requests,
+                  cap: cap.requestsPerDay,
+                },
+                "fetchEventStats skipped — per-user requestsPerDay cap reached",
+              );
+              allow = false;
+            }
+          }
+          if (allow) {
+            const stats = await statsAdapter.fetchEventStats(row.externalId, { userId });
+            // Phase 03.0.1 Wave 4 (post-UAT) — write last_user_refresh_at
+            // into event.metadata so RefreshNowButton's cooldown gate
+            // picks it up. Without this, paste burns a unit + writes
+            // audit, but the cooldown stays inactive — a user clicking
+            // Refresh right after paste would re-fetch the same stats
+            // (double burn). Source of truth matches refresh-poll
+            // service which writes the same field on user-driven polls.
+            if (stats !== null) {
+              const now = new Date();
+              await db
+                .update(events)
+                .set({
+                  metadata: sql`jsonb_set(COALESCE(${events.metadata}, '{}'::jsonb), '{last_user_refresh_at}', to_jsonb(${now.toISOString()}::text), true)`,
+                })
+                .where(and(eq(events.userId, userId), eq(events.id, row.id)));
+            }
+          }
+        }
+      } catch (err) {
+        logger.warn(
+          { eventId: row.id, externalId: row.externalId, err: String(err) },
+          "fetchEventStats failed on createEvent; UI will rely on cron polling",
+        );
+      }
+    }
+  }
+
   return row;
 }
 
@@ -522,7 +590,8 @@ export interface EnrichmentResult {
  */
 export async function enrichFromUrl(userId: string, url: string): Promise<EnrichmentResult> {
   const { parseIngestUrl } = await import("./url-parser.js");
-  const { fetchYoutubeOembed } = await import("../integrations/youtube-oembed.js");
+  const { eventKindToSourceKind } = await import("$lib/sources/event-to-source-kind.js");
+  const { getAdapter } = await import("$lib/sources/registry.js");
 
   const parsed = parseIngestUrl(url);
 
@@ -547,21 +616,47 @@ export async function enrichFromUrl(userId: string, url: string): Promise<Enrich
     throw new AppError("unhandled paste kind", "unsupported_url", 422);
   }
 
-  // YouTube oEmbed (5xx/network → 502; 401 → private; 404 → unavailable).
-  let oembed;
-  try {
-    oembed = await fetchYoutubeOembed(parsed.canonicalUrl);
-  } catch (err) {
+  // Phase 03.0.1 architecture cleanup — adapter-driven preview metadata.
+  // Cross-source code never calls `fetchYoutubeOembed` directly; the adapter
+  // wraps oEmbed (or whatever per-source preview API exists) into a uniform
+  // EventPreviewMetadata shape. Phase 03.1 Reddit's adapter implements
+  // fetchEventPreviewMetadata with Reddit's oEmbed-equivalent; this code
+  // stays unchanged.
+  //
+  // Error vocab is preserved per parsed.kind to keep the UX contract stable
+  // (`youtube_oembed_unreachable` / `youtube_unavailable` codes are pinned
+  // by Paraglide messages + integration tests). A future generic vocab
+  // would mean a coordinated UI + Paraglide migration; out of scope here.
+  const sourceKind = eventKindToSourceKind(parsed.kind);
+  if (sourceKind === null) {
+    throw new AppError(
+      `event kind '${parsed.kind}' has no source-kind mapping`,
+      "kind_not_yet_functional",
+      422,
+      { kind: parsed.kind },
+    );
+  }
+  const adapter = getAdapter(sourceKind);
+  if (adapter.fetchEventPreviewMetadata === undefined) {
+    throw new AppError(
+      `adapter for ${sourceKind} does not support event preview`,
+      "kind_not_yet_functional",
+      422,
+      { kind: parsed.kind },
+    );
+  }
+  const preview = await adapter.fetchEventPreviewMetadata(parsed.canonicalUrl);
+  if (preview.kind === "unreachable") {
     throw new AppError("youtube oembed unreachable", "youtube_oembed_unreachable", 502, {
-      cause: String((err as Error)?.message ?? err),
+      cause: preview.cause,
     });
   }
-  if (oembed.kind === "private") {
+  if (preview.kind === "private") {
     throw new AppError("video is private", "youtube_unavailable", 422, {
       reason: "private",
     });
   }
-  if (oembed.kind === "unavailable") {
+  if (preview.kind === "unavailable") {
     throw new AppError("video unavailable", "youtube_unavailable", 422, {
       reason: "unavailable",
     });
@@ -570,22 +665,20 @@ export async function enrichFromUrl(userId: string, url: string): Promise<Enrich
   // INGEST-03: author_url match against registered data_sources for
   // author_is_me inheritance. Case-sensitive exact match in 2.1.
   const matchedSource =
-    oembed.data.authorUrl !== ""
-      ? await findActiveSourceByHandleUrl(userId, oembed.data.authorUrl)
-      : null;
+    preview.authorUrl !== "" ? await findActiveSourceByHandleUrl(userId, preview.authorUrl) : null;
 
   return {
     kind: "youtube_video",
     externalId: parsed.videoId,
-    title: oembed.data.title || `YouTube video ${parsed.videoId}`,
+    title: preview.title || `YouTube video ${parsed.videoId}`,
     // 2.1 SKIP — YouTube oEmbed has no published_at. Phase 3 fills via
     // YouTube Data API key (KEYS-01) alongside the polling worker.
     occurredAt: null,
     // Deterministic public-CDN thumbnail; oEmbed's `thumbnail_url` is HQ but
     // platform-versioned. mqdefault.jpg matches the Plan 02.1-16 FeedCard.
     thumbnailUrl: `https://img.youtube.com/vi/${parsed.videoId}/mqdefault.jpg`,
-    authorName: oembed.data.authorName || null,
-    authorUrl: oembed.data.authorUrl || null,
+    authorName: preview.authorName || null,
+    authorUrl: preview.authorUrl || null,
     canonicalUrl: parsed.canonicalUrl,
     sourceMatch: matchedSource
       ? { id: matchedSource.id, isOwnedByMe: matchedSource.isOwnedByMe }
@@ -766,20 +859,32 @@ export async function updateEvent(
   // distinct from undefined.
   const mergedKind = input.kind ?? existing.kind;
   const mergedUrl = input.url !== undefined ? input.url : existing.url;
-  if (mergedKind === "youtube_video") {
-    if (!mergedUrl) {
-      throw new AppError("url is required when kind=youtube_video", "kind_url_inconsistent", 422, {
-        event_id: eventId,
-        reason: "youtube_video_requires_url",
-      });
-    }
-    const { parseIngestUrl } = await import("./url-parser.js");
-    const parsed = parseIngestUrl(mergedUrl);
-    if (parsed.kind !== "youtube_video") {
-      throw new AppError("url is not a recognized YouTube URL", "kind_url_inconsistent", 422, {
-        event_id: eventId,
-        reason: "url_not_youtube",
-      });
+
+  // Phase 03.0.1 architecture cleanup — adapter-driven event-input validation.
+  // Cross-source code never switches on event.kind here; the adapter for the
+  // matching source kind (via eventKindToSourceKind) owns its kind-specific
+  // input validation (e.g. youtube_video requires a parseable YouTube URL,
+  // reddit_post will require a parseable reddit URL in Phase 03.1).
+  // Adapters that don't impose constraints simply omit validateEventInput.
+  const { eventKindToSourceKind } = await import("$lib/sources/event-to-source-kind.js");
+  const { getAdapter, hasAdapter } = await import("$lib/sources/registry.js");
+  const sourceKindForValidation = eventKindToSourceKind(mergedKind);
+  if (sourceKindForValidation !== null && hasAdapter(sourceKindForValidation)) {
+    const adapter = getAdapter(sourceKindForValidation);
+    if (adapter.validateEventInput !== undefined) {
+      try {
+        adapter.validateEventInput({ kind: mergedKind, url: mergedUrl });
+      } catch (err) {
+        // Re-throw with event_id metadata pinned (legacy contract: the route
+        // surfaces event_id in the 422 response).
+        if (err instanceof AppError && err.code === "kind_url_inconsistent") {
+          throw new AppError(err.message, err.code, err.status, {
+            event_id: eventId,
+            ...err.metadata,
+          });
+        }
+        throw err;
+      }
     }
   }
 

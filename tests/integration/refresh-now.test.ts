@@ -38,7 +38,7 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { youtubeVideos } = await import("../../src/lib/server/db/schema/youtube-videos.js");
+const { youtubeVideos } = await import("../../src/lib/server/db/schema/index.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { createApp } = await import("../../src/lib/server/http/app.js");
 const { seedUserDirectly } = await import("./helpers.js");
@@ -97,12 +97,12 @@ describe("refresh-now route (Plan 03.0-08)", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body).toEqual({ enqueued: true, queue: "poll.user", eventId: ev.id });
+    expect(body).toEqual({ enqueued: true, queue: "youtube.poll.user", eventId: ev.id });
 
     // pg-boss send was called.
     expect(sentJobs.length).toBeGreaterThanOrEqual(1);
     const lastSend = sentJobs[sentJobs.length - 1]!;
-    expect(lastSend.queue).toBe("poll.user");
+    expect(lastSend.queue).toBe("youtube.poll.user");
     expect(lastSend.data).toMatchObject({
       eventId: ev.id,
       userId: u.id,

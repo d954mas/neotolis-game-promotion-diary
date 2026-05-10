@@ -10,7 +10,9 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { eventGames } from "./db/schema/event-games.js";
-import { youtubeVideos } from "./db/schema/youtube-videos.js";
+import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
+import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
+import type { SourceKind } from "$lib/sources/adapter.js";
 import type { user, session } from "./db/schema/auth.js";
 import type {
   games,
@@ -20,8 +22,7 @@ import type {
   events,
 } from "./db/schema/index.js";
 import type { auditLog } from "./db/schema/audit-log.js";
-import type { youtubeVideoSnapshots } from "./db/schema/youtube-video-snapshots.js";
-import type { youtubeChannels } from "./db/schema/youtube-channels.js";
+import type { youtubeVideoSnapshots, youtubeChannels } from "./db/schema/index.js";
 
 type User = typeof user.$inferSelect;
 type Session = typeof session.$inferSelect;
@@ -242,6 +243,32 @@ export interface DataSourceDto {
   // been resolved yet, and for any DTO projected outside the /feed loader
   // (other call sites just pass it through unchanged).
   channelTitle: string | null;
+  // Phase 03.0.1 Plan 08 — D-13 AdapterError surface fields. Operational
+  // metadata (NOT secrets — no envelope-encryption strip applies). The
+  // /sources/[id] page renders a "Reconnect required" banner when
+  // needsReconnect=true, and a "Last error: <kind> @ <time>" badge when
+  // lastErrorAt is non-null. Future Phase 6+ adds a Reconnect CTA that
+  // resets needsReconnect once credentials are refreshed.
+  needsReconnect: boolean;
+  lastErrorAt: Date | null;
+  lastErrorKind: string | null;
+  // Phase 03.0.1 Wave 4 — channel-scoped state. These fields are populated
+  // by /sources loaders via JOIN with data_source_channel_state on
+  // (kind, channel_id = channel_key). UI components read them as before.
+  // The base toDataSourceDto projection sets null/false defaults — loaders
+  // override with channel-state values.
+  lastPolledAt: Date | null;
+  backfillOldestAt: Date | null;
+  backfillComplete: boolean;
+  backfillTargetSince: Date | null;
+  // Phase 03.0.1 (post-review UAT) — populated by the /sources loader from
+  // a separate aggregate-events query (see sources/+page.server.ts). Null
+  // when no events exist for this source. Not part of toDataSourceDto's
+  // base projection — DTO consumers that don't need the range simply leave
+  // these undefined.
+  firstEventAt?: Date | null;
+  lastEventAt?: Date | null;
+  eventCount?: number;
 }
 
 export function toDataSourceDto(r: DataSourceRow): DataSourceDto {
@@ -258,6 +285,15 @@ export function toDataSourceDto(r: DataSourceRow): DataSourceDto {
     updatedAt: r.updatedAt,
     deletedAt: r.deletedAt,
     channelTitle: null,
+    needsReconnect: r.needsReconnect,
+    lastErrorAt: r.lastErrorAt,
+    lastErrorKind: r.lastErrorKind,
+    // Channel-scoped fields — null/false defaults; loaders override by
+    // JOIN with data_source_channel_state.
+    lastPolledAt: null,
+    backfillOldestAt: null,
+    backfillComplete: false,
+    backfillTargetSince: r.backfillTargetSince,
   };
 }
 
@@ -399,6 +435,12 @@ export interface EventDto {
   // a snapshot row return null. UI consumers (FeedCard) render an inline
   // view-count line when present.
   stats: { viewCount: number; likeCount: number; commentCount: number; polledAt: Date } | null;
+  // Phase 03.0.1 (post-review UAT 2026-05-10) — channelTitle for
+  // kind=youtube_video events (auto-imported AND manual paste). Loader
+  // joins youtube_videos cache by external_id. FeedCard renders chip
+  // for ALL YouTube events (was only auto-imported pre-fix because chip
+  // depended on source.channelTitle which is null for manual paste).
+  channelTitle?: string | null;
 }
 
 /**
@@ -533,40 +575,46 @@ export async function loadVideoDataForEvents(
     { publishedAt: Date | null; lastPolledAt: Date | null; lastPollStatus: string | null }
   >
 > {
-  const externalIds = Array.from(
-    new Set(
-      rows
-        .filter((r) => r.userId === userId && r.kind === "youtube_video" && r.externalId !== null)
-        .map((r) => r.externalId!),
-    ),
-  );
-  const map = new Map<
+  // Phase 03.0.1 architecture cleanup — adapter-driven poll-state lookup.
+  //
+  // Cross-source code never queries youtube_videos / reddit_posts / etc.
+  // directly. Each adapter exposes fetchPollStateMap which knows its own
+  // table + key shape. We:
+  //   1. Group input rows by their adapter (via eventKindToSourceKind +
+  //      registry), filtering tenant + presence of externalId.
+  //   2. Call adapter.fetchPollStateMap(userId, externalIds) per adapter
+  //      that has any externalIds in this batch.
+  //   3. Merge the per-adapter Maps into one. ExternalId collisions
+  //      across adapters are unlikely (YouTube videoId vs reddit post id
+  //      have different shapes) but the merge is last-write-wins and
+  //      kind-tagged at the call site, so no data leaks.
+  //
+  // Adding a new pollable kind in Phase 03.1+ = implement
+  // fetchPollStateMap on its adapter; this code stays unchanged.
+  const merged = new Map<
     string,
     { publishedAt: Date | null; lastPolledAt: Date | null; lastPollStatus: string | null }
   >();
-  if (externalIds.length === 0) return map;
-  // youtube_videos is PUBLIC-DATA (CONTEXT D-07) — no user_id column,
-  // identical across tenants. Lookup is keyed on the PK only. The
-  // tenant-scope rule isn't applied to dto.ts (file outside the rule's
-  // glob — services/http/worker/scheduler/page-loaders), so no disable
-  // directive is needed; the discipline is documented inline instead.
-  const videoRows = await db
-    .select({
-      videoId: youtubeVideos.videoId,
-      publishedAt: youtubeVideos.publishedAt,
-      lastPolledAt: youtubeVideos.lastPolledAt,
-      lastPollStatus: youtubeVideos.lastPollStatus,
-    })
-    .from(youtubeVideos)
-    .where(inArray(youtubeVideos.videoId, externalIds));
-  for (const v of videoRows) {
-    map.set(v.videoId, {
-      publishedAt: v.publishedAt,
-      lastPolledAt: v.lastPolledAt,
-      lastPollStatus: v.lastPollStatus,
-    });
+  // Group externalIds by source-kind via eventKindToSourceKind, skipping
+  // event kinds that have no source-kind mapping (conference, talk, press,
+  // other) — those rows can never carry a poll state.
+  const idsByKind = new Map<SourceKind, Set<string>>();
+  for (const r of rows) {
+    if (r.userId !== userId || r.externalId === null) continue;
+    const sourceKind = eventKindToSourceKind(r.kind);
+    if (sourceKind === null) continue;
+    const set = idsByKind.get(sourceKind) ?? new Set<string>();
+    set.add(r.externalId);
+    idsByKind.set(sourceKind, set);
   }
-  return map;
+  for (const [sourceKind, ids] of idsByKind) {
+    if (!hasAdapter(sourceKind)) continue;
+    const adapter = getAdapter(sourceKind);
+    if (adapter.fetchPollStateMap === undefined) continue;
+    const partial = await adapter.fetchPollStateMap(userId, [...ids]);
+    for (const [k, v] of partial) merged.set(k, v);
+  }
+  return merged;
 }
 
 /**
@@ -683,7 +731,7 @@ export function toYoutubeChannelMetadataCacheDto(
 // + functions from a single barrel (`dto.ts`) consistent with the rest of the
 // Phase 2/3 DTO discipline. The shapes themselves live in
 // `services/admin-quota-read.ts` because they're computed from the row plus
-// the threshold constants exported by `services/youtube-quota-tracker.ts` —
+// the threshold constants exported by `$lib/sources/youtube/server/quota.ts` —
 // keeping them next to the loader avoids a cross-module dance for the
 // pctOfDaily / status derivation.
 //
@@ -694,6 +742,5 @@ export function toYoutubeChannelMetadataCacheDto(
 export {
   type QuotaKeyRow,
   type ServiceAuditEntry,
-  toQuotaKeyRow,
   toServiceAuditEntry,
 } from "./services/admin-quota-read.js";

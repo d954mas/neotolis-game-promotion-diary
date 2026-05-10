@@ -22,6 +22,7 @@
   // Plan 02.1-22's §2.2-bug closure (CTA reachable while a long source list
   // scrolls).
   import PageHeader from "$lib/components/PageHeader.svelte";
+  import QuotaStatusBanner from "$lib/components/QuotaStatusBanner.svelte";
   // Plan 02.1-39 round-6 polish #11 follow-up (UAT-NOTES.md §5.8 follow-up
   // #11 extension, 2026-04-30): the RecoveryDialog modal that landed on
   // /feed in c98eadf is extended to /sources too — same single recovery
@@ -53,6 +54,35 @@
   };
 
   let { data }: { data: PageData } = $props();
+
+  // Phase 03.0.1 (post-review UAT 2026-05-10) — live refresh while any
+  // source has an active cooldown (worker is processing a pull). Server
+  // loader re-runs every 3s; SourceRow updates last_polled_at, event
+  // range, and the cooldown countdown without manual page reload.
+  // Stops polling once all cooldowns hit 0.
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  $effect(() => {
+    // Live-refresh while ANY source is actively pulling (worker job in
+    // pgboss state active/created/retry) OR has cooldown remaining.
+    // Stops when both go to zero.
+    const anyPulling = Object.values(data.pullingBySource ?? {}).some(Boolean);
+    const anyCooldown = Object.values(data.cooldownBySource ?? {}).some((sec) => sec > 0);
+    const anyActive = anyPulling || anyCooldown;
+    if (anyActive && pollTimer === null) {
+      pollTimer = setInterval(() => {
+        void invalidateAll();
+      }, 3000);
+    } else if (!anyActive && pollTimer !== null) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    return () => {
+      if (pollTimer !== null) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+  });
   const active = $derived(data.active as DataSourceDto[]);
   const deleted = $derived(data.deleted as DataSourceDto[]);
 
@@ -117,6 +147,17 @@
     onOpenRecovery={() => (recoveryOpen = true)}
   />
 
+  <!-- Phase 03.0.1 — per-platform API quota banner. Important info but
+       rarely needed during normal use; collapsed under a disclosure to
+       reduce noise on the list view. User opens when wanting to check
+       quota state explicitly. -->
+  {#if data.quotaPlatforms.length > 0}
+    <details class="quota-disclosure">
+      <summary>API usage today</summary>
+      <QuotaStatusBanner platforms={data.quotaPlatforms} />
+    </details>
+  {/if}
+
   {#if active.length === 0 && deleted.length === 0}
     <EmptyState
       heading={m.empty_sources_heading()}
@@ -131,7 +172,11 @@
     <ul class="sources-list">
       {#each active as source (source.id)}
         <li>
-          <SourceRow {source} />
+          <SourceRow
+            {source}
+            cooldownSec={data.cooldownBySource?.[source.id] ?? 0}
+            pulling={data.pullingBySource?.[source.id] ?? false}
+          />
         </li>
       {/each}
     </ul>
@@ -183,4 +228,20 @@
   /* Plan 02.1-39 round-6 polish #11 follow-up: .deleted-sources, .deleted-row,
    * and .restore CSS removed alongside the bottom-of-page <details> recovery
    * block. RecoveryDialog owns the surface (same component on /feed and /games). */
+  .quota-disclosure {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+  }
+  .quota-disclosure > summary {
+    padding: var(--space-sm) var(--space-md);
+    cursor: pointer;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+    font-weight: var(--font-weight-semibold);
+    user-select: none;
+  }
+  .quota-disclosure > summary:hover {
+    color: var(--color-text);
+  }
 </style>

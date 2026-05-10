@@ -455,8 +455,9 @@ describe("Plan 02.1-27 — event_games + steam listing unique swap (0005 + 0006 
       // new verbs: account.deleted, account.restored, account.exported,
       // quota.limit_hit. Phase 3.0 baseline (migration 0010) added 5 more:
       // quota.service_throttled, purge.completed, auto_import.deferred,
-      // poll.failed, event.poll_refreshed.
-      // Total post-Plan-3.0-baseline: 23 (post-Plan-27) + 4 (0008) + 5 (0010) = 32.
+      // poll.failed, event.poll_refreshed. Phase 03.0.1 Plan 10 (migration
+      // 0023) added 1 more: source.refresh_content_requested.
+      // Total post-Plan-03.0.1-10: 23 (post-Plan-27) + 4 (0008) + 5 (0010) + 1 (0023) = 33.
       expect(values).toContain("account.deleted");
       expect(values).toContain("account.restored");
       expect(values).toContain("account.exported");
@@ -466,7 +467,8 @@ describe("Plan 02.1-27 — event_games + steam listing unique swap (0005 + 0006 
       expect(values).toContain("auto_import.deferred");
       expect(values).toContain("poll.failed");
       expect(values).toContain("event.poll_refreshed");
-      expect(values).toHaveLength(32);
+      expect(values).toContain("source.refresh_content_requested");
+      expect(values).toHaveLength(33);
     } finally {
       await pool.end();
     }
@@ -604,7 +606,7 @@ describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
     }
   });
 
-  it("creates the youtube_service_quota_usage table with composite PK (date_pacific, api_key_id)", async () => {
+  it("creates the youtube_service_quota_usage table with composite PK (date_pacific, api_key_id, pool_kind)", async () => {
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const tableRes = await pool.query<{ tablename: string }>(
@@ -616,7 +618,9 @@ describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
          where table_name='youtube_service_quota_usage' and column_name='user_id'`,
       );
       expect(userIdRes.rows.length).toBe(0);
-      // Composite PK columns in order: date_pacific, api_key_id.
+      // Composite PK columns in order: date_pacific, api_key_id, pool_kind.
+      // Phase 03.0.1 post-review #5: pool_kind discriminator added so
+      // reconcileReservoirsOnBoot debits each in-memory reservoir accurately.
       const pkRes = await pool.query<{ column_name: string; ordinal_position: number }>(
         `select kcu.column_name, kcu.ordinal_position
          from information_schema.table_constraints tc
@@ -627,7 +631,11 @@ describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
            and tc.constraint_type='PRIMARY KEY'
          order by kcu.ordinal_position`,
       );
-      expect(pkRes.rows.map((r) => r.column_name)).toEqual(["date_pacific", "api_key_id"]);
+      expect(pkRes.rows.map((r) => r.column_name)).toEqual([
+        "date_pacific",
+        "api_key_id",
+        "pool_kind",
+      ]);
     } finally {
       await pool.end();
     }
@@ -695,8 +703,9 @@ describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
       // Sanity: prior verbs still present.
       expect(values).toContain("quota.limit_hit");
       expect(values).toContain("event.detached_from_game");
-      // 27 (post-Plan-02.2-01) + 5 (Plan 03.0-01) = 32.
-      expect(values).toHaveLength(32);
+      // 27 (post-Plan-02.2-01) + 5 (Plan 03.0-01) + 1 (Plan 03.0.1-10 migration 0023) = 33.
+      expect(values).toContain("source.refresh_content_requested");
+      expect(values).toHaveLength(33);
     } finally {
       await pool.end();
     }

@@ -1807,17 +1807,16 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
  * scan above.
  */
 describe("Plan 02.1-33 — SourceRow edit-mode polish (visibility gates + footer)", () => {
-  it("SourceRow renders the read-mode Edit pencil ONLY when !editing — closes §4.22.B/C", async () => {
+  it("SourceRow read-mode .actions has refresh button, NO edit-icon, NO remove-icon — Phase 03.0.1 post-review UAT", async () => {
+    // Phase 03.0.1 (post-review UAT 2026-05-10): edit pencil REMOVED from
+    // row. User clicks the display-name link to /sources/[id] where edit
+    // (rename, auto-import toggle, delete) lives. Row is read-only except
+    // for the inline refresh button.
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
-    // Read-mode block has the Edit pencil (icon-btn edit-icon class pair)
-    // and explicitly NO Remove button — the {#if !editing} ... {:else}
-    // structure encodes the visibility gate.
     expect(src, "{#if !editing} block exists").toMatch(/\{#if !editing\}/);
     expect(src, "{:else} branch exists for edit mode").toMatch(/\{:else\}/);
-    // The read-mode .actions div contains an edit-icon class but no
-    // remove-icon class — assert by structural slice.
     const ifNotEditingMatch = src.match(
       /\{#if !editing\}\s*<!--[\s\S]*?-->\s*<div class="actions">[\s\S]*?<\/div>\s*\{:else\}/,
     );
@@ -1827,7 +1826,9 @@ describe("Plan 02.1-33 — SourceRow edit-mode polish (visibility gates + footer
     ).not.toBeNull();
     if (ifNotEditingMatch) {
       const readModeBlock = ifNotEditingMatch[0];
-      expect(readModeBlock).toMatch(/edit-icon/);
+      expect(readModeBlock).toMatch(/RefreshContentButton/);
+      // Edit pencil moved to /sources/[id] detail page — row is read-only.
+      expect(readModeBlock).not.toMatch(/edit-icon/);
       // Read-mode block must NOT contain the destructive remove-icon class.
       expect(readModeBlock).not.toMatch(/remove-icon/);
     }

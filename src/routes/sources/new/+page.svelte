@@ -67,7 +67,15 @@
   const initialAutoImport = untrack(() => data.defaultAutoImport);
 
   let selectedKind = $state<SourceKind>("youtube_channel");
-  let displayName = $state("");
+  // Phase 03.0.1 (post-review UAT 2026-05-10) — displayName REMOVED from
+  // onboarding form. Source name comes from the platform (YouTube channel
+  // title, Reddit account name, etc.) — that's more identifiable than a
+  // user-typed label. Custom rename will live on /sources/[id] detail page.
+  // Pre-fix the displayName field added friction without value: 90% of
+  // users left it empty or pasted the URL.
+  // Description (free-form note) replaces it — optional drop-down for
+  // additional context the user wants to remember about this source.
+  let description = $state("");
   let handleUrl = $state("");
   let isOwnedByMe = $state(initialIsOwnedByMe);
   let autoImport = $state(initialAutoImport);
@@ -153,7 +161,9 @@
         body: JSON.stringify({
           kind: selectedKind,
           handleUrl: handleUrl.trim(),
-          displayName: displayName.trim() || null,
+          // Description stored in metadata.description (no schema change
+          // — jsonb column accepts arbitrary keys).
+          metadata: description.trim() ? { description: description.trim() } : undefined,
           isOwnedByMe,
           autoImport,
           // Only include the field when the picker would have been visible —
@@ -267,17 +277,6 @@
     </fieldset>
 
     <label class="field">
-      <span class="label">Display name</span>
-      <input
-        class="input"
-        type="text"
-        bind:value={displayName}
-        maxlength="120"
-        placeholder="e.g. My YouTube channel"
-      />
-    </label>
-
-    <label class="field">
       <span class="label">Handle URL *</span>
       <input
         class="input"
@@ -297,6 +296,19 @@
       <input type="checkbox" bind:checked={autoImport} />
       <span>Auto-import (poll every 6 hours)</span>
     </label>
+
+    <details class="description-details">
+      <summary>Add description (optional)</summary>
+      <label class="field">
+        <textarea
+          class="input"
+          rows="3"
+          bind:value={description}
+          maxlength="500"
+          placeholder="Why are you tracking this? E.g. 'Indie horror channel I'm collaborating with'"
+        ></textarea>
+      </label>
+    </details>
 
     {#if showPicker}
       <hr class="picker-separator" />

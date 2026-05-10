@@ -120,7 +120,7 @@ vi.mock("../../src/lib/server/db/client.js", () => {
 
 // Mock the quota tracker so this test does not depend on plan 03 landing first.
 const incrementCalls: Array<{ apiKeyId: string; units: number; hasTx: boolean }> = [];
-vi.mock("../../src/lib/server/services/youtube-quota-tracker.js", () => ({
+vi.mock("../../src/lib/sources/youtube/server/quota.js", () => ({
   incrementUsage: async (args: { apiKeyId: string; units: number; tx?: unknown }) => {
     incrementCalls.push({
       apiKeyId: args.apiKeyId,
@@ -130,10 +130,9 @@ vi.mock("../../src/lib/server/services/youtube-quota-tracker.js", () => ({
   },
 }));
 
-const { writeSnapshot } = await import("../../src/lib/server/services/youtube-snapshot-writer.js");
-const { youtubeVideoSnapshots } =
-  await import("../../src/lib/server/db/schema/youtube-video-snapshots.js");
-const { youtubeVideos } = await import("../../src/lib/server/db/schema/youtube-videos.js");
+const { writeSnapshot } = await import("../../src/lib/sources/youtube/server/snapshots.js");
+const { youtubeVideoSnapshots, youtubeVideos } =
+  await import("../../src/lib/server/db/schema/index.js");
 
 describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
   beforeEach(() => {
@@ -149,6 +148,7 @@ describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
       metrics: { view_count: 100, like_count: 10, comment_count: 5 },
       apiKeyId: "key-abc",
       unitsUsed: 1,
+      poolKind: "cron",
       status: "ok",
     });
 
@@ -177,6 +177,7 @@ describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
       metrics: { view_count: 1, like_count: 1, comment_count: 1 },
       apiKeyId: "key-r",
       unitsUsed: 1,
+      poolKind: "cron",
       status: "ok",
     });
 
@@ -188,6 +189,7 @@ describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
       metrics: { view_count: 1, like_count: 1, comment_count: 1 },
       apiKeyId: "key-r",
       unitsUsed: 1,
+      poolKind: "cron",
       status: "ok",
     });
     const allRetryInserts = insertCalls.filter(
@@ -205,6 +207,7 @@ describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
       metrics: { view_count: 1, like_count: 0, comment_count: 0 },
       apiKeyId: "key-u",
       unitsUsed: 1,
+      poolKind: "cron",
       status: "ok",
     });
 
@@ -226,6 +229,7 @@ describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
       metrics: null,
       apiKeyId: "key-n",
       unitsUsed: 1,
+      poolKind: "cron",
       status: "not_found",
     });
 
@@ -250,6 +254,7 @@ describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
         metrics: null,
         apiKeyId: "key-x",
         unitsUsed: 1,
+        poolKind: "cron",
         status,
       });
       const snapshotInsert = insertCalls.find((c) => c.table === youtubeVideoSnapshots);
@@ -275,6 +280,7 @@ describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
       metrics: { view_count: 1, like_count: 1, comment_count: 1 },
       apiKeyId: "key-q-sha8",
       unitsUsed: 7,
+      poolKind: "cron",
       status: "ok",
     });
 
@@ -291,6 +297,7 @@ describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
       metrics: { view_count: 1, like_count: 1, comment_count: 1 },
       apiKeyId: "key-tx",
       unitsUsed: 1,
+      poolKind: "cron",
       status: "ok",
     });
     expect(txCount).toBe(1);
@@ -306,6 +313,7 @@ describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
       metrics: { view_count: 1, like_count: 1, comment_count: 1 },
       apiKeyId: "key-tenant",
       unitsUsed: 1,
+      poolKind: "cron",
       status: "ok",
     });
 

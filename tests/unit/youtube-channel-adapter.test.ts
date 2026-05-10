@@ -41,18 +41,18 @@ process.env.YOUTUBE_API_BASE_URL = "https://yt-mock.test/youtube/v3";
 process.env.SERVICE_YOUTUBE_API_KEYS = "test-operator-key-A";
 
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { youtubeChannelAdapter as YoutubeChannelAdapterT } from "../../src/lib/server/integrations/youtube-channel-adapter.js";
+import type { youtubeAdapter as YoutubeChannelAdapterT } from "../../src/lib/sources/youtube/server/index.js";
 
 // Post-build review 2026-05-08 (4th pass): pollContent now flows through
-// chargedFetch (integrations/youtube-http.ts), which calls incrementUsage
+// chargedFetch ($lib/sources/youtube/server/http.ts), which calls incrementUsage
 // + markThrottleTransition. Both touch the DB, which these unit tests
 // neither have nor want. Stub them; pickKeyForJob / youtubeQuotaUser /
 // hashApiKeyId stay real because the test asserts on their outputs (the
 // quotaUser fingerprint, the apiKeyId-keyed fetch URL).
-vi.mock("../../src/lib/server/services/youtube-quota-tracker.js", async () => {
+vi.mock("../../src/lib/sources/youtube/server/quota.js", async () => {
   const actual = await vi.importActual<
-    typeof import("../../src/lib/server/services/youtube-quota-tracker.js")
-  >("../../src/lib/server/services/youtube-quota-tracker.js");
+    typeof import("../../src/lib/sources/youtube/server/quota.js")
+  >("../../src/lib/sources/youtube/server/quota.js");
   return {
     ...actual,
     incrementUsage: vi.fn().mockResolvedValue(undefined),
@@ -70,8 +70,8 @@ type Adapter = typeof YoutubeChannelAdapterT;
 async function loadAdapter(): Promise<Adapter> {
   vi.resetModules();
   process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
-  const mod = await import("../../src/lib/server/integrations/youtube-channel-adapter.js");
-  return mod.youtubeChannelAdapter;
+  const mod = await import("../../src/lib/sources/youtube/server/index.js");
+  return mod.youtubeAdapter;
 }
 
 let youtubeChannelAdapter: Adapter;
@@ -163,7 +163,7 @@ function makePlaylistItemsResponse(
 const fakeUserId = "user-test-123";
 // Post-build review (2026-05-07): adapter signatures take a pre-resolved
 // PickedKey from the caller (worker / route layer) instead of picking
-// internally — see PickedKey jsdoc in data-source-adapter.ts. Tests
+// internally — see PickedKey jsdoc in $lib/sources/adapter.ts. Tests
 // supply this fixture; the API key string is never asserted on the wire
 // (it is sent in the URL `key=` parameter; tests only assert presence).
 const fakePicked = { apiKey: "test-operator-key-A", apiKeyId: "fakekey0" };
@@ -397,7 +397,8 @@ describe("youtubeChannelAdapter.pollContent — playlistItems.list", () => {
     expect(calls[0]!.url.searchParams.get("playlistId")).toBe("PLABC");
     expect(calls[0]!.url.searchParams.get("part")).toBe("snippet");
     expect(calls[0]!.url.searchParams.get("maxResults")).toBe("50");
-    expect(events.map((e) => e.externalId)).toEqual(["new1", "new2"]);
+    expect(events.events.map((e) => e.externalId)).toEqual(["new1", "new2"]);
+    expect(events.unitsUsed).toBe(1);
   });
 
   it("Test 12: pollContent maps publishedAt string → Date object in RawEvent", async () => {
@@ -415,10 +416,11 @@ describe("youtubeChannelAdapter.pollContent — playlistItems.list", () => {
       new Date("2026-04-01T00:00:00Z"),
     );
 
-    expect(events).toHaveLength(1);
-    expect(events[0]!.occurredAt).toBeInstanceOf(Date);
-    expect(events[0]!.occurredAt.toISOString()).toBe("2026-05-01T10:00:00.000Z");
-    expect(events[0]!.url).toBe("https://www.youtube.com/watch?v=newvid");
+    expect(events.events).toHaveLength(1);
+    expect(events.events[0]!.occurredAt).toBeInstanceOf(Date);
+    expect(events.events[0]!.occurredAt.toISOString()).toBe("2026-05-01T10:00:00.000Z");
+    expect(events.events[0]!.url).toBe("https://www.youtube.com/watch?v=newvid");
+    expect(events.unitsUsed).toBe(1);
   });
 
   it("Test 13: pollContent with empty playlist → returns []", async () => {
@@ -429,7 +431,8 @@ describe("youtubeChannelAdapter.pollContent — playlistItems.list", () => {
       new Date("2026-04-01T00:00:00Z"),
     );
 
-    expect(events).toEqual([]);
+    expect(events.events).toEqual([]);
+    expect(events.unitsUsed).toBe(1);
   });
 
   it("pollContent without uploadsPlaylistId → returns [] (channel-context backfill required)", async () => {
@@ -439,7 +442,8 @@ describe("youtubeChannelAdapter.pollContent — playlistItems.list", () => {
       new Date(0),
     );
 
-    expect(events).toEqual([]);
+    expect(events.events).toEqual([]);
+    expect(events.unitsUsed).toBe(0);
   });
 });
 

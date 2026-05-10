@@ -78,7 +78,7 @@ import {
 import { requestRefreshPoll } from "../../services/refresh-poll.js";
 import { AppError } from "../../services/errors.js";
 import { parseIngestUrl } from "../../services/url-parser.js";
-import type { EventKind } from "../../integrations/data-source-adapter.js";
+import type { EventKind } from "$lib/sources/adapter.js";
 import { toEventDto, loadGameIdsForEvent, mapEventsToDtos } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
@@ -558,7 +558,8 @@ eventsRoutes.patch("/events/:id/unmark-standalone", async (c) => {
 //   - AppError "event_not_pollable"     → 422
 //   - AppError "event_no_external_id"   → 422
 //
-// On 200 the body is `{enqueued: true, queue: "poll.user", eventId}`.
+// On 200 the body is `{enqueued: true, queue: "youtube.poll.user", eventId}`
+// (Phase 03.0.1 Plan 07 per-kind queue rename — was "poll.user").
 // Plan 03.0-11 (RefreshNowButton) consumes this contract: after a 200 it
 // disables the button for 5 minutes; after a 429 it reads Retry-After to
 // drive the same countdown without round-tripping the metadata payload.

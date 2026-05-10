@@ -118,6 +118,11 @@
       commentCount: number;
       polledAt: Date | string;
     } | null;
+    // Phase 03.0.1 (post-review UAT 2026-05-10) — channelTitle for ALL
+    // YouTube events (auto-imported AND manual paste), enriched by /feed
+    // loader from youtube_videos cache. Used by the single-chip render
+    // below.
+    channelTitle?: string | null;
   };
   type SourceLite = {
     id: string;
@@ -319,12 +324,29 @@
       </div>
     {/if}
 
-    {#if source}
+    {#if event.kind === "youtube_video" && (event.channelTitle || source)}
+      {@const channelLabel = event.channelTitle ?? source?.channelTitle ?? source?.handleUrl ?? ""}
       <div class="chips-line">
-        {#if source.channelTitle}
-          <span class="chip chip-channel" title="YouTube channel">{source.channelTitle}</span>
+        <!-- Phase 03.0.1 (post-review UAT 2026-05-10) — single channel
+             chip for ALL YouTube events. event.channelTitle is enriched
+             by the /feed loader from youtube_videos cache (works for
+             manual paste; source-level cache covers auto-import). The
+             tracked-source variant prefixes a small ↻ icon to distinguish
+             auto-imported events from manual pastes (option D from UAT
+             discussion 2026-05-10). Tooltip explains the distinction. -->
+        {#if source}
+          <span
+            class="chip chip-channel chip-channel--tracked"
+            title="Auto-imported from tracked source: {channelLabel}"
+          >
+            <span class="chip-channel__icon" aria-hidden="true">↻</span>
+            {channelLabel}
+          </span>
+        {:else}
+          <span class="chip chip-channel" title="YouTube channel">
+            {channelLabel}
+          </span>
         {/if}
-        <span class="chip" title="My source label">{source.displayName ?? source.handleUrl}</span>
       </div>
     {/if}
 
@@ -557,6 +579,13 @@
     font-size: var(--font-size-label);
     line-height: 1;
     white-space: nowrap;
+  }
+  .chip-channel--tracked {
+    gap: 4px;
+  }
+  .chip-channel__icon {
+    font-size: 0.85em;
+    opacity: 0.7;
   }
   /* Game chip stands out a bit more than the source chip (slightly stronger
    * border) since it represents the primary association. */
