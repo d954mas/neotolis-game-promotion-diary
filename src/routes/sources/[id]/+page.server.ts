@@ -26,6 +26,9 @@ import {
 } from "$lib/server/services/quota.js";
 import { allAdapters } from "$lib/sources/registry.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
+import { db } from "$lib/server/db/client.js";
+import { youtubeChannels } from "$lib/server/db/schema/index.js";
+import { eq } from "drizzle-orm";
 
 export const load: PageServerLoad = async ({ params, locals }) => {
   const userId = locals.user?.id;
@@ -58,7 +61,21 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       }),
     );
 
-    return { source: toDataSourceDto(row), quotaPlatforms };
+    // Phase 03.0.1 (post-review UAT 2026-05-10) — populate channelTitle
+    // from youtube_channels cache. /sources list loader has this JOIN
+    // already; detail loader was missing it so heading fell back to
+    // handleUrl. Same code path as the list loader (single-row case).
+    const dto = toDataSourceDto(row);
+    if (dto.channelId !== null) {
+      const [cache] = await db
+        .select({ channelTitle: youtubeChannels.channelTitle })
+        .from(youtubeChannels)
+        .where(eq(youtubeChannels.channelId, dto.channelId))
+        .limit(1);
+      dto.channelTitle = cache?.channelTitle ?? null;
+    }
+
+    return { source: dto, quotaPlatforms };
   } catch (err) {
     if (err instanceof NotFoundError) {
       error(404);
