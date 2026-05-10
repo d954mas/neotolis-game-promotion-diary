@@ -71,7 +71,7 @@
     lastEventAt?: Date | string | null;
   };
 
-  let { source }: { source: DataSourceDto } = $props();
+  let { source, cooldownSec = 0 }: { source: DataSourceDto; cooldownSec?: number } = $props();
 
   // Phase 03.0.1 (post-review UAT) — relative-time formatter for «Last
   // pulled» display. Inline (no luxon dep) — minimal English-only for v0.1.
@@ -261,7 +261,12 @@
          to /sources/[id] where edit (rename, auto-import toggle, delete)
          lives. Row is now read-only except for refresh action. -->
     <div class="actions">
-      <RefreshContentButton sourceId={source.id} sourceKind={source.kind} compact />
+      <RefreshContentButton
+        sourceId={source.id}
+        sourceKind={source.kind}
+        compact
+        initialCooldownSec={cooldownSec}
+      />
     </div>
   {:else}
     <form class="edit-form" onsubmit={saveSourceEdit}>

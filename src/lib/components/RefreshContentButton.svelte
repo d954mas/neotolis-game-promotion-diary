@@ -39,16 +39,35 @@
   // Phase 03.0.1 (post-review UAT) — compact mode: icon-only button for
   // inline placement (e.g., /sources row). Default mode = full text label
   // for the detail page where the affordance is the primary action.
+  //
+  // initialCooldownSec — server-rendered cooldown state. /sources loader
+  // queries audit_log for the most-recent refresh-content INTENT row per
+  // source within the 5-minute singletonKey window; the row passes the
+  // remaining seconds here so the UI cooldown survives page reload.
+  // Pre-fix the cooldown lived only in client state — F5 reset it.
   let {
     sourceId,
     sourceKind: _sourceKind,
     compact = false,
-  }: { sourceId: string; sourceKind: string; compact?: boolean } = $props();
+    initialCooldownSec = 0,
+  }: {
+    sourceId: string;
+    sourceKind: string;
+    compact?: boolean;
+    initialCooldownSec?: number;
+  } = $props();
 
   const COOLDOWN_SEC = 300; // 5min UI cooldown to mirror singletonKey window
 
   let pending = $state(false);
-  let cooldownSec = $state(0);
+  let cooldownSec = $state(initialCooldownSec);
+
+  // Resume cooldown ticker on mount when initial state is set.
+  $effect(() => {
+    if (initialCooldownSec > 0 && cooldownTimer === null) {
+      startCooldown(initialCooldownSec);
+    }
+  });
   let toast = $state<{ kind: "ok" | "err"; text: string } | null>(null);
 
   // Cleanup the cooldown interval on unmount so we don't leak timers.
@@ -60,8 +79,8 @@
     }
   });
 
-  function startCooldown(): void {
-    cooldownSec = COOLDOWN_SEC;
+  function startCooldown(seconds: number = COOLDOWN_SEC): void {
+    cooldownSec = seconds;
     if (cooldownTimer !== null) clearInterval(cooldownTimer);
     cooldownTimer = setInterval(() => {
       cooldownSec = Math.max(0, cooldownSec - 1);
@@ -165,11 +184,15 @@
     gap: var(--space-xs);
   }
   .refresh-content__button--compact {
-    padding: 0 var(--space-sm);
-    min-width: 2rem;
+    /* Fixed width so cooldown numbers (e.g. "287") don't stretch the
+       button — pre-fix `min-width: 2rem` allowed up to 3 char numbers
+       to grow it inconsistently between adjacent rows. */
+    width: 3rem;
     height: 2rem;
-    font-size: 1.1rem;
+    padding: 0;
+    font-size: 1rem;
     line-height: 1;
+    box-sizing: border-box;
   }
   .refresh-content__button {
     padding: var(--space-sm) var(--space-md);

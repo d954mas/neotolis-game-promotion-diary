@@ -140,7 +140,7 @@
     <ul class="sources-list">
       {#each active as source (source.id)}
         <li>
-          <SourceRow {source} />
+          <SourceRow {source} cooldownSec={data.cooldownBySource?.[source.id] ?? 0} />
         </li>
       {/each}
     </ul>

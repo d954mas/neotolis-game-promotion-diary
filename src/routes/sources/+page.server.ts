@@ -10,7 +10,8 @@ import { allAdapters } from "$lib/sources/registry.js";
 import { db } from "$lib/server/db/client.js";
 import { youtubeChannels } from "$lib/server/db/schema/index.js";
 import { events } from "$lib/server/db/schema/events.js";
-import { and, eq, isNull, inArray, sql } from "drizzle-orm";
+import { auditLog } from "$lib/server/db/schema/audit-log.js";
+import { and, eq, isNull, inArray, sql, gte, max } from "drizzle-orm";
 
 /**
  * /sources loader — list the caller's data_sources, partitioned active vs
@@ -81,6 +82,44 @@ export const load: PageServerLoad = async ({ locals }) => {
     s.lastEventAt = range?.last ?? null;
   }
 
+  // Phase 03.0.1 (post-review UAT) — refresh-content cooldown state.
+  // Pre-fix the 5min cooldown was client-only — F5 reset it. Server
+  // queries the latest refresh-content INTENT audit row per source within
+  // the cooldown window and computes remaining seconds. RefreshContentButton
+  // initializes from this state so reload doesn't lose the gate.
+  //
+  // INTENT rows are the ones without `flow` field (worker COMPLETION rows
+  // set flow=incremental/historical). See P3 rate-limit-query fix earlier.
+  const COOLDOWN_MS = 5 * 60_000;
+  const cooldownSince = new Date(Date.now() - COOLDOWN_MS);
+  const cooldownMap = new Map<string, number>(); // sourceId → remaining seconds
+  if (sourceIds.length > 0) {
+    const recent = await db
+      .select({
+        sourceId: sql<string>`metadata->>'source_id'`,
+        latest: max(auditLog.createdAt),
+      })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.userId, locals.user.id),
+          eq(auditLog.action, "source.refresh_content_requested"),
+          sql`${auditLog.metadata}->>'flow' IS NULL`,
+          gte(auditLog.createdAt, cooldownSince),
+        ),
+      )
+      .groupBy(sql`metadata->>'source_id'`);
+    const now = Date.now();
+    for (const r of recent) {
+      if (r.sourceId !== null && r.latest !== null) {
+        const elapsed = now - r.latest.getTime();
+        const remaining = Math.max(0, Math.ceil((COOLDOWN_MS - elapsed) / 1000));
+        if (remaining > 0) cooldownMap.set(r.sourceId, remaining);
+      }
+    }
+  }
+  const cooldownBySource: Record<string, number> = Object.fromEntries(cooldownMap);
+
   // Phase 03.0.1 — quota status per platform (today + lifetime). Banner
   // surfaces all platforms — adding Reddit Phase 03.1+ adds a row automatically
   // via allAdapters iteration. Each adapter declares own userQuotaCap (or
@@ -109,5 +148,6 @@ export const load: PageServerLoad = async ({ locals }) => {
     active: dtos.filter((s) => s.deletedAt === null),
     deleted: dtos.filter((s) => s.deletedAt !== null),
     quotaPlatforms,
+    cooldownBySource,
   };
 };
