@@ -11,7 +11,7 @@ import { db } from "$lib/server/db/client.js";
 import { youtubeChannels } from "$lib/server/db/schema/index.js";
 import { events } from "$lib/server/db/schema/events.js";
 import { auditLog } from "$lib/server/db/schema/audit-log.js";
-import { and, eq, isNull, inArray, sql, gte, max } from "drizzle-orm";
+import { and, eq, isNull, inArray, sql, gte, max, count } from "drizzle-orm";
 
 /**
  * /sources loader — list the caller's data_sources, partitioned active vs
@@ -53,13 +53,13 @@ export const load: PageServerLoad = async ({ locals }) => {
   // so user doesn't need to open detail to see it. Single grouped query
   // — same as /feed's per-source date-range query.
   const sourceIds = dtos.map((s) => s.id);
-  const eventRanges = new Map<string, { first: Date; last: Date }>();
+  const eventStats = new Map<string, { last: Date; count: number }>();
   if (sourceIds.length > 0) {
-    const ranges = await db
+    const rows = await db
       .select({
         sourceId: events.sourceId,
-        first: sql<Date>`MIN(${events.occurredAt})`,
-        last: sql<Date>`MAX(${events.occurredAt})`,
+        last: max(events.occurredAt),
+        cnt: count(),
       })
       .from(events)
       .where(
@@ -70,16 +70,16 @@ export const load: PageServerLoad = async ({ locals }) => {
         ),
       )
       .groupBy(events.sourceId);
-    for (const r of ranges) {
-      if (r.sourceId !== null && r.first !== null && r.last !== null) {
-        eventRanges.set(r.sourceId, { first: r.first, last: r.last });
+    for (const r of rows) {
+      if (r.sourceId !== null && r.last !== null) {
+        eventStats.set(r.sourceId, { last: r.last, count: Number(r.cnt) });
       }
     }
   }
   for (const s of dtos) {
-    const range = eventRanges.get(s.id);
-    s.firstEventAt = range?.first ?? null;
-    s.lastEventAt = range?.last ?? null;
+    const stat = eventStats.get(s.id);
+    s.lastEventAt = stat?.last ?? null;
+    s.eventCount = stat?.count ?? 0;
   }
 
   // Phase 03.0.1 (post-review UAT) — refresh-content cooldown state.

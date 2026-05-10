@@ -266,6 +266,7 @@ export interface DataSourceDto {
   // these undefined.
   firstEventAt?: Date | null;
   lastEventAt?: Date | null;
+  eventCount?: number;
 }
 
 export function toDataSourceDto(r: DataSourceRow): DataSourceDto {

@@ -69,6 +69,7 @@
     backfillComplete?: boolean;
     firstEventAt?: Date | string | null;
     lastEventAt?: Date | string | null;
+    eventCount?: number;
     metadata?: Record<string, unknown> | null;
   };
 
@@ -260,9 +261,12 @@
           ? `Last pulled: ${formatRelativeTime(source.lastPolledAt)}`
           : "Never pulled"}
       </span>
-      {#if source.firstEventAt && source.lastEventAt}
-        <span class="event-range" title="First / last event date">
-          Events: {formatDateShort(source.firstEventAt)} — {formatDateShort(source.lastEventAt)}
+      {#if (source.eventCount ?? 0) > 0}
+        <span class="event-range" title="Total events / latest event date">
+          {source.eventCount}
+          {source.eventCount === 1 ? "event" : "events"}{source.lastEventAt
+            ? `, latest ${formatDateShort(source.lastEventAt)}`
+            : ""}
         </span>
       {/if}
     </div>
