@@ -36,7 +36,7 @@
 // в общей backfill-user queue с priority=0 (lowest); user-driven jobs
 // priority=1 идут вперёд.
 
-import { and, eq, isNull, asc, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { logger } from "$lib/server/logger.js";
@@ -88,25 +88,41 @@ export async function handleAutoBackfillCron(
     return;
   }
 
-  // Picker — incomplete sources, soft-deleted excluded, per-user round-robin.
+  // Picker — incomplete sources, soft-deleted excluded, oldest-poll-first.
   //
   // CROSS-TENANT BY DESIGN (D-11 scheduler fan-out). This SELECT
   // INTENTIONALLY walks all users' incomplete sources to enqueue passive
-  // backfill jobs in round-robin order. The orderBy mentions
-  // `dataSources.userId` as a SORT key, NOT a filter — the tenant-scope
-  // ESLint rule's loose regex currently accepts this (matches `userId`
-  // anywhere in the chain text) but that's incidental.
+  // backfill jobs. The worker handler downstream re-applies tenant scope
+  // via getSourceById(userId, sourceId) on each enqueued job, so cross-
+  // tenant fan-out at the picker level is the correct architectural
+  // primitive.
   //
-  // If a future tightening of the rule (require userId WITHIN .where) ever
-  // lands, this query will start failing the linter. Replace this comment
-  // with `// eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query`
-  // and KEEP this rationale intact — the worker handler downstream
-  // re-applies tenant scope via getSourceById(userId, sourceId) on each
-  // enqueued job, so cross-tenant fan-out at the picker level is the
-  // correct architectural primitive.
+  // Fairness ordering — Phase 03.0.1 (post-review fourth-pass): pre-fix
+  // was `ORDER BY user_id ASC, last_polled_at ASC NULLS FIRST` which
+  // sorted by tenant FIRST. The user whose UUID sorted first and had >50
+  // incomplete sources occupied the entire daily batch; later users
+  // never received cron-driven backfill. Now: drop user_id from the sort
+  // entirely — global oldest-poll-first wins. This is naturally fair on
+  // a per-source basis: if user A has 1000 incomplete sources at
+  // T-1d and user B has 1 incomplete source at T-1d+1m, user A wins this
+  // tick (older), but once A's sources advance to today, B's becomes
+  // the oldest and wins next tick. Power users (more sources = more
+  // catch-up work) consume proportionally more cron budget — correct
+  // semantics, not a fairness violation.
+  //
+  // NULLS FIRST — newly-onboarded sources (last_polled_at IS NULL) are
+  // always the highest-priority pick. Ensures bootstrap walk happens
+  // before any incremental refreshes.
   //
   // P2-3 (post-review) — also excludes needsReconnect sources so broken
   // adapters don't burn cron pool on guaranteed-failing polls.
+  //
+  // Tenant-scope ESLint disable — this query is intentionally cross-tenant
+  // (D-11 scheduler fan-out, see comment block above). The previous version
+  // happened to satisfy the loose regex via `asc(dataSources.userId)` in
+  // the orderBy; removing that for fairness exposed the rule. The worker
+  // handler downstream re-applies tenant scope per job.
+  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query
   const candidates = await db
     .select({
       id: dataSources.id,
@@ -125,7 +141,7 @@ export async function handleAutoBackfillCron(
         sql`${dataSources.kind} = 'youtube_channel'`,
       ),
     )
-    .orderBy(asc(dataSources.userId), sql`${dataSources.lastPolledAt} ASC NULLS FIRST`)
+    .orderBy(sql`${dataSources.lastPolledAt} ASC NULLS FIRST`)
     .limit(MAX_PICK);
 
   if (candidates.length === 0) {

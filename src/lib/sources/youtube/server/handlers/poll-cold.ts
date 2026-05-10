@@ -33,7 +33,10 @@ import {
   TIER_BOUNDARY_COLD_MS,
 } from "$lib/server/services/tier-resolver.js";
 import { selectEligibleVideoIds } from "$lib/server/services/poll-eligibility.js";
-import { youtubeChannelAdapterCore as youtubeChannelAdapter } from "../adapter.js";
+import {
+  youtubeChannelAdapterCore as youtubeChannelAdapter,
+  YOUTUBE_VIDEOS_BATCH_SIZE,
+} from "../adapter.js";
 import { writeSnapshot } from "../snapshots.js";
 import { pickKeyForJob, markThrottleTransition, getThrottleState } from "../quota.js";
 import { logger } from "$lib/server/logger.js";
@@ -114,19 +117,22 @@ export async function handlePollCold(job: {
     picked,
   );
 
-  // Phase B — writeSnapshot per result. Quota counter inflation fix — see
-  // poll-active.ts header for rationale. 1 unit per batched videos.list
-  // call, charged on the FIRST result regardless of status (per Google's
-  // quota guide: "all API requests, including invalid requests, incur at
-  // least a one-point quota cost"). The no-key path returns BEFORE this
-  // loop.
+  // Phase B — writeSnapshot per result. Quota cost: pollStatsByVideoId
+  // chunks input into batches of YOUTUBE_VIDEOS_BATCH_SIZE (50, Google's
+  // videos.list cap) — each chunk = 1 quota unit. Charge on the first
+  // video of every chunk (i % 50 === 0); rest pass unitsUsed=0. Per
+  // Google's quota guide ("all API requests, including invalid requests,
+  // incur at least a one-point quota cost"), auth_error / non-2xx
+  // outcomes still consume the unit because the request reached YouTube.
+  // The no-key path returns BEFORE this loop.
+  //
+  // Phase 03.0.1 (post-review fourth-pass) — fix matches poll-active.ts
+  // (same chargedOnce undercount on >50 active videos).
   let rateLimitedSeen = false;
-  let chargedOnce = false;
   for (let i = 0; i < videoIds.length; i++) {
     const videoId = videoIds[i]!;
     const snap = snapshots[i]!;
-    const unitsThisVideo = !chargedOnce ? 1 : 0;
-    if (unitsThisVideo === 1) chargedOnce = true;
+    const unitsThisVideo = i % YOUTUBE_VIDEOS_BATCH_SIZE === 0 ? 1 : 0;
     try {
       await writeSnapshot({
         videoId,

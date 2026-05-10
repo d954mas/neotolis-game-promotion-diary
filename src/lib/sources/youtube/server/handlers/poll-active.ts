@@ -58,7 +58,10 @@
 
 import { TIER_BOUNDARY_ACTIVE_MS } from "$lib/server/services/tier-resolver.js";
 import { selectEligibleVideoIds } from "$lib/server/services/poll-eligibility.js";
-import { youtubeChannelAdapterCore as youtubeChannelAdapter } from "../adapter.js";
+import {
+  youtubeChannelAdapterCore as youtubeChannelAdapter,
+  YOUTUBE_VIDEOS_BATCH_SIZE,
+} from "../adapter.js";
 import { writeSnapshot } from "../snapshots.js";
 import {
   pickKeyForJob,
@@ -175,21 +178,27 @@ export async function handlePollActive(job: {
   // quota UPSERT chained). On rate_limited from the adapter, mark the
   // throttle transition idempotently per (date_pacific, state).
   //
-  // Quota cost: ONE batched videos.list call (1 quota unit regardless of
-  // batch size up to 50 — VERIFIED via spike). Charge the unit on the FIRST
-  // result regardless of status; subsequent videos pass unitsUsed=0. Per
-  // Google's quota guide ("all API requests, including invalid requests,
-  // incur at least a one-point quota cost"), auth_error and other non-2xx
+  // Quota cost: pollStatsByVideoId chunks videoIds into batches of
+  // YOUTUBE_VIDEOS_BATCH_SIZE (50, Google's videos.list cap). Each
+  // chunk = one videos.list call = 1 quota unit. So total units =
+  // ceil(videoIds.length / 50). Charge 1 unit on the first video of
+  // each chunk (i % 50 === 0); rest pass unitsUsed=0. Per Google's
+  // quota guide ("all API requests, including invalid requests, incur
+  // at least a one-point quota cost"), auth_error and other non-2xx
   // outcomes still consume the unit because the request reached YouTube.
-  // The no-key path (pickKeyForJob → null) still charges 0 — that branch
-  // returns BEFORE this loop and never makes an HTTP request.
+  // The no-key path (pickKeyForJob → null) returns BEFORE this loop.
+  //
+  // Phase 03.0.1 (post-review fourth-pass) — pre-fix `chargedOnce`
+  // boolean charged exactly 1 unit total regardless of batch count, so
+  // a cron run polling >50 active videos undercounted persistent quota
+  // by N-1 units (chargedFetch hit reservoir N times, audit recorded 1).
+  // Result: throttle gates would fire too late, eventually colliding
+  // with Google's hard daily 403.
   let rateLimitedSeen = false;
-  let chargedOnce = false;
   for (let i = 0; i < videoIds.length; i++) {
     const videoId = videoIds[i]!;
     const snap = snapshots[i]!;
-    const unitsThisVideo = !chargedOnce ? 1 : 0;
-    if (unitsThisVideo === 1) chargedOnce = true;
+    const unitsThisVideo = i % YOUTUBE_VIDEOS_BATCH_SIZE === 0 ? 1 : 0;
     try {
       await writeSnapshot({
         videoId,

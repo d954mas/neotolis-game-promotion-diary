@@ -62,6 +62,14 @@ import type {
 } from "$lib/sources/adapter.js";
 
 /**
+ * Google's videos.list cap — max 50 IDs per call. pollStatsByVideoId chunks
+ * input to this size. Each chunk = 1 quota unit. Handlers use this constant
+ * to align persistent quota charges with chunk boundaries (charge on first
+ * video of every chunk-of-50, not just the very first video of the run).
+ */
+export const YOUTUBE_VIDEOS_BATCH_SIZE = 50;
+
+/**
  * youtubeChannelAdapterCore — Phase 03.0.1 architecture cleanup.
  *
  * Exports the YouTube adapter's *core* surface: methods that are pure
@@ -511,8 +519,8 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
   ): Promise<StatsSnapshot[]> {
     if (videoIds.length === 0) return [];
     const result: StatsSnapshot[] = [];
-    for (let i = 0; i < videoIds.length; i += 50) {
-      const chunk = videoIds.slice(i, i + 50);
+    for (let i = 0; i < videoIds.length; i += YOUTUBE_VIDEOS_BATCH_SIZE) {
+      const chunk = videoIds.slice(i, i + YOUTUBE_VIDEOS_BATCH_SIZE);
       const snapshots = await pollStatsBatch(chunk, quotaUser, picked);
       for (const snap of snapshots) result.push(snap);
     }
