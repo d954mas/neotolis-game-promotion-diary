@@ -54,6 +54,7 @@
     lastPolledAt?: Date | string | null;
     lastPollStatus?: string | null;
     externalId?: string | null;
+    metadata?: Record<string, unknown> | null;
   };
 
   type GameLite = { id: string; title: string };
@@ -164,9 +165,11 @@
           event={{
             id: event.id,
             kind: event.kind,
+            occurredAt: event.occurredAt,
             publishedAt: event.publishedAt ?? null,
             lastPolledAt: event.lastPolledAt ?? null,
             lastPollStatus: event.lastPollStatus ?? null,
+            metadata: event.metadata ?? null,
           }}
         />
       </div>
