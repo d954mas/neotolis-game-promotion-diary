@@ -321,14 +321,13 @@
 
     {#if source}
       <div class="chips-line">
-        <!-- Phase 03.0.1 (post-review UAT) — single source chip. Pre-fix
-             rendered both channelTitle (cache) AND displayName/handleUrl,
-             producing «xk xk» when user-typed displayName matched the
-             channel title, or «snailkick + URL» when it didn't. Now:
-             channelTitle (canonical) → displayName → handleUrl as single
-             fallback chain. -->
+        <!-- Phase 03.0.1 (post-review UAT) — single chip, channelTitle
+             only (with handleUrl fallback for sources whose channel-context
+             cache hasn't populated yet). displayName is dropped from UI
+             entirely — onboarding form removed it (canonical channel title
+             is the identifier). -->
         <span class="chip chip-channel" title="YouTube channel">
-          {source.channelTitle ?? source.displayName ?? source.handleUrl}
+          {source.channelTitle ?? source.handleUrl}
         </span>
       </div>
     {/if}
