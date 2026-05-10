@@ -147,15 +147,17 @@
     return "frozen";
   });
 
-  // Refresh-now visibility: D-10 — only for events with a successful prior
-  // poll OR Frozen tier (where the user can rescue an old event).
-  // 'pending' tier hides refresh — backfill is in flight, manual poll
-  // would race it. Refresh-poll service rejects 'pending' with 422 anyway.
-  const refreshVisible = $derived(
-    POLLABLE_KINDS.includes(event.kind) &&
-      tier !== "pending" &&
-      (lastPolledAt !== null || tier === "frozen"),
-  );
+  // Refresh-now visibility: visible for any pollable event NOT in 'pending'
+  // tier. Pre-Wave-4 also required (lastPolledAt !== null || tier === "frozen")
+  // — that hid refresh on cold/active videos with no prior poll, leaving
+  // manually-pasted videos stuck without a way to fetch stats. Wave 4 adds
+  // synchronous stats-fetch on paste (createEventFromPaste →
+  // adapter.fetchEventStats), so cold/active without prior poll is rare;
+  // when it does happen (rate-limit / auth-error swallow), the user now
+  // has an explicit refresh button to rescue.
+  // 'pending' tier still hides refresh — backfill is in flight, manual
+  // poll would race it. Refresh-poll service rejects 'pending' with 422.
+  const refreshVisible = $derived(POLLABLE_KINDS.includes(event.kind) && tier !== "pending");
 
   // Copy resolution.
   const copy = $derived.by(() => {

@@ -489,6 +489,26 @@ export interface DataSourceAdapter {
    *  YouTube: fetchYoutubeOembed wrapper. */
   fetchEventPreviewMetadata?(canonicalUrl: string): Promise<EventPreviewMetadata>;
 
+  /** Phase 03.0.1 Wave 4 (post-UAT) — sync stats fetch on manual event paste.
+   *
+   *  After createEventFromPaste creates the events row from oEmbed data
+   *  (title only, no stats), this method is called to fetch view/like/
+   *  comment counts via videos.list and write a snapshot row. UI's /feed
+   *  loader JOINs youtube_video_snapshots so the user sees stats
+   *  immediately after paste — no «click Refresh now» round-trip required.
+   *
+   *  Cost: 1 quota unit (charged to user pool via chargedFetch with
+   *  origin='user'). Cache-aware via youtube_video_snapshots
+   *  on-conflict-do-nothing (per-minute uniqueness). Errors swallowed by
+   *  caller — paste is the load-bearing path, stats are nice-to-have.
+   *
+   *  Returns null on rate-limited / auth-error / not-found — caller
+   *  treats as «stats unavailable, will be polled later». */
+  fetchEventStats?(
+    externalId: string,
+    ctx: { userId: string },
+  ): Promise<{ viewCount: number; likeCount: number; commentCount: number } | null>;
+
   /** Phase 03.0.1 D-21 — per-adapter event-input validation. Cross-source
    *  createEvent / updateEvent calls this when the merged event.kind matches
    *  this adapter's source kind (via eventKindToSourceKind). YouTube: require

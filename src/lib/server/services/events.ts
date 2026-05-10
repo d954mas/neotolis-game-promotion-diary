@@ -656,7 +656,7 @@ export async function createEventFromPaste(
     await assertGameOwnedByUser(userId, gid);
   }
 
-  return createEvent(
+  const created = await createEvent(
     userId,
     {
       gameIds: pasteGameIds,
@@ -679,6 +679,33 @@ export async function createEventFromPaste(
     ipAddress,
     userAgent,
   );
+
+  // Phase 03.0.1 Wave 4 (post-UAT) — adapter-driven sync stats fetch.
+  // After event row is created, ask the adapter to pull view/like counts
+  // synchronously (1 unit, user pool) so /feed shows stats immediately
+  // without a follow-up «Refresh now» click. Errors swallowed — the
+  // event row already exists; stats will land via cron tick if this
+  // path failed.
+  if (created.externalId) {
+    const { eventKindToSourceKind } = await import("$lib/sources/event-to-source-kind.js");
+    const { getAdapter } = await import("$lib/sources/registry.js");
+    const sourceKindForStats = eventKindToSourceKind(enriched.kind);
+    if (sourceKindForStats !== null) {
+      const statsAdapter = getAdapter(sourceKindForStats);
+      if (statsAdapter.fetchEventStats !== undefined) {
+        try {
+          await statsAdapter.fetchEventStats(created.externalId, { userId });
+        } catch (err) {
+          const { logger } = await import("../logger.js");
+          logger.warn(
+            { eventId: created.id, externalId: created.externalId, err: String(err) },
+            "fetchEventStats failed on paste; UI will rely on cron polling",
+          );
+        }
+      }
+    }
+  }
+  return created;
 }
 
 /**

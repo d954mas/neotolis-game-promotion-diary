@@ -82,6 +82,8 @@ import { handleIncrementalCron } from "./handlers/incremental-cron.js";
 // services delegate via getAdapter(...) so adding Reddit (Phase 03.1) is a
 // registry entry, not a 6-file edit.
 import { fetchVideoMetadataByUrl } from "./metadata.js";
+import { writeSnapshot } from "./snapshots.js";
+import { pickKeyForJob, youtubeQuotaUser } from "./quota.js";
 import { parseYoutubeUrl, youtubeParseUrl } from "./url.js";
 import { fetchYoutubeOembed } from "$lib/server/integrations/youtube-oembed.js";
 import { youtubeMetadataRoutes } from "./route-metadata.js";
@@ -610,6 +612,42 @@ function registerRoutes(app: Hono<AdapterAppContext>): void {
 }
 
 /**
+ * Phase 03.0.1 Wave 4 (post-UAT) — fetchEventStats. Synchronous stats
+ * fetch on manual event paste so /feed shows view/like counts
+ * immediately. Calls videos.list (1 unit, charged to user pool via
+ * pollStatsByVideoId), writes a youtube_video_snapshots row.
+ *
+ * Returns null on rate-limited / auth-error / not-found — caller
+ * (createEventFromPaste) treats as «stats unavailable now, will be
+ * picked up by next active/cold cron tick».
+ */
+async function fetchEventStats(
+  externalId: string,
+  ctx: { userId: string },
+): Promise<{ viewCount: number; likeCount: number; commentCount: number } | null> {
+  const picked = pickKeyForJob();
+  if (!picked) return null;
+  const quotaUser = youtubeQuotaUser(ctx.userId);
+  const snapshots = await youtubeChannelAdapterCore
+    .pollStatsByVideoId([externalId], quotaUser, picked)
+    .catch(() => [] as Awaited<ReturnType<typeof youtubeChannelAdapterCore.pollStatsByVideoId>>);
+  const snap = snapshots[0];
+  if (!snap || snap.status !== "ok" || !snap.metrics) return null;
+  const viewCount = snap.metrics.view_count ?? 0;
+  const likeCount = snap.metrics.like_count ?? 0;
+  const commentCount = snap.metrics.comment_count ?? 0;
+  await writeSnapshot({
+    videoId: externalId,
+    metrics: { view_count: viewCount, like_count: likeCount, comment_count: commentCount },
+    apiKeyId: picked.apiKeyId,
+    unitsUsed: 1,
+    poolKind: "user",
+    status: "ok",
+  });
+  return { viewCount, likeCount, commentCount };
+}
+
+/**
  * Phase 03.0.1 architecture cleanup — quotaCounters.
  * Declares youtube_metadata_fetches_per_day. Cross-source services/quota.ts
  * iterates allAdapters[*].observability.quotaCounters; adding Reddit's
@@ -658,6 +696,7 @@ export const youtubeAdapter: DataSourceAdapter = {
   canonicalizeOnCreate,
   onSourceCreated,
   fetchEventPreviewMetadata,
+  fetchEventStats,
   validateEventInput,
   fetchPollStateMap,
   registerRoutes,
