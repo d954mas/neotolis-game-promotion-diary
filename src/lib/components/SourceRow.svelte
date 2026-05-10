@@ -262,10 +262,10 @@
           : "Never pulled"}
       </span>
       {#if (source.eventCount ?? 0) > 0}
-        <span class="event-range" title="Total events / latest event date">
+        <span class="event-range" title="Total events · earliest — latest event date">
           {source.eventCount}
-          {source.eventCount === 1 ? "event" : "events"}{source.lastEventAt
-            ? `, latest ${formatDateShort(source.lastEventAt)}`
+          {source.eventCount === 1 ? "event" : "events"}{source.firstEventAt && source.lastEventAt
+            ? ` · ${formatDateShort(source.firstEventAt)} — ${formatDateShort(source.lastEventAt)}`
             : ""}
         </span>
       {/if}

@@ -53,11 +53,12 @@ export const load: PageServerLoad = async ({ locals }) => {
   // so user doesn't need to open detail to see it. Single grouped query
   // — same as /feed's per-source date-range query.
   const sourceIds = dtos.map((s) => s.id);
-  const eventStats = new Map<string, { last: Date; count: number }>();
+  const eventStats = new Map<string, { first: Date; last: Date; count: number }>();
   if (sourceIds.length > 0) {
     const rows = await db
       .select({
         sourceId: events.sourceId,
+        first: sql<Date>`MIN(${events.occurredAt})`,
         last: max(events.occurredAt),
         cnt: count(),
       })
@@ -71,13 +72,14 @@ export const load: PageServerLoad = async ({ locals }) => {
       )
       .groupBy(events.sourceId);
     for (const r of rows) {
-      if (r.sourceId !== null && r.last !== null) {
-        eventStats.set(r.sourceId, { last: r.last, count: Number(r.cnt) });
+      if (r.sourceId !== null && r.first !== null && r.last !== null) {
+        eventStats.set(r.sourceId, { first: r.first, last: r.last, count: Number(r.cnt) });
       }
     }
   }
   for (const s of dtos) {
     const stat = eventStats.get(s.id);
+    s.firstEventAt = stat?.first ?? null;
     s.lastEventAt = stat?.last ?? null;
     s.eventCount = stat?.count ?? 0;
   }
@@ -127,12 +129,19 @@ export const load: PageServerLoad = async ({ locals }) => {
   // source is active/created/retry. After completion → plain countdown.
   const pullingMap = new Map<string, boolean>();
   if (sourceIds.length > 0) {
+    // Build IN list via sql.join — drizzle's sql tag doesn't auto-serialize
+    // arrays into Postgres array literals for `= ANY(...)`. Pre-fix used
+    // `ANY(${sourceIds})` which 500'd. IN (…) is the simplest workaround.
+    const idList = sql.join(
+      sourceIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
     const active = await db.execute<{ source_id: string }>(sql`
       SELECT DISTINCT data->>'sourceId' AS source_id
       FROM pgboss.job
       WHERE name = 'youtube.backfill.user'
         AND state IN ('active', 'created', 'retry')
-        AND data->>'sourceId' = ANY(${sourceIds})
+        AND data->>'sourceId' IN (${idList})
     `);
     for (const r of active.rows) {
       if (r.source_id) pullingMap.set(r.source_id, true);
