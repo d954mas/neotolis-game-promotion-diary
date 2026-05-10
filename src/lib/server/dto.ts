@@ -431,6 +431,12 @@ export interface EventDto {
   // a snapshot row return null. UI consumers (FeedCard) render an inline
   // view-count line when present.
   stats: { viewCount: number; likeCount: number; commentCount: number; polledAt: Date } | null;
+  // Phase 03.0.1 (post-review UAT 2026-05-10) — channelTitle for
+  // kind=youtube_video events (auto-imported AND manual paste). Loader
+  // joins youtube_videos cache by external_id. FeedCard renders chip
+  // for ALL YouTube events (was only auto-imported pre-fix because chip
+  // depended on source.channelTitle which is null for manual paste).
+  channelTitle?: string | null;
 }
 
 /**
