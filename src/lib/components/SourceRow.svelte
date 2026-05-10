@@ -210,20 +210,15 @@
       <span class="kind-tag-label">{kindLabel(source.kind)}</span>
     </span>
     {#if !editing}
-      <!-- Phase 03.0.1 (post-review UAT) — display priority:
-           1. Real channel title (YouTube canonical name) — most useful
-              when user remembers the channel by name, not their own label.
-           2. User's displayName (their custom label).
-           3. handleUrl (fallback for channels not yet resolved).
-           Display links to /sources/[id] detail page (date picker, edit,
-           delete live there). User's custom label shown as secondary chip
-           when both present so user can still see what they typed. -->
+      <!-- Phase 03.0.1 (post-review UAT 2026-05-10) — displayName chip
+           REMOVED. User's custom label was confusing alongside the canonical
+           channel title; the field itself was deprecated in onboarding (form
+           dropped displayName, replaced with optional description). Existing
+           rows keep their displayName column data for legacy compat but
+           nothing surfaces it in UI. -->
       <a class="display" href="/sources/{source.id}">
-        {source.channelTitle ?? source.displayName ?? source.handleUrl}
+        {source.channelTitle ?? source.handleUrl}
       </a>
-      {#if source.channelTitle && source.displayName && source.channelTitle !== source.displayName}
-        <span class="channel-title" title="Your custom label">{source.displayName}</span>
-      {/if}
     {/if}
     <span class="ownership-badge" class:mine={source.isOwnedByMe}>
       {source.isOwnedByMe ? m.sources_owned_by_me() : m.sources_owned_by_other()}

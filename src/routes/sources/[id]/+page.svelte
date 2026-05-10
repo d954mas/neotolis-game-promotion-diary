@@ -1,14 +1,13 @@
 <script lang="ts">
   // /sources/[id] page — Phase 03.0.1 Plan 10. Detail page for a single
-  // data_source. Phase 03.0.1 ships the minimal surface needed to host the
-  // RefreshContentButton (D-NEW user payoff); future phases extend with
-  // SourceDetailHeader / DetailMetricsChart / QuotaTab via the per-kind
-  // adapter UI registry (see sources/youtube/ui/ — Plan 09 dual-tree).
+  // data_source.
   //
-  // FUTURE: the Phase 03.1+ migration target is to import getAdapterUI(kind)
-  // from $lib/sources/registry-ui.js and dispatch the page header + metrics
-  // chart via the per-kind UI surface. v0.1 keeps the page minimal — the
-  // button is the load-bearing affordance.
+  // Phase 03.0.1 (post-review UAT 2026-05-10) — restructured into card
+  // sections (Status / Coverage / Description / Actions) with edit-on-
+  // demand pattern: view mode shows current state, click «Edit» on a
+  // section to swap to inputs. Pre-fix everything was always-editable
+  // (textarea + date picker rendered raw) — looked unfinished and
+  // ambiguous about what's a label vs an input.
 
   import RefreshContentButton from "$lib/components/RefreshContentButton.svelte";
   import SourceCoverageBadge from "$lib/components/SourceCoverageBadge.svelte";
@@ -18,87 +17,38 @@
 
   let { data }: { data: PageData } = $props();
   const source = $derived(data.source);
-  const heading = $derived(source.channelTitle ?? source.displayName ?? source.handleUrl);
+  // Heading prefers canonical channel title from cache (always more
+  // identifiable than the user-typed displayName). displayName is legacy
+  // — UI doesn't surface it anymore.
+  const heading = $derived(source.channelTitle ?? source.handleUrl);
 
-  // Phase 03.0.1 (post-review UAT) — sentinel detection. backfillTargetSince
-  // = 1970-01-01 means «pull all available history». Date picker showing
-  // 1970-01-01 is confusing — show «All history» label with override.
+  // ---- date picker (target_since) ----
   const SENTINEL_ISO = "1970-01-01";
+  const todayISO = new Date().toISOString().slice(0, 10);
   const isSentinelTarget = $derived(
     source.backfillTargetSince
       ? new Date(source.backfillTargetSince).toISOString().slice(0, 10) === SENTINEL_ISO
       : false,
   );
-
-  // Local override flag — when user clicks «Set specific date instead» on
-  // a sentinel source, this flips the UI to picker mode WITHOUT saving.
-  // Save fires via the regular saveTargetSince button.
-  let overrideSentinel = $state(false);
-
-  // Picker max bound. Server validation enforces: new target_since cannot
-  // be LATER than current (narrowing window prohibited — pre-fix discussion
-  // 2026-05-10). UI mirrors so user can't pick a forward-narrowing date.
-  // Sentinel source — special case: max=today so user CAN narrow from
-  // «all» down to a specific date (intentional escape hatch).
-  const pickerMax = $derived(
-    isSentinelTarget ? todayISO : (sourceTargetIso(source.backfillTargetSince) ?? todayISO),
-  );
+  const currentTargetIso = $derived(sourceTargetIso(source.backfillTargetSince));
+  // Picker max = current target. Narrowing prohibited (server rejects
+  // anyway with 422 'cannot_narrow_window'); UI mirrors the rule so the
+  // input physically can't pick a forward-narrowing date. Sentinel
+  // sources are locked entirely — Edit button hidden below.
+  const pickerMax = $derived(currentTargetIso ?? todayISO);
 
   function sourceTargetIso(d: Date | string | null | undefined): string | null {
     if (!d) return null;
     return new Date(d).toISOString().slice(0, 10);
   }
-
-  // Description edit (stored in metadata.description).
-  let description = $state(
-    typeof source.metadata?.description === "string" ? source.metadata.description : "",
-  );
-  let descSaving = $state(false);
-  let descError = $state<string | null>(null);
-
-  async function saveDescription(): Promise<void> {
-    descError = null;
-    descSaving = true;
-    try {
-      const res = await fetch(`/api/sources/${source.id}`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          metadata: { ...source.metadata, description: description.trim() || undefined },
-        }),
-      });
-      if (!res.ok) {
-        descError = `HTTP ${res.status}`;
-        return;
-      }
-      await invalidateAll();
-    } finally {
-      descSaving = false;
-    }
+  function formatDateLong(iso: string | null): string {
+    if (iso === null) return "—";
+    if (iso === SENTINEL_ISO) return "all available history";
+    return iso;
   }
 
-  // Phase 03.0.1 — derive quota-exhausted state from this platform's stats
-  // (banner shows full picture; badge needs single boolean).
-  const platformStats = $derived(data.quotaPlatforms.find((p) => p.kind === source.kind) ?? null);
-  const quotaExhausted = $derived.by(() => {
-    if (!platformStats) return false;
-    const cap = platformStats.cap;
-    if (cap.requestsPerDay !== undefined && platformStats.today.requests >= cap.requestsPerDay) {
-      return true;
-    }
-    if (cap.eventsPerDay !== undefined && platformStats.today.events >= cap.eventsPerDay) {
-      return true;
-    }
-    return false;
-  });
-
-  // Date picker state — initialized from source.backfillTargetSince.
-  let targetSinceInput = $state(
-    source.backfillTargetSince
-      ? new Date(source.backfillTargetSince).toISOString().slice(0, 10)
-      : "",
-  );
+  let editingTarget = $state(false);
+  let targetSinceInput = $state(currentTargetIso ?? "");
   let saveError = $state<string | null>(null);
   let saving = $state(false);
 
@@ -119,16 +69,62 @@
         body: JSON.stringify({ backfillTargetSince: picked.toISOString() }),
       });
       if (!res.ok) {
-        saveError = `HTTP ${res.status}`;
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        saveError = body.error ?? `HTTP ${res.status}`;
         return;
       }
+      editingTarget = false;
       await invalidateAll();
     } finally {
       saving = false;
     }
   }
 
-  const todayISO = new Date().toISOString().slice(0, 10);
+  // ---- description (metadata.description) ----
+  const currentDescription = $derived(
+    typeof source.metadata?.description === "string" ? source.metadata.description : "",
+  );
+  let editingDesc = $state(false);
+  let descriptionInput = $state(currentDescription);
+  let descSaving = $state(false);
+  let descError = $state<string | null>(null);
+
+  async function saveDescription(): Promise<void> {
+    descError = null;
+    descSaving = true;
+    try {
+      const res = await fetch(`/api/sources/${source.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metadata: { ...source.metadata, description: descriptionInput.trim() || undefined },
+        }),
+      });
+      if (!res.ok) {
+        descError = `HTTP ${res.status}`;
+        return;
+      }
+      editingDesc = false;
+      await invalidateAll();
+    } finally {
+      descSaving = false;
+    }
+  }
+
+  // ---- coverage badge ----
+  const platformStats = $derived(data.quotaPlatforms.find((p) => p.kind === source.kind) ?? null);
+  const quotaExhausted = $derived.by(() => {
+    if (!platformStats) return false;
+    const cap = platformStats.cap;
+    if (cap.requestsPerDay !== undefined && platformStats.today.requests >= cap.requestsPerDay) {
+      return true;
+    }
+    if (cap.eventsPerDay !== undefined && platformStats.today.events >= cap.eventsPerDay) {
+      return true;
+    }
+    return false;
+  });
 </script>
 
 <svelte:head>
@@ -136,154 +132,262 @@
 </svelte:head>
 
 <section class="source-detail">
-  <h1 class="source-detail__title">{heading}</h1>
-  <p class="source-detail__kind">{source.kind}</p>
-  <p class="source-detail__handle">
-    <a href={source.handleUrl} target="_blank" rel="noopener noreferrer">{source.handleUrl}</a>
-  </p>
+  <header class="hdr">
+    <h1 class="hdr__title">{heading}</h1>
+    <a class="hdr__handle" href={source.handleUrl} target="_blank" rel="noopener noreferrer">
+      {source.handleUrl}
+    </a>
+    <div class="hdr__meta">
+      <span class="kind-tag">{source.kind}</span>
+      <SourceCoverageBadge
+        lastPolledAt={source.lastPolledAt}
+        backfillComplete={source.backfillComplete}
+        {quotaExhausted}
+      />
+    </div>
+  </header>
 
-  <SourceCoverageBadge
-    lastPolledAt={source.lastPolledAt}
-    backfillComplete={source.backfillComplete}
-    {quotaExhausted}
-  />
-
-  <!-- Phase 03.0.1 (post-review UAT) — quota banner REMOVED from detail
-       page. Quota status is per-user (cross-source); detail page is per-
-       source. Banner stays on /sources list view only. -->
-
-  <!-- Phase 03.0.1 — date picker для backfill target. User changes earliest
-       boundary; PATCH stores absolute date. После PATCH user отдельно жмёт
-       Refresh для catch-up. UI disables future dates через max=today. -->
-  <div class="source-detail__target">
-    {#if isSentinelTarget && !overrideSentinel}
-      <span class="source-detail__target-label">
-        Pulling <strong>all available history</strong> (no date limit).
-      </span>
-      <button type="button" onclick={() => (overrideSentinel = true)}>
-        Set specific date instead
-      </button>
+  <!-- Pull window — view by default, edit on demand -->
+  <article class="card">
+    <div class="card__header">
+      <h2 class="card__title">Pull window</h2>
+      {#if !editingTarget && !isSentinelTarget}
+        <button
+          type="button"
+          class="card__edit"
+          onclick={() => {
+            targetSinceInput = currentTargetIso ?? todayISO;
+            saveError = null;
+            editingTarget = true;
+          }}
+        >
+          Edit
+        </button>
+      {/if}
+    </div>
+    {#if !editingTarget}
+      <p class="card__value">
+        Earliest event: <strong>{formatDateLong(currentTargetIso)}</strong>
+      </p>
+      <p class="card__hint">
+        {#if isSentinelTarget}
+          The pull walks back as far as the platform allows. <strong>Locked</strong> — «all history» is
+          the widest possible setting; narrowing is not permitted.
+        {:else}
+          The next pull will fetch events back to this date. You can only widen this window (pick an
+          earlier date) — narrowing is not allowed.
+        {/if}
+      </p>
     {:else}
-      <label class="source-detail__target-label">
-        {m.source_detail_target_label()}
+      <label class="field">
+        <span class="field__label">{m.source_detail_target_label()}</span>
         <input
           type="date"
+          class="field__input"
           bind:value={targetSinceInput}
           min="2005-01-01"
           max={pickerMax}
           disabled={saving}
         />
       </label>
-      <button type="button" onclick={saveTargetSince} disabled={saving || !targetSinceInput}>
-        {m.source_detail_target_save()}
-      </button>
-      <p class="source-detail__hint">
-        You can only widen the window (pick an earlier date). To narrow, the date must be on or
-        before the current target.
+      <p class="card__hint">
+        Pick an earlier date to widen the window. Narrowing is blocked at the server.
       </p>
+      {#if saveError}<p class="err" role="alert">{saveError}</p>{/if}
+      <div class="card__actions">
+        <button
+          type="button"
+          class="btn btn--ghost"
+          onclick={() => {
+            editingTarget = false;
+            saveError = null;
+          }}
+          disabled={saving}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="btn btn--primary"
+          onclick={saveTargetSince}
+          disabled={saving || !targetSinceInput}
+        >
+          {m.source_detail_target_save()}
+        </button>
+      </div>
     {/if}
-    {#if saveError}
-      <p class="source-detail__error" role="alert">{saveError}</p>
-    {/if}
-  </div>
+  </article>
 
-  <!-- Phase 03.0.1 (post-review UAT) — description edit. User added it
-       optionally on /sources/new (replaced displayName); detail page is
-       where they can edit / clear it later. metadata.description is the
-       store (no schema column — jsonb keeps it simple). -->
-  <div class="source-detail__description">
-    <label class="source-detail__description-label">
-      <span>Description (optional)</span>
+  <!-- Description -->
+  <article class="card">
+    <div class="card__header">
+      <h2 class="card__title">Description</h2>
+      {#if !editingDesc}
+        <button
+          type="button"
+          class="card__edit"
+          onclick={() => {
+            descriptionInput = currentDescription;
+            descError = null;
+            editingDesc = true;
+          }}
+        >
+          {currentDescription ? "Edit" : "Add"}
+        </button>
+      {/if}
+    </div>
+    {#if !editingDesc}
+      {#if currentDescription}
+        <p class="card__value card__value--text">{currentDescription}</p>
+      {:else}
+        <p class="card__hint">No description yet.</p>
+      {/if}
+    {:else}
       <textarea
-        class="source-detail__description-input"
+        class="field__input field__input--textarea"
         rows="3"
         maxlength="500"
-        bind:value={description}
+        bind:value={descriptionInput}
         disabled={descSaving}
         placeholder="Why are you tracking this? E.g. 'Indie horror channel I'm collaborating with'"
       ></textarea>
-    </label>
-    <button type="button" onclick={saveDescription} disabled={descSaving}>
-      Save description
-    </button>
-    {#if descError}
-      <p class="source-detail__error" role="alert">{descError}</p>
+      {#if descError}<p class="err" role="alert">{descError}</p>{/if}
+      <div class="card__actions">
+        <button
+          type="button"
+          class="btn btn--ghost"
+          onclick={() => {
+            editingDesc = false;
+            descError = null;
+          }}
+          disabled={descSaving}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="btn btn--primary"
+          onclick={saveDescription}
+          disabled={descSaving}
+        >
+          Save
+        </button>
+      </div>
     {/if}
-  </div>
+  </article>
 
-  <div class="source-detail__actions">
+  <!-- Actions -->
+  <article class="card">
+    <div class="card__header">
+      <h2 class="card__title">Actions</h2>
+    </div>
     <RefreshContentButton sourceId={source.id} sourceKind={source.kind} />
-  </div>
+  </article>
 </section>
 
 <style>
   .source-detail {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: var(--space-md);
     padding: var(--space-md);
     max-width: 720px;
   }
-  .source-detail__title {
+
+  .hdr {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--color-border);
+  }
+  .hdr__title {
     margin: 0;
     font-size: var(--font-size-h1);
+    line-height: 1.2;
+    word-break: break-word;
   }
-  .source-detail__kind {
-    margin: 0;
+  .hdr__handle {
     color: var(--color-text-muted);
     font-size: var(--font-size-label);
+    word-break: break-all;
   }
-  .source-detail__handle {
-    margin: 0;
-    font-size: var(--font-size-body);
-  }
-  .source-detail__actions {
-    margin-top: var(--space-md);
-  }
-  .source-detail__target {
+  .hdr__meta {
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-sm);
     align-items: center;
-    padding: var(--space-sm);
-    border: 1px solid var(--color-border, #e0e0e0);
-    border-radius: var(--radius-md);
-    background: var(--color-surface, #f7f7f7);
+    margin-top: var(--space-xs);
   }
-  .source-detail__target-label {
-    display: flex;
-    gap: var(--space-xs);
-    align-items: center;
-    font-size: var(--font-size-label);
-  }
-  .source-detail__error {
-    margin: 0;
-    color: var(--color-destructive);
-    font-size: var(--font-size-label);
-  }
-  .source-detail__hint {
-    margin: 0;
+  .kind-tag {
+    display: inline-flex;
+    padding: 2px var(--space-sm);
+    background: var(--color-bg);
     color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
     font-size: var(--font-size-label);
-    width: 100%;
   }
-  .source-detail__description {
+
+  .card {
     display: flex;
     flex-direction: column;
     gap: var(--space-sm);
-    padding: var(--space-sm);
-    border: 1px solid var(--color-border, #e0e0e0);
+    padding: var(--space-md);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
-    background: var(--color-surface, #f7f7f7);
   }
-  .source-detail__description-label {
+  .card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+  .card__title {
+    margin: 0;
+    font-size: var(--font-size-h3, 1.05rem);
+    font-weight: var(--font-weight-semibold);
+  }
+  .card__edit {
+    background: none;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: 2px var(--space-sm);
+    color: var(--color-text);
+    font-size: var(--font-size-label);
+    cursor: pointer;
+  }
+  .card__edit:hover {
+    background: var(--color-bg);
+  }
+  .card__value {
+    margin: 0;
+    font-size: var(--font-size-body);
+  }
+  .card__value--text {
+    white-space: pre-wrap;
+  }
+  .card__hint {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+  }
+  .card__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+  }
+  .field {
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
-    font-size: var(--font-size-label);
   }
-  .source-detail__description-input {
-    width: 100%;
+  .field__label {
+    font-size: var(--font-size-label);
+    color: var(--color-text-muted);
+  }
+  .field__input {
     padding: var(--space-sm);
     font-family: inherit;
     font-size: var(--font-size-body);
@@ -291,6 +395,34 @@
     border-radius: var(--radius-sm);
     background: var(--color-bg);
     color: var(--color-text);
+  }
+  .field__input--textarea {
+    width: 100%;
     resize: vertical;
+  }
+  .btn {
+    padding: var(--space-xs) var(--space-md);
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    font-size: var(--font-size-body);
+    cursor: pointer;
+  }
+  .btn--primary {
+    background: var(--color-accent);
+    color: var(--color-on-accent, white);
+  }
+  .btn--primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .btn--ghost {
+    background: transparent;
+    color: var(--color-text);
+    border-color: var(--color-border);
+  }
+  .err {
+    margin: 0;
+    color: var(--color-destructive);
+    font-size: var(--font-size-label);
   }
 </style>
