@@ -31,7 +31,7 @@
 // `softDeleteSource` writes `source.removed` BEFORE the soft-delete UPDATE
 // so the security signal lands even if the UPDATE later fails.
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, type DbOrTx, type Tx } from "../db/client.js";
 import { dataSources } from "../db/schema/data-sources.js";
 import type { SourceKind } from "$lib/sources/adapter.js";
@@ -670,9 +670,19 @@ export async function markSourceLastPolledAt(
 
 /**
  * Move the auto-import frontier — the earliest event.occurred_at we've
- * pulled. Worker should call ONLY when actually moving frontier deeper
- * (oldestAt < current backfillOldestAt OR current is NULL); the helper
- * itself does an unconditional UPDATE — caller's responsibility to gate.
+ * pulled. The UPDATE is WHERE-guarded so concurrent jobs (cron + manual
+ * refresh) cannot race-rollback the frontier to a newer date.
+ *
+ * Phase 03.0.1 (post-review P2-1) — TOCTOU fix. Pre-fix the helper did an
+ * unconditional UPDATE and relied on the caller to read+gate. Two
+ * concurrent workers reading `source.backfillOldestAt` could both pass
+ * the gate (e.g., one with oldestAt=2023, another with oldestAt=2024)
+ * and the second UPDATE would clobber the deeper frontier. Race-safe
+ * version: WHERE backfill_oldest_at IS NULL OR backfill_oldest_at >
+ * $oldestAt — the deeper writer wins regardless of arrival order.
+ *
+ * Caller may still pre-check to avoid issuing no-op SQL, but the helper
+ * is now self-defending.
  */
 export async function markSourceBackfillFrontier(
   userId: string,
@@ -683,7 +693,14 @@ export async function markSourceBackfillFrontier(
   await dbCtx
     .update(dataSources)
     .set({ backfillOldestAt: oldestAt, updatedAt: new Date() })
-    .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
+    .where(
+      and(
+        eq(dataSources.userId, userId),
+        eq(dataSources.id, sourceId),
+        // Race-safe: only move frontier deeper, never roll it back.
+        sql`(${dataSources.backfillOldestAt} IS NULL OR ${dataSources.backfillOldestAt} > ${oldestAt})`,
+      ),
+    );
 }
 
 /**

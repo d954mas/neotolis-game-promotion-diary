@@ -45,7 +45,12 @@ import { env } from "$lib/server/config/env.js";
 import { parseYoutubeUrl } from "../url.js";
 import { logger } from "$lib/server/logger.js";
 import { AdapterError } from "$lib/sources/errors.js";
-import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
+import {
+  markSourceNeedsReconnect,
+  markSourceLastPolledAt,
+  markSourceBackfillFrontier,
+} from "$lib/server/services/data-sources.js";
+import { writeAudit } from "$lib/server/audit.js";
 
 // Zod schemas for the three endpoints — defense against API drift.
 const CHANNELS_LIST_RESPONSE = z.object({
@@ -679,8 +684,7 @@ async function handleChannelContextBackfillImpl(job: {
   // not generic ingest path). Audit row written в both cases — ingest flow
   // (no sourceId) gets minimal metadata (no source_id field).
   if (sourceId) {
-    const { markSourceLastPolledAt, markSourceBackfillFrontier } =
-      await import("$lib/server/services/data-sources.js");
+    // Phase 03.0.1 (post-review P1-4) — static import (cycle long broken).
     await markSourceLastPolledAt(userId, sourceId);
     // Frontier moves to oldest occurredAt we just inserted, when applicable.
     if (videoIds.length > 0) {
@@ -707,7 +711,6 @@ async function handleChannelContextBackfillImpl(job: {
   // not user-initiated quota burn — we skip the audit row to avoid polluting cap
   // queries with rows that have no source_id.
   if (sourceId) {
-    const { writeAudit } = await import("$lib/server/audit.js");
     // Estimate quota units burned: 1 (channels.list) + N pages of playlistItems
     // + M batches of videos.list. Conservative estimate from videoIds.length.
     const requestsUsed = 1 + Math.max(1, Math.ceil(videoIds.length / 50)) * 2;

@@ -36,7 +36,12 @@
   {/if}
   {#if props.metrics.length > 0}
     <ul class="metrics">
-      {#each props.metrics as metric (metric.label)}
+      <!-- Phase 03.0.1 (post-review P1-5) — index key, not metric.label.
+           CardProps contract (card-props.ts) does NOT guarantee unique
+           label; future Reddit / Twitter adapters may emit two metrics
+           with the same label (e.g., "Views" + a per-tier "Views").
+           Index key avoids Svelte 5 each_key_duplicate runtime crash. -->
+      {#each props.metrics as metric, i (i)}
         <li>
           <span class="label">{metric.label}:</span>
           <span class="value">{metric.value}</span>

@@ -335,7 +335,7 @@ export interface MinimalBoss {
   send(
     name: string,
     payload: object,
-    options?: { singletonKey?: string; priority?: number },
+    options?: { singletonKey?: string; singletonSeconds?: number; priority?: number },
   ): Promise<string | null>;
   createQueue(name: string): Promise<unknown>;
 }

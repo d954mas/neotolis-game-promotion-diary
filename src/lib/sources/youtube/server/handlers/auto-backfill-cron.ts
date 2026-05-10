@@ -89,6 +89,19 @@ export async function handleAutoBackfillCron(
   }
 
   // Picker — incomplete sources, soft-deleted excluded, per-user round-robin.
+  //
+  // Phase 03.0.1 (post-review P1-3) — explicit eslint-disable. This SELECT
+  // is INTENTIONALLY cross-tenant by design (D-11 cron picker fan-out): the
+  // scheduler walks ALL users' incomplete sources to enqueue passive
+  // backfill jobs in round-robin order. The orderBy mentions
+  // `dataSources.userId` for sort, NOT for filtering. The tenant-scope
+  // ESLint rule's regex matches the `userId` token in the chain text and
+  // currently passes — but that's incidental, not a real filter. A future
+  // tightening of the regex would silently exclude this file. Make the
+  // cross-tenant intent explicit so the disable survives linter refactors.
+  // P2-3: also exclude needsReconnect sources — broken adapters shouldn't
+  // burn cron pool on guaranteed-failing polls.
+  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- D-11 scheduler fan-out: cron picker is service-wide by design (selects across ALL users for round-robin enqueue). userId in orderBy is a SORT key, not a filter — semantically cross-tenant. Worker handler downstream re-applies tenant scope via getSourceById(userId, sourceId) on each enqueued job.
   const candidates = await db
     .select({
       id: dataSources.id,
@@ -99,6 +112,7 @@ export async function handleAutoBackfillCron(
     .where(
       and(
         eq(dataSources.backfillComplete, false),
+        eq(dataSources.needsReconnect, false),
         isNull(dataSources.deletedAt),
         // Only kinds with adapters that support backfill — youtube_channel today;
         // Phase 03.1+ adds reddit_account when registered. Filter at SQL level
@@ -123,7 +137,14 @@ export async function handleAutoBackfillCron(
       await boss.send(
         QUEUES.YOUTUBE_BACKFILL_USER,
         { sourceId: src.id, userId: src.userId, origin: "cron", flow: "auto_passive" },
-        { singletonKey: `auto-backfill-${src.id}`, priority: 0 },
+        // Phase 03.0.1 (post-review P2-4) — singletonSeconds=3600 for
+        // dedup beyond active state. Pre-fix singletonKey alone deduped
+        // jobs only while the prior was active/queued; if the scheduler
+        // restarted within the cron tick interval, a second tick within
+        // the dedup window could double-enqueue the same source. 1h
+        // window covers worst-case scheduler-restart cycles for the
+        // daily 03:00 PT cron.
+        { singletonKey: `auto-backfill-${src.id}`, singletonSeconds: 3600, priority: 0 },
       );
       enqueued += 1;
     } catch (err) {

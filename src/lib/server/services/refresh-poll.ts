@@ -43,6 +43,7 @@ import { QUEUES } from "../queues.js";
 import { getBoss } from "../queue-client.js";
 import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
 import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
+import { getUserQuotaUsedToday, nextPacificMidnight } from "./quota.js";
 
 const COOLDOWN_MS = 5 * 60 * 1000;
 
@@ -102,12 +103,16 @@ export async function requestRefreshPoll(
 
   // Phase 03.0.1 — L2 per-user fair-share cap. Refresh-card action consumes
   // shared operator API budget; per-user cap protects fairness.
+  //
+  // Phase 03.0.1 (post-review P1-4) — static import. The dynamic import
+  // here was a leftover workaround from before the dates.ts refactor (eed8fb1)
+  // broke the services/quota → registry → youtube → services/quota cycle.
+  // Cycle is gone; static import is now safe and keeps the hot path
+  // predictable (no per-request module-resolution latency).
   const cap = pollableAdapter.observability.userQuotaCap;
   if (cap?.requestsPerDay !== undefined || cap?.eventsPerDay !== undefined) {
-    const { getUserQuotaUsedToday: getUsed, nextPacificMidnight: nextReset } =
-      await import("./quota.js");
-    const used = await getUsed(userId, sourceKindForPoll ?? undefined);
-    const resetAt = nextReset();
+    const used = await getUserQuotaUsedToday(userId, sourceKindForPoll ?? undefined);
+    const resetAt = nextPacificMidnight();
     const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
     if (cap.requestsPerDay !== undefined && used.requests >= cap.requestsPerDay) {
       throw new AppError(

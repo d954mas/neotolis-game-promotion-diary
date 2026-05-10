@@ -63,8 +63,10 @@ import {
   markSourceLastPolledAt,
   markSourceBackfillFrontier,
   markSourceBackfillComplete,
+  markSourceNeedsReconnect,
 } from "$lib/server/services/data-sources.js";
 import { youtubeChannelAdapterCore as adapter } from "../adapter.js";
+import { AdapterError } from "$lib/sources/errors.js";
 
 type BackfillFlow = "initial" | "incremental" | "historical" | "auto_passive";
 
@@ -193,9 +195,53 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
       since,
     );
   } catch (err) {
+    // Phase 03.0.1 (post-review P1-1) — match channel-context-backfill's
+    // AdapterError envelope handling. Pre-fix any pollContent throw led to
+    // bare `return` with no state stamp. A source with persistent error
+    // (revoked API key → operator-issue category) would never advance
+    // last_polled_at → cron picker (ORDER BY last_polled_at NULLS FIRST)
+    // re-selected it on every tick, burning API budget on guaranteed
+    // failures. Now:
+    //   - rate-limited / transient → re-throw for pg-boss retry (worker
+    //     should NOT swallow these; pg-boss honors retryAfterMs).
+    //   - operator-issue / permanent → flag needs_reconnect so admin sees
+    //     it and cron picker (post-P2-3) excludes the source from future
+    //     ticks until operator reconnects.
+    //   - any case → stamp last_polled_at so the cron picker doesn't keep
+    //     re-prioritizing this source by NULLS FIRST. Audit row written
+    //     with requests_used=0 (the throw means we didn't reach a Response;
+    //     chargedFetch's incrementUsage runs AFTER fetch).
+    if (err instanceof AdapterError) {
+      if (err.category === "rate-limited" || err.category === "transient") {
+        logger.info(
+          { jobId: job.id, sourceId, userId, category: err.category },
+          "youtube.backfill.user: AdapterError → pg-boss retry",
+        );
+        throw err;
+      }
+      if (err.category === "operator-issue" || err.category === "permanent") {
+        await markSourceNeedsReconnect(userId, source.id, err.category);
+      }
+    }
+    await markSourceLastPolledAt(userId, source.id);
+    await writeBackfillAudit({
+      job,
+      flow,
+      sourceId: source.id,
+      sourceKind: source.kind,
+      userId,
+      requestsUsed: 0,
+      eventsInserted: 0,
+    });
     logger.warn(
-      { jobId: job.id, sourceId, userId, err: String((err as Error)?.message ?? err) },
-      "youtube.backfill.user: pollContent threw; skipping",
+      {
+        jobId: job.id,
+        sourceId,
+        userId,
+        category: err instanceof AdapterError ? err.category : "non-adapter",
+        err: String((err as Error)?.message ?? err),
+      },
+      "youtube.backfill.user: pollContent threw; state stamped, source flagged if applicable",
     );
     return;
   }
