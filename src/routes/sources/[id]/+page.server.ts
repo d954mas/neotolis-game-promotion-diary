@@ -28,6 +28,7 @@ import { allAdapters } from "$lib/sources/registry.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
 import { db } from "$lib/server/db/client.js";
 import { youtubeChannels } from "$lib/server/db/schema/index.js";
+import { dataSourceChannelState } from "$lib/server/db/schema/data-source-channel-state.js";
 import { auditLog } from "$lib/server/db/schema/audit-log.js";
 import { eq, and, gte, max, sql } from "drizzle-orm";
 
@@ -74,6 +75,29 @@ export const load: PageServerLoad = async ({ params, locals }) => {
         .where(eq(youtubeChannels.channelId, dto.channelId))
         .limit(1);
       dto.channelTitle = cache?.channelTitle ?? null;
+
+      // Phase 03.0.1 Wave 4 — populate channel-scoped state from
+      // data_source_channel_state. Per-source state columns dropped in
+      // migration 0028; channel-level state shared across all subscribers.
+      const [state] = await db
+        .select({
+          lastPolledAt: dataSourceChannelState.lastPolledAt,
+          backfillOldestAt: dataSourceChannelState.backfillOldestAt,
+          backfillComplete: dataSourceChannelState.backfillComplete,
+        })
+        .from(dataSourceChannelState)
+        .where(
+          and(
+            eq(dataSourceChannelState.kind, dto.kind),
+            eq(dataSourceChannelState.channelKey, dto.channelId),
+          ),
+        )
+        .limit(1);
+      if (state) {
+        dto.lastPolledAt = state.lastPolledAt;
+        dto.backfillOldestAt = state.backfillOldestAt;
+        dto.backfillComplete = state.backfillComplete;
+      }
     }
 
     // Phase 03.0.1 (post-review UAT) — refresh cooldown state from server.
@@ -98,24 +122,27 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       ? Math.max(0, Math.ceil((COOLDOWN_MS - (Date.now() - recent.latest.getTime())) / 1000))
       : 0;
 
-    // «Pulling» state from pgboss queue — same query as /sources list
-    // but for one source. Same pgboss-schema-missing guard: catch and
-    // return pulling=false on relation-not-found (fresh self-host where
-    // worker hasn't booted yet).
-    const activeJobs = await db
-      .execute<{ exists: boolean }>(
-        sql`
-      SELECT EXISTS (
-        SELECT 1 FROM pgboss.job
-        WHERE name = 'youtube.backfill.user'
-          AND state IN ('active', 'created', 'retry')
-          AND data->>'sourceId' = ${dto.id}
-          AND to_regclass('pgboss.job') IS NOT NULL
-      ) AS exists
-    `,
-      )
-      .catch(() => ({ rows: [{ exists: false }] }));
-    const pulling = Boolean(activeJobs.rows[0]?.exists);
+    // Phase 03.0.1 Wave 4 — channel-scoped pulling state. Spinner
+    // reflects ANY user's walk on this channel (Q1-A semantics). pgboss
+    // schema guard: to_regclass NULL → fall back to false on fresh
+    // self-host where worker hasn't booted.
+    let pulling = false;
+    if (dto.channelId !== null) {
+      const activeJobs = await db
+        .execute<{ exists: boolean }>(
+          sql`
+        SELECT EXISTS (
+          SELECT 1 FROM pgboss.job
+          WHERE name = 'youtube.backfill.channel'
+            AND state IN ('active', 'created', 'retry')
+            AND data->>'channelKey' = ${dto.channelId}
+            AND to_regclass('pgboss.job') IS NOT NULL
+        ) AS exists
+      `,
+        )
+        .catch(() => ({ rows: [{ exists: false }] }));
+      pulling = Boolean(activeJobs.rows[0]?.exists);
+    }
 
     return { source: dto, quotaPlatforms, cooldownSec, pulling };
   } catch (err) {

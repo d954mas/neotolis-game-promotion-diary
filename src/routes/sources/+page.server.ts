@@ -9,6 +9,7 @@ import {
 import { allAdapters } from "$lib/sources/registry.js";
 import { db } from "$lib/server/db/client.js";
 import { youtubeChannels } from "$lib/server/db/schema/index.js";
+import { dataSourceChannelState } from "$lib/server/db/schema/data-source-channel-state.js";
 import { events } from "$lib/server/db/schema/events.js";
 import { auditLog } from "$lib/server/db/schema/audit-log.js";
 import { and, eq, isNull, inArray, sql, gte, max, count } from "drizzle-orm";
@@ -45,6 +46,43 @@ export const load: PageServerLoad = async ({ locals }) => {
     for (const r of cache) titleByChannel.set(r.channelId, r.channelTitle);
     for (const s of dtos) {
       if (s.channelId) s.channelTitle = titleByChannel.get(s.channelId) ?? null;
+    }
+
+    // Phase 03.0.1 Wave 4 — channel-scoped state JOIN. lastPolledAt /
+    // backfillOldestAt / backfillComplete now live on
+    // data_source_channel_state (one row per channel, shared across
+    // subscribers). UI reads channel-level last-poll value verbatim
+    // (Q3-A semantics: "Channel last checked: 2 min ago").
+    const stateRows = await db
+      .select({
+        channelKey: dataSourceChannelState.channelKey,
+        kind: dataSourceChannelState.kind,
+        lastPolledAt: dataSourceChannelState.lastPolledAt,
+        backfillOldestAt: dataSourceChannelState.backfillOldestAt,
+        backfillComplete: dataSourceChannelState.backfillComplete,
+      })
+      .from(dataSourceChannelState)
+      .where(inArray(dataSourceChannelState.channelKey, channelIds));
+    const stateByKey = new Map<
+      string,
+      { lastPolledAt: Date | null; backfillOldestAt: Date | null; backfillComplete: boolean }
+    >();
+    for (const r of stateRows) {
+      stateByKey.set(`${r.kind}:${r.channelKey}`, {
+        lastPolledAt: r.lastPolledAt,
+        backfillOldestAt: r.backfillOldestAt,
+        backfillComplete: r.backfillComplete,
+      });
+    }
+    for (const s of dtos) {
+      if (s.channelId) {
+        const st = stateByKey.get(`${s.kind}:${s.channelId}`);
+        if (st) {
+          s.lastPolledAt = st.lastPolledAt;
+          s.backfillOldestAt = st.backfillOldestAt;
+          s.backfillComplete = st.backfillComplete;
+        }
+      }
     }
   }
 
@@ -123,38 +161,36 @@ export const load: PageServerLoad = async ({ locals }) => {
   }
   const cooldownBySource: Record<string, number> = Object.fromEntries(cooldownMap);
 
-  // Phase 03.0.1 (post-review UAT) — «pulling» state from pgboss queue.
-  // Pre-fix the spinner ran for the full 5min cooldown — but worker
-  // usually finishes in seconds. Now spinner reflects actual work-in-
-  // flight state: row spins ONLY while a backfill.user job for this
-  // source is active/created/retry. After completion → plain countdown.
+  // Phase 03.0.1 Wave 4 — channel-scoped «pulling» state from pgboss queue.
+  // Worker payload now carries channelKey (not sourceId) — pulling is
+  // channel-level: ALL subscribers to a channel see the spinner together
+  // when ANY user triggered a walk on it (Q1-A semantics: shared walk,
+  // shared visual state).
   const pullingMap = new Map<string, boolean>();
-  if (sourceIds.length > 0) {
-    // Phase 03.0.1 (post-review UAT 2026-05-10) — pgboss schema guard.
-    // App role can render this page BEFORE worker/scheduler boot has
-    // initialized pgboss schema (boss.start() creates it). Migration
-    // 0020 drops the schema on baseline; on fresh self-host install the
-    // table doesn't exist until a worker comes up. to_regclass returns
-    // NULL when the relation is missing — graceful degradation: pulling
-    // state defaults to false, UI shows static refresh button.
-    const idList = sql.join(
-      sourceIds.map((id) => sql`${id}`),
+  if (channelIds.length > 0) {
+    // pgboss schema guard — to_regclass returns NULL when missing
+    // (fresh self-host install before any worker boot).
+    const channelKeyList = sql.join(
+      channelIds.map((c) => sql`${c}`),
       sql`, `,
     );
     const active = await db
-      .execute<{ source_id: string }>(
+      .execute<{ channel_key: string }>(
         sql`
-      SELECT DISTINCT data->>'sourceId' AS source_id
+      SELECT DISTINCT data->>'channelKey' AS channel_key
       FROM pgboss.job
-      WHERE name = 'youtube.backfill.user'
+      WHERE name = 'youtube.backfill.channel'
         AND state IN ('active', 'created', 'retry')
-        AND data->>'sourceId' IN (${idList})
+        AND data->>'channelKey' IN (${channelKeyList})
         AND to_regclass('pgboss.job') IS NOT NULL
     `,
       )
-      .catch(() => ({ rows: [] as { source_id: string }[] }));
-    for (const r of active.rows) {
-      if (r.source_id) pullingMap.set(r.source_id, true);
+      .catch(() => ({ rows: [] as { channel_key: string }[] }));
+    const pullingChannelKeys = new Set(active.rows.map((r) => r.channel_key).filter(Boolean));
+    for (const s of dtos) {
+      if (s.channelId && pullingChannelKeys.has(s.channelId)) {
+        pullingMap.set(s.id, true);
+      }
     }
   }
   const pullingBySource: Record<string, boolean> = Object.fromEntries(pullingMap);

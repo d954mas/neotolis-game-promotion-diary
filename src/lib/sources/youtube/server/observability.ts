@@ -196,9 +196,10 @@ export const youtubeObservability: AdapterObservability = {
   // cap избыточен. Reddit Phase 03.1+ may declare both axes (variable
   // events-per-request).
   //
-  // Cap counts only user-initiated actions: incremental refresh +
-  // historical refresh + stats_refresh. Excluded: initial onboarding +
-  // auto_passive cron (uses cron pool, not user pool).
+  // Cap counts user-initiated actions: initial onboarding + incremental
+  // refresh + historical refresh + stats_refresh. Excluded only:
+  // auto_passive cron (uses cron pool, not user pool). Onboarding-burn
+  // counts because user explicitly opted into a backfill window.
   userQuotaCap: {
     requestsPerDay: 100,
   },

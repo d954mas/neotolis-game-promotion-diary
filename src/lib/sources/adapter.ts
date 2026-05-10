@@ -199,8 +199,11 @@ export interface AdapterQuotaCounter {
  *    ratio so requestsPerDay alone suffices; eventsPerDay omitted.
  *
  *  Counter source: audit_log SUM with metadata.{requests_used, events_inserted}.
- *  Cap kinds: 'incremental' | 'historical' | 'stats_refresh'. Excluded:
- *  'initial' (onboarding UX) and 'auto_passive' (cron pool, not user pool). */
+ *  Cap kinds: 'initial' | 'incremental' | 'historical' | 'stats_refresh'.
+ *  Excluded: 'auto_passive' (cron pool, not user pool). The 'initial' flow
+ *  was originally excluded for onboarding UX, but counts now — onboarding
+ *  also burns user quota and should reflect in the cap (UAT 2026-05-10
+ *  confirmed user expectation). */
 export interface AdapterUserQuotaCap {
   requestsPerDay?: number;
   eventsPerDay?: number;

@@ -252,9 +252,11 @@ export interface DataSourceDto {
   needsReconnect: boolean;
   lastErrorAt: Date | null;
   lastErrorKind: string | null;
-  // Phase 03.0.1 — backfill state. UI: "обновлено N часов назад" +
-  // coverage badge derived from these fields + per-user quota banner.
-  // See drizzle/0024_phase03_01_data_sources_backfill_state.sql header.
+  // Phase 03.0.1 Wave 4 — channel-scoped state. These fields are populated
+  // by /sources loaders via JOIN with data_source_channel_state on
+  // (kind, channel_id = channel_key). UI components read them as before.
+  // The base toDataSourceDto projection sets null/false defaults — loaders
+  // override with channel-state values.
   lastPolledAt: Date | null;
   backfillOldestAt: Date | null;
   backfillComplete: boolean;
@@ -286,9 +288,11 @@ export function toDataSourceDto(r: DataSourceRow): DataSourceDto {
     needsReconnect: r.needsReconnect,
     lastErrorAt: r.lastErrorAt,
     lastErrorKind: r.lastErrorKind,
-    lastPolledAt: r.lastPolledAt,
-    backfillOldestAt: r.backfillOldestAt,
-    backfillComplete: r.backfillComplete,
+    // Channel-scoped fields — null/false defaults; loaders override by
+    // JOIN with data_source_channel_state.
+    lastPolledAt: null,
+    backfillOldestAt: null,
+    backfillComplete: false,
     backfillTargetSince: r.backfillTargetSince,
   };
 }

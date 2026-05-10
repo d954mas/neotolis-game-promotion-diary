@@ -44,10 +44,7 @@ import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { events } from "$lib/server/db/schema/events.js";
 import { logger } from "$lib/server/logger.js";
 import { writeAuditStrict } from "$lib/server/audit.js";
-import {
-  markSourceNeedsReconnect,
-  markSourceLastPolledAt,
-} from "$lib/server/services/data-sources.js";
+import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
 import {
   getChannelState,
   markChannelLastPolledAt,
@@ -193,11 +190,6 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
       }
     }
     await markChannelLastPolledAt(kind, channelKey);
-    // Stamp per-source last_polled_at for legacy UI display path during
-    // Wave 2-3 transition. Wave 4 drops the column.
-    for (const sub of subscribers) {
-      await markSourceLastPolledAt(sub.userId, sub.id);
-    }
     if (triggerUserId) {
       await writeBackfillAudit({
         job,
@@ -232,9 +224,6 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
       await setChannelBackfillPageToken(kind, channelKey, null);
     }
     await markChannelLastPolledAt(kind, channelKey);
-    for (const sub of subscribers) {
-      await markSourceLastPolledAt(sub.userId, sub.id);
-    }
     if (triggerUserId) {
       await writeBackfillAudit({
         job,
@@ -331,18 +320,28 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
       const dedupKey = `${sub.userId}|${sub.id}|${ev.externalId}`;
       if (existingSet.has(dedupKey)) continue;
 
-      await db.insert(events).values({
-        userId: sub.userId,
-        sourceId: sub.id,
-        kind: "youtube_video",
-        authorIsMe: sub.isOwnedByMe,
-        occurredAt: ev.occurredAt,
-        title: ev.title,
-        url: ev.url,
-        externalId: ev.externalId,
-        metadata: ev.metadata ?? {},
-      });
-      insertedByUser.set(sub.userId, (insertedByUser.get(sub.userId) ?? 0) + 1);
+      // onConflictDoNothing — race-safe against parallel walks (e.g.,
+      // user click + cron tick on the same channel that bypassed
+      // singletonKey via worker-restart timing). The pre-SELECT above
+      // is the optimistic fast path; this is the DB-level defense.
+      const inserted = await db
+        .insert(events)
+        .values({
+          userId: sub.userId,
+          sourceId: sub.id,
+          kind: "youtube_video",
+          authorIsMe: sub.isOwnedByMe,
+          occurredAt: ev.occurredAt,
+          title: ev.title,
+          url: ev.url,
+          externalId: ev.externalId,
+          metadata: ev.metadata ?? {},
+        })
+        .onConflictDoNothing()
+        .returning({ id: events.id });
+      if (inserted.length > 0) {
+        insertedByUser.set(sub.userId, (insertedByUser.get(sub.userId) ?? 0) + 1);
+      }
     }
   }
 
@@ -362,13 +361,7 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
   }
   await markChannelLastPolledAt(kind, channelKey);
 
-  // 10. Stamp per-source last_polled_at for Wave 2-3 transition. Wave 4
-  //     drops the column and UI reads channel state directly.
-  for (const sub of subscribers) {
-    await markSourceLastPolledAt(sub.userId, sub.id);
-  }
-
-  // 11. Audit — only for trigger user. Cron flows are traced via
+  // 10. Audit — only for trigger user. Cron flows are traced via
   //     youtube_service_quota_usage operator pool table; no per-user row.
   if (triggerUserId) {
     const userInserted = insertedByUser.get(triggerUserId) ?? 0;

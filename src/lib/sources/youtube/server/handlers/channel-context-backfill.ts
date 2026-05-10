@@ -45,11 +45,11 @@ import { env } from "$lib/server/config/env.js";
 import { parseYoutubeUrl } from "../url.js";
 import { logger } from "$lib/server/logger.js";
 import { AdapterError } from "$lib/sources/errors.js";
+import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
 import {
-  markSourceNeedsReconnect,
-  markSourceLastPolledAt,
-  markSourceBackfillFrontier,
-} from "$lib/server/services/data-sources.js";
+  markChannelLastPolledAt,
+  markChannelBackfillFrontier,
+} from "$lib/server/services/channel-state.js";
 import { writeAudit } from "$lib/server/audit.js";
 
 // Zod schemas for the three endpoints — defense against API drift.
@@ -643,16 +643,23 @@ async function handleChannelContextBackfillImpl(job: {
 
     for (const c of collected) {
       if (existingIds.has(c.videoId)) continue;
-      await db.insert(events).values({
-        userId,
-        sourceId,
-        kind: "youtube_video",
-        authorIsMe,
-        occurredAt: new Date(c.publishedAt),
-        title: c.title,
-        url: `https://www.youtube.com/watch?v=${c.videoId}`,
-        externalId: c.videoId,
-      });
+      // onConflictDoNothing — race-safe against parallel
+      // channel-context-backfill jobs (singletonKey window edge,
+      // pgboss restart). Optimistic SELECT is the fast path; UNIQUE
+      // is the DB-level defense.
+      await db
+        .insert(events)
+        .values({
+          userId,
+          sourceId,
+          kind: "youtube_video",
+          authorIsMe,
+          occurredAt: new Date(c.publishedAt),
+          title: c.title,
+          url: `https://www.youtube.com/watch?v=${c.videoId}`,
+          externalId: c.videoId,
+        })
+        .onConflictDoNothing();
     }
   }
 
@@ -683,10 +690,11 @@ async function handleChannelContextBackfillImpl(job: {
   // State updates only happen когда sourceId is present (createSource flow,
   // not generic ingest path). Audit row written в both cases — ingest flow
   // (no sourceId) gets minimal metadata (no source_id field).
-  if (sourceId) {
-    // Phase 03.0.1 (post-review P1-4) — static import (cycle long broken).
-    await markSourceLastPolledAt(userId, sourceId);
-    // Frontier moves to oldest occurredAt we just inserted, when applicable.
+  if (sourceId && channelId !== null) {
+    // Phase 03.0.1 Wave 4 — channel-scoped state writes. Per-source state
+    // columns (last_polled_at, backfill_oldest_at) dropped in migration 0028;
+    // channel state is the single source of truth across all subscribers.
+    await markChannelLastPolledAt("youtube_channel", channelId);
     if (videoIds.length > 0) {
       const oldestRow = await db
         .select({ at: youtubeVideos.publishedAt })
@@ -701,7 +709,7 @@ async function handleChannelContextBackfillImpl(job: {
         .limit(1);
       const oldest = oldestRow[0]?.at ?? null;
       if (oldest !== null) {
-        await markSourceBackfillFrontier(userId, sourceId, oldest);
+        await markChannelBackfillFrontier("youtube_channel", channelId, oldest);
       }
     }
   }

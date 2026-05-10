@@ -31,8 +31,8 @@
 // `softDeleteSource` writes `source.removed` BEFORE the soft-delete UPDATE
 // so the security signal lands even if the UPDATE later fails.
 
-import { and, eq, isNull, sql } from "drizzle-orm";
-import { db, type DbOrTx, type Tx } from "../db/client.js";
+import { and, eq, isNull, count } from "drizzle-orm";
+import { db, type Tx } from "../db/client.js";
 import { dataSources } from "../db/schema/data-sources.js";
 import type { SourceKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
@@ -274,19 +274,58 @@ export async function createSource(
     );
   }
 
+  // Phase 03.0.1 Wave 4 (post-review P1) — cheap pre-checks BEFORE
+  // canonicalize. Pre-fix the adapter's canonicalizeOnCreate (which can
+  // call YouTube's videos.list for /watch?v= URLs) ran first, so a user
+  // hitting the source quota cap or pasting an exact-duplicate handle
+  // URL still burned operator-pool quota before the eventual rejection.
+  //
+  // Two cheap SELECTs catch the common cases:
+  //   1. Source-count cap: count user's active data_sources rows; if at
+  //      or above LIMIT_SOURCES_PER_USER, throw 429 quota_exceeded
+  //      (audit emitted by withQuotaGuard's same check below — this is
+  //      the optimistic skip).
+  //   2. Exact handle_url duplicate: SELECT by user_id + handle_url
+  //      catches "user pasted the same URL twice" without canonicalize.
+  //      Canonicalize-discovered duplicates ("two different /watch URLs
+  //      → same channel") still need the post-canonicalize path.
+  //
+  // The withQuotaGuard's atomic check is preserved as the race-safe
+  // source of truth — these pre-checks just dodge the YouTube API call
+  // for already-rejectable inputs.
+  const sourceLimit = env.LIMIT_SOURCES_PER_USER;
+  const [countRow] = await db
+    .select({ c: count() })
+    .from(dataSources)
+    .where(and(eq(dataSources.userId, userId), isNull(dataSources.deletedAt)));
+  const currentCount = Number(countRow?.c ?? 0);
+  if (currentCount >= sourceLimit) {
+    throw new AppError(
+      `data_sources quota exceeded: ${currentCount}/${sourceLimit}`,
+      "quota_exceeded",
+      429,
+      { kind: "data_sources", limit: sourceLimit, current: currentCount },
+    );
+  }
+  const [existingDup] = await db
+    .select({ id: dataSources.id })
+    .from(dataSources)
+    .where(
+      and(
+        eq(dataSources.userId, userId),
+        eq(dataSources.handleUrl, input.handleUrl),
+        isNull(dataSources.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (existingDup) {
+    throw new AppError("You already track this YouTube channel", "duplicate_source", 422, {
+      handle_url: input.handleUrl,
+    });
+  }
+
   // Phase 3.0 post-build (UAT 2026-05-06): canonicalize the handle_url
-  // for kind=youtube_channel sources BEFORE insert. Operators routinely
-  // paste any YouTube URL (watch?v=…, /shorts/ID, youtu.be/ID, /@handle,
-  // /channel/UC…). Resolving every variant to the canonical channel URL
-  // (and pre-setting channel_id) means:
-  //   - The (user_id, handle_url) unique catches duplicates on the second
-  //     paste of the same channel via a different video URL.
-  //   - The worker takes the fast path on backfill (no resolve step, no
-  //     extra quota unit).
-  // Cache-first via fetchVideoMetadataByUrl so a re-paste of a known video
-  // is zero quota.
-  // Phase 03.0.1 architecture cleanup — adapter-driven canonicalize.
-  // Cross-source code never switches on `source.kind`; the adapter owns
+  // for kind=youtube_channel sources BEFORE insert. Adapter-driven —
   // the per-source URL canonicalization (parse handle URL, dereference
   // video URL → channelId via videos.list, leave legacy /@handle / /c/
   // URLs to be resolved on first worker backfill). Phase 03.1 Reddit
@@ -544,17 +583,13 @@ export async function updateSource(
       );
     }
     update.backfillTargetSince = patch.backfillTargetSince;
-    // Decision matrix:
-    //   target newer (closer to NOW) than frontier → "shrinking window";
-    //     existing data still satisfies, may even cover more — keep complete.
-    //   target older than frontier → "expanding window"; gap to fill → reset.
-    //   frontier null → first pull pending → reset to ensure cron picks up.
-    const frontier = existing.backfillOldestAt;
-    const expandingWindow =
-      frontier === null || patch.backfillTargetSince.getTime() < frontier.getTime();
-    if (expandingWindow) {
-      update.backfillComplete = false;
-    }
+    // Phase 03.0.1 Wave 4 — channel-scoped state machine. Per-source
+    // backfill_complete column dropped; channel-level state is now
+    // shared across subscribers. Widening one user's target_since does
+    // NOT reset the channel's complete flag — other subscribers may have
+    // narrower targets that are already satisfied. The next refresh-
+    // content click by THIS user explicitly resets channel complete via
+    // resetChannelBackfillComplete (trust-but-verify).
   }
 
   const [row] = await db
@@ -569,20 +604,6 @@ export async function updateSource(
     )
     .returning();
   if (!row) throw new NotFoundError();
-
-  // Phase 03.0.1 (post-review UAT 2026-05-10) — when target_since widens,
-  // clear any saved pagination cursor. The cursor was set during a prior
-  // walk that stopped (walkedPastSince) at the OLD target; items between
-  // OLD and NEW target on already-fetched pages were skipped (continue,
-  // not break) and won't be re-fetched if we resume from the cursor.
-  // Forcing a cursor reset makes the next refresh-content click restart
-  // the walk from page 1, picking up all items in the widened window.
-  if (
-    patch.backfillTargetSince !== undefined &&
-    update.backfillComplete === false // expandingWindow signal, computed above
-  ) {
-    await setSourceBackfillPageToken(userId, sourceId, null);
-  }
 
   if (patch.autoImport !== undefined && patch.autoImport !== existing.autoImport) {
     await writeAudit({
@@ -751,182 +772,17 @@ export async function markSourceNeedsReconnect(
  * incremental, historical, stats_refresh, auto_passive) on success.
  * UI displays "обновлено N часов назад" from this column.
  */
-export async function markSourceLastPolledAt(
-  userId: string,
-  sourceId: string,
-  dbCtx: DbOrTx = db,
-): Promise<void> {
-  await dbCtx
-    .update(dataSources)
-    .set({ lastPolledAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
-}
-
-/**
- * Move the auto-import frontier — the earliest event.occurred_at we've
- * pulled. The UPDATE is WHERE-guarded so concurrent jobs (cron + manual
- * refresh) cannot race-rollback the frontier to a newer date.
- *
- * Phase 03.0.1 (post-review P2-1) — TOCTOU fix. Pre-fix the helper did an
- * unconditional UPDATE and relied on the caller to read+gate. Two
- * concurrent workers reading `source.backfillOldestAt` could both pass
- * the gate (e.g., one with oldestAt=2023, another with oldestAt=2024)
- * and the second UPDATE would clobber the deeper frontier. Race-safe
- * version: WHERE backfill_oldest_at IS NULL OR backfill_oldest_at >
- * $oldestAt — the deeper writer wins regardless of arrival order.
- *
- * Caller may still pre-check to avoid issuing no-op SQL, but the helper
- * is now self-defending.
- */
-export async function markSourceBackfillFrontier(
-  userId: string,
-  sourceId: string,
-  oldestAt: Date,
-  dbCtx: DbOrTx = db,
-): Promise<void> {
-  await dbCtx
-    .update(dataSources)
-    .set({ backfillOldestAt: oldestAt, updatedAt: new Date() })
-    .where(
-      and(
-        eq(dataSources.userId, userId),
-        eq(dataSources.id, sourceId),
-        // Race-safe: only move frontier deeper, never roll it back.
-        sql`(${dataSources.backfillOldestAt} IS NULL OR ${dataSources.backfillOldestAt} > ${oldestAt})`,
-      ),
-    );
-}
-
-/**
- * Mark this source's backfill complete — adapter.pollContent returned an
- * empty HTTP-200 page (platform confirmed "no more older content").
- * Auto-backfill cron skips sources with `backfill_complete=true`. User
- * refresh resets via `resetSourceBackfillComplete` (trust-but-verify).
- */
-export async function markSourceBackfillComplete(
-  userId: string,
-  sourceId: string,
-  dbCtx: DbOrTx = db,
-): Promise<void> {
-  await dbCtx
-    .update(dataSources)
-    .set({ backfillComplete: true, updatedAt: new Date() })
-    .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
-}
-
-/**
- * Phase 03.0.1 (post-review UAT 2026-05-10) — persistent backfill pagination
- * cursor. YouTube playlistItems pagination is uploads-DESC; deep-history
- * channels (>1000 videos) need multiple refresh-content clicks to walk back
- * to target_since. Adapter returns `nextPageToken` from each call; worker
- * persists it here so the next call resumes from the saved position.
- *
- * Pass `null` to clear (end-of-playlist reached or walked past target).
- *
- * Tenant-scoped UPDATE — no cross-tenant write possible.
- */
-export async function setSourceBackfillPageToken(
-  userId: string,
-  sourceId: string,
-  pageToken: string | null,
-  dbCtx: DbOrTx = db,
-): Promise<void> {
-  // Atomic JSON merge — preserves any other fields in metadata (e.g.
-  // adapter-specific cache keys) while updating just the cursor field.
-  // jsonb_set with create_missing=true initializes metadata if NULL.
-  if (pageToken === null) {
-    await dbCtx
-      .update(dataSources)
-      .set({
-        metadata: sql`COALESCE(${dataSources.metadata}, '{}'::jsonb) - 'lastBackfillPageToken'`,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
-  } else {
-    await dbCtx
-      .update(dataSources)
-      .set({
-        metadata: sql`jsonb_set(COALESCE(${dataSources.metadata}, '{}'::jsonb), '{lastBackfillPageToken}', to_jsonb(${pageToken}::text), true)`,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
-  }
-}
-
-/**
- * Reset `backfill_complete` to false. Called from POST /api/sources/:id/refresh-content
- * BEFORE worker enqueue — gives worker a chance to re-verify completeness
- * (recover from silent errors that may have set complete=true incorrectly).
- * If still empty after re-check, worker re-sets to true.
- */
-export async function resetSourceBackfillComplete(
-  userId: string,
-  sourceId: string,
-  dbCtx: DbOrTx = db,
-): Promise<void> {
-  await dbCtx
-    .update(dataSources)
-    .set({ backfillComplete: false, updatedAt: new Date() })
-    .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
-}
-
-/** Boundaries for catch-up worker. */
-export interface BackfillBoundaries {
-  /** Pull events newer than this date — "what came out since I last looked".
-   *  NULL = no events exist yet for this source; old-side pull alone covers it. */
-  newSide: Date | null;
-  /** Pull events back to this date — "fill the gap to my target window".
-   *  NULL = either backfill_complete OR frontier already at/past target. */
-  oldSide: Date | null;
-}
-
-/**
- * Compute catch-up boundaries for a refresh action — pure function used by
- * worker handlers to decide what pollContent calls to make.
- *
- * Logic:
- *   newSide = latest event.occurred_at we have (or NULL if no events).
- *   oldSide = backfill_target_since IF (not complete AND frontier > target).
- *
- * Worker:
- *   - if newSide != null  → pollContent(source, newSide) → INSERT new events.
- *   - if oldSide != null  → pollContent(source, oldSide) → INSERT older events
- *                           (idempotency via externalId UNIQUE skips overlap).
- *   - if both null         → no work needed (caught up).
- *   - if newSide null + oldSide non-null → initial pull (no events yet, fetch
- *                                          everything in target window).
- *
- * Pure — no DB query. Caller fetches `latestEventOccurredAt` separately
- * (typically via `MAX(events.occurred_at) WHERE source_id`) and passes both.
- */
-export function computeSinceForRefresh(
-  source: {
-    backfillOldestAt: Date | null;
-    backfillComplete: boolean;
-    backfillTargetSince: Date | null;
-  },
-  latestEventOccurredAt: Date | null,
-): BackfillBoundaries {
-  const newSide = latestEventOccurredAt;
-
-  let oldSide: Date | null = null;
-  if (!source.backfillComplete) {
-    const target = source.backfillTargetSince;
-    const frontier = source.backfillOldestAt;
-    if (target !== null) {
-      if (frontier === null) {
-        // Never pulled historical — start from target (= "all in window").
-        oldSide = target;
-      } else if (target.getTime() < frontier.getTime()) {
-        // Frontier hasn't reached target yet — gap to fill.
-        oldSide = target;
-      }
-      // else: frontier already at/past target — covered, no old-side pull.
-    }
-  }
-
-  return { newSide, oldSide };
-}
+// Phase 03.0.1 Wave 4 — channel-scoped state replaced these per-source
+// helpers. See src/lib/server/services/channel-state.ts:
+//   markSourceLastPolledAt        → markChannelLastPolledAt
+//   markSourceBackfillFrontier    → markChannelBackfillFrontier
+//   markSourceBackfillComplete    → markChannelBackfillComplete
+//   setSourceBackfillPageToken    → setChannelBackfillPageToken
+//   resetSourceBackfillComplete   → resetChannelBackfillComplete
+// computeSinceForRefresh removed — channel-scoped worker passes
+// depthBoundIso explicitly per trigger context (user click → user's
+// target_since; cron auto-backfill → 1970 sentinel; cron incremental
+// → now - INCREMENTAL_WINDOW_DAYS).
 
 /**
  * INGEST-03 author_is_me inheritance — given an oEmbed `author_url` parsed
