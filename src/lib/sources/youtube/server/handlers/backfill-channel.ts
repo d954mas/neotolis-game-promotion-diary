@@ -42,6 +42,7 @@ import { and, eq, isNotNull, isNull, sql, inArray } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { events } from "$lib/server/db/schema/events.js";
+import { youtubeVideos as youtubeVideosTable } from "../schema/index.js";
 import { logger } from "$lib/server/logger.js";
 import { writeAuditStrict } from "$lib/server/audit.js";
 import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
@@ -289,7 +290,46 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
     }
   }
 
-  // 8. Fan-out INSERT loop. Per (event × subscriber):
+  // 8. youtube_videos cache UPSERT for every fetched event. Phase 03.0.1
+  //    Wave 4 (post-UAT 2026-05-10) — without this the channel-scoped
+  //    polling path INSERTed events but left youtube_videos cache empty
+  //    for those video_ids. PollingBadge tier resolver reads
+  //    youtube_videos.publishedAt; missing → tier=pending → "Pending ·
+  //    fetching video info…" badge with no stats forever (until manual
+  //    refresh-poll click hit the user). channel-context-backfill DOES
+  //    write the cache, but that path runs only at onSourceCreated for
+  //    a single backfill window — it doesn't re-fire for cron walks or
+  //    refresh-content clicks that walk past the original window.
+  //
+  //    UPSERT on video_id PK — public-data, no userId scope. Only writes
+  //    snippet fields we have from pollContent (title, publishedAt,
+  //    channelId). Stats land separately via active/cold poll workers
+  //    (which read this row to compute tier).
+  for (const ev of pollResult.events) {
+    if (!ev.externalId) continue;
+    const evChannelId =
+      typeof ev.metadata?.channelId === "string" ? ev.metadata.channelId : channelKey;
+    await db
+      .insert(youtubeVideosTable)
+      .values({
+        videoId: ev.externalId,
+        title: ev.title,
+        channelId: evChannelId,
+        publishedAt: ev.occurredAt,
+        fetchedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: youtubeVideosTable.videoId,
+        set: {
+          title: ev.title,
+          channelId: evChannelId,
+          publishedAt: ev.occurredAt,
+          updatedAt: new Date(),
+        },
+      });
+  }
+
+  // 9. Fan-out INSERT loop. Per (event × subscriber):
   //    - skip if event.publishedAt < subscriber.target_since
   //    - skip if auto_passive flow AND subscriber.auto_import == false
   //      (cron passive cache hydration only — but we don't hydrate cache

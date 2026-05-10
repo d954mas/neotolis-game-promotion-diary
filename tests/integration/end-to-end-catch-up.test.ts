@@ -201,6 +201,39 @@ describe("end-to-end channel-scoped catch-up flow", () => {
     const titles = eventRows.map((r) => r.title).sort();
     expect(titles).toEqual(["A", "B", "C"]);
 
+    // Phase 03.0.1 Wave 4 (post-UAT prod hotfix) — backfill-channel
+    // populates youtube_videos cache for every fetched event. Pre-fix
+    // the channel-scoped polling path INSERTed events but left the cache
+    // empty, so PollingBadge tier resolution returned 'pending' and
+    // poll-active/poll-cold cron skipped the videos forever (no stats
+    // ever landed). Assert the cache is populated post-walk so a
+    // regression dropping the UPSERT block is caught.
+    const externalIds = eventRows
+      .map((r) => r.externalId)
+      .filter((x): x is string => typeof x === "string");
+    expect(externalIds.length).toBe(3);
+    const cacheRows = await db
+      .select()
+      .from((await import("../../src/lib/sources/youtube/server/schema/index.js")).youtubeVideos)
+      .where(
+        (await import("drizzle-orm")).inArray(
+          (await import("../../src/lib/sources/youtube/server/schema/index.js")).youtubeVideos
+            .videoId,
+          externalIds,
+        ),
+      );
+    expect(cacheRows.length).toBe(3);
+    for (const row of cacheRows) {
+      expect(row.publishedAt).not.toBeNull();
+      expect(row.title).toBeTruthy();
+      expect(row.channelId).toBe(channelId);
+      // last_polled_at intentionally NULL — backfill-channel only
+      // populates cache (snippet); poll-active/poll-cold cron will fetch
+      // stats and stamp last_polled_at. Distinguishes from the
+      // channel-context-backfill seed path which DOES stamp it.
+      expect(row.lastPolledAt).toBeNull();
+    }
+
     // Channel state advanced.
     const channelState = await getChannelState("youtube_channel", channelId);
     expect(channelState).toBeDefined();
