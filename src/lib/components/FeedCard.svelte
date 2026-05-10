@@ -321,10 +321,15 @@
 
     {#if source}
       <div class="chips-line">
-        {#if source.channelTitle}
-          <span class="chip chip-channel" title="YouTube channel">{source.channelTitle}</span>
-        {/if}
-        <span class="chip" title="My source label">{source.displayName ?? source.handleUrl}</span>
+        <!-- Phase 03.0.1 (post-review UAT) — single source chip. Pre-fix
+             rendered both channelTitle (cache) AND displayName/handleUrl,
+             producing «xk xk» when user-typed displayName matched the
+             channel title, or «snailkick + URL» when it didn't. Now:
+             channelTitle (canonical) → displayName → handleUrl as single
+             fallback chain. -->
+        <span class="chip chip-channel" title="YouTube channel">
+          {source.channelTitle ?? source.displayName ?? source.handleUrl}
+        </span>
       </div>
     {/if}
 
