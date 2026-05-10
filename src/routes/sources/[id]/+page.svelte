@@ -17,6 +17,28 @@
 
   let { data }: { data: PageData } = $props();
   const source = $derived(data.source);
+
+  // Phase 03.0.1 (post-review UAT) — same live-refresh loop as /sources
+  // list. While cooldown is active (worker processing pull), invalidateAll
+  // every 3s so UI shows last_polled_at advancing, events appearing,
+  // cooldown countdown ticking without manual reload.
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  $effect(() => {
+    if ((data.cooldownSec ?? 0) > 0 && pollTimer === null) {
+      pollTimer = setInterval(() => {
+        void invalidateAll();
+      }, 3000);
+    } else if ((data.cooldownSec ?? 0) === 0 && pollTimer !== null) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    return () => {
+      if (pollTimer !== null) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+  });
   // Heading prefers canonical channel title from cache (always more
   // identifiable than the user-typed displayName). displayName is legacy
   // — UI doesn't surface it anymore.

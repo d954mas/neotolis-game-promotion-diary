@@ -149,13 +149,17 @@
     onclick={onClick}
   >
     {#if compact}
-      <!-- Refresh icon (Unicode ↻ — circular arrow). Inline so no SVG asset. -->
-      {#if pending}
-        ⟳
-      {:else if cooldownSec > 0}
-        {cooldownSec}
-      {:else}
+      <!-- Refresh icon (Unicode ↻). Spinning class drives CSS animation
+           while pending OR while cooldown is active (worker is processing
+           the job — visual signal to user that pull is in flight). -->
+      <span
+        class="refresh-content__icon"
+        class:refresh-content__icon--spinning={pending || cooldownSec > 0}
+      >
         ↻
+      </span>
+      {#if cooldownSec > 0 && !pending}
+        <span class="refresh-content__compact-count">{cooldownSec}</span>
       {/if}
     {:else if pending}
       {m.sources_detail_pull_new_content_pending()}
@@ -190,9 +194,33 @@
     width: 3rem;
     height: 2rem;
     padding: 0;
-    font-size: 1rem;
+    font-size: 0.85rem;
     line-height: 1;
     box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+  }
+  .refresh-content__icon {
+    display: inline-block;
+    font-size: 1.05rem;
+    line-height: 1;
+  }
+  .refresh-content__icon--spinning {
+    animation: refresh-spin 1.4s linear infinite;
+  }
+  .refresh-content__compact-count {
+    font-size: 0.7rem;
+    opacity: 0.85;
+  }
+  @keyframes refresh-spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
   .refresh-content__button {
     padding: var(--space-sm) var(--space-md);

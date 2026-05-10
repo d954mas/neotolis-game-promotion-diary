@@ -54,6 +54,30 @@
   };
 
   let { data }: { data: PageData } = $props();
+
+  // Phase 03.0.1 (post-review UAT 2026-05-10) — live refresh while any
+  // source has an active cooldown (worker is processing a pull). Server
+  // loader re-runs every 3s; SourceRow updates last_polled_at, event
+  // range, and the cooldown countdown without manual page reload.
+  // Stops polling once all cooldowns hit 0.
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  $effect(() => {
+    const anyActive = Object.values(data.cooldownBySource ?? {}).some((sec) => sec > 0);
+    if (anyActive && pollTimer === null) {
+      pollTimer = setInterval(() => {
+        void invalidateAll();
+      }, 3000);
+    } else if (!anyActive && pollTimer !== null) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    return () => {
+      if (pollTimer !== null) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+  });
   const active = $derived(data.active as DataSourceDto[]);
   const deleted = $derived(data.deleted as DataSourceDto[]);
 
