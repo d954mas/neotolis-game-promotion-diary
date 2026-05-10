@@ -503,6 +503,35 @@ export async function updateSource(
         field: "backfillTargetSince",
       });
     }
+    // Phase 03.0.1 (post-review UAT 2026-05-10) — narrowing prohibited.
+    // backfill_target_since semantics: «pull history back to this date».
+    // Earlier date = wider coverage, later date = narrower. User mental
+    // model: «I picked X, asking for Y means I want LESS» — surprising
+    // when accidentally hit by changing 1970-01-01 sentinel to today.
+    // Allow only widening (new ≤ current) or keeping (new === current).
+    // Sentinel «all» (1970-01-01) is widest; it cannot be widened, but
+    // narrowing FROM sentinel is intentional escape hatch — UI flips a
+    // local override flag and the server allows ANY past date when
+    // current is sentinel.
+    const SENTINEL_MS = new Date("1970-01-01T00:00:00Z").getTime();
+    const currentMs = existing.backfillTargetSince?.getTime() ?? null;
+    const isCurrentSentinel = currentMs === SENTINEL_MS;
+    if (
+      !isCurrentSentinel &&
+      currentMs !== null &&
+      patch.backfillTargetSince.getTime() > currentMs
+    ) {
+      throw new AppError(
+        `backfillTargetSince cannot move forward (would narrow window)`,
+        "cannot_narrow_window",
+        422,
+        {
+          field: "backfillTargetSince",
+          current: existing.backfillTargetSince?.toISOString(),
+          requested: patch.backfillTargetSince.toISOString(),
+        },
+      );
+    }
     update.backfillTargetSince = patch.backfillTargetSince;
     // Decision matrix:
     //   target newer (closer to NOW) than frontier → "shrinking window";
