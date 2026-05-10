@@ -476,13 +476,17 @@ export async function createEvent(
   });
 
   // Phase 03.0.1 Wave 4 (post-UAT) — adapter-driven sync stats fetch.
-  // After ANY event create with externalId (paste flow OR direct-form
-  // submit OR preview-then-submit), ask the adapter to pull view/like
-  // counts synchronously (1 unit, user pool) so /feed shows stats
-  // immediately. Errors swallowed — the event row already exists;
-  // stats will land via cron tick if this path failed (rate-limit,
-  // auth-error). YouTube adapter implements via pollStatsByVideoId +
-  // writeSnapshot; other source kinds with no fetchEventStats are no-op.
+  // After ANY event create with externalId, ask the adapter to pull
+  // view/like counts synchronously (1 unit, user pool) so /feed shows
+  // stats immediately. Errors swallowed — event row already exists;
+  // stats will land via cron tick if this path failed.
+  //
+  // Cap check FIRST. fetchEventStats writes an audit row with
+  // flow=stats_refresh which counts toward the per-user requestsPerDay
+  // cap. Without a pre-check, a user at 100/100 could push to 101 by
+  // pasting a new event — letting them silently bypass the cap.
+  // Pre-check: if used >= cap, skip stats fetch and let cron pick up
+  // the polling later (no user-visible error — paste still succeeds).
   if (row.externalId) {
     const { eventKindToSourceKind } = await import("$lib/sources/event-to-source-kind.js");
     const { getAdapter } = await import("$lib/sources/registry.js");
@@ -491,6 +495,24 @@ export async function createEvent(
       try {
         const statsAdapter = getAdapter(sourceKindForStats);
         if (statsAdapter.fetchEventStats !== undefined) {
+          const cap = statsAdapter.observability.userQuotaCap;
+          if (cap?.requestsPerDay !== undefined) {
+            const { getUserQuotaUsedToday } = await import("./quota.js");
+            const used = await getUserQuotaUsedToday(userId, sourceKindForStats);
+            if (used.requests >= cap.requestsPerDay) {
+              const { logger } = await import("../logger.js");
+              logger.info(
+                {
+                  eventId: row.id,
+                  externalId: row.externalId,
+                  used: used.requests,
+                  cap: cap.requestsPerDay,
+                },
+                "fetchEventStats skipped — per-user requestsPerDay cap reached",
+              );
+              return row;
+            }
+          }
           await statsAdapter.fetchEventStats(row.externalId, { userId });
         }
       } catch (err) {
