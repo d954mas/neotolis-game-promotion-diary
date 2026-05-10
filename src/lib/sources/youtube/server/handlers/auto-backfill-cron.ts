@@ -39,6 +39,7 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
+import { dataSourceChannelState } from "$lib/server/db/schema/data-source-channel-state.js";
 import { logger } from "$lib/server/logger.js";
 import { QUEUES } from "$lib/server/queues.js";
 import { youtubeObservability } from "../observability.js";
@@ -114,64 +115,84 @@ export async function handleAutoBackfillCron(
   // always the highest-priority pick. Ensures bootstrap walk happens
   // before any incremental refreshes.
   //
-  // P2-3 (post-review) — also excludes needsReconnect sources so broken
-  // adapters don't burn cron pool on guaranteed-failing polls.
+  // Channel-scoped picker — Phase 03.0.1 Wave 2. SELECT DISTINCT
+  // (kind, channel_key) from data_source_channel_state where NOT complete,
+  // joined with data_sources to ensure at least one active subscriber
+  // exists (orphan channels with all subscribers soft-deleted are skipped).
+  // Worker fans out to all subscribers per job.
   //
-  // Tenant-scope ESLint disable — this query is intentionally cross-tenant
-  // (D-11 scheduler fan-out, see comment block above). The previous version
-  // happened to satisfy the loose regex via `asc(dataSources.userId)` in
-  // the orderBy; removing that for fairness exposed the rule. The worker
-  // handler downstream re-applies tenant scope per job.
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query
+  // Cross-tenant by design — channel state is global; subscribers joined
+  // for liveness check. The worker handler re-applies fan-out logic to
+  // active subscribers (per-user filter on auto_import + target_since).
+  // The tenant-scope ESLint rule does NOT fire here because the primary
+  // SELECT is from data_source_channel_state (not in TENANT_TABLES); the
+  // join against data_sources references userId only via its column path,
+  // not as a WHERE filter — the rule's regex requires a userId filter on
+  // tenant tables and this query intentionally has none.
   const candidates = await db
-    .select({
-      id: dataSources.id,
-      userId: dataSources.userId,
-      kind: dataSources.kind,
+    .selectDistinct({
+      kind: dataSourceChannelState.kind,
+      channelKey: dataSourceChannelState.channelKey,
+      lastPolledAt: dataSourceChannelState.lastPolledAt,
     })
-    .from(dataSources)
-    .where(
+    .from(dataSourceChannelState)
+    .innerJoin(
+      dataSources,
       and(
-        eq(dataSources.backfillComplete, false),
-        eq(dataSources.needsReconnect, false),
+        eq(dataSources.kind, dataSourceChannelState.kind),
+        eq(dataSources.channelId, dataSourceChannelState.channelKey),
         isNull(dataSources.deletedAt),
-        // Only kinds with adapters that support backfill — youtube_channel today;
-        // Phase 03.1+ adds reddit_account when registered. Filter at SQL level
-        // avoids enqueueing jobs that the worker would no-op anyway.
-        sql`${dataSources.kind} = 'youtube_channel'`,
+        eq(dataSources.needsReconnect, false),
       ),
     )
-    .orderBy(sql`${dataSources.lastPolledAt} ASC NULLS FIRST`)
+    .where(
+      and(
+        eq(dataSourceChannelState.backfillComplete, false),
+        sql`${dataSourceChannelState.kind} = 'youtube_channel'`,
+      ),
+    )
+    .orderBy(sql`${dataSourceChannelState.lastPolledAt} ASC NULLS FIRST`)
     .limit(MAX_PICK);
 
   if (candidates.length === 0) {
     logger.info(
       { jobId: job.id },
-      "youtube.auto_backfill_cron: no incomplete sources to pick — all caught up",
+      "youtube.auto_backfill_cron: no incomplete channels to pick — all caught up",
     );
     return;
   }
 
   let enqueued = 0;
-  for (const src of candidates) {
+  for (const ch of candidates) {
     try {
       await boss.send(
-        QUEUES.YOUTUBE_BACKFILL_USER,
-        { sourceId: src.id, userId: src.userId, origin: "cron", flow: "auto_passive" },
-        // Phase 03.0.1 (post-review P2-4) — singletonSeconds=3600 for
-        // dedup beyond active state. Pre-fix singletonKey alone deduped
-        // jobs only while the prior was active/queued; if the scheduler
-        // restarted within the cron tick interval, a second tick within
-        // the dedup window could double-enqueue the same source. 1h
-        // window covers worst-case scheduler-restart cycles for the
-        // daily 03:00 PT cron.
-        { singletonKey: `auto-backfill-${src.id}`, singletonSeconds: 3600, priority: 0 },
+        QUEUES.YOUTUBE_BACKFILL_CHANNEL,
+        {
+          kind: ch.kind,
+          channelKey: ch.channelKey,
+          // No triggerUserId — cron flow consumes operator cron pool, no
+          // per-user audit row, free fan-out to subscribers.
+          depthBoundIso: "1970-01-01T00:00:00Z",
+          flow: "auto_passive",
+        },
+        // singletonKey by channelKey deduplicates concurrent triggers
+        // (cron + user click on the same channel within 1h). singletonSeconds
+        // covers worst-case scheduler-restart cycles for the daily cron.
+        {
+          singletonKey: `auto-backfill-${ch.channelKey}`,
+          singletonSeconds: 3600,
+          priority: 0,
+        },
       );
       enqueued += 1;
     } catch (err) {
       logger.warn(
-        { jobId: job.id, sourceId: src.id, err: String((err as Error)?.message ?? err) },
-        "youtube.auto_backfill_cron: enqueue failed for source; continuing",
+        {
+          jobId: job.id,
+          channelKey: ch.channelKey,
+          err: String((err as Error)?.message ?? err),
+        },
+        "youtube.auto_backfill_cron: enqueue failed for channel; continuing",
       );
     }
   }

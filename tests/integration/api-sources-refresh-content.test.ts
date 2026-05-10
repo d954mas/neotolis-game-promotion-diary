@@ -97,22 +97,26 @@ describe("POST /api/sources/:id/refresh-content — Phase 03.0.1 Plan 10", () =>
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).toEqual({
       enqueued: true,
-      queue: "youtube.backfill.user",
+      queue: "youtube.backfill.channel",
       jobId: "mock-job-id",
     });
 
     // pg-boss send was called with the right payload.
-    const enqueues = sentJobs.filter((j) => j.queue === "youtube.backfill.user");
+    const enqueues = sentJobs.filter((j) => j.queue === "youtube.backfill.channel");
     expect(enqueues).toHaveLength(1);
     const job = enqueues[0]!;
+    // Phase 03.0.1 Wave 2 — channel-scoped payload.
     expect(job.data).toMatchObject({
-      sourceId: src.id,
-      userId: u.id,
-      origin: "user",
+      kind: "youtube_channel",
+      channelKey: src.channelId,
+      triggerUserId: u.id,
+      flow: "incremental",
     });
-    // singletonKey dedups concurrent clicks within ~5min.
-    expect((job.options as { singletonKey?: string }).singletonKey).toBe(`backfill-${src.id}`);
-    // priority=1 puts user-initiated jobs ahead of cron polls (D-09 reserve).
+    // singletonKey by channelKey dedupes concurrent triggers across users.
+    expect((job.options as { singletonKey?: string }).singletonKey).toBe(
+      `backfill-channel-${src.channelId}`,
+    );
+    // priority=1 puts user-initiated jobs ahead of cron walks.
     expect((job.options as { priority?: number }).priority).toBe(1);
   });
 
@@ -233,9 +237,10 @@ describe("POST /api/sources/:id/refresh-content — Phase 03.0.1 Plan 10", () =>
     expect(auditRows).toHaveLength(1);
     const row = auditRows[0]!;
     expect(row.metadata).toMatchObject({
+      // Intent rows still carry source_id (per-user click forensics).
       source_id: src.id,
       kind: "youtube_channel",
-      queue: "youtube.backfill.user",
+      queue: "youtube.backfill.channel",
       job_id: "mock-job-id",
     });
   });

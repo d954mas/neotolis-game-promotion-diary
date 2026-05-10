@@ -30,8 +30,8 @@ import {
   updateSource,
   softDeleteSource,
   restoreSource,
-  resetSourceBackfillComplete,
 } from "../../services/data-sources.js";
+import { resetChannelBackfillComplete } from "../../services/channel-state.js";
 import { getUserQuotaUsedToday, nextPacificMidnight } from "../../services/quota.js";
 import { toDataSourceDto } from "../../dto.js";
 import { db } from "../../db/client.js";
@@ -383,17 +383,25 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
       }
     }
 
-    // Phase 03.0.1 — trust-but-verify. Reset backfill_complete BEFORE worker
-    // enqueue so the catch-up worker re-checks completeness. If канал ничего
-    // нового не имеет, worker re-устанавливает true. Если был silent error,
-    // user refresh даёт chance recover.
-    await resetSourceBackfillComplete(ctx.userId, source.id);
+    // Phase 03.0.1 Wave 2 — channel-scoped trust-but-verify. Reset
+    // channel-level backfill_complete BEFORE worker enqueue so the
+    // catch-up walk re-checks completeness. Channel state covers ALL
+    // subscribers; one user's refresh can re-open the walk for everyone.
+    if (source.channelId) {
+      await resetChannelBackfillComplete(source.kind, source.channelId);
+    }
 
     const result = await adapter.backfillSource(
       {
         id: source.id,
         userId: source.userId,
-        metadata: (source.metadata ?? {}) as Record<string, unknown>,
+        // Thread channelId + backfillTargetSince into metadata so
+        // backfillSource can construct the channel-scoped job payload.
+        metadata: {
+          ...((source.metadata ?? {}) as Record<string, unknown>),
+          channelId: source.channelId,
+          backfillTargetSince: source.backfillTargetSince?.toISOString(),
+        },
       },
       { userId: ctx.userId, origin: "user" },
     );

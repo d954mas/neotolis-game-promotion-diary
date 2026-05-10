@@ -66,12 +66,11 @@ import { handlePollUser } from "./handlers/poll-user.js";
 import { handleRehabUnavailable } from "./handlers/rehab-unavailable.js";
 import { handleChannelContextBackfill } from "./handlers/channel-context-backfill.js";
 import { handleQuotaReset } from "./handlers/quota-reset.js";
-// Phase 03.0.1 Plan 10 — youtube.backfill.user handler. Plan 07 declared the
-// queue (boss.createQueue) and left the subscription comment-only since the
-// handler did not yet exist; Plan 10 fills both the producer side
-// (backfillSource fires boss.send into this queue) and the consumer side
-// (boss.work below dispatches each job to handleBackfillUser).
-import { handleBackfillUser } from "./handlers/backfill-user.js";
+// Phase 03.0.1 Wave 2 — channel-scoped backfill handler. Replaces
+// per-source backfill-user.ts. Job payload carries (kind, channelKey,
+// triggerUserId?, depthBoundIso, flow); handler walks channel once and
+// fans out events INSERT to all active subscribers.
+import { handleBackfillChannel } from "./handlers/backfill-channel.js";
 // Phase 03.0.1 — daily auto-backfill cron picker. Skip-gates на cron pool
 // ≥50% used; enqueues backfill-user with metadata.flow='auto_passive'.
 import { handleAutoBackfillCron } from "./handlers/auto-backfill-cron.js";
@@ -98,7 +97,7 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
   // same pattern in Phase 03.1+.
   await boss.createQueue(QUEUES.YOUTUBE_POLL_CRON);
   await boss.createQueue(QUEUES.YOUTUBE_POLL_USER);
-  await boss.createQueue(QUEUES.YOUTUBE_BACKFILL_USER);
+  await boss.createQueue(QUEUES.YOUTUBE_BACKFILL_CHANNEL);
   await boss.createQueue(QUEUES.YOUTUBE_QUOTA_RESET);
   await boss.createQueue(QUEUES.YOUTUBE_REHAB);
   await boss.createQueue(QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL);
@@ -121,17 +120,22 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
     }
   });
 
-  // Phase 03.0.1 Plan 10 — youtube.backfill.user worker subscription.
-  // batchSize=1 mirrors channel-context-backfill (the backfill class of
-  // queues stays single-stream so two clicks on the same source don't
-  // race against each other; pg-boss singletonKey on the producer side is
-  // the dedup gate, this batch size is the backstop).
-  await boss.work(QUEUES.YOUTUBE_BACKFILL_USER, { batchSize: 1 }, async (jobs) => {
+  // Phase 03.0.1 Wave 2 — youtube.backfill.channel worker subscription.
+  // batchSize=1 keeps the backfill stream single-flight per worker process;
+  // pg-boss singletonKey by channelKey on the producer side dedupes
+  // parallel triggers across multiple users to the same channel.
+  await boss.work(QUEUES.YOUTUBE_BACKFILL_CHANNEL, { batchSize: 1 }, async (jobs) => {
     for (const job of jobs) {
-      await handleBackfillUser(
+      await handleBackfillChannel(
         job as {
           id?: string;
-          data: { sourceId: string; userId: string; origin?: "user" | "cron" };
+          data: {
+            kind: "youtube_channel";
+            channelKey: string;
+            triggerUserId?: string;
+            depthBoundIso: string;
+            flow: "initial" | "incremental" | "historical" | "auto_passive";
+          };
         },
       );
     }
@@ -232,41 +236,45 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
 }
 
 /**
- * Plan 10 — REAL backfillSource (replaces the Plan 03 throwing stub in
- * ./adapter.ts). Fire-and-forget enqueue into youtube.backfill.user via the
- * APP-role pg-boss singleton (`getBoss()` — same accessor that
- * services/data-sources.ts uses to enqueue YOUTUBE_CHANNEL_CONTEXT_BACKFILL
- * on createSource).
+ * Phase 03.0.1 Wave 2 — channel-scoped backfillSource. Enqueues a
+ * channel-level walk job. Triggering user pays quota; ALL active
+ * subscribers to the channel receive events.
  *
- * singletonKey=`backfill-${source.id}` dedups concurrent clicks: two POSTs
- * to /api/sources/:id/refresh-content within the pg-boss default singleton
- * window (~5min) coalesce into one job. The second POST returns the
- * pg-boss-supplied `null` jobId — the route still emits 202 Accepted with
- * a null jobId so the user-facing button optimistically reflects success
- * (the worker only needs to run once to surface new content).
+ * singletonKey=`backfill-channel-${channelKey}` dedups concurrent triggers
+ * across users — two parallel clicks on the same channel (different users)
+ * coalesce into one walk. Trigger user is the FIRST to enqueue; subsequent
+ * clicks return null jobId (pg-boss singleton coalesce) and free-ride the
+ * walk's results once it completes.
  *
- * priority=1 puts user-initiated jobs ahead of cron-initiated polls in the
- * same queue (D-09 user-pool reserve). The worker's batchSize=1 means
- * priority is the only ordering knob that matters — no concurrent mixing.
+ * AdapterContext threads triggerUserId (the clicking user) and the
+ * walk's depth bound (target_since for user-triggered, sentinel for cron).
+ *
+ * priority=1 puts user-initiated jobs ahead of cron-initiated walks in
+ * the same queue (D-09 user-pool reserve).
  */
 async function backfillSource(
   source: PollableSource,
   ctx: AdapterContext,
 ): Promise<{ jobId: string | null; queue: string }> {
+  const channelKey = (source.metadata as { channelId?: string })?.channelId ?? source.id;
   const boss = await getBoss();
   const jobId = await boss.send(
-    QUEUES.YOUTUBE_BACKFILL_USER,
+    QUEUES.YOUTUBE_BACKFILL_CHANNEL,
     {
-      sourceId: source.id,
-      userId: source.userId,
-      origin: ctx.origin,
+      kind: "youtube_channel" as const,
+      channelKey,
+      triggerUserId: ctx.origin === "user" ? source.userId : undefined,
+      depthBoundIso:
+        (source.metadata as { backfillTargetSince?: string })?.backfillTargetSince ??
+        "1970-01-01T00:00:00Z",
+      flow: ctx.origin === "user" ? "incremental" : "auto_passive",
     },
     {
-      singletonKey: `backfill-${source.id}`,
-      priority: 1,
+      singletonKey: `backfill-channel-${channelKey}`,
+      priority: ctx.origin === "user" ? 1 : 0,
     },
   );
-  return { jobId, queue: QUEUES.YOUTUBE_BACKFILL_USER };
+  return { jobId, queue: QUEUES.YOUTUBE_BACKFILL_CHANNEL };
 }
 
 /**

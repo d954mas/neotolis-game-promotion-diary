@@ -55,7 +55,12 @@ export const QUEUES = {
   // Per-kind: youtube
   YOUTUBE_POLL_CRON: "youtube.poll.cron",
   YOUTUBE_POLL_USER: "youtube.poll.user",
-  YOUTUBE_BACKFILL_USER: "youtube.backfill.user",
+  /** Phase 03.0.1 Wave 2 — channel-scoped backfill. Replaces
+   *  YOUTUBE_BACKFILL_USER. Job payload carries (kind, channelKey,
+   *  triggerUserId?, depthBoundIso, flow). One walk per call;
+   *  fan-out INSERT to all active subscribers. Singleton key by
+   *  channelKey dedupes parallel triggers. */
+  YOUTUBE_BACKFILL_CHANNEL: "youtube.backfill.channel",
   YOUTUBE_QUOTA_RESET: "youtube.quota_reset",
   YOUTUBE_REHAB: "youtube.rehab",
   YOUTUBE_CHANNEL_CONTEXT_BACKFILL: "youtube.channel_context_backfill",

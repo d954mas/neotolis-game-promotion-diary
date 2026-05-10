@@ -40,13 +40,13 @@ afterAll(async () => {
 });
 
 describe("queue topology (Plan 03.0.1-07 per-kind rename)", () => {
-  it("declares all Plan 07 queues — INTERNAL_HEALTHCHECK, PURGE_DAILY, YOUTUBE_POLL_CRON, YOUTUBE_POLL_USER, YOUTUBE_BACKFILL_USER, YOUTUBE_QUOTA_RESET, YOUTUBE_REHAB, YOUTUBE_CHANNEL_CONTEXT_BACKFILL", async () => {
+  it("declares all queues — INTERNAL_HEALTHCHECK, PURGE_DAILY, YOUTUBE_POLL_CRON, YOUTUBE_POLL_USER, YOUTUBE_BACKFILL_CHANNEL, YOUTUBE_QUOTA_RESET, YOUTUBE_REHAB, YOUTUBE_CHANNEL_CONTEXT_BACKFILL", async () => {
     const expected = [
       QUEUES.INTERNAL_HEALTHCHECK,
       QUEUES.PURGE_DAILY,
       QUEUES.YOUTUBE_POLL_CRON,
       QUEUES.YOUTUBE_POLL_USER,
-      QUEUES.YOUTUBE_BACKFILL_USER,
+      QUEUES.YOUTUBE_BACKFILL_CHANNEL,
       QUEUES.YOUTUBE_QUOTA_RESET,
       QUEUES.YOUTUBE_REHAB,
       QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL,
@@ -69,7 +69,7 @@ describe("queue topology (Plan 03.0.1-07 per-kind rename)", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("retired Plan 07 names (poll.active, poll.cold, poll.user, scheduler.tick.*, youtube.rehab_unavailable) are absent — migration 0021 cleanup", async () => {
+  it("retired queue names (poll.active, poll.cold, poll.user, scheduler.tick.*, youtube.rehab_unavailable, youtube.backfill.user) are absent", async () => {
     // The Plan-07 forward-only migration (drizzle/0021_phase03_01_per_kind_queue_topology.sql)
     // DELETEs orphan rows for these names from pgboss.queue. After the
     // migration runs and the new code declares the per-kind names, the
@@ -81,6 +81,8 @@ describe("queue topology (Plan 03.0.1-07 per-kind rename)", () => {
       "scheduler.tick.active",
       "scheduler.tick.cold",
       "youtube.rehab_unavailable",
+      // Phase 03.0.1 Wave 2 — channel-scoped polling replaces per-source.
+      "youtube.backfill.user",
     ];
     const { rows } = await pool.query<{ name: string }>(
       `SELECT name FROM pgboss.queue WHERE name = ANY($1::text[])`,

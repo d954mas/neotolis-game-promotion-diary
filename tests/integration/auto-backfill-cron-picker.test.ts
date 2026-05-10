@@ -1,14 +1,12 @@
 // Phase 03.0.1 (post-review) — auto-backfill cron picker integration test.
+// Phase 03.0.1 Wave 2 — channel-scoped picker rewrite.
 //
 // Verifies the daily 03:00 PT cron tick correctly:
-//   1. Skips sources where backfill_complete = true.
-//   2. Picks incomplete sources в per-user round-robin order.
-//   3. Enqueues with flow='auto_passive' + singletonKey + priority=0.
+//   1. Skips channels where data_source_channel_state.backfill_complete = true.
+//   2. Picks DISTINCT channel_key per active subscriber (channel-scoped).
+//   3. Enqueues with flow='auto_passive', kind+channelKey payload,
+//      singletonKey by channelKey, priority=0.
 //   4. Skips entire tick when operator quota at >= SKIP_THRESHOLD_PCT (50%).
-//
-// Pre-review only the SQL helper (selectIncomplete-style picker) was unit-
-// tested; integration test ensures the handler invokes adapter contract
-// correctly with the mock boss.
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { sql } from "drizzle-orm";
@@ -31,14 +29,14 @@ const mockBoss = {
 };
 
 const { createSource } = await import("../../src/lib/server/services/data-sources.js");
+const { markChannelBackfillComplete } =
+  await import("../../src/lib/server/services/channel-state.js");
 const { handleAutoBackfillCron } =
   await import("../../src/lib/sources/youtube/server/handlers/auto-backfill-cron.js");
 const { db } = await import("../../src/lib/server/db/client.js");
-const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { youtubeServiceQuotaUsage } = await import("../../src/lib/server/db/schema/index.js");
 const { todayPacific } = await import("../../src/lib/server/dates.js");
 const { seedUserDirectly } = await import("./helpers.js");
-const { eq } = await import("drizzle-orm");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
@@ -67,7 +65,7 @@ describe("auto-backfill cron picker (handleAutoBackfillCron)", () => {
       "127.0.0.1",
     );
 
-    // Source B — mark complete=true so picker skips it.
+    // Source B — mark its channel complete=true so picker skips it.
     const srcComplete = await createSource(
       u.id,
       {
@@ -78,27 +76,28 @@ describe("auto-backfill cron picker (handleAutoBackfillCron)", () => {
       },
       "127.0.0.1",
     );
-    await db
-      .update(dataSources)
-      .set({ backfillComplete: true })
-      .where(eq(dataSources.id, srcComplete.id));
+    await markChannelBackfillComplete("youtube_channel", srcComplete.channelId!);
 
     await handleAutoBackfillCron({ id: "mock-cron-tick-1", data: {} }, mockBoss);
 
-    // Only the incomplete source enqueued. Filter by source.id (other tests
-    // in the same DB run may seed unrelated incomplete sources — keeps
+    // Only the incomplete channel enqueued. Filter by channelKey (other tests
+    // in the same DB run may seed unrelated incomplete channels — keeps
     // assertion idempotent against test pollution).
     const ourJobs = sentJobs.filter(
-      (j) => j.data.sourceId === srcIncomplete.id || j.data.sourceId === srcComplete.id,
+      (j) =>
+        j.data.channelKey === srcIncomplete.channelId ||
+        j.data.channelKey === srcComplete.channelId,
     );
     expect(ourJobs.length).toBe(1);
     const job = ourJobs[0]!;
-    expect(job.queue).toContain("youtube.backfill.user");
-    expect(job.data.sourceId).toBe(srcIncomplete.id);
-    expect(job.data.userId).toBe(u.id);
+    expect(job.queue).toBe("youtube.backfill.channel");
+    expect(job.data.kind).toBe("youtube_channel");
+    expect(job.data.channelKey).toBe(srcIncomplete.channelId);
     expect(job.data.flow).toBe("auto_passive");
-    expect(job.data.origin).toBe("cron");
-    expect(job.options.singletonKey).toBe(`auto-backfill-${srcIncomplete.id}`);
+    expect(job.data.depthBoundIso).toBe("1970-01-01T00:00:00Z");
+    // No triggerUserId for cron flows (operator pool, no per-user audit).
+    expect(job.data.triggerUserId).toBeUndefined();
+    expect(job.options.singletonKey).toBe(`auto-backfill-${srcIncomplete.channelId}`);
     expect(job.options.priority).toBe(0);
   });
 

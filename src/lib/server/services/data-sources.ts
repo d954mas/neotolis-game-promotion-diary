@@ -42,6 +42,7 @@ import { withQuotaGuard } from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
 import { getAdapter } from "$lib/sources/registry.js";
 import { youtubeChannels } from "../db/schema/index.js";
+import { ensureChannelState } from "./channel-state.js";
 
 // Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — initial-backfill window
 // presets accepted by createSource for kind=youtube_channel + autoImport.
@@ -379,6 +380,16 @@ export async function createSource(
     userAgent,
     metadata: { source_id: row.id, kind: row.kind, handle_url: row.handleUrl },
   });
+
+  // Phase 03.0.1 Wave 2 — ensure channel state row exists for the cron
+  // picker. Without this row, the auto-backfill cron's INNER JOIN against
+  // data_source_channel_state filters out brand-new sources entirely until
+  // the first walk auto-creates the row. Idempotent — concurrent
+  // createSource calls for the same (kind, channel_id) collide on the PK
+  // and ON CONFLICT DO NOTHING absorbs.
+  if (resolvedChannelId !== null) {
+    await ensureChannelState(input.kind, resolvedChannelId);
+  }
 
   // Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — when the new source is
   // a YouTube channel with auto-import ON, enqueue ONE channel-context
