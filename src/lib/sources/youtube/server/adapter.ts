@@ -334,52 +334,74 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     const picked = pickKeyForJob();
     if (!picked) return { events: [], unitsUsed: 0 };
 
-    const url = new URL(`${env.YOUTUBE_API_BASE_URL}/playlistItems`);
-    url.searchParams.set("playlistId", uploadsPlaylistId);
-    url.searchParams.set("part", "snippet");
-    url.searchParams.set("maxResults", "50");
-    url.searchParams.set("key", picked.apiKey);
-    url.searchParams.set("quotaUser", youtubeQuotaUser(source.userId));
-
-    // Phase 03.0.1 (post-review P1 #1) — RE-THROW AdapterError per the
-    // contract jsdoc (adapter.ts:341 «NEVER return [] for inability-to-
-    // fetch — that mis-signals «no more events»»). Pre-fix this catch
-    // contradicted the contract: 403 / 5xx / reservoir-exhaustion all
-    // returned `[]` and the worker treated empty as «backfill complete»,
-    // burying real errors and prematurely marking sources done.
-    // Worker's catch handler maps AdapterError categories to needs_reconnect
-    // / pg-boss retry / state stamp (see backfill-user.ts:195+).
+    // Phase 03.0.1 (post-review UAT 2026-05-10) — paginate playlistItems.list
+    // using nextPageToken until either:
+    //   - no more pages (json.nextPageToken absent — end of playlist)
+    //   - oldest item on page is at-or-before `since` (we walked past target)
+    //   - hard cap MAX_PAGES (prevents runaway quota burn on /sources with
+    //     pathological histories — 20 pages × 50 items = 1000 events
+    //     per single refresh click)
     //
-    // Phase 03.0.1 (post-review P1 #2) — pass caller's origin through. Pre-
-    // fix pollContent hardcoded origin='cron' regardless of caller, so user-
-    // initiated refresh-content clicks consumed cron reservoir (and the
-    // chargedFetch persistent counter wrote pool_kind='cron'). Reservoir
-    // budgets stayed nominally separated but factually scrambled.
+    // Pre-fix pollContent fetched ONLY the first page (50 newest items),
+    // so users with target_since=«all» couldn't pull full history even
+    // with multiple refresh clicks (idempotency UNIQUE skipped re-INSERTs;
+    // frontier never advanced because oldest-fetched stayed the same 50
+    // newest items every click).
     //
-    // unitsUsed accounting: chargedFetch charges 1 unit on EVERY Response
-    // (including non-2xx — Google's quota guide). Successful chargedFetch
-    // returns Response → unitsUsed=1. Throw path propagates without
-    // touching unitsUsed (caller observes throw, not return).
-    const resp = await chargedFetch(url, picked, 1, {
-      sourceId: source.id,
-      origin: ctx?.origin ?? "cron",
-      logTag: "youtube-adapter: playlistItems.list",
-    });
-    const unitsUsed = 1;
-    if (!resp.ok) return { events: [], unitsUsed }; // dead-code defense — chargedFetch throws on non-2xx in Plan 08.
-    const json = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await resp.json());
+    // unitsUsed = pages fetched (1 quota unit per playlistItems.list call).
+    // Origin from ctx (P1 #2 fix) — user-initiated clicks consume user
+    // pool, cron-driven jobs consume cron pool.
+    const MAX_PAGES = 20;
     const sinceMs = since.getTime();
-    const events = json.items
-      .map<RawEvent>((item) => ({
-        externalId: item.snippet.resourceId.videoId,
-        title: item.snippet.title,
-        occurredAt: new Date(item.snippet.publishedAt),
-        url: `https://www.youtube.com/watch?v=${item.snippet.resourceId.videoId}`,
-        kind: "youtube_video",
-        metadata: { channelId: item.snippet.channelId },
-      }))
-      .filter((e) => e.occurredAt.getTime() > sinceMs);
-    return { events, unitsUsed };
+    const collected: RawEvent[] = [];
+    let pageToken: string | undefined;
+    let unitsUsed = 0;
+    let walkedPastSince = false;
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const url = new URL(`${env.YOUTUBE_API_BASE_URL}/playlistItems`);
+      url.searchParams.set("playlistId", uploadsPlaylistId);
+      url.searchParams.set("part", "snippet");
+      url.searchParams.set("maxResults", "50");
+      url.searchParams.set("key", picked.apiKey);
+      url.searchParams.set("quotaUser", youtubeQuotaUser(source.userId));
+      if (pageToken) url.searchParams.set("pageToken", pageToken);
+
+      const resp = await chargedFetch(url, picked, 1, {
+        sourceId: source.id,
+        origin: ctx?.origin ?? "cron",
+        logTag: "youtube-adapter: playlistItems.list",
+        page,
+      });
+      unitsUsed += 1;
+      if (!resp.ok) break; // dead-code defense — chargedFetch throws on non-2xx
+      const json = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await resp.json());
+
+      for (const item of json.items) {
+        const occurredAt = new Date(item.snippet.publishedAt);
+        if (occurredAt.getTime() <= sinceMs) {
+          walkedPastSince = true;
+          continue; // skip; don't break — items can be slightly out of order
+        }
+        collected.push({
+          externalId: item.snippet.resourceId.videoId,
+          title: item.snippet.title,
+          occurredAt,
+          url: `https://www.youtube.com/watch?v=${item.snippet.resourceId.videoId}`,
+          kind: "youtube_video",
+          metadata: { channelId: item.snippet.channelId },
+        });
+      }
+
+      // Stop conditions:
+      //   - end of playlist (no nextPageToken)
+      //   - we encountered items past `since` on this page (no point
+      //     continuing — earlier pages will only have older items)
+      if (!json.nextPageToken || walkedPastSince) break;
+      pageToken = json.nextPageToken;
+    }
+
+    return { events: collected, unitsUsed };
   },
 
   /** Stats polling — user-driven path (Refresh now button → poll-user worker).

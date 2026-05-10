@@ -98,10 +98,11 @@
     return `${month}mo ago`;
   }
 
-  // Short YYYY-MM-DD for first/last event date display.
+  // Human-readable date: "22 Feb 2026". en-GB puts day before month
+  // (Russian / European convention; matches user's expectation).
   function formatDateShort(when: Date | string): string {
     const t = typeof when === "string" ? new Date(when) : when;
-    return t.toISOString().slice(0, 10);
+    return t.toLocaleDateString("en-GB", { year: "numeric", month: "short", day: "numeric" });
   }
 
   let editing = $state(false);
