@@ -28,7 +28,8 @@ import { allAdapters } from "$lib/sources/registry.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
 import { db } from "$lib/server/db/client.js";
 import { youtubeChannels } from "$lib/server/db/schema/index.js";
-import { eq } from "drizzle-orm";
+import { auditLog } from "$lib/server/db/schema/audit-log.js";
+import { eq, and, gte, max, sql } from "drizzle-orm";
 
 export const load: PageServerLoad = async ({ params, locals }) => {
   const userId = locals.user?.id;
@@ -75,7 +76,29 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       dto.channelTitle = cache?.channelTitle ?? null;
     }
 
-    return { source: dto, quotaPlatforms };
+    // Phase 03.0.1 (post-review UAT) — refresh cooldown state from server.
+    // Same query as /sources list loader: latest INTENT audit row within
+    // the 5-minute singletonKey window. Lets RefreshContentButton resume
+    // the cooldown ticker on page reload (pre-fix it was client-only).
+    const COOLDOWN_MS = 5 * 60_000;
+    const cooldownSince = new Date(Date.now() - COOLDOWN_MS);
+    const [recent] = await db
+      .select({ latest: max(auditLog.createdAt) })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.userId, userId),
+          eq(auditLog.action, "source.refresh_content_requested"),
+          sql`${auditLog.metadata}->>'flow' IS NULL`,
+          sql`${auditLog.metadata}->>'source_id' = ${dto.id}`,
+          gte(auditLog.createdAt, cooldownSince),
+        ),
+      );
+    const cooldownSec = recent?.latest
+      ? Math.max(0, Math.ceil((COOLDOWN_MS - (Date.now() - recent.latest.getTime())) / 1000))
+      : 0;
+
+    return { source: dto, quotaPlatforms, cooldownSec };
   } catch (err) {
     if (err instanceof NotFoundError) {
       error(404);

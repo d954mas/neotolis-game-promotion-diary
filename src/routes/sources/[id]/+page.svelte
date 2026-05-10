@@ -24,6 +24,7 @@
 
   // ---- date picker (target_since) ----
   const SENTINEL_ISO = "1970-01-01";
+  // todayISO used as max in custom date picker below.
   const todayISO = new Date().toISOString().slice(0, 10);
   const isSentinelTarget = $derived(
     source.backfillTargetSince
@@ -31,11 +32,6 @@
       : false,
   );
   const currentTargetIso = $derived(sourceTargetIso(source.backfillTargetSince));
-  // Picker max = current target. Narrowing prohibited (server rejects
-  // anyway with 422 'cannot_narrow_window'); UI mirrors the rule so the
-  // input physically can't pick a forward-narrowing date. Sentinel
-  // sources are locked entirely — Edit button hidden below.
-  const pickerMax = $derived(currentTargetIso ?? todayISO);
 
   function sourceTargetIso(d: Date | string | null | undefined): string | null {
     if (!d) return null;
@@ -47,37 +43,75 @@
     return iso;
   }
 
-  let editingTarget = $state(false);
-  let targetSinceInput = $state(currentTargetIso ?? "");
   let saveError = $state<string | null>(null);
   let saving = $state(false);
 
-  async function saveTargetSince(): Promise<void> {
+  // Preset buttons — each computes a target date. «All» is the sentinel
+  // (1970-01-01). A preset is ENABLED only if applying it would widen
+  // (proposed ≤ current) — server enforces «can only widen» so we mirror
+  // here. Sentinel current → all presets disabled (locked).
+  type Preset = { key: "week" | "month" | "year" | "all"; label: string; date: Date };
+  function makePresets(): Preset[] {
+    const now = Date.now();
+    return [
+      { key: "week", label: "Last week", date: new Date(now - 7 * 86_400_000) },
+      { key: "month", label: "Last month", date: new Date(now - 30 * 86_400_000) },
+      { key: "year", label: "Last year", date: new Date(now - 365 * 86_400_000) },
+      { key: "all", label: "All history", date: new Date(SENTINEL_ISO + "T00:00:00Z") },
+    ];
+  }
+  const presets = makePresets();
+  const currentTargetMs = $derived(
+    source.backfillTargetSince ? new Date(source.backfillTargetSince).getTime() : null,
+  );
+  function isPresetWidening(preset: Preset): boolean {
+    if (currentTargetMs === null) return true;
+    return preset.date.getTime() < currentTargetMs;
+  }
+
+  async function applyPreset(preset: Preset): Promise<void> {
+    await applyTargetDate(preset.date);
+  }
+
+  async function applyTargetDate(when: Date): Promise<void> {
     saveError = null;
-    if (!targetSinceInput) return;
-    const picked = new Date(targetSinceInput);
-    if (Number.isNaN(picked.getTime()) || picked.getTime() > Date.now()) {
-      saveError = m.source_detail_target_invalid_future();
-      return;
-    }
     saving = true;
     try {
       const res = await fetch(`/api/sources/${source.id}`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ backfillTargetSince: picked.toISOString() }),
+        body: JSON.stringify({ backfillTargetSince: when.toISOString() }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         saveError = body.error ?? `HTTP ${res.status}`;
         return;
       }
-      editingTarget = false;
       await invalidateAll();
     } finally {
       saving = false;
     }
+  }
+
+  // Custom date input — only shown when expanded, only useful when
+  // current is non-sentinel (sentinel is locked).
+  let customDateInput = $state(currentTargetIso ?? "");
+  let customExpanded = $state(false);
+
+  async function applyCustomDate(): Promise<void> {
+    if (!customDateInput) return;
+    const picked = new Date(customDateInput);
+    if (Number.isNaN(picked.getTime())) {
+      saveError = "Invalid date";
+      return;
+    }
+    if (picked.getTime() > Date.now()) {
+      saveError = m.source_detail_target_invalid_future();
+      return;
+    }
+    await applyTargetDate(picked);
+    customExpanded = false;
   }
 
   // ---- description (metadata.description) ----
@@ -109,6 +143,37 @@
       await invalidateAll();
     } finally {
       descSaving = false;
+    }
+  }
+
+  // ---- toggles (autoImport + isOwnedByMe) ----
+  let editingFlags = $state(false);
+  let flagAutoImport = $state(source.autoImport);
+  let flagIsOwnedByMe = $state(source.isOwnedByMe);
+  let flagSaving = $state(false);
+  let flagError = $state<string | null>(null);
+
+  async function saveFlags(): Promise<void> {
+    flagError = null;
+    flagSaving = true;
+    try {
+      const res = await fetch(`/api/sources/${source.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          autoImport: flagAutoImport,
+          isOwnedByMe: flagIsOwnedByMe,
+        }),
+      });
+      if (!res.ok) {
+        flagError = `HTTP ${res.status}`;
+        return;
+      }
+      editingFlags = false;
+      await invalidateAll();
+    } finally {
+      flagSaving = false;
     }
   }
 
@@ -147,75 +212,67 @@
     </div>
   </header>
 
-  <!-- Pull window — view by default, edit on demand -->
+  <!-- Pull window — preset buttons (only widening enabled) -->
   <article class="card">
     <div class="card__header">
       <h2 class="card__title">Pull window</h2>
-      {#if !editingTarget && !isSentinelTarget}
-        <button
-          type="button"
-          class="card__edit"
-          onclick={() => {
-            targetSinceInput = currentTargetIso ?? todayISO;
-            saveError = null;
-            editingTarget = true;
-          }}
-        >
-          Edit
-        </button>
-      {/if}
     </div>
-    {#if !editingTarget}
-      <p class="card__value">
-        Earliest event: <strong>{formatDateLong(currentTargetIso)}</strong>
-      </p>
-      <p class="card__hint">
-        {#if isSentinelTarget}
-          The pull walks back as far as the platform allows. <strong>Locked</strong> — «all history» is
-          the widest possible setting; narrowing is not permitted.
-        {:else}
-          The next pull will fetch events back to this date. You can only widen this window (pick an
-          earlier date) — narrowing is not allowed.
-        {/if}
-      </p>
-    {:else}
-      <label class="field">
-        <span class="field__label">{m.source_detail_target_label()}</span>
-        <input
-          type="date"
-          class="field__input"
-          bind:value={targetSinceInput}
-          min="2005-01-01"
-          max={pickerMax}
-          disabled={saving}
-        />
-      </label>
-      <p class="card__hint">
-        Pick an earlier date to widen the window. Narrowing is blocked at the server.
-      </p>
-      {#if saveError}<p class="err" role="alert">{saveError}</p>{/if}
-      <div class="card__actions">
-        <button
-          type="button"
-          class="btn btn--ghost"
-          onclick={() => {
-            editingTarget = false;
-            saveError = null;
-          }}
-          disabled={saving}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          class="btn btn--primary"
-          onclick={saveTargetSince}
-          disabled={saving || !targetSinceInput}
-        >
-          {m.source_detail_target_save()}
-        </button>
+    <p class="card__value">
+      Earliest event: <strong>{formatDateLong(currentTargetIso)}</strong>
+    </p>
+    <p class="card__hint">
+      {#if isSentinelTarget}
+        The pull walks back as far as the platform allows. <strong>Locked</strong> — «all history» is
+        the widest possible setting.
+      {:else}
+        Pick a preset to widen the window. Narrowing is not allowed — only presets that go further
+        back than the current target are enabled.
+      {/if}
+    </p>
+    {#if !isSentinelTarget}
+      <div class="presets">
+        {#each presets as preset (preset.key)}
+          {@const enabled = isPresetWidening(preset) && !saving}
+          <button
+            type="button"
+            class="preset-btn"
+            class:preset-btn--disabled={!enabled}
+            onclick={() => enabled && applyPreset(preset)}
+            disabled={!enabled}
+            title={enabled
+              ? `Set earliest event to ${preset.key === "all" ? "all history" : preset.date.toISOString().slice(0, 10)}`
+              : "Narrowing is not allowed"}
+          >
+            {preset.label}
+          </button>
+        {/each}
       </div>
+      <details class="custom-date" bind:open={customExpanded}>
+        <summary>Or pick a custom date…</summary>
+        <div class="custom-date__row">
+          <input
+            type="date"
+            class="field__input"
+            bind:value={customDateInput}
+            min="2005-01-01"
+            max={currentTargetIso ?? todayISO}
+            disabled={saving}
+          />
+          <button
+            type="button"
+            class="btn btn--primary"
+            onclick={applyCustomDate}
+            disabled={saving || !customDateInput}
+          >
+            Apply
+          </button>
+        </div>
+        <p class="card__hint">
+          Only earlier dates than the current target are allowed (server rejects narrowing).
+        </p>
+      </details>
     {/if}
+    {#if saveError}<p class="err" role="alert">{saveError}</p>{/if}
   </article>
 
   <!-- Description -->
@@ -276,12 +333,73 @@
     {/if}
   </article>
 
+  <!-- Settings (auto-import + ownership) -->
+  <article class="card">
+    <div class="card__header">
+      <h2 class="card__title">{m.source_detail_settings_title()}</h2>
+      {#if !editingFlags}
+        <button
+          type="button"
+          class="card__edit"
+          onclick={() => {
+            flagAutoImport = source.autoImport;
+            flagIsOwnedByMe = source.isOwnedByMe;
+            flagError = null;
+            editingFlags = true;
+          }}
+        >
+          Edit
+        </button>
+      {/if}
+    </div>
+    {#if !editingFlags}
+      <p class="card__value">
+        {m.source_detail_settings_auto_import()}:
+        <strong>{source.autoImport ? "On" : "Off"}</strong>
+      </p>
+      <p class="card__value">
+        {m.source_detail_settings_owned_by_me()}:
+        <strong>{source.isOwnedByMe ? "Yes" : "No"}</strong>
+      </p>
+    {:else}
+      <label class="toggle">
+        <input type="checkbox" bind:checked={flagAutoImport} disabled={flagSaving} />
+        <span>{m.source_detail_settings_auto_import()}</span>
+      </label>
+      <label class="toggle">
+        <input type="checkbox" bind:checked={flagIsOwnedByMe} disabled={flagSaving} />
+        <span>{m.source_detail_settings_owned_by_me()}</span>
+      </label>
+      {#if flagError}<p class="err" role="alert">{flagError}</p>{/if}
+      <div class="card__actions">
+        <button
+          type="button"
+          class="btn btn--ghost"
+          onclick={() => {
+            editingFlags = false;
+            flagError = null;
+          }}
+          disabled={flagSaving}
+        >
+          {m.common_cancel()}
+        </button>
+        <button type="button" class="btn btn--primary" onclick={saveFlags} disabled={flagSaving}>
+          {m.common_save()}
+        </button>
+      </div>
+    {/if}
+  </article>
+
   <!-- Actions -->
   <article class="card">
     <div class="card__header">
       <h2 class="card__title">Actions</h2>
     </div>
-    <RefreshContentButton sourceId={source.id} sourceKind={source.kind} />
+    <RefreshContentButton
+      sourceId={source.id}
+      sourceKind={source.kind}
+      initialCooldownSec={data.cooldownSec ?? 0}
+    />
   </article>
 </section>
 
@@ -424,5 +542,55 @@
     margin: 0;
     color: var(--color-destructive);
     font-size: var(--font-size-label);
+  }
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--font-size-body);
+    cursor: pointer;
+  }
+  .toggle input {
+    cursor: pointer;
+  }
+  .presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    margin-top: var(--space-xs);
+  }
+  .preset-btn {
+    padding: var(--space-xs) var(--space-md);
+    background: var(--color-bg);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    font-size: var(--font-size-label);
+    cursor: pointer;
+  }
+  .preset-btn:hover:not(:disabled) {
+    background: var(--color-accent);
+    color: var(--color-on-accent, white);
+    border-color: var(--color-accent);
+  }
+  .preset-btn--disabled,
+  .preset-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .custom-date {
+    margin-top: var(--space-xs);
+    font-size: var(--font-size-label);
+  }
+  .custom-date summary {
+    cursor: pointer;
+    color: var(--color-text-muted);
+    padding: var(--space-xs) 0;
+  }
+  .custom-date__row {
+    display: flex;
+    gap: var(--space-sm);
+    align-items: center;
+    margin-top: var(--space-xs);
   }
 </style>

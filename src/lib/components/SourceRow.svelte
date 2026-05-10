@@ -69,9 +69,16 @@
     backfillComplete?: boolean;
     firstEventAt?: Date | string | null;
     lastEventAt?: Date | string | null;
+    metadata?: Record<string, unknown> | null;
   };
 
   let { source, cooldownSec = 0 }: { source: DataSourceDto; cooldownSec?: number } = $props();
+
+  const descriptionText = $derived(
+    typeof source.metadata?.description === "string" && source.metadata.description.trim()
+      ? source.metadata.description
+      : "",
+  );
 
   // Phase 03.0.1 (post-review UAT) — relative-time formatter for «Last
   // pulled» display. Inline (no luxon dep) — minimal English-only for v0.1.
@@ -225,18 +232,23 @@
     </span>
   </div>
 
-  <div class="meta">
-    <code class="handle">{source.handleUrl}</code>
-  </div>
+  <!-- Phase 03.0.1 (post-review UAT 2026-05-10) — handle URL REMOVED from
+       row. Channel title is the identifier; raw URL is noise. URL still
+       lives on /sources/[id] detail page header for reference. -->
+
+  {#if descriptionText}
+    <div class="meta">
+      <p class="description">{descriptionText}</p>
+    </div>
+  {/if}
 
   {#if !editing}
     <div class="status">
       <!-- Phase 03.0.1 (post-review UAT) — auto-import chip shown ONLY
-           when ON. Pre-fix the «Auto-import: Off» text took up the same
-           space as «Auto-import: On» but conveyed nothing actionable.
-           Empty space when off is a clearer signal. -->
+           when ON. Label is now just «Auto-import» (the presence of the
+           chip itself is the signal — «: On» suffix was redundant). -->
       {#if source.autoImport}
-        <span class="auto-pill">{m.sources_auto_import_on()}</span>
+        <span class="auto-pill">{m.source_chip_auto_import()}</span>
       {/if}
       <span class="last-polled" title="Last successful pull">
         {source.lastPolledAt
@@ -478,6 +490,16 @@
     font-size: var(--font-size-label);
     color: var(--color-text-muted);
     word-break: break-all;
+  }
+  .description {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
   .status {
     display: flex;

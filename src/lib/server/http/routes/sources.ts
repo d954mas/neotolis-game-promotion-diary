@@ -107,20 +107,20 @@ const updateSourceSchema = z
     isOwnedByMe: z.boolean().optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
     // Phase 03.0.1 — earliest-event boundary user wants pulled.
-    // Accept ISO date string from UI (date picker). Coerced to Date and
-    // validated server-side in updateSource: must be in past; future dates
-    // → 422 'date_must_be_past'.
+    // Accept ISO date string from UI (date picker / preset button). Coerced
+    // to Date and validated server-side in updateSource:
+    //   - must be in past (future dates → 422 'date_must_be_past')
+    //   - must NOT narrow window (≤ current → 422 'cannot_narrow_window')
     //
-    // Lower bound: 2005-01-01 (YouTube launch) — defensive validation.
-    // Anything older is either a fat-finger user input or the legacy migration
-    // 0024 sentinel '1970-01-01' (mapped from `metadata.backfillWindow:
-    // "everything"` preset for existing rows). The sentinel survives in
-    // legacy rows but new PATCHes can't introduce it. Rejecting < 2005 forces
-    // user input through a sane date range without exposing the sentinel as
-    // a user-pickable value.
+    // Lower bound: 1970-01-01 (the «all history» sentinel — preset button
+    // «All» on detail page submits this value). UI date picker enforces a
+    // tighter min (2005-01-01) for fat-finger protection on custom-date
+    // input; the route schema's looser bound accepts the sentinel from the
+    // preset path. Pre-fix the schema had min=2005 which rejected the
+    // sentinel — UAT bug «validation failed when I picked All».
     backfillTargetSince: z.coerce
       .date()
-      .min(new Date("2005-01-01T00:00:00Z"), "date too old (earliest: 2005-01-01)")
+      .min(new Date("1970-01-01T00:00:00Z"), "date too old")
       .optional(),
   })
   .refine((obj) => Object.keys(obj).length > 0, {
