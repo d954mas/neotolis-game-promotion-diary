@@ -78,50 +78,52 @@ function mkEvent(overrides: Partial<EventForBadge> = {}): EventForBadge {
 }
 
 describe("PollingBadge — live state (Plan 03.0-11)", () => {
-  it("Active tier (12h occurred, 1h polled): renders 'Hot · checked Xh ago' + refresh button", () => {
+  // Phase 03.0.1 Wave 4 (post-UAT) — badge text replaced tier vocab
+  // ("Hot/Cold/Frozen") with relative-time copy ("Updated 1h ago"). Tier
+  // still drives the variant CSS class for color rules. Tests assert
+  // both: relative-time copy AND variant class so style/copy contracts
+  // stay independent.
+  it("Active tier (12h occurred, 1h polled): renders 'Updated Xh ago' + refresh button", () => {
     const out = render(PollingBadge, { props: { event: mkEvent() } });
-    expect(out.body).toMatch(/Hot/);
-    expect(out.body).toMatch(/h ago/);
-    // Refresh-now visible because lastPolledAt !== null per D-10.
+    expect(out.body).toMatch(/Updated \d+h ago/);
     expect(out.body).toMatch(/class="refresh-now/);
-    // Variant class on the badge root for color-rule routing.
     expect(out.body).toMatch(/polling-badge--active/);
   });
 
-  it("Cold tier (5d published, 30h polled): renders Cold variant", () => {
+  it("Cold tier (5d published, 30h polled): renders 'Updated Xd ago' + cold variant", () => {
     const ev = mkEvent({
       occurredAt: ago(5 * 86_400_000),
       publishedAt: ago(5 * 86_400_000),
       lastPolledAt: ago(30 * 3_600_000),
     });
     const out = render(PollingBadge, { props: { event: ev } });
-    expect(out.body).toMatch(/Cold/);
+    expect(out.body).toMatch(/Updated \d+d ago/);
     expect(out.body).toMatch(/polling-badge--cold-(yesterday|days-ago)/);
   });
 
-  it("Cold tier (5d published, 24h polled): renders 'Cold · yesterday'", () => {
+  it("Cold tier (5d published, 24h polled): renders 'Updated 1d ago'", () => {
     const ev = mkEvent({
       occurredAt: ago(5 * 86_400_000),
       publishedAt: ago(5 * 86_400_000),
       lastPolledAt: ago(86_400_000),
     });
     const out = render(PollingBadge, { props: { event: ev } });
-    expect(out.body).toMatch(/yesterday/);
+    expect(out.body).toMatch(/Updated 1d ago/);
   });
 
-  it("Frozen tier (30d published, 30d polled): renders 'Frozen · refresh to update' + refresh button", () => {
+  it("Frozen tier (30d published, 30d polled): renders 'Updated <date>' + refresh button", () => {
     const ev = mkEvent({
       occurredAt: ago(30 * 86_400_000),
       publishedAt: ago(30 * 86_400_000),
       lastPolledAt: ago(30 * 86_400_000),
     });
     const out = render(PollingBadge, { props: { event: ev } });
-    expect(out.body).toMatch(/Frozen/);
-    expect(out.body).toMatch(/refresh to update/);
-    // Frozen carries a dashed border per UI-SPEC §"Color → variant color rules".
+    // Beyond 30 days the relative-time copy switches to a localized date
+    // string. Assert the "Updated " prefix without pinning the date format.
+    expect(out.body).toMatch(/Updated \S+/);
     expect(out.body).toMatch(/polling-badge--frozen/);
-    // D-10: refresh-now visible when tier=Frozen even if lastPolledAt would
-    // suggest otherwise (here both gates are true).
+    // Phase 03.0.1 Wave 4 — refresh-now visible whenever tier !== 'pending'
+    // (was previously gated also on lastPolledAt !== null OR tier === 'frozen').
     expect(out.body).toMatch(/class="refresh-now/);
   });
 
@@ -131,8 +133,7 @@ describe("PollingBadge — live state (Plan 03.0-11)", () => {
       lastPolledAt: ago(2 * 86_400_000),
     });
     const out = render(PollingBadge, { props: { event: ev } });
-    expect(out.body).toMatch(/Unavailable/);
-    expect(out.body).toMatch(/last seen/);
+    expect(out.body).toMatch(/Unavailable · updated/);
     expect(out.body).toMatch(/polling-badge--unavailable/);
   });
 
@@ -154,7 +155,7 @@ describe("PollingBadge — live state (Plan 03.0-11)", () => {
     expect(out.body).toMatch(/Unavailable/);
   });
 
-  it("Manual entry: lastPolledAt=null + Active tier renders Manual variant + HIDES refresh button", () => {
+  it("Manual entry: lastPolledAt=null + Active tier renders Manual variant + refresh button visible", () => {
     const ev = mkEvent({
       lastPolledAt: null,
       occurredAt: ago(3_600_000),
@@ -164,8 +165,11 @@ describe("PollingBadge — live state (Plan 03.0-11)", () => {
     expect(out.body).toMatch(/Manual entry/);
     expect(out.body).toMatch(/no polling/);
     expect(out.body).toMatch(/polling-badge--manual/);
-    // D-10: refresh-now HIDDEN when lastPolledAt IS NULL AND tier ≠ Frozen.
-    expect(out.body).not.toMatch(/class="refresh-now/);
+    // Phase 03.0.1 Wave 4 — refresh-now visible (was hidden pre-UAT). The
+    // sync-stats hook in createEvent makes manual-tier-with-null-poll a
+    // rare edge case (only on rate-limit / auth-error swallow), and when
+    // it does happen the user needs a way to retry.
+    expect(out.body).toMatch(/class="refresh-now/);
   });
 
   it("Non-pollable kind (kind=conference): component renders nothing", () => {
@@ -221,7 +225,7 @@ describe("PollingBadge — live state (Plan 03.0-11)", () => {
     });
     // Should still pick the Active variant — coercion succeeded.
     const out = render(PollingBadge, { props: { event: ev } });
-    expect(out.body).toMatch(/Hot/);
+    expect(out.body).toMatch(/Updated 1h ago/);
     expect(out.body).toMatch(/polling-badge--active/);
   });
 
