@@ -190,6 +190,13 @@
       "when": 1778700000000,
       "tag": "0026_phase03_01_quota_usage_pool_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1778800000000,
+      "tag": "0027_phase03_01_channel_state",
+      "breakpoints": true
     }
   ]
 }
