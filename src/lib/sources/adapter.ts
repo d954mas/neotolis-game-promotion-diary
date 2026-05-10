@@ -270,7 +270,12 @@ export interface CreateContext {
 }
 
 /** Post-create hook payload — minimum set the YouTube context-backfill enqueue
- *  needs. Adapters that don't need this fields ignore them. */
+ *  needs. Adapters that don't need this fields ignore them.
+ *
+ *  Phase 03.0.1 Wave 3 — extended with channelId, backfillTargetSince,
+ *  isOwnedByMe so adapters can implement zero-quota onboarding (bulk
+ *  INSERT events for new subscriber from existing channel cache without
+ *  making any HTTP calls). */
 export interface SourceCreatedHookSource {
   id: string;
   userId: string;
@@ -278,6 +283,16 @@ export interface SourceCreatedHookSource {
   handleUrl: string;
   metadata: Record<string, unknown>;
   kind: SourceKind;
+  /** Resolved channel id (UCxxx for YouTube). NULL when canonicalize did
+   *  not resolve a synchronous identifier (e.g., /@handle URLs defer
+   *  resolution to the worker). Required for zero-quota onboarding. */
+  channelId: string | null;
+  /** Per-user backfill target boundary. Adapter filters cache rows
+   *  ≥ this date when seeding events for the new subscriber. */
+  backfillTargetSince: Date | null;
+  /** Whether the new subscriber owns this channel — drives events.author_is_me
+   *  on the seeded rows. Default true. */
+  isOwnedByMe: boolean;
 }
 
 /** Discriminated result of fetchEventPreviewMetadata — Phase 03.0.1 D-20.

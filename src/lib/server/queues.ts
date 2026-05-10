@@ -64,12 +64,21 @@ export const QUEUES = {
   YOUTUBE_QUOTA_RESET: "youtube.quota_reset",
   YOUTUBE_REHAB: "youtube.rehab",
   YOUTUBE_CHANNEL_CONTEXT_BACKFILL: "youtube.channel_context_backfill",
-  // Phase 03.0.1 — daily passive backfill cron. Picker selects sources WHERE
-  // backfill_complete=false и enqueue's youtube.backfill.user with
-  // metadata.flow='auto_passive'. Skip-gates на pctOfDaily ≥ 50% (cron pool
+  // Phase 03.0.1 — daily passive backfill cron. Picker selects channels
+  // WHERE backfill_complete=false and enqueue channel-scoped backfill jobs
+  // with flow='auto_passive'. Skip-gates на pctOfDaily ≥ 50% (cron pool
   // priority floor — active stats poll защищён до 95%, cold poll до 80%,
   // auto-backfill сдаётся first при contention).
   YOUTUBE_AUTO_BACKFILL_CRON: "youtube.auto_backfill_cron",
+  /** Phase 03.0.1 Wave 3 — daily INCREMENTAL cron for completed channels.
+   *  Auto-backfill cron excludes complete channels (their deep history is
+   *  done); but the channel keeps uploading new videos after completion.
+   *  This cron picks complete channels with active auto_import subscribers
+   *  and triggers a page-1-only walk (cheap: 1 unit/channel/day) to
+   *  discover new uploads. Job lands as flow='auto_passive' on
+   *  YOUTUBE_BACKFILL_CHANNEL with depthBoundIso=now-N-days bound.
+   *  Without this, completed channels go silent until manual refresh-click. */
+  YOUTUBE_INCREMENTAL_CRON: "youtube.incremental_cron",
 } as const satisfies Record<string, string>;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

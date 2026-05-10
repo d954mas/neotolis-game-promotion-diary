@@ -422,6 +422,9 @@ export async function createSource(
         handleUrl: row.handleUrl,
         metadata: (row.metadata ?? {}) as Record<string, unknown>,
         kind: row.kind,
+        channelId: row.channelId,
+        backfillTargetSince: row.backfillTargetSince,
+        isOwnedByMe: row.isOwnedByMe,
       },
       { backfillWindow },
     );

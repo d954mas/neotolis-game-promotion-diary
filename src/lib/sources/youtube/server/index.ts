@@ -74,6 +74,9 @@ import { handleBackfillChannel } from "./handlers/backfill-channel.js";
 // Phase 03.0.1 — daily auto-backfill cron picker. Skip-gates на cron pool
 // ≥50% used; enqueues backfill-user with metadata.flow='auto_passive'.
 import { handleAutoBackfillCron } from "./handlers/auto-backfill-cron.js";
+// Phase 03.0.1 Wave 3 — daily incremental cron. Walks page 1 of every
+// active channel including completed ones to discover new uploads.
+import { handleIncrementalCron } from "./handlers/incremental-cron.js";
 // Phase 03.0.1 architecture cleanup — adapter-driven create-time hooks +
 // preview metadata + poll-state lookup + per-source HTTP routes. Cross-source
 // services delegate via getAdapter(...) so adding Reddit (Phase 03.1) is a
@@ -83,8 +86,9 @@ import { parseYoutubeUrl, youtubeParseUrl } from "./url.js";
 import { fetchYoutubeOembed } from "$lib/server/integrations/youtube-oembed.js";
 import { youtubeMetadataRoutes } from "./route-metadata.js";
 import { youtubeVideos, youtubeMetadataFetchLog } from "./schema/index.js";
+import { events } from "$lib/server/db/schema/events.js";
 import { db } from "$lib/server/db/client.js";
-import { eq, and, gte, count, inArray } from "drizzle-orm";
+import { eq, and, gte, count, inArray, sql } from "drizzle-orm";
 import { AppError } from "$lib/server/services/errors.js";
 import { logger } from "$lib/server/logger.js";
 
@@ -102,6 +106,7 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
   await boss.createQueue(QUEUES.YOUTUBE_REHAB);
   await boss.createQueue(QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL);
   await boss.createQueue(QUEUES.YOUTUBE_AUTO_BACKFILL_CRON);
+  await boss.createQueue(QUEUES.YOUTUBE_INCREMENTAL_CRON);
 
   // youtube.poll.cron — Active+Cold collapsed via tier-tagged payload.
   // batchSize=4 matches Phase 03.0 POLL_ACTIVE concurrency (Cold's daily
@@ -172,10 +177,21 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
 
   // Phase 03.0.1 — daily auto-backfill cron picker. batchSize=1 — single
   // tick per day, picks ≤50 sources, enqueues passive jobs into
-  // YOUTUBE_BACKFILL_USER. Handler does the gate check (skip if pool ≥50%).
+  // YOUTUBE_BACKFILL_CHANNEL. Handler does the gate check (skip if pool ≥50%).
   await boss.work(QUEUES.YOUTUBE_AUTO_BACKFILL_CRON, { batchSize: 1 }, async (jobs) => {
     for (const job of jobs) {
       await handleAutoBackfillCron(job as { id: string; data: object }, boss);
+    }
+  });
+
+  // Phase 03.0.1 Wave 3 — daily incremental cron. Single tick per day at
+  // 04:00 PT (1h after auto-backfill). Picks complete + incomplete
+  // channels with active auto_import subscribers; enqueues page-1 walks
+  // (1 quota unit each) on YOUTUBE_BACKFILL_CHANNEL. Closes the new-
+  // upload-discovery gap on completed channels.
+  await boss.work(QUEUES.YOUTUBE_INCREMENTAL_CRON, { batchSize: 1 }, async (jobs) => {
+    for (const job of jobs) {
+      await handleIncrementalCron(job as { id: string; data: object }, boss);
     }
   });
 }
@@ -230,6 +246,16 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
   await boss.schedule(
     QUEUES.YOUTUBE_AUTO_BACKFILL_CRON,
     "0 3 * * *",
+    {},
+    { tz: "America/Los_Angeles" },
+  );
+  // Phase 03.0.1 Wave 3 — daily incremental cron at 04:00 Pacific (1h
+  // after auto-backfill). Walks page 1 of every active channel including
+  // completed ones to discover new uploads. Same gate-check as auto-
+  // backfill (skip if cron pool ≥50%).
+  await boss.schedule(
+    QUEUES.YOUTUBE_INCREMENTAL_CRON,
+    "0 4 * * *",
     {},
     { tz: "America/Los_Angeles" },
   );
@@ -338,6 +364,14 @@ async function canonicalizeOnCreate(
  * services/data-sources.ts into the adapter. Logic preserved verbatim from
  * the prior data-sources.ts:377-400 inline switch.
  *
+ * Phase 03.0.1 Wave 3 — added zero-quota onboarding. Before enqueueing
+ * the channel-context-backfill job, we check if the channel cache already
+ * has data (other users have walked this channel before). If yes, we
+ * bulk INSERT events for the new subscriber from cache without making any
+ * HTTP calls — the user gets an instantly-populated feed and zero quota
+ * is consumed. The cron walks (auto-backfill / incremental) still run
+ * later to top up new uploads.
+ *
  * Fire-and-forget: pg-boss / DB errors are logged at WARN. The created
  * source row is the load-bearing return value; backfill enqueue is a
  * nice-to-have that the user can re-trigger by re-toggling auto-import
@@ -348,6 +382,35 @@ async function onSourceCreated(
   opts: { backfillWindow: BackfillWindow },
 ): Promise<void> {
   if (!source.autoImport) return;
+
+  // Zero-quota onboarding. Only fires when channelId resolved at create
+  // time (i.e., /channel/UC... URL or /watch?v= URL with synchronous
+  // resolution). For /@handle URLs the channel-context-backfill worker
+  // resolves channelId AFTER the HTTP call, so this branch is skipped
+  // and the worker takes the normal HTTP path.
+  if (source.channelId !== null) {
+    try {
+      const seeded = await seedEventsFromChannelCache({
+        userId: source.userId,
+        sourceId: source.id,
+        channelId: source.channelId,
+        targetSince: source.backfillTargetSince,
+        isOwnedByMe: source.isOwnedByMe,
+      });
+      if (seeded > 0) {
+        logger.info(
+          { sourceId: source.id, channelId: source.channelId, seeded },
+          "youtube.onSourceCreated: zero-quota seed from cache",
+        );
+      }
+    } catch (err) {
+      logger.warn(
+        { sourceId: source.id, err: String((err as Error)?.message ?? err) },
+        "youtube.onSourceCreated: cache-seed failed; falling through to HTTP backfill",
+      );
+    }
+  }
+
   try {
     const boss = await getBoss();
     await boss.send(
@@ -369,6 +432,67 @@ async function onSourceCreated(
       "channel-context-backfill enqueue on createSource failed; ignoring",
     );
   }
+}
+
+/**
+ * Phase 03.0.1 Wave 3 — bulk-INSERT events for a new subscriber from the
+ * youtube_videos cache. Triggered by onSourceCreated when channelId is
+ * resolved synchronously and another user has previously walked this
+ * channel (cache populated).
+ *
+ * Idempotency UNIQUE on (user_id, source_id, kind, external_id) protects
+ * against double-INSERT if multiple createSource calls race.
+ *
+ * Returns: number of events seeded. 0 means cache miss (channel never
+ * walked) — caller's HTTP backfill path takes over.
+ */
+async function seedEventsFromChannelCache(args: {
+  userId: string;
+  sourceId: string;
+  channelId: string;
+  targetSince: Date | null;
+  isOwnedByMe: boolean;
+}): Promise<number> {
+  // Cache lookup — youtube_videos is global (PK=video_id). Filter by
+  // channel + target_since boundary so we don't seed events older than
+  // the user's preference.
+  const sinceFilter = args.targetSince ?? new Date("1970-01-01T00:00:00Z");
+  const cached = await db
+    .select({
+      videoId: youtubeVideos.videoId,
+      title: youtubeVideos.title,
+      publishedAt: youtubeVideos.publishedAt,
+      channelId: youtubeVideos.channelId,
+    })
+    .from(youtubeVideos)
+    .where(
+      and(
+        eq(youtubeVideos.channelId, args.channelId),
+        // published_at IS NOT NULL — pre-resolution rows are excluded
+        // (a partial-index materialization of the same gate).
+        sql`${youtubeVideos.publishedAt} IS NOT NULL`,
+        sql`${youtubeVideos.publishedAt} >= ${sinceFilter.toISOString()}::timestamptz`,
+      ),
+    );
+  if (cached.length === 0) return 0;
+
+  // Bulk INSERT — one round-trip via Drizzle's values([]). Idempotency
+  // UNIQUE on events handles concurrent races (two createSource calls
+  // for the same user against the same channel — second hits the unique
+  // and we skip with onConflictDoNothing).
+  const rowsToInsert = cached.map((c) => ({
+    userId: args.userId,
+    sourceId: args.sourceId,
+    kind: "youtube_video" as const,
+    authorIsMe: args.isOwnedByMe,
+    occurredAt: c.publishedAt!,
+    title: c.title,
+    url: `https://www.youtube.com/watch?v=${c.videoId}`,
+    externalId: c.videoId,
+    metadata: { channelId: c.channelId } as Record<string, unknown>,
+  }));
+  await db.insert(events).values(rowsToInsert).onConflictDoNothing();
+  return rowsToInsert.length;
 }
 
 /**

@@ -50,6 +50,8 @@ describe("queue topology (Plan 03.0.1-07 per-kind rename)", () => {
       QUEUES.YOUTUBE_QUOTA_RESET,
       QUEUES.YOUTUBE_REHAB,
       QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL,
+      QUEUES.YOUTUBE_AUTO_BACKFILL_CRON,
+      QUEUES.YOUTUBE_INCREMENTAL_CRON,
     ];
 
     const { rows } = await pool.query<{ name: string }>(
