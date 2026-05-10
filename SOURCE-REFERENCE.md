@@ -479,16 +479,16 @@ Worker handlers write audit row at completion с full metadata:
 }
 ```
 
-**Cap counts only** `flow IN ('incremental', 'historical', 'stats_refresh')`:
+**Cap counts** `flow IN ('initial', 'incremental', 'historical', 'stats_refresh')`:
 
+- `initial` — onboarding channel-context-backfill at createSource. User explicitly added the source; API budget burned under their identity; MUST count or the cap counter lies. Pre-fix this was excluded «for UX» but that created a discrepancy between Today (excluded) and Lifetime (included), confusing users about real consumption. If onboarding burn is large enough to matter for cap, the user adding 30+ channels in one day is exactly the abuse the cap is designed to gate.
 - `incremental` — refresh-content button (default catch-up).
 - `historical` — refresh-content with explicit older date (PATCH backfill_target_since + refresh).
 - `stats_refresh` — per-event refresh-card button (1 unit per call).
 
 **Excluded** (NOT counted в user cap):
 
-- `initial` — onboarding setup at createSource. UX should never thrash on cap.
-- `auto_passive` — auto-backfill cron pick. Uses cron pool reservoir, not user pool.
+- `auto_passive` — auto-backfill cron pick. Uses cron pool reservoir, not user pool. Cron-driven, no user-initiated trigger.
 
 Cron pool reservoir (Plan 08 8000 units/day) is independent of user pool (2000 units/day). Auto-backfill workers consume cron pool; user-driven actions consume user pool. Per-user cap protects user pool fairness.
 

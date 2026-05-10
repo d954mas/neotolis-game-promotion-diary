@@ -247,9 +247,22 @@ export async function withQuotaGuard<T>(
  */
 /**
  * Per-user cap counter: SUM of audit metadata.requests_used + events_inserted
- * for the current Pacific calendar day, scoped to user-initiated capped flows
- * (excludes 'initial' onboarding and 'auto_passive' cron — those use cron pool,
- * not user pool).
+ * for the current Pacific calendar day, scoped to user-initiated capped flows.
+ *
+ * Capped flows (counted in user fair-share cap):
+ *   - 'initial' — onboarding channel-context-backfill. The user explicitly
+ *     added the source; the API call burned operator budget under their
+ *     identity; it MUST count or the cap counter lies. Pre-fix this was
+ *     excluded «for UX» (don't thrash on cap during onboarding) but that's
+ *     wrong reasoning: it created a discrepancy between Today (excluded)
+ *     and Lifetime (included), confusing users about real consumption.
+ *   - 'incremental' — refresh-content button (default catch-up).
+ *   - 'historical' — refresh-content with explicit older boundary.
+ *   - 'stats_refresh' — refresh-poll endpoint (Refresh now button).
+ *
+ * Excluded flows (use the cron pool, not user pool):
+ *   - 'auto_passive' — daily auto-backfill cron pick. Cron-driven, runs
+ *     against operator's cron reservoir; per-user cap is irrelevant.
  *
  * Filters by `metadata.platform` when supplied — Phase 03.1+ multi-platform
  * separates Reddit cap from YouTube cap. When omitted (or undefined), counts
@@ -275,7 +288,7 @@ export async function getUserQuotaUsedToday(
     FROM audit_log
     WHERE user_id = ${userId}
       AND action IN ('source.refresh_content_requested', 'event.poll_refreshed')
-      AND metadata->>'flow' IN ('incremental', 'historical', 'stats_refresh')
+      AND metadata->>'flow' IN ('initial', 'incremental', 'historical', 'stats_refresh')
       AND created_at >= ${since.toISOString()}::timestamptz
       ${platformFilter}
   `);

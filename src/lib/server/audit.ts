@@ -26,13 +26,17 @@ import { logger } from "./logger.js";
  * toward (services/quota.ts:getUserQuotaUsedToday filters on these values).
  *
  * Capped (counted in user fair-share cap query):
+ *   - 'initial'        — onboarding channel-context-backfill. User-initiated
+ *                        (they explicitly added the source); API budget burned
+ *                        under their identity. MUST count.
  *   - 'incremental'    — refresh-content default (catch-up newer events)
  *   - 'historical'     — refresh-content with explicit older boundary
  *   - 'stats_refresh'  — refresh-poll endpoint (Refresh now button)
  *
- * Excluded (uses operator pool, not user pool):
- *   - 'initial'        — onboarding channel-context-backfill
- *   - 'auto_passive'   — daily auto-backfill cron pick
+ * Excluded (uses operator cron pool, not user pool):
+ *   - 'auto_passive'   — daily auto-backfill cron pick (cron-driven, no
+ *                        user-initiated trigger; runs against operator's
+ *                        cron reservoir per Plan 08).
  *
  * Adding a new flow value requires (a) extending this union AND (b) adding
  * to the audit_log CHECK constraint (drizzle/0025_audit_metadata_flow_check.sql).
