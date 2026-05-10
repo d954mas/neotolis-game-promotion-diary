@@ -159,30 +159,38 @@
   // poll would race it. Refresh-poll service rejects 'pending' with 422.
   const refreshVisible = $derived(POLLABLE_KINDS.includes(event.kind) && tier !== "pending");
 
-  // Copy resolution.
+  // Copy resolution. Phase 03.0.1 Wave 4 (post-UAT) — replace tier
+  // vocabulary ("Cold", "Frozen") with user-meaningful "Updated X ago"
+  // relative time. Tier still drives variant CSS (colors), but the
+  // visible text is what the user actually cares about: how stale are
+  // the stats. 'pending' / 'unavailable' / 'manual' still use the
+  // dedicated copy (they signal special states, not just freshness).
   const copy = $derived.by(() => {
-    const hoursAgo = lastPolledAt
-      ? Math.max(1, Math.round((now.getTime() - lastPolledAt.getTime()) / 3_600_000))
-      : 0;
-    const daysAgo = lastPolledAt
-      ? Math.max(1, Math.round((now.getTime() - lastPolledAt.getTime()) / 86_400_000))
-      : 0;
-    switch (variant) {
-      case "pending":
-        return m.polling_badge_pending();
-      case "active":
-        return m.polling_badge_hot({ hoursAgo });
-      case "cold-yesterday":
-        return m.polling_badge_cold_yesterday();
-      case "cold-days-ago":
-        return m.polling_badge_cold_days_ago({ daysAgo });
-      case "frozen":
-        return m.polling_badge_frozen();
-      case "unavailable":
-        return m.polling_badge_unavailable({ daysAgo });
-      case "manual":
-        return m.polling_badge_manual();
+    if (variant === "pending") return m.polling_badge_pending();
+    if (variant === "manual") return m.polling_badge_manual();
+    if (lastPolledAt === null) {
+      // Active without prior poll — manual-paste fallback for swallowed
+      // sync-fetch errors (rate-limit / auth-error). Not yet updated.
+      return "Not yet updated";
     }
+    const elapsedMs = now.getTime() - lastPolledAt.getTime();
+    const minutesAgo = Math.max(1, Math.round(elapsedMs / 60_000));
+    const hoursAgo = Math.round(elapsedMs / 3_600_000);
+    const daysAgo = Math.round(elapsedMs / 86_400_000);
+    let relative: string;
+    if (elapsedMs < 60_000) {
+      relative = "just now";
+    } else if (minutesAgo < 60) {
+      relative = `${minutesAgo} min ago`;
+    } else if (hoursAgo < 24) {
+      relative = `${hoursAgo}h ago`;
+    } else if (daysAgo < 30) {
+      relative = `${daysAgo}d ago`;
+    } else {
+      relative = lastPolledAt.toLocaleDateString();
+    }
+    if (variant === "unavailable") return `Unavailable · updated ${relative}`;
+    return `Updated ${relative}`;
   });
 </script>
 
