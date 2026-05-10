@@ -72,8 +72,11 @@ import type { EventKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { withQuotaGuard } from "./quota.js";
+import { withQuotaGuard, getUserQuotaUsedToday } from "./quota.js";
 import { encodeCursor, decodeCursor } from "./audit-read.js";
+import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
+import { getAdapter } from "$lib/sources/registry.js";
+import { logger } from "../logger.js";
 
 export type EventRow = typeof events.$inferSelect;
 export type DataSourceRow = typeof dataSources.$inferSelect;
@@ -488,19 +491,16 @@ export async function createEvent(
   // Pre-check: if used >= cap, skip stats fetch and let cron pick up
   // the polling later (no user-visible error — paste still succeeds).
   if (row.externalId) {
-    const { eventKindToSourceKind } = await import("$lib/sources/event-to-source-kind.js");
-    const { getAdapter } = await import("$lib/sources/registry.js");
     const sourceKindForStats = eventKindToSourceKind(row.kind);
     if (sourceKindForStats !== null) {
       try {
         const statsAdapter = getAdapter(sourceKindForStats);
         if (statsAdapter.fetchEventStats !== undefined) {
           const cap = statsAdapter.observability.userQuotaCap;
+          let allow = true;
           if (cap?.requestsPerDay !== undefined) {
-            const { getUserQuotaUsedToday } = await import("./quota.js");
             const used = await getUserQuotaUsedToday(userId, sourceKindForStats);
             if (used.requests >= cap.requestsPerDay) {
-              const { logger } = await import("../logger.js");
               logger.info(
                 {
                   eventId: row.id,
@@ -510,13 +510,30 @@ export async function createEvent(
                 },
                 "fetchEventStats skipped — per-user requestsPerDay cap reached",
               );
-              return row;
+              allow = false;
             }
           }
-          await statsAdapter.fetchEventStats(row.externalId, { userId });
+          if (allow) {
+            const stats = await statsAdapter.fetchEventStats(row.externalId, { userId });
+            // Phase 03.0.1 Wave 4 (post-UAT) — write last_user_refresh_at
+            // into event.metadata so RefreshNowButton's cooldown gate
+            // picks it up. Without this, paste burns a unit + writes
+            // audit, but the cooldown stays inactive — a user clicking
+            // Refresh right after paste would re-fetch the same stats
+            // (double burn). Source of truth matches refresh-poll
+            // service which writes the same field on user-driven polls.
+            if (stats !== null) {
+              const now = new Date();
+              await db
+                .update(events)
+                .set({
+                  metadata: sql`jsonb_set(COALESCE(${events.metadata}, '{}'::jsonb), '{last_user_refresh_at}', to_jsonb(${now.toISOString()}::text), true)`,
+                })
+                .where(and(eq(events.userId, userId), eq(events.id, row.id)));
+            }
+          }
         }
       } catch (err) {
-        const { logger } = await import("../logger.js");
         logger.warn(
           { eventId: row.id, externalId: row.externalId, err: String(err) },
           "fetchEventStats failed on createEvent; UI will rely on cron polling",
