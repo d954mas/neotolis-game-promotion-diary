@@ -190,7 +190,16 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
       {
         id: source.id,
         userId: source.userId,
-        metadata: (source.metadata ?? {}) as Record<string, unknown>,
+        // Phase 03.0.1 (post-review UAT 2026-05-10) — thread channelId
+        // through metadata so YouTube pollContent can look up
+        // uploadsPlaylistId from youtube_channels cache. Pre-fix
+        // adapter expected `metadata.uploadsPlaylistId` which was never
+        // populated (cache and source.metadata are different stores).
+        // Adapters that don't need channelId ignore the field.
+        metadata: {
+          ...((source.metadata ?? {}) as Record<string, unknown>),
+          channelId: source.channelId ?? undefined,
+        },
       },
       since,
       // Phase 03.0.1 (post-review P1 #2) — thread origin so the adapter's
@@ -266,7 +275,21 @@ export async function handleBackfillUser(job: BackfillUserJob): Promise<void> {
   // If a future refactor decouples oldSide from the «has historical work»
   // signal, ветвь this on (oldSide !== null) explicitly to preserve intent.
   if (pollResult.events.length === 0) {
-    await markSourceBackfillComplete(userId, source.id);
+    // Phase 03.0.1 (post-review UAT 2026-05-10) — only mark complete when
+    // an HTTP call was actually made (unitsUsed > 0). Pre-fix any empty
+    // result (including «adapter returned [] without making a request»
+    // paths — missing metadata / no API key / cache miss) was treated as
+    // «platform confirmed no more events» and source got
+    // backfill_complete=true. Result: source mis-marked as done after
+    // onboarding even though pollContent never got past metadata-lookup.
+    //
+    // Now: empty result + unitsUsed=0 means «no work done» (preconditions
+    // missing) → log + skip, don't mark complete. Empty result +
+    // unitsUsed>0 means «platform truly confirmed no more events» →
+    // mark complete.
+    if (pollResult.unitsUsed > 0) {
+      await markSourceBackfillComplete(userId, source.id);
+    }
     await markSourceLastPolledAt(userId, source.id);
     await writeBackfillAudit({
       job,

@@ -236,12 +236,13 @@
 
   {#if !editing}
     <div class="status">
-      <!-- Phase 03.0.1 (post-review UAT) — single auto-import pill (was
-           dup'd with .polling-status saying the same thing). Last-polled
-           timestamp added inline for at-a-glance freshness. -->
-      <span class="auto-pill">
-        {source.autoImport ? m.sources_auto_import_on() : m.sources_auto_import_off()}
-      </span>
+      <!-- Phase 03.0.1 (post-review UAT) — auto-import chip shown ONLY
+           when ON. Pre-fix the «Auto-import: Off» text took up the same
+           space as «Auto-import: On» but conveyed nothing actionable.
+           Empty space when off is a clearer signal. -->
+      {#if source.autoImport}
+        <span class="auto-pill">{m.sources_auto_import_on()}</span>
+      {/if}
       <span class="last-polled" title="Last successful pull">
         {source.lastPolledAt
           ? `Last pulled: ${formatRelativeTime(source.lastPolledAt)}`

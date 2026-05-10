@@ -41,6 +41,9 @@
 
 import { pickKeyForJob, youtubeQuotaUser } from "./quota.js";
 import { chargedFetch, fetchWithTimeout } from "./http.js";
+import { youtubeChannels } from "./schema/index.js";
+import { db as serverDb } from "$lib/server/db/client.js";
+import { eq as serverEq } from "drizzle-orm";
 import { youtubeObservability } from "./observability.js";
 import { youtubeParseUrl } from "./url.js";
 import { z } from "zod";
@@ -296,17 +299,35 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     since: Date,
     ctx?: { origin?: "cron" | "user" },
   ): Promise<{ events: RawEvent[]; unitsUsed: number }> {
-    const uploadsPlaylistId = (source.metadata as { uploadsPlaylistId?: string })
-      ?.uploadsPlaylistId;
+    // Phase 03.0.1 (post-review UAT 2026-05-10) — uploadsPlaylistId lives
+    // in youtube_channels cache (PK = channelId), NOT in data_sources.metadata.
+    // Pre-fix pollContent read only source.metadata.uploadsPlaylistId which
+    // was never populated by channel-context-backfill (it writes to the
+    // cache table, not source metadata). Result: always empty → worker
+    // marked backfill_complete=true immediately after onboarding without
+    // ever making an HTTP call.
+    //
+    // Lookup chain: prefer explicit metadata.uploadsPlaylistId (existing
+    // unit tests + any future direct caller), fall back to youtube_channels
+    // cache via metadata.channelId (the production path; worker injects
+    // source.channelId into metadata before calling).
+    let uploadsPlaylistId: string | null =
+      (source.metadata as { uploadsPlaylistId?: string })?.uploadsPlaylistId ?? null;
     if (!uploadsPlaylistId) {
-      // Plan 03.0-10 ingest-channel-context-trigger backfills this metadata
-      // on first paste; if the user pasted before that plan shipped (or the
-      // backfill failed), the source has no uploadsPlaylistId yet. Return
-      // empty rather than throwing — the worker logs + skips and the next
-      // backfill tick will resolve it. unitsUsed=0: no HTTP made.
+      const sourceChannelId = (source.metadata as { channelId?: string })?.channelId;
+      if (sourceChannelId) {
+        const [cached] = await serverDb
+          .select({ uploadsPlaylistId: youtubeChannels.uploadsPlaylistId })
+          .from(youtubeChannels)
+          .where(serverEq(youtubeChannels.channelId, sourceChannelId))
+          .limit(1);
+        uploadsPlaylistId = cached?.uploadsPlaylistId ?? null;
+      }
+    }
+    if (!uploadsPlaylistId) {
       logger.warn(
         { sourceId: source.id, userId: source.userId },
-        "pollContent: missing uploadsPlaylistId in source.metadata; channel-context backfill required first",
+        "pollContent: uploadsPlaylistId not resolvable — channel-context backfill required",
       );
       return { events: [], unitsUsed: 0 };
     }
