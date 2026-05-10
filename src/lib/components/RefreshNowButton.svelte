@@ -39,13 +39,13 @@
 
   type UiState = "idle" | "pending" | "cooldown" | "done" | "error";
   let uiState = $state<UiState>("idle");
-  let cooldownMinutesLeft = $state(0);
+  let cooldownSecondsLeft = $state(0);
 
   // 5-min cooldown — CONTEXT D-10. Matches the server-side cooldown enforced
   // by Plan 04's requestRefreshPoll service (which throws AppError 429
   // 'too_many_refreshes' with metadata.minutesLeft + retryAfterSeconds).
   const COOLDOWN_MS = 5 * 60 * 1000;
-  const COOLDOWN_RECHECK_MS = 30_000;
+  const COOLDOWN_RECHECK_MS = 1_000;
 
   function readMetadataLastRefresh(): number | null {
     const meta = event.metadata;
@@ -56,25 +56,25 @@
     return Number.isFinite(ts) ? ts : null;
   }
 
-  function computeCooldownMinutes(): number {
+  function computeCooldownSeconds(): number {
     const last = readMetadataLastRefresh();
     if (last === null) return 0;
     const elapsed = Date.now() - last;
     if (elapsed >= COOLDOWN_MS) return 0;
-    return Math.ceil((COOLDOWN_MS - elapsed) / 60_000);
+    return Math.ceil((COOLDOWN_MS - elapsed) / 1000);
   }
 
-  // Initial cooldown evaluation + 30s interval re-evaluation. The $effect
-  // cleanup clears the interval on unmount so we don't leak timers when the
-  // parent <PollingBadge> rerenders or the FeedCard scrolls out of view.
+  // Initial cooldown evaluation + per-second interval re-evaluation so
+  // the visible countdown ticks down smoothly. $effect cleanup clears
+  // the interval on unmount so we don't leak timers.
   $effect(() => {
-    cooldownMinutesLeft = computeCooldownMinutes();
-    if (cooldownMinutesLeft > 0 && uiState !== "pending" && uiState !== "done") {
+    cooldownSecondsLeft = computeCooldownSeconds();
+    if (cooldownSecondsLeft > 0 && uiState !== "pending" && uiState !== "done") {
       uiState = "cooldown";
     }
     const timer = setInterval(() => {
-      cooldownMinutesLeft = computeCooldownMinutes();
-      if (cooldownMinutesLeft === 0 && uiState === "cooldown") {
+      cooldownSecondsLeft = computeCooldownSeconds();
+      if (cooldownSecondsLeft === 0 && uiState === "cooldown") {
         uiState = "idle";
       }
     }, COOLDOWN_RECHECK_MS);
@@ -103,7 +103,7 @@
         const retryAfter = resp.headers.get("Retry-After");
         const seconds = retryAfter !== null ? Number(retryAfter) : COOLDOWN_MS / 1000;
         const safeSeconds = Number.isFinite(seconds) && seconds > 0 ? seconds : COOLDOWN_MS / 1000;
-        cooldownMinutesLeft = Math.max(1, Math.ceil(safeSeconds / 60));
+        cooldownSecondsLeft = Math.max(1, Math.ceil(safeSeconds));
         uiState = "cooldown";
         return;
       }
@@ -130,33 +130,17 @@
   {disabled}
   onclick={handleClick}
 >
-  <svg
-    class="refresh-now__icon"
-    viewBox="0 0 24 24"
-    width="16"
-    height="16"
-    stroke="currentColor"
-    stroke-width="2"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    fill="none"
-    aria-hidden="true"
-  >
-    <!-- Circular-arrow refresh glyph per UI-SPEC §"Inline-SVG icon additions" -->
-    <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-    <path d="M21 3v5h-5" />
-    <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-    <path d="M3 21v-5h5" />
-  </svg>
+  <span class="refresh-now__icon" class:refresh-now__icon--spinning={uiState === "pending"}>
+    ↻
+  </span>
   {#if uiState === "cooldown"}
+    <span class="refresh-now__count">{cooldownSecondsLeft}s</span>
     <span id={cooldownTooltipId} class="sr-only">
-      {m.polling_refresh_now_cooldown_tooltip({ minutesLeft: cooldownMinutesLeft })}
+      Cooldown — wait {cooldownSecondsLeft} seconds
     </span>
-  {/if}
-  {#if uiState === "pending"}
+  {:else if uiState === "pending"}
     <span class="sr-only">{m.polling_refresh_now_pending()}</span>
-  {/if}
-  {#if uiState === "done"}
+  {:else if uiState === "done"}
     <span class="sr-only">{m.polling_refresh_now_done()}</span>
   {/if}
 </button>
@@ -166,38 +150,48 @@
 
 <style>
   .refresh-now {
-    width: 44px;
-    height: 44px;
+    min-width: 3rem;
+    height: 2rem;
+    padding: 0 var(--space-sm);
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 4px;
     background: transparent;
-    border: none;
+    border: 1px solid var(--color-border, #ccc);
+    border-radius: 4px;
     cursor: pointer;
     color: var(--color-text-muted);
-    padding: 0;
+    font-size: 0.85rem;
+    line-height: 1;
   }
   .refresh-now:hover:not(:disabled) {
     color: var(--color-text);
+    border-color: var(--color-text);
   }
   .refresh-now:disabled {
     cursor: not-allowed;
   }
-  .refresh-now--cooldown,
+  .refresh-now--cooldown {
+    opacity: 0.6;
+  }
   .refresh-now--done {
-    opacity: 0.5;
+    opacity: 0.7;
   }
   .refresh-now__icon {
-    width: 16px;
-    height: 16px;
+    display: inline-block;
+    font-size: 1.05rem;
+    line-height: 1;
+  }
+  .refresh-now__count {
+    font-size: 0.75rem;
+    opacity: 0.85;
+    font-variant-numeric: tabular-nums;
   }
 
-  /* Spinning animation honors @media (prefers-reduced-motion).
-     UI-SPEC §"Accessibility floor delta": collapse to a static aria-busy
-     state when the user has prefers-reduced-motion: reduce. */
   @media (prefers-reduced-motion: no-preference) {
-    .refresh-now--pending .refresh-now__icon {
-      animation: refresh-spin 1s linear infinite;
+    .refresh-now__icon--spinning {
+      animation: refresh-spin 1.4s linear infinite;
     }
     @keyframes refresh-spin {
       from {
