@@ -103,7 +103,10 @@
         credentials: "include",
       });
       if (res.status === 202) {
-        toast = { kind: "ok", text: m.sources_detail_pull_new_content_success() };
+        // Phase 03.0.1 (post-review UAT) — no «Refresh started» success
+        // toast. The spinning ↻ icon + live-refresh loop are the visual
+        // signal the pull is in flight; a redundant text toast just adds
+        // noise (and shifted button layout in compact mode).
         startCooldown();
         await invalidateAll();
       } else if (res.status === 422) {
@@ -173,7 +176,10 @@
       {m.sources_detail_pull_new_content()}
     {/if}
   </button>
-  {#if toast}
+  {#if toast && !compact}
+    <!-- Toast hidden in compact mode (icon-only inline placement) so the
+         text doesn't push surrounding row layout. Errors still surface
+         in the full-button mode on /sources/[id] detail page. -->
     <p
       class="refresh-content__toast"
       class:refresh-content__toast--ok={toast.kind === "ok"}
