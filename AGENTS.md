@@ -110,6 +110,40 @@ Detailed rationale and version pins live in `.planning/research/STACK.md`. Don't
 To be populated as patterns emerge. Until then, follow what's already in `src/`.
 <!-- GSD:conventions-end -->
 
+## Production operations
+
+Operational notes for the hosted instance at `neotolis-diary.dev`. Self-host operators following `docs/deploy/install.md` will see the same containers and the same failure modes.
+
+### Known issue: nginx caches stale upstream IP after `app` restart → site returns 502
+
+**Symptom.** Site returns `502 Bad Gateway`. `docker ps` shows `diary-app-1 (healthy)`, `diary-nginx-1 Up` (longer than `app`). nginx logs show `connect() failed (111: Connection refused) ... upstream: http://172.18.0.X:3000/` against an IP that no longer belongs to any container.
+
+**Root cause.** `nginx/nginx.conf.template` resolves `app` once at startup and caches the IP inside the upstream block. When `diary-app-1` is recreated (deploy / `docker compose up`), it gets a new IP on the docker bridge network, but nginx keeps proxying to the old one. The `resolver 127.0.0.11 valid=10s` directive at line 55 is currently a no-op because `proxy_pass http://app:3000;` (lines 75, 91) does not go through a variable — runtime DNS only kicks in when the upstream is referenced via `set $var ...; proxy_pass $var;`.
+
+**Quick fix on the VPS (≤10s of downtime).**
+
+```bash
+docker compose -f docker-compose.prod.yml restart nginx
+# or
+docker restart diary-nginx-1
+```
+
+nginx restarts → re-resolves `app` → traffic flows again. App data and Postgres are untouched.
+
+**Permanent fix (TODO, separate PR against `nginx/nginx.conf.template`).** Force runtime DNS resolution by routing both `proxy_pass` calls through a variable:
+
+```nginx
+# inside server { ... }, before location blocks:
+set $upstream_app http://app:3000;
+
+# then in each location:
+proxy_pass $upstream_app;
+```
+
+The existing `resolver 127.0.0.11 valid=10s ipv6=off;` then becomes load-bearing — nginx will pick up new container IPs within ~10s without a restart. Verify by running `docker compose restart app` and watching `docker logs diary-nginx-1` stay clean.
+
+First observed: 2026-05-10 ~18:42 UTC (post-deploy). Fix-in-place by `docker restart diary-nginx-1`.
+
 <!-- GSD:architecture-start source:ARCHITECTURE.md -->
 ## Architecture
 
