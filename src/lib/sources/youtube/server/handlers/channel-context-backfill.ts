@@ -577,7 +577,6 @@ async function handleChannelContextBackfillImpl(job: {
   //    coverage (Tracking). For the ingest paste path (sourceId NOT provided)
   //    the event is already created by the ingest service, so we skip this
   //    block and only step 7 below refreshes its lastPolledAt timestamp.
-  let authorIsMe = false;
   if (sourceId) {
     // Tenant-scoped lookup — Pattern 1. The job payload pairs sourceId
     // with userId; even though pg-boss won't deliver a malformed job,
@@ -588,7 +587,7 @@ async function handleChannelContextBackfillImpl(job: {
       .from(dataSources)
       .where(and(eq(dataSources.id, sourceId), eq(dataSources.userId, userId)))
       .limit(1);
-    authorIsMe = sourceRow[0]?.isOwnedByMe ?? false;
+    const authorIsMe = sourceRow[0]?.isOwnedByMe ?? false;
 
     // Auto-import idempotency: pre-insert SELECT scoped by `sourceId`.
     //

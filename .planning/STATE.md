@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to plan
-stopped_at: Completed 03.0.1-11-source-reference-doc-PLAN.md (Phase 03.0.1 phase-close)
-last_updated: "2026-05-08T17:58:15.951Z"
-last_activity: 2026-05-08
+stopped_at: "Completed 03.0.2-09-PLAN.md (drizzle pair refresh, Path A: drizzle-orm 0.45.2 re-pin + drizzle-kit ^0.31.10 caret bump, D-08 no-diff); CI green run 25655923896"
+last_updated: "2026-05-11T07:57:51.800Z"
+last_activity: 2026-05-11
 progress:
   total_phases: 12
-  completed_phases: 6
-  total_plans: 93
-  completed_plans: 93
+  completed_phases: 7
+  total_plans: 103
+  completed_plans: 104
 ---
 
 # Project State
@@ -20,11 +20,11 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Replace messy Google Sheets / markdown files with a structured, secure, query-friendly diary so an indie developer can see — at a glance — which promotion actions actually moved the needle on wishlists and engagement.
-**Current focus:** Phase 03.0.1 — source-plugin-architecture (COMPLETE 2026-05-08); next is Phase 03.0.2 (Dependency Refresh) — needs `/gsd:plan-phase 03.0.2` to break down.
+**Current focus:** Phase 03.0.2 — dependency-refresh-inserted
 
 ## Current Position
 
-Phase: 03.0.2
+Phase: 3.1
 Plan: Not started
 
 ## Performance Metrics
@@ -135,6 +135,15 @@ Plan: Not started
 | Phase 03.0.1 P09 | ~5 minutes | 1 tasks | 8 files |
 | Phase 03.0.1-source-plugin-architecture P10 | ~9 min | 3 tasks | 12 files |
 | Phase 03.0.1-source-plugin-architecture P11 | ~5 min | 2 tasks | 3 files |
+| Phase 03.0.2-dependency-refresh-inserted P01 | ~25min | 1 tasks | 3 files |
+| Phase 03.0.2-dependency-refresh-inserted P02 | ~8min | 1 tasks | 2 files |
+| Phase 03.0.2-dependency-refresh-inserted P03 | ~12min | 1 tasks | 3 files |
+| Phase 03.0.2-dependency-refresh-inserted P04 | ~17min | 1 tasks | 6 files |
+| Phase 03.0.2-dependency-refresh-inserted P05 | 7m | 1 tasks | 2 files |
+| Phase 03.0.2-dependency-refresh-inserted P06 | 12min | 1 tasks | 3 files |
+| Phase 03.0.2-dependency-refresh-inserted P07 | ~11min | 1 tasks | 2 files |
+| Phase 03.0.2 P08 | 25min | 1 tasks | 2 files |
+| Phase 03.0.2-dependency-refresh-inserted P09 | ~8min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -404,6 +413,16 @@ Recent decisions affecting current work:
 - [Phase 03.0.1-source-plugin-architecture]: Plan 10: writeAudit fires AFTER the enqueue (not BEFORE per D-32 forensics ordering). Audit metadata REQUIRES result.queue + result.jobId which only the adapter knows. Trade-off accepted — writeAudit never throws, singletonKey makes re-click dedup-safe, security signal forensics need is 'user X requested refresh on Y at T'.
 - [Phase 03.0.1-source-plugin-architecture]: Plan 11 (phase close): SOURCE-REFERENCE.md describes the AS-LIVE shipped tree (8 handlers including poll-cron dispatcher + poll-active + poll-cold split; ui/server.ts + ui/index.ts split per Pitfall 7; three-layer barrel-override with throwing stubs in adapter.ts and real impls in index.ts). Doc landed last per CONTEXT.md wave_strategy_guidance ("doc describes ACTUAL shipped tree, not planned"). All src/lib/sources/youtube/*.ts references verified to resolve against the working copy (path-verification grep loop, 0 missing).
 - [Phase 03.0.1-source-plugin-architecture]: Plan 11: ROADMAP fix is a 3-line patch (Plan 11 checkbox flip + progress-table row 10/11→11/11 + stale Phase 03.0.2 "10/11 plans executed" line corrected). The full Phase 03.0.1 entry (goal narrative + 11-plan list) was seeded ahead of execution; phase-close only flipped deltas to preserve prior plans' completion state.
+- [Phase 03.0.2-dependency-refresh-inserted]: Phase 03.0.2-01: opened phase-PR (#26) as draft at commit 1/10 to enforce D-02 per-commit green CI (CI only triggers on push-to-master or PR events; feature-branch push alone is silent). Memory rule (ONE final PR per phase) preserved; just opened earlier as draft.
+- [Phase 03.0.2-dependency-refresh-inserted]: Phase 03.0.2-01: pnpm on Windows requires NODE_OPTIONS=--use-system-ca prefix (TLS chain rejection of npm registry); workaround applies to all remaining 9 phase commits. Documented in 03.0.2-01-SUMMARY.md.
+- [Phase 03.0.2-dependency-refresh-inserted]: Phase 03.0.2-01: supertest + @types/supertest are stranded deps (zero callers in src/ and tests/). Bumped types per D-04 strict-reading; defer 'drop unused supertest' to a follow-up PR after Phase 03.0.2 ships. Flagged in PR #26 body and commit 4ec4c6a message body.
+- [Phase 03.0.2-dependency-refresh-inserted]: Plan 02: oauth2-mock-server 7→8 — no source edits required; smoke (D-07 load-bearing) green on first try → v8 contract identical to v7 for our usage
+- [Phase 03.0.2-dependency-refresh-inserted]: Plan 03.0.2-03: dotenv 16→17 bump + { quiet: true } at both env.ts loadDotenv() calls; D-07 invariant intact (env.ts still sole process.env reader; ESLint no-restricted-properties green); advertising line suppressed; CI green on all 4 jobs (run 25653146599)
+- [Phase 03.0.2-dependency-refresh-inserted]: Plan 05: Svelte-lint pair landed as one trivial atomic commit (b75efb6) — zero code touches; rune-aware parser surfaced no new lint hits; Plan 04 peer-dep warning resolved
+- [Phase 03.0.2-dependency-refresh-inserted]: Plan 06: Pino pair bump (pino 9->10 + pino-pretty 11->13) landed as ZERO source-code change; D-07 load-bearing assertion (tests/unit/logger.test.ts redact tripwire) green on new @pinojs/redact engine; privacy floor invariant intact
+- [Phase 03.0.2-dependency-refresh-inserted]: Plan 07: @hono/node-server 1.19.14->2.0.2 (EXACT pin preserved, no caret). Zero source changes - v2 public API unchanged per release notes. Sole importer src/roles/app.ts serve() call API-compatible. Smoke CI green (load-bearing gate for production HTTP serve path).
+- [Phase 03.0.2]: Plan 08: TS6 pre-immunization held — zero source-code touches needed for typescript 5.6->6.0.3 bump; tsconfig.json unchanged (D-06)
+- [Phase 03.0.2-dependency-refresh-inserted]: Plan 09: drizzle pair Path A landed — drizzle-orm 0.45.2 re-pin (audit-trail no-op, latest dist-tag still 0.45.2 at commit-time) + drizzle-kit ^0.31.0 -> ^0.31.10 caret patch bump. D-08 forward-only invariant verified via `pnpm db:check` no-diff; zero edits to merged migration files in drizzle/. CI run 25655923896 green on all 4 jobs (unit-integration exercised real drizzle queries against Postgres; smoke ran migration at boot under advisory lock). Trigger condition for follow-up phase: drizzle-orm@latest flips to 1.0.0 stable -> schedule Casing API refactor across src/lib/server/db/schema/*.ts + src/lib/sources/*/server/schema/*.ts.
 
 ### Pending Todos
 
@@ -446,8 +465,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-08T17:47:13.000Z
-Last Activity: 2026-05-08
-Stopped at: Completed 03.0.1-11-source-reference-doc-PLAN.md (Phase 03.0.1 phase-close)
+Last session: 2026-05-11T12:21:00.000Z
+Last Activity: 2026-05-11
+Stopped at: Completed 03.0.2-09-PLAN.md (drizzle pair refresh, Path A: drizzle-orm 0.45.2 re-pin + drizzle-kit ^0.31.10 caret bump, D-08 no-diff); CI green run 25655923896
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md

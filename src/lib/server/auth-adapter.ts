@@ -98,7 +98,7 @@ function decryptField(stored: string): string {
     blob = JSON.parse(json) as SerializedEnvelope;
   } catch (err) {
     logger.error({ err }, "envelope: failed to parse stored token JSON");
-    throw new Error("envelope: malformed stored token");
+    throw new Error("envelope: malformed stored token", { cause: err });
   }
   const env: EncryptedSecret = {
     secretCt: Buffer.from(blob.secretCt, "base64"),

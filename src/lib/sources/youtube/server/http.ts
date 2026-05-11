@@ -198,7 +198,7 @@ export async function chargedFetch(
 
   // 5-9. Error path — classify into AdapterError category.
   if (resp.status === 403) {
-    let reason: string | null = null;
+    let reason: string | null;
     try {
       const body = (await resp.clone().json()) as {
         error?: { errors?: { reason?: string }[] };
