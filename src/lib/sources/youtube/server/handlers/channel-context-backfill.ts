@@ -49,6 +49,8 @@ import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
 import {
   markChannelLastPolledAt,
   markChannelBackfillFrontier,
+  markChannelBackfillComplete,
+  setChannelBackfillPageToken,
 } from "$lib/server/services/channel-state.js";
 import { writeAudit } from "$lib/server/audit.js";
 
@@ -435,6 +437,10 @@ async function handleChannelContextBackfillImpl(job: {
   const collected: { videoId: string; publishedAt: string; title: string }[] = [];
   let pageToken: string | undefined;
   let stopReason: "no_more_pages" | "cutoff_crossed" | "hard_cap" = "no_more_pages";
+  // Phase 03.0.3 P1 (D-#29-5) — captured at the hard-cap exit so the
+  // post-loop state writes can persist the resume cursor for the next
+  // walk. NULL on every non-hard_cap exit.
+  let hardCapResumeToken: string | null = null;
 
   for (let page = 0; page < MAX_PAGES; page++) {
     const playlistUrl = new URL(`${env.YOUTUBE_API_BASE_URL}/playlistItems`);
@@ -479,6 +485,10 @@ async function handleChannelContextBackfillImpl(job: {
     }
     if (page === MAX_PAGES - 1) {
       stopReason = "hard_cap";
+      // Preserve the cursor at MAX_PAGES so the next refresh-content
+      // click resumes from page 21 instead of restarting the walk
+      // (Phase 03.0.3 P1; D-#29-5).
+      hardCapResumeToken = playlistJson.nextPageToken ?? null;
       break;
     }
     pageToken = playlistJson.nextPageToken;
@@ -690,11 +700,31 @@ async function handleChannelContextBackfillImpl(job: {
   // not generic ingest path). Audit row written в both cases — ingest flow
   // (no sourceId) gets minimal metadata (no source_id field).
   if (sourceId && channelId !== null) {
+    // Phase 03.0.3 P1 (D-#29-5) — terminal channel-state writes per
+    // stopReason. Pre-fix the handler set frontier + last_polled_at but
+    // left backfill_complete=false even for channels that finished
+    // naturally (`no_more_pages`), causing the cron auto-backfill picker
+    // to re-walk them at 3am Pacific the next day — the typical
+    // onboarding double-walk.
+    //
+    // | stopReason       | complete | frontier            | token              |
+    // |------------------|----------|---------------------|--------------------|
+    // | no_more_pages    | true     | MIN(oldest seen)    | null               |
+    // | hard_cap         | false    | oldest seen         | nextPageToken      |
+    // | cutoff_crossed   | false    | cutoff              | null               |
+    //
     // Phase 03.0.1 Wave 4 — channel-scoped state writes. Per-source state
     // columns (last_polled_at, backfill_oldest_at) dropped in migration 0028;
     // channel state is the single source of truth across all subscribers.
     await markChannelLastPolledAt("youtube_channel", channelId);
-    if (videoIds.length > 0) {
+
+    // Frontier write — depends on stopReason. `cutoff_crossed` uses the
+    // window boundary directly because the frontier represents how far
+    // back we walked, which IS the cutoff when we stopped because we
+    // crossed it; oldest-seen would lie about the boundary.
+    if (stopReason === "cutoff_crossed" && cutoff !== null) {
+      await markChannelBackfillFrontier("youtube_channel", channelId, cutoff);
+    } else if (videoIds.length > 0) {
       const oldestRow = await db
         .select({ at: youtubeVideos.publishedAt })
         .from(youtubeVideos)
@@ -710,6 +740,25 @@ async function handleChannelContextBackfillImpl(job: {
       if (oldest !== null) {
         await markChannelBackfillFrontier("youtube_channel", channelId, oldest);
       }
+    }
+
+    // Complete + token writes — depends on stopReason.
+    if (stopReason === "no_more_pages") {
+      await markChannelBackfillComplete("youtube_channel", channelId);
+      await setChannelBackfillPageToken("youtube_channel", channelId, null);
+    } else if (stopReason === "hard_cap") {
+      // Complete stays false; preserve resume cursor for next walk.
+      await setChannelBackfillPageToken(
+        "youtube_channel",
+        channelId,
+        hardCapResumeToken,
+      );
+    } else {
+      // cutoff_crossed — complete stays false (more history is available
+      // past the cutoff if the user later widens backfillTargetSince);
+      // clear token because we did NOT exhaust pagination, we just
+      // stopped at the window boundary.
+      await setChannelBackfillPageToken("youtube_channel", channelId, null);
     }
   }
 
