@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 03.0.2-08-PLAN.md (typescript 5.6->6.0 bump, zero source touches); CI green run 25655460778
-last_updated: "2026-05-11T07:12:48.557Z"
+stopped_at: Completed 03.0.2-09-PLAN.md (drizzle pair refresh, Path A: drizzle-orm 0.45.2 re-pin + drizzle-kit ^0.31.10 caret bump, D-08 no-diff); CI green run 25655923896
+last_updated: "2026-05-11T12:21:00.000Z"
 last_activity: 2026-05-11
 progress:
   total_phases: 12
   completed_phases: 6
   total_plans: 103
-  completed_plans: 101
+  completed_plans: 102
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-04-27)
 ## Current Position
 
 Phase: 03.0.2 (dependency-refresh-inserted) — EXECUTING
-Plan: 9 of 10
+Plan: 10 of 10
 
 ## Performance Metrics
 
@@ -143,6 +143,7 @@ Plan: 9 of 10
 | Phase 03.0.2-dependency-refresh-inserted P06 | 12min | 1 tasks | 3 files |
 | Phase 03.0.2-dependency-refresh-inserted P07 | ~11min | 1 tasks | 2 files |
 | Phase 03.0.2 P08 | 25min | 1 tasks | 2 files |
+| Phase 03.0.2-dependency-refresh-inserted P09 | ~8min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -421,6 +422,7 @@ Recent decisions affecting current work:
 - [Phase 03.0.2-dependency-refresh-inserted]: Plan 06: Pino pair bump (pino 9->10 + pino-pretty 11->13) landed as ZERO source-code change; D-07 load-bearing assertion (tests/unit/logger.test.ts redact tripwire) green on new @pinojs/redact engine; privacy floor invariant intact
 - [Phase 03.0.2-dependency-refresh-inserted]: Plan 07: @hono/node-server 1.19.14->2.0.2 (EXACT pin preserved, no caret). Zero source changes - v2 public API unchanged per release notes. Sole importer src/roles/app.ts serve() call API-compatible. Smoke CI green (load-bearing gate for production HTTP serve path).
 - [Phase 03.0.2]: Plan 08: TS6 pre-immunization held — zero source-code touches needed for typescript 5.6->6.0.3 bump; tsconfig.json unchanged (D-06)
+- [Phase 03.0.2-dependency-refresh-inserted]: Plan 09: drizzle pair Path A landed — drizzle-orm 0.45.2 re-pin (audit-trail no-op, latest dist-tag still 0.45.2 at commit-time) + drizzle-kit ^0.31.0 -> ^0.31.10 caret patch bump. D-08 forward-only invariant verified via `pnpm db:check` no-diff; zero edits to merged migration files in drizzle/. CI run 25655923896 green on all 4 jobs (unit-integration exercised real drizzle queries against Postgres; smoke ran migration at boot under advisory lock). Trigger condition for follow-up phase: drizzle-orm@latest flips to 1.0.0 stable -> schedule Casing API refactor across src/lib/server/db/schema/*.ts + src/lib/sources/*/server/schema/*.ts.
 
 ### Pending Todos
 
@@ -463,8 +465,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-11T07:12:19.081Z
+Last session: 2026-05-11T12:21:00.000Z
 Last Activity: 2026-05-11
-Stopped at: Completed 03.0.2-08-PLAN.md (typescript 5.6->6.0 bump, zero source touches); CI green run 25655460778
+Stopped at: Completed 03.0.2-09-PLAN.md (drizzle pair refresh, Path A: drizzle-orm 0.45.2 re-pin + drizzle-kit ^0.31.10 caret bump, D-08 no-diff); CI green run 25655923896
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
