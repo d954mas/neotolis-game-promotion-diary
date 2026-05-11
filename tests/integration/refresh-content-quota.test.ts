@@ -206,19 +206,36 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     expect(Number(meta.requests_used)).toBeLessThanOrEqual(1);
   });
 
-  it("(b) backdated upload (publishedAt < newestKnown but > prior session) is collected on the next click", async () => {
-    // Setup: target = 60d-ago (the subscriber's window — events newer
-    // than 60d-ago are kept). Prior partial walk to 90d-ago (deeper).
-    // D-#29-2 locked algebra: target.getTime() >= deepestWalked.getTime()
-    // — for "ms since epoch", 60d-ago has a LARGER number (= more recent
-    // instant) than 90d-ago, so the comparison routes to
-    // branch="incremental". newestKnown=now via a seeded youtube_videos
-    // row → since = max(newestKnown, target) = now. The walker would
-    // normally walkedPastSince anything older; our mocked pollContent
-    // returns one backdated event at 45d-ago (within the user's 60d
-    // window) — the collected row exists post-walk, demonstrating
-    // D-#29-1's promise (no silent drop of backdated uploads relative
-    // to newestKnown).
+  it("(b) incremental branch: since=max(newestKnown, target) + token cleared + adapter events fan out to events.user_id rows", async () => {
+    // What this test actually verifies (Phase 03.0.3 code-review follow-up):
+    //   1. branch selection — backfillComplete=false + deepestWalked=90d-ago
+    //      + target=60d-ago routes to branch="incremental" (D-#29-2:
+    //      `target.getTime() >= deepestWalked.getTime()` is true because
+    //      60d-ago is a more-recent instant than 90d-ago).
+    //   2. since derivation — since=max(newestKnown=now, target=60d-ago)=now.
+    //   3. fan-out — whatever events the adapter yields (mocked here with
+    //      one backdated event at 45d-ago) get INSERTed into `events` keyed
+    //      by (user_id, external_id) without being dropped at the fan-out
+    //      layer.
+    //
+    // What this test does NOT verify: walker-level walkedPastSince
+    // behavior. `pollContent` is mocked at the adapter boundary, so the
+    // mock returns the backdated event regardless of the `since` arg it
+    // receives. The production walker decides whether to yield a backdated
+    // item based on its position relative to `since` in the uploads
+    // playlist; that decision happens INSIDE pollContent and is not
+    // covered here. The plan's original framing (D-#29-1's promise that
+    // walkedPastSince does not silently drop backdated uploads) requires
+    // a separate unit test against the YouTube adapter's pollContent
+    // implementation with a synthetic playlist fixture — filed as
+    // follow-up TODO below.
+    //
+    // TODO(03.0.3 follow-up): add tests/unit/youtube-channel-adapter.test.ts
+    // case that drives pollContent against an in-memory playlist with
+    // one backdated item and asserts the adapter yields it instead of
+    // short-circuiting on walkedPastSince. Requires unmocking the
+    // adapter and feeding fake HTTP responses; out of scope for the
+    // integration suite.
     const channelKey = newChannelKey();
     await clearChannelFixture(channelKey);
 
@@ -325,14 +342,12 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     expect(meta.since_branch).toBe("incremental");
     expect(Number(meta.requests_used)).toBe(1);
 
-    // The backdated event was collected even though its publishedAt
-    // (45d-ago) is older than newestKnown (now) — D-#29-1's promise:
-    // walkedPastSince does not silently drop backdated uploads relative
-    // to newestKnown. (The walker would normally short-circuit on the
-    // first event older than `since`, but the mock returns events
-    // directly; the assertion below is what the production walker
-    // delivers when the page contains a backdated item before crossing
-    // the cutoff.)
+    // Fan-out assertion: the adapter's backdated event (45d-ago, returned
+    // unconditionally by the mocked pollContent) appears in `events`
+    // keyed by (user_id, external_id). Demonstrates the fan-out layer
+    // does NOT drop adapter events on its own. Does NOT demonstrate that
+    // the production walker yields backdated uploads — that lives behind
+    // the mock boundary (see TODO above).
     const newEvents = await db
       .select()
       .from(events)
