@@ -67,13 +67,11 @@ vi.mock("../../src/lib/sources/youtube/server/http.js", async (importOriginal) =
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
-const { dataSourceChannelState } = await import(
-  "../../src/lib/server/db/schema/data-source-channel-state.js"
-);
+const { dataSourceChannelState } =
+  await import("../../src/lib/server/db/schema/data-source-channel-state.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
-const { handleChannelContextBackfill } = await import(
-  "../../src/lib/sources/youtube/server/handlers/channel-context-backfill.js"
-);
+const { handleChannelContextBackfill } =
+  await import("../../src/lib/sources/youtube/server/handlers/channel-context-backfill.js");
 const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
@@ -126,9 +124,9 @@ describe("channel-context-backfill — naturally-empty channel (Phase 03.0.3 fol
     expect(stateRows).toHaveLength(1);
     const state = stateRows[0]!;
     expect(state.backfillComplete).toBe(true);
-    expect((state.metadata as { lastBackfillPageToken?: string } | null)?.lastBackfillPageToken ?? null).toBe(
-      null,
-    );
+    expect(
+      (state.metadata as { lastBackfillPageToken?: string } | null)?.lastBackfillPageToken ?? null,
+    ).toBe(null);
   });
 
   it("audit row fires with events_inserted=0 (operator visibility for empty-channel walks)", async () => {
@@ -159,10 +157,7 @@ describe("channel-context-backfill — naturally-empty channel (Phase 03.0.3 fol
       .select()
       .from(auditLog)
       .where(
-        and(
-          eq(auditLog.userId, u.id),
-          eq(auditLog.action, "source.refresh_content_requested"),
-        ),
+        and(eq(auditLog.userId, u.id), eq(auditLog.action, "source.refresh_content_requested")),
       );
     expect(auditRows).toHaveLength(1);
     const meta = auditRows[0]!.metadata as Record<string, unknown>;

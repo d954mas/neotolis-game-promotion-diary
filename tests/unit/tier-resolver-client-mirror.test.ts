@@ -101,7 +101,12 @@ describe("tier-resolver client mirror — identical results across battery", () 
     // Phase 03.0.3 bootstrap rule — mirror must agree.
     ["bootstrap: frozen-by-age + never polled → cold", ago(30 * 86_400_000), null, null],
     ["bootstrap dormant: frozen-by-age + polled → frozen", ago(30 * 86_400_000), null, ago(1000)],
-    ["bootstrap: override wins (frozen + never + not_found)", ago(30 * 86_400_000), "not_found", null],
+    [
+      "bootstrap: override wins (frozen + never + not_found)",
+      ago(30 * 86_400_000),
+      "not_found",
+      null,
+    ],
   ];
 
   test.each(battery)("%s → mirror === canonical", (_label, published, status, polledAt) => {

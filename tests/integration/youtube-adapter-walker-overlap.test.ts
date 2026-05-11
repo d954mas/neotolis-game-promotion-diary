@@ -53,9 +53,8 @@ vi.mock("../../src/lib/sources/youtube/server/http.js", async (importOriginal) =
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { youtubeVideos } = await import("../../src/lib/sources/youtube/server/schema/index.js");
-const { youtubeChannelAdapterCore } = await import(
-  "../../src/lib/sources/youtube/server/adapter.js"
-);
+const { youtubeChannelAdapterCore } =
+  await import("../../src/lib/sources/youtube/server/adapter.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
@@ -83,7 +82,9 @@ function playlistResponse(items: FixtureItem[], nextPageToken?: string): Respons
   );
 }
 
-async function seedYoutubeVideos(rows: Array<{ videoId: string; publishedAt: Date }>): Promise<void> {
+async function seedYoutubeVideos(
+  rows: Array<{ videoId: string; publishedAt: Date }>,
+): Promise<void> {
   for (const r of rows) {
     await db
       .insert(youtubeVideos)

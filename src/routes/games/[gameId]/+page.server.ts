@@ -92,9 +92,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
   // default) to source.handleUrl (the raw URL) — visually inconsistent
   // with /feed for the same event.
   const sourceDtos = sources.map(toDataSourceDto);
-  const channelIds = sourceDtos
-    .map((s) => s.channelId)
-    .filter((c): c is string => c !== null);
+  const channelIds = sourceDtos.map((s) => s.channelId).filter((c): c is string => c !== null);
   if (channelIds.length > 0) {
     const channelCache = await db
       .select({

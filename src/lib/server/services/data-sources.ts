@@ -272,10 +272,7 @@ async function maybeEnqueueForceDeepWalk(opts: {
   previousTarget: Date | null;
   newTarget: Date;
 }): Promise<void> {
-  if (
-    opts.previousTarget !== null &&
-    opts.newTarget.getTime() >= opts.previousTarget.getTime()
-  ) {
+  if (opts.previousTarget !== null && opts.newTarget.getTime() >= opts.previousTarget.getTime()) {
     return;
   }
   const state = await getChannelState("youtube_channel", opts.channelKey);

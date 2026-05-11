@@ -757,11 +757,7 @@ async function handleChannelContextBackfillImpl(job: {
       await setChannelBackfillPageToken("youtube_channel", channelId, null);
     } else if (stopReason === "hard_cap") {
       // Complete stays false; preserve resume cursor for next walk.
-      await setChannelBackfillPageToken(
-        "youtube_channel",
-        channelId,
-        hardCapResumeToken,
-      );
+      await setChannelBackfillPageToken("youtube_channel", channelId, hardCapResumeToken);
     } else {
       // cutoff_crossed — complete stays false (more history is available
       // past the cutoff if the user later widens backfillTargetSince);

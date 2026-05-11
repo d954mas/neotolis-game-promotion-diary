@@ -88,17 +88,15 @@ vi.mock("../../src/lib/sources/youtube/server/adapter.js", async (importOriginal
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
-const { dataSourceChannelState } = await import(
-  "../../src/lib/server/db/schema/data-source-channel-state.js"
-);
+const { dataSourceChannelState } =
+  await import("../../src/lib/server/db/schema/data-source-channel-state.js");
 const { youtubeVideos } = await import("../../src/lib/sources/youtube/server/schema/index.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
 const { createApp } = await import("../../src/lib/server/http/app.js");
 const { createSource } = await import("../../src/lib/server/services/data-sources.js");
-const { handleBackfillChannel } = await import(
-  "../../src/lib/sources/youtube/server/handlers/backfill-channel.js"
-);
+const { handleBackfillChannel } =
+  await import("../../src/lib/sources/youtube/server/handlers/backfill-channel.js");
 const { getChannelState } = await import("../../src/lib/server/services/channel-state.js");
 const { seedUserDirectly } = await import("./helpers.js");
 
@@ -197,19 +195,14 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     expect(pollContentCalls).toHaveLength(1);
     // since arg lifted to newestKnown floor (branch="exhausted" with
     // newestKnown > target=epoch).
-    expect(pollContentCalls[0]!.since.getTime()).toBeGreaterThanOrEqual(
-      seededNewest.getTime(),
-    );
+    expect(pollContentCalls[0]!.since.getTime()).toBeGreaterThanOrEqual(seededNewest.getTime());
 
     // Audit row carries since_branch="exhausted" + requests_used <= 1.
     const auditRows = await db
       .select()
       .from(auditLog)
       .where(
-        and(
-          eq(auditLog.userId, u.id),
-          eq(auditLog.action, "source.refresh_content_requested"),
-        ),
+        and(eq(auditLog.userId, u.id), eq(auditLog.action, "source.refresh_content_requested")),
       );
     const completion = auditRows.find(
       (r) => (r.metadata as Record<string, unknown>)?.events_inserted !== undefined,
@@ -343,10 +336,7 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
       .select()
       .from(auditLog)
       .where(
-        and(
-          eq(auditLog.userId, u.id),
-          eq(auditLog.action, "source.refresh_content_requested"),
-        ),
+        and(eq(auditLog.userId, u.id), eq(auditLog.action, "source.refresh_content_requested")),
       );
     const completion = auditRows.find(
       (r) => (r.metadata as Record<string, unknown>)?.events_inserted !== undefined,
@@ -509,10 +499,7 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
       .select()
       .from(auditLog)
       .where(
-        and(
-          eq(auditLog.userId, u.id),
-          eq(auditLog.action, "source.refresh_content_requested"),
-        ),
+        and(eq(auditLog.userId, u.id), eq(auditLog.action, "source.refresh_content_requested")),
       );
     const completion = auditRows
       .filter((r) => (r.metadata as Record<string, unknown>)?.events_inserted !== undefined)
@@ -639,9 +626,9 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     const state = await getChannelState("youtube_channel", channelKey);
     expect(state).toBeDefined();
     expect(state!.backfillComplete).toBe(true);
-    expect((state!.metadata as { lastBackfillPageToken?: string } | null)?.lastBackfillPageToken ?? null).toBe(
-      null,
-    );
+    expect(
+      (state!.metadata as { lastBackfillPageToken?: string } | null)?.lastBackfillPageToken ?? null,
+    ).toBe(null);
   });
 
   it("(e) empty + walkedPastSince (endOfPlaylist=false, no nextPageToken) → backfill_complete UNCHANGED, token cleared", async () => {
@@ -693,9 +680,9 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     // Critical: NOT marked complete. Channel may have older history past
     // the 30d window; next widen-target click must be able to deep-walk.
     expect(state!.backfillComplete).toBe(false);
-    expect((state!.metadata as { lastBackfillPageToken?: string } | null)?.lastBackfillPageToken ?? null).toBe(
-      null,
-    );
+    expect(
+      (state!.metadata as { lastBackfillPageToken?: string } | null)?.lastBackfillPageToken ?? null,
+    ).toBe(null);
   });
 
   it("(g) PATCH widen + boss.send fails → UPDATE rolled back, backfillTargetSince stays at OLD value (atomicity-of-intent, PR #31 P2)", async () => {
@@ -851,8 +838,8 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     expect(state).toBeDefined();
     expect(state!.backfillComplete).toBe(false);
     // Resume cursor survives so the next click continues the walk.
-    expect((state!.metadata as { lastBackfillPageToken?: string } | null)?.lastBackfillPageToken).toBe(
-      "RESUME_AT_PAGE_21",
-    );
+    expect(
+      (state!.metadata as { lastBackfillPageToken?: string } | null)?.lastBackfillPageToken,
+    ).toBe("RESUME_AT_PAGE_21");
   });
 });

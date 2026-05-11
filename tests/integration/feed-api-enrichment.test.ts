@@ -29,9 +29,8 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { youtubeVideos, youtubeVideoSnapshots } = await import(
-  "../../src/lib/sources/youtube/server/schema/index.js"
-);
+const { youtubeVideos, youtubeVideoSnapshots } =
+  await import("../../src/lib/sources/youtube/server/schema/index.js");
 const { createApp } = await import("../../src/lib/server/http/app.js");
 const { createSource } = await import("../../src/lib/server/services/data-sources.js");
 const { seedUserDirectly } = await import("./helpers.js");
@@ -152,8 +151,6 @@ describe("feed-api-enrichment — Phase 03.0.3 P2 (issue #29 Part 2)", () => {
     // default for stats is null (set by toEventDto); channelTitle is
     // optional and undefined when not enriched.
     expect(myRow!.stats === null || myRow!.stats === undefined).toBe(true);
-    expect(
-      myRow!.channelTitle === null || myRow!.channelTitle === undefined,
-    ).toBe(true);
+    expect(myRow!.channelTitle === null || myRow!.channelTitle === undefined).toBe(true);
   });
 });

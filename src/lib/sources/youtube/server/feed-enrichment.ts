@@ -56,10 +56,7 @@ export async function youtubeEnrichFeedDtos(
       })
       .from(youtubeVideoSnapshots)
       .where(inArray(youtubeVideoSnapshots.videoId, youtubeExternalIds))
-      .orderBy(
-        youtubeVideoSnapshots.videoId,
-        sql`${youtubeVideoSnapshots.polledAt} DESC`,
-      );
+      .orderBy(youtubeVideoSnapshots.videoId, sql`${youtubeVideoSnapshots.polledAt} DESC`);
     const latest = new Map<
       string,
       { viewCount: number; likeCount: number; commentCount: number; polledAt: Date }
