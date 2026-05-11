@@ -30,7 +30,7 @@
     "start": "node build/server.js"
   },
   "dependencies": {
-    "@hono/node-server": "1.19.14",
+    "@hono/node-server": "2.0.2",
     "@hono/zod-validator": "^0.7.0",
     "@inlang/paraglide-js": "2.16.1",
     "@sveltejs/adapter-node": "^5.2.0",
