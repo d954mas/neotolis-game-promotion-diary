@@ -35,7 +35,9 @@ import { sql } from "drizzle-orm";
 export const outbox = pgTable(
   "outbox",
   {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
     queue: text("queue").notNull(),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     options: jsonb("options").$type<Record<string, unknown>>().notNull().default({}),

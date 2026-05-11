@@ -154,10 +154,7 @@ export async function startOutboxForwarder(): Promise<() => Promise<void>> {
       });
       await client.query(`LISTEN "${NOTIFY_CHANNEL}"`);
       listenClient = client;
-      logger.info(
-        { channel: NOTIFY_CHANNEL },
-        "outbox-forwarder: LISTEN connection ready",
-      );
+      logger.info({ channel: NOTIFY_CHANNEL }, "outbox-forwarder: LISTEN connection ready");
     } catch (err) {
       logger.warn(
         { err: err instanceof Error ? err.message : String(err) },

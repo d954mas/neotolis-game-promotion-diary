@@ -834,9 +834,7 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     // pending → forwarded transition. boss.send is mocked at the
     // queue-client layer (see the top-of-file vi.mock); the forwarder
     // collects via the same mock that records into sentJobs.
-    const { drainOutboxOnce } = await import(
-      "../../src/worker/handlers/outbox-forwarder.js"
-    );
+    const { drainOutboxOnce } = await import("../../src/worker/handlers/outbox-forwarder.js");
 
     sentJobs.length = 0;
 
@@ -882,9 +880,7 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
   });
 
   it("(i) outbox forwarder retries on boss.send failure — row stays pending, attempt counter bumps", async () => {
-    const { drainOutboxOnce } = await import(
-      "../../src/worker/handlers/outbox-forwarder.js"
-    );
+    const { drainOutboxOnce } = await import("../../src/worker/handlers/outbox-forwarder.js");
 
     sentJobs.length = 0;
 

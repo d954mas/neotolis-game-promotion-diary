@@ -61,10 +61,7 @@ export async function handlePurgeDaily(job: { id: string; data: object }): Promi
       "purge-daily: outbox cleanup complete",
     );
   } catch (err) {
-    logger.error(
-      { jobId: job.id, err },
-      "purge-daily: outbox cleanup failed; continuing",
-    );
+    logger.error({ jobId: job.id, err }, "purge-daily: outbox cleanup failed; continuing");
   }
 
   logger.info(
