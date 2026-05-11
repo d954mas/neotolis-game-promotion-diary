@@ -580,3 +580,32 @@ Token-clear rule (incremental + exhausted branches): the persistent `lastBackfil
 Lazy widening: when the user widens `backfill_target_since` (e.g. 30d → epoch) via `PATCH /api/sources/:id`, the cross-source `updateSource` service does NOT eagerly reset channel state. The next refresh-content click sees `target < deepestWalked` and falls into the `deep` branch naturally. This avoids the multi-tenant fairness violation where one user's widening would re-open the walk for ALL subscribers on the channel (D-#29-7).
 
 Reference implementation: YouTube — `src/lib/sources/youtube/server/handlers/backfill-channel.ts` step 3 (the "Compute since" block). The `since_branch` discriminator is also written to the success/empty/error audit metadata for forensic queries — operator can run `SELECT metadata->>'since_branch', COUNT(*) FROM audit_log WHERE action='source.refresh_content_requested' GROUP BY 1` to see how often each branch fires on prod.
+
+## 11. Feed enrichment pattern
+
+*Established in Phase 03.0.3 P2 for YouTube; copy-the-pattern for Reddit / Twitter / Telegram / Discord adapters in Phase 03.1+.*
+
+Adapters that have per-event metadata worth showing on `FeedCard` (stats, channel/author chips, embedded media, etc.) implement the optional `enrichFeedDtos` method on `DataSourceAdapter`:
+
+```typescript
+interface DataSourceAdapter {
+  // ... other methods ...
+  enrichFeedDtos?(userId: string, dtos: EventDto[]): Promise<void>;
+}
+```
+
+Contract:
+  - The method MUST internally filter `dtos` to its own `kind` — callers do NOT pre-filter. Avoids the "did I forget to filter for adapter X?" footgun.
+  - The method MUTATES `dtos` in place; returns void.
+  - The method MUST swallow errors (log at WARN). A failed enrichment query MUST NOT break the feed render — the cards just render without the enrichment.
+  - The method MAY make multiple DB queries (YouTube makes 2: one for `youtube_video_snapshots` latest-per-videoId, one for `youtube_videos.channelTitle`). Batch by `IN (...)` over the externalIds extracted from filtered dtos.
+
+Three cross-source callsites iterate `allAdapters` and call this method:
+  - `src/routes/feed/+page.server.ts` — SSR for the primary `/feed` view
+  - `src/lib/server/http/routes/events.ts` — `GET /api/events` cursor pagination
+  - `src/routes/games/[gameId]/+page.server.ts` — per-game curated view
+
+Deliberate skip:
+  - `GET /api/events/deleted` (events.ts:374) does NOT call `enrichFeedDtos`. `DeletedEventsPanel.svelte` renders soft-deleted events with a compact KindIcon + strikethrough-title view — no stats line, no channel chip. The skip is documented inline with a load-bearing WHY comment at the call site.
+
+Reference implementation: YouTube — `src/lib/sources/youtube/server/feed-enrichment.ts`. The Phase 03.0.3 P2 commit replaced the inline JOIN in `/feed/+page.server.ts:162-237` with a single adapter loop that all three callsites share. Issue #29 Part 2 was the load-bearing motivation: pre-fix, the SSR first batch on `/feed` was enriched inline but `GET /api/events` cursor-paginated batches dropped both `stats` and `channelTitle` on every card past the first SSR batch.
