@@ -234,10 +234,19 @@ Plans:
 **Goal:** Bump remaining major-version deps that don't unblock 03.0.1 but accumulate as technical debt. Tracked in #23. Each major lands as its own dedicated PR per AGENTS.md "Locked stack versions" practice. In scope: ESLint 10 + plugins, TypeScript 6, pino 10, @hono/node-server 2, eslint-plugin-svelte 3 + svelte-eslint-parser 1.6, oauth2-mock-server 8, dotenv 17, pg-boss 12 (likely first, ahead of this phase). Out of scope: drizzle-orm / better-auth / pg load-bearing pins — separate dedicated PRs if/when bumped.
 **Requirements**: N/A (technical debt — no user-facing requirements)
 **Depends on:** Phase 03.0.1
-**Plans:** 11/11 plans complete
+**Plans:** 10 plans
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 03.0.2 to break down)
+- [ ] 03.0.2-01-PLAN.md — Bump @types/supertest 6→7 (Commit 1)
+- [ ] 03.0.2-02-PLAN.md — Bump oauth2-mock-server 7→8 (Commit 2)
+- [ ] 03.0.2-03-PLAN.md — Bump dotenv 16→17 + { quiet: true } in env.ts (Commit 3)
+- [ ] 03.0.2-04-PLAN.md — Bump ESLint core family to v10 (eslint + @eslint/js + eslint-config-prettier + globals) (Commit 4)
+- [ ] 03.0.2-05-PLAN.md — Bump eslint-plugin-svelte 2→3 + svelte-eslint-parser 0.43→1.6 (Commit 5)
+- [ ] 03.0.2-06-PLAN.md — Bump pino 9→10 + pino-pretty 11→13 (D-07 redact tripwire) (Commit 6)
+- [ ] 03.0.2-07-PLAN.md — Bump @hono/node-server 1→2 (Commit 7)
+- [ ] 03.0.2-08-PLAN.md — Bump typescript 5.6→6.0 (Commit 8)
+- [ ] 03.0.2-09-PLAN.md — Drizzle pair refresh — no major on latest (Path A) (Commit 9)
+- [ ] 03.0.2-10-PLAN.md — Bump better-auth 1.6.9→1.6.10 + open phase PR (Commit 10) (D-07 OAuth smoke)
 
 ### Phase 3.1: Reddit Adapter
 *DECIMAL SPLIT — scope split decided during /gsd:discuss-phase 03 on 2026-05-05.*
