@@ -189,8 +189,23 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
         ? newestKnown
         : target;
   const incrementalBranchTaken = branch !== "deep";
+  // Phase 03.0.3 follow-up (PR #31 Codex P1) — the resume cursor passed to
+  // pollContent MUST be undefined for incremental/exhausted branches.
+  // Pre-fix only the DB row was cleared (setChannelBackfillPageToken
+  // below); the in-memory channelState.metadata.lastBackfillPageToken
+  // still held the stale token from the prior deep walk, and the
+  // pollContent call below read from THAT in-memory copy — so the
+  // adapter started from page N+1 of the prior deep walk instead of
+  // page 1, missing the recent uploads the incremental walk was
+  // supposed to discover. Deep branch keeps the resume cursor so the
+  // walk continues from where MAX_PAGES cut it off.
+  const pageTokenForPoll: string | undefined = incrementalBranchTaken
+    ? undefined
+    : (channelState?.metadata as { lastBackfillPageToken?: string } | undefined)
+        ?.lastBackfillPageToken;
   if (incrementalBranchTaken) {
-    // D-#29-3 — clear stale resume cursor before incremental walk.
+    // D-#29-3 — clear stale resume cursor before incremental walk. Persisted
+    // here so a worker crash mid-walk doesn't leave a dangling token in DB.
     await setChannelBackfillPageToken(kind, channelKey, null);
   }
 
@@ -217,9 +232,7 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
         userId: triggerUserId ?? QUOTA_USER_BACKFILL,
         metadata: {
           channelId: channelKey,
-          lastBackfillPageToken: (
-            channelState?.metadata as { lastBackfillPageToken?: string } | undefined
-          )?.lastBackfillPageToken,
+          lastBackfillPageToken: pageTokenForPoll,
         },
       },
       since,
