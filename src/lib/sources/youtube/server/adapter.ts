@@ -41,6 +41,7 @@
 
 import { pickKeyForJob, youtubeQuotaUser } from "./quota.js";
 import { chargedFetch, fetchWithTimeout } from "./http.js";
+import { youtubeEnrichFeedDtos } from "./feed-enrichment.js";
 import { youtubeChannels } from "./schema/index.js";
 import { db as serverDb } from "$lib/server/db/client.js";
 import { eq as serverEq } from "drizzle-orm";
@@ -104,6 +105,7 @@ type YoutubeChannelAdapterCore = Pick<
   | "parseUrl"
   | "observability"
   | "canRefreshPoll"
+  | "enrichFeedDtos"
 >;
 
 // Plan 03.0-03's canonical pickKeyForJob + hashApiKeyId are imported above
@@ -542,4 +544,9 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
    *  (Plan 06). YouTube returns true for kind === "youtube_video"; Reddit
    *  (Phase 03.1) returns true for kind === "reddit_post". */
   canRefreshPoll: (eventKind: EventKind): boolean => eventKind === "youtube_video",
+  /** enrichFeedDtos — Phase 03.0.3 P2 (D-A1). Internal filter to
+   *  kind=youtube_video; mutates stats + channelTitle in place. The
+   *  barrel spreads this into the exported youtubeAdapter alongside the
+   *  rest of the Core surface. */
+  enrichFeedDtos: youtubeEnrichFeedDtos,
 };
