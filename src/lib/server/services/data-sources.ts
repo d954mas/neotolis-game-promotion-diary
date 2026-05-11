@@ -646,18 +646,35 @@ export async function updateSource(
       );
     }
     update.backfillTargetSince = patch.backfillTargetSince;
-    // Phase 03.0.3 — widening backfillTargetSince is handled LAZILY by
-    // the next refresh-content click's three-branch since-derivation
-    // (backfill-channel.ts), NOT by an eager channel-state reset here.
-    // After this UPDATE `target` becomes deeper than the channel's
-    // recorded `backfillOldestAt`, so the next walk lands in the `deep`
-    // branch: since=target, token preserved, walk resumes from the saved
-    // cursor or restarts. Pre-Phase-03.0.3 this path eagerly flipped
-    // backfill_complete=false at the channel level; that reset was
-    // redundant (the three-branch since-derivation covers the same
-    // ground) AND wrong (it re-opened the walk for ALL subscribers on
-    // the channel, not just the user who widened — multi-tenant
-    // fairness violation per D-#29-7).
+    // Phase 03.0.3 — widening backfillTargetSince is handled in TWO
+    // places, depending on whether the channel was previously walked
+    // to exhaustion:
+    //
+    //   1. If channel_state.backfill_complete === true AND newTarget
+    //      crosses past backfill_oldest_at: immediate force-deep job
+    //      enqueued for THIS user via maybeEnqueueForceDeepWalk below
+    //      (Phase 03.0.3-02 D-#29-acceptance). The user pays quota for
+    //      the deep walk; other subscribers free-ride on fan-out. The
+    //      enqueue runs BEFORE the UPDATE for atomicity-of-intent —
+    //      see the inline rationale block on the enqueue call itself.
+    //
+    //   2. Otherwise (channel still has unwalked history below the
+    //      previous target — backfill_complete=false): no enqueue
+    //      here. The next refresh-content click (or scheduler tick)
+    //      lands in the three-branch since-derivation in
+    //      backfill-channel.ts and picks the deep branch
+    //      automatically because target < deepest_walked. This is the
+    //      "lazy" path; the early refactor pass had it as the ONLY
+    //      path until D-#29-7 fairness review surfaced that the
+    //      exhausted-channel widen needed an explicit override.
+    //
+    // Pre-Phase-03.0.3 this path also eagerly flipped
+    // backfill_complete=false at the CHANNEL level; that reset was
+    // redundant (the three-branch since-derivation covers the
+    // never-walked case) AND wrong (it re-opened the walk for ALL
+    // subscribers on the channel, not just the user who widened —
+    // multi-tenant fairness violation per D-#29-7). Both behaviours
+    // above are per-user.
   }
 
   // Phase 03.0.3 follow-up (PR #31 review P2) — atomicity-of-intent.
