@@ -495,11 +495,17 @@ async function handleChannelContextBackfillImpl(job: {
   }
 
   if (collected.length === 0) {
+    // Phase 03.0.3 follow-up — do NOT early-return here. Pre-fix this
+    // returned and skipped the terminal state writes at the bottom of
+    // the function, so a brand-new or naturally-empty channel
+    // (no_more_pages on page 0 with zero items) stayed
+    // backfill_complete=false forever and cron re-walked it every day.
+    // The empty-aware guards below let the function fall through to
+    // markChannelBackfillComplete + audit row with events_inserted=0.
     logger.info(
       { jobId: job.id, channelId, window, stopReason },
       "channel-context-backfill: no videos in window",
     );
-    return;
   }
 
   const videoIds = collected.map((c) => c.videoId);
@@ -587,7 +593,14 @@ async function handleChannelContextBackfillImpl(job: {
   //    coverage (Tracking). For the ingest paste path (sourceId NOT provided)
   //    the event is already created by the ingest service, so we skip this
   //    block and only step 7 below refreshes its lastPolledAt timestamp.
-  if (sourceId) {
+  //
+  // Phase 03.0.3 follow-up — added `collected.length > 0` guard. The
+  // pre-insert SELECT below uses `${events.externalId} IN (...)` with
+  // `collected.map(c => sql`${c.videoId}`)`; if collected is empty,
+  // Drizzle emits `IN ()`, which is a Postgres syntax error. Now that
+  // the early-return on empty collected is gone, this branch needs to
+  // skip explicitly.
+  if (sourceId && collected.length > 0) {
     // Tenant-scoped lookup — Pattern 1. The job payload pairs sourceId
     // with userId; even though pg-boss won't deliver a malformed job,
     // the eq(userId) filter is the load-bearing guarantee that we never
