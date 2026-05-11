@@ -20,13 +20,13 @@ import { z } from "zod";
 // Test isolation: vitest sets NODE_ENV=test before module load. We skip
 // .env.local in that case so per-test withEnv() / withYoutubeKeys() helpers
 // can stub process.env without local-machine secrets bleeding through.
-loadDotenv();
+loadDotenv({ quiet: true });
 // dotenv probe BEFORE we parse env; this is the boot-time gate that
 // decides whether to layer .env.local (D-24). env.ts is the single
 // legitimate process.env reader, so the no-restricted-properties rule
 // does not apply here.
 if (process.env.NODE_ENV !== "test") {
-  loadDotenv({ path: ".env.local", override: true });
+  loadDotenv({ path: ".env.local", override: true, quiet: true });
 }
 
 const RawSchema = z.object({
