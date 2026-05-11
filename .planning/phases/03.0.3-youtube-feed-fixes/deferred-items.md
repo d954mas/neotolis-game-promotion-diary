@@ -53,3 +53,28 @@ some test fixture. Out of scope per AGENTS.md atomic-PR rule.
 **Recommended follow-up:** File a standalone GitHub issue
 "ingest-paste-then-poll: handlePollActive TypeError on writeSnapshot"
 with the `tests/integration` label.
+
+## .dev-oauth-mock.mjs — process.env reads outside config/env.ts (lint failure)
+
+**Found during:** Plan 03.0.3-02 end-of-plan `pnpm lint`.
+
+**Symptom:** `eslint .` fails on `.dev-oauth-mock.mjs` lines 9/10/11 with
+`'process.env' is restricted from being used. Read env via
+src/lib/server/config/env.ts (PITFALL P2 mitigation)`.
+
+**Root cause:** Pre-existing — `.dev-oauth-mock.mjs` is an untracked dev
+helper file (visible in `git status` at session start; not committed to
+master). The file uses `process.env` directly because it runs as a
+standalone Node script outside the SvelteKit/Hono runtime.
+
+**Scope decision:** NOT auto-fixed. The file is untracked and outside the
+plan's scope (Plan 03.0.3-02 touches feed-enrichment adapter wiring; the
+dev helper is unrelated). Options to resolve later:
+1. Add `.dev-*.mjs` / `.dev-*.ts` to `.eslintignore` (developer convention).
+2. Delete the file if it's an orphan from earlier dev work.
+3. Migrate the file to read env via `src/lib/server/config/env.ts` if it's
+   meant to ship.
+
+**Recommended follow-up:** Discuss with the operator (file is in their
+local working copy, not on master). Likely belongs in `.gitignore` /
+`.eslintignore` alongside the other `.dev-*.{ts,mjs}` developer scripts.

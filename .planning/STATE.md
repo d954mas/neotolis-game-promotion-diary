@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
-stopped_at: Completed 03.0.3-01-PLAN.md
-last_updated: "2026-05-11T13:43:18.729Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 03.0.3-02-PLAN.md
+last_updated: "2026-05-11T14:01:45.459Z"
 last_activity: 2026-05-11
 progress:
   total_phases: 13
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 105
-  completed_plans: 105
+  completed_plans: 106
 ---
 
 # Project State
@@ -145,6 +145,7 @@ Plan: 2 of 2
 | Phase 03.0.2 P08 | 25min | 1 tasks | 2 files |
 | Phase 03.0.2-dependency-refresh-inserted P09 | ~8min | 1 tasks | 2 files |
 | Phase 03.0.3 P01 | 45min | 6 tasks | 11 files |
+| Phase 03.0.3-youtube-feed-fixes P02 | ~15min | 6 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -427,6 +428,8 @@ Recent decisions affecting current work:
 - [Phase 03.0.2-dependency-refresh-inserted]: Plan 09: drizzle pair Path A landed — drizzle-orm 0.45.2 re-pin (audit-trail no-op, latest dist-tag still 0.45.2 at commit-time) + drizzle-kit ^0.31.0 -> ^0.31.10 caret patch bump. D-08 forward-only invariant verified via `pnpm db:check` no-diff; zero edits to merged migration files in drizzle/. CI run 25655923896 green on all 4 jobs (unit-integration exercised real drizzle queries against Postgres; smoke ran migration at boot under advisory lock). Trigger condition for follow-up phase: drizzle-orm@latest flips to 1.0.0 stable -> schedule Casing API refactor across src/lib/server/db/schema/*.ts + src/lib/sources/*/server/schema/*.ts.
 - [Phase 03.0.3]: Three-branch since-derivation (exhausted/incremental/deep) in YouTube channel walker drops refresh-content quota burn from ~110 units to <=8 units for admin all-history clicks (issue #29 Part 1)
 - [Phase 03.0.3]: newest-known cursor pattern (MAX(youtube_videos.published_at) by channel) - backdated-upload-safe replacement for last_polled_at; documented in SOURCE-REFERENCE.md S10 for Phase 03.1+ adapters
+- [Phase 03.0.3-youtube-feed-fixes]: Plan 02: enrichFeedDtos lives on DataSourceAdapter as optional method; type-only EventDto import preserves layering boundary; barrel spread propagates impl automatically (no explicit override needed).
+- [Phase 03.0.3-youtube-feed-fixes]: Plan 02: GET /api/events/deleted carries load-bearing WHY comment (deliberate skip — DeletedEventsPanel compact view); second of two such comments in Phase 03.0.3 alongside Plan 01's updateSource lazy-deep-walk reference.
 
 ### Pending Todos
 
@@ -469,8 +472,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-11T13:43:13.585Z
+Last session: 2026-05-11T14:01:45.455Z
 Last Activity: 2026-05-11
-Stopped at: Completed 03.0.3-01-PLAN.md
+Stopped at: Completed 03.0.3-02-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
