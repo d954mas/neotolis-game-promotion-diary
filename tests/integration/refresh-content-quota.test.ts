@@ -21,6 +21,10 @@ interface CapturedJob {
   options: Record<string, unknown>;
 }
 const sentJobs: CapturedJob[] = [];
+// Phase 03.0.3 follow-up (PR #31 review P2) — test (g) below toggles this
+// to simulate a transient pg-boss failure (queue table missing, network
+// blip) and assert the PATCH aborts without committing the UPDATE.
+let bossSendShouldThrow = false;
 
 vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -32,6 +36,9 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
         data: Record<string, unknown>,
         options: Record<string, unknown>,
       ) => {
+        if (bossSendShouldThrow) {
+          throw new Error("pg-boss: simulated transient failure");
+        }
         sentJobs.push({ queue, data, options });
         return `mock-job-${Math.random().toString(36).slice(2, 10)}`;
       },
@@ -118,6 +125,7 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     pollContentEndOfPlaylist = false;
     pollContentUnitsUsed = 1;
     pollContentNextPageToken = undefined;
+    bossSendShouldThrow = false;
   });
 
   it("(a) repeated click within 5min on a steady-state channel costs ≤1 page (not N/50 pages)", async () => {
@@ -688,6 +696,115 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     expect((state!.metadata as { lastBackfillPageToken?: string } | null)?.lastBackfillPageToken ?? null).toBe(
       null,
     );
+  });
+
+  it("(g) PATCH widen + boss.send fails → UPDATE rolled back, backfillTargetSince stays at OLD value (atomicity-of-intent, PR #31 P2)", async () => {
+    // Pre-fix the UPDATE ran BEFORE the force-deep enqueue. On boss.send
+    // failure, data_sources.backfill_target_since was committed but the
+    // force-deep job was lost — and the retry path was a no-op because
+    // maybeEnqueueForceDeepWalk's "newTarget >= previousTarget" early
+    // return short-circuited when the user re-PATCHed with the same
+    // (already-widened) value. Permanent silent loss of the deep-walk
+    // intent. PR #31 review P2.
+    //
+    // Post-fix the enqueue runs BEFORE the UPDATE: a throw from
+    // boss.send propagates up, the UPDATE never runs, the user sees a
+    // 5xx, retries, and on the retry the force-deep enqueue is
+    // attempted again — eventually succeeds. This test pins the
+    // happy-failure semantic.
+    const channelKey = newChannelKey();
+    await clearChannelFixture(channelKey);
+
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `quota-g-${uniq()}@test.local` });
+    const src = await createSource(
+      u.id,
+      {
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/channel/${channelKey}`,
+        isOwnedByMe: true,
+        autoImport: true,
+      },
+      "127.0.0.1",
+    );
+
+    const now = Date.now();
+    const thirtyDaysAgo = new Date(now - 30 * 86_400_000);
+    await db
+      .update(dataSources)
+      .set({ backfillTargetSince: thirtyDaysAgo })
+      .where(eq(dataSources.id, src.id));
+
+    // Seed channel state so maybeEnqueueForceDeepWalk's conditions hold
+    // (complete=true + oldest=30d-ago + newTarget=epoch < oldest).
+    await db
+      .insert(dataSourceChannelState)
+      .values({
+        kind: "youtube_channel",
+        channelKey,
+        backfillComplete: true,
+        backfillOldestAt: thirtyDaysAgo,
+      })
+      .onConflictDoUpdate({
+        target: [dataSourceChannelState.kind, dataSourceChannelState.channelKey],
+        set: {
+          backfillComplete: true,
+          backfillOldestAt: thirtyDaysAgo,
+          updatedAt: new Date(),
+        },
+      });
+
+    sentJobs.length = 0;
+    bossSendShouldThrow = true;
+
+    const patchRes = await app.request(`/api/sources/${src.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ backfillTargetSince: "1970-01-01T00:00:00.000Z" }),
+    });
+
+    // boss.send failure surfaces as a 5xx (internal_server_error or similar).
+    expect(patchRes.status).toBeGreaterThanOrEqual(500);
+    expect(patchRes.status).toBeLessThan(600);
+
+    // Critical assertion — UPDATE rolled back (never committed).
+    // backfillTargetSince must STILL be the pre-PATCH value.
+    const [reloaded] = await db
+      .select({ backfillTargetSince: dataSources.backfillTargetSince })
+      .from(dataSources)
+      .where(eq(dataSources.id, src.id));
+    expect(reloaded).toBeDefined();
+    expect(reloaded!.backfillTargetSince?.getTime()).toBe(thirtyDaysAgo.getTime());
+
+    // No job in queue (boss.send threw before capturing).
+    expect(sentJobs.filter((j) => j.queue === "youtube.backfill.channel")).toHaveLength(0);
+
+    // Retry path — disable the failure injection, retry the same PATCH.
+    bossSendShouldThrow = false;
+    const retry = await app.request(`/api/sources/${src.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ backfillTargetSince: "1970-01-01T00:00:00.000Z" }),
+    });
+    expect(retry.status).toBe(200);
+
+    // On retry, force-deep enqueue ran successfully.
+    const enqueues = sentJobs.filter((j) => j.queue === "youtube.backfill.channel");
+    expect(enqueues).toHaveLength(1);
+    expect(enqueues[0]!.data).toMatchObject({ forceDeep: true });
+
+    // And the UPDATE finally committed.
+    const [final] = await db
+      .select({ backfillTargetSince: dataSources.backfillTargetSince })
+      .from(dataSources)
+      .where(eq(dataSources.id, src.id));
+    expect(final!.backfillTargetSince?.getTime()).toBe(new Date(0).getTime());
   });
 
   it("(f) empty + MAX_PAGES (endOfPlaylist=false, nextPageToken defined) → backfill_complete UNCHANGED, token PRESERVED for resume", async () => {

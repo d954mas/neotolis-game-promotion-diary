@@ -660,6 +660,46 @@ export async function updateSource(
     // fairness violation per D-#29-7).
   }
 
+  // Phase 03.0.3 follow-up (PR #31 review P2) — atomicity-of-intent.
+  // The force-deep enqueue runs BEFORE the UPDATE so a transient
+  // boss.send failure aborts the PATCH cleanly (HTTP 500 → user
+  // retries → eventual success). Pre-fix order was UPDATE-then-enqueue;
+  // on enqueue failure that committed the widen but silently lost the
+  // force-deep job → user's intent to walk older history permanently
+  // broken with no recovery path (a re-PATCH with the same target is a
+  // no-op because previousTarget already equals the widened value).
+  //
+  // Source identity fields used here (existing.kind, existing.channelId)
+  // cannot change via PATCH — updateSource only mutates displayName /
+  // autoImport / isOwnedByMe / metadata / backfillTargetSince. Reading
+  // them off `existing` instead of the post-UPDATE `row` is safe.
+  //
+  // Failure modes after reversal:
+  //   - boss.send throws → maybeEnqueueForceDeepWalk re-throws → UPDATE
+  //     never runs → user sees 500 → retries → consistent recovery.
+  //   - UPDATE throws AFTER successful enqueue (extremely rare —
+  //     connection drop in the ms window) → job is in queue with the
+  //     new target, but data_sources still has the old target. The
+  //     subsequent walker run's fan-out (backfill-channel.ts:445)
+  //     filters per-subscriber by their STORED target_since → events
+  //     past the user's old target are skipped at INSERT. User's
+  //     PATCH retry succeeds, and a second deep walk (triggered by the
+  //     same maybeEnqueueForceDeepWalk check) fan-outs the older events
+  //     correctly. Cost: one wasted deep walk (~50 quota units), no
+  //     correctness regression, no silent loss.
+  if (
+    patch.backfillTargetSince !== undefined &&
+    existing.kind === "youtube_channel" &&
+    existing.channelId !== null
+  ) {
+    await maybeEnqueueForceDeepWalk({
+      channelKey: existing.channelId,
+      triggerUserId: userId,
+      previousTarget: existing.backfillTargetSince,
+      newTarget: patch.backfillTargetSince,
+    });
+  }
+
   const [row] = await db
     .update(dataSources)
     .set(update)
@@ -672,19 +712,6 @@ export async function updateSource(
     )
     .returning();
   if (!row) throw new NotFoundError();
-
-  if (
-    patch.backfillTargetSince !== undefined &&
-    row.kind === "youtube_channel" &&
-    row.channelId !== null
-  ) {
-    await maybeEnqueueForceDeepWalk({
-      channelKey: row.channelId,
-      triggerUserId: userId,
-      previousTarget: existing.backfillTargetSince,
-      newTarget: patch.backfillTargetSince,
-    });
-  }
 
   if (patch.autoImport !== undefined && patch.autoImport !== existing.autoImport) {
     await writeAudit({
