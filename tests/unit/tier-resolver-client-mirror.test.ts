@@ -42,6 +42,7 @@ type Tier = "pending" | "active" | "cold" | "frozen" | "unavailable";
 function mirrorResolveTier(
   publishedAt: Date | null,
   lastPollStatus: string | null,
+  lastPolledAt: Date | null,
   now: Date,
 ): Tier {
   if (publishedAt === null) return "pending";
@@ -51,6 +52,8 @@ function mirrorResolveTier(
   const ageMs = now.getTime() - publishedAt.getTime();
   if (ageMs < MIRROR_TIER_BOUNDARY_ACTIVE_MS) return "active";
   if (ageMs < MIRROR_TIER_BOUNDARY_COLD_MS) return "cold";
+  // Phase 03.0.3 follow-up — bootstrap rule mirror.
+  if (lastPolledAt === null) return "cold";
   return "frozen";
 }
 
@@ -75,29 +78,35 @@ describe("tier-resolver client mirror — boundary constants", () => {
 
 describe("tier-resolver client mirror — identical results across battery", () => {
   // Boundary battery — every literal from tests/unit/tier-resolver.test.ts.
-  const battery: Array<[string, Date | null, string | null]> = [
-    ["pending: publishedAt=null", null, null],
-    ["pending: publishedAt=null + status='ok' still pending", null, "ok"],
-    ["pending: publishedAt=null + status='not_found' still pending", null, "not_found"],
-    ["active boundary low (0ms ago)", ago(0), null],
-    ["active boundary high (23h59m59s999ms ago)", ago(86_399_999), null],
-    ["cold boundary low (24h ago)", ago(86_400_000), null],
-    ["cold boundary low+1m (24h1m ago)", ago(86_400_000 + 60_000), null],
-    ["cold boundary high (27d23h59m59s999ms ago)", ago(27 * 86_400_000 + 86_399_999), null],
-    ["frozen boundary (28d ago)", ago(28 * 86_400_000), null],
-    ["frozen boundary +1m (28d1m ago)", ago(28 * 86_400_000 + 60_000), null],
-    ["override not_found", ago(1000), "not_found"],
-    ["override private", ago(1000), "private"],
-    ["override auth_error", ago(1000), "auth_error"],
-    ["override not_found at 28d", ago(28 * 86_400_000), "not_found"],
-    ["non-override 'ok' at active", ago(1000), "ok"],
-    ["non-override 'timeout' at cold", ago(2 * 86_400_000), "timeout"],
-    ["non-override 'ok' at frozen", ago(30 * 86_400_000), "ok"],
+  // lastPolledAt fixed to NOW unless the case specifically exercises the
+  // bootstrap rule (frozen + lastPolledAt=null → cold).
+  const battery: Array<[string, Date | null, string | null, Date | null]> = [
+    ["pending: publishedAt=null", null, null, null],
+    ["pending: publishedAt=null + status='ok' still pending", null, "ok", null],
+    ["pending: publishedAt=null + status='not_found' still pending", null, "not_found", null],
+    ["active boundary low (0ms ago)", ago(0), null, NOW],
+    ["active boundary high (23h59m59s999ms ago)", ago(86_399_999), null, NOW],
+    ["cold boundary low (24h ago)", ago(86_400_000), null, NOW],
+    ["cold boundary low+1m (24h1m ago)", ago(86_400_000 + 60_000), null, NOW],
+    ["cold boundary high (27d23h59m59s999ms ago)", ago(27 * 86_400_000 + 86_399_999), null, NOW],
+    ["frozen boundary (28d ago)", ago(28 * 86_400_000), null, NOW],
+    ["frozen boundary +1m (28d1m ago)", ago(28 * 86_400_000 + 60_000), null, NOW],
+    ["override not_found", ago(1000), "not_found", NOW],
+    ["override private", ago(1000), "private", NOW],
+    ["override auth_error", ago(1000), "auth_error", NOW],
+    ["override not_found at 28d", ago(28 * 86_400_000), "not_found", NOW],
+    ["non-override 'ok' at active", ago(1000), "ok", NOW],
+    ["non-override 'timeout' at cold", ago(2 * 86_400_000), "timeout", NOW],
+    ["non-override 'ok' at frozen", ago(30 * 86_400_000), "ok", NOW],
+    // Phase 03.0.3 bootstrap rule — mirror must agree.
+    ["bootstrap: frozen-by-age + never polled → cold", ago(30 * 86_400_000), null, null],
+    ["bootstrap dormant: frozen-by-age + polled → frozen", ago(30 * 86_400_000), null, ago(1000)],
+    ["bootstrap: override wins (frozen + never + not_found)", ago(30 * 86_400_000), "not_found", null],
   ];
 
-  test.each(battery)("%s → mirror === canonical", (_label, published, status) => {
-    const canonical = canonicalResolveTier(published, status, NOW);
-    const mirror = mirrorResolveTier(published, status, NOW);
+  test.each(battery)("%s → mirror === canonical", (_label, published, status, polledAt) => {
+    const canonical = canonicalResolveTier(published, status, polledAt, NOW);
+    const mirror = mirrorResolveTier(published, status, polledAt, NOW);
     expect(mirror).toBe(canonical);
   });
 });

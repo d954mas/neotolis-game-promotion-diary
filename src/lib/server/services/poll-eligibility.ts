@@ -50,6 +50,9 @@ import { resolveTier } from "./tier-resolver.js";
  *
  * Returns the de-duplicated list of external_ids whose:
  *   - youtube_videos.published_at falls in the (cutoffOldest, cutoffNewest] window
+ *     OR (Phase 03.0.3 bootstrap rule) the video is older than the window
+ *     AND last_polled_at IS NULL — the never-polled bootstrap path that gives
+ *     each frozen-by-age video exactly one cron-driven shot at writeSnapshot.
  *   - youtube_videos.last_poll_status is NOT in the unavailable override list
  *     (the JS-side resolveTier check applies it)
  *   - at least one alive (deleted_at IS NULL) event references the video
@@ -68,12 +71,22 @@ export async function selectEligibleVideoIds(
   expectedTier: "active" | "cold",
   now: Date,
 ): Promise<string[]> {
+  // Phase 03.0.3 follow-up — the SQL window widens for tier=cold to include
+  // never-polled frozen videos (last_polled_at IS NULL AND published_at <=
+  // cutoffOldest). The JS-side resolveTier() collapses them to 'cold' via
+  // the bootstrap rule, so they get picked up by the cold-tier worker
+  // exactly once. tier=active stays untouched — active is age-only and
+  // never crosses the frozen boundary by definition.
+  const bootstrapClause =
+    expectedTier === "cold" ? sql`OR (${youtubeVideos.lastPolledAt} IS NULL)` : sql``;
+
   // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- scheduler fan-out is service-wide by design (Plan 03.0-09 §"scheduler tick" — one cron tick batches eligible videos across ALL tenants into POLL_ACTIVE/COLD jobs). Per-video writeSnapshot downstream is public-data; tenant scope does not apply.
   const rows = await db
     .selectDistinct({
       videoId: youtubeVideos.videoId,
       publishedAt: youtubeVideos.publishedAt,
       lastPollStatus: youtubeVideos.lastPollStatus,
+      lastPolledAt: youtubeVideos.lastPolledAt,
     })
     .from(events)
     .innerJoin(youtubeVideos, eq(events.externalId, youtubeVideos.videoId))
@@ -84,13 +97,15 @@ export async function selectEligibleVideoIds(
         isNull(events.deletedAt),
         isNotNull(youtubeVideos.publishedAt),
         cutoffNewest ? lte(youtubeVideos.publishedAt, cutoffNewest) : sql`true`,
-        gt(youtubeVideos.publishedAt, cutoffOldest),
+        sql`(${gt(youtubeVideos.publishedAt, cutoffOldest)} ${bootstrapClause})`,
       ),
     );
 
   // Authoritative tier classification on the JS side. SQL window is a
   // superset (it does not know about UNAVAILABLE_POLL_STATUSES override).
   return rows
-    .filter((r) => resolveTier(r.publishedAt, r.lastPollStatus, now) === expectedTier)
+    .filter(
+      (r) => resolveTier(r.publishedAt, r.lastPollStatus, r.lastPolledAt, now) === expectedTier,
+    )
     .map((r) => r.videoId);
 }
