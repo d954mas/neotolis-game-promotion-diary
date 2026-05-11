@@ -54,6 +54,7 @@ import {
   setChannelBackfillPageToken,
 } from "$lib/server/services/channel-state.js";
 import { youtubeChannelAdapterCore as adapter } from "../adapter.js";
+import { getNewestKnownPublishedAt } from "../newest-known.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import type { SourceKind } from "$lib/sources/adapter.js";
 
@@ -125,20 +126,55 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
   // 2. Resolve channel state (auto-create on first walk via mark*/set* helpers).
   const channelState = await getChannelState(kind, channelKey);
 
-  // 3. Compute since.
-  // Worker passes `since` as a stop boundary; adapter resumes from
-  // channel.metadata.lastBackfillPageToken if set (cursor-driven), else
-  // starts page 1. Walk continues until:
-  //   - items older than `since` encountered (walkedPastSince)
-  //   - endOfPlaylist
-  //   - MAX_PAGES reached (cursor saved for next walk)
-  const since = new Date(job.data.depthBoundIso);
-  if (Number.isNaN(since.getTime())) {
+  // 3. Compute since — three-branch derivation (Phase 03.0.3 P1; D-#29-2).
+  //
+  // The walker historically used `since = depthBoundIso` unconditionally;
+  // that re-walks the full uploads playlist on every click when the user's
+  // target is epoch (~110 quota units across 8 channels with zero new
+  // videos). The branch logic gates the walk depth using the channel's
+  // newest-known publishedAt cursor + the channel's prior walk frontier.
+  //
+  // Branches (D-#29-2 — applies identically to ctx.origin user AND cron):
+  //   - exhausted   (backfill_complete=true)
+  //                 since = max(newestKnown, target)  — steady state
+  //   - incremental (!complete && deepestWalked !== null && target >= deepestWalked)
+  //                 since = max(newestKnown, target)  — partial walk, target shallower
+  //   - deep        (else)
+  //                 since = target                    — no prior walk OR target deeper
+  //
+  // Token clearing rule (D-#29-3): exhausted + incremental branches CLEAR
+  // metadata.lastBackfillPageToken before adapter.pollContent. Deep branch
+  // preserves it (resume cursor for >MAX_PAGES walks). Without this clear,
+  // a stale page-N cursor from a prior deep walk would cause walkedPastSince
+  // to fire immediately on the incremental click with zero events.
+  const target = new Date(job.data.depthBoundIso);
+  if (Number.isNaN(target.getTime())) {
     logger.warn(
       { jobId: job.id, depthBoundIso: job.data.depthBoundIso },
       "youtube.backfill.channel: invalid depthBoundIso; skipping",
     );
     return;
+  }
+  const newestKnown = await getNewestKnownPublishedAt(channelKey);
+  const deepestWalked = channelState?.backfillOldestAt ?? null;
+  let branch: "exhausted" | "incremental" | "deep";
+  if (channelState?.backfillComplete === true) {
+    branch = "exhausted";
+  } else if (deepestWalked !== null && target.getTime() >= deepestWalked.getTime()) {
+    branch = "incremental";
+  } else {
+    branch = "deep";
+  }
+  const since =
+    branch === "deep"
+      ? target
+      : newestKnown !== null && newestKnown.getTime() > target.getTime()
+        ? newestKnown
+        : target;
+  const incrementalBranchTaken = branch !== "deep";
+  if (incrementalBranchTaken) {
+    // D-#29-3 — clear stale resume cursor before incremental walk.
+    await setChannelBackfillPageToken(kind, channelKey, null);
   }
 
   // 4. Build PollableSource shape for adapter (legacy name; semantically a
@@ -200,6 +236,7 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
         triggerUserId,
         requestsUsed: 0,
         eventsInserted: 0,
+        sinceBranch: branch,
       });
     }
     logger.warn(
@@ -234,6 +271,7 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
         triggerUserId,
         requestsUsed: pollResult.unitsUsed,
         eventsInserted: 0,
+        sinceBranch: branch,
       });
     }
     logger.info(
@@ -413,6 +451,7 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
       triggerUserId,
       requestsUsed: pollResult.unitsUsed,
       eventsInserted: userInserted,
+      sinceBranch: branch,
     });
   }
 
@@ -441,6 +480,11 @@ async function writeBackfillAudit(args: {
   triggerUserId: string;
   requestsUsed: number;
   eventsInserted: number;
+  // Phase 03.0.3 P1 — forensics discriminator for the three-branch
+  // since-derivation. Operator can run `SELECT metadata->>'since_branch',
+  // COUNT(*) FROM audit_log WHERE action='source.refresh_content_requested'
+  // GROUP BY 1` to verify the quota-burn invariant on prod (D-#29-2).
+  sinceBranch: "exhausted" | "incremental" | "deep";
 }): Promise<void> {
   // STRICT — cap counter sums requests_used + events_inserted from this row;
   // a swallowed insert silently undercounts user usage.
@@ -457,6 +501,7 @@ async function writeBackfillAudit(args: {
       job_id: args.job.id ?? null,
       requests_used: args.requestsUsed,
       events_inserted: args.eventsInserted,
+      since_branch: args.sinceBranch,
     },
   });
 }
