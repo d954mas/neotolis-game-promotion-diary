@@ -79,6 +79,7 @@ import { requestRefreshPoll } from "../../services/refresh-poll.js";
 import { AppError } from "../../services/errors.js";
 import { parseIngestUrl } from "../../services/url-parser.js";
 import type { EventKind } from "$lib/sources/adapter.js";
+import { allAdapters } from "$lib/sources/registry.js";
 import { toEventDto, loadGameIdsForEvent, mapEventsToDtos } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
@@ -328,6 +329,15 @@ eventsRoutes.get(
       // lookup. Two queries total: one for events (page.rows above),
       // one for the junction (mapEventsToDtos).
       const dtos = await mapEventsToDtos(c.var.userId, page.rows);
+      // Phase 03.0.3 P2 — adapter-driven feed enrichment. Same loop as the
+      // /feed SSR loader; closes issue #29 Part 2 (cursor-paginated batches
+      // pre-fix dropped stats + channelTitle on every card past the first
+      // SSR batch).
+      for (const adapter of allAdapters) {
+        if (adapter.enrichFeedDtos) {
+          await adapter.enrichFeedDtos(c.var.userId, dtos);
+        }
+      }
       return c.json({
         rows: dtos,
         nextCursor: page.nextCursor,
@@ -380,6 +390,13 @@ eventsRoutes.get("/events/deleted", async (c) => {
     // column by Plan 02.1-27 design), so the DTO will surface the gameIds
     // they were attached to at delete time.
     const dtos = await mapEventsToDtos(c.var.userId, rows);
+    // Phase 03.0.3 P2 — deliberately NOT calling adapter.enrichFeedDtos
+    // here. DeletedEventsPanel.svelte (`src/lib/components/DeletedEventsPanel.svelte`)
+    // renders soft-deleted events with a compact KindIcon + strikethrough-
+    // title view — no stats line, no channel chip. Running the enrichment
+    // query would be wasted I/O. If a future redesign of DeletedEventsPanel
+    // adds the stats/channel chips back, add the same `for-of allAdapters`
+    // loop the GET /api/events handler uses (see ~25 lines up).
     return c.json({ rows: dtos });
   } catch (err) {
     return mapErr(c, err, "GET /api/events/deleted");

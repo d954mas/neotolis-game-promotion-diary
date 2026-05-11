@@ -10,6 +10,7 @@ import {
   mapEventsToDtos,
   toDataSourceDto,
 } from "$lib/server/dto.js";
+import { allAdapters } from "$lib/sources/registry.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
 
 /**
@@ -72,6 +73,13 @@ export const load: PageServerLoad = async ({ locals, params }) => {
   // via the batch junction loader. Multi-game events surface their full
   // attachment set; the rendering page can show "also attached to X, Y".
   const eventDtos = await mapEventsToDtos(userId, events);
+  // Phase 03.0.3 P2 — adapter-driven feed enrichment for the per-game
+  // curated view. Same loop as /feed SSR + GET /api/events.
+  for (const adapter of allAdapters) {
+    if (adapter.enrichFeedDtos) {
+      await adapter.enrichFeedDtos(userId, eventDtos);
+    }
+  }
 
   return {
     game: toGameDto(game),
