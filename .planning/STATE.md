@@ -3,11 +3,11 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to plan
-stopped_at: "Completed 03.0.2-09-PLAN.md (drizzle pair refresh, Path A: drizzle-orm 0.45.2 re-pin + drizzle-kit ^0.31.10 caret bump, D-08 no-diff); CI green run 25655923896"
-last_updated: "2026-05-11T07:57:51.800Z"
+stopped_at: Phase 03.0.3 context gathered
+last_updated: "2026-05-11T10:54:16.505Z"
 last_activity: 2026-05-11
 progress:
-  total_phases: 12
+  total_phases: 13
   completed_phases: 7
   total_plans: 103
   completed_plans: 104
@@ -151,6 +151,7 @@ Plan: Not started
 
 - Phase 02.2 inserted after Phase 02 (chronologically after 02.1): ship-to-prod (URGENT) — pre-Phase-3 deploy work so user can dogfood the SaaS before polling pipeline lands
 - Phase 03.0.1 inserted after Phase 03.0 (2026-05-08): source plugin architecture — restructure YouTube-prefixed code into `src/lib/server/sources/youtube/` plugin folder + widen DataSourceAdapter contract (registry dispatch, AdapterContext + AdapterCredentials union) so future sources (Reddit/Twitter/Telegram/Discord) drop in as new sub-folders without editing cross-source plumbing. Prerequisite for Phase 3.1 (Reddit Adapter) — without 03.0.1, adding Reddit requires editing 4 worker handlers and copy-pasting the YouTube plumbing pattern. Also ships generic `POST /api/sources/:id/refresh-content` endpoint and SOURCE-REFERENCE.md "how to add a new source" guide.
+- Phase 03.0.3 inserted after Phase 03.0.2 (2026-05-11): YouTube Feed Fixes (URGENT) — fixes two pre-existing gaps discovered during 03.0.2 manual testing: (1) refresh-content burns per-user quota by walking full playlist on every click when `backfill_target_since` is epoch (incremental flow is labelled but not implemented at the walker level — `since=backfillTargetSince` always); (2) `GET /api/events` cursor pagination skips the snapshot+channelTitle enrichment that `/feed/+page.server.ts` does inline at SSR. Both tracked in #29. Branch: `feat/phase-03.0.3-youtube-feed-fixes`. No schema migration — reuses existing `data_source_channel_state` columns; adds `getNewestKnownPublishedAt(kind, channelKey)` helper + `enrichFeedDtos(userId, dtos)` helper.
 
 ### Decisions
 
@@ -465,8 +466,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-11T12:21:00.000Z
+Last session: 2026-05-11T10:54:16.501Z
 Last Activity: 2026-05-11
-Stopped at: Completed 03.0.2-09-PLAN.md (drizzle pair refresh, Path A: drizzle-orm 0.45.2 re-pin + drizzle-kit ^0.31.10 caret bump, D-08 no-diff); CI green run 25655923896
-Resume file: None
+Stopped at: Phase 03.0.3 context gathered
+Resume file: .planning/phases/03.0.3-youtube-feed-fixes/03.0.3-CONTEXT.md
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md
