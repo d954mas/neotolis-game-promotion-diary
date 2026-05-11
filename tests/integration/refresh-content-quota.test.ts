@@ -54,6 +54,10 @@ const pollContentCalls: { since: Date }[] = [];
 let pollContentResults: RawEventStub[] = [];
 let pollContentEndOfPlaylist = false;
 let pollContentUnitsUsed = 1;
+// Phase 03.0.3 follow-up — tests (d)/(e)/(f) below toggle this to simulate
+// the three distinct empty-result shapes the walker can produce
+// (MAX_PAGES, walkedPastSince, endOfPlaylist).
+let pollContentNextPageToken: string | undefined = undefined;
 
 vi.mock("../../src/lib/sources/youtube/server/adapter.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -68,6 +72,7 @@ vi.mock("../../src/lib/sources/youtube/server/adapter.js", async (importOriginal
           events: pollContentResults.slice(),
           unitsUsed: pollContentUnitsUsed,
           endOfPlaylist: pollContentEndOfPlaylist,
+          nextPageToken: pollContentNextPageToken,
         };
       },
     },
@@ -112,6 +117,7 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     pollContentResults = [];
     pollContentEndOfPlaylist = false;
     pollContentUnitsUsed = 1;
+    pollContentNextPageToken = undefined;
   });
 
   it("(a) repeated click within 5min on a steady-state channel costs ≤1 page (not N/50 pages)", async () => {
@@ -575,5 +581,161 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
 
     const enqueues = sentJobs.filter((j) => j.queue === "youtube.backfill.channel");
     expect(enqueues).toHaveLength(0);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Phase 03.0.3 follow-up (external code review P1 #2) — empty-result
+  // state transitions. Pre-fix, ANY empty result with unitsUsed > 0
+  // marked the channel backfill_complete=true, conflating three distinct
+  // shapes the walker can produce. Tests (d)/(e)/(f) below pin all three.
+  // ─────────────────────────────────────────────────────────────────────
+
+  it("(d) empty + endOfPlaylist=true → backfill_complete=true, token cleared (genuine exhaustion)", async () => {
+    const channelKey = newChannelKey();
+    await clearChannelFixture(channelKey);
+
+    const u = await seedUserDirectly({ email: `quota-d-${uniq()}@test.local` });
+    const src = await createSource(
+      u.id,
+      {
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/channel/${channelKey}`,
+        isOwnedByMe: true,
+        autoImport: true,
+      },
+      "127.0.0.1",
+    );
+    await db
+      .update(dataSources)
+      .set({ backfillTargetSince: new Date(0) })
+      .where(eq(dataSources.id, src.id));
+
+    // No prior state — first walk ever. Branch resolves to "deep"
+    // (deepestWalked === null && !backfillComplete).
+    pollContentResults = [];
+    pollContentUnitsUsed = 1;
+    pollContentEndOfPlaylist = true;
+    pollContentNextPageToken = undefined;
+
+    await handleBackfillChannel({
+      id: "mock-job-quota-d",
+      data: {
+        kind: "youtube_channel",
+        channelKey,
+        triggerUserId: u.id,
+        depthBoundIso: new Date(0).toISOString(),
+        flow: "incremental",
+      },
+    });
+
+    const state = await getChannelState("youtube_channel", channelKey);
+    expect(state).toBeDefined();
+    expect(state!.backfillComplete).toBe(true);
+    expect((state!.metadata as { lastBackfillPageToken?: string } | null)?.lastBackfillPageToken ?? null).toBe(
+      null,
+    );
+  });
+
+  it("(e) empty + walkedPastSince (endOfPlaylist=false, no nextPageToken) → backfill_complete UNCHANGED, token cleared", async () => {
+    // Pre-fix bug: a deep walk on a channel with no uploads in the
+    // requested 30d window would mark the channel complete=true after
+    // a single empty page, and auto-backfill would never revisit even
+    // when the user later widened the target. Test pins the fix: empty
+    // result with walkedPastSince does NOT set the complete flag.
+    const channelKey = newChannelKey();
+    await clearChannelFixture(channelKey);
+
+    const u = await seedUserDirectly({ email: `quota-e-${uniq()}@test.local` });
+    const src = await createSource(
+      u.id,
+      {
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/channel/${channelKey}`,
+        isOwnedByMe: true,
+        autoImport: true,
+      },
+      "127.0.0.1",
+    );
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
+    await db
+      .update(dataSources)
+      .set({ backfillTargetSince: thirtyDaysAgo })
+      .where(eq(dataSources.id, src.id));
+
+    // No prior state — but explicitly NOT exhausted. Walker mock returns
+    // empty + endOfPlaylist=false + no nextPageToken = walkedPastSince.
+    pollContentResults = [];
+    pollContentUnitsUsed = 1;
+    pollContentEndOfPlaylist = false;
+    pollContentNextPageToken = undefined;
+
+    await handleBackfillChannel({
+      id: "mock-job-quota-e",
+      data: {
+        kind: "youtube_channel",
+        channelKey,
+        triggerUserId: u.id,
+        depthBoundIso: thirtyDaysAgo.toISOString(),
+        flow: "incremental",
+      },
+    });
+
+    const state = await getChannelState("youtube_channel", channelKey);
+    expect(state).toBeDefined();
+    // Critical: NOT marked complete. Channel may have older history past
+    // the 30d window; next widen-target click must be able to deep-walk.
+    expect(state!.backfillComplete).toBe(false);
+    expect((state!.metadata as { lastBackfillPageToken?: string } | null)?.lastBackfillPageToken ?? null).toBe(
+      null,
+    );
+  });
+
+  it("(f) empty + MAX_PAGES (endOfPlaylist=false, nextPageToken defined) → backfill_complete UNCHANGED, token PRESERVED for resume", async () => {
+    // Walker hit the 20-page hard cap with zero new items collected
+    // (e.g. cache is fully populated for these 20 pages in overlap
+    // mode, but the channel has more history below). Resume cursor
+    // must survive so the next walk picks up from page 21.
+    const channelKey = newChannelKey();
+    await clearChannelFixture(channelKey);
+
+    const u = await seedUserDirectly({ email: `quota-f-${uniq()}@test.local` });
+    const src = await createSource(
+      u.id,
+      {
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/channel/${channelKey}`,
+        isOwnedByMe: true,
+        autoImport: true,
+      },
+      "127.0.0.1",
+    );
+    await db
+      .update(dataSources)
+      .set({ backfillTargetSince: new Date(0) })
+      .where(eq(dataSources.id, src.id));
+
+    pollContentResults = [];
+    pollContentUnitsUsed = 20;
+    pollContentEndOfPlaylist = false;
+    pollContentNextPageToken = "RESUME_AT_PAGE_21";
+
+    await handleBackfillChannel({
+      id: "mock-job-quota-f",
+      data: {
+        kind: "youtube_channel",
+        channelKey,
+        triggerUserId: u.id,
+        depthBoundIso: new Date(0).toISOString(),
+        flow: "incremental",
+      },
+    });
+
+    const state = await getChannelState("youtube_channel", channelKey);
+    expect(state).toBeDefined();
+    expect(state!.backfillComplete).toBe(false);
+    // Resume cursor survives so the next click continues the walk.
+    expect((state!.metadata as { lastBackfillPageToken?: string } | null)?.lastBackfillPageToken).toBe(
+      "RESUME_AT_PAGE_21",
+    );
   });
 });

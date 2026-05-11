@@ -278,14 +278,44 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
     return;
   }
 
-  // 5. Empty result handling. Empty + unitsUsed > 0 = platform confirmed
-  //    no items (end of playlist OR walked past since on first page).
-  //    Mark complete only when at least one HTTP call landed — empty + 0
-  //    means precondition missing (no API key / unresolvable playlist).
+  // 5. Empty result handling. The walker returns events.length === 0 in
+  //    three distinct shapes; conflating them (the pre-fix behaviour
+  //    marked complete for ALL of them) silently closes channels whose
+  //    deeper history is not yet covered, and auto-backfill never
+  //    revisits them. Disambiguate by the flags adapter.pollContent
+  //    threads back:
+  //
+  //    | endOfPlaylist | nextPageToken    | meaning                  | state |
+  //    |---------------|------------------|--------------------------|-------|
+  //    | true          | undefined        | playlist exhausted       | complete=true, token=null  |
+  //    | false         | undefined        | walkedPastSince at depth | complete=unchanged, token=null  |
+  //    | false         | defined          | MAX_PAGES interrupted    | complete=unchanged, token=preserved  |
+  //
+  //    The "walkedPastSince" branch is the one Phase 03.0.3 cared about:
+  //    a deep walk with since=30d-ago whose page 1 is all older than
+  //    30d-ago means "the channel has no uploads in the last 30 days",
+  //    NOT "the channel is fully exhausted across all history".
+  //    Auto-backfill needs the unchanged complete flag to revisit when
+  //    target widens.
+  //
+  //    Empty + unitsUsed === 0 means the precondition failed (no API
+  //    key / unresolvable playlist) — preserve all state and just stamp
+  //    last_polled_at so the operator can still see the click in audit.
   if (pollResult.events.length === 0) {
     if (pollResult.unitsUsed > 0) {
-      await markChannelBackfillComplete(kind, channelKey);
-      await setChannelBackfillPageToken(kind, channelKey, null);
+      if (pollResult.endOfPlaylist) {
+        await markChannelBackfillComplete(kind, channelKey);
+        await setChannelBackfillPageToken(kind, channelKey, null);
+      } else if (pollResult.nextPageToken) {
+        // MAX_PAGES with token returned — preserve cursor for resume.
+        await setChannelBackfillPageToken(kind, channelKey, pollResult.nextPageToken);
+      } else {
+        // walkedPastSince (window-bounded walk, depth target hit but
+        // channel may have more older history). Clear cursor (we
+        // deliberately stopped, not interrupted) but leave complete flag
+        // unchanged so the next widened-target click can deep-walk again.
+        await setChannelBackfillPageToken(kind, channelKey, null);
+      }
     }
     await markChannelLastPolledAt(kind, channelKey);
     if (triggerUserId) {
