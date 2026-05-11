@@ -13,7 +13,7 @@
 // end-to-end-catch-up.test.ts.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 interface CapturedJob {
   queue: string;
@@ -452,11 +452,26 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     expect(stateAfterPatch!.backfillComplete).toBe(true);
 
     // The PATCH path detected widening past deepestWalked + complete=true
-    // → enqueued a force-deep job for THIS user.
-    const enqueues = sentJobs.filter((j) => j.queue === "youtube.backfill.channel");
-    expect(enqueues).toHaveLength(1);
-    const job = enqueues[0]!;
-    expect(job.data).toMatchObject({
+    // → wrote a force-deep intent to the outbox table (PR #31 Codex P2
+    // refactor — atomic with the data_sources UPDATE). The forwarder
+    // would translate this into boss.send asynchronously, but that
+    // half is exercised in test (h). Here we only assert the intent
+    // landed correctly.
+    const outboxRows = await db.execute(sql`
+      SELECT queue, payload, options
+      FROM outbox
+      WHERE queue = 'youtube.backfill.channel'
+        AND payload->>'channelKey' = ${channelKey}
+        AND payload->>'triggerUserId' = ${u.id}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+    expect(outboxRows.rows.length).toBe(1);
+    const outboxRow = outboxRows.rows[0] as {
+      payload: Record<string, unknown>;
+      options: Record<string, unknown>;
+    };
+    expect(outboxRow.payload).toMatchObject({
       kind: "youtube_channel",
       channelKey,
       triggerUserId: u.id,
@@ -464,9 +479,14 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
       flow: "historical",
       forceDeep: true,
     });
-    expect((job.options as { singletonKey?: string }).singletonKey).toBe(
-      `force-deep-${channelKey}-${u.id}`,
-    );
+    expect(outboxRow.options).toMatchObject({
+      singletonKey: `force-deep-${channelKey}-${u.id}`,
+    });
+
+    // Reconstruct the would-be pg-boss job data shape for the next
+    // half: pass it directly into handleBackfillChannel so we don't
+    // depend on the forwarder running.
+    const jobData = outboxRow.payload as Parameters<typeof handleBackfillChannel>[0]["data"];
 
     // Half 2 — invoke the handler with the captured job. Seed a historical
     // event so the success path runs (the historical-flow upgrade lives in
@@ -486,7 +506,7 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
 
     await handleBackfillChannel({
       id: "mock-job-quota-c",
-      data: job.data as Parameters<typeof handleBackfillChannel>[0]["data"],
+      data: jobData,
     });
 
     expect(pollContentCalls).toHaveLength(1);
@@ -685,20 +705,31 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     ).toBe(null);
   });
 
-  it("(g) PATCH widen + boss.send fails → UPDATE rolled back, backfillTargetSince stays at OLD value (atomicity-of-intent, PR #31 P2)", async () => {
-    // Pre-fix the UPDATE ran BEFORE the force-deep enqueue. On boss.send
-    // failure, data_sources.backfill_target_since was committed but the
-    // force-deep job was lost — and the retry path was a no-op because
-    // maybeEnqueueForceDeepWalk's "newTarget >= previousTarget" early
-    // return short-circuited when the user re-PATCHed with the same
-    // (already-widened) value. Permanent silent loss of the deep-walk
-    // intent. PR #31 review P2.
+  it("(g) PATCH widen via outbox: UPDATE and force-deep intent commit atomically; boss never reached at request time (PR #31 Codex P2)", async () => {
+    // Pre-outbox the PATCH path called boss.send directly inside
+    // updateSource. Two failure modes existed in succession:
+    //   (i)  pre-Option-G: UPDATE-then-send → boss.send failure
+    //        committed the widen but lost the force-deep intent
+    //        forever (re-PATCH with the same target was a no-op).
+    //   (ii) Option-G: send-then-UPDATE → race window between
+    //        boss.send NOTIFY (worker pickup <10ms) and the
+    //        subsequent UPDATE commit (~15-25ms). Worker reads
+    //        pre-UPDATE subscriber state, fan-out filters old events
+    //        out, silent loss.
     //
-    // Post-fix the enqueue runs BEFORE the UPDATE: a throw from
-    // boss.send propagates up, the UPDATE never runs, the user sees a
-    // 5xx, retries, and on the retry the force-deep enqueue is
-    // attempted again — eventually succeeds. This test pins the
-    // happy-failure semantic.
+    // Post-outbox the PATCH path writes the force-deep intent to the
+    // `outbox` table inside the same Drizzle transaction as the
+    // data_sources UPDATE. boss.send is NOT called at request time —
+    // the asynchronous forwarder picks the row up and dispatches.
+    // Atomicity comes from the transaction, not from any
+    // boss-vs-DB ordering trick.
+    //
+    // This test pins the new semantic:
+    //   - PATCH returns 200.
+    //   - data_sources.backfillTargetSince is updated.
+    //   - An outbox row exists with the expected force-deep payload.
+    //   - The pg-boss mock saw ZERO sends at request time (the
+    //     forwarder is not started in this test).
     const channelKey = newChannelKey();
     await clearChannelFixture(channelKey);
 
@@ -722,8 +753,6 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
       .set({ backfillTargetSince: thirtyDaysAgo })
       .where(eq(dataSources.id, src.id));
 
-    // Seed channel state so maybeEnqueueForceDeepWalk's conditions hold
-    // (complete=true + oldest=30d-ago + newTarget=epoch < oldest).
     await db
       .insert(dataSourceChannelState)
       .values({
@@ -742,7 +771,6 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
       });
 
     sentJobs.length = 0;
-    bossSendShouldThrow = true;
 
     const patchRes = await app.request(`/api/sources/${src.id}`, {
       method: "PATCH",
@@ -753,45 +781,169 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
       body: JSON.stringify({ backfillTargetSince: "1970-01-01T00:00:00.000Z" }),
     });
 
-    // boss.send failure surfaces as a 5xx (internal_server_error or similar).
-    expect(patchRes.status).toBeGreaterThanOrEqual(500);
-    expect(patchRes.status).toBeLessThan(600);
+    expect(patchRes.status).toBe(200);
 
-    // Critical assertion — UPDATE rolled back (never committed).
-    // backfillTargetSince must STILL be the pre-PATCH value.
+    // The UPDATE committed.
     const [reloaded] = await db
       .select({ backfillTargetSince: dataSources.backfillTargetSince })
       .from(dataSources)
       .where(eq(dataSources.id, src.id));
-    expect(reloaded).toBeDefined();
-    expect(reloaded!.backfillTargetSince?.getTime()).toBe(thirtyDaysAgo.getTime());
+    expect(reloaded!.backfillTargetSince?.getTime()).toBe(new Date(0).getTime());
 
-    // No job in queue (boss.send threw before capturing).
+    // The outbox row exists with the expected payload — proves atomic
+    // commit alongside the UPDATE.
+    const outboxRows = await db.execute(sql`
+      SELECT queue, payload, options, forwarded_at
+      FROM outbox
+      WHERE queue = 'youtube.backfill.channel'
+        AND payload->>'channelKey' = ${channelKey}
+        AND payload->>'triggerUserId' = ${u.id}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+    expect(outboxRows.rows.length).toBe(1);
+    const row = outboxRows.rows[0] as {
+      payload: Record<string, unknown>;
+      options: Record<string, unknown>;
+      forwarded_at: Date | null;
+    };
+    expect(row.payload).toMatchObject({
+      kind: "youtube_channel",
+      channelKey,
+      triggerUserId: u.id,
+      depthBoundIso: "1970-01-01T00:00:00.000Z",
+      flow: "historical",
+      forceDeep: true,
+    });
+    expect(row.options).toMatchObject({
+      singletonKey: `force-deep-${channelKey}-${u.id}`,
+    });
+    // Forwarder not started in this test — row stays pending.
+    expect(row.forwarded_at).toBeNull();
+
+    // boss.send NOT called at request time. The forwarder is the only
+    // path that touches pg-boss for force-deep intents.
     expect(sentJobs.filter((j) => j.queue === "youtube.backfill.channel")).toHaveLength(0);
 
-    // Retry path — disable the failure injection, retry the same PATCH.
+    // Cleanup — drop the outbox row so it does not leak across tests.
+    await db.execute(sql`DELETE FROM outbox WHERE payload->>'channelKey' = ${channelKey}`);
+  });
+
+  it("(h) outbox forwarder picks up pending row, calls boss.send, marks forwarded_at (idempotent on retry)", async () => {
+    // Drives the forwarder's drainOutboxOnce export to prove the
+    // pending → forwarded transition. boss.send is mocked at the
+    // queue-client layer (see the top-of-file vi.mock); the forwarder
+    // collects via the same mock that records into sentJobs.
+    const { drainOutboxOnce } = await import(
+      "../../src/worker/handlers/outbox-forwarder.js"
+    );
+
+    sentJobs.length = 0;
+
+    const channelKey = newChannelKey();
+    const userId = `forwarder-test-${uniq()}`;
+    const payload = {
+      kind: "youtube_channel",
+      channelKey,
+      triggerUserId: userId,
+      depthBoundIso: "1970-01-01T00:00:00.000Z",
+      flow: "historical",
+      forceDeep: true,
+    };
+    const options = { singletonKey: `force-deep-${channelKey}-${userId}`, priority: 1 };
+
+    // Seed outbox row directly (skipping the PATCH path tested in (g)).
+    await db.execute(sql`
+      INSERT INTO outbox (queue, payload, options)
+      VALUES ('youtube.backfill.channel', ${JSON.stringify(payload)}::jsonb, ${JSON.stringify(options)}::jsonb)
+    `);
+
+    // First drain — should forward exactly once.
+    await drainOutboxOnce();
+    const after1 = await db.execute(sql`
+      SELECT forwarded_at, forwarder_attempt
+      FROM outbox
+      WHERE payload->>'channelKey' = ${channelKey}
+    `);
+    expect(after1.rows.length).toBe(1);
+    const row1 = after1.rows[0] as { forwarded_at: Date | null; forwarder_attempt: number };
+    expect(row1.forwarded_at).not.toBeNull();
+    expect(row1.forwarder_attempt).toBe(0);
+    expect(sentJobs.filter((j) => j.queue === "youtube.backfill.channel")).toHaveLength(1);
+
+    // Second drain — row is forwarded, must NOT be picked up again
+    // (idempotency: at-most-one boss.send per row, modulo crash-replay
+    // which is dedup'd by singletonKey at the pg-boss layer).
+    await drainOutboxOnce();
+    expect(sentJobs.filter((j) => j.queue === "youtube.backfill.channel")).toHaveLength(1);
+
+    // Cleanup.
+    await db.execute(sql`DELETE FROM outbox WHERE payload->>'channelKey' = ${channelKey}`);
+  });
+
+  it("(i) outbox forwarder retries on boss.send failure — row stays pending, attempt counter bumps", async () => {
+    const { drainOutboxOnce } = await import(
+      "../../src/worker/handlers/outbox-forwarder.js"
+    );
+
+    sentJobs.length = 0;
+
+    const channelKey = newChannelKey();
+    const userId = `forwarder-retry-${uniq()}`;
+    const payload = {
+      kind: "youtube_channel",
+      channelKey,
+      triggerUserId: userId,
+      depthBoundIso: "1970-01-01T00:00:00.000Z",
+      flow: "historical",
+      forceDeep: true,
+    };
+    const options = { singletonKey: `force-deep-${channelKey}-${userId}`, priority: 1 };
+
+    await db.execute(sql`
+      INSERT INTO outbox (queue, payload, options)
+      VALUES ('youtube.backfill.channel', ${JSON.stringify(payload)}::jsonb, ${JSON.stringify(options)}::jsonb)
+    `);
+
+    // Inject boss.send failure on the first drain.
+    bossSendShouldThrow = true;
+    await drainOutboxOnce();
+
+    const afterFail = await db.execute(sql`
+      SELECT forwarded_at, forwarder_attempt, last_error
+      FROM outbox
+      WHERE payload->>'channelKey' = ${channelKey}
+    `);
+    expect(afterFail.rows.length).toBe(1);
+    const r1 = afterFail.rows[0] as {
+      forwarded_at: Date | null;
+      forwarder_attempt: number;
+      last_error: string | null;
+    };
+    // Row stays pending — boss.send threw, forwarded_at NOT set.
+    expect(r1.forwarded_at).toBeNull();
+    expect(r1.forwarder_attempt).toBe(1);
+    expect(r1.last_error).toContain("simulated transient failure");
+    // boss.send was attempted but threw before sentJobs captured it.
+    expect(sentJobs.filter((j) => j.queue === "youtube.backfill.channel")).toHaveLength(0);
+
+    // Disable the failure injection, drain again — second attempt succeeds.
     bossSendShouldThrow = false;
-    const retry = await app.request(`/api/sources/${src.id}`, {
-      method: "PATCH",
-      headers: {
-        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ backfillTargetSince: "1970-01-01T00:00:00.000Z" }),
-    });
-    expect(retry.status).toBe(200);
+    await drainOutboxOnce();
 
-    // On retry, force-deep enqueue ran successfully.
-    const enqueues = sentJobs.filter((j) => j.queue === "youtube.backfill.channel");
-    expect(enqueues).toHaveLength(1);
-    expect(enqueues[0]!.data).toMatchObject({ forceDeep: true });
+    const afterRetry = await db.execute(sql`
+      SELECT forwarded_at, forwarder_attempt
+      FROM outbox
+      WHERE payload->>'channelKey' = ${channelKey}
+    `);
+    const r2 = afterRetry.rows[0] as { forwarded_at: Date | null; forwarder_attempt: number };
+    expect(r2.forwarded_at).not.toBeNull();
+    // The successful retry left forwarder_attempt at 1 (we don't bump on success).
+    expect(r2.forwarder_attempt).toBe(1);
+    expect(sentJobs.filter((j) => j.queue === "youtube.backfill.channel")).toHaveLength(1);
 
-    // And the UPDATE finally committed.
-    const [final] = await db
-      .select({ backfillTargetSince: dataSources.backfillTargetSince })
-      .from(dataSources)
-      .where(eq(dataSources.id, src.id));
-    expect(final!.backfillTargetSince?.getTime()).toBe(new Date(0).getTime());
+    // Cleanup.
+    await db.execute(sql`DELETE FROM outbox WHERE payload->>'channelKey' = ${channelKey}`);
   });
 
   it("(f) empty + MAX_PAGES (endOfPlaylist=false, nextPageToken defined) → backfill_complete UNCHANGED, token PRESERVED for resume", async () => {

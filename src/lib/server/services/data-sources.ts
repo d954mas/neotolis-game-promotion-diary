@@ -43,8 +43,8 @@ import { isPgUniqueViolation } from "../db/postgres-errors.js";
 import { getAdapter } from "$lib/sources/registry.js";
 import { youtubeChannels } from "../db/schema/index.js";
 import { ensureChannelState, getChannelState } from "./channel-state.js";
-import { getBoss } from "../queue-client.js";
 import { QUEUES } from "../queues.js";
+import { enqueueViaOutbox } from "./outbox.js";
 
 // Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — initial-backfill window
 // presets accepted by createSource for kind=youtube_channel + autoImport.
@@ -266,12 +266,15 @@ export async function assertNoChannelConflict(
  * gets one job per channel, but two users widening on the same channel
  * concurrently both get their own walk.
  */
-async function maybeEnqueueForceDeepWalk(opts: {
-  channelKey: string;
-  triggerUserId: string;
-  previousTarget: Date | null;
-  newTarget: Date;
-}): Promise<void> {
+async function maybeEnqueueForceDeepWalk(
+  tx: Tx,
+  opts: {
+    channelKey: string;
+    triggerUserId: string;
+    previousTarget: Date | null;
+    newTarget: Date;
+  },
+): Promise<void> {
   if (opts.previousTarget !== null && opts.newTarget.getTime() >= opts.previousTarget.getTime()) {
     return;
   }
@@ -281,8 +284,20 @@ async function maybeEnqueueForceDeepWalk(opts: {
   if (state.backfillOldestAt === null) return;
   if (opts.newTarget.getTime() >= state.backfillOldestAt.getTime()) return;
 
-  const boss = await getBoss();
-  await boss.send(
+  // Phase 03.0.3 follow-up (PR #31 Codex P2) — write the force-deep
+  // intent through the transactional outbox so it commits atomically
+  // with the data_sources UPDATE in the enclosing transaction. The
+  // forwarder picks the row up via LISTEN/NOTIFY (typically <10ms) and
+  // calls boss.send asynchronously. If boss.send fails the row stays
+  // pending and the forwarder retries on every NOTIFY + 30s sweep.
+  // Pre-outbox the same code path did a direct boss.send which:
+  //   - could win the race against the UPDATE (worker reads pre-UPDATE
+  //     state of data_sources, fan-out filters old events out, silent
+  //     loss of widen intent), and
+  //   - committed UPDATE before send so a transient queue failure was
+  //     a permanent silent loss with no user-side recovery.
+  await enqueueViaOutbox(
+    tx,
     QUEUES.YOUTUBE_BACKFILL_CHANNEL,
     {
       kind: "youtube_channel" as const,
@@ -674,58 +689,52 @@ export async function updateSource(
     // above are per-user.
   }
 
-  // Phase 03.0.3 follow-up (PR #31 review P2) — atomicity-of-intent.
-  // The force-deep enqueue runs BEFORE the UPDATE so a transient
-  // boss.send failure aborts the PATCH cleanly (HTTP 500 → user
-  // retries → eventual success). Pre-fix order was UPDATE-then-enqueue;
-  // on enqueue failure that committed the widen but silently lost the
-  // force-deep job → user's intent to walk older history permanently
-  // broken with no recovery path (a re-PATCH with the same target is a
-  // no-op because previousTarget already equals the widened value).
+  // Phase 03.0.3 follow-up (PR #31 Codex P2) — atomicity-of-intent via
+  // transactional outbox. The UPDATE and the force-deep queue intent
+  // commit in a single Drizzle transaction so the worker cannot pick
+  // up the force-deep job before data_sources reflects the widened
+  // target (the pre-outbox direct boss.send path raced against the
+  // UPDATE: pg-boss NOTIFY arrives in ~5ms; our UPDATE commits in
+  // ~15-25ms; worker reads pre-UPDATE subscriber state ~30% of the
+  // time on healthy load; fan-out filters by stored backfillTargetSince
+  // and silently skips old events — permanent silent loss with no
+  // user-side recovery). Outbox writes the intent into the outbox
+  // table inside the tx; the forwarder (worker handler) translates
+  // committed rows into boss.send asynchronously via LISTEN/NOTIFY.
   //
-  // Source identity fields used here (existing.kind, existing.channelId)
-  // cannot change via PATCH — updateSource only mutates displayName /
-  // autoImport / isOwnedByMe / metadata / backfillTargetSince. Reading
-  // them off `existing` instead of the post-UPDATE `row` is safe.
-  //
-  // Failure modes after reversal:
-  //   - boss.send throws → maybeEnqueueForceDeepWalk re-throws → UPDATE
-  //     never runs → user sees 500 → retries → consistent recovery.
-  //   - UPDATE throws AFTER successful enqueue (extremely rare —
-  //     connection drop in the ms window) → job is in queue with the
-  //     new target, but data_sources still has the old target. The
-  //     subsequent walker run's fan-out (backfill-channel.ts:445)
-  //     filters per-subscriber by their STORED target_since → events
-  //     past the user's old target are skipped at INSERT. User's
-  //     PATCH retry succeeds, and a second deep walk (triggered by the
-  //     same maybeEnqueueForceDeepWalk check) fan-outs the older events
-  //     correctly. Cost: one wasted deep walk (~50 quota units), no
-  //     correctness regression, no silent loss.
-  if (
-    patch.backfillTargetSince !== undefined &&
-    existing.kind === "youtube_channel" &&
-    existing.channelId !== null
-  ) {
-    await maybeEnqueueForceDeepWalk({
-      channelKey: existing.channelId,
-      triggerUserId: userId,
-      previousTarget: existing.backfillTargetSince,
-      newTarget: patch.backfillTargetSince,
-    });
-  }
+  // Source identity fields used to gate the enqueue (existing.kind,
+  // existing.channelId) cannot change via PATCH — updateSource only
+  // mutates displayName / autoImport / isOwnedByMe / metadata /
+  // backfillTargetSince. Reading them off `existing` instead of the
+  // post-UPDATE `row` is safe.
+  const row = await db.transaction(async (tx) => {
+    if (
+      patch.backfillTargetSince !== undefined &&
+      existing.kind === "youtube_channel" &&
+      existing.channelId !== null
+    ) {
+      await maybeEnqueueForceDeepWalk(tx, {
+        channelKey: existing.channelId,
+        triggerUserId: userId,
+        previousTarget: existing.backfillTargetSince,
+        newTarget: patch.backfillTargetSince,
+      });
+    }
 
-  const [row] = await db
-    .update(dataSources)
-    .set(update)
-    .where(
-      and(
-        eq(dataSources.userId, userId),
-        eq(dataSources.id, sourceId),
-        isNull(dataSources.deletedAt),
-      ),
-    )
-    .returning();
-  if (!row) throw new NotFoundError();
+    const [updated] = await tx
+      .update(dataSources)
+      .set(update)
+      .where(
+        and(
+          eq(dataSources.userId, userId),
+          eq(dataSources.id, sourceId),
+          isNull(dataSources.deletedAt),
+        ),
+      )
+      .returning();
+    if (!updated) throw new NotFoundError();
+    return updated;
+  });
 
   if (patch.autoImport !== undefined && patch.autoImport !== existing.autoImport) {
     await writeAudit({

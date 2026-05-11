@@ -15,6 +15,8 @@ export * from "./event-games.js";
 export * from "./events.js";
 export * from "./game-steam-listings.js";
 export * from "./games.js";
+// Phase 03.0.3 follow-up (PR #31 Codex P2) — transactional outbox.
+export * from "./outbox.js";
 // Phase 03.0.1 Plan 02 — YouTube schemas relocated to per-source folder
 // per D-14. Re-exported here so existing call sites
 // (`import { youtubeVideos } from "$lib/server/db/schema/index.js"`)
