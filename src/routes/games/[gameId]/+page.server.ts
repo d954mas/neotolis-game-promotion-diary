@@ -12,6 +12,9 @@ import {
 } from "$lib/server/dto.js";
 import { allAdapters } from "$lib/sources/registry.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
+import { db } from "$lib/server/db/client.js";
+import { youtubeChannels } from "$lib/server/db/schema/index.js";
+import { inArray } from "drizzle-orm";
 
 /**
  * /games/[gameId] loader — Phase 2.1 Plan 02.1-09 rebuild.
@@ -81,12 +84,38 @@ export const load: PageServerLoad = async ({ locals, params }) => {
     }
   }
 
+  // Phase 03.0.3 UAT follow-up — populate source.channelTitle from
+  // youtube_channels cache, mirroring /feed/+page.server.ts. Without
+  // this enrichment, FeedCard's `channelLabel` chain falls from
+  // event.channelTitle (null when youtube_videos cache lacks the row)
+  // through source.channelTitle (always null per toDataSourceDto
+  // default) to source.handleUrl (the raw URL) — visually inconsistent
+  // with /feed for the same event.
+  const sourceDtos = sources.map(toDataSourceDto);
+  const channelIds = sourceDtos
+    .map((s) => s.channelId)
+    .filter((c): c is string => c !== null);
+  if (channelIds.length > 0) {
+    const channelCache = await db
+      .select({
+        channelId: youtubeChannels.channelId,
+        channelTitle: youtubeChannels.channelTitle,
+      })
+      .from(youtubeChannels)
+      .where(inArray(youtubeChannels.channelId, channelIds));
+    const titleByChannel = new Map<string, string | null>();
+    for (const r of channelCache) titleByChannel.set(r.channelId, r.channelTitle);
+    for (const s of sourceDtos) {
+      if (s.channelId) s.channelTitle = titleByChannel.get(s.channelId) ?? null;
+    }
+  }
+
   return {
     game: toGameDto(game),
     listings: listings.map(toGameSteamListingDto),
     deletedListings: deletedListings.map(toGameSteamListingDto),
     events: eventDtos,
     games: gamesAll.map(toGameDto),
-    sources: sources.map(toDataSourceDto),
+    sources: sourceDtos,
   };
 };
