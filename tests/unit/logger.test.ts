@@ -17,7 +17,7 @@ import pino from "pino";
 
 describe("logger redaction", () => {
   it("logger module exposes pino-shaped interface", async () => {
-    let logger: unknown = null;
+    let logger: unknown;
     try {
       const mod = await import("../../src/lib/server/logger.js");
       logger = (mod as { logger?: unknown }).logger ?? mod;
