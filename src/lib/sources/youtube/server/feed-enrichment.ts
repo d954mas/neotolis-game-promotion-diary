@@ -26,6 +26,15 @@ import { logger } from "$lib/server/logger.js";
 import type { EventDto } from "$lib/server/dto.js";
 
 export async function youtubeEnrichFeedDtos(
+  /**
+   * userId is required by the DataSourceAdapter.enrichFeedDtos contract but
+   * is intentionally unused here: youtube_video_snapshots and youtube_videos
+   * are PUBLIC-DATA tables (no userId column — already in the ESLint
+   * tenant-scope allowlist). The tenant guarantee comes from the upstream
+   * events SELECT in mapEventsToDtos. Other adapters whose enrichment
+   * touches tenant-owned tables (e.g. a future Reddit adapter reading
+   * per-user OAuth-scoped metadata) MUST scope by userId in their queries.
+   */
   _userId: string,
   dtos: EventDto[],
 ): Promise<void> {

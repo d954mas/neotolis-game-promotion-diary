@@ -725,10 +725,6 @@ async function handleChannelContextBackfillImpl(job: {
     // | no_more_pages    | true     | MIN(oldest seen)    | null               |
     // | hard_cap         | false    | oldest seen         | nextPageToken      |
     // | cutoff_crossed   | false    | cutoff              | null               |
-    //
-    // Phase 03.0.1 Wave 4 — channel-scoped state writes. Per-source state
-    // columns (last_polled_at, backfill_oldest_at) dropped in migration 0028;
-    // channel state is the single source of truth across all subscribers.
     await markChannelLastPolledAt("youtube_channel", channelId);
 
     // Frontier write — depends on stopReason. `cutoff_crossed` uses the
