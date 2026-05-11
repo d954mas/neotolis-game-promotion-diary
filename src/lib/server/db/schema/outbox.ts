@@ -18,13 +18,21 @@
 //
 // Failure modes:
 //   - boss.send fails: forwarder leaves the row pending, bumps
-//     forwarder_attempt, logs last_error. Next tick (or NOTIFY)
-//     retries. At-least-once delivery.
-//   - Forwarder crashes between boss.send success and forwarded_at
-//     update: next tick re-forwards. pg-boss singletonKey in options
-//     dedups duplicate sends; downstream handlers must be idempotent
-//     (events have UNIQUE (user_id, source_id, external_id); audit
-//     writes are accepted as occasional dup).
+//     forwarder_attempt, logs last_error. Retry happens after the
+//     CLAIM_WINDOW_SECONDS interval (60s in outbox-forwarder.ts) has
+//     elapsed since last_attempt_at — concurrent claimers see the
+//     bumped timestamp and skip the row until the window expires.
+//     So a failed row retries roughly every 60s on the next sweep
+//     or NOTIFY wakeup, NOT every tick. After MAX_ATTEMPTS (20) the
+//     row stays pending until an operator manually intervenes.
+//   - Forwarder crashes mid-send (last_attempt_at bumped but no
+//     forwarded_at update and no logged failure): the row stays
+//     claimed for CLAIM_WINDOW_SECONDS, then releases naturally.
+//     Another forwarder (or the next sweep) picks it up. pg-boss
+//     singletonKey in options dedups duplicate sends in the worst-
+//     case race; downstream handlers must be idempotent (events
+//     have UNIQUE (user_id, source_id, external_id); audit writes
+//     are accepted as occasional dup).
 //
 // Cleanup: extended purge.daily cron deletes rows older than 7 days
 // after successful forward.

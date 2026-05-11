@@ -52,6 +52,15 @@ export interface OutboxEnqueueOptions {
  * `boss.send`, the forwarder sets `forwarded_at` and the cleanup
  * cron deletes rows older than 7 days from that mark.
  *
+ * Retry timing (Phase 03.0.3 round-3 Codex P3): on a failed
+ * `boss.send`, the row stays pending but its last_attempt_at is
+ * already stamped from the atomic claim — concurrent claimers (and
+ * follow-up sweeps within this process) skip the row until the
+ * CLAIM_WINDOW_SECONDS interval (60s, see outbox-forwarder.ts)
+ * elapses. Effective retry cadence is therefore ~60s, NOT
+ * "next tick / next NOTIFY". After MAX_ATTEMPTS (20) the row stays
+ * pending forever and operator intervention is required.
+ *
  * Returns nothing — the row id is auto-generated and not needed by
  * callers (the forwarder owns the lifecycle).
  *

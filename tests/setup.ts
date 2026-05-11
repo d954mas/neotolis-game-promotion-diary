@@ -29,12 +29,23 @@ process.env.DATABASE_URL = dbUrl;
 export const pool = new pg.Pool({ connectionString: dbUrl, max: 5 });
 
 beforeAll(async () => {
-  try {
-    const { runMigrations } = await import("../src/lib/server/db/migrate.js");
-    await runMigrations();
-  } catch (err) {
-    console.warn("[tests/setup] migrations failed:", (err as Error).message);
-  }
+  // Phase 03.0.3 round-3 (Codex P2) — migration failure is no longer
+  // silently warned. Pre-fix this try/catch suppressed both "no Postgres
+  // reachable" (the original intent) AND "schema drift on local
+  // neotolis_test DB" (an accidental side effect). Integration tests
+  // against a half-migrated DB are vacuous-pass at best and silently
+  // wrong at worst; AGENTS.md Validation §4 ("CI gate honesty") forbids
+  // both shapes. We now propagate the failure so:
+  //   - CI sees a clean migration on every run (fresh DB → no drift
+  //     ever surfaces), or fails the integration-tests job loudly.
+  //   - Local dev sees the drift immediately and can resolve it via
+  //     `docker exec <pg-container> psql -U postgres -c 'DROP DATABASE
+  //     neotolis_test;' && pnpm db:migrate` (recreate via the migrate
+  //     helper that runs against TEST_DATABASE_URL).
+  // The "no Postgres" case still surfaces with a clear ECONNREFUSED that
+  // any contributor recognises.
+  const { runMigrations } = await import("../src/lib/server/db/migrate.js");
+  await runMigrations();
 });
 
 afterEach(async () => {
