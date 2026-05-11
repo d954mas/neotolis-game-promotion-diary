@@ -834,7 +834,13 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     // pending → forwarded transition. boss.send is mocked at the
     // queue-client layer (see the top-of-file vi.mock); the forwarder
     // collects via the same mock that records into sentJobs.
+    //
+    // PR #31 Codex P2 #1 — the forwarder takes the boss instance
+    // injected by the worker. Tests reach for the same mocked boss via
+    // getBoss() (which the queue-client.ts mock exposes).
     const { drainOutboxOnce } = await import("../../src/worker/handlers/outbox-forwarder.js");
+    const { getBoss } = await import("../../src/lib/server/queue-client.js");
+    const mockBoss = await getBoss();
 
     sentJobs.length = 0;
 
@@ -857,7 +863,7 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     `);
 
     // First drain — should forward exactly once.
-    await drainOutboxOnce();
+    await drainOutboxOnce(mockBoss);
     const after1 = await db.execute(sql`
       SELECT forwarded_at, forwarder_attempt
       FROM outbox
@@ -872,7 +878,7 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     // Second drain — row is forwarded, must NOT be picked up again
     // (idempotency: at-most-one boss.send per row, modulo crash-replay
     // which is dedup'd by singletonKey at the pg-boss layer).
-    await drainOutboxOnce();
+    await drainOutboxOnce(mockBoss);
     expect(sentJobs.filter((j) => j.queue === "youtube.backfill.channel")).toHaveLength(1);
 
     // Cleanup.
@@ -881,6 +887,8 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
 
   it("(i) outbox forwarder retries on boss.send failure — row stays pending, attempt counter bumps", async () => {
     const { drainOutboxOnce } = await import("../../src/worker/handlers/outbox-forwarder.js");
+    const { getBoss } = await import("../../src/lib/server/queue-client.js");
+    const mockBoss = await getBoss();
 
     sentJobs.length = 0;
 
@@ -903,7 +911,7 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
 
     // Inject boss.send failure on the first drain.
     bossSendShouldThrow = true;
-    await drainOutboxOnce();
+    await drainOutboxOnce(mockBoss);
 
     const afterFail = await db.execute(sql`
       SELECT forwarded_at, forwarder_attempt, last_error
@@ -923,9 +931,17 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     // boss.send was attempted but threw before sentJobs captured it.
     expect(sentJobs.filter((j) => j.queue === "youtube.backfill.channel")).toHaveLength(0);
 
+    // The claim-window (60s) blocks immediate retry to give natural
+    // back-off in production. For the test, advance the row's
+    // last_attempt_at past the window so the next drain claims it.
+    await db.execute(sql`
+      UPDATE outbox SET last_attempt_at = NULL
+      WHERE payload->>'channelKey' = ${channelKey}
+    `);
+
     // Disable the failure injection, drain again — second attempt succeeds.
     bossSendShouldThrow = false;
-    await drainOutboxOnce();
+    await drainOutboxOnce(mockBoss);
 
     const afterRetry = await db.execute(sql`
       SELECT forwarded_at, forwarder_attempt

@@ -54,6 +54,29 @@ export interface OutboxEnqueueOptions {
  *
  * Returns nothing — the row id is auto-generated and not needed by
  * callers (the forwarder owns the lifecycle).
+ *
+ * ⚠ SECRETS RULE (AGENTS.md Constraints — "Secrets at rest envelope-
+ * encrypted"):
+ *
+ *   `payload` is persisted as plaintext jsonb. It MUST NOT contain:
+ *     - API keys (Google YouTube, Reddit, Twitter, etc.)
+ *     - OAuth access / refresh / id tokens
+ *     - Encrypted ciphertext columns (`secret_ct`, `wrapped_dek`, …)
+ *     - User passwords, session cookies, raw Authorization headers
+ *     - Any other field name covered by REDACT_PATHS in logger.ts
+ *
+ *   When a worker needs a secret to run a job, the caller must:
+ *     1. Store the secret in the envelope-encrypted table that owns it
+ *        (`api_keys_steam`, the future `api_keys_reddit`, etc.).
+ *     2. Pass an opaque id reference in the outbox payload.
+ *     3. The worker looks the secret up by id, decrypts via the KEK,
+ *        and uses it in-memory only.
+ *
+ *   The forwarder does NOT introspect payloads, but Pino's redact
+ *   patterns (logger.ts REDACT_PATHS) cover all the field-name shapes
+ *   above — so an accidental `logger.info({ row })` on a stuck outbox
+ *   debug path won't leak even if the payload contains a token.
+ *   Defense in depth, not a license to violate the rule.
  */
 export async function enqueueViaOutbox(
   tx: Tx,

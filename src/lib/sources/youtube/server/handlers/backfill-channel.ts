@@ -492,14 +492,35 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
     }
   }
 
-  // 9. Update channel state.
-  if (oldestFetchedOccurredAt !== null) {
+  // 9. Update channel state. Frontier advance is gated to deep-mode
+  //    walks only (PR #31 Codex P1 #2) — an overlap-mode walk collects
+  //    backdated cache-miss items intentionally (D-#29-1) but those
+  //    items can appear near page 1 of the upload-time-sorted playlist
+  //    while the walker never actually walked the playlist down to
+  //    their publishedAt. Advancing backfill_oldest_at from such an
+  //    arbitrary backdated event would incorrectly tell future
+  //    target-widen decisions that we've already covered that depth,
+  //    routing them to incremental and silently skipping the in-between
+  //    history.
+  //
+  //    For deep-mode walks two cases:
+  //      - endOfPlaylist=true: walker covered the entire playlist; the
+  //        oldest collected event publishedAt is the legitimate channel
+  //        floor.
+  //      - !endOfPlaylist (walkedPastSince OR MAX_PAGES): walker
+  //        stopped at the depth target. Frontier = since (= target)
+  //        rather than the oldest collected event — by construction
+  //        every collected event in deep mode has publishedAt > since,
+  //        so `since` is the true boundary we walked to.
+  const walkedInDeepMode = branch === "deep";
+  if (walkedInDeepMode && oldestFetchedOccurredAt !== null) {
+    const frontier = pollResult.endOfPlaylist ? oldestFetchedOccurredAt : since;
     if (
       channelState?.backfillOldestAt === null ||
       channelState?.backfillOldestAt === undefined ||
-      oldestFetchedOccurredAt.getTime() < channelState.backfillOldestAt.getTime()
+      frontier.getTime() < channelState.backfillOldestAt.getTime()
     ) {
-      await markChannelBackfillFrontier(kind, channelKey, oldestFetchedOccurredAt);
+      await markChannelBackfillFrontier(kind, channelKey, frontier);
     }
   }
   await setChannelBackfillPageToken(kind, channelKey, pollResult.nextPageToken ?? null);

@@ -133,7 +133,7 @@ export async function startWorker(): Promise<void> {
   // outbox rows into pg-boss `boss.send` calls. Uses LISTEN on
   // 'outbox.new' for instant pickup + 30s periodic sweep as backstop.
   // Returns a teardown closure the shutdown handler awaits.
-  const stopOutboxForwarder = await startOutboxForwarder();
+  const stopOutboxForwarder = await startOutboxForwarder({ boss });
 
   // D-15 smoke assertion #2 — exact string `worker ready` on stdout.
   logger.info({ role: "worker" }, "worker ready");
