@@ -583,13 +583,18 @@ export async function updateSource(
       );
     }
     update.backfillTargetSince = patch.backfillTargetSince;
-    // Phase 03.0.1 Wave 4 — channel-scoped state machine. Per-source
-    // backfill_complete column dropped; channel-level state is now
-    // shared across subscribers. Widening one user's target_since does
-    // NOT reset the channel's complete flag — other subscribers may have
-    // narrower targets that are already satisfied. The next refresh-
-    // content click by THIS user explicitly resets channel complete via
-    // resetChannelBackfillComplete (trust-but-verify).
+    // Phase 03.0.3 — widening backfillTargetSince is handled LAZILY by
+    // the next refresh-content click's three-branch since-derivation
+    // (backfill-channel.ts), NOT by an eager channel-state reset here.
+    // After this UPDATE `target` becomes deeper than the channel's
+    // recorded `backfillOldestAt`, so the next walk lands in the `deep`
+    // branch: since=target, token preserved, walk resumes from the saved
+    // cursor or restarts. Pre-Phase-03.0.3 this path eagerly flipped
+    // backfill_complete=false at the channel level; that reset was
+    // redundant (the three-branch since-derivation covers the same
+    // ground) AND wrong (it re-opened the walk for ALL subscribers on
+    // the channel, not just the user who widened — multi-tenant
+    // fairness violation per D-#29-7).
   }
 
   const [row] = await db
@@ -778,7 +783,10 @@ export async function markSourceNeedsReconnect(
 //   markSourceBackfillFrontier    → markChannelBackfillFrontier
 //   markSourceBackfillComplete    → markChannelBackfillComplete
 //   setSourceBackfillPageToken    → setChannelBackfillPageToken
-//   resetSourceBackfillComplete   → resetChannelBackfillComplete
+// Phase 03.0.3 P1 — `resetSourceBackfillComplete` and the wave-4
+// channel-level reset helper were both dropped: the new three-branch
+// since-derivation in backfill-channel.ts subsumes the
+// "trust-but-verify" reset (D-D1 / D-#29-6 / D-#29-7).
 // computeSinceForRefresh removed — channel-scoped worker passes
 // depthBoundIso explicitly per trigger context (user click → user's
 // target_since; cron auto-backfill → 1970 sentinel; cron incremental

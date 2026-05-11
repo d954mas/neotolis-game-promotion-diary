@@ -15,7 +15,6 @@ import {
   markChannelLastPolledAt,
   markChannelBackfillFrontier,
   markChannelBackfillComplete,
-  resetChannelBackfillComplete,
   setChannelBackfillPageToken,
 } from "../../src/lib/server/services/channel-state.js";
 
@@ -83,14 +82,16 @@ describe("channel-state helpers", () => {
     expect(row!.backfillOldestAt!.getTime()).toBe(t2.getTime());
   });
 
-  it("markChannelBackfillComplete + resetChannelBackfillComplete toggle the flag", async () => {
+  it("markChannelBackfillComplete sets the flag", async () => {
+    // Phase 03.0.3 P1 — the companion reset helper was removed (D-D1).
+    // The "trust-but-verify" toggle was redundant once the three-branch
+    // since-derivation landed (D-#29-6); only the set-true direction is
+    // exercised here now. Widening a user's backfill_target_since lands
+    // in the `deep` branch lazily on the next refresh-content click —
+    // no in-band flag flip required.
     await markChannelBackfillComplete("youtube_channel", channelKey);
-    let row = await getChannelState("youtube_channel", channelKey);
+    const row = await getChannelState("youtube_channel", channelKey);
     expect(row!.backfillComplete).toBe(true);
-
-    await resetChannelBackfillComplete("youtube_channel", channelKey);
-    row = await getChannelState("youtube_channel", channelKey);
-    expect(row!.backfillComplete).toBe(false);
   });
 
   it("setChannelBackfillPageToken stores and clears the cursor", async () => {

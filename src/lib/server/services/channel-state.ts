@@ -129,26 +129,6 @@ export async function markChannelBackfillComplete(
 }
 
 /**
- * Reset `backfill_complete=false` — called from the user-facing
- * refresh-content endpoint as trust-but-verify (let the worker re-check
- * if the channel has new content past endOfPlaylist; if still empty,
- * worker re-sets to true).
- */
-export async function resetChannelBackfillComplete(
-  kind: SourceKind,
-  channelKey: string,
-  dbCtx: DbOrTx = db,
-): Promise<void> {
-  await dbCtx
-    .insert(dataSourceChannelState)
-    .values({ kind, channelKey, backfillComplete: false })
-    .onConflictDoUpdate({
-      target: [dataSourceChannelState.kind, dataSourceChannelState.channelKey],
-      set: { backfillComplete: false, updatedAt: new Date() },
-    });
-}
-
-/**
  * Persistent backfill pagination cursor. Adapter returns `nextPageToken`
  * from each walk; worker stores it here so the next walk resumes from the
  * saved position instead of re-fetching the same first MAX_PAGES of pages.

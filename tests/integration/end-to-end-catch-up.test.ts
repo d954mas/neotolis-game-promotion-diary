@@ -11,9 +11,12 @@
 //
 //   1. POST /api/sources/:id/refresh-content
 //      - intent audit row written (no flow field)
-//      - resetChannelBackfillComplete called against (kind, channelKey)
 //      - boss.send invoked with YOUTUBE_BACKFILL_CHANNEL + payload
 //        { kind, channelKey, triggerUserId, depthBoundIso, flow }
+//      (Phase 03.0.3 P1: the pre-refactor channel-state reset call was
+//      removed — three-branch since-derivation in backfill-channel.ts
+//      handles the steady-state vs deep-walk decision lazily at
+//      walk-time. See D-D1 / D-#29-6.)
 //
 //   2. handleBackfillChannel invoked
 //      - resolves all subscribers for (kind, channelKey)
