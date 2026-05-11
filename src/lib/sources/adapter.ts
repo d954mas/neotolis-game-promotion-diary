@@ -97,6 +97,19 @@ export interface PollableSource {
 export interface AdapterContext {
   userId: string | null;
   origin: "cron" | "user";
+  /** Phase 03.0.3 follow-up — how the playlist walker decides when to stop.
+   *  - "depth" (default): items with publishedAt <= since are dropped AND
+   *    end the walk. Use for deep walks where `since` is the historical floor
+   *    (e.g. user widened backfill_target_since to epoch — walker stops at
+   *    epoch via endOfPlaylist, or at 30d-ago when since=30d-ago).
+   *  - "overlap": items are NOT dropped by publishedAt alone. Walker stops
+   *    after K consecutive items that are BOTH already in the youtube_videos
+   *    cache AND have publishedAt <= since. Use for incremental walks
+   *    (channel previously walked; we just want what's new). Backdated
+   *    uploads with publishedAt below newestKnown but NOT yet in cache
+   *    survive — they get collected because cache-miss means "we have not
+   *    seen this video before", which is the D-#29-1 invariant. */
+  walkStop?: "depth" | "overlap";
 }
 
 /**
@@ -393,7 +406,7 @@ export interface DataSourceAdapter {
   pollContent(
     source: PollableSource,
     since: Date,
-    ctx?: { origin?: "cron" | "user" },
+    ctx?: { origin?: "cron" | "user"; walkStop?: "depth" | "overlap" },
   ): Promise<{
     events: RawEvent[];
     unitsUsed: number;

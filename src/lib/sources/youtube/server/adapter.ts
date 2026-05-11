@@ -42,9 +42,9 @@
 import { pickKeyForJob, youtubeQuotaUser } from "./quota.js";
 import { chargedFetch, fetchWithTimeout } from "./http.js";
 import { youtubeEnrichFeedDtos } from "./feed-enrichment.js";
-import { youtubeChannels } from "./schema/index.js";
+import { youtubeChannels, youtubeVideos as youtubeVideosTable } from "./schema/index.js";
 import { db as serverDb } from "$lib/server/db/client.js";
-import { eq as serverEq } from "drizzle-orm";
+import { eq as serverEq, inArray as serverInArray } from "drizzle-orm";
 import { youtubeObservability } from "./observability.js";
 import { youtubeParseUrl } from "./url.js";
 import { z } from "zod";
@@ -307,7 +307,7 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
   async pollContent(
     source: PollableSource,
     since: Date,
-    ctx?: { origin?: "cron" | "user" },
+    ctx?: { origin?: "cron" | "user"; walkStop?: "depth" | "overlap" },
   ): Promise<{
     events: RawEvent[];
     unitsUsed: number;
@@ -398,6 +398,32 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     let endOfPlaylist = false;
     let nextPageToken: string | undefined;
 
+    // Phase 03.0.3 follow-up — D-#29-1 backdated-upload safety. The legacy
+    // "depth" walk drops every item with publishedAt <= since unconditionally;
+    // that silently loses videos whose publishedAt is older than newestKnown
+    // (e.g. uploaded today but with a custom publishedAt months back —
+    // unlisted-then-public, podcast schedule, channel takeover migration).
+    //
+    // The "overlap" mode does a per-page cache lookup against
+    // youtube_videos. An item is treated as a stop signal only when it is
+    // BOTH already in the cache (we've seen it before) AND publishedAt is
+    // past since (we'd previously have dropped it). After OVERLAP_THRESHOLD
+    // consecutive such items the walker stops. Backdated cache-miss items
+    // continue to be collected. Single-item gaps (one re-uploaded video
+    // in the middle of unknown territory) do NOT terminate the walk
+    // because the counter resets on every unknown item.
+    //
+    // Mode is chosen by the orchestrator (backfill-channel.ts) per branch:
+    //   - branch="deep"        → walkStop="depth"   (since = historical floor)
+    //   - branch="exhausted"   → walkStop="overlap" (since = newestKnown)
+    //   - branch="incremental" → walkStop="overlap" (since = max(newestKnown, target))
+    // Cron paths default to "depth" — they pass since=epoch and rely on
+    // endOfPlaylist / MAX_PAGES as their natural floors; overlap would
+    // be no-op for cron's epoch-since anyway.
+    const walkStop = ctx?.walkStop ?? "depth";
+    const OVERLAP_THRESHOLD = 3;
+    let consecutiveKnownPastSince = 0;
+
     for (let page = 0; page < MAX_PAGES; page++) {
       const url = new URL(`${env.YOUTUBE_API_BASE_URL}/playlistItems`);
       url.searchParams.set("playlistId", uploadsPlaylistId);
@@ -417,17 +443,58 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
       if (!resp.ok) break;
       const json = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await resp.json());
 
+      // Overlap-mode: one indexed SELECT per page against the public-data
+      // youtube_videos cache (no userId scope — every tenant shares the
+      // row). Empty page short-circuits the query to avoid Postgres `IN ()`.
+      let knownByPage: Set<string> = new Set<string>();
+      if (walkStop === "overlap" && json.items.length > 0) {
+        const pageExternalIds = json.items.map((it) => it.snippet.resourceId.videoId);
+        const rows = await serverDb
+          .select({ videoId: youtubeVideosTable.videoId })
+          .from(youtubeVideosTable)
+          .where(serverInArray(youtubeVideosTable.videoId, pageExternalIds));
+        knownByPage = new Set(rows.map((r) => r.videoId));
+      }
+
       for (const item of json.items) {
+        const externalId = item.snippet.resourceId.videoId;
         const occurredAt = new Date(item.snippet.publishedAt);
-        if (occurredAt.getTime() <= sinceMs) {
-          walkedPastSince = true;
-          continue;
+        const pastSince = occurredAt.getTime() <= sinceMs;
+
+        if (walkStop === "depth") {
+          if (pastSince) {
+            walkedPastSince = true;
+            continue;
+          }
+        } else {
+          // walkStop === "overlap"
+          const isKnown = knownByPage.has(externalId);
+          if (isKnown && pastSince) {
+            consecutiveKnownPastSince += 1;
+            if (consecutiveKnownPastSince >= OVERLAP_THRESHOLD) {
+              walkedPastSince = true;
+              break;
+            }
+            continue;
+          }
+          // Unknown-OR-fresh item resets the counter. Known-and-fresh
+          // (a video the cache already saw but published AFTER since)
+          // is rare — we still skip it (dedup) without breaking. Backdated
+          // cache-miss (the D-#29-1 case) lands here and IS collected.
+          consecutiveKnownPastSince = 0;
+          if (isKnown) {
+            // Defensive skip to avoid double-fan-out on re-upload edge case;
+            // the events INSERT-ON-CONFLICT downstream is the load-bearing
+            // dedup, but skipping here saves an idempotency-loss INSERT.
+            continue;
+          }
         }
+
         collected.push({
-          externalId: item.snippet.resourceId.videoId,
+          externalId,
           title: item.snippet.title,
           occurredAt,
-          url: `https://www.youtube.com/watch?v=${item.snippet.resourceId.videoId}`,
+          url: `https://www.youtube.com/watch?v=${externalId}`,
           kind: "youtube_video",
           metadata: { channelId: item.snippet.channelId },
         });

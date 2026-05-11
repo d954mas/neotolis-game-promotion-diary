@@ -223,7 +223,16 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
         },
       },
       since,
-      { origin: triggerUserId ? "user" : "cron" },
+      {
+        origin: triggerUserId ? "user" : "cron",
+        // Phase 03.0.3 follow-up — D-#29-1 backdated-upload safety. Deep
+        // walks need the historical floor (since=target), so they stay
+        // on legacy "depth" stop. Incremental/exhausted walks (where
+        // since=newestKnown) MUST not drop backdated cache-miss items;
+        // switch to "overlap" which stops the walker after 3 consecutive
+        // already-cached items past the cutoff. See AdapterContext.walkStop.
+        walkStop: branch === "deep" ? "depth" : "overlap",
+      },
     );
   } catch (err) {
     if (err instanceof AdapterError) {
