@@ -42,7 +42,9 @@ import { withQuotaGuard } from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
 import { getAdapter } from "$lib/sources/registry.js";
 import { youtubeChannels } from "../db/schema/index.js";
-import { ensureChannelState } from "./channel-state.js";
+import { ensureChannelState, getChannelState } from "./channel-state.js";
+import { getBoss } from "../queue-client.js";
+import { QUEUES } from "../queues.js";
 
 // Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — initial-backfill window
 // presets accepted by createSource for kind=youtube_channel + autoImport.
@@ -239,6 +241,67 @@ export async function assertNoChannelConflict(
  * 2005 to prevent the sentinel being indistinguishable from legitimate
  * input.
  */
+/**
+ * Phase 03.0.3 follow-up — when a user widens `backfillTargetSince` past the
+ * channel's recorded `backfill_oldest_at` on a fully-walked channel, enqueue
+ * a one-shot force-deep walk for this user. Without this override, the
+ * three-branch since-derivation in `handleBackfillChannel` always routes to
+ * `branch=exhausted` (D-#29-7 multi-tenant fairness prioritises the channel
+ * state's exhausted flag over the per-user target), so historical events
+ * below the prior depth would never surface on the next refresh-content
+ * click. This function is the single per-user opt-in to override that.
+ *
+ * Skipped when:
+ *   - new target is NOT deeper than the previous target (no widening);
+ *   - channel state row missing (no prior walk — three-branch logic
+ *     naturally routes to `branch=deep` on its own);
+ *   - channel state's `backfillComplete` is false (three-branch logic
+ *     already routes to `incremental` or `deep` based on `backfillOldestAt`);
+ *   - new target is NOT deeper than `backfill_oldest_at` (we already walked
+ *     past the requested depth — nothing new to find).
+ *
+ * Quota attribution: the trigger user (this PATCH author) pays. Subscribers
+ * on the same channel free-ride on fan-out — same as a normal refresh-content
+ * click. `singletonKey` is `force-deep-{channelKey}-{userId}` so each user
+ * gets one job per channel, but two users widening on the same channel
+ * concurrently both get their own walk.
+ */
+async function maybeEnqueueForceDeepWalk(opts: {
+  channelKey: string;
+  triggerUserId: string;
+  previousTarget: Date | null;
+  newTarget: Date;
+}): Promise<void> {
+  if (
+    opts.previousTarget !== null &&
+    opts.newTarget.getTime() >= opts.previousTarget.getTime()
+  ) {
+    return;
+  }
+  const state = await getChannelState("youtube_channel", opts.channelKey);
+  if (!state) return;
+  if (state.backfillComplete !== true) return;
+  if (state.backfillOldestAt === null) return;
+  if (opts.newTarget.getTime() >= state.backfillOldestAt.getTime()) return;
+
+  const boss = await getBoss();
+  await boss.send(
+    QUEUES.YOUTUBE_BACKFILL_CHANNEL,
+    {
+      kind: "youtube_channel" as const,
+      channelKey: opts.channelKey,
+      triggerUserId: opts.triggerUserId,
+      depthBoundIso: opts.newTarget.toISOString(),
+      flow: "historical" as const,
+      forceDeep: true,
+    },
+    {
+      singletonKey: `force-deep-${opts.channelKey}-${opts.triggerUserId}`,
+      priority: 1,
+    },
+  );
+}
+
 function backfillWindowToDate(window: BackfillWindow): Date {
   const now = Date.now();
   switch (window) {
@@ -609,6 +672,19 @@ export async function updateSource(
     )
     .returning();
   if (!row) throw new NotFoundError();
+
+  if (
+    patch.backfillTargetSince !== undefined &&
+    row.kind === "youtube_channel" &&
+    row.channelId !== null
+  ) {
+    await maybeEnqueueForceDeepWalk({
+      channelKey: row.channelId,
+      triggerUserId: userId,
+      previousTarget: existing.backfillTargetSince,
+      newTarget: patch.backfillTargetSince,
+    });
+  }
 
   if (patch.autoImport !== undefined && patch.autoImport !== existing.autoImport) {
     await writeAudit({

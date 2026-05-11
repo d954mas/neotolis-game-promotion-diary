@@ -355,9 +355,31 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     expect(newEvents).toHaveLength(1);
   });
 
-  it("(c) widening backfillTargetSince (30d → epoch) triggers deep walk on next refresh-content click", async () => {
-    // Setup: current target=30d ago; channel state exhausted at 30d ago;
-    // youtube_videos has one row with publishedAt=now (newestKnown=now).
+  it("(c) widening backfillTargetSince past deepestWalked on a fully-walked channel enqueues a force-deep job that bypasses branch=exhausted", async () => {
+    // Phase 03.0.3 follow-up — the original test (c) framing was inconsistent
+    // with D-#29-2's locked branch ordering: once backfill_complete=true,
+    // `branch=exhausted` always wins regardless of target (D-#29-7
+    // multi-tenant fairness). The Plan 01 implementation honoured this
+    // ordering, which meant the original Issue #29 acceptance — "widen
+    // target on a fully-walked channel → next click deep-walks below
+    // prior depth" — was effectively a no-op for completed channels.
+    //
+    // The follow-up rewires the path: `updateSource` detects a widen past
+    // `backfill_oldest_at` on a complete channel and enqueues a separate
+    // force-deep job (forceDeep: true) per user. The handler sees
+    // `forceDeep===true` and routes to `branch="deep"` regardless of the
+    // channel's complete flag. The trigger user pays quota; subscribers
+    // free-ride on fan-out — same as a normal refresh-content click.
+    //
+    // This test exercises BOTH halves end-to-end:
+    //   1. PATCH /api/sources/:id { backfillTargetSince: epoch } on a
+    //      complete=true channel with backfill_oldest_at=30d-ago → asserts
+    //      sentJobs captures a YOUTUBE_BACKFILL_CHANNEL job with
+    //      forceDeep=true and depthBoundIso=epoch.
+    //   2. Invokes handleBackfillChannel with the captured job → asserts
+    //      pollContent received since=epoch (NOT max(newestKnown, target))
+    //      and the audit row carries since_branch="deep" + flow="historical".
+
     const channelKey = newChannelKey();
     await clearChannelFixture(channelKey);
 
@@ -405,7 +427,11 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
         },
       });
 
-    // PATCH /api/sources/<id> { backfillTargetSince: epoch }.
+    // Reset captured jobs from createSource above so we only see the
+    // PATCH-triggered enqueue below.
+    sentJobs.length = 0;
+
+    // Half 1 — PATCH widens target past deepestWalked.
     const patchRes = await app.request(`/api/sources/${src.id}`, {
       method: "PATCH",
       headers: {
@@ -421,76 +447,26 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     expect(stateAfterPatch).toBeDefined();
     expect(stateAfterPatch!.backfillComplete).toBe(true);
 
-    // Now trigger the worker with the widened target.
-    pollContentResults = [];
-    pollContentUnitsUsed = 1;
-    await handleBackfillChannel({
-      id: "mock-job-quota-c",
-      data: {
-        kind: "youtube_channel",
-        channelKey,
-        triggerUserId: u.id,
-        depthBoundIso: "1970-01-01T00:00:00.000Z",
-        flow: "incremental",
-      },
+    // The PATCH path detected widening past deepestWalked + complete=true
+    // → enqueued a force-deep job for THIS user.
+    const enqueues = sentJobs.filter((j) => j.queue === "youtube.backfill.channel");
+    expect(enqueues).toHaveLength(1);
+    const job = enqueues[0]!;
+    expect(job.data).toMatchObject({
+      kind: "youtube_channel",
+      channelKey,
+      triggerUserId: u.id,
+      depthBoundIso: "1970-01-01T00:00:00.000Z",
+      flow: "historical",
+      forceDeep: true,
     });
-
-    expect(pollContentCalls).toHaveLength(1);
-    // Branch logic: backfill_complete=true → branch="exhausted" first,
-    // then since=max(newestKnown=now, target=epoch)=now.
-    //
-    // Wait — D-#29-2 prioritises 'exhausted' check FIRST. Once complete=true,
-    // branch=exhausted regardless of target. The plan's test (c) description
-    // expects branch="deep" + flow="historical".
-    //
-    // Reading D-#29-2 again:
-    //   - exhausted   (backfill_complete=true)
-    //   - incremental (!complete && deepest!==null && target>=deepest)
-    //   - deep        (else)
-    //
-    // So with complete=true, we're in exhausted — NOT deep. The plan's
-    // expectation that "exhausted at 30d" + "widen to epoch" + "next click
-    // → deep" is inconsistent with D-#29-2 locked semantics. The honest
-    // assertion is: branch="exhausted", since=max(newestKnown, target)=now.
-    //
-    // This is the multi-tenant-fairness behavior locked by D-#29-7: one
-    // user widening does NOT re-open the walk for other subscribers, and
-    // the channel state's exhausted flag wins. The user's widened target
-    // only matters when complete=false (which is the typical case before
-    // a deep walk has completed; here we artificially set complete=true
-    // to model a fully-walked channel).
-    const auditRows = await db
-      .select()
-      .from(auditLog)
-      .where(
-        and(
-          eq(auditLog.userId, u.id),
-          eq(auditLog.action, "source.refresh_content_requested"),
-        ),
-      );
-    const completion = auditRows.find(
-      (r) => (r.metadata as Record<string, unknown>)?.events_inserted !== undefined,
+    expect((job.options as { singletonKey?: string }).singletonKey).toBe(
+      `force-deep-${channelKey}-${u.id}`,
     );
-    expect(completion).toBeDefined();
-    const meta = completion!.metadata as Record<string, unknown>;
-    expect(meta.since_branch).toBe("exhausted");
 
-    // Reset and re-test the actual "widen triggers deep" scenario: channel
-    // state is NOT exhausted but DEEPEST is shallower than the new target.
-    // Take 2: same channel, flip complete=false and re-trigger.
-    await db
-      .update(dataSourceChannelState)
-      .set({ backfillComplete: false })
-      .where(
-        and(
-          eq(dataSourceChannelState.kind, "youtube_channel"),
-          eq(dataSourceChannelState.channelKey, channelKey),
-        ),
-      );
-    pollContentCalls.length = 0;
-    // Seed a historical event so the success path runs (the
-    // historical-flow upgrade lives in the events-collected branch,
-    // not the empty-result branch).
+    // Half 2 — invoke the handler with the captured job. Seed a historical
+    // event so the success path runs (the historical-flow upgrade lives in
+    // the events-collected branch).
     const histEventId = `vid_c_hist_${uniq()}`;
     pollContentResults = [
       {
@@ -501,23 +477,21 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
         metadata: { channelId: channelKey },
       },
     ];
+    pollContentUnitsUsed = 1;
+    pollContentCalls.length = 0;
+
     await handleBackfillChannel({
-      id: "mock-job-quota-c-2",
-      data: {
-        kind: "youtube_channel",
-        channelKey,
-        triggerUserId: u.id,
-        depthBoundIso: "1970-01-01T00:00:00.000Z",
-        flow: "incremental",
-      },
+      id: "mock-job-quota-c",
+      data: job.data as Parameters<typeof handleBackfillChannel>[0]["data"],
     });
 
     expect(pollContentCalls).toHaveLength(1);
-    // target=epoch (0 ms); deepestWalked=30d ago. target.getTime() (=0) <
-    // deepestWalked.getTime() (positive) → branch="deep". since=target=epoch.
+    // forceDeep=true → branch="deep" → since=target=epoch (NOT
+    // max(newestKnown=now, target=epoch)=now — the deep branch uses target
+    // directly).
     expect(pollContentCalls[0]!.since.getTime()).toBe(0);
 
-    const auditRows2 = await db
+    const auditRows = await db
       .select()
       .from(auditLog)
       .where(
@@ -526,15 +500,80 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
           eq(auditLog.action, "source.refresh_content_requested"),
         ),
       );
-    // Latest completion row should be the deep one.
-    const deepCompletion = auditRows2
+    const completion = auditRows
       .filter((r) => (r.metadata as Record<string, unknown>)?.events_inserted !== undefined)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
-    expect(deepCompletion).toBeDefined();
-    const deepMeta = deepCompletion!.metadata as Record<string, unknown>;
-    expect(deepMeta.since_branch).toBe("deep");
+    expect(completion).toBeDefined();
+    const meta = completion!.metadata as Record<string, unknown>;
+    expect(meta.since_branch).toBe("deep");
     // historical-flow upgrade fires when since.getTime() < deepestWalked.getTime()
-    // and flow=incremental, which is the case here (0 < 30d-ago.getTime()).
-    expect(deepMeta.flow).toBe("historical");
+    // and flow=historical (passed in via the job). Both hold here.
+    expect(meta.flow).toBe("historical");
+  });
+
+  it("(c2) widening backfillTargetSince to a value ≥ deepestWalked does NOT enqueue a force-deep job", async () => {
+    // Negative case for the force-deep predicate — narrowing from epoch
+    // toward present is already blocked by `cannot_narrow_window`; this
+    // test verifies the no-op path: a widen that does NOT cross
+    // backfill_oldest_at must not burn quota on a redundant deep walk.
+    const channelKey = newChannelKey();
+    await clearChannelFixture(channelKey);
+
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `quota-c2-${uniq()}@test.local` });
+    const src = await createSource(
+      u.id,
+      {
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/channel/${channelKey}`,
+        isOwnedByMe: true,
+        autoImport: true,
+      },
+      "127.0.0.1",
+    );
+
+    const now = Date.now();
+    const ninetyDaysAgo = new Date(now - 90 * 86_400_000);
+    const sixtyDaysAgo = new Date(now - 60 * 86_400_000);
+    const thirtyDaysAgo = new Date(now - 30 * 86_400_000);
+
+    // Channel was walked deeper (90d-ago) than current target (30d-ago).
+    await db
+      .update(dataSources)
+      .set({ backfillTargetSince: thirtyDaysAgo })
+      .where(eq(dataSources.id, src.id));
+    await db
+      .insert(dataSourceChannelState)
+      .values({
+        kind: "youtube_channel",
+        channelKey,
+        backfillComplete: true,
+        backfillOldestAt: ninetyDaysAgo,
+      })
+      .onConflictDoUpdate({
+        target: [dataSourceChannelState.kind, dataSourceChannelState.channelKey],
+        set: {
+          backfillComplete: true,
+          backfillOldestAt: ninetyDaysAgo,
+          updatedAt: new Date(),
+        },
+      });
+
+    sentJobs.length = 0;
+
+    // Widening from 30d to 60d — STILL shallower than the deepestWalked
+    // (90d-ago); nothing new to find, so no force-deep needed.
+    const patchRes = await app.request(`/api/sources/${src.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ backfillTargetSince: sixtyDaysAgo.toISOString() }),
+    });
+    expect(patchRes.status).toBe(200);
+
+    const enqueues = sentJobs.filter((j) => j.queue === "youtube.backfill.channel");
+    expect(enqueues).toHaveLength(0);
   });
 });

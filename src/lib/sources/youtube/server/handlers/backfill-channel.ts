@@ -79,6 +79,16 @@ interface BackfillChannelJob {
      *  toward trigger user's per-user requestsPerDay cap;
      *  auto_passive does NOT count and does not write audit. */
     flow: BackfillFlow;
+    /** Phase 03.0.3 follow-up — force a deep walk regardless of the
+     *  three-branch since-derivation. Set ONLY by `updateSource` after a
+     *  user widens `backfillTargetSince` past the channel's
+     *  `backfill_oldest_at` on a fully-walked channel — without this
+     *  override, branch=exhausted always wins and historical events
+     *  below the prior depth would never surface (D-#29-7 multi-tenant
+     *  fairness was the reason for prioritising exhausted; this flag
+     *  is the single per-user opt-in to override it). The trigger user
+     *  pays quota for the deep walk; subscribers free-ride on fan-out. */
+    forceDeep?: boolean;
   };
 }
 
@@ -158,7 +168,14 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
   const newestKnown = await getNewestKnownPublishedAt(channelKey);
   const deepestWalked = channelState?.backfillOldestAt ?? null;
   let branch: "exhausted" | "incremental" | "deep";
-  if (channelState?.backfillComplete === true) {
+  if (job.data.forceDeep === true) {
+    // Phase 03.0.3 follow-up — user-driven override of D-#29-7 fairness
+    // for one walk: widening backfillTargetSince past deepestWalked on a
+    // fully-walked channel does NOT trigger a deep walk under the
+    // three-branch logic (exhausted wins). updateSource enqueues this
+    // override exactly when a widen would otherwise be silently no-op.
+    branch = "deep";
+  } else if (channelState?.backfillComplete === true) {
     branch = "exhausted";
   } else if (deepestWalked !== null && target.getTime() >= deepestWalked.getTime()) {
     branch = "incremental";
