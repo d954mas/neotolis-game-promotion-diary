@@ -21,3 +21,18 @@ nginx/certs/origin.key
 
 # Local scratch — `git diff > diff.txt` for ad-hoc review, never committed.
 diff.txt
+
+# Developer-personal dev helpers — each developer ships their own local
+# .dev-*.ts/.mjs scripts (e.g. .dev-worker.ts to run the worker handler
+# bypassing migrate-at-boot; .dev-oauth-mock.mjs to spin up the OAuth
+# mock for interactive sign-in testing; .dev-probe-youtube.ts to drive
+# the YouTube adapter directly for diagnostics). These are intentionally
+# OUT of source control — they pin a single developer's machine setup
+# (admin user_id, API key paths, queue names) and are not portable. The
+# canonical scripts (e.g. scripts/dev-mock-oauth.mjs) live under
+# scripts/ and ARE committed. Phase 03.0.3 P3 deferred-items.md cites
+# .dev-oauth-mock.mjs as an example of why this exclusion matters
+# (process.env reads outside config/env.ts are intentional in standalone
+# Node scripts; ESLint would otherwise flag every developer's helper).
+.dev-*.ts
+.dev-*.mjs
