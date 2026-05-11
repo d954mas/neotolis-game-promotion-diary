@@ -241,7 +241,7 @@ Plans:
 - [x] 03.0.2-02-PLAN.md — Bump oauth2-mock-server 7→8 (Commit 2)
 - [x] 03.0.2-03-PLAN.md — Bump dotenv 16→17 + { quiet: true } in env.ts (Commit 3)
 - [x] 03.0.2-04-PLAN.md — Bump ESLint core family to v10 (eslint + @eslint/js + eslint-config-prettier + globals) (Commit 4)
-- [ ] 03.0.2-05-PLAN.md — Bump eslint-plugin-svelte 2→3 + svelte-eslint-parser 0.43→1.6 (Commit 5)
+- [x] 03.0.2-05-PLAN.md — Bump eslint-plugin-svelte 2→3 + svelte-eslint-parser 0.43→1.6 (Commit 5)
 - [ ] 03.0.2-06-PLAN.md — Bump pino 9→10 + pino-pretty 11→13 (D-07 redact tripwire) (Commit 6)
 - [ ] 03.0.2-07-PLAN.md — Bump @hono/node-server 1→2 (Commit 7)
 - [ ] 03.0.2-08-PLAN.md — Bump typescript 5.6→6.0 (Commit 8)
