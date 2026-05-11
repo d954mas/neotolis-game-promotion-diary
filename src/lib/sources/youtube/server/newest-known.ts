@@ -21,9 +21,17 @@ import { db } from "$lib/server/db/client.js";
 import { youtubeVideos } from "$lib/server/db/schema/index.js";
 
 export async function getNewestKnownPublishedAt(channelKey: string): Promise<Date | null> {
+  // Drizzle's `sql<Date | null>` is structural; node-postgres returns
+  // aggregate results as the raw column type, but a SELECT-MAX expression
+  // can lose the timestamptz tag and surface as a string. Coerce
+  // defensively so callers can rely on Date semantics.
   const [row] = await db
-    .select({ maxPublishedAt: sql<Date | null>`MAX(${youtubeVideos.publishedAt})` })
+    .select({
+      maxPublishedAt: sql<Date | string | null>`MAX(${youtubeVideos.publishedAt})`,
+    })
     .from(youtubeVideos)
     .where(eq(youtubeVideos.channelId, channelKey));
-  return row?.maxPublishedAt ?? null;
+  const raw = row?.maxPublishedAt ?? null;
+  if (raw === null) return null;
+  return raw instanceof Date ? raw : new Date(raw);
 }
