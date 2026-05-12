@@ -379,6 +379,52 @@ describe("purgeAccount service (Plan 03.0-05)", () => {
     const kBs = await db.select().from(apiKeysSteam).where(eq(apiKeysSteam.userId, fixB.user.id));
     expect(kBs.length).toBeGreaterThanOrEqual(1);
   });
+
+  it("Phase 03.0.3 round-8 (Codex P1): purgeAccount deletes outbox rows that reference the purged user via payload.triggerUserId", async () => {
+    // Force-deep enqueue lands a row in `outbox` carrying triggerUserId
+    // inside the payload. If the user purges before the forwarder has
+    // dispatched the row to pg-boss, the dangling row would later
+    // enqueue a worker job under a deleted tenant — privacy violation.
+    // purgeAccount must scrub user-scoped outbox rows in the same
+    // cascade transaction so this race closes by construction.
+    const { user: u } = await seedFullFixture("outbox-scrub");
+
+    // Seed two pending outbox rows referencing this user, one
+    // referencing a DIFFERENT user (must survive).
+    const otherUser = await seedFullFixture("outbox-scrub-other");
+    await db.execute(sql`
+      INSERT INTO outbox (queue, payload, options) VALUES
+        ('youtube.backfill.channel',
+         ${JSON.stringify({ kind: "youtube_channel", channelKey: "UCabc", triggerUserId: u.id, depthBoundIso: "1970-01-01T00:00:00.000Z", flow: "historical", forceDeep: true })}::jsonb,
+         '{}'::jsonb),
+        ('youtube.backfill.channel',
+         ${JSON.stringify({ kind: "youtube_channel", channelKey: "UCdef", triggerUserId: u.id, depthBoundIso: "1970-01-01T00:00:00.000Z", flow: "historical", forceDeep: true })}::jsonb,
+         '{}'::jsonb),
+        ('youtube.backfill.channel',
+         ${JSON.stringify({ kind: "youtube_channel", channelKey: "UCxyz", triggerUserId: otherUser.user.id, depthBoundIso: "1970-01-01T00:00:00.000Z", flow: "historical", forceDeep: true })}::jsonb,
+         '{}'::jsonb)
+    `);
+
+    const result = await purgeAccount(u.id, { ignoreRetention: true });
+
+    expect(result.purged).toBe(true);
+    expect(result.rowCounts!.outbox).toBe(2);
+
+    // Purged user's outbox rows are gone.
+    const purgedRows = await db.execute(sql`
+      SELECT id FROM outbox WHERE payload->>'triggerUserId' = ${u.id}
+    `);
+    expect(purgedRows.rows.length).toBe(0);
+
+    // Other user's outbox row survives (cross-tenant isolation).
+    const otherRows = await db.execute(sql`
+      SELECT id FROM outbox WHERE payload->>'triggerUserId' = ${otherUser.user.id}
+    `);
+    expect(otherRows.rows.length).toBe(1);
+
+    // Cleanup.
+    await db.execute(sql`DELETE FROM outbox WHERE payload->>'triggerUserId' = ${otherUser.user.id}`);
+  });
 });
 
 // Phase 3.0 Plan 08 — DELETE /api/me/account/purge route activation.
