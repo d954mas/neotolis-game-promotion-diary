@@ -208,6 +208,9 @@ describe("purgeAccount service (Plan 03.0-05)", () => {
       games: 0,
       sessions: 0,
       user: 0,
+      // Phase 03.0.3 round-8 (Codex P1) — outbox is part of the
+      // cascade; an already-purged user has 0 outbox rows.
+      outbox: 0,
     });
   });
 
@@ -423,7 +426,9 @@ describe("purgeAccount service (Plan 03.0-05)", () => {
     expect(otherRows.rows.length).toBe(1);
 
     // Cleanup.
-    await db.execute(sql`DELETE FROM outbox WHERE payload->>'triggerUserId' = ${otherUser.user.id}`);
+    await db.execute(
+      sql`DELETE FROM outbox WHERE payload->>'triggerUserId' = ${otherUser.user.id}`,
+    );
   });
 });
 
