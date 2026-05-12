@@ -55,8 +55,16 @@ import {
 } from "$lib/server/services/channel-state.js";
 import { youtubeChannelAdapterCore as adapter } from "../adapter.js";
 import { getNewestKnownPublishedAt } from "../newest-known.js";
+import { writeSnapshot } from "../snapshots.js";
+import { pickKeyForJob } from "../quota.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import type { SourceKind } from "$lib/sources/adapter.js";
+
+/** YouTube videos.list batch limit — mirrors YOUTUBE_VIDEOS_BATCH_SIZE
+ *  in the adapter (Google's hard cap). One quota unit per chunk; charge
+ *  the first video of each chunk, rest get unitsUsed=0 (same accounting
+ *  as poll-active.ts). */
+const YOUTUBE_VIDEOS_BATCH_SIZE = 50;
 
 type BackfillFlow = "initial" | "incremental" | "historical" | "auto_passive";
 
@@ -489,6 +497,91 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
       if (inserted.length > 0) {
         insertedByUser.set(sub.userId, (insertedByUser.get(sub.userId) ?? 0) + 1);
       }
+    }
+  }
+
+  // 8b. Phase 03.0.3 follow-up — inline stats fetch for newly-discovered
+  //     videos. Pre-fix, backfill-channel only INSERTed events; stats
+  //     (view/like/comment) landed via a separate poll-active cron tick
+  //     up to 6 hours later. That created a transient "Manual entry —
+  //     no polling" UX state on every fresh refresh-content click —
+  //     the user explicitly added a tracked source EXPECTING the full
+  //     picture immediately. Mirrors the channel-context-backfill
+  //     pattern that already does playlistItems + videos.list in one
+  //     handler. Quota cost: ceil(N/50) extra units where N = new
+  //     videos collected — 0 in steady-state, 1 batch typical for a
+  //     refresh that surfaced 1-3 new uploads.
+  //
+  //     Failure modes:
+  //       - pickKeyForJob() returns null → skip silently (self-host
+  //         without keys gets graceful no-op; the per-event polling
+  //         cron's auth_error writeSnapshot path covers the rare
+  //         "keys configured but rejected" case).
+  //       - adapter.pollStatsByVideoId throws → log and continue.
+  //         Events are already INSERTed; stats poll can retry via the
+  //         cron or "Refresh now" button per card.
+  //       - per-video writeSnapshot throws → log and continue; other
+  //         videos in the batch still land.
+  const insertedExternalIds = Array.from(
+    new Set(
+      pollResult.events
+        .map((e) => e.externalId)
+        .filter((x): x is string => typeof x === "string" && x.length > 0),
+    ),
+  );
+  if (insertedExternalIds.length > 0) {
+    const picked = pickKeyForJob();
+    if (picked) {
+      try {
+        const quotaUser = triggerUserId ?? QUOTA_USER_BACKFILL;
+        const statsSnapshots = await adapter.pollStatsByVideoId(
+          insertedExternalIds,
+          quotaUser,
+          picked,
+        );
+        for (let i = 0; i < insertedExternalIds.length; i++) {
+          const videoId = insertedExternalIds[i]!;
+          const snap = statsSnapshots[i]!;
+          // Charge 1 unit on the first video of each batch; rest pass
+          // unitsUsed=0 (mirrors the chargedOnce-per-batch accounting
+          // in poll-active.ts:198-218).
+          const unitsThisVideo = i % YOUTUBE_VIDEOS_BATCH_SIZE === 0 ? 1 : 0;
+          try {
+            await writeSnapshot({
+              videoId,
+              metrics:
+                snap.status === "ok" && snap.metrics
+                  ? {
+                      view_count: snap.metrics.view_count ?? 0,
+                      like_count: snap.metrics.like_count ?? 0,
+                      comment_count: snap.metrics.comment_count ?? 0,
+                    }
+                  : null,
+              apiKeyId: picked.apiKeyId,
+              unitsUsed: unitsThisVideo,
+              // user-trigger → user pool; cron-trigger → cron pool.
+              // Mirrors backfill-channel's overall quota attribution.
+              poolKind: triggerUserId ? "user" : "cron",
+              status: snap.status,
+            });
+          } catch (err) {
+            logger.warn(
+              { jobId: job.id, videoId, err: String((err as Error).message ?? err) },
+              "youtube.backfill.channel: inline writeSnapshot failed; continuing",
+            );
+          }
+        }
+      } catch (err) {
+        logger.warn(
+          { jobId: job.id, kind, channelKey, err: String((err as Error).message ?? err) },
+          "youtube.backfill.channel: inline pollStatsByVideoId failed; stats will fetch on next poll cron",
+        );
+      }
+    } else {
+      logger.debug(
+        { jobId: job.id, count: insertedExternalIds.length },
+        "youtube.backfill.channel: SERVICE_YOUTUBE_API_KEYS empty; skipping inline stats fetch (will retry via cron)",
+      );
     }
   }
 
