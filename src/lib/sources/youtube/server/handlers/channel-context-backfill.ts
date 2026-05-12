@@ -731,7 +731,21 @@ async function handleChannelContextBackfillImpl(job: {
     // window boundary directly because the frontier represents how far
     // back we walked, which IS the cutoff when we stopped because we
     // crossed it; oldest-seen would lie about the boundary.
-    if (stopReason === "cutoff_crossed" && cutoff !== null) {
+    //
+    // Phase 03.0.3 round-7 (Codex P2) — the cutoff_crossed frontier
+    // write is gated on `videoIds.length > 0`. Empty-window onboarding
+    // (channel exists but has no uploads in the requested window) used
+    // to record backfill_oldest_at = cutoff with an empty youtube_videos
+    // cache. The next refresh-content click then routed to
+    // branch="incremental" (target >= deepestWalked) and the
+    // overlap-mode walker, having no cache rows to compare against,
+    // never triggered the overlap-stop threshold — it walked to
+    // MAX_PAGES (20 quota units) and fan-out dropped every event for
+    // being before the user's target. Skipping the frontier write
+    // when nothing landed in cache means the next click routes to
+    // branch="deep" (walkStop="depth") and terminates on the first
+    // page past the cutoff — 1 quota unit instead of 20.
+    if (stopReason === "cutoff_crossed" && cutoff !== null && videoIds.length > 0) {
       await markChannelBackfillFrontier("youtube_channel", channelId, cutoff);
     } else if (videoIds.length > 0) {
       const oldestRow = await db
