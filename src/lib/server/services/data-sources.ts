@@ -308,7 +308,20 @@ async function maybeEnqueueForceDeepWalk(
       forceDeep: true,
     },
     {
-      singletonKey: `force-deep-${opts.channelKey}-${opts.triggerUserId}`,
+      // Phase 03.0.3 round-4 (Codex P2) — include target in the
+      // singleton key. The key dedupes IN-FLIGHT pg-boss jobs (queued
+      // or active). Without `newTarget` in the key, two rapid widens
+      // (e.g. 30d→90d, then 90d→epoch before the first walk finishes)
+      // share the same key; pg-boss rejects the second send with a
+      // null return value, the forwarder marks the row forwarded
+      // anyway, and the deeper user intent is silently lost — later
+      // refresh-content clicks land in branch=exhausted because the
+      // first walk already set complete=true at the shallower depth.
+      // Including the target gives each unique widen its own key:
+      // back-to-back widens with different targets both run; an
+      // idempotent re-PATCH with the same target stays correctly
+      // deduped.
+      singletonKey: `force-deep-${opts.channelKey}-${opts.triggerUserId}-${opts.newTarget.getTime()}`,
       priority: 1,
     },
   );

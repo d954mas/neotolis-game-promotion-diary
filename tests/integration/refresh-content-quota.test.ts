@@ -480,7 +480,7 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
       forceDeep: true,
     });
     expect(outboxRow.options).toMatchObject({
-      singletonKey: `force-deep-${channelKey}-${u.id}`,
+      singletonKey: `force-deep-${channelKey}-${u.id}-${new Date(0).getTime()}`,
     });
 
     // Reconstruct the would-be pg-boss job data shape for the next
@@ -816,7 +816,7 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
       forceDeep: true,
     });
     expect(row.options).toMatchObject({
-      singletonKey: `force-deep-${channelKey}-${u.id}`,
+      singletonKey: `force-deep-${channelKey}-${u.id}-${new Date(0).getTime()}`,
     });
     // Forwarder not started in this test — row stays pending.
     expect(row.forwarded_at).toBeNull();
@@ -1005,5 +1005,115 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     expect(
       (state!.metadata as { lastBackfillPageToken?: string } | null)?.lastBackfillPageToken,
     ).toBe("RESUME_AT_PAGE_21");
+  });
+
+  it("(j) rapid double-widen produces two outbox rows with DIFFERENT singletonKeys (Codex round-4 P2 fix)", async () => {
+    // Pre-fix the singletonKey omitted the target — two rapid widens
+    // (e.g. 30d→90d then 90d→epoch before the first walk finished)
+    // produced two outbox rows with IDENTICAL singletonKeys. pg-boss's
+    // singleton constraint rejected the second `boss.send` with a null
+    // return value; the forwarder marked the row forwarded anyway and
+    // the deeper user intent (epoch) was silently lost. After the fix
+    // the singletonKey includes newTarget.getTime() so each unique
+    // widen has its own key, both jobs flow through pg-boss, and the
+    // walker covers the full requested depth.
+    const channelKey = newChannelKey();
+    await clearChannelFixture(channelKey);
+
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `quota-j-${uniq()}@test.local` });
+    const src = await createSource(
+      u.id,
+      {
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/channel/${channelKey}`,
+        isOwnedByMe: true,
+        autoImport: true,
+      },
+      "127.0.0.1",
+    );
+
+    const now = Date.now();
+    const thirtyDaysAgo = new Date(now - 30 * 86_400_000);
+    const ninetyDaysAgo = new Date(now - 90 * 86_400_000);
+    await db
+      .update(dataSources)
+      .set({ backfillTargetSince: thirtyDaysAgo })
+      .where(eq(dataSources.id, src.id));
+
+    // Seed channel state so force-deep predicate fires on both widens
+    // (complete=true + oldest=30d-ago — every widen past 30d-ago goes
+    // through the force-deep path).
+    await db
+      .insert(dataSourceChannelState)
+      .values({
+        kind: "youtube_channel",
+        channelKey,
+        backfillComplete: true,
+        backfillOldestAt: thirtyDaysAgo,
+      })
+      .onConflictDoUpdate({
+        target: [dataSourceChannelState.kind, dataSourceChannelState.channelKey],
+        set: {
+          backfillComplete: true,
+          backfillOldestAt: thirtyDaysAgo,
+          updatedAt: new Date(),
+        },
+      });
+
+    // Widen #1: 30d-ago → 90d-ago
+    const patch1 = await app.request(`/api/sources/${src.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ backfillTargetSince: ninetyDaysAgo.toISOString() }),
+    });
+    expect(patch1.status).toBe(200);
+
+    // Widen #2: 90d-ago → epoch (BEFORE the forwarder picks up #1).
+    const patch2 = await app.request(`/api/sources/${src.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ backfillTargetSince: "1970-01-01T00:00:00.000Z" }),
+    });
+    expect(patch2.status).toBe(200);
+
+    // Two outbox rows, two DIFFERENT singletonKeys — pg-boss can flow
+    // both through without coalescing the deeper intent away.
+    const outboxRows = await db.execute(sql`
+      SELECT payload, options
+      FROM outbox
+      WHERE queue = 'youtube.backfill.channel'
+        AND payload->>'channelKey' = ${channelKey}
+        AND payload->>'triggerUserId' = ${u.id}
+      ORDER BY created_at ASC
+    `);
+    expect(outboxRows.rows.length).toBe(2);
+
+    const row1 = outboxRows.rows[0] as {
+      payload: Record<string, unknown>;
+      options: Record<string, unknown>;
+    };
+    const row2 = outboxRows.rows[1] as {
+      payload: Record<string, unknown>;
+      options: Record<string, unknown>;
+    };
+
+    expect(row1.payload).toMatchObject({ depthBoundIso: ninetyDaysAgo.toISOString() });
+    expect(row2.payload).toMatchObject({ depthBoundIso: "1970-01-01T00:00:00.000Z" });
+
+    const key1 = (row1.options as { singletonKey?: string }).singletonKey;
+    const key2 = (row2.options as { singletonKey?: string }).singletonKey;
+    expect(key1).toBe(`force-deep-${channelKey}-${u.id}-${ninetyDaysAgo.getTime()}`);
+    expect(key2).toBe(`force-deep-${channelKey}-${u.id}-${new Date(0).getTime()}`);
+    expect(key1).not.toBe(key2);
+
+    // Cleanup.
+    await db.execute(sql`DELETE FROM outbox WHERE payload->>'channelKey' = ${channelKey}`);
   });
 });
