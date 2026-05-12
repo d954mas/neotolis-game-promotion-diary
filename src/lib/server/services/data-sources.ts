@@ -38,7 +38,7 @@ import type { SourceKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { withQuotaGuard } from "./quota.js";
+import { withQuotaGuard, getUserQuotaUsedToday, nextPacificMidnight } from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
 import { getAdapter } from "$lib/sources/registry.js";
 import { youtubeChannels } from "../db/schema/index.js";
@@ -283,6 +283,48 @@ async function maybeEnqueueForceDeepWalk(
   if (state.backfillComplete !== true) return;
   if (state.backfillOldestAt === null) return;
   if (opts.newTarget.getTime() >= state.backfillOldestAt.getTime()) return;
+
+  // Phase 03.0.3 round-6 (Codex P2) — per-user fair-share cap check.
+  // Force-deep walks consume the same user quota as a refresh-content
+  // click (the worker audits them as a capped 'historical' flow). The
+  // POST /api/sources/:id/refresh-content path runs this check before
+  // enqueueing; without the equivalent guard here, a user who already
+  // hit their daily cap could trigger a deep historical walk through
+  // PATCH /api/sources/:id widening — the cap counter would only
+  // observe the overage post-walk, by which time operator quota is
+  // already spent. Mirror the refresh-content check verbatim so both
+  // paths fail-loud with the same 429 envelope.
+  const adapter = getAdapter("youtube_channel");
+  const cap = adapter?.observability.userQuotaCap;
+  if (cap?.requestsPerDay !== undefined || cap?.eventsPerDay !== undefined) {
+    const used = await getUserQuotaUsedToday(opts.triggerUserId, "youtube_channel");
+    const resetAt = nextPacificMidnight();
+    const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
+    if (cap.requestsPerDay !== undefined && used.requests >= cap.requestsPerDay) {
+      throw new AppError(
+        `daily request quota exhausted: ${used.requests}/${cap.requestsPerDay}`,
+        "requests_quota_exhausted",
+        429,
+        {
+          cap: cap.requestsPerDay,
+          used: used.requests,
+          reset_in_seconds: resetInSeconds,
+        },
+      );
+    }
+    if (cap.eventsPerDay !== undefined && used.events >= cap.eventsPerDay) {
+      throw new AppError(
+        `daily events quota exhausted: ${used.events}/${cap.eventsPerDay}`,
+        "events_quota_exhausted",
+        429,
+        {
+          cap: cap.eventsPerDay,
+          used: used.events,
+          reset_in_seconds: resetInSeconds,
+        },
+      );
+    }
+  }
 
   // Phase 03.0.3 follow-up (PR #31 Codex P2) — write the force-deep
   // intent through the transactional outbox so it commits atomically

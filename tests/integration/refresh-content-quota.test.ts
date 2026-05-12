@@ -1116,4 +1116,105 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     // Cleanup.
     await db.execute(sql`DELETE FROM outbox WHERE payload->>'channelKey' = ${channelKey}`);
   });
+
+  it("(k) PATCH widen on user with exhausted per-user cap → 429 + UPDATE rolled back (Codex round-6 P2)", async () => {
+    // Pre-fix the per-user fair-share cap was enforced only on
+    // POST /api/sources/:id/refresh-content. A user who had hit the
+    // daily 100-request cap could still PATCH backfillTargetSince
+    // wider; the force-deep walk it triggered was audited as a
+    // capped 'historical' flow but only AFTER the work ran —
+    // operator quota was already spent and the cap counter
+    // observed the overage. Mirror the refresh-content guard inside
+    // maybeEnqueueForceDeepWalk so the bypass closes.
+    const channelKey = newChannelKey();
+    await clearChannelFixture(channelKey);
+
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `quota-k-${uniq()}@test.local` });
+    const src = await createSource(
+      u.id,
+      {
+        kind: "youtube_channel",
+        handleUrl: `https://www.youtube.com/channel/${channelKey}`,
+        isOwnedByMe: true,
+        autoImport: true,
+      },
+      "127.0.0.1",
+    );
+
+    const now = Date.now();
+    const thirtyDaysAgo = new Date(now - 30 * 86_400_000);
+    await db
+      .update(dataSources)
+      .set({ backfillTargetSince: thirtyDaysAgo })
+      .where(eq(dataSources.id, src.id));
+
+    // Seed channel state so the widen would otherwise trigger force-deep.
+    await db
+      .insert(dataSourceChannelState)
+      .values({
+        kind: "youtube_channel",
+        channelKey,
+        backfillComplete: true,
+        backfillOldestAt: thirtyDaysAgo,
+      })
+      .onConflictDoUpdate({
+        target: [dataSourceChannelState.kind, dataSourceChannelState.channelKey],
+        set: {
+          backfillComplete: true,
+          backfillOldestAt: thirtyDaysAgo,
+          updatedAt: new Date(),
+        },
+      });
+
+    // Seed audit_log to push the user past the YouTube user cap
+    // (requestsPerDay = 100 — see youtube/server/observability.ts).
+    // We INSERT 100 capped audit rows directly; the INSERT-only
+    // trigger on audit_log only blocks UPDATE/DELETE.
+    const rowsToSeed = 100;
+    for (let i = 0; i < rowsToSeed; i += 1) {
+      await db.insert(auditLog).values({
+        userId: u.id,
+        action: "source.refresh_content_requested",
+        ipAddress: "127.0.0.1",
+        userAgent: "seed",
+        metadata: {
+          kind: "youtube_channel",
+          platform: "youtube_channel",
+          flow: "incremental",
+          requests_used: 1,
+          events_inserted: 0,
+        },
+      });
+    }
+
+    // PATCH widen — should be rejected with 429.
+    const patchRes = await app.request(`/api/sources/${src.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ backfillTargetSince: "1970-01-01T00:00:00.000Z" }),
+    });
+    expect(patchRes.status).toBe(429);
+    const body = (await patchRes.json()) as { error?: string };
+    expect(body.error).toBe("requests_quota_exhausted");
+
+    // UPDATE rolled back — backfillTargetSince stays at the pre-PATCH value.
+    const [reloaded] = await db
+      .select({ backfillTargetSince: dataSources.backfillTargetSince })
+      .from(dataSources)
+      .where(eq(dataSources.id, src.id));
+    expect(reloaded!.backfillTargetSince?.getTime()).toBe(thirtyDaysAgo.getTime());
+
+    // No outbox row created (atomic with the rolled-back UPDATE).
+    const outboxRows = await db.execute(sql`
+      SELECT id FROM outbox
+      WHERE queue = 'youtube.backfill.channel'
+        AND payload->>'channelKey' = ${channelKey}
+        AND payload->>'triggerUserId' = ${u.id}
+    `);
+    expect(outboxRows.rows.length).toBe(0);
+  });
 });
