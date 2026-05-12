@@ -29,7 +29,7 @@ diff.txt
 # todos / discussion logs — historical context for how a phase came
 # together. None of it is load-bearing for the running application; the
 # squash-merge PR body is the canonical phase record on master (see
-# AGENTS.md "Planning artifacts" section).
+# AGENTS.md "Workflow" section).
 #
 # Old `.planning/` snapshots from previous phases remain in master's
 # pre-#27 history; untracking going forward stops new artifacts from
