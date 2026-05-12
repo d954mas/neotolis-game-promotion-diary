@@ -62,7 +62,7 @@ import {
   TIER_BOUNDARY_COLD_MS,
   UNAVAILABLE_POLL_STATUSES,
 } from "$lib/server/services/tier-resolver.js";
-import { notInArray, gt, asc, or as drizzleOr, not } from "drizzle-orm";
+import { gt, asc, or as drizzleOr, not } from "drizzle-orm";
 import type { SourceKind } from "$lib/sources/adapter.js";
 
 /** YouTube videos.list batch limit — mirrors YOUTUBE_VIDEOS_BATCH_SIZE
