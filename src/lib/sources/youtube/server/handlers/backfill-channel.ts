@@ -601,9 +601,7 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
             )
             .orderBy(asc(youtubeVideosTable.lastPolledAt))
             .limit(capacity);
-          const filler = fillerRows
-            .map((r) => r.videoId)
-            .filter((id) => !newSet.has(id));
+          const filler = fillerRows.map((r) => r.videoId).filter((id) => !newSet.has(id));
           if (filler.length > 0) {
             allIdsToPoll = [...insertedExternalIds, ...filler];
             logger.debug(
@@ -630,11 +628,7 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
 
       try {
         const quotaUser = triggerUserId ?? QUOTA_USER_BACKFILL;
-        const statsSnapshots = await adapter.pollStatsByVideoId(
-          allIdsToPoll,
-          quotaUser,
-          picked,
-        );
+        const statsSnapshots = await adapter.pollStatsByVideoId(allIdsToPoll, quotaUser, picked);
         for (let i = 0; i < allIdsToPoll.length; i++) {
           const videoId = allIdsToPoll[i]!;
           const snap = statsSnapshots[i]!;
