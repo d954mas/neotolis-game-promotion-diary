@@ -21,7 +21,7 @@
 
 import { inArray, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
-import { youtubeVideoSnapshots, youtubeVideos } from "$lib/server/db/schema/index.js";
+import { youtubeVideos } from "$lib/server/db/schema/index.js";
 import { logger } from "$lib/server/logger.js";
 import type { EventDto } from "$lib/server/dto.js";
 
@@ -44,32 +44,44 @@ export async function youtubeEnrichFeedDtos(
   if (youtubeExternalIds.length === 0) return;
 
   try {
-    // 1. Latest-snapshot lookup. ORDER BY videoId, polledAt DESC; pick
-    //    first row per videoId.
-    const snapshots = await db
-      .select({
-        videoId: youtubeVideoSnapshots.videoId,
-        polledAt: youtubeVideoSnapshots.polledAt,
-        viewCount: youtubeVideoSnapshots.viewCount,
-        likeCount: youtubeVideoSnapshots.likeCount,
-        commentCount: youtubeVideoSnapshots.commentCount,
-      })
-      .from(youtubeVideoSnapshots)
-      .where(inArray(youtubeVideoSnapshots.videoId, youtubeExternalIds))
-      .orderBy(youtubeVideoSnapshots.videoId, sql`${youtubeVideoSnapshots.polledAt} DESC`);
+    // 1. Latest-snapshot lookup. youtube_video_snapshots is an immutable
+    //    time series — a busy video may carry hundreds of historical
+    //    rows. DISTINCT ON (video_id) ORDER BY video_id, polled_at DESC
+    //    keeps the database scan tight: exactly one row per requested
+    //    video_id, the most recent. Pre-fix (Phase 03.0.3 round-5
+    //    Codex P2) the query loaded every historical row and JS picked
+    //    the first per video — cost grew with polling history rather
+    //    than page size. Raw SQL because Drizzle's pg-core builder
+    //    doesn't have a first-class DISTINCT ON helper.
+    const idsSql = sql.join(
+      youtubeExternalIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    const latestRows = await db.execute<{
+      video_id: string;
+      polled_at: Date;
+      view_count: number | null;
+      like_count: number | null;
+      comment_count: number | null;
+    }>(sql`
+      SELECT DISTINCT ON (video_id)
+        video_id, polled_at, view_count, like_count, comment_count
+      FROM youtube_video_snapshots
+      WHERE video_id IN (${idsSql})
+      ORDER BY video_id, polled_at DESC
+    `);
     const latest = new Map<
       string,
       { viewCount: number; likeCount: number; commentCount: number; polledAt: Date }
     >();
-    for (const s of snapshots) {
-      if (!latest.has(s.videoId)) {
-        latest.set(s.videoId, {
-          viewCount: s.viewCount ?? 0,
-          likeCount: s.likeCount ?? 0,
-          commentCount: s.commentCount ?? 0,
-          polledAt: s.polledAt,
-        });
-      }
+    for (const s of latestRows.rows) {
+      latest.set(s.video_id, {
+        viewCount: s.view_count ?? 0,
+        likeCount: s.like_count ?? 0,
+        commentCount: s.comment_count ?? 0,
+        polledAt:
+          s.polled_at instanceof Date ? s.polled_at : new Date(s.polled_at as unknown as string),
+      });
     }
 
     // 2. ChannelTitle lookup from youtube_videos cache.

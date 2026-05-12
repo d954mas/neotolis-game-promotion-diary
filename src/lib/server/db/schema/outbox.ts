@@ -56,10 +56,14 @@ export const outbox = pgTable(
     lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
   },
   (t) => [
-    // Mirrors the partial index in migration 0029 — Drizzle's pg dialect
-    // doesn't have a first-class partial-index helper but does pass
-    // arbitrary `where` clauses through; declared here so drizzle-kit's
-    // diff stays clean against future schema changes.
-    index("outbox_pending_idx").on(t.createdAt),
+    // Phase 03.0.3 round-5 (Codex P2) — partial index matching
+    // migration 0029's `CREATE INDEX outbox_pending_idx ON outbox
+    // (created_at) WHERE forwarded_at IS NULL`. Without the `.where`
+    // chain the schema would diverge from the applied migration and
+    // a future `drizzle-kit generate` could regenerate the index
+    // without the partial clause — defeating the forwarder's
+    // pending-scan optimisation (full index over every forwarded
+    // row instead of the tight pending tail).
+    index("outbox_pending_idx").on(t.createdAt).where(sql`forwarded_at IS NULL`),
   ],
 );
