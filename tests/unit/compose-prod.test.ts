@@ -2,8 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import yaml from "js-yaml";
 
-// Phase 02.2 Plan 02.2-06 — live tests for docker-compose.prod.yml.
-// Plan 02.2-01 reserved 6 it.skip blocks; Plan 02.2-06 flipped them live.
+// Tests for docker-compose.prod.yml structural invariants.
 
 const composePath = "docker-compose.prod.yml";
 
@@ -22,13 +21,13 @@ interface Compose {
   volumes: Record<string, unknown>;
 }
 
-describe("docker-compose.prod.yml structural invariants (Phase 02.2)", () => {
-  it("Plan 02.2-06: docker-compose.prod.yml is a parseable YAML file", () => {
+describe("docker-compose.prod.yml structural invariants", () => {
+  it("docker-compose.prod.yml is a parseable YAML file", () => {
     const content = readFileSync(composePath, "utf-8");
     expect(() => yaml.load(content)).not.toThrow();
   });
 
-  it("Plan 02.2-06: every service in docker-compose.prod.yml has restart: unless-stopped (D-22a)", () => {
+  it("every service in docker-compose.prod.yml has restart: unless-stopped", () => {
     const content = readFileSync(composePath, "utf-8");
     const compose = yaml.load(content) as Compose;
     expect(Object.keys(compose.services).length).toBeGreaterThanOrEqual(5);
@@ -39,7 +38,7 @@ describe("docker-compose.prod.yml structural invariants (Phase 02.2)", () => {
     }
   });
 
-  it("Plan 02.2-06: postgres / app / worker / scheduler / nginx services exist", () => {
+  it("postgres / app / worker / scheduler / nginx services exist", () => {
     const content = readFileSync(composePath, "utf-8");
     const compose = yaml.load(content) as Compose;
     expect(compose.services).toHaveProperty("postgres");
@@ -49,7 +48,7 @@ describe("docker-compose.prod.yml structural invariants (Phase 02.2)", () => {
     expect(compose.services).toHaveProperty("nginx");
   });
 
-  it("Plan 02.2-06: every service has logging.driver: json-file with max-size 10m / max-file 3", () => {
+  it("every service has logging.driver: json-file with max-size 10m / max-file 3", () => {
     const content = readFileSync(composePath, "utf-8");
     const compose = yaml.load(content) as Compose;
     for (const [name, service] of Object.entries(compose.services)) {
@@ -59,7 +58,7 @@ describe("docker-compose.prod.yml structural invariants (Phase 02.2)", () => {
     }
   });
 
-  it("Plan 02.2-06: app/worker/scheduler use image ghcr.io/d954mas/neotolis-diary:${IMAGE_TAG:-latest} (NOT build:.)", () => {
+  it("app/worker/scheduler use image ghcr.io/d954mas/neotolis-diary:${IMAGE_TAG:-latest} (NOT build:.)", () => {
     const content = readFileSync(composePath, "utf-8");
     const compose = yaml.load(content) as Compose;
     for (const name of ["app", "worker", "scheduler"] as const) {
@@ -71,19 +70,19 @@ describe("docker-compose.prod.yml structural invariants (Phase 02.2)", () => {
     }
   });
 
-  it("Plan 02.2-06: postgres uses named volume pg_data (not bind mount) per D-22a", () => {
+  it("postgres uses named volume pg_data (not bind mount)", () => {
     const content = readFileSync(composePath, "utf-8");
     const compose = yaml.load(content) as Compose;
     expect(compose.services.postgres?.volumes ?? []).toContain("pg_data:/var/lib/postgresql/data");
     expect(compose.volumes).toHaveProperty("pg_data");
   });
 
-  // Post-deploy fix #1 (issue #14): the production image does NOT bundle
-  // pino-pretty (dev dependency). When NODE_ENV is unset or set to
-  // 'development', logger.ts loads pino-pretty and the container crash-loops.
-  // Hard-pin NODE_ENV: production in the environment block of every service
-  // that runs the app image so operator-side .env mistakes don't surface.
-  it("Plan 02.2-06 (issue #14): app/worker/scheduler hard-pin NODE_ENV: production in environment block", () => {
+  // The production image does NOT bundle pino-pretty (dev dependency).
+  // When NODE_ENV is unset or set to 'development', logger.ts loads
+  // pino-pretty and the container crash-loops. Hard-pin NODE_ENV:
+  // production in the environment block of every service that runs the
+  // app image so operator-side .env mistakes don't surface.
+  it("app/worker/scheduler hard-pin NODE_ENV: production in environment block", () => {
     const content = readFileSync(composePath, "utf-8");
     const compose = yaml.load(content) as Compose;
     for (const name of ["app", "worker", "scheduler"] as const) {
@@ -92,16 +91,16 @@ describe("docker-compose.prod.yml structural invariants (Phase 02.2)", () => {
     }
   });
 
-  // Post-deploy fix #2 (issue #14): nginx exposes only 443 (Cloudflare Full
-  // Strict mode connects via HTTPS only). Origin port 80 is closed at every
-  // layer — UFW (§1 Step 2), compose ports (this assertion), and
-  // nginx.conf.template (no `listen 80`). HTTP→HTTPS redirect is delegated
-  // to Cloudflare's "Always Use HTTPS" rule at the edge (§2 Step 4.4).
+  // nginx exposes only 443 (Cloudflare Full Strict mode connects via HTTPS
+  // only). Origin port 80 is closed at every layer — UFW (§1 Step 2),
+  // compose ports (this assertion), and nginx.conf.template (no
+  // `listen 80`). HTTP→HTTPS redirect is delegated to Cloudflare's
+  // "Always Use HTTPS" rule at the edge (§2 Step 4.4).
   //
-  // Codex PR #15 P1 follow-up — strict reading of constraint "plain HTTP
-  // only behind a TLS-terminating proxy" interpreted as "origin never
-  // participates in plaintext HTTP, even just to redirect".
-  it("Plan 02.2-06 (issue #14): nginx exposes ONLY port 443 (no port 80) with cert volume mounted", () => {
+  // Strict reading of constraint "plain HTTP only behind a TLS-terminating
+  // proxy" interpreted as "origin never participates in plaintext HTTP,
+  // even just to redirect".
+  it("nginx exposes ONLY port 443 (no port 80) with cert volume mounted", () => {
     const content = readFileSync(composePath, "utf-8");
     const compose = yaml.load(content) as Compose;
     const nginx = compose.services.nginx;

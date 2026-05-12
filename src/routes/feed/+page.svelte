@@ -1,59 +1,52 @@
 <script lang="ts">
-  // /feed — primary daily workspace for authenticated users (Plan 02.1-07,
-  // extended Plan 02.1-14 + 02.1-15; Plan 02.1-19 round-2 UAT rebuild).
+  // /feed — primary daily workspace for authenticated users.
   //
-  // Composition (Plan 02.1-19):
+  // Composition:
   //   - <h1>Feed</h1> at heading-24.
-  //   - <DateRangeControl> with always-visible from/to inputs + 4 presets +
-  //     × clear (Plan 02.1-15 Custom toggle dropped).
-  //   - <FilterChips> emits one chip per active axis (kind / source / show /
-  //     authorIsMe), comma-joined values; click opens FiltersSheet on that
-  //     axis; × clears entire axis.
+  //   - <DateRangeControl> with always-visible from/to inputs + 4
+  //     presets + × clear.
+  //   - <FilterChips> emits one chip per active axis (kind / source /
+  //     show / authorIsMe), comma-joined values; click opens
+  //     FiltersSheet on that axis; × clears entire axis.
   //   - <FeedDateGroupHeader> + <FeedCard> tiles in a CSS grid
   //     (auto-fill, minmax 280px) — Google Photos / Apple Photos timeline.
-  //   - Sentinel <div> drives IntersectionObserver-based infinite scroll
-  //     (replaces <CursorPager>).
-  //   - <RecoveryDialog> modal opened from PageHeader's "Recently deleted (N)"
-  //     button (Plan 02.1-14 — Gap 2; revised Plan 02.1-39 round-6 polish #11
-  //     — anchor → modal so infinite scroll does not throw the user to a
-  //     moving target).
+  //   - Sentinel <div> drives IntersectionObserver-based infinite scroll.
+  //   - <RecoveryDialog> modal opened from PageHeader's "Recently
+  //     deleted (N)" button (a dialog rather than an anchor so infinite
+  //     scroll does not throw the user to a moving target).
   //   - <EmptyState> for first-time empty + filtered-no-match cases.
   //
-  // Plan 02.1-19 a11y note: infinite scroll has no JavaScript-disabled
-  // fallback in 2.1. Screen-reader users can still scroll the rendered first
-  // page; subsequent pages require IntersectionObserver. A "Load more"
-  // button fallback is filed as Phase 6 polish if user feedback surfaces it.
-  // The role="status" on the loading + end banners ensures assistive tech
+  // a11y note: infinite scroll has no JavaScript-disabled fallback.
+  // Screen-reader users can still scroll the rendered first page;
+  // subsequent pages require IntersectionObserver. A "Load more" button
+  // fallback is a future polish if user feedback surfaces it. The
+  // role="status" on the loading + end banners ensures assistive tech
   // announces state changes.
 
   import { goto, invalidateAll } from "$app/navigation";
   import { page } from "$app/state";
   import { m } from "$lib/paraglide/messages.js";
   import FeedCard from "$lib/components/FeedCard.svelte";
-  // Phase 03.0.1 D-04 escape hatch — adapter-specific card override.
-  // Phase 03.0.1 ships no overrides (YouTube uses the universal FeedCard);
-  // Reddit / Twitter Phase 03.1+ register `cardComponent` on their
-  // sources/<kind>/ui/index.ts to opt into a custom layout.
+  // Escape hatch — adapter-specific card override. YouTube uses the
+  // universal FeedCard. Other source kinds may register `cardComponent`
+  // on their sources/<kind>/ui/index.ts to opt into a custom layout.
   import { getCardComponent } from "$lib/sources/registry-ui-client.js";
   import FeedDateGroupHeader from "$lib/components/FeedDateGroupHeader.svelte";
   import FeedQuickNav from "$lib/components/FeedQuickNav.svelte";
-  // Plan 02.1-25 (UAT-NOTES.md §3.1-polish): shared PageHeader replaces the
-  // inline <header class="head"> + .cta block — title + CTA inline on the
-  // left instead of justify-content: space-between.
+  // Shared PageHeader replaces the inline <header class="head"> + .cta
+  // block — title + CTA inline on the left instead of
+  // justify-content: space-between.
   import PageHeader from "$lib/components/PageHeader.svelte";
   import DateRangeControl from "$lib/components/DateRangeControl.svelte";
   import FilterChips from "$lib/components/FilterChips.svelte";
   import FiltersSheet from "$lib/components/FiltersSheet.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
-  // Plan 02.1-39 round-6 polish #11 (UAT-NOTES.md §5.8 follow-up #11,
-  // 2026-04-30): <DeletedEventsPanel> below the feed grid replaced by a
-  // <RecoveryDialog> modal opened from PageHeader's "Recently deleted (N)"
-  // button. The bottom-of-page panel broke on infinite-scroll surfaces by
-  // construction (anchor link → scroll to bottom → sentinel fires → bottom
-  // moves → user lost). The dialog decouples the recovery UI from scroll
-  // position. <DeletedEventsPanel> is now unused on /feed and removed from
-  // the imports — the soft-deleted events flow comes from the same loader
-  // (data.deletedEvents) but renders inside the modal instead.
+  // <RecoveryDialog> modal opens from PageHeader's "Recently deleted (N)"
+  // button. A bottom-of-page panel broke on infinite-scroll surfaces by
+  // construction (anchor link → scroll to bottom → sentinel fires →
+  // bottom moves → user lost). The dialog decouples the recovery UI from
+  // scroll position. The soft-deleted events flow comes from the same
+  // loader (data.deletedEvents) and renders inside the modal.
   import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
   import type { PageData } from "./$types";
@@ -61,10 +54,10 @@
   let { data }: { data: PageData } = $props();
 
   let sheetOpen = $state(false);
-  // Plan 02.1-39 round-6 polish #11: RecoveryDialog open state. Opened by
-  // PageHeader's "Recently deleted (N)" button; closed by Escape, backdrop
-  // click, or the dialog's own close button. Auto-closes when the last
-  // recoverable item is restored (items reactively shrink to length 0).
+  // RecoveryDialog open state. Opened by PageHeader's "Recently deleted (N)"
+  // button; closed by Escape, backdrop click, or the dialog's own close
+  // button. Auto-closes when the last recoverable item is restored
+  // (items reactively shrink to length 0).
   let recoveryOpen = $state(false);
 
   // Map deletedEvents (toEventDto-projected, no ciphertext) into the
@@ -90,47 +83,35 @@
       if (data.deletedEvents.length <= 1) recoveryOpen = false;
     }
   }
-  // Plan 02.1-20 widens FilterChips/FiltersSheet axis union to include
-  // 'action' for /audit reuse; /feed never receives that axis (filters.action
-  // is left undefined here) but the local type must match the component
-  // contract. Plan 02.1-21 added 'date' to the union (secondary entry inside
-  // the sheet); Plan 02.1-39 round-6 polish #9 (UAT-NOTES.md §5.6 follow-up
-  // #9, 2026-04-30) REVERSES that — see FEED_SCHEMA comment below — but the
-  // axis identifier stays in the union so the type still flows through
-  // FiltersSheet/FilterChips on other surfaces (e.g. /audit).
+  // FilterChips/FiltersSheet's axis union includes 'action' for /audit
+  // reuse; /feed never receives that axis (filters.action is left
+  // undefined here) but the local type must match the component contract.
+  // 'date' stays in the union so the type still flows through
+  // FiltersSheet/FilterChips on other surfaces (e.g. /audit), even
+  // though /feed itself owns the date range via <DateRangeControl>.
   let sheetFocusAxis = $state<
     "kind" | "source" | "show" | "authorIsMe" | "date" | "action" | undefined
   >(undefined);
 
-  // Plan 02.1-21: schema is the explicit list of axes /feed owns. Replaces
-  // FiltersSheet's old implicit "render everything" default.
+  // FEED_SCHEMA is the explicit list of axes /feed owns. The
+  // always-visible <DateRangeControl> above the chip strip is the SOLE
+  // date-range entry on /feed; 'date' is intentionally excluded from
+  // this schema so FiltersSheet skips the date fieldset AND its clearAll
+  // skips the date axis.
   //
-  // Plan 02.1-39 round-6 polish #9 (UAT-NOTES.md §5.6 follow-up #9,
-  // 2026-04-30): 'date' DROPPED from /feed's schema. User during round-6 UAT:
-  // "Так и в фильрах в feed не нужна дата, дату мы задаем до выбора
-  // фильтров." The always-visible <DateRangeControl> above the chip strip
-  // (rendered unconditionally below) is the SOLE date-range entry on /feed —
-  // the in-sheet secondary axis Plan 02.1-21 added was redundant since the
-  // primary control is never hidden. Removing the axis from FEED_SCHEMA
-  // makes FiltersSheet skip the date fieldset (the schema.includes('date')
-  // gate handles it) AND makes FiltersSheet's clearAll skip the date axis.
-  //
-  // Plan 02.1-39 round-6 polish #10 (UAT-NOTES.md §5.6 follow-up #10,
-  // 2026-04-30) extended this contract to BOTH "Clear filters" surfaces.
-  // User quote: "и clear filters вообще никак не трогает дату." The
-  // chip-strip clearAll (see clearAll() below) now also preserves the date
-  // range, matching the in-sheet behavior. Date is owned exclusively by
-  // <DateRangeControl>; both "Clear filters" buttons clear ONLY the chip-
-  // owned axes (kind / source / show / game / authorIsMe / cursor).
+  // Both "Clear filters" surfaces (chip-strip clearAll() below + in-
+  // sheet) preserve the date range. Date is owned exclusively by
+  // <DateRangeControl>; both "Clear filters" buttons clear ONLY the
+  // chip-owned axes (kind / source / show / game / authorIsMe / cursor).
   const FEED_SCHEMA = ["kind", "source", "show", "authorIsMe"] as const;
 
   const sourceById = $derived(new Map(data.sources.map((s) => [s.id, s])));
   const gameById = $derived(new Map(data.games.map((g) => [g.id, g])));
 
   function hasNoActiveFilters(f: typeof data.activeFilters): boolean {
-    // Plan 02.1-19: source / kind are arrays + show is a discriminated
-    // union. "No filter" = all arrays empty, show.kind === 'any',
-    // authorIsMe undefined, no date constraint.
+    // source / kind are arrays + show is a discriminated union. "No
+    // filter" = all arrays empty, show.kind === 'any', authorIsMe
+    // undefined, no date constraint.
     return (
       f.source.length === 0 &&
       f.kind.length === 0 &&
@@ -159,10 +140,10 @@
     void goto(qs ? `/feed?${qs}` : "/feed");
   }
 
-  // Plan 02.1-19: per-axis dismiss — × on a chip clears the entire axis
-  // (drops all values for that axis, NOT a single value).
-  // Plan 02.1-20: 'action' is part of the FilterChips axis union for /audit
-  // reuse but is unreachable here (/feed never sets filters.action).
+  // Per-axis dismiss — × on a chip clears the entire axis (drops all
+  // values for that axis, NOT a single value). 'action' is part of the
+  // FilterChips axis union for /audit reuse but is unreachable here
+  // (/feed never sets filters.action).
   type ChipAxis = "kind" | "source" | "show" | "authorIsMe" | "action";
   function dismissAxis(axis: ChipAxis): void {
     const params = new URLSearchParams(page.url.searchParams);
@@ -195,39 +176,35 @@
   function applyFiltersFromSheet(next: {
     source?: string[];
     kind?: string[];
-    // Plan 02.1-20: FiltersSheet's onApply widens show to optional so /audit
-    // can omit it. /feed always supplies it; default to { kind: 'any' } when
-    // the sheet returns undefined (defensive).
+    // FiltersSheet's onApply widens show to optional so /audit can omit
+    // it. /feed always supplies it; default to { kind: 'any' } when the
+    // sheet returns undefined (defensive).
     show?: ShowFilter;
     authorIsMe?: boolean;
-    // Plan 02.1-21 originally added an in-sheet date axis emitting from/to;
-    // Plan 02.1-39 round-6 polish #9 reversed that on /feed (FEED_SCHEMA no
-    // longer includes 'date'). The keys remain in the type signature because
-    // FiltersSheet's onApply contract is shared with /audit (which DOES use
-    // 'date' via its own schema). With FEED_SCHEMA missing 'date', the sheet
-    // never emits these on /feed — the `"from" in next || "to" in next` gate
-    // below is what makes the omission a no-op for the date params.
+    // FiltersSheet's onApply contract is shared with /audit, which DOES
+    // use 'date' via its own schema. With FEED_SCHEMA missing 'date',
+    // the sheet never emits these on /feed — the
+    // `"from" in next || "to" in next` gate below is what makes the
+    // omission a no-op for the date params.
     from?: string;
     to?: string;
     action?: string[]; // unused on /feed
   }): void {
     const params = new URLSearchParams(page.url.searchParams);
-    // Sheet owns source/kind/show/authorIsMe on /feed. The 'date' axis was
-    // dropped in Plan 02.1-39 round-6 polish #9 (FEED_SCHEMA above) — the
-    // <DateRangeControl> above the chip strip is the sole date entry now.
+    // Sheet owns source/kind/show/authorIsMe on /feed. The
+    // <DateRangeControl> above the chip strip is the sole date entry.
     params.delete("source");
     params.delete("kind");
     params.delete("game");
     params.delete("show");
     params.delete("authorIsMe");
     params.delete("cursor");
-    // Plan 02.1-21: only rewrite from/to if the sheet emitted them (i.e.
-    // schema includes 'date'). After Plan 02.1-39 round-6 polish #9 dropped
-    // 'date' from FEED_SCHEMA on /feed, this branch is a no-op on /feed —
-    // the user's date range survives the sheet's apply/clearAll round-trip,
-    // which matches the new contract (DateRangeControl owns the axis). The
-    // gate is preserved so the same handler shape stays compatible if a
-    // future surface re-introduces 'date' in its schema.
+    // Only rewrite from/to if the sheet emitted them (i.e. schema
+    // includes 'date'). This branch is a no-op on /feed — the user's
+    // date range survives the sheet's apply/clearAll round-trip
+    // (DateRangeControl owns the axis). The gate is preserved so the
+    // same handler shape stays compatible if a future surface
+    // re-introduces 'date' in its schema.
     if ("from" in next || "to" in next) {
       params.delete("from");
       params.delete("to");
@@ -243,7 +220,7 @@
     if (show.kind === "inbox") {
       params.set("show", "inbox");
     } else if (show.kind === "standalone") {
-      // Plan 02.1-24: standalone filter axis.
+      // Standalone (not attached to any game) filter axis.
       params.set("show", "standalone");
     } else if (show.kind === "specific") {
       params.set("show", "specific");
@@ -257,25 +234,16 @@
   }
 
   function clearAll(): void {
-    // Wired to <FilterChips onClearAll>. Plan 02.1-39 round-6 polish #10
-    // (UAT-NOTES.md §5.6 follow-up #10, 2026-04-30) — user clarified after
-    // polish #9 landed:
-    //
-    //   "и clear filters вообще никак не трогает дату"
-    //   ("and Clear filters should not touch the date AT ALL")
-    //
-    // After polish #9 made the in-sheet Clear preserve the date axis on
-    // /feed, the user expects the same from the chip-strip Clear button.
-    // Both surfaces now do the same thing: clear chip-owned axes
+    // Wired to <FilterChips onClearAll>. Both "Clear filters" surfaces
+    // (in-sheet + chip-strip) clear chip-owned axes
     // (kind / source / show / game / authorIsMe / cursor) and PRESERVE
     // the user's selected date range (?from / ?to / ?all).
     //
     // Date is owned exclusively by <DateRangeControl>; the only way to
     // change the date range is to interact with that control directly
-    // (presets, from/to inputs, or its own × reset button). Both
-    // "Clear filters" buttons are now date-axis-neutral, matching the
-    // mental model where the date range is established BEFORE picking
-    // filters and survives every filter operation.
+    // (presets, from/to inputs, or its own × reset button). The mental
+    // model: the date range is established BEFORE picking filters and
+    // survives every filter operation.
     const params = new URLSearchParams(page.url.search);
     // Drop chip-owned axes only.
     params.delete("kind");
@@ -289,8 +257,8 @@
     void goto(qs ? `/feed?${qs}` : "/feed");
   }
 
-  // Plan 02.1-19: cumulative rows for infinite scroll. data.rows is the
-  // first page from the loader; loadMore() appends next pages via fetch.
+  // Cumulative rows for infinite scroll. data.rows is the first page
+  // from the loader; loadMore() appends next pages via fetch.
   let allRows = $state(data.rows);
   let nextCursor = $state<string | null>(data.nextCursor);
   let loading = $state(false);
@@ -319,8 +287,7 @@
       params.set("cursor", nextCursor);
       const res = await fetch(`/api/events?${params.toString()}`);
       if (!res.ok) {
-        // On error, stop trying — user can refresh manually. Phase 4 may
-        // add a toast retry banner.
+        // On error, stop trying — user can refresh manually.
         endReached = true;
         return;
       }
@@ -363,11 +330,11 @@
     onOpenRecovery={() => (recoveryOpen = true)}
   />
 
-  <!-- Plan 02.1-26 — FeedQuickNav: chip strip / segmented control for the
-       most-common Show axis values (All / Inbox / Standalone / per-game).
-       Closes UAT-NOTES.md §6.2-redesign — the user wants single-click switch
-       instead of opening FiltersSheet. The full FiltersSheet stays for
-       long-tail filters (kind, source, date, authorIsMe). -->
+  <!-- FeedQuickNav: chip strip / segmented control for the most-common
+       Show axis values (All / Inbox / Standalone / per-game). The user
+       wants a single-click switch instead of opening FiltersSheet. The
+       full FiltersSheet stays for long-tail filters (kind, source, date,
+       authorIsMe). -->
   <FeedQuickNav
     games={data.games}
     activeShow={data.activeFilters.show}
@@ -433,15 +400,12 @@
     </div>
   {/if}
 
-  <!-- Plan 02.1-39 round-6 polish #11 (UAT-NOTES.md §5.8 follow-up #11):
-       <DeletedEventsPanel> at the bottom of the page is REMOVED. The
-       same recovery flow now lives in <RecoveryDialog> — a modal opened
-       from PageHeader's "Recently deleted (N)" button. The dialog
-       decouples the recovery UI from scroll position so infinite-scroll
-       does not throw the user to a moving target. The dialog only
-       mounts when data.deletedEvents.length > 0; the dialog itself
-       still defends against the empty case (renders the localized
-       empty message). -->
+  <!-- The recovery flow lives in <RecoveryDialog> — a modal opened from
+       PageHeader's "Recently deleted (N)" button. The dialog decouples
+       the recovery UI from scroll position so infinite-scroll does not
+       throw the user to a moving target. The dialog only mounts when
+       data.deletedEvents.length > 0; the dialog itself still defends
+       against the empty case (renders the localized empty message). -->
   {#if data.deletedEvents.length > 0}
     <RecoveryDialog
       open={recoveryOpen}
@@ -480,14 +444,14 @@
     gap: var(--space-md);
     min-width: 0;
   }
-  /* Plan 02.1-25: inline .head + .cta CSS removed — replaced by the shared
-   * <PageHeader> component (see top of file). The new component uses the
-   * inline-on-the-left flex layout instead of justify-content: space-between
-   * per UAT-NOTES.md §3.1-polish. */
-  /* Plan 02.1-19: CSS grid (auto-fill, minmax 280px) replaces the Plan
-   * 02.1-15 vertical list. Multi-column on >=640px; single column below.
-   * <FeedDateGroupHeader> sets `grid-column: 1 / -1` so the header spans
-   * the full row, separating card groups visually. */
+  /* Inline .head + .cta CSS removed — replaced by the shared
+   * <PageHeader> component (see top of file). The shared component uses
+   * the inline-on-the-left flex layout instead of
+   * justify-content: space-between. */
+  /* CSS grid (auto-fill, minmax 280px) for the timeline. Multi-column
+   * on >=640px; single column below. <FeedDateGroupHeader> sets
+   * `grid-column: 1 / -1` so the header spans the full row, separating
+   * card groups visually. */
   .feed-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));

@@ -2,13 +2,12 @@ import { describe, it, expect } from "vitest";
 import { createApp } from "../../src/lib/server/http/app.js";
 import { migrationsApplied } from "../../src/lib/server/db/migrate.js";
 
-// VALIDATION ad-hoc — D-21 (`/healthz` always 200; `/readyz` 200 only after
-// migrations applied + DB reachable). Plan 06 lands the routes; this file
-// flips the Wave 0 placeholders into active assertions.
+// `/healthz` always 200; `/readyz` 200 only after migrations applied +
+// DB reachable.
 //
-// tests/setup.ts (Plan 02) runs runMigrations() in beforeAll for the
-// integration project, so migrationsApplied.current is already true by the
-// time these specs run. The pre-migration test temporarily flips the flag
+// tests/setup.ts runs runMigrations() in beforeAll for the integration
+// project, so migrationsApplied.current is already true by the time
+// these specs run. The pre-migration test temporarily flips the flag
 // off, asserts 503, then restores it for the rest of the suite.
 
 describe("/healthz and /readyz", () => {

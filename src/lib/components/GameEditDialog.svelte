@@ -2,32 +2,13 @@
   // GameEditDialog — modal dialog for editing game.title + game.description
   // on /games/[gameId].
   //
-  // Plan 02.1-39 round-6 polish #14b (UAT-NOTES.md §5.8 follow-up #14,
-  // 2026-04-30). User during round-6 UAT after polish #13 landed
-  // (verbatim, ru):
-  //   - "я вижу заголовок. Возле которого кнопка edit. Я нажал но не могу
-  //      менять этот заголовок."
-  //     ("I see the title. Edit is next to it. I clicked it but I can't
-  //      edit this title.")
-  //   - "Потом я вижу крупный header он тут не нужен. Дальше я вижу
-  //      Редактируемый загловок, он не нужен это дублирование."
-  //     ("Then I see a large header, it's not needed here. Then I see an
-  //      editable title, it's a duplicate, not needed.")
-  //   - "Еще я хочу чтобы тут можно было сделать описание игры."
-  //     ("I also want to be able to add a description for the game here.")
-  //
-  // The polish #13 page mounted both <PageHeader> (with a non-functional
-  // Edit button that just toggled an "Edit…" hint) AND <RenameInline>
-  // (the actual click-to-edit h1) — two title surfaces, only one wired.
-  // Polish #14b consolidates: PageHeader.title is the only title; the
-  // Edit button opens THIS modal with title input + description textarea
-  // + Save / Cancel; RenameInline is removed from the page.
+  // PageHeader.title is the only title; the Edit button opens THIS modal
+  // with title input + description textarea + Save / Cancel.
   //
   // Pattern matches RecoveryDialog / ConfirmDialog: native <dialog>
   // element + showModal() (focus trap + Escape-to-close for free) +
   // backdrop-click closes via target===dialogEl discriminator + the
-  // .dialog[open] display:flex scoping (commit 087a2fc) so the closed
-  // state stays hidden.
+  // .dialog[open] display:flex scoping so the closed state stays hidden.
   //
   // Save flow: on submit, call onSave({title, description}). The parent
   // owns the fetch (PATCH /api/games/:id) so this component stays a
@@ -36,8 +17,8 @@
   //
   // Privacy invariant: this dialog handles game.title + game.description,
   // both of which are non-secret fields. The toGameDto projection layer
-  // is the runtime barrier (Plan 02-04 / D-39); this component never
-  // sees ciphertext columns by construction.
+  // is the runtime barrier; this component never sees ciphertext columns
+  // by construction.
 
   import { tick } from "svelte";
   import { m } from "$lib/paraglide/messages.js";
@@ -194,11 +175,11 @@
   /* Mirrors RecoveryDialog / ConfirmDialog visual treatment so the
    * three modal patterns feel like one family.
    *
-   * .dialog[open] { display: flex } scoping (commit 087a2fc) is the
-   * load-bearing rule that keeps a closed dialog hidden. UA stylesheet
-   * default is `display: none` UNLESS [open] is set; an unscoped
-   * `display: flex` on `.dialog` would override the UA hide rule and
-   * leak the dialog into normal flow even when closed. */
+   * .dialog[open] { display: flex } scoping is the load-bearing rule
+   * that keeps a closed dialog hidden. UA stylesheet default is
+   * `display: none` UNLESS [open] is set; an unscoped `display: flex`
+   * on `.dialog` would override the UA hide rule and leak the dialog
+   * into normal flow even when closed. */
   .dialog[open] {
     display: flex;
     flex-direction: column;

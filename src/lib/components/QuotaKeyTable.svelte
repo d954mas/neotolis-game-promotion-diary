@@ -1,25 +1,23 @@
 <script lang="ts">
-  // Phase 3.0 Plan 13 Task 2 — per-API-key quota usage table.
+  // Per-API-key quota usage table.
   //
   // Renders the operator's view of today's youtube_service_quota_usage rows
-  // (sourced from /api/admin/quota — Plan 03.0-07). Four columns:
+  // (sourced from /api/admin/quota). Four columns:
   //   1. Key id      (sha-8 hash from admin-quota-read.toQuotaKeyRow)
   //   2. Units used  (estimatedUnits, locale-formatted)
   //   3. % of 10 000 (pctOfDaily, 1 decimal)
   //   4. Status      (pill: OK · 80% throttle — Cold paused · 95% throttle — Active paused)
   //
-  // UI-SPEC contract (.planning/phases/03.0-polling-pipeline-plumbing-youtube/03.0-UI-SPEC.md):
+  // UI contract:
   //   - Plain <table> (no virtualization — N keys is bounded by
-  //     SERVICE_YOUTUBE_API_KEYS.length, typically 1–3 per CONTEXT
-  //     "Google ToS limits").
+  //     SERVICE_YOUTUBE_API_KEYS.length, typically 1–3 per Google ToS limits).
   //   - Status pill is the ONLY admin-side place where the Throttled
-  //     PollingBadge variant copy surfaces (DV-3). Status colors per
-  //     UI-SPEC §"Color → QuotaKeyTable status pill color rules":
+  //     PollingBadge variant copy surfaces. Status colors:
   //       OK         → success (green) at 12% alpha + success text
   //       80_throttle → info    (cyan)  at 12% alpha + info text
   //       95_throttle → destructive (red) at 12% alpha + destructive text
   //     Alpha via color-mix(in srgb, var(--color-X) 12%, transparent) —
-  //     idiom established in Phase 2 RetentionBadge warning state.
+  //     idiom shared with RetentionBadge warning state.
   //   - Stacked layout < 600px viewport (no horizontal scroll); thead
   //     hides, each row collapses to a 2-column grid (key id full-width,
   //     details + status pill below).
@@ -106,8 +104,8 @@
     color: var(--color-text);
   }
 
-  /* UI-SPEC §"Color → QuotaKeyTable status pill color rules":
-   * 12% alpha wash via color-mix — Phase 2 RetentionBadge idiom. */
+  /* QuotaKeyTable status pill color rules: 12% alpha wash via color-mix
+   * (the RetentionBadge idiom). */
   .status-pill {
     display: inline-block;
     padding: 2px var(--space-sm);
@@ -129,10 +127,9 @@
     color: var(--color-destructive);
   }
 
-  /* UI-SPEC §"Layout & Responsive Contract → QuotaKeyTable stacked layout":
-   * < 600px viewport, columns collapse to a stacked layout (each row
-   * becomes a vertical block: key id on first line, units used + % +
-   * status pill below). Status pill stays right-aligned. */
+  /* Stacked layout < 600px viewport: columns collapse so each row becomes
+   * a vertical block (key id on first line, units used + % + status pill
+   * below). Status pill stays right-aligned. */
   @media (max-width: 600px) {
     .quota-key-table thead {
       display: none;

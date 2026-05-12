@@ -8,13 +8,13 @@
   // checkbox — the speed-bump pattern from PROJECT.md's "calm > flashy"
   // stance applied to security-impactful actions (key remove, key replace).
   //
-  // Plan 02.2-04 (D-S3): an additional Type-DELETE variant. When `requireText`
-  // is set (e.g. "DELETE"), the dialog renders a text input under the body
-  // and the confirm button stays disabled until the input value matches the
-  // required string verbatim. Layered with `isIrreversible` (the checkbox
-  // speedbump) when both are set; either gate disables the confirm button.
-  // When `requireText` is null/undefined, the dialog behaves exactly as it
-  // did pre-Phase-2.2 — no behavior change for existing call sites.
+  // Type-DELETE variant: when `requireText` is set (e.g. "DELETE"), the
+  // dialog renders a text input under the body and the confirm button
+  // stays disabled until the input value matches the required string
+  // verbatim. Layered with `isIrreversible` (the checkbox speedbump) when
+  // both are set; either gate disables the confirm button. When
+  // `requireText` is null/undefined, the dialog behaves like a plain
+  // confirmation — no behavior change for existing call sites.
   //
   // Native <dialog>'s showModal() traps focus and gives us escape-to-close
   // behaviour without a focus-trap library. The cancel button is the

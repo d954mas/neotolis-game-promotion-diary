@@ -1,19 +1,16 @@
 <script lang="ts">
-  // /events/[id]/edit — full event edit form (Plan 02.1-18 — new route).
+  // /events/[id]/edit — full event edit form.
   //
-  // Plan 02.1-18 — round-2 UAT closure: pencil moves from FeedCard to
-  // /events/[id] detail; this is its destination. Form mirrors the
-  // /events/new shape (kind / occurredAt / title / url / notes / gameId)
-  // PLUS an "Author is me" checkbox. Submit → PATCH /api/events/:id
-  // (carries authorIsMe, validated by Plan 02.1-17 updateEventSchema)
-  // and, IF gameId changed, a separate PATCH /api/events/:id/attach so
-  // the dedicated attach endpoint owns gameId mutation (validates game
-  // ownership via assertGameOwnedByUser; Pitfall 4 mitigation).
+  // Form mirrors the /events/new shape
+  // (kind / occurredAt / title / url / notes / gameId) PLUS an "Author is
+  // me" checkbox. Submit → PATCH /api/events/:id (carries authorIsMe,
+  // validated by updateEventSchema) and, IF gameId changed, a separate
+  // PATCH /api/events/:id/attach so the dedicated attach endpoint owns
+  // gameId mutation (validates game ownership via assertGameOwnedByUser).
   //
   // Privacy invariants (mirrored in +page.server.ts):
-  //   - Anonymous → redirect to /login (loader gate; page-route equivalent
-  //     of MUST_BE_PROTECTED).
-  //   - Cross-tenant → 404 via NotFoundError → error(404) (PRIV-01).
+  //   - Anonymous → redirect to /login (loader gate).
+  //   - Cross-tenant → 404 via NotFoundError → error(404).
   //   - PATCH /api/events/:id is mounted under tenantScope
   //     (anonymous-401 sweep covers it; service-layer updateEvent throws
   //     NotFoundError on cross-tenant).
@@ -39,10 +36,8 @@
 
   type EventDtoLocal = {
     id: string;
-    // Plan 02.1-28 (M:N migration): gameIds[] replaces the legacy singular
-    // gameId. Plan 02.1-38 (UAT-NOTES.md §5.2 — Path A) swaps the round-3
-    // single-select continuity for a multi-select checkbox-list bound
-    // directly to gameIds.
+    // gameIds[] replaces the legacy singular gameId; the form uses a
+    // multi-select checkbox-list bound directly to gameIds.
     gameIds: string[];
     kind: EventKind;
     authorIsMe: boolean;
@@ -50,10 +45,9 @@
     title: string;
     url: string | null;
     notes: string | null;
-    // Plan 02.1-32 (UAT-NOTES.md §4.24.D): metadata.triage.standalone
-    // surfaces the "Not game-related" toggle on the edit form. toEventDto
-    // already projects metadata so the value reaches the page load function
-    // unchanged.
+    // metadata.triage.standalone surfaces the "Not game-related" toggle on
+    // the edit form. toEventDto already projects metadata so the value
+    // reaches the page load function unchanged.
     metadata: unknown;
   };
 
@@ -63,8 +57,8 @@
   const event = $derived(data.event as EventDtoLocal);
   const games = $derived(data.games as GameOpt[]);
 
-  // Initial form state hydrated from the loader. Plan 02.1-18 captures
-  // originalGameId so the submit handler can decide whether to call
+  // Initial form state hydrated from the loader. originalGameIds is
+  // captured so the submit handler can decide whether to call
   // PATCH /api/events/:id/attach (only when the picker actually changed).
   let kind = $state<EventKind>(event.kind);
   let title = $state(event.title);
@@ -76,11 +70,9 @@
   );
   let url = $state(event.url ?? "");
   let notes = $state(event.notes ?? "");
-  // Plan 02.1-38 (UAT-NOTES.md §5.2 — Path A): multi-select via checkbox-list.
-  // The round-3 single-select continuity preserved by Plan 02.1-32 is
-  // RETIRED — the user can now attach the event to ≥2 games from the UI.
-  // Submit sends `{gameIds: [...]}` to PATCH /api/events/:id/attach
-  // unchanged (backend set-replacement semantics — Plan 02.1-28).
+  // Multi-select via checkbox-list. The user can attach the event to ≥2
+  // games from the UI. Submit sends `{gameIds: [...]}` to
+  // PATCH /api/events/:id/attach (backend set-replacement semantics).
   let gameIds = $state<string[]>([...event.gameIds]);
   let authorIsMe = $state(event.authorIsMe);
   const originalGameIds = new Set(event.gameIds);
@@ -93,11 +85,11 @@
     }
   }
 
-  // Plan 02.1-32 (UAT-NOTES.md §4.24.D): standalone toggle hydrated from
-  // metadata.triage.standalone. The submit handler fires PATCH
-  // /api/events/:id/mark-standalone (or /unmark-standalone) ONLY when the
-  // toggle's value differs from the loaded value — reuses the existing
-  // service surface from Plan 02.1-24 so no new audit verb is added.
+  // Standalone toggle hydrated from metadata.triage.standalone. The submit
+  // handler fires PATCH /api/events/:id/mark-standalone (or
+  // /unmark-standalone) ONLY when the toggle's value differs from the
+  // loaded value — reuses the existing service surface so no new audit
+  // verb is added.
   function readStandaloneFromMetadata(md: unknown): boolean {
     if (md === null || typeof md !== "object") return false;
     const triage = (md as { triage?: unknown }).triage;
@@ -107,22 +99,20 @@
   const initialStandalone = readStandaloneFromMetadata(event.metadata);
   let editStandalone = $state(initialStandalone);
 
-  // Plan 02.1-32 (UAT-NOTES.md §4.24.C — UI guard layer; service-layer 422
-  // from Plan 02.1-28 is defense-in-depth): when the form has at least one
-  // game attached AND the user toggles standalone=true, surface an inline
-  // conflict error and disable Save. The user must clear one or the other.
-  // Plan 02.1-38 (UAT-NOTES.md §5.2): predicate now checks gameIds.length —
-  // semantics unchanged ("at least one attached game conflicts").
+  // UI guard layer (service-layer 422 is defense-in-depth): when the form
+  // has at least one game attached AND the user toggles standalone=true,
+  // surface an inline conflict error and disable Save. The user must clear
+  // one or the other. Predicate checks gameIds.length — "at least one
+  // attached game conflicts".
   const hasAttachedGame = $derived(gameIds.length > 0);
   const standaloneConflict = $derived(editStandalone === true && hasAttachedGame);
 
   let pending = $state(false);
   let errorText = $state<string | null>(null);
 
-  // Plan 02.1-32 (UAT-NOTES.md §4.18.A): Delete button moves from the
-  // /events/[id] read-only detail page to this edit form's footer. Uses
-  // the existing ConfirmDialog flow (Plan 02.1-14 pattern) + soft-delete
-  // semantics (DELETE /api/events/:id → restore-within-60-days).
+  // Delete button at this edit form's footer. Uses the existing
+  // ConfirmDialog flow + soft-delete semantics
+  // (DELETE /api/events/:id → restore-within-60-days).
   let confirmDeleteOpen = $state(false);
   let deleteBusy = $state(false);
   let deleteError = $state<string | null>(null);
@@ -183,9 +173,9 @@
       errorText = m.error_server_generic();
       return;
     }
-    // Plan 02.1-32 UI guard: prevent submit when standalone+game conflict.
-    // The Save button is disabled, but defense-in-depth here too in case the
-    // user finds an alternate trigger.
+    // UI guard: prevent submit when standalone+game conflict. The Save
+    // button is disabled, but defense-in-depth here too in case the user
+    // finds an alternate trigger.
     if (standaloneConflict) {
       return;
     }
@@ -219,10 +209,9 @@
       }
 
       // 2) If the gameIds set changed, PATCH /attach as a separate fetch so
-      //    the dedicated endpoint validates game ownership (Pitfall 4).
-      // Plan 02.1-38 (UAT-NOTES.md §5.2 — Path A): set-difference dirty
-      // check (order-agnostic). attachEventToGames is set-replacement
-      // semantics on the backend (Plan 02.1-28 — DELETE diff + INSERT
+      //    the dedicated endpoint validates game ownership.
+      // Set-difference dirty check (order-agnostic). attachEventToGames is
+      // set-replacement semantics on the backend (DELETE diff + INSERT
       // diff), so any membership change triggers exactly one PATCH.
       const currentSet = new Set(gameIds);
       const sameSize = currentSet.size === originalGameIds.size;
@@ -239,13 +228,13 @@
         }
       }
 
-      // 3) Plan 02.1-32 (UAT-NOTES.md §4.24.D): if the standalone toggle
-      //    differs from the loaded value, fire the dedicated route. Two
-      //    PATCHes (instead of folding the toggle into the main updateEvent)
-      //    because (a) markStandalone has its own audit verb (forensics
-      //    intact — event.marked_standalone / event.unmarked_standalone),
-      //    (b) the conflict-guard 422 (Plan 02.1-28) fires correctly only
-      //    on the dedicated route, (c) reuses existing service surface.
+      // 3) If the standalone toggle differs from the loaded value, fire
+      //    the dedicated route. Two PATCHes (instead of folding the toggle
+      //    into the main updateEvent) because (a) markStandalone has its
+      //    own audit verb (forensics intact — event.marked_standalone /
+      //    event.unmarked_standalone), (b) the conflict-guard 422 fires
+      //    correctly only on the dedicated route, (c) reuses existing
+      //    service surface.
       if (editStandalone !== initialStandalone) {
         const path = editStandalone ? "mark-standalone" : "unmark-standalone";
         const standaloneRes = await fetch(`/api/events/${event.id}/${path}`, {
@@ -331,12 +320,10 @@
       <input class="input" type="url" bind:value={url} placeholder="https://" disabled={pending} />
     </label>
 
-    <!-- Plan 02.1-38 (UAT-NOTES.md §5.2 — Path A): multi-select Game picker.
-         Replaces the single-select <select> with a checkbox-list bound to
-         gameIds. The user can attach the event to ≥2 games from the UI;
-         submit handler sends `{gameIds: [...]}` via PATCH /api/events/:id/attach
-         (backend unchanged — Plan 02.1-28 set-replacement semantics). Empty
-         array === detach (move to inbox). -->
+    <!-- Multi-select Game picker. Checkbox-list bound to gameIds; the
+         user can attach the event to ≥2 games from the UI. Submit handler
+         sends `{gameIds: [...]}` via PATCH /api/events/:id/attach (backend
+         set-replacement semantics). Empty array === detach (move to inbox). -->
     <fieldset class="field game-picker">
       <legend class="field-label">{m.events_edit_games_label()}</legend>
       {#if games.length === 0}
@@ -365,8 +352,8 @@
       <textarea class="input textarea" bind:value={notes} rows="3" disabled={pending}></textarea>
     </label>
 
-    <!-- Plan 02.1-32 (UAT-NOTES.md §4.24.D): standalone toggle. Submit
-         fires PATCH /api/events/:id/mark-standalone (or /unmark-standalone)
+    <!-- Standalone toggle. Submit fires
+         PATCH /api/events/:id/mark-standalone (or /unmark-standalone)
          when the toggle differs from the loaded value. The conflict
          warning surfaces when standalone=true AND a game is attached;
          the Save button stays disabled while the conflict is active. -->
@@ -393,10 +380,9 @@
     </div>
     {#if errorText}<InlineError message={errorText} />{/if}
 
-    <!-- Plan 02.1-32 (UAT-NOTES.md §4.18.A): Delete button at the form
-         footer. Replaces the Delete on /events/[id] read-only page. Uses
-         the existing ConfirmDialog flow (Plan 02.1-14 pattern) +
-         soft-delete + restore-within-60-days semantics. -->
+    <!-- Delete button at the form footer. Uses the existing
+         ConfirmDialog flow + soft-delete + restore-within-60-days
+         semantics. -->
     <hr class="section-divider" />
     <div class="footer-actions">
       <button type="button" class="delete-button" onclick={askDelete} disabled={deleteBusy}>
@@ -508,10 +494,10 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
-  /* Plan 02.1-32: standalone toggle fieldset wrapping. Reset native
-   * <fieldset> default (border/padding/margin) to fit the existing form
-   * style. The conflict-error styling uses the destructive accent color
-   * to flag the mutual-exclusion violation. */
+  /* Standalone toggle fieldset wrapping. Reset native <fieldset> default
+   * (border/padding/margin) to fit the existing form style. The
+   * conflict-error styling uses the destructive accent color to flag the
+   * mutual-exclusion violation. */
   .standalone-fieldset {
     border: none;
     padding: 0;
@@ -520,10 +506,10 @@
     flex-direction: column;
     gap: var(--space-xs);
   }
-  /* Plan 02.1-38 (UAT-NOTES.md §5.2 — Path A): multi-select Game picker.
-   * Mirrors the SourceRow / FiltersSheet checkbox-row visual pattern at
-   * 360px the list scrolls vertically inside the form (no horizontal
-   * overflow); each <li> is full-width with the checkbox left-aligned. */
+  /* Multi-select Game picker. Mirrors the SourceRow / FiltersSheet
+   * checkbox-row visual pattern; the list scrolls vertically inside the
+   * form (no horizontal overflow); each <li> is full-width with the
+   * checkbox left-aligned. */
   .game-picker {
     border: none;
     padding: 0;
@@ -573,9 +559,8 @@
     color: var(--color-destructive);
     font-size: var(--font-size-label);
   }
-  /* Plan 02.1-32: form footer Delete button. Visually separated by a
-   * divider so it reads as a destructive action distinct from the
-   * Save / Cancel pair. */
+  /* Form footer Delete button. Visually separated by a divider so it
+   * reads as a destructive action distinct from the Save / Cancel pair. */
   .section-divider {
     border: none;
     border-top: 1px solid var(--color-border);

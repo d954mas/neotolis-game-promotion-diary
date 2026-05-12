@@ -3,21 +3,18 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import enMessages from "../../messages/en.json" with { type: "json" };
 
-// Plan 01-09 (Wave 4) — UX-04 i18n structure.
-// VALIDATION 18: Paraglide message function resolves at runtime.
-// VALIDATION 19: Adding a locale = drop a JSON file (no source-code change).
-// D-17: baseLocale only in MVP — no locale detection.
-// D-18: single messages/en.json at repo root.
+// Paraglide i18n structure. Invariants:
+//   - Paraglide message function resolves at runtime.
+//   - Adding a locale = drop a JSON file (no source-code change).
+//   - baseLocale only in MVP — no locale detection.
+//   - Single messages/en.json at repo root.
 //
-// Phase 2.1 (Plan 02.1-03 Wave 0) — keyset extends to the full Phase 2.1
-// alphabetical contract. The locale-add invariant is preserved by the
-// explicit alphabetical EXPECTED_KEYS list (D-41): a future PR adding a key
-// without expanding this list trips the test loudly. Two Phase 2 keys
-// (`audit_action_item_created`, `audit_action_item_deleted`) are REMOVED
-// because the audit_action enum no longer carries `item.created` /
-// `item.deleted` (UI-SPEC Copywriting Contract REMOVED block).
-describe("paraglide i18n (UX-04)", () => {
-  it("VALIDATION 18: messages/en.json contains expected keys with the right English values", () => {
+// The locale-add invariant is preserved by the explicit alphabetical
+// EXPECTED_KEYS list: a future PR adding a key without expanding this list
+// trips the test loudly. The audit_action enum no longer carries
+// `item.created` / `item.deleted` (renamed to event.*).
+describe("paraglide i18n", () => {
+  it("messages/en.json contains expected keys with the right English values", () => {
     const raw = JSON.parse(fs.readFileSync(path.resolve("messages/en.json"), "utf8"));
     expect(raw.dashboard_title).toBe("Promotion diary");
     expect(raw.login_button).toBe("Sign in with Google");
@@ -25,7 +22,7 @@ describe("paraglide i18n (UX-04)", () => {
     expect(raw.sign_out_all_devices).toBe("Sign out from all devices");
   });
 
-  it("VALIDATION 18: m.dashboard_title resolves to English at runtime (when paraglide built)", async () => {
+  it("m.dashboard_title resolves to English at runtime (when paraglide built)", async () => {
     // The compiled messages.js is gitignored. If present (CI runs `pnpm build`
     // first; local dev runs `pnpm dev` which compiles on demand), import it.
     // Otherwise this test is a contract assertion against the JSON.
@@ -40,7 +37,7 @@ describe("paraglide i18n (UX-04)", () => {
     }
   });
 
-  it("messages/en.json keyset matches the Phase 2.1 alphabetical contract (locale-add invariant)", () => {
+  it("messages/en.json keyset matches the alphabetical contract (locale-add invariant)", () => {
     // The CONTRACT is: every locale file MUST share en.json's keyset.
     // This explicit alphabetical list IS the contract. A future PR adding a
     // key to en.json without extending this list trips the test; a future
@@ -48,136 +45,8 @@ describe("paraglide i18n (UX-04)", () => {
     // Adding a brand new locale is purely "drop a JSON file matching this
     // keyset" — no source change required.
     //
-    // Phase 2.1 (Plan 02.1-03, Wave 0): expanded from Phase 2's 81 keys to
-    // the Phase 2.1 alphabetical superset. Two Phase 2 audit-action keys
-    // (`audit_action_item_created`, `audit_action_item_deleted`) are
-    // REMOVED — the audit_action enum no longer carries those values
-    // post-2.1 (UI-SPEC Copywriting Contract REMOVED block).
-    //
-    // Phase 2.1 gap-closure (Plans 02.1-12 / 13 / 14 / 15 / 16): the snapshot
-    // absorbed every gap-closure-added key in lock-step (Plan 02.1-15 Task 3
-    // already pulled the prior plans' deferred entries; Plan 02.1-16 adds
-    // its own `feed_card_*` pair). Total post-Plan-16: 177 keys.
-    //
-    // Plan 02.1-19 (round-2 UAT closure): adds 13 keys for the redesigned
-    // /feed (4 date-range presets + clear + 4 show-axis labels + 3 chip-axis
-    // labels + 2 infinite-scroll status banners). Removes 8 keys for the
-    // dropped axes (Plan 02.1-15 5-preset DateRangeControl + 2 attached
-    // chips + 1 date-range chip). Net delta: +5 keys.
-    //
-    // Plan 02.1-18 (round-2 UAT closure — edit-flow rebuild via /events/[id]
-    // detail page): adds 10 keys (feed_card_author_is_me_badge,
-    // events_detail_{delete,edit,open_original,phase4_chart_placeholder,
-    // restore}, events_edit_{author_is_me,heading,save},
-    // events_new_author_is_me). Net delta: +10 keys.
-    //
-    // Plan 02.1-26 (round-3 gap closure — FeedQuickNav): adds 4 keys
-    // (feed_quick_nav_all, feed_quick_nav_inbox, feed_quick_nav_more_games,
-    // feed_quick_nav_standalone). Net delta: +4 keys.
-    //
-    // Plan 02.1-28 (round-4 gap closure — UAT-NOTES.md §4.24.G M:N migration
-    // application layer): adds 1 key (audit_action_event_detached_from_game)
-    // for the symmetric inverse of attached_to_game on the new event_games
-    // junction. Net delta: +1 key.
-    //
-    // Plan 02.1-32 (round-4 gap closure — UAT-NOTES.md §4.24.C/D/E/F + 4.18.A/B):
-    // adds 6 keys for the /events/[id]/edit standalone toggle + Delete-at-footer +
-    // /events/[id] read-only Edit pencil aria-label + AttachToGamePicker compact
-    // label. Keys: event_edit_aria_label, events_edit_delete_button,
-    // events_edit_standalone_conflict, events_edit_standalone_help,
-    // events_edit_standalone_label, feed_card_attach_compact_label. Net delta:
-    // +6 keys.
-    //
-    // Plan 02.1-30 (round-4 gap closure — UAT-NOTES.md §4.25.A/B/C/G/H —
-    // /games/[id] Stores section + FeedCard list redesign + duplicate-toast
-    // UX + Remove listing UI + Mine accent token unification): adds 11 keys
-    // (confirm_listing_remove_body, confirm_listing_remove_title,
-    // games_detail_events_empty, games_detail_events_heading,
-    // steam_listing_duplicate_active_link_label,
-    // steam_listing_duplicate_active_prefix,
-    // steam_listing_duplicate_soft_deleted, steam_listing_remove_aria,
-    // stores_add_cta, stores_empty, stores_section_heading). Net delta:
-    // +11 keys.
-    //
-    // Plan 02.1-33 (round-4 gap closure — UAT-NOTES.md §4.22.B/C/D/E —
-    // SourceRow edit-mode polish): adds 1 key (common_save) for the
-    // edit-form footer Save button. The previous Save button reused
-    // m.toast_saved() ("Saved.") which is the post-action toast text — a
-    // subtly wrong label for a button that has not yet acted. Net delta:
-    // +1 key.
-    //
-    // Plan 02.1-38 (round-6 gap closure — UAT-NOTES.md §5.2 P0 —
-    // /events/[id]/edit Game picker becomes multi-select via Path A
-    // checkbox-list): adds 2 keys for the new fieldset legend +
-    // empty-state hint (events_edit_games_label, events_edit_games_empty).
-    // Net delta: +2 keys.
-    //
-    // Plan 02.1-39 (round-6 gap closure — UAT-NOTES.md §5.3/5.4/5.5/5.6/5.7/5.8
-    // round-6 UI bundle): adds 6 keys for the /games/[id] three-section
-    // restructure + Steam-listing card with deep-link + PageHeader recovery
-    // CTA. Keys: games_detail_section_events, games_detail_section_game,
-    // games_detail_section_stores, page_header_recently_deleted,
-    // steam_listing_open_in_steam, steam_listing_unnamed. Net delta: +6 keys.
-    //
-    // Plan 02.1-39 round-6 polish #11 (UAT-NOTES.md §5.8 follow-up #11 —
-    // anchor → modal): adds 2 keys for the new <RecoveryDialog> heading +
-    // empty state. Keys: recovery_dialog_empty, recovery_dialog_heading.
-    // Net delta: +2 keys.
-    //
-    // Plan 02.1-39 round-6 polish #13 (UAT-NOTES.md §5.8 follow-up #13 —
-    // /games/[id] UI redesign per user direction): adds 6 keys for the
-    // restructured page. Game heading removed (PageHeader.title is the
-    // primary identifier); Edit CTA goes next to title via PageHeader's
-    // cta prop (games_detail_edit_cta — Russian-translatable label).
-    // Stores section gets the Add CTA at the BOTTOM after cards
-    // (stores_add_cta_after_cards) and per-card Edit on each store card
-    // (steam_listing_edit_aria). Card content reordered to image + name
-    // + STEAM badge (steam_listing_kind_steam) + appId
-    // (steam_listing_app_id) — the cover image alt text (steam_listing_
-    // cover_alt) keeps screen-readers covered. Net delta: +6 keys.
-    //
-    // Plan 02.1-39 round-6 polish #14 (UAT-NOTES.md §5.8 follow-up #14 —
-    // /games/[id] consolidated UI fix): adds 11 keys across the three
-    // child commits + REMOVES 1 dead key (polish #13 reverted). #14b
-    // (GameEditDialog modal): games_edit_cancel_cta,
-    // games_edit_description_empty, games_edit_description_label,
-    // games_edit_description_placeholder, games_edit_dialog_heading,
-    // games_edit_save_cta, games_edit_title_label. #14c (per-store
-    // label edit + AddStoreDialog): add_store_dialog_heading,
-    // steam_listing_edit_save_cta, steam_listing_label_edit_label,
-    // steam_listing_label_prefix. REMOVED: stores_add_cta_after_cards
-    // (polish #13 inline-Add CTA reverted in #14c — back to the
-    // section-header CTA which uses the existing stores_add_cta key).
-    // Net delta: +11 -1 = +10 keys.
-    //
-    // Plan 02.2-05 (public /privacy /terms /about pages per CONTEXT
-    // D-09 / D-10 / D-14 / D-S4): adds 57 keys across three new public
-    // routes + ~40 Paraglide message keys. Privacy: 28 keys (title +
-    // last-updated + 13 section title/body pairs). Terms: 22 keys
-    // (title + last-updated + 10 section title/body pairs). About: 7
-    // keys (title + intro + repo link + canonical-instance label +
-    // privacy/terms link labels + footer contact). Net delta: +57 keys.
-    //
-    // Plan 03.0-02 (Wave 0 — doc + Paraglide + test scaffolds): adds 42
-    // keys for the Phase 3.0 PollingBadge live state (5 polling_badge_*
-    // copy variants — hot / cold-yesterday / cold-days-ago / frozen /
-    // unavailable / throttled), the refresh-now affordance (5
-    // polling_refresh_now_* variants — aria / cooldown-tooltip / pending /
-    // done / error), the operator /admin/quota page (16 admin_quota_* +
-    // admin_layout_* keys for title / intro / table cols / status pills /
-    // empty states), the AccountDeletedBanner Permanent-delete-now CTA
-    // (2 account_deleted_banner_permanent_delete_* variants — failed /
-    // pending — see DV-6), and the BackfillPicker initial-import widget
-    // (11 backfill_picker_* keys — section title / blurb / 5 preset
-    // labels / 2 cost labels / 2 helper variants). REMOVES the now-orphan
-    // polling_badge_phase3_placeholder key (the Phase 2.1 placeholder
-    // string "Phase 3 will start polling" — UI-SPEC retires it under
-    // §Copywriting Contract REMOVED). polling_badge_manual is RETAINED
-    // — UI-SPEC keeps it for the never-polled-yet edge case. Net delta:
-    // +42 keys, -1 key.
-    //
     // Asserting an explicit keyset (vs toMatchSnapshot) is more durable
-    // across renames (Phase 2 STATE.md guidance, carried forward).
+    // across renames.
     const EXPECTED_KEYS = [
       "about_canonical_instance_label",
       "about_footer_contact",
@@ -350,9 +219,8 @@ describe("paraglide i18n (UX-04)", () => {
       "events_detail_delete",
       "events_detail_edit",
       "events_detail_open_original",
-      "events_detail_phase4_body",
-      "events_detail_phase4_chart_placeholder",
-      "events_detail_phase4_heading",
+      "events_detail_charts_heading",
+      "events_detail_charts_placeholder",
       "events_detail_restore",
       "events_edit_author_is_me",
       "events_edit_delete_button",
@@ -459,7 +327,7 @@ describe("paraglide i18n (UX-04)", () => {
       "ingest_error_unsupported_host",
       "ingest_error_youtube_duplicate",
       "ingest_error_youtube_unavailable",
-      "ingest_info_reddit_phase3",
+      "ingest_info_reddit_not_yet_supported",
       "keys_steam_cta_add_another",
       "keys_steam_cta_replace",
       "keys_steam_cta_save",
@@ -548,16 +416,16 @@ describe("paraglide i18n (UX-04)", () => {
       "source_kind_label_telegram_channel",
       "source_kind_label_twitter_account",
       "source_kind_label_youtube_channel",
-      "source_kind_phase_discord_server",
-      "source_kind_phase_reddit_account",
-      "source_kind_phase_telegram_channel",
-      "source_kind_phase_twitter_account",
+      "source_kind_status_discord_server",
+      "source_kind_status_reddit_account",
+      "source_kind_status_telegram_channel",
+      "source_kind_status_twitter_account",
       "sources_auto_import_off",
       "sources_auto_import_on",
       "sources_cta_new_source",
       "sources_cta_save_source",
-      // Phase 03.0.1 Plan 10 — refresh-content endpoint UI ("Pull new content"
-      // button + toast variants on /sources/[id]).
+      // refresh-content endpoint UI ("Pull new content" button + toast
+      // variants on /sources/[id]).
       "sources_detail_pull_events_quota_exhausted",
       "sources_detail_pull_new_content",
       "sources_detail_pull_new_content_cooldown",
@@ -655,17 +523,16 @@ describe("paraglide i18n (UX-04)", () => {
     expect(keys).toEqual([...EXPECTED_KEYS].sort());
   });
 
-  it("removes Phase 2 audit_action_item_* keys (dead after enum rename)", () => {
+  it("removes audit_action_item_* keys (dead after enum rename)", () => {
     expect(enMessages).not.toHaveProperty("audit_action_item_created");
     expect(enMessages).not.toHaveProperty("audit_action_item_deleted");
   });
 
-  it("Plan 03.0-02: PollingBadge + refresh-now + admin /quota copy lands the UI-SPEC verbatim strings", () => {
-    // UI-SPEC §Copywriting Contract — these literals must match exactly.
-    // Drift here means the badge / page now renders different copy than
-    // the design contract; UI-SPEC has the EXACT strings as the source of
-    // truth. The test is structural-AND-content (keyset assertion above
-    // catches missing keys; this catches accidental copy drift).
+  it("PollingBadge + refresh-now + admin /quota copy lands the verbatim strings", () => {
+    // These literals must match exactly. Drift here means the badge / page
+    // now renders different copy than the design contract. The test is
+    // structural-AND-content (keyset assertion above catches missing keys;
+    // this catches accidental copy drift).
     const m = enMessages as Record<string, string>;
     // PollingBadge five live variants (Active / Cold ×2 / Frozen / Unavailable + Throttled).
     expect(m.polling_badge_hot).toBe("Hot · checked {hoursAgo}h ago");
@@ -691,11 +558,11 @@ describe("paraglide i18n (UX-04)", () => {
     expect(m.backfill_picker_preset_everything_label).toBe("All");
   });
 
-  it("Plan 03.0-02: deprecated polling_badge_phase3_placeholder key is removed (UI-SPEC §Copywriting Contract REMOVED)", () => {
+  it("deprecated polling_badge_phase3_placeholder key is removed", () => {
     expect(enMessages).not.toHaveProperty("polling_badge_phase3_placeholder");
   });
 
-  it("UX-04 invariant: project.inlang/settings.json has baseLocale=en and a single locale in MVP (D-17)", () => {
+  it("project.inlang/settings.json has baseLocale=en and a single locale in MVP", () => {
     const settings = JSON.parse(
       fs.readFileSync(path.resolve("project.inlang/settings.json"), "utf8"),
     );

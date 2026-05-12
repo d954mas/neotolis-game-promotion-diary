@@ -1,11 +1,11 @@
 // SvelteKit ambient types — populates App.Locals with the DTO shapes that
 // `src/hooks.server.ts` writes after reading the Better Auth session, plus
-// the resolved theme (Plan 02-09, UX-01).
+// the resolved theme.
 //
-// Plan 05 ships the actual UserDto / SessionDto definitions in
-// $lib/server/dto.ts; this file only re-exports the type names into the
-// global App namespace so every +page.server.ts and +layout.server.ts can
-// reference `locals.user` with full type safety.
+// $lib/server/dto.ts ships the actual UserDto / SessionDto definitions;
+// this file only re-exports the type names into the global App namespace
+// so every +page.server.ts and +layout.server.ts can reference
+// `locals.user` with full type safety.
 //
 // `theme` is non-optional — themeHandle in src/hooks.server.ts always
 // resolves it to one of the three valid values (cookie wins; falls back to

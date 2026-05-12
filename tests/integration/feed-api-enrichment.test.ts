@@ -1,6 +1,6 @@
-// Phase 03.0.3 P2 — feed enrichment invariants (issue #29 Part 2).
+// Feed enrichment invariants (issue #29 Part 2).
 //
-// Two behavioural tests (D-C2):
+// Two behavioural tests:
 //   (1) GET /api/events with cursor pagination returns rows enriched with
 //       stats + channelTitle (the gap pre-fix — SSR first batch enriched
 //       inline; cursor-paginated batches dropped both).
@@ -38,7 +38,7 @@ const { seedUserDirectly } = await import("./helpers.js");
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 const newChannelKey = (): string => `UC${uniq()}${uniq().slice(0, 8)}aa`;
 
-describe("feed-api-enrichment — Phase 03.0.3 P2 (issue #29 Part 2)", () => {
+describe("feed-api-enrichment (issue #29 Part 2)", () => {
   it("(1) GET /api/events returns rows with stats + channelTitle (adapter loop fires on cursor pagination)", async () => {
     const u = await seedUserDirectly({ email: `enrich-1-${uniq()}@test.local` });
     const channelKey = newChannelKey();

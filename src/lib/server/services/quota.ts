@@ -1,40 +1,41 @@
-// Phase 02.2 D-11: per-user abuse quotas.
+// Per-user abuse quotas.
 //
 // Canonical entry point for the 3 create paths most subject to abuse:
 //   - createGame   -> withQuotaGuard(userId, "games", ipAddress, async tx => INSERT)
 //   - createSource -> withQuotaGuard(userId, "data_sources", ipAddress, async tx => INSERT)
 //   - createEvent  -> withQuotaGuard(userId, "events_per_day", ipAddress, async tx => INSERT)
 //
-// Race-free contract (Codex P2.1):
+// Race-free contract:
 //   withQuotaGuard wraps takeUserQuotaLock + count + caller-INSERT in one
-//   db.transaction. Same-user concurrent requests serialize on the per-user
-//   pg_advisory_xact_lock; cross-user concurrency is unaffected (lock key is
-//   hashtext(userId)).
+//   db.transaction. Same-user concurrent requests serialize on the
+//   per-user pg_advisory_xact_lock; cross-user concurrency is unaffected
+//   (lock key is hashtext(userId)).
 //
-// Pool-deadlock-safe audit (Codex post-fix review):
-//   When the quota fires, the AppError throw bubbles out of the transaction.
-//   ROLLBACK runs, the connection returns to the pool, and ONLY THEN does the
-//   `finally` block write the audit row via the top-level `db`. If audit were
-//   written from inside the transaction (via `db`, not `tx`), it would need a
-//   second pool connection while the tx still holds its first; with pool
-//   max=10, ten concurrent over-limit same-user requests would each hold one
-//   tx connection waiting for the audit connection that the pool can never
-//   provide → permanent deadlock. The finally pattern releases first, audits
+// Pool-deadlock-safe audit:
+//   When the quota fires, the AppError throw bubbles out of the
+//   transaction. ROLLBACK runs, the connection returns to the pool, and
+//   ONLY THEN does the `finally` block write the audit row via the
+//   top-level `db`. If audit were written from inside the transaction
+//   (via `db`, not `tx`), it would need a second pool connection while
+//   the tx still holds its first; with pool max=10, ten concurrent
+//   over-limit same-user requests would each hold one tx connection
+//   waiting for the audit connection that the pool can never provide →
+//   permanent deadlock. The finally pattern releases first, audits
 //   second.
 //
-// Why audit survives rollback anyway: writeAudit runs OUTSIDE the rolled-back
-// transaction on a fresh connection, so the audit row is committed
-// independently. The abuse-detection signal isn't lost.
+// Why audit survives rollback anyway: writeAudit runs OUTSIDE the
+// rolled-back transaction on a fresh connection, so the audit row is
+// committed independently. The abuse-detection signal isn't lost.
 //
-// Reset semantics for events_per_day: rolling 24h (NOT calendar-day-server-time).
-// Avoids midnight cliff: a user posting 499 at 23:59 + 1 at 00:01 still hits
-// the cap. Locked in RESEARCH §1.
+// Reset semantics for events_per_day: rolling 24h (NOT
+// calendar-day-server-time). Avoids midnight cliff: a user posting 499
+// at 23:59 + 1 at 00:01 still hits the cap.
 //
-// Soft-deleted rows are EXCLUDED from games/data_sources counts (CONTEXT D-11).
-// Events are NOT excluded — events_per_day is a rate cap, not a footprint cap.
+// Soft-deleted rows are EXCLUDED from games/data_sources counts. Events
+// are NOT excluded — events_per_day is a rate cap, not a footprint cap.
 //
 // Tenant-scope contract: every Drizzle query inside this module filters
-// `eq(<table>.userId, userId)` (AGENTS.md §1). The custom ESLint rule
+// `eq(<table>.userId, userId)`. The custom ESLint rule
 // eslint-plugin-tenant-scope/no-unfiltered-tenant-query flags drift.
 
 import { and, eq, isNull, gte, count, sql } from "drizzle-orm";
@@ -51,15 +52,15 @@ import { pacificDayStart, nextPacificMidnight, todayPacific } from "../dates.js"
 export { pacificDayStart, nextPacificMidnight, todayPacific };
 
 /**
- * Phase 03.0.1 architecture cleanup — adapter-driven quota counters.
+ * Adapter-driven quota counters.
  *
  * Cross-source quotas (games, data_sources, events_per_day) live here as
  * the abuse-quota authority of record. Per-source counters
- * (youtube_metadata_fetches_per_day, reddit_metadata_fetches_per_day in
- * Phase 03.1, etc.) are declared by each adapter via
- * `observability.quotaCounters[]` and looked up via
- * `findAdapterCounter(kind)`. Adding a new per-source counter means
- * declaring it on the adapter — quota.ts code stays unchanged.
+ * (youtube_metadata_fetches_per_day, future reddit_metadata_fetches_per_day,
+ * etc.) are declared by each adapter via `observability.quotaCounters[]`
+ * and looked up via `findAdapterCounter(kind)`. Adding a new per-source
+ * counter means declaring it on the adapter — quota.ts code stays
+ * unchanged.
  */
 export type QuotaKind =
   | "games"
@@ -108,11 +109,11 @@ async function currentCount(dbCtx: DbOrTx, userId: string, kind: QuotaKind): Pro
       .where(and(eq(dataSources.userId, userId), isNull(dataSources.deletedAt)));
     return Number(r?.c ?? 0);
   }
-  // Phase 03.0.1 architecture cleanup — per-source counters live on the
-  // adapter (e.g. youtube_metadata_fetches_per_day → youtube adapter's
-  // observability.quotaCounters). Cross-source code never knows the table.
-  // Adding Reddit's metadata-fetches counter in Phase 03.1 = declare it on
-  // the Reddit adapter; this iteration finds it without a quota.ts edit.
+  // Per-source counters live on the adapter (e.g.
+  // youtube_metadata_fetches_per_day → youtube adapter's
+  // observability.quotaCounters). Cross-source code never knows the
+  // table. Adding a new metadata-fetches counter = declare it on the
+  // new adapter; this iteration finds it without a quota.ts edit.
   const adapterCounter = findAdapterCounter(kind);
   if (adapterCounter !== null) {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -120,13 +121,13 @@ async function currentCount(dbCtx: DbOrTx, userId: string, kind: QuotaKind): Pro
   }
   // events_per_day — rolling 24h count.
   //
-  // Phase 3.0 Plan 04 — DV-5: the events_per_day cap models the human-time
-  // budget for manual creates. Auto-import (rows where source_id IS NOT NULL)
-  // is excluded from the count entirely; a registered YouTube channel that
-  // posts 50 videos in one day must not burn the user's manual-paste budget.
-  // The auto-import worker (Plan 03.0-09) bypasses withQuotaGuard altogether;
-  // this filter is the defense-in-depth guarantee that ANY service that DOES
-  // route an auto-import write through withQuotaGuard still excludes those
+  // The events_per_day cap models the human-time budget for manual
+  // creates. Auto-import (rows where source_id IS NOT NULL) is excluded
+  // from the count entirely; a registered YouTube channel that posts 50
+  // videos in one day must not burn the user's manual-paste budget. The
+  // auto-import worker bypasses withQuotaGuard altogether; this filter
+  // is the defense-in-depth guarantee that ANY service that DOES route
+  // an auto-import write through withQuotaGuard still excludes those
   // rows from the rate cap.
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const [r] = await dbCtx
@@ -136,7 +137,7 @@ async function currentCount(dbCtx: DbOrTx, userId: string, kind: QuotaKind): Pro
       and(
         eq(events.userId, userId),
         gte(events.createdAt, since),
-        isNull(events.sourceId), // DV-5: human-driven creates only
+        isNull(events.sourceId), // human-driven creates only
       ),
     );
   return Number(r?.c ?? 0);
@@ -145,8 +146,8 @@ async function currentCount(dbCtx: DbOrTx, userId: string, kind: QuotaKind): Pro
 /**
  * Run `fn(tx)` inside a per-user-locked transaction with a quota check
  * upfront. On quota hit: throws AppError 429 `quota_exceeded`; the audit
- * row is written AFTER the transaction releases its connection (Codex
- * post-fix review — see header).
+ * row is written AFTER the transaction releases its connection (see the
+ * pool-deadlock note in this file's header).
  *
  * Race-free under same-user concurrency: pg_advisory_xact_lock(hashtext(userId))
  * serializes the count + INSERT pair. Cross-user concurrency is unaffected.
@@ -204,16 +205,16 @@ export async function withQuotaGuard<T>(
   }
 }
 
-// ───── Phase 03.0.1 — per-user fair-share cap window helpers ─────
+// ───── per-user fair-share cap window helpers ─────
 // Per-user cap on operator's API budget (separate from cross-source
 // `events_per_day` cap which targets manual creates). Sources of truth:
 //   - Cap declaration:   adapter.observability.userQuotaCap (each platform).
 //   - Counter source:    audit_log SUM (metadata.requests_used /
 //                        metadata.events_inserted).
-//   - Window:            Pacific calendar day (sync с operator's reservoir
-//                        reset cycle in chargedFetch — Plan 08).
-//   - Capped kinds:      'incremental' | 'historical' | 'stats_refresh'.
-//   - Excluded kinds:    'initial' (onboarding UX), 'auto_passive' (cron pool).
+//   - Window:            Pacific calendar day (in sync with the
+//                        operator's reservoir reset cycle in chargedFetch).
+//   - Capped flows:      'initial' | 'incremental' | 'historical' | 'stats_refresh'.
+//   - Excluded flows:    'auto_passive' (uses the cron pool).
 //
 // SOFT FAIRNESS CAP — not security-grade strict.
 //   The cap-check pattern (read counter → compare → write audit) is NOT
@@ -264,22 +265,22 @@ export async function withQuotaGuard<T>(
  *   - 'auto_passive' — daily auto-backfill cron pick. Cron-driven, runs
  *     against operator's cron reservoir; per-user cap is irrelevant.
  *
- * Filters by `metadata.platform` when supplied — Phase 03.1+ multi-platform
- * separates Reddit cap from YouTube cap. When omitted (or undefined), counts
- * across all platforms (used by lifetime stats).
+ * Filters by `metadata.platform` when supplied — multi-platform builds
+ * separate per-source caps (e.g. Reddit cap from YouTube cap). When
+ * omitted (or undefined), counts across all platforms (used by lifetime
+ * stats).
  */
 export async function getUserQuotaUsedToday(
   userId: string,
   platform?: string,
 ): Promise<{ requests: number; events: number }> {
   const since = pacificDayStart();
-  // Phase 03.0.1 (post-review) — `platform` field carries source-kind
-  // explicitly. Pre-fix the query filtered on `metadata->>'kind'`, but
-  // `kind` carries different semantics across audit verbs (event.poll_refreshed
-  // wrote event-kind = 'youtube_video' while the cap query passed
-  // source-kind = 'youtube_channel' — never matched, leaked stats_refresh
-  // counts entirely). `platform` is a dedicated field across ALL capped-flow
-  // writers — see audit.ts AuditMetadata.platform jsdoc.
+  // `platform` field carries source-kind explicitly. `kind` carries
+  // different semantics across audit verbs (event.poll_refreshed writes
+  // event-kind = 'youtube_video' while the cap query passes source-kind
+  // = 'youtube_channel' — would never match, leaking stats_refresh
+  // counts entirely). `platform` is a dedicated field across ALL
+  // capped-flow writers — see audit.ts AuditMetadata.platform jsdoc.
   const platformFilter = platform ? sql`AND metadata->>'platform' = ${platform}` : sql``;
   const result = await db.execute(sql`
     SELECT
@@ -311,12 +312,9 @@ export async function getUserQuotaLifetime(
   userId: string,
   platform?: string,
 ): Promise<{ requests: number; events: number }> {
-  // Phase 03.0.1 (post-review) — filter on `metadata->>'platform'` for the
-  // same reason as getUserQuotaUsedToday above. Pre-fix this query
-  // filtered on `kind` while writers populated the dedicated `platform`
-  // field, so the per-platform lifetime banner under-reported (showed 0
-  // even when today's counter was non-zero — same writer rows, two
-  // different filters).
+  // Filter on `metadata->>'platform'` for the same reason as
+  // getUserQuotaUsedToday above. Filtering on `kind` would
+  // under-report (writers populate the dedicated `platform` field).
   const platformFilter = platform ? sql`AND metadata->>'platform' = ${platform}` : sql``;
   const result = await db.execute(sql`
     SELECT

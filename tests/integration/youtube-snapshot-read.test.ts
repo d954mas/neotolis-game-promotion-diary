@@ -1,6 +1,6 @@
-// Phase 3.0 Plan 09 — Phase 4 chart-loader contract pin.
+// Chart-loader contract pin.
 //
-// The per-event detail page (Phase 4) reads snapshots from
+// The per-event detail page reads snapshots from
 // youtube_video_snapshots WHERE video_id = events.external_id. The
 // snapshot row is tenant-agnostic — public data, no user_id column —
 // but the JOIN against events filters by user_id so each tenant only
@@ -11,8 +11,6 @@
 // ownership). Two tenants pasting the same YouTube URL share the
 // snapshot row (1 row in the table); each tenant's chart loader gets
 // the same data via different events rows.
-//
-// Phase 4 inherits this test as the load-bearing contract.
 
 import { describe, it, expect } from "vitest";
 import { eq, and, asc } from "drizzle-orm";
@@ -25,8 +23,8 @@ const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
-describe("youtube snapshot read contract (Plan 03.0-09 — Phase 4 chart-loader handoff)", () => {
-  it("Plan 03.0-09: chart-loader query — JOIN events ON events.external_id = snapshots.video_id WHERE events.user_id=$1 returns shared snapshot data per tenant", async () => {
+describe("youtube snapshot read contract — chart-loader handoff", () => {
+  it("chart-loader query — JOIN events ON events.external_id = snapshots.video_id WHERE events.user_id=$1 returns shared snapshot data per tenant", async () => {
     const userA = await seedUserDirectly({ email: `read-A-${uniq()}@test.local` });
     const userB = await seedUserDirectly({ email: `read-B-${uniq()}@test.local` });
 
@@ -90,7 +88,7 @@ describe("youtube snapshot read contract (Plan 03.0-09 — Phase 4 chart-loader 
       },
     ]);
 
-    // Phase 4 chart-loader query for userA's eventA.
+    // Chart-loader query for userA's eventA.
     const aRows = await db
       .select({
         polledAt: youtubeVideoSnapshots.polledAt,

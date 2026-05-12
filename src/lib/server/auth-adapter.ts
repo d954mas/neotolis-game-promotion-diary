@@ -2,8 +2,8 @@
 // rest in the `account` table.
 //
 // CLAUDE.md "Secrets at rest" constraint: API keys and OAuth refresh tokens
-// must be envelope-encrypted with a per-row DEK wrapped by an env-loaded KEK
-// (D-09, D-10, D-11). The Better Auth canonical `account` schema stores
+// must be envelope-encrypted with a per-row DEK wrapped by an env-loaded KEK.
+// The Better Auth canonical `account` schema stores
 // `accessToken` / `refreshToken` / `idToken` as plain `text` columns by
 // default — a DB exfil leaks these directly. This wrapper sits between
 // Better Auth and the official `drizzleAdapter`, intercepting create/update
@@ -11,7 +11,7 @@
 // intercepting findOne/findMany so reads return plaintext to Better Auth's
 // internal session/refresh logic.
 //
-// Approach A from the post-Phase-1 review:
+// Approach:
 //   * The wrapper preserves the `text` column type (still `account.refreshToken
 //     text`) — column shape is unchanged, no migration required. The contents
 //     change from `<plaintext>` to `{"v":1,"secretCt":"...","wrappedDek":"...",
@@ -86,7 +86,7 @@ function encryptField(plaintext: string): string {
  * is returned as-is — covers legacy rows and the integration-test fixtures
  * that insert plaintext directly via Drizzle. A prefixed value that fails
  * to decode/decrypt throws, since that means tampering or a KEK rotation
- * defect (PITFALL P2 — fail fast).
+ * defect (fail fast).
  */
 function decryptField(stored: string): string {
   if (!stored.startsWith(ENVELOPE_PREFIX)) {

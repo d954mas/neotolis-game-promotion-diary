@@ -1,4 +1,4 @@
-// Phase 03.0.1 Wave 3 — zero-quota onboarding integration test.
+// Zero-quota onboarding integration test.
 //
 // Verifies that when a new subscriber is added to a YouTube channel that
 // another user has previously walked, events are bulk-INSERTed from

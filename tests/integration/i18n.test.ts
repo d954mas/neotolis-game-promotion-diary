@@ -2,11 +2,8 @@ import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-// Plan 01-09 (Wave 4) — UX-04 i18n at runtime.
-// Plan 02-09 (Wave 3) — extends with the P2 keyset invariant (D-41).
-//
-// VALIDATION 18 end-to-end "render a SvelteKit page through Hono and grep
-// English text from the response body" lands in Plan 11's Docker smoke test
+// i18n at runtime. End-to-end "render a SvelteKit page through Hono and grep
+// English text from the response body" lands in the Docker smoke test
 // (which boots the actual built image). At the integration-test layer we
 // assert two contracts that tie .svelte files to messages/en.json:
 //
@@ -17,12 +14,12 @@ import * as path from "node:path";
 //      addition because this test runs without requiring the Paraglide
 //      compile step to have produced output yet).
 //
-//   2. The Phase 2 keyset (D-41) must be present in en.json. Adding a
+//   2. The required keyset must be present in en.json. Adding a
 //      key to en.json is content-only — the locale-add invariant says any
 //      future locale (e.g. messages/ru.json) is a content addition, not
 //      a code change. Asserting the keyset HERE protects that contract:
 //      a future translator needs to provide values for exactly this list.
-describe("i18n at runtime (UX-04, VALIDATION 18, D-41)", () => {
+describe("i18n at runtime", () => {
   it("messages/en.json exists, is valid JSON, and contains every key referenced by .svelte files", () => {
     const raw = JSON.parse(fs.readFileSync(path.resolve("messages/en.json"), "utf8"));
     // Grep .svelte files for m.<key>(...) references and assert each key exists.
@@ -31,9 +28,8 @@ describe("i18n at runtime (UX-04, VALIDATION 18, D-41)", () => {
       path.resolve("src/routes/login/+page.svelte"),
       path.resolve("src/routes/+layout.svelte"),
     ];
-    // Plan 02-09 adds 18 components under src/lib/components/. Sweep the
-    // whole directory so a future component using a typo'd key trips the
-    // assertion immediately.
+    // Sweep the whole components directory so a future component using a
+    // typo'd key trips the assertion immediately.
     const componentsDir = path.resolve("src/lib/components");
     if (fs.existsSync(componentsDir)) {
       for (const f of fs.readdirSync(componentsDir)) {
@@ -58,12 +54,11 @@ describe("i18n at runtime (UX-04, VALIDATION 18, D-41)", () => {
     }
   });
 
-  it("02-09: D-41 Phase 2 P2 keyset present in messages/en.json (locale-add invariant)", () => {
+  it("required keyset present in messages/en.json (locale-add invariant)", () => {
     const raw = JSON.parse(fs.readFileSync(path.resolve("messages/en.json"), "utf8"));
-    // The Phase 2 P2 keyset — every key UI-SPEC §"Copywriting Contract"
-    // declares. Adding a key here without adding it to en.json (or vice
-    // versa) trips this test. Removing a key here without removing the
-    // .svelte references trips the previous test.
+    // The required copywriting keyset. Adding a key here without adding it to
+    // en.json (or vice versa) trips this test. Removing a key here without
+    // removing the .svelte references trips the previous test.
     const required = [
       // Primary CTAs (per page)
       "games_cta_new_game",
@@ -98,17 +93,16 @@ describe("i18n at runtime (UX-04, VALIDATION 18, D-41)", () => {
       "audit_action_game_created",
       "audit_action_game_deleted",
       "audit_action_game_restored",
-      // audit_action_item_* keys removed in Phase 2.1 baseline (item.* → event.*
-      // rename per ROADMAP success-criterion 1; new audit verbs land under the
-      // unified events table so the key family converges with audit_action_event_*).
+      // item.* → event.* audit verb rename: the key family converges on
+      // audit_action_event_* under the unified events table.
       "audit_action_event_created",
       "audit_action_event_edited",
       "audit_action_event_deleted",
       "audit_action_theme_changed",
-      // Error states (UX-03 + INGEST-04 reject-inline)
+      // Error states (reject-inline)
       "ingest_error_malformed_url",
       "ingest_error_unsupported_host",
-      "ingest_info_reddit_phase3",
+      "ingest_info_reddit_not_yet_supported",
       "ingest_error_youtube_unavailable",
       "ingest_error_oembed_unreachable",
       "ingest_error_youtube_duplicate",
@@ -134,7 +128,7 @@ describe("i18n at runtime (UX-04, VALIDATION 18, D-41)", () => {
       "paste_box_label",
     ];
     for (const k of required) {
-      expect(raw, `D-41 P2 keyset missing key: ${k}`).toHaveProperty(k);
+      expect(raw, `keyset missing key: ${k}`).toHaveProperty(k);
     }
   });
 });

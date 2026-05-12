@@ -1,10 +1,10 @@
-// Manually authored against Better Auth 1.6 default schema. Plan 05 verifies
-// via `@better-auth/cli generate --diff` and patches only if the CLI output
+// Manually authored against Better Auth 1.6 default schema. Verified via
+// `@better-auth/cli generate --diff` and patched only if the CLI output
 // drifts from this hand-written shape.
 //
 // Better Auth's canonical core schema covers four tables: `user`, `session`,
 // `account`, `verification`. All primary keys are TEXT but we override the
-// default-fn so the value is a UUIDv7 string (D-06 — time-sortable,
+// default-fn so the value is a UUIDv7 string (time-sortable,
 // enumeration-safe).
 //
 // Source of truth: https://better-auth.com/docs/concepts/database
@@ -20,14 +20,14 @@ export const user = pgTable("user", {
   emailVerified: boolean("email_verified").notNull().default(false),
   name: text("name").notNull(),
   image: text("image"),
-  // Phase 2 D-40: cookie + DB persisted theme preference. Default 'system'
-  // honors prefers-color-scheme; explicit 'light' / 'dark' overrides.
+  // Cookie + DB persisted theme preference. Default 'system' honors
+  // prefers-color-scheme; explicit 'light' / 'dark' overrides.
   themePreference: text("theme_preference").notNull().default("system"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  // Phase 02.2 D-16: soft-delete the entire account, with cascade to user-owned
-  // children (games, data_sources, events, api_keys_steam) via the same
-  // captured timestamp the cascade uses. NULL == active. Restore (within
+  // Soft-delete the entire account, with cascade to user-owned children
+  // (games, data_sources, events, api_keys_steam) via the same captured
+  // timestamp the cascade uses. NULL == active. Restore (within
   // RETENTION_DAYS) reverses ONLY children whose deletedAt === user.deletedAt.
   // audit_log is INSERT-only (AGENTS §4) and is never cascaded.
   deletedAt: timestamp("deleted_at", { withTimezone: true }),

@@ -1,8 +1,7 @@
 /**
  * tests/smoke/lib/oauth-mock-driver.ts
  *
- * Plan 01-10 — D-13 mechanism per CONTEXT.md `<deviations>` 2026-04-27 maps
- * D-13 ("mocked OAuth in CI") onto the `oauth2-mock-server` package. This
+ * Maps "mocked OAuth in CI" onto the `oauth2-mock-server` package. This
  * helper is invoked from `tests/smoke/self-host.sh` and drives the full
  * Better Auth OAuth round-trip:
  *
@@ -20,11 +19,10 @@
  *      trailing newline) so bash can `$()`-capture and replay the cookie
  *      against `/api/me` and `/`.
  *
- * INFO I2 (issuer URL handling) — RESOLVED via the genericOAuth plugin
- * (review blocker P0-2 fix). Better Auth's genericOAuth plugin reads the
- * issuer from the discovery document at boot, so the mock's natural issuer
- * URL (http://localhost:9090) flows through unchanged. The previous mock-
- * side `iss` coercion to https://accounts.google.com is no longer needed.
+ * Issuer URL handling: Better Auth's genericOAuth plugin reads the
+ * issuer from the discovery document at boot, so the mock's natural
+ * issuer URL (http://localhost:9090) flows through unchanged. No
+ * mock-side `iss` coercion is needed.
  *
  * Better Auth route shape (genericOAuth plugin):
  *   POST /api/auth/sign-in/oauth2
@@ -239,8 +237,8 @@ async function main(): Promise<void> {
       }
     }
 
-    // Better Auth's cookie name is `${cookiePrefix}.session_token`. Plan 05
-    // locked the prefix to `neotolis`. In production with `useSecureCookies`
+    // Better Auth's cookie name is `${cookiePrefix}.session_token`. The
+    // prefix is locked to `neotolis`. In production with `useSecureCookies`
     // the name is prefixed with `__Secure-`; smoke runs the production image
     // over plain HTTP and the smoke harness sets BETTER_AUTH_SECURE_COOKIES=false
     // so the unprefixed name applies. We probe BOTH names anyway so a

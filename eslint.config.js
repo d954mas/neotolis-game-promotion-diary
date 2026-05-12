@@ -1,5 +1,5 @@
 // ESLint 9 flat config. Replaces legacy .eslintrc.cjs.
-// PITFALL P2 mitigation: bans `process.env` reads outside the env config module.
+// Bans `process.env` reads outside the env config module.
 
 import js from "@eslint/js";
 import tsParser from "@typescript-eslint/parser";
@@ -16,7 +16,7 @@ const noProcessEnv = {
     {
       object: "process",
       property: "env",
-      message: "Read env via src/lib/server/config/env.ts (PITFALL P2 mitigation)",
+      message: "Read env via src/lib/server/config/env.ts",
     },
   ],
 };
@@ -44,12 +44,12 @@ export default [
       "src/lib/paraglide/",
       "drizzle/",
       "messages/",
-      // Plan 02.1-28 (Rule 3 — Blocking): exclude parallel-agent worktrees
-      // from lint. These are GSD orchestrator scratch dirs that mirror the
-      // repo state from prior plan runs; ESLint should not police them.
-      // The active source-of-truth is the top-level src/ + tests/ trees.
+      // Exclude parallel-agent worktrees from lint. These are GSD
+      // orchestrator scratch dirs that mirror the repo state from prior
+      // plan runs; ESLint should not police them. The active
+      // source-of-truth is the top-level src/ + tests/ trees.
       ".claude/",
-      // Phase 03.0.3 follow-up — developer-personal dev helpers
+      // Developer-personal dev helpers
       // (.dev-worker.ts, .dev-oauth-mock.mjs, .dev-probe-youtube.ts,
       // .dev-trigger-poll.ts, etc). These are intentionally outside
       // source control (see .gitignore) and pin a single developer's
@@ -90,7 +90,7 @@ export default [
     plugins: { svelte: sveltePlugin, "@typescript-eslint": tsPlugin },
     rules: {
       "no-undef": "off",
-      // Plan 02-09: Svelte 5 components declare callback prop types like
+      // Svelte 5 components declare callback prop types like
       // `onChange: (v: T) => void`. The bare `no-unused-vars` rule from
       // js.configs.recommended fires on `v` because the parser sees a
       // function-type signature; the TS-aware rule with the underscore
@@ -100,30 +100,27 @@ export default [
       ...noProcessEnv,
     },
   },
-  // Plan 02-02 (Phase 2 Wave 0): structural Pattern 1 enforcement.
-  // The tenant-scope rule fires on Drizzle queries against tenant-owned
-  // tables that omit the mandatory `userId` filter. It is the lint-time
-  // half of the two-layer Pattern 1 defense (the integration test
-  // `tests/integration/tenant-scope.test.ts` is the runtime half).
+  // Structural tenant-scope enforcement. The tenant-scope rule fires on
+  // Drizzle queries against tenant-owned tables that omit the mandatory
+  // `userId` filter. It is the lint-time half of the two-layer defense
+  // (the integration test `tests/integration/tenant-scope.test.ts` is
+  // the runtime half).
   //
-  // Phase 3.0 post-build (UAT 2026-05-06): glob extended to cover worker
-  // handlers, the scheduler, and SvelteKit page server-loaders. Original
-  // glob (`services/**`) missed `youtube-channel-context-backfill.ts`'s
-  // data_sources query without a userId filter — caught by manual review,
-  // not by lint, which left the project one refactor away from a leak.
-  // Sites that intentionally bypass the rule (cross-tenant scheduler
-  // fan-out, admin cross-tenant audit aggregation) must carry a
-  // justified disable directive per the project rule contract.
+  // The glob covers services, the HTTP layer, worker handlers, the
+  // scheduler, and SvelteKit page server-loaders. A narrower glob would
+  // miss queries against tenant-owned tables in handlers and leave the
+  // project one refactor away from a leak. Sites that intentionally
+  // bypass the rule (cross-tenant scheduler fan-out, admin cross-tenant
+  // audit aggregation) must carry a justified disable directive.
   {
     files: [
       "src/lib/server/services/**/*.ts",
       "src/lib/server/services/**/*.tsx",
       "src/lib/server/http/**/*.ts",
-      // Phase 03.0.1 Plan 04: per-source server folders execute the same
-      // tenant-scope discipline as services/. Without this glob, code moved
-      // from services/youtube-* into sources/youtube/server/ would lose its
-      // lint-time guard (and existing eslint-disable-next-line directives
-      // would error with "rule definition not found").
+      // Per-source server folders execute the same tenant-scope discipline
+      // as services/. Without this glob, code under sources/<kind>/server/
+      // would lose its lint-time guard (and existing eslint-disable-next-line
+      // directives would error with "rule definition not found").
       "src/lib/sources/**/server/**/*.ts",
       "src/worker/**/*.ts",
       "src/scheduler/**/*.ts",
@@ -143,9 +140,9 @@ export default [
     rules: { "no-restricted-properties": "off" },
   },
   // Tests legitimately read/manipulate process.env to drive env-config behavior.
-  // .mjs covers smoke-gate fixtures (e.g. tests/smoke/lib/youtube-mock.mjs from
-  // Plan 03.0-14) which run as standalone Node processes outside the app
-  // bundle and read process.env to take their PORT from the smoke harness.
+  // .mjs covers smoke-gate fixtures (e.g. tests/smoke/lib/youtube-mock.mjs)
+  // which run as standalone Node processes outside the app bundle and read
+  // process.env to take their PORT from the smoke harness.
   {
     files: [
       "tests/**/*.ts",

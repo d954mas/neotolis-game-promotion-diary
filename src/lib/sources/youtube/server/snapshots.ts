@@ -1,5 +1,4 @@
-// Phase 3.0 Plan 04 + post-build refactor (2026-05-06) — idempotent
-// per-video snapshot writer.
+// Idempotent per-video snapshot writer.
 //
 // Atomic across 3 ops in a single short db.transaction:
 //   1. INSERT row in youtube_video_snapshots with polled_at = date_trunc('minute', now())
@@ -14,21 +13,21 @@
 //      disagree with the work that consumed quota).
 //
 // Caller is responsible for the HTTP call (which happens OUTSIDE this tx —
-// Pitfall 5: tx-boundary < 50ms; never hold a row lock while waiting on a 5s
-// HTTP request). This service expects the metrics + status as already-resolved
+// tx-boundary < 50ms; never hold a row lock while waiting on a 5s HTTP
+// request). This service expects the metrics + status as already-resolved
 // inputs.
 //
-// Per-video refactor (2026-05-06): the events row is NOT updated here anymore.
-// Polling state lives on youtube_videos; the /feed loader JOINs back to expose
-// last_polled_at + last_poll_status to the UI.
+// The events row is NOT updated here. Polling state lives on
+// youtube_videos; the /feed loader JOINs back to expose last_polled_at +
+// last_poll_status to the UI.
 
 import { sql, eq } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { youtubeVideoSnapshots, youtubeVideos } from "$lib/server/db/schema/index.js";
 
-// Lazy-import the quota tracker — historical from Plan 04. Kept dynamic because
-// Vitest's module mock contract uses the resolved path; dynamic imports
-// respect vi.mock the same as static imports.
+// Lazy-import the quota tracker. Kept dynamic because Vitest's module
+// mock contract uses the resolved path; dynamic imports respect vi.mock
+// the same as static imports.
 async function incrementUsage(args: {
   apiKeyId: string;
   units: number;
@@ -66,11 +65,11 @@ export interface WriteSnapshotArgs {
   /** Units consumed by the upstream call (1 per videos.list call per VERIFIED FACT). */
   unitsUsed: number;
   /**
-   * Phase 03.0.1 post-review #5 — which reservoir burned the units. Worker
-   * handlers running in scheduler context (poll-active, poll-cold) pass
-   * 'cron'; user-driven handlers (poll-user — Refresh now button) pass
-   * 'user'. Required so reconcileReservoirsOnBoot can debit each pool
-   * accurately on worker restart.
+   * Which reservoir burned the units. Worker handlers running in
+   * scheduler context (poll-active, poll-cold) pass 'cron'; user-driven
+   * handlers (poll-user — Refresh now button) pass 'user'. Required so
+   * reconcileReservoirsOnBoot can debit each pool accurately on worker
+   * restart.
    */
   poolKind: "cron" | "user";
   /** Outcome label written to youtube_videos.last_poll_status. */

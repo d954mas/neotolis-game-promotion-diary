@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { sortByLabel } from "../../src/lib/util/sort-kinds.js";
 
-describe("Plan 02.1-20: sortByLabel utility", () => {
+describe("sortByLabel utility", () => {
   it("returns [] for empty input", () => {
     expect(sortByLabel([], () => "")).toEqual([]);
   });

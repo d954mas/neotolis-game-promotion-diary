@@ -1,38 +1,31 @@
 <script lang="ts">
-  // /sources — data source registry (Phase 2.1 SOURCES-01 / SOURCES-02).
+  // /sources — data source registry.
   //
-  // Replaces the retired Phase 2 per-platform accounts page. One unified list of every
-  // data_source the user has registered (any of 5 kinds; only youtube_channel
-  // functional in 2.1 — see Plan 02.1-04 FUNCTIONAL_KINDS gate). Soft-deleted
-  // sources show in a collapsed <details> section with a RetentionBadge and
-  // a Restore action (60-day window per env.RETENTION_DAYS).
+  // One unified list of every data_source the user has registered (any of
+  // 5 kinds; only youtube_channel functional today — see FUNCTIONAL_KINDS
+  // gate). Soft-deleted sources show in a collapsed <details> section with
+  // a RetentionBadge and a Restore action (60-day window per
+  // env.RETENTION_DAYS).
   //
   // The "+ Add data source" CTA navigates to /sources/new (a full-page form
-  // per CONTEXT D-09 — same pattern as /games/new and /events/new). NOT an
-  // inline dialog: the kind picker has 5 chips with phase tooltips and earns
-  // its own page surface.
+  // — same pattern as /games/new and /events/new). NOT an inline dialog:
+  // the kind picker has 5 chips with tooltips and earns its own page
+  // surface.
 
   import { invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import SourceRow from "$lib/components/SourceRow.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
-  // Plan 02.1-25 (UAT-NOTES.md §3.1-polish): shared PageHeader replaces the
-  // inline <header class="head"> + .cta block. The `sticky` prop preserves
-  // Plan 02.1-22's §2.2-bug closure (CTA reachable while a long source list
-  // scrolls).
+  // Shared PageHeader replaces the inline <header class="head"> + .cta
+  // block. The `sticky` prop keeps the CTA reachable while a long source
+  // list scrolls.
   import PageHeader from "$lib/components/PageHeader.svelte";
   import QuotaStatusBanner from "$lib/components/QuotaStatusBanner.svelte";
-  // Plan 02.1-39 round-6 polish #11 follow-up (UAT-NOTES.md §5.8 follow-up
-  // #11 extension, 2026-04-30): the RecoveryDialog modal that landed on
-  // /feed in c98eadf is extended to /sources too — same single recovery
-  // surface across the app. User quote (verbatim, ru):
-  //   "и так сделать для всеху удаленных обьектов на других страницах"
-  // The previous bottom-of-page <details class="deleted-sources"> block is
-  // REMOVED; the dialog opens from PageHeader's "Recently deleted (N)"
-  // button. RetentionBadge + per-row Restore live INSIDE the dialog now
-  // (the dialog already mirrors the visual treatment SourceRow used for
-  // soft-deleted rows).
+  // RecoveryDialog is the single recovery surface across the app. The
+  // dialog opens from PageHeader's "Recently deleted (N)" button.
+  // RetentionBadge + per-row Restore live INSIDE the dialog (the dialog
+  // mirrors the visual treatment SourceRow used for soft-deleted rows).
   import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
   import type { PageData } from "./$types";
 
@@ -55,11 +48,10 @@
 
   let { data }: { data: PageData } = $props();
 
-  // Phase 03.0.1 (post-review UAT 2026-05-10) — live refresh while any
-  // source has an active cooldown (worker is processing a pull). Server
-  // loader re-runs every 3s; SourceRow updates last_polled_at, event
-  // range, and the cooldown countdown without manual page reload.
-  // Stops polling once all cooldowns hit 0.
+  // Live refresh while any source has an active cooldown (worker is
+  // processing a pull). Server loader re-runs every 3s; SourceRow updates
+  // last_polled_at, event range, and the cooldown countdown without manual
+  // page reload. Stops polling once all cooldowns hit 0.
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   $effect(() => {
     // Live-refresh while ANY source is actively pulling (worker job in
@@ -86,11 +78,10 @@
   const active = $derived(data.active as DataSourceDto[]);
   const deleted = $derived(data.deleted as DataSourceDto[]);
 
-  // Plan 02.1-39 round-6 polish #11 follow-up: RecoveryDialog open state.
-  // Opened by PageHeader's "Recently deleted (N)" button; closed by
-  // Escape, backdrop click, the dialog's × button, or auto-closes when
-  // the last recoverable item is restored (same contract as /feed and
-  // /games).
+  // RecoveryDialog open state. Opened by PageHeader's "Recently deleted (N)"
+  // button; closed by Escape, backdrop click, the dialog's × button, or
+  // auto-closes when the last recoverable item is restored (same contract
+  // as /feed and /games).
   let recoveryOpen = $state(false);
   let restoreError = $state<string | null>(null);
 
@@ -147,10 +138,10 @@
     onOpenRecovery={() => (recoveryOpen = true)}
   />
 
-  <!-- Phase 03.0.1 — per-platform API quota banner. Important info but
-       rarely needed during normal use; collapsed under a disclosure to
-       reduce noise on the list view. User opens when wanting to check
-       quota state explicitly. -->
+  <!-- Per-platform API quota banner. Important info but rarely needed
+       during normal use; collapsed under a disclosure to reduce noise on
+       the list view. User opens when wanting to check quota state
+       explicitly. -->
   {#if data.quotaPlatforms.length > 0}
     <details class="quota-disclosure">
       <summary>API usage today</summary>
@@ -181,19 +172,18 @@
       {/each}
     </ul>
 
-    <!-- Plan 02.1-39 round-6 polish #11 follow-up: bottom-of-page
-         <details class="deleted-sources"> recovery block REMOVED; the
-         InlineError used to surface 422 retention_expired stays here so
-         the user sees feedback even when the modal is closed. -->
+    <!-- The bottom-of-page <details class="deleted-sources"> recovery
+         block was removed; the InlineError used to surface 422
+         retention_expired stays here so the user sees feedback even when
+         the modal is closed. -->
     {#if restoreError}
       <InlineError message={restoreError} />
     {/if}
   {/if}
 
-  <!-- Plan 02.1-39 round-6 polish #11 follow-up (UAT-NOTES.md §5.8 follow-up
-       #11 extension): same RecoveryDialog modal as /feed and /games. The
-       dialog mounts only when deleted.length > 0; the dialog itself still
-       defends against the empty case. -->
+  <!-- Same RecoveryDialog modal as /feed and /games. The dialog mounts
+       only when deleted.length > 0; the dialog itself still defends
+       against the empty case. -->
   {#if deleted.length > 0}
     <RecoveryDialog
       open={recoveryOpen}
@@ -213,10 +203,10 @@
     gap: var(--space-md);
     min-width: 0;
   }
-  /* Plan 02.1-25: inline .head + .cta CSS removed — replaced by the shared
-   * <PageHeader sticky> component (see top of file). Plan 02.1-22's
-   * sticky-top: 72px + background fill is preserved on PageHeader's
-   * .page-header.sticky rule. */
+  /* Inline .head + .cta CSS removed — replaced by the shared
+   * <PageHeader sticky> component (see top of file). The sticky-top: 72px
+   * + background fill is preserved on PageHeader's .page-header.sticky
+   * rule. */
   .sources-list {
     list-style: none;
     padding: 0;
@@ -225,9 +215,9 @@
     flex-direction: column;
     gap: var(--space-sm);
   }
-  /* Plan 02.1-39 round-6 polish #11 follow-up: .deleted-sources, .deleted-row,
-   * and .restore CSS removed alongside the bottom-of-page <details> recovery
-   * block. RecoveryDialog owns the surface (same component on /feed and /games). */
+  /* .deleted-sources, .deleted-row, and .restore CSS removed alongside the
+   * bottom-of-page <details> recovery block. RecoveryDialog owns the
+   * surface (same component on /feed and /games). */
   .quota-disclosure {
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);

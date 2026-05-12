@@ -1,8 +1,7 @@
-// YouTube ui/server.ts — Phase 03.0.1 D-02 + RESEARCH.md Pitfall 7.
+// YouTube ui/server.ts — server-safe entry.
 //
-// Server-safe entry: exports ONLY pure functions (no Svelte component
-// imports). Importable from SvelteKit +page.server.ts loaders without
-// crashing pre-render.
+// Exports ONLY pure functions (no Svelte component imports). Importable
+// from SvelteKit +page.server.ts loaders without crashing pre-render.
 //
 // Per-source ui/index.ts (client-safe entry) re-exports from this file
 // AND adds Svelte components. registry-ui.ts imports THIS file (server-

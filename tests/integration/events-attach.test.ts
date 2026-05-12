@@ -14,26 +14,22 @@ import { seedUserDirectly } from "./helpers.js";
 import { AppError, NotFoundError } from "../../src/lib/server/services/errors.js";
 
 /**
- * Phase 2.1 Plan 02.1-28 (UAT-NOTES.md §4.24.G — M:N migration application
- * layer) — attachEventToGames service-level tests.
+ * attachEventToGames service-level tests.
  *
- * Replaces the Phase 2.1 Plan 02.1-05 attachToGame tests. The legacy
- * attachToGame export is REMOVED in lock-step with the schema change
- * (Plan 02.1-27 dropped events.game_id; Plan 02.1-28 swaps every consumer
- * over to the event_games junction).
+ * events.game_id was dropped in favor of the event_games junction.
  *
- * The PITFALL P-4 mitigation (validate gameIds BEFORE writing the junction;
- * cross-tenant gameId returns 404 not 500) lives at the SERVICE layer, which
- * is what we assert. The route layer (Plan 02.1-06 + 02.1-28) accepts both
- * `{ gameIds: [...] }` (canonical) and `{ gameId: X | null }` (back-compat
- * alias for one round of UAT) — see the HTTP-boundary block below.
+ * Validating gameIds BEFORE writing the junction (cross-tenant gameId
+ * returns 404 not 500) lives at the SERVICE layer, which is what we
+ * assert. The route layer accepts both `{ gameIds: [...] }` (canonical)
+ * and `{ gameId: X | null }` (back-compat alias) — see the HTTP-boundary
+ * block below.
  */
 
-describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
-  // Parallel-executor email-uniqueness coordination (Plan 02.1-17 pattern):
+describe("attachEventToGames (M:N junction service)", () => {
+  // Parallel-executor email-uniqueness coordination:
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 02.1-28: attachEventToGames(userId, eventId, [A]) on inbox event → 1 junction row + 1 audit", async () => {
+  it("attachEventToGames(userId, eventId, [A]) on inbox event → 1 junction row + 1 audit", async () => {
     const u = await seedUserDirectly({ email: `attach28-1-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
@@ -72,7 +68,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
     expect(addMeta?.kind).toBe("press");
   });
 
-  it("Plan 02.1-28: attachEventToGames(userId, eventId, [A, B]) writes 2 junction rows + 2 attached_to_game audits", async () => {
+  it("attachEventToGames(userId, eventId, [A, B]) writes 2 junction rows + 2 attached_to_game audits", async () => {
     const u = await seedUserDirectly({ email: `attach28-2-${uniq()}@test.local` });
     const gA = uuidv7();
     const gB = uuidv7();
@@ -106,7 +102,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
     expect(adds.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("Plan 02.1-28: attachEventToGames(userId, eventId, []) on attached event detaches all games + writes detached_from_game audit per removed", async () => {
+  it("attachEventToGames(userId, eventId, []) on attached event detaches all games + writes detached_from_game audit per removed", async () => {
     const u = await seedUserDirectly({ email: `attach28-3-${uniq()}@test.local` });
     const gA = uuidv7();
     const gB = uuidv7();
@@ -148,7 +144,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
     expect(gids).toEqual([gA, gB].sort());
   });
 
-  it("Plan 02.1-28: attachEventToGames(userId, eventId, [A, A]) is idempotent under input dedup → 1 junction row", async () => {
+  it("attachEventToGames(userId, eventId, [A, A]) is idempotent under input dedup → 1 junction row", async () => {
     const u = await seedUserDirectly({ email: `attach28-4-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
@@ -173,7 +169,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
     expect(junction).toHaveLength(1);
   });
 
-  it("Plan 02.1-28: attachEventToGames with cross-tenant gameId throws NotFoundError 404 (Pitfall 4)", async () => {
+  it("attachEventToGames with cross-tenant gameId throws NotFoundError 404", async () => {
     const userA = await seedUserDirectly({ email: `attach28-5a-${uniq()}@test.local` });
     const userB = await seedUserDirectly({ email: `attach28-5b-${uniq()}@test.local` });
     const evA = await createEvent(
@@ -210,7 +206,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
     expect(junction).toHaveLength(0);
   });
 
-  it("Plan 02.1-28: cross-tenant attachEventToGames on another tenant's event returns 404 (event-ownership wins)", async () => {
+  it("cross-tenant attachEventToGames on another tenant's event returns 404 (event-ownership wins)", async () => {
     const userA = await seedUserDirectly({ email: `attach28-6a-${uniq()}@test.local` });
     const userB = await seedUserDirectly({ email: `attach28-6b-${uniq()}@test.local` });
     const evA = await createEvent(
@@ -246,7 +242,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
     expect(junction).toHaveLength(0);
   });
 
-  it("Plan 02.1-28: attachEventToGames on non-existent eventId returns 404 not_found", async () => {
+  it("attachEventToGames on non-existent eventId returns 404 not_found", async () => {
     const u = await seedUserDirectly({ email: `attach28-7-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
@@ -257,7 +253,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
     );
   });
 
-  it("Plan 02.1-28: attachEventToGames with non-existent gameId returns 404 not_found (Pitfall 4)", async () => {
+  it("attachEventToGames with non-existent gameId returns 404 not_found", async () => {
     const u = await seedUserDirectly({ email: `attach28-8-${uniq()}@test.local` });
     const ev = await createEvent(
       u.id,
@@ -276,7 +272,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
     );
   });
 
-  it("Plan 02.1-28: attachEventToGames(non-empty) on a standalone event throws AppError 422 'standalone_conflicts_with_game'", async () => {
+  it("attachEventToGames(non-empty) on a standalone event throws AppError 422 'standalone_conflicts_with_game'", async () => {
     const u = await seedUserDirectly({ email: `attach28-9-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
@@ -310,7 +306,7 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
     expect(junction).toHaveLength(0);
   });
 
-  it("Plan 02.1-28: attachEventToGames bumps events.updatedAt", async () => {
+  it("attachEventToGames bumps events.updatedAt", async () => {
     const u = await seedUserDirectly({ email: `attach28-10-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
@@ -333,15 +329,14 @@ describe("Plan 02.1-28 — attachEventToGames (M:N junction service)", () => {
   });
 });
 
-// Plan 02.1-28 — PATCH /api/events/:id/attach HTTP boundary tests.
+// PATCH /api/events/:id/attach HTTP boundary tests.
 // The route schema accepts BOTH the canonical { gameIds: string[] } shape
-// AND the deprecated { gameId: string | null } back-compat alias for one
-// round of UAT (Plan 02.1-32 retires the alias on the UI side).
-describe("Plan 02.1-28: PATCH /api/events/:id/attach HTTP boundary (M:N + back-compat alias)", () => {
-  // Parallel-executor email-uniqueness coordination (Plan 02.1-17 pattern):
+// AND the deprecated { gameId: string | null } back-compat alias.
+describe("PATCH /api/events/:id/attach HTTP boundary (M:N + back-compat alias)", () => {
+  // Parallel-executor email-uniqueness coordination:
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 02.1-28: PATCH /api/events/:id/attach { gameIds: [A, B] } returns 200 + EventDto.gameIds with both", async () => {
+  it("PATCH /api/events/:id/attach { gameIds: [A, B] } returns 200 + EventDto.gameIds with both", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `http-attach28-1-${uniq()}@test.local` });
@@ -374,7 +369,7 @@ describe("Plan 02.1-28: PATCH /api/events/:id/attach HTTP boundary (M:N + back-c
     expect([...body.gameIds].sort()).toEqual([gA, gB].sort());
   });
 
-  it("Plan 02.1-28: PATCH /api/events/:id/attach { gameIds: [] } detaches all (move-to-inbox)", async () => {
+  it("PATCH /api/events/:id/attach { gameIds: [] } detaches all (move-to-inbox)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `http-attach28-2-${uniq()}@test.local` });
@@ -404,7 +399,7 @@ describe("Plan 02.1-28: PATCH /api/events/:id/attach HTTP boundary (M:N + back-c
     expect(body.gameIds).toEqual([]);
   });
 
-  it("Plan 02.1-28: PATCH /api/events/:id/attach { gameId: A } (back-compat alias) attaches single game", async () => {
+  it("PATCH /api/events/:id/attach { gameId: A } (back-compat alias) attaches single game", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `http-attach28-3-${uniq()}@test.local` });
@@ -434,7 +429,7 @@ describe("Plan 02.1-28: PATCH /api/events/:id/attach HTTP boundary (M:N + back-c
     expect(body.gameIds).toEqual([gA]);
   });
 
-  it("Plan 02.1-28: PATCH /api/events/:id/attach { gameId: null } (back-compat alias) detaches all", async () => {
+  it("PATCH /api/events/:id/attach { gameId: null } (back-compat alias) detaches all", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `http-attach28-4-${uniq()}@test.local` });
@@ -464,7 +459,7 @@ describe("Plan 02.1-28: PATCH /api/events/:id/attach HTTP boundary (M:N + back-c
     expect(body.gameIds).toEqual([]);
   });
 
-  it("Plan 02.1-28: PATCH /api/events/:id/attach with non-existent gameId returns 404 not_found (Pitfall 4 — NEVER 500)", async () => {
+  it("PATCH /api/events/:id/attach with non-existent gameId returns 404 not_found (NEVER 500)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `http-attach28-5-${uniq()}@test.local` });
@@ -493,7 +488,7 @@ describe("Plan 02.1-28: PATCH /api/events/:id/attach HTTP boundary (M:N + back-c
     expect((await res.json()).error).toBe("not_found");
   });
 
-  it("Plan 02.1-28: PATCH /api/events/:id/mark-standalone on event with attached games returns 422 'standalone_conflicts_with_game'", async () => {
+  it("PATCH /api/events/:id/mark-standalone on event with attached games returns 422 'standalone_conflicts_with_game'", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `http-attach28-6-${uniq()}@test.local` });
@@ -521,7 +516,7 @@ describe("Plan 02.1-28: PATCH /api/events/:id/attach HTTP boundary (M:N + back-c
 });
 
 /**
- * Plan 02.1-35 — attachEventToGames transactional rollback.
+ * attachEventToGames transactional rollback.
  *
  * Closes UAT-NOTES.md §5.12 (P1) for attachEventToGames: the multi-step
  * junction DELETE / INSERT + parent UPDATE must be atomic. When one INSERT
@@ -536,10 +531,10 @@ describe("Plan 02.1-28: PATCH /api/events/:id/attach HTTP boundary (M:N + back-c
 import { vi } from "vitest";
 import { events } from "../../src/lib/server/db/schema/events.js";
 
-describe("Plan 02.1-35 — attachEventToGames transactional rollback", () => {
+describe("attachEventToGames transactional rollback", () => {
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 02.1-35: attachEventToGames rolls back diff when a junction INSERT throws — pre-existing rows preserved + updatedAt unchanged", async () => {
+  it("attachEventToGames rolls back diff when a junction INSERT throws — pre-existing rows preserved + updatedAt unchanged", async () => {
     const u = await seedUserDirectly({ email: `attach35-rollback-${uniq()}@test.local` });
     const gA = uuidv7();
     const gB = uuidv7();
@@ -631,26 +626,24 @@ describe("Plan 02.1-35 — attachEventToGames transactional rollback", () => {
 });
 
 /**
- * Phase 2.1 Plan 02.1-38 — UAT-NOTES.md §5.2 (P0) closure: /events/[id]/edit
- * Game picker becomes multi-select via Path A (checkbox-list bound to
+ * /events/[id]/edit Game picker as multi-select (checkbox-list bound to
  * gameIds: string[]). The UI fix is in src/routes/events/[id]/edit/+page.svelte;
  * the test below labels the backend round-trip that the fix now exercises.
  *
- * The backend correctness of attachEventToGames with multi-element arrays
- * is already proven by the Plan 02.1-28 block above. The value of this
- * describe block is the labeled trace from UI fix → backend round-trip:
- * future grep "Plan 02.1-38" surfaces both ends of the §5.2 closure.
+ * The backend correctness of attachEventToGames with multi-element
+ * arrays is already proven above. The value of this describe block is
+ * the trace from UI fix → backend round-trip.
  *
- * Round-trip is asserted at the SERVICE layer (attachEventToGames + direct
- * eventGames query) rather than the HTTP layer because (a) the HTTP route is
- * a thin adapter over the service (Plan 02.1-28 already covers it), and (b)
- * the integration suite has no fetchAuthed harness — every other test in this
- * file calls the service directly and queries the junction.
+ * Round-trip is asserted at the SERVICE layer (attachEventToGames +
+ * direct eventGames query) rather than the HTTP layer because the HTTP
+ * route is a thin adapter over the service (already covered above) and
+ * the integration suite has no fetchAuthed harness — every other test
+ * in this file calls the service directly and queries the junction.
  */
-describe("Plan 02.1-38 — multi-select gameIds round-trip (UAT-NOTES.md §5.2)", () => {
+describe("multi-select gameIds round-trip", () => {
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 02.1-38: attach with [g1, g2] writes both junction rows + reverse [] detaches both", async () => {
+  it("attach with [g1, g2] writes both junction rows + reverse [] detaches both", async () => {
     const u = await seedUserDirectly({ email: `attach38-1-${uniq()}@test.local` });
     const g1 = uuidv7();
     const g2 = uuidv7();

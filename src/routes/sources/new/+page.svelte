@@ -1,24 +1,23 @@
 <script lang="ts">
-  // /sources/new — full-page form for registering a data_source (Phase 2.1
-  // CONTEXT D-09 — same full-page pattern Phase 2 used for /games/new and
-  // /keys/steam). NOT an inline dialog: the 5-chip kind picker (4 disabled
-  // with phase tooltips per RESEARCH §5.2) earns its own page surface.
+  // /sources/new — full-page form for registering a data_source. NOT an
+  // inline dialog: the 5-chip kind picker (4 disabled with availability
+  // tooltips) earns its own page surface.
   //
   // Submit flow:
   //   - POST /api/sources with {kind, handleUrl, displayName?, isOwnedByMe,
   //     autoImport}.
   //   - 201 Created → goto("/sources").
   //   - 422 kind_not_yet_functional → InlineError with
-  //     m.sources_error_kind_not_yet_functional({kind, phase}) sourced from
-  //     the response metadata (Plan 02.1-04 service throws AppError with
-  //     metadata.kind + metadata.available_phase).
+  //     m.sources_error_kind_not_yet_functional({kind, status}) sourced from
+  //     the response metadata (the service throws AppError with
+  //     metadata.kind + metadata.status).
   //   - 422 duplicate_source → InlineError with m.sources_error_duplicate().
   //   - other failures → InlineError with the response body.error or a
   //     generic copy.
   //
   // Cancel returns to /sources via m.common_cancel() — non-destructive close
   // (the typed input is not at risk because navigating back to /sources is
-  // the equivalent; UI-SPEC §"Copywriting Contract" Note on common_cancel).
+  // the equivalent).
 
   import { untrack } from "svelte";
   import { goto } from "$app/navigation";
@@ -41,16 +40,16 @@
     | "source_kind_label_telegram_channel"
     | "source_kind_label_discord_server";
 
-  type KindPhaseKey =
-    | "source_kind_phase_reddit_account"
-    | "source_kind_phase_twitter_account"
-    | "source_kind_phase_telegram_channel"
-    | "source_kind_phase_discord_server";
+  type KindStatusKey =
+    | "source_kind_status_reddit_account"
+    | "source_kind_status_twitter_account"
+    | "source_kind_status_telegram_channel"
+    | "source_kind_status_discord_server";
 
   type KindEntry = {
     value: SourceKind;
     labelKey: KindLabelKey;
-    phaseKey: KindPhaseKey | null;
+    statusKey: KindStatusKey | null;
     disabled: boolean;
   };
 
@@ -58,23 +57,20 @@
   const kindMatrix = $derived(data.kindMatrix as KindEntry[]);
 
   // Form defaults are seeded from the loader on the initial render. The
-  // form is one-shot (CONTEXT D-09 full-page form pattern) so reading
-  // `data.default*` once at init is intentional — there is no parent re-mount
-  // path that would change the defaults mid-form. `untrack` decouples the
-  // read from the reactive graph so Svelte 5's state_referenced_locally
-  // warning recognises the intent.
+  // form is one-shot, so reading `data.default*` once at init is
+  // intentional — there is no parent re-mount path that would change the
+  // defaults mid-form. `untrack` decouples the read from the reactive graph
+  // so Svelte 5's state_referenced_locally warning recognises the intent.
   const initialIsOwnedByMe = untrack(() => data.defaultIsOwnedByMe);
   const initialAutoImport = untrack(() => data.defaultAutoImport);
 
   let selectedKind = $state<SourceKind>("youtube_channel");
-  // Phase 03.0.1 (post-review UAT 2026-05-10) — displayName REMOVED from
-  // onboarding form. Source name comes from the platform (YouTube channel
-  // title, Reddit account name, etc.) — that's more identifiable than a
-  // user-typed label. Custom rename will live on /sources/[id] detail page.
-  // Pre-fix the displayName field added friction without value: 90% of
-  // users left it empty or pasted the URL.
-  // Description (free-form note) replaces it — optional drop-down for
-  // additional context the user wants to remember about this source.
+  // displayName is intentionally not in this onboarding form. Source name
+  // comes from the platform (YouTube channel title, Reddit account name,
+  // etc.) — that's more identifiable than a user-typed label. Custom rename
+  // lives on /sources/[id] detail page. Description (free-form note)
+  // replaces it — optional drop-down for additional context the user wants
+  // to remember about this source.
   let description = $state("");
   let handleUrl = $state("");
   let isOwnedByMe = $state(initialIsOwnedByMe);
@@ -82,27 +78,25 @@
   let submitting = $state(false);
   let formError = $state<string | null>(null);
 
-  // Phase 03.0-12 (D-09) — initial-backfill window for YouTube channels.
-  // Defaults to '30d' (UI-SPEC BackfillPicker default-selected preset).
-  // The picker is conditionally rendered ONLY when the chosen kind is
+  // Initial-backfill window for YouTube channels. Defaults to '30d'. The
+  // picker is conditionally rendered ONLY when the chosen kind is
   // 'youtube_channel' AND auto-import is ON; toggling either off collapses
-  // the picker AND resets the value to '30d'. The reset is what the
-  // server expects (createSource defaults undefined → '30d' but resetting
-  // here keeps the form-state clean if the user toggles back on).
+  // the picker AND resets the value to '30d'. The reset is what the server
+  // expects (createSource defaults undefined → '30d' but resetting here
+  // keeps the form-state clean if the user toggles back on).
   type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
   let backfillWindow = $state<BackfillWindow>("30d");
   const showPicker = $derived(selectedKind === "youtube_channel" && autoImport);
 
-  // No auto-link between is_owned_by_me and auto_import. Operator's UAT
-  // direction 2026-05-06: "Оно доступна всем не только моим каналам".
-  // Both checkboxes are fully independent — the user toggles each on its
-  // own. The earlier "soft-default reset" effect had a self-resetting bug
-  // (autoImport === initialAutoImport could become true again after user
-  // re-checked, causing the effect to re-fire and uncheck it).
+  // No auto-link between is_owned_by_me and auto_import — auto-import is
+  // available for any channel, not just owned ones. Both checkboxes are
+  // fully independent. An earlier "soft-default reset" effect had a
+  // self-resetting bug (autoImport === initialAutoImport could become true
+  // again after user re-checked, causing the effect to re-fire and uncheck
+  // it).
 
-  // Picker collapse → reset value (UI-SPEC §"Interaction Contracts → BackfillPicker
-  // interaction": "Toggling auto_import off OR switching kind collapses the
-  // picker AND resets its value to '30d'").
+  // Picker collapse → reset value. Toggling auto_import off OR switching
+  // kind collapses the picker AND resets its value to '30d'.
   $effect(() => {
     if (!showPicker && backfillWindow !== "30d") {
       backfillWindow = "30d";
@@ -124,24 +118,24 @@
     }
   }
 
-  function phaseFor(key: KindPhaseKey | null): string | null {
+  function statusFor(key: KindStatusKey | null): string | null {
     if (!key) return null;
     switch (key) {
-      case "source_kind_phase_reddit_account":
-        return m.source_kind_phase_reddit_account();
-      case "source_kind_phase_twitter_account":
-        return m.source_kind_phase_twitter_account();
-      case "source_kind_phase_telegram_channel":
-        return m.source_kind_phase_telegram_channel();
-      case "source_kind_phase_discord_server":
-        return m.source_kind_phase_discord_server();
+      case "source_kind_status_reddit_account":
+        return m.source_kind_status_reddit_account();
+      case "source_kind_status_twitter_account":
+        return m.source_kind_status_twitter_account();
+      case "source_kind_status_telegram_channel":
+        return m.source_kind_status_telegram_channel();
+      case "source_kind_status_discord_server":
+        return m.source_kind_status_discord_server();
     }
   }
 
   function disabledTooltip(entry: KindEntry): string {
     const kindLabel = labelFor(entry.labelKey);
-    const phase = phaseFor(entry.phaseKey) ?? "";
-    return m.sources_kind_disabled_tooltip({ kind: kindLabel, phase });
+    const status = statusFor(entry.statusKey) ?? "";
+    return m.sources_kind_disabled_tooltip({ kind: kindLabel, status });
   }
 
   async function submit(e: Event): Promise<void> {
@@ -167,9 +161,8 @@
           isOwnedByMe,
           autoImport,
           // Only include the field when the picker would have been visible —
-          // otherwise the server applies its default ('30d'). Mirrors
-          // UI-SPEC §"BackfillPicker interaction": chosen value is included
-          // in /api/sources POST when kind=youtube_channel AND auto_import=true.
+          // otherwise the server applies its default ('30d'). The chosen
+          // value is included when kind=youtube_channel AND auto_import=true.
           ...(showPicker ? { backfillWindow } : {}),
         }),
       });
@@ -177,7 +170,7 @@
         await goto("/sources");
         return;
       }
-      let body: { error?: string; metadata?: { kind?: string; available_phase?: string } } = {};
+      let body: { error?: string; metadata?: { kind?: string; status?: string } } = {};
       try {
         body = (await res.json()) as typeof body;
       } catch {
@@ -185,8 +178,8 @@
       }
       if (res.status === 422 && body.error === "kind_not_yet_functional") {
         const kindLabel = body.metadata?.kind ?? selectedKind;
-        const phase = body.metadata?.available_phase ?? "";
-        formError = m.sources_error_kind_not_yet_functional({ kind: kindLabel, phase });
+        const status = body.metadata?.status ?? "";
+        formError = m.sources_error_kind_not_yet_functional({ kind: kindLabel, status });
         return;
       }
       if (
@@ -259,7 +252,7 @@
               title={disabledTooltip(entry)}
             >
               {labelFor(entry.labelKey)}
-              <small class="phase">{phaseFor(entry.phaseKey)}</small>
+              <small class="status">{statusFor(entry.statusKey)}</small>
             </button>
           {:else}
             <button
@@ -403,7 +396,7 @@
     opacity: 0.55;
     cursor: not-allowed;
   }
-  .phase {
+  .status {
     font-size: var(--font-size-label);
     color: var(--color-text-muted);
   }
@@ -436,9 +429,9 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
-  /* UI-SPEC §"/sources/new second step layout": horizontal rule between
-     the kind/owner/auto-import fields and the conditional BackfillPicker.
-     Collapses with the picker — no orphan separator. */
+  /* Horizontal rule between the kind/owner/auto-import fields and the
+     conditional BackfillPicker. Collapses with the picker — no orphan
+     separator. */
   .picker-separator {
     border: 0;
     border-top: 1px solid var(--color-border);

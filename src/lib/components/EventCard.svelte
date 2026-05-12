@@ -1,19 +1,16 @@
-<!-- src/lib/components/EventCard.svelte — Phase 03.0.1 D-03 universal shell.
+<!-- Universal event card shell.
      Consumes CardProps. Per-source mappers (sources/<kind>/ui/card-props.ts)
-     produce the shape; this shell renders it. Per-source overrides via
-     the D-04 escape hatch are not yet wired in 03.0.1.
+     produce the shape; this shell renders it.
 
      This is a NEW component. The existing src/lib/components/FeedCard.svelte
-     is INTENTIONALLY UNCHANGED — its rich Phase 02.1-23 redesign features
+     is INTENTIONALLY UNCHANGED — its rich redesign features
      (overlays, associated-games block, Mine treatment, image fallbacks per
      kind, inline triage controls) remain the production /feed rendering
      path. EventCard.svelte exists as a contract demonstration: it consumes
      toCardProps output, exercises the dispatch via getAdapterUI(kind), and
-     is wired against unit tests. /feed migration to use registry-ui is
-     deferred to Phase 03.1 (when Reddit lands and there are multiple kinds
-     to render).
+     is wired against unit tests.
 
-     Per CONTEXT.md D-04 the escape hatch is documented but discouraged —
+     The escape hatch is documented but discouraged —
      when a future source plugin needs a layout this shell can't accommodate,
      it ships its own EventCard.svelte under sources/<kind>/ui/ and the
      /feed dispatch picks the per-source override. -->
@@ -36,7 +33,7 @@
   {/if}
   {#if props.metrics.length > 0}
     <ul class="metrics">
-      <!-- Phase 03.0.1 (post-review P1-5) — index key, not metric.label.
+      <!-- Index key, not metric.label.
            CardProps contract (card-props.ts) does NOT guarantee unique
            label; future Reddit / Twitter adapters may emit two metrics
            with the same label (e.g., "Views" + a per-tier "Views").

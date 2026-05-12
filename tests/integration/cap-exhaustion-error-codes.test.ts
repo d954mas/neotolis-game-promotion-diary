@@ -1,4 +1,4 @@
-// Phase 03.0.1 (post-review) — cap exhaustion 429 error code surfacing.
+// Cap exhaustion 429 error code surfacing.
 //
 // The endpoint cap-check pattern returns one of three distinct 429 codes
 // based on which axis was hit:

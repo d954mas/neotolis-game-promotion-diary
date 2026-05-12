@@ -1,16 +1,12 @@
 <script lang="ts">
-  // DateRangeControl — primary date-range picker for /feed (Plan 02.1-15
-  // Gap 10; rewritten in Plan 02.1-19 round-2 UAT closure).
+  // DateRangeControl — primary date-range picker for /feed.
   //
-  // Plan 02.1-19 changes:
-  //   - From/To inputs ARE always visible. The Plan 02.1-15 "Custom" raise-
-  //     toggle pattern is GONE (UAT round-2 rejected hidden inputs).
+  //   - From/To inputs are always visible.
   //   - 4 quick presets: Today | Week | Month | Year (each fills both inputs).
-  //   - × (clear) emits { all: true } → URL becomes ?all=1 (semantically
-  //     equivalent to the old "All time" preset; opt-out from the 30-day
-  //     default — Gap 9).
-  //   - The visible from/to inputs ARE the date indicator. FilterChips no
-  //     longer emits a date chip (round-2 UAT gap "no chip duplication").
+  //   - × (clear) emits { all: true } → URL becomes ?all=1 (opt-out from
+  //     the 30-day default).
+  //   - The visible from/to inputs ARE the date indicator. FilterChips does
+  //     not emit a date chip (no chip duplication).
   //
   // Sits above <FilterChips> on /feed; owns from/to entirely.
 

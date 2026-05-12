@@ -1,33 +1,34 @@
-// Phase 3.0 Plan 07 — admin /admin/quota loader (D-16 + DV-3).
+// Admin /admin/quota loader.
 //
 // Service-layer reader (no Hono, no auth concerns): the route at
-// `src/lib/server/http/routes/admin/quota.ts` calls `loadAdminQuotaPage()`
-// after the auth + allowlist gates have fired. Returns the operator's view
-// of today's per-key quota usage plus a tail of service-level audit rows.
+// `src/lib/server/http/routes/admin/quota.ts` calls
+// `loadAdminQuotaPage()` after the auth + allowlist gates have fired.
+// Returns the operator's view of today's per-key quota usage plus a tail
+// of service-level audit rows.
 //
 // Allowlist-gated CROSS-TENANT reads:
-//   The audit_log lookup intentionally aggregates across tenants. /admin/quota
-//   is the operator's signal pane — they need to see purges across all
-//   tenants, quota throttle transitions tied to the operator's API keys, and
-//   adapter-level auto-import deferrals regardless of which tenant triggered
-//   them. The security property is the env allowlist: a non-allowlisted user
-//   never reaches this loader (admin middleware throws NotFoundError before
-//   the route handler runs). Per AGENTS.md the audit_log table is in
-//   ESLint's TENANT_TABLES; the cross-tenant query below carries an
-//   `eslint-disable-next-line` with a `--` justification per AGENTS.md
-//   pitfall-7 convention.
+//   The audit_log lookup intentionally aggregates across tenants.
+//   /admin/quota is the operator's signal pane — they need to see purges
+//   across all tenants, quota throttle transitions tied to the
+//   operator's API keys, and adapter-level auto-import deferrals
+//   regardless of which tenant triggered them. The security property is
+//   the env allowlist: a non-allowlisted user never reaches this loader
+//   (admin middleware throws NotFoundError before the route handler
+//   runs). The audit_log table is in ESLint's TENANT_TABLES; the
+//   cross-tenant query below carries an `eslint-disable-next-line` with
+//   a `--` justification.
 //
 // Threshold derivation:
 //   pctOfDaily = estimatedUnits / dailyLimit * 100, rounded to 1 decimal.
-//   status: derived from per-key `throttleState` returned by the adapter's
-//     observability surface (`getDailyStats(now).keys[].throttleState`):
+//   status: derived from per-key `throttleState` returned by the
+//     adapter's observability surface
+//     (`getDailyStats(now).keys[].throttleState`):
 //       'ok'                    → status 'ok'
 //       'eighty'                → status '80_throttle'
 //       'ninetyfive'            → status '95_throttle'
-//   Per-platform threshold values are an adapter-internal concern — Phase 03.0.1
-//   moved them out of the cross-source admin-read surface so Reddit / Twitter
-//   adapters can use their own (e.g. rolling-window) thresholds without
-//   touching this loader.
+//   Per-platform threshold values are an adapter-internal concern so
+//   different source adapters can use their own (e.g. rolling-window)
+//   thresholds without touching this loader.
 
 import { desc, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
@@ -56,9 +57,9 @@ export interface ServiceAuditEntry {
 }
 
 /**
- * The audit verbs surfaced on /admin/quota — operator-facing signals only.
- * Per-tenant audit rows (session.signin / event.created / ...) are NOT
- * surfaced here; users see those in their own /audit page (PRIV-02).
+ * The audit verbs surfaced on /admin/quota — operator-facing signals
+ * only. Per-tenant audit rows (session.signin / event.created / ...)
+ * are NOT surfaced here; users see those in their own /audit page.
  */
 const SERVICE_LEVEL_AUDIT_ACTIONS: readonly AuditAction[] = [
   "quota.service_throttled",
@@ -78,40 +79,37 @@ export async function loadAdminQuotaPage(): Promise<{
   const today = todayPacific();
   const now = new Date();
 
-  // Phase 03.0.1 Plan 08 (D-08) — kind-decoupled key read via the adapter's
-  // observability surface. Pre-Plan-08 this loader queried
-  // youtube_service_quota_usage directly; Plan 08 routes through
-  // getAdapter("youtube_channel").observability.quota.getDailyStats so the
-  // /admin/quota page is decoupled from YouTube-specific schema. Adding
-  // Reddit / Twitter etc. in Phase 03.1+ extends this loader by iterating
-  // adapters that surface observability, not by editing kind-specific reads.
+  // Kind-decoupled key read via the adapter's observability surface.
+  // Routes through getAdapter("youtube_channel").observability.quota.getDailyStats
+  // so the /admin/quota page is decoupled from YouTube-specific schema.
+  // Adding new sources extends this loader by iterating adapters that
+  // surface observability, not by editing kind-specific reads.
   //
   // The `keys` projection still uses the existing { apiKeyId,
-  // estimatedUnits, pctOfDaily (0-100 percent), status } shape for backward
-  // compatibility with the /admin route + UI; the observability stats
-  // surface returns a richer shape (unitsUsed total / dailyLimit / pct
-  // fraction / throttleState) that we adapt at projection time. The
-  // existing tests/integration/admin-quota.test.ts assertions hold.
+  // estimatedUnits, pctOfDaily (0-100 percent), status } shape for
+  // backward compatibility with the /admin route + UI; the observability
+  // stats surface returns a richer shape (unitsUsed total / dailyLimit /
+  // pct fraction / throttleState) that we adapt at projection time.
   const stats = await getAdapter("youtube_channel").observability.quota.getDailyStats(now);
 
-  // Per-key projection — convert observability stats.keys[] to QuotaKeyRow[].
-  // The keys array carries one entry per apiKeyId with today's estimatedUnits
-  // AND a throttleState classification computed by the adapter (Phase 03.0.1).
-  // Cross-source admin-read no longer hardcodes thresholds — it trusts the
-  // adapter's per-key state.
+  // Per-key projection — convert observability stats.keys[] to
+  // QuotaKeyRow[]. The keys array carries one entry per apiKeyId with
+  // today's estimatedUnits AND a throttleState classification computed
+  // by the adapter. Cross-source admin-read no longer hardcodes
+  // thresholds — it trusts the adapter's per-key state.
   const keyRows: QuotaKeyRow[] = (stats.keys ?? []).map((k) =>
     toQuotaKeyRowFromObservability(k.apiKeyId, k.unitsUsed, k.throttleState, stats.dailyLimit),
   );
 
   // Audit aggregation is intentionally CROSS-SOURCE — it surfaces
   // purge.completed / auto_import.deferred / poll.failed (cross-cutting
-  // verbs not owned by any single adapter) alongside quota.service_throttled
-  // (YouTube-specific). The adapter's observability.quota.getRecentAudit
-  // only carries YouTube-specific verbs by D-08 contract; aggregating
-  // here keeps the operator's "what crossed our system today" pane
-  // complete. The eslint-disable below is the same security justification
-  // as pre-Plan-08 — admin allowlist is the gate, not row-level userId.
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- /admin/quota is allowlist-gated; cross-tenant audit aggregation is the intended operator view (CONTEXT D-16 / DV-3 / Open Question 4 in 03.0-RESEARCH.md). Adding a userId filter here would defeat the operator's signal pane (purges, quota transitions, adapter deferrals all live across tenants).
+  // verbs not owned by any single adapter) alongside
+  // quota.service_throttled. The adapter's
+  // observability.quota.getRecentAudit only carries YouTube-specific
+  // verbs by contract; aggregating here keeps the operator's "what
+  // crossed our system today" pane complete. The eslint-disable below
+  // is justified — admin allowlist is the gate, not row-level userId.
+  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- /admin/quota is allowlist-gated; cross-tenant audit aggregation is the intended operator view. Adding a userId filter here would defeat the operator's signal pane (purges, quota transitions, adapter deferrals all live across tenants).
   const auditRows = await db
     .select()
     .from(auditLog)
@@ -130,10 +128,10 @@ export async function loadAdminQuotaPage(): Promise<{
  * Convert an observability key entry { apiKeyId, unitsUsed, throttleState }
  * to the legacy QuotaKeyRow shape (pctOfDaily as 0-100 percent + status pill).
  *
- * Phase 03.0.1 — `throttleState` is computed by the adapter (per-platform
- * thresholds). This function only translates between observability shape
+ * `throttleState` is computed by the adapter (per-platform thresholds).
+ * This function only translates between observability shape
  * (`'ok' | 'eighty' | 'ninetyfive'`) and admin wire-format (`'ok' |
- * '80_throttle' | '95_throttle'`); it no longer recomputes thresholds.
+ * '80_throttle' | '95_throttle'`); it does not recompute thresholds.
  *
  * `dailyLimit` is the per-platform single-key budget used for the percent
  * denominator (YouTube = 10000). Falling back to 10000 keeps the legacy wire

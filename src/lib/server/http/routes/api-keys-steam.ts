@@ -1,14 +1,14 @@
-// Steam API keys HTTP routes (Plan 02-08).
+// Steam API keys HTTP routes.
 //
 // Routes:
 //   POST   /api/api-keys/steam        — createSteamKey
 //   GET    /api/api-keys/steam        — listSteamKeys (DTO array, NEVER ciphertext)
 //   GET    /api/api-keys/steam/:id    — getSteamKeyById (single DTO)
-//   PATCH  /api/api-keys/steam/:id    — rotateSteamKey (D-13 multi-key Replace flow)
+//   PATCH  /api/api-keys/steam/:id    — rotateSteamKey (multi-key Replace flow)
 //   DELETE /api/api-keys/steam/:id    — removeSteamKey
 //
 // Every response goes through `toApiKeySteamDto`. The DTO strips every
-// ciphertext column at runtime (D-39). TypeScript erases at runtime — the
+// ciphertext column at runtime. TypeScript erases at runtime — the
 // projection function is the load-bearing security barrier.
 //
 // AppError code mapping is automatic via `mapErr`:

@@ -2,31 +2,18 @@
   // AddStoreDialog — modal wrapper around <AddSteamListingForm> for
   // /games/[gameId]'s "Add Store" affordance.
   //
-  // Plan 02.1-39 round-6 polish #14c (UAT-NOTES.md §5.8 follow-up #14,
-  // 2026-04-30). User during round-6 UAT after polish #13 landed
-  // (verbatim, ru):
-  //   "сейчас добавление стора сделано полями на этой странице. Я хочу
-  //    через кнопку add рядом с заголовкот Stores"
-  //   ("right now adding a store is done with fields on the page. I
-  //    want it via an Add button next to the Stores heading.")
-  //
-  // Polish #13 placed the Add CTA at the bottom of StoresSection (the
-  // ".add-row" block), expanding the form INLINE on the page. Polish
-  // #14c reverts this back to a button NEXT TO the Stores h2 — but the
-  // click now opens THIS modal instead of expanding inline. The
-  // existing <AddSteamListingForm> renders inside the dialog body
-  // unchanged.
+  // The Add CTA sits next to the Stores h2; click opens this modal. The
+  // existing <AddSteamListingForm> renders inside the dialog body unchanged.
   //
   // Pattern follows RecoveryDialog / ConfirmDialog / GameEditDialog:
   // native <dialog> + showModal() (focus trap + Escape close) +
   // backdrop-click closes via target===dialogEl + .dialog[open] CSS
-  // scoping (commit 087a2fc) so the closed state stays hidden.
+  // scoping so the closed state stays hidden.
   //
-  // Phase 2.1 ships Steam-only behind the new shell. Per
-  // UAT-NOTES.md §4.25.C, Itch + Epic are explicitly DEFERRED (no
-  // platform selector). Phase 3+ promotes AddSteamListingForm to a
-  // per-platform sub-form and adds a platform picker above it; the
-  // dialog wrapping pattern stays the same.
+  // Steam-only today. Itch + Epic are explicitly DEFERRED (no platform
+  // selector). When more platforms ship, promote AddSteamListingForm to a
+  // per-platform sub-form and add a platform picker above it; the dialog
+  // wrapping pattern stays the same.
 
   import { m } from "$lib/paraglide/messages.js";
   import AddSteamListingForm from "./AddSteamListingForm.svelte";
@@ -84,7 +71,7 @@
 <style>
   /* Mirrors RecoveryDialog / GameEditDialog visual treatment so the
    * dialog patterns share one visual language. .dialog[open] scoping
-   * (commit 087a2fc) keeps the closed state hidden. */
+   * keeps the closed state hidden. */
   .dialog[open] {
     display: flex;
     flex-direction: column;

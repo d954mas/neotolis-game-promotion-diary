@@ -1,11 +1,12 @@
 // User-level helpers built on top of the Better Auth canonical schema.
 //
-// `signOutAllDevices` implements D-08 — the "sign out from all devices"
-// settings button deletes every session row for the current user, invalidating
-// every cookie that points to one of those rows on the very next request.
-// This is the free security win that DB-backed sessions (D-05) unlock.
+// `signOutAllDevices` powers the "sign out from all devices" settings
+// button: it deletes every session row for the current user,
+// invalidating every cookie that points to one of those rows on the
+// very next request. This is the free security win that DB-backed
+// sessions unlock.
 //
-// `getUserById` is the read-side helper Plan 01-07 calls inside `/api/me`.
+// `getUserById` is the read-side helper `/api/me` calls.
 
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
@@ -21,11 +22,11 @@ export async function getUserById(userId: string) {
 }
 
 /**
- * D-08: delete every session row for the given user.
+ * Delete every session row for the given user.
  *
- * Returns the number of rows deleted so the audit-log writer (Plan 01-07 +
- * Phase 2 KEYS-06) can record "user signed out N devices" without an extra
- * read. The count is also useful in tests.
+ * Returns the number of rows deleted so the audit-log writer can record
+ * "user signed out N devices" without an extra read. The count is also
+ * useful in tests.
  */
 export async function signOutAllDevices(userId: string): Promise<{ deletedCount: number }> {
   const result = await db

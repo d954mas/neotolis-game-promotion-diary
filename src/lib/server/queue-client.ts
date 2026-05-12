@@ -45,7 +45,7 @@ export async function createBoss(): Promise<PgBoss> {
     max: 4,
     // pg-boss creates its own schema (default: 'pgboss') and runs its
     // internal migrations on .start(). Distinct from app migrations
-    // (Plan 03's runMigrations()), which target the public schema.
+    // (runMigrations()), which target the public schema.
     //
     // Retention is per-queue in v12 (`QueueOptions.retentionSeconds`).
     // We rely on v12's defaults: 14d retention for queued/retry jobs,
@@ -59,18 +59,17 @@ export async function createBoss(): Promise<PgBoss> {
 
   await boss.start();
 
-  // Phase-1 specific pitfall mitigation: always declare every queue at boot.
-  // createQueue is idempotent in v10+, so calling on every boot is safe and
-  // also prevents queue-declaration drift between deploys.
+  // Always declare every queue at boot. createQueue is idempotent in
+  // v10+, so calling on every boot is safe and also prevents
+  // queue-declaration drift between deploys.
   await declareAllQueues(boss);
 
   return boss;
 }
 
 /**
- * Graceful drain. Wait up to 60 s for in-flight jobs (D-22 graceful shutdown
- * in CONTEXT.md; surfaces Phase 3's POLL-06 requirement that no in-flight
- * poll is lost on redeploy).
+ * Graceful drain. Wait up to 60 s for in-flight jobs so no in-flight
+ * poll is lost on redeploy.
  *
  *   - graceful: true → completes in-flight job handlers
  *   - timeout: 60_000 → hard-stop ceiling so a wedged handler cannot hang the
@@ -88,24 +87,24 @@ export async function stopBoss(boss: PgBoss): Promise<void> {
   logger.info("pg-boss stopped");
 }
 
-// Phase 3.0 Plan 04 — process-wide boss singleton for the APP role.
+// Process-wide boss singleton for the APP role.
 //
-// Worker / scheduler entrypoints own their own boss instance via createBoss
-// (and call stopBoss at SIGTERM). The APP role is different: HTTP handlers
-// occasionally need to enqueue jobs (refresh-poll, account-purge-now), but
-// each request booting its own boss would burn one Postgres connection per
-// request and throw on graceful shutdown when no one calls stopBoss.
+// Worker / scheduler entrypoints own their own boss instance via
+// createBoss (and call stopBoss at SIGTERM). The APP role is different:
+// HTTP handlers occasionally need to enqueue jobs (refresh-poll,
+// account-purge-now), but each request booting its own boss would burn
+// one Postgres connection per request and throw on graceful shutdown
+// when no one calls stopBoss.
 //
 // `getBoss()` lazily boots ONE boss per process, memoizes the promise, and
 // returns the same instance on every subsequent call. The first call pays
 // the boss startup cost; subsequent calls resolve synchronously from the
 // memoized promise.
 //
-// Lifecycle: the singleton lives until process exit. The hooks.server.ts
-// process-exit hook (Plan 02-08 + Phase 1 graceful-drain pattern) is the
-// only place that should call `stopBossSingleton()` — wiring is left to a
-// later plan; the unwinding-at-exit path is acceptable for now because
-// pg-boss's own pool drains on Node's process exit.
+// Lifecycle: the singleton lives until process exit. A future
+// process-exit hook is the only place that should call
+// `stopBossSingleton()`; the unwinding-at-exit path is acceptable for
+// now because pg-boss's own pool drains on Node's process exit.
 let bossSingleton: Promise<PgBoss> | null = null;
 
 export async function getBoss(): Promise<PgBoss> {

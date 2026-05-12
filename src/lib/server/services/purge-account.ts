@@ -1,14 +1,13 @@
-// Phase 3.0 Plan 05 — closes Phase 02.2 PUTOFF + GDPR Art. 17 60-day-grace.
+// GDPR Art. 17 60-day-grace hard-delete.
 //
 // Hard-deletes a soft-deleted user's rows in FK-respecting order in a single
-// tx. Two callers in Phase 3.0:
+// tx. Two callers:
 //
-//   1. Cron path (Plan 09 — `purge.daily` worker, runs `0 4 * * *` PT after
-//      backup): scans `listPurgeEligibleUsers()` and calls
-//      `purgeAccount(userId)` per match. Eligibility = `user.deletedAt`
-//      older than `RETENTION_DAYS`.
-//   2. CTA path (Plan 08 — DELETE /api/me/account/purge from the
-//      Permanent-delete-now button on AccountDeletedBanner): calls
+//   1. Cron path (`purge.daily` worker, runs `0 4 * * *` PT after backup):
+//      scans `listPurgeEligibleUsers()` and calls `purgeAccount(userId)`
+//      per match. Eligibility = `user.deletedAt` older than RETENTION_DAYS.
+//   2. CTA path (DELETE /api/me/account/purge from the Permanent-delete-now
+//      button on AccountDeletedBanner): calls
 //      `purgeAccount(userId, { ignoreRetention: true })` immediately.
 //
 // Cascade chain (FK-respecting order, single tx):
@@ -17,21 +16,19 @@
 //
 // Idempotent: re-running on an already-purged user is a no-op (DELETE WHERE
 // finds nothing; row counts are all zero; no error). Audit row written
-// OUTSIDE the tx (Phase 02.2 D-15 pool-deadlock-safe pattern from
-// softDeleteAccount). The audit row is scoped to the PURGED user_id (Open
-// Question 4 — preserves AGENTS.md §4 INSERT-only invariant + per-tenant
-// cursor invariant P19; admin sees cross-tenant audit list via
-// /admin/quota allowlist gate, NOT user_id matching).
+// OUTSIDE the tx (pool-deadlock-safe pattern from softDeleteAccount). The
+// audit row is scoped to the PURGED user_id — preserves the INSERT-only
+// invariant + per-tenant cursor invariant; admin sees cross-tenant audit
+// list via the /admin/quota allowlist gate, NOT user_id matching.
 //
-// Migration 0011 dropped the audit_log.user_id → user(id) FK so this
-// audit row survives the user delete. See drizzle/0011_drop_audit_log_user_fk.sql.
+// A historical migration dropped the audit_log.user_id → user(id) FK so
+// this audit row survives the user delete.
 //
 // audit_log rows for the purged user are NOT touched by the cascade
-// (preserves the "deletion event remains" contract from Phase 02.2 D-15).
-// Better Auth `account` rows (OAuth tokens) are ALSO NOT cascaded — Phase
-// 02.2 left them under user.id { onDelete: cascade } in the schema, so
-// the `user` DELETE in step 8 takes them down via Postgres FK cascade
-// (no explicit tx step needed).
+// (preserves the "deletion event remains" contract). Better Auth `account`
+// rows (OAuth tokens) are ALSO NOT cascaded — they live under user.id
+// { onDelete: cascade } in the schema, so the `user` DELETE in step 8
+// takes them down via Postgres FK cascade (no explicit tx step needed).
 
 import { and, eq, isNotNull, lt, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
@@ -73,15 +70,14 @@ export interface PurgeRowCounts {
   games: number;
   sessions: number;
   user: number;
-  /** Phase 03.0.3 round-8 (Codex P1) — outbox rows that referenced the
-   *  purged user via payload.triggerUserId, deleted inside the same
-   *  cascade transaction. Pending rows (forwarded_at IS NULL) would
-   *  otherwise be forwarded to pg-boss AFTER the user row is gone,
-   *  enqueueing work for a deleted tenant and breaking the hard-delete
-   *  contract. Forwarded rows (forwarded_at IS NOT NULL) are deleted
-   *  too — they retained the purged user_id for up to 7 days under the
-   *  purge.daily retention window, violating GDPR Art. 17 for that
-   *  period. */
+  /** Outbox rows that referenced the purged user via
+   *  payload.triggerUserId, deleted inside the same cascade transaction.
+   *  Pending rows (forwarded_at IS NULL) would otherwise be forwarded to
+   *  pg-boss AFTER the user row is gone, enqueueing work for a deleted
+   *  tenant and breaking the hard-delete contract. Forwarded rows
+   *  (forwarded_at IS NOT NULL) are deleted too — they would retain the
+   *  purged user_id for up to 7 days under the purge.daily retention
+   *  window, violating GDPR Art. 17 for that period. */
   outbox: number;
 }
 
@@ -138,7 +134,7 @@ export async function purgeAccount(userId: string, opts: PurgeOptions = {}): Pro
     // 2. event_games — junction with FK to events.id (cascade) and games.id
     //    (cascade); deleting it explicitly keeps the cascade order legible
     //    and ensures we have a real row count for the audit metadata.
-    //    user_id is denormalized (Plan 02.1-27).
+    //    user_id is denormalized.
     const eg = await tx
       .delete(eventGames)
       .where(eq(eventGames.userId, userId))
@@ -163,14 +159,13 @@ export async function purgeAccount(userId: string, opts: PurgeOptions = {}): Pro
       .returning({ id: dataSources.id });
 
     // 5b. outbox — queue intents that reference this user via
-    //     payload.triggerUserId (Phase 03.0.3 force-deep enqueues are
-    //     the only such payload today). Codex round-8 P1: deleting the
-    //     user without scrubbing the outbox lets the forwarder later
-    //     enqueue a YOUTUBE_BACKFILL_CHANNEL job with the purged
-    //     userId, which the worker then audits against a non-existent
-    //     tenant. Filter via the JSON ->>'triggerUserId' accessor —
-    //     rows whose payload omits the field (system-level enqueues if
-    //     any future ones land) don't match and survive.
+    //     payload.triggerUserId (force-deep enqueues are the only such
+    //     payload today). Deleting the user without scrubbing the outbox
+    //     would let the forwarder later enqueue a YOUTUBE_BACKFILL_CHANNEL
+    //     job with the purged userId, which the worker then audits against
+    //     a non-existent tenant. Filter via the JSON ->>'triggerUserId'
+    //     accessor — rows whose payload omits the field don't match and
+    //     survive.
     const ob = await tx
       .delete(outbox)
       .where(sql`${outbox.payload}->>'triggerUserId' = ${userId}`)
@@ -188,7 +183,7 @@ export async function purgeAccount(userId: string, opts: PurgeOptions = {}): Pro
     // 8. user — final step. Better Auth's `account` rows (OAuth tokens)
     //    cascade-delete via the schema's onDelete: "cascade" FK on
     //    account.userId, so we don't need an explicit tx step for them.
-    //    audit_log rows are NOT cascaded (FK dropped in migration 0011).
+    //    audit_log rows are NOT cascaded (FK previously dropped).
     const u = await tx.delete(user).where(eq(user.id, userId)).returning({ id: user.id });
 
     return {
@@ -204,9 +199,9 @@ export async function purgeAccount(userId: string, opts: PurgeOptions = {}): Pro
     } satisfies PurgeRowCounts;
   });
 
-  // Audit OUTSIDE the tx — Phase 02.2 D-15 pool-deadlock-safe pattern.
-  // Migration 0011 dropped the user FK so this INSERT succeeds even though
-  // the user row is gone. Open Question 4: scoped to the purged user_id.
+  // Audit OUTSIDE the tx — pool-deadlock-safe pattern. The audit_log user
+  // FK was previously dropped so this INSERT succeeds even though the user
+  // row is gone. Scoped to the purged user_id.
   await writeAudit({
     userId,
     action: "purge.completed",
@@ -234,7 +229,7 @@ export async function purgeAccount(userId: string, opts: PurgeOptions = {}): Pro
 
 /**
  * Cron helper — returns user_ids whose `deletedAt < now - RETENTION_DAYS`.
- * Plan 09's `purge.daily` worker iterates this list and calls `purgeAccount`
+ * The `purge.daily` worker iterates this list and calls `purgeAccount`
  * per id. Active users (deletedAt IS NULL) are excluded by construction.
  */
 export async function listPurgeEligibleUsers(now: Date = new Date()): Promise<string[]> {

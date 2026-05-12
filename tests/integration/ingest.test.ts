@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 
-// Phase 3.0 Plan 10 — channel-context backfill enqueue is exercised in the
-// new INGEST-channel-context test block at the bottom of this file. We mock
-// pg-boss's `getBoss` (mirrors refresh-poll-cooldown.test.ts / refresh-now.test.ts)
-// so this test doesn't depend on a live boss schema. The mock is hoisted by
+// Channel-context backfill enqueue is exercised in the channel-context
+// test block at the bottom of this file. We mock pg-boss's `getBoss`
+// (mirrors refresh-poll-cooldown.test.ts / refresh-now.test.ts) so this
+// test doesn't depend on a live boss schema. The mock is hoisted by
 // vitest, so the existing top-level static imports below remain valid.
 const sentJobs: Array<{
   queue: string;
@@ -41,23 +41,22 @@ import { uuidv7 } from "../../src/lib/server/ids.js";
 import { seedUserDirectly } from "./helpers.js";
 
 /**
- * Phase 2.1 Wave 1B (Plan 02.1-05) — INGEST-02..04 reframed under unified events.
- *
- * The Phase 2 ingest path wrote a row to `tracked_youtube_videos`. Phase 2.1
- * collapses that into ONE `events` row (kind=youtube_video) carrying source_id
- * (NULL on no match) + author_is_me (false on no match). This test file is
- * the contract: the items-youtube service is gone, and a YouTube paste
+ * URL ingest paste-box, reframed under unified events. The legacy ingest
+ * path wrote a row to `tracked_youtube_videos`; that has collapsed into
+ * ONE `events` row (kind=youtube_video) carrying source_id (NULL on no
+ * match) + author_is_me (false on no match). This test file is the
+ * contract: the items-youtube service is gone, and a YouTube paste
  * produces exactly one events row.
  *
  * Mocking strategy: vi.spyOn(YT, 'fetchYoutubeOembed') and the same against
  * twitter-oembed. ESM partial mocks via vi.mock are flaky on @sveltejs/kit +
- * Vitest 4; spyOn against `import * as` mirrors the Phase 2 precedent.
+ * Vitest 4; spyOn against `import * as` is the working pattern.
  *
- * D-19 / AGENTS.md "validate-first INGEST" verification: every test exercising
- * a 422 / 502 failure asserts ZERO rows in `events` after the failure — no
+ * AGENTS.md "validate-first INGEST" verification: every test exercising a
+ * 422 / 502 failure asserts ZERO rows in `events` after the failure — no
  * half-write.
  */
-describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
+describe("URL ingest paste-box — unified events", () => {
   const ytSpy = vi.spyOn(YT, "fetchYoutubeOembed");
   const twSpy = vi.spyOn(TW, "fetchTwitterOembed");
   afterEach(() => {
@@ -65,7 +64,7 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
     twSpy.mockReset();
   });
 
-  it("INGEST-02: YouTube paste creates events row (kind=youtube_video, source_id=NULL on no match)", async () => {
+  it("YouTube paste creates events row (kind=youtube_video, source_id=NULL on no match)", async () => {
     ytSpy.mockResolvedValue({
       kind: "ok",
       data: {
@@ -97,7 +96,7 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
     // No registered data_source matches → source_id NULL, author_is_me false.
     expect(row.sourceId).toBeNull();
     expect(row.authorIsMe).toBe(false);
-    // Plan 02.1-28: gameId column gone; verify the junction has the gameId.
+    // gameId column gone; verify the M:N junction has the gameId.
     const { eventGames: eg28 } = await import("../../src/lib/server/db/schema/event-games.js");
     const { and: and28, eq: eq28 } = await import("drizzle-orm");
     const junction = await db
@@ -110,7 +109,7 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
     expect(meta.author_name).toBe("Rick Astley");
   });
 
-  it("INGEST-03: YouTube paste with author_url matching registered data_source (is_owned_by_me=true) sets author_is_me=true and source_id=:source", async () => {
+  it("YouTube paste with author_url matching registered data_source (is_owned_by_me=true) sets author_is_me=true and source_id=:source", async () => {
     const u = await seedUserDirectly({ email: "ing2@test.local" });
     const gameId = uuidv7();
     await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
@@ -150,7 +149,7 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
     expect(row.kind).toBe("youtube_video");
   });
 
-  it("INGEST-03: YouTube paste with no author_url match keeps author_is_me=false and source_id=NULL", async () => {
+  it("YouTube paste with no author_url match keeps author_is_me=false and source_id=NULL", async () => {
     ytSpy.mockResolvedValue({
       kind: "ok",
       data: {
@@ -186,7 +185,7 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
     expect(rows[0]!.authorIsMe).toBe(false);
   });
 
-  it("INGEST-03: YouTube paste with author_url matching a soft-deleted source does NOT inherit (deletedAt filter)", async () => {
+  it("YouTube paste with author_url matching a soft-deleted source does NOT inherit (deletedAt filter)", async () => {
     ytSpy.mockResolvedValue({
       kind: "ok",
       data: {
@@ -221,7 +220,7 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
     expect(rows[0]!.authorIsMe).toBe(false);
   });
 
-  it("INGEST-04: malformed URL returns 422 unsupported_url; NO row inserted (validate-first)", async () => {
+  it("malformed URL returns 422 unsupported_url; NO row inserted (validate-first)", async () => {
     const u = await seedUserDirectly({ email: "ing4@test.local" });
     const gameId = uuidv7();
     await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
@@ -234,7 +233,7 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("INGEST-04: oEmbed 5xx returns 502 youtube_oembed_unreachable; NO row inserted", async () => {
+  it("oEmbed 5xx returns 502 youtube_oembed_unreachable; NO row inserted", async () => {
     ytSpy.mockRejectedValue(new Error("youtube_oembed_5xx"));
     const u = await seedUserDirectly({ email: "ing5@test.local" });
     const gameId = uuidv7();
@@ -248,7 +247,7 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("INGEST-04: oEmbed 404 unavailable returns 422 youtube_unavailable; NO row inserted", async () => {
+  it("oEmbed 404 unavailable returns 422 youtube_unavailable; NO row inserted", async () => {
     ytSpy.mockResolvedValue({ kind: "unavailable" });
     const u = await seedUserDirectly({ email: "ing5b@test.local" });
     const gameId = uuidv7();
@@ -266,7 +265,7 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("INGEST-04: Reddit paste returns 422 reddit_pending_phase3 — no row inserted (CONTEXT DV-7)", async () => {
+  it("Reddit paste returns 422 reddit_not_yet_supported — no row inserted", async () => {
     const u = await seedUserDirectly({ email: "ing6@test.local" });
     const gameId = uuidv7();
     await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
@@ -278,13 +277,13 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
         "https://www.reddit.com/r/IndieDev/comments/abc/foo/",
         "127.0.0.1",
       ),
-    ).rejects.toMatchObject({ status: 422, code: "reddit_pending_phase3" });
+    ).rejects.toMatchObject({ status: 422, code: "reddit_not_yet_supported" });
 
     const rows = await db.select().from(events).where(eq(events.userId, u.id));
     expect(rows).toHaveLength(0);
   });
 
-  it("Twitter paste creates events row kind=twitter_post (carry-forward Phase 2 behavior)", async () => {
+  it("Twitter paste creates events row kind=twitter_post", async () => {
     twSpy.mockResolvedValue({
       authorName: "Anna Indie",
       authorHandle: "AnnaIndie",
@@ -332,8 +331,8 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
 
     const rows = await db.select().from(events).where(eq(events.userId, u.id));
     expect(rows).toHaveLength(1);
-    // Plan 02.1-28: inbox criterion is "zero junction rows" — verify the
-    // event has no event_games attachments.
+    // Inbox criterion is "zero junction rows" — verify the event has no
+    // event_games attachments.
     const { eventGames: eg28 } = await import("../../src/lib/server/db/schema/event-games.js");
     const { and: and28, eq: eq28 } = await import("drizzle-orm");
     const junction = await db
@@ -345,15 +344,14 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
 });
 
 /**
- * Phase 3.0 Plan 10 — Channel-context backfill trigger (CONTEXT D-14).
+ * Channel-context backfill trigger.
  *
  * When the user pastes a YouTube URL via the manual-paste flow and the URL's
  * channel is NOT yet in `youtube_channels`, ingest enqueues ONE
  * `YOUTUBE_CHANNEL_CONTEXT_BACKFILL` job (idempotent via pg-boss singletonKey).
  * Subsequent paste from the same channel = cache hit, no extra quota burn.
  *
- * The handler that processes the backfill job ships in Plan 03.0-09. This
- * test block only verifies the trigger half:
+ * This test block verifies the trigger half (handler tests live separately):
  *   1. Cache miss → exactly ONE enqueue (right queue, right payload, right key)
  *   2. Same-channel double paste during in-flight → second paste does NOT enqueue
  *      (singletonKey gates pg-boss; we assert the dedup at the trigger layer
@@ -362,9 +360,9 @@ describe("URL ingest paste-box (INGEST-02..04 — unified events)", () => {
  *   4. Non-YouTube paste (twitter / telegram) → ZERO enqueue
  *   5. oEmbed authorUrl empty (private/unavailable already handled, but a
  *      successful 200 with empty author_url is a real edge case) → event row
- *      still created via Phase 2.1 path; ZERO enqueue (silent skip)
+ *      still created; ZERO enqueue (silent skip)
  */
-describe("Plan 03.0-10: channel-context backfill trigger (CONTEXT D-14)", () => {
+describe("channel-context backfill trigger", () => {
   const ytSpy = vi.spyOn(YT, "fetchYoutubeOembed");
   const twSpy = vi.spyOn(TW, "fetchTwitterOembed");
   beforeEach(() => {
@@ -394,7 +392,7 @@ describe("Plan 03.0-10: channel-context backfill trigger (CONTEXT D-14)", () => 
       "127.0.0.1",
     );
 
-    // Event row was created (Phase 2.1 contract preserved).
+    // Event row was created.
     const rows = await db.select().from(events).where(eq(events.userId, u.id));
     expect(rows).toHaveLength(1);
 
@@ -445,8 +443,8 @@ describe("Plan 03.0-10: channel-context backfill trigger (CONTEXT D-14)", () => 
     // therefore call boss.send. The dedup gate is the singletonKey, which
     // pg-boss uses to coalesce; we verify the trigger emits IDENTICAL
     // singletonKeys so pg-boss has the information it needs to dedup. The
-    // pg-boss-side coalescing is asserted in Plan 03.0-09's handler tests
-    // and / or in the live integration smoke.
+    // pg-boss-side coalescing is asserted in the handler tests and / or
+    // in the live integration smoke.
     const enqueues = sentJobs.filter((j) => j.queue === "youtube.channel_context_backfill");
     expect(enqueues).toHaveLength(2);
     const k1 = (enqueues[0]!.options as { singletonKey?: string }).singletonKey;
@@ -490,8 +488,8 @@ describe("Plan 03.0-10: channel-context backfill trigger (CONTEXT D-14)", () => 
   });
 
   it("Test 3a: paste where channel matches a handle_aliases entry → event created; ZERO enqueue (handle-URL cache hit)", async () => {
-    // Phase 3.0 post-build (2026-05-07) — handle-URL cache miss closure.
-    // ingest extracts the raw handle URL as channelId for /@… inputs.
+    // Handle-URL cache miss closure: ingest extracts the raw handle URL
+    // as channelId for /@… inputs.
     // Backfill worker resolves the URL → UC and writes the URL into
     // handle_aliases on the existing UC row. This test pins the
     // ingest-side payoff: a paste that matches a row's handle_aliases
@@ -530,10 +528,10 @@ describe("Plan 03.0-10: channel-context backfill trigger (CONTEXT D-14)", () => 
     expect(enqueues).toHaveLength(0);
   });
 
-  it("Test 3b: paste of YouTube URL with author_url pointing at /@handle (cache miss) → enqueues with HANDLE_URL field, NOT channelId (P1 fix 2026-05-08)", async () => {
-    // Regression for the third-pass review's #1 finding. Pre-fix, the
-    // ingest extractor returned the full /@handle URL as a string and
-    // the caller stuffed it into the job's channelId field. The worker's
+  it("Test 3b: paste of YouTube URL with author_url pointing at /@handle (cache miss) → enqueues with HANDLE_URL field, NOT channelId", async () => {
+    // Regression guard. Pre-fix, the ingest extractor returned the full
+    // /@handle URL as a string and the caller stuffed it into the job's
+    // channelId field. The worker's
     // resolution branch (`if (!channelId && handleUrl)`) skipped because
     // channelId was truthy (the URL string), so it called channels.list?
     // id=<full URL> → no items → silent failure. Every @handle backfill

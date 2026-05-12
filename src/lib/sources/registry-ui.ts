@@ -1,11 +1,10 @@
-// UI-side registry — Phase 03.0.1 D-14. Plan 09 wires the per-kind UI
-// module re-exports (toCardProps + future Svelte components per kind).
+// UI-side registry — server entry. Per-kind UI module re-exports
+// (toCardProps + future Svelte components per kind).
 //
 // Imports from `./youtube/ui/server.js` (server-safe entry) so this
 // registry can be consumed from +page.server.ts loaders without
-// triggering RESEARCH.md Pitfall 7 (SvelteKit pre-render crashes when
-// a server module transitively imports .svelte files outside a Svelte
-// context).
+// triggering a SvelteKit pre-render crash (which happens when a server
+// module transitively imports .svelte files outside a Svelte context).
 import type { SourceKind } from "./adapter.js";
 import type { CardProps } from "./card-props.js";
 import * as youtubeUiServer from "./youtube/ui/server.js";
@@ -21,7 +20,7 @@ export interface AdapterUiServer {
 // callers don't have to know the per-kind shape. The cast here is the
 // boundary where the per-kind narrow type meets the registry's generic
 // surface — same pattern as src/lib/sources/registry.ts's adapter map for
-// the server-side DataSourceAdapter contract (D-14).
+// the server-side DataSourceAdapter contract.
 const uiRegistry = new Map<SourceKind, AdapterUiServer>([
   ["youtube_channel", youtubeUiServer as unknown as AdapterUiServer],
 ]);

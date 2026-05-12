@@ -1,11 +1,11 @@
-// Phase 3.0 Plan 09 — user-driven refresh-now handler.
+// User-driven refresh-now handler.
 //
 // Receives `{ eventId: string; userId: string; externalId?: string; kind?:
-// string }` jobs sent by services/refresh-poll.ts (the route layer for the
-// "Refresh now" button). Single-event variant of poll-active; the user
-// already paid the 5-min cooldown gate at the route layer (D-10) and the
-// scheduler's tier resolver is BYPASSED for this path — Frozen events ARE
-// permitted (D-10).
+// string }` jobs sent by services/refresh-poll.ts (the route layer for
+// the "Refresh now" button). Single-event variant of poll-active; the
+// user already paid the 5-min cooldown gate at the route layer and the
+// scheduler's tier resolver is BYPASSED for this path — Frozen events
+// ARE permitted.
 //
 // Throttle gate: refresh-now is independent of the quota throttle state.
 // Even at 95% the user-driven path keeps working — the worst case is the
@@ -38,13 +38,13 @@ export async function handlePollUser(job: {
   id: string;
   data: { eventId: string; userId: string };
 }): Promise<void> {
-  // Plan 08 (D-13) AdapterError envelope. Same routing contract as
+  // AdapterError envelope. Same routing contract as
   // channel-context-backfill — see that file's handler header for the
   // category-by-category rationale. poll-user runs in user-driven origin;
   // sourceId is resolved from the event row when AdapterError fires
-  // against an auto-imported event (events.source_id IS NOT NULL); manual-
-  // paste events have source_id=NULL and we just log+swallow without
-  // flipping any source's needs_reconnect (no source to flip).
+  // against an auto-imported event (events.source_id IS NOT NULL);
+  // manual-paste events have source_id=NULL and we just log+swallow
+  // without flipping any source's needs_reconnect (no source to flip).
   try {
     await handlePollUserImpl(job);
   } catch (err) {
@@ -64,7 +64,7 @@ export async function handlePollUser(job: {
         userId &&
         (err.category === "operator-issue" || err.category === "permanent")
       ) {
-        // Tenant-scoped lookup — Pattern 1.
+        // Tenant-scoped lookup.
         const evRows = await db
           .select({ sourceId: events.sourceId })
           .from(events)
@@ -95,8 +95,8 @@ async function handlePollUserImpl(job: {
     return;
   }
 
-  // Phase A — fetch event tenant-scoped. ESLint tenant-scope rule enforced
-  // by the eq(events.userId, userId) clause.
+  // Step A — fetch event tenant-scoped. ESLint tenant-scope rule
+  // enforced by the eq(events.userId, userId) clause.
   const rows = await db
     .select({
       id: events.id,
@@ -153,9 +153,9 @@ async function handlePollUserImpl(job: {
     return;
   }
 
-  // Phase B — HTTP via adapter (single event batch). pollStats accepts an
-  // array; we pass a length-1 array so the same code path serves user-driven
-  // and scheduler-driven calls.
+  // Step B — HTTP via adapter (single event batch). pollStats accepts
+  // an array; we pass a length-1 array so the same code path serves
+  // user-driven and scheduler-driven calls.
   const snapshots = await youtubeChannelAdapter.pollStats(
     [{ id: event.id, userId: event.userId, externalId: event.externalId }],
     null,
@@ -163,15 +163,14 @@ async function handlePollUserImpl(job: {
   );
   const snap = snapshots[0]!;
 
-  // Phase C — single write tx via writeSnapshot.
+  // Step C — single write tx via writeSnapshot.
   //
-  // Catch-and-log instead of rethrow (post-build review 2026-05-07): a
-  // rethrow here triggers pg-boss retry → another HTTP to YouTube → 1
-  // more quota unit per retry. A flaky DB during a flurry of refresh-now
-  // clicks could 3-5× the quota burn. The user already paid the
-  // upstream call; if writeSnapshot fails the data is gone, but charging
-  // another N units to retry the same outcome is worse than logging and
-  // letting the user click again.
+  // Catch-and-log instead of rethrow: a rethrow here triggers pg-boss
+  // retry → another HTTP to YouTube → 1 more quota unit per retry. A
+  // flaky DB during a flurry of refresh-now clicks could 3-5× the quota
+  // burn. The user already paid the upstream call; if writeSnapshot
+  // fails the data is gone, but charging another N units to retry the
+  // same outcome is worse than logging and letting the user click again.
   try {
     await writeSnapshot({
       videoId: event.externalId,

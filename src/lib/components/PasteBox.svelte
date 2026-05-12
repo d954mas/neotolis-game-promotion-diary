@@ -1,18 +1,18 @@
 <script lang="ts">
-  // PasteBox — single global URL input (D-18, UI-SPEC §"<PasteBox> interaction
-  // contract"). The most-used widget on the game detail page.
+  // PasteBox — single global URL input. The most-used widget on the game
+  // detail page.
   //
-  // Validation order (D-19 INGEST-04):
+  // Validation order:
   //   a. Client-side URL parse: not a URL → InlineError immediate, no POST.
-  //   b. Host = reddit.com / redd.it → InlineInfo "Reddit support arrives in
-  //      Phase 3", NO POST. (Distinct color from error — we didn't reject;
+  //   b. Host = reddit.com / redd.it → InlineInfo "Reddit support not yet
+  //      available", NO POST. (Distinct color from error — we didn't reject;
   //      we deferred.)
   //   c. Otherwise POST /api/items/youtube. On 4xx → InlineError with the
   //      server's error code (mapped through Paraglide). On 2xx → call
   //      onSuccess(result), clear the input.
   //
-  // Min height 48px on the input (UI-SPEC §"Spacing" — primary action gets
-  // extra forgiveness past the 44px touch target floor).
+  // Min height 48px on the input — primary action gets extra forgiveness
+  // past the 44px touch target floor.
 
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "./InlineError.svelte";
@@ -76,7 +76,7 @@
       return;
     }
     if (isRedditHost(url.host)) {
-      infoMessage = m.ingest_info_reddit_phase3();
+      infoMessage = m.ingest_info_reddit_not_yet_supported();
       return;
     }
 

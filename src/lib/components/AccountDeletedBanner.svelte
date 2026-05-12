@@ -1,16 +1,16 @@
 <script lang="ts">
   // AccountDeletedBanner — top-of-layout banner shown ONLY when the
-  // authenticated user's `deletedAt` is non-null (Plan 02.2-04, D-15 / D-16).
+  // authenticated user's `deletedAt` is non-null.
   //
   // Rendering is gated by the parent layout (src/routes/+layout.svelte),
   // which checks `data.user?.deletedAt`. The banner itself is render-only;
   // it never decides on its own whether to show.
   //
-  // Phase 3.0 post-build (UAT 2026-05-06): the "Permanently delete now"
-  // CTA was REMOVED from the banner per operator decision. Banner stays
-  // simple — just a Restore button. Immediate-purge UI moved to
-  // /settings under an "Advanced" disclosure to reduce the footgun risk
-  // of a destructive button living next to Restore on every page.
+  // The "Permanently delete now" CTA is intentionally NOT on this banner.
+  // The banner stays simple — just a Restore button. Immediate-purge UI
+  // lives in /settings under an "Advanced" disclosure to reduce the
+  // footgun risk of a destructive button living next to Restore on every
+  // page.
 
   import { invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";

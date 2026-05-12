@@ -1,49 +1,51 @@
-// Game Steam Listings service — multi-listing per game (Demo / Full / DLC / OST)
-// keyed by Steam appId. D-06 + D-10.
+// Game Steam Listings service — multi-listing per game (Demo / Full /
+// DLC / OST) keyed by Steam appId.
 //
-// Pattern 1 (tenant scope): every Drizzle query filters by `eq(<table>.userId, userId)`.
-// `addSteamListing` ALSO calls `getGameById(userId, gameId)` first as defense-in-depth —
-// it would already be impossible for user A to attach a listing to user B's game
-// (the listing INSERT itself includes `userId`, and Postgres would reject the FK
-// chain) but the explicit check turns the failure into a clean 404 instead of a
-// 23503 foreign_key_violation surfacing as a 500.
+// Tenant scope: every Drizzle query filters by
+// `eq(<table>.userId, userId)`. `addSteamListing` ALSO calls
+// `getGameById(userId, gameId)` first as defense-in-depth — it would
+// already be impossible for user A to attach a listing to user B's game
+// (the listing INSERT itself includes `userId`, and Postgres would
+// reject the FK chain) but the explicit check turns the failure into a
+// clean 404 instead of a 23503 foreign_key_violation surfacing as a 500.
 //
-// fetchSteamAppDetails runs ONCE at INSERT time. If Steam is down or returns
-// success:false, we still create the listing with NULL cover/release fields
-// and `comingSoon='unavailable'` so the user can retry the metadata fetch
-// later (Phase 6 backfill worker). The listing row itself is the source of
-// truth for `app_id` + `game_id` + `label`.
+// fetchSteamAppDetails runs ONCE at INSERT time. If Steam is down or
+// returns success:false, we still create the listing with NULL
+// cover/release fields and `comingSoon='unavailable'` so the user can
+// retry the metadata fetch later via a backfill worker. The listing row
+// itself is the source of truth for `app_id` + `game_id` + `label`.
 //
-// Plan 02.1-29 (UAT-NOTES.md §4.25.E + §4.25.G): `addSteamListing` translates
-// Postgres 23505 unique_violation on `game_steam_listings_game_app_id_unq`
-// into AppError(422, 'steam_listing_duplicate', { gameId, appId,
-// existingGameId, existingState }). Plan 02.1-27 dropped the user-scoped
-// `(user_id, app_id)` constraint; the only remaining listing uniqueness is
-// `(game_id, app_id)` UNCONDITIONAL (no `WHERE deleted_at IS NULL` clause).
+// `addSteamListing` translates Postgres 23505 unique_violation on
+// `game_steam_listings_game_app_id_unq` into AppError(422,
+// 'steam_listing_duplicate', { gameId, appId, existingGameId,
+// existingState }). The only remaining listing uniqueness is
+// `(game_id, app_id)` UNCONDITIONAL (no `WHERE deleted_at IS NULL`
+// clause).
 //
-// Path B (Plan 02.1-29): a defensive pre-INSERT same-tenant same-game lookup
-// runs FIRST — without an `isNull(deletedAt)` filter — so soft-deleted same-
-// game duplicates surface as `existingState='soft_deleted'` BEFORE the
-// INSERT (saving a roundtrip + giving the UI the hint to render the "use
-// Restore" affordance). The INSERT is wrapped in `isPgUniqueViolation`
-// try/catch as the race-window backstop: an active row that landed
-// between our SELECT and INSERT translates to `existingState='active'`.
-// Path B chosen over Path A (partial-WHERE constraint) because it (i)
-// doesn't require changing Plan 02.1-27's constraint shape, (ii) matches
-// the Plan 02.1-14 events soft-delete-Restore UX precedent, (iii) keeps
-// audit forensics simple — every (game_id, app_id) tuple maps to one
-// historical row chain regardless of soft-delete state.
+// A defensive pre-INSERT same-tenant same-game lookup runs FIRST —
+// without an `isNull(deletedAt)` filter — so soft-deleted same-game
+// duplicates surface as `existingState='soft_deleted'` BEFORE the
+// INSERT (saving a roundtrip + giving the UI the hint to render the
+// "use Restore" affordance). The INSERT is wrapped in
+// `isPgUniqueViolation` try/catch as the race-window backstop: an
+// active row that landed between our SELECT and INSERT translates to
+// `existingState='active'`. The pre-INSERT lookup is preferred over a
+// partial-WHERE unique constraint because it (i) keeps the existing
+// constraint shape, (ii) matches the events soft-delete-Restore UX
+// precedent, (iii) keeps audit forensics simple — every (game_id,
+// app_id) tuple maps to one historical row chain regardless of
+// soft-delete state.
 //
-// The 422 metadata payload is non-secret (gameId / appId / existingGameId /
-// existingState — all non-credential identifiers); Pino redact paths
-// unchanged. The payload reaches the user via mapErr → JSON response →
-// Plan 02.1-30 client-side toast.
+// The 422 metadata payload is non-secret (gameId / appId /
+// existingGameId / existingState — all non-credential identifiers);
+// Pino redact paths unchanged. The payload reaches the user via mapErr
+// → JSON response → client-side toast.
 //
-// NO audit entries from this service (D-32): the audit verbs `key.*`,
-// `game.*`, `item.*`, `event.*`, `theme.*`, `session.*` cover the
-// security-relevant operations. Listing CRUD is creation/destruction of
-// metadata, not security state — recording every add/remove would balloon
-// the audit log without forensic benefit.
+// NO audit entries from this service: the security-relevant audit verbs
+// (`key.*`, `game.*`, `item.*`, `event.*`, `theme.*`, `session.*`)
+// cover what matters. Listing CRUD is creation/destruction of metadata,
+// not security state — recording every add/remove would balloon the
+// audit log without forensic benefit.
 
 import { and, eq, isNull, isNotNull, desc } from "drizzle-orm";
 import { db } from "../db/client.js";
@@ -69,26 +71,24 @@ export interface AddSteamListingInput {
  *
  * Throws:
  *   - NotFoundError if `input.gameId` does not belong to `userId`
- *     (cross-tenant 404, not 403 — PRIV-01).
+ *     (cross-tenant 404, not 403).
  *   - AppError(422, 'steam_listing_duplicate', { gameId, appId,
  *     existingGameId, existingState }) when an active OR soft-deleted
  *     same-game listing already exists for `(userId, gameId, appId)`.
  *     `existingState` is `'active'` for non-deleted rows and
- *     `'soft_deleted'` for tombstoned rows (Plan 02.1-29 / Path B —
- *     pre-INSERT lookup catches soft-deletes BEFORE the INSERT). Plan
- *     02.1-30's UI reads `existingGameId` to render an actionable toast
- *     ("open game" for active duplicates; "use Restore" for soft-
- *     deleted duplicates).
+ *     `'soft_deleted'` for tombstoned rows (pre-INSERT lookup catches
+ *     soft-deletes BEFORE the INSERT). The UI reads `existingGameId`
+ *     to render an actionable toast ("open game" for active duplicates;
+ *     "use Restore" for soft-deleted duplicates).
  *
- *     Cross-game same-appId is ALLOWED (post-Plan-02.1-27 the
- *     user-scoped unique constraint is gone): the same Steam appId can
- *     attach to multiple games of the same user (e.g. a Portal-2 main
- *     card + a Portal-2 review-notes card — denorm cost accepted).
+ *     Cross-game same-appId is ALLOWED: the same Steam appId can attach
+ *     to multiple games of the same user (e.g. a Portal-2 main card +
+ *     a Portal-2 review-notes card — denorm cost accepted).
  *
- * `ipAddress` is currently unused (no audit row per D-32) but kept in
- * the signature for parity with the audited services and so Plan 02-08
- * can pass it through without a service-shape change if the audit
- * vocabulary later expands.
+ * `ipAddress` is currently unused (no audit row) but kept in the
+ * signature for parity with the audited services so callers can pass
+ * it through without a service-shape change if the audit vocabulary
+ * later expands.
  */
 export async function addSteamListing(
   userId: string,
@@ -99,11 +99,11 @@ export async function addSteamListing(
   // attempts surface as 404, not a foreign-key violation.
   await getGameById(userId, input.gameId);
 
-  // Plan 02.1-29 Path B — pre-INSERT same-tenant same-game lookup. NO
-  // `isNull(deletedAt)` filter so soft-deleted dupes surface as
+  // Pre-INSERT same-tenant same-game lookup. NO `isNull(deletedAt)`
+  // filter so soft-deleted dupes surface as
   // existingState='soft_deleted'. Cross-game same-appId is NOT scoped
   // here (different gameId) — falls through to the INSERT, which is
-  // the post-Plan-02.1-27 expected path.
+  // the expected path for cross-game listings.
   const existing = await db
     .select({
       id: gameSteamListings.id,
@@ -132,14 +132,14 @@ export async function addSteamListing(
 
   const meta = await fetchSteamAppDetails(input.appId);
 
-  // Plan 02.1-29 — defense-in-depth try/catch translates the (game_id,
-  // app_id) unique-violation race window: an active same-game row that
-  // landed between our SELECT above and the INSERT below. Pattern reused
-  // from Plan 02.1-04 services/data-sources.ts (now via the shared
-  // src/lib/server/db/postgres-errors.ts module). The catch can't know
+  // Defense-in-depth try/catch translates the (game_id, app_id)
+  // unique-violation race window: an active same-game row that landed
+  // between our SELECT above and the INSERT below. Pattern reused from
+  // services/data-sources.ts via the shared
+  // src/lib/server/db/postgres-errors.ts module. The catch can't know
   // whether the colliding row was soft-deleted post-our-SELECT, so it
-  // defaults to existingState='active'; Plan 02.1-30's UI re-fetches
-  // the listing list after a 422 to reconcile that edge case.
+  // defaults to existingState='active'; the UI re-fetches the listing
+  // list after a 422 to reconcile that edge case.
   let row: SteamListingRow | undefined;
   try {
     [row] = await db
@@ -149,8 +149,8 @@ export async function addSteamListing(
         gameId: input.gameId,
         appId: input.appId,
         label: input.label ?? "",
-        // Plan 02.1-25: persist Steam game name when the appdetails fetch
-        // succeeded; otherwise NULL (Steam down or success:false). The UI
+        // Persist Steam game name when the appdetails fetch succeeded;
+        // otherwise NULL (Steam down or success:false). The UI
         // (SteamListingRow) renders `App {appId}` fallback for null rows.
         name: meta?.name ?? null,
         coverUrl: meta?.coverUrl ?? null,
@@ -199,17 +199,9 @@ export async function listListings(userId: string, gameId: string): Promise<Stea
 }
 
 /**
- * List the caller's SOFT-DELETED listings for a given game (Plan 02.1-39
- * round-6 polish #12 — UAT-NOTES.md §5.8 follow-up #12, 2026-04-30).
+ * List the caller's SOFT-DELETED listings for a given game.
  *
- * User during round-6 UAT after `d4d55eb` extended <RecoveryDialog> to
- * /games + /sources reported (verbatim, ru):
- *   "и я удалил стор, и теперь нет вохзможности его восстановить"
- *   ("and I deleted a store, and now there's no way to restore it")
- *
- * The schema's `deletedAt` column has been carrying soft-delete state
- * since Plan 02.1-04; only the recovery UI/endpoint was missing. This
- * function powers the per-game RecoveryDialog mounted on
+ * Powers the per-game RecoveryDialog mounted on
  * /games/[gameId]/+page.svelte — same pattern as listSoftDeletedGames
  * on the games service.
  *
@@ -245,7 +237,7 @@ export async function listSoftDeletedListings(
 }
 
 /**
- * Restore a soft-deleted listing (Plan 02.1-39 round-6 polish #12).
+ * Restore a soft-deleted listing.
  *
  * Mirrors `restoreSource` (data-sources service): sets `deletedAt = NULL`
  * + bumps `updatedAt`, scoped to (userId, gameId, listingId) AND requiring
@@ -253,22 +245,20 @@ export async function listSoftDeletedListings(
  * (calling restore on an already-active row throws NotFoundError instead
  * of silently no-op'ing — the UI should not surface this case).
  *
- * Wrapped in `db.transaction` per the round-5 §5.12 invariant fix
- * (Plan 02.1-39 §5.12 closure — multi-step writes go through a
- * transaction so a partial-write race window cannot leave the listing
- * in an inconsistent state). The audit-write-OUTSIDE-the-transaction
- * pattern from softDeleteSource is N/A here because no audit verb is
- * recorded for listing CRUD (D-32 — see file-header rationale).
+ * Wrapped in `db.transaction` so a partial-write race window cannot
+ * leave the listing in an inconsistent state. The
+ * audit-write-OUTSIDE-the-transaction pattern from softDeleteSource is
+ * N/A here because no audit verb is recorded for listing CRUD — see
+ * file-header rationale.
  *
  * Throws NotFoundError on:
- *   - cross-tenant gameId / listingId (PRIV-01: 404, not 403)
+ *   - cross-tenant gameId / listingId (404, not 403)
  *   - already-active row (deletedAt IS NULL — programming error)
  *   - non-existent row
  *
- * No retention-window check (Plan 02.1-39 round-6 #12 design — listings
- * have no retention purge worker yet; row keeps `deletedAt` indefinitely
- * until Phase 6+ adds a purge job. When that lands, mirror restoreSource's
- * 422 retention_expired path here too.)
+ * No retention-window check — listings have no retention purge worker
+ * yet; rows keep `deletedAt` indefinitely. When a purge job lands,
+ * mirror restoreSource's 422 retention_expired path here too.
  */
 export async function restoreListing(
   userId: string,
@@ -312,20 +302,13 @@ export async function restoreListing(
 }
 
 /**
- * Update mutable fields on a listing (Plan 02.1-39 round-6 polish #14c
- * — UAT-NOTES.md §5.8 follow-up #14, 2026-04-30).
- *
- * User during round-6 UAT (verbatim, ru):
- *   "При редактировании стора, я бы хотел иметь возможноть поменять label.
- *    И вот мне не понятно что так лейбл и где"
- *   ("When editing a store, I'd like to be able to change the label.
- *    And I don't understand what 'label' is or where it lives.")
+ * Update mutable fields on a listing.
  *
  * Today the only editable field is `label` (the user's free-text "Demo
- * / Full / DLC / OST" tag). Future phases extend this to the rest of
- * the §5.3 item B "full Steam-listing edit form" (release-date /
- * categories override) — the signature is shaped so adding a field is
- * one optional input + one patch line, no breaking change.
+ * / Full / DLC / OST" tag). Future work extends this to the rest of
+ * the per-listing edit form (release-date / categories override) — the
+ * signature is shaped so adding a field is one optional input + one
+ * patch line, no breaking change.
  *
  * Tenant scope: scoped to (userId, gameId, listingId) AND requires
  * `deletedAt IS NULL` so the operation can't accidentally surface
@@ -334,19 +317,18 @@ export async function restoreListing(
  * games gets a clean 404 instead of a cross-game label edit.
  *
  * Throws NotFoundError on:
- *   - cross-tenant gameId / listingId (PRIV-01: 404, not 403)
+ *   - cross-tenant gameId / listingId (404, not 403)
  *   - mismatched gameId/listingId (listing belongs to a different game)
  *   - soft-deleted row (use restoreListing first)
  *   - non-existent row
  *
- * Wrapped in `db.transaction` per the round-5 §5.12 invariant fix
- * (multi-step writes go through a transaction so a partial-write race
- * window cannot leave the listing in an inconsistent state). Today
- * it's a single UPDATE; the transaction wrap is forward-compat for
- * the future field-set extension (which will likely involve a
- * pre-update SELECT + computed merge).
+ * Wrapped in `db.transaction` so a partial-write race window cannot
+ * leave the listing in an inconsistent state. Today it's a single
+ * UPDATE; the transaction wrap is forward-compat for the future
+ * field-set extension (which will likely involve a pre-update SELECT
+ * + computed merge).
  *
- * No audit row (D-32: listing CRUD is metadata, not security state).
+ * No audit row (listing CRUD is metadata, not security state).
  */
 export async function updateListing(
   userId: string,
@@ -395,7 +377,8 @@ export async function updateListing(
  * Soft-delete one listing. The parent game is unaffected; if the parent
  * is also soft-deleted later, the listing's existing `deletedAt`
  * differs from the parent's marker so a future restore will NOT bring
- * this listing back (D-23 design — earlier deletes stay deleted).
+ * this listing back (marker-timestamp design — earlier deletes stay
+ * deleted).
  *
  * Throws NotFoundError on miss / cross-tenant.
  */
@@ -420,8 +403,7 @@ export async function removeSteamListing(
 
 /**
  * Attach (or detach with `keyId=null`) a Steamworks API key to this
- * listing. Plan 02-05 lands the key creation; Plan 02-08 wires the
- * route. The FK on `api_key_id` is set null on key delete, so detach
+ * listing. The FK on `api_key_id` is set null on key delete, so detach
  * happens implicitly when a key is removed.
  *
  * Throws NotFoundError on miss / cross-tenant.

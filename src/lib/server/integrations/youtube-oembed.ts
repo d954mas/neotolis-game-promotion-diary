@@ -1,7 +1,7 @@
 // YouTube oEmbed integration — public, no API key, called BEFORE INSERT
-// in the validate-first ingest pipeline (D-19; INGEST-04). The discriminated
-// return type (W-6 from Plan 02-06 checker iteration) lets the orchestrator
-// map cleanly to AppError variants without parsing message strings.
+// in the validate-first ingest pipeline. The discriminated return type
+// lets the orchestrator map cleanly to AppError variants without parsing
+// message strings.
 //
 // Result kinds (all observed live 2026-04-27 against
 // https://www.youtube.com/oembed?url=...):

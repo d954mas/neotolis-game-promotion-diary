@@ -1,5 +1,4 @@
-// Plan 02.1-39 round-6 polish #11 (UAT-NOTES.md §5.8 follow-up #11) —
-// regression guards for <RecoveryDialog>, the modal that replaces the
+// Regression guards for <RecoveryDialog>, the modal that replaces the
 // bottom-of-page DeletedEventsPanel anchor target on /feed. The anchor
 // link broke on infinite-scroll surfaces by construction (clicking jumps
 // to bottom → sentinel fires → bottom moves → user lost). Switching to
@@ -11,22 +10,21 @@
 //   - Empty-items branch renders the localized "Nothing to recover" copy
 //     instead of the rows list.
 //   - data-entity-type attribute is set so future styling / a11y hooks
-//     can target per-type (forward-compat per §5.8 paths B/C — /games and
-//     /sources adoption is deferred).
+//     can target per-type (forward-compat — /games and /sources adoption
+//     is deferred).
 //   - The <dialog> root element is rendered (not just a <div>) so the
 //     parent's `open` prop drives showModal() / close() at runtime.
 //
 // Browser-driven assertions (Escape closes, backdrop click closes, ×
-// click closes) need DOM + Playwright — those land in the browser
-// project alongside the auth harness in Phase 6 (same precedent as Plan
-// 02.1-39's other §5.x manual-UAT items). The Russian UAT recipe for
-// the round-6 walkthrough lives in tests/browser/responsive-360.test.ts.
+// click closes) need DOM + Playwright — those land in the browser project
+// alongside the auth harness. The Russian UAT recipe for the dialog
+// walkthrough lives in tests/browser/responsive-360.test.ts.
 
 import { describe, it, expect } from "vitest";
 import { render } from "svelte/server";
 import RecoveryDialog from "../../src/lib/components/RecoveryDialog.svelte";
 
-describe("Plan 02.1-39 round-6 polish #11 — RecoveryDialog (anchor → modal)", () => {
+describe("RecoveryDialog (anchor → modal)", () => {
   it("renders one row per item with the item's name + a Restore button", () => {
     const out = render(RecoveryDialog, {
       props: {
@@ -109,8 +107,7 @@ describe("Plan 02.1-39 round-6 polish #11 — RecoveryDialog (anchor → modal)"
   });
 
   it("sets data-entity-type on the dialog so future per-type styling / a11y hooks can target it", () => {
-    // Plan 02.1-39 round-6 polish #12 (UAT-NOTES.md §5.8 follow-up #12,
-    // 2026-04-30): "store" added for game_steam_listings recovery on
+    // "store" is the discriminator for game_steam_listings recovery on
     // /games/[gameId]. The discriminator is exposed via data-entity-type
     // so future per-type styling / a11y hooks can target it; today the
     // visual treatment is identical across all four types.
@@ -129,7 +126,7 @@ describe("Plan 02.1-39 round-6 polish #11 — RecoveryDialog (anchor → modal)"
     }
   });
 
-  it("Plan 02.1-39 round-6 #12 — renders entityType='store' rows with the listing name as the recovery label", () => {
+  it("renders entityType='store' rows with the listing name as the recovery label", () => {
     // Mirrors the production wiring on /games/[gameId]/+page.svelte:
     // `recoveryItems` maps `deletedListings` into { id, name: l.name ??
     // `App ${l.appId}`, deletedAt }. SteamListingRow's displayName

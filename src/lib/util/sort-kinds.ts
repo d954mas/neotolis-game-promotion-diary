@@ -1,6 +1,6 @@
 /**
- * Plan 02.1-20: tiny utility for sorting items alphabetically by their
- * translated label. Used by:
+ * Tiny utility for sorting items alphabetically by their translated label.
+ * Used by:
  *   - /events/new kind picker (functional-only kinds, sorted by m.event_kind_label_*())
  *   - FiltersSheet kind checkbox-list (same)
  *   - FiltersSheet action checkbox-list (audit, sorted by m.audit_action_*())

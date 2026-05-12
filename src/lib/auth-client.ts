@@ -1,7 +1,7 @@
 // Client-side Better Auth helpers for SvelteKit components.
 //
 // `createAuthClient` ships hooks/helpers (signIn, signOut, useSession) that
-// talk to the Better Auth handler mounted in src/hooks.server.ts (Plan 01-06).
+// talk to the Better Auth handler mounted in src/hooks.server.ts.
 //
 // Same-origin: in dev and prod the SvelteKit app and the Better Auth handler
 // live behind one origin. When the SaaS deployment uses a wildcard cookie

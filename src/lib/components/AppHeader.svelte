@@ -1,16 +1,14 @@
 <script lang="ts">
   // AppHeader — top bar present on every authenticated page.
   //
-  // Phase 2.1 Plan 02.1-09 changes (UI-SPEC §"`<AppHeader>` UI polish"):
-  //   1. ADD <UserChip>: avatar (Google profile picture) + email + sign-out
-  //      menu. The 28px circular avatar replaces the Phase 2 plain-text
-  //      "name" trigger.
-  //   2. REMOVE <ThemeToggle>: the toggle relocates to /settings only
-  //      (UI-SPEC: Phase 2 UAT P1 surfaced it was clutter on every page).
+  //   1. <UserChip>: avatar (Google profile picture) + email + sign-out
+  //      menu. The 28px circular avatar is the trigger.
+  //   2. The theme toggle lives only on /settings — it was clutter on
+  //      every page.
   //
   // The `theme` prop is no longer consumed here but stays in the props
   // bag (set by +layout.svelte for backward compatibility) — removing it
-  // would force a layout-svelte change. Phase 4 cleanup can drop it.
+  // would force a layout-svelte change.
 
   import { m } from "$lib/paraglide/messages.js";
   import UserChip from "./UserChip.svelte";
@@ -42,19 +40,18 @@
 
 <style>
   .header {
-    /* Plan 02.1-39 round-6 #5 (UAT-NOTES.md §5.4 follow-up #5): AppHeader is
-       NON-STICKY here. The Plan 02.1-22 closure required AppHeader to stay
-       visible while content scrolled — that contract is preserved, but the
-       sticky positioning has moved UP one level to the `.sticky-chrome`
-       wrapper in src/routes/+layout.svelte that contains both AppHeader and
-       Nav. Reason: when AppHeader and Nav were each independently sticky
-       (top: 0 and top: --app-header-height respectively), every overlap
-       value either left a subpixel gap (too small) or made Nav visibly slip
-       up on scroll-start (too large). User quote on the slip after round-6
-       #4 (419e3c7): "Зазора нет, но есть небольшой скрол табов feed sources
-       что выглядит как артефакт". Wrapping both in a single sticky block
-       removes the AppHeader↔Nav internal sticky boundary entirely — they
-       move as one DOM unit, so neither gap nor slip is possible. */
+    /* AppHeader is NON-STICKY here. AppHeader must stay visible while
+       content scrolls — that contract is preserved by the
+       `.sticky-chrome` wrapper in src/routes/+layout.svelte that
+       contains both AppHeader and Nav. When AppHeader and Nav were
+       each independently sticky (top: 0 and top: --app-header-height
+       respectively), every overlap value either left a subpixel gap
+       (too small) or made Nav visibly slip up on scroll-start (too
+       large). User quote on the slip: "Зазора нет, но есть небольшой
+       скрол табов feed sources что выглядит как артефакт". Wrapping
+       both in a single sticky block removes the AppHeader↔Nav internal
+       sticky boundary entirely — they move as one DOM unit, so neither
+       gap nor slip is possible. */
     display: flex;
     align-items: center;
     justify-content: space-between;

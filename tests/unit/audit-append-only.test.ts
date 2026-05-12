@@ -15,23 +15,17 @@ process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
 const auditModule = await import("../../src/lib/server/audit.js");
 
 /**
- * Audit module export-shape invariant (PITFALL P19).
+ * Audit module export-shape invariant.
  *
  * `src/lib/server/audit.ts` is INSERT-only by design: it exports `writeAudit`
- * and the `AuditEntry` interface, NOTHING ELSE. A future plan that
+ * and the `AuditEntry` interface, NOTHING ELSE. A future change that
  * accidentally adds an `updateAudit` / `deleteAudit` / `purgeAudit` /
  * `clearAudit` / `removeAudit` / `setAction` / `amendAudit` export trips
  * this test loudly — the structural assertion is intentionally broad so
  * verb-shape drift (whatever an attacker thought to add) gets caught.
- *
- * Wave 0 placeholder names PRESERVED (`02-08: writeAudit module exports no
- * update path` / `02-08: writeAudit module exports no delete path`) — the
- * `02-08:` annotation is intentional (Plan 08 surfaces audit at the route
- * layer; the invariant is plan-08 scoped). Plan 02-07 lights it up early
- * because the test depends ONLY on audit.ts (Phase 1) — no need to wait.
  */
-describe("audit module export shape (P19)", () => {
-  it("02-08: writeAudit module exports no update path", () => {
+describe("audit module export shape", () => {
+  it("writeAudit module exports no update path", () => {
     const keys = Object.keys(auditModule);
     for (const k of keys) {
       expect(k).not.toMatch(/^update/i);
@@ -39,7 +33,7 @@ describe("audit module export shape (P19)", () => {
     }
   });
 
-  it("02-08: writeAudit module exports no delete path", () => {
+  it("writeAudit module exports no delete path", () => {
     const keys = Object.keys(auditModule);
     for (const k of keys) {
       expect(k).not.toMatch(/^delete/i);

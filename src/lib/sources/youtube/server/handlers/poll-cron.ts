@@ -1,12 +1,10 @@
-// YouTube poll-cron handler — Phase 03.0.1 Plan 07.
+// YouTube poll-cron handler.
 //
-// Replaces the separate per-queue poll-active + poll-cold handlers
-// (Phase 03.0 Plan 09 model: subscribed to two queues `poll.active` /
-// `poll.cold`) with a single handler subscribed to youtube.poll.cron.
-// Dispatches on job.data.tier ('active' | 'cold').
+// One handler subscribed to youtube.poll.cron, dispatching on
+// job.data.tier ('active' | 'cold').
 //
 // The cron SCHEDULE itself is split via pg-boss v11+ key-based multiple
-// schedules per queue (see RESEARCH.md Open Question #2):
+// schedules per queue:
 //
 //   await boss.schedule(
 //     QUEUES.YOUTUBE_POLL_CRON,
@@ -25,10 +23,10 @@
 // (queue_name, key); pg-boss v11+ allows multiple schedules per queue
 // when the {key} option is provided.
 //
-// Adding a third tier (e.g. user-driven backfill cron in some future
-// phase) means adding a third boss.schedule call with a different key
-// and extending this dispatch with another tier branch — the queue +
-// handler topology stay flat.
+// Adding a third tier (e.g. a future user-driven backfill cron) means
+// adding a third boss.schedule call with a different key and extending
+// this dispatch with another tier branch — the queue + handler topology
+// stay flat.
 //
 // See sources/youtube/server/index.ts.scheduleCronTicks for the
 // schedule registration.

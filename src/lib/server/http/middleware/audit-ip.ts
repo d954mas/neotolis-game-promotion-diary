@@ -1,15 +1,10 @@
-// Audit-context helper (Plan 01-07 — Wave 4).
+// Audit-context helper.
 //
-// Combines the resolved client IP (set by Plan 06's proxyTrust middleware as
+// Combines the resolved client IP (set by proxyTrust middleware as
 // `clientIp`) with the authenticated user (set by tenantScope as `userId`)
 // and the request's User-Agent for use as the audit-log row payload.
 //
-// Phase 1 doesn't write audit rows from request handlers yet — Better Auth
-// owns the auth-event audits, and Phase 1 has no other tenant-modifying
-// endpoint. The helper exists so Phase 2's KEYS-06 / GAMES-01 writers (and
-// Phase 6's admin endpoints) don't have to touch the middleware chain again.
-//
-// Usage (Phase 2+):
+// Usage:
 //
 //   ```ts
 //   import { writeAudit } from '$lib/server/audit.js';

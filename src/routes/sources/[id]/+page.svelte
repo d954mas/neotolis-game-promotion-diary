@@ -1,13 +1,9 @@
 <script lang="ts">
-  // /sources/[id] page — Phase 03.0.1 Plan 10. Detail page for a single
-  // data_source.
+  // /sources/[id] page — detail page for a single data_source.
   //
-  // Phase 03.0.1 (post-review UAT 2026-05-10) — restructured into card
-  // sections (Status / Coverage / Description / Actions) with edit-on-
-  // demand pattern: view mode shows current state, click «Edit» on a
-  // section to swap to inputs. Pre-fix everything was always-editable
-  // (textarea + date picker rendered raw) — looked unfinished and
-  // ambiguous about what's a label vs an input.
+  // Structured into card sections (Status / Coverage / Description /
+  // Actions) with an edit-on-demand pattern: view mode shows current state,
+  // click «Edit» on a section to swap to inputs.
 
   import RefreshContentButton from "$lib/components/RefreshContentButton.svelte";
   import SourceCoverageBadge from "$lib/components/SourceCoverageBadge.svelte";
@@ -18,10 +14,10 @@
   let { data }: { data: PageData } = $props();
   const source = $derived(data.source);
 
-  // Phase 03.0.1 (post-review UAT) — same live-refresh loop as /sources
-  // list. While cooldown is active (worker processing pull), invalidateAll
-  // every 3s so UI shows last_polled_at advancing, events appearing,
-  // cooldown countdown ticking without manual reload.
+  // Same live-refresh loop as /sources list. While cooldown is active
+  // (worker processing pull), invalidateAll every 3s so UI shows
+  // last_polled_at advancing, events appearing, cooldown countdown ticking
+  // without manual reload.
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   $effect(() => {
     const isActive = (data.cooldownSec ?? 0) > 0 || (data.pulling ?? false);

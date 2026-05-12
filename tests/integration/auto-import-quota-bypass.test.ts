@@ -8,7 +8,7 @@ import { AppError } from "../../src/lib/server/services/errors.js";
 import { env } from "../../src/lib/server/config/env.js";
 import { seedUserDirectly } from "./helpers.js";
 
-// Phase 3.0 Plan 04 — DV-5 auto-import quota bypass.
+// Auto-import quota bypass.
 //
 // The events_per_day cap models the human-time budget for manual creates.
 // Auto-imported rows (events with source_id pointing at a registered
@@ -17,8 +17,8 @@ import { seedUserDirectly } from "./helpers.js";
 // manual-paste budget.
 //
 // Two layers of defense:
-//   1. The auto-import worker (Plan 03.0-09) bypasses withQuotaGuard
-//      altogether (it does a plain db.insert + audit, no per-user advisory
+//   1. The auto-import worker bypasses withQuotaGuard altogether (it
+//      does a plain db.insert + audit, no per-user advisory
 //      lock + count check).
 //   2. Even if a future code path DOES route an auto-import write through
 //      withQuotaGuard, the currentCount('events_per_day') filter excludes
@@ -60,8 +60,8 @@ async function seedAutoImportedEvent(args: {
   return id;
 }
 
-describe("auto-import quota bypass (Plan 03.0-04, DV-5)", () => {
-  it("Plan 03.0-04: currentCount('events_per_day') excludes events with source_id IS NOT NULL", async () => {
+describe("auto-import quota bypass", () => {
+  it("currentCount('events_per_day') excludes events with source_id IS NOT NULL", async () => {
     const u = await seedUserDirectly({ email: `q-by1-${uniq()}@test.local` });
     const src = await seedDataSource(u.id);
 
@@ -100,7 +100,7 @@ describe("auto-import quota bypass (Plan 03.0-04, DV-5)", () => {
     expect(created.id).toBeTruthy();
   });
 
-  it("Plan 03.0-04: auto-import worker creating event when user is at 500/day cap → succeeds", async () => {
+  it("auto-import worker creating event when user is at 500/day cap → succeeds", async () => {
     const u = await seedUserDirectly({ email: `q-by2-${uniq()}@test.local` });
     const src = await seedDataSource(u.id);
 
@@ -123,9 +123,9 @@ describe("auto-import quota bypass (Plan 03.0-04, DV-5)", () => {
       await db.insert(events).values(row);
     }
 
-    // Auto-import path simulated as a direct INSERT (the production path —
-    // Plan 03.0-09 worker — bypasses withQuotaGuard by design). The DB
-    // accepts the row even though the user is at the manual cap.
+    // Auto-import path simulated as a direct INSERT (the production
+    // worker bypasses withQuotaGuard by design). The DB accepts the row
+    // even though the user is at the manual cap.
     const autoId = await seedAutoImportedEvent({
       userId: u.id,
       sourceId: src,
@@ -134,10 +134,10 @@ describe("auto-import quota bypass (Plan 03.0-04, DV-5)", () => {
     expect(autoId).toBeTruthy();
   });
 
-  it("Plan 03.0-04: manual paste at 500/day cap → AppError 429 quota_exceeded (cap still enforced)", async () => {
+  it("manual paste at 500/day cap → AppError 429 quota_exceeded (cap still enforced)", async () => {
     const u = await seedUserDirectly({ email: `q-by3-${uniq()}@test.local` });
 
-    // Saturate with manual rows (source_id NULL → counted by DV-5 filter).
+    // Saturate with manual rows (source_id NULL → counted by the filter).
     const limit = env.LIMIT_EVENTS_PER_DAY;
     const seedRows = Array.from({ length: limit }, (_, i) => ({
       id: uuidv7(),

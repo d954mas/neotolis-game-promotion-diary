@@ -9,14 +9,13 @@ import { invalidateSession } from "../../src/lib/server/services/sessions.js";
 import { createApp } from "../../src/lib/server/http/app.js";
 import { seedUserDirectly } from "./helpers.js";
 
-// VALIDATION 1/2/3/4 (Better Auth Google OAuth happy path) — the full HTTP redirect
-// dance lands in Plan 01-10's smoke test (which boots the image and hits the mock
-// IdP via real HTTP). This file covers the session DB lifecycle that AUTH-02 (sign-out
-// invalidates), D-08 (sign-out-all-devices), and AUTH-03 (returning user resumes the
-// same row) require — pure DB-level operations that work without an HTTP layer.
-//
-// D-13 mechanism = oauth2-mock-server per CONTEXT.md <deviations> 2026-04-27.
-describe("Better Auth — DB session lifecycle (AUTH-01/02/03)", () => {
+// Better Auth Google OAuth happy path — the full HTTP redirect dance
+// lands in the smoke test (which boots the image and hits the mock IdP
+// via real HTTP). This file covers the session DB lifecycle that
+// sign-out invalidation, sign-out-all-devices, and returning-user
+// resumption require — pure DB-level operations that work without an
+// HTTP layer.
+describe("Better Auth — DB session lifecycle", () => {
   it("seeded session is readable via auth.api.getSession", async () => {
     const { signedSessionCookieValue } = await seedUserDirectly({
       email: "alice@test.local",
@@ -52,7 +51,7 @@ describe("Better Auth — DB session lifecycle (AUTH-01/02/03)", () => {
     await db.delete(user).where(eq(user.id, userId));
   });
 
-  it("AUTH-02 (D-08): signOutAllDevices removes every session row for the user (all devices)", async () => {
+  it("AUTH-02: signOutAllDevices removes every session row for the user (all devices)", async () => {
     const { id: userId } = await seedUserDirectly({
       email: "carol@test.local",
     });
@@ -78,16 +77,17 @@ describe("Better Auth — DB session lifecycle (AUTH-01/02/03)", () => {
   it("AUTH-03: returning user resumes the same row (UNIQUE on email proves no duplicate)", async () => {
     // Seed once.
     await seedUserDirectly({ email: "dave@test.local" });
-    // Seeding "again" with the same email must fail because user.email is UNIQUE
-    // (Plan 01-03 schema). This proves Better Auth's account-linkage path will
-    // resolve the same row on a returning sign-in instead of inserting a duplicate.
+    // Seeding "again" with the same email must fail because user.email
+    // is UNIQUE. This proves Better Auth's account-linkage path will
+    // resolve the same row on a returning sign-in instead of inserting
+    // a duplicate.
     await expect(seedUserDirectly({ email: "dave@test.local" })).rejects.toThrow();
 
     const all = await db.select().from(user).where(eq(user.email, "dave@test.local"));
     expect(all.length).toBe(1);
   });
 
-  it("D-08: POST /api/me/sessions/all deletes every session row for the caller", async () => {
+  it("POST /api/me/sessions/all deletes every session row for the caller", async () => {
     const { id: userId, signedSessionCookieValue } = await seedUserDirectly({
       email: "erin@test.local",
     });

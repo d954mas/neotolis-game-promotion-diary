@@ -1,10 +1,8 @@
-// Plan 02.1-39 (UAT-NOTES.md §5.6): shared helper for the human-facing
-// source-kind label (e.g. "YouTube channel" / "Reddit account"). Extracted
-// from SourceRow.svelte's inline kindLabel function so SourceRow and
-// FiltersSheet resolve to the same wording — single source of truth for
-// the round-6 kind-glyph + label pattern that lands in FiltersSheet's
-// source list. Mirrors the shape of the `m.source_kind_label_*` Paraglide
-// keys (Plan 02.1-08), one entry per data_sources.kind enum value.
+// Shared helper for the human-facing source-kind label (e.g.
+// "YouTube channel" / "Reddit account"). Single source of truth used by
+// SourceRow and FiltersSheet so they resolve to the same wording. Mirrors
+// the shape of the `m.source_kind_label_*` Paraglide keys, one entry per
+// data_sources.kind enum value.
 
 import { m } from "$lib/paraglide/messages.js";
 

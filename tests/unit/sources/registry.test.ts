@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { allAdapters, getAdapter } from "$lib/sources/registry.js";
 import type { ParsedUrl } from "$lib/sources/adapter.js";
 
-describe("SourceRegistry — Phase 03.0.1 D-14", () => {
-  it("allAdapters is an array (empty pre-Plan 03; populated Wave 1)", () => {
+describe("SourceRegistry", () => {
+  it("allAdapters is an array", () => {
     expect(Array.isArray(allAdapters)).toBe(true);
   });
 
@@ -30,9 +30,8 @@ describe("SourceRegistry — Phase 03.0.1 D-14", () => {
     expect(adapter.canRefreshPoll?.("reddit_post")).toBe(false);
   });
 
-  // Phase 03.0.1 Plan 08 — observability surface flips live (D-08).
-  // The test.todo placeholder from Plan 01 is replaced with the real assertions:
-  // auth.kind / requiresUserSetup / quota.getDailyStats shape / quota.getRecentAudit shape.
+  // Observability surface assertions: auth.kind / requiresUserSetup /
+  // quota.getDailyStats shape / quota.getRecentAudit shape.
 
   it("youtubeAdapter.observability.auth.kind === 'operator-static-key'", () => {
     const a = getAdapter("youtube_channel");

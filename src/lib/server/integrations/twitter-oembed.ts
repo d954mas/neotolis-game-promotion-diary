@@ -7,9 +7,9 @@
 // and frequently flaky for niche accounts; failing the user's paste because
 // publish.twitter.com hiccupped would be worse than missing the author name.
 //
-// Pitfall 8 — the orchestrator MUST canonicalize x.com → twitter.com BEFORE
-// calling this function, because publish.twitter.com only accepts twitter.com
-// host strings. The url-parser handles this; this integration assumes it.
+// The orchestrator MUST canonicalize x.com → twitter.com BEFORE calling
+// this function, because publish.twitter.com only accepts twitter.com host
+// strings. The url-parser handles this; this integration assumes it.
 //
 // 5s AbortController timeout matches the rest of the integration layer.
 
@@ -26,7 +26,7 @@ export interface TwitterOembed {
  * Fetch the publish.twitter.com/oembed record for a canonicalized twitter.com
  * status URL. Returns null on any error or non-2xx response — the caller MUST
  * handle null by creating the events row with a placeholder title rather than
- * surfacing the failure to the user (D-29 / Pitfall 8 best-effort contract).
+ * surfacing the failure to the user (best-effort contract).
  */
 export async function fetchTwitterOembed(canonicalUrl: string): Promise<TwitterOembed | null> {
   const ctrl = new AbortController();

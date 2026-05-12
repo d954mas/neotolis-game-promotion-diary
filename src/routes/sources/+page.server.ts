@@ -16,12 +16,11 @@ import { and, eq, isNull, inArray, sql, gte, max, count } from "drizzle-orm";
 
 /**
  * /sources loader — list the caller's data_sources, partitioned active vs
- * soft-deleted (Phase 2.1 SOURCES-01 / SOURCES-02).
+ * soft-deleted.
  *
- * Phase 3.0 post-build (UAT 2026-05-06): each row gains the YouTube channel
- * title from the youtube_channels cache so the page shows BOTH the user's
- * own label (displayName) AND the real channel name. Same pattern as the
- * /feed loader.
+ * Each row gains the YouTube channel title from the youtube_channels cache
+ * so the page shows BOTH the user's own label (displayName) AND the real
+ * channel name. Same pattern as the /feed loader.
  */
 export const load: PageServerLoad = async ({ locals }) => {
   if (!locals.user)
@@ -48,11 +47,10 @@ export const load: PageServerLoad = async ({ locals }) => {
       if (s.channelId) s.channelTitle = titleByChannel.get(s.channelId) ?? null;
     }
 
-    // Phase 03.0.1 Wave 4 — channel-scoped state JOIN. lastPolledAt /
-    // backfillOldestAt / backfillComplete now live on
-    // data_source_channel_state (one row per channel, shared across
-    // subscribers). UI reads channel-level last-poll value verbatim
-    // (Q3-A semantics: "Channel last checked: 2 min ago").
+    // Channel-scoped state JOIN. lastPolledAt / backfillOldestAt /
+    // backfillComplete now live on data_source_channel_state (one row per
+    // channel, shared across subscribers). UI reads channel-level
+    // last-poll value verbatim ("Channel last checked: 2 min ago").
     const stateRows = await db
       .select({
         channelKey: dataSourceChannelState.channelKey,
@@ -86,10 +84,10 @@ export const load: PageServerLoad = async ({ locals }) => {
     }
   }
 
-  // Phase 03.0.1 (post-review UAT) — first/last event date per source.
-  // Surfaces «what's the time range we have for this source» on the row
-  // so user doesn't need to open detail to see it. Single grouped query
-  // — same as /feed's per-source date-range query.
+  // First/last event date per source. Surfaces «what's the time range we
+  // have for this source» on the row so user doesn't need to open detail
+  // to see it. Single grouped query — same as /feed's per-source
+  // date-range query.
   const sourceIds = dtos.map((s) => s.id);
   const eventStats = new Map<string, { first: Date; last: Date; count: number }>();
   if (sourceIds.length > 0) {
@@ -122,14 +120,14 @@ export const load: PageServerLoad = async ({ locals }) => {
     s.eventCount = stat?.count ?? 0;
   }
 
-  // Phase 03.0.1 (post-review UAT) — refresh-content cooldown state.
-  // Pre-fix the 5min cooldown was client-only — F5 reset it. Server
-  // queries the latest refresh-content INTENT audit row per source within
-  // the cooldown window and computes remaining seconds. RefreshContentButton
-  // initializes from this state so reload doesn't lose the gate.
+  // Refresh-content cooldown state. The 5min cooldown was client-only
+  // — F5 used to reset it. Server queries the latest refresh-content
+  // INTENT audit row per source within the cooldown window and computes
+  // remaining seconds. RefreshContentButton initializes from this state
+  // so reload doesn't lose the gate.
   //
   // INTENT rows are the ones without `flow` field (worker COMPLETION rows
-  // set flow=incremental/historical). See P3 rate-limit-query fix earlier.
+  // set flow=incremental/historical).
   const COOLDOWN_MS = 5 * 60_000;
   const cooldownSince = new Date(Date.now() - COOLDOWN_MS);
   const cooldownMap = new Map<string, number>(); // sourceId → remaining seconds
@@ -161,11 +159,10 @@ export const load: PageServerLoad = async ({ locals }) => {
   }
   const cooldownBySource: Record<string, number> = Object.fromEntries(cooldownMap);
 
-  // Phase 03.0.1 Wave 4 — channel-scoped «pulling» state from pgboss queue.
-  // Worker payload now carries channelKey (not sourceId) — pulling is
-  // channel-level: ALL subscribers to a channel see the spinner together
-  // when ANY user triggered a walk on it (Q1-A semantics: shared walk,
-  // shared visual state).
+  // Channel-scoped «pulling» state from pgboss queue. Worker payload
+  // carries channelKey (not sourceId) — pulling is channel-level: ALL
+  // subscribers to a channel see the spinner together when ANY user
+  // triggered a walk on it (shared walk, shared visual state).
   const pullingMap = new Map<string, boolean>();
   if (channelIds.length > 0) {
     // pgboss schema guard — to_regclass returns NULL when missing
@@ -195,9 +192,9 @@ export const load: PageServerLoad = async ({ locals }) => {
   }
   const pullingBySource: Record<string, boolean> = Object.fromEntries(pullingMap);
 
-  // Phase 03.0.1 — quota status per platform (today + lifetime). Banner
-  // surfaces all platforms — adding Reddit Phase 03.1+ adds a row automatically
-  // via allAdapters iteration. Each adapter declares own userQuotaCap (or
+  // Quota status per platform (today + lifetime). Banner surfaces all
+  // platforms — adding a new source kind adds a row automatically via
+  // allAdapters iteration. Each adapter declares own userQuotaCap (or
   // omits — banner shows count + "no limit").
   const userId = locals.user.id;
   const resetAt = nextPacificMidnight();

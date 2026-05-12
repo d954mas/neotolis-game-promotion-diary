@@ -1,5 +1,4 @@
-// Phase 3.0 Plan 09 + post-build refactor (2026-05-06) — poll worker tx
-// boundary assertion (Pitfall 5).
+// Poll worker tx boundary assertion.
 //
 // Holding a row lock during the upstream YouTube fetch is the classic
 // anti-pattern that cascades into pool exhaustion. The two-phase pattern
@@ -15,10 +14,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
-// Phase 3.0 post-build review (2026-05-07): worker handlers now require
-// pickKeyForJob() to return a non-null PickedKey — the no-key path
-// short-circuits without invoking the adapter (matches production
-// self-host parity for the env.SERVICE_YOUTUBE_API_KEYS-empty case).
+// Worker handlers now require pickKeyForJob() to return a non-null
+// PickedKey — the no-key path short-circuits without invoking the
+// adapter (matches production self-host parity for the
+// env.SERVICE_YOUTUBE_API_KEYS-empty case).
 // Mock pickKeyForJob to return a fixture so this suite reaches the
 // adapter mock under test. ESM hoisting prevents seeding env at module
 // top from being picked up by env.ts; mocking the picker directly is
@@ -34,9 +33,8 @@ vi.mock("../../src/lib/sources/youtube/server/quota.js", async (importOriginal) 
 const adapterMock = {
   pollStatsByVideoId: vi.fn(),
 };
-// Phase 03.0.1 Plan 07 — handlePollActive imports from ../adapter.js
-// directly (the barrel ../index.js was the pre-Plan-07 import path; Plan 07
-// avoids the circular barrel→handlers→barrel path by going to adapter.js).
+// handlePollActive imports from ../adapter.js directly to avoid the
+// circular barrel→handlers→barrel path.
 vi.mock("../../src/lib/sources/youtube/server/adapter.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
@@ -61,8 +59,8 @@ const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
 async function insertEventAndVideo(userId: string, externalId: string): Promise<string> {
   const id = uuidv7();
-  // Phase 03.0.1 Plan 07: handlePollActive now enumerates eligible videos
-  // itself via selectEligibleVideoIds, keyed on youtube_videos.published_at
+  // handlePollActive enumerates eligible videos itself via
+  // selectEligibleVideoIds, keyed on youtube_videos.published_at
   // landing inside the Active-tier window (age < 24h). Seed with publishedAt
   // 12h ago (relative to the live clock) so the seeded video falls in the
   // Active tier regardless of when the test runs.
@@ -87,13 +85,13 @@ async function insertEventAndVideo(userId: string, externalId: string): Promise<
   return id;
 }
 
-describe("poll worker tx boundary (Plan 03.0-09 + per-video refactor)", () => {
+describe("poll worker tx boundary (per-video refactor)", () => {
   it("snapshot write tx stays short even with 100ms simulated upstream latency", async () => {
     const u = await seedUserDirectly({ email: `tx-bound-${uniq()}@test.local` });
     const externalId = `vid_${uniq()}`;
     await insertEventAndVideo(u.id, externalId);
 
-    // Return one snapshot per requested videoId — Plan 07's handlePollActive
+    // Return one snapshot per requested videoId — handlePollActive
     // enumerates eligibility itself so it may pass multiple videoIds (any
     // other Active-tier videos in the test DB from sibling tests). We map
     // every requested id to a viewCount=42 snapshot; the assertion below

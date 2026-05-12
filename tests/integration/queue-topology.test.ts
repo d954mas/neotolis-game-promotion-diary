@@ -1,15 +1,15 @@
-// Phase 03.0.1 Plan 07 — per-kind queue topology assertion.
+// Per-kind queue topology assertion.
 //
-// Phase 1 declared 4 poll queues + internal.healthcheck as a forward-compat
-// scaffold. Phase 3.0 Plan 01 collapsed POLL_HOT → POLL_ACTIVE and dropped
-// POLL_WARM. Plan 09 added 2 scheduler-tick queues. Phase 03.0.1 Plan 07
-// renames the YouTube-poll queues to the per-kind topology and retires
-// the scheduler-tick queues (collapsed into the youtube.poll.cron schedule
-// via pg-boss v11+ key-based multiple-schedule-per-queue).
+// The history: the original scaffold declared 4 poll queues +
+// internal.healthcheck. POLL_HOT collapsed into POLL_ACTIVE and POLL_WARM
+// was dropped. Two scheduler-tick queues were added, then collapsed into
+// the youtube.poll.cron schedule via pg-boss v11+ key-based
+// multiple-schedule-per-queue. The YouTube-poll queues were renamed to
+// the per-kind topology and the scheduler-tick queues retired.
 //
 // pgboss persists queue declarations in pgboss.queue. This test pins the
-// new topology so a future executor cannot accidentally re-introduce the
-// retired names or drop a Plan 07 queue.
+// current topology so a future executor cannot accidentally re-introduce
+// the retired names or drop a queue.
 //
 // Implementation note: createBoss() is called once via getBoss() singleton
 // to declare every QUEUES.* entry. The assertions read pgboss.queue table
@@ -39,7 +39,7 @@ afterAll(async () => {
   resetBossSingletonForTesting();
 });
 
-describe("queue topology (Plan 03.0.1-07 per-kind rename)", () => {
+describe("queue topology (per-kind rename)", () => {
   it("declares all queues — INTERNAL_HEALTHCHECK, PURGE_DAILY, YOUTUBE_POLL_CRON, YOUTUBE_POLL_USER, YOUTUBE_BACKFILL_CHANNEL, YOUTUBE_QUOTA_RESET, YOUTUBE_REHAB, YOUTUBE_CHANNEL_CONTEXT_BACKFILL", async () => {
     const expected = [
       QUEUES.INTERNAL_HEALTHCHECK,
@@ -64,7 +64,7 @@ describe("queue topology (Plan 03.0.1-07 per-kind rename)", () => {
     }
   });
 
-  it("retired POLL_HOT and POLL_WARM names are absent (DV-2 collapse — Phase 03.0 Plan 01 migration)", async () => {
+  it("retired POLL_HOT and POLL_WARM names are absent", async () => {
     const { rows } = await pool.query<{ name: string }>(
       `SELECT name FROM pgboss.queue WHERE name IN ('poll.hot', 'poll.warm')`,
     );
@@ -72,7 +72,7 @@ describe("queue topology (Plan 03.0.1-07 per-kind rename)", () => {
   });
 
   it("retired queue names (poll.active, poll.cold, poll.user, scheduler.tick.*, youtube.rehab_unavailable, youtube.backfill.user) are absent", async () => {
-    // The Plan-07 forward-only migration (drizzle/0021_phase03_01_per_kind_queue_topology.sql)
+    // The forward-only migration (drizzle/0021_phase03_01_per_kind_queue_topology.sql)
     // DELETEs orphan rows for these names from pgboss.queue. After the
     // migration runs and the new code declares the per-kind names, the
     // legacy names should not be re-created (no code path references them).
@@ -83,7 +83,7 @@ describe("queue topology (Plan 03.0.1-07 per-kind rename)", () => {
       "scheduler.tick.active",
       "scheduler.tick.cold",
       "youtube.rehab_unavailable",
-      // Phase 03.0.1 Wave 2 — channel-scoped polling replaces per-source.
+      // Channel-scoped polling replaced per-source.
       "youtube.backfill.user",
     ];
     const { rows } = await pool.query<{ name: string }>(

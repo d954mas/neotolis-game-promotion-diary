@@ -1,11 +1,11 @@
 <script lang="ts">
-  // Explicit /login route used as a redirect target by Plan 07's tenantScope
-  // when an unauthenticated browser request hits a protected page. Plan 07
-  // wires the redirect; this page just renders the Google sign-in button.
-  // Plan 01-09: strings sourced from Paraglide (UX-04, D-17/D-18).
-  // Plan 02.2-04 (D-12): early-access disclaimer below the CTA prevents the
-  // "I added a YouTube channel and nothing happened" confusion that would
-  // otherwise hit every new user pre-Phase-3 (auto-import lands in Phase 3).
+  // Explicit /login route used as a redirect target by tenantScope when an
+  // unauthenticated browser request hits a protected page. The middleware
+  // wires the redirect; this page renders the Google sign-in button.
+  // Strings sourced from Paraglide.
+  // Early-access disclaimer below the CTA explains that auto-import isn't
+  // yet wired so a new user doesn't expect "I added a YouTube channel and
+  // nothing happened" to surface content immediately.
   import { m } from "$lib/paraglide/messages.js";
   import { signIn } from "$lib/auth-client";
 </script>

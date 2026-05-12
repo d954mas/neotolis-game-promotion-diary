@@ -11,18 +11,14 @@ import {
 import { NotFoundError } from "$lib/server/services/errors.js";
 
 /**
- * /events/[id] loader (Plan 02.1-18 — full detail rebuild).
- *
- * Phase-2.1 Plan 02.1-18 replaces the Phase-4 stub with a full event
- * detail surface. The Phase-4 LayerChart placeholder is now anchored
- * inline at the bottom (D-07 spirit preserved).
+ * /events/[id] loader — full detail surface.
  *
  * Privacy invariants:
  *   - Anonymous → redirect(303, /login?next=...) — page-route gate
- *     (Plan 02.1-09 precedent; the anonymous-401 sweep covers /api/*).
+ *     (the anonymous-401 sweep covers /api/*).
  *     `error(401)` is reserved for /api/*; pages route to /login.
  *   - Cross-tenant → 404 via NotFoundError → throw error(404)
- *     (PRIV-01: 404, never 403).
+ *     (404, never 403).
  *   - Soft-deleted rows are surfaced ONLY when ?deleted=1 is set, so
  *     the Restore button has a destination from DeletedEventsPanel.
  *     The opts.includeSoftDeleted flag does NOT relax tenant scope.
@@ -37,14 +33,13 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   try {
     const row = await getEventById(locals.user.id, params.id, { includeSoftDeleted });
     const games = await listGames(locals.user.id);
-    // Plan 02.1-28: load attached gameIds via the M:N junction. The page
-    // surfaces the FIRST attached game as the "primary" (legacy single-
-    // game UI affordance preserved for round-3 UAT continuity); future
-    // Plan 02.1-32 swaps this for a full multi-game chip render.
+    // Load attached gameIds via the M:N junction. The page surfaces the
+    // FIRST attached game as the "primary" (legacy single-game UI
+    // affordance preserved).
     const gameIds = await loadGameIdsForEvent(locals.user.id, row.id);
-    // Per-video refactor (2026-05-06): load polling state from
-    // youtube_videos for kind=youtube_video events. PollingBadge consumes
-    // publishedAt + lastPollStatus + lastPolledAt via the EventDto.
+    // Load polling state from youtube_videos for kind=youtube_video events.
+    // PollingBadge consumes publishedAt + lastPollStatus + lastPolledAt via
+    // the EventDto.
     const videoMap = await loadVideoDataForEvents(locals.user.id, [row]);
     const videoData = row.externalId ? (videoMap.get(row.externalId) ?? null) : null;
     const primaryGame =

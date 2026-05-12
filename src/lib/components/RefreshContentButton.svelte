@@ -1,11 +1,9 @@
 <script lang="ts">
-  // RefreshContentButton — Phase 03.0.1 Plan 10. The user-facing payoff of
-  // the Wave 0-8 source-plugin refactor: a "Pull new content" button on
-  // /sources/[id] that POSTs to /api/sources/:id/refresh-content. The
-  // route dispatches via getAdapter(source.kind).backfillSource — for
-  // YouTube this enqueues a youtube.backfill.user job (singletonKey-deduped
-  // ~5min). Phase 03.1 lights this up for Reddit by writing the Reddit
-  // adapter's backfillSource; this component requires zero edits.
+  // RefreshContentButton — "Pull new content" button on /sources/[id]
+  // that POSTs to /api/sources/:id/refresh-content. The route dispatches
+  // via getAdapter(source.kind).backfillSource — for YouTube this
+  // enqueues a youtube.backfill.user job (singletonKey-deduped ~5min).
+  // Adding a new source kind requires zero edits to this component.
   //
   // CONTRACT (matches the route's wire format):
   //   - 202 → { enqueued: true, queue: 'youtube.backfill.user', jobId: <string|null> }
@@ -32,19 +30,20 @@
   import { m } from "$lib/paraglide/messages.js";
   import { invalidateAll } from "$app/navigation";
 
-  // sourceKind is threaded so future per-kind copy (e.g. "Pull new Reddit
-  // posts") can land without a prop-shape change. Currently unused — the
-  // underscore prefix matches the existing project convention for
-  // intentionally-unused destructured props.
-  // Phase 03.0.1 (post-review UAT) — compact mode: icon-only button for
-  // inline placement (e.g., /sources row). Default mode = full text label
-  // for the detail page where the affordance is the primary action.
+  // sourceKind is threaded so future per-kind copy (e.g. "Pull new
+  // Reddit posts") can land without a prop-shape change. Currently
+  // unused — the underscore prefix matches the existing project
+  // convention for intentionally-unused destructured props.
   //
-  // initialCooldownSec — server-rendered cooldown state. /sources loader
-  // queries audit_log for the most-recent refresh-content INTENT row per
-  // source within the 5-minute singletonKey window; the row passes the
-  // remaining seconds here so the UI cooldown survives page reload.
-  // Pre-fix the cooldown lived only in client state — F5 reset it.
+  // compact mode: icon-only button for inline placement (e.g., /sources
+  // row). Default mode = full text label for the detail page where the
+  // affordance is the primary action.
+  //
+  // initialCooldownSec — server-rendered cooldown state. The /sources
+  // loader queries audit_log for the most-recent refresh-content INTENT
+  // row per source within the 5-minute singletonKey window; the row
+  // passes the remaining seconds here so the UI cooldown survives page
+  // reload.
   let {
     sourceId,
     sourceKind: _sourceKind,
@@ -103,17 +102,16 @@
         credentials: "include",
       });
       if (res.status === 202) {
-        // Phase 03.0.1 (post-review UAT) — no «Refresh started» success
-        // toast. The spinning ↻ icon + live-refresh loop are the visual
-        // signal the pull is in flight; a redundant text toast just adds
-        // noise (and shifted button layout in compact mode).
+        // No «Refresh started» success toast. The spinning ↻ icon +
+        // live-refresh loop are the visual signal the pull is in
+        // flight; a redundant text toast just adds noise.
         startCooldown();
         await invalidateAll();
       } else if (res.status === 422) {
         toast = { kind: "err", text: m.sources_detail_pull_new_content_unsupported() };
       } else if (res.status === 429) {
-        // Phase 03.0.1 — distinct error codes for per-axis quota exhaustion.
-        // Banner UI shows full quota state; toast gives quick feedback.
+        // Distinct error codes for per-axis quota exhaustion. Banner UI
+        // shows full quota state; toast gives quick feedback.
         try {
           const body = (await res.json()) as { error?: string };
           if (body.error === "platform_quota_exhausted") {

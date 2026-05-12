@@ -1,19 +1,17 @@
 <script lang="ts">
   // AddSteamListingForm — inline form for "+ Add Steam listing" on
-  // /games/[id] under StoresSection. Closes the second half of the Phase 2
-  // P0 functional gap (the first half is RenameInline).
+  // /games/[id] under StoresSection.
   //
   // Steam URL paste field. We parse the appId from the URL client-side and
-  // POST /api/games/:gameId/listings { appId, label } — the existing Phase 2
-  // game-listings router (Plan 02-08) accepts a numeric appId, not a URL.
+  // POST /api/games/:gameId/listings { appId, label } — the game-listings
+  // router accepts a numeric appId, not a URL.
   //
   // On 201/200 → onSuccess() callback (StoresSection collapses the form +
   // calls invalidateAll on the parent). On 422 with body.error ===
-  // 'steam_listing_duplicate' (Plan 02.1-29 service hardening), read
-  // body.metadata.existingGameId + existingState and surface inline:
+  // 'steam_listing_duplicate', read body.metadata.existingGameId +
+  // existingState and surface inline:
   //   - existingState === 'active'      → text + deep link to /games/{id}
   //   - existingState === 'soft_deleted' → soft-deleted explanation
-  // (Plan 02.1-30, UAT-NOTES.md §4.25.G).
   //
   // Other 4xx responses → InlineError with the server's error code.
 
@@ -32,9 +30,9 @@
   let label = $state("");
   let pending = $state(false);
   let errorText = $state<string | null>(null);
-  // Plan 02.1-30 (UAT-NOTES.md §4.25.G): duplicate-toast state. When set,
-  // renders the inline error block with the existingGameId deep link and
-  // the appropriate localized copy per existingState.
+  // Duplicate-toast state. When set, renders the inline error block with
+  // the existingGameId deep link and the appropriate localized copy per
+  // existingState.
   let duplicateError = $state<{
     existingGameId: string;
     existingState: "active" | "soft_deleted";
@@ -81,9 +79,9 @@
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ appId, label: label.trim() || undefined }),
       });
-      // Plan 02.1-30: 422 with steam_listing_duplicate is a special case —
-      // we surface the existing game's deep link instead of a generic error.
-      // Plan 02.1-29 service hardening guarantees the metadata shape.
+      // 422 with steam_listing_duplicate is a special case — we surface
+      // the existing game's deep link instead of a generic error. The
+      // service guarantees the metadata shape.
       if (res.status === 422) {
         try {
           const body = (await res.json()) as {
@@ -165,11 +163,10 @@
 {#if duplicateError}
   <p class="duplicate-error" role="alert">
     {#if duplicateError.existingState === "active"}
-      <!-- Plan 02.1-30 (UAT-NOTES.md §4.25.G): the duplicate-active label
-           is split into prefix + link-label so the .svelte renders an
-           actual <a href> for the existingGameId deep link. The userId-
-           scoped service lookup (Plan 02.1-29) guarantees existingGameId
-           never crosses tenants. -->
+      <!-- The duplicate-active label is split into prefix + link-label so
+           the .svelte renders an actual <a href> for the existingGameId
+           deep link. The userId-scoped service lookup guarantees
+           existingGameId never crosses tenants. -->
       {m.steam_listing_duplicate_active_prefix()}
       <a href={`/games/${duplicateError.existingGameId}`}>
         {m.steam_listing_duplicate_active_link_label()}
@@ -223,8 +220,8 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
-  /* Plan 02.1-30: duplicate-toast inline error block. Mirrors InlineError's
-   * destructive surface but keeps the deep link rendered as a child <a>. */
+  /* Duplicate-toast inline error block. Mirrors InlineError's destructive
+   * surface but keeps the deep link rendered as a child <a>. */
   .duplicate-error {
     margin: var(--space-sm) 0 0 0;
     padding: var(--space-sm) var(--space-md);

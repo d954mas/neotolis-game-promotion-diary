@@ -1,5 +1,5 @@
 <script lang="ts">
-  // CursorPager — "Older →" / "← Newer" pair (D-31). No page numbers
+  // CursorPager — "Older →" / "← Newer" pair. No page numbers
   // (cursor pagination is opaque-by-construction).
   //
   // The page consumes /api/audit's `nextCursor` and `prevCursors` (a stack

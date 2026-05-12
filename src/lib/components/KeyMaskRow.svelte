@@ -1,8 +1,8 @@
 <script lang="ts">
   // KeyMaskRow — renders a Steam Web API key as `••••••••${last4}` plus a
   // label, last-rotated timestamp, and Replace + Remove buttons. The mask
-  // pattern is the load-bearing visual proof of D-14 / D-39: the only thing
-  // the user sees post-save is the last 4 chars.
+  // pattern is the load-bearing visual proof of the write-once contract:
+  // the only thing the user sees post-save is the last 4 chars.
 
   import { m } from "$lib/paraglide/messages.js";
 

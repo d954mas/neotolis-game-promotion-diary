@@ -1,7 +1,6 @@
 <script lang="ts">
   // DeletedEventsPanel — expand-toggle panel for soft-deleted events on
-  // /feed (Plan 02.1-14 gap closure — VERIFICATION.md Gap 2). Mirrors the
-  // /sources soft-deleted-section pattern (Plan 02.1-08) for events.
+  // /feed. Mirrors the /sources soft-deleted-section pattern for events.
   //
   // Visual rhythm: collapsed by default; toggle button reads
   //   "Show {N} deleted events (within {RETENTION_DAYS} days)"
@@ -12,8 +11,7 @@
   //   - The component receives only `deletedEvents` from SSR (already
   //     projected through toEventDto by the loader). No userId in the props.
   //   - The fetch PATCH /api/events/:id/restore goes through tenantScope
-  //     middleware; cross-tenant id throws NotFoundError → 404 (Plan 02.1-14
-  //     Task 2 service guarantee).
+  //     middleware; cross-tenant id throws NotFoundError → 404.
   //   - Renders nothing when deletedEvents.length === 0 (graceful empty case
   //     — no toggle, no header, no footprint on /feed when there's nothing
   //     to recover).

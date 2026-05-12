@@ -7,32 +7,29 @@ import { db } from "../../src/lib/server/db/client.js";
 import { gameSteamListings } from "../../src/lib/server/db/schema/game-steam-listings.js";
 import { AppError } from "../../src/lib/server/services/errors.js";
 
-// Plan 02.1-25 round-3 dev/test-DB conflation: tests/setup.ts truncates
-// `neotolis_test`, but runMigrations() reads env.DATABASE_URL which points
-// at `neotolis` (the dev DB). Tests run against the dev DB, so a fixed
+// Dev/test-DB conflation: tests/setup.ts truncates `neotolis_test`,
+// but runMigrations() reads env.DATABASE_URL which points at
+// `neotolis` (the dev DB). Tests run against the dev DB, so a fixed
 // email collides across re-runs. Random suffix keeps emails unique per
 // invocation without changing the test-harness wiring (deferred).
 const sfx = (): string => randomBytes(4).toString("hex");
 
 /**
- * Plan 02-04 — GAMES-04a integration tests for `youtube-channels` were
- * retired in Plan 02.1-01 baseline collapse (the per-platform table was
- * dropped in favor of `data_sources`). The original Phase 2 attach tests
- * lived in this file; their service imports are gone post-2.1, so the
- * file now hosts the Plan 02.1-25 round-3 closure for Steam listing
- * `name` persistence. Cross-tenant ownership of Steam listings stays
+ * The original `youtube-channels` attach tests were retired in the
+ * baseline collapse. The file now hosts the Steam listing `name`
+ * persistence tests. Cross-tenant ownership of Steam listings stays
  * exercised in `tests/integration/games.test.ts` and the cross-tenant
  * matrix in `tests/integration/tenant-scope.test.ts`.
  */
 
-// Plan 02.1-25 — Steam listing `name` persistence.
+// Steam listing `name` persistence.
 //
-// Round-3 UAT §3.3-polish: user wants the game's Steam name visible on
-// /games/[id] (not just `App {id}`) plus an "Open on Steam" link. This
-// test covers the data layer: addSteamListing populates the new `name`
-// column from the Steam appdetails fetch; toGameSteamListingDto projects
-// it; on Steam-down the column stays NULL (UI fallback to "App {id}"
-// renders correctly via SteamListingRow).
+// User wants the game's Steam name visible on /games/[id] (not just
+// `App {id}`) plus an "Open on Steam" link. This test covers the data
+// layer: addSteamListing populates the `name` column from the Steam
+// appdetails fetch; toGameSteamListingDto projects it; on Steam-down
+// the column stays NULL (UI fallback to "App {id}" renders correctly
+// via SteamListingRow).
 //
 // We mock fetchSteamAppDetails via vi.mock so the test does not call the
 // public Steam endpoint (deterministic + no rate-limit risk).
@@ -46,7 +43,7 @@ const { addSteamListing, listListings } =
 const { toGameSteamListingDto } = await import("../../src/lib/server/dto.js");
 const { fetchSteamAppDetails } = await import("../../src/lib/server/integrations/steam-api.js");
 
-describe("Plan 02.1-25 — Steam listing name persistence", () => {
+describe("Steam listing name persistence", () => {
   beforeEach(() => {
     vi.mocked(fetchSteamAppDetails).mockReset();
   });
@@ -76,7 +73,7 @@ describe("Plan 02.1-25 — Steam listing name persistence", () => {
 
     const dto = toGameSteamListingDto(row);
     expect(dto.name).toBe("Portal 2");
-    // P3 discipline: userId never crosses the projection boundary.
+    // DTO discipline: userId never crosses the projection boundary.
     expect(dto).not.toHaveProperty("userId");
   });
 
@@ -125,26 +122,20 @@ describe("Plan 02.1-25 — Steam listing name persistence", () => {
   });
 });
 
-// Plan 02.1-29 — addSteamListing duplicate translation (Path B).
-//
-// Closes UAT-NOTES.md §4.25.E (500 → 422 on duplicate appId), §4.25.G prep
-// (existingGameId + existingState payload for Plan 30's actionable toast),
-// and §4.25.H verification (cross-tenant DELETE returns 404; the route
-// itself shipped in Plan 02-08 at routes/game-listings.ts lines 69-77).
+// addSteamListing duplicate translation.
 //
 // Path B = unconditional DB constraint `(game_id, app_id)` + defensive
-// pre-INSERT lookup (no `isNull(deletedAt)` filter so soft-deleted dupes
-// surface as `existingState='soft_deleted'` BEFORE the INSERT) + race-window
-// catch around the INSERT translating 23505 to AppError 422 with
-// `existingState='active'`.
+// pre-INSERT lookup (no `isNull(deletedAt)` filter so soft-deleted
+// dupes surface as `existingState='soft_deleted'` BEFORE the INSERT)
+// + race-window catch around the INSERT translating 23505 to AppError
+// 422 with `existingState='active'`.
 //
-// Note on schema preconditions: this block expects the post-Plan-02.1-27
-// schema state — Plan 27 drops `game_steam_listings_user_app_id_unq`, so
-// cross-game-allowed (Test 3 below) is only post-27 valid. Pre-27 the
-// (user_id, app_id) constraint would 23505 the second add and fall through
-// to `existingState='active'` via the catch path. Plan 27 must run before
-// this test passes its cross-game assertion.
-describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () => {
+// Note on schema preconditions: this block expects the state where the
+// `game_steam_listings_user_app_id_unq` constraint has been dropped
+// (so cross-game-allowed in Test 3 below works). Before that drop the
+// (user_id, app_id) constraint would 23505 the second add and fall
+// through to `existingState='active'` via the catch path.
+describe("addSteamListing duplicate translation (Path B)", () => {
   beforeEach(() => {
     vi.mocked(fetchSteamAppDetails).mockReset();
   });
@@ -321,13 +312,12 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
     expect(stillThere?.deletedAt).toBeNull();
   });
 
-  // Plan 02.1-39 round-6 polish #12 (UAT-NOTES.md §5.8 follow-up #12,
-  // 2026-04-30): per-game listing restore endpoint. New surface:
+  // Per-game listing restore endpoint:
   //   POST /api/games/:gameId/listings/:listingId/restore
-  // Cross-tenant access on either gameId or listingId returns 404, never
-  // 403 (AGENTS.md item 2 — tenant-scope invariant). Body must NOT
-  // contain "forbidden" / "permission" for tenant-owned resources.
-  it("Plan 02.1-39 #12: cross-tenant POST /api/games/:gameId/listings/:listingId/restore → 404", async () => {
+  // Cross-tenant access on either gameId or listingId returns 404,
+  // never 403 (AGENTS.md item 2 — tenant-scope invariant). Body must
+  // NOT contain "forbidden" / "permission" for tenant-owned resources.
+  it("cross-tenant POST /api/games/:gameId/listings/:listingId/restore → 404", async () => {
     vi.mocked(fetchSteamAppDetails).mockResolvedValue(null);
 
     const { createApp } = await import("../../src/lib/server/http/app.js");
@@ -365,7 +355,7 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
     expect(stillDeleted?.deletedAt).not.toBeNull();
   });
 
-  it("Plan 02.1-39 #12: same-tenant POST /listings/:listingId/restore on already-active row → 404", async () => {
+  it("same-tenant POST /listings/:listingId/restore on already-active row → 404", async () => {
     vi.mocked(fetchSteamAppDetails).mockResolvedValue(null);
 
     const { createApp } = await import("../../src/lib/server/http/app.js");
@@ -385,7 +375,7 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
     expect(body.error).toBe("not_found");
   });
 
-  it("Plan 02.1-39 #12: same-tenant POST /listings/:listingId/restore on soft-deleted row → 200 + active DTO", async () => {
+  it("same-tenant POST /listings/:listingId/restore on soft-deleted row → 200 + active DTO", async () => {
     vi.mocked(fetchSteamAppDetails).mockResolvedValue({
       appId: 730,
       name: "Counter-Strike 2",
@@ -417,19 +407,18 @@ describe("Plan 02.1-29 — addSteamListing duplicate translation (Path B)", () =
     const dto = (await res.json()) as Record<string, unknown>;
     expect(dto.id).toBe(listing.id);
     expect(dto.deletedAt).toBeNull();
-    // P3 discipline: userId is stripped at the projection layer.
+    // DTO discipline: userId is stripped at the projection layer.
     expect(dto).not.toHaveProperty("userId");
   });
 
-  // Plan 02.1-39 round-6 polish #14c (UAT-NOTES.md §5.8 follow-up #14,
-  // 2026-04-30): per-listing label edit. User during round-6 UAT:
+  // Per-listing label edit. User during UAT:
   //   "При редактировании стора, я бы хотел иметь возможноть поменять label"
-  // Today only `label` is mutable (the rest of §5.3 item B remains a
-  // Phase 6 deferred). New service updateListing + PATCH route
-  // /api/games/:gameId/listings/:listingId. Cross-tenant 404 invariant
-  // exercised; same-tenant happy-path round-trips; route accepts {label}
-  // and rejects {label: <too long>} at the Zod boundary.
-  describe("Plan 02.1-39 round-6 polish #14c — per-listing label edit", () => {
+  // Today only `label` is mutable (the rest is deferred). updateListing
+  // service + PATCH route /api/games/:gameId/listings/:listingId.
+  // Cross-tenant 404 invariant exercised; same-tenant happy-path
+  // round-trips; route accepts {label} and rejects {label: <too long>}
+  // at the Zod boundary.
+  describe("per-listing label edit", () => {
     it("updateListing service round-trips label and the DTO projects the new value", async () => {
       vi.mocked(fetchSteamAppDetails).mockResolvedValue({
         appId: 620,

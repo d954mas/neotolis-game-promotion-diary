@@ -1,4 +1,4 @@
-// Phase 03.0.3 follow-up (PR #31 Codex P2) — transactional outbox helper.
+// Transactional outbox helper.
 //
 // Public surface — one function that callers use INSIDE a Drizzle
 // transaction to atomically commit a queue-intent alongside their DB
@@ -52,11 +52,10 @@ export interface OutboxEnqueueOptions {
  * `boss.send`, the forwarder sets `forwarded_at` and the cleanup
  * cron deletes rows older than 7 days from that mark.
  *
- * Retry timing (Phase 03.0.3 round-3 Codex P3): on a failed
- * `boss.send`, the row stays pending but its last_attempt_at is
- * already stamped from the atomic claim — concurrent claimers (and
- * follow-up sweeps within this process) skip the row until the
- * CLAIM_WINDOW_SECONDS interval (60s, see outbox-forwarder.ts)
+ * Retry timing: on a failed `boss.send`, the row stays pending but its
+ * last_attempt_at is already stamped from the atomic claim — concurrent
+ * claimers (and follow-up sweeps within this process) skip the row
+ * until the CLAIM_WINDOW_SECONDS interval (60s, see outbox-forwarder.ts)
  * elapses. Effective retry cadence is therefore ~60s, NOT
  * "next tick / next NOTIFY". After MAX_ATTEMPTS (20) the row stays
  * pending forever and operator intervention is required.
@@ -106,8 +105,8 @@ export async function enqueueViaOutbox(
 /**
  * Operator visibility helper — list outbox rows that have failed at
  * least one forward attempt. Useful for /admin/quota-style debugging
- * (Phase 6+) or ad-hoc SQL (`SELECT * FROM outbox WHERE
- * forwarder_attempt > 0 ORDER BY last_attempt_at DESC`).
+ * or ad-hoc SQL (`SELECT * FROM outbox WHERE forwarder_attempt > 0
+ * ORDER BY last_attempt_at DESC`).
  *
  * Returns the raw rows; callers project as needed. Limited to 100 by
  * default to keep the response bounded.

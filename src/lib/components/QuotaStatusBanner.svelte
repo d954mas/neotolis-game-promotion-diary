@@ -1,10 +1,9 @@
 <script lang="ts">
-  // QuotaStatusBanner — Phase 03.0.1.
-  //
-  // Always-visible banner на /sources + /sources/[id] showing per-platform
-  // API usage today + lifetime totals. Designed для multi-platform expansion
-  // (Phase 03.1 Reddit + later Twitter): each platform gets a row; per-axis
-  // bar shows progress vs cap or "no limit" when adapter doesn't declare cap.
+  // QuotaStatusBanner — always-visible banner on /sources +
+  // /sources/[id] showing per-platform API usage today + lifetime
+  // totals. Designed for multi-platform expansion: each platform gets a
+  // row; per-axis bar shows progress vs cap or "no limit" when the
+  // adapter doesn't declare a cap.
   //
   // Color zones (per capped axis):
   //   < 80% — neutral.

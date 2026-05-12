@@ -1,10 +1,9 @@
 <script lang="ts">
-  // Phase 02.2 Plan 02.2-05 — Privacy Policy (D-09, D-S4).
+  // Privacy Policy. 13 sections.
   //
-  // 13 sections per RESEARCH §6 Privacy structure. Each {section_X_title,
-  // section_X_body} pair is a Paraglide message; SUPPORT_EMAIL + RETENTION_DAYS
-  // come from `+page.server.ts` so a self-host operator overrides via .env
-  // without forking the template (D-30, D-31).
+  // Each {section_X_title, section_X_body} pair is a Paraglide message;
+  // SUPPORT_EMAIL + RETENTION_DAYS come from `+page.server.ts` so a
+  // self-host operator overrides via .env without forking the template.
   //
   // The "Right to Erasure" magic phrase in privacy_section_rights_body is
   // load-bearing — tests/integration/public-pages.test.ts asserts it.

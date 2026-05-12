@@ -1,17 +1,16 @@
-// formatFeedDate — compact / relative date format for the feed surface
-// (Plan 02.1-16 / Gap 5). The full ISO datetime was visually loud per UAT;
-// this helper buckets dates into 4 surfaces:
+// formatFeedDate — compact / relative date format for the feed surface.
+// This helper buckets dates into 4 surfaces:
 //   - same calendar day → "Today, HH:MM" (24h locale)
 //   - one calendar day back → "Yesterday"
 //   - same calendar year, older than yesterday → "MMM D" (Apr 25)
 //   - earlier years → "MMM D, YYYY" (Apr 25, 2025)
 //
-// Locale: fixed `"en"` (Plan 02.1-36 / UAT-NOTES.md §5.9). Date format
-// conventions (Apr 15, Dec 25, 2025) are a brand choice, NOT a translation
-// target — Paraglide handles all user-facing copy elsewhere. Locking the
-// locale keeps assertions stable on any host machine (a Russian-locale dev
-// box was producing "15 апр." and tripping CI). If Phase 6 polish ships
-// per-user date-format preference, this becomes a user setting.
+// Locale: fixed `"en"`. Date format conventions (Apr 15, Dec 25, 2025) are
+// a brand choice, NOT a translation target — Paraglide handles all
+// user-facing copy elsewhere. Locking the locale keeps assertions stable
+// on any host machine (a Russian-locale dev box would otherwise produce
+// "15 апр." and trip CI). Per-user date-format preference can be added
+// as a user setting later.
 //
 // All four buckets compare local calendar dates (getFullYear/getMonth/
 // getDate), not raw millis, so DST transitions don't flip "Yesterday" to

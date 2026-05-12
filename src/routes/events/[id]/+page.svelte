@@ -1,15 +1,12 @@
 <script lang="ts">
-  // /events/[id] — full event detail (Plan 02.1-18 replaces Phase-4 stub).
-  //
-  // Plan 02.1-18 — round-2 UAT closure: FeedCard becomes a pure preview
-  // tile; ALL mutating + destructive actions live HERE. The Phase-4
-  // LayerChart placeholder is anchored inline at the bottom (CONTEXT
-  // D-07 spirit preserved).
+  // /events/[id] — full event detail. FeedCard is a pure preview tile;
+  // ALL mutating + destructive actions live HERE. A future chart will
+  // anchor inline at the bottom.
   //
   // Privacy invariants (mirrored in +page.server.ts):
   //   - Anonymous → redirect to /login (loader gate; page-route equivalent
   //     of MUST_BE_PROTECTED).
-  //   - Cross-tenant → 404 via NotFoundError → error(404) (PRIV-01).
+  //   - Cross-tenant → 404 via NotFoundError → error(404).
   //   - Soft-deleted rows surface only when ?deleted=1; Restore button
   //     visible only on those rows.
   //   - toEventDto strips userId; no ciphertext on events.
@@ -38,9 +35,9 @@
 
   type EventDtoLocal = {
     id: string;
-    // Plan 02.1-28 (M:N migration): gameIds[] replaces the legacy singular
-    // gameId. Round-3 detail page surfaces the first attached game as the
-    // primary "game" chip via the loader's primaryGame derivation.
+    // gameIds[] (M:N) replaces the legacy singular gameId. The detail page
+    // surfaces the first attached game as the primary "game" chip via the
+    // loader's primaryGame derivation.
     gameIds: string[];
     sourceId: string | null;
     kind: EventKind;
@@ -99,11 +96,10 @@
     }
   });
 
-  // Plan 02.1-32 (UAT-NOTES.md §4.18.A): Delete moved to /events/[id]/edit
-  // form footer; the read-only detail page no longer carries a Delete
-  // button. Restore stays here because it only applies on the
-  // soft-deleted-events view (?deleted=1) and the edit page intentionally
-  // doesn't load soft-deleted rows.
+  // Delete moved to /events/[id]/edit form footer; the read-only detail
+  // page no longer carries a Delete button. Restore stays here because it
+  // only applies on the soft-deleted-events view (?deleted=1) and the edit
+  // page intentionally doesn't load soft-deleted rows.
   let restoreBusy = $state(false);
   let restoreError = $state<string | null>(null);
 
@@ -135,10 +131,9 @@
 </nav>
 
 <article class="detail">
-  <!-- Plan 02.1-32 (UAT-NOTES.md §4.18.B): Edit pencil moves to the
-       top-right corner of the card, mirroring the FeedCard top-right
-       overlay placement Plan 02.1-23 established. Hidden when the row
-       is soft-deleted (Restore is the only action available there). -->
+  <!-- Edit pencil sits at the top-right corner of the card, mirroring
+       FeedCard's top-right overlay placement. Hidden when the row is
+       soft-deleted (Restore is the only action available there). -->
   {#if !isSoftDeleted}
     <a class="edit-pencil" href={`/events/${event.id}/edit`} aria-label={m.event_edit_aria_label()}>
       ✎
@@ -182,12 +177,11 @@
     </section>
   {/if}
 
-  <!-- Plan 02.1-32 (UAT-NOTES.md §4.18.A): Delete REMOVED from this
-       read-only detail page. The Delete button now lives at the
-       /events/[id]/edit form footer (Plan 02.1-32 Task 1). The Edit
-       affordance is the top-right pencil above. The actions row keeps
-       Open-original (no-op for events without a URL) and Restore (only
-       on soft-deleted rows). -->
+  <!-- Delete REMOVED from this read-only detail page; the Delete button
+       now lives at the /events/[id]/edit form footer. The Edit affordance
+       is the top-right pencil above. The actions row keeps Open-original
+       (no-op for events without a URL) and Restore (only on soft-deleted
+       rows). -->
   <div class="actions">
     {#if event.url}
       <a class="action" href={event.url} target="_blank" rel="noopener noreferrer">
@@ -203,10 +197,10 @@
 
   {#if restoreError}<InlineError message={restoreError} />{/if}
 
-  <section class="chart-placeholder" aria-label="Phase-4 chart placeholder">
+  <section class="chart-placeholder" aria-label="Chart placeholder">
     <EmptyState
-      heading={m.events_detail_phase4_heading()}
-      body={m.events_detail_phase4_chart_placeholder()}
+      heading={m.events_detail_charts_heading()}
+      body={m.events_detail_charts_placeholder()}
     />
   </section>
 </article>
@@ -233,15 +227,14 @@
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: 4px;
-    /* Plan 02.1-32 (UAT-NOTES.md §4.18.B): anchor the absolutely-positioned
-     * .edit-pencil (top-right corner) — mirrors the FeedCard top-right
-     * overlay anchoring Plan 02.1-23 established. */
+    /* Anchors the absolutely-positioned .edit-pencil at the top-right
+     * corner, mirroring FeedCard's overlay anchoring. */
     position: relative;
   }
-  /* Plan 02.1-32: Edit pencil at the top-right of the card. Sized to a
-   * 44x44 touch target so a 360px-viewport tap reaches it without the user
-   * fumbling for the small icon (UAT-NOTES.md §4.18.B). z-index: 1 lifts
-   * it above the chart placeholder section if the layout overlaps. */
+  /* Edit pencil at the top-right of the card. Sized to a 44x44 touch target
+   * so a 360px-viewport tap reaches it without the user fumbling for the
+   * small icon. z-index: 1 lifts it above the chart placeholder section if
+   * the layout overlaps. */
   .edit-pencil {
     position: absolute;
     top: var(--space-md);

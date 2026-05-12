@@ -2,13 +2,11 @@ import { describe, it, expect } from "vitest";
 
 import { toCardProps } from "$lib/sources/youtube/ui/server.js";
 
-// Plan 09 (Wave 8) — flips Plan 01's test.todo scaffold live. Each `it`
-// pins a single contract on src/lib/sources/youtube/ui/card-props.ts's
-// toCardProps mapper (D-03 props mapper). The mapper is a pure function
-// — no Svelte component imports — so it's safe to import from
-// +page.server.ts loaders (RESEARCH.md Pitfall 7).
+// Each `it` pins a single contract on src/lib/sources/youtube/ui/card-props.ts's
+// toCardProps mapper. The mapper is a pure function — no Svelte component
+// imports — so it's safe to import from +page.server.ts loaders.
 
-describe("YouTube toCardProps — Phase 03.0.1 D-03 props mapper", () => {
+describe("YouTube toCardProps — props mapper", () => {
   const baseEvent = {
     id: "evt-1",
     externalId: "abc123",
@@ -78,7 +76,7 @@ describe("YouTube toCardProps — Phase 03.0.1 D-03 props mapper", () => {
   });
 });
 
-describe("getAdapterUI('youtube_channel') — Plan 09 registry-ui wiring", () => {
+describe("getAdapterUI('youtube_channel') — registry-ui wiring", () => {
   it("returns object exposing toCardProps function", async () => {
     const { getAdapterUI } = await import("$lib/sources/registry-ui.js");
     const ui = getAdapterUI("youtube_channel");
@@ -93,7 +91,7 @@ describe("getAdapterUI('youtube_channel') — Plan 09 registry-ui wiring", () =>
   });
 });
 
-describe("eventKindToSourceKind — Plan 09 event.kind → SourceKind bridge", () => {
+describe("eventKindToSourceKind — event.kind → SourceKind bridge", () => {
   it("maps youtube_video → youtube_channel", async () => {
     const { eventKindToSourceKind } = await import("$lib/sources/event-to-source-kind.js");
     expect(eventKindToSourceKind("youtube_video")).toBe("youtube_channel");

@@ -1,22 +1,20 @@
-// Phase 03.0.1 (post-review) — end-to-end catch-up flow integration test.
-// Phase 03.0.1 Wave 2 — channel-scoped polling rewrite.
+// End-to-end catch-up flow integration test for channel-scoped polling.
 //
-// Pre-review the suite covered each layer in isolation (endpoint cap-check,
+// Historically the suite covered each layer in isolation (endpoint cap-check,
 // state helpers, computeSinceForRefresh) but never wired them together. The
-// P1 platform-leak bug (refresh-poll wrote `kind=youtube_video`, cap query
+// platform-leak bug (refresh-poll wrote `kind=youtube_video`, cap query
 // filtered for `kind=youtube_channel` — never matched) survived four review
 // passes precisely because no test traced data through the pipeline.
 //
-// Wave 2 makes the flow channel-scoped. Path:
+// The flow is channel-scoped. Path:
 //
 //   1. POST /api/sources/:id/refresh-content
 //      - intent audit row written (no flow field)
 //      - boss.send invoked with YOUTUBE_BACKFILL_CHANNEL + payload
 //        { kind, channelKey, triggerUserId, depthBoundIso, flow }
-//      (Phase 03.0.3 P1: the pre-refactor channel-state reset call was
-//      removed — three-branch since-derivation in backfill-channel.ts
-//      handles the steady-state vs deep-walk decision lazily at
-//      walk-time. See D-D1 / D-#29-6.)
+//      (The pre-refactor channel-state reset call was removed —
+//      three-branch since-derivation in backfill-channel.ts handles the
+//      steady-state vs deep-walk decision lazily at walk-time.)
 //
 //   2. handleBackfillChannel invoked
 //      - resolves all subscribers for (kind, channelKey)
@@ -204,9 +202,9 @@ describe("end-to-end channel-scoped catch-up flow", () => {
     const titles = eventRows.map((r) => r.title).sort();
     expect(titles).toEqual(["A", "B", "C"]);
 
-    // Phase 03.0.1 Wave 4 (post-UAT prod hotfix) — backfill-channel
-    // populates youtube_videos cache for every fetched event. Pre-fix
-    // the channel-scoped polling path INSERTed events but left the cache
+    // Backfill-channel populates youtube_videos cache for every fetched
+    // event. Pre-fix the channel-scoped polling path INSERTed events but
+    // left the cache
     // empty, so PollingBadge tier resolution returned 'pending' and
     // poll-active/poll-cold cron skipped the videos forever (no stats
     // ever landed). Assert the cache is populated post-walk so a
@@ -239,9 +237,9 @@ describe("end-to-end channel-scoped catch-up flow", () => {
 
     // Channel state advanced.
     //
-    // PR #31 Codex P1 #2 follow-up — in deep-mode walks with
-    // endOfPlaylist=false (mock returns no nextPageToken so the
-    // worker treats it as walkedPastSince), frontier advances to
+    // In deep-mode walks with endOfPlaylist=false (mock returns no
+    // nextPageToken so the worker treats it as walkedPastSince),
+    // frontier advances to
     // `since` (= target = 2026-03-01), NOT to the oldest collected
     // event (2026-04-01). Rationale: items collected in deep mode
     // have publishedAt > since by construction; setting frontier to

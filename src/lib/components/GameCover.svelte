@@ -1,23 +1,14 @@
 <script lang="ts">
   // GameCover — game header artwork on /games/[id].
   //
-  // Plan 02.1-25 (UAT-NOTES.md §3.2-redesign): the game-detail page wants
-  // a visual cover at the top of the GAME HEADER CARD. Round-3 rule (cheap
-  // win for indie budget): if any attached Steam listing has a coverUrl
-  // already populated by Plan 02-04 fetchSteamAppDetails (header_image),
-  // render the FIRST listing's coverUrl as the cover. Otherwise show a
-  // gradient placeholder with the game's title initials.
-  //
-  // TODO Phase 3+: manual cover upload + itch.io fallback (UAT-NOTES.md
-  // §9.1-backlog). The schema shape will be either a `cover_url` column
-  // on `games` (manual upload) OR a `metadata.image.url` jsonb path on the
-  // unified data-source attachment. The future plan picks the resolver
-  // (manual-upload wins, then itch metadata, then Steam cover, then
-  // gradient placeholder).
+  // If any attached Steam listing has a coverUrl already populated by
+  // fetchSteamAppDetails (header_image), render the FIRST listing's
+  // coverUrl as the cover. Otherwise show a gradient placeholder with the
+  // game's title initials.
   //
   // Privacy: `referrerpolicy="no-referrer"` so we don't leak the user's
   // game-detail URL back to Steam's CDN. Same defensive default already
-  // used on FeedCard's YouTube thumbnail (Plan 02.1-16 / 02.1-23).
+  // used on FeedCard's YouTube thumbnail.
 
   type ListingLite = {
     coverUrl: string | null;

@@ -1,4 +1,4 @@
-// Phase 03.0.3 follow-up — D-#29-1 backdated-upload safety, adapter-level.
+// Backdated-upload safety, adapter-level.
 //
 // Pre-fix, youtubeChannelAdapter.pollContent dropped every item with
 // publishedAt <= since (the `walkedPastSince = true; continue` branch).
@@ -12,7 +12,7 @@
 //      publishedAt <= since ARE dropped. Existing unit tests already
 //      cover this in isolation; we keep one assertion here to make the
 //      contrast explicit alongside the overlap-mode test.
-//   2. walkStop="overlap" (Phase 03.0.3 incremental / exhausted branches)
+//   2. walkStop="overlap" (incremental / exhausted branches)
 //      — items with publishedAt <= since are dropped ONLY when they are
 //      ALSO in the youtube_videos cache. A backdated upload (publishedAt
 //      far in the past, NOT in the cache) survives the walk.

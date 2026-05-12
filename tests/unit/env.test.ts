@@ -1,11 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { randomBytes } from "node:crypto";
 
-// Phase 02.2 Plan 02.2-01 Wave 0 — env.ts zod schema tests for the 6 new
-// Phase 02.2 vars (D-11, D-32, D-S4, D-24, D-04). The schema additions land
-// in this same plan, so the placeholders are flipped LIVE here at Wave 0
-// time (leaving them it.skip would be vacuous-pass per Plan 01-07
-// vacuous-pass guard pattern).
+// env.ts zod schema tests.
 //
 // Pattern (matches tests/unit/proxy-trust.test.ts): seed required env BEFORE
 // dynamic import; vi.resetModules() between cases so each test sees a fresh
@@ -56,46 +52,46 @@ afterEach(() => {
   vi.resetModules();
 });
 
-describe("Phase 02.2 env additions (D-32)", () => {
-  it("Plan 02.2-01: SUPPORT_EMAIL accepts empty string (default)", async () => {
+describe("env additions — operational limits + tag", () => {
+  it("SUPPORT_EMAIL accepts empty string (default)", async () => {
     await withEnv({ SUPPORT_EMAIL: undefined }, (env) => {
       expect(env.SUPPORT_EMAIL).toBe("");
     });
   });
 
-  it("Plan 02.2-01: LIMIT_GAMES_PER_USER coerces string '50' to number 50", async () => {
+  it("LIMIT_GAMES_PER_USER coerces string '50' to number 50", async () => {
     await withEnv({ LIMIT_GAMES_PER_USER: "50" }, (env) => {
       expect(env.LIMIT_GAMES_PER_USER).toBe(50);
       expect(typeof env.LIMIT_GAMES_PER_USER).toBe("number");
     });
   });
 
-  it("Plan 02.2-01: LIMIT_SOURCES_PER_USER defaults to 50", async () => {
+  it("LIMIT_SOURCES_PER_USER defaults to 50", async () => {
     await withEnv({ LIMIT_SOURCES_PER_USER: undefined }, (env) => {
       expect(env.LIMIT_SOURCES_PER_USER).toBe(50);
     });
   });
 
-  it("Plan 02.2-01: LIMIT_EVENTS_PER_DAY defaults to 500", async () => {
+  it("LIMIT_EVENTS_PER_DAY defaults to 500", async () => {
     await withEnv({ LIMIT_EVENTS_PER_DAY: undefined }, (env) => {
       expect(env.LIMIT_EVENTS_PER_DAY).toBe(500);
     });
   });
 
-  it("Plan 02.2-01: IMAGE_TAG defaults to 'latest'", async () => {
+  it("IMAGE_TAG defaults to 'latest'", async () => {
     await withEnv({ IMAGE_TAG: undefined }, (env) => {
       expect(env.IMAGE_TAG).toBe("latest");
     });
   });
 
-  it("Plan 02.2-01: DOMAIN accepts empty string default", async () => {
+  it("DOMAIN accepts empty string default", async () => {
     await withEnv({ DOMAIN: undefined }, (env) => {
       expect(env.DOMAIN).toBe("");
     });
   });
 });
 
-describe("Phase 3.0 env additions (Plan 03.0-01)", () => {
+describe("env additions — YouTube + admin allowlist", () => {
   it("SERVICE_YOUTUBE_API_KEYS empty default ⇒ empty array (smoke parity)", async () => {
     await withEnv({ SERVICE_YOUTUBE_API_KEYS: undefined }, (env) => {
       expect(env.SERVICE_YOUTUBE_API_KEYS).toEqual([]);

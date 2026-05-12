@@ -2,8 +2,7 @@ import { describe, it, expect } from "vitest";
 import { randomBytes } from "node:crypto";
 import { render } from "svelte/server";
 
-// Phase 02.2 Plan 02.2-05 — public /privacy /terms /about pages
-// (D-09 / D-10 / D-14 / D-S4). Wave 0 placeholders flipped to live.
+// Public /privacy /terms /about pages.
 //
 // Approach: SSR-render each route's +page.svelte via svelte/server (the
 // audit-render.test.ts pattern) with mock {data} props matching what the
@@ -29,8 +28,8 @@ process.env.BETTER_AUTH_SECRET ??= "x".repeat(40);
 process.env.OAUTH_CLIENT_ID ??= "test";
 process.env.OAUTH_CLIENT_SECRET ??= "test";
 process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
-// Plan 02.2-05 specifically tests env-injection — set deterministic values
-// so the assertions can match exact substrings.
+// The tests below exercise env-injection — set deterministic values so
+// the assertions can match exact substrings.
 process.env.SUPPORT_EMAIL ??= "test-support@example.com";
 
 const PrivacyPage = (await import("../../src/routes/privacy/+page.svelte")).default;
@@ -59,11 +58,10 @@ async function runLoad<Shape>(fn: unknown, event: unknown = undefined): Promise<
 
 const anonymousAboutEvent = { parent: async () => ({ user: null }) };
 
-// Codex PR #15 follow-up: root `/` is the new canonical landing for
-// anonymous (renders the same content via shared <AboutContent>); for
-// signed-in users it 303-redirects to /feed. The mock event passes both
-// `locals` (load checks `locals.user`) and `parent` (load merges in
-// layout user).
+// Root `/` is the canonical landing for anonymous (renders the same
+// content via shared <AboutContent>); for signed-in users it
+// 303-redirects to /feed. The mock event passes both `locals` (load
+// checks `locals.user`) and `parent` (load merges in layout user).
 const anonymousRootEvent = {
   locals: { user: null },
   parent: async () => ({ user: null }),
@@ -97,8 +95,8 @@ function renderHtml<TData>(Component: unknown, data: TData): string {
   return render(Component as any, { props: { data } as any }).body;
 }
 
-describe("public pages /privacy /terms /about (Phase 02.2)", () => {
-  it("Plan 02.2-05: GET /privacy returns 200 and contains Article 17 (Right to Erasure) magic phrase", async () => {
+describe("public pages /privacy /terms /about", () => {
+  it("GET /privacy returns 200 and contains Article 17 (Right to Erasure) magic phrase", async () => {
     const data = await runLoad<PrivacyData>(privacyLoad);
     const html = renderHtml(PrivacyPage, data);
     // GDPR Article 17 magic phrase MUST appear (legal-compliance lock from
@@ -107,7 +105,7 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
     expect(html).toContain("Right to Erasure");
   });
 
-  it("Plan 02.2-05: GET /privacy renders SUPPORT_EMAIL value from server-side load (not hardcoded literal)", async () => {
+  it("GET /privacy renders SUPPORT_EMAIL value from server-side load (not hardcoded literal)", async () => {
     const data = await runLoad<PrivacyData>(privacyLoad);
     expect(data.supportEmail).toBe("test-support@example.com");
     const html = renderHtml(PrivacyPage, data);
@@ -119,7 +117,7 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
     expect(html).not.toContain("(support email not configured)");
   });
 
-  it("Plan 02.2-05: GET /privacy renders RETENTION_DAYS value from server-side load (not hardcoded literal)", async () => {
+  it("GET /privacy renders RETENTION_DAYS value from server-side load (not hardcoded literal)", async () => {
     const data = await runLoad<PrivacyData>(privacyLoad);
     expect(data.retentionDays).toBe(env.RETENTION_DAYS);
     const html = renderHtml(PrivacyPage, data);
@@ -135,7 +133,7 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
     // would change the rendered output).
   });
 
-  it("Plan 02.2-05: GET /terms returns 200 and contains 'early access' magic phrase", async () => {
+  it("GET /terms returns 200 and contains 'early access' magic phrase", async () => {
     const data = await runLoad<TermsData>(termsLoad);
     const html = renderHtml(TermsPage, data);
     // Case-insensitive — terms_section_early_access_body uses lowercase
@@ -143,14 +141,14 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
     expect(html.toLowerCase()).toContain("early access");
   });
 
-  it("Plan 02.2-05: GET /terms renders SUPPORT_EMAIL value from server-side load", async () => {
+  it("GET /terms renders SUPPORT_EMAIL value from server-side load", async () => {
     const data = await runLoad<TermsData>(termsLoad);
     expect(data.supportEmail).toBe("test-support@example.com");
     const html = renderHtml(TermsPage, data);
     expect(html).toContain("test-support@example.com");
   });
 
-  it("Plan 02.2-05: GET /about returns 200 and contains GitHub repo link", async () => {
+  it("GET /about returns 200 and contains GitHub repo link", async () => {
     const data = await runLoad<AboutData>(aboutLoad, anonymousAboutEvent);
     const html = renderHtml(AboutPage, data);
     // Issue #14 post-deploy fix: the actual repo lives at
@@ -159,7 +157,7 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
     expect(html).toContain("https://github.com/d954mas/neotolis-game-promotion-diary");
   });
 
-  it("Codex PR #15 follow-up: GET / for anonymous returns 200 with the same landing content as /about", async () => {
+  it("GET / for anonymous returns 200 with the same landing content as /about", async () => {
     // SEO: root must serve 200 with the marketing landing for anonymous,
     // not redirect. /about is now an alias rendering the same shared
     // <AboutContent> component; rel=canonical on both pages points to /.
@@ -171,7 +169,7 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
     expect(html).toContain("test-support@example.com");
   });
 
-  it("Codex PR #15 follow-up: GET / for signed-in user 303-redirects to /feed", async () => {
+  it("GET / for signed-in user 303-redirects to /feed", async () => {
     // Authenticated users hitting / should never see the marketing
     // landing; the load throws redirect(303, '/feed') before returning
     // any data. SvelteKit's redirect() throws an object with
@@ -182,7 +180,7 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
     });
   });
 
-  it("Codex PR #15 follow-up: AboutContent renders rel=canonical pointing to /", async () => {
+  it("AboutContent renders rel=canonical pointing to /", async () => {
     // Both / and /about render <link rel="canonical" href="https://${DOMAIN}/" />
     // (or "/" if DOMAIN unset). This tells search engines / is the
     // canonical landing and /about is a duplicate alias.
@@ -210,14 +208,14 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
     expect(aboutResult.head).not.toMatch(/rel="canonical"[^>]*href="[^"]*\/about"/);
   });
 
-  it("Plan 02.2-05: GET /about renders SUPPORT_EMAIL value from server-side load", async () => {
+  it("GET /about renders SUPPORT_EMAIL value from server-side load", async () => {
     const data = await runLoad<AboutData>(aboutLoad, anonymousAboutEvent);
     expect(data.supportEmail).toBe("test-support@example.com");
     const html = renderHtml(AboutPage, data);
     expect(html).toContain("test-support@example.com");
   });
 
-  it("Plan 02.2-05: anonymous user can access /, /privacy, /terms, /about without auth (200 not 401)", async () => {
+  it("anonymous user can access /, /privacy, /terms, /about without auth (200 not 401)", async () => {
     // The auth-gate for SvelteKit pages lives in src/routes/+layout.server.ts's
     // PROTECTED_PATHS allowlist. Public pages MUST NOT appear there — if
     // they did, anonymous requests would hit the redirect(303 → /login)
@@ -228,8 +226,8 @@ describe("public pages /privacy /terms /about (Phase 02.2)", () => {
     const protectedMatch = layoutSource.match(/PROTECTED_PATHS[^=]*=\s*\[([\s\S]*?)\]/);
     expect(protectedMatch, "PROTECTED_PATHS array not found in +layout.server.ts").not.toBeNull();
     const protectedBlock = protectedMatch![1]!;
-    // Codex PR #15 follow-up: / now serves the marketing landing for
-    // anonymous and is NOT in PROTECTED_PATHS (it never was, but locking
+    // / serves the marketing landing for anonymous and is NOT in
+    // PROTECTED_PATHS (it never was, but locking
     // the negative assertion since the route is now load-bearing for SEO).
     expect(protectedBlock).not.toMatch(/["']\/["']/);
     expect(protectedBlock).not.toMatch(/["']\/privacy["']/);

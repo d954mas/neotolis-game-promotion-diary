@@ -1,8 +1,8 @@
-// YouTube feed enrichment — Phase 03.0.3 P2 (D-A1).
+// YouTube feed enrichment.
 //
 // Implements DataSourceAdapter.enrichFeedDtos for the youtube_channel
 // adapter. Internally filters dtos to kind=youtube_video; ignores other
-// kinds (caller does NOT pre-filter — Phase 03.0.3 D-A1 contract).
+// kinds (caller does NOT pre-filter).
 //
 // Two batched queries:
 //   1. youtube_video_snapshots — DISTINCT ON videoId ORDER BY polledAt DESC.
@@ -48,11 +48,10 @@ export async function youtubeEnrichFeedDtos(
     //    time series — a busy video may carry hundreds of historical
     //    rows. DISTINCT ON (video_id) ORDER BY video_id, polled_at DESC
     //    keeps the database scan tight: exactly one row per requested
-    //    video_id, the most recent. Pre-fix (Phase 03.0.3 round-5
-    //    Codex P2) the query loaded every historical row and JS picked
-    //    the first per video — cost grew with polling history rather
-    //    than page size. Raw SQL because Drizzle's pg-core builder
-    //    doesn't have a first-class DISTINCT ON helper.
+    //    video_id, the most recent. Loading every historical row and
+    //    picking the first per video in JS would grow with polling
+    //    history rather than page size. Raw SQL because Drizzle's
+    //    pg-core builder doesn't have a first-class DISTINCT ON helper.
     const idsSql = sql.join(
       youtubeExternalIds.map((id) => sql`${id}`),
       sql`, `,
@@ -107,8 +106,8 @@ export async function youtubeEnrichFeedDtos(
       r.channelTitle = titleByVideo.get(r.externalId) ?? null;
     }
   } catch (err) {
-    // D-A1 — failure is non-fatal. Log and return; the feed still
-    // renders, just without the enrichment.
+    // Failure is non-fatal. Log and return; the feed still renders, just
+    // without the enrichment.
     logger.warn(
       { err: String((err as Error)?.message ?? err), count: youtubeExternalIds.length },
       "youtube.enrichFeedDtos: query failed; feed renders without enrichment",

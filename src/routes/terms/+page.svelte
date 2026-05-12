@@ -1,10 +1,9 @@
 <script lang="ts">
-  // Phase 02.2 Plan 02.2-05 — Terms of Service (D-10, D-11, D-S4).
+  // Terms of Service. 10 sections.
   //
-  // 10 sections per RESEARCH §6 ToS structure. SUPPORT_EMAIL + per-user
-  // limits come from `+page.server.ts`; the "early access" magic phrase
-  // in terms_section_early_access_body is load-bearing — the integration
-  // test asserts it (case-insensitive grep).
+  // SUPPORT_EMAIL + per-user limits come from `+page.server.ts`; the
+  // "early access" magic phrase in terms_section_early_access_body is
+  // load-bearing — the integration test asserts it (case-insensitive grep).
   import { m } from "$lib/paraglide/messages.js";
   let { data } = $props();
   const supportCtx = {

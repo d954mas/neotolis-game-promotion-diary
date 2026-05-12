@@ -1,9 +1,8 @@
 <script lang="ts">
-  // AuditRow — single row in the /audit page list (PRIV-02). Stacked layout
-  // on mobile, table-row on desktop. Renders the action chip via the shared
-  // auditActionLabel helper (Phase 03.0.1 architecture cleanup — pre-cleanup
-  // this file carried an 80-line switch duplicated in FilterChips +
-  // FiltersSheet; the helper is the single source of truth).
+  // AuditRow — single row in the /audit page list. Stacked layout on mobile,
+  // table-row on desktop. Renders the action chip via the shared
+  // auditActionLabel helper (single source of truth, also used by FilterChips
+  // and FiltersSheet).
   //
   // The `action` value is one of AUDIT_ACTIONS (src/lib/server/audit/actions.ts).
   // We accept it as a string so this component doesn't have to import the

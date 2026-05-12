@@ -1,28 +1,28 @@
 /**
- * Custom ESLint rule (Plan 02-02 — Phase 2 Wave 0).
+ * Custom ESLint rule.
  *
  * SCOPE — what this rule enforces:
  *   This rule enforces tenant scoping (`eq(<table>.userId, ...)`) on Drizzle
  *   SELECT / UPDATE / DELETE queries against tenant-owned tables. It is the
- *   STRUCTURAL half of the two-layer Pattern 1 defense; the integration test
- *   `tests/integration/tenant-scope.test.ts` is the BEHAVIORAL half.
+ *   STRUCTURAL half of the two-layer tenant-scope defense; the integration
+ *   test `tests/integration/tenant-scope.test.ts` is the BEHAVIORAL half.
  *
  * SCOPE — what this rule does NOT enforce:
  *   This rule does NOT enforce audit-log append-only semantics. The audit
  *   append-only invariant (no `.update()` / `.delete()` against `auditLog`,
- *   no `update*` / `delete*` exports from `src/lib/server/audit.ts`) is asserted
- *   by `tests/unit/audit-append-only.test.ts` (Plan 02-07). The two invariants
- *   share the same family of risks (PITFALL P19) but have different surfaces
- *   and different enforcement layers — keep them mentally separated.
+ *   no `update*` / `delete*` exports from `src/lib/server/audit.ts`) is
+ *   asserted by `tests/unit/audit-append-only.test.ts`. The two invariants
+ *   share the same family of risks but have different surfaces and
+ *   different enforcement layers — keep them mentally separated.
  *
- * SCOPE — what this rule does NOT enforce (continued):
- *   - DTO ciphertext-strip (D-39 / P3) — enforced by `tests/unit/dto.test.ts`.
+ *   Other related guarantees enforced elsewhere:
+ *   - DTO ciphertext-strip — enforced by `tests/unit/dto.test.ts`.
  *   - Anonymous-401 sweep — enforced by `tests/integration/anonymous-401.test.ts`.
  *   - Cross-tenant 404 (not 403) at the route boundary — enforced by
  *     `tests/integration/tenant-scope.test.ts` body-string checks.
  */
 // Catches Drizzle queries against tenant-owned tables that omit the
-// mandatory `userId` filter (Pattern 1 — PITFALL P1 cross-tenant leak).
+// mandatory `userId` filter (cross-tenant leak prevention).
 // The rule is structural — it walks the .from(<TABLE>) call site and
 // checks the surrounding chain text for `.where(...userId...)`.
 // It is COMPLEMENTARY to the integration cross-tenant test (which catches
@@ -31,24 +31,19 @@
 // Allowlisted tables (NOT tenant-owned):
 //   - Better Auth core: user, session, account, verification (Better Auth
 //     manages its own scoping; queries here use sessionId / accountId).
-//   - Phase 5 subredditRules: shared seed data (curated rule cache).
+//   - subredditRules: shared seed data (curated rule cache).
 //
 // Disable comments must include a justification per the convention in
-// AGENTS.md (Pitfall 7 of RESEARCH.md):
+// AGENTS.md:
 //   // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- caller scope guarantee in services/X
 //
 // PRs that add a disable comment without `--` justification fail review.
 
 import { ESLintUtils } from "@typescript-eslint/utils";
 
-// Phase 2.1 (Plan 02.1-01): unified `dataSources` replaces the per-platform
-// `youtubeChannels` / `gameYoutubeChannels` / `trackedYoutubeVideos` trio.
-// `events` carries forward; `gameSteamListings` / `apiKeysSteam` / `games` /
-// `auditLog` unchanged from Phase 2.
-//
-// Plan 02.1-27 (UAT-NOTES.md §4.24.G): `eventGames` M:N junction added —
-// userId is denormalized so this rule can require a userId WHERE clause on
-// every Drizzle query (the rule cannot inspect FK-chained values).
+// `eventGames` is the M:N junction with userId denormalized so this rule
+// can require a userId WHERE clause on every Drizzle query (the rule
+// cannot inspect FK-chained values).
 const TENANT_TABLES = new Set([
   "games",
   "gameSteamListings",
@@ -60,21 +55,21 @@ const TENANT_TABLES = new Set([
 ]);
 
 const ALLOWLIST_TABLES = new Set([
-  "subredditRules", // Phase 5 — non-tenant by design (shared seed data)
+  "subredditRules", // non-tenant by design (shared seed data)
   "user", // Better Auth core
   "session", // Better Auth core
   "account", // Better Auth core
   "verification", // Better Auth core
-  // Phase 3.0 Plan 01 — public external data, no tenant scope.
+  // Public external data, no tenant scope.
   //
   // These tables hold YouTube public-data shared across tenants by video_id
-  // / channel_id (D-07 / D-14) and operator-side quota counters keyed on
-  // (date_pacific, api_key_id) (D-13). The events table that REFERENCES
-  // this data remains tenant-owned (events.user_id) — the snapshot / cache
-  // / quota rows themselves are public statistics or operator-side state.
-  // Anyone with `events.external_id = X` for video X sees the same view
-  // count history. Re-validating tenant scope on these tables would force
-  // a useless join.
+  // / channel_id and operator-side quota counters keyed on (date_pacific,
+  // api_key_id). The events table that REFERENCES this data remains
+  // tenant-owned (events.user_id) — the snapshot / cache / quota rows
+  // themselves are public statistics or operator-side state. Anyone with
+  // `events.external_id = X` for video X sees the same view count
+  // history. Re-validating tenant scope on these tables would force a
+  // useless join.
   //
   // The allowlist entries here are explicit-intent documentation: queries
   // against these identifiers do not currently trip the rule (they're not
@@ -84,10 +79,9 @@ const ALLOWLIST_TABLES = new Set([
   "youtubeVideoSnapshots",
   "youtubeChannels",
   "youtubeServiceQuotaUsage",
-  // Phase 3.0 post-build (UAT 2026-05-06): public-data cache for video
-  // metadata (title / description / channel info). Same semantics as
-  // youtubeChannelMetadataCache — keyed on video_id, no user_id, shared
-  // across all tenants who ever reference this video.
+  // Public-data cache for video metadata (title / description / channel
+  // info). Same semantics as youtubeChannels — keyed on video_id, no
+  // user_id, shared across all tenants who ever reference this video.
   "youtubeVideos",
 ]);
 
@@ -96,7 +90,7 @@ export default ESLintUtils.RuleCreator.withoutDocs({
     type: "problem",
     messages: {
       missingUserIdFilter:
-        "Drizzle query on tenant-owned table '{{table}}' must include a userId filter in .where(...) (Pattern 1; PITFALL P1)",
+        "Drizzle query on tenant-owned table '{{table}}' must include a userId filter in .where(...)",
     },
     schema: [],
   },

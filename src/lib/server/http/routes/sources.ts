@@ -1,11 +1,10 @@
-// Data Sources HTTP routes (Plan 02.1-06 — Wave 2).
+// Data Sources HTTP routes.
 //
-// Replaces the Phase 2 per-platform channel route group with a unified
-// per-tenant data_source registry over kinds youtube_channel /
+// Unified per-tenant data_source registry over kinds youtube_channel /
 // reddit_account / twitter_account / telegram_channel / discord_server.
-// In Phase 2.1 only youtube_channel is wired; non-functional kinds reject at
-// the service boundary with AppError 'kind_not_yet_functional' (422) which
-// flows through `mapErr` automatically.
+// Only youtube_channel is wired; non-functional kinds reject at the service
+// boundary with AppError 'kind_not_yet_functional' (422) which flows
+// through `mapErr` automatically.
 //
 // Routes:
 //   POST   /api/sources                — createSource
@@ -16,8 +15,8 @@
 //   POST   /api/sources/:id/restore    — restoreSource (422 retention_expired beyond RETENTION_DAYS)
 //
 // Every handler runs after the `/api/*` tenantScope middleware (anonymous → 401)
-// and after Plan 06's proxy-trust middleware (clientIp + userAgent for audit).
-// Cross-tenant access surfaces as NotFoundError → 404 (PRIV-01: never 403).
+// and after the proxy-trust middleware (clientIp + userAgent for audit).
+// Cross-tenant access surfaces as NotFoundError → 404 (never 403).
 
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
@@ -41,12 +40,12 @@ import { writeAuditStrict } from "../../audit.js";
 import { AppError, NotFoundError } from "../../services/errors.js";
 import { getAdapter } from "$lib/sources/registry.js";
 
-// Phase 03.0.1 architecture cleanup — refresh-content rate limit. Cap on
-// per-user POST /api/sources/:id/refresh-content calls in any rolling 1-min
-// window. Bounds quota burn from a user mashing the "Pull new content"
-// button across N registered sources: singletonKey already dedupes per
-// source (~5min), but a user with many sources can still queue 1 backfill
-// per source per 5min — the per-user cap pins overall throughput.
+// Refresh-content rate limit. Cap on per-user POST
+// /api/sources/:id/refresh-content calls in any rolling 1-min window.
+// Bounds quota burn from a user mashing the "Pull new content" button
+// across N registered sources: singletonKey already dedupes per source
+// (~5min), but a user with many sources can still queue 1 backfill per
+// source per 5min — the per-user cap pins overall throughput.
 //
 // Counter source: audit_log itself. Every successful refresh-content writes
 // `source.refresh_content_requested` with a server timestamp. A `SELECT
@@ -69,26 +68,26 @@ const sourceKindEnum = z.enum([
   "discord_server",
 ]);
 
-// Phase 03.0-12 (D-09) — initial-backfill window field. Defaults applied
-// at the service layer (createSource picks '30d' when undefined), not here:
-// keeping the field truly optional at the HTTP boundary mirrors the
-// BackfillPicker's UI gate (the field is only POSTed when the picker is
-// rendered, which happens iff kind=youtube_channel + autoImport).
+// Initial-backfill window field. Defaults applied at the service layer
+// (createSource picks '30d' when undefined), not here: keeping the field
+// truly optional at the HTTP boundary mirrors the BackfillPicker's UI gate
+// (the field is only POSTed when the picker is rendered, which happens
+// iff kind=youtube_channel + autoImport).
 const backfillWindowEnum = z.enum(["1d", "7d", "30d", "90d", "1y", "everything"]);
 
-// channelId is intentionally NOT in the HTTP schema (post-build review
-// 2026-05-08, 8th pass). The service-level CreateSourceInput accepts it
-// for internal callers (tests, future server-side flows) but the public
-// HTTP boundary must derive it from handleUrl. Pre-fix, an external
-// client could POST {kind:'youtube_channel', handleUrl:'https://evil.com/x',
+// channelId is intentionally NOT in the HTTP schema. The service-level
+// CreateSourceInput accepts it for internal callers (tests, future
+// server-side flows) but the public HTTP boundary must derive it from
+// handleUrl. Otherwise an external client could POST
+// {kind:'youtube_channel', handleUrl:'https://evil.com/x',
 // channelId:'UCfaked...'} and createSource's
 // `if (kind === 'youtube_channel' && resolvedChannelId === null)` gate
 // would skip parseYoutubeChannelUrl/canonicalization because the
 // supplied channelId was non-null — landing a row with a non-YouTube
 // URL under kind=youtube_channel. The duplicate gate and polling
 // adapters trust the kind/URL pairing; a forged channel_id breaks both.
-// The UI never sends this field (sources/new/+page.svelte uses only
-// handleUrl), so dropping it from the schema is non-breaking.
+// The UI never sends this field, so dropping it from the schema is
+// non-breaking.
 const createSourceSchema = z.object({
   kind: sourceKindEnum,
   handleUrl: z.string().url(),
@@ -105,9 +104,9 @@ const updateSourceSchema = z
     autoImport: z.boolean().optional(),
     isOwnedByMe: z.boolean().optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
-    // Phase 03.0.1 — earliest-event boundary user wants pulled.
-    // Accept ISO date string from UI (date picker / preset button). Coerced
-    // to Date and validated server-side in updateSource:
+    // Earliest-event boundary user wants pulled. Accept ISO date string
+    // from UI (date picker / preset button). Coerced to Date and validated
+    // server-side in updateSource:
     //   - must be in past (future dates → 422 'date_must_be_past')
     //   - must NOT narrow window (≤ current → 422 'cannot_narrow_window')
     //
@@ -115,8 +114,7 @@ const updateSourceSchema = z
     // «All» on detail page submits this value). UI date picker enforces a
     // tighter min (2005-01-01) for fat-finger protection on custom-date
     // input; the route schema's looser bound accepts the sentinel from the
-    // preset path. Pre-fix the schema had min=2005 which rejected the
-    // sentinel — UAT bug «validation failed when I picked All».
+    // preset path.
     backfillTargetSince: z.coerce
       .date()
       .min(new Date("1970-01-01T00:00:00Z"), "date too old")
@@ -232,53 +230,46 @@ sourcesRoutes.post("/sources/:id/restore", async (c) => {
   }
 });
 
-// Phase 03.0.1 Plan 10 — POST /api/sources/:id/refresh-content (D-NEW).
+// POST /api/sources/:id/refresh-content.
 //
-// User-facing payoff of the Wave 0-8 refactor: the "Pull new content" button
-// on /sources/[id] fires this endpoint, which dispatches via the registry to
-// the per-kind adapter's backfillSource. For YouTube the adapter enqueues a
-// youtube.backfill.user job (singletonKey-deduped to ~5min). Adding refresh
-// for Reddit (Phase 03.1) requires zero edits here — only the Reddit
-// adapter's backfillSource implementation.
+// The "Pull new content" button on /sources/[id] fires this endpoint, which
+// dispatches via the registry to the per-kind adapter's backfillSource.
+// For YouTube the adapter enqueues a youtube.backfill.channel job
+// (singletonKey-deduped). Adding refresh for a new source kind requires
+// zero edits here — only that adapter's backfillSource implementation.
 //
-// AGENTS.md invariants:
+// Invariants:
 //   1. Tenant scoping — getSourceById(userId, params.id) is the entry point;
 //      no unfiltered query.
 //   2. Cross-tenant 404 not 403 — getSourceById throws NotFoundError on miss
 //      OR cross-tenant; mapErr translates to {error:'not_found'} status 404.
-//      Body never contains "forbidden" / "permission" (tenant-scope test
-//      pins the wire format).
+//      Body never contains "forbidden" / "permission".
 //   3. Anonymous-401 sweep — extended in tests/integration/anonymous-401.test.ts
 //      MUST_BE_PROTECTED with this route's path pattern.
 //   4. Audit INSERT-only — writeAuditStrict fires after the enqueue with
-//      action "source.refresh_content_requested" (forward-only migration
-//      0023 added the enum value). STRICT variant: a failed audit surfaces
-//      as 5xx so the caller retries; the queue's singletonKey dedupes the
-//      re-enqueue (no-op) and the second writeAuditStrict succeeds. This
-//      preserves the audit-row-per-action contract without a transactional
-//      enqueue (which would require pushing pg-boss IDatabase plumbing
-//      through the adapter contract).
+//      action "source.refresh_content_requested". STRICT variant: a failed
+//      audit surfaces as 5xx so the caller retries; the queue's singletonKey
+//      dedupes the re-enqueue (no-op) and the second writeAuditStrict
+//      succeeds. This preserves the audit-row-per-action contract without
+//      a transactional enqueue.
 //
 // 422 path: getAdapter throws on unregistered kinds. We re-throw as
 // AppError('kind_not_yet_functional', 422) so mapErr emits a clean wire
-// format the UI can localize via Paraglide. Phase 2.1's createSource gates
+// format the UI can localize via Paraglide. createSource gates
 // non-functional kinds out at write time, so in practice the only way a
 // row's kind is unregistered here is during the per-phase rollout window
-// (e.g. /sources page rendered a reddit_account row created via direct
-// schema insert in tests).
+// (e.g. /sources page rendered a row created via direct schema insert).
 sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
   const ctx = getAuditContext(c);
   try {
-    // Phase 03.0.1 (post-review UAT 2026-05-10) — tenant-scoped lookup
-    // FIRST, then rate-limit gate.
+    // Tenant-scoped lookup FIRST, then rate-limit gate.
     //
-    // Pre-fix the rate-limit gate ran before getSourceById, so a user
-    // hitting the rate limit on an arbitrary (foreign or non-existent)
-    // sourceId would receive 429 instead of the canonical 404. AGENTS.md
-    // invariant 2 says cross-tenant resource access returns 404 — period.
-    // Mild ownership-disclosure: a user could probe the rate-limit error
-    // shape to distinguish «owned source, gated» from «unknown source,
-    // 404». Tenant lookup first eliminates the gap.
+    // If the rate-limit gate ran before getSourceById, a user hitting the
+    // rate limit on an arbitrary (foreign or non-existent) sourceId would
+    // receive 429 instead of the canonical 404. Cross-tenant resource
+    // access returns 404 — period. Tenant lookup first eliminates the
+    // ownership-disclosure gap a probe of the rate-limit error shape
+    // would otherwise create.
     //
     // Cost: extra getSourceById round-trip for users actively spamming
     // the button. At indie scale that's a few queries / day at worst —
@@ -330,10 +321,10 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
       );
     }
 
-    // Phase 03.0.1 — L1 throttle check (operator-side reservoir).
-    // When operator's YouTube quota approaches 95%, ALL users get 429 — это
-    // system-wide signal, не per-user. Banner UI на /sources показывает
-    // отдельный indicator для этого state.
+    // L1 throttle check (operator-side reservoir). When operator's YouTube
+    // quota approaches 95%, ALL users get 429 — system-wide signal, not
+    // per-user. Banner UI on /sources shows a separate indicator for this
+    // state.
     const stats = await adapter.observability.quota.getDailyStats(new Date());
     if (stats.throttleState === "ninetyfive") {
       throw new AppError(
@@ -347,10 +338,10 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
       );
     }
 
-    // Phase 03.0.1 — L2 per-user fair-share cap. When adapter declares
-    // userQuotaCap, check audit-log SUM против cap. Per-axis denial:
+    // L2 per-user fair-share cap. When adapter declares userQuotaCap,
+    // check audit-log SUM against cap. Per-axis denial:
     // requests_quota_exhausted vs events_quota_exhausted (banner UI shows
-    // distinct toast).
+    // a distinct toast).
     const cap = adapter.observability.userQuotaCap;
     if (cap?.requestsPerDay !== undefined || cap?.eventsPerDay !== undefined) {
       const used = await getUserQuotaUsedToday(ctx.userId, source.kind);
@@ -382,12 +373,11 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
       }
     }
 
-    // Phase 03.0.3 P1 — no eager state reset. The three-branch
-    // since-derivation in backfill-channel.ts decides at walk-time whether
-    // the click is steady-state (exhausted), incremental, or deep — the
-    // pre-Phase-03.0.3 trust-but-verify reset was redundant AND a
-    // multi-tenant fairness violation (it re-opened the walk for ALL
-    // subscribers when one user clicked refresh — D-#29-7).
+    // No eager state reset. The three-branch since-derivation in
+    // backfill-channel.ts decides at walk-time whether the click is
+    // steady-state (exhausted), incremental, or deep. Eagerly resetting
+    // here would re-open the walk for ALL subscribers whenever one user
+    // clicked refresh — a multi-tenant fairness violation.
     const result = await adapter.backfillSource(
       {
         id: source.id,
@@ -404,8 +394,8 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
     );
 
     // STRICT — failed audit returns 5xx; user retry hits singletonKey dedup
-    // on the queue (no-op enqueue) and the audit INSERT retries. AGENTS.md
-    // invariant 4 honored without a transactional enqueue plumbing.
+    // on the queue (no-op enqueue) and the audit INSERT retries. Audit-row-
+    // per-action contract honored without a transactional enqueue.
     //
     // This is the INTENT row — written pre-completion for immediate forensics
     // ("user X clicked refresh on source Y at time T"). Worker writes a
@@ -420,10 +410,10 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
       metadata: {
         source_id: source.id,
         kind: source.kind,
-        // Phase 03.0.1 (post-review) — `platform` for cap-query consistency.
-        // Intent rows are NOT counted by the cap query (no `flow` field — see
-        // worker completion audit), but we set `platform` anyway so any
-        // future query that aggregates intent + completion stays consistent.
+        // `platform` for cap-query consistency. Intent rows are NOT
+        // counted by the cap query (no `flow` field — see worker
+        // completion audit), but we set `platform` anyway so any future
+        // query that aggregates intent + completion stays consistent.
         platform: source.kind,
         queue: result.queue,
         job_id: result.jobId,

@@ -15,31 +15,29 @@ import { youtubeChannels } from "$lib/server/db/schema/index.js";
 import { inArray } from "drizzle-orm";
 import { allAdapters } from "$lib/sources/registry.js";
 
-// Plan 02.1-19 URL contract: /feed accepts ?show=any|inbox|specific +
-// ?game=A&game=B (when show=specific). The legacy ?attached=true|false is
-// no longer recognized. Pre-launch destructive contract change (CONTEXT
-// D-04). When neither ?show nor ?game is present, default = "any".
+// URL contract: /feed accepts ?show=any|inbox|specific + ?game=A&game=B
+// (when show=specific). The legacy ?attached=true|false is no longer
+// recognized. When neither ?show nor ?game is present, default = "any".
 
 /**
  * /feed loader — the primary daily workspace for authenticated users.
  *
  * The +layout.server.ts protected-paths sweep redirects anonymous requests
- * to /login (Phase 2 D-37 — `PROTECTED_PATHS` covers `/feed` once added);
- * here we double-check and bail to /login on any path that slips through
- * (defense-in-depth — if `/feed` is ever removed from the layout
+ * to /login; here we double-check and bail to /login on any path that slips
+ * through (defense-in-depth — if `/feed` is ever removed from the layout
  * allowlist by accident, the route stays auth-gated).
  *
- * Single-shot DTO assembly (RESEARCH §10.3 sub-question c): the loader
- * runs `listFeedPage` + `listGames` + `listSources` in parallel and
- * projects each row through its DTO function. The page component renders
- * with id-only references on the EventDto and an O(1) JS lookup for the
- * matching source / game — no per-row HTTP roundtrip.
+ * Single-shot DTO assembly: the loader runs `listFeedPage` + `listGames` +
+ * `listSources` in parallel and projects each row through its DTO function.
+ * The page component renders with id-only references on the EventDto and
+ * an O(1) JS lookup for the matching source / game — no per-row HTTP
+ * roundtrip.
  *
- * Filter parsing: 7 URL-param axes (RESEARCH §3.3 + Plan 02.1-05's
- * FeedFilters). Booleans arrive as the strings 'true' / 'false' / undefined;
- * we coerce explicitly so a malformed value is treated as "no filter".
- * Date params (`from` / `to`) are ISO strings; an invalid date short-circuits
- * to undefined (the cursor pager will return zero rows rather than crash).
+ * Filter parsing: 7 URL-param axes. Booleans arrive as the strings 'true' /
+ * 'false' / undefined; we coerce explicitly so a malformed value is
+ * treated as "no filter". Date params (`from` / `to`) are ISO strings;
+ * an invalid date short-circuits to undefined (the cursor pager will
+ * return zero rows rather than crash).
  */
 export const load: PageServerLoad = async ({ locals, url }) => {
   if (!locals.user) {
@@ -47,30 +45,29 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   }
   const userId = locals.user.id;
 
-  // Plan 02.1-15 — multi-value axes via URLSearchParams.getAll(). Repeated
-  // query params (?source=A&source=B) yield ["A","B"]; a single param yields
-  // ["A"]; absence yields []. The service-layer pushAxis helper collapses
-  // each shape to its right SQL form (empty = no filter, 1-elem = eq,
+  // Multi-value axes via URLSearchParams.getAll(). Repeated query params
+  // (?source=A&source=B) yield ["A","B"]; a single param yields ["A"];
+  // absence yields []. The service-layer pushAxis helper collapses each
+  // shape to its right SQL form (empty = no filter, 1-elem = eq,
   // N-elem = inArray).
   const sourceList = url.searchParams.getAll("source");
-  // Plan 02.1-37 (UAT-NOTES.md §5.13): filter unknown kinds out before they
-  // reach Drizzle's inArray(events.kind, [...]) clause. A malformed URL like
-  // /feed?kind=foo would otherwise surface as a Postgres 500 (unknown enum
-  // value). Silent drop matches the existing ?show= malformed-param fallback
-  // at lines 87-95 — defensive validation, not user-visible error.
+  // Filter unknown kinds out before they reach Drizzle's
+  // inArray(events.kind, [...]) clause. A malformed URL like /feed?kind=foo
+  // would otherwise surface as a Postgres 500 (unknown enum value). Silent
+  // drop matches the ?show= malformed-param fallback below — defensive
+  // validation, not user-visible error.
   const kindList = filterValidKinds(url.searchParams.getAll("kind"));
   const gameList = url.searchParams.getAll("game");
 
   const fromParam = url.searchParams.get("from");
   const toParam = url.searchParams.get("to");
   // `?all=1` was the legacy escape hatch for the 30-day default window.
-  // Phase 3.0 post-build retired the implicit window; this read is preserved
-  // only for analytics symmetry. Underscore-prefixed to satisfy
-  // no-unused-vars; remove when /feed history confirms no tooling reads it.
+  // The implicit window is retired; this read is preserved only for
+  // analytics symmetry. Underscore-prefixed to satisfy no-unused-vars;
+  // remove when /feed history confirms no tooling reads it.
   const _allParam = url.searchParams.get("all");
 
-  // Phase 3.0 post-build (UAT 2026-05-06): default is now All-time. The
-  // 30-day implicit window from Plan 02.1-15 Gap 9 was confusing — a fresh
+  // Default is All-time. The 30-day implicit window was confusing — a fresh
   // YouTube backfill of a channel often surfaces older uploads, and the
   // implicit cap silently hid them. Cursor pagination already protects from
   // rendering huge lists, so dropping the default cap is safe. `?all=1`
@@ -86,10 +83,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const fromDate = fromForFilter ? new Date(`${fromForFilter}T00:00:00.000Z`) : undefined;
   const toDate = toForFilter ? new Date(`${toForFilter}T23:59:59.999Z`) : undefined;
 
-  // Plan 02.1-19: ?show=any|inbox|specific URL contract. Default = "any".
+  // ?show=any|inbox|standalone|specific URL contract. Default = "any".
   // Any other value (including null / unrecognized) falls back to "any" so a
   // malformed URL doesn't 500 — the chip strip will simply show no Show chip.
-  // Plan 02.1-24: adds 'standalone' for the new triage-state filter.
   const showParam = url.searchParams.get("show") ?? "any";
   const showKind: "any" | "inbox" | "standalone" | "specific" =
     showParam === "inbox"
@@ -110,8 +106,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
   const filters: FeedFilters = {
     source: sourceList.length > 0 ? sourceList : undefined,
-    // Plan 02.1-37: kindList is now EventKind[] (filtered against VALID_EVENT_KINDS
-    // via filterValidKinds above), so the historical cast is no longer needed.
+    // kindList is now EventKind[] (filtered against VALID_EVENT_KINDS via
+    // filterValidKinds above), so a cast is no longer needed.
     kind: kindList.length > 0 ? kindList : undefined,
     show: showFilter,
     authorIsMe:
@@ -125,51 +121,48 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   };
   const cursor = url.searchParams.get("cursor");
 
-  // Plan 02.1-14 (gap closure): listDeletedEvents joins the parallel fetch
-  // so the /feed page can render the soft-delete recovery panel below the
-  // CursorPager. retentionDays is forwarded from +layout.server.ts (the
-  // SOLE process.env reader path — CLAUDE.md / AGENTS.md hard rule).
+  // listDeletedEvents joins the parallel fetch so the /feed page can render
+  // the soft-delete recovery panel below the CursorPager. retentionDays is
+  // forwarded from +layout.server.ts (the SOLE process.env reader path —
+  // CLAUDE.md / AGENTS.md hard rule).
   const [page, gameRows, sourceRows, deletedRows] = await Promise.all([
     listFeedPage(userId, filters, cursor),
     listGames(userId),
-    // Phase 3.0 post-build (UAT 2026-05-06): include soft-deleted sources
-    // so the feed card can still resolve channelTitle / displayName for
-    // events whose parent source the user has removed. Without this, events
-    // backed by a now-deleted source render with no source chip — confusing
-    // because the events themselves remain in /feed (events are not cascaded
-    // when sources go soft-deleted; the user's own historical metadata stays
-    // intact). The UI may surface a "(removed)" suffix on the chip later.
+    // Include soft-deleted sources so the feed card can still resolve
+    // channelTitle / displayName for events whose parent source the user
+    // has removed. Without this, events backed by a now-deleted source
+    // render with no source chip — confusing because the events themselves
+    // remain in /feed (events are not cascaded when sources go
+    // soft-deleted; the user's own historical metadata stays intact). The
+    // UI may surface a "(removed)" suffix on the chip later.
     listSources(userId, { includeDeleted: true }),
     listDeletedEvents(userId),
   ]);
 
-  // Plan 02.1-28: mapEventsToDtos batch-loads the event_games junction rows
-  // so each EventDto carries its gameIds[] without an N+1 query (one
-  // junction lookup per page; one for the deletedEvents list).
+  // mapEventsToDtos batch-loads the event_games junction rows so each
+  // EventDto carries its gameIds[] without an N+1 query (one junction
+  // lookup per page; one for the deletedEvents list).
   const [rowDtos, deletedDtos] = await Promise.all([
     mapEventsToDtos(userId, page.rows),
     mapEventsToDtos(userId, deletedRows),
   ]);
 
-  // Phase 03.0.3 P2 — adapter-driven feed enrichment. Iterates allAdapters
-  // and lets each one mutate the dtos in place. YouTube enriches
-  // kind=youtube_video rows with stats + channelTitle; future Reddit /
-  // Twitter / Telegram / Discord adapters enrich their own kinds from
-  // per-platform metadata tables. Replaces the inline JOIN that lived
-  // here pre-Phase-03.0.3 — that path enriched only the SSR first batch,
-  // leaving GET /api/events cursor pagination + /games/[id] curated views
-  // unenriched (issue #29 Part 2). Now all three callsites share the
-  // same loop.
+  // Adapter-driven feed enrichment. Iterates allAdapters and lets each one
+  // mutate the dtos in place. YouTube enriches kind=youtube_video rows with
+  // stats + channelTitle; future per-platform adapters enrich their own
+  // kinds from per-platform metadata tables. All three feed-rendering
+  // callsites (SSR first batch, GET /api/events cursor pagination,
+  // /games/[id] curated views) share the same loop.
   for (const adapter of allAdapters) {
     if (adapter.enrichFeedDtos) {
       await adapter.enrichFeedDtos(userId, rowDtos);
     }
   }
 
-  // Phase 3.0 post-build: enrich source DTOs with the YouTube channel_title
-  // from cache so the feed card can show the real channel name alongside
-  // the user's own displayName. One batched lookup keyed on every distinct
-  // channelId across all loaded sources.
+  // Enrich source DTOs with the YouTube channel_title from cache so the
+  // feed card can show the real channel name alongside the user's own
+  // displayName. One batched lookup keyed on every distinct channelId
+  // across all loaded sources.
   const sourceDtos = sourceRows.map(toDataSourceDto);
   const channelIds = sourceDtos.map((s) => s.channelId).filter((c): c is string => c !== null);
   if (channelIds.length > 0) {
@@ -192,20 +185,20 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     nextCursor: page.nextCursor,
     games: gameRows.map(toGameDto),
     sources: sourceDtos,
-    // Plan 02.1-14 (preserved): listDeletedEvents flows through the loader
+    // listDeletedEvents flows through the loader
     // so /feed renders the soft-delete recovery panel without a second
     // round-trip. retentionDays continues to come from the layout
     // pass-through (CLAUDE.md / AGENTS.md hard rule — only env.ts reads
     // process.env; the layout already exposes RETENTION_DAYS).
     deletedEvents: deletedDtos,
     activeFilters: {
-      // Plan 02.1-15: array form for the multi-value axes — always present,
-      // possibly empty. The chip strip / sheet always treat them as
-      // string[] so single-value renders the same as zero-value.
+      // Array form for the multi-value axes — always present, possibly
+      // empty. The chip strip / sheet always treat them as string[] so
+      // single-value renders the same as zero-value.
       source: sourceList,
       kind: kindList,
-      // Plan 02.1-19: merged 'show' axis replaces game + attached pair.
-      // Plan 02.1-24: adds 'standalone' branch.
+      // Merged 'show' axis (any | inbox | standalone | specific) replaces
+      // the legacy game + attached pair.
       show:
         showKind === "inbox"
           ? { kind: "inbox" as const }
@@ -217,11 +210,10 @@ export const load: PageServerLoad = async ({ locals, url }) => {
       authorIsMe: filters.authorIsMe,
       from: filters.from ? filters.from.toISOString().slice(0, 10) : undefined,
       to: filters.to ? filters.to.toISOString().slice(0, 10) : undefined,
-      // Phase 3.0 post-build (UAT 2026-05-06): the implicit 30-day
-      // default window from Plan 02.1-15 Gap 9 was retired. /feed now
-      // defaults to All-time. defaultDateRange always false here so the
-      // FilterChips strip never renders the "Last 30 days (default)"
-      // chip; `all` is true whenever the user hasn't picked a from/to.
+      // The implicit 30-day default window was retired; /feed now defaults
+      // to All-time. defaultDateRange always false so the FilterChips strip
+      // never renders the "Last 30 days (default)" chip; `all` is true
+      // whenever the user hasn't picked a from/to.
       defaultDateRange: false,
       all: fromParam === null && toParam === null,
     },

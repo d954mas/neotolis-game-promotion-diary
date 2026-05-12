@@ -2,8 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { formatFeedDate } from "../../src/lib/util/format-feed-date.js";
 
 /**
- * Plan 02.1-16 / Gap 5 — compact / relative date format for the /feed
- * surface. Four buckets (UI-SPEC §"Gap 5"):
+ * Compact / relative date format for the /feed surface. Four buckets:
  *   - same calendar day → "Today, HH:MM" (24h locale)
  *   - one calendar day back → "Yesterday"
  *   - same calendar year, older than yesterday → "MMM D" (Apr 25)
@@ -13,7 +12,7 @@ import { formatFeedDate } from "../../src/lib/util/format-feed-date.js";
  * deterministic across CI machines. Locale-rendered strings keep the regex
  * tolerant (TZ skew across runners may shift "Apr 15" by ±1 day).
  */
-describe("formatFeedDate (Plan 02.1-16 / Gap 5)", () => {
+describe("formatFeedDate", () => {
   // 2026-04-28 14:30:00 UTC. Choose a UTC anchor far from midnight in
   // common test runner zones (UTC, ET, CET, JST) so getDate()/getMonth()
   // stay on the 28th regardless of where the runner lives.

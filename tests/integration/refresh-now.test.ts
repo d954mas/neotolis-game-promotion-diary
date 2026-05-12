@@ -1,4 +1,4 @@
-// Phase 3.0 Plan 08 — POST /api/events/:id/refresh-poll route activation.
+// POST /api/events/:id/refresh-poll route.
 //
 // The user-side affordance for "refresh this event's stats right now". The
 // route enqueues to poll.user (its own queue so user-pressed work doesn't
@@ -83,8 +83,8 @@ async function insertEvent(
   return row;
 }
 
-describe("refresh-now route (Plan 03.0-08)", () => {
-  it("Plan 03.0-08: POST /api/events/:id/refresh-poll 200 enqueues to poll.user", async () => {
+describe("refresh-now route", () => {
+  it("POST /api/events/:id/refresh-poll 200 enqueues to poll.user", async () => {
     sentJobs.length = 0;
     const app = createApp();
     const u = await seedUserDirectly({ email: `rn-ok-${uniq()}@test.local` });
@@ -111,7 +111,7 @@ describe("refresh-now route (Plan 03.0-08)", () => {
     });
   });
 
-  it("Plan 03.0-08: POST refresh-poll persists events.metadata.last_user_refresh_at", async () => {
+  it("POST refresh-poll persists events.metadata.last_user_refresh_at", async () => {
     sentJobs.length = 0;
     const app = createApp();
     const u = await seedUserDirectly({ email: `rn-meta-${uniq()}@test.local` });
@@ -133,7 +133,7 @@ describe("refresh-now route (Plan 03.0-08)", () => {
     expect(ts).toBeLessThanOrEqual(after);
   });
 
-  it("Plan 03.0-08: second click within 5min → 429 with retry-after header + metadata", async () => {
+  it("second click within 5min → 429 with retry-after header + metadata", async () => {
     sentJobs.length = 0;
     const app = createApp();
     const u = await seedUserDirectly({ email: `rn-cd-${uniq()}@test.local` });
@@ -163,7 +163,7 @@ describe("refresh-now route (Plan 03.0-08)", () => {
     expect(Number(retryAfter)).toBe(body.metadata!.retryAfterSeconds);
   });
 
-  it("Plan 03.0-08: cross-tenant event id → 404 (body excludes 'forbidden'/'permission')", async () => {
+  it("cross-tenant event id → 404 (body excludes 'forbidden'/'permission')", async () => {
     sentJobs.length = 0;
     const app = createApp();
     const a = await seedUserDirectly({ email: `rn-xtA-${uniq()}@test.local` });
@@ -182,7 +182,7 @@ describe("refresh-now route (Plan 03.0-08)", () => {
     expect(JSON.parse(text)).toEqual({ error: "not_found" });
   });
 
-  it("Plan 03.0-08: non-pollable event (kind=conference) → 422 event_not_pollable", async () => {
+  it("non-pollable event (kind=conference) → 422 event_not_pollable", async () => {
     sentJobs.length = 0;
     const app = createApp();
     const u = await seedUserDirectly({ email: `rn-np-${uniq()}@test.local` });
@@ -202,7 +202,7 @@ describe("refresh-now route (Plan 03.0-08)", () => {
     expect(body.error).toBe("event_not_pollable");
   });
 
-  it("Plan 03.0-08: youtube_video with external_id NULL → 422 event_no_external_id", async () => {
+  it("youtube_video with external_id NULL → 422 event_no_external_id", async () => {
     sentJobs.length = 0;
     const app = createApp();
     const u = await seedUserDirectly({ email: `rn-noext-${uniq()}@test.local` });
@@ -218,7 +218,7 @@ describe("refresh-now route (Plan 03.0-08)", () => {
     expect(body.error).toBe("event_no_external_id");
   });
 
-  it("Plan 03.0-08: anonymous POST → 401 (auth gate before route fires)", async () => {
+  it("anonymous POST → 401 (auth gate before route fires)", async () => {
     sentJobs.length = 0;
     const app = createApp();
 

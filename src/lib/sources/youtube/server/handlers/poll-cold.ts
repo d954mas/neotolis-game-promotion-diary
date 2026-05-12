@@ -1,8 +1,7 @@
-// Phase 03.0.1 Plan 07 — Cold-tier poll handler (REWRITTEN).
+// Cold-tier poll handler.
 //
-// Identical pipeline shape to poll-active.ts (see that file's header for the
-// pre-Plan-07 vs Plan-07 model description). Differentiation is at the
-// CONFIGURATION level:
+// Identical pipeline shape to poll-active.ts (see that file's header).
+// Differentiation is at the CONFIGURATION level:
 //   - Tier window: 24h <= age < 28d (vs. age < 24h for Active).
 //   - Throttle gate: skip on BOTH 'eighty' AND 'ninetyfive'. Cold is the
 //     first thing to give up on heavy days. (Active runs through 'eighty'.)
@@ -18,10 +17,10 @@
 // caps + tier-keyed quotaUser; the duplication makes the topology obvious
 // in the per-source server barrel.
 //
-// Plan-07 wires both Active and Cold under one queue (youtube.poll.cron)
-// with a key-based schedule split (boss.schedule(...,{key:"active"|"cold"})
-// per pg-boss v11+). The poll-cron dispatcher (./poll-cron.ts) reads
-// job.data.tier and routes to handlePollActive or handlePollCold.
+// Active and Cold share one queue (youtube.poll.cron) with a key-based
+// schedule split (boss.schedule(...,{key:"active"|"cold"}) per pg-boss
+// v11+). The poll-cron dispatcher (./poll-cron.ts) reads job.data.tier
+// and routes to handlePollActive or handlePollCold.
 //
 // Per-user cap audit: same as poll-active — this handler does NOT write
 // audit_log. Cron-driven cold polls consume the operator pool, not any
@@ -52,9 +51,7 @@ export async function handlePollCold(job: {
   id?: string;
   data: { tier: "cold" } & Record<string, unknown>;
 }): Promise<void> {
-  // Throttle gate — skip Cold on BOTH 'eighty' and 'ninetyfive'. Pre-Plan-07
-  // this gate lived in scheduler/enqueue.ts.enqueueColdPolls; Plan-07 moves
-  // it here alongside the tier-eligibility computation.
+  // Throttle gate — skip Cold on BOTH 'eighty' and 'ninetyfive'.
   const now = new Date();
   const throttle = await getThrottleState(now);
   if (throttle !== "ok") {
@@ -67,8 +64,9 @@ export async function handlePollCold(job: {
 
   // Tier-eligibility: 24h <= published_at age < 28d. cutoffNewest is the
   // 24h boundary (active/cold split); cutoffOldest is 28d (cold/frozen
-  // split). resolveTier() applies the JS-side authoritative classification.
-  // Pitfall 7 — never inline the boundary literals.
+  // split). resolveTier() applies the JS-side authoritative
+  // classification. Never inline the boundary literals — keep them in
+  // tier-resolver as the single source of truth.
   const cutoffNewest = new Date(now.getTime() - TIER_BOUNDARY_ACTIVE_MS);
   const cutoffOldest = new Date(now.getTime() - TIER_BOUNDARY_COLD_MS);
   const videoIds = await selectEligibleVideoIds(cutoffNewest, cutoffOldest, "cold", now);
@@ -110,14 +108,14 @@ export async function handlePollCold(job: {
     return;
   }
 
-  // Phase A — HTTP (OUTSIDE any tx).
+  // Step A — HTTP (OUTSIDE any tx).
   const snapshots = await youtubeChannelAdapter.pollStatsByVideoId(
     videoIds,
     QUOTA_USER_COLD,
     picked,
   );
 
-  // Phase B — writeSnapshot per result. Quota cost: pollStatsByVideoId
+  // Step B — writeSnapshot per result. Quota cost: pollStatsByVideoId
   // chunks input into batches of YOUTUBE_VIDEOS_BATCH_SIZE (50, Google's
   // videos.list cap) — each chunk = 1 quota unit. Charge on the first
   // video of every chunk (i % 50 === 0); rest pass unitsUsed=0. Per
@@ -125,9 +123,6 @@ export async function handlePollCold(job: {
   // incur at least a one-point quota cost"), auth_error / non-2xx
   // outcomes still consume the unit because the request reached YouTube.
   // The no-key path returns BEFORE this loop.
-  //
-  // Phase 03.0.1 (post-review fourth-pass) — fix matches poll-active.ts
-  // (same chargedOnce undercount on >50 active videos).
   let rateLimitedSeen = false;
   for (let i = 0; i < videoIds.length; i++) {
     const videoId = videoIds[i]!;

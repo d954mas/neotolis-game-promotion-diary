@@ -1,4 +1,4 @@
-// Phase 03.0.1 Wave 3 — daily incremental cron handler.
+// Daily incremental cron handler.
 //
 // Closes the auto-backfill cron gap: once a channel reaches
 // backfill_complete=true (full uploads playlist walked), the auto-backfill

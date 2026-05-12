@@ -1,12 +1,12 @@
 <script lang="ts">
-  // EmptyState — UX-03 empty-state primitive used by every list page
+  // EmptyState — empty-state primitive used by every list page
   // (/games, /events, /audit, /sources, /keys/steam, items panel).
   //
-  // Contract per UI-SPEC §"Empty states":
+  // Contract:
   //   - heading at display size (32px / weight 600)
   //   - body paragraph; if `exampleUrl` is set, the body's `{url}` token
   //     is REPLACED by a <code> element so the URL renders monospace
-  //     (D-43 — example URLs are inert literal strings, not anchors)
+  //     (example URLs are inert literal strings, not anchors)
   //   - optional CTA button below body
   //
   // The body string is expected to come from a Paraglide function that
@@ -15,8 +15,8 @@
   // EmptyState test (tests/integration/empty-states.test.ts) asserts the
   // rendered HTML contains <code>...</code> wrapping the URL.
   //
-  // FLAG (UI-SPEC): example URLs render with `cursor: text` (not pointer)
-  // and a quiet tooltip clarifying they are inert.
+  // Example URLs render with `cursor: text` (not pointer) and a quiet
+  // tooltip clarifying they are inert.
 
   let {
     heading,

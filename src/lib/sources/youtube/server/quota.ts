@@ -1,4 +1,4 @@
-// Phase 3.0 Plan 03 — YouTube Data API v3 service-quota tracker (D-13 + Pattern 4).
+// YouTube Data API v3 service-quota tracker.
 //
 // Operator-side counter: YouTube quota is per-API-key, per-Pacific-day, NOT
 // per-tenant. Multiple users sharing one operator API key share the same
@@ -10,19 +10,20 @@
 //   - `markThrottleTransition` idempotent audit row when threshold first crossed
 //   - `todayPacific`          'YYYY-MM-DD' in America/Los_Angeles (Google's reset boundary)
 //   - `hashApiKeyId`          sha-8 of the API key string (stable identifier)
-//   - `resetThrottleState`    midnight-Pacific reset hook (Plan 03.0-09 cron)
+//   - `resetThrottleState`    midnight-Pacific reset hook
 //
-// Consumers (Plan 03.0-04 / 06 / 09):
+// Consumers:
 //   - $lib/sources/youtube/server/adapter.ts    (pickKeyForJob per HTTP call)
 //   - $lib/sources/youtube/server/snapshots.ts  (incrementUsage in same tx as snapshot insert)
 //   - src/scheduler/enqueue.ts                   (getThrottleState — pause Cold/auto-import at 80%)
 //   - $lib/sources/youtube/server/handlers/quota-reset.ts (resetThrottleState at 00:01 Pacific daily)
 //
-// Pitfall D — YouTube quota resets at midnight America/Los_Angeles, which floats
-// across UTC 7h/8h depending on DST. We compute the "today" key with Intl in
-// the LA zone so DST transitions are handled by the runtime, not by us.
+// YouTube quota resets at midnight America/Los_Angeles, which floats
+// across UTC 7h/8h depending on DST. We compute the "today" key with Intl
+// in the LA zone so DST transitions are handled by the runtime, not by
+// us.
 //
-// Threshold values (D-13):
+// Threshold values:
 //   - 80% (>= 8000 units on any key) → throttle 'eighty':
 //       scheduler pauses Cold-tier polls + auto-import; refresh-now still works.
 //   - 95% (>= 9500 units on any key) → throttle 'ninetyfive':
@@ -59,18 +60,18 @@ export interface PickedKey {
   apiKeyId: string;
 }
 
-/** D-13 threshold — 80% of YouTube's 10 000 units/key/day budget. */
+/** Threshold — 80% of YouTube's 10 000 units/key/day budget. */
 export const THROTTLE_EIGHTY_THRESHOLD = 8000;
 
-/** D-13 threshold — 95% of YouTube's 10 000 units/key/day budget (hard-pause boundary). */
+/** Threshold — 95% of YouTube's 10 000 units/key/day budget (hard-pause boundary). */
 export const THROTTLE_NINETYFIVE_THRESHOLD = 9500;
 
 /**
- * D-NEW idempotency — module-level audit-emission guard. Map<date_pacific,
- * Set<state>>. Resets on container restart; cron `youtube.quota_reset` clears
- * at midnight Pacific via `resetThrottleState`. Defense-in-depth: a prior-emit
- * lookup against audit_log handles the container-restart case where the Set
- * is empty but the row was already written today.
+ * Module-level audit-emission guard. Map<date_pacific, Set<state>>.
+ * Resets on container restart; cron `youtube.quota_reset` clears at
+ * midnight Pacific via `resetThrottleState`. Defense-in-depth: a
+ * prior-emit lookup against audit_log handles the container-restart case
+ * where the Set is empty but the row was already written today.
  */
 const auditedTransitions = new Map<string, Set<"eighty" | "ninetyfive">>();
 
@@ -88,8 +89,8 @@ let roundRobinIdx = 0;
 let cachedOperatorId: string | null | undefined;
 
 /**
- * D-13 — sha-8 of the API key string. Stable across boots; what we store as
- * the row identifier in youtube_service_quota_usage. Collision-free at indie
+ * sha-8 of the API key string. Stable across boots; what we store as the
+ * row identifier in youtube_service_quota_usage. Collision-free at indie
  * scale (operator may have 1-3 keys per day, not millions).
  */
 export function hashApiKeyId(apiKey: string): string {
@@ -131,9 +132,10 @@ export function youtubeQuotaUser(userId: string): string {
 }
 
 /**
- * D-13 — round-robin pick across SERVICE_YOUTUBE_API_KEYS. Returns null if
- * the env list is empty (auto-import + scheduled polling disabled — caller
- * decides what to do; typical handling is `auto_import.deferred` audit + skip).
+ * Round-robin pick across SERVICE_YOUTUBE_API_KEYS. Returns null if the
+ * env list is empty (auto-import + scheduled polling disabled — caller
+ * decides what to do; typical handling is `auto_import.deferred` audit +
+ * skip).
  */
 export function pickKeyForJob(): PickedKey | null {
   const keys = env.SERVICE_YOUTUBE_API_KEYS;
@@ -144,24 +146,23 @@ export function pickKeyForJob(): PickedKey | null {
 }
 
 /**
- * D-13 — UPSERT (date_pacific, api_key_id) += units. Idempotent at the row
+ * UPSERT (date_pacific, api_key_id) += units. Idempotent at the row
  * level: the composite PK plus `ON CONFLICT DO UPDATE SET estimated_units =
- * estimated_units + EXCLUDED.units` makes concurrent increments race-safe in
- * Postgres.
+ * estimated_units + EXCLUDED.units` makes concurrent increments race-safe
+ * in Postgres.
  *
- * Caller passes `tx` when the increment must commit/rollback with a snapshot
- * insert (Plan 03.0-04 — atomic counter increment). Standalone calls (e.g.
+ * Caller passes `tx` when the increment must commit/rollback with a
+ * snapshot insert (atomic counter increment). Standalone calls (e.g.
  * channel-context adapter) omit `tx` and run on the top-level pool.
  */
 export async function incrementUsage(args: {
   apiKeyId: string;
   units: number;
   /**
-   * Phase 03.0.1 post-review #5 — which in-memory reservoir burned the
-   * units. Lets reconcileReservoirsOnBoot debit each pool accurately after
-   * a worker crash. Required (no default) — making it explicit at every
-   * call site forces the caller to think about pool attribution. Pre-fix
-   * all writes were unattributed and reconciliation guessed wrong.
+   * Which in-memory reservoir burned the units. Lets
+   * reconcileReservoirsOnBoot debit each pool accurately after a worker
+   * crash. Required (no default) — making it explicit at every call site
+   * forces the caller to think about pool attribution.
    */
   poolKind: "cron" | "user";
   tx?: DbCtx;
@@ -190,17 +191,17 @@ export async function incrementUsage(args: {
 }
 
 /**
- * D-13 — at-enqueue scheduler check. Returns the WORST state across all keys
- * for today: any key at 95% pauses everything; any key at 80% pauses Cold +
+ * At-enqueue scheduler check. Returns the WORST state across all keys for
+ * today: any key at 95% pauses everything; any key at 80% pauses Cold +
  * auto-import. The scheduler short-circuits BEFORE enqueueing the job, so
  * over-budget calls never reach pickKeyForJob.
  */
 export async function getThrottleState(now: Date = new Date()): Promise<ThrottleState> {
   const datePacific = todayPacific(now);
-  // Phase 03.0.1 post-review #5 — sum across pool_kind per api_key_id.
-  // Threshold is per-key daily envelope (10000 units); pool split is an
-  // internal accounting artifact for reservoir reconciliation, not a
-  // throttle gate. WORST-key (max sum) wins per pre-existing semantics.
+  // Sum across pool_kind per api_key_id. Threshold is per-key daily
+  // envelope (10000 units); pool split is an internal accounting artifact
+  // for reservoir reconciliation, not a throttle gate. WORST-key (max
+  // sum) wins per pre-existing semantics.
   const rows = await db
     .select({
       apiKeyId: youtubeServiceQuotaUsage.apiKeyId,
@@ -217,16 +218,16 @@ export async function getThrottleState(now: Date = new Date()): Promise<Throttle
 }
 
 /**
- * D-13 — write audit `quota.service_throttled` ONCE per (date_pacific, state).
+ * Write audit `quota.service_throttled` ONCE per (date_pacific, state).
  *
  * Idempotency layered:
  *   1. Module-level Set — fast path within container lifetime.
  *   2. audit_log lookup — handles container restart (Set is empty but the row
  *      already exists for today).
  *
- * The audit row carries a real user_id (audit_log.user_id is NOT NULL — a
- * Phase 02.2 invariant). We resolve to ADMIN_EMAIL_ALLOWLIST[0]'s user record
- * — that's the canonical operator identity for SaaS / single-admin self-host.
+ * The audit row carries a real user_id (audit_log.user_id is NOT NULL).
+ * We resolve to ADMIN_EMAIL_ALLOWLIST[0]'s user record — that's the
+ * canonical operator identity for SaaS / single-admin self-host.
  * If the allowlist is empty OR the email has no user row yet (operator hasn't
  * signed in), we log a warn and skip the audit; the throttle state itself
  * still applies via getThrottleState. Self-host parity holds: operators
@@ -256,7 +257,7 @@ export async function markThrottleTransition(args: {
   // audit row; the (date_pacific, state) composite is the natural idempotency
   // key — adding a userId filter here would defeat the cross-restart guard.
   // The row IS still written under a real operator user_id by writeAudit
-  // below (Phase 02.2 audit_log.user_id NOT NULL contract holds).
+  // below (audit_log.user_id NOT NULL contract holds).
   // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query
   const priorRows = await db
     .select({ id: auditLog.id })
@@ -309,8 +310,8 @@ export async function markThrottleTransition(args: {
 }
 
 /**
- * Called by the youtube.quota_reset cron handler (Plan 03.0-09) at midnight
- * Pacific. Clears the audit-emission gate and resets the round-robin index so
+ * Called by the youtube.quota_reset cron handler at midnight Pacific.
+ * Clears the audit-emission gate and resets the round-robin index so
  * a fresh day starts with predictable behaviour. Also drops the cached
  * operator id so a mid-day allowlist change picks up on next emission.
  */

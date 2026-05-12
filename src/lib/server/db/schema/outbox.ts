@@ -1,4 +1,4 @@
-// Phase 03.0.3 follow-up (PR #31 Codex P2) — transactional outbox table.
+// Transactional outbox table.
 //
 // CROSS-TENANT BY DESIGN. This is a queue-intent table: rows describe
 // pg-boss jobs to be sent. Tenant context is inside `payload`; the
@@ -56,14 +56,13 @@ export const outbox = pgTable(
     lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
   },
   (t) => [
-    // Phase 03.0.3 round-5 (Codex P2) — partial index matching
-    // migration 0029's `CREATE INDEX outbox_pending_idx ON outbox
-    // (created_at) WHERE forwarded_at IS NULL`. Without the `.where`
-    // chain the schema would diverge from the applied migration and
-    // a future `drizzle-kit generate` could regenerate the index
-    // without the partial clause — defeating the forwarder's
-    // pending-scan optimisation (full index over every forwarded
-    // row instead of the tight pending tail).
+    // Partial index matching the applied migration's `CREATE INDEX
+    // outbox_pending_idx ON outbox (created_at) WHERE forwarded_at IS NULL`.
+    // Without the `.where` chain the schema would diverge from the applied
+    // migration and a future `drizzle-kit generate` could regenerate the
+    // index without the partial clause — defeating the forwarder's
+    // pending-scan optimisation (full index over every forwarded row
+    // instead of the tight pending tail).
     index("outbox_pending_idx")
       .on(t.createdAt)
       .where(sql`forwarded_at IS NULL`),

@@ -1,35 +1,26 @@
-// Widened DataSourceAdapter — Phase 03.0.1 D-01..D-17. Supersedes
-// src/lib/server/integrations/data-source-adapter.ts (deleted in Plan 03 once
-// youtubeAdapter is registered).
+// DataSourceAdapter — the per-source interface implementations register
+// against the registry.
 //
-// Plan 01 landed this file co-existing with the legacy interface; Plan 03
-// wires the YouTube adapter in and deletes the legacy file.
-//
-// Differences from the legacy interface (see data-source-adapter.ts):
-//   - parseUrl(url) — per-adapter URL detection (D-15 first-match-wins).
-//   - observability — per-adapter quota/audit/auth API for /admin/quota tabs
-//     (D-08).
+// Surface includes:
+//   - parseUrl(url) — per-adapter URL detection (first-match-wins).
+//   - observability — per-adapter quota/audit/auth API for /admin/quota tabs.
 //   - registerQueues / scheduleCronTicks / backfillSource — adapter owns its
-//     queue topology and cron schedules (D-10 per-kind queues).
+//     queue topology and cron schedules (per-kind queues).
 //   - canRefreshPoll — optional dispatch hint for the generic
-//     POST /api/sources/:id/refresh-content endpoint (Plan 10).
+//     POST /api/sources/:id/refresh-content endpoint.
 //
-// Plan 03 deviation note (Rule 3 — blocking issue): the v0.1 adapter methods
-// (pollContent / pollStats / pollStatsByVideoId) keep their legacy `PickedKey`
-// + `quotaUser` signatures because callers (poll-active / poll-cold /
-// poll-user / rehab-unavailable) still thread a pre-resolved key down for the
-// `youtube_service_quota_usage` row keyed under the same apiKeyId the adapter
-// burned (PickedKey jsdoc rationale; load-bearing with N≥2 keys). Moving
-// picking INSIDE the adapter (D-06 Thick scope) requires either returning
-// apiKeyId on every StatsSnapshot or threading ctx into pickCredentials —
-// both are non-trivial behavioral changes that land in Plan 04 (services
-// move) / Plan 08 (observability + reservoir) once the supporting
-// infrastructure is in place. Plan 01's widened-interface comment ("ctx
-// instead of PickedKey") was aspirational; Plan 03 reconciles to reality.
+// The v0.1 adapter methods (pollContent / pollStats / pollStatsByVideoId)
+// keep legacy `PickedKey` + `quotaUser` signatures because callers
+// (poll-active / poll-cold / poll-user / rehab-unavailable) still thread
+// a pre-resolved key down for the `youtube_service_quota_usage` row keyed
+// under the same apiKeyId the adapter burned (load-bearing with N≥2 keys).
+// Moving picking INSIDE the adapter requires either returning apiKeyId
+// on every StatsSnapshot or threading ctx into pickCredentials — both
+// are non-trivial behavioral changes deferred until the supporting
+// infrastructure is in place.
 //
-// AdapterContext is still defined here because parseUrl-iteration callers
-// (Plan 06) and backfillSource (Plan 10) consume it directly; the legacy
-// methods just don't take it yet.
+// AdapterContext is defined here because parseUrl-iteration callers and
+// backfillSource consume it directly; the legacy methods don't take it yet.
 
 import type { dataSources, events } from "$lib/server/db/schema/index.js";
 import type { DbOrTx } from "$lib/server/db/client.js";
@@ -90,14 +81,13 @@ export interface PollableSource {
 }
 
 /** AdapterContext threads tenant + origin into adapter calls so credential
- *  picking + rate-limit budget split happen inside the adapter (D-06, D-09).
- *  Plan 03: parseUrl-iterators (Plan 06) and backfillSource (Plan 10) consume
- *  this; the v0.1 poll methods still take PickedKey directly until Plan 04/08
- *  refactors picking inside. */
+ *  picking + rate-limit budget split happen inside the adapter. Consumed by
+ *  parseUrl-iterators and backfillSource; the v0.1 poll methods still take
+ *  PickedKey directly. */
 export interface AdapterContext {
   userId: string | null;
   origin: "cron" | "user";
-  /** Phase 03.0.3 follow-up — how the playlist walker decides when to stop.
+  /** How the playlist walker decides when to stop.
    *  - "depth" (default): items with publishedAt <= since are dropped AND
    *    end the walk. Use for deep walks where `since` is the historical floor
    *    (e.g. user widened backfill_target_since to epoch — walker stops at
@@ -108,7 +98,7 @@ export interface AdapterContext {
    *    (channel previously walked; we just want what's new). Backdated
    *    uploads with publishedAt below newestKnown but NOT yet in cache
    *    survive — they get collected because cache-miss means "we have not
-   *    seen this video before", which is the D-#29-1 invariant. */
+   *    seen this video before". */
   walkStop?: "depth" | "overlap";
 }
 
@@ -124,19 +114,13 @@ export interface AdapterContext {
  * a 100-video batch fans out into 2 chunks but both HTTP calls hit the
  * same key, the same counter row updates, and the operator's
  * /admin/quota dashboard reflects predictable round-robin balance.
- *
- * Phase 03.0.1 Plan 03 keeps PickedKey in the contract. Plan 04/08 will
- * either return apiKeyId on every snapshot or thread AdapterContext into
- * pickCredentials inside the adapter — both follow the Thick-adapter D-06
- * direction but require schema-level changes that don't fit Plan 03's
- * relocation-only scope.
  */
 export interface PickedKey {
   apiKey: string;
   apiKeyId: string;
 }
 
-/** Per-adapter URL detection result — D-15 first-match-wins iteration. */
+/** Per-adapter URL detection result — first-match-wins iteration. */
 export interface ParsedUrl {
   kind: EventKind;
   externalId: string;
@@ -181,8 +165,8 @@ export interface ObservabilityAuditEntry {
 /** Per-adapter quota counter declaration — adapters expose their per-user
  *  rolling quotas (e.g. youtube_metadata_fetches_per_day) so cross-source
  *  services/quota.ts iterates `allAdapters[*].observability.quotaCounters`
- *  instead of switching on a hard-coded list. Phase 03.1+ Reddit adapter
- *  declares its own counters; quota.ts code stays unchanged.
+ *  instead of switching on a hard-coded list. New adapters declare their
+ *  own counters; quota.ts code stays unchanged.
  *
  *  count() receives `dbCtx: DbOrTx` so it can be invoked under the per-user
  *  advisory lock inside withQuotaGuard's transaction (race-safe limit check).
@@ -229,7 +213,7 @@ export interface AdapterObservability {
     getDailyStats(date: Date): Promise<ObservabilityDailyStats>;
     getRecentAudit(limit: number): Promise<ObservabilityAuditEntry[]>;
   };
-  /** Per-adapter rolling-window quota counters (Phase 03.0.1 D-19).
+  /** Per-adapter rolling-window quota counters.
    *  Cross-source services/quota.ts iterates these to compute current
    *  usage; new sources add their counters here, no quota.ts edit needed. */
   quotaCounters?: ReadonlyArray<AdapterQuotaCounter>;
@@ -239,15 +223,15 @@ export interface AdapterObservability {
    *  audit metadata для visibility но не denial). */
   userQuotaCap?: AdapterUserQuotaCap;
   /**
-   * Phase 03.0.1 (post-review) — adapter declares whether it maintains
-   * in-process rate-limit state (e.g., RateLimiterMemory reservoirs that
-   * lose state on worker restart). Worker bootstrap iterates and refuses
-   * to start with WORKER_REPLICA_COUNT > 1 if ANY adapter sets this true,
-   * because per-process reservoirs would each hold independent budgets →
-   * N × envelope burn → quota overshoot. Pre-fix the assertion hardcoded
-   * the YouTube migration message; making it adapter-declared lets the
-   * generic worker bootstrap accumulate offending adapters and surface a
-   * truthful error message when N>1 platforms ship in-process state.
+   * Adapter declares whether it maintains in-process rate-limit state
+   * (e.g., RateLimiterMemory reservoirs that lose state on worker
+   * restart). Worker bootstrap iterates and refuses to start with
+   * WORKER_REPLICA_COUNT > 1 if ANY adapter sets this true, because
+   * per-process reservoirs would each hold independent budgets →
+   * N × envelope burn → quota overshoot. Making the property
+   * adapter-declared lets the generic worker bootstrap accumulate
+   * offending adapters and surface a truthful error message when
+   * N>1 platforms ship in-process state.
    *
    * When false / omitted: adapter uses persistent counters only
    * (RateLimiterPostgres, DB-backed) — replica scaling is safe.
@@ -289,10 +273,9 @@ export interface CreateContext {
 /** Post-create hook payload — minimum set the YouTube context-backfill enqueue
  *  needs. Adapters that don't need this fields ignore them.
  *
- *  Phase 03.0.1 Wave 3 — extended with channelId, backfillTargetSince,
- *  isOwnedByMe so adapters can implement zero-quota onboarding (bulk
- *  INSERT events for new subscriber from existing channel cache without
- *  making any HTTP calls). */
+ *  Includes channelId, backfillTargetSince, isOwnedByMe so adapters can
+ *  implement zero-quota onboarding (bulk INSERT events for new subscriber
+ *  from existing channel cache without making any HTTP calls). */
 export interface SourceCreatedHookSource {
   id: string;
   userId: string;
@@ -312,10 +295,10 @@ export interface SourceCreatedHookSource {
   isOwnedByMe: boolean;
 }
 
-/** Discriminated result of fetchEventPreviewMetadata — Phase 03.0.1 D-20.
- *  Maps to the legacy YouTube oEmbed result shape (events.ts:559-568) so
- *  the cross-source enrichFromUrl path is per-adapter without leaking
- *  YouTube-specific error vocab into other adapters' impl. */
+/** Discriminated result of fetchEventPreviewMetadata.
+ *  Maps to the YouTube oEmbed result shape so the cross-source
+ *  enrichFromUrl path is per-adapter without leaking YouTube-specific
+ *  error vocab into other adapters' impl. */
 export type EventPreviewMetadata =
   | {
       kind: "ok";
@@ -350,8 +333,8 @@ export type AdapterAppContext = {
 };
 
 /** Minimal pg-boss surface the adapter consumes — keeps the adapter decoupled
- *  from pg-boss major-version type drift (Phase 1 Plan 03 MinimalBoss
- *  pattern). Plan 03 widens this if youtubeAdapter needs more verbs. */
+ *  from pg-boss major-version type drift. Widen if a new adapter needs more
+ *  verbs. */
 export interface MinimalBoss {
   work(
     name: string,
@@ -385,8 +368,8 @@ export interface DataSourceAdapter {
    *   - `unitsUsed`: exact upstream HTTP request count made by the adapter
    *     (1 per chargedFetch call for YouTube; varies per platform). Worker
    *     writes this to audit_log.metadata.requests_used for the per-user
-   *     cap counter. Pre-Phase-03.0.1 the worker estimated via
-   *     `ceil(events/page_size)` which under-counted multi-page walks.
+   *     cap counter. Estimating via `ceil(events/page_size)` would
+   *     under-count multi-page walks.
    *
    * Throws `AdapterError` when the adapter could NOT determine the answer
    * (rate-limit, network failure, parse error, auth-issue). Worker leaves
@@ -399,9 +382,8 @@ export interface DataSourceAdapter {
    *   from rate-limit failure may need a richer return type — see
    *   SOURCE-REFERENCE.md §8 for the proposed `hasMore` extension.
    *
-   * v0.1 surface — preserved verbatim from legacy data-source-adapter.ts.
-   * Plan 04/08 will move credential picking INSIDE the adapter (D-06 Thick
-   * scope); until then the caller threads PickedKey down.
+   * v0.1 surface: caller threads PickedKey down. Credential picking may
+   * later move INSIDE the adapter (thick-adapter direction).
    */
   pollContent(
     source: PollableSource,
@@ -446,7 +428,7 @@ export interface DataSourceAdapter {
     quotaUser: string,
     picked: PickedKey,
   ): Promise<StatsSnapshot[]>;
-  /** Phase 03.0.1 widened-contract surface (Plans 06/08/05/07/10). */
+  /** Widened-contract surface. */
   parseUrl(url: string): ParsedUrl | null;
   readonly observability: AdapterObservability;
   registerQueues(boss: MinimalBoss): Promise<void>;
@@ -477,7 +459,7 @@ export interface DataSourceAdapter {
    */
   reconcileRuntimeState?(): Promise<void>;
 
-  /** Phase 03.0.1 D-18 — create-time adapter hooks. Cross-source createSource
+  /** Create-time adapter hooks. Cross-source createSource
    *  (services/data-sources.ts) calls these so per-source URL canonicalization
    *  + auto-import init don't live in the cross-source code. */
 
@@ -497,13 +479,13 @@ export interface DataSourceAdapter {
     opts: { backfillWindow: BackfillWindow },
   ): Promise<void>;
 
-  /** Phase 03.0.1 D-20 — adapter-driven event preview (POST /api/events/preview-url
-   *  + ingest paste flow). After URL is parsed + routed, the adapter is asked
+  /** Adapter-driven event preview (POST /api/events/preview-url + ingest
+   *  paste flow). After URL is parsed + routed, the adapter is asked
    *  to fetch a friendly preview (title / authorName / authorUrl).
    *  YouTube: fetchYoutubeOembed wrapper. */
   fetchEventPreviewMetadata?(canonicalUrl: string): Promise<EventPreviewMetadata>;
 
-  /** Phase 03.0.1 Wave 4 (post-UAT) — sync stats fetch on manual event paste.
+  /** Sync stats fetch on manual event paste.
    *
    *  After createEventFromPaste creates the events row from oEmbed data
    *  (title only, no stats), this method is called to fetch view/like/
@@ -523,31 +505,31 @@ export interface DataSourceAdapter {
     ctx: { userId: string },
   ): Promise<{ viewCount: number; likeCount: number; commentCount: number } | null>;
 
-  /** Phase 03.0.1 D-21 — per-adapter event-input validation. Cross-source
-   *  createEvent / updateEvent calls this when the merged event.kind matches
-   *  this adapter's source kind (via eventKindToSourceKind). YouTube: require
+  /** Per-adapter event-input validation. Cross-source createEvent /
+   *  updateEvent calls this when the merged event.kind matches this
+   *  adapter's source kind (via eventKindToSourceKind). YouTube: require
    *  URL parseable as youtube_video. Throws AppError on invalid input. */
   validateEventInput?(input: { kind: string; url?: string | null }): void;
 
-  /** Phase 03.0.1 D-22 — batch lookup of live poll-state for events of this
-   *  adapter's kinds. dto.ts's overlayPollStateOnEvents iterates allAdapters
-   *  and merges results. YouTube: SELECT publishedAt/lastPolledAt/lastPollStatus
+  /** Batch lookup of live poll-state for events of this adapter's kinds.
+   *  dto.ts's overlayPollStateOnEvents iterates allAdapters and merges
+   *  results. YouTube: SELECT publishedAt/lastPolledAt/lastPollStatus
    *  from youtube_videos by externalId IN (…). */
   fetchPollStateMap?(
     userId: string,
     externalIds: readonly string[],
   ): Promise<Map<string, AdapterPollState>>;
 
-  /** Phase 03.0.1 D-23 — adapter-owned HTTP routes. Called once at app boot
-   *  by createApp(); the adapter mounts its routes on the shared Hono
-   *  instance. YouTube: mounts /api/youtube/fetch-metadata (preview button on
-   *  /events/new). Synchronous mount per Hono's contract. */
+  /** Adapter-owned HTTP routes. Called once at app boot by createApp();
+   *  the adapter mounts its routes on the shared Hono instance. YouTube:
+   *  mounts /api/youtube/fetch-metadata (preview button on /events/new).
+   *  Synchronous mount per Hono's contract. */
   registerRoutes?(app: Hono<AdapterAppContext>): void;
 
   /**
-   * Phase 03.0.3 P2 (D-A1) — enrich the supplied feed DTOs in-place with
-   * adapter-specific data (stats, channel/author metadata, anything that
-   * lives in per-kind metadata tables and renders on FeedCard).
+   * Enrich the supplied feed DTOs in-place with adapter-specific data
+   * (stats, channel/author metadata, anything that lives in per-kind
+   * metadata tables and renders on FeedCard).
    *
    * Cross-source callsites (/feed loader, GET /api/events, /games/[id])
    * iterate allAdapters and call this method per adapter. The adapter
@@ -565,8 +547,7 @@ export interface DataSourceAdapter {
    *
    * Deliberately NOT called from GET /api/events/deleted — DeletedEventsPanel
    * renders a compact KindIcon + strikethrough-title view that needs none
-   * of the enrichment data. See events.ts:374 for the load-bearing skip
-   * comment.
+   * of the enrichment data. See events.ts for the load-bearing skip comment.
    */
   enrichFeedDtos?(userId: string, dtos: EventDto[]): Promise<void>;
 }

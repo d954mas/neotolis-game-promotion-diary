@@ -1,10 +1,9 @@
-// Phase 3.0 Plan 07 — GET /api/admin/quota.
+// GET /api/admin/quota — allowlist-gated operator dashboard endpoint.
 //
-// Allowlist-gated operator dashboard endpoint. Auth (tenantScope) +
-// allowlist (adminAllowlist) are mounted in app.ts BEFORE this router so
-// every request reaching here is already (a) authenticated and (b) in the
-// ADMIN_EMAIL_ALLOWLIST. The handler does no further auth — just reads the
-// service layer.
+// Auth (tenantScope) + allowlist (adminAllowlist) are mounted in app.ts
+// BEFORE this router so every request reaching here is already
+// (a) authenticated and (b) in the ADMIN_EMAIL_ALLOWLIST. The handler
+// does no further auth — just reads the service layer.
 //
 // Returns:
 //   {
@@ -14,9 +13,9 @@
 //   }
 //
 // CROSS-TENANT BY DESIGN: the audit aggregation across tenants is the
-// operator signal pane (D-16 / DV-3). The security property is the
-// allowlist gate, not row-level userId scoping. See admin-quota-read.ts for
-// the AGENTS.md-compliant eslint-disable justification on the underlying
+// operator signal pane. The security property is the allowlist gate, not
+// row-level userId scoping. See admin-quota-read.ts for the
+// AGENTS.md-compliant eslint-disable justification on the underlying
 // query.
 
 import { Hono } from "hono";

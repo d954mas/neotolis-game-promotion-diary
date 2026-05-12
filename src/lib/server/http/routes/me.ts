@@ -1,12 +1,12 @@
-// GET /api/me handler (Plan 01-07 — Wave 4).
+// GET /api/me handler.
 //
-// Phase 1's only authenticated /api/* route. Phase 2 adds /api/games and
-// expands the surface; the error-translation pattern below (AppError →
-// status code + `{error: code}` body) is what every later route reuses.
+// The error-translation pattern (AppError → status code + `{error: code}`
+// body) is what every later route reuses.
 //
-// PRIV-01: this route is mounted UNDER tenantScope (see src/lib/server/http/app.ts),
-// so anonymous requests never reach this handler — they're intercepted by the
-// middleware and returned 401. The handler body assumes `c.var.userId` is set.
+// This route is mounted UNDER tenantScope (see
+// src/lib/server/http/app.ts), so anonymous requests never reach this
+// handler — they're intercepted by the middleware and returned 401. The
+// handler body assumes `c.var.userId` is set.
 
 import { Hono } from "hono";
 import { getMe } from "../../services/me.js";
@@ -24,8 +24,8 @@ meRoutes.get("/me", async (c) => {
     return c.json(me);
   } catch (err) {
     if (err instanceof NotFoundError) {
-      // PRIV-01: cross-tenant / vanished-row → 404 with `not_found` code.
-      // Body NEVER contains "forbidden" or "permission" (P1 invariant).
+      // Cross-tenant / vanished-row → 404 with `not_found` code.
+      // Body NEVER contains "forbidden" or "permission".
       return c.json({ error: "not_found" }, 404);
     }
     if (err instanceof AppError) {

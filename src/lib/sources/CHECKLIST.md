@@ -119,7 +119,7 @@ Per-platform required tests:
 - [ ] **End-to-end catch-up flow.** Click refresh-content → endpoint → boss enqueue → handler → events INSERT → audit row → cap counter increments. Mock `getBoss` and adapter's `pollContent`.
 - [ ] **Cap exhaustion error codes.** Seed audit rows at cap, verify endpoint returns 429 with correct error code (`requests_quota_exhausted` / `events_quota_exhausted` / `platform_quota_exhausted` / `rate_limited`).
 - [ ] **parseUrl coverage.** Each URL shape supported by the platform.
-- [ ] **AuditFlow sync.** Update `tests/unit/audit-flow-sync.test.ts` if adding new flow values (also requires migration to extend the CHECK constraint — see Phase 03.0.1 lockstep convention).
+- [ ] **AuditFlow sync.** Update `tests/unit/audit-flow-sync.test.ts` if adding new flow values (also requires migration to extend the CHECK constraint — TS const + migration in lockstep).
 
 ---
 
@@ -144,13 +144,13 @@ Before merging the platform PR:
 
 ---
 
-## Known gaps (Phase 03.0.1 reference state)
+## Known gaps
 
 These are documented gaps that future platform authors may bump into. None are blockers — workarounds exist — but flagging here so you're not surprised:
 
-- **PickedKey threading** (Plan 04 deferred). `pollContent` / `pollStats` / `pollStatsByVideoId` accept `PickedKey` from the caller (caller-side credential picking). YouTube round-robins across multiple operator API keys. If your platform has N≥2 OAuth tokens and wants round-robin per request, you'll need to thread PickedKey through the same way. Plan 04 will refactor this so the adapter picks internally; until then, copy the YouTube pattern verbatim.
-- **Rolling-window quota shapes** (Issue 6 deferred). `userQuotaCap` only supports daily windows. Platforms with rolling caps (Reddit 600/10min) pick one of three documented options in `SOURCE-REFERENCE.md` §9.
-- **UI server cast** (registry-ui.ts:26). `as unknown as AdapterUiServer` cast is a known type-narrowing smell. Will be cleaned up when the second UI adapter lands and the actual abstraction shape becomes concrete.
+- **PickedKey threading.** `pollContent` / `pollStats` / `pollStatsByVideoId` accept `PickedKey` from the caller (caller-side credential picking). YouTube round-robins across multiple operator API keys. If your platform has N≥2 OAuth tokens and wants round-robin per request, you'll need to thread PickedKey through the same way. A future refactor may move picking into the adapter; until then, copy the YouTube pattern verbatim.
+- **Rolling-window quota shapes.** `userQuotaCap` only supports daily windows. Platforms with rolling caps (Reddit 600/10min) pick one of three documented options in `SOURCE-REFERENCE.md` §9.
+- **UI server cast** (registry-ui.ts). `as unknown as AdapterUiServer` cast is a known type-narrowing smell. Will be cleaned up when the second UI adapter lands and the actual abstraction shape becomes concrete.
 
 ---
 

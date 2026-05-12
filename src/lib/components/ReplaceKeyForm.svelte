@@ -1,10 +1,10 @@
 <script lang="ts">
   // ReplaceKeyForm — paste-form for adding or replacing a Steam Web API key.
-  // Reused for both flows (D-14): mode='add' POSTs /api/api-keys/steam,
+  // Reused for both flows: mode='add' POSTs /api/api-keys/steam,
   // mode='replace' PATCHes /api/api-keys/steam/:id.
   //
   // The submit is gated by a non-empty value (Steam keys are 32 hex chars,
-  // but we don't validate length here — the server's D-17 test-call against
+  // but we don't validate length here — the server's test-call against
   // IWishlistService is the source of truth; surface its error via
   // InlineError if it rejects).
 

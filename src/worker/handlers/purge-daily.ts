@@ -1,4 +1,4 @@
-// Phase 3.0 Plan 09 — daily purge cron handler (PRIV-04 / GDPR Art. 17).
+// Daily purge cron handler (GDPR Art. 17).
 //
 // Fires at 04:00 America/Los_Angeles (after the nightly backup at 03:00) —
 // the operator wants the backup to capture the soft-deleted user's data
@@ -6,13 +6,13 @@
 // purged today is still in yesterday's backup if recovery is needed.
 //
 // Pipeline:
-//   1. listPurgeEligibleUsers() — Plan 05 helper. Returns user_ids whose
-//      deletedAt is older than RETENTION_DAYS (default 60). Active users
-//      (deletedAt IS NULL) are excluded by construction.
+//   1. listPurgeEligibleUsers() returns user_ids whose deletedAt is older
+//      than RETENTION_DAYS (default 60). Active users (deletedAt IS NULL)
+//      are excluded by construction.
 //   2. For each eligible user, call purgeAccount(userId). Per-user errors
 //      are caught + logged so one failure doesn't abort the rest of the
-//      sweep. purgeAccount itself is idempotent (Plan 05 contract) so a
-//      re-run on partial failure is safe.
+//      sweep. purgeAccount itself is idempotent so a re-run on partial
+//      failure is safe.
 //
 // The purge.completed audit row is written by purgeAccount itself — no
 // audit work in this handler.
@@ -48,11 +48,11 @@ export async function handlePurgeDaily(job: { id: string; data: object }): Promi
     }
   }
 
-  // Phase 03.0.3 follow-up — outbox cleanup. Forwarded rows older than
-  // 7 days are deleted. Pending rows (forwarded_at IS NULL) are NEVER
-  // touched here regardless of age — they represent stuck intents the
-  // operator must investigate manually (likely a persistent boss.send
-  // failure that exhausted MAX_ATTEMPTS in outbox-forwarder.ts).
+  // Outbox cleanup. Forwarded rows older than 7 days are deleted. Pending
+  // rows (forwarded_at IS NULL) are NEVER touched here regardless of age —
+  // they represent stuck intents the operator must investigate manually
+  // (likely a persistent boss.send failure that exhausted MAX_ATTEMPTS in
+  // outbox-forwarder.ts).
   try {
     const cutoff = new Date(Date.now() - OUTBOX_RETENTION_DAYS * 86_400_000);
     const deleted = await deleteForwardedOutboxRows(cutoff);

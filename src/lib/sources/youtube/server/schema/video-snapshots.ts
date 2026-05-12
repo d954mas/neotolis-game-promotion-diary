@@ -1,7 +1,7 @@
-// youtube_video_snapshots — Phase 3.0 Plan 01.
+// youtube_video_snapshots.
 //
-// PUBLIC-DATA TABLE — no `user_id` column by design (CONTEXT D-07). Snapshot
-// rows hold YouTube viewCount / likeCount / commentCount aggregated against
+// PUBLIC-DATA TABLE — no `user_id` column by design. Snapshot rows hold
+// YouTube viewCount / likeCount / commentCount aggregated against
 // `video_id`; the same numbers apply to every tenant who has an event for
 // that video, so storing per-tenant copies would waste disk and burn quota
 // for no privacy benefit. ESLint TENANT_TABLES allowlist extends the
@@ -9,11 +9,11 @@
 // no tenant scope" comment so the no-unfiltered-tenant-query rule does not
 // trip on legitimate `db.select().from(youtubeVideoSnapshots)` calls.
 //
-// Worker write pattern (Plan 03.0-04): one row per successful poll, with
+// Worker write pattern: one row per successful poll, with
 // `(video_id, polled_at)` UNIQUE making within-the-minute retries idempotent
 // (`INSERT ... ON CONFLICT DO NOTHING`). `polled_at` is `date_trunc('minute',
 // now())` at insert time so two retries inside the same minute collapse to
-// one row. Counts are bigint (popular videos exceed 2^31) per RESEARCH.md.
+// one row. Counts are bigint (popular videos exceed 2^31).
 
 import { pgTable, text, bigint, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { uuidv7 } from "$lib/server/ids.js";
@@ -33,11 +33,11 @@ export const youtubeVideoSnapshots = pgTable(
   },
   (t) => ({
     // (video_id, polled_at) — UNIQUE index doubles as both the idempotency
-    // guard for Plan 03.0-04's INSERT ON CONFLICT DO NOTHING retries AND
-    // the read index the chart loader scans for "show last N points for
-    // video X". A non-unique sibling on the same columns shipped in the
-    // 0010 baseline alongside this; migration 0015 dropped it (paid two
-    // B-tree updates per snapshot insert for no extra read coverage).
+    // guard for INSERT ON CONFLICT DO NOTHING retries AND the read index
+    // the chart loader scans for "show last N points for video X". A
+    // non-unique sibling on the same columns shipped in the 0010 baseline
+    // alongside this; migration 0015 dropped it (paid two B-tree updates
+    // per snapshot insert for no extra read coverage).
     videoPolledUnq: uniqueIndex("youtube_video_snapshots_video_polled_unq").on(
       t.videoId,
       t.polledAt,

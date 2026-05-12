@@ -25,17 +25,10 @@ const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js")
 const { seedUserDirectly } = await import("./helpers.js");
 
 /**
- * Plan 02-09 — UX-01 theme cookie + DB persist.
- *
- * Wave 0 placeholder names PRESERVED — the three `02-09: UX-01 ...` it.skip
- * stubs from Plan 02-01 are flipped here. The third (cookie-wins
- * reconciliation on signin) stays as `it.skip` with a Plan 10 deferral
- * annotation: the wire is in src/routes/+layout.server.ts which Plan 10
- * amends, so attempting it here would either duplicate Plan 10 work or
- * vacuous-pass against an unwired endpoint.
+ * Theme cookie + DB persist.
  */
-describe("theme cookie + DB persist (UX-01)", () => {
-  it("02-09: UX-01 SSR no flash (locals.theme set before handler)", async () => {
+describe("theme cookie + DB persist", () => {
+  it("SSR no flash (locals.theme set before handler)", async () => {
     // The SSR no-flash contract has two halves:
     //   1. event.locals.theme is populated BEFORE the page handler runs
     //      (so any +page.server.ts can read it).
@@ -76,7 +69,7 @@ describe("theme cookie + DB persist (UX-01)", () => {
     expect(rewritten).not.toMatch(/%theme%/);
   });
 
-  it("02-09: UX-01 themeHandle defaults to 'system' on missing/invalid cookie", async () => {
+  it("themeHandle defaults to 'system' on missing/invalid cookie", async () => {
     // Defense-in-depth check: an absent or rogue cookie value MUST resolve
     // to 'system' rather than blow up or leak the rogue string into
     // data-theme. The SET membership check in themeHandle covers this.
@@ -106,7 +99,7 @@ describe("theme cookie + DB persist (UX-01)", () => {
     }
   });
 
-  it("02-09: UX-01 POST /api/me/theme updates cookie + DB + audits theme.changed", async () => {
+  it("POST /api/me/theme updates cookie + DB + audits theme.changed", async () => {
     const app = createApp();
     const u = await seedUserDirectly({ email: "th@test.local" });
 
@@ -121,8 +114,8 @@ describe("theme cookie + DB persist (UX-01)", () => {
     expect(res.status).toBe(200);
 
     // Set-Cookie carries __theme=dark with the right attributes and NO
-    // HttpOnly (Pitfall 5 — SvelteKit's client-side runtime reads the
-    // cookie pre-paint to flip CSS classes).
+    // HttpOnly — SvelteKit's client-side runtime reads the cookie
+    // pre-paint to flip CSS classes.
     const setCookie = res.headers.get("set-cookie") ?? "";
     expect(setCookie).toContain("__theme=dark");
     expect(setCookie).toContain("Path=/");
@@ -146,11 +139,11 @@ describe("theme cookie + DB persist (UX-01)", () => {
     expect(meta).toMatchObject({ from: "system", to: "dark" });
   });
 
-  it("Plan 02.1-09: AppHeader does NOT render ThemeToggle (relocation to /settings)", async () => {
-    // UI-SPEC §"`<AppHeader>` UI polish": theme toggle is REMOVED from the
-    // header in Phase 2.1 (P1 UAT — clutter on every page). The toggle
-    // relocates to /settings only. We render <AppHeader> server-side and
-    // assert the theme-toggle's stable selector (aria-label) is absent.
+  it("AppHeader does NOT render ThemeToggle (relocation to /settings)", async () => {
+    // The theme toggle is REMOVED from the header (clutter on every
+    // page). The toggle relocates to /settings only. We render
+    // <AppHeader> server-side and assert the theme-toggle's stable
+    // selector (aria-label) is absent.
     const { render } = await import("svelte/server");
     const AppHeader = (await import("../../src/lib/components/AppHeader.svelte")).default;
     const out = render(AppHeader, {
@@ -165,7 +158,7 @@ describe("theme cookie + DB persist (UX-01)", () => {
     expect(html).not.toContain("Toggle color theme");
   });
 
-  it("Plan 02.1-09: ThemeToggle renders exactly once on /settings (relocation)", async () => {
+  it("ThemeToggle renders exactly once on /settings (relocation)", async () => {
     // The same ThemeToggle's aria-label appears exactly once on /settings.
     // We render the toggle directly here (the full settings page requires
     // a parent layout context that's not trivial to seed in unit/integration
@@ -177,20 +170,20 @@ describe("theme cookie + DB persist (UX-01)", () => {
     const out = render(ThemeToggle, { props: { current: "system" as const } });
     const html = out.body;
     expect(html).toContain("Toggle color theme");
-    // The settings page is the sole consumer in 2.1.
+    // The settings page is the sole consumer.
     const fs = await import("node:fs");
     const settings = fs.readFileSync("src/routes/settings/+page.svelte", "utf8");
     expect(settings).toContain("ThemeToggle");
     const header = fs.readFileSync("src/lib/components/AppHeader.svelte", "utf8");
     // AppHeader's comment block historically references <ThemeToggle> to
-    // document the Plan 02.1-09 relocation. The load-bearing relocation
-    // signal is the absence of the IMPORT — JSX-style references survive
-    // in commentary so the historical narrative stays readable.
+    // document the relocation. The load-bearing relocation signal is
+    // the absence of the IMPORT — JSX-style references survive in
+    // commentary so the historical narrative stays readable.
     expect(header).not.toMatch(/from ['"][^'"]*ThemeToggle\.svelte['"]/);
   });
 
-  it("02-10: UX-01 cookie wins on signin reconciliation (+layout.server.ts)", async () => {
-    // Plan 10 wires the cookie-wins reconciliation in
+  it("cookie wins on signin reconciliation (+layout.server.ts)", async () => {
+    // The cookie-wins reconciliation lives in
     // src/routes/+layout.server.ts. When an authenticated user has a valid
     // __theme cookie that disagrees with the DB themePreference, the
     // cookie wins — the DB is updated to match.

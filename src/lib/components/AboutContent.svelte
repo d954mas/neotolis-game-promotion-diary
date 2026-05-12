@@ -3,12 +3,11 @@
   // canonical landing) and `/about/+page.svelte` (alias kept for backward
   // compat + Nav About tab + back-links from /privacy /terms).
   //
-  // Codex PR #15 follow-up: the previous shape was `/` → 303 → `/about`
-  // for anonymous, which is non-standard SEO (search engines indexed
-  // /about as the landing instead of /). This component lets both URLs
-  // render identical content; `<link rel="canonical">` points both to
-  // `/`, so Google treats `/` as the canonical landing and `/about` as
-  // an alias.
+  // The previous shape was `/` → 303 → `/about` for anonymous, which is
+  // non-standard SEO (search engines indexed /about as the landing
+  // instead of /). This component lets both URLs render identical
+  // content; `<link rel="canonical">` points both to `/`, so Google
+  // treats `/` as the canonical landing and `/about` as an alias.
   //
   // The "Sign in with Google" CTA in the hero is gated by `!data.user`
   // so signed-in users opening `/about` directly (via Nav) don't see a

@@ -1,4 +1,4 @@
-// Phase 03.0.1 architecture cleanup — mapErr sanitization regression guard.
+// mapErr sanitization regression guard.
 //
 // POST /api/sources/:id/refresh-content uses mapErr (src/lib/server/http/routes/_shared.ts)
 // to translate any unhandled error into the wire envelope. mapErr's contract:

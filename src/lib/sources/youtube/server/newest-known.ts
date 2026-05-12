@@ -1,5 +1,5 @@
 // Newest-known publishedAt cursor for the YouTube three-branch
-// since-derivation (Phase 03.0.3 P1; D-A2 / D-#29-1).
+// since-derivation.
 //
 // Returns MAX(youtube_videos.published_at) WHERE channel_id = $1, or null
 // when the channel has no rows yet (cold start — caller falls back to the

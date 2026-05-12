@@ -1,11 +1,11 @@
-// youtube_videos — Phase 3.0 post-build (UAT 2026-05-06) + per-video polling
-// refactor (2026-05-06).
+// youtube_videos — our local copy of YouTube video metadata + polling
+// state.
 //
-// Our local copy of YouTube video metadata + polling state. One row per
-// video, keyed on `video_id` (PK). PUBLIC-DATA — no `user_id` column by
-// design. Identical across every tenant who ever references this video.
+// One row per video, keyed on `video_id` (PK). PUBLIC-DATA — no `user_id`
+// column by design. Identical across every tenant who ever references
+// this video.
 //
-// Phase 3.0 refactor moved polling state from `events` to here:
+// Polling state lives here (not on `events`):
 //   - `last_polled_at` / `last_poll_status` — last successful or failed
 //     attempt to fetch this video's metrics from Google. Properties of the
 //     VIDEO, not of the user-logged event. Multiple events referencing the
@@ -27,8 +27,8 @@
 // separate refactor.
 //
 // Populated by:
-//   - youtube-channel-context-backfill worker (Plan 03.0-09 / 10) — initial
-//     seed on each video discovered during a channel backfill.
+//   - youtube-channel-context-backfill worker — initial seed on each
+//     video discovered during a channel backfill.
 //   - poll-active / poll-cold workers — UPDATE last_polled_at +
 //     last_poll_status + poll_failure_count after each scheduler-driven
 //     poll, plus snapshot append.
@@ -42,7 +42,7 @@
 // ESLint allowlist mirror in eslint-plugin-tenant-scope/no-unfiltered-tenant-
 // query.js with the explicit "public external data, no tenant scope" comment.
 //
-// Retention contract (post-build review 2026-05-08):
+// Retention contract:
 //   Rows are NEVER garbage-collected, even when the last referencing event /
 //   data_source has been deleted. Future channel-level analytics (median
 //   views per channel, total reach, video count, publishing cadence) require
@@ -67,9 +67,9 @@ export const youtubeVideos = pgTable(
     channelTitle: text("channel_title"),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
-    // Phase 3.0 post-build refactor (2026-05-06) — polling state moved here
-    // from events. NULL on rows freshly inserted by ingest before
-    // channel-context-backfill has fetched stats.
+    // Polling state lives here (not on `events`). NULL on rows freshly
+    // inserted by ingest before channel-context-backfill has fetched
+    // stats.
     lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
     lastPollStatus: text("last_poll_status"),
     pollFailureCount: integer("poll_failure_count").notNull().default(0),

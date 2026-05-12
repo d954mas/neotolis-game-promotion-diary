@@ -3,7 +3,7 @@ import { detectFutureKind } from "$lib/sources/future-kinds.js";
 import { parseAnyUrl } from "$lib/sources/url.js";
 import { allAdapters } from "$lib/sources/registry.js";
 
-describe("detectFutureKind — Phase 03.0.1 RESEARCH.md SOTA divergence #3 (Reddit deferral preservation)", () => {
+describe("detectFutureKind — Reddit deferral preservation", () => {
   it("reddit.com → 'reddit_post'", () => {
     expect(detectFutureKind("https://reddit.com/r/IndieDev/comments/x/y")).toBe("reddit_post");
   });
@@ -16,7 +16,7 @@ describe("detectFutureKind — Phase 03.0.1 RESEARCH.md SOTA divergence #3 (Redd
   it("redd.it → 'reddit_post'", () => {
     expect(detectFutureKind("https://redd.it/abc123")).toBe("reddit_post");
   });
-  it("twitter.com → null (twitter not on the future-kinds map; out of 03.0.1 scope)", () => {
+  it("twitter.com → null (twitter not on the future-kinds map)", () => {
     expect(detectFutureKind("https://twitter.com/x/status/123")).toBeNull();
   });
   it("example.com → null", () => {
@@ -27,7 +27,7 @@ describe("detectFutureKind — Phase 03.0.1 RESEARCH.md SOTA divergence #3 (Redd
   });
 });
 
-describe("parseAnyUrl — D-15 first-match-wins iterate-registry", () => {
+describe("parseAnyUrl — first-match-wins iterate-registry", () => {
   it("registry has at least one adapter (precondition for first-match-wins)", () => {
     expect(allAdapters.length).toBeGreaterThanOrEqual(1);
   });
@@ -59,11 +59,11 @@ describe("parseAnyUrl — D-15 first-match-wins iterate-registry", () => {
     expect(r.kind).toBe("youtube_video");
   });
 
-  it("twitter.com URL → kind: 'unsupported' (no adapter for twitter in 03.0.1)", () => {
+  it("twitter.com URL → kind: 'unsupported' (no Twitter adapter registered)", () => {
     expect(parseAnyUrl("https://twitter.com/x/status/123").kind).toBe("unsupported");
   });
 
-  it("reddit.com URL → kind: 'unsupported' (registry layer; ingest.ts maps to reddit_pending_phase3)", () => {
+  it("reddit.com URL → kind: 'unsupported' (registry layer; ingest.ts maps to reddit_not_yet_supported)", () => {
     expect(parseAnyUrl("https://reddit.com/r/IndieDev").kind).toBe("unsupported");
   });
 

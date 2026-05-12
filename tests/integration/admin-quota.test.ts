@@ -1,4 +1,4 @@
-// Phase 3.0 Plan 07 — admin /quota route integration tests (Wave 0 placeholder activated).
+// Admin /quota route integration tests.
 //
 // Covers the full HTTP surface — auth + allowlist composition + 404 / 200
 // branches + cross-tenant audit aggregation. Each test re-imports
@@ -40,8 +40,8 @@ async function withAllowlist<T>(value: string, fn: () => Promise<T>): Promise<T>
   }
 }
 
-describe("admin /quota route (Plan 03.0-07)", () => {
-  it("Plan 03.0-07: anonymous → 401 (auth gate fires before allowlist gate)", async () => {
+describe("admin /quota route", () => {
+  it("anonymous → 401 (auth gate fires before allowlist gate)", async () => {
     await withAllowlist("admin@example.com", async () => {
       const { createApp } = await import("../../src/lib/server/http/app.js");
       const app = createApp();
@@ -51,7 +51,7 @@ describe("admin /quota route (Plan 03.0-07)", () => {
     });
   });
 
-  it("Plan 03.0-07: empty ADMIN_EMAIL_ALLOWLIST + valid session → 404 (self-host parity)", async () => {
+  it("empty ADMIN_EMAIL_ALLOWLIST + valid session → 404 (self-host parity)", async () => {
     await withAllowlist("", async () => {
       const { createApp } = await import("../../src/lib/server/http/app.js");
       const app = createApp();
@@ -67,7 +67,7 @@ describe("admin /quota route (Plan 03.0-07)", () => {
     });
   });
 
-  it("Plan 03.0-07: valid session + email NOT in allowlist → 404 (body excludes forbidden/permission)", async () => {
+  it("valid session + email NOT in allowlist → 404 (body excludes forbidden/permission)", async () => {
     await withAllowlist("someone-else@example.com", async () => {
       const { createApp } = await import("../../src/lib/server/http/app.js");
       const app = createApp();
@@ -83,7 +83,7 @@ describe("admin /quota route (Plan 03.0-07)", () => {
     });
   });
 
-  it("Plan 03.0-07: valid session + email IN allowlist → 200 + {today, keys, audit}", async () => {
+  it("valid session + email IN allowlist → 200 + {today, keys, audit}", async () => {
     const adminEmail = `p07-admin-${uniq()}@test.local`;
     await withAllowlist(adminEmail, async () => {
       const { createApp } = await import("../../src/lib/server/http/app.js");
@@ -105,7 +105,7 @@ describe("admin /quota route (Plan 03.0-07)", () => {
     });
   });
 
-  it("Plan 03.0-07: keys[] reflects today's youtube_service_quota_usage rows with status thresholds", async () => {
+  it("keys[] reflects today's youtube_service_quota_usage rows with status thresholds", async () => {
     const adminEmail = `p07-keys-${uniq()}@test.local`;
     const today = todayPacific();
     const keyOk = `ok${uniq()}`;
@@ -155,7 +155,7 @@ describe("admin /quota route (Plan 03.0-07)", () => {
     });
   });
 
-  it("Plan 03.0-07: audit[] aggregates SERVICE_LEVEL_AUDIT_ACTIONS across tenants (allowlist is the gate)", async () => {
+  it("audit[] aggregates SERVICE_LEVEL_AUDIT_ACTIONS across tenants (allowlist is the gate)", async () => {
     const adminEmail = `p07-aud-${uniq()}@test.local`;
     // Seed audit rows across multiple users with the surfaced + non-surfaced
     // action verbs so we can prove (a) cross-tenant aggregation works and
@@ -223,7 +223,7 @@ describe("admin /quota route (Plan 03.0-07)", () => {
     });
   });
 
-  it("Plan 03.0-07: case-insensitive allowlist match (uppercase env entry, lowercase caller)", async () => {
+  it("case-insensitive allowlist match (uppercase env entry, lowercase caller)", async () => {
     const adminEmailLower = `p07-case-${uniq()}@test.local`;
     // Operator types ALL CAPS by accident; reader normalizes at boot.
     await withAllowlist(adminEmailLower.toUpperCase(), async () => {

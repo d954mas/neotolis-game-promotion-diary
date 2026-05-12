@@ -1,22 +1,22 @@
 <script lang="ts">
-  // Phase 3.0 Plan 13 Task 3 — service-level audit list (last 50 entries).
+  // Service-level audit list (last 50 entries).
   //
   // Visually mirrors <AuditRow> from /audit but reads SERVICE-LEVEL audit
   // verbs (quota.service_throttled / purge.completed / auto_import.deferred /
   // poll.failed) instead of the per-tenant /audit feed. Sourced from
-  // /api/admin/quota response.audit (Plan 03.0-07).
+  // /api/admin/quota response.audit.
   //
-  // UI-SPEC contract (.planning/phases/03.0-polling-pipeline-plumbing-youtube/03.0-UI-SPEC.md):
+  // UI contract:
   //   - <ul> (semantic list) of <li> entries.
   //   - Each entry: <time datetime=...> · <code>{action}</code> · metadata
   //     summary (compact one-line; operator can drill into full audit log
   //     via /audit elsewhere if needed).
-  //   - NOT cursor-paginated (last-50 is the spec); Phase 6 may extend.
+  //   - NOT cursor-paginated (last-50 is the spec).
   //   - Empty state via <EmptyState> when entries.length === 0.
   //   - Same dense-table aesthetic as <AuditRow>: no accent fills, every
   //     row reads identically regardless of action verb (color-coding
   //     verbs would imply some are more important — we don't make that
-  //     claim in 3.0).
+  //     claim here).
   //
   // Date formatting note: locale-fixed ISO ("YYYY-MM-DD HH:MM:SS") for SSR
   // consistency. The full ISO timestamp lives in the <time datetime=> attr

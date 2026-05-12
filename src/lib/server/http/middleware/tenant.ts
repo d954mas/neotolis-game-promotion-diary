@@ -1,4 +1,4 @@
-// Tenant-scope middleware (Plan 01-07 — Wave 4).
+// Tenant-scope middleware.
 //
 // Mount on '/api/*' AFTER the '/api/auth/*' mount so Better Auth's own routes
 // are NOT intercepted (Better Auth must handle anonymous OAuth callback
@@ -8,7 +8,7 @@
 //   - 401 with body `{ error: 'unauthorized' }` if no valid session.
 //   - calls next() with `c.var.userId` and `c.var.sessionId` set if authed.
 //
-// PRIV-01 / Pattern 3 (two-layer enforcement):
+// Two-layer enforcement:
 //   - Middleware enforces "must be SOMEONE" (= 401 if anonymous).
 //   - Service functions enforce "must be the OWNER" (= NotFoundError if the
 //     row is not theirs, which translates to 404 — never 403 — at the HTTP
@@ -32,10 +32,10 @@ export const tenantScope: MiddlewareHandler<{
   }
   c.set("userId", result.user.id);
   c.set("sessionId", result.session.id);
-  // Phase 3.0 Plan 07: surface email for the admin-allowlist middleware
-  // (mounted on /api/admin/* after tenantScope). Better Auth's getSession
-  // already returns email on the result.user projection (it's a non-secret
-  // field — UserDto exposes it too); reading it here avoids a second DB
+  // Surface email for the admin-allowlist middleware (mounted on
+  // /api/admin/* after tenantScope). Better Auth's getSession already
+  // returns email on the result.user projection (it's a non-secret field
+  // — UserDto exposes it too); reading it here avoids a second DB
   // round-trip in the admin gate.
   c.set("userEmail", result.user.email);
   logger.debug({ userId: result.user.id, route: c.req.path }, "tenant-scope: authed");

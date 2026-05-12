@@ -1,4 +1,4 @@
-// /api/me/theme HTTP route — UX-01 server side (Plan 02-08).
+// /api/me/theme HTTP route.
 //
 // POST /api/me/theme
 //   body: {theme: 'light'|'dark'|'system'}
@@ -6,10 +6,10 @@
 //   side-effects: updates user.theme_preference; writes theme.changed audit;
 //                 sets `__theme` cookie (Path=/, SameSite=Lax, Max-Age=1y, NO HttpOnly).
 //
-// Pitfall 5 (UI-SPEC): the cookie is INTENTIONALLY NOT HttpOnly. The theme
-// must be readable from `document.cookie` so SvelteKit's hooks.server.ts can
-// honor it on the very first SSR render of every subsequent navigation
-// without round-tripping to the DB. Theme is not a security secret.
+// The cookie is INTENTIONALLY NOT HttpOnly. The theme must be readable
+// from `document.cookie` so SvelteKit's hooks.server.ts can honor it on
+// the very first SSR render of every subsequent navigation without
+// round-tripping to the DB. Theme is not a security secret.
 //
 // Env discipline (CLAUDE.md / AGENTS.md hard rule): this file MUST NOT read
 // `process.env`. The Secure cookie flag is derived from `env.NODE_ENV` via
@@ -46,8 +46,8 @@ meThemeRoutes.post(
       //   Path=/       — site-wide
       //   SameSite=Lax — protected against most CSRF; theme is non-sensitive
       //   Max-Age=1y   — survives session expiry (theme is preference, not auth)
-      //   NO HttpOnly  — Pitfall 5 (UI-SPEC): SvelteKit's client-side runtime
-      //                  reads document.cookie to flip CSS classes pre-paint
+      //   NO HttpOnly  — SvelteKit's client-side runtime reads document.cookie
+      //                  to flip CSS classes pre-paint
       //   Secure       — only when NODE_ENV === "production". Local dev runs
       //                  over plain HTTP; smoke tests do too. Behind a TLS-
       //                  terminating proxy in production this is set.

@@ -1,11 +1,10 @@
-// Phase 03.0.3 follow-up (PR #31 Codex P2) — outbox forwarder.
+// Outbox forwarder.
 //
 // Long-running async loop in the worker process that translates pending
 // `outbox` rows into pg-boss `boss.send` calls. Two wake-up sources:
 //
 //   1. Postgres LISTEN on 'outbox.new' channel — triggered by the
-//      AFTER-INSERT trigger from migration 0029. Instant pickup
-//      (typically <10ms after commit).
+//      AFTER-INSERT trigger. Instant pickup (typically <10ms after commit).
 //
 //   2. Periodic sweep every 30s — durability backstop in case the
 //      LISTEN connection drops silently (TCP timeout, pg restart),
@@ -17,7 +16,7 @@
 // outbox.options dedupes those rare duplicates; downstream handlers
 // must be idempotent.
 //
-// Concurrency safety (Phase 03.0.3 round-2 review — Codex P1 #1):
+// Concurrency safety:
 //   - drainInFlight mutex prevents two drain() calls from running
 //     concurrently within the same process (NOTIFY trigger + 30s
 //     interval would otherwise both pick up the same rows).
@@ -45,7 +44,7 @@ import { logger } from "../../lib/server/logger.js";
 import { env } from "../../lib/server/config/env.js";
 
 /** Forwarder LISTEN channel — must match `pg_notify('outbox.new', ...)`
- *  in migration 0029's AFTER-INSERT trigger. */
+ *  in the AFTER-INSERT trigger migration. */
 const NOTIFY_CHANNEL = "outbox.new";
 /** Periodic sweep interval. 30s gives <1m worst-case latency even when
  *  LISTEN drops; tight enough that an operator-introduced stuck row
@@ -183,7 +182,7 @@ export interface StartOutboxForwarderOptions {
   /** Existing pg-boss instance from the worker's createBoss() call.
    *  Injected (rather than called via getBoss()) so the forwarder
    *  shares the worker's boss + pool instead of lazily booting a
-   *  second singleton. PR #31 Codex P2 #1. */
+   *  second singleton. */
   boss: PgBoss;
 }
 

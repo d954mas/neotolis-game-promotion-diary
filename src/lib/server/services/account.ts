@@ -1,23 +1,23 @@
-// Phase 02.2 D-15 / D-16: account export + soft-delete + restore.
+// Account export + soft-delete + restore.
 //
-// Phase 3.0 Plan 05 — purgeAccount lives in services/purge-account.ts; this
-// module remains the entry point for soft-delete / restore / export. The
-// re-exports at the bottom of the file make `import { purgeAccount } from
+// `purgeAccount` lives in services/purge-account.ts; this module remains
+// the entry point for soft-delete / restore / export. The re-exports at
+// the bottom of the file make `import { purgeAccount } from
 // '../services/account.js'` and `import { purgeAccount } from
-// '../services/purge-account.js'` both work — Plan 08 (DELETE
-// /api/me/account/purge) and Plan 09 (purge.daily worker) pick whichever
-// matches the surrounding import style.
+// '../services/purge-account.js'` both work — DELETE /api/me/account/purge
+// and the purge.daily worker pick whichever matches the surrounding import
+// style.
 //
-// Soft-cascade clones Phase 2 D-23 from services/games.ts:
+// Soft-cascade design:
 //   - capture ONE Date once
 //   - mark user.deleted_at + cascade to user-owned tables that carry
 //     deletedAt (games, game_steam_listings, data_sources, events)
 //   - HARD-delete api_keys_steam rows (no deletedAt column on that table —
-//     D-14 hard-deletes via removeSteamKey; on account-soft-delete we follow
-//     the same semantics so envelope-encrypted secrets do NOT linger past
-//     the user's deletion intent. Restore does NOT bring keys back; the
-//     user re-enters them. Phase 6 PRIV-04 polish may add soft-delete to
-//     api_keys_steam if that proves wrong.)
+//     keys hard-delete via removeSteamKey; on account-soft-delete we
+//     follow the same semantics so envelope-encrypted secrets do NOT
+//     linger past the user's deletion intent. Restore does NOT bring keys
+//     back; the user re-enters them. Adding soft-delete to api_keys_steam
+//     can happen in a future polish if that proves wrong.)
 //   - hard-delete session rows (forces logout on next request)
 //   - account (Better Auth OAuth tokens) NOT touched — restore re-uses them
 //   - audit_log NOT cascaded (AGENTS.md §4 INSERT-only invariant)
@@ -73,7 +73,7 @@ export interface AccountExportEnvelope {
 
 export async function softDeleteAccount(userId: string, ipAddress: string): Promise<void> {
   // Captured ONCE so every UPDATE in this tx writes the same Date value
-  // (D-23 marker-timestamp design — restore reverses ONLY rows whose
+  // (marker-timestamp design — restore reverses ONLY rows whose
   // deletedAt === this exact value).
   const deletedAt = new Date();
   await db.transaction(async (tx) => {
@@ -101,7 +101,7 @@ export async function softDeleteAccount(userId: string, ipAddress: string): Prom
       .set({ deletedAt })
       .where(and(eq(events.userId, userId), isNull(events.deletedAt)));
 
-    // api_keys_steam has no deletedAt column (D-14 hard-deletes via
+    // api_keys_steam has no deletedAt column (keys hard-delete via
     // removeSteamKey). Hard-delete inside the same tx so envelope-
     // encrypted secrets are gone the moment the user requests deletion;
     // restore won't bring them back — the user re-enters keys post-restore.
@@ -140,9 +140,9 @@ export async function restoreAccount(userId: string, ipAddress: string): Promise
 
     // Children deleted EXACTLY at markerTs are restored. Children
     // deleted BEFORE (manually soft-deleted by the user before account
-    // delete) stay deleted — Phase 2 D-23 marker-timestamp semantics.
+    // delete) stay deleted — marker-timestamp semantics.
     // api_keys_steam was hard-deleted in softDeleteAccount and is NOT
-    // restorable by this path (Phase 02.2 baseline; user re-enters keys).
+    // restorable by this path (user re-enters keys).
     await tx
       .update(games)
       .set({ deletedAt: null })
@@ -164,14 +164,14 @@ export async function restoreAccount(userId: string, ipAddress: string): Promise
   await writeAudit({ userId, action: "account.restored", ipAddress });
 }
 
-// PUTOFF Phase 6 — streaming export. Current implementation pulls every
-// user-owned row into memory and serializes one envelope object via c.json.
-// At Phase 02.2 limits (50 games + 50 sources + 500 events/day) the worst
-// case for an active user-year is ~18k events ≈ 5-10 MB JSON — fine for a
-// 2 GB VPS. Switch to a cursor-streaming JSON writer (e.g. JSONStream) when
+// FUTURE: streaming export. Current implementation pulls every user-owned
+// row into memory and serializes one envelope object via c.json. At the
+// current limits (50 games + 50 sources + 500 events/day) the worst case
+// for an active user-year is ~18k events ≈ 5-10 MB JSON — fine for a 2 GB
+// VPS. Switch to a cursor-streaming JSON writer (e.g. JSONStream) when
 // EITHER LIMIT_EVENTS_PER_DAY rises above ~1000 OR per-user total events
-// crosses ~50k. Smoke-test heuristic: if exportAccountJson p95 latency on a
-// real user starts to dominate the request, that's the trigger.
+// crosses ~50k. Smoke-test heuristic: if exportAccountJson p95 latency on
+// a real user starts to dominate the request, that's the trigger.
 export async function exportAccountJson(
   userId: string,
   ipAddress: string,
@@ -208,9 +208,9 @@ export async function exportAccountJson(
   return envelope;
 }
 
-// Phase 3.0 Plan 05 — purgeAccount + listPurgeEligibleUsers re-exports so
-// `import { purgeAccount } from '../services/account.js'` keeps Plan 08 +
-// Plan 09 importers ergonomic alongside softDeleteAccount / restoreAccount.
+// purgeAccount + listPurgeEligibleUsers re-exports so
+// `import { purgeAccount } from '../services/account.js'` keeps importers
+// ergonomic alongside softDeleteAccount / restoreAccount.
 // The implementation lives in services/purge-account.ts.
 export { purgeAccount, listPurgeEligibleUsers } from "./purge-account.js";
 export type { PurgeOptions, PurgeResult, PurgeRowCounts } from "./purge-account.js";

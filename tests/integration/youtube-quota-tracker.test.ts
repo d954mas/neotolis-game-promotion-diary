@@ -1,4 +1,4 @@
-// Phase 3.0 Plan 03 — DB-touching tests for youtube-quota-tracker.
+// DB-touching tests for youtube-quota-tracker.
 //
 // Pure-function tests (round-robin, hashApiKeyId, todayPacific) live in
 // tests/unit/youtube-quota-tracker.test.ts. This file covers the parts that
@@ -89,7 +89,7 @@ describe("incrementUsage — UPSERT counter (date_pacific, api_key_id)", () => {
   });
 });
 
-describe("getThrottleState — D-13 80% / 95% gate", () => {
+describe("getThrottleState — 80% / 95% gate", () => {
   it("returns 'ok' when no rows exist for today", async () => {
     expect(await getThrottleState()).toBe("ok");
   });

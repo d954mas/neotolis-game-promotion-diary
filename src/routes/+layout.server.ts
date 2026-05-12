@@ -6,31 +6,27 @@ import { user } from "$lib/server/db/schema/auth.js";
 import { env } from "$lib/server/config/env.js";
 
 /**
- * SvelteKit layout load (Plan 01-07 — Wave 4; Plan 02-10 — Wave 3).
+ * SvelteKit layout load.
  *
- *   1. Pass DTO-projected user (or null) to all pages so layouts can render
- *      auth-aware UI without re-querying the session (P3 discipline —
- *      `locals.user` is already projected by `src/hooks.server.ts`).
+ *   1. Pass DTO-projected user (or null) to all pages so layouts can
+ *      render auth-aware UI without re-querying the session
+ *      (`locals.user` is already projected by `src/hooks.server.ts`).
  *   2. Protected-paths redirect: anonymous requests to any path in
- *      `PROTECTED_PATHS` are redirected to `/login?next=<originalPath>`
- *      (PRIV-01).
- *   3. Theme cookie ↔ DB reconciliation (D-40 cookie-wins on signin).
+ *      `PROTECTED_PATHS` are redirected to `/login?next=<originalPath>`.
+ *   3. Theme cookie ↔ DB reconciliation (cookie-wins on signin).
  *      When an authenticated user has both a `__theme` cookie and a DB
- *      `themePreference` that disagree, COOKIE WINS — write the cookie value
- *      back to the DB. When the cookie is absent and the DB has a
+ *      `themePreference` that disagree, COOKIE WINS — write the cookie
+ *      value back to the DB. When the cookie is absent and the DB has a
  *      non-default value, hydrate the cookie from the DB so the next
  *      browser request hits the right `data-theme` on the first byte.
- *      The reconciliation is a sync (not a user action) so no audit row is
- *      written and no `AppError` ever bubbles out — the request continues
- *      regardless of the DB write outcome.
- *   4. Surface `RETENTION_DAYS` to every page via the layout pass-through.
- *      `+page.server.ts` files in this phase MUST NOT read env vars via the
- *      Node global directly (CLAUDE.md / AGENTS.md hard rule — only
+ *      The reconciliation is a sync (not a user action) so no audit row
+ *      is written and no `AppError` ever bubbles out — the request
+ *      continues regardless of the DB write outcome.
+ *   4. Surface `RETENTION_DAYS` to every page via the layout
+ *      pass-through. `+page.server.ts` files MUST NOT read env vars via
+ *      the Node global directly (CLAUDE.md / AGENTS.md hard rule — only
  *      `src/lib/server/config/env.ts` may); they consume the value via
  *      `await parent()`.
- *
- * Phase 2 extends `PROTECTED_PATHS` from Phase 1's empty array to the six
- * authenticated-only top-level paths shipped by Plan 02-10.
  */
 const PROTECTED_PATHS: string[] = [
   "/feed",
@@ -54,9 +50,9 @@ export const load: LayoutServerLoad = async ({ locals, url, cookies, request }) 
   // value if valid, "system" otherwise). Then, when authenticated, see
   // whether the DB disagrees.
   //
-  // The same SELECT pulls user.deletedAt — Phase 02.2 review (Codex P1.1)
-  // flagged that deletedAt arrives via Better Auth's getSession passthrough
-  // only because @better-auth/drizzle-adapter currently issues an unprojected
+  // The same SELECT pulls user.deletedAt — deletedAt arrives via Better
+  // Auth's getSession passthrough only because
+  // @better-auth/drizzle-adapter currently issues an unprojected
   // SELECT *. That's fragile: future projection would silently break the
   // restore banner. Reading from `user` directly here makes deletedAt
   // load-bearing and authoritative regardless of adapter behaviour.
@@ -77,8 +73,8 @@ export const load: LayoutServerLoad = async ({ locals, url, cookies, request }) 
     deletedAt = row?.deletedAt ?? null;
 
     if (cookieThemeValid && cookieTheme !== dbTheme) {
-      // Cookie wins (D-40). Write the cookie value back to the DB so the
-      // next signin from a different browser sees the user's most recent
+      // Cookie wins. Write the cookie value back to the DB so the next
+      // signin from a different browser sees the user's most recent
       // intent. No audit (this is a sync, not a user action). Bump
       // updatedAt so admin tooling can spot the reconciliation moment.
       await db

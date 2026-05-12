@@ -1,4 +1,4 @@
-// Phase 03.0.1 Wave 3 — daily incremental cron picker integration test.
+// Daily incremental cron picker integration test.
 //
 // Verifies the daily 04:00 PT cron correctly:
 //   1. Picks BOTH complete and incomplete channels (vs auto-backfill cron

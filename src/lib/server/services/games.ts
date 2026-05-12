@@ -1,44 +1,40 @@
-// Games service — GAMES-01..03 (CRUD + soft-delete + transactional restore).
+// Games service — CRUD + soft-delete + transactional restore.
 //
-// Pattern 1 (tenant scope): EVERY function here takes `userId: string` as the
-// first arg and EVERY Drizzle query .where()-clauses on `eq(<table>.userId, userId)`.
-// The custom ESLint rule `tenant-scope/no-unfiltered-tenant-query` (Plan 02-02)
-// fires on any query against tenant-owned tables that omits this filter — so
-// the absence of warnings on this file is a load-bearing assertion, not a
-// stylistic preference. Disable comments are NOT allowed in this file.
+// Tenant scope: EVERY function here takes `userId: string` as the first
+// arg and EVERY Drizzle query .where()-clauses on
+// `eq(<table>.userId, userId)`. The custom ESLint rule
+// `tenant-scope/no-unfiltered-tenant-query` fires on any query against
+// tenant-owned tables that omits this filter — so the absence of warnings
+// on this file is a load-bearing assertion, not a stylistic preference.
+// Disable comments are NOT allowed in this file.
 //
-// Soft-delete + transactional restore (D-23): when a parent `games` row is
-// soft-deleted, the SAME captured `Date` value lands on the parent and on
-// every active child row (game_steam_listings) inside ONE database
-// transaction. On restore, we read the parent's `deletedAt` as the marker
-// timestamp and reverse ONLY children whose `deletedAt === markerTs`. Rows
-// soft-deleted EARLIER keep their original `deletedAt` and stay deleted —
-// that's the marker-timestamp design.
+// Soft-delete + transactional restore: when a parent `games` row is
+// soft-deleted, the SAME captured `Date` value lands on the parent and
+// on every active child row (game_steam_listings) inside ONE database
+// transaction. On restore, we read the parent's `deletedAt` as the
+// marker timestamp and reverse ONLY children whose
+// `deletedAt === markerTs`. Rows soft-deleted EARLIER keep their
+// original `deletedAt` and stay deleted — that's the marker-timestamp
+// design.
 //
-// Phase 2.1: `game_youtube_channels` and `tracked_youtube_videos` were
-// retired in Plan 02.1-01 (the per-platform M:N + per-platform tracked
-// tables collapsed into the unified `events` table + the user-level
-// `data_sources` registry).
-//
-// Plan 02.1-28 (M:N migration): the events cascade is REMOVED. With the
-// `events.game_id` column dropped (Plan 02.1-27) and events relating to
-// games via the `event_games` junction, soft-deleting a game no longer
-// has a clean "delete events whose gameId = this" semantic — events can
-// be attached to multiple games, and soft-deleting an event because ONE
-// of its attached games went away would be wrong. The schema's CASCADE
-// on `event_games(game_id)` means HARD-deleting a game removes the
-// junction row but leaves the event; soft-deleting a game leaves the
-// junction rows alone too (no deletedAt column on the junction). The
-// per-game listEventsForGame query naturally JOINs through the junction
-// — events stay visible only on the games they're still attached to.
+// Events are M:N to games via the `event_games` junction; soft-deleting
+// a game does NOT cascade to events. Events can be attached to multiple
+// games, and soft-deleting an event because ONE of its attached games
+// went away would be wrong. The schema's CASCADE on
+// `event_games(game_id)` means HARD-deleting a game removes the junction
+// row but leaves the event; soft-deleting a game leaves the junction
+// rows alone too (no deletedAt column on the junction). The per-game
+// `listEventsForGame` query JOINs through the junction — events stay
+// visible only on the games they're still attached to.
 //
 // NOT cascaded: `data_sources` (user-level, reused across games),
 // `api_keys_steam` (the user's wishlist key is not game-bound), and
-// `events` (M:N relation; see Plan 02.1-28 rationale above).
+// `events` (M:N relation; see rationale above).
 //
-// writeAudit calls are `await`-ed but never throw — see src/lib/server/audit.ts.
-// We capture `game.created`, `game.deleted`, `game.restored` per D-32; listing
-// CRUD is intentionally NOT audited (D-32: only the audit verbs in the enum).
+// writeAudit calls are `await`-ed but never throw — see
+// src/lib/server/audit.ts. We capture `game.created`, `game.deleted`,
+// `game.restored`; listing CRUD is intentionally NOT audited (only the
+// security-relevant verbs in the audit enum).
 
 import { and, eq, isNull, desc } from "drizzle-orm";
 import { db } from "../db/client.js";
@@ -63,23 +59,21 @@ export interface UpdateGameInput {
   releaseTba?: boolean;
   releaseDate?: string | null;
   coverUrl?: string | null;
-  // Plan 02.1-39 round-6 polish #14a: nullable long-form description.
-  // Service-layer max length 2000 chars (DB column has no constraint
-  // — the migration is purely additive). Pass `null` explicitly to
-  // clear an existing description; omit the field to leave it
-  // untouched. The empty-string case is normalized to NULL at the
-  // service entry so callers can pass an empty textarea verbatim.
+  // Nullable long-form description. Service-layer max length 2000 chars
+  // (DB column has no constraint). Pass `null` explicitly to clear an
+  // existing description; omit the field to leave it untouched. The
+  // empty-string case is normalized to NULL at the service entry so
+  // callers can pass an empty textarea verbatim.
   description?: string | null;
 }
 
 const TITLE_MIN = 1;
 const TITLE_MAX = 200;
-// Plan 02.1-39 round-6 polish #14a: description is bounded at the
-// service layer (DB column is unconstrained — see schema/games.ts).
-// 2000 chars is roughly two short paragraphs — enough for "what's
-// the pitch / target audience / status" without growing into a wiki
-// surface. The validateDescription helper accepts NULL (clear) and
-// validates length on string inputs only.
+// Description is bounded at the service layer (DB column is unconstrained
+// — see schema/games.ts). 2000 chars is roughly two short paragraphs —
+// enough for "what's the pitch / target audience / status" without
+// growing into a wiki surface. The validateDescription helper accepts
+// NULL (clear) and validates length on string inputs only.
 const DESCRIPTION_MAX = 2000;
 
 function validateTitle(title: string): void {
@@ -117,9 +111,9 @@ export async function createGame(
 ): Promise<GameRow> {
   validateTitle(input.title);
 
-  // Race-free, deadlock-safe quota path (Codex P2.1 + post-fix). withQuotaGuard
-  // takes a per-user advisory lock, runs the count + INSERT in one tx, and
-  // emits the quota.limit_hit audit AFTER the tx releases its pool connection.
+  // Race-free, deadlock-safe quota path. withQuotaGuard takes a per-user
+  // advisory lock, runs the count + INSERT in one tx, and emits the
+  // quota.limit_hit audit AFTER the tx releases its pool connection.
   const row = await withQuotaGuard(userId, "games", ipAddress, async (tx) => {
     const [r] = await tx
       .insert(games)
@@ -148,7 +142,7 @@ export async function createGame(
 
 /**
  * List the caller's games. By default omits soft-deleted rows. Pass
- * `includeSoftDeleted: true` for the trash view (Plan 02-08 wires the route).
+ * `includeSoftDeleted: true` for the trash view.
  */
 export async function listGames(
   userId: string,
@@ -177,13 +171,13 @@ export async function listSoftDeletedGames(userId: string): Promise<GameRow[]> {
 /**
  * Read one game by id. Throws NotFoundError when:
  *   - row does not exist
- *   - row exists but is owned by a different user (cross-tenant 404, NOT 403 — PRIV-01)
+ *   - row exists but is owned by a different user (cross-tenant 404, NOT 403)
  *   - row is soft-deleted (call getGameByIdIncludingDeleted for the restore route)
  *
- * The double-condition (`userId AND id`) is the Pattern 1 invariant — the
- * only way a row comes back is when both the resource id and the caller
- * id agree, so cross-tenant fetches are indistinguishable from "this id
- * never existed" by construction.
+ * The double-condition (`userId AND id`) is the tenant-scope invariant —
+ * the only way a row comes back is when both the resource id and the
+ * caller id agree, so cross-tenant fetches are indistinguishable from
+ * "this id never existed" by construction.
  */
 export async function getGameById(userId: string, gameId: string): Promise<GameRow> {
   const rows = await db
@@ -198,8 +192,8 @@ export async function getGameById(userId: string, gameId: string): Promise<GameR
 
 /**
  * Read one game including soft-deleted rows. Used by the restore endpoint
- * (Plan 02-08) where the caller explicitly wants to operate on a row in
- * trash. Cross-tenant access still throws NotFoundError.
+ * where the caller explicitly wants to operate on a row in trash.
+ * Cross-tenant access still throws NotFoundError.
  */
 export async function getGameByIdIncludingDeleted(
   userId: string,
@@ -220,7 +214,7 @@ export async function getGameByIdIncludingDeleted(
  * fields preserve their existing values. `updatedAt` is bumped on every
  * call so the UI can show "edited Nm ago" without a separate column.
  *
- * No audit row — D-32 reserves audit verbs for security-relevant ops; field
+ * No audit row — audit verbs are reserved for security-relevant ops; field
  * edits are not in the enum.
  */
 export async function updateGame(
@@ -229,11 +223,10 @@ export async function updateGame(
   input: UpdateGameInput,
 ): Promise<GameRow> {
   if (input.title !== undefined) validateTitle(input.title);
-  // Plan 02.1-39 round-6 polish #14a: normalize empty string → null
-  // BEFORE validation so the 2000-char check operates on the
-  // post-normalization value. Empty string is semantically equivalent
-  // to "no description"; collapsing it to NULL keeps the column
-  // tri-state-free (NULL vs string-with-content).
+  // Normalize empty string → null BEFORE validation so the 2000-char
+  // check operates on the post-normalization value. Empty string is
+  // semantically equivalent to "no description"; collapsing it to NULL
+  // keeps the column tri-state-free (NULL vs string-with-content).
   let normalizedDescription: string | null | undefined = input.description;
   if (typeof normalizedDescription === "string") {
     if (normalizedDescription.trim().length === 0) {
@@ -262,18 +255,18 @@ export async function updateGame(
 }
 
 /**
- * Soft-delete a game and cascade the same `deletedAt` to its four child
- * tables in a single transaction (D-23). Children sharing the parent's
- * exact timestamp can be reversed atomically by `restoreGame`; rows that
- * were already soft-deleted before this call have a different (earlier)
+ * Soft-delete a game and cascade the same `deletedAt` to its child
+ * tables in a single transaction. Children sharing the parent's exact
+ * timestamp can be reversed atomically by `restoreGame`; rows that were
+ * already soft-deleted before this call have a different (earlier)
  * `deletedAt` and stay deleted on restore.
  *
- * `youtubeChannels` and `apiKeysSteam` are intentionally NOT cascaded
- * (D-24) — channels live at user level and api keys are not game-bound.
+ * `data_sources` and `apiKeysSteam` are intentionally NOT cascaded —
+ * sources live at user level and api keys are not game-bound.
  *
  * Audit: writes `game.deleted` with `metadata: { gameId, retentionDays }`.
  * The retentionDays value lets the UI surface "this game will be hard-
- * purged in N days" without re-reading env (Plan 02-08).
+ * purged in N days" without re-reading env.
  */
 export async function softDeleteGame(
   userId: string,
@@ -302,13 +295,12 @@ export async function softDeleteGame(
           isNull(gameSteamListings.deletedAt),
         ),
       );
-    // Plan 02.1-28: events cascade REMOVED — see file-header rationale.
-    // Events are M:N to games via event_games (Plan 02.1-27 schema); a
-    // game's soft-delete no longer cleanly maps to "delete events
-    // attached to this game" because events can be attached to multiple
-    // games. Per-game views (listEventsForGame) JOIN through the
-    // junction so events stop appearing on the deleted game's curated
-    // list as long as the game stays soft-deleted.
+    // No events cascade — see file-header rationale. Events are M:N to
+    // games via event_games; a game's soft-delete no longer cleanly
+    // maps to "delete events attached to this game" because events can
+    // be attached to multiple games. Per-game views (listEventsForGame)
+    // JOIN through the junction so events stop appearing on the deleted
+    // game's curated list as long as the game stays soft-deleted.
   });
   await writeAudit({
     userId,
@@ -322,7 +314,7 @@ export async function softDeleteGame(
  * Restore a soft-deleted game and reverse ONLY children whose `deletedAt`
  * matches the parent's marker timestamp. Children soft-deleted BEFORE the
  * parent (earlier `deletedAt`) keep their original timestamp and stay
- * deleted — that's the design (D-23).
+ * deleted — that's the design.
  *
  * Audit: writes `game.restored` with `metadata: { gameId }`.
  */
@@ -354,9 +346,9 @@ export async function restoreGame(
           eq(gameSteamListings.deletedAt, markerTs),
         ),
       );
-    // Plan 02.1-28: events cascade REMOVED — see file-header rationale.
-    // Symmetric with softDeleteGame: no events were soft-deleted as part
-    // of the game's cascade, so there's nothing to restore here.
+    // No events cascade — see file-header rationale. Symmetric with
+    // softDeleteGame: no events were soft-deleted as part of the game's
+    // cascade, so there's nothing to restore here.
   });
   await writeAudit({
     userId,

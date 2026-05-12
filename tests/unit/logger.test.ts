@@ -4,16 +4,14 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import pino from "pino";
 
-// Phase-1 final D-24 coverage: redaction-behavior + env-discipline tripwire.
-// Plan 01-01 owns src/lib/server/logger.ts; this test guards two invariants
-// that no other test catches:
+// Redaction-behavior + env-discipline tripwire for src/lib/server/logger.ts.
+// Guards two invariants that no other test catches:
 //   1. Every path in the logger's REDACT_PATHS list actually emits
 //      "[REDACTED]" in the JSON output. A typo in the list silently disables
 //      the protection — the only way to notice is to log an object shaped
 //      like the path and grep stdout in tests.
 //   2. process.env.* is read ONLY in src/lib/server/config/env.ts. Anywhere
-//      else risks a KEK-shaped secret leaking via accidental console.log
-//      (PITFALL P2).
+//      else risks a KEK-shaped secret leaking via accidental console.log.
 
 describe("logger redaction", () => {
   it("logger module exposes pino-shaped interface", async () => {
@@ -28,7 +26,7 @@ describe("logger redaction", () => {
     expect(typeof (logger as { info?: unknown }).info).toBe("function");
   });
 
-  it("redacts every D-24 path with [REDACTED]", async () => {
+  it("redacts every REDACT_PATHS entry with [REDACTED]", async () => {
     // Read the canonical list straight from the source so the test mirrors
     // whatever the runtime logger uses. We don't import the live logger
     // because it is configured to write to stdout / a transport — feeding it
@@ -71,18 +69,17 @@ describe("logger redaction", () => {
   });
 
   it("process.env.* is not accessed outside src/lib/server/config/env.ts", async () => {
-    // Static-grep tripwire (D-24 / PITFALL P2). The ESLint contract is
-    // configured separately, but a runtime guard catches the case where the
-    // lint config drifts or a future contributor disables the rule with
-    // `// eslint-disable-next-line` and forgets to revert.
+    // Static-grep tripwire. The ESLint contract is configured separately,
+    // but a runtime guard catches the case where the lint config drifts or a
+    // future contributor disables the rule with `// eslint-disable-next-line`
+    // and forgets to revert.
     //
-    // Plan 02.1-36 / UAT-NOTES.md §5.9: strip multi-line block comments
-    // (including JSDoc /** ... */) at the FILE level so cross-line comment
-    // boundaries don't survive into the per-line grep below. JSDoc is
-    // canonical project documentation per AGENTS.md commenting policy —
-    // references to the env-discipline rule in JSDoc must NOT trigger the
-    // tripwire. The replacement preserves newlines so reported line numbers
-    // for actual offenders stay accurate.
+    // Strip multi-line block comments (including JSDoc /** ... */) at the
+    // FILE level so cross-line comment boundaries don't survive into the
+    // per-line grep below. JSDoc is canonical project documentation per
+    // AGENTS.md commenting policy — references to the env-discipline rule
+    // in JSDoc must NOT trigger the tripwire. The replacement preserves
+    // newlines so reported line numbers for actual offenders stay accurate.
     const root = path.resolve(process.cwd(), "src");
     const allowed = path.normalize(path.join("server", "config", "env.ts"));
     const offenders: { file: string; line: number; text: string }[] = [];
@@ -122,8 +119,7 @@ describe("logger redaction", () => {
     }
   });
 
-  it("Plan 02.1-36: env-discipline scanner skips JSDoc /** ... */ blocks", async () => {
-    // Regression test for UAT-NOTES.md §5.9 (CI-blocker root cause B).
+  it("env-discipline scanner skips JSDoc /** ... */ blocks", async () => {
     // A JSDoc body containing `process.env` must NOT trigger the
     // env-discipline scanner. Failure mode would be re-introducing the
     // false positive on src/routes/settings/+page.server.ts:14-15 or any
@@ -151,19 +147,17 @@ export function load() {
     expect(/\bprocess\.env\b/.test(stripped)).toBe(false);
   });
 
-  it("Plan 02.1-36: REDACT_PATHS covers every ciphertext column in src/lib/server/db/schema/", async () => {
-    // Closes UAT-NOTES.md §5.10. Derive expected redact paths from schema
-    // introspection so any future ciphertext column added without a
-    // corresponding REDACT_PATHS entry fails this test loudly (privacy
-    // floor per AGENTS.md item 6 — "redact paths cover every credential /
-    // ciphertext field name").
+  it("REDACT_PATHS covers every ciphertext column in src/lib/server/db/schema/", async () => {
+    // Derive expected redact paths from schema introspection so any future
+    // ciphertext column added without a corresponding REDACT_PATHS entry
+    // fails this test loudly (privacy floor per AGENTS.md item 6 — "redact
+    // paths cover every credential / ciphertext field name").
     //
     // Scope: every `bytea("<snake>")` declaration is a ciphertext column;
     // additionally `kek_version` (smallint, not bytea) is the KEK rotation
-    // marker that the round-5 review flagged as missing. We extract both
-    // shapes (camelCase Drizzle field name + snake_case DB column name)
-    // because row dumps surface in either form depending on the call site
-    // (Drizzle returns camel; raw pg returns snake).
+    // marker. We extract both shapes (camelCase Drizzle field name +
+    // snake_case DB column name) because row dumps surface in either form
+    // depending on the call site (Drizzle returns camel; raw pg returns snake).
     const schemaDir = path.resolve(process.cwd(), "src", "lib", "server", "db", "schema");
     const entries = await fs.readdir(schemaDir, { withFileTypes: true });
     const expected = new Set<string>();
@@ -185,10 +179,10 @@ export function load() {
       }
     }
     // Sanity check: at least one ciphertext column was discovered
-    // (Phase 2.1 has api_keys_steam.secret_ct/secret_iv/secret_tag/
-    // wrapped_dek/dek_iv/dek_tag/kek_version). If the schema later drops
-    // every ciphertext column the assertion below becomes vacuous, so
-    // this guard preserves the test's load-bearing intent.
+    // (api_keys_steam has secret_ct/secret_iv/secret_tag/wrapped_dek/
+    // dek_iv/dek_tag/kek_version). If the schema later drops every
+    // ciphertext column the assertion below becomes vacuous, so this
+    // guard preserves the test's load-bearing intent.
     expect(expected.size, "schema introspection found no ciphertext columns").toBeGreaterThan(0);
 
     const { REDACT_PATHS } = await import("../../src/lib/server/logger.js");
@@ -199,11 +193,11 @@ export function load() {
       `REDACT_PATHS is missing entries for ciphertext columns:\n${missing.join("\n")}`,
     ).toEqual([]);
 
-    // Defense-in-depth: assert the explicit Phase 2.1 entries are present
+    // Defense-in-depth: assert the explicit ciphertext entries are present
     // even if the schema-grep above finds zero matches (e.g. a future
     // refactor moves bytea columns behind a custom type alias the regex
     // can't see). These 12 entries are the floor.
-    const REQUIRED_PHASE_2_1 = [
+    const REQUIRED_CIPHERTEXT_FLOOR = [
       "*.secret_ct",
       "*.secretCt",
       "*.secret_iv",
@@ -217,10 +211,10 @@ export function load() {
       "*.kek_version",
       "*.kekVersion",
     ];
-    const missingFloor = REQUIRED_PHASE_2_1.filter((p) => !actual.has(p));
+    const missingFloor = REQUIRED_CIPHERTEXT_FLOOR.filter((p) => !actual.has(p));
     expect(
       missingFloor,
-      `REDACT_PATHS is missing Phase 2.1 ciphertext floor entries:\n${missingFloor.join("\n")}`,
+      `REDACT_PATHS is missing ciphertext floor entries:\n${missingFloor.join("\n")}`,
     ).toEqual([]);
   });
 });

@@ -1,28 +1,29 @@
 // Better Auth 1.6 — single source of truth for the auth instance.
 //
-// Wired against the Drizzle pg client + canonical Better Auth core schema from
-// Plan 01-03 (user / session / account / verification). All env reads go
-// through src/lib/server/config/env.ts (D-24, P2 mitigation).
+// Wired against the Drizzle pg client + the canonical Better Auth core
+// schema (user / session / account / verification). All env reads go
+// through src/lib/server/config/env.ts.
 //
 // Decisions encoded here:
-//   - D-05: database-backed sessions; the cookie carries only `session_id`.
-//           `cookieCache: { enabled: false }` is explicit — the entire point of
-//           DB-backed sessions is that the server can invalidate instantly. A
-//           cookie cache would defeat AUTH-02.
-//   - D-07: minimum user record on first sign-in (Better Auth's default user
-//           shape matches; no custom `additionalFields`).
-//   - D-08: sign-out-from-all-devices is implemented in
-//           src/lib/server/services/users.ts on top of these tables.
-//   - CLAUDE.md project constraint: Google OAuth ONLY — `emailAndPassword`
-//           is explicitly disabled. No password-reset flow, no breach surface.
+//   - Database-backed sessions; the cookie carries only `session_id`.
+//     `cookieCache: { enabled: false }` is explicit — the entire point of
+//     DB-backed sessions is that the server can invalidate instantly. A
+//     cookie cache would defeat that.
+//   - Minimum user record on first sign-in (Better Auth's default user
+//     shape matches; no custom `additionalFields`).
+//   - Sign-out-from-all-devices is implemented in
+//     src/lib/server/services/users.ts on top of these tables.
+//   - CLAUDE.md project constraint: Google OAuth ONLY —
+//     `emailAndPassword` is explicitly disabled. No password-reset flow,
+//     no breach surface.
 //
-// INFO I2 (issuer URL) — RESOLVED via genericOAuth plugin (review blocker
-// P0-2). Better Auth 1.6.x's `socialProviders.google` hardcodes the Google
-// authorize/token endpoints, which means the initial /api/auth/sign-in/...
-// redirect always points at real Google — incompatible with CI/smoke runs
-// that need to talk to oauth2-mock-server. The genericOAuth plugin exposes
-// `discoveryUrl` (and explicit endpoint overrides), so the same code works
-// against real Google in production and the mock IdP in CI/smoke.
+// genericOAuth plugin: Better Auth 1.6.x's `socialProviders.google`
+// hardcodes the Google authorize/token endpoints, which means the
+// initial /api/auth/sign-in/... redirect always points at real Google —
+// incompatible with CI/smoke runs that need to talk to
+// oauth2-mock-server. The genericOAuth plugin exposes `discoveryUrl`
+// (and explicit endpoint overrides), so the same code works against
+// real Google in production and the mock IdP in CI/smoke.
 //
 // The account row's `providerId` is env-driven via OAUTH_PROVIDER_ID
 // (default "google" — SaaS never overrides). Self-host operators who
@@ -40,12 +41,12 @@ import * as authSchema from "./server/db/schema/auth.js";
 import { env } from "./server/config/env.js";
 
 export const auth = betterAuth({
-  // CLAUDE.md "Secrets at rest" + D-11: OAuth provider tokens
-  // (accessToken / refreshToken / idToken on the `account` row) are
-  // envelope-encrypted in src/lib/server/auth-adapter.ts. The wrapper sits
-  // between Better Auth and the official drizzleAdapter without changing
-  // schema columns — the `text` column now holds an `ev1:`-prefixed JSON
-  // blob; decryption happens transparently on read.
+  // CLAUDE.md "Secrets at rest": OAuth provider tokens (accessToken /
+  // refreshToken / idToken on the `account` row) are envelope-encrypted
+  // in src/lib/server/auth-adapter.ts. The wrapper sits between Better
+  // Auth and the official drizzleAdapter without changing schema
+  // columns — the `text` column now holds an `ev1:`-prefixed JSON blob;
+  // decryption happens transparently on read.
   database: encryptedDrizzleAdapter(db, {
     provider: "pg",
     schema: {
@@ -77,8 +78,9 @@ export const auth = betterAuth({
     }),
   ],
   session: {
-    // D-05: database-backed sessions. cookieCache disabled so every request
-    // hits the session table — that's the entire point. Sign-out is instant.
+    // Database-backed sessions. cookieCache disabled so every request
+    // hits the session table — that's the entire point. Sign-out is
+    // instant.
     cookieCache: { enabled: false },
     expiresIn: 60 * 60 * 24 * 30, // 30 days
     updateAge: 60 * 60 * 24, // refresh idle sessions every 1 day
@@ -92,10 +94,10 @@ export const auth = betterAuth({
     crossSubDomainCookies: env.COOKIE_DOMAIN
       ? { enabled: true, domain: env.COOKIE_DOMAIN }
       : { enabled: false },
-    // BETTER_AUTH_SECURE_COOKIES override (review blocker P1 fix): a self-host
-    // operator running the production image behind a TLS-terminating reverse
-    // proxy over plain HTTP between proxy and app must set the env var to
-    // "false". Otherwise Better Auth emits the `__Secure-` cookie prefix and
+    // BETTER_AUTH_SECURE_COOKIES override: a self-host operator running
+    // the production image behind a TLS-terminating reverse proxy over
+    // plain HTTP between proxy and app must set the env var to "false".
+    // Otherwise Better Auth emits the `__Secure-` cookie prefix and
     // browsers refuse to set it over HTTP. Default tracks NODE_ENV.
     useSecureCookies: env.BETTER_AUTH_SECURE_COOKIES ?? env.NODE_ENV === "production",
     defaultCookieAttributes: {

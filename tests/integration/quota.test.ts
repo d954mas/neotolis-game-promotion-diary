@@ -12,10 +12,7 @@ import { AppError } from "../../src/lib/server/services/errors.js";
 import { env } from "../../src/lib/server/config/env.js";
 import { seedUserDirectly } from "./helpers.js";
 
-// Phase 02.2 Plan 02 — per-user abuse quotas (D-11). Live integration tests
-// flipped from the Plan 02.2-01 it.skip placeholders. Each it() name keeps the
-// "Plan 02.2-02:" prefix so traceability holds: each placeholder belongs to one
-// implementing plan, and each implementing plan fills in the body.
+// Per-user abuse quotas.
 //
 // Quota guard contract (services/quota.ts):
 //   - createGame   -> withQuotaGuard(userId, "games", ipAddress, ...)
@@ -23,13 +20,12 @@ import { seedUserDirectly } from "./helpers.js";
 //   - createEvent  -> withQuotaGuard(userId, "events_per_day", ipAddress, ...)
 // On exceedance: throws AppError 429 quota_exceeded with metadata
 // {kind, limit, current}; writeAudit fires `quota.limit_hit` AFTER the tx
-// releases its pool connection (Codex post-P2.1 deadlock fix — see header
-// in services/quota.ts).
+// releases its pool connection — see header in services/quota.ts.
 // Soft-deleted rows excluded from games / data_sources counts; events use
 // rolling 24h (createdAt >= now - 24h).
 
-describe("per-user abuse quotas (Phase 02.2)", () => {
-  it("Plan 02.2-02: createGame throws AppError 429 quota_exceeded when active games count >= LIMIT_GAMES_PER_USER", async () => {
+describe("per-user abuse quotas", () => {
+  it("createGame throws AppError 429 quota_exceeded when active games count >= LIMIT_GAMES_PER_USER", async () => {
     const userA = await seedUserDirectly({ email: "quota-g1@test.local" });
     const limit = env.LIMIT_GAMES_PER_USER;
 
@@ -51,7 +47,7 @@ describe("per-user abuse quotas (Phase 02.2)", () => {
     });
   });
 
-  it("Plan 02.2-02: 429 body shape is {error:'quota_exceeded', metadata:{kind:'games', limit:50, current:50}}", async () => {
+  it("429 body shape is {error:'quota_exceeded', metadata:{kind:'games', limit:50, current:50}}", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
 
@@ -81,7 +77,7 @@ describe("per-user abuse quotas (Phase 02.2)", () => {
     });
   });
 
-  it("Plan 02.2-02: createSource throws 429 when active data_sources count >= LIMIT_SOURCES_PER_USER", async () => {
+  it("createSource throws 429 when active data_sources count >= LIMIT_SOURCES_PER_USER", async () => {
     const userA = await seedUserDirectly({ email: "quota-s1@test.local" });
     const limit = env.LIMIT_SOURCES_PER_USER;
 
@@ -105,7 +101,7 @@ describe("per-user abuse quotas (Phase 02.2)", () => {
     });
   });
 
-  it("Plan 02.2-02: createEvent throws 429 when rolling-24h event count >= LIMIT_EVENTS_PER_DAY", async () => {
+  it("createEvent throws 429 when rolling-24h event count >= LIMIT_EVENTS_PER_DAY", async () => {
     const userA = await seedUserDirectly({ email: "quota-e1@test.local" });
     const limit = env.LIMIT_EVENTS_PER_DAY;
 
@@ -134,7 +130,7 @@ describe("per-user abuse quotas (Phase 02.2)", () => {
     });
   });
 
-  it("Plan 02.2-02: rolling-24h reset semantics: events older than 24h drop out of the count", async () => {
+  it("rolling-24h reset semantics: events older than 24h drop out of the count", async () => {
     const userA = await seedUserDirectly({ email: "quota-e2@test.local" });
     const limit = env.LIMIT_EVENTS_PER_DAY;
 
@@ -162,7 +158,7 @@ describe("per-user abuse quotas (Phase 02.2)", () => {
     expect(result.userId).toBe(userA.id);
   });
 
-  it("Plan 02.2-02: soft-deleted games / sources do NOT count toward the limit (deleted_at IS NOT NULL excluded)", async () => {
+  it("soft-deleted games / sources do NOT count toward the limit (deleted_at IS NOT NULL excluded)", async () => {
     // games branch
     const userA = await seedUserDirectly({ email: "quota-sd-a@test.local" });
     const gameLimit = env.LIMIT_GAMES_PER_USER;
@@ -196,7 +192,7 @@ describe("per-user abuse quotas (Phase 02.2)", () => {
     expect(newSource.handleUrl).toBe("https://www.youtube.com/@active");
   });
 
-  it("Plan 02.2-02: quota.limit_hit audit event written with metadata {kind, limit, current} when guard fires", async () => {
+  it("quota.limit_hit audit event written with metadata {kind, limit, current} when guard fires", async () => {
     const userA = await seedUserDirectly({ email: "quota-audit@test.local" });
     const limit = env.LIMIT_GAMES_PER_USER;
 
@@ -224,8 +220,8 @@ describe("per-user abuse quotas (Phase 02.2)", () => {
     });
   });
 
-  // Phase 02.2 review (Codex P2.1): the quota guard must be race-free under
-  // concurrent same-user requests. Before the fix, count() ran outside the
+  // The quota guard must be race-free under concurrent same-user
+  // requests. Before the fix, count() ran outside the
   // INSERT's transaction so two requests at limit-1 both saw "limit-1" and
   // both INSERTed, ending at limit+1. The fix (withQuotaGuard) wraps the
   // per-user advisory lock + count + INSERT in one db.transaction; same-user
@@ -235,7 +231,7 @@ describe("per-user abuse quotas (Phase 02.2)", () => {
   // Promise.allSettled. Exactly ONE must succeed; the rest must reject with
   // AppError quota_exceeded. After all settle, active-games count = limit
   // (NOT limit+4).
-  it("Plan 02.2-02 (Codex P2.1): concurrent createGame at limit-1 stays at limit, never exceeds (advisory-lock contract)", async () => {
+  it("concurrent createGame at limit-1 stays at limit, never exceeds (advisory-lock contract)", async () => {
     const userA = await seedUserDirectly({
       email: `quota-race-g-${Math.random().toString(36).slice(2, 10)}@test.local`,
     });
@@ -274,8 +270,8 @@ describe("per-user abuse quotas (Phase 02.2)", () => {
     expect(active.length).toBe(limit);
   });
 
-  // Phase 02.2 review (Codex post-P2.1 deadlock fix): when the quota fires,
-  // the audit row MUST be emitted AFTER the surrounding transaction releases
+  // When the quota fires, the audit row MUST be emitted AFTER the
+  // surrounding transaction releases
   // its pool connection. Otherwise N concurrent over-limit same-user requests
   // (where N >= pool max) deadlock — every tx-held connection waits for an
   // audit-write connection that the pool can never provide.
@@ -285,7 +281,7 @@ describe("per-user abuse quotas (Phase 02.2)", () => {
   // indefinitely. Post-fix it completes promptly because the audit-write
   // happens in `finally` AFTER `db.transaction` resolves and the connection
   // is back in the pool.
-  it("Plan 02.2-02 (Codex post-fix): N>pool over-limit concurrent requests do NOT deadlock the pool", async () => {
+  it("N>pool over-limit concurrent requests do NOT deadlock the pool", async () => {
     const userA = await seedUserDirectly({
       email: `quota-pool-deadlock-${Math.random().toString(36).slice(2, 10)}@test.local`,
     });

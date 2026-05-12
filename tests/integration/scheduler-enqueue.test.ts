@@ -1,12 +1,12 @@
-// Phase 03.0.1 Plan 07 — tier-eligibility assertions on the new poll-cron path.
+// Tier-eligibility assertions on the poll-cron path.
 //
-// Pre-Plan-07 (Phase 03.0 Plan 09): the scheduler.tick.{active,cold} cron
-// drove src/scheduler/enqueue.ts.{enqueueActivePolls,enqueueColdPolls},
+// Historically the scheduler.tick.{active,cold} cron drove
+// src/scheduler/enqueue.ts.{enqueueActivePolls,enqueueColdPolls},
 // which sent per-tier-batch jobs to poll.active / poll.cold. This test
 // pinned the tier-resolver → enqueue indirection by mocking pg-boss send
 // and asserting the queue + payload shape.
 //
-// Plan-07 collapses that hop. The cron schedule sends tier-tagged jobs
+// That hop has been collapsed. The cron schedule sends tier-tagged jobs
 // DIRECTLY to youtube.poll.cron; the poll-cron handler dispatches by
 // job.data.tier and the per-tier handlers (handlePollActive /
 // handlePollCold) now own the eligibility query + writeSnapshot pipeline.
@@ -111,7 +111,7 @@ beforeEach(() => {
   resetThrottleState();
 });
 
-describe("youtube.poll.cron tier-eligibility (Plan 03.0.1-07 + per-video refactor)", () => {
+describe("youtube.poll.cron tier-eligibility (per-video refactor)", () => {
   it("handlePollActive picks Active-tier videos (publishedAt < 24h) and polls them", async () => {
     const u = await seedUserDirectly({ email: `sch-active-${uniq()}@test.local` });
     // The handler reads the LIVE clock (no `now` injection in Plan-07
@@ -145,8 +145,8 @@ describe("youtube.poll.cron tier-eligibility (Plan 03.0.1-07 + per-video refacto
   it("Frozen videos that have already been polled (publishedAt > 28d, lastPolledAt set) are NOT polled by either tier handler", async () => {
     const u = await seedUserDirectly({ email: `sch-frozen-${uniq()}@test.local` });
     const longAgo = new Date(Date.now() - 35 * 86_400_000);
-    // Phase 03.0.3 follow-up — the bootstrap rule promotes frozen-by-age
-    // videos with lastPolledAt=NULL to cold for ONE shot. To pin the
+    // The bootstrap rule promotes frozen-by-age videos with
+    // lastPolledAt=NULL to cold for ONE shot. To pin the
     // dormant path (already-polled video stays frozen forever), seed an
     // explicit lastPolledAt timestamp.
     const { videoId } = await insertEventWithVideo(u.id, longAgo, {
@@ -160,7 +160,7 @@ describe("youtube.poll.cron tier-eligibility (Plan 03.0.1-07 + per-video refacto
     expect(allPolledIds).not.toContain(videoId);
   });
 
-  it("Frozen videos that have NEVER been polled (publishedAt > 28d, lastPolledAt IS NULL) ARE polled once by cold tier (Phase 03.0.3 bootstrap)", async () => {
+  it("Frozen videos that have NEVER been polled (publishedAt > 28d, lastPolledAt IS NULL) ARE polled once by cold tier (bootstrap)", async () => {
     const u = await seedUserDirectly({ email: `sch-frozen-bootstrap-${uniq()}@test.local` });
     const longAgo = new Date(Date.now() - 35 * 86_400_000);
     // No videoOverrides — youtube_videos.last_polled_at column defaults

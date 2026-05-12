@@ -21,23 +21,20 @@ import { seedUserDirectly } from "./helpers.js";
 import { AppError, NotFoundError } from "../../src/lib/server/services/errors.js";
 
 /**
- * Phase 2.1 Wave 1B (Plan 02.1-05) — unified events service tests.
+ * Unified events service tests.
  *
- * Replaces the Phase 2 events.test.ts which exercised listTimelineForGame's
- * JS-merge of events + tracked_youtube_videos. The unified table makes the
- * merge unnecessary; listEventsForGame is the new per-game curated view.
+ * listEventsForGame is the per-game curated view. Three groups of
+ * assertions:
+ *   - create + the closed-enum kind validation (9 kinds)
+ *   - listEventsForGame
+ *   - audit on create / update / delete
  *
- * EVENTS-01 covers create + the closed-enum kind validation (now 9 kinds).
- * EVENTS-02 covers listEventsForGame (replaces Phase 2 listTimelineForGame).
- * EVENTS-03 covers audit on create / update / delete.
- *
- * Pitfall 6 (defense-in-depth): VALID_EVENT_KINDS const list mirrors the
- * pgEnum's enumValues; assert equality so a schema change forces a service
- * update in lock-step.
+ * VALID_EVENT_KINDS const list mirrors the pgEnum's enumValues; assert
+ * equality so a schema change forces a service update in lock-step.
  */
 
-describe("events CRUD (EVENTS-01..03 — unified table)", () => {
-  it("VALID_EVENT_KINDS mirrors the pgEnum eventKindEnum.enumValues exactly (Pitfall 6)", () => {
+describe("events CRUD — unified table", () => {
+  it("VALID_EVENT_KINDS mirrors the pgEnum eventKindEnum.enumValues exactly", () => {
     // Sorted comparison so order in either the const or the enum doesn't matter.
     const fromConst = [...VALID_EVENT_KINDS].sort();
     const fromEnum = [...eventKindEnum.enumValues].sort();
@@ -64,12 +61,12 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     expect(ev.title).toBe("GDC 2026");
     expect(ev.userId).toBe(u.id);
     expect(ev.deletedAt).toBeNull();
-    // Phase 2.1 defaults.
+    // Defaults.
     expect(ev.authorIsMe).toBe(false);
     expect(ev.sourceId).toBeNull();
     expect(ev.metadata).toEqual({});
-    // Plan 02.1-28: junction-based attachment replaces events.gameId. Query
-    // event_games to verify the gameId is attached.
+    // Junction-based attachment replaces events.gameId. Query event_games
+    // to verify the gameId is attached.
     const { eventGames: eg28 } = await import("../../src/lib/server/db/schema/event-games.js");
     const junction1 = await db
       .select()
@@ -100,7 +97,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
       "127.0.0.1",
     );
     expect(ev.kind).toBe("youtube_video");
-    // Plan 02.1-28: gameId column gone; "no game attached" === zero junction
+    // The gameId column is gone; "no game attached" === zero junction
     // rows. Surfaces in inbox view via the NOT EXISTS subquery in listFeedPage.
 
     // Surfaces in attached=false (inbox) view.
@@ -131,7 +128,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("EVENTS-01 create with cross-tenant gameId throws NotFoundError (Pitfall 4)", async () => {
+  it("EVENTS-01 create with cross-tenant gameId throws NotFoundError", async () => {
     const userA = await seedUserDirectly({ email: "ev4a@test.local" });
     const userB = await seedUserDirectly({ email: "ev4b@test.local" });
     const gameB = uuidv7();
@@ -155,7 +152,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     expect(rowsA).toHaveLength(0);
   });
 
-  it("EVENTS-02 listEventsForGame returns events filtered to the game (replaces Phase 2 listTimelineForGame)", async () => {
+  it("EVENTS-02 listEventsForGame returns events filtered to the game", async () => {
     const u = await seedUserDirectly({ email: "ev5@test.local" });
     const gameId = uuidv7();
     await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
@@ -215,8 +212,8 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     await expect(listEventsForGame(userA.id, gameB)).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it("Plan 02.1-09: free-form event with kind=conference and gameId=null lands in inbox view", async () => {
-    // Phase 2.1 /events/new free-form path. Free-form events with no game
+  it("free-form event with kind=conference and gameId=null lands in inbox view", async () => {
+    // /events/new free-form path. Free-form events with no game
     // attach drop into the inbox (game_id IS NULL). The unified-table reach
     // means a kind=conference row co-exists with the kind=youtube_video
     // rows of /games/[id] curated views.
@@ -232,7 +229,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
       "127.0.0.1",
     );
     expect(ev.kind).toBe("conference");
-    // Plan 02.1-28: gameId column gone; inbox criterion is "zero junction rows".
+    // The gameId column is gone; inbox criterion is "zero junction rows".
 
     // Inbox view (attached=false) surfaces the row.
     const inbox = await listFeedPage(u.id, { show: { kind: "inbox" } }, null);
@@ -242,12 +239,12 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     expect(all.rows.map((r) => r.id)).toContain(ev.id);
   });
 
-  it("Plan 02.1-09: free-form event with kind=youtube_video and gameId=:game lands in /games/:id curated view via listEventsForGame", async () => {
-    // Phase 2.1 unified-table reach: kind=youtube_video can be created
-    // free-form (without going through the paste flow / oEmbed). The /games
-    // /[id] curated panel surfaces it via listEventsForGame, which is what
-    // Plan 02.1-09's loader fetches. Validates the unified events table is
-    // happy serving both paste-flow and free-form youtube_video rows.
+  it("free-form event with kind=youtube_video and gameId=:game lands in /games/:id curated view via listEventsForGame", async () => {
+    // Unified-table reach: kind=youtube_video can be created free-form
+    // (without going through the paste flow / oEmbed). The /games/[id]
+    // curated panel surfaces it via listEventsForGame, which is what the
+    // loader fetches. Validates the unified events table is happy serving
+    // both paste-flow and free-form youtube_video rows.
     const u = await seedUserDirectly({ email: "ev09b@test.local" });
     const gameId = uuidv7();
     await db.insert(games).values({ id: gameId, userId: u.id, title: "Hades" });
@@ -265,7 +262,7 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
       "127.0.0.1",
     );
 
-    // Curated view returns the row (replaces Phase 2 listTimelineForGame).
+    // Curated view returns the row.
     const curated = await listEventsForGame(u.id, gameId);
     expect(curated.map((r) => r.id)).toContain(ev.id);
     expect(curated.find((r) => r.id === ev.id)?.kind).toBe("youtube_video");
@@ -304,10 +301,10 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
     await expect(softDeleteEvent(u.id, ev.id, "127.0.0.1")).rejects.toBeInstanceOf(AppError);
   });
 
-  it("02.1-12: createEvent accepts kind='post' and persists round-trip", async () => {
-    // Plan 02.1-12 (Gap 12) — generic platform-agnostic kind for Mastodon /
-    // LinkedIn / Bluesky / Threads / unmapped platforms. Service must accept
-    // the value and round-trip it through SELECT.
+  it("createEvent accepts kind='post' and persists round-trip", async () => {
+    // Generic platform-agnostic kind for Mastodon / LinkedIn / Bluesky /
+    // Threads / unmapped platforms. Service must accept the value and
+    // round-trip it through SELECT.
     const u = await seedUserDirectly({ email: "ev12post@test.local" });
     const gameId = uuidv7();
     await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
@@ -335,17 +332,16 @@ describe("events CRUD (EVENTS-01..03 — unified table)", () => {
 });
 
 /**
- * Plan 02.1-14 (gap closure) — soft-delete event recovery.
+ * Soft-delete event recovery.
  *
- * Closes VERIFICATION.md Gap 2 (P0 — `confirm_event_delete` promises a 60-day
- * restore but until this plan there was no service / route / UI surface to
- * deliver on the promise). The service layer is the load-bearing tier: the
- * UPDATE's WHERE clause encodes tenant scoping + retention window + idempotency
- * by construction, so cross-tenant attempts, restore-on-never-deleted, and
+ * `confirm_event_delete` promises a 60-day restore window. The service
+ * layer is the load-bearing tier: the UPDATE's WHERE clause encodes
+ * tenant scoping + retention window + idempotency by construction, so
+ * cross-tenant attempts, restore-on-never-deleted, and
  * past-retention-window all collapse to NotFoundError.
  */
-describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
-  it("02.1-14: restore round-trips deletedAt to null and audits event.restored", async () => {
+describe("event soft-delete recovery", () => {
+  it("restore round-trips deletedAt to null and audits event.restored", async () => {
     const u = await seedUserDirectly({ email: "ev14a@test.local" });
     const gameId = uuidv7();
     await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
@@ -399,7 +395,7 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
     expect(restoredMeta?.kind).toBe("talk");
   });
 
-  it("02.1-14: cross-tenant restore throws NotFoundError", async () => {
+  it("cross-tenant restore throws NotFoundError", async () => {
     const userA = await seedUserDirectly({ email: "ev14b1@test.local" });
     const userB = await seedUserDirectly({ email: "ev14b2@test.local" });
     const gameA = uuidv7();
@@ -467,14 +463,14 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
       deletedAt: pastDeleted,
     });
 
-    // Past-retention rows are pending Phase 6 purge; restore returns 404
+    // Past-retention rows are pending purge; restore returns 404
     // (same null-result semantics as cross-tenant / never-deleted).
     await expect(restoreEvent(u.id, expiredEventId, "127.0.0.1")).rejects.toBeInstanceOf(
       NotFoundError,
     );
   });
 
-  it("02.1-14: listDeletedEvents returns recent soft-deletes only, tenant-scoped", async () => {
+  it("listDeletedEvents returns recent soft-deletes only, tenant-scoped", async () => {
     const userA = await seedUserDirectly({ email: "ev14e1@test.local" });
     const userB = await seedUserDirectly({ email: "ev14e2@test.local" });
     const gameA = uuidv7();
@@ -568,13 +564,13 @@ describe("event soft-delete recovery (Plan 02.1-14 gap closure)", () => {
 });
 
 /**
- * Plan 02.1-14 Task 2 — HTTP-boundary tests for the new restore + deleted-list
- * routes. The service-layer tests above prove the contract; these tests
- * confirm the wire-format projection (toEventDto strips userId, deletedAt
- * round-trips to null on restore, cross-tenant returns 404).
+ * HTTP-boundary tests for the restore + deleted-list routes. The
+ * service-layer tests above prove the contract; these tests confirm the
+ * wire-format projection (toEventDto strips userId, deletedAt round-trips
+ * to null on restore, cross-tenant returns 404).
  */
-describe("event soft-delete recovery routes (Plan 02.1-14 gap closure)", () => {
-  it("02.1-14: authenticated PATCH /api/events/:id/restore returns 200 + EventDto with deletedAt: null", async () => {
+describe("event soft-delete recovery routes", () => {
+  it("authenticated PATCH /api/events/:id/restore returns 200 + EventDto with deletedAt: null", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "ev14r1@test.local" });
@@ -604,11 +600,11 @@ describe("event soft-delete recovery routes (Plan 02.1-14 gap closure)", () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.id).toBe(ev.id);
     expect(body.deletedAt).toBeNull();
-    // DTO discipline (PRIV / P3): userId MUST NOT cross the wire.
+    // DTO discipline: userId MUST NOT cross the wire.
     expect(body).not.toHaveProperty("userId");
   });
 
-  it("02.1-14: authenticated GET /api/events/deleted returns {rows: EventDto[]} scoped to RETENTION_DAYS", async () => {
+  it("authenticated GET /api/events/deleted returns {rows: EventDto[]} scoped to RETENTION_DAYS", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "ev14r2@test.local" });
@@ -660,24 +656,23 @@ describe("event soft-delete recovery routes (Plan 02.1-14 gap closure)", () => {
 });
 
 /**
- * Plan 02.1-17 — createEvent kind-aware enrichment + enrichFromUrl helper.
+ * createEvent kind-aware enrichment + enrichFromUrl helper.
  *
- * Closes UAT BLOCKER "external_id parsing in createEvent" — manual-create path
- * (POST /api/events with kind=youtube_video + url) must parse the URL and
- * persist the canonical YouTube videoId so FeedCard thumbnails render
- * end-to-end. Idempotent: explicit input.externalId wins.
+ * The manual-create path (POST /api/events with kind=youtube_video + url)
+ * parses the URL and persists the canonical YouTube videoId so FeedCard
+ * thumbnails render end-to-end. Idempotent: explicit input.externalId
+ * wins.
  *
- * enrichFromUrl is the shared helper backing the new POST /api/events/preview-url
- * endpoint (Task 2) — pure URL parse + oEmbed fetch, no DB write.
+ * enrichFromUrl is the shared helper backing POST /api/events/preview-url
+ * — pure URL parse + oEmbed fetch, no DB write.
  */
-describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
-  // Parallel-execution coordination: Plan 02.1-19 runs against the same DB
-  // concurrently. Random suffixes on test emails avoid unique-key collisions
-  // when the parallel agent's tests reach this DB between our truncate and
-  // our insert. See PLAN front-matter parallel_execution block.
+describe("createEvent kind-aware enrichment", () => {
+  // Parallel-execution coordination: random suffixes on test emails avoid
+  // unique-key collisions when parallel test agents reach this DB between
+  // our truncate and our insert.
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 02.1-17 Test 1: createEvent kind=youtube_video + url derives external_id from canonical YouTube videoId", async () => {
+  it("createEvent kind=youtube_video + url derives external_id from canonical YouTube videoId", async () => {
     const u = await seedUserDirectly({ email: `ev17t1-${uniq()}@test.local` });
     const ev = await createEvent(
       u.id,
@@ -694,7 +689,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
     expect(ev.kind).toBe("youtube_video");
   });
 
-  it("Plan 02.1-17 Test 2: explicit input.externalId overrides URL-parsed value (caller wins)", async () => {
+  it("explicit input.externalId overrides URL-parsed value (caller wins)", async () => {
     const u = await seedUserDirectly({ email: `ev17t2-${uniq()}@test.local` });
     const ev = await createEvent(
       u.id,
@@ -711,7 +706,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
     expect(ev.externalId).toBe("ABC123EXPLI");
   });
 
-  it("Plan 02.1-17 Test 3: kind=youtube_video with null url leaves external_id NULL (route-layer catches the missing url; service is opportunistic)", async () => {
+  it("kind=youtube_video with null url leaves external_id NULL (route-layer catches the missing url; service is opportunistic)", async () => {
     const u = await seedUserDirectly({ email: `ev17t3-${uniq()}@test.local` });
     // Service-layer is opportunistic — the route-layer superRefine catches the
     // missing-url case BEFORE service is called. Direct service call without
@@ -730,7 +725,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
     expect(ev.externalId).toBeNull();
   });
 
-  it("Plan 02.1-17 Test 4: kind=conference + YouTube URL does NOT set external_id (parsing only fires for kind=youtube_video)", async () => {
+  it("kind=conference + YouTube URL does NOT set external_id (parsing only fires for kind=youtube_video)", async () => {
     const u = await seedUserDirectly({ email: `ev17t4-${uniq()}@test.local` });
     const ev = await createEvent(
       u.id,
@@ -746,10 +741,10 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
     expect(ev.externalId).toBeNull();
   });
 
-  it("Plan 02.1-17 Test 5: enrichFromUrl returns full enrichment shape for YouTube URL (no DB write)", async () => {
+  it("enrichFromUrl returns full enrichment shape for YouTube URL (no DB write)", async () => {
     const u = await seedUserDirectly({ email: `ev17t5-${uniq()}@test.local` });
 
-    // Mock the oEmbed fetch — same pattern as Phase 2 paste-flow tests.
+    // Mock the oEmbed fetch — same pattern as the paste-flow tests.
     const youtubeOembed = await import("../../src/lib/server/integrations/youtube-oembed.js");
     const spy = vi.spyOn(youtubeOembed, "fetchYoutubeOembed").mockResolvedValue({
       kind: "ok",
@@ -767,7 +762,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
       expect(result.externalId).toBe("dQw4w9WgXcQ");
       expect(result.title).toBe("Never Gonna Give You Up");
       expect(result.thumbnailUrl).toBe("https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg");
-      expect(result.occurredAt).toBeNull(); // 2.1 SKIP — Phase 3 fills via YouTube Data API key
+      expect(result.occurredAt).toBeNull(); // Filled later via YouTube Data API key
 
       // No event row written.
       const rows = await db.select().from(events).where(eq(events.userId, u.id));
@@ -777,7 +772,7 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
     }
   });
 
-  it("Plan 02.1-17 Test 6: enrichFromUrl with garbage URL throws AppError 'unsupported_url' 422", async () => {
+  it("enrichFromUrl with garbage URL throws AppError 'unsupported_url' 422", async () => {
     const u = await seedUserDirectly({ email: `ev17t6-${uniq()}@test.local` });
     await expect(enrichFromUrl(u.id, "not-a-url-at-all")).rejects.toMatchObject({
       code: "unsupported_url",
@@ -786,14 +781,12 @@ describe("Plan 02.1-17: createEvent kind-aware enrichment", () => {
   });
 });
 
-// Plan 02.1-19 — feed UX rebuild: discriminated 'show' axis URL contract.
-// Backend FeedFilters reshape collapses Plan 02.1-15's `attached?: boolean` +
-// `game?: string | string[]` into a single `show: ShowFilter` discriminator.
-// HTTP query-string switches from ?attached=true|false&game=A&game=B to
-// ?show=any|inbox|specific&game=A&game=B. Pre-launch destructive contract
-// change (CONTEXT D-04: zero self-host deployments).
-describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events", () => {
-  it("Plan 02.1-19 Test 6a: GET /api/events?show=any returns ALL rows for that user (default)", async () => {
+// Feed UX: discriminated 'show' axis URL contract. Backend FeedFilters
+// collapse the legacy `attached?: boolean` + `game?: string | string[]`
+// into a single `show: ShowFilter` discriminator. HTTP query-string is
+// ?show=any|inbox|specific&game=A&game=B.
+describe("?show=any|inbox|specific URL contract over /api/events", () => {
+  it("GET /api/events?show=any returns ALL rows for that user (default)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "ev19-a@test.local" });
@@ -830,7 +823,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     expect(ids).toContain(inbox.id);
   });
 
-  it("Plan 02.1-19 Test 6b: GET /api/events?show=inbox returns ONLY inbox rows (game_id IS NULL AND not dismissed)", async () => {
+  it("GET /api/events?show=inbox returns ONLY inbox rows (game_id IS NULL AND not dismissed)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "ev19-b@test.local" });
@@ -878,12 +871,12 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     const ids = body.rows.map((r) => r.id);
     expect(ids).toContain(inbox.id);
     expect(ids).not.toContain(dismissed.id);
-    // Plan 02.1-28: inbox events have ZERO junction rows; the EventDto
-    // surfaces this via gameIds: [].
+    // Inbox events have ZERO junction rows; the EventDto surfaces this
+    // via gameIds: [].
     expect(body.rows.every((r) => r.gameIds.length === 0)).toBe(true);
   });
 
-  it("Plan 02.1-19 Test 6c: GET /api/events?show=specific&game=A&game=B returns rows attached to A or B", async () => {
+  it("GET /api/events?show=specific&game=A&game=B returns rows attached to A or B", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "ev19-c@test.local" });
@@ -935,7 +928,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     expect(ids).not.toContain(evC.id);
   });
 
-  it("Plan 02.1-19 Test 6d: GET /api/events with no ?show param defaults to 'any' (returns all rows)", async () => {
+  it("GET /api/events with no ?show param defaults to 'any' (returns all rows)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "ev19-d@test.local" });
@@ -972,7 +965,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     expect(ids).toContain(inbox.id);
   });
 
-  it("Plan 02.1-19 Test 7: GET /api/events?show=garbage returns 422 validation_failed (zod enum)", async () => {
+  it("GET /api/events?show=garbage returns 422 validation_failed (zod enum)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "ev19-e@test.local" });
@@ -983,7 +976,7 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
     expect((await res.json()).error).toBe("validation_failed");
   });
 
-  it("Plan 02.1-19 Test 8: GET /api/events?game=X with no ?show treats as 'any' (bare ?game without ?show=specific is ignored)", async () => {
+  it("GET /api/events?game=X with no ?show treats as 'any' (bare ?game without ?show=specific is ignored)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "ev19-f@test.local" });
@@ -1024,19 +1017,19 @@ describe("Plan 02.1-19: ?show=any|inbox|specific URL contract over /api/events",
 });
 
 /**
- * Plan 02.1-17 Task 2 — createEventSchema authorIsMe + url-required-for-youtube
- * superRefine; new POST /api/events/preview-url endpoint.
+ * createEventSchema authorIsMe + url-required-for-youtube superRefine;
+ * POST /api/events/preview-url endpoint.
  *
- * Closes UAT gaps "kind=youtube_video → url required validation",
- * "author_is_me toggle restoration on backend", and "POST /api/events/preview-url
- * endpoint". The 12 test cases assert the HTTP-boundary contract; the
- * Task 1 service-layer contract is already covered above.
+ * The 12 test cases assert the HTTP-boundary contract for
+ * "kind=youtube_video → url required validation", "author_is_me toggle
+ * restoration on backend", and "POST /api/events/preview-url". The
+ * service-layer contract is already covered above.
  */
-describe("Plan 02.1-17: createEventSchema + preview-url", () => {
-  // Same parallel-execution coordination pattern as Task 1.
+describe("createEventSchema + preview-url", () => {
+  // Same parallel-execution coordination pattern as above.
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 02.1-17 Task 2 Test 1: POST /api/events kind=youtube_video + url=null → 422 'validation_failed' field='url'", async () => {
+  it("POST /api/events kind=youtube_video + url=null → 422 'validation_failed' field='url'", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev17t2t1-${uniq()}@test.local` });
@@ -1065,7 +1058,7 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     expect(fields).toContain("url");
   });
 
-  it("Plan 02.1-17 Task 2 Test 2: POST /api/events kind=youtube_video + non-YouTube url → 422 'validation_failed'", async () => {
+  it("POST /api/events kind=youtube_video + non-YouTube url → 422 'validation_failed'", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev17t2t2-${uniq()}@test.local` });
@@ -1088,7 +1081,7 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     expect(body.error).toBe("validation_failed");
   });
 
-  it("Plan 02.1-17 Task 2 Test 3: POST /api/events kind=youtube_video + valid YouTube url → 201 + body.externalId set", async () => {
+  it("POST /api/events kind=youtube_video + valid YouTube url → 201 + body.externalId set", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev17t2t3-${uniq()}@test.local` });
@@ -1111,7 +1104,7 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     expect(body.externalId).toBe("ABCDEFGHIJK");
   });
 
-  it("Plan 02.1-17 Task 2 Test 4: POST /api/events kind=post + url=null → 201 (kind-aware rule fires only for youtube_video)", async () => {
+  it("POST /api/events kind=post + url=null → 201 (kind-aware rule fires only for youtube_video)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev17t2t4-${uniq()}@test.local` });
@@ -1132,7 +1125,7 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     expect(res.status).toBe(201);
   });
 
-  it("Plan 02.1-17 Task 2 Test 5: POST /api/events with authorIsMe=true → 201 + body.authorIsMe===true (round-trip)", async () => {
+  it("POST /api/events with authorIsMe=true → 201 + body.authorIsMe===true (round-trip)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev17t2t5-${uniq()}@test.local` });
@@ -1155,7 +1148,7 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     expect(body.authorIsMe).toBe(true);
   });
 
-  it("Plan 02.1-17 Task 2 Test 6: POST /api/events without authorIsMe → 201 + body.authorIsMe===false (default)", async () => {
+  it("POST /api/events without authorIsMe → 201 + body.authorIsMe===false (default)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev17t2t6-${uniq()}@test.local` });
@@ -1177,7 +1170,7 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     expect(body.authorIsMe).toBe(false);
   });
 
-  it("Plan 02.1-17 Task 2 Test 7: POST /api/events/preview-url with valid YouTube URL → 200 + enrichment shape", async () => {
+  it("POST /api/events/preview-url with valid YouTube URL → 200 + enrichment shape", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev17t2t7-${uniq()}@test.local` });
@@ -1223,7 +1216,7 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     }
   });
 
-  it("Plan 02.1-17 Task 2 Test 8: POST /api/events/preview-url with garbage URL → 422 'unsupported_url'", async () => {
+  it("POST /api/events/preview-url with garbage URL → 422 'unsupported_url'", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev17t2t8-${uniq()}@test.local` });
@@ -1241,7 +1234,7 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     expect(body.error).toBe("unsupported_url");
   });
 
-  it("Plan 02.1-17 Task 2 Test 9: anonymous POST /api/events/preview-url → 401 unauthorized (sweep complement)", async () => {
+  it("anonymous POST /api/events/preview-url → 401 unauthorized (sweep complement)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
 
@@ -1256,7 +1249,7 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 02.1-17 Task 2 Test 10: POST /api/events/preview-url is read-only — both userA and userB get same shape from same URL", async () => {
+  it("POST /api/events/preview-url is read-only — both userA and userB get same shape from same URL", async () => {
     // /api/events/preview-url is read-only — pure URL parse + oEmbed fetch.
     // No tenant-owned data is read. Cross-tenant invariant: both users get
     // the same enrichment shape from the same URL.
@@ -1318,11 +1311,10 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     }
   });
 
-  it("Plan 02.1-17 Task 2 Test 11: PATCH /api/events/:id with authorIsMe=true → 200 + body.authorIsMe===true (updateEventSchema round-trip)", async () => {
-    // Plan-checker round-2 P0 fix: without this test, partial-ship risk is
-    // real (createEventSchema gets authorIsMe but updateEventSchema silently
-    // doesn't, edit form fails at runtime). Plan 02.1-18's edit form depends
-    // on this contract.
+  it("PATCH /api/events/:id with authorIsMe=true → 200 + body.authorIsMe===true (updateEventSchema round-trip)", async () => {
+    // Without this test, partial-ship risk is real (createEventSchema
+    // gets authorIsMe but updateEventSchema silently doesn't, edit form
+    // fails at runtime). The edit form depends on this contract.
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev17t2t11-${uniq()}@test.local` });
@@ -1352,16 +1344,13 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
     expect(body.authorIsMe).toBe(true);
   });
 
-  it("Plan 02.1-17 Task 2 Test 12 (updated by Plan 02.1-37): PATCH /api/events/:id changing kind=youtube_video without url → 422 'kind_url_inconsistent'", async () => {
-    // Plan-checker round-2 P0 fix: catches a kind-change PATCH that drops the
-    // url. Plan 02.1-37 (UAT-NOTES.md §5.11) moved the validator from the
-    // route-layer superRefine to the service layer (merged-state check). The
-    // old route-layer error was `{error: 'validation_failed', details: [...]}`;
-    // the service-layer error is `{error: 'kind_url_inconsistent', metadata}`.
-    // Both still produce a 422; the body shape is the documented contract
-    // change in Plan 02.1-37. This kind-change PATCH (kind=youtube_video,
-    // url=null) on a row whose existing url is null falls into the
-    // youtube_video_requires_url branch.
+  it("PATCH /api/events/:id changing kind=youtube_video without url → 422 'kind_url_inconsistent'", async () => {
+    // Catches a kind-change PATCH that drops the url. The validator
+    // lives in the service layer (merged-state check). The error is
+    // `{error: 'kind_url_inconsistent', metadata}` with status 422. This
+    // kind-change PATCH (kind=youtube_video, url=null) on a row whose
+    // existing url is null falls into the youtube_video_requires_url
+    // branch.
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev17t2t12-${uniq()}@test.local` });
@@ -1396,20 +1385,20 @@ describe("Plan 02.1-17: createEventSchema + preview-url", () => {
 });
 
 /**
- * Plan 02.1-18 — edit-flow rebuild via /events/[id] detail page.
+ * Edit-flow via /events/[id] detail page.
  *
  * Service-layer + HTTP-boundary tests for:
  *   - getEventById opts.includeSoftDeleted toggle (Restore flow needs to
  *     surface soft-deleted rows; default behavior unchanged for existing
  *     callers; cross-tenant scope MUST NOT relax under the opts flag)
- *   - PATCH /api/events/:id round-trips authorIsMe through Plan 02.1-17's
+ *   - PATCH /api/events/:id round-trips authorIsMe through
  *     updateEventSchema + service-layer updateEvent patch builder
  */
-describe("Plan 02.1-18: detail loader + edit + author_is_me round-trip", () => {
-  // Same parallel-execution coordination pattern as Plan 02.1-17.
+describe("detail loader + edit + author_is_me round-trip", () => {
+  // Same parallel-execution coordination pattern as above.
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 02.1-18 Test 1: getEventById opts.includeSoftDeleted=true returns soft-deleted row", async () => {
+  it("getEventById opts.includeSoftDeleted=true returns soft-deleted row", async () => {
     const { getEventById } = await import("../../src/lib/server/services/events.js");
     const u = await seedUserDirectly({ email: `ev18t1-${uniq()}@test.local` });
     const ev = await createEvent(
@@ -1426,13 +1415,13 @@ describe("Plan 02.1-18: detail loader + edit + author_is_me round-trip", () => {
 
     // Default behavior: throws NotFoundError on soft-deleted rows.
     await expect(getEventById(u.id, ev.id)).rejects.toBeInstanceOf(NotFoundError);
-    // Plan 02.1-18: opt-in surfaces the soft-deleted row.
+    // Opt-in surfaces the soft-deleted row.
     const row = await getEventById(u.id, ev.id, { includeSoftDeleted: true });
     expect(row.id).toBe(ev.id);
     expect(row.deletedAt).not.toBeNull();
   });
 
-  it("Plan 02.1-18 Test 2: getEventById opts.includeSoftDeleted=true cross-tenant still throws NotFoundError", async () => {
+  it("getEventById opts.includeSoftDeleted=true cross-tenant still throws NotFoundError", async () => {
     // The opts flag MUST NOT bypass the userId WHERE clause. Privacy
     // invariants are encoded by query construction, not by the opts.
     const { getEventById } = await import("../../src/lib/server/services/events.js");
@@ -1456,7 +1445,7 @@ describe("Plan 02.1-18: detail loader + edit + author_is_me round-trip", () => {
     );
   });
 
-  it("Plan 02.1-18 Test 3: PATCH /api/events/:id { authorIsMe: true } persists author_is_me=true on the row", async () => {
+  it("PATCH /api/events/:id { authorIsMe: true } persists author_is_me=true on the row", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev18t3-${uniq()}@test.local` });
@@ -1492,7 +1481,7 @@ describe("Plan 02.1-18: detail loader + edit + author_is_me round-trip", () => {
     expect(row?.authorIsMe).toBe(true);
   });
 
-  it("Plan 02.1-18 Test 4: PATCH /api/events/:id authorIsMe round-trips: response body matches request", async () => {
+  it("PATCH /api/events/:id authorIsMe round-trips: response body matches request", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev18t4-${uniq()}@test.local` });
@@ -1524,22 +1513,20 @@ describe("Plan 02.1-18: detail loader + edit + author_is_me round-trip", () => {
 });
 
 /**
- * Plan 02.1-28 (UAT-NOTES.md §4.24.G — M:N migration application layer) —
  * createEvent / updateEvent gameIds[] semantics.
  *
- * Closes the M:N gap at the events service: events relate to ZERO-or-MORE
- * games via the event_games junction; gameIds=[] === inbox; non-empty
- * gameIds[] populates one junction row per id; updateEvent.gameIds is a
- * SET-replacement (not an additive append) per attachEventToGames diff
- * semantics.
+ * Events relate to ZERO-or-MORE games via the event_games junction;
+ * gameIds=[] === inbox; non-empty gameIds[] populates one junction row
+ * per id; updateEvent.gameIds is a SET-replacement (not an additive
+ * append) per attachEventToGames diff semantics.
  */
-describe("Plan 02.1-28 — M:N gameIds", () => {
+describe("M:N gameIds", () => {
   // Parallel-execution coordination: random suffix on test emails avoids
   // unique-key collisions when sibling agents hit the same DB between
-  // truncate cycles (Plan 02.1-17 precedent — see top of file).
+  // truncate cycles (see top of file).
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 02.1-28: createEvent with gameIds=[A, B] populates 2 event_games rows + audit metadata.game_ids matches", async () => {
+  it("createEvent with gameIds=[A, B] populates 2 event_games rows + audit metadata.game_ids matches", async () => {
     const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
     const u = await seedUserDirectly({ email: `ev28-create-multi-${uniq()}@test.local` });
     const gA = uuidv7();
@@ -1572,7 +1559,7 @@ describe("Plan 02.1-28 — M:N gameIds", () => {
     expect((meta?.game_ids ?? []).sort()).toEqual([gA, gB].sort());
   });
 
-  it("Plan 02.1-28: createEvent with no gameIds creates event in inbox (zero junction rows)", async () => {
+  it("createEvent with no gameIds creates event in inbox (zero junction rows)", async () => {
     const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
     const u = await seedUserDirectly({ email: `ev28-create-inbox-${uniq()}@test.local` });
     const ev = await createEvent(
@@ -1591,7 +1578,7 @@ describe("Plan 02.1-28 — M:N gameIds", () => {
     expect(junction).toHaveLength(0);
   });
 
-  it("Plan 02.1-28: createEvent with cross-tenant gameId throws NotFoundError; events row NOT inserted (validate-first)", async () => {
+  it("createEvent with cross-tenant gameId throws NotFoundError; events row NOT inserted (validate-first)", async () => {
     const u1 = uniq();
     const u2 = uniq();
     const userA = await seedUserDirectly({ email: `ev28-create-xt-a-${u1}@test.local` });
@@ -1617,7 +1604,7 @@ describe("Plan 02.1-28 — M:N gameIds", () => {
     expect(rowsA).toHaveLength(0);
   });
 
-  it("Plan 02.1-28: updateEvent.gameIds replaces the attached set atomically (set-replacement)", async () => {
+  it("updateEvent.gameIds replaces the attached set atomically (set-replacement)", async () => {
     const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
     const u = await seedUserDirectly({ email: `ev28-update-replace-${uniq()}@test.local` });
     const gA = uuidv7();
@@ -1651,9 +1638,9 @@ describe("Plan 02.1-28 — M:N gameIds", () => {
     expect(after.map((r) => r.gameId)).toEqual([gB]);
 
     // Audit chain: createEvent writes ONE attached_to_game(A) audit row
-    // (Plan 02.1-28: createEvent issues the audit per-junction-row when
-    // it inserts the initial set; updateEvent → attachEventToGames then
-    // writes attached_to_game(B) + detached_from_game(A) for the diff).
+    // (createEvent issues the audit per-junction-row when it inserts the
+    // initial set; updateEvent → attachEventToGames then writes
+    // attached_to_game(B) + detached_from_game(A) for the diff).
     // Note: createEvent inserts the junction directly (no
     // attachEventToGames roundtrip), so the initial audit is from
     // createEvent's writeAudit({ action: 'event.created', metadata:
@@ -1677,28 +1664,25 @@ describe("Plan 02.1-28 — M:N gameIds", () => {
 });
 
 /**
- * Plan 02.1-32 (UAT-NOTES.md §4.24.D + §4.24.C + §4.18.A) —
  * /events/[id]/edit standalone toggle round-trip.
  *
- * Closes the round-trip behavior the form relies on:
+ * Asserts the round-trip behavior the form relies on:
  *   1. PATCH /api/events/:id (main fields) followed by PATCH
  *      /api/events/:id/mark-standalone reaches the desired state
  *      (metadata.triage.standalone === true) AND writes both audit verbs
  *      in order (event.edited, event.marked_standalone).
  *   2. PATCH /api/events/:id/mark-standalone on an event with attached
  *      games returns 422 standalone_conflicts_with_game (defense-in-depth
- *      mirror of the events-attach.test.ts coverage; verifies the same
- *      contract from the events.test.ts perspective).
+ *      mirror of the events-attach.test.ts coverage).
  *   3. DELETE /api/events/:id soft-deletes the event; subsequent GET
- *      returns 404 (default loader excludes soft-deleted rows). The Delete
- *      button now lives at the /events/[id]/edit form footer (Plan
- *      02.1-32) rather than the read-only detail page.
+ *      returns 404 (default loader excludes soft-deleted rows). The
+ *      Delete button lives at the /events/[id]/edit form footer.
  */
-describe("Plan 02.1-32 — /events/[id]/edit standalone toggle round-trip", () => {
-  // Parallel-executor email-uniqueness coordination (Plan 02.1-17 pattern):
+describe("/events/[id]/edit standalone toggle round-trip", () => {
+  // Parallel-executor email-uniqueness coordination:
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 02.1-32: PATCH /api/events/:id then PATCH /api/events/:id/mark-standalone reaches metadata.triage.standalone=true + audit chain", async () => {
+  it("PATCH /api/events/:id then PATCH /api/events/:id/mark-standalone reaches metadata.triage.standalone=true + audit chain", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev32-roundtrip-${uniq()}@test.local` });
@@ -1754,7 +1738,7 @@ describe("Plan 02.1-32 — /events/[id]/edit standalone toggle round-trip", () =
     expect(actions).toContain("event.marked_standalone");
   });
 
-  it("Plan 02.1-32: PATCH /api/events/:id/mark-standalone on event with attached games returns 422 standalone_conflicts_with_game (defense-in-depth)", async () => {
+  it("PATCH /api/events/:id/mark-standalone on event with attached games returns 422 standalone_conflicts_with_game (defense-in-depth)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev32-conflict-${uniq()}@test.local` });
@@ -1781,7 +1765,7 @@ describe("Plan 02.1-32 — /events/[id]/edit standalone toggle round-trip", () =
     expect(body.error).toBe("standalone_conflicts_with_game");
   });
 
-  it("Plan 02.1-32: DELETE /api/events/:id soft-deletes; subsequent GET /api/events/:id returns 404", async () => {
+  it("DELETE /api/events/:id soft-deletes; subsequent GET /api/events/:id returns 404", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev32-delete-${uniq()}@test.local` });
@@ -1812,17 +1796,14 @@ describe("Plan 02.1-32 — /events/[id]/edit standalone toggle round-trip", () =
 });
 
 /**
- * Plan 02.1-35 — transactional integrity + inbox.dismissed clear.
- *
- * Closes UAT-NOTES.md §5.1 (P0 — `metadata.inbox.dismissed=true` sticky after
- * attach→detach) and §5.12 (P1 — `createEvent` + `attachEventToGames` perform
- * multi-step writes without `db.transaction()`).
+ * Transactional integrity + inbox.dismissed clear.
  *
  * Asserted behavior:
  * 1. createEvent rolls back the parent events row when the junction INSERT
  *    throws (no orphan parent).
- * 2. attachEventToGames clears `metadata.inbox.dismissed` on any junction diff
- *    (attach OR detach) so the event re-engages with the inbox triage flow.
+ * 2. attachEventToGames clears `metadata.inbox.dismissed` on any junction
+ *    diff (attach OR detach) so the event re-engages with the inbox
+ *    triage flow.
  * 3. attachEventToGames preserves metadata on a no-op call (toAdd=[],
  *    toRemove=[]) — the strip is gated on diff > 0.
  *
@@ -1830,10 +1811,10 @@ describe("Plan 02.1-32 — /events/[id]/edit standalone toggle round-trip", () =
  * failure must not block the business path); a missing audit row on a
  * successful junction write is a forensics-acceptable failure mode.
  */
-describe("Plan 02.1-35 — transactional integrity + inbox.dismissed clear", () => {
+describe("transactional integrity + inbox.dismissed clear", () => {
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 02.1-35: createEvent rolls back parent events row when junction INSERT throws", async () => {
+  it("createEvent rolls back parent events row when junction INSERT throws", async () => {
     const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
     const u = await seedUserDirectly({ email: `ev35-rollback-${uniq()}@test.local` });
     const gA = uuidv7();
@@ -1902,7 +1883,7 @@ describe("Plan 02.1-35 — transactional integrity + inbox.dismissed clear", () 
     expect(junction).toHaveLength(0);
   });
 
-  it("Plan 02.1-35: attachEventToGames clears metadata.inbox.dismissed after attach (diff > 0)", async () => {
+  it("attachEventToGames clears metadata.inbox.dismissed after attach (diff > 0)", async () => {
     const { dismissFromInbox, attachEventToGames } =
       await import("../../src/lib/server/services/events.js");
     const u = await seedUserDirectly({ email: `ev35-clear-attach-${uniq()}@test.local` });
@@ -1939,7 +1920,7 @@ describe("Plan 02.1-35 — transactional integrity + inbox.dismissed clear", () 
     expect((row!.metadata as { inbox?: unknown } | null)?.inbox).toBeUndefined();
   });
 
-  it("Plan 02.1-35: attachEventToGames clears metadata.inbox.dismissed after detach (diff > 0)", async () => {
+  it("attachEventToGames clears metadata.inbox.dismissed after detach (diff > 0)", async () => {
     const { dismissFromInbox, attachEventToGames } =
       await import("../../src/lib/server/services/events.js");
     const u = await seedUserDirectly({ email: `ev35-clear-detach-${uniq()}@test.local` });
@@ -2004,7 +1985,7 @@ describe("Plan 02.1-35 — transactional integrity + inbox.dismissed clear", () 
     expect((row!.metadata as { inbox?: unknown } | null)?.inbox).toBeUndefined();
   });
 
-  it("Plan 02.1-35: attachEventToGames no-op call (diff === 0) preserves metadata.inbox.dismissed", async () => {
+  it("attachEventToGames no-op call (diff === 0) preserves metadata.inbox.dismissed", async () => {
     const { dismissFromInbox, attachEventToGames } =
       await import("../../src/lib/server/services/events.js");
     const u = await seedUserDirectly({ email: `ev35-noop-${uniq()}@test.local` });
@@ -2050,16 +2031,16 @@ describe("Plan 02.1-35 — transactional integrity + inbox.dismissed clear", () 
 });
 
 /**
- * Plan 02.1-37 — PATCH /api/events/:id youtube invariant (merged-state validator).
+ * PATCH /api/events/:id youtube invariant (merged-state validator).
  *
- * Closes UAT-NOTES.md §5.11 (P1). The route-layer superRefine on
- * updateEventSchema returned early when the body lacked `kind`; a PATCH like
- * {url: null} on an existing kind=youtube_video row would slip past and the
- * UPDATE would write url=null, leaving the row in a kind=youtube_video AND
- * url=null state (round-4 invariant violation).
+ * The route-layer superRefine on updateEventSchema returned early when
+ * the body lacked `kind`; a PATCH like {url: null} on an existing
+ * kind=youtube_video row would slip past and the UPDATE would write
+ * url=null, leaving the row in a kind=youtube_video AND url=null state
+ * (an invariant violation).
  *
- * Plan 02.1-37 moves the validator into the service layer so it sees BOTH
- * the request body AND the existing row, computes the merged state, and
+ * The validator now lives in the service layer so it sees BOTH the
+ * request body AND the existing row, computes the merged state, and
  * throws AppError('kind_url_inconsistent', 422) when:
  *   - merged.kind === 'youtube_video' AND merged.url is falsy, OR
  *   - merged.kind === 'youtube_video' AND merged.url does not parse as
@@ -2073,7 +2054,7 @@ describe("Plan 02.1-35 — transactional integrity + inbox.dismissed clear", () 
  * AFTER the existing-row load, so a forged eventId from another tenant
  * never reaches it.
  */
-describe("Plan 02.1-37 — PATCH /api/events/:id youtube invariant (merged-state validator)", () => {
+describe("PATCH /api/events/:id youtube invariant (merged-state validator)", () => {
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
   it("PATCH {url: null} on kind=youtube_video event returns 422 with code=kind_url_inconsistent", async () => {
@@ -2160,8 +2141,7 @@ describe("Plan 02.1-37 — PATCH /api/events/:id youtube invariant (merged-state
   });
 
   it("PATCH {url: malformed YT (non-11-char videoId)} returns 422 — matches POST strictness", async () => {
-    // Phase 03.0.1 (post-review) — regression guard for create-vs-update
-    // strictness drift. Pre-fix:
+    // Regression guard for create-vs-update strictness drift. Pre-fix:
     //   - POST /api/events used parseIngestUrl which validated /^[\w-]{11}$/
     //     for the 11-char YouTube videoId.
     //   - PATCH /api/events used adapter.validateEventInput → youtubeParseUrl

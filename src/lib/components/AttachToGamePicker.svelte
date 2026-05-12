@@ -1,47 +1,39 @@
 <script lang="ts">
   // AttachToGamePicker — inline picker for the per-row "Attach to game"
-  // affordance on FeedRow (UI-SPEC §"Component inventory" + §"/feed row
-  // interaction contract" point 4). Three workflows:
+  // affordance on FeedRow. Three workflows:
   //
   //   1. Pick a game → PATCH /api/events/:id/attach with {gameIds: [X]}
-  //      (round-3 picker is single-select; Plan 02.1-32 multi-select swap
-  //      is staged behind the back-compat alias which the route accepts).
+  //      (single-select UI surface; the route accepts the canonical
+  //      multi-select shape).
   //   2. "Move to inbox" → PATCH /api/events/:id/attach with {gameIds: []}
   //   3. "Mark not game-related" → PATCH /api/events/:id/dismiss-inbox
-  //
-  // Plan 02.1-28: switches from {gameId} to {gameIds} on the wire while
-  // preserving the single-select UX for round-3 UAT. The full multi-
-  // select rebuild lands in Plan 02.1-32 (separate plan; declares
-  // depends_on: ["02.1-28"]).
   //
   // Closed state: a button labeled "Attach to game" (no game) or the matched
   // game's title (game attached).
   //
   // Open state: anchored dropdown listing the user's games + a divider +
   // "Move to inbox" + "Mark not game-related" options. Esc closes the
-  // dropdown (UI-SPEC §"/feed row interaction contract" point 4).
+  // dropdown.
   //
-  // CONTEXT D-08: mobile open-state is the inline anchored dropdown
-  // (NOT a bottom-sheet <dialog>). Bottom-sheet variant is filed for Phase 6
-  // polish if UAT surfaces clipping at 360px on users with >10 games.
+  // Mobile open-state is the inline anchored dropdown (NOT a bottom-sheet
+  // <dialog>). Bottom-sheet variant is filed for future polish if UAT
+  // surfaces clipping at 360px on users with >10 games.
   //
-  // CONTEXT D-14: when the user has ZERO games, render an inline link
+  // When the user has ZERO games, render an inline link
   // "No games yet — + Add a game" via m.feed_attach_no_games_inline()
   // (the 0-games + source-registration onboarding case).
   //
-  // Accessibility (UI-SPEC §"Accessibility Floor delta"): the trigger is a
-  // <button>; the dropdown has role="menu" with role="menuitem" children.
-  // Esc closes; clicking outside closes.
+  // Accessibility: the trigger is a <button>; the dropdown has role="menu"
+  // with role="menuitem" children. Esc closes; clicking outside closes.
 
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "./InlineError.svelte";
 
   type EventForPicker = {
     id: string;
-    // Plan 02.1-28 (M:N migration): the picker now reads gameIds[] from
-    // the EventDto. Round-3 single-select UX surfaces the FIRST attached
-    // game as the trigger label (matchedGame derivation below); Plan
-    // 02.1-32 swaps for full multi-select.
+    // The picker reads gameIds[] from the EventDto. Single-select UX
+    // surfaces the FIRST attached game as the trigger label (matchedGame
+    // derivation below).
     gameIds: string[];
   };
   type GameOption = {
@@ -58,13 +50,12 @@
     event: EventForPicker;
     games: GameOption[];
     onChanged?: () => void;
-    // Plan 02.1-32 (UAT-NOTES.md §4.24.F): compact-mode trigger for the
-    // /feed inbox card surface. Reduces visual weight (smaller font,
-    // lighter background, shrunken padding) and swaps the trigger label
-    // to m.feed_card_attach_compact_label() (`"Attach"`). The expanded
-    // dropdown menu is unchanged — only the trigger button shrinks.
-    // The /events/[id]/edit form usage stays on the default (full-size)
-    // picker.
+    // Compact-mode trigger for the /feed inbox card surface. Reduces
+    // visual weight (smaller font, lighter background, shrunken padding)
+    // and swaps the trigger label to m.feed_card_attach_compact_label()
+    // (`"Attach"`). The expanded dropdown menu is unchanged — only the
+    // trigger button shrinks. The /events/[id]/edit form usage stays on
+    // the default (full-size) picker.
     compact?: boolean;
   } = $props();
 
@@ -72,21 +63,19 @@
   let busy = $state(false);
   let error = $state<string | null>(null);
 
-  // Plan 02.1-28: pick the first attached game for the round-3 trigger
-  // label. Multi-game events render the first; Plan 02.1-32's multi-select
-  // surface will replace this with a full chip cluster.
+  // Pick the first attached game for the trigger label. Multi-game events
+  // render the first.
   const matchedGame = $derived.by(() => {
     if (event.gameIds.length === 0) return null;
     const firstId = event.gameIds[0]!;
     return games.find((g) => g.id === firstId) ?? null;
   });
-  // Plan 02.1-32 (UAT-NOTES.md §4.24.F): compact-mode trigger always shows
-  // the short label regardless of attached state — the inbox-card use case
-  // never has an attached game (the picker is hidden via isInboxRow gate
-  // when gameIds.length > 0), so the matched-game branch is unreachable
-  // in compact mode. The defensive `matchedGame` check below preserves
-  // round-trip safety if a future caller passes compact=true with a
-  // non-empty gameIds[].
+  // Compact-mode trigger always shows the short label regardless of
+  // attached state — the inbox-card use case never has an attached game
+  // (the picker is hidden via isInboxRow gate when gameIds.length > 0),
+  // so the matched-game branch is unreachable in compact mode. The
+  // defensive `matchedGame` check below preserves round-trip safety if a
+  // future caller passes compact=true with a non-empty gameIds[].
   const triggerLabel = $derived.by(() => {
     if (compact) return m.feed_card_attach_compact_label();
     return matchedGame ? matchedGame.title : m.feed_attach_to_game();
@@ -112,8 +101,8 @@
     busy = true;
     error = null;
     try {
-      // Plan 02.1-28: send the canonical {gameIds: string[]} shape.
-      // Empty array === "move to inbox" (replaces the legacy {gameId: null}).
+      // Send the canonical {gameIds: string[]} shape. Empty array ===
+      // "move to inbox".
       const gameIds = gameId === null ? [] : [gameId];
       const res = await fetch(`/api/events/${event.id}/attach`, {
         method: "PATCH",
@@ -255,12 +244,12 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
-  /* Plan 02.1-32 (UAT-NOTES.md §4.24.F): compact-mode trigger shrinks the
-   * visual weight of the inline picker on inbox cards. User quote:
-   * "это кнопка ее сделать меньше, это по сути просто быстрый способ
-   * разбирать инбокс". Smaller font, lighter (transparent) background,
-   * tighter padding, muted color — the picker reads as a quick-action
-   * affordance instead of competing with the card's primary content. */
+  /* Compact-mode trigger shrinks the visual weight of the inline picker
+   * on inbox cards. User quote: "это кнопка ее сделать меньше, это по
+   * сути просто быстрый способ разбирать инбокс". Smaller font, lighter
+   * (transparent) background, tighter padding, muted color — the picker
+   * reads as a quick-action affordance instead of competing with the
+   * card's primary content. */
   .trigger.compact {
     min-height: 0;
     padding: var(--space-xs) var(--space-sm);

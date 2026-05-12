@@ -1,4 +1,4 @@
-// Cross-source URL router — Phase 03.0.1 Plan 06 (D-15).
+// Cross-source URL router.
 //
 // Iterates `allAdapters` from the registry in registration order; the
 // first non-null `adapter.parseUrl(input)` wins. Returns `RoutedUrl`
@@ -11,14 +11,14 @@
 // `youtu.be` host matches and any future overlap is resolved by moving
 // the more-specific adapter ahead of the more-general one.
 //
-// The friendly Reddit deferral message (RESEARCH.md SOTA divergence #3)
-// is NOT added here. `parseAnyUrl` returns `{ kind: "unsupported" }`
-// for reddit.com URLs (no Reddit adapter exists yet) and the
-// orchestrator (`src/lib/server/services/url-parser.ts`) maps that to
+// The friendly Reddit deferral message is NOT added here. `parseAnyUrl`
+// returns `{ kind: "unsupported" }` for reddit.com URLs (no Reddit
+// adapter exists yet) and the orchestrator
+// (`src/lib/server/services/url-parser.ts`) maps that to
 // `{ kind: "reddit_deferred" }` via `detectFutureKind` from
 // `./future-kinds.ts`. Keeping the Reddit-specific friendly path out
 // of the registry-iteration layer means the iterator stays pure —
-// adding Reddit (Phase 03.1) is a single registry entry and the
+// adding Reddit later is a single registry entry and the
 // `detectFutureKind` map shrinks accordingly.
 
 import { allAdapters } from "./registry.js";

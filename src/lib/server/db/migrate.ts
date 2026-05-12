@@ -1,16 +1,16 @@
 // Programmatic migration runner with a Postgres advisory lock.
 //
-// Pattern 1 (RESEARCH.md "Migrations on boot"): every container that boots
-// the app/worker/scheduler image attempts to run pending migrations against
+// "Migrations on boot" pattern: every container that boots the
+// app/worker/scheduler image attempts to run pending migrations against
 // its own `DATABASE_URL` before serving traffic. Concurrent containers must
 // not race the migration table — we use `pg_advisory_lock(int8)` so only one
 // process applies migrations at a time, and the others wait until the lock
 // is released, then observe the final schema and proceed.
 //
-// `migrationsApplied.current` is a mutable boolean read by `/readyz` (Open
-// Question Q4 — strict readyz semantics). The HTTP server exposes /readyz
-// only after this flag flips true, so Cloudflare Tunnel / Docker healthcheck
-// don't route traffic to a partially-migrated process.
+// `migrationsApplied.current` is a mutable boolean read by `/readyz`. The
+// HTTP server exposes /readyz only after this flag flips true, so
+// Cloudflare Tunnel / Docker healthcheck don't route traffic to a
+// partially-migrated process.
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -26,8 +26,7 @@ export const migrationsApplied = { current: false };
 //
 // 0x4D49475241544531 = 5_494_251_782_888_259_377 in decimal.
 // That value is well within Postgres int8 max (9_223_372_036_854_775_807),
-// so passing it as a JS BigInt → string is safe. Reviewers: this comment is
-// the BIGINT-safety annotation called out in VALIDATION.md revision 1 W2.
+// so passing it as a JS BigInt → string is safe.
 const LOCK_KEY = 0x4d49475241544531n; // BIGINT-safe; pg accepts numeric/bigint
 
 export async function runMigrations(): Promise<void> {

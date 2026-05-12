@@ -9,15 +9,13 @@ import { listAuditPage, encodeCursor } from "../../src/lib/server/services/audit
 import { seedUserDirectly } from "./helpers.js";
 
 /**
- * Plan 02-07 — audit-read PRIV-02 integration tests.
+ * Audit-read integration tests.
  *
- * Wave 0 placeholder names PRESERVED — the three `02-07: PRIV-02 ...` it.skip
- * stubs from Plan 02-01 are flipped to live tests below. Plan 02-05 already
- * lit up `02-05: KEYS-06 ip resolved via proxy-trust` in its own describe
- * block; that one is left untouched.
+ * The audit-IP-forwarding test lives in its own describe block below so
+ * the spyOn pattern stays scoped narrowly.
  */
-describe("audit log read endpoint (PRIV-02 + KEYS-06 metadata)", () => {
-  it("02-07: PRIV-02 page size 50 + cursor", async () => {
+describe("audit log read endpoint", () => {
+  it("page size 50 + cursor", async () => {
     const u = await seedUserDirectly({ email: "ap1@test.local" });
     // Seed 60 audit rows — one above PAGE_SIZE so the cursor is exercised.
     for (let i = 0; i < 60; i++) {
@@ -32,7 +30,7 @@ describe("audit log read endpoint (PRIV-02 + KEYS-06 metadata)", () => {
     expect(page1.nextCursor).toBeTruthy();
 
     const page2 = await listAuditPage(u.id, page1.nextCursor!, []);
-    // Plan 02.1: rapid writeAudit() bursts on a fast CI Postgres can land
+    // Rapid writeAudit() bursts on a fast CI Postgres can land
     // multiple rows in the same millisecond AND the (created_at, id) tuple
     // strict-less-than cursor can drop or duplicate boundary rows when many
     // share a timestamp. Two load-bearing invariants survive that flakiness:
@@ -49,7 +47,7 @@ describe("audit log read endpoint (PRIV-02 + KEYS-06 metadata)", () => {
     for (const r of page2.rows) expect(ids1.has(r.id)).toBe(false);
   });
 
-  it("02-07: PRIV-02 action filter", async () => {
+  it("action filter", async () => {
     const u = await seedUserDirectly({ email: "ap2@test.local" });
     await writeAudit({ userId: u.id, action: "session.signin", ipAddress: "10.0.0.1" });
     await writeAudit({ userId: u.id, action: "key.add", ipAddress: "10.0.0.1" });
@@ -63,12 +61,12 @@ describe("audit log read endpoint (PRIV-02 + KEYS-06 metadata)", () => {
     expect(keyAdds.rows[0]!.action).toBe("key.add");
   });
 
-  it("02-07: PRIV-02 tenant-relative cursor (cross-tenant rejection)", async () => {
-    // P19 mitigation by construction. Seed rows for user A; capture a cursor
-    // from one of A's rows; present that cursor as user B; assert zero of
-    // A's rows leak. The userId WHERE clause is independent of the cursor —
-    // even a forged cursor encoding A's (created_at, id) cannot return A's
-    // rows because the tenant filter has already pruned them.
+  it("tenant-relative cursor (cross-tenant rejection)", async () => {
+    // Seed rows for user A; capture a cursor from one of A's rows;
+    // present that cursor as user B; assert zero of A's rows leak. The
+    // userId WHERE clause is independent of the cursor — even a forged
+    // cursor encoding A's (created_at, id) cannot return A's rows
+    // because the tenant filter has already pruned them.
     const userA = await seedUserDirectly({ email: "tcA@test.local" });
     const userB = await seedUserDirectly({ email: "tcB@test.local" });
     for (let i = 0; i < 5; i++) {
@@ -85,7 +83,7 @@ describe("audit log read endpoint (PRIV-02 + KEYS-06 metadata)", () => {
     const aCursor = encodeCursor(aPage.rows[2]!.createdAt, aPage.rows[2]!.id);
 
     // Query as user B with A's cursor — must return 0 rows. This is the
-    // load-bearing PRIV-02 / P19 assertion.
+    // load-bearing tenant-isolation assertion.
     const bPage = await listAuditPage(userB.id, aCursor, []);
     expect(bPage.rows.length).toBe(0);
     expect(bPage.nextCursor).toBeNull();
@@ -99,29 +97,21 @@ describe("audit log read endpoint (PRIV-02 + KEYS-06 metadata)", () => {
 });
 
 /**
- * Plan 02-05 — audit IP forwarding (KEYS-06).
+ * Audit IP forwarding.
  *
- * The placeholder `02-05: KEYS-06 ip resolved via proxy-trust` stub from
- * Plan 02-01 lives in its own describe block here so the spyOn pattern is
- * scoped narrowly: only this block mocks `validateSteamKey`. The other
- * audit stubs (Plan 02-07 owners) keep their original `it.skip` shape
- * untouched.
- *
- * Why this lives in audit.test.ts (and not secrets-steam.test.ts):
- * the assertion under test is the audit row's `ip_address` column, not
- * the api_keys_steam row. Routing the test by the column it exercises
- * keeps Plan 02-07's audit-read tests near this one.
+ * The assertion under test is the audit row's `ip_address` column, not
+ * the api_keys_steam row.
  */
-describe("audit IP forwarding (KEYS-06)", () => {
+describe("audit IP forwarding", () => {
   const validateSpy = vi.spyOn(SteamApi, "validateSteamKey");
   afterEach(() => validateSpy.mockReset());
 
-  it("02-05: KEYS-06 ip resolved via proxy-trust", async () => {
+  it("ip resolved via proxy-trust", async () => {
     validateSpy.mockResolvedValue(true);
     const userA = await seedUserDirectly({ email: "ip@test.local" });
     // The resolved client IP (203.0.113.7 — RFC 5737 TEST-NET-3 documentation
-    // range) is what the trusted-proxy middleware (Plan 01-06) hands to
-    // services. Audit must record THIS value, not the raw socket peer.
+    // range) is what the trusted-proxy middleware hands to services.
+    // Audit must record THIS value, not the raw socket peer.
     await createSteamKey(userA.id, { label: "K", plaintext: "ABCD1234" }, "203.0.113.7");
     const [a] = await db.select().from(auditLog).where(eq(auditLog.userId, userA.id)).limit(1);
     expect(a).toBeDefined();
@@ -130,17 +120,16 @@ describe("audit IP forwarding (KEYS-06)", () => {
 });
 
 /**
- * Plan 02.1-20 — listAuditPage multi-action filter (round-2 UAT closure).
+ * listAuditPage multi-action filter.
  *
- * The `actionFilter` parameter widens from `"all" | AuditAction` (single
- * value with sentinel) to `AuditAction[]` (empty array = "all" semantics).
- * The /audit UI consumes the new shape via FilterChips + FiltersSheet
- * (Plan 02.1-19 reshape) and emits ?action=A&action=B repeated params.
+ * The `actionFilter` parameter takes `AuditAction[]` (empty array =
+ * "all" semantics). The /audit UI consumes the shape via FilterChips +
+ * FiltersSheet and emits ?action=A&action=B repeated params.
  *
- * Tests cover the four SQL branches (0, 1, 2+ entries; invalid entry fails
- * closed) AND the cross-tenant 404 invariant under the new shape.
+ * Tests cover the four SQL branches (0, 1, 2+ entries; invalid entry
+ * fails closed) AND the cross-tenant 404 invariant.
  */
-describe("Plan 02.1-20: listAuditPage multi-action filter", () => {
+describe("listAuditPage multi-action filter", () => {
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
   it("empty array returns all rows ('all' semantics)", async () => {
@@ -189,7 +178,7 @@ describe("Plan 02.1-20: listAuditPage multi-action filter", () => {
     ).rejects.toMatchObject({ code: "validation_failed", status: 422 });
   });
 
-  it("cross-tenant 404 invariant preserved with multi-action filter (P19)", async () => {
+  it("cross-tenant 404 invariant preserved with multi-action filter", async () => {
     const userA = await seedUserDirectly({ email: `p20-tcA-${uniq()}@test.local` });
     const userB = await seedUserDirectly({ email: `p20-tcB-${uniq()}@test.local` });
     for (let i = 0; i < 3; i++) {
@@ -201,27 +190,26 @@ describe("Plan 02.1-20: listAuditPage multi-action filter", () => {
     const aCursor = encodeCursor(aPage.rows[2]!.createdAt, aPage.rows[2]!.id);
     // userB queries with userA's cursor + multi-action filter — must
     // return zero rows. The userId WHERE clause prunes BEFORE the
-    // action filter narrows further. This is the load-bearing P19
-    // assertion under the new multi-action shape.
+    // action filter narrows further. Load-bearing tenant-isolation
+    // assertion under the multi-action shape.
     const bPage = await listAuditPage(userB.id, aCursor, ["key.add", "session.signin"]);
     expect(bPage.rows.length).toBe(0);
   });
 });
 
 /**
- * Plan 02.1-21 — listAuditPage dateRange (round-3 UAT closure for §9.2-bug).
+ * listAuditPage dateRange.
  *
- * UAT-NOTES.md §9.2-bug user quote: "В окне аудита нет возможности выбрать
- * дату как в feed". /audit gains a date-range filter that mirrors /feed's
- * URL contract (?from=YYYY-MM-DD&to=YYYY-MM-DD). listAuditPage signature
- * widens to accept an optional `dateRange?: { from?: Date; to?: Date }`
- * parameter; SQL clause adds gte/lte on auditLog.createdAt when present.
+ * /audit has a date-range filter that mirrors /feed's URL contract
+ * (?from=YYYY-MM-DD&to=YYYY-MM-DD). listAuditPage accepts an optional
+ * `dateRange?: { from?: Date; to?: Date }` parameter; SQL clause adds
+ * gte/lte on auditLog.createdAt when present.
  *
  * Privacy invariant: the userId WHERE clause STAYS the FIRST clause in
- * `and(...)`. Cross-tenant 404 invariant (P19) preserved by construction
- * — the userId filter is independent of the date filter.
+ * `and(...)`. Cross-tenant 404 invariant preserved by construction —
+ * the userId filter is independent of the date filter.
  */
-describe("Plan 02.1-21: listAuditPage dateRange", () => {
+describe("listAuditPage dateRange", () => {
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
   it("dateRange.from + to filters rows to the inclusive window", async () => {

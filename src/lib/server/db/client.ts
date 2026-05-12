@@ -1,11 +1,11 @@
 // Single pg.Pool + Drizzle ORM client for the application process.
 //
-// Pool sizing is APP_ROLE-aware (D-01 three-role single image): the `app`
+// Pool sizing is APP_ROLE-aware (three-role single image): the `app`
 // role serves HTTP requests so it gets the largest pool; `worker` consumes
 // jobs concurrently but still less than the app; `scheduler` only enqueues
 // jobs on a cron and barely touches the DB. pg-boss runs against its own
-// pool (Plan 08 passes `connectionString` to `new PgBoss()` directly) — that
-// keeps queue traffic from contending with app-data traffic for connections.
+// pool (passes `connectionString` to `new PgBoss()` directly) — that keeps
+// queue traffic from contending with app-data traffic for connections.
 //
 // Tuned for a small VPS where Postgres `max_connections` is ~100 by default
 // and we want headroom for backups, manual psql, and future replicas.

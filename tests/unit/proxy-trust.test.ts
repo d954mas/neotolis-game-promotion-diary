@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Hono } from "hono";
 import { randomBytes } from "node:crypto";
 
-// Seed env BEFORE importing the module under test (matches Plan 04's env-shape contract).
+// Seed env BEFORE importing the module under test (env-shape contract).
 process.env.DATABASE_URL ??= "postgres://test:test@localhost:5432/test";
 process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
 process.env.BETTER_AUTH_SECRET ??= "x".repeat(40);
@@ -10,7 +10,7 @@ process.env.OAUTH_CLIENT_ID ??= "test";
 process.env.OAUTH_CLIENT_SECRET ??= "test";
 process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
 // Trusted CIDRs for these tests: private LAN, loopback, IPv6 loopback,
-// and a real Cloudflare IPv6 prefix (PT4).
+// and a real Cloudflare IPv6 prefix.
 process.env.TRUSTED_PROXY_CIDR ??= "10.0.0.0/8,127.0.0.1/32,::1/128,2400:cb00::/32";
 
 const { parseCidrList, isTrusted, proxyTrust } =

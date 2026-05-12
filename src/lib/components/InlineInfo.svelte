@@ -1,8 +1,7 @@
 <script lang="ts">
-  // InlineInfo — same shape as <InlineError> but uses the info color
-  // (UI-SPEC §"Color"). Reserved by UI-SPEC for non-error deferrals like
-  // "Reddit support arrives in Phase 3" — rendering this in red would
-  // miscommunicate "you did something wrong".
+  // InlineInfo — same shape as <InlineError> but uses the info color.
+  // Reserved for non-error deferrals like "feature coming later" —
+  // rendering this in red would miscommunicate "you did something wrong".
   let { message }: { message: string } = $props();
 </script>
 

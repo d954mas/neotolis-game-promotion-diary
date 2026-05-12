@@ -1,11 +1,11 @@
-# Phase 02.2 nginx template (D-04 / D-05 / D-28). nginx terminates HTTPS on
-# the VPS using a Cloudflare Origin CA cert; Cloudflare also terminates TLS
-# at the edge and connects to origin over HTTPS (Full Strict mode — see
-# docs/deploy/install.md §2 step 4 for cert generation). The application's
-# `proxy-trust.ts` middleware reads CF-Connecting-IP for client-IP rewrite
-# — nginx ALSO rewrites $remote_addr via real_ip_header below; both layers
-# are correct (defense-in-depth) and the application's middleware has been
-# audited to be idempotent under repeated rewrites (Phase 1 Plan 01-04).
+# nginx template. nginx terminates HTTPS on the VPS using a Cloudflare
+# Origin CA cert; Cloudflare also terminates TLS at the edge and connects
+# to origin over HTTPS (Full Strict mode — see docs/deploy/install.md §2
+# step 4 for cert generation). The application's `proxy-trust.ts`
+# middleware reads CF-Connecting-IP for client-IP rewrite — nginx ALSO
+# rewrites $remote_addr via real_ip_header below; both layers are correct
+# (defense-in-depth) and the application's middleware is idempotent under
+# repeated rewrites.
 #
 # nginx listens ONLY on 443. Origin never participates in plaintext HTTP —
 # UFW closes port 80 (install.md §1 Step 2), docker-compose.prod.yml does
@@ -13,7 +13,7 @@
 # Step 4.4) bounces user-typed `http://` at the edge before any request
 # could reach origin. This is the strict reading of the constraint
 # "TLS 1.3 + HSTS, plain HTTP only behind a TLS-terminating proxy".
-# TLS 1.3 only (TLSv1.2 dropped per Codex P1 review of PR #15).
+# TLS 1.3 only.
 #
 # `${DOMAIN}` is substituted by nginx's envsubst-on-startup behavior when
 # this file is mounted at /etc/nginx/templates/default.conf.template (the
@@ -28,7 +28,7 @@ real_ip_recursive on;
 # quarterly per docs/deploy/install.md §"Refresh CF IPs").
 include /etc/nginx/cf-ips.conf;
 
-# Per-IP rate limit on auth endpoints (D-28: 10 req/sec per IP).
+# Per-IP rate limit on auth endpoints (10 req/sec per IP).
 # 10 req/sec, burst 20, no-delay (immediate 503 on burst overrun).
 limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/s;
 

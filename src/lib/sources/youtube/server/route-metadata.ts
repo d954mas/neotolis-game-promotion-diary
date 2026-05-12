@@ -1,31 +1,23 @@
-// POST /api/youtube/fetch-metadata — on-demand YouTube videos.list call from
-// the /events/new paste form (Phase 3.0 post-build, UAT 2026-05-06).
+// POST /api/youtube/fetch-metadata — on-demand YouTube videos.list call
+// from the /events/new paste form.
 //
 // This is the "Get from YouTube" button: user pastes a watch URL, taps the
 // button, we resolve video_id → call videos.list?part=snippet (1 quota
 // unit), return title + description + channel title for the form to
-// pre-fill. Distinct from POST /api/events/preview-url (Plan 02.1-17),
-// which uses oEmbed and is auto-triggered on URL blur — this one is
-// explicit-button and uses the richer YouTube Data API surface.
+// pre-fill. Distinct from POST /api/events/preview-url, which uses oEmbed
+// and is auto-triggered on URL blur — this one is explicit-button and uses
+// the richer YouTube Data API surface.
 //
 // Auth: tenantScope chain (anonymous → 401). Per-user rate-limit: cache
 // hits are free (no Google call); cache misses run inside withQuotaGuard
 // against the youtube_metadata_fetches_per_day kind (default 50/day,
 // rolling 24h, counted in youtube_metadata_fetch_log). Closes the
 // operator-quota burn loop a scripted-loop attacker could otherwise
-// exploit by mass-pasting random video ids — pre-fix the route was
-// auth-gated but not rate-limited (the old comment's "events_per_day
-// is the cap" claim was false: events_per_day counts events table
-// rows, which a metadata-fetch never touches).
+// exploit by mass-pasting random video ids.
 //
-// Mount: app.route("/api/youtube", youtubeMetadataRoutes).
-//
-// Phase 03.0.1 Plan 06 — relocated from src/lib/server/http/routes/
-// youtube-metadata.ts to per-source folder
-// src/lib/sources/youtube/server/route-metadata.ts. The Hono app
-// composition (src/lib/server/http/app.ts) now imports
-// `youtubeMetadataRoutes` from `$lib/sources/youtube/server/route-metadata.js`.
-// Adding Reddit's per-source routes in Phase 03.1 follows the same pattern.
+// Mount: app.route("/api/youtube", youtubeMetadataRoutes). Lives under the
+// per-source folder so adding e.g. Reddit's per-source routes follows the
+// same pattern.
 
 import { Hono } from "hono";
 import { z } from "zod";

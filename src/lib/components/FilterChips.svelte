@@ -1,22 +1,19 @@
 <script lang="ts">
-  // FilterChips — per-axis chip strip rendering active /feed filters
-  // (UI-SPEC §"Component inventory" + §"/feed filter row — chips → sheet
-  // pattern"; Plan 02.1-19 rewrites the chip emission to one chip per
-  // active axis, not one per value).
+  // FilterChips — per-axis chip strip rendering active /feed filters.
+  // One chip per active axis, not one per value.
   //
-  // Layout contract (Plan 02.1-19):
-  //   - One chip per active axis (kind / source / show / authorIsMe), with
-  //     value labels comma-joined inside the chip text. No '+N more'
-  //     truncation — long chips wrap text inside (word-break: break-word;
-  //     min-width: 0). flex-wrap moves whole chips to a new row when
-  //     natural width exceeds the strip.
+  // Layout contract:
+  //   - One chip per active axis (kind / source / show / authorIsMe),
+  //     with value labels comma-joined inside the chip text. No '+N
+  //     more' truncation — long chips wrap text inside
+  //     (word-break: break-word; min-width: 0). flex-wrap moves whole
+  //     chips to a new row when natural width exceeds the strip.
   //   - Click chip body → opens FiltersSheet with focusAxis hint so the
   //     sheet scrolls/focuses the corresponding fieldset.
-  //   - Click × → clears the entire axis (drops all values for that axis,
-  //     NOT a single value).
-  //   - Date-range chip is NOT emitted — the visible from/to inputs above
-  //     the chip strip ARE the indicator (round-2 UAT gap "no chip
-  //     duplication").
+  //   - Click × → clears the entire axis (drops all values for that
+  //     axis, NOT a single value).
+  //   - Date-range chip is NOT emitted — the visible from/to inputs
+  //     above the chip strip ARE the indicator.
 
   import { m } from "$lib/paraglide/messages.js";
   import { auditActionLabel } from "$lib/audit-labels.js";
@@ -36,18 +33,16 @@
     to?: string;
     defaultDateRange: boolean;
     all: boolean;
-    // Plan 02.1-20 carry-over: action stays in the type so /audit can
-    // populate it. Plan 02.1-21: chip emission is gated on `schema`,
-    // not on the presence of this field.
+    // action stays in the type so /audit can populate it. Chip emission
+    // is gated on `schema`, not on the presence of this field.
     action?: string[];
   };
   type SourceOption = { id: string; displayName: string | null; handleUrl: string };
   type GameOption = { id: string; title: string };
 
-  // Plan 02.1-21: the FilterChips axis union mirrors FiltersSheet's
-  // FilterAxis type. 'date' is intentionally NOT included — the visible
-  // from/to inputs in <DateRangeControl> are the date indicator (round-2
-  // UAT contract preserved).
+  // The FilterChips axis union mirrors FiltersSheet's FilterAxis type.
+  // 'date' is intentionally NOT included — the visible from/to inputs
+  // in <DateRangeControl> are the date indicator.
   type ChipAxis = "kind" | "source" | "show" | "authorIsMe" | "action";
   type FilterAxis = ChipAxis | "date";
 
@@ -63,12 +58,12 @@
     filters: ActiveFilters;
     sources: SourceOption[];
     games: GameOption[];
-    // Plan 02.1-21: REQUIRED — same shape as FiltersSheet's schema. Chips
-    // are only emitted for axes present in schema. /feed passes
+    // REQUIRED — same shape as FiltersSheet's schema. Chips are only
+    // emitted for axes present in schema. /feed passes
     // ['kind','source','show','authorIsMe','date']; /audit passes
-    // ['action','date']. (The 'date' entry has no chip — the date inputs
-    // ARE the indicator — but it stays in the schema to keep the array a
-    // single source of truth across both components.)
+    // ['action','date']. (The 'date' entry has no chip — the date
+    // inputs ARE the indicator — but it stays in the schema to keep
+    // the array a single source of truth across both components.)
     schema: ReadonlyArray<FilterAxis>;
     onDismiss: (axis: ChipAxis) => void;
     onOpenSheet: (focusAxis?: ChipAxis) => void;
@@ -102,20 +97,19 @@
     }
   }
 
-  // Phase 03.0.1 architecture cleanup — auditActionLabel imported from the
-  // shared $lib/audit-labels.js helper. Single source of truth across
-  // AuditRow / FilterChips / FiltersSheet; TypeScript Record<AuditAction, ...>
-  // guarantees completeness at compile time.
+  // auditActionLabel comes from the shared $lib/audit-labels.js helper.
+  // Single source of truth across AuditRow / FilterChips /
+  // FiltersSheet; TypeScript Record<AuditAction, ...> guarantees
+  // completeness at compile time.
 
   type Chip = { axis: ChipAxis; label: string; ariaName: string; key: string };
   const chips = $derived.by((): Chip[] => {
     const out: Chip[] = [];
 
-    // Plan 02.1-21: each axis emits a chip only when the consumer's schema
-    // includes it. Replaces Plan 02.1-20's implicit gate (was: action
-    // presence on filters). /audit passes schema=['action','date'] so
-    // /feed-only axes (kind/source/show/authorIsMe) don't leak into the
-    // audit chip strip even if filters carries default values for them.
+    // Each axis emits a chip only when the consumer's schema includes
+    // it. /audit passes schema=['action','date'] so /feed-only axes
+    // (kind/source/show/authorIsMe) don't leak into the audit chip
+    // strip even if filters carries default values for them.
 
     // Kind axis — one chip with comma-joined value labels.
     if (schema.includes("kind") && filters.kind.length > 0) {
@@ -142,7 +136,7 @@
         const label = `${m.feed_chip_axis_show()}: ${m.feed_filter_show_inbox()}`;
         out.push({ axis: "show", label, ariaName: label, key: "axis:show:inbox" });
       } else if (filters.show.kind === "standalone") {
-        // Plan 02.1-24: standalone triage state chip.
+        // Standalone triage state chip.
         const label = `${m.feed_chip_axis_show()}: ${m.feed_filter_show_standalone()}`;
         out.push({ axis: "show", label, ariaName: label, key: "axis:show:standalone" });
       } else if (filters.show.kind === "specific" && filters.show.gameIds.length > 0) {
@@ -178,11 +172,10 @@
       out.push({ axis: "action", label, ariaName: label, key: "axis:action" });
     }
 
-    // Plan 02.1-19/21: NO date-range chip emission. The visible from/to
-    // inputs in <DateRangeControl> ARE the indicator. Duplication is
-    // confusing (UAT round-2 gap "FilterChips MUST NOT emit any chip for
-    // date range"). 'date' may appear in schema (it does on /audit and
-    // /feed) but the chip strip stays silent on it.
+    // NO date-range chip emission. The visible from/to inputs in
+    // <DateRangeControl> ARE the indicator. 'date' may appear in schema
+    // (it does on /audit and /feed) but the chip strip stays silent on
+    // it.
     return out;
   });
 
@@ -268,8 +261,8 @@
     padding: 0 var(--space-xs) 0 var(--space-sm);
     font-size: var(--font-size-label);
     line-height: 1;
-    /* Plan 02.1-19: chip text wraps inside the chip when natural width
-     * exceeds the strip. No '+N more' truncation. */
+    /* Chip text wraps inside the chip when natural width exceeds the
+     * strip. No '+N more' truncation. */
     max-width: 100%;
     min-width: 0;
     word-break: break-word;

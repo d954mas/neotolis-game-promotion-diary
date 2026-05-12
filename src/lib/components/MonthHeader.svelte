@@ -1,9 +1,9 @@
 <script lang="ts">
   // MonthHeader — sticky month-group heading used on /games/[id] curated
-  // events panel and on /feed (Plan 02.1-07's consumer).
+  // events panel and on /feed.
   //
-  // UI-SPEC: visually quiet — uses --color-text-muted and label typography
-  // (14px) so the chronological pool below it owns the page's attention.
+  // Visually quiet — uses --color-text-muted and label typography (14px)
+  // so the chronological pool below it owns the page's attention.
   // Renders <h2> for screen readers (the page <h1> is the game title /
   // "Feed"; month groups within are <h2>).
 

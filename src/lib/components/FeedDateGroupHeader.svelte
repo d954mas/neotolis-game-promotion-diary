@@ -1,13 +1,11 @@
 <script lang="ts">
-  // FeedDateGroupHeader — date label above each /feed card group (Plan
-  // 02.1-19, UAT round-2 gap "date-group header"). Mirrors Google Photos /
-  // Apple Photos timeline UI.
+  // FeedDateGroupHeader — date label above each /feed card group. Mirrors
+  // Google Photos / Apple Photos timeline UI.
   //
-  // Reuses formatFeedDate (Plan 02.1-16) so the label format matches what
-  // <FeedCard> used to render inline (Today HH:MM / Yesterday / Mon D /
-  // Mon D, YYYY). The HH:MM suffix on Today reads slightly oddly as a
-  // date header — Plan 02.1-19 truncates "Today, HH:MM" to "Today" for the
-  // header context.
+  // Reuses formatFeedDate so the label format matches what <FeedCard> used
+  // to render inline (Today HH:MM / Yesterday / Mon D / Mon D, YYYY).
+  // The HH:MM suffix on Today reads oddly as a date header — we truncate
+  // "Today, HH:MM" to "Today" for the header context.
 
   import { formatFeedDate } from "$lib/util/format-feed-date.js";
 
@@ -16,7 +14,7 @@
   const label = $derived.by(() => {
     const raw = formatFeedDate(occurredAt);
     // Trim "Today, HH:MM" → "Today" — the header is per-day, time-of-day
-    // is on the card if needed (Phase 4 may surface it; 2.1 does not).
+    // can surface on the card if needed.
     return raw.startsWith("Today") ? "Today" : raw;
   });
 
@@ -30,32 +28,24 @@
 </h2>
 
 <style>
-  /* Plan 02.1-39 round-6 polish follow-up #6 (2026-04-30): Instagram /
-   * Google Sheets sticky date-section pattern. User quote (ru, surfaced
-   * during round-6 UAT — NOT a round-5 finding):
-   *   "хотелось чтобы дата была всегда виджимая наверху, пока я скролю
-   *    эту дату. Так в гугл таблицах или инстаграмме сделоано"
+  /* Instagram / Google Sheets sticky date-section pattern. User quote
+   * (ru): "хотелось чтобы дата была всегда виджимая наверху, пока я
+   *  скролю эту дату. Так в гугл таблицах или инстаграмме сделоано"
    *
-   * The component HAD `position: sticky; top: 0;` since Plan 02.1-19 — but
-   * `top: 0` puts the date header under the sticky chrome (.sticky-chrome,
-   * z:10, in +layout.svelte) AND PageHeader.sticky (z:5), so it was never
-   * visible while scrolling. Now anchored at the BOTTOM of the chrome +
-   * PageHeader stack:
+   * The header anchors at the BOTTOM of the chrome + PageHeader stack:
    *
    *   top: calc(--chrome-height + --page-header-height - --sticky-overlap)
    *
    * --chrome-height is published by the +layout.svelte ResizeObserver on
-   * `.sticky-chrome` (round-6 #5). --page-header-height is published by
-   * PageHeader.svelte's ResizeObserver on its rendered <header> (round-6
-   * #6, this commit). Both use raw fractional getBoundingClientRect().height;
-   * --sticky-overlap (1px) absorbs DPR rounding at the chrome+PageHeader →
-   * date-header boundary (one boundary, single-tier defense — same proof
-   * as round-6 #3 for the prior single-boundary case).
+   * `.sticky-chrome`. --page-header-height is published by
+   * PageHeader.svelte's ResizeObserver on its rendered <header>. Both use
+   * raw fractional getBoundingClientRect().height; --sticky-overlap (1px)
+   * absorbs DPR rounding at the chrome+PageHeader → date-header boundary.
    *
    * Fallbacks: 116px (chrome) + 56px (PageHeader: ~24px h1 + 2 × space-sm
    * padding + line-height) cover SSR / pre-effect first paint / no-JS.
-   * Used on /feed and /games/[id] (both render FeedDateGroupHeader and
-   * a sticky PageHeader above it).
+   * Used on /feed and /games/[id] (both render FeedDateGroupHeader and a
+   * sticky PageHeader above it).
    *
    * z-index: 1 keeps the date header above neighbouring FeedCards within
    * the grid, but well below PageHeader (z:5) and the chrome (z:10) — when

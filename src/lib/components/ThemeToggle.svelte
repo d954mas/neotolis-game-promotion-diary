@@ -1,5 +1,5 @@
 <script lang="ts">
-  // ThemeToggle — three-way light/dark/system switch (UX-01, D-40).
+  // ThemeToggle — three-way light/dark/system switch.
   //
   // Click cycles light → dark → system → light. Optimistically updates
   // document.documentElement.dataset.theme for an instant swap (no FOUC),

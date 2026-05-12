@@ -4,13 +4,12 @@ import { db } from "../../src/lib/server/db/client.js";
 import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
 import { games } from "../../src/lib/server/db/schema/games.js";
 import { gameSteamListings } from "../../src/lib/server/db/schema/game-steam-listings.js";
-// Plan 02.1-28 (Rule 3 — Blocking): the gameYoutubeChannels / youtubeChannels /
-// trackedYoutubeVideos imports below were retired in Plan 02.1-01 baseline
-// schema collapse. The Phase 2 02-04 GAMES-02 cascade test referenced them
-// directly; we skip the stale subtest below (preserves the trail) and remove
-// the imports here so this test file compiles. The Plan 02.1-28 events
-// cascade is REMOVED entirely (events are M:N now); the per-listing cascade
-// continues to work via gameSteamListings (covered by the restore subtest).
+// The gameYoutubeChannels / youtubeChannels / trackedYoutubeVideos
+// schemas were retired in the baseline schema collapse. The original
+// cascade test referenced them directly; we skip the stale subtest
+// below (preserves the trail). The events cascade is also REMOVED
+// (events are M:N now); the per-listing cascade continues to work via
+// gameSteamListings (covered by the restore subtest).
 import {
   createGame,
   softDeleteGame,
@@ -24,15 +23,10 @@ import { seedUserDirectly } from "./helpers.js";
 import { AppError, NotFoundError } from "../../src/lib/server/services/errors.js";
 
 /**
- * Plan 02-04 — GAMES-01 + GAMES-02 live integration tests.
- *
- * The placeholder it.skip stubs from Plan 02-01 are replaced with `it(...)`
- * bodies here. Names match exactly so Wave 0 traceability holds: each
- * placeholder belongs to one implementing plan, and each implementing plan
- * fills in the body with no new it() calls.
+ * Games CRUD integration tests.
  */
-describe("games CRUD (GAMES-01, GAMES-02)", () => {
-  it("02-04: GAMES-01 create game returns 201 + DTO", async () => {
+describe("games CRUD", () => {
+  it("create game returns 201 + DTO", async () => {
     const userA = await seedUserDirectly({ email: "g1-a@test.local" });
     const game = await createGame(userA.id, { title: "My Test Game" }, "127.0.0.1");
 
@@ -53,7 +47,7 @@ describe("games CRUD (GAMES-01, GAMES-02)", () => {
     expect(createdAudit).toBeDefined();
   });
 
-  it("02-04: GAMES-01 422 on missing title", async () => {
+  it("422 on missing title", async () => {
     const userA = await seedUserDirectly({ email: "g2-a@test.local" });
     await expect(createGame(userA.id, { title: "" }, "127.0.0.1")).rejects.toBeInstanceOf(AppError);
     await expect(createGame(userA.id, { title: "   " }, "127.0.0.1")).rejects.toMatchObject({
@@ -66,25 +60,21 @@ describe("games CRUD (GAMES-01, GAMES-02)", () => {
     expect(rows).toHaveLength(0);
   });
 
-  // Plan 02.1-28 (Rule 3 — Blocking): the original Phase 2 cascade test
-  // referenced gameYoutubeChannels / youtubeChannels / trackedYoutubeVideos
-  // schemas that Plan 02.1-01 retired; this stale subtest has been broken
-  // since Plan 02.1-01 baseline collapse. Plan 02.1-28 also removes the
-  // events cascade in softDeleteGame (M:N relations can't cleanly map a
-  // game's soft-delete to "delete events whose gameId = this"). The
-  // gameSteamListings cascade behavior is covered by the GAMES-02 restore
-  // subtest below. Marked it.skip to preserve the Wave 0 trail.
-  it.skip("02-04: GAMES-02 soft cascade delete (superseded — see Plan 02.1-01 + 02.1-28; gameSteamListings cascade covered by restore subtest below)", async () => {
-    // Body intentionally elided — the original test exercised the Phase 2
-    // gameYoutubeChannels / youtubeChannels / trackedYoutubeVideos cascade
-    // which has been retired by Plan 02.1-01 (baseline schema collapse) and
-    // events.gameId by Plan 02.1-27 (M:N junction). The cascade now spans
-    // gameSteamListings only (Plan 02.1-28 services/games.ts header doc);
-    // that path is exercised by the GAMES-02 restore subtest below which
+  // The original cascade test referenced gameYoutubeChannels /
+  // youtubeChannels / trackedYoutubeVideos schemas that have been
+  // retired. The events cascade in softDeleteGame is also removed
+  // (M:N relations can't cleanly map a game's soft-delete to "delete
+  // events whose gameId = this"). The gameSteamListings cascade
+  // behavior is covered by the restore subtest below. Kept as
+  // it.skip to preserve the trail.
+  it.skip("soft cascade delete (superseded — gameSteamListings cascade covered by restore subtest below)", async () => {
+    // Body intentionally elided — the original test exercised a cascade
+    // which has been retired. The cascade now spans gameSteamListings
+    // only; that path is exercised by the restore subtest below which
     // verifies the marker-timestamp design end-to-end.
   });
 
-  it("02-04: GAMES-02 transactional restore", async () => {
+  it("transactional restore", async () => {
     const userA = await seedUserDirectly({ email: "g4-a@test.local" });
     const game = await createGame(userA.id, { title: "G4" }, "127.0.0.1");
 
@@ -148,15 +138,14 @@ describe("games CRUD (GAMES-01, GAMES-02)", () => {
     expect((audits[0]!.metadata as { gameId?: string } | null)?.gameId).toBe(game.id);
   });
 
-  // Plan 02.1-39 round-6 polish #14a (UAT-NOTES.md §5.8 follow-up #14,
-  // 2026-04-30): games.description column added in migration 0007 +
-  // updateGame service extension + DTO projection. User during round-6
-  // UAT (verbatim, ru): "Еще я хочу чтобы тут можно было сделать
-  // описание игры." The service-layer 2000-char cap and the
-  // empty-string → NULL normalization are exercised here so the
-  // contract holds independently of the HTTP-route Zod schema (which
-  // also caps at 2000 — defense-in-depth).
-  describe("Plan 02.1-39 round-6 polish #14a — games.description", () => {
+  // games.description column added in migration 0007 + updateGame
+  // service extension + DTO projection. User during UAT (verbatim, ru):
+  // "Еще я хочу чтобы тут можно было сделать описание игры." The
+  // service-layer 2000-char cap and the empty-string → NULL
+  // normalization are exercised here so the contract holds
+  // independently of the HTTP-route Zod schema (which also caps at
+  // 2000 — defense-in-depth).
+  describe("games.description", () => {
     it("updateGame round-trips a description and the DTO projects it", async () => {
       const userA = await seedUserDirectly({ email: "p14a-rt-a@test.local" });
       const game = await createGame(userA.id, { title: "Desc RT" }, "127.0.0.1");

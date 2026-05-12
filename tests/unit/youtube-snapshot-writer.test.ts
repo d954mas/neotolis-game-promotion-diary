@@ -12,11 +12,10 @@ process.env.OAUTH_CLIENT_ID ??= "test";
 process.env.OAUTH_CLIENT_SECRET ??= "test";
 process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
 
-// Phase 3.0 Plan 04 + post-build refactor (2026-05-06) — youtube-snapshot-
-// writer is a thin orchestrator: it does not encode any business logic
-// beyond "wrap 3 ops in one tx". The unit-test surface verifies STRUCTURAL
-// invariants of the tx callback rather than DB state (DB-state tests live
-// in integration/poll-worker-tx-boundary.test.ts).
+// youtube-snapshot-writer is a thin orchestrator: it does not encode any
+// business logic beyond "wrap 3 ops in one tx". The unit-test surface
+// verifies STRUCTURAL invariants of the tx callback rather than DB state
+// (DB-state tests live in integration/poll-worker-tx-boundary.test.ts).
 //
 // What we verify here:
 //   - one db.transaction() call per writeSnapshot()
@@ -118,7 +117,7 @@ vi.mock("../../src/lib/server/db/client.js", () => {
   };
 });
 
-// Mock the quota tracker so this test does not depend on plan 03 landing first.
+// Mock the quota tracker so this test does not depend on its real impl.
 const incrementCalls: Array<{ apiKeyId: string; units: number; hasTx: boolean }> = [];
 vi.mock("../../src/lib/sources/youtube/server/quota.js", () => ({
   incrementUsage: async (args: { apiKeyId: string; units: number; tx?: unknown }) => {
@@ -134,7 +133,7 @@ const { writeSnapshot } = await import("../../src/lib/sources/youtube/server/sna
 const { youtubeVideoSnapshots, youtubeVideos } =
   await import("../../src/lib/server/db/schema/index.js");
 
-describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
+describe("youtube-snapshot-writer", () => {
   beforeEach(() => {
     insertCalls.length = 0;
     updateCalls.length = 0;
@@ -304,10 +303,10 @@ describe("youtube-snapshot-writer (Plan 03.0-04 + per-video refactor)", () => {
   });
 
   it("youtube_videos UPDATE keys on video_id (no tenant filter — public-data table)", async () => {
-    // Per-video refactor (2026-05-06): polling state moved to youtube_videos
-    // which is PUBLIC-DATA (no user_id column). The tenant-scope rule
-    // explicitly allowlists this table; the WHERE clause keys on the video_id
-    // PK only. Multiple tenants referencing this video share one row.
+    // Polling state lives on youtube_videos which is PUBLIC-DATA (no
+    // user_id column). The tenant-scope rule explicitly allowlists this
+    // table; the WHERE clause keys on the video_id PK only. Multiple
+    // tenants referencing this video share one row.
     await writeSnapshot({
       videoId: "VID-shared",
       metrics: { view_count: 1, like_count: 1, comment_count: 1 },
