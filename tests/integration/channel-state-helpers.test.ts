@@ -114,10 +114,17 @@ describe("channel-state helpers", () => {
     ).toBeUndefined();
   });
 
-  it("kind discriminator — same channelKey across kinds gets separate rows", async () => {
+  it("kind discriminator — distinct channelKeys produce separate state rows", async () => {
     // No reddit_account adapter yet, but the table key supports both kinds.
     // Use the existing youtube_channel kind and synthesize a different
-    // channelKey to verify PK discrimination.
+    // channelKey to verify PK discrimination. The earlier shape of this
+    // test asserted that the two lastPolledAt timestamps differed, which
+    // was flaky: on a fast CI runner both calls land in the same
+    // millisecond (now() resolution) and the rows are correctly stored
+    // but the timestamp check fails. The honest assertion for "separate
+    // rows" is that the rows exist with distinct channelKeys, both
+    // carry a stamped lastPolledAt, and they don't reference each
+    // other.
     const k1 = uniqKey();
     const k2 = uniqKey();
     await markChannelLastPolledAt("youtube_channel", k1);
@@ -126,7 +133,11 @@ describe("channel-state helpers", () => {
     const r2 = await getChannelState("youtube_channel", k2);
     expect(r1).toBeDefined();
     expect(r2).toBeDefined();
-    expect(r1!.lastPolledAt!.getTime()).not.toBe(r2!.lastPolledAt!.getTime());
+    expect(r1!.channelKey).toBe(k1);
+    expect(r2!.channelKey).toBe(k2);
+    expect(r1!.channelKey).not.toBe(r2!.channelKey);
+    expect(r1!.lastPolledAt).not.toBeNull();
+    expect(r2!.lastPolledAt).not.toBeNull();
     await clearChannel(k1);
     await clearChannel(k2);
   });
