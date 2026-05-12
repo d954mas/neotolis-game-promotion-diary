@@ -64,6 +64,8 @@ export const outbox = pgTable(
     // without the partial clause — defeating the forwarder's
     // pending-scan optimisation (full index over every forwarded
     // row instead of the tight pending tail).
-    index("outbox_pending_idx").on(t.createdAt).where(sql`forwarded_at IS NULL`),
+    index("outbox_pending_idx")
+      .on(t.createdAt)
+      .where(sql`forwarded_at IS NULL`),
   ],
 );

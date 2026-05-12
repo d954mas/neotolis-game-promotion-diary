@@ -75,10 +75,13 @@ export async function youtubeEnrichFeedDtos(
       { viewCount: number; likeCount: number; commentCount: number; polledAt: Date }
     >();
     for (const s of latestRows.rows) {
+      // db.execute returns raw pg driver shapes — int columns come
+      // back as strings on some pg versions; explicit Number() coercion
+      // matches the snapshot column types declared in the schema.
       latest.set(s.video_id, {
-        viewCount: s.view_count ?? 0,
-        likeCount: s.like_count ?? 0,
-        commentCount: s.comment_count ?? 0,
+        viewCount: s.view_count === null ? 0 : Number(s.view_count),
+        likeCount: s.like_count === null ? 0 : Number(s.like_count),
+        commentCount: s.comment_count === null ? 0 : Number(s.comment_count),
         polledAt:
           s.polled_at instanceof Date ? s.polled_at : new Date(s.polled_at as unknown as string),
       });
