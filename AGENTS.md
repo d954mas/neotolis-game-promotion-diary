@@ -54,7 +54,7 @@ This is a service. Real people use it. Some self-host it. The codebase is open. 
 We work PR-only on master. No direct pushes to master.
 
 1. **Branch.** Every change starts with a feature branch. Naming: `fix/<topic>` for bugfixes, `feat/<topic>` for features, `docs/<topic>` for docs-only, `chore/<topic>` for tooling.
-2. **Plan + issue.** Before non-trivial code, capture intent. Phases use the GSD planning artifacts in `.planning/phases/<NN>-<slug>/` (`-CONTEXT.md`, `-RESEARCH.md`, `-PLAN.md`, `-VALIDATION.md`). Standalone work uses a GitHub issue with a short scope and acceptance criteria. Trivial fixes (typo, lint) can skip the issue but still go through a branch + PR.
+2. **Plan + issue.** Before non-trivial code, capture intent. Phases use the GSD planning artifacts in `.planning/phases/<NN>-<slug>/` (`-CONTEXT.md`, `-RESEARCH.md`, `-PLAN.md`, `-VALIDATION.md`) — kept locally only, see "Planning artifacts" below. Standalone work uses a GitHub issue with a short scope and acceptance criteria. Trivial fixes (typo, lint) can skip the issue but still go through a branch + PR.
 3. **Work in the branch.** Iterate, push as needed. CI runs on every push and on PR open. Address failures before requesting review.
 4. **PR to master.** Title under 70 chars, Summary section (1-3 bullets explaining the why), Test plan section. Link the issue with `Closes #N`.
 5. **Squash-merge.** One PR = one commit on master. The repo is configured `delete_branch_on_merge: true`. Master stays a clean linear history of feature-sized changes.
@@ -69,6 +69,18 @@ The repo enforces this via GitHub settings:
 - `squash_merge_commit_message: PR_BODY`
 
 CI gates every PR with three jobs: `lint-typecheck`, `unit-integration` (Postgres service container), `smoke` (production Docker image, all three roles, OAuth dance via `oauth2-mock-server`, cross-tenant + anonymous-401 invariants). Smoke is the load-bearing trust signal — when it's green, a self-host operator can deploy with confidence.
+
+## Planning artifacts
+
+Issue #27 (2026-05-12): GSD workflow artifacts under `.planning/` are **local-only**. They are listed in `.gitignore`; future PRs do not carry them, and master no longer accumulates planning noise alongside code/tests/configs.
+
+What lives there: `CONTEXT.md`, `RESEARCH.md`, `PLAN.md`, `SUMMARY.md`, `VERIFICATION.md`, `STATE.md`, `ROADMAP.md`, `PROJECT.md`, debug sessions, todos, discussion logs. All of it is historical context for how a phase came together — the squash-merge PR body is the canonical phase record on master.
+
+Implications for contributors:
+- The five remaining `.planning/...` pointers in this file (`AP-3` in `ARCHITECTURE.md`, the workflow step's phase-artifact paths, the Validation `Documentation drift` item, `STACK.md`, the Architecture `.planning/PROJECT.md` pointer) refer to artifacts only present in the local working copy of whoever has run the GSD workflow on this repo. Pre-#27 master history still carries old phase snapshots from previous merges, but new ones stop accumulating.
+- Multi-machine sync (laptop + VPS) is out of scope. Operator copies the directory manually or accepts that planning state is single-machine.
+- GSD tooling (`gsd-tools`) keeps working — it reads/writes `.planning/` regardless of git tracking.
+- `git blame` on a `.planning/...` file is meaningless going forward; the plan IS historical context, not code.
 
 ## Validation
 

@@ -22,6 +22,24 @@ nginx/certs/origin.key
 # Local scratch — `git diff > diff.txt` for ad-hoc review, never committed.
 diff.txt
 
+# Issue #27 — GSD workflow artifacts are local-only.
+#
+# `.planning/` holds CONTEXT.md / RESEARCH.md / PLAN.md / SUMMARY.md /
+# VERIFICATION.md / STATE.md / ROADMAP.md / PROJECT.md / debug sessions /
+# todos / discussion logs — historical context for how a phase came
+# together. None of it is load-bearing for the running application; the
+# squash-merge PR body is the canonical phase record on master (see
+# AGENTS.md "Planning artifacts" section).
+#
+# Old `.planning/` snapshots from previous phases remain in master's
+# pre-#27 history; untracking going forward stops new artifacts from
+# accumulating in the tree.
+#
+# Multi-machine sync (laptop + VPS) is out of scope here — the operator
+# either copies the directory manually or accepts that planning state
+# is single-machine. See AGENTS.md.
+.planning/
+
 # Developer-personal dev helpers — each developer ships their own local
 # .dev-*.ts/.mjs scripts (e.g. .dev-worker.ts to run the worker handler
 # bypassing migrate-at-boot; .dev-oauth-mock.mjs to spin up the OAuth
