@@ -33,6 +33,7 @@
 
 import type { dataSources, events } from "$lib/server/db/schema/index.js";
 import type { DbOrTx } from "$lib/server/db/client.js";
+import type { EventDto } from "$lib/server/dto.js";
 import type { Hono } from "hono";
 
 export type DataSourceRow = typeof dataSources.$inferSelect;
@@ -96,6 +97,19 @@ export interface PollableSource {
 export interface AdapterContext {
   userId: string | null;
   origin: "cron" | "user";
+  /** Phase 03.0.3 follow-up — how the playlist walker decides when to stop.
+   *  - "depth" (default): items with publishedAt <= since are dropped AND
+   *    end the walk. Use for deep walks where `since` is the historical floor
+   *    (e.g. user widened backfill_target_since to epoch — walker stops at
+   *    epoch via endOfPlaylist, or at 30d-ago when since=30d-ago).
+   *  - "overlap": items are NOT dropped by publishedAt alone. Walker stops
+   *    after K consecutive items that are BOTH already in the youtube_videos
+   *    cache AND have publishedAt <= since. Use for incremental walks
+   *    (channel previously walked; we just want what's new). Backdated
+   *    uploads with publishedAt below newestKnown but NOT yet in cache
+   *    survive — they get collected because cache-miss means "we have not
+   *    seen this video before", which is the D-#29-1 invariant. */
+  walkStop?: "depth" | "overlap";
 }
 
 /**
@@ -392,7 +406,7 @@ export interface DataSourceAdapter {
   pollContent(
     source: PollableSource,
     since: Date,
-    ctx?: { origin?: "cron" | "user" },
+    ctx?: { origin?: "cron" | "user"; walkStop?: "depth" | "overlap" },
   ): Promise<{
     events: RawEvent[];
     unitsUsed: number;
@@ -529,4 +543,30 @@ export interface DataSourceAdapter {
    *  instance. YouTube: mounts /api/youtube/fetch-metadata (preview button on
    *  /events/new). Synchronous mount per Hono's contract. */
   registerRoutes?(app: Hono<AdapterAppContext>): void;
+
+  /**
+   * Phase 03.0.3 P2 (D-A1) — enrich the supplied feed DTOs in-place with
+   * adapter-specific data (stats, channel/author metadata, anything that
+   * lives in per-kind metadata tables and renders on FeedCard).
+   *
+   * Cross-source callsites (/feed loader, GET /api/events, /games/[id])
+   * iterate allAdapters and call this method per adapter. The adapter
+   * MUST filter internally to its own kind(s) — callers do NOT pre-filter
+   * (avoids the "did I forget to filter for adapter X?" footgun).
+   *
+   * Mutates `dtos` in place; returns void. Errors are swallowed by the
+   * adapter (logged at WARN); a failed enrichment query MUST NOT break
+   * the feed render — the cards just render without the enrichment.
+   *
+   * Future adapters (Reddit / Twitter / Telegram / Discord) implement this
+   * against their own metadata tables. Adapters that have no enrichment
+   * can omit the method entirely (optional via `?:`); the caller's
+   * `if (adapter.enrichFeedDtos)` gate skips undefined methods.
+   *
+   * Deliberately NOT called from GET /api/events/deleted — DeletedEventsPanel
+   * renders a compact KindIcon + strikethrough-title view that needs none
+   * of the enrichment data. See events.ts:374 for the load-bearing skip
+   * comment.
+   */
+  enrichFeedDtos?(userId: string, dtos: EventDto[]): Promise<void>;
 }

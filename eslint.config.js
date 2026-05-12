@@ -49,6 +49,16 @@ export default [
       // repo state from prior plan runs; ESLint should not police them.
       // The active source-of-truth is the top-level src/ + tests/ trees.
       ".claude/",
+      // Phase 03.0.3 follow-up — developer-personal dev helpers
+      // (.dev-worker.ts, .dev-oauth-mock.mjs, .dev-probe-youtube.ts,
+      // .dev-trigger-poll.ts, etc). These are intentionally outside
+      // source control (see .gitignore) and pin a single developer's
+      // machine setup. They read process.env directly because they run
+      // as standalone Node scripts outside the SvelteKit/Hono runtime
+      // (the no-restricted-properties rule is load-bearing for the
+      // runtime code, not for one-off dev scripts).
+      ".dev-*.ts",
+      ".dev-*.mjs",
     ],
   },
   js.configs.recommended,

@@ -42,6 +42,18 @@
 // age rule still applies. This keeps the override list narrow and predictable;
 // any new override must land here in lock-step with the worker code that
 // writes the new lastPollStatus value.
+//
+// Phase 03.0.3 follow-up — bootstrap rule (issue #29 extension). A video
+// that is frozen by age (publishedAt > 28d ago) but has NEVER been polled
+// (lastPolledAt IS NULL) is upgraded to 'cold' so the next scheduler tick
+// picks it up exactly once. After the first poll fires writeSnapshot
+// (success OR failure — auth_error/not_found/timeout all stamp lastPolledAt
+// + lastPollStatus), the tier collapses back to 'frozen' (or 'unavailable')
+// on the next resolve call. This guarantees every event with a resolved
+// video gets at least one snapshot row, regardless of how it landed in the
+// DB (initial backfill, manual paste, channel-context-backfill that
+// pre-dated this rule, etc.). No quota runaway: each frozen video burns
+// exactly ONE additional videos.list batch entry.
 
 export type Tier = "pending" | "active" | "cold" | "frozen" | "unavailable";
 
@@ -55,7 +67,8 @@ export const TIER_BOUNDARY_COLD_MS = 28 * 86_400_000;
 export const UNAVAILABLE_POLL_STATUSES: readonly string[] = ["not_found", "private", "auth_error"];
 
 /**
- * Pure tier resolution. Deterministic given (publishedAt, lastPollStatus, now).
+ * Pure tier resolution. Deterministic given
+ * (publishedAt, lastPollStatus, lastPolledAt, now).
  *
  * Pure-function discipline: no DB / IO / module-level mutable state read.
  * Same inputs → same output, every time. Any caller that needs different
@@ -66,10 +79,15 @@ export const UNAVAILABLE_POLL_STATUSES: readonly string[] = ["not_found", "priva
  * publishedAt is the YouTube-native timestamp from `youtube_videos.published_at`,
  * loaded by the caller from the JOIN. It is NULL while channel-context-backfill
  * has not yet run (the 'pending' tier window).
+ *
+ * lastPolledAt is the YouTube-side metadata timestamp from
+ * `youtube_videos.last_polled_at`, stamped by every writeSnapshot regardless
+ * of success/failure. NULL means: never polled (the bootstrap path applies).
  */
 export function resolveTier(
   publishedAt: Date | null,
   lastPollStatus: string | null,
+  lastPolledAt: Date | null,
   now: Date = new Date(),
 ): Tier {
   if (publishedAt === null) {
@@ -81,5 +99,10 @@ export function resolveTier(
   const ageMs = now.getTime() - publishedAt.getTime();
   if (ageMs < TIER_BOUNDARY_ACTIVE_MS) return "active";
   if (ageMs < TIER_BOUNDARY_COLD_MS) return "cold";
+  // Phase 03.0.3 follow-up — bootstrap: frozen by age but never polled
+  // gets ONE shot at 'cold' classification. After the next writeSnapshot
+  // (any status) stamps lastPolledAt, this branch is dormant for the
+  // video forever. See file header for the issue #29 extension rationale.
+  if (lastPolledAt === null) return "cold";
   return "frozen";
 }

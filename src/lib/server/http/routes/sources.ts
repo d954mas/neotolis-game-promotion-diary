@@ -31,7 +31,6 @@ import {
   softDeleteSource,
   restoreSource,
 } from "../../services/data-sources.js";
-import { resetChannelBackfillComplete } from "../../services/channel-state.js";
 import { getUserQuotaUsedToday, nextPacificMidnight } from "../../services/quota.js";
 import { toDataSourceDto } from "../../dto.js";
 import { db } from "../../db/client.js";
@@ -383,14 +382,12 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
       }
     }
 
-    // Phase 03.0.1 Wave 2 — channel-scoped trust-but-verify. Reset
-    // channel-level backfill_complete BEFORE worker enqueue so the
-    // catch-up walk re-checks completeness. Channel state covers ALL
-    // subscribers; one user's refresh can re-open the walk for everyone.
-    if (source.channelId) {
-      await resetChannelBackfillComplete(source.kind, source.channelId);
-    }
-
+    // Phase 03.0.3 P1 — no eager state reset. The three-branch
+    // since-derivation in backfill-channel.ts decides at walk-time whether
+    // the click is steady-state (exhausted), incremental, or deep — the
+    // pre-Phase-03.0.3 trust-but-verify reset was redundant AND a
+    // multi-tenant fairness violation (it re-opened the walk for ALL
+    // subscribers when one user clicked refresh — D-#29-7).
     const result = await adapter.backfillSource(
       {
         id: source.id,

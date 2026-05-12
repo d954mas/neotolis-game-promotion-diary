@@ -11,12 +11,9 @@ import { listSources } from "$lib/server/services/data-sources.js";
 import { mapEventsToDtos, toGameDto, toDataSourceDto } from "$lib/server/dto.js";
 import { filterValidKinds } from "$lib/util/filter-event-kinds.js";
 import { db } from "$lib/server/db/client.js";
-import {
-  youtubeVideoSnapshots,
-  youtubeChannels,
-  youtubeVideos,
-} from "$lib/server/db/schema/index.js";
-import { sql, inArray } from "drizzle-orm";
+import { youtubeChannels } from "$lib/server/db/schema/index.js";
+import { inArray } from "drizzle-orm";
+import { allAdapters } from "$lib/sources/registry.js";
 
 // Plan 02.1-19 URL contract: /feed accepts ?show=any|inbox|specific +
 // ?game=A&game=B (when show=specific). The legacy ?attached=true|false is
@@ -154,64 +151,18 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     mapEventsToDtos(userId, deletedRows),
   ]);
 
-  // Phase 3.0 post-build (UAT 2026-05-06): attach the latest YouTube stats
-  // snapshot to each youtube_video event in the feed. Single batched DISTINCT
-  // ON query — one DB round-trip regardless of page size. The snapshot table
-  // is public-data (no userId scope) so we filter only by external_id; the
-  // events list itself is already userId-scoped at listFeedPage.
-  const youtubeExternalIds = rowDtos
-    .filter((r) => r.kind === "youtube_video" && r.externalId !== null)
-    .map((r) => r.externalId as string);
-  if (youtubeExternalIds.length > 0) {
-    const snapshots = await db
-      .select({
-        videoId: youtubeVideoSnapshots.videoId,
-        polledAt: youtubeVideoSnapshots.polledAt,
-        viewCount: youtubeVideoSnapshots.viewCount,
-        likeCount: youtubeVideoSnapshots.likeCount,
-        commentCount: youtubeVideoSnapshots.commentCount,
-      })
-      .from(youtubeVideoSnapshots)
-      .where(inArray(youtubeVideoSnapshots.videoId, youtubeExternalIds))
-      .orderBy(youtubeVideoSnapshots.videoId, sql`${youtubeVideoSnapshots.polledAt} DESC`);
-    const latest = new Map<
-      string,
-      { viewCount: number; likeCount: number; commentCount: number; polledAt: Date }
-    >();
-    for (const s of snapshots) {
-      if (!latest.has(s.videoId)) {
-        latest.set(s.videoId, {
-          viewCount: s.viewCount ?? 0,
-          likeCount: s.likeCount ?? 0,
-          commentCount: s.commentCount ?? 0,
-          polledAt: s.polledAt,
-        });
-      }
-    }
-    for (const r of rowDtos) {
-      if (r.kind === "youtube_video" && r.externalId) {
-        r.stats = latest.get(r.externalId) ?? null;
-      }
-    }
-
-    // Phase 03.0.1 (post-review UAT 2026-05-10) — channelTitle for ALL
-    // youtube_video events (auto-imported AND manual paste). Lookup via
-    // youtube_videos cache (populated by oEmbed on manual paste +
-    // channel-context-backfill on auto-import). FeedCard renders single
-    // chip with optional «auto-import» icon prefix.
-    const videoChannels = await db
-      .select({
-        videoId: youtubeVideos.videoId,
-        channelTitle: youtubeVideos.channelTitle,
-      })
-      .from(youtubeVideos)
-      .where(inArray(youtubeVideos.videoId, youtubeExternalIds));
-    const titleByVideo = new Map<string, string | null>();
-    for (const v of videoChannels) titleByVideo.set(v.videoId, v.channelTitle);
-    for (const r of rowDtos) {
-      if (r.kind === "youtube_video" && r.externalId) {
-        r.channelTitle = titleByVideo.get(r.externalId) ?? null;
-      }
+  // Phase 03.0.3 P2 — adapter-driven feed enrichment. Iterates allAdapters
+  // and lets each one mutate the dtos in place. YouTube enriches
+  // kind=youtube_video rows with stats + channelTitle; future Reddit /
+  // Twitter / Telegram / Discord adapters enrich their own kinds from
+  // per-platform metadata tables. Replaces the inline JOIN that lived
+  // here pre-Phase-03.0.3 — that path enriched only the SSR first batch,
+  // leaving GET /api/events cursor pagination + /games/[id] curated views
+  // unenriched (issue #29 Part 2). Now all three callsites share the
+  // same loop.
+  for (const adapter of allAdapters) {
+    if (adapter.enrichFeedDtos) {
+      await adapter.enrichFeedDtos(userId, rowDtos);
     }
   }
 

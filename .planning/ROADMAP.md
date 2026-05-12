@@ -248,6 +248,17 @@ Plans:
 - [x] 03.0.2-09-PLAN.md — Drizzle pair refresh — no major on latest (Path A) (Commit 9)
 - [ ] 03.0.2-10-PLAN.md — Bump better-auth 1.6.9→1.6.10 + open phase PR (Commit 10) (D-07 OAuth smoke)
 
+### Phase 03.0.3: YouTube Feed Fixes (INSERTED)
+
+**Goal:** Fix two related YouTube feed gaps discovered during 03.0.2 manual testing — both pre-existing, not regressions. (1) refresh-content walks the full playlist on every click when `backfill_target_since` is epoch (e.g., "all-history" users or seed data), burning per-user cap (110/100 units) on 8 channels with zero new videos; «incremental» flow is labelled but not implemented. (2) `GET /api/events` cursor pagination skips the snapshot + channelTitle enrichment that `/feed/+page.server.ts` does inline at SSR — scroll-loaded YouTube cards lose stats and channel chip. Tracked in #29.
+
+**Requirements**: N/A (bug fix + performance — no new user-facing requirements)
+**Depends on:** Phase 03.0.2 (relies on its dependency refresh shape; no schema migration needed for this phase)
+**Plans:** 2/2 plans complete
+
+Plans:
+- (to be planned via `/gsd:plan-phase 03.0.3`)
+
 ### Phase 3.1: Reddit Adapter
 *DECIMAL SPLIT — scope split decided during /gsd:discuss-phase 03 on 2026-05-05.*
 

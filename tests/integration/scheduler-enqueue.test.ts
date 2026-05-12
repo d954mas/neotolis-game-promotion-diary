@@ -142,14 +142,48 @@ describe("youtube.poll.cron tier-eligibility (Plan 03.0.1-07 + per-video refacto
     expect(pollStatsCalls[0]!.quotaUser).toBe("neotolis-svc-cold");
   });
 
-  it("Frozen videos (publishedAt > 28d) are NOT polled by either tier handler", async () => {
+  it("Frozen videos that have already been polled (publishedAt > 28d, lastPolledAt set) are NOT polled by either tier handler", async () => {
     const u = await seedUserDirectly({ email: `sch-frozen-${uniq()}@test.local` });
     const longAgo = new Date(Date.now() - 35 * 86_400_000);
-    const { videoId } = await insertEventWithVideo(u.id, longAgo);
+    // Phase 03.0.3 follow-up — the bootstrap rule promotes frozen-by-age
+    // videos with lastPolledAt=NULL to cold for ONE shot. To pin the
+    // dormant path (already-polled video stays frozen forever), seed an
+    // explicit lastPolledAt timestamp.
+    const { videoId } = await insertEventWithVideo(u.id, longAgo, {
+      videoOverrides: { lastPolledAt: new Date(Date.now() - 86_400_000) },
+    });
 
     await handlePollActive({ id: "test", data: { tier: "active" } });
     await handlePollCold({ id: "test", data: { tier: "cold" } });
 
+    const allPolledIds = pollStatsCalls.flatMap((c) => c.videoIds);
+    expect(allPolledIds).not.toContain(videoId);
+  });
+
+  it("Frozen videos that have NEVER been polled (publishedAt > 28d, lastPolledAt IS NULL) ARE polled once by cold tier (Phase 03.0.3 bootstrap)", async () => {
+    const u = await seedUserDirectly({ email: `sch-frozen-bootstrap-${uniq()}@test.local` });
+    const longAgo = new Date(Date.now() - 35 * 86_400_000);
+    // No videoOverrides — youtube_videos.last_polled_at column defaults
+    // to NULL. The bootstrap rule (resolveTier line: frozen + lastPolledAt
+    // === null → cold) makes this video eligible for handlePollCold's
+    // selectEligibleVideoIds query.
+    const { videoId } = await insertEventWithVideo(u.id, longAgo);
+
+    await handlePollCold({ id: "test", data: { tier: "cold" } });
+
+    const allPolledIds = pollStatsCalls.flatMap((c) => c.videoIds);
+    expect(allPolledIds).toContain(videoId);
+  });
+
+  it("Bootstrap is dormant on active tier — never-polled active videos still classify as active, NOT cold (no double-poll across both crons)", async () => {
+    const u = await seedUserDirectly({ email: `sch-active-bootstrap-${uniq()}@test.local` });
+    const recent = new Date(Date.now() - 12 * 60 * 60 * 1000); // 12h ago — active
+    const { videoId } = await insertEventWithVideo(u.id, recent);
+
+    await handlePollCold({ id: "test", data: { tier: "cold" } });
+
+    // handlePollCold's eligibility filter must reject this video — it's
+    // active-tier by age and the bootstrap rule only fires for frozen.
     const allPolledIds = pollStatsCalls.flatMap((c) => c.videoIds);
     expect(allPolledIds).not.toContain(videoId);
   });

@@ -38,11 +38,13 @@ import type { SourceKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { withQuotaGuard } from "./quota.js";
+import { withQuotaGuard, getUserQuotaUsedToday, nextPacificMidnight } from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
 import { getAdapter } from "$lib/sources/registry.js";
 import { youtubeChannels } from "../db/schema/index.js";
-import { ensureChannelState } from "./channel-state.js";
+import { ensureChannelState, getChannelState } from "./channel-state.js";
+import { QUEUES } from "../queues.js";
+import { enqueueViaOutbox } from "./outbox.js";
 
 // Phase 03.0-12 (D-09 / UI-SPEC BackfillPicker) — initial-backfill window
 // presets accepted by createSource for kind=youtube_channel + autoImport.
@@ -239,6 +241,134 @@ export async function assertNoChannelConflict(
  * 2005 to prevent the sentinel being indistinguishable from legitimate
  * input.
  */
+/**
+ * Phase 03.0.3 follow-up — when a user widens `backfillTargetSince` past the
+ * channel's recorded `backfill_oldest_at` on a fully-walked channel, enqueue
+ * a one-shot force-deep walk for this user. Without this override, the
+ * three-branch since-derivation in `handleBackfillChannel` always routes to
+ * `branch=exhausted` (D-#29-7 multi-tenant fairness prioritises the channel
+ * state's exhausted flag over the per-user target), so historical events
+ * below the prior depth would never surface on the next refresh-content
+ * click. This function is the single per-user opt-in to override that.
+ *
+ * Skipped when:
+ *   - new target is NOT deeper than the previous target (no widening);
+ *   - channel state row missing (no prior walk — three-branch logic
+ *     naturally routes to `branch=deep` on its own);
+ *   - channel state's `backfillComplete` is false (three-branch logic
+ *     already routes to `incremental` or `deep` based on `backfillOldestAt`);
+ *   - new target is NOT deeper than `backfill_oldest_at` (we already walked
+ *     past the requested depth — nothing new to find).
+ *
+ * Quota attribution: the trigger user (this PATCH author) pays. Subscribers
+ * on the same channel free-ride on fan-out — same as a normal refresh-content
+ * click. `singletonKey` is `force-deep-{channelKey}-{userId}` so each user
+ * gets one job per channel, but two users widening on the same channel
+ * concurrently both get their own walk.
+ */
+async function maybeEnqueueForceDeepWalk(
+  tx: Tx,
+  opts: {
+    channelKey: string;
+    triggerUserId: string;
+    previousTarget: Date | null;
+    newTarget: Date;
+  },
+): Promise<void> {
+  if (opts.previousTarget !== null && opts.newTarget.getTime() >= opts.previousTarget.getTime()) {
+    return;
+  }
+  const state = await getChannelState("youtube_channel", opts.channelKey);
+  if (!state) return;
+  if (state.backfillComplete !== true) return;
+  if (state.backfillOldestAt === null) return;
+  if (opts.newTarget.getTime() >= state.backfillOldestAt.getTime()) return;
+
+  // Phase 03.0.3 round-6 (Codex P2) — per-user fair-share cap check.
+  // Force-deep walks consume the same user quota as a refresh-content
+  // click (the worker audits them as a capped 'historical' flow). The
+  // POST /api/sources/:id/refresh-content path runs this check before
+  // enqueueing; without the equivalent guard here, a user who already
+  // hit their daily cap could trigger a deep historical walk through
+  // PATCH /api/sources/:id widening — the cap counter would only
+  // observe the overage post-walk, by which time operator quota is
+  // already spent. Mirror the refresh-content check verbatim so both
+  // paths fail-loud with the same 429 envelope.
+  const adapter = getAdapter("youtube_channel");
+  const cap = adapter?.observability.userQuotaCap;
+  if (cap?.requestsPerDay !== undefined || cap?.eventsPerDay !== undefined) {
+    const used = await getUserQuotaUsedToday(opts.triggerUserId, "youtube_channel");
+    const resetAt = nextPacificMidnight();
+    const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
+    if (cap.requestsPerDay !== undefined && used.requests >= cap.requestsPerDay) {
+      throw new AppError(
+        `daily request quota exhausted: ${used.requests}/${cap.requestsPerDay}`,
+        "requests_quota_exhausted",
+        429,
+        {
+          cap: cap.requestsPerDay,
+          used: used.requests,
+          reset_in_seconds: resetInSeconds,
+        },
+      );
+    }
+    if (cap.eventsPerDay !== undefined && used.events >= cap.eventsPerDay) {
+      throw new AppError(
+        `daily events quota exhausted: ${used.events}/${cap.eventsPerDay}`,
+        "events_quota_exhausted",
+        429,
+        {
+          cap: cap.eventsPerDay,
+          used: used.events,
+          reset_in_seconds: resetInSeconds,
+        },
+      );
+    }
+  }
+
+  // Phase 03.0.3 follow-up (PR #31 Codex P2) — write the force-deep
+  // intent through the transactional outbox so it commits atomically
+  // with the data_sources UPDATE in the enclosing transaction. The
+  // forwarder picks the row up via LISTEN/NOTIFY (typically <10ms) and
+  // calls boss.send asynchronously. If boss.send fails the row stays
+  // pending and the forwarder retries on every NOTIFY + 30s sweep.
+  // Pre-outbox the same code path did a direct boss.send which:
+  //   - could win the race against the UPDATE (worker reads pre-UPDATE
+  //     state of data_sources, fan-out filters old events out, silent
+  //     loss of widen intent), and
+  //   - committed UPDATE before send so a transient queue failure was
+  //     a permanent silent loss with no user-side recovery.
+  await enqueueViaOutbox(
+    tx,
+    QUEUES.YOUTUBE_BACKFILL_CHANNEL,
+    {
+      kind: "youtube_channel" as const,
+      channelKey: opts.channelKey,
+      triggerUserId: opts.triggerUserId,
+      depthBoundIso: opts.newTarget.toISOString(),
+      flow: "historical" as const,
+      forceDeep: true,
+    },
+    {
+      // Phase 03.0.3 round-4 (Codex P2) — include target in the
+      // singleton key. The key dedupes IN-FLIGHT pg-boss jobs (queued
+      // or active). Without `newTarget` in the key, two rapid widens
+      // (e.g. 30d→90d, then 90d→epoch before the first walk finishes)
+      // share the same key; pg-boss rejects the second send with a
+      // null return value, the forwarder marks the row forwarded
+      // anyway, and the deeper user intent is silently lost — later
+      // refresh-content clicks land in branch=exhausted because the
+      // first walk already set complete=true at the shallower depth.
+      // Including the target gives each unique widen its own key:
+      // back-to-back widens with different targets both run; an
+      // idempotent re-PATCH with the same target stays correctly
+      // deduped.
+      singletonKey: `force-deep-${opts.channelKey}-${opts.triggerUserId}-${opts.newTarget.getTime()}`,
+      priority: 1,
+    },
+  );
+}
+
 function backfillWindowToDate(window: BackfillWindow): Date {
   const now = Date.now();
   switch (window) {
@@ -583,27 +713,83 @@ export async function updateSource(
       );
     }
     update.backfillTargetSince = patch.backfillTargetSince;
-    // Phase 03.0.1 Wave 4 — channel-scoped state machine. Per-source
-    // backfill_complete column dropped; channel-level state is now
-    // shared across subscribers. Widening one user's target_since does
-    // NOT reset the channel's complete flag — other subscribers may have
-    // narrower targets that are already satisfied. The next refresh-
-    // content click by THIS user explicitly resets channel complete via
-    // resetChannelBackfillComplete (trust-but-verify).
+    // Phase 03.0.3 — widening backfillTargetSince is handled in TWO
+    // places, depending on whether the channel was previously walked
+    // to exhaustion:
+    //
+    //   1. If channel_state.backfill_complete === true AND newTarget
+    //      crosses past backfill_oldest_at: immediate force-deep job
+    //      enqueued for THIS user via maybeEnqueueForceDeepWalk below
+    //      (Phase 03.0.3-02 D-#29-acceptance). The user pays quota for
+    //      the deep walk; other subscribers free-ride on fan-out. The
+    //      enqueue runs BEFORE the UPDATE for atomicity-of-intent —
+    //      see the inline rationale block on the enqueue call itself.
+    //
+    //   2. Otherwise (channel still has unwalked history below the
+    //      previous target — backfill_complete=false): no enqueue
+    //      here. The next refresh-content click (or scheduler tick)
+    //      lands in the three-branch since-derivation in
+    //      backfill-channel.ts and picks the deep branch
+    //      automatically because target < deepest_walked. This is the
+    //      "lazy" path; the early refactor pass had it as the ONLY
+    //      path until D-#29-7 fairness review surfaced that the
+    //      exhausted-channel widen needed an explicit override.
+    //
+    // Pre-Phase-03.0.3 this path also eagerly flipped
+    // backfill_complete=false at the CHANNEL level; that reset was
+    // redundant (the three-branch since-derivation covers the
+    // never-walked case) AND wrong (it re-opened the walk for ALL
+    // subscribers on the channel, not just the user who widened —
+    // multi-tenant fairness violation per D-#29-7). Both behaviours
+    // above are per-user.
   }
 
-  const [row] = await db
-    .update(dataSources)
-    .set(update)
-    .where(
-      and(
-        eq(dataSources.userId, userId),
-        eq(dataSources.id, sourceId),
-        isNull(dataSources.deletedAt),
-      ),
-    )
-    .returning();
-  if (!row) throw new NotFoundError();
+  // Phase 03.0.3 follow-up (PR #31 Codex P2) — atomicity-of-intent via
+  // transactional outbox. The UPDATE and the force-deep queue intent
+  // commit in a single Drizzle transaction so the worker cannot pick
+  // up the force-deep job before data_sources reflects the widened
+  // target (the pre-outbox direct boss.send path raced against the
+  // UPDATE: pg-boss NOTIFY arrives in ~5ms; our UPDATE commits in
+  // ~15-25ms; worker reads pre-UPDATE subscriber state ~30% of the
+  // time on healthy load; fan-out filters by stored backfillTargetSince
+  // and silently skips old events — permanent silent loss with no
+  // user-side recovery). Outbox writes the intent into the outbox
+  // table inside the tx; the forwarder (worker handler) translates
+  // committed rows into boss.send asynchronously via LISTEN/NOTIFY.
+  //
+  // Source identity fields used to gate the enqueue (existing.kind,
+  // existing.channelId) cannot change via PATCH — updateSource only
+  // mutates displayName / autoImport / isOwnedByMe / metadata /
+  // backfillTargetSince. Reading them off `existing` instead of the
+  // post-UPDATE `row` is safe.
+  const row = await db.transaction(async (tx) => {
+    if (
+      patch.backfillTargetSince !== undefined &&
+      existing.kind === "youtube_channel" &&
+      existing.channelId !== null
+    ) {
+      await maybeEnqueueForceDeepWalk(tx, {
+        channelKey: existing.channelId,
+        triggerUserId: userId,
+        previousTarget: existing.backfillTargetSince,
+        newTarget: patch.backfillTargetSince,
+      });
+    }
+
+    const [updated] = await tx
+      .update(dataSources)
+      .set(update)
+      .where(
+        and(
+          eq(dataSources.userId, userId),
+          eq(dataSources.id, sourceId),
+          isNull(dataSources.deletedAt),
+        ),
+      )
+      .returning();
+    if (!updated) throw new NotFoundError();
+    return updated;
+  });
 
   if (patch.autoImport !== undefined && patch.autoImport !== existing.autoImport) {
     await writeAudit({
@@ -778,7 +964,10 @@ export async function markSourceNeedsReconnect(
 //   markSourceBackfillFrontier    → markChannelBackfillFrontier
 //   markSourceBackfillComplete    → markChannelBackfillComplete
 //   setSourceBackfillPageToken    → setChannelBackfillPageToken
-//   resetSourceBackfillComplete   → resetChannelBackfillComplete
+// Phase 03.0.3 P1 — `resetSourceBackfillComplete` and the wave-4
+// channel-level reset helper were both dropped: the new three-branch
+// since-derivation in backfill-channel.ts subsumes the
+// "trust-but-verify" reset (D-D1 / D-#29-6 / D-#29-7).
 // computeSinceForRefresh removed — channel-scoped worker passes
 // depthBoundIso explicitly per trigger context (user click → user's
 // target_since; cron auto-backfill → 1970 sentinel; cron incremental

@@ -551,9 +551,61 @@ User can change earliest-boundary через UI date picker:
 PATCH /api/sources/:id  body: { backfillTargetSince: "2023-06-01T00:00:00Z" }
 ```
 
-Server validates: future dates → `422 'date_must_be_past'`. Recomputes `backfill_complete`:
+Server validates: future dates → `422 'date_must_be_past'`. The PATCH does NOT eagerly mutate channel state — widening the target is handled lazily by the next refresh-content click's three-branch since-derivation (see §10 "Incremental-vs-deep-walk pattern"). Pre-Phase-03.0.3 this path called `resetChannelBackfillComplete` eagerly; that reset was a multi-tenant fairness violation because it re-opened the walk for ALL subscribers when a single user widened (D-#29-7).
 
-- Если new target older than current `backfill_oldest_at` → expanding window → reset complete=false (worker will re-pull historical).
-- Если new target newer than/equal frontier → covered → keep complete state.
+UI flow: user picks date → PATCH → optionally clicks Refresh → POST refresh-content (catch-up worker fires). Two clicks под одним user action. The refresh click's since-derivation decides whether to deep-walk or stay incremental based on the channel's current state — no PATCH-time state mutation required.
 
-UI flow: user picks date → PATCH → optionally clicks Refresh → POST refresh-content (catch-up worker fires). Two clicks под одним user action.
+## 10. Incremental-vs-deep-walk pattern
+
+*Established in Phase 03.0.3 P1 for YouTube; copy-the-pattern for Reddit / Twitter / Telegram / Discord adapters in Phase 03.1+.*
+
+The channel walker (`handlers/backfill-channel.ts` for YouTube; the analogous walker file for other adapters) computes the `since` argument it passes to `adapter.pollContent` using a three-branch derivation:
+
+| Channel state                                                                            | Branch        | `since`                              | `lastBackfillPageToken` |
+|------------------------------------------------------------------------------------------|---------------|--------------------------------------|--------------------------|
+| `backfill_complete = true`                                                               | `exhausted`   | `max(newestKnown, target)`           | cleared                  |
+| `!complete && deepestWalked !== null && target >= deepestWalked`                         | `incremental` | `max(newestKnown, target)`           | cleared                  |
+| else                                                                                     | `deep`        | `target`                             | preserved (resume cursor)|
+
+Definitions:
+  - **`target`** — the user's `backfill_target_since` for this source. Comes in as `job.data.depthBoundIso`.
+  - **`newestKnown`** — `MAX(<adapter's events table>.published_at) WHERE channel_id = $channelKey`. For YouTube: `getNewestKnownPublishedAt(channelKey)` in `src/lib/sources/youtube/server/newest-known.ts`. Returns `null` on a cold channel (caller falls back to `target`).
+  - **`deepestWalked`** — the channel's prior frontier (`backfill_oldest_at` column on `data_source_channel_state`).
+  - **`target >= deepestWalked`** — comparison by `.getTime()` ms-since-epoch. A "shallower" target (fewer days ago, more-recent instant) has a LARGER ms number than a deeper one. So `target=30d-ago, deepest=60d-ago` lands in incremental (30d-ago.ms > 60d-ago.ms); `target=epoch, deepest=30d-ago` lands in deep.
+
+Why `newestKnown` and not `last_polled_at`: backdated uploads (rare on YouTube, common on Telegram / Discord) have `publishedAt` earlier than the newest collected video. Using `MAX(published_at)` as the cursor means `walkedPastSince` fires only on items older than the newest collected — which is the correct semantic. `last_polled_at` would skip backdated uploads silently.
+
+Token-clear rule (incremental + exhausted branches): the persistent `lastBackfillPageToken` cursor from a prior deep-walk MUST be cleared before invoking `pollContent` in either incremental branch. Without this, a stale page-N cursor would cause `walkedPastSince` to fire immediately with zero events. Deep branch preserves the token so >MAX_PAGES walks resume from where the last walk stopped.
+
+Lazy widening: when the user widens `backfill_target_since` (e.g. 30d → epoch) via `PATCH /api/sources/:id`, the cross-source `updateSource` service does NOT eagerly reset channel state. The next refresh-content click sees `target < deepestWalked` and falls into the `deep` branch naturally. This avoids the multi-tenant fairness violation where one user's widening would re-open the walk for ALL subscribers on the channel (D-#29-7).
+
+Reference implementation: YouTube — `src/lib/sources/youtube/server/handlers/backfill-channel.ts` step 3 (the "Compute since" block). The `since_branch` discriminator is also written to the success/empty/error audit metadata for forensic queries — operator can run `SELECT metadata->>'since_branch', COUNT(*) FROM audit_log WHERE action='source.refresh_content_requested' GROUP BY 1` to see how often each branch fires on prod.
+
+## 11. Feed enrichment pattern
+
+*Established in Phase 03.0.3 P2 for YouTube; copy-the-pattern for Reddit / Twitter / Telegram / Discord adapters in Phase 03.1+.*
+
+Adapters that have per-event metadata worth showing on `FeedCard` (stats, channel/author chips, embedded media, etc.) implement the optional `enrichFeedDtos` method on `DataSourceAdapter`:
+
+```typescript
+interface DataSourceAdapter {
+  // ... other methods ...
+  enrichFeedDtos?(userId: string, dtos: EventDto[]): Promise<void>;
+}
+```
+
+Contract:
+  - The method MUST internally filter `dtos` to its own `kind` — callers do NOT pre-filter. Avoids the "did I forget to filter for adapter X?" footgun.
+  - The method MUTATES `dtos` in place; returns void.
+  - The method MUST swallow errors (log at WARN). A failed enrichment query MUST NOT break the feed render — the cards just render without the enrichment.
+  - The method MAY make multiple DB queries (YouTube makes 2: one for `youtube_video_snapshots` latest-per-videoId, one for `youtube_videos.channelTitle`). Batch by `IN (...)` over the externalIds extracted from filtered dtos.
+
+Three cross-source callsites iterate `allAdapters` and call this method:
+  - `src/routes/feed/+page.server.ts` — SSR for the primary `/feed` view
+  - `src/lib/server/http/routes/events.ts` — `GET /api/events` cursor pagination
+  - `src/routes/games/[gameId]/+page.server.ts` — per-game curated view
+
+Deliberate skip:
+  - `GET /api/events/deleted` (events.ts:374) does NOT call `enrichFeedDtos`. `DeletedEventsPanel.svelte` renders soft-deleted events with a compact KindIcon + strikethrough-title view — no stats line, no channel chip. The skip is documented inline with a load-bearing WHY comment at the call site.
+
+Reference implementation: YouTube — `src/lib/sources/youtube/server/feed-enrichment.ts`. The Phase 03.0.3 P2 commit replaced the inline JOIN in `/feed/+page.server.ts:162-237` with a single adapter loop that all three callsites share. Issue #29 Part 2 was the load-bearing motivation: pre-fix, the SSR first batch on `/feed` was enriched inline but `GET /api/events` cursor-paginated batches dropped both `stats` and `channelTitle` on every card past the first SSR batch.

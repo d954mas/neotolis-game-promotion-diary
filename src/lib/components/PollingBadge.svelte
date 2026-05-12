@@ -69,7 +69,15 @@
   // Per-video refactor (2026-05-06): tier keyed on publishedAt (the video's
   // age), not occurredAt (the event's age). NULL publishedAt → 'pending'
   // (channel-context-backfill in flight; show "Pending..." badge).
-  function resolveTier(publishedAt: Date | null, lastPollStatus: string | null, now: Date): Tier {
+  // Phase 03.0.3 follow-up — bootstrap rule: frozen by age + lastPolledAt=null
+  // → upgrade to 'cold' so the scheduler picks the video up once. See the
+  // canonical resolver header for the issue #29 extension rationale.
+  function resolveTier(
+    publishedAt: Date | null,
+    lastPollStatus: string | null,
+    lastPolledAt: Date | null,
+    now: Date,
+  ): Tier {
     if (publishedAt === null) return "pending";
     if (lastPollStatus !== null && UNAVAILABLE_POLL_STATUSES.includes(lastPollStatus)) {
       return "unavailable";
@@ -77,6 +85,7 @@
     const ageMs = now.getTime() - publishedAt.getTime();
     if (ageMs < TIER_BOUNDARY_ACTIVE_MS) return "active";
     if (ageMs < TIER_BOUNDARY_COLD_MS) return "cold";
+    if (lastPolledAt === null) return "cold";
     return "frozen";
   }
 
@@ -121,7 +130,7 @@
   // enough for the user-facing copy.
   const now = $derived(new Date());
 
-  const tier: Tier = $derived(resolveTier(publishedAt, event.lastPollStatus, now));
+  const tier: Tier = $derived(resolveTier(publishedAt, event.lastPollStatus, lastPolledAt, now));
 
   // Variant resolution per UI-SPEC §"Interaction Contracts → Variant resolution".
   type Variant =

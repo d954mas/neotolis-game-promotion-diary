@@ -33,7 +33,7 @@
 // the `user` DELETE in step 8 takes them down via Postgres FK cascade
 // (no explicit tx step needed).
 
-import { and, eq, isNotNull, lt } from "drizzle-orm";
+import { and, eq, isNotNull, lt, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { user, session } from "../db/schema/auth.js";
 import { games } from "../db/schema/games.js";
@@ -42,6 +42,7 @@ import { dataSources } from "../db/schema/data-sources.js";
 import { events } from "../db/schema/events.js";
 import { eventGames } from "../db/schema/event-games.js";
 import { apiKeysSteam } from "../db/schema/api-keys-steam.js";
+import { outbox } from "../db/schema/outbox.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { logger } from "../logger.js";
@@ -72,6 +73,16 @@ export interface PurgeRowCounts {
   games: number;
   sessions: number;
   user: number;
+  /** Phase 03.0.3 round-8 (Codex P1) — outbox rows that referenced the
+   *  purged user via payload.triggerUserId, deleted inside the same
+   *  cascade transaction. Pending rows (forwarded_at IS NULL) would
+   *  otherwise be forwarded to pg-boss AFTER the user row is gone,
+   *  enqueueing work for a deleted tenant and breaking the hard-delete
+   *  contract. Forwarded rows (forwarded_at IS NOT NULL) are deleted
+   *  too — they retained the purged user_id for up to 7 days under the
+   *  purge.daily retention window, violating GDPR Art. 17 for that
+   *  period. */
+  outbox: number;
 }
 
 export interface PurgeResult {
@@ -151,6 +162,20 @@ export async function purgeAccount(userId: string, opts: PurgeOptions = {}): Pro
       .where(eq(dataSources.userId, userId))
       .returning({ id: dataSources.id });
 
+    // 5b. outbox — queue intents that reference this user via
+    //     payload.triggerUserId (Phase 03.0.3 force-deep enqueues are
+    //     the only such payload today). Codex round-8 P1: deleting the
+    //     user without scrubbing the outbox lets the forwarder later
+    //     enqueue a YOUTUBE_BACKFILL_CHANNEL job with the purged
+    //     userId, which the worker then audits against a non-existent
+    //     tenant. Filter via the JSON ->>'triggerUserId' accessor —
+    //     rows whose payload omits the field (system-level enqueues if
+    //     any future ones land) don't match and survive.
+    const ob = await tx
+      .delete(outbox)
+      .where(sql`${outbox.payload}->>'triggerUserId' = ${userId}`)
+      .returning({ id: outbox.id });
+
     // 6. games — children of user.
     const g = await tx.delete(games).where(eq(games.userId, userId)).returning({ id: games.id });
 
@@ -175,6 +200,7 @@ export async function purgeAccount(userId: string, opts: PurgeOptions = {}): Pro
       games: g.length,
       sessions: sess.length,
       user: u.length,
+      outbox: ob.length,
     } satisfies PurgeRowCounts;
   });
 

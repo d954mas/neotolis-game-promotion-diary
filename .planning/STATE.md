@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to plan
-stopped_at: "Completed 03.0.2-09-PLAN.md (drizzle pair refresh, Path A: drizzle-orm 0.45.2 re-pin + drizzle-kit ^0.31.10 caret bump, D-08 no-diff); CI green run 25655923896"
-last_updated: "2026-05-11T07:57:51.800Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 03.0.3-02-PLAN.md
+last_updated: "2026-05-11T14:01:45.459Z"
 last_activity: 2026-05-11
 progress:
-  total_phases: 12
-  completed_phases: 7
-  total_plans: 103
-  completed_plans: 104
+  total_phases: 13
+  completed_phases: 8
+  total_plans: 105
+  completed_plans: 106
 ---
 
 # Project State
@@ -20,12 +20,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Replace messy Google Sheets / markdown files with a structured, secure, query-friendly diary so an indie developer can see — at a glance — which promotion actions actually moved the needle on wishlists and engagement.
-**Current focus:** Phase 03.0.2 — dependency-refresh-inserted
+**Current focus:** Phase 03.0.3 — youtube-feed-fixes
 
 ## Current Position
 
-Phase: 3.1
-Plan: Not started
+Phase: 03.0.3 (youtube-feed-fixes) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -144,6 +144,8 @@ Plan: Not started
 | Phase 03.0.2-dependency-refresh-inserted P07 | ~11min | 1 tasks | 2 files |
 | Phase 03.0.2 P08 | 25min | 1 tasks | 2 files |
 | Phase 03.0.2-dependency-refresh-inserted P09 | ~8min | 1 tasks | 2 files |
+| Phase 03.0.3 P01 | 45min | 6 tasks | 11 files |
+| Phase 03.0.3-youtube-feed-fixes P02 | ~15min | 6 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -151,6 +153,7 @@ Plan: Not started
 
 - Phase 02.2 inserted after Phase 02 (chronologically after 02.1): ship-to-prod (URGENT) — pre-Phase-3 deploy work so user can dogfood the SaaS before polling pipeline lands
 - Phase 03.0.1 inserted after Phase 03.0 (2026-05-08): source plugin architecture — restructure YouTube-prefixed code into `src/lib/server/sources/youtube/` plugin folder + widen DataSourceAdapter contract (registry dispatch, AdapterContext + AdapterCredentials union) so future sources (Reddit/Twitter/Telegram/Discord) drop in as new sub-folders without editing cross-source plumbing. Prerequisite for Phase 3.1 (Reddit Adapter) — without 03.0.1, adding Reddit requires editing 4 worker handlers and copy-pasting the YouTube plumbing pattern. Also ships generic `POST /api/sources/:id/refresh-content` endpoint and SOURCE-REFERENCE.md "how to add a new source" guide.
+- Phase 03.0.3 inserted after Phase 03.0.2 (2026-05-11): YouTube Feed Fixes (URGENT) — fixes two pre-existing gaps discovered during 03.0.2 manual testing: (1) refresh-content burns per-user quota by walking full playlist on every click when `backfill_target_since` is epoch (incremental flow is labelled but not implemented at the walker level — `since=backfillTargetSince` always); (2) `GET /api/events` cursor pagination skips the snapshot+channelTitle enrichment that `/feed/+page.server.ts` does inline at SSR. Both tracked in #29. Branch: `feat/phase-03.0.3-youtube-feed-fixes`. No schema migration — reuses existing `data_source_channel_state` columns; adds `getNewestKnownPublishedAt(kind, channelKey)` helper + `enrichFeedDtos(userId, dtos)` helper.
 
 ### Decisions
 
@@ -423,6 +426,10 @@ Recent decisions affecting current work:
 - [Phase 03.0.2-dependency-refresh-inserted]: Plan 07: @hono/node-server 1.19.14->2.0.2 (EXACT pin preserved, no caret). Zero source changes - v2 public API unchanged per release notes. Sole importer src/roles/app.ts serve() call API-compatible. Smoke CI green (load-bearing gate for production HTTP serve path).
 - [Phase 03.0.2]: Plan 08: TS6 pre-immunization held — zero source-code touches needed for typescript 5.6->6.0.3 bump; tsconfig.json unchanged (D-06)
 - [Phase 03.0.2-dependency-refresh-inserted]: Plan 09: drizzle pair Path A landed — drizzle-orm 0.45.2 re-pin (audit-trail no-op, latest dist-tag still 0.45.2 at commit-time) + drizzle-kit ^0.31.0 -> ^0.31.10 caret patch bump. D-08 forward-only invariant verified via `pnpm db:check` no-diff; zero edits to merged migration files in drizzle/. CI run 25655923896 green on all 4 jobs (unit-integration exercised real drizzle queries against Postgres; smoke ran migration at boot under advisory lock). Trigger condition for follow-up phase: drizzle-orm@latest flips to 1.0.0 stable -> schedule Casing API refactor across src/lib/server/db/schema/*.ts + src/lib/sources/*/server/schema/*.ts.
+- [Phase 03.0.3]: Three-branch since-derivation (exhausted/incremental/deep) in YouTube channel walker drops refresh-content quota burn from ~110 units to <=8 units for admin all-history clicks (issue #29 Part 1)
+- [Phase 03.0.3]: newest-known cursor pattern (MAX(youtube_videos.published_at) by channel) - backdated-upload-safe replacement for last_polled_at; documented in SOURCE-REFERENCE.md S10 for Phase 03.1+ adapters
+- [Phase 03.0.3-youtube-feed-fixes]: Plan 02: enrichFeedDtos lives on DataSourceAdapter as optional method; type-only EventDto import preserves layering boundary; barrel spread propagates impl automatically (no explicit override needed).
+- [Phase 03.0.3-youtube-feed-fixes]: Plan 02: GET /api/events/deleted carries load-bearing WHY comment (deliberate skip — DeletedEventsPanel compact view); second of two such comments in Phase 03.0.3 alongside Plan 01's updateSource lazy-deep-walk reference.
 
 ### Pending Todos
 
@@ -465,8 +472,8 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-05-11T12:21:00.000Z
+Last session: 2026-05-11T14:01:45.455Z
 Last Activity: 2026-05-11
-Stopped at: Completed 03.0.2-09-PLAN.md (drizzle pair refresh, Path A: drizzle-orm 0.45.2 re-pin + drizzle-kit ^0.31.10 caret bump, D-08 no-diff); CI green run 25655923896
+Stopped at: Completed 03.0.3-02-PLAN.md
 Resume file: None
 Resume command: see end-of-session message — start with `/clear`, then update PROJECT.md

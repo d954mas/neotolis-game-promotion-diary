@@ -37,6 +37,7 @@ import { env, scrubKekFromEnv } from "../lib/server/config/env.js";
 
 import { allAdapters } from "../lib/sources/registry.js";
 import { handlePurgeDaily } from "./handlers/purge-daily.js";
+import { startOutboxForwarder } from "./handlers/outbox-forwarder.js";
 
 export async function startWorker(): Promise<void> {
   // Phase 03.0.1 architecture cleanup — multi-replica safety guard.
@@ -127,6 +128,13 @@ export async function startWorker(): Promise<void> {
   // youtube.poll.cron; the poll-cron handler dispatches by tier. The
   // intermediate scheduler-tick → enqueue → per-event-job hop is gone.
 
+  // Phase 03.0.3 follow-up (PR #31 Codex P2) — transactional outbox
+  // forwarder. Long-running async loop that translates pending
+  // outbox rows into pg-boss `boss.send` calls. Uses LISTEN on
+  // 'outbox.new' for instant pickup + 30s periodic sweep as backstop.
+  // Returns a teardown closure the shutdown handler awaits.
+  const stopOutboxForwarder = await startOutboxForwarder({ boss });
+
   // D-15 smoke assertion #2 — exact string `worker ready` on stdout.
   logger.info({ role: "worker" }, "worker ready");
   console.log("worker ready");
@@ -134,6 +142,11 @@ export async function startWorker(): Promise<void> {
   // D-22 graceful shutdown — Phase 1 contract, preserved.
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "worker received shutdown signal");
+    try {
+      await stopOutboxForwarder();
+    } catch (err) {
+      logger.warn({ err }, "outbox-forwarder stop failed");
+    }
     try {
       await stopBoss(boss);
     } catch (err) {
