@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { AdapterError, categoryToSnapshotStatus } from "$lib/sources/errors.js";
 
-describe("AdapterError — Phase 03.0.1 D-13 5-category taxonomy", () => {
+describe("AdapterError — 5-category taxonomy", () => {
   it("transient category constructs with default retryAfterMs=null", () => {
     const err = new AdapterError("transient 5xx", { category: "transient" });
     expect(err.category).toBe("transient");
@@ -40,7 +40,7 @@ describe("AdapterError — Phase 03.0.1 D-13 5-category taxonomy", () => {
   });
 });
 
-describe("categoryToSnapshotStatus — D-13 mapping", () => {
+describe("categoryToSnapshotStatus — mapping", () => {
   it("transient → auth_error (caller logs + retries)", () => {
     expect(categoryToSnapshotStatus("transient")).toBe("auth_error");
   });

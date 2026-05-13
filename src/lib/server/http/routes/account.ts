@@ -1,5 +1,5 @@
-// Phase 02.2 D-16: in-app GDPR baseline — export, soft-delete, restore.
-// Phase 3.0 Plan 08: Permanent-delete-now CTA — DELETE /api/me/account/purge.
+// In-app GDPR baseline — export, soft-delete, restore.
+// Permanent-delete-now CTA — DELETE /api/me/account/purge.
 //
 // Tenant-scope contract: routes operate on c.var.userId only — there is
 // NO :userId path parameter. Cross-tenant access impossible by construction
@@ -53,15 +53,14 @@ accountRoutes.post("/me/account/restore", async (c) => {
   }
 });
 
-// Phase 3.0 Plan 08 — Permanent-delete-now CTA (DV-6 / D-NEW Purge worker).
-// Calls purgeAccount({ignoreRetention: true}) — the CTA path bypasses the
-// 60-day retention gate so the user can nuke their account immediately.
+// Permanent-delete-now CTA. Calls purgeAccount({ignoreRetention: true}) —
+// the CTA path bypasses the 60-day retention gate so the user can nuke
+// their account immediately.
 //
 // On 200 the body is `{purged: true, rowCounts: {...}}`. The cascade DELETE
 // in the same tx removes session rows, so any subsequent request with the
-// pre-purge cookie returns 401 (intended logout). The SvelteKit client (Plan
-// 12) reads the 200 and redirects to /login per UI-SPEC interaction
-// contract.
+// pre-purge cookie returns 401 (intended logout). The SvelteKit client
+// reads the 200 and redirects to /login.
 //
 // The route is exempted from the account-state 423 gate (see
 // middleware/account-state.ts ALLOWED_WHEN_DELETED) because the CTA's

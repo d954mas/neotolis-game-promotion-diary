@@ -17,16 +17,12 @@ import * as Audit from "../../src/lib/server/audit.js";
 import { NotFoundError, AppError } from "../../src/lib/server/services/errors.js";
 import { seedUserDirectly } from "./helpers.js";
 
-// Plan 02.1-04 — SOURCES-01 + SOURCES-02 service-layer integration.
-//
-// The Wave 0 it.skip placeholders from Plan 02.1-02 are flipped to live `it(...)`
-// bodies here. Names continue to start with `Plan 02.1-04:` so a future grep
-// can trace each placeholder to the plan that filled it. SOURCES-01 / SOURCES-02
-// HTTP-route concerns (status codes, route shape) belong to Plan 02.1-06; this
+// Service-layer integration for the data_sources registry. HTTP-route concerns
+// (status codes, route shape) live in the HTTP-boundary suite below; this
 // suite asserts service-layer behaviour exclusively.
 
-describe("SOURCES-01: register data sources via POST /api/sources", () => {
-  it("Plan 02.1-04: creating kind=youtube_channel returns row with userId-stripped DTO + active row in DB", async () => {
+describe("register data sources via POST /api/sources", () => {
+  it("creating kind=youtube_channel returns row with userId-stripped DTO + active row in DB", async () => {
     const userA = await seedUserDirectly({ email: "ds1@test.local" });
     const row = await createSource(
       userA.id,
@@ -61,7 +57,7 @@ describe("SOURCES-01: register data sources via POST /api/sources", () => {
     expect(persisted[0]!.deletedAt).toBeNull();
   });
 
-  it("Plan 02.1-04: kind=reddit_account rejects with AppError 'kind_not_yet_functional' (422 + metadata)", async () => {
+  it("kind=reddit_account rejects with AppError 'kind_not_yet_functional' (422 + metadata)", async () => {
     const userA = await seedUserDirectly({ email: "ds2@test.local" });
     await expect(
       createSource(
@@ -72,7 +68,7 @@ describe("SOURCES-01: register data sources via POST /api/sources", () => {
     ).rejects.toMatchObject({
       code: "kind_not_yet_functional",
       status: 422,
-      metadata: { kind: "reddit_account", available_phase: "Phase 3" },
+      metadata: { kind: "reddit_account", status: "coming soon — pending Reddit OAuth" },
     });
 
     // No row was inserted.
@@ -80,7 +76,7 @@ describe("SOURCES-01: register data sources via POST /api/sources", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("Plan 02.1-04: kinds twitter_account / telegram_channel / discord_server reject with 'kind_not_yet_functional'", async () => {
+  it("kinds twitter_account / telegram_channel / discord_server reject with 'kind_not_yet_functional'", async () => {
     const userA = await seedUserDirectly({ email: "ds3@test.local" });
     const rejectedKinds = ["twitter_account", "telegram_channel", "discord_server"] as const;
     for (const kind of rejectedKinds) {
@@ -95,14 +91,14 @@ describe("SOURCES-01: register data sources via POST /api/sources", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("Plan 02.1-04: empty handle_url rejects with AppError 'validation_failed' (422)", async () => {
+  it("empty handle_url rejects with AppError 'validation_failed' (422)", async () => {
     const userA = await seedUserDirectly({ email: "ds4@test.local" });
     await expect(
       createSource(userA.id, { kind: "youtube_channel", handleUrl: "" }, "127.0.0.1"),
     ).rejects.toMatchObject({ code: "validation_failed", status: 422 });
   });
 
-  it("Plan 02.1-04: duplicate (user_id, handle_url) translates PG 23505 into 'duplicate_source' (422)", async () => {
+  it("duplicate (user_id, handle_url) translates PG 23505 into 'duplicate_source' (422)", async () => {
     const userA = await seedUserDirectly({ email: "ds5@test.local" });
     await createSource(
       userA.id,
@@ -122,7 +118,7 @@ describe("SOURCES-01: register data sources via POST /api/sources", () => {
     });
   });
 
-  it("Plan 02.1-04: createSource writes audit_action='source.added' with ipAddress + userAgent", async () => {
+  it("createSource writes audit_action='source.added' with ipAddress + userAgent", async () => {
     const userA = await seedUserDirectly({ email: "ds6@test.local" });
     const row = await createSource(
       userA.id,
@@ -145,7 +141,7 @@ describe("SOURCES-01: register data sources via POST /api/sources", () => {
     });
   });
 
-  it("Plan 02.1-04: listSources returns active rows only (omits soft-deleted)", async () => {
+  it("listSources returns active rows only (omits soft-deleted)", async () => {
     const userA = await seedUserDirectly({ email: "ds7@test.local" });
     const a = await createSource(
       userA.id,
@@ -166,7 +162,7 @@ describe("SOURCES-01: register data sources via POST /api/sources", () => {
     expect(includingDeleted.map((r) => r.id).sort()).toEqual([a.id, b.id].sort());
   });
 
-  it("Plan 02.1-04: getSourceById on cross-tenant id throws NotFoundError (404, never 403)", async () => {
+  it("getSourceById on cross-tenant id throws NotFoundError (404, never 403)", async () => {
     const userA = await seedUserDirectly({ email: "ds8a@test.local" });
     const userB = await seedUserDirectly({ email: "ds8b@test.local" });
     const aSource = await createSource(
@@ -189,12 +185,12 @@ describe("SOURCES-01: register data sources via POST /api/sources", () => {
   });
 });
 
-describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () => {
+describe("soft-delete + retention + auto_import toggle + audit", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("Plan 02.1-04: softDeleteSource sets deleted_at and returns the soft-deleted row", async () => {
+  it("softDeleteSource sets deleted_at and returns the soft-deleted row", async () => {
     const userA = await seedUserDirectly({ email: "ds9@test.local" });
     const src = await createSource(
       userA.id,
@@ -213,7 +209,7 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     expect(persisted!.deletedAt).not.toBeNull();
   });
 
-  it("Plan 02.1-04: softDeleteSource called twice on the same id throws NotFoundError on the second call (idempotency)", async () => {
+  it("softDeleteSource called twice on the same id throws NotFoundError on the second call (idempotency)", async () => {
     const userA = await seedUserDirectly({ email: "ds10@test.local" });
     const src = await createSource(
       userA.id,
@@ -226,7 +222,7 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     );
   });
 
-  it("Plan 02.1-04: restoreSource clears deleted_at when within RETENTION_DAYS window", async () => {
+  it("restoreSource clears deleted_at when within RETENTION_DAYS window", async () => {
     const userA = await seedUserDirectly({ email: "ds11@test.local" });
     const src = await createSource(
       userA.id,
@@ -246,7 +242,7 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     expect(persisted!.deletedAt).toBeNull();
   });
 
-  it("Plan 02.1-04: restoreSource throws AppError 'retention_expired' when the soft-delete is older than RETENTION_DAYS", async () => {
+  it("restoreSource throws AppError 'retention_expired' when the soft-delete is older than RETENTION_DAYS", async () => {
     const userA = await seedUserDirectly({ email: "ds12@test.local" });
     const src = await createSource(
       userA.id,
@@ -444,7 +440,7 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     });
   });
 
-  it("Plan 02.1-04: updateSource toggling autoImport=false writes audit_action='source.toggled_auto_import' with from/to metadata", async () => {
+  it("updateSource toggling autoImport=false writes audit_action='source.toggled_auto_import' with from/to metadata", async () => {
     const userA = await seedUserDirectly({ email: "ds13@test.local" });
     const src = await createSource(
       userA.id,
@@ -478,7 +474,7 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     });
   });
 
-  it("Plan 02.1-04: updateSource WITHOUT changing autoImport does NOT emit a toggle audit row", async () => {
+  it("updateSource WITHOUT changing autoImport does NOT emit a toggle audit row", async () => {
     const userA = await seedUserDirectly({ email: "ds13b@test.local" });
     const src = await createSource(
       userA.id,
@@ -497,7 +493,7 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     expect(audits).toHaveLength(0);
   });
 
-  it("Plan 02.1-04: softDeleteSource writes audit BEFORE the soft-delete update (D-32 forensics order)", async () => {
+  it("softDeleteSource writes audit BEFORE the soft-delete update (forensics order)", async () => {
     const userA = await seedUserDirectly({ email: "ds14@test.local" });
     const src = await createSource(
       userA.id,
@@ -506,8 +502,8 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     );
 
     // Spy on writeAudit. When it's called, the source row's deleted_at MUST
-    // still be NULL — the audit fires BEFORE the UPDATE that sets it. Mirrors
-    // Phase 2 removeSteamKey's forensics-order pattern: even if the UPDATE
+    // still be NULL — the audit fires BEFORE the UPDATE that sets it (the
+    // same forensics-order pattern removeSteamKey uses): even if the UPDATE
     // later fails, the security signal lands.
     const auditSpy = vi.spyOn(Audit, "writeAudit").mockImplementation(async (entry) => {
       if (entry.action === "source.removed") {
@@ -525,7 +521,7 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     expect(auditSpy.mock.calls.some(([entry]) => entry.action === "source.removed")).toBe(true);
   });
 
-  it("Plan 02.1-04: cross-tenant softDeleteSource throws NotFoundError (404, never 403)", async () => {
+  it("cross-tenant softDeleteSource throws NotFoundError (404, never 403)", async () => {
     const userA = await seedUserDirectly({ email: "ds15a@test.local" });
     const userB = await seedUserDirectly({ email: "ds15b@test.local" });
     const aSrc = await createSource(
@@ -538,7 +534,7 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     );
   });
 
-  it("Plan 02.1-04: cross-tenant updateSource + restoreSource throw NotFoundError", async () => {
+  it("cross-tenant updateSource + restoreSource throw NotFoundError", async () => {
     const userA = await seedUserDirectly({ email: "ds16a@test.local" });
     const userB = await seedUserDirectly({ email: "ds16b@test.local" });
     const aSrc = await createSource(
@@ -556,10 +552,9 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
     );
   });
 
-  it("Plan 02.1-04: soft-deleted source can be re-added via the partial unique index (resurrect by re-create)", async () => {
-    // SOURCES-02 + Plan 02.1-01 schema decision: the unique index is
-    // `WHERE deleted_at IS NULL` so the soft-deleted handle does not block
-    // a fresh registration of the same handle_url.
+  it("soft-deleted source can be re-added via the partial unique index (resurrect by re-create)", async () => {
+    // The unique index is `WHERE deleted_at IS NULL`, so the soft-deleted
+    // handle does not block a fresh registration of the same handle_url.
     const userA = await seedUserDirectly({ email: "ds17@test.local" });
     const first = await createSource(
       userA.id,
@@ -578,12 +573,12 @@ describe("SOURCES-02: soft-delete + retention + auto_import toggle + audit", () 
   });
 });
 
-// Plan 02.1-06 — /api/sources HTTP-boundary tests. The service-layer suite
-// above asserts SOURCES-01 + SOURCES-02 behaviour against the Drizzle layer;
-// these tests assert that Plan 02.1-06's Hono router wires the same contract
-// into the HTTP envelope (status codes + DTO projection + tenantScope guard).
-describe("Plan 02.1-06: /api/sources HTTP boundary", () => {
-  it("Plan 02.1-06: POST /api/sources kind=youtube_channel returns 201 + DataSourceDto without userId", async () => {
+// /api/sources HTTP-boundary tests. The service-layer suite above asserts
+// behaviour against the Drizzle layer; these tests assert that the Hono
+// router wires the same contract into the HTTP envelope (status codes +
+// DTO projection + tenantScope guard).
+describe("/api/sources HTTP boundary", () => {
+  it("POST /api/sources kind=youtube_channel returns 201 + DataSourceDto without userId", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-src-1@test.local" });
@@ -653,7 +648,7 @@ describe("Plan 02.1-06: /api/sources HTTP boundary", () => {
     expect(row!.handleUrl).toBe("https://www.youtube.com/@no-forge-attempt");
   });
 
-  it("Plan 02.1-06: POST /api/sources kind=reddit_account returns 422 kind_not_yet_functional", async () => {
+  it("POST /api/sources kind=reddit_account returns 422 kind_not_yet_functional", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-src-2@test.local" });
@@ -673,7 +668,7 @@ describe("Plan 02.1-06: /api/sources HTTP boundary", () => {
     expect(body.error).toBe("kind_not_yet_functional");
   });
 
-  it("Plan 02.1-06: POST /api/sources duplicate handleUrl returns 422 duplicate_source", async () => {
+  it("POST /api/sources duplicate handleUrl returns 422 duplicate_source", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-src-3@test.local" });
@@ -697,7 +692,7 @@ describe("Plan 02.1-06: /api/sources HTTP boundary", () => {
     expect((await r2.json()).error).toBe("duplicate_source");
   });
 
-  it("Plan 02.1-06: GET /api/sources omits soft-deleted by default; ?includeDeleted=true returns them", async () => {
+  it("GET /api/sources omits soft-deleted by default; ?includeDeleted=true returns them", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-src-4@test.local" });
@@ -727,7 +722,7 @@ describe("Plan 02.1-06: /api/sources HTTP boundary", () => {
     expect(listAll.map((r) => r.id).sort()).toEqual([a.id, b.id].sort());
   });
 
-  it("Plan 02.1-06: DELETE /api/sources/:id returns 200 + soft-deleted DTO; second call returns 404", async () => {
+  it("DELETE /api/sources/:id returns 200 + soft-deleted DTO; second call returns 404", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-src-5@test.local" });
@@ -754,7 +749,7 @@ describe("Plan 02.1-06: /api/sources HTTP boundary", () => {
     expect((await r2.json()).error).toBe("not_found");
   });
 
-  it("Plan 02.1-06: POST /api/sources/:id/restore beyond RETENTION_DAYS returns 422 retention_expired", async () => {
+  it("POST /api/sources/:id/restore beyond RETENTION_DAYS returns 422 retention_expired", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-src-6@test.local" });

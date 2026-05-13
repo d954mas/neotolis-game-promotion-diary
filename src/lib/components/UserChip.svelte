@@ -1,18 +1,18 @@
 <script lang="ts">
-  // UserChip — avatar + email + sign-out menu for AppHeader (Plan 02.1-09).
+  // UserChip — avatar + email + sign-out menu for AppHeader.
   //
-  // UI-SPEC §"Layout & Responsive Contract — `<AppHeader>`":
+  // Layout:
   //   - 28px circular avatar (Google profile picture from user.image)
-  //   - email label hidden below 480px viewport (hard-coded media query —
-  //     UI-SPEC FLAG accepts hard-coding here; the token would be premature)
+  //   - email label hidden below 480px viewport (hard-coded media query;
+  //     a token would be premature)
   //   - <button> trigger with aria-label `Account menu — {email}`
   //   - menu items: read-only email + Sign out + Sign out from all devices
   //   - Esc closes the menu; click outside closes the menu
   //
-  // UI-SPEC §"Registry Safety": Google profile picture rendered with
-  //   referrerpolicy="no-referrer" + crossorigin="anonymous" + alt="" so a
-  //   network failure renders the fallback (initial-letter placeholder
-  //   generated client-side) without leaking referrer.
+  // Google profile picture rendered with referrerpolicy="no-referrer" +
+  // crossorigin="anonymous" + alt="" so a network failure renders the
+  // fallback (initial-letter placeholder generated client-side) without
+  // leaking referrer.
 
   import { m } from "$lib/paraglide/messages.js";
 
@@ -164,7 +164,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  /* UI-SPEC FLAG: 480px hard-coded breakpoint (the token set has none). */
+  /* 480px hard-coded breakpoint (the token set has none). */
   @media (max-width: 479px) {
     .email {
       display: none;

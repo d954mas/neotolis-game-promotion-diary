@@ -1,35 +1,33 @@
-// API Keys (Steam) service — KEYS-03..06, the typed-per-kind credential
-// example (D-08). The implementation pattern here is the template Phase 3
-// will copy for `api_keys_youtube` and `api_keys_reddit`.
+// API Keys (Steam) service — the typed-per-kind credential example.
+// This implementation pattern is the template future kinds
+// (`api_keys_youtube`, `api_keys_reddit`) will copy.
 //
-// Pattern 1 (tenant scope): EVERY function takes `userId: string` first;
+// Tenant scope: EVERY function takes `userId: string` first;
 // EVERY Drizzle query .where()-clauses on `eq(apiKeysSteam.userId, userId)`.
-// The custom ESLint rule `tenant-scope/no-unfiltered-tenant-query` (Plan
-// 02-02) fires on any query that omits this filter — so the absence of
-// warnings on this file is a load-bearing assertion, not a stylistic
-// preference. Disable comments are NOT allowed in this file.
+// The custom ESLint rule `tenant-scope/no-unfiltered-tenant-query` fires
+// on any query that omits this filter — so the absence of warnings on
+// this file is a load-bearing assertion, not a stylistic preference.
+// Disable comments are NOT allowed in this file.
 //
-// Envelope encryption (D-12): plaintext NEVER persists. `encryptSecret`
+// Envelope encryption: plaintext NEVER persists. `encryptSecret`
 // produces a tuple of {secretCt, secretIv, secretTag, wrappedDek, dekIv,
 // dekTag, kekVersion}; we INSERT every field explicitly (NOT a `...enc`
 // spread) so the schema-DTO mapping stays reviewable and a future schema
 // change can't silently widen what hits the row.
 //
-// Validation order (D-17): every write path runs `validateSteamKey` BEFORE
+// Validation order: every write path runs `validateSteamKey` BEFORE
 // `encryptSecret` BEFORE persist. 4xx Steam → AppError 422 (caller's
-// problem); 5xx Steam → AppError 502 (Steam's problem, retry hint per
-// RESEARCH.md Pitfall 9). On validation failure NOTHING is written —
-// the row is whole or absent.
+// problem); 5xx Steam → AppError 502 (Steam's problem, retry hint).
+// On validation failure NOTHING is written — the row is whole or absent.
 //
-// Audit (D-32, D-34): every successful write produces one audit row
-// with shape {kind:'steam', key_id, label, last4}. last4 is NOT a
-// secret (already shown in masked UI) and is INTENTIONALLY in the
-// audit metadata as the forensics path. Pino redact does not match
-// `last4` (verified Phase 1 plan 01-01 redact paths).
+// Audit: every successful write produces one audit row with shape
+// {kind:'steam', key_id, label, last4}. last4 is NOT a secret (already
+// shown in masked UI) and is INTENTIONALLY in the audit metadata as the
+// forensics path. Pino redact does not match `last4`.
 //
-// `removeSteamKey` AUDITS BEFORE the DELETE (D-32 forensics): even if
-// the DELETE fails for any reason, the attempt is logged. The reverse
-// order would let a transient DB error swallow the security signal.
+// `removeSteamKey` AUDITS BEFORE the DELETE for forensics: even if the
+// DELETE fails for any reason, the attempt is logged. The reverse order
+// would let a transient DB error swallow the security signal.
 
 import { and, eq, desc } from "drizzle-orm";
 import { db } from "../db/client.js";
@@ -100,15 +98,15 @@ async function probeSteamKey(plaintext: string): Promise<void> {
  *
  *   1. Validate input shape (label length 1..100, plaintext length >= 1)
  *      → AppError(422) BEFORE any external call.
- *   2. Label-collision pre-check (D-13/B-3 multi-key UI) — UNIQUE(user_id,
+ *   2. Label-collision pre-check (multi-key UI) — UNIQUE(user_id,
  *      label) at the DB layer is the load-bearing guarantee; this check
  *      exists so the user gets a clean Paraglide-keyed error code instead
- *      of a Postgres 23505 unique-violation. Plan 02-08 maps
+ *      of a Postgres 23505 unique-violation. Routes map
  *      `steam_key_label_exists` → 422.
  *   3. Probe Steam (`validateSteamKey`) → AppError(422) on 4xx,
  *      AppError(502) on 5xx.
  *   4. `encryptSecret(plaintext)` → fresh DEK + ciphertext tuple.
- *   5. Compute `last4` from plaintext (NOT a secret per D-34; forensic).
+ *   5. Compute `last4` from plaintext (NOT a secret; forensic).
  *   6. INSERT, RETURNING only the DTO-shaped columns (NOT the ciphertext —
  *      keeps the in-process variable used for the response narrow so a
  *      future logger.info({ row }) can't accidentally serialize ciphertext).
@@ -126,10 +124,10 @@ export async function createSteamKey(
   validateLabel(input.label);
   validatePlaintext(input.plaintext);
 
-  // Label-collision pre-check (D-13/B-3 multi-key UI). The DB-level
-  // UNIQUE(user_id, label) is the load-bearing safety net; this check
-  // exists so the route layer can map `steam_key_label_exists` → 422
-  // with a Paraglide-keyed error message instead of leaking 23505.
+  // Label-collision pre-check (multi-key UI). The DB-level UNIQUE(user_id,
+  // label) is the load-bearing safety net; this check exists so the route
+  // layer can map `steam_key_label_exists` → 422 with a Paraglide-keyed
+  // error message instead of leaking 23505.
   const existing = await db
     .select({ id: apiKeysSteam.id })
     .from(apiKeysSteam)
@@ -148,11 +146,11 @@ export async function createSteamKey(
   // reviewable. RETURNING projects ONLY the DTO-shaped fields so a future
   // `logger.info({ row })` cannot serialize ciphertext.
   //
-  // Codex review (round-19 P2): the (userId, label) pre-check above is a
-  // best-effort guard but cannot prevent two concurrent requests from both
-  // passing it and racing the INSERT. Catch the resulting 23505 here and
-  // map to the same 422 contract a sequential pre-check produces, mirroring
-  // the addSteamListing pattern (Plan 02.1-29).
+  // The (userId, label) pre-check above is a best-effort guard but cannot
+  // prevent two concurrent requests from both passing it and racing the
+  // INSERT. Catch the resulting 23505 here and map to the same 422
+  // contract a sequential pre-check produces, mirroring the
+  // addSteamListing pattern.
   let row;
   try {
     [row] = await db
@@ -207,12 +205,12 @@ export async function listSteamKeys(userId: string): Promise<ApiKeySteamRow[]> {
 
 /**
  * Read one Steam key row scoped to userId. Throws NotFoundError on miss
- * or cross-tenant attempt (PRIV-01: 404, never 403).
+ * or cross-tenant attempt (404, never 403).
  *
  * Used internally by rotate / remove / decrypt-for-operator. NOT directly
- * mapped to a route — Plan 02-08's GET /api/keys/steam/:id (if any)
- * would call `listSteamKeys` and project, OR call this and project; in
- * either case the route runs `toApiKeySteamDto` before responding.
+ * mapped to a route — any GET /api/keys/steam/:id route would call
+ * `listSteamKeys` and project, OR call this and project; in either case
+ * the route runs `toApiKeySteamDto` before responding.
  */
 export async function getSteamKeyById(userId: string, keyId: string): Promise<ApiKeySteamRow> {
   const rows = await db
@@ -236,8 +234,7 @@ export async function getSteamKeyById(userId: string, keyId: string): Promise<Ap
  * On validation failure NOTHING is written — the previous ciphertext
  * stands intact.
  *
- * Throws NotFoundError if the key does not belong to userId (cross-tenant
- * 404 per PRIV-01).
+ * Throws NotFoundError if the key does not belong to userId (cross-tenant 404).
  */
 export async function rotateSteamKey(
   userId: string,
@@ -295,10 +292,10 @@ export async function rotateSteamKey(
  *      if the DELETE fails the attempt is logged.
  *   3. DELETE scoped to userId+id.
  *
- * The Postgres FK `game_steam_listings.api_key_id ON DELETE SET NULL` (Plan
- * 02-03 schema) clears the FK on any listings that referenced this key —
- * that's a deliberate D-13 choice: listings persist; only the key linkage
- * is severed. The user can attach a new key later.
+ * The Postgres FK `game_steam_listings.api_key_id ON DELETE SET NULL`
+ * clears the FK on any listings that referenced this key — listings
+ * persist; only the key linkage is severed. The user can attach a new
+ * key later.
  */
 export async function removeSteamKey(
   userId: string,
@@ -313,7 +310,7 @@ export async function removeSteamKey(
   const row = rows[0];
   if (!row) throw new NotFoundError();
 
-  // Audit BEFORE delete (D-32 forensics).
+  // Audit BEFORE delete (forensics).
   await writeAudit({
     userId,
     action: "key.remove",
@@ -329,16 +326,16 @@ export async function removeSteamKey(
 /**
  * Decrypt a Steam API key plaintext. INTERNAL USE ONLY.
  *
- * **DO NOT EXPOSE THIS VIA AN HTTP ROUTE.** Phase 2 only uses this in tests
- * (envelope-encryption round-trip proof). Phase 3's wishlist polling worker
- * is the only future production caller — and even there the decrypted
- * plaintext lives only inside the worker's per-job try block, never logged,
- * never returned to a client.
+ * **DO NOT EXPOSE THIS VIA AN HTTP ROUTE.** Currently used only in tests
+ * (envelope-encryption round-trip proof). The future wishlist polling
+ * worker is the only intended production caller — and even there the
+ * decrypted plaintext lives only inside the worker's per-job try block,
+ * never logged, never returned to a client.
  *
- * The function-scope `plaintext` cannot be wiped (V8 strings are immutable)
- * but Pino's redact paths (D-24) catch any accidental log emission by
- * field-shape match. Callers should hand the plaintext to the Steam API
- * call and let it go out of scope immediately.
+ * The function-scope `plaintext` cannot be wiped (V8 strings are
+ * immutable) but Pino's redact paths catch any accidental log emission
+ * by field-shape match. Callers should hand the plaintext to the Steam
+ * API call and let it go out of scope immediately.
  */
 export async function decryptSteamKeyForOperator(userId: string, keyId: string): Promise<string> {
   const row = await getSteamKeyById(userId, keyId);

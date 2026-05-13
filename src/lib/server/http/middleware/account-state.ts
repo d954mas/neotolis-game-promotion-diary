@@ -1,8 +1,8 @@
-// Account-state middleware (Phase 02.2 review — Codex P1.2 fix).
+// Account-state middleware.
 //
 // Mount on '/api/*' AFTER tenantScope so c.var.userId is set. Queries the
-// authoritative user.deleted_at from the DB (NOT via Better Auth getSession —
-// see Codex P1.1: adapter projection behaviour is fragile) and gates writes
+// authoritative user.deleted_at from the DB (NOT via Better Auth
+// getSession — adapter projection behaviour is fragile) and gates writes
 // when the account is soft-deleted.
 //
 // Why this exists:
@@ -12,7 +12,7 @@
 //   session row regardless of user.deleted_at. Without this guard, the freshly
 //   re-authed deleted user could call POST /api/games and create rows that
 //   neither carry the marker timestamp (so restoreAccount won't reverse them)
-//   nor get hard-purged by the Phase 3 worker (which keys off user.deleted_at,
+//   nor get hard-purged by the purge worker (which keys off user.deleted_at,
 //   not on per-row timestamps for newly-inserted rows). That orphans data.
 //
 // Allowlist when deleted:
@@ -22,8 +22,8 @@
 //   - POST   /api/me/sessions/all     — let the user sign out from everywhere
 //   - GET    /api/me                  — read self so the layout banner can
 //                                       compute days-remaining
-//   - DELETE /api/me/account/purge    — Phase 3.0 Plan 08 — Permanent-delete-
-//                                       now CTA on AccountDeletedBanner.
+//   - DELETE /api/me/account/purge    — Permanent-delete-now CTA on
+//                                       AccountDeletedBanner.
 //                                       MUST work for soft-deleted users
 //                                       (that IS the user state this CTA
 //                                       targets). The route calls
@@ -49,7 +49,7 @@ const ALLOWED_WHEN_DELETED = new Set<string>([
   "GET /api/me/export",
   "POST /api/me/sessions/all",
   "GET /api/me",
-  // Phase 3.0 Plan 08 — CTA path for soft-deleted users: bypass retention.
+  // CTA path for soft-deleted users: bypass retention.
   "DELETE /api/me/account/purge",
 ]);
 

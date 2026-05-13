@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { groupEventsByDate } from "../../src/lib/util/group-events-by-date.js";
 
-// Plan 02.1-19 — pure utility behind /feed's Google-Photos-style date
-// grouping. Five tests cover the contract surface (empty, same-day,
-// multi-day, UTC-boundary, mixed Date|string inputs).
+// Pure utility behind /feed's Google-Photos-style date grouping. Five tests
+// cover the contract surface (empty, same-day, multi-day, UTC-boundary,
+// mixed Date|string inputs).
 
-describe("groupEventsByDate (Plan 02.1-19)", () => {
+describe("groupEventsByDate", () => {
   it("Test 1: empty input returns empty list", () => {
     expect(groupEventsByDate([])).toEqual([]);
   });
@@ -40,8 +40,8 @@ describe("groupEventsByDate (Plan 02.1-19)", () => {
 
   it("Test 4: UTC-boundary — events at 23:50Z and 00:10Z next-day land in DIFFERENT groups", () => {
     // Document the contract: occurredAt is stored UTC; the user's local-tz
-    // boundary would require client-side regrouping which Plan 02.1-19
-    // does not ship (filed as Phase 6 polish).
+    // boundary would require client-side regrouping which this utility
+    // does not ship.
     const rows = [
       { id: "next-day-early", occurredAt: new Date("2026-04-29T00:10:00.000Z") },
       { id: "prev-day-late", occurredAt: new Date("2026-04-28T23:50:00.000Z") },

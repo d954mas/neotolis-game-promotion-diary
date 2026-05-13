@@ -1,20 +1,16 @@
-// Phase 3.0 Plan 13 + post-build review (2026-05-08, fourth pass) —
-// admin shell loader.
+// Admin shell loader.
 //
-// Originally this layout was gate-less and relied on the child page's API
-// call to /api/admin/* returning 404 for non-allowlisted users. The third
-// review caught the chrome leak (SvelteKit renders a parent layout
-// AROUND a child error page, so non-allowlisted users saw the "Admin
-// mode" breadcrumb on top of the 404). The fix moved the deny to this
-// layout — but kept a redirect-to-login for anonymous callers, which the
-// fourth review noted ALSO leaks the area's existence (the redirect
-// shape "/admin → /login?next=/admin" tells an unauthenticated probe
-// that /admin is a real route).
+// SvelteKit renders a parent layout AROUND a child error page, so the
+// deny lives in this layout — otherwise non-allowlisted users would see
+// the "Admin mode" breadcrumb on top of the 404. A redirect-to-login here
+// would also leak the area's existence (the redirect shape
+// "/admin → /login?next=/admin" tells an unauthenticated probe that
+// /admin is a real route).
 //
-// Both anonymous and authenticated-non-allowlisted now get 404. The
-// existence of /admin/* is the secret — see AGENTS.md Privacy invariant
-// 2 + AP-4. A real operator who hits 404 by mistake just signs in; the
-// page link in the operator's mental model is private to the operator.
+// Both anonymous and authenticated-non-allowlisted get 404. The existence
+// of /admin/* is the secret — see AGENTS.md Privacy invariant 2. A real
+// operator who hits 404 by mistake just signs in; the page link in the
+// operator's mental model is private to the operator.
 //
 // The check lives in TWO places (this loader + adminAllowlist middleware
 // on /api/admin/*) reading ONE source of truth (env.ADMIN_EMAIL_ALLOWLIST),

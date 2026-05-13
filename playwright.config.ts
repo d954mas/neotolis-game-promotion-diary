@@ -1,10 +1,10 @@
 // Playwright Test runner config — replaces vitest browser mode for the
 // 4 active 360px responsive tests in tests/playwright/. The vitest 4
 // browser provider hits an unfixed upstream issue (vitest-dev/vitest#7981
-// — "Browser connection was closed while running tests" mid-RPC,
-// reproduced reliably in CI rounds 1-17 of Phase 2.1 closure work).
-// @playwright/test is the official Playwright team's runner; the same
-// chromium binary, no birpc layer, no random disconnects.
+// — "Browser connection was closed while running tests" mid-RPC) that
+// reproduces reliably on CI. @playwright/test is the official Playwright
+// team's runner; the same chromium binary, no birpc layer, no random
+// disconnects.
 //
 // Tests assume a `pnpm preview` server is running on :5173 (CI workflow
 // boots it in the same step that runs `pnpm test:browser`; locally

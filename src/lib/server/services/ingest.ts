@@ -1,39 +1,33 @@
-// Ingest orchestrator — paste-box backend (Phase 2.1 unified events refactor).
+// Ingest orchestrator — paste-box backend.
 //
-// Phase 2.1 reframe: the YouTube paste path no longer writes to a separate
-// `tracked_youtube_videos` table — it writes ONE row into the unified `events`
-// table via `events.createEventFromPaste` (kind=youtube_video). The
-// `tracked_youtube_videos` table is gone (Plan 02.1-01 baseline collapse) and
-// the `items-youtube.ts` service is deleted (this plan, Plan 02.1-05).
+// The YouTube paste path writes ONE row into the unified `events` table via
+// `events.createEventFromPaste` (kind=youtube_video). No separate
+// `tracked_youtube_videos` table.
 //
-// Twitter and Telegram paste paths still go through createEvent directly —
-// they're free-form social posts (no oEmbed-driven dedup / source attachment),
-// and the orchestrator wires the platform-specific oEmbed call before INSERT.
+// Twitter and Telegram paste paths go through createEvent directly — they're
+// free-form social posts (no oEmbed-driven dedup / source attachment), and
+// the orchestrator wires the platform-specific oEmbed call before INSERT.
 //
-// Reddit URLs return AppError 'reddit_pending_phase3' (422). CONTEXT DV-7:
-// Reddit ingest lands in Phase 3 alongside the poll.reddit adapter.
+// Reddit URLs return AppError 'reddit_not_yet_supported' (422). Reddit
+// ingest waits for the poll.reddit adapter.
 //
-// Validate-first invariant (D-19; INGEST-04 / AGENTS.md "validate-first
-// INGEST" anti-pattern): URL parsing + oEmbed call run BEFORE any INSERT.
-// On 422 / 502 the database is provably untouched.
+// Validate-first invariant (AGENTS.md): URL parsing + oEmbed call run
+// BEFORE any INSERT. On 422 / 502 the database is provably untouched.
 //
-// Result is a discriminated union the route handler (Plan 02.1-06) maps to:
+// Result is a discriminated union the route handler maps to:
 //   { kind: 'event_created', eventId } → 201 + projected DTO
-//   { kind: 'reddit_deferred' }         → kept only for backwards-compat with
-//                                         Phase 2 callers; new code throws
-//                                         AppError 'reddit_pending_phase3'.
+//   { kind: 'reddit_deferred' }         → legacy-callers compat; new code
+//                                         throws AppError 'reddit_not_yet_supported'.
 // Throws AppError 422 (unsupported_url / youtube_unavailable /
-// reddit_pending_phase3) or AppError 502 (youtube_oembed_unreachable) for the
+// reddit_not_yet_supported) or AppError 502 (youtube_oembed_unreachable) for the
 // failure modes.
 //
-// Phase 3.0 Plan 10 (CONTEXT D-14) — channel-context backfill trigger.
-// After the youtube_video event row is created, if the URL's channel is NOT
-// yet in `youtube_channel_metadata_cache`, enqueue ONE
-// YOUTUBE_CHANNEL_CONTEXT_BACKFILL job (idempotent via pg-boss singletonKey
-// = the extracted channelId). The handler that resolves uploads_playlist_id
-// + populates the cache lives in Plan 03.0-09. The trigger is fire-and-forget:
-// any error enqueueing is logged + swallowed so the user-facing paste still
-// returns 201.
+// Channel-context backfill trigger: after the youtube_video event row is
+// created, if the URL's channel is NOT yet in `youtube_channels`, enqueue
+// ONE YOUTUBE_CHANNEL_CONTEXT_BACKFILL job (idempotent via pg-boss
+// singletonKey = the extracted channelId). The trigger is fire-and-forget:
+// any error enqueueing is logged + swallowed so the user-facing paste
+// still returns 201.
 
 import { eq, or, sql } from "drizzle-orm";
 import { parseIngestUrl } from "./url-parser.js";
@@ -49,24 +43,22 @@ import { logger } from "../logger.js";
 export type IngestResult = { kind: "event_created"; eventId: string };
 
 /**
- * parsePasteAndCreate — the orchestrator the route layer (Plan 02.1-06) calls.
+ * parsePasteAndCreate — the orchestrator the route layer calls.
  *
- * Phase 2.1 contract (vs Phase 2):
- *   - youtube_video → events.createEventFromPaste (NOT items-youtube anymore;
- *     ONE events row carries everything, no separate tracked_youtube_videos
- *     row). source_id and author_is_me are inherited from the user's
- *     registered data_source on author_url match.
- *   - twitter_post / telegram_post → createEvent directly (free-form social
- *     posts; oEmbed best-effort for Twitter, URL-derived placeholder title
- *     for Telegram).
- *   - reddit_post → AppError 'reddit_pending_phase3' (422). CONTEXT DV-7.
+ *   - youtube_video → events.createEventFromPaste (ONE events row carries
+ *     everything). source_id and author_is_me are inherited from the
+ *     user's registered data_source on author_url match.
+ *   - twitter_post / telegram_post → createEvent directly (free-form
+ *     social posts; oEmbed best-effort for Twitter, URL-derived
+ *     placeholder title for Telegram).
+ *   - reddit_post → AppError 'reddit_not_yet_supported' (422).
  *   - unsupported → AppError 'unsupported_url' (422).
  *
- * gameId is OPTIONAL (nullable) per Phase 2.1 — manual paste with no game
- * lands in the inbox (events.game_id IS NULL).
+ * gameId is OPTIONAL (nullable) — manual paste with no game lands in the
+ * inbox (zero junction rows).
  *
  * The user's gameId is asserted by the underlying createEvent /
- * createEventFromPaste calls (cross-tenant 404 BEFORE INSERT — Pitfall 4).
+ * createEventFromPaste calls (cross-tenant 404 BEFORE INSERT).
  */
 export async function parsePasteAndCreate(
   userId: string,
@@ -82,32 +74,31 @@ export async function parsePasteAndCreate(
   }
 
   if (parsed.kind === "reddit_deferred") {
-    // CONTEXT DV-7: Reddit ingest lands in Phase 3 with poll.reddit. The route
-    // layer (Plan 02.1-06) maps this to a friendly inline-info body.
-    throw new AppError("Reddit ingest arrives in Phase 3", "reddit_pending_phase3", 422);
+    // Reddit ingest waits for the poll.reddit adapter. The route layer
+    // maps this to a friendly inline-info body.
+    throw new AppError("Reddit ingest is not yet supported", "reddit_not_yet_supported", 422);
   }
 
-  // Plan 02.1-28 (M:N migration): the underlying createEvent /
-  // createEventFromPaste services accept gameIds[] (M:N junction); the
-  // legacy singular gameId is normalized to a single-element array (or
-  // empty array on null) before the call.
+  // The underlying createEvent / createEventFromPaste services accept
+  // gameIds[] (M:N junction); the legacy singular gameId is normalized to
+  // a single-element array (or empty array on null) before the call.
   const gameIds = gameId === null ? [] : [gameId];
 
   if (parsed.kind === "youtube_video") {
     const event = await createEventFromPaste(userId, { url: input, gameIds }, ipAddress, userAgent);
 
-    // Phase 3.0 Plan 10 / CONTEXT D-14 — channel-context backfill trigger.
+    // Channel-context backfill trigger.
     //
     // The event row's metadata.author_url was populated by enrichFromUrl
-    // (events.ts) from the oEmbed response. We extract the YouTube channelId
-    // and, if it's NOT already in youtube_channel_metadata_cache, enqueue a
-    // one-time YOUTUBE_CHANNEL_CONTEXT_BACKFILL job. pg-boss's singletonKey
-    // dedups concurrent pastes from the same channel.
+    // (events.ts) from the oEmbed response. We extract the YouTube
+    // channelId and, if it's NOT already in youtube_channels, enqueue a
+    // one-time YOUTUBE_CHANNEL_CONTEXT_BACKFILL job. pg-boss's
+    // singletonKey dedups concurrent pastes from the same channel.
     //
-    // Fire-and-forget: any failure here is logged and swallowed. The backfill
-    // is a quality-of-Phase-4-charts enhancement (median context for the
-    // user's "compare with other videos on the channel" use case) — it must
-    // never block the user-facing paste UX.
+    // Fire-and-forget: any failure here is logged and swallowed. The
+    // backfill is a quality enhancement for the user's "compare with
+    // other videos on the channel" use case — it must never block the
+    // user-facing paste UX.
     const eventMeta = (event.metadata ?? {}) as { author_url?: unknown };
     const authorUrl = typeof eventMeta.author_url === "string" ? eventMeta.author_url : "";
     if (authorUrl !== "") {
@@ -118,8 +109,8 @@ export async function parsePasteAndCreate(
   }
 
   if (parsed.kind === "twitter_post") {
-    // Twitter oEmbed is best-effort (Pitfall 8 / D-29). Failure is non-fatal —
-    // event row still created with a URL-derived placeholder title.
+    // Twitter oEmbed is best-effort. Failure is non-fatal — event row
+    // still created with a URL-derived placeholder title.
     const oembed = await fetchTwitterOembed(parsed.canonicalUrl).catch(() => null);
     const title = oembed?.authorName
       ? `Tweet by ${oembed.authorName}`
@@ -159,8 +150,8 @@ export async function parsePasteAndCreate(
 }
 
 /**
- * D-14 — extract a stable identifier from a YouTube oEmbed `author_url` and,
- * if the channel is not yet in `youtube_channel_metadata_cache`, enqueue ONE
+ * Extract a stable identifier from a YouTube oEmbed `author_url` and,
+ * if the channel is not yet in `youtube_channels`, enqueue ONE
  * YOUTUBE_CHANNEL_CONTEXT_BACKFILL job. Idempotent across concurrent pastes
  * via pg-boss `singletonKey` = the extracted channelId.
  *
@@ -196,12 +187,11 @@ async function maybeEnqueueChannelContextBackfill(
     // module header). A row exists if a previous paste of any tenant's video
     // from this channel already triggered the backfill handler successfully.
     //
-    // Phase 3.0 post-build (2026-05-07) — bug-3 closure: extend the
-    // lookup with `= ANY(handle_aliases)` so handle/legacy URL paste hits
-    // its UC row through the alias array. Backfill worker writes the
-    // resolved-from URL into handle_aliases after channels.list?forHandle
-    // returns the UC id; subsequent pastes of the same handle URL find
-    // the row directly here, no enqueue, no quota.
+    // Extend the lookup with `= ANY(handle_aliases)` so handle/legacy URL
+    // paste hits its UC row through the alias array. Backfill worker
+    // writes the resolved-from URL into handle_aliases after
+    // channels.list?forHandle returns the UC id; subsequent pastes of the
+    // same handle URL find the row directly here, no enqueue, no quota.
     //
     // Lookup key is the parsed value regardless of kind: for channelId we
     // hit the PK; for handleUrl we hit the alias array.
@@ -221,21 +211,19 @@ async function maybeEnqueueChannelContextBackfill(
     // Belt-and-suspenders: even with handle_aliases closing the steady-
     // state cache miss, a backfill that crashes BEFORE writing the alias
     // leaves no cache entry behind. Singleton dedup catches concurrent
-    // re-pastes within the window. 24h applies to BOTH UC and handle URLs
-    // (post-build review 2026-05-07): handle_aliases now closes the
-    // steady-state cache miss for handle URLs too, so the previous wider
-    // 30-day window for handle URLs is no longer needed and would just
-    // blackout failed-backfill recovery for a month — operator visibility
-    // wins over a paranoid quota safety net.
+    // re-pastes within the window. 24h applies to BOTH UC and handle URLs:
+    // handle_aliases closes the steady-state cache miss for handle URLs
+    // too, so a wider 30-day window for handle URLs would just black out
+    // failed-backfill recovery for a month — operator visibility wins
+    // over a paranoid quota safety net.
     //
-    // Discriminated payload (post-build review 2026-05-08): @handle URLs
-    // go into job.data.handleUrl (worker resolves via forHandle), UC ids
-    // go into job.data.channelId (worker calls channels.list?id directly).
-    // Previously both were stuffed into channelId — the worker's
-    // `if (!channelId && handleUrl)` resolution branch skipped because
-    // channelId was the URL string (truthy), and the subsequent
-    // channels.list?id=<full URL> returned no items, silently failing
-    // every @handle backfill from the ingest path.
+    // Discriminated payload: @handle URLs go into job.data.handleUrl
+    // (worker resolves via forHandle), UC ids go into job.data.channelId
+    // (worker calls channels.list?id directly). Putting an @handle URL
+    // into channelId would make the worker's
+    // `if (!channelId && handleUrl)` resolution branch skip because
+    // channelId would be the URL string (truthy), and channels.list?id=
+    // <full URL> would return no items, silently failing.
     const payload =
       parsed.kind === "channelId"
         ? { channelId: parsed.value, userId }
@@ -266,12 +254,12 @@ async function maybeEnqueueChannelContextBackfill(
  *   - null: URL didn't match either shape — silent skip (backfill is best-
  *     effort).
  *
- * Post-build review 2026-05-08: previously this function returned a single
- * string and the caller put it into the job's `channelId` field. For
- * @handle URLs, that meant `channelId = "https://www.youtube.com/@x"` —
- * the worker's resolution branch (`if (!channelId && handleUrl)`) skipped
- * because channelId was truthy, so it called channels.list?id=<full URL>
- * which Google ignored, and every @handle backfill silently failed.
+ * An earlier version of this function returned a single string and the
+ * caller put it into the job's `channelId` field. For @handle URLs, that
+ * meant `channelId = "https://www.youtube.com/@x"` — the worker's
+ * resolution branch (`if (!channelId && handleUrl)`) would skip because
+ * channelId was truthy, so it would call channels.list?id=<full URL>
+ * which Google ignores, and every @handle backfill would silently fail.
  */
 function extractChannelIdFromAuthorUrl(
   authorUrl: string,

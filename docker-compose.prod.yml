@@ -1,17 +1,17 @@
-# Production compose template (D-S2). Lives alongside docker-compose.selfhost.yml
-# but is NOT smoke-gated. The selfhost.yml stays the published self-host file
-# (D-31); this is the author-instance variant.
+# Production compose template. Lives alongside docker-compose.selfhost.yml
+# but is NOT smoke-gated. The selfhost.yml stays the published self-host
+# file; this is the author-instance variant.
 #
 # Differences from selfhost.yml:
 #   - image from GHCR (not build:.)
 #   - nginx service with HTTPS termination via Cloudflare Origin CA cert
 #     (Full Strict mode — see docs/deploy/install.md §2 step 7)
-#   - restart: unless-stopped on every service (D-22a)
-#   - log driver json-file with rotation (D-27)
+#   - restart: unless-stopped on every service
+#   - log driver json-file with rotation
 #   - env_file: .env (vs literal inline values)
-#   - POSTGRES_PASSWORD via env file (D-03)
+#   - POSTGRES_PASSWORD via env file
 #   - NODE_ENV: production hard-pinned in `environment:` so operator-side
-#     .env mistakes don't crash-loop the app on pino-pretty (post-deploy fix #1)
+#     .env mistakes don't crash-loop the app on pino-pretty.
 
 services:
   postgres:

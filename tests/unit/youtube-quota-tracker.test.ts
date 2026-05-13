@@ -1,4 +1,4 @@
-// Phase 3.0 Plan 03 — pure-function tests for youtube-quota-tracker.
+// Pure-function tests for youtube-quota-tracker.
 //
 // DB-touching behaviour (incrementUsage UPSERT, getThrottleState, audit
 // idempotency) lives in tests/integration/youtube-quota-tracker.test.ts —
@@ -9,7 +9,7 @@
 //
 // vi.resetModules() between cases that mutate SERVICE_YOUTUBE_API_KEYS so
 // each test re-parses the env from the latest process.env — same pattern as
-// tests/unit/env.test.ts (Phase 02.2 / Phase 3.0).
+// tests/unit/env.test.ts.
 
 import { describe, it, test, expect, vi, afterEach } from "vitest";
 import { randomBytes } from "node:crypto";
@@ -72,7 +72,7 @@ describe("hashApiKeyId — sha-8 stable identifier", () => {
   });
 });
 
-describe("todayPacific — 'YYYY-MM-DD' in America/Los_Angeles (Pitfall D)", () => {
+describe("todayPacific — 'YYYY-MM-DD' in America/Los_Angeles", () => {
   test.each([
     // 2026-05-05 in May — Pacific is UTC-7 (PDT).
     ["2026-05-05T20:00:00Z", "2026-05-05"], // 13:00 PT
@@ -143,7 +143,7 @@ describe("pickKeyForJob — round-robin", () => {
   });
 });
 
-describe("threshold constants (D-13)", () => {
+describe("threshold constants", () => {
   it("THROTTLE_EIGHTY_THRESHOLD = 8000 (80% of 10 000)", async () => {
     await withYoutubeKeys(undefined, ({ THROTTLE_EIGHTY_THRESHOLD }) => {
       expect(THROTTLE_EIGHTY_THRESHOLD).toBe(8000);

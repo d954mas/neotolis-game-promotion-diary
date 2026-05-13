@@ -2,11 +2,10 @@
   // SourceKindIcon — inline SVG dispatch on the data_sources.kind enum.
   // Five geometric forms (camera/film for youtube_channel, speech bubble
   // for reddit_account, generic bubble for twitter_account, paper-plane
-  // for telegram_channel, two-circle chat for discord_server) per
-  // Phase 2.1 UI-SPEC §"Inline-SVG icon additions". Geometric, not brand
-  // marks — same approach as the Phase 2 KindIcon.svelte.
+  // for telegram_channel, two-circle chat for discord_server). Geometric,
+  // not brand marks — same approach as the original KindIcon.svelte.
   //
-  // Style contract (UI-SPEC):
+  // Style contract:
   //   - 24px viewBox
   //   - stroke="currentColor"
   //   - stroke-width="2"
@@ -15,8 +14,7 @@
   //   - color via var(--color-text-muted)
   //
   // Decorative — `aria-hidden="true"`. Adjacent text (the source-kind label
-  // chip + display_name) carries the accessible name (UI-SPEC Accessibility
-  // Floor delta).
+  // chip + display_name) carries the accessible name.
 
   type SourceKind =
     | "youtube_channel"

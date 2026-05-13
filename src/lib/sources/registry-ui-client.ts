@@ -1,4 +1,4 @@
-// UI-side registry — CLIENT entry. Phase 03.0.1 D-04 escape hatch.
+// UI-side registry — CLIENT entry.
 //
 // Companion to registry-ui.ts (server-safe). This file imports per-source
 // `./<kind>/ui/index.ts` (client-safe — may transitively import .svelte
@@ -6,9 +6,9 @@
 // to a per-source `cardComponent` override when one is registered.
 //
 // Why two files: registry-ui.ts is consumed by +page.server.ts loaders; it
-// MUST stay free of .svelte imports per RESEARCH.md Pitfall 7. This file
-// is the parallel client surface — `cardComponent` is a Svelte
-// `Component` value, which can only flow through the client bundle.
+// MUST stay free of .svelte imports. This file is the parallel client
+// surface — `cardComponent` is a Svelte `Component` value, which can only
+// flow through the client bundle.
 //
 // Adapters that want to override the universal /feed FeedCard ship their
 // own component under `sources/<kind>/ui/<Whatever>Card.svelte` and
@@ -29,11 +29,11 @@ export type FeedCardComponent = typeof FeedCard;
 
 export interface AdapterUiClient {
   /** Optional per-source override for the /feed event card. When omitted,
-   *  /feed renders the universal `FeedCard.svelte` (Phase 02.1-23 production
-   *  layout, handles every event.kind via internal switches). When present,
-   *  dispatch picks this component via `getCardComponent(eventKind)` —
-   *  Reddit / Twitter Phase 03.1+ may want a different visual without
-   *  bloating the universal card with kind-specific branches. */
+   *  /feed renders the universal `FeedCard.svelte` (handles every
+   *  event.kind via internal switches). When present, dispatch picks this
+   *  component via `getCardComponent(eventKind)` — per-platform adapters
+   *  may want a different visual without bloating the universal card with
+   *  kind-specific branches. */
   cardComponent?: FeedCardComponent;
 }
 

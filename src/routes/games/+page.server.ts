@@ -3,7 +3,7 @@ import { listGames, listSoftDeletedGames } from "$lib/server/services/games.js";
 import { toGameDto } from "$lib/server/dto.js";
 
 /**
- * /games loader — list the caller's games (Plan 02-10).
+ * /games loader — list the caller's games.
  *
  * Returns both the active list and the soft-deleted list so the UI can
  * render the "Show N deleted games" toggle without a second SSR

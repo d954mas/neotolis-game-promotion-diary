@@ -7,21 +7,21 @@ import pg from "pg";
 // "Open-source compatibility"), opens a pg.Pool, runs migrations once at suite start, and
 // truncates every public table between specs.
 //
-// Plan 01-03 has landed `src/lib/server/db/migrate.ts`; if migrations fail (e.g. no Postgres
-// reachable), the catch logs a warn so contributors understand why integration tests
-// skip-with-context.
+// `src/lib/server/db/migrate.ts` runs migrations against the truncate
+// pool's database; if migrations fail (e.g. no Postgres reachable), the
+// beforeAll propagates so integration tests fail loudly rather than
+// silently passing against a half-migrated schema.
 //
-// Phase 03.0.3 UAT follow-up — env-routing fix. Pre-fix the truncate pool
-// used TEST_DATABASE_URL while the Drizzle `db` client in
-// src/lib/server/db/client.ts read DATABASE_URL. On a developer machine
-// where DATABASE_URL points to the local production-data database, every
-// integration test wrote fixtures (`view=1/like=0/comment=0`, mocked
-// `vid_*` external_ids) into prod data and the afterEach TRUNCATE bit
-// the wrong DB. Force the Drizzle client to share the same DB as this
-// setup file by overwriting DATABASE_URL BEFORE any test imports
-// transitively pull in $lib/server/config/env.ts (which Zod-validates the
-// value at module-load time). vitest setupFiles run before test files,
-// so this assignment is in scope for every test process.
+// Env-routing fix: pre-fix the truncate pool used TEST_DATABASE_URL while
+// the Drizzle `db` client in src/lib/server/db/client.ts read
+// DATABASE_URL. On a developer machine where DATABASE_URL points to the
+// local production-data database, every integration test wrote fixtures
+// into prod data and the afterEach TRUNCATE hit the wrong DB. Force the
+// Drizzle client to share the same DB as this setup file by overwriting
+// DATABASE_URL BEFORE any test imports transitively pull in
+// $lib/server/config/env.ts (which Zod-validates the value at
+// module-load time). vitest setupFiles run before test files, so this
+// assignment is in scope for every test process.
 const dbUrl =
   process.env.TEST_DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/neotolis_test";
 process.env.DATABASE_URL = dbUrl;
@@ -29,7 +29,7 @@ process.env.DATABASE_URL = dbUrl;
 export const pool = new pg.Pool({ connectionString: dbUrl, max: 5 });
 
 beforeAll(async () => {
-  // Phase 03.0.3 round-3 (Codex P2) — migration failure is no longer
+  // Migration failure is no longer
   // silently warned. Pre-fix this try/catch suppressed both "no Postgres
   // reachable" (the original intent) AND "schema drift on local
   // neotolis_test DB" (an accidental side effect). Integration tests

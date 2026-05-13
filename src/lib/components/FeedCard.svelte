@@ -1,9 +1,7 @@
 <script lang="ts">
-  // FeedCard — pure preview tile (Plan 02.1-18 read-only contract preserved).
+  // FeedCard — pure preview tile (read-only contract preserved).
   //
-  // Plan 02.1-23 RESTRUCTURE per UAT-NOTES.md §1.5-redesign — the user-
-  // proposed card layout from round-3 UAT (ASCII mockup drawn by the user).
-  // The vertical structure is now (top → bottom):
+  // The vertical structure is (top → bottom):
   //
   //   1. Image area at TOP with absolute-positioned top overlay carrying
   //      kind icon+text label + Inbox badge (if applicable) + Mine badge
@@ -20,44 +18,44 @@
   //      OUTSIDE the wrapping <a> so its onclick handlers don't trigger
   //      card navigation). INBOX-only flow.
   //
-  // Mine treatment (UAT user choice "C and A combined"):
+  // Mine treatment (user choice "C and A combined"):
   //   - C: `<span class='overlay-mine'>` pill in the top overlay alongside
   //        kind label and Inbox indicator.
   //   - A: `border-left: 4px solid var(--color-accent)` on the entire card
   //        when `event.authorIsMe === true`. The class:mine={authorIsMe}
   //        toggle on the root <article> drives the CSS rule.
   //
-  // Image-source rules per kind (UAT-NOTES.md §1.5-redesign — auto-derived
-  // images only; manual upload UI is OUT OF SCOPE for round-3, see TODO):
+  // Image-source rules per kind (auto-derived images only;
+  // manual upload UI is OUT OF SCOPE, see TODO):
   //   - kind=youtube_video AND externalId → img.youtube.com/vi/{id}/mqdefault.jpg
   //   - kind=reddit_post / twitter_post / telegram_post → metadata.media.url
   //     (type-safe lookup; falls through if missing)
   //   - all other kinds (conference, talk, press, other, post, discord_drop)
   //     → text fallback (KindIcon centered in the .icon-anchor block)
   //
-  // The Inbox indicator is rendered INLINE in the overlay (Plan 02.1-23
-  // executor pick — option (b) per <interfaces>): a `<span class='overlay-inbox'>`
+  // The Inbox indicator is rendered INLINE in the overlay:
+  // a `<span class='overlay-inbox'>`
   // showing m.inbox_badge() text. The standalone <InboxBadge> component is no
   // longer used here (the overlay needs the dark-pill visual style consistent
   // with overlay-kind / overlay-mine; threading a `variant` prop through
   // InboxBadge would be premature for one consumer). InboxBadge stays
   // exported for potential future contexts.
   //
-  // Plan 02.1-18 read-only contract PRESERVED:
+  // Read-only contract PRESERVED:
   //   - No inline Edit / Delete / Open buttons.
   //   - The wrapping <a href={`/events/${id}`}> stays as the click target.
   //   - AttachToGamePicker is the only mutating control (INBOX-only flow).
   //
-  // Plan 02.1-19 date-removal PRESERVED:
+  // Date-removal PRESERVED:
   //   - No inline date string on the card. The <FeedDateGroupHeader> above
   //     each card group is the date label (Google Photos / Apple Photos
   //     timeline pattern).
   //
-  // TODO Phase 3+: support manual image upload per UAT-NOTES.md §1.5-redesign
-  // user quote "Хочется чтобы пользователь мог для каждого такого события сам
-  // добавить картинку". Schema would add `cover_url TEXT NULL` on events OR
-  // `metadata.image.url` (jsonb path); resolver returns manual upload OR
-  // auto-derived per kind. Round-3 ships auto-derived only.
+  // TODO: support manual image upload — user quote "Хочется чтобы пользователь
+  // мог для каждого такого события сам добавить картинку". Schema would add
+  // `cover_url TEXT NULL` on events OR `metadata.image.url` (jsonb path);
+  // resolver returns manual upload OR auto-derived per kind. Currently
+  // auto-derived only.
   //
   // Privacy invariants:
   //   - <img referrerpolicy="no-referrer" crossorigin="anonymous"> for any
@@ -85,11 +83,10 @@
 
   type EventDtoLite = {
     id: string;
-    // Plan 02.1-28: M:N migration — gameIds[] replaces the singular gameId.
+    // M:N migration — gameIds[] replaces the singular gameId.
     // Empty array === inbox (no attached games); non-empty === at least
     // one attached game. The card renders the first attached game as the
-    // primary chip for round-3 UAT continuity (Plan 02.1-32 swaps for the
-    // full chip-set render).
+    // primary chip.
     gameIds: string[];
     sourceId: string | null;
     kind: EventKind;
@@ -100,38 +97,35 @@
     externalId: string | null;
     notes: string | null;
     metadata: unknown;
-    // Per-video refactor (2026-05-06): publishedAt + lastPolledAt +
-    // lastPollStatus all source from the youtube_videos JOIN in the
-    // /feed loader (mapEventsToDtos → loadVideoDataForEvents). Null on
-    // fresh events whose channel-context-backfill has not yet completed
-    // ('pending' tier window). Optional so test fixtures and non-feed
-    // surfaces can omit it; PollingBadge handles undefined as null.
+    // publishedAt + lastPolledAt + lastPollStatus all source from the
+    // youtube_videos JOIN in the /feed loader
+    // (mapEventsToDtos → loadVideoDataForEvents). Null on fresh events whose
+    // channel-context-backfill has not yet completed ('pending' tier window).
+    // Optional so test fixtures and non-feed surfaces can omit it;
+    // PollingBadge handles undefined as null.
     publishedAt?: Date | string | null;
     lastPolledAt: Date | string | null;
     lastPollStatus: string | null;
-    // Phase 3.0 post-build (UAT 2026-05-06): latest snapshot stats for
-    // youtube_video events. Null when no snapshot exists yet (newly-pasted
-    // event before first poll, or non-youtube kinds).
+    // Latest snapshot stats for youtube_video events. Null when no snapshot
+    // exists yet (newly-pasted event before first poll, or non-youtube kinds).
     stats?: {
       viewCount: number;
       likeCount: number;
       commentCount: number;
       polledAt: Date | string;
     } | null;
-    // Phase 03.0.1 (post-review UAT 2026-05-10) — channelTitle for ALL
-    // YouTube events (auto-imported AND manual paste), enriched by /feed
-    // loader from youtube_videos cache. Used by the single-chip render
-    // below.
+    // channelTitle for ALL YouTube events (auto-imported AND manual paste),
+    // enriched by /feed loader from youtube_videos cache. Used by the
+    // single-chip render below.
     channelTitle?: string | null;
   };
   type SourceLite = {
     id: string;
     displayName: string | null;
     handleUrl: string;
-    // Phase 3.0 post-build (UAT 2026-05-06): real YouTube channel title
-    // from the public-data cache. Distinct from displayName (the user's
-    // own label for this tracking row). When both are set and differ, the
-    // card renders both — channel chip + source chip.
+    // Real YouTube channel title from the public-data cache. Distinct from
+    // displayName (the user's own label for this tracking row). When both
+    // are set and differ, the card renders both — channel chip + source chip.
     channelTitle?: string | null;
   };
   type GameLite = {
@@ -153,7 +147,7 @@
     onChanged?: () => void;
   } = $props();
 
-  // Type-safe metadata.media.url extraction (Plan 02.1-23 image-source rules).
+  // Type-safe metadata.media.url extraction (image-source rules).
   // metadata is `unknown` from toEventDto — we narrow before reading.
   function readMediaUrlFromMetadata(md: unknown): string | null {
     if (md === null || typeof md !== "object") return null;
@@ -210,36 +204,32 @@
   });
 
   const isInboxRow = $derived.by((): boolean => {
-    // Plan 02.1-28 (M:N migration): inbox criterion = ZERO attached games.
-    // The legacy `event.gameId !== null` check is replaced with the
-    // `gameIds.length > 0` check on the new EventDto shape.
+    // M:N migration: inbox criterion = ZERO attached games.
     if (event.gameIds.length > 0) return false;
     const md = event.metadata as
       | { inbox?: { dismissed?: boolean }; triage?: { standalone?: boolean } }
       | null
       | undefined;
     if (md?.inbox?.dismissed === true) return false;
-    // Plan 02.1-24: standalone events are NOT inbox rows — they have a
-    // separate triage state. The inline "Mark standalone" button only
-    // appears on plain inbox cards (not on already-standalone ones).
+    // Standalone events are NOT inbox rows — they have a separate triage
+    // state. The inline "Mark standalone" button only appears on plain inbox
+    // cards (not on already-standalone ones).
     if (md?.triage?.standalone === true) return false;
     return true;
   });
 
-  // Plan 02.1-24 (UAT-NOTES.md §6.1-redesign): standalone events render dimmed
-  // in /feed (opacity 0.55) so they don't distract from game-tied events.
-  // The user-explicit "not related to any game" state surfaces as a visible
-  // muting in the timeline.
+  // Standalone events render dimmed in /feed (opacity 0.55) so they don't
+  // distract from game-tied events. The user-explicit "not related to any
+  // game" state surfaces as a visible muting in the timeline.
   const isStandalone = $derived.by((): boolean => {
     const md = event.metadata as { triage?: { standalone?: boolean } } | null | undefined;
     return md?.triage?.standalone === true;
   });
 
-  // Plan 02.1-24: inline "Mark standalone" handler. Calls the new HTTP
-  // endpoint then bubbles onChanged() so /feed's invalidateAll() re-runs the
-  // loader. The button is the EXPLICIT user-accepted exception to Plan
-  // 02.1-18's read-only-tile contract (UAT round-3 user direction). Errors
-  // are swallowed silently in 2.1; phase 6 polish may surface a toast.
+  // Inline "Mark standalone" handler. Calls the new HTTP endpoint then
+  // bubbles onChanged() so /feed's invalidateAll() re-runs the loader. The
+  // button is the EXPLICIT user-accepted exception to the read-only-tile
+  // contract. Errors are swallowed silently; later polish may surface a toast.
   let markingStandalone = $state(false);
   async function markStandaloneClick(): Promise<void> {
     if (markingStandalone) return;
@@ -254,11 +244,11 @@
     }
   }
 
-  // Phase 3.0 post-build (UAT 2026-05-06): PollingBadge removed from feed
-  // cards — tier vocabulary ("Cold", "Frozen") is internal scheduler state,
-  // not user-facing. The live state shows up only in the per-event detail
-  // view alongside the refresh-now button. /feed cards now surface the load-
-  // bearing user metric instead: latest YouTube view / like / comment count.
+  // PollingBadge removed from feed cards — tier vocabulary ("Cold", "Frozen")
+  // is internal scheduler state, not user-facing. The live state shows up
+  // only in the per-event detail view alongside the refresh-now button.
+  // /feed cards surface the load-bearing user metric instead: latest
+  // YouTube view / like / comment count.
   function formatStat(n: number): string {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
     if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
@@ -288,7 +278,7 @@
           <KindIcon kind={event.kind} size={48} />
         </div>
       {/if}
-      <!-- Plan 02.1-23 top overlay: kind label + Inbox + Mine pills.
+      <!-- Top overlay: kind label + Inbox + Mine pills.
            Always rendered (kind label is unconditional); Inbox / Mine are
            conditional. pointer-events: none so the overlay never intercepts
            clicks on the wrapping <a>. -->
@@ -327,13 +317,12 @@
     {#if event.kind === "youtube_video" && (event.channelTitle || source)}
       {@const channelLabel = event.channelTitle ?? source?.channelTitle ?? source?.handleUrl ?? ""}
       <div class="chips-line">
-        <!-- Phase 03.0.1 (post-review UAT 2026-05-10) — single channel
-             chip for ALL YouTube events. event.channelTitle is enriched
-             by the /feed loader from youtube_videos cache (works for
-             manual paste; source-level cache covers auto-import). The
-             tracked-source variant prefixes a small ↻ icon to distinguish
-             auto-imported events from manual pastes (option D from UAT
-             discussion 2026-05-10). Tooltip explains the distinction. -->
+        <!-- Single channel chip for ALL YouTube events.
+             event.channelTitle is enriched by the /feed loader from
+             youtube_videos cache (works for manual paste; source-level
+             cache covers auto-import). The tracked-source variant prefixes
+             a small ↻ icon to distinguish auto-imported events from manual
+             pastes. Tooltip explains the distinction. -->
         {#if source}
           <span
             class="chip chip-channel chip-channel--tracked"
@@ -357,9 +346,8 @@
     {/if}
   </a>
 
-  <!-- Plan 02.1-32 (UAT-NOTES.md §4.24.E + §4.24.F): the inline picker
-       is gated on isInboxRow — it shows ONLY on cards where
-       gameIds.length === 0 AND metadata.inbox.dismissed !== true AND
+  <!-- The inline picker is gated on isInboxRow — it shows ONLY on cards
+       where gameIds.length === 0 AND metadata.inbox.dismissed !== true AND
        metadata.triage.standalone !== true. Cards already attached to a
        game OR marked standalone hide the picker entirely (the user's
        triage decision is already recorded; the affordance would be
@@ -369,11 +357,10 @@
   {#if isInboxRow}
     <div class="picker-line">
       <AttachToGamePicker {event} {games} onChanged={() => onChanged?.()} compact={true} />
-      <!-- Plan 02.1-24 (UAT-NOTES.md §6.1-redesign): inline "Mark standalone"
-           triage button on inbox cards ONLY. EXPLICIT exception to the
-           Plan 02.1-18 read-only-tile contract — accepted by the user
-           during round-3 UAT. Outside the wrapping <a> so its onclick
-           doesn't trigger card navigation. -->
+      <!-- Inline "Mark standalone" triage button on inbox cards ONLY.
+           EXPLICIT exception to the read-only-tile contract — accepted by
+           the user. Outside the wrapping <a> so its onclick doesn't trigger
+           card navigation. -->
       <button
         type="button"
         class="standalone-button"
@@ -387,11 +374,10 @@
 </article>
 
 <style>
-  /* Plan 02.1-23 layout: card body remains a vertical flex column. The
-   * Mine treatment combines a left-border accent (CSS) and a top-overlay
-   * Mine pill (DOM). Plan 02.1-19 grid cell sizing
-   * (`repeat(auto-fill, minmax(280px, 1fr))`) preserved by /feed's grid;
-   * this card sizes to its content within the cell. */
+  /* Card body remains a vertical flex column. The Mine treatment combines
+   * a left-border accent (CSS) and a top-overlay Mine pill (DOM).
+   * Grid cell sizing (`repeat(auto-fill, minmax(280px, 1fr))`) lives on
+   * /feed's grid; this card sizes to its content within the cell. */
   .feed-card {
     display: flex;
     flex-direction: column;
@@ -409,19 +395,17 @@
     background: var(--color-bg);
   }
   /* Mine treatment (A): left-border accent on the whole card. Combined with
-   * the overlay Mine pill (C) per UAT-NOTES.md §1.5-redesign user choice
-   * "C and A combined".
-   * Plan 02.1-30 (UAT-NOTES.md §4.25.A): swap var(--color-accent) for
-   * var(--color-mine) so FeedCard.mine + SourceRow.mine resolve to the
+   * the overlay Mine pill (C) per user choice "C and A combined".
+   * Uses var(--color-mine) so FeedCard.mine + SourceRow.mine resolve to the
    * single shared Mine token (defaults to accent today; can diverge). */
   .feed-card.mine {
     border-left: 4px solid var(--color-mine);
   }
-  /* Plan 02.1-24 (UAT-NOTES.md §6.1-redesign): standalone events render
-   * dimmed in /feed so they don't distract from game-tied events. User
-   * quote: "такие не связанные с игрой, нужно как-то затемнять, чтобы они
-   * не мешали". The reduced opacity is purely visual — the card remains
-   * clickable + the wrapping <a> still navigates to /events/[id]. */
+  /* Standalone events render dimmed in /feed so they don't distract from
+   * game-tied events. User quote: "такие не связанные с игрой, нужно как-то
+   * затемнять, чтобы они не мешали". The reduced opacity is purely visual —
+   * the card remains clickable + the wrapping <a> still navigates to
+   * /events/[id]. */
   .feed-card.standalone {
     opacity: 0.55;
   }
@@ -463,7 +447,7 @@
     justify-content: center;
     color: var(--color-text-muted);
   }
-  /* Plan 02.1-23 top overlay — flex row of dark pills over the image. */
+  /* Top overlay — flex row of dark pills over the image. */
   .overlay {
     position: absolute;
     top: var(--space-xs);
@@ -510,10 +494,10 @@
     word-break: break-word;
     min-width: 0;
   }
-  /* Plan 02.1-23: notes paragraph clipped to 3 lines with ellipsis. The
-   * underlying CSS uses the prefixed `-webkit-line-clamp` block trick which
-   * is the de facto cross-browser standard for line clamping (Firefox 68+
-   * supports the prefixed form). */
+  /* Notes paragraph clipped to 3 lines with ellipsis. The underlying CSS
+   * uses the prefixed `-webkit-line-clamp` block trick which is the de facto
+   * cross-browser standard for line clamping (Firefox 68+ supports the
+   * prefixed form). */
   .notes {
     margin: 0;
     color: var(--color-text-muted);
@@ -534,7 +518,7 @@
     font-size: var(--font-size-label);
     color: var(--color-text-muted);
   }
-  /* Phase 3.0 post-build: latest snapshot stats line for youtube_video cards. */
+  /* Latest snapshot stats line for youtube_video cards. */
   .stats-line {
     display: flex;
     flex-wrap: wrap;
@@ -557,7 +541,7 @@
     align-items: center;
     min-width: 0;
   }
-  /* Plan 02.1-23: associated games block at the BOTTOM of the card body.
+  /* Associated games block at the BOTTOM of the card body.
    * `margin-top: auto` pushes it to the bottom when the .card-body has
    * space remaining; otherwise it sits naturally after the chips-line. */
   .games-block {
@@ -600,9 +584,9 @@
     flex-wrap: wrap;
     min-width: 0;
   }
-  /* Plan 02.1-24: inline "Mark standalone" triage button. Visual style
-   * mirrors the AttachToGamePicker trigger (subtle ghost button) so the
-   * two affordances read as a triage pair on inbox cards. */
+  /* Inline "Mark standalone" triage button. Visual style mirrors the
+   * AttachToGamePicker trigger (subtle ghost button) so the two affordances
+   * read as a triage pair on inbox cards. */
   .standalone-button {
     min-height: 44px;
     padding: 0 var(--space-md);

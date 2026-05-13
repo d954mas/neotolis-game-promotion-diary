@@ -1,27 +1,23 @@
-// Phase 3.0 Plan 03.0-06 — youtube-channel-adapter live impl.
-//
-// Replaces the Phase 2.1 STUB `youtube_channel.pollContent: implemented in
-// Phase 3` throws-error tests with real coverage of the videos.list +
-// playlistItems.list pipeline. Mocks `global.fetch` directly (the adapter
-// uses native fetch per RESEARCH.md §"googleapis npm = heavy for two-endpoint
-// use") and routes calls via env.YOUTUBE_API_BASE_URL so the test stub URL
-// gets full URL validation through zod at boot.
+// youtube-channel-adapter live impl — videos.list + playlistItems.list
+// pipeline. Mocks `global.fetch` directly (the adapter uses native fetch
+// because the googleapis npm package is heavy for two-endpoint use) and
+// routes calls via env.YOUTUBE_API_BASE_URL so the test stub URL gets full
+// URL validation through zod at boot.
 //
 // Contract pinned by this suite:
 //   - pollStats(events, source|null) → batched videos.list (1 unit per ≤50
 //     ids per call); aligned to input order.
 //   - pollContent(source, since) → playlistItems.list against
 //     metadata.uploadsPlaylistId; filters publishedAt > since; returns
-//     RawEvent[] with Date objects (Pitfall H — Date round-trip).
+//     RawEvent[] with Date objects (Date round-trip preserved).
 //   - error mapping: 403 quotaExceeded → 'rate_limited'; 403 forbidden →
 //     'auth_error'; 404 → 'not_found'; videoId missing from response items
 //     → 'not_found' for that index.
-//   - quotaUser=hash(userId) parameter on every call (Google fairness gate
-//     per RESEARCH.md OQ#5 / Pattern 4).
+//   - quotaUser=hash(userId) parameter on every call (Google fairness gate).
 //   - Shorts detection: contentDetails.duration ≤ 60s → metadata.is_short
-//     === true (D-NEW Shorts handling).
-//   - 30 000 ms AbortController.timeout on every HTTP call (Pitfall 5 —
-//     never hold a DB tx across HTTP).
+//     === true.
+//   - 30 000 ms AbortController.timeout on every HTTP call (never hold a
+//     DB tx across HTTP).
 
 // env.ts loader — runs before any value-import on the adapter (which itself
 // imports env.ts at module load). Mirrors the dynamic-import + vi.resetModules
@@ -34,8 +30,8 @@ process.env.BETTER_AUTH_SECRET ??= "x".repeat(40);
 process.env.OAUTH_CLIENT_ID ??= "test";
 process.env.OAUTH_CLIENT_SECRET ??= "test";
 process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
-// Plan 03.0-06 — non-default base URL so the suite asserts the env-routed
-// HTTP path (AGENTS.md AP-6 — env reads only via env.ts).
+// Non-default base URL so the suite asserts the env-routed HTTP path
+// (AGENTS.md — env reads only via env.ts).
 process.env.YOUTUBE_API_BASE_URL = "https://yt-mock.test/youtube/v3";
 // Stub a single operator key so pickKeyForJob() returns non-null.
 process.env.SERVICE_YOUTUBE_API_KEYS = "test-operator-key-A";
@@ -43,12 +39,11 @@ process.env.SERVICE_YOUTUBE_API_KEYS = "test-operator-key-A";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { youtubeAdapter as YoutubeChannelAdapterT } from "../../src/lib/sources/youtube/server/index.js";
 
-// Post-build review 2026-05-08 (4th pass): pollContent now flows through
-// chargedFetch ($lib/sources/youtube/server/http.ts), which calls incrementUsage
-// + markThrottleTransition. Both touch the DB, which these unit tests
-// neither have nor want. Stub them; pickKeyForJob / youtubeQuotaUser /
-// hashApiKeyId stay real because the test asserts on their outputs (the
-// quotaUser fingerprint, the apiKeyId-keyed fetch URL).
+// pollContent flows through chargedFetch ($lib/sources/youtube/server/http.ts),
+// which calls incrementUsage + markThrottleTransition. Both touch the DB,
+// which these unit tests neither have nor want. Stub them; pickKeyForJob /
+// youtubeQuotaUser / hashApiKeyId stay real because the test asserts on
+// their outputs (the quotaUser fingerprint, the apiKeyId-keyed fetch URL).
 vi.mock("../../src/lib/sources/youtube/server/quota.js", async () => {
   const actual = await vi.importActual<
     typeof import("../../src/lib/sources/youtube/server/quota.js")
@@ -66,7 +61,7 @@ type Adapter = typeof YoutubeChannelAdapterT;
 /** Dynamic-import the adapter with the env values currently set in process.env.
  *  vi.resetModules() forces env.ts to re-parse so the adapter's module-level
  *  env reads pick up our test values. APP_KEK_BASE64 must be re-seeded because
- *  env.ts scrubs it after parse (PITFALL P2 mitigation #4). */
+ *  env.ts scrubs it after parse. */
 async function loadAdapter(): Promise<Adapter> {
   vi.resetModules();
   process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
@@ -161,11 +156,11 @@ function makePlaylistItemsResponse(
 }
 
 const fakeUserId = "user-test-123";
-// Post-build review (2026-05-07): adapter signatures take a pre-resolved
-// PickedKey from the caller (worker / route layer) instead of picking
-// internally — see PickedKey jsdoc in $lib/sources/adapter.ts. Tests
-// supply this fixture; the API key string is never asserted on the wire
-// (it is sent in the URL `key=` parameter; tests only assert presence).
+// Adapter signatures take a pre-resolved PickedKey from the caller (worker /
+// route layer) instead of picking internally — see PickedKey jsdoc in
+// $lib/sources/adapter.ts. Tests supply this fixture; the API key string is
+// never asserted on the wire (it is sent in the URL `key=` parameter; tests
+// only assert presence).
 const fakePicked = { apiKey: "test-operator-key-A", apiKeyId: "fakekey0" };
 
 // ----- Tests -----
@@ -286,13 +281,10 @@ describe("youtubeChannelAdapter.pollStats — error mapping", () => {
 
 describe("youtubeChannelAdapter.pollStats — quotaUser fairness param", () => {
   it("Test 8: quotaUser=youtubeQuotaUser(userId) param present (8 hex chars — fairness shard)", async () => {
-    // Phase 3.0 post-build (UAT 2026-05-06): adapter now imports the
-    // canonical youtubeQuotaUser helper from youtube-quota-tracker (8-hex
-    // sha256(userId)) instead of the inline 16-hex implementation. The
-    // adapter and the tracker now agree on the per-user fairness-shard
-    // hash. 8 vs 16 chars is opaque to YouTube; both work as a stable
-    // per-user shard. (Function renamed from quotaUserId on
-    // 2026-05-06 to make YouTube-specificity explicit in the call site.)
+    // Adapter imports the canonical youtubeQuotaUser helper from
+    // youtube-quota-tracker (8-hex sha256(userId)). The adapter and the
+    // tracker agree on the per-user fairness-shard hash. 8 vs 16 chars
+    // is opaque to YouTube; both work as a stable per-user shard.
     const events = [{ id: "e1", userId: fakeUserId, externalId: "v1" }];
     const calls = installFetchMock([{ status: 200, body: makeVideosListResponse(["v1"]) }]);
 
@@ -303,18 +295,18 @@ describe("youtubeChannelAdapter.pollStats — quotaUser fairness param", () => {
     expect(quotaUser).toMatch(/^[0-9a-f]{8}$/);
   });
 
-  it("Test 8a: URL `key=` matches the threaded PickedKey.apiKey (regression test for post-build review bug 2 — double-pick drift)", async () => {
-    // Pre-fix the adapter called pickKeyForJob() internally inside
-    // pollStatsBatch, which would have advanced the round-robin index
-    // independently from the worker's pre-pick. The HTTP would burn the
-    // adapter's pick while writeSnapshot stored the worker's pick in
-    // youtube_service_quota_usage — invisible at indie scale (1 key) but
-    // the entire /admin/quota dashboard would mis-attribute units the
-    // moment the operator added a second key.
+  it("Test 8a: URL `key=` matches the threaded PickedKey.apiKey (regression test — double-pick drift)", async () => {
+    // Without the threaded-key contract the adapter would call
+    // pickKeyForJob() internally inside pollStatsBatch, advancing the
+    // round-robin index independently from the worker's pre-pick. The
+    // HTTP would burn the adapter's pick while writeSnapshot stored the
+    // worker's pick in youtube_service_quota_usage — invisible at indie
+    // scale (1 key) but the entire /admin/quota dashboard would
+    // mis-attribute units the moment the operator added a second key.
     //
-    // Post-fix the adapter is FORCED to use whatever the caller threads
-    // through. This test pins the contract by passing a unique value
-    // that could not match any env-resolved key.
+    // The adapter is FORCED to use whatever the caller threads through.
+    // This test pins the contract by passing a unique value that could
+    // not match any env-resolved key.
     const events = [{ id: "e1", userId: fakeUserId, externalId: "v1" }];
     const customPicked = { apiKey: "CUSTOM-KEY-XYZ-not-in-env", apiKeyId: "custom01" };
     const calls = installFetchMock([{ status: 200, body: makeVideosListResponse(["v1"]) }]);
@@ -325,7 +317,7 @@ describe("youtubeChannelAdapter.pollStats — quotaUser fairness param", () => {
   });
 });
 
-describe("youtubeChannelAdapter.pollStats — Shorts detection (D-NEW)", () => {
+describe("youtubeChannelAdapter.pollStats — Shorts detection", () => {
   it("Test 9: duration='PT15S' (15s ≤ 60s) → metadata.is_short=true", async () => {
     const events = [{ id: "e1", userId: fakeUserId, externalId: "v1" }];
     installFetchMock([

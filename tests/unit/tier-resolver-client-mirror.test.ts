@@ -1,11 +1,11 @@
-// Phase 3.0 Plan 11 — single-source-of-truth guard for tier resolution.
+// Single-source-of-truth guard for tier resolution.
 //
-// Pitfall 7 (CONTEXT) forbids inlining the Active / Cold / Frozen boundary
-// literals or the unavailable-poll-status override list anywhere except
+// The Active / Cold / Frozen boundary literals and the unavailable-poll-status
+// override list MUST NOT be inlined anywhere except
 // src/lib/server/services/tier-resolver.ts. SvelteKit's $lib/server boundary
 // makes that module unreachable from client components, so PollingBadge.svelte
-// MIRRORS the rules inline (see the "MIRRORS services/tier-resolver.ts;
-// Pitfall 7 — keep in sync" comment block in the component source).
+// MIRRORS the rules inline (see the "MIRRORS services/tier-resolver.ts —
+// keep in sync" comment block in the component source).
 //
 // This test imports the canonical resolver AND extracts the mirrored
 // resolver from the .svelte source via a re-implementation that follows the
@@ -52,7 +52,7 @@ function mirrorResolveTier(
   const ageMs = now.getTime() - publishedAt.getTime();
   if (ageMs < MIRROR_TIER_BOUNDARY_ACTIVE_MS) return "active";
   if (ageMs < MIRROR_TIER_BOUNDARY_COLD_MS) return "cold";
-  // Phase 03.0.3 follow-up — bootstrap rule mirror.
+  // Bootstrap rule mirror.
   if (lastPolledAt === null) return "cold";
   return "frozen";
 }
@@ -98,7 +98,7 @@ describe("tier-resolver client mirror — identical results across battery", () 
     ["non-override 'ok' at active", ago(1000), "ok", NOW],
     ["non-override 'timeout' at cold", ago(2 * 86_400_000), "timeout", NOW],
     ["non-override 'ok' at frozen", ago(30 * 86_400_000), "ok", NOW],
-    // Phase 03.0.3 bootstrap rule — mirror must agree.
+    // Bootstrap rule — mirror must agree.
     ["bootstrap: frozen-by-age + never polled → cold", ago(30 * 86_400_000), null, null],
     ["bootstrap dormant: frozen-by-age + polled → frozen", ago(30 * 86_400_000), null, ago(1000)],
     [

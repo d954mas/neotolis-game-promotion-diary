@@ -1,24 +1,21 @@
 <script lang="ts">
-  // KindIcon — inline SVG dispatch on the 9 event kinds (Phase 2.1 extends
-  // the Phase 2 7-kind dispatch with `youtube_video` and `reddit_post` per
-  // UI-SPEC §"Inline-SVG icon additions" + §"Component inventory" KindIcon
-  // MODIFY entry).
+  // KindIcon — inline SVG dispatch on the event kinds.
   //
-  // The 9 kinds match EventDto.kind from src/lib/server/dto.ts (Plan 02.1-05
-  // toEventDto extension) and the eventKindEnum schema:
+  // The kinds match EventDto.kind from src/lib/server/dto.ts and the
+  // eventKindEnum schema:
   //   youtube_video, reddit_post, twitter_post, telegram_post, discord_drop,
-  //   conference, talk, press, other.
+  //   conference, talk, press, other, post.
   //
-  // Icon style contract (UI-SPEC — UNCHANGED from Phase 2): 24px viewBox,
-  // stroke="currentColor", stroke-width 2, round caps/joins, fill="none",
-  // colored via --color-text-muted. Geometric forms only — NO brand marks
-  // (a YouTube "play" rectangle is the closest visual; we render it as a
-  // generic play-button triangle inside a rounded rect, indistinguishable
-  // from a generic media icon).
+  // Icon style contract: 24px viewBox, stroke="currentColor",
+  // stroke-width 2, round caps/joins, fill="none", colored via
+  // --color-text-muted. Geometric forms only — NO brand marks (a YouTube
+  // "play" rectangle is the closest visual; we render it as a generic
+  // play-button triangle inside a rounded rect, indistinguishable from a
+  // generic media icon).
   //
-  // Accessibility (UI-SPEC §"Accessibility Floor delta"): aria-hidden="true"
-  // (decorative); the kind name is conveyed in adjacent text via the
-  // m.event_kind_label_*() Paraglide labels.
+  // Accessibility: aria-hidden="true" (decorative); the kind name is
+  // conveyed in adjacent text via the m.event_kind_label_*() Paraglide
+  // labels.
 
   type EventKind =
     | "youtube_video"

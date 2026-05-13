@@ -1,13 +1,12 @@
 // Audit-action display labels — single source of truth.
 //
-// Phase 03.0.1 architecture cleanup. Pre-cleanup, three Svelte components
-// (AuditRow, FilterChips, FiltersSheet) carried independent switch
-// statements mapping each AUDIT_ACTIONS value to a Paraglide message —
-// 80+ duplicated lines per file plus a manual `AUDIT_ACTIONS_MIRROR`
-// array in FiltersSheet. CI caught drift twice when Plan 10 added
-// `source.refresh_content_requested` (chip showed raw enum string in
-// /audit; FiltersSheet rendered N-1 checkboxes). The lock-step contract
-// was empirically brittle.
+// Three Svelte components (AuditRow, FilterChips, FiltersSheet) previously
+// carried independent switch statements mapping each AUDIT_ACTIONS value
+// to a Paraglide message — 80+ duplicated lines per file plus a manual
+// mirror array in FiltersSheet. CI caught drift twice when new actions
+// were added (chip showed raw enum string in /audit; FiltersSheet
+// rendered N-1 checkboxes). The lock-step contract was empirically
+// brittle.
 //
 // This file collapses the three switches into one `Record<AuditAction, ...>`.
 // TypeScript guarantees completeness at compile time — adding a value to

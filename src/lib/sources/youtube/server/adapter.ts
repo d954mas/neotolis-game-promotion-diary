@@ -1,37 +1,33 @@
-// youtube_channel adapter — Phase 3.0 Plan 06 LIVE impl.
+// youtube_channel adapter.
 //
-// Replaces the Phase 2.1 STUB. Implements DataSourceAdapter via two YouTube
-// Data API v3 endpoints:
+// Implements DataSourceAdapter via two YouTube Data API v3 endpoints:
 //
 //   - playlistItems.list?playlistId=<uploadsPlaylistId>&part=snippet
 //     &maxResults=50  (1 quota unit per call) — used by pollContent for
 //     backfill + auto-import. Filters response items to publishedAt > since.
 //
 //   - videos.list?id=<≤50 comma-joined ids>&part=snippet,statistics,
-//     contentDetails  (1 quota unit per call regardless of batch size —
-//     VERIFIED by the Plan 03.0-01 spike on 2026-05-06; 8 calls = 8 units)
-//     — used by pollStats for per-event metrics + Shorts detection.
+//     contentDetails  (1 quota unit per call regardless of batch size;
+//     8 calls = 8 units) — used by pollStats for per-event metrics +
+//     Shorts detection.
 //
-// HTTP discipline (per RESEARCH.md + AGENTS.md):
-//   - Native fetch (RESEARCH.md notes the `googleapis` npm package is heavy
-//     for two-endpoint use).
-//   - AbortController.timeout(30_000) on every call (Pitfall 5 — never hold
-//     a DB tx across HTTP).
+// HTTP discipline:
+//   - Native fetch (the `googleapis` npm package is heavy for two-endpoint
+//     use).
+//   - AbortController.timeout(30_000) on every call (never hold a DB tx
+//     across HTTP).
 //   - quotaUser=youtubeQuotaUser(userId) parameter on every call (Google's
-//     per-end-user fairness gate — RESEARCH.md OQ#5 / Pattern 4 — splits
-//     the operator's quota evenly across tenants instead of letting one
-//     whale starve the others).
+//     per-end-user fairness gate splits the operator's quota evenly across
+//     tenants instead of letting one whale starve the others).
 //   - All HTTP routed through env.YOUTUBE_API_BASE_URL (smoke override,
 //     production default = https://www.googleapis.com/youtube/v3).
 //
-// Statelessness (AGENTS.md AP-3): the adapter NEVER caches user secrets and
-// never holds plaintext keys across calls. The operator's plaintext key is
-// read from env at call time via `pickKeyForJob`. The canonical
-// `pickKeyForJob` + `hashApiKeyId` live in `./quota.js` (relocated from
-// `services/youtube-quota-tracker.ts` in Phase 03.0.1 Plan 04 — pre-Plan 04
-// path: `$lib/server/services/youtube-quota-tracker.js`).
+// Statelessness: the adapter NEVER caches user secrets and never holds
+// plaintext keys across calls. The operator's plaintext key is read from
+// env at call time via `pickKeyForJob`. The canonical `pickKeyForJob` +
+// `hashApiKeyId` live in `./quota.js`.
 //
-// Error mapping (Phase 3.0 D-12 status codes):
+// Error mapping (status codes):
 //   - 200 + item present in response.items     → status:'ok' + metrics + metadata
 //   - 200 + item missing from response.items   → status:'not_found' (private/deleted/embedded-disabled)
 //   - 403 with errors[].reason='quotaExceeded' → status:'rate_limited' (worker defers; scheduler pauses)
@@ -71,11 +67,10 @@ import type {
 export const YOUTUBE_VIDEOS_BATCH_SIZE = 50;
 
 /**
- * youtubeChannelAdapterCore — Phase 03.0.1 architecture cleanup.
- *
- * Exports the YouTube adapter's *core* surface: methods that are pure
- * polling / URL-parsing / observability — everything that's safe for
- * any caller (handlers, tests, scheduler dispatch hint) to use directly.
+ * youtubeChannelAdapterCore — the YouTube adapter's *core* surface:
+ * methods that are pure polling / URL-parsing / observability — everything
+ * that's safe for any caller (handlers, tests, scheduler dispatch hint)
+ * to use directly.
  *
  * Infrastructure-touching methods (registerQueues / scheduleCronTicks /
  * backfillSource) and cross-source create-time hooks (canonicalizeOnCreate /
@@ -87,14 +82,7 @@ export const YOUTUBE_VIDEOS_BATCH_SIZE = 50;
  *
  * The Core's TypeScript shape is `Pick<DataSourceAdapter, ...>` — TypeScript
  * red-flags any caller that tries to invoke a non-Core method (e.g.
- * `core.backfillSource()` — won't compile, used to throw at runtime).
- *
- * Why split: the previous shape exported a full `DataSourceAdapter` with
- * registerQueues / scheduleCronTicks / backfillSource as throwing stubs;
- * the barrel spread + override produced the live object. That made
- * `youtubeChannelAdapter` look complete to outsiders while half its surface
- * was a runtime trap. The split makes the Core honest at the type level
- * and forces composition to live where it always lived (the barrel).
+ * `core.backfillSource()` — won't compile).
  */
 type YoutubeChannelAdapterCore = Pick<
   DataSourceAdapter,
@@ -108,15 +96,13 @@ type YoutubeChannelAdapterCore = Pick<
   | "enrichFeedDtos"
 >;
 
-// Plan 03.0-03's canonical pickKeyForJob + hashApiKeyId are imported above
-// (./quota.js — relocated in Phase 03.0.1 Plan 04 from
-// services/youtube-quota-tracker.ts). The Wave-1-cross-plan inline copies
-// were removed in the post-build review sweep — they had divergent state
-// (separate roundRobinCursor module variable + different hash length) that
-// caused the apiKeyId stored in youtube_service_quota_usage by the worker
-// to NOT match the apiKeyId the adapter produced. With one key in the
-// envelope this was masked; with two keys the counter rows would never
-// settle on a stable pair.
+// The canonical pickKeyForJob + hashApiKeyId are imported above
+// (./quota.js). Adapter must never define its own copies — divergent state
+// (e.g. a separate roundRobinCursor module variable or different hash
+// length) would cause the apiKeyId stored in youtube_service_quota_usage
+// by the worker to NOT match the apiKeyId the adapter produced; with one
+// key in the envelope this is masked, with two keys the counter rows
+// never settle on a stable pair.
 
 // ---- Zod schemas — defense against API drift ----
 
@@ -187,9 +173,9 @@ function durationToSeconds(iso: string): number {
   return Number(h ?? 0) * 3600 + Number(m ?? 0) * 60 + Number(s ?? 0);
 }
 
-// fetchWithTimeout + chargedFetch live in $lib/sources/youtube/server/http.ts
-// (post-build review 2026-05-08). This adapter exposes TWO YouTube
-// methods, each with a different accounting boundary:
+// fetchWithTimeout + chargedFetch live in $lib/sources/youtube/server/http.ts.
+// This adapter exposes TWO YouTube methods, each with a different accounting
+// boundary:
 //
 //   pollStatsBatch — used by poll-active / poll-cold / poll-user /
 //     rehab-unavailable, which charge quota via writeSnapshot's
@@ -201,8 +187,7 @@ function durationToSeconds(iso: string): number {
 //   pollContent — auto-import path. No writeSnapshot equivalent at the
 //     caller side, so this method DOES use chargedFetch and accounts
 //     at the fetch boundary. (When auto-import lands as a worker
-//     handler, that handler trusts pollContent to charge.) This was
-//     surfaced by the fourth-pass review: pollContent's earlier
+//     handler, that handler trusts pollContent to charge.) The earlier
 //     fetchWithTimeout-only pattern would have been a future trap —
 //     auto-import quota burn would not land in
 //     youtube_service_quota_usage at all.
@@ -240,12 +225,11 @@ async function classifyError(resp: Response): Promise<SnapshotStatus> {
  * This module does not pick the policy; it just sends what it's given.
  *
  * `picked` is the pre-resolved key from the caller's `pickKeyForJob` — see
- * the PickedKey jsdoc on $lib/sources/adapter.ts. The adapter no longer
- * picks on its own (post-build review 2026-05-07): without threading,
- * the worker would advance roundRobinIdx once at handler start AND the
- * adapter would advance it again per chunk, leaving the
- * youtube_service_quota_usage row keyed under the worker's pick while
- * the actual HTTP burned the adapter's pick.
+ * the PickedKey jsdoc on $lib/sources/adapter.ts. Without threading, the
+ * worker would advance roundRobinIdx once at handler start AND the adapter
+ * would advance it again per chunk, leaving the youtube_service_quota_usage
+ * row keyed under the worker's pick while the actual HTTP burned the
+ * adapter's pick.
  */
 async function pollStatsBatch(
   videoIds: string[],
@@ -314,13 +298,12 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     nextPageToken?: string;
     endOfPlaylist?: boolean;
   }> {
-    // Phase 03.0.1 (post-review UAT 2026-05-10) — uploadsPlaylistId lives
-    // in youtube_channels cache (PK = channelId), NOT in data_sources.metadata.
-    // Pre-fix pollContent read only source.metadata.uploadsPlaylistId which
-    // was never populated by channel-context-backfill (it writes to the
-    // cache table, not source metadata). Result: always empty → worker
-    // marked backfill_complete=true immediately after onboarding without
-    // ever making an HTTP call.
+    // uploadsPlaylistId lives in youtube_channels cache (PK = channelId),
+    // NOT in data_sources.metadata. channel-context-backfill writes the
+    // cache table, not source metadata. Reading only
+    // source.metadata.uploadsPlaylistId would always come back empty and
+    // the worker would mark backfill_complete=true immediately after
+    // onboarding without ever making an HTTP call.
     //
     // Lookup chain: prefer explicit metadata.uploadsPlaylistId (existing
     // unit tests + any future direct caller), fall back to youtube_channels
@@ -349,29 +332,22 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     const picked = pickKeyForJob();
     if (!picked) return { events: [], unitsUsed: 0 };
 
-    // Phase 03.0.1 (post-review UAT 2026-05-10) — paginate playlistItems.list
-    // using nextPageToken until either:
+    // Paginate playlistItems.list using nextPageToken until either:
     //   - no more pages (json.nextPageToken absent — end of playlist)
     //   - oldest item on page is at-or-before `since` (we walked past target)
     //   - hard cap MAX_PAGES (prevents runaway quota burn on /sources with
     //     pathological histories — 20 pages × 50 items = 1000 events
     //     per single refresh click)
     //
-    // Pre-fix pollContent fetched ONLY the first page (50 newest items),
-    // so users with target_since=«all» couldn't pull full history even
-    // with multiple refresh clicks (idempotency UNIQUE skipped re-INSERTs;
-    // frontier never advanced because oldest-fetched stayed the same 50
-    // newest items every click).
-    //
     // unitsUsed = pages fetched (1 quota unit per playlistItems.list call).
-    // Origin from ctx (P1 #2 fix) — user-initiated clicks consume user
-    // pool, cron-driven jobs consume cron pool.
-    // Phase 03.0.1 (post-review UAT 2026-05-10) — persistent pagination
-    // cursor for «all history» backfill of channels with >MAX_PAGES×50
-    // (1000) videos. Pre-fix every refresh-content click started from
-    // page 1 — for a 5000-video channel the worker would re-fetch the
-    // same 1000 newest items every click, idempotency UNIQUE skipped
-    // them all, frontier never advanced past page 20.
+    // Origin from ctx — user-initiated clicks consume user pool, cron-driven
+    // jobs consume cron pool.
+    //
+    // Persistent pagination cursor for «all history» backfill of channels
+    // with >MAX_PAGES×50 (1000) videos. Without it, every refresh-content
+    // click would start from page 1 — for a 5000-video channel the worker
+    // would re-fetch the same 1000 newest items every click, idempotency
+    // UNIQUE would skip them all, frontier would never advance past page 20.
     //
     // Resume protocol:
     //   - Worker passes source.metadata.lastBackfillPageToken into
@@ -398,11 +374,11 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     let endOfPlaylist = false;
     let nextPageToken: string | undefined;
 
-    // Phase 03.0.3 follow-up — D-#29-1 backdated-upload safety. The legacy
-    // "depth" walk drops every item with publishedAt <= since unconditionally;
-    // that silently loses videos whose publishedAt is older than newestKnown
-    // (e.g. uploaded today but with a custom publishedAt months back —
-    // unlisted-then-public, podcast schedule, channel takeover migration).
+    // Backdated-upload safety. The legacy "depth" walk drops every item
+    // with publishedAt <= since unconditionally; that silently loses
+    // videos whose publishedAt is older than newestKnown (e.g. uploaded
+    // today but with a custom publishedAt months back — unlisted-then-
+    // public, podcast schedule, channel takeover migration).
     //
     // The "overlap" mode does a per-page cache lookup against
     // youtube_videos. An item is treated as a stop signal only when it is
@@ -480,7 +456,7 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
           // Unknown-OR-fresh item resets the counter. Known-and-fresh
           // (a video the cache already saw but published AFTER since)
           // is rare — we still skip it (dedup) without breaking. Backdated
-          // cache-miss (the D-#29-1 case) lands here and IS collected.
+          // cache-miss lands here and IS collected.
           consecutiveKnownPastSince = 0;
           if (isKnown) {
             // Defensive skip to avoid double-fan-out on re-upload edge case;
@@ -521,7 +497,7 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
 
   /** Stats polling — user-driven path (Refresh now button → poll-user worker).
    *  Caller passes events of `kind=youtube_video`; source MAY be null (manual
-   *  paste D-11). Returns StatsSnapshot[] aligned to input order.
+   *  paste). Returns StatsSnapshot[] aligned to input order.
    *
    *  Per-user quotaUser fingerprint: the user initiated this action, so
    *  Google's burst-shaper should track it under that user's bucket. Distinct
@@ -596,24 +572,22 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     return result;
   },
 
-  /** parseUrl — D-15 first-match-wins URL detection. Delegates to
-   *  ./url.ts youtubeParseUrl which is also used by the registry's
-   *  parseAnyUrl iterator. */
+  /** parseUrl — first-match-wins URL detection. Delegates to ./url.ts
+   *  youtubeParseUrl which is also used by the registry's parseAnyUrl
+   *  iterator. */
   parseUrl(url: string): ParsedUrl | null {
     return youtubeParseUrl(url);
   },
-  /** observability (Plan 08) — Core observability without per-adapter
-   *  quotaCounters. The barrel adds quotaCounters via spread+override so
-   *  cross-source services/quota.ts can iterate them without knowing
-   *  about youtube_metadata_fetch_log. */
+  /** Core observability without per-adapter quotaCounters. The barrel adds
+   *  quotaCounters via spread+override so cross-source services/quota.ts
+   *  can iterate them without knowing about youtube_metadata_fetch_log. */
   observability: youtubeObservability,
-  /** canRefreshPoll — cheap dispatch hint used by services/refresh-poll.ts
-   *  (Plan 06). YouTube returns true for kind === "youtube_video"; Reddit
-   *  (Phase 03.1) returns true for kind === "reddit_post". */
+  /** canRefreshPoll — cheap dispatch hint used by services/refresh-poll.ts.
+   *  YouTube returns true for kind === "youtube_video"; per-platform
+   *  adapters return true for their own kinds. */
   canRefreshPoll: (eventKind: EventKind): boolean => eventKind === "youtube_video",
-  /** enrichFeedDtos — Phase 03.0.3 P2 (D-A1). Internal filter to
-   *  kind=youtube_video; mutates stats + channelTitle in place. The
-   *  barrel spreads this into the exported youtubeAdapter alongside the
-   *  rest of the Core surface. */
+  /** enrichFeedDtos — internal filter to kind=youtube_video; mutates stats +
+   *  channelTitle in place. The barrel spreads this into the exported
+   *  youtubeAdapter alongside the rest of the Core surface. */
   enrichFeedDtos: youtubeEnrichFeedDtos,
 };

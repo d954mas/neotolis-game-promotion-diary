@@ -1,35 +1,25 @@
-// Phase 03.0.1 Plan 07 — Active-tier poll handler (REWRITTEN).
+// Active-tier poll handler.
 //
-// Pre-Plan-07 model (Phase 03.0 Plan 09): scheduler.tick.active cron tick
-// fired → src/scheduler/enqueue.ts.enqueueActivePolls() ran → it computed
-// the tier window, called selectEligibleVideoIds, and sent per-tier-batch
-// jobs to poll.active (with `{ videoIds: string[] }` payload). This
-// handler then received the videoIds batch and ran the two-phase tx
-// pattern.
+// The youtube.poll.cron cron schedule fires with `{ tier: "active" }`
+// payload (via boss.schedule key=active per pg-boss v11+
+// multiple-schedule-per-queue). The poll-cron dispatcher (./poll-cron.ts)
+// calls handlePollActive with that tier-tagged job. handlePollActive
+// internally enumerates eligible videos AND runs the two-phase
+// HTTP+writeSnapshot pipeline.
 //
-// Plan-07 model: youtube.poll.cron cron schedule fires DIRECTLY with
-// `{ tier: "active" }` payload (via boss.schedule key=active per pg-boss
-// v11+ multiple-schedule-per-queue). The poll-cron dispatcher (./poll-cron.ts)
-// calls handlePollActive with that tier-tagged job. handlePollActive now
-// internally enumerates eligible videos (the work that USED to live in
-// scheduler/enqueue.ts.enqueueActivePolls) AND runs the existing two-phase
-// HTTP+writeSnapshot pipeline. The intermediate poll.active queue + scheduler-
-// tick hop are gone.
-//
-// Throttle gate: pre-Plan-07 enqueueActivePolls held the throttle gate
-// (skip-on-ninetyfive, no-skip-on-eighty); Plan-07 preserves the gate
-// HERE since the tier-eligibility computation now lives in the handler.
+// Throttle gate: skip-on-ninetyfive, no-skip-on-eighty. Lives in this
+// handler alongside the tier-eligibility computation.
 //
 // Per-video discipline: stats polling is per-video — the scheduler keys
 // on youtube_videos.published_at (the video's age), not events.occurred_at.
 // One videos.list call serves up to 50 ids regardless of how many tenants
 // reference each video.
 //
-// Two-phase tx pattern (Pitfall 5; pinned by tests/integration/poll-worker-tx-boundary.test.ts):
-//   A. Phase A — single batched HTTP via pollStatsByVideoId(...) OUTSIDE
-//      any tx. Adapter handles the ≤50-id boundary, error mapping, Shorts
-//      detection, and the quotaUser fairness param.
-//   B. Phase B — writeSnapshot per video result, each in its OWN short tx
+// Two-step tx pattern (pinned by tests/integration/poll-worker-tx-boundary.test.ts):
+//   A. Step A — single batched HTTP via pollStatsByVideoId(...) OUTSIDE
+//      any tx. Adapter handles the ≤50-id boundary, error mapping,
+//      Shorts detection, and the quotaUser fairness param.
+//   B. Step B — writeSnapshot per video result, each in its OWN short tx
 //      (snapshot INSERT + youtube_videos UPDATE + quota UPSERT). Tx-
 //      boundary < 50ms regardless of upstream YouTube latency.
 //
@@ -37,11 +27,11 @@
 // Service-driven polls span all tenants; one HTTP serves N tenants
 // referencing the same video.
 //
-// Auth gate: pickKeyForJob() returns null if SERVICE_YOUTUBE_API_KEYS is empty.
-// Pre-Plan-07 the no-key path STILL ran through the worker; we preserve
-// that behavior — for every eligible video we writeSnapshot status='auth_error'
-// so youtube_videos.last_polled_at advances and the tier resolver classifies
-// the video as Unavailable on subsequent ticks (D-12).
+// Auth gate: pickKeyForJob() returns null if SERVICE_YOUTUBE_API_KEYS is
+// empty. The no-key path still runs through the worker — for every
+// eligible video we writeSnapshot status='auth_error' so
+// youtube_videos.last_polled_at advances and the tier resolver
+// classifies the video as Unavailable on subsequent ticks.
 //
 // Throttle transition: when the adapter returns status='rate_limited' for any
 // video, we call markThrottleTransition({state:'ninetyfive'}) — first signal
@@ -79,19 +69,13 @@ const QUOTA_USER_ACTIVE = "neotolis-svc-active";
  * Job shape: `{ id?, data: { tier: "active" } }`. The cron schedule sends
  * `{ tier: "active" }` payloads via boss.schedule(...,{key:"active"});
  * see src/lib/sources/youtube/server/index.ts.scheduleCronTicks.
- *
- * Pre-Plan-07 callers (poll-active.ts directly invoked with
- * `{ data: { videoIds: string[] } }`) are gone — the scheduler-tick →
- * enqueue.ts hop is retired by this plan.
  */
 export async function handlePollActive(job: {
   id?: string;
   data: { tier: "active" } & Record<string, unknown>;
 }): Promise<void> {
   // Throttle gate — pause Active tier at ninetyfive (the hard ceiling).
-  // 'eighty' lets Active continue (only Cold pauses there). Pre-Plan-07
-  // this gate lived in scheduler/enqueue.ts.enqueueActivePolls; with the
-  // tier-eligibility computation moving in here, the gate moves with it.
+  // 'eighty' lets Active continue (only Cold pauses there).
   const now = new Date();
   const throttle = await getThrottleState(now);
   if (throttle === "ninetyfive") {
@@ -116,8 +100,8 @@ export async function handlePollActive(job: {
 
   // Tier-eligibility: published_at within the active window (age < 24h).
   // resolveTier() applies the JS-side authoritative classification (the
-  // SQL window is a coarse first-cut). Pitfall 7 — never inline the
-  // boundary literals; reuse TIER_BOUNDARY_ACTIVE_MS.
+  // SQL window is a coarse first-cut). Never inline the boundary
+  // literals; reuse TIER_BOUNDARY_ACTIVE_MS.
   const cutoffOldest = new Date(now.getTime() - TIER_BOUNDARY_ACTIVE_MS);
   const videoIds = await selectEligibleVideoIds(null, cutoffOldest, "active", now);
   if (videoIds.length === 0) {
@@ -164,7 +148,7 @@ export async function handlePollActive(job: {
     return;
   }
 
-  // Phase A — HTTP call (OUTSIDE any tx). The adapter handles the ≤50-id
+  // Step A — HTTP call (OUTSIDE any tx). The adapter handles the ≤50-id
   // boundary, error mapping, Shorts detection, and the quotaUser fairness
   // param. Returns StatsSnapshot[] aligned to input order.
   const snapshots = await youtubeChannelAdapter.pollStatsByVideoId(
@@ -173,7 +157,7 @@ export async function handlePollActive(job: {
     picked,
   );
 
-  // Phase B — writeSnapshot per result. Each call opens its own short tx
+  // Step B — writeSnapshot per result. Each call opens its own short tx
   // (snapshot INSERT ON CONFLICT DO NOTHING + youtube_videos UPDATE +
   // quota UPSERT chained). On rate_limited from the adapter, mark the
   // throttle transition idempotently per (date_pacific, state).
@@ -187,13 +171,6 @@ export async function handlePollActive(job: {
   // at least a one-point quota cost"), auth_error and other non-2xx
   // outcomes still consume the unit because the request reached YouTube.
   // The no-key path (pickKeyForJob → null) returns BEFORE this loop.
-  //
-  // Phase 03.0.1 (post-review fourth-pass) — pre-fix `chargedOnce`
-  // boolean charged exactly 1 unit total regardless of batch count, so
-  // a cron run polling >50 active videos undercounted persistent quota
-  // by N-1 units (chargedFetch hit reservoir N times, audit recorded 1).
-  // Result: throttle gates would fire too late, eventually colliding
-  // with Google's hard daily 403.
   let rateLimitedSeen = false;
   for (let i = 0; i < videoIds.length; i++) {
     const videoId = videoIds[i]!;

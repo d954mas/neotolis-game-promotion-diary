@@ -1,10 +1,9 @@
-// Phase 3.0 Plan 09 — YouTube channel-context backfill handler (D-NEW / D-14).
+// YouTube channel-context backfill handler.
 //
-// Triggered on first paste of a video from an unknown channel (Plan 03.0-10
-// ingest-channel-context-trigger), this handler resolves the channel's
-// uploads playlist id, populates the metadata cache, and seeds the
-// youtube_video_snapshots table with the last 50 videos so the user's chart
-// loader has historical context immediately.
+// Triggered on first paste of a video from an unknown channel, this handler
+// resolves the channel's uploads playlist id, populates the metadata cache,
+// and seeds the youtube_video_snapshots table with the last 50 videos so
+// the chart loader has historical context immediately.
 //
 // Quota cost: 1 (channels.list) + N (playlistItems pages, 1≤N≤MAX_PAGES) +
 // M (videos.list batches of ≤50 ids each, 1≤M≤MAX_PAGES). Hard upper bound:
@@ -15,19 +14,19 @@
 //
 // The pagination loop walks playlistItems pages newest→oldest and stops on
 // the first page whose oldest item crosses the cutoff (uploads playlists
-// are sorted publishedAt DESC). For "everything" there is no cutoff but the
-// MAX_PAGES bound still applies — VIZ-01's chart-loader doesn't need a
+// are sorted publishedAt DESC). For "everything" there is no cutoff but
+// the MAX_PAGES bound still applies — the chart loader doesn't need a
 // channel's full history, just its visible recency.
 //
-// Idempotency: youtube_channel_metadata_cache UPSERT on channel_id PK
-// (Plan 01); a re-run of this handler for the same channel is a no-op at the
-// cache row level. youtube_video_snapshots UNIQUE(video_id, polled_at)
-// makes the snapshot inserts idempotent within the same minute.
+// Idempotency: youtube_channels UPSERT on channel_id PK; a re-run of this
+// handler for the same channel is a no-op at the cache row level.
+// youtube_video_snapshots UNIQUE(video_id, polled_at) makes the snapshot
+// inserts idempotent within the same minute.
 //
-// Auth gate: pickKeyForJob() returning null = SERVICE_YOUTUBE_API_KEYS empty.
-// We log+skip rather than throw — this preserves self-host parity (a self-
-// hoster who never sets the env var sees a graceful no-op on first paste,
-// not a worker crash).
+// Auth gate: pickKeyForJob() returning null = SERVICE_YOUTUBE_API_KEYS
+// empty. We log+skip rather than throw — preserves self-host parity (a
+// self-hoster who never sets the env var sees a graceful no-op on first
+// paste, not a worker crash).
 
 import { sql, and, eq, isNull, isNotNull } from "drizzle-orm";
 import { z } from "zod";
@@ -115,11 +114,10 @@ const VIDEOS_LIST_RESPONSE = z.object({
   items: z.array(
     z.object({
       id: z.string(),
-      // Phase 3.0 post-build: snippet now travels alongside statistics so
-      // the same 1-quota-unit batched call seeds youtube_video_metadata_cache
-      // with title/description/channel info. Saves the /events/new "Get
-      // from YouTube" button from a redundant call when the video has
-      // already been backfilled.
+      // Snippet travels alongside statistics so the same 1-quota-unit
+      // batched call seeds youtube_videos with title/description/channel
+      // info. Saves the /events/new "Get from YouTube" button from a
+      // redundant call when the video has already been backfilled.
       snippet: z
         .object({
           title: z.string(),
@@ -140,14 +138,13 @@ const VIDEOS_LIST_RESPONSE = z.object({
   ),
 });
 
-// fetchWithTimeout + chargedFetch moved to $lib/sources/youtube/server/http.ts
-// (post-build review 2026-05-08) so $lib/sources/youtube/server/metadata.ts and
+// fetchWithTimeout + chargedFetch live in $lib/sources/youtube/server/http.ts
+// so $lib/sources/youtube/server/metadata.ts and
 // $lib/sources/youtube/server/adapter.ts share the same charge-on-Response +
 // throttle-audit-on-403-quotaExceeded contract.
 
-// YouTube URL parsing moved to $lib/sources/youtube/server/url.ts (Phase 03.0.1
-// Plan 04 — pre-Plan 04 path: services/youtube-url.ts) — see that module's
-// header for the rationale.
+// YouTube URL parsing lives in $lib/sources/youtube/server/url.ts — see
+// that module's header for the rationale.
 
 const CHANNELS_LIST_FOR_HANDLE_RESPONSE = z.object({
   kind: z.literal("youtube#channelListResponse"),
@@ -164,10 +161,10 @@ const CHANNELS_LIST_FOR_HANDLE_RESPONSE = z.object({
   ),
 });
 
-// Phase 3.0 unified backfill job shape. Either { channelId } (ingest paste
-// flow — Plan 10 already knows the channelId from the parsed video URL) or
-// { handleUrl, sourceId } (createSource flow — Plan 12 only knows the URL the
-// user typed). Handler resolves handle→channelId in the second case using a
+// Unified backfill job shape. Either { channelId } (ingest paste flow
+// already knows the channelId from the parsed video URL) or
+// { handleUrl, sourceId } (createSource flow only knows the URL the user
+// typed). Handler resolves handle→channelId in the second case using a
 // channels.list?forHandle= call (1 quota unit) and persists the resolved
 // channelId back to data_sources so subsequent polls skip the resolution.
 export async function handleChannelContextBackfill(job: {
@@ -180,8 +177,8 @@ export async function handleChannelContextBackfill(job: {
     backfillWindow?: "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
   };
 }): Promise<void> {
-  // Plan 08 (D-13) AdapterError envelope. The body throws AdapterError on
-  // upstream non-2xx; route by category:
+  // AdapterError envelope. The body throws AdapterError on upstream
+  // non-2xx; route by category:
   //   - rate-limited → re-throw (pg-boss retries with retryAfterMs)
   //   - operator-issue / permanent → mark source needs_reconnect and swallow
   //     (the operator must intervene; pg-boss retries are pointless)
@@ -228,11 +225,11 @@ async function handleChannelContextBackfillImpl(job: {
 }): Promise<void> {
   const { userId, handleUrl, sourceId } = job.data;
   let channelId = job.data.channelId;
-  // Phase 3.0 post-build (2026-05-07): track the alias input that triggered
-  // this backfill. After resolving handle/legacy/video URL → UC id we write
-  // the alias into youtube_channels.handle_aliases so the next ingest paste
-  // of the same alias hits the cache directly. Captured BEFORE resolution
-  // because `channelId` is reassigned to the UC id mid-flow.
+  // Track the alias input that triggered this backfill. After resolving
+  // handle/legacy/video URL → UC id we write the alias into
+  // youtube_channels.handle_aliases so the next ingest paste of the same
+  // alias hits the cache directly. Captured BEFORE resolution because
+  // `channelId` is reassigned to the UC id mid-flow.
   //   - From ingest path: job.data.channelId may be the raw URL string
   //     ("https://youtube.com/@handle") when ingest could not extract a UC
   //     id; that string is the alias to record on the resolved row.
@@ -292,7 +289,7 @@ async function handleChannelContextBackfillImpl(job: {
         origin: "cron",
         logTag: "channel-context-backfill: videos.list lookup",
       });
-      if (!videoResp.ok) return; // Plan 08: chargedFetch throws on non-2xx; this is dead-code defense — caught by the outer try/catch.
+      if (!videoResp.ok) return; // chargedFetch throws on non-2xx; this is dead-code defense — caught by the outer try/catch.
       const videoJson = VIDEOS_LIST_RESPONSE.parse(await videoResp.json());
       const v = videoJson.items[0];
       if (!v || !v.snippet?.channelId) {
@@ -317,7 +314,7 @@ async function handleChannelContextBackfillImpl(job: {
         origin: "cron",
         logTag: "channel-context-backfill: forHandle lookup",
       });
-      if (!lookupResp.ok) return; // dead-code defense — chargedFetch throws on non-2xx in Plan 08.
+      if (!lookupResp.ok) return; // dead-code defense — chargedFetch throws on non-2xx.
       const lookupJson = CHANNELS_LIST_FOR_HANDLE_RESPONSE.parse(await lookupResp.json());
       const item = lookupJson.items[0];
       if (!item) {
@@ -367,7 +364,7 @@ async function handleChannelContextBackfillImpl(job: {
     origin: "cron",
     logTag: "channel-context-backfill: channels.list",
   });
-  if (!channelsResp.ok) return; // dead-code defense — chargedFetch throws on non-2xx in Plan 08.
+  if (!channelsResp.ok) return; // dead-code defense — chargedFetch throws on non-2xx.
   const channelsJson = CHANNELS_LIST_RESPONSE.parse(await channelsResp.json());
   const channelItem = channelsJson.items[0];
   const uploadsPlaylistId = channelItem?.contentDetails?.relatedPlaylists?.uploads;
@@ -400,11 +397,10 @@ async function handleChannelContextBackfillImpl(job: {
       },
     });
 
-  // 2a. Append the resolved-from URL to handle_aliases (Phase 3.0 post-build,
-  //     2026-05-07). Fixes the handle-URL cache miss documented in the
-  //     build-phase code review (bug-3): ingest's cache lookup now widens
-  //     with `OR $key = ANY(handle_aliases)`, so any future paste of the
-  //     same handle URL hits the row directly — no enqueue, no quota.
+  // 2a. Append the resolved-from URL to handle_aliases. Fixes the
+  //     handle-URL cache miss: ingest's cache lookup widens with
+  //     `OR $key = ANY(handle_aliases)`, so any future paste of the same
+  //     handle URL hits the row directly — no enqueue, no quota.
   //     Skip writes when:
   //       - aliasInputCandidate is null (no input URL captured);
   //       - the alias equals the resolved channelId (UC-only path: already
@@ -437,9 +433,9 @@ async function handleChannelContextBackfillImpl(job: {
   const collected: { videoId: string; publishedAt: string; title: string }[] = [];
   let pageToken: string | undefined;
   let stopReason: "no_more_pages" | "cutoff_crossed" | "hard_cap" = "no_more_pages";
-  // Phase 03.0.3 P1 (D-#29-5) — captured at the hard-cap exit so the
-  // post-loop state writes can persist the resume cursor for the next
-  // walk. NULL on every non-hard_cap exit.
+  // Captured at the hard-cap exit so the post-loop state writes can
+  // persist the resume cursor for the next walk. NULL on every
+  // non-hard_cap exit.
   let hardCapResumeToken: string | null = null;
 
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -458,7 +454,7 @@ async function handleChannelContextBackfillImpl(job: {
       origin: "cron",
       logTag: "channel-context-backfill: playlistItems.list",
     });
-    if (!playlistResp.ok) break; // dead-code defense — chargedFetch throws on non-2xx in Plan 08.
+    if (!playlistResp.ok) break; // dead-code defense — chargedFetch throws on non-2xx.
     const playlistJson = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await playlistResp.json());
 
     let crossedCutoffOnThisPage = false;
@@ -486,8 +482,7 @@ async function handleChannelContextBackfillImpl(job: {
     if (page === MAX_PAGES - 1) {
       stopReason = "hard_cap";
       // Preserve the cursor at MAX_PAGES so the next refresh-content
-      // click resumes from page 21 instead of restarting the walk
-      // (Phase 03.0.3 P1; D-#29-5).
+      // click resumes from page 21 instead of restarting the walk.
       hardCapResumeToken = playlistJson.nextPageToken ?? null;
       break;
     }
@@ -495,13 +490,13 @@ async function handleChannelContextBackfillImpl(job: {
   }
 
   if (collected.length === 0) {
-    // Phase 03.0.3 follow-up — do NOT early-return here. Pre-fix this
-    // returned and skipped the terminal state writes at the bottom of
-    // the function, so a brand-new or naturally-empty channel
-    // (no_more_pages on page 0 with zero items) stayed
-    // backfill_complete=false forever and cron re-walked it every day.
-    // The empty-aware guards below let the function fall through to
-    // markChannelBackfillComplete + audit row with events_inserted=0.
+    // Do NOT early-return here. An earlier version returned and skipped
+    // the terminal state writes at the bottom of the function, so a
+    // brand-new or naturally-empty channel (no_more_pages on page 0 with
+    // zero items) stayed backfill_complete=false forever and cron re-
+    // walked it every day. The empty-aware guards below let the function
+    // fall through to markChannelBackfillComplete + audit row with
+    // events_inserted=0.
     logger.info(
       { jobId: job.id, channelId, window, stopReason },
       "channel-context-backfill: no videos in window",
@@ -529,16 +524,15 @@ async function handleChannelContextBackfillImpl(job: {
       origin: "cron",
       logTag: "channel-context-backfill: videos.list",
     });
-    if (!videosResp.ok) continue; // dead-code defense — chargedFetch throws on non-2xx in Plan 08.
+    if (!videosResp.ok) continue; // dead-code defense — chargedFetch throws on non-2xx.
     const videosJson = VIDEOS_LIST_RESPONSE.parse(await videosResp.json());
     allItems.push(...videosJson.items);
   }
 
-  // 5a. UPSERT youtube_video_metadata_cache (Phase 3.0 post-build,
-  //     UAT 2026-05-06). One row per video, no time-series — title /
-  //     description / channel only. The snippet half of videos.list lands
-  //     here so the /events/new "Get from YouTube" button can read it
-  //     for free on a re-paste of the same video.
+  // 5a. UPSERT youtube_videos. One row per video, no time-series —
+  //     title / description / channel only. The snippet half of
+  //     videos.list lands here so the /events/new "Get from YouTube"
+  //     button can read it for free on a re-paste of the same video.
   for (const item of allItems) {
     const sn = item.snippet;
     if (!sn) continue;
@@ -594,17 +588,15 @@ async function handleChannelContextBackfillImpl(job: {
   //    the event is already created by the ingest service, so we skip this
   //    block and only step 7 below refreshes its lastPolledAt timestamp.
   //
-  // Phase 03.0.3 follow-up — added `collected.length > 0` guard. The
-  // pre-insert SELECT below uses `${events.externalId} IN (...)` with
-  // `collected.map(c => sql`${c.videoId}`)`; if collected is empty,
-  // Drizzle emits `IN ()`, which is a Postgres syntax error. Now that
-  // the early-return on empty collected is gone, this branch needs to
-  // skip explicitly.
+  // `collected.length > 0` guard: the pre-insert SELECT below uses
+  // `${events.externalId} IN (...)` with `collected.map(c => sql`${c.videoId}`)`;
+  // if collected is empty, Drizzle emits `IN ()`, which is a Postgres
+  // syntax error.
   if (sourceId && collected.length > 0) {
-    // Tenant-scoped lookup — Pattern 1. The job payload pairs sourceId
-    // with userId; even though pg-boss won't deliver a malformed job,
-    // the eq(userId) filter is the load-bearing guarantee that we never
-    // read another tenant's source row.
+    // Tenant-scoped lookup. The job payload pairs sourceId with userId;
+    // even though pg-boss won't deliver a malformed job, the eq(userId)
+    // filter is the load-bearing guarantee that we never read another
+    // tenant's source row.
     const sourceRow = await db
       .select({ isOwnedByMe: dataSources.isOwnedByMe })
       .from(dataSources)
@@ -614,9 +606,9 @@ async function handleChannelContextBackfillImpl(job: {
 
     // Auto-import idempotency: pre-insert SELECT scoped by `sourceId`.
     //
-    // Phase 3.0 post-build review (2026-05-07): pre-fix, the SELECT skipped
-    // any user/external_id match regardless of sourceId, which silently
-    // dropped backfill writes when:
+    // An earlier version of the SELECT skipped any user/external_id
+    // match regardless of sourceId, which silently dropped backfill
+    // writes when:
     //   - the user previously manually pasted the same video (sourceId=NULL
     //     — backfill saw it and skipped, source page showed "0 imported"),
     //   - a different source already auto-imported the same video (rare,
@@ -642,9 +634,7 @@ async function handleChannelContextBackfillImpl(job: {
     // load-bearing. A future reader who removes it (thinking
     // "just one event per video") will silently re-introduce the bug
     // where a user's manual paste blocks the auto-import event for the
-    // same video. Integration test pinning this is filed as
-    // .planning/todos/pending/2026-05-07-channel-context-backfill-handler-integration-test.md
-    // (the existing test infra does not cover the handler holistically).
+    // same video.
     const existing = await db
       .select({ externalId: events.externalId })
       .from(events)
@@ -685,8 +675,8 @@ async function handleChannelContextBackfillImpl(job: {
     }
   }
 
-  // 7. Phase 3.0 post-build refactor (2026-05-06): polling state lives on
-  //    youtube_videos now, not on events. The youtube_videos UPSERT in step
+  // 7. Polling state lives on youtube_videos, not on events. The
+  //    youtube_videos UPSERT in step
   //    5a already wrote {title, description, channel_*, published_at,
   //    fetched_at} for every collected video. We extend it here by stamping
   //    last_polled_at + last_poll_status='ok' on those rows so the tier
@@ -708,17 +698,16 @@ async function handleChannelContextBackfillImpl(job: {
       );
   }
 
-  // Phase 03.0.1 — backfill state machine + audit metadata for cap counter.
-  // State updates only happen когда sourceId is present (createSource flow,
-  // not generic ingest path). Audit row written в both cases — ingest flow
-  // (no sourceId) gets minimal metadata (no source_id field).
+  // Backfill state machine + audit metadata for cap counter. State updates
+  // only happen when sourceId is present (createSource flow, not generic
+  // ingest path). Audit row written in both cases — ingest flow (no
+  // sourceId) gets minimal metadata (no source_id field).
   if (sourceId && channelId !== null) {
-    // Phase 03.0.3 P1 (D-#29-5) — terminal channel-state writes per
-    // stopReason. Pre-fix the handler set frontier + last_polled_at but
-    // left backfill_complete=false even for channels that finished
-    // naturally (`no_more_pages`), causing the cron auto-backfill picker
-    // to re-walk them at 3am Pacific the next day — the typical
-    // onboarding double-walk.
+    // Terminal channel-state writes per stopReason. An earlier version
+    // set frontier + last_polled_at but left backfill_complete=false even
+    // for channels that finished naturally (`no_more_pages`), causing the
+    // cron auto-backfill picker to re-walk them at 3am Pacific the next
+    // day — the typical onboarding double-walk.
     //
     // | stopReason       | complete | frontier            | token              |
     // |------------------|----------|---------------------|--------------------|
@@ -732,8 +721,8 @@ async function handleChannelContextBackfillImpl(job: {
     // back we walked, which IS the cutoff when we stopped because we
     // crossed it; oldest-seen would lie about the boundary.
     //
-    // Phase 03.0.3 round-7 (Codex P2) — the cutoff_crossed frontier
-    // write is gated on `videoIds.length > 0`. Empty-window onboarding
+    // The cutoff_crossed frontier write is gated on
+    // `videoIds.length > 0`. Empty-window onboarding
     // (channel exists but has no uploads in the requested window) used
     // to record backfill_oldest_at = cutoff with an empty youtube_videos
     // cache. The next refresh-content click then routed to
@@ -796,10 +785,10 @@ async function handleChannelContextBackfillImpl(job: {
       metadata: {
         source_id: sourceId,
         kind: "youtube_channel",
-        // Phase 03.0.1 (post-review) — `platform` for cap-query consistency.
-        // 'initial' flow excluded from cap by design (onboarding UX), but we
-        // set platform anyway so audit aggregation stays uniform across all
-        // refresh-related verbs.
+        // `platform` for cap-query consistency. 'initial' flow excluded
+        // from cap by design (onboarding UX), but we set platform anyway
+        // so audit aggregation stays uniform across all refresh-related
+        // verbs.
         platform: "youtube_channel",
         flow: "initial",
         queue: "youtube.channel_context_backfill",

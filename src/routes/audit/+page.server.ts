@@ -5,41 +5,29 @@ import { toAuditEntryDto } from "$lib/server/dto.js";
 import { AppError } from "$lib/server/services/errors.js";
 
 /**
- * /audit loader — paginated audit-log read (Plan 02-10; reshaped Plan 02.1-20;
- * extended Plan 02.1-21 with date-range filter).
+ * /audit loader — paginated audit-log read.
  *
- * Plan 02.1-20: action filter switches from single-select (?action=A) to
- * multi-select (?action=A&action=B repeated params), mirroring /feed's
- * convention from Plan 02.1-15. Empty array = "all" semantics (default).
+ * Action filter is multi-select (?action=A&action=B repeated params),
+ * mirroring /feed's convention. Empty array = "all" semantics (default).
  *
- * Plan 02.1-21: date-range filter mirrors /feed's URL contract
- * (?from=YYYY-MM-DD&to=YYYY-MM-DD). UAT-NOTES.md §9.2-bug user quote:
- * "В окне аудита нет возможности выбрать дату как в feed". UNLIKE /feed,
- * /audit does NOT default to last-30-days — auditing is investigative;
- * the default is "no date filter, show every row".
- *
- * URL contract change (Plan 02.1-20) is destructive: the previous
- * `?action=key.add` single value is no longer interpreted as a sentinel-
- * needing field; the same URL still works because
- * url.searchParams.getAll('action') returns ['key.add'] which the new
- * single-element array branch handles via eq(). Pre-launch (CONTEXT D-04:
- * zero self-host deployments) so any older bookmark with `?action=all`
- * literal falls through forgiving-GET (filtered out by VALID_ACTIONS) and
- * the page renders the no-filter default. No leak.
+ * Date-range filter mirrors /feed's URL contract
+ * (?from=YYYY-MM-DD&to=YYYY-MM-DD). UNLIKE /feed, /audit does NOT default
+ * to last-30-days — auditing is investigative; the default is "no date
+ * filter, show every row".
  *
  * The cursor and filter params are URL query parameters so the browser's
  * back/forward stack reflects pagination state.
  *
  * Direct service call (NOT fetch('/api/...')): the API and the page
  * render in the same Node process; an HTTP roundtrip back to Hono would
- * deadlock SvelteKit's internal_fetch (D-31 + Plan 02-10 P0 fix).
+ * deadlock SvelteKit's internal_fetch.
  *
  * Forgiving-GET: invalid action entries are dropped silently rather than
  * surfacing 422 to the user. Invalid date strings short-circuit to
  * undefined (same pattern as /feed). The defense-in-depth in
  * listAuditPage catches anything that bypasses this filter.
  *
- * Privacy review (Plan 02.1-21):
+ * Privacy review:
  *   - if (!locals.user) early-return — anonymous-401 surface (no /api/* route).
  *   - listAuditPage(userId, ...) is userId-scoped — tenant-scope ESLint rule passes.
  *   - DTO projection (toAuditEntryDto) strips userId by construction.
@@ -66,7 +54,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   // Forgiving-GET: drop invalid entries silently rather than 422 the page.
   const actionFilter = rawActions.filter((a): a is AuditAction => VALID_ACTIONS.has(a));
 
-  // Plan 02.1-21: date-range parsing mirrors /feed's pattern — date-only
+  // Date-range parsing mirrors /feed's pattern — date-only
   // YYYY-MM-DD inputs are inclusive on both ends. `from` becomes 00:00:00
   // UTC of that day; `to` becomes 23:59:59.999 UTC so picking
   // from=to=2026-04-26 matches every row on the 26th.

@@ -1,64 +1,46 @@
 <script lang="ts">
-  // FiltersSheet — mobile-only <dialog>-based bottom-sheet filter UX
-  // (UI-SPEC §"Component inventory" + §"/feed filter row — chips → sheet
-  // pattern"; Plan 02.1-19 reshape over Plan 02.1-15).
-  // Triggered by the FilterChips "Filters (N)" button.
+  // FiltersSheet — mobile-only <dialog>-based bottom-sheet filter UX,
+  // triggered by the FilterChips "Filters (N)" button.
   //
   // Native <dialog> + showModal() gives focus-trap + Esc-to-close out of
   // the box. Mirrors the ConfirmDialog pattern.
   //
-  // Plan 02.1-19 changes (round-2 UAT):
-  //   - Game checkbox-list + Attached radio MERGE into one "Show" 3-radio
-  //     (Any / Inbox only / Attached to games). Picking "Attached to games"
-  //     reveals the games multi-select; the conflict between
-  //     "Attached=Inbox AND Game=X" is impossible by construction (UI guard).
-  //   - onApply payload: replaces { game?, attached? } with
-  //     { show: { kind: 'any' | 'inbox' | 'specific'; gameIds? } }.
+  // Show axis: Any / Inbox only / Attached to games. Picking "Attached
+  // to games" reveals the games multi-select; the conflict between
+  // "Attached=Inbox AND Game=X" is impossible by construction (UI
+  // guard).
   //
-  // Plan 02.1-15 carry-over:
-  //   - source / kind become checkbox LISTS (multi-select per Gap 4).
-  //   - source + game lists carry a typeahead `<input type="search">` so a
-  //     long source/game list stays scannable.
-  //   - from / to date inputs are owned by <DateRangeControl> above the
-  //     chip strip on /feed (Gap 10).
+  // source / kind are checkbox LISTS (multi-select). source + game lists
+  // carry a typeahead `<input type="search">` so a long source/game list
+  // stays scannable.
   //
-  // Plan 02.1-21 changes (round-3 UAT closure for §9.2-bug):
-  //   - REQUIRED `schema: ReadonlyArray<FilterAxis>` prop replaces Plan
-  //     02.1-20's implicit axis-detection (was: filters.action presence as
-  //     the gate). Each fieldset is gated on `schema.includes('axisName')`
-  //     so the rendered surface mirrors the consumer's intent exactly.
-  //   - New 'date' axis fieldset (two date inputs) renders when
-  //     schema.includes('date').
+  // REQUIRED `schema: ReadonlyArray<FilterAxis>` prop: each fieldset is
+  // gated on `schema.includes('axisName')` so the rendered surface
+  // mirrors the consumer's intent exactly. A 'date' axis fieldset renders
+  // when schema.includes('date').
   //
-  // Schema-by-consumer matrix (current state, post Plan 02.1-39 round-6):
-  //   - /feed:     ['kind','source','show','authorIsMe']  ← 'date' DROPPED
-  //                in Plan 02.1-39 round-6 polish #9 (UAT-NOTES.md §5.6
-  //                follow-up #9). DateRangeControl above the chip strip is
-  //                the sole date-range entry on /feed; the in-sheet axis
-  //                Plan 02.1-21 added was redundant since the primary
-  //                always-visible control is never hidden.
-  //   - /audit:    ['action']  ← 'date' DROPPED in Plan 02.1-34 (§4.21.A);
-  //                same rationale — page-level DateRangeControl is the SOT.
-  //   - Future surfaces that don't render their own DateRangeControl can
-  //     opt into the in-sheet 'date' axis by including it in their schema.
+  // Schema-by-consumer:
+  //   - /feed:     ['kind','source','show','authorIsMe']  ('date'
+  //                lives in <DateRangeControl> above the chip strip).
+  //   - /audit:    ['action']                              (same — page-
+  //                level DateRangeControl is the SOT).
+  //   - Future surfaces that don't render their own DateRangeControl
+  //     can opt into the in-sheet 'date' axis by including it in their
+  //     schema.
   //
-  // The gating logic (schema.includes(axis)) MUST cover BOTH applyAll and
-  // clearAll. clearAll is the load-bearing piece: when 'date' is absent
-  // from a consumer's schema, the sheet's clearAll MUST NOT emit
-  // from=undefined / to=undefined — emitting them would let the consumer
-  // wipe the user's selected date range from the SOT (DateRangeControl)
-  // via a button that says "clear filters" inside the sheet. The current
-  // gate at line ~402 satisfies this — a future refactor that breaks it
-  // would silently regress the /feed UX.
+  // The gating logic MUST cover BOTH applyAll and clearAll. clearAll is
+  // the load-bearing piece: when 'date' is absent from a consumer's
+  // schema, the sheet's clearAll MUST NOT emit from=undefined /
+  // to=undefined — emitting them would let the consumer wipe the user's
+  // selected date range from the SOT (DateRangeControl) via a button
+  // that says "clear filters" inside the sheet.
 
   import { m } from "$lib/paraglide/messages.js";
   import { sortByLabel } from "$lib/util/sort-kinds.js";
   import { auditActionLabel, AUDIT_ACTION_LIST } from "$lib/audit-labels.js";
-  // Plan 02.1-39 (UAT-NOTES.md §5.6): source list shows a kind glyph + short
-  // kind label adjacent to displayName. Reuses SourceKindIcon (Plan 02.1-08)
-  // and the shared sourceKindLabel helper (Plan 02.1-39 — extracted from
-  // SourceRow). Round-5 UAT user quote: "вижу в фильтрах источники.
-  // Хотелось бы еще там видеть тип источника(ютуб)".
+  // Source list shows a kind glyph + short kind label adjacent to
+  // displayName. Reuses SourceKindIcon and the shared sourceKindLabel
+  // helper.
   import SourceKindIcon from "./SourceKindIcon.svelte";
   import {
     sourceKindLabel,
@@ -71,8 +53,8 @@
     | { kind: "standalone" }
     | { kind: "specific"; gameIds: string[] };
 
-  // Plan 02.1-21: explicit axis enumeration. Each consumer page passes the
-  // subset it wants rendered; FiltersSheet renders ONLY axes in `schema`.
+  // Explicit axis enumeration. Each consumer page passes the subset it
+  // wants rendered; FiltersSheet renders ONLY axes in `schema`.
   type FilterAxis = "kind" | "source" | "show" | "authorIsMe" | "date" | "action";
 
   type ActiveFilters = {
@@ -84,17 +66,16 @@
     to?: string;
     defaultDateRange: boolean;
     all: boolean;
-    // Plan 02.1-20 carry-over: action stays in the type so /audit can
-    // populate it. Plan 02.1-21: axis rendering is now driven by `schema`,
-    // not by the presence of this field. The field is still a string[]
-    // so the action checkbox state can survive a re-render.
+    // action stays in the type so /audit can populate it. Axis
+    // rendering is driven by `schema`, not by the presence of this
+    // field. The field is still a string[] so the action checkbox state
+    // can survive a re-render.
     action?: string[];
   };
-  // Plan 02.1-39 (UAT-NOTES.md §5.6): kind extends SourceOption so the
-  // source-list rendering can show a kind glyph + short label adjacent to
-  // displayName, AND so the typeahead filter matches against the kind label.
-  // The DataSourceDto already exposes kind (src/lib/server/dto.ts:217); the
-  // /feed loader maps it through (verified at plan time — see below).
+  // SourceOption.kind drives the kind glyph + short label adjacent to
+  // displayName AND lets the typeahead filter match against the kind
+  // label. DataSourceDto exposes kind already (src/lib/server/dto.ts);
+  // the /feed loader maps it through.
   type SourceOption = {
     id: string;
     displayName: string | null;
@@ -116,22 +97,22 @@
     sources: SourceOption[];
     games: GameOption[];
     focusAxis?: FilterAxis;
-    // Plan 02.1-21: REQUIRED — consumer pages opt in to each axis explicitly.
-    // /feed passes ['kind','source','show','authorIsMe','date']; /audit
-    // passes ['action','date']. Replaces Plan 02.1-20's implicit gate.
+    // REQUIRED — consumer pages opt in to each axis explicitly. /feed
+    // passes ['kind','source','show','authorIsMe']; /audit passes
+    // ['action'].
     schema: ReadonlyArray<FilterAxis>;
     onApply: (next: {
       source?: string[];
       kind?: string[];
       show?: ShowFilter;
       authorIsMe?: boolean;
-      // Plan 02.1-21: date axis applied via this payload when 'date' is in
-      // the schema. /feed continues to use <DateRangeControl> (date params
-      // still flow via that path); the sheet's date inputs are a secondary
-      // entry that emits the same shape.
+      // Date axis applied via this payload when 'date' is in the
+      // schema. /feed continues to use <DateRangeControl>; the sheet's
+      // date inputs (when present) are a secondary entry that emits the
+      // same shape.
       from?: string;
       to?: string;
-      // Plan 02.1-20 carry-over: action axis emitted when schema includes it.
+      // Action axis emitted when schema includes it.
       action?: string[];
     }) => void;
     onClose: () => void;
@@ -155,23 +136,22 @@
     filters.authorIsMe === true ? "true" : filters.authorIsMe === false ? "false" : "any",
   );
 
-  // Plan 02.1-20: action axis state (used by /audit). /feed leaves
-  // filters.action undefined so this Set stays empty.
-  // Plan 02.1-21: rendering gate moved to schema.includes('action').
+  // Action axis state (used by /audit). /feed leaves filters.action
+  // undefined so this Set stays empty. Rendering is gated on
+  // schema.includes('action').
   let actionSelected = $state<Set<string>>(new Set(filters.action ?? []));
 
-  // Plan 02.1-21: in-sheet date axis (secondary entry; <DateRangeControl>
-  // above the chip strip is the primary always-visible entry). Local state
+  // In-sheet date axis (secondary entry; <DateRangeControl> above the
+  // chip strip is the primary always-visible entry). Local state
   // mirrors the loader-supplied values so users can edit + Apply.
   let fromVal = $state<string>(filters.from ?? "");
   let toVal = $state<string>(filters.to ?? "");
 
-  // Plan 02.1-20: functional-only allowlist + alphabetical-by-label sort.
-  // Mirrors the /events/new picker — same allowlist, same sort. Hidden
-  // kinds (reddit_post / twitter_post / telegram_post / discord_drop)
-  // re-appear when their Phase 3+ adapter ships. Legacy rows of hidden
-  // kinds still render via FilterChips' kindLabel switch (preserved — no
-  // change to FilterChips kind cases).
+  // Functional-only allowlist + alphabetical-by-label sort. Mirrors the
+  // /events/new picker — same allowlist, same sort. Hidden kinds
+  // (reddit_post / twitter_post / telegram_post / discord_drop)
+  // re-appear when their adapter ships. Legacy rows of hidden kinds
+  // still render via FilterChips' kindLabel switch.
   const FUNCTIONAL_KIND_OPTIONS: ReadonlyArray<string> = [
     "youtube_video",
     "post",
@@ -182,12 +162,10 @@
   ];
   const KIND_OPTIONS = $derived(sortByLabel(FUNCTIONAL_KIND_OPTIONS, (k) => kindLabel(k)));
 
-  // Phase 03.0.1 architecture cleanup — auditActionLabel + AUDIT_ACTIONS
-  // imported directly. Pre-cleanup this file carried an inline
-  // AUDIT_ACTIONS_MIRROR array AND an 80-line switch duplicated across
-  // AuditRow / FilterChips / FiltersSheet — drift caught by CI twice.
-  // Now: $lib/audit-labels.ts is the single source of truth (Record<...>
-  // gives compile-time completeness), and the const itself is the roster.
+  // auditActionLabel + AUDIT_ACTIONS imported directly. The shared
+  // $lib/audit-labels.ts is the single source of truth
+  // (Record<AuditAction, ...> gives compile-time completeness), and the
+  // const itself is the roster.
 
   const ACTION_OPTIONS = $derived(sortByLabel(AUDIT_ACTION_LIST, (a) => auditActionLabel(a)));
 
@@ -216,7 +194,7 @@
     }
   }
 
-  // Plan 02.1-39 (UAT-NOTES.md §5.6): typeahead also matches against the
+  // Typeahead also matches against the
   // localized kind label so a search for "youtube" / "ютуб" surfaces every
   // YouTube source even when displayName / handleUrl don't contain that
   // literal substring.
@@ -239,18 +217,15 @@
   $effect(() => {
     if (dialogEl && !dialogEl.open) {
       dialogEl.showModal();
-      // Plan 02.1-34 (UAT-NOTES.md §4.22.F regression fix): the imperative
-      // document.body.style.overflow = 'hidden' approach Plan 02.1-22 used
-      // here regressed — Svelte 5 $effect cleanup timing was unreliable AND
-      // nested ConfirmDialog instances could overwrite the inline style
-      // back to ''. The body-scroll-lock is now declarative via
+      // Body-scroll-lock is declarative via
       // `body:has(dialog[open]) { overflow: hidden; }` in src/app.css —
-      // the browser engine applies it the moment any <dialog open> exists
-      // and self-restores when none does. No JS state to manage here.
+      // the browser engine applies it the moment any <dialog open>
+      // exists and self-restores when none does. No JS state to manage
+      // here.
       //
-      // Plan 02.1-19: focus-jump support — when chip click opens the sheet
-      // with a specific axis hint, scroll its fieldset into view + focus
-      // the first interactive control. Lightweight UX nice-to-have.
+      // Focus-jump support — when chip click opens the sheet with a
+      // specific axis hint, scroll its fieldset into view + focus the
+      // first interactive control.
       if (focusAxis) {
         queueMicrotask(() => {
           const el = dialogEl?.querySelector<HTMLElement>(`[data-axis="${focusAxis}"]`);
@@ -266,8 +241,8 @@
 
   function onDialogCancel(e: Event): void {
     e.preventDefault();
-    // Plan 02.1-34: body-scroll lock is declarative (CSS :has(dialog[open]))
-    // — no imperative restore needed on Esc/backdrop close.
+    // Body-scroll lock is declarative (CSS :has(dialog[open])) — no
+    // imperative restore needed on Esc/backdrop close.
     onClose();
   }
 
@@ -287,8 +262,8 @@
           : showSelection === "standalone"
             ? { kind: "standalone" }
             : { kind: "specific", gameIds: Array.from(gameSelected) };
-    // Plan 02.1-21: emit each axis only when the consumer's schema includes
-    // it. The consumer page maps the apply payload back to URL params; an
+    // Emit each axis only when the consumer's schema includes it. The
+    // consumer page maps the apply payload back to URL params; an
     // omitted key means "this consumer doesn't own this axis".
     const payload: {
       source?: string[];
@@ -314,9 +289,9 @@
   }
 
   function clearAll(): void {
-    // Plan 02.1-21: clearAll preserves the schema-presence contract. Each
-    // axis the consumer owns is reset to its empty form; axes the consumer
-    // does NOT own are omitted from the payload entirely.
+    // clearAll preserves the schema-presence contract. Each axis the
+    // consumer owns is reset to its empty form; axes the consumer does
+    // NOT own are omitted from the payload entirely.
     const payload: {
       source?: string[];
       kind?: string[];
@@ -351,8 +326,7 @@
   <h2 id="filters-sheet-heading" class="heading">Filters</h2>
 
   <div class="grid">
-    <!-- Plan 02.1-21: each fieldset is gated on schema.includes(axis).
-         Replaces Plan 02.1-20's implicit filters.action-detection. -->
+    <!-- Each fieldset is gated on schema.includes(axis). -->
     {#if schema.includes("source")}
       <fieldset class="field" data-axis="source">
         <legend class="label">Source</legend>
@@ -364,11 +338,11 @@
         />
         <div class="checklist">
           {#each filteredSources as s (s.id)}
-            <!-- Plan 02.1-39 (UAT-NOTES.md §5.6): kind glyph + label appear
-                 BEFORE the displayName so users can scan the source list at
-                 a glance. Mirrors SourceRow's existing kind-tag pattern from
-                 Plan 02.1-25 — same SourceKindIcon + same sourceKindLabel
-                 helper for visual + textual consistency. -->
+            <!-- Kind glyph + label appear BEFORE the displayName so
+                 users can scan the source list at a glance. Mirrors
+                 SourceRow's existing kind-tag pattern — same
+                 SourceKindIcon + same sourceKindLabel helper for visual
+                 + textual consistency. -->
             <label class="check">
               <input
                 type="checkbox"
@@ -404,20 +378,12 @@
       </fieldset>
     {/if}
 
-    <!-- Plan 02.1-19: Game checkbox-list + Attached radio MERGED into a
-         single Show 3-radio with a conditional games multi-select. The
-         conflict between "Inbox AND specific games" is impossible by
-         construction.
-         Plan 02.1-39 round-6 polish #8 (UAT-NOTES.md §5.6 follow-up #8,
-         2026-04-30): converted from radio-button group to <select>
-         dropdown. User during UAT: "после кажлого круглого бокса пропуск
-         строки, выглядит как юудто это разные выборы. Может там через
-         раскрывающийся список, будет меньге месьта." The 4 stacked radios
-         had visible vertical gaps that read as 4 separate filters instead
-         of one mutually-exclusive choice. URL contract is unchanged
+    <!-- Show axis as a <select> dropdown with a conditional games
+         multi-select. The conflict between "Inbox AND specific games"
+         is impossible by construction. URL contract is unchanged
          (?show=any|inbox|standalone|specific) — the dropdown picks the
-         AXIS, the conditional checkbox-list below still picks the GAMES
-         when showSelection === "specific". -->
+         AXIS, the conditional checkbox-list below picks the GAMES when
+         showSelection === "specific". -->
     {#if schema.includes("show")}
       <fieldset class="field" data-axis="show">
         <legend class="label">{m.feed_filter_show_axis_label()}</legend>
@@ -451,12 +417,9 @@
       </fieldset>
     {/if}
 
-    <!-- Plan 02.1-39 round-6 polish #8: Author axis converted from radio
-         group to <select> for consistency with the Show axis treatment.
-         Same visual problem (vertical gaps between mutually-exclusive
-         options); same fix. URL contract unchanged (?authorIsMe=true|false
-         or omitted). Three options + "Any" → still compact as a dropdown,
-         and matching the Show pattern keeps the sheet visually uniform. -->
+    <!-- Author axis as a <select> for consistency with the Show axis
+         treatment. URL contract unchanged
+         (?authorIsMe=true|false or omitted). -->
     {#if schema.includes("authorIsMe")}
       <fieldset class="field" data-axis="authorIsMe">
         <legend class="label">Author</legend>
@@ -468,8 +431,8 @@
       </fieldset>
     {/if}
 
-    <!-- Plan 02.1-21: in-sheet date axis. Secondary entry; the always-
-         visible <DateRangeControl> above the chip strip is the primary one. -->
+    <!-- In-sheet date axis. Secondary entry; the always-visible
+         <DateRangeControl> above the chip strip is the primary one. -->
     {#if schema.includes("date")}
       <fieldset class="field" data-axis="date">
         <legend class="label">{m.audit_filter_date_axis_label()}</legend>
@@ -568,17 +531,16 @@
     border-radius: 4px;
     font-size: var(--font-size-body);
   }
-  /* Plan 02.1-39 round-6 polish #8: native <select> styling. Reuses the
-   * .input box treatment so Show / Author dropdowns visually match the
-   * search inputs and date pickers. The native chevron is preserved
-   * (browser-default appearance) — on mobile it gives the OS picker UX
-   * the user asked for ("через раскрывающийся список, будет меньге месьта"),
-   * and on desktop it gives the standard inline dropdown. */
+  /* Native <select> styling. Reuses the .input box treatment so Show /
+   * Author dropdowns visually match the search inputs and date pickers.
+   * The native chevron is preserved (browser-default appearance) — on
+   * mobile it gives the OS picker UX, on desktop the standard inline
+   * dropdown. */
   .select {
     width: 100%;
     cursor: pointer;
   }
-  /* Plan 02.1-21: in-sheet date axis label/input pair. */
+  /* In-sheet date axis label/input pair. */
   .input-wrap {
     display: flex;
     flex-direction: column;
@@ -607,20 +569,12 @@
     min-height: 32px;
     cursor: pointer;
   }
-  /* Plan 02.1-39 (UAT-NOTES.md §5.6): source row layout. The kind glyph +
-   * short kind label sit before the displayName so the visual hierarchy
-   * reads "▶ YouTube · Cool Channel Name". Mirrors SourceRow's existing
-   * kind-tag treatment for cross-surface consistency.
-   *
-   * Plan 02.1-39 round-6 polish #7 (UAT-NOTES.md §5.6 follow-up #7,
-   * 2026-04-30): label font-size reduced to var(--font-size-label) — kind
-   * metadata is subordinate to the displayName which carries the primary
-   * identity. User quote during round-6 UAT walking §5.6: "тип занимает
-   * слишком много места. МОжно просто ютую и шрифт меньше". The labels
-   * themselves shortened from "YouTube channel" / "Reddit account" / ...
-   * to single-word forms "YouTube" / "Reddit" / ... in messages/en.json
-   * for the same reason. SourceRow.kind-tag carries the same font-size
-   * reduction to keep the two surfaces visually consistent. */
+  /* Source row layout. The kind glyph + short kind label sit before
+   * the displayName so the visual hierarchy reads "▶ YouTube · Cool
+   * Channel Name". Mirrors SourceRow's existing kind-tag treatment for
+   * cross-surface consistency. Label font-size is reduced so kind
+   * metadata is subordinate to the displayName. The labels are
+   * single-word forms in messages/en.json. */
   .source-kind-tag {
     display: inline-flex;
     align-items: center;
@@ -637,10 +591,8 @@
     word-break: break-word;
     min-width: 0;
   }
-  /* .toggle was the radio-button row layout (4 stacked label+input pairs
-   * for the Show axis, 3 for Author). Plan 02.1-39 round-6 polish #8
-   * replaced both with <select> dropdowns; the rule is removed to keep
-   * dead CSS out of the bundle. */
+  /* The Show and Author axes use <select> dropdowns; the previous
+   * .toggle radio-button row layout is gone. */
   .actions {
     display: flex;
     gap: var(--space-sm);

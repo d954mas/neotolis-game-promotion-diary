@@ -1,4 +1,4 @@
-// Phase 3.0 Plan 07 — admin middleware live tests (Wave 0 placeholder activated).
+// Admin middleware tests.
 //
 // Covers the env-allowlist gate's NotFoundError contract:
 //   - empty ADMIN_EMAIL_ALLOWLIST → 404 for any authenticated user
@@ -6,7 +6,7 @@
 //   - allowlist match is case-insensitive (env reader lowercases at boot)
 //   - non-allowlisted email → NotFoundError → 404
 //
-// 404 not 403: AGENTS.md "Privacy & multi-tenancy" invariant 2 + AP-4. The
+// 404 not 403: AGENTS.md "Privacy & multi-tenancy" invariant 2. The
 // existence of /admin/* must NOT leak to non-allowlisted callers; returning
 // 403 would distinguish "you're not in the allowlist" from "this route does
 // not exist", which is the leak we explicitly forbid.
@@ -70,12 +70,12 @@ async function buildHarnessApp(opts: {
   return app;
 }
 
-describe("admin-middleware (Plan 03.0-07)", () => {
+describe("admin-middleware", () => {
   afterEach(() => {
     vi.resetModules();
   });
 
-  it("empty ADMIN_EMAIL_ALLOWLIST → 404 for any authenticated user — Plan 03.0-07", async () => {
+  it("empty ADMIN_EMAIL_ALLOWLIST → 404 for any authenticated user", async () => {
     const app = await buildHarnessApp({
       allowlist: "",
       userEmail: "anyone@example.com",
@@ -84,13 +84,13 @@ describe("admin-middleware (Plan 03.0-07)", () => {
     expect(res.status).toBe(404);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).toEqual({ error: "not_found" });
-    // AGENTS.md AP-4: response body MUST NOT leak "forbidden" / "permission".
+    // AGENTS.md: response body MUST NOT leak "forbidden" / "permission".
     const txt = JSON.stringify(body);
     expect(txt).not.toMatch(/forbidden/i);
     expect(txt).not.toMatch(/permission/i);
   });
 
-  it("user email NOT in allowlist → 404 — Plan 03.0-07", async () => {
+  it("user email NOT in allowlist → 404", async () => {
     const app = await buildHarnessApp({
       allowlist: "admin@example.com",
       userEmail: "other@example.com",
@@ -100,7 +100,7 @@ describe("admin-middleware (Plan 03.0-07)", () => {
     expect(await res.json()).toEqual({ error: "not_found" });
   });
 
-  it("user email in allowlist (exact match) → calls next() — Plan 03.0-07", async () => {
+  it("user email in allowlist (exact match) → calls next()", async () => {
     const app = await buildHarnessApp({
       allowlist: "admin@example.com",
       userEmail: "admin@example.com",
@@ -110,7 +110,7 @@ describe("admin-middleware (Plan 03.0-07)", () => {
     expect(await res.json()).toEqual({ ok: true });
   });
 
-  it("user email in allowlist (case-insensitive — uppercase caller) → calls next() — Plan 03.0-07", async () => {
+  it("user email in allowlist (case-insensitive — uppercase caller) → calls next()", async () => {
     // The env reader lowercases entries at boot; the middleware lowercases
     // the caller's email on every request. Mixed-case input on either side
     // resolves to the same key.
@@ -123,7 +123,7 @@ describe("admin-middleware (Plan 03.0-07)", () => {
     expect(await res.json()).toEqual({ ok: true });
   });
 
-  it("user email in allowlist (mixed-case env entry) → calls next() — Plan 03.0-07", async () => {
+  it("user email in allowlist (mixed-case env entry) → calls next()", async () => {
     // Mirror image of the previous test: the env entry uses mixed case
     // (operator typo in .env) but the reader normalizes at boot.
     const app = await buildHarnessApp({
@@ -134,7 +134,7 @@ describe("admin-middleware (Plan 03.0-07)", () => {
     expect(res.status).toBe(200);
   });
 
-  it("multi-entry allowlist + caller in second slot → calls next() — Plan 03.0-07", async () => {
+  it("multi-entry allowlist + caller in second slot → calls next()", async () => {
     const app = await buildHarnessApp({
       allowlist: "first@example.com,second@example.com",
       userEmail: "second@example.com",
@@ -143,7 +143,7 @@ describe("admin-middleware (Plan 03.0-07)", () => {
     expect(res.status).toBe(200);
   });
 
-  it("missing userEmail (defensive — tenantScope MUST set it) → 404 — Plan 03.0-07", async () => {
+  it("missing userEmail (defensive — tenantScope MUST set it) → 404", async () => {
     // tenantScope always sets c.var.userEmail before adminAllowlist runs in
     // production (the auth gate fires before the allowlist gate). This test
     // pins the defensive fallback: an undefined userEmail string is treated

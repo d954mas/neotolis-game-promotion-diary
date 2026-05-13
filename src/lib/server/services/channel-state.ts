@@ -1,10 +1,6 @@
-// channel-state service — Phase 03.0.1 Wave 1 (channel-scoped polling).
+// channel-state service — channel-scoped polling state.
 //
-// Replaces per-source backfill state helpers in services/data-sources.ts
-// (markSourceLastPolledAt / markSourceBackfillFrontier /
-// markSourceBackfillComplete / setSourceBackfillPageToken /
-// resetSourceBackfillComplete). Channel-level: one row per (kind,
-// channelKey) shared across all subscribers.
+// One row per (kind, channelKey) shared across all subscribers.
 //
 // CROSS-TENANT BY DESIGN. Channels are global; per-user state lives in
 // data_sources (target_since, auto_import, etc.). Tenant scoping happens
@@ -15,8 +11,8 @@
 // queries deliberately omit a userId filter.
 //
 // Race-safety: markChannelBackfillFrontier WHERE-guards the deeper-only
-// move (matches Phase 03.0.1 P2-1 fix); other helpers are last-write-wins
-// (cosmetic — last_polled_at, backfill_complete are monotonic-ish state).
+// move; other helpers are last-write-wins (cosmetic — last_polled_at,
+// backfill_complete are monotonic-ish state).
 
 import { and, eq, sql } from "drizzle-orm";
 import { db, type DbOrTx } from "../db/client.js";
@@ -67,7 +63,7 @@ export async function ensureChannelState(
  * Stamp `last_polled_at = NOW()` on this channel. Called from EVERY
  * successful walk regardless of trigger (cron incremental, cron
  * auto-backfill, user click). UI displays this value verbatim across
- * all subscribers — Q3-A semantics.
+ * all subscribers.
  *
  * Auto-creates the row if it doesn't exist (cold-start path).
  */
@@ -89,8 +85,6 @@ export async function markChannelLastPolledAt(
  * Move the auto-import frontier (deepest-walked event timestamp). The
  * UPDATE is WHERE-guarded so concurrent walks (cron + manual click) cannot
  * race-rollback the frontier. Only deeper writes win. Auto-creates row.
- *
- * Mirrors Phase 03.0.1 P2-1 race-safety from per-source impl.
  */
 export async function markChannelBackfillFrontier(
   kind: SourceKind,

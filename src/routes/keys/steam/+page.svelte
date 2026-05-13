@@ -1,5 +1,5 @@
 <script lang="ts">
-  // /keys/steam — write-once secret store, multi-key UI (Plan 02-10, D-13).
+  // /keys/steam — write-once secret store, multi-key UI.
   //
   // 0 rows → <EmptyState> + <ReplaceKeyForm mode="add"> ("Add your first key")
   // N ≥ 1 rows → <KeyMaskRow> list + <ReplaceKeyForm mode="add"> ("Add another")
@@ -7,8 +7,8 @@
   // Each row exposes Replace and Remove. Replace opens an inline
   // <ReplaceKeyForm mode="replace"> for that row's id (PATCH the row).
   // Remove opens <ConfirmDialog isIrreversible> with the speed-bump pattern.
-  // All ciphertext discipline (D-14 / D-39) lives behind the API surface;
-  // this page never sees plaintext or ciphertext, only the masked DTO.
+  // All ciphertext discipline lives behind the API surface; this page never
+  // sees plaintext or ciphertext, only the masked DTO.
 
   import { invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";

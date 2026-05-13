@@ -15,13 +15,12 @@ import { uuidv7 } from "../../src/lib/server/ids.js";
 import { seedUserDirectly } from "./helpers.js";
 
 /**
- * Phase 2.1 Wave 1B (Plan 02.1-05) — listFeedPage service-level tests.
+ * listFeedPage service-level tests.
  *
- * The placeholders (Plan 02.1-02) named `Plan 02.1-06: GET /api/events ...` —
- * those route-layer assertions land in Plan 02.1-06. Here we flip them to live
- * SERVICE-level tests against listFeedPage, which is the function the route
- * layer wraps. The service contract IS the load-bearing one (RESEARCH §3.3 +
- * PITFALL P19); the route layer only adds URL-param parsing + DTO projection.
+ * The route-layer assertions live elsewhere. Here we test the
+ * listFeedPage service that the route layer wraps. The service contract
+ * IS the load-bearing one; the route layer only adds URL-param parsing
+ * + DTO projection.
  */
 
 interface Seeded {
@@ -32,8 +31,8 @@ interface Seeded {
 
 async function seedUserGameAndSource(email: string): Promise<Seeded> {
   const u = await seedUserDirectly({ email });
-  // Insert games / data_sources rows directly so we don't depend on the
-  // games / data-sources services (Plan 02.1-04 may be mid-flight in parallel).
+  // Insert games / data_sources rows directly so we don't depend on
+  // the games / data-sources services.
   const gameId = uuidv7();
   await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
   const sourceId = uuidv7();
@@ -186,7 +185,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
   });
 
   it("filter show.specific with empty gameIds is equivalent to any (no filter applied)", async () => {
-    // Plan 02.1-19 contract: `show: { kind: 'specific', gameIds: [] }` is
+    // Contract: `show: { kind: 'specific', gameIds: [] }` is
     // semantically equivalent to `show: { kind: 'any' }`. The UI prevents
     // this state but the service stays defensive (mirrors pushAxis empty-
     // array semantics).
@@ -280,7 +279,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     expect(ids).toContain(inbox.id);
   });
 
-  it("Plan 02.1-19: cross-tenant probe — userB cannot pierce userId scope via show.specific&gameIds=[userAGameId]", async () => {
+  it("cross-tenant probe — userB cannot pierce userId scope via show.specific&gameIds=[userAGameId]", async () => {
     // userId WHERE clause is the firewall — gameId match is downstream of
     // tenant scope. CLAUDE.md item 1: tenant scope is mandatory and explicit.
     const userA = await seedUserDirectly({ email: "feed-cross-a@test.local" });
@@ -312,7 +311,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     expect(page.rows).toHaveLength(0);
   });
 
-  it("Plan 02.1-19: show.specific with one game returns only events with game_id = X (replaces legacy attached=true semantic)", async () => {
+  it("show.specific with one game returns only events with game_id = X", async () => {
     const { userId, gameId } = await seedUserGameAndSource("feed5@test.local");
     const attached = await createEvent(
       userId,
@@ -342,12 +341,12 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     );
     expect(page.rows).toHaveLength(1);
     expect(page.rows[0]!.id).toBe(attached.id);
-    // Plan 02.1-28: events.gameId column gone; gameId membership is verified
+    // The events.gameId column is gone; gameId membership is verified
     // by the EXISTS subquery in listFeedPage. The single returned row is
     // the one we attached above (attached.id matches).
   });
 
-  it("Plan 02.1-19: show.inbox returns events with game_id IS NULL AND metadata.inbox.dismissed != true (replaces legacy attached=false)", async () => {
+  it("show.inbox returns events with game_id IS NULL AND metadata.inbox.dismissed != true", async () => {
     const { userId, gameId } = await seedUserGameAndSource("feed6@test.local");
     const inbox = await createEvent(
       userId,
@@ -387,8 +386,8 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     const ids = page.rows.map((r) => r.id);
     expect(ids).toContain(inbox.id);
     expect(ids).not.toContain(dismissed.id);
-    // Plan 02.1-28: inbox criterion = NOT EXISTS over event_games. The
-    // attached row is excluded by the EXISTS check; we verify by id.
+    // Inbox criterion = NOT EXISTS over event_games. The attached row
+    // is excluded by the EXISTS check; we verify by id.
     const attachedIdInIds = ids.filter((id) => id === inbox.id);
     expect(attachedIdInIds).toHaveLength(1);
   });
@@ -574,7 +573,7 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
     expect(page2.nextCursor).toBeNull();
   });
 
-  it("PITFALL P19: cursor opacity does not let user A see user B's row IDs (userId WHERE clause first)", async () => {
+  it("cursor opacity does not let user A see user B's row IDs (userId WHERE clause first)", async () => {
     const userA = await seedUserDirectly({ email: "feed11a@test.local" });
     const userB = await seedUserDirectly({ email: "feed11b@test.local" });
     const gameB = uuidv7();
@@ -640,9 +639,9 @@ describe("FEED-01: listFeedPage chronological pool with filters", () => {
   });
 });
 
-// Plan 02.1-06 — GET /api/events HTTP-boundary tests for the feed loader.
-describe("Plan 02.1-06: GET /api/events HTTP boundary", () => {
-  it("Plan 02.1-06: GET /api/events returns 200 + {rows, nextCursor} with EventDto-projected rows (no userId)", async () => {
+// GET /api/events HTTP-boundary tests for the feed loader.
+describe("GET /api/events HTTP boundary", () => {
+  it("GET /api/events returns 200 + {rows, nextCursor} with EventDto-projected rows (no userId)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const { userId, gameId } = await seedUserGameAndSource("http-feed-1@test.local");
@@ -674,10 +673,8 @@ describe("Plan 02.1-06: GET /api/events HTTP boundary", () => {
     expect(body.nextCursor).toBeNull();
   });
 
-  it("Plan 02.1-19: GET /api/events?show=specific&game=:id returns rows attached to that game (replaces legacy ?attached=true)", async () => {
-    // Plan 02.1-19 destructive contract change: ?attached=true|false is gone;
-    // ?show=any|inbox|specific&game=A&game=B replaces it. Pre-launch
-    // (CONTEXT D-04: zero self-host deployments) so the URL break is OK.
+  it("GET /api/events?show=specific&game=:id returns rows attached to that game", async () => {
+    // The URL contract is ?show=any|inbox|specific&game=A&game=B.
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-feed-2@test.local" });
@@ -710,12 +707,12 @@ describe("Plan 02.1-06: GET /api/events HTTP boundary", () => {
     const body = (await res.json()) as { rows: Array<{ id: string; gameIds: string[] }> };
     expect(body.rows).toHaveLength(1);
     expect(body.rows[0]!.id).toBe(attached.id);
-    // Plan 02.1-28: EventDto.gameIds replaces gameId. The single returned row
-    // carries the attached gameId in its gameIds array.
+    // EventDto.gameIds replaces gameId. The single returned row carries
+    // the attached gameId in its gameIds array.
     expect(body.rows[0]!.gameIds).toEqual([gameId]);
   });
 
-  it("Plan 02.1-06: GET /api/events response rows are EventDto-projected (no userId leaks)", async () => {
+  it("GET /api/events response rows are EventDto-projected (no userId leaks)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-feed-3@test.local" });
@@ -739,7 +736,7 @@ describe("Plan 02.1-06: GET /api/events HTTP boundary", () => {
     expect(body.rows[0]).not.toHaveProperty("userId");
   });
 
-  it("Plan 02.1-06: GET /api/events?kind=invalid returns 422 validation_failed", async () => {
+  it("GET /api/events?kind=invalid returns 422 validation_failed", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-feed-4@test.local" });
@@ -751,11 +748,12 @@ describe("Plan 02.1-06: GET /api/events HTTP boundary", () => {
   });
 });
 
-// Plan 02.1-15 — multi-select filter tests (VERIFICATION.md Gap 4 closure).
-// OR-within-axis (source IN (A, B)) + AND-across-axes ((source IN ...) AND
-// (kind = ...)) semantics; bare-string back-compat preserved; HTTP-layer
-// repeated-param parsing (?source=A&source=B) lands the same envelope.
-describe("Plan 02.1-15: multi-select feed filters (OR-within-axis, AND-across-axes)", () => {
+// Multi-select filter tests.
+// OR-within-axis (source IN (A, B)) + AND-across-axes ((source IN ...)
+// AND (kind = ...)) semantics; bare-string back-compat preserved;
+// HTTP-layer repeated-param parsing (?source=A&source=B) lands the same
+// envelope.
+describe("multi-select feed filters (OR-within-axis, AND-across-axes)", () => {
   async function seedThreeSources(
     email: string,
   ): Promise<{ userId: string; sourceA: string; sourceB: string; sourceC: string }> {
@@ -795,7 +793,7 @@ describe("Plan 02.1-15: multi-select feed filters (OR-within-axis, AND-across-ax
     return { userId: u.id, sourceA, sourceB, sourceC };
   }
 
-  it("Plan 02.1-15: source=[A, B] returns rows from A or B (OR within axis), excludes C", async () => {
+  it("source=[A, B] returns rows from A or B (OR within axis), excludes C", async () => {
     const { userId, sourceA, sourceB, sourceC } = await seedThreeSources("ms-feed-1@test.local");
     const eA = await createEvent(
       userId,
@@ -839,7 +837,7 @@ describe("Plan 02.1-15: multi-select feed filters (OR-within-axis, AND-across-ax
     expect(page.rows.every((r) => r.sourceId === sourceA || r.sourceId === sourceB)).toBe(true);
   });
 
-  it("Plan 02.1-15: source=[A] (single-element array) returns one row — eq() back-compat", async () => {
+  it("source=[A] (single-element array) returns one row — eq() back-compat", async () => {
     const { userId, sourceA, sourceB } = await seedThreeSources("ms-feed-2@test.local");
     const eA = await createEvent(
       userId,
@@ -869,7 +867,7 @@ describe("Plan 02.1-15: multi-select feed filters (OR-within-axis, AND-across-ax
     expect(page.rows[0]!.id).toBe(eA.id);
   });
 
-  it("Plan 02.1-15: source='A' (legacy bare string) preserves Phase 2 callers", async () => {
+  it("source='A' (legacy bare string) preserves single-value callers", async () => {
     const { userId, sourceA, sourceB } = await seedThreeSources("ms-feed-3@test.local");
     const eA = await createEvent(
       userId,
@@ -899,7 +897,7 @@ describe("Plan 02.1-15: multi-select feed filters (OR-within-axis, AND-across-ax
     expect(page.rows[0]!.id).toBe(eA.id);
   });
 
-  it("Plan 02.1-15: source=[] (empty array) is treated as no filter — returns all rows", async () => {
+  it("source=[] (empty array) is treated as no filter — returns all rows", async () => {
     const { userId, sourceA, sourceB, sourceC } = await seedThreeSources("ms-feed-4@test.local");
     await createEvent(
       userId,
@@ -939,7 +937,7 @@ describe("Plan 02.1-15: multi-select feed filters (OR-within-axis, AND-across-ax
     expect(page.rows).toHaveLength(3);
   });
 
-  it("Plan 02.1-15: AND-across-axes — source=[A,B] AND kind=[youtube_video]", async () => {
+  it("AND-across-axes — source=[A,B] AND kind=[youtube_video]", async () => {
     const { userId, sourceA, sourceB } = await seedThreeSources("ms-feed-5@test.local");
     // Mixed kinds: A has a youtube_video AND a press; B has only youtube_video.
     const aYt = await createEvent(
@@ -987,7 +985,7 @@ describe("Plan 02.1-15: multi-select feed filters (OR-within-axis, AND-across-ax
     expect(page.rows.every((r) => r.kind === "youtube_video")).toBe(true);
   });
 
-  it("Plan 02.1-15: GET /api/events?source=A&source=B returns 200 + rows scoped to those 2 sources", async () => {
+  it("GET /api/events?source=A&source=B returns 200 + rows scoped to those 2 sources", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "ms-feed-http-1@test.local" });
@@ -1069,7 +1067,7 @@ describe("Plan 02.1-15: multi-select feed filters (OR-within-axis, AND-across-ax
     expect(body.rows.every((r) => r.sourceId === sourceA || r.sourceId === sourceB)).toBe(true);
   });
 
-  it("Plan 02.1-15: GET /api/events?source=A (single param) preserves single-value back-compat", async () => {
+  it("GET /api/events?source=A (single param) preserves single-value back-compat", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "ms-feed-http-2@test.local" });
@@ -1131,14 +1129,14 @@ describe("Plan 02.1-15: multi-select feed filters (OR-within-axis, AND-across-ax
   });
 });
 
-// Plan 02.1-24 — listFeedPage gains a fourth ShowFilter branch:
-// `{ kind: 'standalone' }` returns only events where game_id IS NULL AND
-// metadata.triage.standalone='true'. Inbox view continues to exclude
-// dismissed events AND now also excludes standalone events (they are a
-// separate triage state, not "still in inbox"). Cross-tenant probe with
-// show.kind=standalone returns ZERO of the other tenant's standalone rows.
-describe("Plan 02.1-24 — show.kind=standalone filter", () => {
-  it("Plan 02.1-24 Test A: listFeedPage with show.kind=standalone returns ONLY events where game_id IS NULL AND metadata.triage.standalone=true", async () => {
+// listFeedPage's ShowFilter branch `{ kind: 'standalone' }` returns
+// only events where game_id IS NULL AND metadata.triage.standalone =
+// 'true'. Inbox view excludes dismissed events AND standalone events
+// (they are a separate triage state, not "still in inbox").
+// Cross-tenant probe with show.kind=standalone returns ZERO of the
+// other tenant's standalone rows.
+describe("show.kind=standalone filter", () => {
+  it("listFeedPage with show.kind=standalone returns ONLY events where game_id IS NULL AND metadata.triage.standalone=true", async () => {
     const u = await seedUserDirectly({ email: "p24-feed-1@test.local" });
 
     // Inbox event (game_id=null, no standalone flag) — must NOT appear in standalone view.
@@ -1187,7 +1185,7 @@ describe("Plan 02.1-24 — show.kind=standalone filter", () => {
     expect(ids).not.toContain(attachedEv.id);
   });
 
-  it("Plan 02.1-24 Test B: listFeedPage with show.kind=inbox EXCLUDES standalone events (in addition to existing dismissed exclusion)", async () => {
+  it("listFeedPage with show.kind=inbox EXCLUDES standalone events (in addition to existing dismissed exclusion)", async () => {
     const u = await seedUserDirectly({ email: "p24-feed-2@test.local" });
 
     const inboxEv = await createEvent(
@@ -1219,7 +1217,7 @@ describe("Plan 02.1-24 — show.kind=standalone filter", () => {
     expect(ids).not.toContain(standaloneEv.id);
   });
 
-  it("Plan 02.1-24 Test C: cross-tenant probe with show.kind=standalone returns ZERO of other-tenant standalone rows (P19 mitigation by construction)", async () => {
+  it("cross-tenant probe with show.kind=standalone returns ZERO of other-tenant standalone rows", async () => {
     const userA = await seedUserDirectly({ email: "p24-feed-3a@test.local" });
     const userB = await seedUserDirectly({ email: "p24-feed-3b@test.local" });
 
@@ -1241,21 +1239,16 @@ describe("Plan 02.1-24 — show.kind=standalone filter", () => {
 });
 
 /**
- * Plan 02.1-26 — FeedQuickNav loader contract.
+ * FeedQuickNav loader contract.
  *
- * The new <FeedQuickNav> component renders one tab per the user's games
+ * The <FeedQuickNav> component renders one tab per the user's games
  * (collapsed into a 'More games' dropdown when > 5). It consumes the
  * existing /feed/+page.server.ts loader's `data.games` array directly —
  * NO new loader call, NO new endpoint. The tests below document the
- * contract so a future loader refactor that drops `games` from the page
- * data trips this assertion BEFORE FeedQuickNav goes blank.
- *
- * `data.games` was already returned by the loader since Plan 02.1-07
- * (FiltersSheet's per-game multi-select needs the list). Plan 02.1-26
- * adds a SECOND consumer; the contract assertion below makes that
- * explicit.
+ * contract so a future loader refactor that drops `games` from the
+ * page data trips this assertion BEFORE FeedQuickNav goes blank.
  */
-describe("Plan 02.1-26 — FeedQuickNav loader contract (data.games available)", () => {
+describe("FeedQuickNav loader contract (data.games available)", () => {
   it("listFeedPage's tenant-scoping is preserved by per-game show filter (sanity guard for FeedQuickNav per-game tab path)", async () => {
     // FeedQuickNav per-game tab navigates to ?show=specific&game=<id>. The
     // loader resolves that into ShowFilter { kind: 'specific', gameIds: [id] }
@@ -1294,7 +1287,6 @@ describe("Plan 02.1-26 — FeedQuickNav loader contract (data.games available)",
 });
 
 /**
- * Plan 02.1-28 (UAT-NOTES.md §4.24.G — M:N migration application layer) —
  * listFeedPage show-axis behavior over the event_games junction.
  *
  * The legacy `events.gameId IS NULL` predicate is replaced with NOT EXISTS
@@ -1304,11 +1296,11 @@ describe("Plan 02.1-26 — FeedQuickNav loader contract (data.games available)",
  * clause is duplicated INSIDE the subquery — the `eventGames.userId`
  * column is the literal column the ESLint tenant-scope rule walks for).
  */
-describe("Plan 02.1-28 — listFeedPage M:N show-axis", () => {
-  // Parallel-executor email-uniqueness coordination (Plan 02.1-17 pattern):
+describe("listFeedPage M:N show-axis", () => {
+  // Parallel-executor email-uniqueness coordination:
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 02.1-28: listFeedPage show=specific gameIds=[A] returns events attached to A only via EXISTS junction subquery", async () => {
+  it("listFeedPage show=specific gameIds=[A] returns events attached to A only via EXISTS junction subquery", async () => {
     const u = await seedUserDirectly({ email: `feed28-specific-a-${uniq()}@test.local` });
     const gA = uuidv7();
     const gB = uuidv7();
@@ -1352,7 +1344,7 @@ describe("Plan 02.1-28 — listFeedPage M:N show-axis", () => {
     expect(ids).not.toContain(evInbox.id);
   });
 
-  it("Plan 02.1-28: listFeedPage show=inbox returns events with ZERO event_games rows (NOT EXISTS subquery)", async () => {
+  it("listFeedPage show=inbox returns events with ZERO event_games rows (NOT EXISTS subquery)", async () => {
     const u = await seedUserDirectly({ email: `feed28-inbox-${uniq()}@test.local` });
     const gA = uuidv7();
     await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
@@ -1383,7 +1375,7 @@ describe("Plan 02.1-28 — listFeedPage M:N show-axis", () => {
     expect(ids).not.toContain(attached.id);
   });
 
-  it("Plan 02.1-28: listFeedPage show=specific multi-game uses EXISTS + IN — returns events attached to ANY of the gameIds", async () => {
+  it("listFeedPage show=specific multi-game uses EXISTS + IN — returns events attached to ANY of the gameIds", async () => {
     const u = await seedUserDirectly({ email: `feed28-multi-${uniq()}@test.local` });
     const gA = uuidv7();
     const gB = uuidv7();
@@ -1429,7 +1421,7 @@ describe("Plan 02.1-28 — listFeedPage M:N show-axis", () => {
     expect(ids).not.toContain(evC.id);
   });
 
-  it("Plan 02.1-28: listFeedPage show=specific cross-tenant gameId returns zero rows (subquery userId clause)", async () => {
+  it("listFeedPage show=specific cross-tenant gameId returns zero rows (subquery userId clause)", async () => {
     const userA = await seedUserDirectly({ email: `feed28-xt-a-${uniq()}@test.local` });
     const userB = await seedUserDirectly({ email: `feed28-xt-b-${uniq()}@test.local` });
     const gA = uuidv7();

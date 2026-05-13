@@ -6,10 +6,9 @@ import * as SteamApi from "../../src/lib/server/integrations/steam-api.js";
 import { seedUserDirectly } from "./helpers.js";
 
 /**
- * Plan 02-08 — cross-cutting Pino redact (P3 + D-24).
+ * Cross-cutting Pino redact.
  *
- * The Wave 0 placeholder for "ciphertext field names never logged during
- * request flow" lights up here. The assertion is coarse but load-bearing:
+ * The assertion is coarse but load-bearing:
  *
  *   1. The plaintext input to `createSteamKey` MUST NOT appear in any
  *      logged line. (If it did, an attacker reading the operator's log
@@ -22,11 +21,10 @@ import { seedUserDirectly } from "./helpers.js";
  *
  * Capture strategy: spy on the four logger output methods. This is
  * coarser than attaching a stream to Pino but sufficient for the
- * cross-cutting check the plan requires; tightening (e.g. fast-redact
- * fuzzing) is Phase 6 polish.
+ * cross-cutting check; tightening (e.g. fast-redact fuzzing) is deferred.
  */
-describe("cross-cutting Pino redact (P3 + D-24)", () => {
-  it("02-08: cross-cutting Pino redact — ciphertext field names never logged during request flow", async () => {
+describe("cross-cutting Pino redact", () => {
+  it("ciphertext field names never logged during request flow", async () => {
     const captured: string[] = [];
     const originalInfo = logger.info.bind(logger);
     const originalWarn = logger.warn.bind(logger);
@@ -70,7 +68,7 @@ describe("cross-cutting Pino redact (P3 + D-24)", () => {
 
       // (2) Ciphertext bytes (base64-shaped string after a known column-name key)
       //     MUST NOT appear in logs. Pino's redact paths cover camelCase variants
-      //     of these (D-24 / src/lib/server/logger.ts). The check below is a
+      //     of these (src/lib/server/logger.ts). The check below is a
       //     belt-and-suspenders proxy: if the ciphertext bytes leaked alongside
       //     the field name, we'd spot the regex hit and fail.
       const ciphertextNames = [

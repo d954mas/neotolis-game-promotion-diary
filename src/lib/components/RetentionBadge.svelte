@@ -1,8 +1,8 @@
 <script lang="ts">
-  // RetentionBadge — displays "Purges in N days" for soft-deleted rows
-  // (D-25). Computes daysUntilPurge = (deletedAt + retentionDays - now)
-  // and renders the warning variant (destructive color) when fewer than
-  // 7 days remain — gives the user a chance to restore before the cron
+  // RetentionBadge — displays "Purges in N days" for soft-deleted rows.
+  // Computes daysUntilPurge = (deletedAt + retentionDays - now) and
+  // renders the warning variant (destructive color) when fewer than 7
+  // days remain — gives the user a chance to restore before the cron
   // permanently purges.
   //
   // retentionDays is a prop so the page can pass the env-derived value

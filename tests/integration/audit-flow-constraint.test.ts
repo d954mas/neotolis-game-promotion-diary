@@ -1,4 +1,4 @@
-// Phase 03.0.1 (post-review Issue 5) — defense-in-depth CHECK constraint test.
+// Defense-in-depth CHECK constraint test.
 //
 // Migration 0025 adds `audit_log_metadata_flow_valid` pinning
 // metadata->>'flow' to the AuditFlow enum. TypeScript catches typos at
@@ -12,7 +12,7 @@
 //   3. metadata->>'flow' IN (...allowed values...) → pass when valid
 //   4. metadata->>'flow' = anything else           → REJECT with constraint error
 //
-// We don't test branch 1 explicitly — every Phase 02.x audit row went in
+// We don't test branch 1 explicitly — every legacy audit row went in
 // with metadata != NULL (writeAudit defaults to {}); branch 2 covers the
 // vast majority of legacy rows.
 
@@ -63,7 +63,7 @@ describe("audit_log metadata.flow CHECK constraint (migration 0025)", () => {
     ).resolves.toBeDefined();
   });
 
-  it("accepts raw INSERT without flow key (legacy Phase 02.x verbs)", async () => {
+  it("accepts raw INSERT without flow key (legacy verbs)", async () => {
     const u = await seedUserDirectly({ email: `flow-none-${uniq()}@test.local` });
     await expect(
       db.execute(sql`

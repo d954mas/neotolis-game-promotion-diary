@@ -1,16 +1,16 @@
 // `app` role entrypoint — boots the Hono server and mounts the SvelteKit
 // adapter-node handler so a single process serves /healthz, /readyz,
-// /api/auth/* (Better Auth), /api/* (Plan 07 tenantScope target), and every
+// /api/auth/* (Better Auth), /api/* (tenantScope target), and every
 // SvelteKit page from one port.
 //
-// Pattern 1 (RESEARCH.md): Hono is the outer server; SvelteKit's
-// adapter-node handler is invoked as a Node middleware for the catch-all
-// route. That keeps the auth and health layers Hono-native (web standards,
-// fast) while letting SvelteKit own UI rendering and form actions.
+// Hono is the outer server; SvelteKit's adapter-node handler is invoked
+// as a Node middleware for the catch-all route. That keeps the auth and
+// health layers Hono-native (web standards, fast) while letting SvelteKit
+// own UI rendering and form actions.
 //
-// Graceful shutdown (D-22): SIGTERM drains the HTTP server, then closes the
-// pg.Pool. Force-exit fallback at 60 s to keep an orchestrator from hanging
-// on a wedged drain.
+// Graceful shutdown: SIGTERM drains the HTTP server, then closes the
+// pg.Pool. Force-exit fallback at 60 s to keep an orchestrator from
+// hanging on a wedged drain.
 
 import { serve } from "@hono/node-server";
 import { createApp } from "../lib/server/http/app.js";
@@ -107,7 +107,7 @@ export async function start(): Promise<void> {
     logger.info({ port: info.port, role: "app" }, "app role listening");
   });
 
-  // Graceful shutdown (D-22).
+  // Graceful shutdown.
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "received shutdown signal, draining…");
     server.close(async () => {

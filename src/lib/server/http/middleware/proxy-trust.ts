@@ -1,4 +1,4 @@
-// Trusted-proxy header parser (D-19/D-20 — Phase 1 Plan 06).
+// Trusted-proxy header parser.
 //
 // Resolves the real client IP and protocol scheme behind any combination of
 // bare port / nginx / Caddy / Cloudflare. Implements CVE-2026-27700

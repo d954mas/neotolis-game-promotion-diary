@@ -1,12 +1,11 @@
-// Phase 3.0 Plan 11 — render-time guard for the live-state PollingBadge
-// rewrite (5 user-facing variants per UI-SPEC §"Component inventory:
-// PollingBadge REWRITE").
+// Render-time guard for the live-state PollingBadge rewrite (5
+// user-facing variants).
 //
-// Uses Svelte 5 SSR via `svelte/server` — same pattern as Plan 02.1-20's
-// audit-render.test.ts and Plan 03.0-12's tests/unit/account-deleted-banner.test.ts.
+// Uses Svelte 5 SSR via `svelte/server` — same pattern as
+// audit-render.test.ts and tests/unit/account-deleted-banner.test.ts.
 //
-// FILE LOCATION DEVIATION (Rule 3 — blocking): the plan asked for the test
-// at tests/browser/polling-badge.test.ts but vitest's browser-mode bundler
+// FILE LOCATION DEVIATION: the test was originally planned at
+// tests/browser/polling-badge.test.ts but vitest's browser-mode bundler
 // (Playwright-driven Chromium) cannot resolve the $app/navigation virtual
 // module pulled in by RefreshNowButton.svelte (which PollingBadge renders
 // inline). A vi.mock() runs at TEST time but the import-analysis vite
@@ -17,19 +16,19 @@
 // tests/unit/account-deleted-banner.test.ts which has the exact same
 // $app/navigation challenge for AccountDeletedBanner). Moving the test
 // here keeps all 14 assertions live; the browser-mode 360px-viewport
-// end-to-end is deferred to Phase 6 with the rest of the auth-harness
-// surface (same precedent as feed-360.test.ts skips for /feed at 360px).
+// end-to-end is deferred along with the rest of the auth-harness surface
+// (same precedent as feed-360.test.ts skips for /feed at 360px).
 //
-// Coverage (per the plan's <behavior> block):
+// Coverage:
 //   1. Active tier — Hot · checked Xh ago
 //   2. Cold tier — Cold variant copy with day count
 //   3. Frozen tier — Frozen · refresh to update
 //   4. lastPollStatus override — Unavailable · last seen Xd ago
 //   5. Manual entry — lastPolledAt=null + Active tier; refresh button HIDDEN
-//   6. Non-pollable kind — component renders nothing (Phase 2.1 contract)
+//   6. Non-pollable kind — component renders nothing
 //   7. RefreshNowButton renders inline when refresh affordance is visible
 //
-// All copy comes from messages/en.json via Paraglide (Plan 02 keys);
+// All copy comes from messages/en.json via Paraglide;
 // assertions match against substring fragments to stay tolerant of small
 // copy edits down the road (the `Hot` / `Cold` / `Frozen` / `Unavailable`
 // / `Manual entry` discriminator words are load-bearing).
@@ -77,9 +76,9 @@ function mkEvent(overrides: Partial<EventForBadge> = {}): EventForBadge {
   };
 }
 
-describe("PollingBadge — live state (Plan 03.0-11)", () => {
-  // Phase 03.0.1 Wave 4 (post-UAT) — badge text replaced tier vocab
-  // ("Hot/Cold/Frozen") with relative-time copy ("Updated 1h ago"). Tier
+describe("PollingBadge — live state", () => {
+  // Badge text replaced tier vocab ("Hot/Cold/Frozen") with relative-time
+  // copy ("Updated 1h ago"). Tier
   // still drives the variant CSS class for color rules. Tests assert
   // both: relative-time copy AND variant class so style/copy contracts
   // stay independent.
@@ -122,7 +121,7 @@ describe("PollingBadge — live state (Plan 03.0-11)", () => {
     // string. Assert the "Updated " prefix without pinning the date format.
     expect(out.body).toMatch(/Updated \S+/);
     expect(out.body).toMatch(/polling-badge--frozen/);
-    // Phase 03.0.1 Wave 4 — refresh-now visible whenever tier !== 'pending'
+    // Refresh-now visible whenever tier !== 'pending'
     // (was previously gated also on lastPolledAt !== null OR tier === 'frozen').
     expect(out.body).toMatch(/class="refresh-now/);
   });
@@ -165,7 +164,7 @@ describe("PollingBadge — live state (Plan 03.0-11)", () => {
     expect(out.body).toMatch(/Manual entry/);
     expect(out.body).toMatch(/no polling/);
     expect(out.body).toMatch(/polling-badge--manual/);
-    // Phase 03.0.1 Wave 4 — refresh-now visible (was hidden pre-UAT). The
+    // Refresh-now visible (was hidden pre-UAT). The
     // sync-stats hook in createEvent makes manual-tier-with-null-poll a
     // rare edge case (only on rate-limit / auth-error swallow), and when
     // it does happen the user needs a way to retry.
@@ -182,9 +181,9 @@ describe("PollingBadge — live state (Plan 03.0-11)", () => {
     expect(out.body).not.toMatch(/Hot|Cold|Frozen|Unavailable|Manual entry/);
   });
 
-  it("Non-pollable kind (kind=reddit_post): component renders nothing in 3.0 (Phase 3.1 lifts gate)", () => {
-    // Phase 3.0 keeps PollingBadge YouTube-only per UI-SPEC. Phase 3.1
-    // extends POLLABLE_KINDS with 'reddit_post' once the Reddit adapter
+  it("Non-pollable kind (kind=reddit_post): component renders nothing", () => {
+    // PollingBadge stays YouTube-only for now. A future iteration will
+    // extend POLLABLE_KINDS with 'reddit_post' once the Reddit adapter
     // ships. The current contract: any non-youtube_video kind renders
     // nothing.
     const ev = mkEvent({ kind: "reddit_post" });
@@ -217,7 +216,7 @@ describe("PollingBadge — live state (Plan 03.0-11)", () => {
     expect(out.body).toMatch(/polling-badge--frozen/);
   });
 
-  it("Pitfall H: ISO-string publishedAt + lastPolledAt are coerced to Date before tier resolution", () => {
+  it("ISO-string publishedAt + lastPolledAt are coerced to Date before tier resolution", () => {
     const ev = mkEvent({
       occurredAt: ago(12 * 3_600_000).toISOString(),
       publishedAt: ago(12 * 3_600_000).toISOString(),

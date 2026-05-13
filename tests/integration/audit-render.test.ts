@@ -1,9 +1,7 @@
-// Phase 2.1 Plan 20 (gap closure round 2) — render-time regression guard
-// for the /audit filter UX rewrite. Replaces the Plan 02.1-11 ActionFilter
-// guards (component deleted by Plan 02.1-20). AuditRow guard preserved —
-// AuditRow is unchanged.
+// Render-time regression guard for the /audit filter UX. AuditRow guard
+// preserved — AuditRow is unchanged.
 //
-// New guards over FiltersSheet (the ActionFilter replacement):
+// Guards over FiltersSheet (the ActionFilter replacement):
 //   1. Renders one checkbox per AUDIT_ACTIONS member when filters.action is
 //      a non-undefined array (sweep over the closed AUDIT_ACTIONS list — a
 //      future addition to AUDIT_ACTIONS without the matching auditActionLabel
@@ -15,11 +13,10 @@
 
 import { describe, it, expect, vi } from "vitest";
 
-// Phase 3.0 Plan 11 — FeedCard now indirectly imports $app/navigation via
-// PollingBadge → RefreshNowButton (the Plan 11 live-state rewrite added
-// the inline refresh affordance). The SSR-render path never invokes the
-// real navigation helpers; mock with no-op stubs so the static import
-// resolves at module load. Pattern lifted from
+// FeedCard indirectly imports $app/navigation via PollingBadge →
+// RefreshNowButton (the inline refresh affordance). The SSR-render path
+// never invokes the real navigation helpers; mock with no-op stubs so
+// the static import resolves at module load. Pattern lifted from
 // tests/unit/account-deleted-banner.test.ts.
 vi.mock("$app/navigation", () => ({
   goto: vi.fn(),
@@ -31,7 +28,7 @@ import AuditRow from "../../src/lib/components/AuditRow.svelte";
 import FiltersSheet from "../../src/lib/components/FiltersSheet.svelte";
 import { AUDIT_ACTIONS } from "../../src/lib/server/audit/actions.js";
 
-describe("/audit render-time guard (Plan 02.1-20 — FiltersSheet + AuditRow)", () => {
+describe("/audit render-time guard (FiltersSheet + AuditRow)", () => {
   it("AuditRow renders a non-fallback chip label for every AUDIT_ACTIONS value", () => {
     for (const a of AUDIT_ACTIONS) {
       const renderOnce = () =>
@@ -75,11 +72,11 @@ describe("/audit render-time guard (Plan 02.1-20 — FiltersSheet + AuditRow)", 
           show: { kind: "any" },
           defaultDateRange: false,
           all: true,
-          action: [], // ← Plan 02.1-21: schema decides rendering, not filters.action
+          action: [], // ← schema decides rendering, not filters.action
         },
         sources: [],
         games: [],
-        // Plan 02.1-21: schema explicit; was implicit on filters.action shape.
+        // schema explicit; was implicit on filters.action shape.
         schema: ["action"] as const,
         onApply: () => {},
         onClose: () => {},
@@ -107,13 +104,13 @@ describe("/audit render-time guard (Plan 02.1-20 — FiltersSheet + AuditRow)", 
           show: { kind: "any" },
           defaultDateRange: false,
           all: true,
-          // action: undefined  ← Plan 02.1-21: schema decides rendering.
+          // action: undefined  ← schema decides rendering.
         },
         sources: [],
         games: [],
-        // /feed-shape schema (post Plan 02.1-39 round-6 polish #9: 'date'
-        // dropped — DateRangeControl is the SOT). Same regression-guard
-        // intent: no 'action' fieldset leaks into /feed's sheet.
+        // /feed-shape schema ('date' is not in the sheet — DateRangeControl
+        // is the SOT). Same regression-guard intent: no 'action' fieldset
+        // leaks into /feed's sheet.
         schema: ["kind", "source", "show", "authorIsMe"] as const,
         onApply: () => {},
         onClose: () => {},
@@ -164,22 +161,18 @@ describe("/audit render-time guard (Plan 02.1-20 — FiltersSheet + AuditRow)", 
 });
 
 /**
- * Plan 02.1-21 — schema prop honored.
+ * schema prop honored.
  *
- * The `schema` prop replaces Plan 02.1-20's implicit `filters.action !==
- * undefined` axis-detection. Each consumer page (/feed, /audit) passes the
- * authoritative list of axes its FiltersSheet / FilterChips renders. Plan
- * 02.1-20 shoehorned /audit into /feed's contract; this plan replaces that
- * with an explicit array. UAT-NOTES.md §9.2-bug user quote: "Открывает окно,
- * там есть типы аудита, но и куча полей из feed фильтров" — the audit sheet
- * MUST NOT render kind/source/show/authorIsMe.
+ * The `schema` prop replaces the implicit `filters.action !== undefined`
+ * axis-detection. Each consumer page (/feed, /audit) passes the
+ * authoritative list of axes its FiltersSheet / FilterChips renders. The
+ * audit sheet MUST NOT render kind/source/show/authorIsMe.
  *
  * Tests cover both components:
  *   - FiltersSheet: only fieldsets in `schema` render.
  *   - FilterChips: chips only emit for axes in `schema`.
- * Both regression-guard against the Plan 02.1-20 leak.
  */
-describe("Plan 02.1-21 — schema prop honored", () => {
+describe("schema prop honored", () => {
   it("FiltersSheet schema=['action'] renders ONLY the action fieldset (no kind/source/show/authorIsMe)", () => {
     const out = render(FiltersSheet, {
       props: {
@@ -199,7 +192,7 @@ describe("Plan 02.1-21 — schema prop honored", () => {
       },
     });
     expect(out.body).toMatch(/<fieldset[^>]*data-axis="action"/);
-    // Regression guard for UAT §9.2-bug — Plan 02.1-20 leak.
+    // Regression guard for the cross-page leak.
     expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="source"/);
     expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="kind"/);
     expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="show"/);
@@ -234,14 +227,12 @@ describe("Plan 02.1-21 — schema prop honored", () => {
   });
 
   it("FiltersSheet schema=['kind','source','show','authorIsMe','date'] renders all those fieldsets (NO action) — prop-machinery test", () => {
-    // Note: this is a prop-machinery test, NOT a /feed snapshot — Plan
-    // 02.1-39 round-6 polish #9 narrowed /feed's actual schema to
-    // ['kind','source','show','authorIsMe'] (no 'date'). The schema prop
-    // contract still has to render the date fieldset when a consumer DOES
-    // include 'date', so we keep this assertion to guard the schema-honored
-    // contract. /audit's actual schema is asserted in the Plan 02.1-34
-    // describe block; /feed's actual schema is asserted in the
-    // 02.1-39-round-6-#9 describe block below.
+    // Note: this is a prop-machinery test, NOT a /feed snapshot — /feed's
+    // actual schema is ['kind','source','show','authorIsMe'] (no 'date').
+    // The schema prop contract still has to render the date fieldset when
+    // a consumer DOES include 'date', so we keep this assertion to guard
+    // the schema-honored contract. /audit's actual schema is asserted
+    // below; /feed's actual schema is asserted in its own describe block.
     const out = render(FiltersSheet, {
       props: {
         filters: {
@@ -330,10 +321,10 @@ describe("Plan 02.1-21 — schema prop honored", () => {
 });
 
 /**
- * Plan 02.1-23 — FeedCard restructured layout (UAT §1.5-redesign closure).
+ * FeedCard restructured layout.
  *
- * The user-proposed card layout from round-3 UAT (ASCII mockup in
- * UAT-NOTES.md §1.5-redesign) restructures the FeedCard:
+ * The user-proposed card layout (ASCII mockup in UAT notes) restructures
+ * the FeedCard:
  *   1. Image area at TOP with absolute-positioned top overlay carrying
  *      kind icon+text label + Inbox badge (if applicable) + Mine badge
  *      (if author_is_me).
@@ -348,14 +339,14 @@ describe("Plan 02.1-21 — schema prop honored", () => {
  *   - A: `border-left: 4px solid var(--color-accent)` on the entire card
  *        when `event.authorIsMe === true`.
  *
- * Plan 02.1-18 read-only contract preserved — no inline Edit/Delete/Open
- * buttons. Plan 02.1-19 date-removal preserved — no per-card date label.
+ * Read-only contract preserved — no inline Edit/Delete/Open buttons.
+ * Date-removal preserved — no per-card date label.
  */
-describe("Plan 02.1-23 — FeedCard restructured layout", () => {
+describe("FeedCard restructured layout", () => {
   const baseEvent = {
     id: "ev-1",
-    // Plan 02.1-28 (M:N migration): the legacy singular gameId is REPLACED
-    // with gameIds[]. Empty array === inbox event (no attached games).
+    // The legacy singular gameId is REPLACED with gameIds[]. Empty array
+    // === inbox event (no attached games).
     gameIds: [] as string[],
     sourceId: null,
     kind: "youtube_video" as const,
@@ -367,9 +358,9 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
     notes: null as string | null,
     metadata: null as unknown,
     lastPolledAt: null as Date | null,
-    // Plan 03.0-11: PollingBadge live-state rewrite extends EventDtoLite
-    // with lastPollStatus (D-12 unavailable override). Test fixtures get
-    // null since these tests don't exercise the polling tier.
+    // PollingBadge live-state extends EventDtoLite with lastPollStatus
+    // (the unavailable override). Test fixtures get null since these
+    // tests don't exercise the polling tier.
     lastPollStatus: null as string | null,
   };
 
@@ -573,7 +564,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
     expect(out.body).toMatch(/class="icon-anchor(?:\s[^"]*)?"/);
   });
 
-  it("Plan 02.1-18 contract preserved — no inline Edit / Delete / Open buttons", async () => {
+  it("read-only contract preserved — no inline Edit / Delete / Open buttons", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -591,7 +582,7 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
     expect(out.body).not.toMatch(/<button[^>]*>[^<]*Open[^<]*<\/button>/);
   });
 
-  it("Plan 02.1-19 contract preserved — no inline date string on the card", async () => {
+  it("date-removal contract preserved — no inline date string on the card", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -611,21 +602,21 @@ describe("Plan 02.1-23 — FeedCard restructured layout", () => {
 });
 
 /**
- * Plan 02.1-26 — FeedQuickNav SSR render-time guards.
+ * FeedQuickNav SSR render-time guards.
  *
- * NEW component — chip strip / segmented control at the TOP of /feed for the
- * most-common Show axis values (All / Inbox / Standalone / per-game). Closes
- * UAT-NOTES.md §6.2-redesign. The end-to-end browser flow at 360px (computed
- * overflow-x: auto, click→URL change) is stub-skipped in
- * tests/browser/feed-360.test.ts pending the cookie-injection auth harness
- * (Phase 6); the SSR-render-time contract is locked in HERE.
+ * Chip strip / segmented control at the TOP of /feed for the most-common
+ * Show axis values (All / Inbox / Standalone / per-game). The end-to-end
+ * browser flow at 360px (computed overflow-x: auto, click→URL change) is
+ * stub-skipped in tests/browser/feed-360.test.ts pending the
+ * cookie-injection auth harness; the SSR-render-time contract is locked
+ * in HERE.
  *
  * Component is testable in pure SSR because it takes `currentUrlSearch`
  * (string) and `onNavigate` (callback) as props instead of importing
  * `$app/state` / `$app/navigation` directly. The /feed/+page.svelte parent
  * threads those values through.
  */
-describe("Plan 02.1-26 — FeedQuickNav", () => {
+describe("FeedQuickNav", () => {
   it("renders <nav class='quick-nav'> with All / Inbox / Standalone fixed tabs", async () => {
     const FeedQuickNav = (await import("../../src/lib/components/FeedQuickNav.svelte")).default;
     const out = render(FeedQuickNav, {
@@ -639,15 +630,15 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
     expect(out.body).toMatch(/data-testid="feed-quick-nav"/);
     expect(out.body).toMatch(/data-tab="all"/);
     expect(out.body).toMatch(/data-tab="inbox"/);
-    // Plan 02.1-31: technical state name 'standalone' (lowercase) STAYS on
-    // the data-tab attribute (URL contract preserved); the user-facing
-    // rendered text is now "Not game-related" via the renamed m.* value.
+    // Technical state name 'standalone' (lowercase) STAYS on the
+    // data-tab attribute (URL contract preserved); the user-facing
+    // rendered text is "Not game-related" via the renamed m.* value.
     expect(out.body).toMatch(/data-tab="standalone"/);
     // Paraglide labels render at runtime (m.feed_quick_nav_*).
     expect(out.body).toContain("All");
     expect(out.body).toContain("Inbox");
-    // Plan 02.1-31: standalone segment now renders user-facing text
-    // "Not game-related" instead of "Standalone" (UAT-NOTES.md §4.24.A).
+    // The standalone segment renders user-facing text "Not game-related"
+    // instead of "Standalone".
     expect(out.body).toContain("Not game-related");
     // The literal English word "Standalone" MUST NOT appear in the rendered
     // user-facing text — the data-tab attribute uses the lowercase technical
@@ -902,19 +893,17 @@ describe("Plan 02.1-26 — FeedQuickNav", () => {
 });
 
 /**
- * Plan 02.1-25 — render-time regression guards for the new components
- * (PageHeader, GameCover, SteamListingRow) + the SourceRow Mine treatment +
- * the /games/[id] two-card layout.
+ * Render-time regression guards for the components (PageHeader,
+ * GameCover, SteamListingRow) + the SourceRow Mine treatment + the
+ * /games/[id] two-card layout.
  *
- * The end-to-end browser flow at 360px (PageHeader inline-on-the-left,
- * /games/[id] two-card layout, SourceRow accent left-border, GameCover img
- * vs placeholder, SteamListingRow Open-on-Steam href) requires the
- * cookie-injection auth harness still deferred to Phase 6 — stub-skipped
- * in tests/browser/responsive-360.test.ts + feed-360.test.ts. The
- * component-level contracts are locked in HERE via SSR render so a future
- * regression breaks at CI time, not at manual UAT.
+ * The end-to-end browser flow at 360px requires the cookie-injection
+ * auth harness which is stub-skipped in
+ * tests/browser/responsive-360.test.ts + feed-360.test.ts. The
+ * component-level contracts are locked in HERE via SSR render so a
+ * future regression breaks at CI time, not at manual UAT.
  */
-describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
+describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
   it("PageHeader with href CTA renders <a class='cta'> as the call-to-action", async () => {
     const PageHeader = (await import("../../src/lib/components/PageHeader.svelte")).default;
     const out = render(PageHeader, {
@@ -1005,20 +994,11 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     expect(empty.body).toContain("H");
   });
 
-  it("GameCover comments document the Phase 3+ deferred manual-upload path", async () => {
-    const fs = await import("node:fs");
-    const path = await import("node:path");
-    const src = fs.readFileSync(path.resolve("src/lib/components/GameCover.svelte"), "utf8");
-    expect(src).toMatch(/TODO Phase 3\+/);
-  });
-
   it("SteamListingRow renders the persisted name when listing.name is present", async () => {
-    // Plan 02.1-39 round-6 polish #13: the app id ALSO renders as its own
-    // line on the card now (user direction "app id" — explicit content
-    // requirement). The previous Plan 02.1-25 assertion that "App {appId}"
-    // is NOT rendered when name is present is INVERTED — the app id is
-    // ALWAYS visible because it is technical metadata users need to
-    // disambiguate listings (e.g. Portal 2 main app vs Portal 2 demo).
+    // The app id renders as its own line on the card — explicit user
+    // requirement. The app id is ALWAYS visible because it is technical
+    // metadata users need to disambiguate listings (e.g. Portal 2 main
+    // app vs Portal 2 demo).
     const SteamListingRow = (await import("../../src/lib/components/SteamListingRow.svelte"))
       .default;
     const out = render(SteamListingRow, {
@@ -1035,8 +1015,8 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
       },
     });
     expect(out.body).toContain("Portal 2");
-    // Plan 02.1-39 round-6 polish #13: app id surfaces in its own muted
-    // monospace line, INDEPENDENT of the name fallback. Both Portal 2
+    // App id surfaces in its own muted monospace line, INDEPENDENT of
+    // the name fallback. Both Portal 2
     // (the name) and "App 620" (the technical id) coexist on the card.
     // Svelte adds a per-component CSS-scope hash (`svelte-XXXX`) to the
     // class attribute, so match the prefix only.
@@ -1044,12 +1024,11 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     expect(out.body).toMatch(/class="app-id\b/);
   });
 
-  it("SteamListingRow falls back to localized 'Untitled' when listing.name is null (round-6 #13)", async () => {
-    // Plan 02.1-39 round-6 polish #13: the name fallback is now
-    // m.steam_listing_unnamed() ("Untitled") rather than `App {appId}` —
-    // user direction wanted human-readable text (the appId surfaces in
-    // its own line via m.steam_listing_app_id, so the fallback no longer
-    // duplicates that information).
+  it("SteamListingRow falls back to localized 'Untitled' when listing.name is null", async () => {
+    // The name fallback is m.steam_listing_unnamed() ("Untitled") rather
+    // than `App {appId}` — user direction wanted human-readable text
+    // (the appId surfaces in its own line via m.steam_listing_app_id,
+    // so the fallback no longer duplicates that information).
     const SteamListingRow = (await import("../../src/lib/components/SteamListingRow.svelte"))
       .default;
     const out = render(SteamListingRow, {
@@ -1092,10 +1071,10 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     expect(out.body).toMatch(/<a[^>]*href="https:\/\/store\.steampowered\.com\/app\/1145360\/"/);
     expect(out.body).toMatch(/target="_blank"/);
     expect(out.body).toMatch(/rel="noopener noreferrer"/);
-    // Paraglide label renders. Plan 02.1-39 §5.3 introduced
+    // Paraglide label renders.
     // m.steam_listing_open_in_steam() ("Open in Steam") — distinct from
-    // the Plan 02.1-25 m.steam_listing_open_link_label() ("Open on
-    // Steam") which is now unused by SteamListingRow but kept in the
+    // m.steam_listing_open_link_label() ("Open on Steam") which is now
+    // unused by SteamListingRow but kept in the
     // message catalog for any future re-use.
     expect(out.body).toContain("Open in Steam");
   });
@@ -1106,81 +1085,75 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
     // class:mine on root .row div + .row.mine border-left rule.
     expect(src).toMatch(/class:mine=\{source\.isOwnedByMe\}/);
-    // Plan 02.1-30 (UAT-NOTES.md §4.25.A): swapped --color-accent for
-    // --color-mine so SourceRow.mine + FeedCard.mine resolve to the same
-    // shared token (defaults to accent today; can diverge later).
+    // --color-accent swapped for --color-mine so SourceRow.mine +
+    // FeedCard.mine resolve to the same shared token (defaults to accent
+    // today; can diverge later).
     expect(src).toMatch(/\.row\.mine\s*\{[\s\S]*?border-left:\s*4px solid var\(--color-mine\)/);
     expect(src).toMatch(/\.ownership-badge\.mine[\s\S]*?background:\s*var\(--color-mine\)/);
     // Kind label rendered next to the icon via kindLabel(SourceKind).
-    // Plan 02.1-39 round-6 polish #7 extracted the per-kind paraglide keys
-    // into src/lib/util/source-kind-label.ts (sourceKindLabel helper); the
-    // SourceRow component imports + calls the helper rather than referencing
-    // m.source_kind_label_* directly, so the literal-string assertions live
-    // in the helper's own test now (covered indirectly by paraglide.test.ts
-    // EXPECTED_KEYS snapshot).
+    // The per-kind paraglide keys are extracted into
+    // src/lib/util/source-kind-label.ts (sourceKindLabel helper); the
+    // SourceRow component imports + calls the helper rather than
+    // referencing m.source_kind_label_* directly, so the literal-string
+    // assertions live in the helper's own test now (covered indirectly
+    // by paraglide.test.ts EXPECTED_KEYS snapshot).
     expect(src).toMatch(/kindLabel/);
     expect(src).toMatch(/from\s+["']\$lib\/util\/source-kind-label\.js["']/);
   });
 
-  it("/games/[id]/+page.svelte renders the three-section layout (Plan 02.1-39 §5.3 + round-6 polish #13/#14b)", async () => {
+  it("/games/[id]/+page.svelte renders the three-section layout", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/routes/games/[gameId]/+page.svelte"), "utf8");
-    // Plan 02.1-39 (UAT-NOTES.md §5.3): three labelled sections — Игра /
-    // Магазины / Лента — replace Plan 02.1-25's two-card layout AND Plan
-    // 02.1-30's intermediate "lean header + StoresSection + events-feed"
-    // shape. Each section carries an id + class prefixed by its scope so
-    // anchor links + CSS selectors stay stable.
+    // Three labelled sections — Игра / Магазины / Лента. Each section
+    // carries an id + class prefixed by its scope so anchor links + CSS
+    // selectors stay stable.
     //
-    // Plan 02.1-39 round-6 polish #13 (UAT-NOTES.md §5.8 follow-up #13):
-    // the "Game" h2 + section-header row is REMOVED — game.title in
+    // The "Game" h2 + section-header row is REMOVED — game.title in
     // PageHeader is the primary identifier. Edit moves to PageHeader's
     // cta slot. Stores/Events sections KEEP their h2 markers.
     //
-    // Plan 02.1-39 round-6 polish #14b (UAT-NOTES.md §5.8 follow-up #14):
-    // the polish #13 `gameInfoEditing` toggle (which only flipped a
-    // non-functional "Edit…" hint) is REPLACED by `editGameOpen` — the
-    // open-state of the new <GameEditDialog> modal. PageHeader's cta
-    // opens the dialog; <RenameInline> (the duplicate h1) is GONE.
+    // `editGameOpen` holds the open-state of the <GameEditDialog>
+    // modal. PageHeader's cta opens the dialog; <RenameInline> is GONE.
     expect(src).toMatch(/<section[^>]*class="game-info"[^>]*id="section-game"/);
     expect(src).toMatch(/<section[^>]*class="stores"[^>]*id="section-stores"/);
     expect(src).toMatch(/<section[^>]*class="events"[^>]*id="section-events"/);
     // Sticky PageHeader sits at the top with the game's title.
     expect(src).toMatch(/<PageHeader[\s\S]*?title=\{game\.title\}/);
-    // Polish #14b: cta opens the modal (editGameOpen = true), label is
-    // the static "Edit" key (no longer a toggle pair).
+    // The cta opens the modal (editGameOpen = true), label is the static
+    // "Edit" key (no longer a toggle pair).
     expect(src).toMatch(/editGameOpen\s*=\s*true/);
     expect(src).toMatch(/label:\s*m\.games_detail_edit_cta\(\)/);
-    // Plan 02.1-39 round-6 polish #15 removed <GameCover> from this page
-    // (user during UAT: "после названия игры идет огромная картинка...
-    // она тут лишняя, она есть в карточки стора"). The cover already
-    // surfaces on each SteamListingRow inside StoresSection.
+    // <GameCover> is removed from this page (user during UAT: "после
+    // названия игры идет огромная картинка... она тут лишняя, она есть
+    // в карточки стора"). The cover already surfaces on each
+    // SteamListingRow inside StoresSection.
     expect(src).not.toMatch(/<GameCover\s/);
     expect(src).toMatch(/<StoresSection\s/);
     // GameEditDialog mounted with title + description from the game DTO.
     expect(src).toMatch(/<GameEditDialog\s/);
     expect(src).toMatch(/initialTitle=\{game\.title\}/);
     expect(src).toMatch(/initialDescription=\{game\.description\}/);
-    // Plan 02.1-39 §5.3 item D: FeedCards wrapped in a feedcard-grid.
+    // FeedCards wrapped in a feedcard-grid.
     expect(src).toMatch(/class="feedcard-grid"/);
     expect(src).toMatch(
       /\.feedcard-grid[\s\S]*?grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(280px/,
     );
-    // Polish #14b: the polish #13 `gameInfoEditing` toggle is GONE
-    // (replaced by `editGameOpen` modal-open state). RenameInline import
-    // and usage are removed entirely — the title lives only in
-    // PageHeader.title now (no duplicate h1 surface).
+    // The `gameInfoEditing` toggle is GONE (replaced by `editGameOpen`
+    // modal-open state). RenameInline import and usage are removed
+    // entirely — the title lives only in PageHeader.title now (no
+    // duplicate h1 surface).
     expect(src).toMatch(/let editGameOpen = \$state\(false\)/);
     expect(src).not.toMatch(/let gameInfoEditing\s*=\s*\$state/);
     expect(src).not.toMatch(/let editingStores\s*=\s*\$state/);
     expect(src).not.toMatch(/import RenameInline/);
     expect(src).not.toMatch(/<RenameInline\s/);
-    // Negative assertion: the §5.3 "Game" section <h2> is REMOVED in
-    // round-6 #13. The game's name lives in PageHeader.title now.
+    // Negative assertion: the "Game" section <h2> is REMOVED.
+    // The game's name lives in PageHeader.title now.
     const markupOnly = src.replace(/<script[\s\S]*?<\/script>/g, "");
     expect(markupOnly).not.toMatch(/m\.games_detail_section_game\s*\(/);
     expect(markupOnly).not.toMatch(/onclick=\{[^}]*editingStores/);
-    // Polish #14b: the polish #13 "editing-hint" paragraph is GONE.
+    // The "editing-hint" paragraph is GONE.
     expect(markupOnly).not.toMatch(/class="editing-hint"/);
     // Description paragraph renders when game.description is non-null.
     expect(markupOnly).toMatch(/{#if game\.description}/);
@@ -1190,19 +1163,17 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
     expect(src).not.toMatch(/<section[^>]*class="events-feed-card"/);
   });
 
-  // Plan 02.1-39 round-6 polish #13 (UAT-NOTES.md §5.8 follow-up #13,
-  // 2026-04-30): /games/[gameId] UI redesign per user direction.
-  // Three discrete user-driven layout changes:
+  // /games/[gameId] UI redesign per user direction:
   //   1. "Game" heading removed; Edit moved to PageHeader.cta.
   //   2. Add Store CTA migrated from above the cards to AFTER the cards.
   //   3. Per-card Edit button on each store card.
-  describe("Plan 02.1-39 round-6 polish #13 — /games/[gameId] UI redesign", () => {
+  describe("/games/[gameId] UI redesign", () => {
     it("removes the 'Game' section heading; PageHeader carries the game title + Edit cta", async () => {
       const fs = await import("node:fs");
       const path = await import("node:path");
       const src = fs.readFileSync(path.resolve("src/routes/games/[gameId]/+page.svelte"), "utf8");
       const markupOnly = src.replace(/<script[\s\S]*?<\/script>/g, "");
-      // The §5.3 section-header row inside <section class="game-info">
+      // The section-header row inside <section class="game-info">
       // is gone — there's no <header class="section-header"> anywhere
       // INSIDE the game-info section markup.
       const gameInfoMatch = markupOnly.match(
@@ -1211,20 +1182,17 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
       expect(gameInfoMatch, "game-info section must render").not.toBeNull();
       const gameInfoBody = gameInfoMatch![1]!;
       expect(gameInfoBody).not.toMatch(/<header[^>]*class="section-header"/);
-      // Polish #14b: PageHeader.cta opens the new <GameEditDialog>
-      // modal (editGameOpen = true), replacing polish #13's
-      // hint-toggle. The Edit label is the static games_detail_edit_cta key.
+      // PageHeader.cta opens the <GameEditDialog> modal (editGameOpen
+      // = true). The Edit label is the static games_detail_edit_cta key.
       expect(src).toMatch(/<PageHeader[\s\S]*?cta=\{/);
       expect(src).toMatch(/editGameOpen\s*=\s*true/);
       expect(src).toMatch(/m\.games_detail_edit_cta\(\)/);
     });
 
-    it("StoresSection becomes a pure list renderer (polish #14c reversal); Add CTA lives next to the Stores h2 in +page.svelte", async () => {
+    it("StoresSection becomes a pure list renderer; Add CTA lives next to the Stores h2 in +page.svelte", async () => {
       const fs = await import("node:fs");
       const path = await import("node:path");
-      // Plan 02.1-39 round-6 polish #14c (UAT-NOTES.md §5.8 follow-up
-      // #14): polish #13's bottom-of-section Add CTA is REVERTED. The
-      // CTA moves back to the section-header row next to the h2 (in
+      // The CTA lives in the section-header row next to the h2 (in
       // +page.svelte, not StoresSection). StoresSection no longer
       // renders an Add affordance, an inline form, or any add-state
       // — it's a pure list renderer.
@@ -1233,8 +1201,8 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
         "utf8",
       );
       const storesMarkup = storesSrc.replace(/<script[\s\S]*?<\/script>/g, "");
-      // Both the polish-13 .add-row AND the pre-polish-13 .actions-row
-      // are GONE — StoresSection has no add affordance now.
+      // Both .add-row and .actions-row are GONE — StoresSection has no
+      // add affordance now.
       expect(storesMarkup).not.toMatch(/class="actions-row"/);
       expect(storesMarkup).not.toMatch(/class="add-row"/);
       // The component no longer imports AddSteamListingForm — the
@@ -1263,11 +1231,11 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
       // Section-header carries the CTA + h2.
       expect(storesSection).toMatch(/<header[^>]*class="section-header"/);
       expect(storesSection).toMatch(/m\.stores_add_cta\(\)/);
-      // The polish-13 stores_add_cta_after_cards key is no longer used.
+      // The stores_add_cta_after_cards key is no longer used.
       expect(storesSection).not.toMatch(/m\.stores_add_cta_after_cards\(\)/);
     });
 
-    it("SteamListingRow renders cover image + STEAM badge + appId + per-card Edit button + inline label form (polish #14c)", async () => {
+    it("SteamListingRow renders cover image + STEAM badge + appId + per-card Edit button + inline label form", async () => {
       const fs = await import("node:fs");
       const path = await import("node:path");
       const src = fs.readFileSync(
@@ -1290,9 +1258,8 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
       // Edit button visible when not editing.
       expect(src).toMatch(/class="edit-btn"/);
       expect(src).toMatch(/m\.steam_listing_edit_aria\(\)/);
-      // Plan 02.1-39 round-6 polish #14c: inline label edit FORM
-      // (not just a × Remove). Local labelDraft state + saveEdit
-      // function + .edit-form markup with a label input.
+      // Inline label edit FORM (not just a × Remove). Local labelDraft
+      // state + saveEdit function + .edit-form markup with a label input.
       expect(src).toMatch(/let labelDraft = \$state/);
       expect(src).toMatch(/async function saveEdit/);
       expect(src).toMatch(/class="edit-form"/);
@@ -1315,8 +1282,8 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
       "src/routes/sources/+page.svelte",
       "src/routes/feed/+page.svelte",
       "src/routes/games/+page.svelte",
-      // Plan 02.1-39 (UAT-NOTES.md §5.7): /audit joins the sticky
-      // PageHeader club for cross-page consistency.
+      // /audit joins the sticky PageHeader club for cross-page
+      // consistency.
       "src/routes/audit/+page.svelte",
     ]) {
       const src = fs.readFileSync(path.resolve(route), "utf8");
@@ -1338,7 +1305,7 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
 });
 
 /**
- * Plan 02.1-31 — Standalone label rename to "Not game-related".
+ * Standalone label rename to "Not game-related".
  *
  * Closes UAT-NOTES.md §4.24.A — the user does not parse "Standalone" as
  * "not related to any game". User quote: "Standalone странный текст. Не
@@ -1356,14 +1323,14 @@ describe("Plan 02.1-25 — PageHeader + GameCover + SteamListingRow + SourceRow 
  *   - FeedQuickNav segment via m.feed_quick_nav_standalone()
  *   - FilterChips chip via m.feed_filter_show_standalone()
  *   - FiltersSheet show <select> option via m.feed_filter_show_standalone()
- *     (Plan 02.1-39 round-6 polish #8: was a radio group, now a <select>
+ *     (was a radio group, now a <select>
  *     dropdown — same Paraglide key, same value="standalone" attribute on
  *     the option element, same load-bearing assertion on the rendered text)
  *   - FeedCard inline button via m.feed_card_mark_standalone_button()
  * Plus a positive guard that the audit-action verb names STAY as the
  * technical strings (m.audit_action_event_marked_standalone() unchanged).
  */
-describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () => {
+describe("Standalone label rename to 'Not game-related'", () => {
   it("FeedQuickNav standalone segment renders 'Not game-related' (NOT 'Standalone')", async () => {
     const FeedQuickNav = (await import("../../src/lib/components/FeedQuickNav.svelte")).default;
     const out = render(FeedQuickNav, {
@@ -1401,7 +1368,7 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
         },
         sources: [],
         games: [],
-        // /feed schema post Plan 02.1-39 round-6 polish #9: no 'date' axis
+        // /feed schema: no 'date' axis
         // (DateRangeControl above the chip strip is the SOT). Asserting the
         // standalone label rendering — schema content is fixture-only here.
         schema: ["kind", "source", "show", "authorIsMe"] as const,
@@ -1416,7 +1383,7 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
   });
 
   it("FiltersSheet show fieldset <option value='standalone'> renders 'Not game-related' label", async () => {
-    // Plan 02.1-39 round-6 polish #8 (UAT-NOTES.md §5.6 follow-up #8): the
+    // The
     // Show axis was converted from a radio-button group to a <select>
     // dropdown for compactness. The technical state name (value="standalone")
     // and the user-facing label (m.feed_filter_show_standalone() →
@@ -1435,7 +1402,7 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
         },
         sources: [],
         games: [],
-        // /feed schema post Plan 02.1-39 round-6 polish #9: no 'date' axis.
+        // /feed schema: no 'date' axis.
         schema: ["kind", "source", "show", "authorIsMe"] as const,
         onApply: () => {},
         onClose: () => {},
@@ -1479,7 +1446,7 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
           notes: null,
           metadata: null,
           lastPolledAt: null,
-          // Plan 03.0-11: lastPollStatus added to EventDtoLite.
+          // lastPollStatus is part of EventDtoLite.
           lastPollStatus: null,
         },
         source: null,
@@ -1497,7 +1464,7 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
   });
 
   it("audit-action verb names STAY unchanged (technical context — by design)", async () => {
-    // Plan 02.1-31 INVARIANT: the audit log is a technical surface and
+    // INVARIANT: the audit log is a technical surface and
     // the audit verbs match existing entries like "Event attached to a
     // game". The marked_standalone / unmarked_standalone audit-action
     // values stay as the technical verb names (NOT renamed to the
@@ -1522,7 +1489,7 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
 });
 
 /**
- * Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema cleanup.
+ * Layout regression fixes + /audit FiltersSheet schema cleanup.
  *
  * Closes UAT-NOTES.md §4.22.A (sticky AppHeader regression — fixed via
  * src/app.css overflow-x: clip; covered by tests/browser/responsive-360.test.ts),
@@ -1544,7 +1511,7 @@ describe("Plan 02.1-31 — Standalone label rename to 'Not game-related'", () =>
  *   5. src/app.css uses overflow-x: clip on body (NOT hidden) — the sticky
  *      regression-source guard.
  */
-describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema cleanup", () => {
+describe("layout regression fixes + /audit FiltersSheet schema cleanup", () => {
   it("/audit AUDIT_SCHEMA is exactly ['action'] — no 'date' axis (UAT-NOTES.md §4.21.A)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
@@ -1557,25 +1524,24 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     expect(match, "src/routes/audit/+page.svelte: AUDIT_SCHEMA literal not found").not.toBeNull();
     const literal = match![1]!;
     expect(literal).toMatch(/"action"/);
-    expect(literal, "AUDIT_SCHEMA still references 'date' — Plan 02.1-34 removes it").not.toMatch(
+    expect(literal, "AUDIT_SCHEMA still references 'date' — should be removed").not.toMatch(
       /"date"/,
     );
   });
 
-  it("/feed FEED_SCHEMA does NOT include 'date' (Plan 02.1-39 round-6 polish #9 reversal of Plan 02.1-21 in-sheet date axis)", async () => {
+  it("/feed FEED_SCHEMA does NOT include 'date' (the in-sheet date axis has been removed)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/routes/feed/+page.svelte"), "utf8");
-    // Plan 02.1-39 round-6 polish #9 (UAT-NOTES.md §5.6 follow-up #9,
-    // 2026-04-30) — user during round-6 UAT: "в фильрах в feed не нужна
+    // User direction during UAT: "в фильрах в feed не нужна
     // дата, дату мы задаем до выбора фильтров." The always-visible
     // <DateRangeControl> above the chip strip is the SOLE date-range entry
-    // on /feed; the in-sheet secondary axis Plan 02.1-21 added was
+    // on /feed; the in-sheet secondary axis was
     // redundant and the user explicitly asked for its removal during UAT.
     //
     // Match the FEED_SCHEMA literal — the array MUST contain
     // 'kind','source','show','authorIsMe' and MUST NOT contain 'date'.
-    // Mirrors the Plan 02.1-34 AUDIT_SCHEMA assertion shape.
+    // Mirrors the AUDIT_SCHEMA assertion shape.
     const match = src.match(/const FEED_SCHEMA\s*=\s*(\[[^\]]*\])/);
     expect(match, "src/routes/feed/+page.svelte: FEED_SCHEMA literal not found").not.toBeNull();
     const literal = match![1]!;
@@ -1583,14 +1549,13 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     expect(literal).toMatch(/"source"/);
     expect(literal).toMatch(/"show"/);
     expect(literal).toMatch(/"authorIsMe"/);
-    expect(
-      literal,
-      "FEED_SCHEMA still references 'date' — Plan 02.1-39 round-6 polish #9 removes it",
-    ).not.toMatch(/"date"/);
+    expect(literal, "FEED_SCHEMA still references 'date' — should be removed").not.toMatch(
+      /"date"/,
+    );
   });
 
-  it("/feed clearAll() preserves the date axis — chip-strip Clear filters does NOT touch ?from/?to/?all (Plan 02.1-39 round-6 polish #10)", async () => {
-    // Plan 02.1-39 round-6 polish #10 (UAT-NOTES.md §5.6 follow-up #10,
+  it("/feed clearAll() preserves the date axis — chip-strip Clear filters does NOT touch ?from/?to/?all", async () => {
+    // User direction during UAT:
     // 2026-04-30). User clarified after polish #9 landed:
     //   "и clear filters вообще никак не трогает дату"
     //   ("and Clear filters should not touch the date AT ALL")
@@ -1626,7 +1591,7 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     // Old behavior MUST be gone — `?all=1` reset wiped the date range.
     expect(
       body,
-      'clearAll() still uses goto("/feed?all=1") — round-6 polish #10 removes the date-wipe behavior',
+      'clearAll() still uses goto("/feed?all=1") — the chip-strip clear removes the date-wipe behavior',
     ).not.toMatch(/goto\(["']\/feed\?all=1["']\)/);
     // Chip-owned axes MUST be deleted.
     expect(body).toMatch(/params\.delete\(["']kind["']\)/);
@@ -1638,19 +1603,19 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     // Date-axis params MUST NOT be deleted — that's the whole point.
     expect(
       body,
-      "clearAll() deletes ?from — round-6 polish #10 requires date axis to be preserved",
+      "clearAll() deletes ?from — the chip-strip clear requires date axis to be preserved",
     ).not.toMatch(/params\.delete\(["']from["']\)/);
     expect(
       body,
-      "clearAll() deletes ?to — round-6 polish #10 requires date axis to be preserved",
+      "clearAll() deletes ?to — the chip-strip clear requires date axis to be preserved",
     ).not.toMatch(/params\.delete\(["']to["']\)/);
     expect(
       body,
-      "clearAll() deletes ?all — round-6 polish #10 requires date axis to be preserved (?all=1 is a date-axis state, not a filter state)",
+      "clearAll() deletes ?all — the chip-strip clear requires date axis to be preserved (?all=1 is a date-axis state, not a filter state)",
     ).not.toMatch(/params\.delete\(["']all["']\)/);
   });
 
-  it("/feed clearAll() URL behavior — preserves from/to and strips chip-owned axes (Plan 02.1-39 round-6 polish #10)", () => {
+  it("/feed clearAll() URL behavior — preserves from/to and strips chip-owned axes", () => {
     // Behavioral test mirroring clearAll()'s URL-construction logic. The
     // /feed/+page.svelte function is wired to <FilterChips onClearAll> and
     // does:
@@ -1680,7 +1645,7 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     expect(result).toBe("/feed?from=2026-04-01&to=2026-04-15");
   });
 
-  it("/feed clearAll() URL behavior — preserves ?all=1 when user opted into all-time view (Plan 02.1-39 round-6 polish #10)", () => {
+  it("/feed clearAll() URL behavior — preserves ?all=1 when user opted into all-time view", () => {
     // Same logic as above but starting from ?all=1 (user clicked × on
     // <DateRangeControl> for all-time view). Clear filters MUST NOT wipe
     // that — the user explicitly chose all-time, so it survives.
@@ -1701,7 +1666,7 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/lib/components/FiltersSheet.svelte"), "utf8");
-    // Plan 02.1-22's imperative approach (document.body.style.overflow =
+    // The previous imperative approach (document.body.style.overflow =
     // 'hidden' / '') is replaced by declarative CSS :has(dialog[open]) in
     // src/app.css. The component MUST NOT touch document.body.style at all
     // in CODE — drift is a regression candidate. Comments referring to the
@@ -1710,7 +1675,7 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     const codeOnly = src.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
     expect(
       codeOnly,
-      "FiltersSheet.svelte still imperatively sets document.body.style.overflow — Plan 02.1-34 removes that path in favor of CSS :has()",
+      "FiltersSheet.svelte still imperatively sets document.body.style.overflow — should be replaced with CSS :has()",
     ).not.toMatch(/document\.body\.style\.overflow/);
     // Sanity: showModal / dialog wiring still in place.
     expect(src).toMatch(/showModal\(\)/);
@@ -1735,12 +1700,11 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     // The html+body block MUST use overflow-x: clip. `hidden` paired with
     // overflow-y: visible promotes body to a scroll container per CSS spec
     // (overflow-y coerced to auto), which breaks position: sticky on
-    // descendants — that was the round-3 regression source. `clip` crops
+    // descendants — that was the regression source. `clip` crops
     // without promoting.
-    expect(
-      css,
-      "src/app.css must use 'overflow-x: clip' on body (Plan 02.1-34 sticky regression fix)",
-    ).toMatch(/overflow-x:\s*clip/);
+    expect(css, "src/app.css must use 'overflow-x: clip' on body (sticky regression fix)").toMatch(
+      /overflow-x:\s*clip/,
+    );
     // Negative guard: 'overflow-x: hidden' must NOT appear on the html+body
     // block (the regression source). The match below isolates the html+body
     // block AND strips CSS comments — comments referring to the historical
@@ -1750,11 +1714,11 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     const htmlBodyCodeOnly = htmlBodyBlock![0].replace(/\/\*[\s\S]*?\*\//g, "");
     expect(
       htmlBodyCodeOnly,
-      "html+body block still uses overflow-x: hidden — Plan 02.1-34 should switch it to clip",
+      "html+body block still uses overflow-x: hidden — should be switched to clip",
     ).not.toMatch(/overflow-x:\s*hidden/);
   });
 
-  it("FiltersSheet schema=['action'] (Plan 02.1-34 /audit shape) renders ONLY action fieldset — no date leak", () => {
+  it("FiltersSheet schema=['action'] (/audit shape) renders ONLY action fieldset — no date leak", () => {
     const out = render(FiltersSheet, {
       props: {
         filters: {
@@ -1767,7 +1731,7 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
         },
         sources: [],
         games: [],
-        // Plan 02.1-34: /audit's new schema — date axis dropped.
+        // /audit's schema — date axis dropped.
         schema: ["action"] as const,
         onApply: () => {},
         onClose: () => {},
@@ -1778,9 +1742,9 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
     // schema (now ['action'] only) opens the sheet.
     expect(
       out.body,
-      "FiltersSheet rendered date axis even when schema=['action'] (Plan 02.1-34 §4.21.A regression)",
+      "FiltersSheet rendered date axis even when schema=['action'] (regression)",
     ).not.toMatch(/<fieldset[^>]*data-axis="date"/);
-    // Other /feed-only axes also stay out (regression carry-over from Plan 02.1-21).
+    // Other /feed-only axes also stay out (regression carry-over).
     expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="source"/);
     expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="kind"/);
     expect(out.body).not.toMatch(/<fieldset[^>]*data-axis="show"/);
@@ -1789,29 +1753,26 @@ describe("Plan 02.1-34 — layout regression fixes + /audit FiltersSheet schema 
 });
 
 /**
- * Plan 02.1-33 — SourceRow edit-mode polish (UAT-NOTES.md §4.22.B/C/D/E).
+ * SourceRow edit-mode polish.
  *
- * Closes four findings on the same component:
- *   §4.22.B — Remove visible only inside edit mode.
- *   §4.22.C — Edit pencil hidden inside edit mode.
- *   §4.22.D — auto_import is rendered as EXACTLY one checkbox (regression
- *             guard against re-introduction of a parallel text-input
- *             control bound to editAutoImport).
- *   §4.22.E — Save / Cancel / Remove sit at the BOTTOM of the edit-form
- *             block with a section divider above the action row.
+ * Four findings on the same component:
+ *   - Remove visible only inside edit mode.
+ *   - Edit pencil hidden inside edit mode.
+ *   - auto_import is rendered as EXACTLY one checkbox (regression
+ *     guard against re-introduction of a parallel text-input
+ *     control bound to editAutoImport).
+ *   - Save / Cancel / Remove sit at the BOTTOM of the edit-form
+ *     block with a section divider above the action row.
  *
  * The vitest-browser end-to-end (interactive open / cancel / save) is
- * stub-skipped pending the Phase 6 auth harness. SSR-level regression
- * guards live here — grep + structural assertions on SourceRow.svelte
- * source — same pattern as the Plan 02.1-25 SourceRow Mine treatment
- * scan above.
+ * stub-skipped pending the auth harness. SSR-level regression guards
+ * live here — grep + structural assertions on SourceRow.svelte source.
  */
-describe("Plan 02.1-33 — SourceRow edit-mode polish (visibility gates + footer)", () => {
-  it("SourceRow read-mode .actions has refresh button, NO edit-icon, NO remove-icon — Phase 03.0.1 post-review UAT", async () => {
-    // Phase 03.0.1 (post-review UAT 2026-05-10): edit pencil REMOVED from
-    // row. User clicks the display-name link to /sources/[id] where edit
-    // (rename, auto-import toggle, delete) lives. Row is read-only except
-    // for the inline refresh button.
+describe("SourceRow edit-mode polish (visibility gates + footer)", () => {
+  it("SourceRow read-mode .actions has refresh button, NO edit-icon, NO remove-icon", async () => {
+    // Edit pencil is REMOVED from row. User clicks the display-name link
+    // to /sources/[id] where edit (rename, auto-import toggle, delete)
+    // lives. Row is read-only except for the inline refresh button.
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
@@ -1834,7 +1795,7 @@ describe("Plan 02.1-33 — SourceRow edit-mode polish (visibility gates + footer
     }
   });
 
-  it("SourceRow renders the destructive Remove button ONLY in edit-form footer — closes §4.22.B", async () => {
+  it("SourceRow renders the destructive Remove button ONLY in edit-form footer", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
@@ -1843,11 +1804,10 @@ describe("Plan 02.1-33 — SourceRow edit-mode polish (visibility gates + footer
     expect(src).toMatch(/form-footer/);
     expect(src).toMatch(/footer-btn-danger/);
     // The Remove button is wired to confirmingRemove = true, opening the
-    // existing ConfirmDialog flow — preserves Plan 02.1-08 soft-delete
-    // contract.
+    // existing ConfirmDialog flow — preserves the soft-delete contract.
     expect(src).toMatch(/confirmingRemove\s*=\s*true/);
-    // remove-icon class lives on the footer button (Plan 02.1-33), not on
-    // a top-level read-mode .actions button.
+    // remove-icon class lives on the footer button, not on a top-level
+    // read-mode .actions button.
     const removeIconMatches = src.match(/remove-icon/g) ?? [];
     expect(
       removeIconMatches.length,
@@ -1855,7 +1815,7 @@ describe("Plan 02.1-33 — SourceRow edit-mode polish (visibility gates + footer
     ).toBe(1);
   });
 
-  it("SourceRow form-footer hosts Save (primary) / Cancel (ghost) / Remove (danger) AT THE BOTTOM — closes §4.22.E", async () => {
+  it("SourceRow form-footer hosts Save (primary) / Cancel (ghost) / Remove (danger) AT THE BOTTOM", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
@@ -1876,14 +1836,14 @@ describe("Plan 02.1-33 — SourceRow edit-mode polish (visibility gates + footer
     expect(src).toMatch(/footer-btn-primary/);
     expect(src).toMatch(/footer-btn-ghost/);
     expect(src).toMatch(/footer-btn-danger/);
-    // Save uses common_save (added in this plan); Cancel uses common_cancel;
-    // Remove uses common_remove.
+    // Save uses common_save; Cancel uses common_cancel; Remove uses
+    // common_remove.
     expect(src).toMatch(/m\.common_save\(\)/);
     expect(src).toMatch(/m\.common_cancel\(\)/);
     expect(src).toMatch(/m\.common_remove\(\)/);
   });
 
-  it("SourceRow auto_import is rendered as EXACTLY ONE checkbox (regression guard) — closes §4.22.D", async () => {
+  it("SourceRow auto_import is rendered as EXACTLY ONE checkbox (regression guard)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
@@ -1906,24 +1866,23 @@ describe("Plan 02.1-33 — SourceRow edit-mode polish (visibility gates + footer
     expect(src).not.toMatch(/type="text"[^>]*[Aa]uto[_-]?[Ii]mport/);
   });
 
-  it("SourceRow PATCH /api/sources/:id payload still ships { displayName, autoImport } — preserves Plan 02.1-22 contract", async () => {
+  it("SourceRow PATCH /api/sources/:id payload still ships { displayName, autoImport }", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
-    // saveSourceEdit body still serializes displayName + autoImport — no
-    // schema or service change in Plan 02.1-33; pure component refactor.
+    // saveSourceEdit body still serializes displayName + autoImport —
+    // pure component refactor, no schema or service change.
     expect(src).toMatch(/method:\s*"PATCH"/);
     expect(src).toMatch(/displayName:\s*editName\.trim\(\)\s*\|\|\s*null/);
     expect(src).toMatch(/autoImport:\s*editAutoImport/);
   });
 
-  it("SourceRow ConfirmDialog wired to existing soft-delete flow — preserves Plan 02.1-08 contract", async () => {
+  it("SourceRow ConfirmDialog wired to existing soft-delete flow", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
     // The Remove button (now in the edit-form footer) opens the same
-    // ConfirmDialog used since Plan 02.1-08; on confirm, DELETE
-    // /api/sources/:id is fired.
+    // ConfirmDialog; on confirm, DELETE /api/sources/:id is fired.
     expect(src).toMatch(/<ConfirmDialog\s/);
     expect(src).toMatch(/method:\s*"DELETE"/);
     expect(src).toMatch(/m\.confirm_source_remove/);
@@ -1931,21 +1890,20 @@ describe("Plan 02.1-33 — SourceRow edit-mode polish (visibility gates + footer
 });
 
 /**
- * Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker compact + FeedCard visibility gate.
+ * /events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker
+ * compact + FeedCard visibility gate.
  *
- * Closes UAT-NOTES.md §4.18.A + §4.18.B + §4.24.E + §4.24.F. The four
- * findings ride together because they all reshape the read-only detail
- * page + inbox card surface in one user-visible UX delta:
- *   §4.18.A — /events/[id] Delete REMOVED (now at /events/[id]/edit footer).
- *   §4.18.B — /events/[id] Edit pencil moves to top-right corner.
- *   §4.24.E — AttachToGamePicker hidden when gameIds.length > 0 OR standalone.
- *   §4.24.F — AttachToGamePicker visual shrink (compact mode label + style).
+ * Four findings ride together because they all reshape the read-only
+ * detail page + inbox card surface in one user-visible UX delta:
+ *   - /events/[id] Delete REMOVED (now at /events/[id]/edit footer).
+ *   - /events/[id] Edit pencil moves to top-right corner.
+ *   - AttachToGamePicker hidden when gameIds.length > 0 OR standalone.
+ *   - AttachToGamePicker visual shrink (compact mode label + style).
  *
- * SSR-render-time guards live here. Browser-mode 360px assertions live in
- * tests/browser/feed-360.test.ts (auth harness deferred to Phase 6 — same
- * precedent as Plans 02.1-18 / 19 / 20 / 21 / 23 / 25 / 26 / 33).
+ * SSR-render-time guards live here. Browser-mode 360px assertions live
+ * in tests/browser/feed-360.test.ts (auth harness deferred).
  */
-describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker compact + FeedCard visibility gate", () => {
+describe("/events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker compact + FeedCard visibility gate", () => {
   const baseEvent = {
     id: "ev-1",
     gameIds: [] as string[],
@@ -1959,13 +1917,13 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
     notes: null as string | null,
     metadata: null as unknown,
     lastPolledAt: null as Date | null,
-    // Plan 03.0-11: PollingBadge live-state rewrite extends EventDtoLite
-    // with lastPollStatus (D-12 unavailable override). Test fixtures get
-    // null since these tests don't exercise the polling tier.
+    // PollingBadge live-state extends EventDtoLite with lastPollStatus
+    // (the unavailable override). Test fixtures get null since these
+    // tests don't exercise the polling tier.
     lastPollStatus: null as string | null,
   };
 
-  it("Plan 02.1-32 — FeedCard with gameIds.length > 0 does NOT render AttachToGamePicker (closes §4.24.E)", async () => {
+  it("FeedCard with gameIds.length > 0 does NOT render AttachToGamePicker", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -1983,7 +1941,7 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
     expect(out.body).not.toMatch(/<div class="picker(?:\s[^"]*)?"/);
   });
 
-  it("Plan 02.1-32 — FeedCard with metadata.triage.standalone === true does NOT render AttachToGamePicker (closes §4.24.E)", async () => {
+  it("FeedCard with metadata.triage.standalone === true does NOT render AttachToGamePicker", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -2000,7 +1958,7 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
     expect(out.body).not.toMatch(/class="picker-line(?:\s[^"]*)?"/);
   });
 
-  it("Plan 02.1-32 — FeedCard inbox row (gameIds=[], no triage flags) renders AttachToGamePicker WITH compact class (closes §4.24.F)", async () => {
+  it("FeedCard inbox row (gameIds=[], no triage flags) renders AttachToGamePicker WITH compact class", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -2022,7 +1980,7 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
     expect(out.body).toContain("Attach");
   });
 
-  it("Plan 02.1-32 — AttachToGamePicker compact={true} swaps the trigger label to feed_card_attach_compact_label (closes §4.24.F)", async () => {
+  it("AttachToGamePicker compact={true} swaps the trigger label to feed_card_attach_compact_label", async () => {
     const AttachToGamePicker = (await import("../../src/lib/components/AttachToGamePicker.svelte"))
       .default;
     const out = render(AttachToGamePicker, {
@@ -2036,7 +1994,7 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
     expect(out.body).toContain("Attach");
   });
 
-  it("Plan 02.1-32 — AttachToGamePicker compact={false} (default) keeps the original 'Attach to game' label", async () => {
+  it("AttachToGamePicker compact={false} (default) keeps the original 'Attach to game' label", async () => {
     const AttachToGamePicker = (await import("../../src/lib/components/AttachToGamePicker.svelte"))
       .default;
     const out = render(AttachToGamePicker, {
@@ -2051,7 +2009,7 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
     expect(out.body).not.toMatch(/<button[^>]*class="[^"]*\bcompact\b[^"]*"/);
   });
 
-  it("Plan 02.1-32 — /events/[id]/+page.svelte renders an edit-pencil link top-right; NO Delete button (closes §4.18.A + §4.18.B)", async () => {
+  it("/events/[id]/+page.svelte renders an edit-pencil link top-right; NO Delete button", async () => {
     const fs = await import("node:fs");
     const src = fs.readFileSync("src/routes/events/[id]/+page.svelte", "utf8");
     // Edit pencil link is present.
@@ -2066,14 +2024,14 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
     expect(src).not.toMatch(/import\s+ConfirmDialog\s+from/);
   });
 
-  it("Plan 02.1-32 — /events/[id]/edit/+page.svelte ships standalone toggle + Delete button at footer (closes §4.18.A + §4.24.D)", async () => {
+  it("/events/[id]/edit/+page.svelte ships standalone toggle + Delete button at footer", async () => {
     const fs = await import("node:fs");
     const src = fs.readFileSync("src/routes/events/[id]/edit/+page.svelte", "utf8");
     // Standalone toggle state + conflict guard derivation present.
     expect(src).toMatch(/editStandalone/);
     expect(src).toMatch(/standaloneConflict/);
     expect(src).toMatch(/metadata\.triage\.standalone|triage.*standalone/);
-    // Standalone Paraglide labels referenced (4 keys from Task 1).
+    // Standalone Paraglide labels referenced.
     expect(src).toMatch(/m\.events_edit_standalone_label\(\)/);
     expect(src).toMatch(/m\.events_edit_standalone_help\(\)/);
     expect(src).toMatch(/m\.events_edit_standalone_conflict\(\)/);
@@ -2089,11 +2047,10 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
 });
 
 /**
- * Plan 02.1-39 round-6 polish #11 follow-up — RecoveryDialog parity sweep
- * across /feed, /games, /sources.
+ * RecoveryDialog parity sweep across /feed, /games, /sources.
  *
- * c98eadf wired <RecoveryDialog> into /feed only. The user surfaced the
- * single-recovery-surface intent during round-6 UAT (verbatim, ru):
+ * Initially RecoveryDialog was wired into /feed only. The user surfaced
+ * the single-recovery-surface intent during UAT (verbatim, ru):
  *   "и так сделать для всеху удаленных обьектов на других страницах"
  *   ("and do the same for all deleted objects on other pages")
  *
@@ -2108,7 +2065,7 @@ describe("Plan 02.1-32 — /events/[id] Edit pencil top-right + Delete moved + A
  *      <details class="deleted-sources"> blocks are gone (no <details>
  *      wrapping the soft-deleted list survives in the markup).
  */
-describe("Plan 02.1-39 round-6 polish #11 follow-up — RecoveryDialog parity across /feed, /games, /sources", () => {
+describe("RecoveryDialog parity across /feed, /games, /sources", () => {
   it("PageHeader renders a recovery-link <button> when deletedCount > 0 AND onOpenRecovery is provided", async () => {
     const PageHeader = (await import("../../src/lib/components/PageHeader.svelte")).default;
     const out = render(PageHeader, {
@@ -2119,13 +2076,13 @@ describe("Plan 02.1-39 round-6 polish #11 follow-up — RecoveryDialog parity ac
         onOpenRecovery: () => {},
       },
     });
-    // The affordance is a <button> (round-6 #11 — anchor → modal-trigger
-    // button) with class="recovery-link" + the localized count string.
+    // The affordance is a <button> (anchor → modal-trigger button) with
+    // class="recovery-link" + the localized count string.
     expect(out.body).toMatch(/<button[^>]*class="[^"]*\brecovery-link\b/);
     expect(out.body).toMatch(/Recently deleted \(3\)/);
-    // Defensive: the previous Path A <a href="#deleted-events"> anchor
-    // pattern is gone from PageHeader entirely. No <a> with the
-    // recovery-link class survives.
+    // Defensive: the previous <a href="#deleted-events"> anchor pattern
+    // is gone from PageHeader entirely. No <a> with the recovery-link
+    // class survives.
     expect(out.body).not.toMatch(/<a[^>]*class="[^"]*\brecovery-link\b/);
     expect(out.body).not.toMatch(/href="#deleted-events"/);
   });
@@ -2179,12 +2136,12 @@ describe("Plan 02.1-39 round-6 polish #11 follow-up — RecoveryDialog parity ac
       expect(src, `${route}: passes entityType="event" | "game" | "source"`).toMatch(
         /entityType="(event|game|source)"/,
       );
-      // PageHeader receives the callback via the new prop name (round-6
-      // #11 replaced recoveryAnchor with onOpenRecovery).
+      // PageHeader receives the callback via onOpenRecovery (the
+      // previous prop was recoveryAnchor).
       expect(src, `${route}: PageHeader receives onOpenRecovery callback`).toMatch(
         /onOpenRecovery=\{/,
       );
-      // Negative: the previous Path A `recoveryAnchor=` prop is gone.
+      // Negative: the previous `recoveryAnchor=` prop is gone.
       expect(src, `${route}: legacy recoveryAnchor prop removed`).not.toMatch(/recoveryAnchor=/);
     }
   });
@@ -2200,10 +2157,10 @@ describe("Plan 02.1-39 round-6 polish #11 follow-up — RecoveryDialog parity ac
       const src = fs.readFileSync(path.resolve(route), "utf8");
       // Strip <script>, <style>, AND HTML comments so historical
       // references in code comments / removed-CSS commentary / breadcrumb
-      // <!-- comments --> documenting the round-6 #11 follow-up don't
-      // trigger false positives — we only care about live, rendered
-      // markup. Both /games and /sources keep breadcrumb comments
-      // mentioning the retired class names by design.
+      // <!-- comments --> documenting the recovery rework don't trigger
+      // false positives — we only care about live, rendered markup. Both
+      // /games and /sources keep breadcrumb comments mentioning the
+      // retired class names by design.
       const markupOnly = src
         .replace(/<script[\s\S]*?<\/script>/g, "")
         .replace(/<style[\s\S]*?<\/style>/g, "")

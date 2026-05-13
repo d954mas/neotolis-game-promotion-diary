@@ -6,9 +6,9 @@ import { uuidv7 } from "../../src/lib/server/ids.js";
 import { createEvent } from "../../src/lib/server/services/events.js";
 import { seedUserDirectly } from "./helpers.js";
 
-// Phase 3.0 Plan 04 — manual-paste dedup (CONTEXT D-15).
+// Manual-paste dedup.
 //
-// Phase 3.0 post-build (migration 0012, 2026-05-06): the partial unique
+// Migration 0012 (2026-05-06): the partial unique
 // (user_id, kind, external_id) index that this test originally pinned was
 // DROPPED. UAT direction — operator wants to log multiple promotion events
 // for the same upstream video (e.g. "Released video X" + "Promo stream
@@ -28,7 +28,7 @@ import { seedUserDirectly } from "./helpers.js";
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
-describe("events manual-paste dedup (Plan 03.0-04 post-0012)", () => {
+describe("events manual-paste dedup (post-migration-0012)", () => {
   it("post-0012: second manual paste of same external_id SUCCEEDS — diary intentionally permits multiple events per video", async () => {
     const u = await seedUserDirectly({ email: `dedup-1-${uniq()}@test.local` });
 
@@ -73,7 +73,7 @@ describe("events manual-paste dedup (Plan 03.0-04 post-0012)", () => {
     expect(both.every((r) => r.externalId === "dQw4w9WgXcQ")).toBe(true);
   });
 
-  it("Plan 03.0-04: soft-deleted dupe is INVISIBLE to the partial unique index — next paste succeeds", async () => {
+  it("soft-deleted dupe is INVISIBLE to the partial unique index — next paste succeeds", async () => {
     const u = await seedUserDirectly({ email: `dedup-2-${uniq()}@test.local` });
 
     const url = "https://www.youtube.com/watch?v=jNQXAC9IVRw";
@@ -110,7 +110,7 @@ describe("events manual-paste dedup (Plan 03.0-04 post-0012)", () => {
     expect(second.id).not.toBe(first.id);
   });
 
-  it("Plan 03.0-04: different user pasting same URL → both succeed (user-scoped uniqueness)", async () => {
+  it("different user pasting same URL → both succeed (user-scoped uniqueness)", async () => {
     const a = await seedUserDirectly({ email: `dedup-a-${uniq()}@test.local` });
     const b = await seedUserDirectly({ email: `dedup-b-${uniq()}@test.local` });
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pnpm deploy (D-22). Triggers a deploy on the production VPS via the
+# pnpm deploy. Triggers a deploy on the production VPS via the
 # `command="..."` restricted SSH key. The remote sshd's authorized_keys
 # entry restricts this key to running:
 #
@@ -9,7 +9,7 @@
 # So the SSH login itself runs the deploy. This script is therefore
 # minimal: open the SSH session, capture output, then verify /healthz.
 #
-# Setup is documented in docs/deploy/install.md (Plan 02.2-08).
+# Setup is documented in docs/deploy/install.md.
 
 set -euo pipefail
 

@@ -1,5 +1,4 @@
-// Phase 03.0.1 (post-review) — automation for the AuditFlow ↔ CHECK constraint
-// lockstep convention.
+// Automation for the AuditFlow ↔ CHECK constraint lockstep convention.
 //
 // Two sources of truth for the flow enum must stay in sync:
 //   1. TypeScript — `AuditFlow` literal union in src/lib/server/audit.ts

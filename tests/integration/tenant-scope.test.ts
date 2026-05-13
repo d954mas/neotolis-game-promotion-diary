@@ -7,18 +7,12 @@ import { NotFoundError } from "../../src/lib/server/services/errors.js";
 import { seedUserDirectly } from "./helpers.js";
 
 /**
- * Plan 01-07 (Wave 4) — VALIDATION 7/8/9 (cross-tenant 404 not 403).
+ * Cross-tenant 404 not 403.
  *
- * Phase 1 has /api/me only — no cross-resource matrix yet (Phase 2 lands
- * /api/games). This test seeds the Pattern-3 invariant on a sentinel: an
- * audit_log row owned by user B is unreadable when scoped by user A's id.
- *
- * Revision 1 W1 fix: VALIDATION 8 (write) and 9 (delete) are explicit
- * `it.skip` with the EXACT annotations `deferred to Phase 2: no writable
- * resource in Phase 1` and `deferred to Phase 2: no deletable resource in
- * Phase 1`. No silent skips; every behavior accounted for.
+ * Seeds the Pattern-3 invariant on a sentinel: an audit_log row owned by
+ * user B is unreadable when scoped by user A's id.
  */
-describe("cross-tenant 404 (PRIV-01, VALIDATION 7/8/9)", () => {
+describe("cross-tenant 404", () => {
   it("user A cannot READ user B audit row (404 NOT 403)", async () => {
     const userA = await seedUserDirectly({ email: "a@test.local" });
     const userB = await seedUserDirectly({ email: "b@test.local" });
@@ -46,8 +40,7 @@ describe("cross-tenant 404 (PRIV-01, VALIDATION 7/8/9)", () => {
     await expect(getAuditRowFor(userA.id, userB.id)).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  // Plan 02-08 — VALIDATION 8 lit up (Phase 1 deferred from "no writable resource").
-  it("user A cannot WRITE user B resource — returns 404 (Phase 2 GAMES-01 turns this on)", async () => {
+  it("user A cannot WRITE user B resource — returns 404", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const { createGame, getGameById } = await import("../../src/lib/server/services/games.js");
     const app = createApp();
@@ -68,7 +61,7 @@ describe("cross-tenant 404 (PRIV-01, VALIDATION 7/8/9)", () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body).toEqual({ error: "not_found" });
 
-    // P1 invariant: body MUST NOT contain "forbidden" or "permission".
+    // Invariant: body MUST NOT contain "forbidden" or "permission".
     const bodyStr = JSON.stringify(body);
     expect(bodyStr).not.toMatch(/forbidden|permission/i);
 
@@ -77,7 +70,6 @@ describe("cross-tenant 404 (PRIV-01, VALIDATION 7/8/9)", () => {
     expect(after.title).toBe("A's Game");
   });
 
-  // Plan 02-08 — VALIDATION 9 lit up (Phase 1 deferred from "no deletable resource").
   it("user A cannot DELETE user B resource — returns 404", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const { createGame, getGameByIdIncludingDeleted } =
@@ -110,12 +102,12 @@ describe("cross-tenant 404 (PRIV-01, VALIDATION 7/8/9)", () => {
     expect(body).not.toContain("permission");
   });
 
-  // Plan 02.1-17 — POST /api/events/preview-url is read-only (pure URL parse +
-  // oEmbed fetch). No tenant-owned data is read. Cross-tenant invariant: both
-  // users get the same enrichment shape from the same URL. This test asserts
-  // that contract and surfaces any future drift if a refactor accidentally
-  // reads from the caller's tenant scope.
-  it("Plan 02.1-17: POST /api/events/preview-url is tenant-scoped but tenant-data-free — same URL → same shape for any user", async () => {
+  // POST /api/events/preview-url is read-only (pure URL parse + oEmbed
+  // fetch). No tenant-owned data is read. Cross-tenant invariant: both
+  // users get the same enrichment shape from the same URL. This test
+  // asserts that contract and surfaces any future drift if a refactor
+  // accidentally reads from the caller's tenant scope.
+  it("POST /api/events/preview-url is tenant-scoped but tenant-data-free — same URL → same shape for any user", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const youtubeOembed = await import("../../src/lib/server/integrations/youtube-oembed.js");
     const { vi } = await import("vitest");
@@ -161,7 +153,7 @@ describe("cross-tenant 404 (PRIV-01, VALIDATION 7/8/9)", () => {
       expect(bodyA.externalId).toBe(bodyB.externalId);
       expect(bodyA.kind).toBe(bodyB.kind);
       expect(bodyA.title).toBe(bodyB.title);
-      // DTO discipline (P3): preview-url response carries no userId.
+      // DTO discipline: preview-url response carries no userId.
       expect(bodyA).not.toHaveProperty("userId");
       expect(bodyB).not.toHaveProperty("userId");
     } finally {
@@ -193,20 +185,20 @@ describe("cross-tenant 404 (PRIV-01, VALIDATION 7/8/9)", () => {
 });
 
 /**
- * Plan 02-08 — D-37 cross-tenant matrix.
+ * Cross-tenant matrix.
  *
- * For every Phase 2 route that takes an id (or gameId) parameter, exercise
+ * For every route that takes an id (or gameId) parameter, exercise
  * the cross-tenant case at the HTTP boundary: user B presents their own
  * cookie against an id that belongs to user A and MUST receive 404 — never
  * 403, never 200 with another tenant's data, and the body MUST NOT contain
- * the strings 'forbidden' or 'permission' (P1 invariant; CLAUDE.md Privacy
- * & multi-tenancy rule 2).
+ * the strings 'forbidden' or 'permission' (CLAUDE.md Privacy & multi-tenancy
+ * rule 2).
  *
  * The probes use `expect.soft` so a single test surfaces every violation in
  * one run rather than failing on the first — the matrix is large enough
  * that the all-or-nothing failure mode would mask regressions.
  */
-describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
+describe("cross-tenant matrix", () => {
   it("user B requests on user A's resources return 404, never 403/200", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const { createGame } = await import("../../src/lib/server/services/games.js");
@@ -267,8 +259,8 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
         },
         "127.0.0.1",
       );
-      // Plan 02.1-14: User A's soft-deleted event — used for the cross-tenant
-      // restore probe (must 404 by construction; restore is gated by the
+      // User A's soft-deleted event — used for the cross-tenant restore
+      // probe (must 404 by construction; restore is gated by the
       // service-layer userId AND-clause on the UPDATE).
       const deletedEvent = await createEvent(
         userA.id,
@@ -314,7 +306,7 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
           path: `/api/games/${game.id}/listings/${listing.id}/key`,
           body: { apiKeyId: null },
         },
-        // Phase 2.1 — data_sources (replaces Phase 2 youtube-channels probes)
+        // data_sources
         { method: "GET", path: `/api/sources/${source.id}` },
         {
           method: "PATCH",
@@ -323,7 +315,7 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
         },
         { method: "DELETE", path: `/api/sources/${source.id}` },
         { method: "POST", path: `/api/sources/${source.id}/restore` },
-        // Phase 03.0.1 Plan 10 — refresh-content endpoint cross-tenant probe.
+        // refresh-content endpoint cross-tenant probe.
         // Dispatches via getAdapter(source.kind).backfillSource; the
         // getSourceById fast-path throws NotFoundError BEFORE any enqueue,
         // so this assertion does not need a pg-boss mock — the 404 short-
@@ -337,7 +329,7 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
           body: { plaintext: "STEAM-XYZW-NEWNEW-CCCC" },
         },
         { method: "DELETE", path: `/api/api-keys/steam/${key.id}` },
-        // events: per-game + per-id (Phase 2.1 unified-events surface)
+        // events: per-game + per-id (unified-events surface)
         { method: "GET", path: `/api/games/${game.id}/events` },
         { method: "GET", path: `/api/events/${event.id}` },
         {
@@ -346,11 +338,11 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
           body: { title: "B HACKED" },
         },
         { method: "DELETE", path: `/api/events/${event.id}` },
-        // Phase 2.1 — events attach + dismiss-inbox cross-tenant probes
+        // events attach + dismiss-inbox cross-tenant probes
         // PATCH /api/events/:id/attach with B's own gameId — B is authed but
         // the event belongs to A so the UPDATE matches no rows and the
-        // service returns NotFoundError → 404. Pitfall 4 explicit guard
-        // (NOT 500 from a bare PG FK rejection).
+        // service returns NotFoundError → 404. Explicit guard:
+        // NOT 500 from a bare PG FK rejection.
         {
           method: "PATCH",
           path: `/api/events/${event.id}/attach`,
@@ -369,19 +361,19 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
           method: "PATCH",
           path: `/api/events/${inboxEvent.id}/dismiss-inbox`,
         },
-        // Plan 02.1-14 — PATCH /api/events/:id/restore on A's soft-deleted
-        // event must 404 cross-tenant. The restore service's UPDATE WHERE
-        // clause is `userId AND id AND deleted_at IS NOT NULL`; user B's
-        // session id never satisfies the userId clause.
+        // PATCH /api/events/:id/restore on A's soft-deleted event must 404
+        // cross-tenant. The restore service's UPDATE WHERE clause is
+        // `userId AND id AND deleted_at IS NOT NULL`; user B's session id
+        // never satisfies the userId clause.
         {
           method: "PATCH",
           path: `/api/events/${deletedEvent.id}/restore`,
         },
-        // Plan 02.1-24 — PATCH /api/events/:id/mark-standalone +
-        // /unmark-standalone on A's inbox event must 404 cross-tenant. The
-        // service's UPDATE WHERE clause requires the userId match; B's
-        // session never satisfies it (tenant-scope/no-unfiltered-tenant-query
-        // ESLint rule plus the explicit eq(events.userId, userId) clause).
+        // PATCH /api/events/:id/mark-standalone + /unmark-standalone on A's
+        // inbox event must 404 cross-tenant. The service's UPDATE WHERE
+        // clause requires the userId match; B's session never satisfies it
+        // (tenant-scope/no-unfiltered-tenant-query ESLint rule plus the
+        // explicit eq(events.userId, userId) clause).
         {
           method: "PATCH",
           path: `/api/events/${inboxEvent.id}/mark-standalone`,
@@ -405,10 +397,10 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
         expect
           .soft(res.status, `${p.method} ${p.path} should be 404 cross-tenant (got ${res.status})`)
           .toBe(404);
-        // Pitfall 4 explicit guard: cross-tenant attach must NEVER surface 500
-        // from a bare PG FK rejection — assertGameOwnedByUser fires first.
+        // Explicit guard: cross-tenant attach must NEVER surface 500 from a
+        // bare PG FK rejection — assertGameOwnedByUser fires first.
         expect
-          .soft(res.status, `${p.method} ${p.path} must NOT be 500 (Pitfall 4: cross-tenant FK)`)
+          .soft(res.status, `${p.method} ${p.path} must NOT be 500 (cross-tenant FK)`)
           .not.toBe(500);
         const txt = await res.text();
         expect
@@ -416,8 +408,8 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
           .not.toMatch(/forbidden|permission/i);
       }
 
-      // Plan 02.1-14 — GET /api/events/deleted is a list endpoint, not a
-      // single-row endpoint, so the cross-tenant isolation contract is
+      // GET /api/events/deleted is a list endpoint, not a single-row
+      // endpoint, so the cross-tenant isolation contract is
       // "user B's call returns ZERO of user A's rows" rather than 404. The
       // service-layer eq(events.userId, userId) clause enforces this by
       // construction; the route assertion confirms the wire-format isolation.
@@ -444,8 +436,7 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
 });
 
 /**
- * Plan 02.1-28 (UAT-NOTES.md §4.24.G — M:N migration application layer) —
- * cross-tenant probes against the new `event_games` junction.
+ * Cross-tenant probes against the `event_games` junction.
  *
  * Two probe shapes:
  *   - userB attempting to attach userA's eventId to userB's own gameId →
@@ -455,19 +446,18 @@ describe("Phase 2 + 2.1 cross-tenant matrix (D-37)", () => {
  *     404 (NotFoundError from assertGameOwnedByUser; userB's session
  *     never satisfies the userId clause on the games SELECT).
  *
- * Body MUST NOT contain 'forbidden' / 'permission' (P1 invariant;
- * CLAUDE.md Privacy & multi-tenancy rule 2).
+ * Body MUST NOT contain 'forbidden' / 'permission' (CLAUDE.md Privacy
+ * & multi-tenancy rule 2).
  *
  * The eventGames table is tenant-scoped at every read site via the
- * denormalized userId column (Plan 02.1-27 schema design); the
- * ESLint tenant-scope rule fires on any future Drizzle query that
- * omits eq(eventGames.userId, userId).
+ * denormalized userId column; the ESLint tenant-scope rule fires on any
+ * future Drizzle query that omits eq(eventGames.userId, userId).
  */
-describe("Plan 02.1-28 — event_games cross-tenant", () => {
-  // Parallel-executor email-uniqueness coordination (Plan 02.1-17 pattern):
+describe("event_games cross-tenant", () => {
+  // Parallel-executor email-uniqueness coordination:
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 02.1-28: userB attaches userA's event to userB's game → 404 (eventId ownership wins)", async () => {
+  it("userB attaches userA's event to userB's game → 404 (eventId ownership wins)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const { createGame } = await import("../../src/lib/server/services/games.js");
     const { createEvent } = await import("../../src/lib/server/services/events.js");
@@ -503,7 +493,7 @@ describe("Plan 02.1-28 — event_games cross-tenant", () => {
     expect(bodyStr).not.toMatch(/forbidden|permission/i);
   });
 
-  it("Plan 02.1-28: userB attaches userB's own event to userA's game → 404 (gameId ownership wins via assertGameOwnedByUser)", async () => {
+  it("userB attaches userB's own event to userA's game → 404 (gameId ownership wins via assertGameOwnedByUser)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const { createGame } = await import("../../src/lib/server/services/games.js");
     const { createEvent } = await import("../../src/lib/server/services/events.js");
@@ -541,7 +531,7 @@ describe("Plan 02.1-28 — event_games cross-tenant", () => {
     expect(bodyStr).not.toMatch(/forbidden|permission/i);
   });
 
-  it("Plan 02.1-28: GET /api/events list response from userB cursor never contains userA's gameIds in any row", async () => {
+  it("GET /api/events list response from userB cursor never contains userA's gameIds in any row", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const { createGame } = await import("../../src/lib/server/services/games.js");
     const { createEvent, attachEventToGames } =
@@ -597,17 +587,16 @@ describe("Plan 02.1-28 — event_games cross-tenant", () => {
   });
 });
 
-// Phase 02.2 D-16 — cross-tenant invariants for the /api/me/* account
-// surface (Plan 02.2-03). The routes have no :userId path parameter — they
-// operate on c.var.userId only, so cross-tenant access is impossible by
-// construction. The two assertions below exercise both layers: the
-// behavioural HTTP-boundary check (User A's export does not contain User B
-// rows) and the structural by-construction check (no :userId in any
-// registered route path).
-describe("Phase 02.2 cross-tenant invariants for /api/me/account routes", () => {
+// Cross-tenant invariants for the /api/me/* account surface. The routes
+// have no :userId path parameter — they operate on c.var.userId only, so
+// cross-tenant access is impossible by construction. The two assertions
+// below exercise both layers: the behavioural HTTP-boundary check (User
+// A's export does not contain User B rows) and the structural
+// by-construction check (no :userId in any registered route path).
+describe("cross-tenant invariants for /api/me/account routes", () => {
   const uniqAcc = () => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 02.2-03: GET /api/me/export for User A does NOT contain any User B rows", async () => {
+  it("GET /api/me/export for User A does NOT contain any User B rows", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const { createGame } = await import("../../src/lib/server/services/games.js");
     const app = createApp();
@@ -630,11 +619,11 @@ describe("Phase 02.2 cross-tenant invariants for /api/me/account routes", () => 
     expect(json).not.toContain(userB.id);
   });
 
-  it("Plan 02.2-03: account routes have no :userId path parameter — cross-tenant impossible by construction", async () => {
+  it("account routes have no :userId path parameter — cross-tenant impossible by construction", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const routes = (app as unknown as { routes: Array<{ path: string }> }).routes;
-    // The 3 Plan 02.2-03 routes registered under /api/me/*. By construction
+    // The 3 routes registered under /api/me/*. By construction
     // none of them carry a :userId path parameter; cross-tenant access is
     // impossible because the handler only reads c.var.userId.
     const accountPaths = routes
@@ -649,18 +638,17 @@ describe("Phase 02.2 cross-tenant invariants for /api/me/account routes", () => 
   });
 });
 
-// Phase 3.0 Plan 03.0-08 — cross-tenant probes for the Wave 2 routes
-// that ship in this plan. CLAUDE.md §Privacy invariant 2: cross-tenant
-// returns 404, never 403. /api/me/account/purge has no :userId path
-// parameter (Plan 02.2-03 precedent — account routes operate on
-// c.var.userId only); the cross-tenant probe is therefore a structural
-// pin ("the shape of the route can't accidentally grow a :userId
-// param") rather than a behavioural assertion.
+// Cross-tenant probes for refresh-poll + account/purge routes.
+// CLAUDE.md §Privacy invariant 2: cross-tenant returns 404, never 403.
+// /api/me/account/purge has no :userId path parameter (account routes
+// operate on c.var.userId only); the cross-tenant probe is therefore a
+// structural pin ("the shape of the route can't accidentally grow a
+// :userId param") rather than a behavioural assertion.
 //
 // pg-boss is mocked so the cross-tenant test doesn't need a live boss —
 // the assertion is on the 404 short-circuit BEFORE any enqueue.
-describe("Plan 03.0-08 — refresh-poll + account/purge cross-tenant", () => {
-  it("Plan 03.0-08: cross-tenant POST /api/events/:id/refresh-poll → 404", async () => {
+describe("refresh-poll + account/purge cross-tenant", () => {
+  it("cross-tenant POST /api/events/:id/refresh-poll → 404", async () => {
     const { vi } = await import("vitest");
     vi.doMock("../../src/lib/server/queue-client.js", async (importOriginal) => {
       const actual = (await importOriginal()) as Record<string, unknown>;
@@ -707,7 +695,7 @@ describe("Plan 03.0-08 — refresh-poll + account/purge cross-tenant", () => {
     }
   });
 
-  it("Plan 03.0-08: account/purge route has no :userId path parameter — cross-tenant impossible by construction", async () => {
+  it("account/purge route has no :userId path parameter — cross-tenant impossible by construction", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const routes = (app as unknown as { routes: Array<{ path: string }> }).routes;
@@ -721,13 +709,13 @@ describe("Plan 03.0-08 — refresh-poll + account/purge cross-tenant", () => {
   });
 });
 
-// Phase 03.0.1 Plan 10 — refresh-content cross-tenant. Beyond the matrix
-// row above (which uses expect.soft over many probes), this dedicated
-// describe pins the wire format so any future refactor that drifts into
-// 403 / "forbidden" body trips a single, named test rather than a soft
-// assertion buried in the matrix.
-describe("Plan 03.0.1-10 — POST /api/sources/:id/refresh-content cross-tenant", () => {
-  it("Plan 03.0.1-10: cross-tenant POST /api/sources/:id/refresh-content returns 404, body never contains 'forbidden' or 'permission'", async () => {
+// Refresh-content cross-tenant. Beyond the matrix row above (which uses
+// expect.soft over many probes), this dedicated describe pins the wire
+// format so any future refactor that drifts into 403 / "forbidden" body
+// trips a single, named test rather than a soft assertion buried in the
+// matrix.
+describe("POST /api/sources/:id/refresh-content cross-tenant", () => {
+  it("cross-tenant POST /api/sources/:id/refresh-content returns 404, body never contains 'forbidden' or 'permission'", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const { createSource } = await import("../../src/lib/server/services/data-sources.js");
     const app = createApp();
@@ -766,17 +754,17 @@ describe("Plan 03.0.1-10 — POST /api/sources/:id/refresh-content cross-tenant"
   });
 });
 
-// Phase 3.0 Plan 03.0-07 — admin/quota cross-allowlist assertion ACTIVATED.
+// admin/quota cross-allowlist assertion.
 // The "non-allowlisted user → 404" contract is structurally distinct from
 // the row-ownership 404 above (the gate is the env allowlist, not tenant
 // ownership), but the wire format is identical: existence doesn't leak.
 //
-// AGENTS.md AP-4 — body MUST NOT contain "forbidden" / "permission". The
+// Body MUST NOT contain "forbidden" / "permission". The
 // adminAllowlist middleware matches the wire format mapErr emits for
 // NotFoundError, so callers cannot distinguish "you're not in the allowlist"
 // from "this URL has no resource for you" — that's the contract.
-describe("Plan 03.0-07 — admin/quota cross-allowlist", () => {
-  it("Plan 03.0-07: GET /api/admin/quota for non-allowlisted user → 404 (matches anonymous; allowlist is the gate)", async () => {
+describe("admin/quota cross-allowlist", () => {
+  it("GET /api/admin/quota for non-allowlisted user → 404 (matches anonymous; allowlist is the gate)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     // The integration test process boots with ADMIN_EMAIL_ALLOWLIST empty by
@@ -791,7 +779,7 @@ describe("Plan 03.0-07 — admin/quota cross-allowlist", () => {
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body).toEqual({ error: "not_found" });
-    // AGENTS.md AP-4: response body MUST NOT leak "forbidden" / "permission".
+    // Response body MUST NOT leak "forbidden" / "permission".
     const bodyStr = JSON.stringify(body);
     expect(bodyStr).not.toMatch(/forbidden|permission/i);
   });

@@ -1,10 +1,10 @@
-// eventKindToSourceKind — Phase 03.0.1 Plan 09 D-03 bridge.
+// eventKindToSourceKind — bridge between EventKind and SourceKind.
 //
 // Events carry an EventKind (`youtube_video`, `reddit_post`, ...). The
 // per-kind UI registry is keyed by SourceKind (`youtube_channel`,
-// `reddit_account`, ...). The /feed page (and /events/[id] in Phase 03.1+)
-// passes event.kind through this helper to resolve the SourceKind, then
-// calls getAdapterUI(sourceKind).toCardProps(event).
+// `reddit_account`, ...). The /feed page passes event.kind through this
+// helper to resolve the SourceKind, then calls
+// getAdapterUI(sourceKind).toCardProps(event).
 //
 // Free-form kinds (`post`, `conference`, `talk`, `press`, `other`) and
 // the discord case which has no v0.1 polling path return null. Callers

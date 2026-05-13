@@ -1,9 +1,9 @@
-// Games HTTP routes (Plan 02-08).
+// Games HTTP routes.
 //
-// CRUD + soft-delete + restore for `games`. Mounted under `/api/*` in app.ts so
-// every handler runs after the tenantScope middleware (Plan 01-07): anonymous
-// requests are 401'd before reaching this file. Cross-tenant access surfaces
-// as NotFoundError from the service layer → 404 here (PRIV-01: 404, never 403).
+// CRUD + soft-delete + restore for `games`. Mounted under `/api/*` in
+// app.ts so every handler runs after the tenantScope middleware: anonymous
+// requests are 401'd before reaching this file. Cross-tenant access
+// surfaces as NotFoundError from the service layer → 404 here (404, never 403).
 //
 // Error mapping is uniform via `mapErr`:
 //   - NotFoundError    → 404 {error: 'not_found'}
@@ -43,11 +43,10 @@ const updateGameSchema = z.object({
     .nullable()
     .optional(),
   coverUrl: z.string().url().nullable().optional(),
-  // Plan 02.1-39 round-6 polish #14a: long-form per-game description.
-  // Nullable + optional; service layer normalizes empty string → null
-  // and enforces the 2000-char cap (DB column is unconstrained per
-  // migration 0007). Zod also rejects oversized payloads at the
-  // boundary so a malformed client cannot reach the service.
+  // Long-form per-game description. Nullable + optional; service layer
+  // normalizes empty string → null and enforces the 2000-char cap (DB
+  // column is unconstrained). Zod also rejects oversized payloads at
+  // the boundary so a malformed client cannot reach the service.
   description: z.string().max(2000).nullable().optional(),
 });
 
@@ -127,20 +126,18 @@ gamesRoutes.post("/games/:id/restore", async (c) => {
   }
 });
 
-// Per-game curated events list (Phase 2.1 — replaces Phase 2's
-// `/api/games/:gameId/timeline` JS-merge over events + tracked_youtube_videos).
-// The unified events table now holds every per-game artifact regardless of
-// platform; the JS merge is gone, replaced by a single tenant-scoped query
-// in `listEventsForGame`. Cross-tenant gameId surfaces as 404 (PRIV-01)
-// because `listEventsForGame` calls `assertGameOwnedByUser` first.
+// Per-game curated events list. The unified events table holds every
+// per-game artifact regardless of platform; a single tenant-scoped query
+// in `listEventsForGame` returns them all. Cross-tenant gameId surfaces
+// as 404 because `listEventsForGame` calls `assertGameOwnedByUser` first.
 gamesRoutes.get("/games/:gameId/events", async (c) => {
   try {
     const list = await listEventsForGame(c.var.userId, c.req.param("gameId"));
-    // Plan 02.1-28: batch-load junction rows so each EventDto carries its
-    // gameIds[] array. The list-of-events itself is already filtered to
-    // the requested game by listEventsForGame's INNER JOIN; the gameIds
-    // array on the response surfaces ALL games each event is attached to
-    // (multi-game events render with their full attachment set).
+    // Batch-load junction rows so each EventDto carries its gameIds[]
+    // array. The list-of-events itself is already filtered to the
+    // requested game by listEventsForGame's INNER JOIN; the gameIds
+    // array on the response surfaces ALL games each event is attached
+    // to (multi-game events render with their full attachment set).
     const dtos = await mapEventsToDtos(c.var.userId, list);
     return c.json(dtos);
   } catch (err) {

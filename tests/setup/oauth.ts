@@ -1,8 +1,4 @@
-// oauth2-mock-server lifecycle helpers — D-13 mechanism per CONTEXT.md <deviations> 2026-04-27.
-//
-// Plan 01-05 (this plan) uses the lifecycle wrappers in integration tests; Plan 01-10
-// drives the happy-path smoke through the same mock. Phase 1 Wave 0 landed an early
-// stub; Plan 01-05 (Wave 3) finalizes the API.
+// oauth2-mock-server lifecycle helpers.
 //
 // Why a sidecar mock instead of mocking Better Auth internals:
 //   - Failures point at our integration code, not at a mocked-too-deep abstraction.
@@ -10,13 +6,12 @@
 //   - oauth2-mock-server mints valid id_tokens with configurable claims (iss, sub, email, etc.)
 //     so we exercise Better Auth's real OAuth verification path via the genericOAuth plugin.
 //
-// INFO I2 (issuer URL handling) — RESOLVED via the genericOAuth plugin (review blocker
-// P0-2 fix). Better Auth 1.6.x's `socialProviders.google` hardcodes the Google endpoints,
-// so we switched to the genericOAuth plugin (providerId: "google") which exposes
-// `discoveryUrl`. The mock's iss is whatever discovery returns (the mock's own issuer URL),
-// so the previous mock-side `iss` coercion to https://accounts.google.com is no longer
-// needed. We keep the mock's natural issuer claim so Better Auth's strict-issuer
-// validation matches the discovery document the plugin fetched at boot.
+// Issuer URL handling: Better Auth 1.6.x's `socialProviders.google` hardcodes
+// the Google endpoints, so we use the genericOAuth plugin (providerId: "google")
+// which exposes `discoveryUrl`. The mock's iss is whatever discovery returns
+// (the mock's own issuer URL); we keep the mock's natural issuer claim so
+// Better Auth's strict-issuer validation matches the discovery document the
+// plugin fetched at boot.
 
 import { OAuth2Server } from "oauth2-mock-server";
 
@@ -55,7 +50,7 @@ export async function stopMockOauth(): Promise<void> {
 /**
  * Claim shape minted by the mock server. `sub` becomes `account.account_id`
  * (the Google subject identifier, aka "google_sub" — never returned to the
- * browser, see src/lib/server/dto.ts P3 discipline).
+ * browser, see src/lib/server/dto.ts).
  */
 export interface MockUserClaims {
   sub: string;
@@ -67,11 +62,11 @@ export interface MockUserClaims {
 /**
  * Configure the mock server's NEXT issued id_token + userinfo response.
  *
- * INFO I2 (resolved): the `beforeTokenSigning` hook lets the mock's natural
- * issuer claim flow through — Better Auth's genericOAuth plugin learned the
- * issuer from the discovery document the plugin fetched at boot, so the
- * mock-issued token's iss already matches. We only override claims the test
- * needs to control (sub / email / etc).
+ * The `beforeTokenSigning` hook lets the mock's natural issuer claim flow
+ * through — Better Auth's genericOAuth plugin learned the issuer from the
+ * discovery document the plugin fetched at boot, so the mock-issued token's
+ * iss already matches. We only override claims the test needs to control
+ * (sub / email / etc).
  */
 export function setNextUserClaims(claims: MockUserClaims): void {
   if (!server) {
@@ -114,6 +109,6 @@ export function setNextUserClaims(claims: MockUserClaims): void {
 // `mintIdToken` was an early stub for direct id_token minting; oauth2-mock-server
 // 7.x does not expose a public `buildResponse` API, and the integration suite
 // drives the full OAuth dance through `setNextUserClaims` + Better Auth's
-// genericOAuth plugin (review blocker P0-2 fix). Removed to keep the surface
-// honest. See tests/integration/helpers.ts `seedUserDirectly` for the cheaper
+// genericOAuth plugin. Removed to keep the surface honest. See
+// tests/integration/helpers.ts `seedUserDirectly` for the cheaper
 // "skip OAuth, seed a session row" path most specs use.

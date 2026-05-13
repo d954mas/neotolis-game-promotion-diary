@@ -1,26 +1,22 @@
 <script lang="ts">
-  // /audit — read-only audit-log view (Plan 02-10; UX rewrite Plan 02.1-20;
-  // schema-prop reshape + date-range filter Plan 02.1-21).
+  // /audit — read-only audit-log view.
   //
-  // Plan 02.1-20: ActionFilter dropdown REMOVED. /audit reuses
-  // <FilterChips> + <FiltersSheet> from /feed (Plan 02.1-19 reshape).
-  //
-  // Plan 02.1-21 (round-3 UAT closure for §9.2-bug):
-  //   - schema={['action','date']} replaces Plan 02.1-20's implicit
-  //     filters.action-detection. /feed-only axes (kind / source / show /
-  //     authorIsMe) cannot leak into the FiltersSheet or chip strip.
+  // /audit reuses <FilterChips> + <FiltersSheet> from /feed.
+  //   - schema={['action','date']} explicitly scopes which axes /audit
+  //     owns. /feed-only axes (kind / source / show / authorIsMe) cannot
+  //     leak into the FiltersSheet or chip strip.
   //   - <DateRangeControl> ABOVE the chip strip mirrors /feed layout
   //     (UAT user quote: "В окне аудита нет возможности выбрать дату как
   //     в feed").
   //   - URL contract: ?from=YYYY-MM-DD&to=YYYY-MM-DD (mirrors /feed).
   //     UNLIKE /feed, no default 30-day window — auditing is investigative.
   //
-  // URL contract (Plan 02.1-20): ?action=A&action=B repeated params for
-  // multi-select. No `?action=` params = all actions (default).
+  // URL contract: ?action=A&action=B repeated params for multi-select.
+  // No `?action=` params = all actions (default).
   //
   // Privacy review: loader gates anonymous users via early-return; the
   // listAuditPage call is userId-scoped (FIRST and-clause); DTO projection
-  // strips userId; cross-tenant 404 not 403 holds via P19 (test asserts).
+  // strips userId; cross-tenant 404 not 403 holds (test asserts).
 
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
@@ -31,9 +27,9 @@
   import FiltersSheet from "$lib/components/FiltersSheet.svelte";
   import DateRangeControl from "$lib/components/DateRangeControl.svelte";
   import CursorPager from "$lib/components/CursorPager.svelte";
-  // Plan 02.1-39 (UAT-NOTES.md §5.7): /audit gains the shared sticky
-  // PageHeader so its title row stays pinned under AppHeader on scroll —
-  // matches /feed, /games, /sources for cross-page consistency.
+  // /audit uses the shared sticky PageHeader so its title row stays pinned
+  // under AppHeader on scroll — matches /feed, /games, /sources for
+  // cross-page consistency.
   import PageHeader from "$lib/components/PageHeader.svelte";
   import type { PageData } from "./$types";
 
@@ -54,17 +50,16 @@
   const fromIso = $derived((data.from as string | undefined) ?? undefined);
   const toIso = $derived((data.to as string | undefined) ?? undefined);
 
-  // Plan 02.1-21: schema is the authoritative list of axes /audit owns.
-  // FiltersSheet renders only these; FilterChips emits chips only for these.
+  // Schema is the authoritative list of axes /audit owns. FiltersSheet
+  // renders only these; FilterChips emits chips only for these.
   //
-  // Plan 02.1-34 (UAT-NOTES.md §4.21.A): 'date' axis REMOVED from /audit's
-  // schema. The page-level <DateRangeControl> above <FilterChips> stays as
-  // the single source of truth for date filtering on /audit. Plan 02.1-21
-  // shipped both the page-level DateRangeControl AND the in-sheet date
-  // axis; round-4 UAT surfaced the duplication ("Дублируется выбор даты —
-  // и в date-range-control, и в окне фильтров"). The /feed schema KEEPS
-  // 'date' in the sheet (no duplication on /feed by design — there the
-  // sheet date axis is the secondary entry the user actively wants).
+  // 'date' axis is NOT in /audit's schema. The page-level
+  // <DateRangeControl> above <FilterChips> is the single source of truth
+  // for date filtering on /audit (the user previously saw duplicated date
+  // controls in both DateRangeControl and the filters sheet).
+  // /feed's schema KEEPS 'date' in the sheet (no duplication on /feed by
+  // design — there the sheet date axis is the secondary entry the user
+  // actively wants).
   const AUDIT_SCHEMA = ["action"] as const;
 
   let prevStack = $state<string[]>([]);
@@ -75,7 +70,7 @@
   // shape. /audit owns only the 'action' + 'date' axes — pass empty
   // arrays for source/kind, show=any, no authorIsMe. The schema prop
   // (passed below) is what controls per-axis rendering, not the field
-  // values themselves (Plan 02.1-21 reshape).
+  // values themselves.
   const activeFilters = $derived({
     source: [] as string[],
     kind: [] as string[],
@@ -106,8 +101,8 @@
     sheetOpen = false;
     prevStack = [];
     const nextActions = next.action ?? actionFilter;
-    // Sheet's date axis: empty string in either field clears it. Plan
-    // 02.1-21 schema-respecting clearAll sends from/to as undefined.
+    // Sheet's date axis: empty string in either field clears it. The
+    // schema-respecting clearAll sends from/to as undefined.
     const nextFrom = next.from || undefined;
     const nextTo = next.to || undefined;
     await goto(buildHref(null, nextActions, nextFrom, nextTo));
@@ -131,7 +126,7 @@
     sheetOpen = true;
   }
 
-  // Plan 02.1-21: dedicated handler for the always-visible <DateRangeControl>.
+  // Dedicated handler for the always-visible <DateRangeControl>.
   // The control emits { from, to } (preset / inputs) or { all: true } (× clear).
   async function applyDateRangeAudit(next: {
     from?: string;
@@ -208,10 +203,10 @@
     gap: var(--space-md);
     min-width: 0;
   }
-  /* Plan 02.1-39 (UAT-NOTES.md §5.7): inline .head + .head h1 styles
-   * removed — replaced by the shared <PageHeader sticky> at the top of the
-   * page. PageHeader owns the title font-size + sticky offset; .audit only
-   * needs the column layout for the rest of the page chrome. */
+  /* Inline .head + .head h1 styles were replaced by the shared
+   * <PageHeader sticky> at the top of the page. PageHeader owns the title
+   * font-size + sticky offset; .audit only needs the column layout for
+   * the rest of the page chrome. */
   .rows {
     background: var(--color-surface);
     border: 1px solid var(--color-border);

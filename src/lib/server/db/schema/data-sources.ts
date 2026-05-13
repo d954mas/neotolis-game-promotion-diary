@@ -1,9 +1,9 @@
-// data_sources — unified per-tenant registry of content sources (Phase 2.1).
+// data_sources — unified per-tenant registry of content sources.
 //
-// Replaces the Phase 2 `youtube_channels` table. One row per (user, kind, handle):
-// YouTube channels, Reddit accounts, Twitter accounts, Telegram channels, Discord
-// servers. Pollable in Phase 3 via per-kind `DataSourceAdapter`; in Phase 2.1
-// only the schema + the `youtube_channel` STUB exist.
+// One row per (user, kind, handle): YouTube channels, Reddit accounts,
+// Twitter accounts, Telegram channels, Discord servers. Pollable via
+// per-kind `DataSourceAdapter`; today only YouTube has a functional
+// adapter implementation.
 //
 // Lives at user level (NOT cascaded by game soft-delete). Two ways the user can
 // paste a YouTube source: (a) handle URL like https://youtube.com/@RickAstleyYT,
@@ -11,20 +11,20 @@
 // is ALWAYS set (the user-pasted form); channel_id is set only if (b) was pasted
 // OR a future resolver fetches the canonical id. For non-YouTube kinds,
 // channel_id stays NULL — the per-kind metadata jsonb carries platform-specific
-// resolved identifiers (e.g. `uploads_playlist_id` for YouTube once Phase 3
-// resolves it; `subreddit` for Reddit; etc.).
+// resolved identifiers (e.g. `uploads_playlist_id` for YouTube; `subreddit`
+// for Reddit; etc.).
 //
 // is_owned_by_me: true => own content (videos auto-mark as own); false =>
 // blogger / community coverage. UI heuristic: first source defaults to true,
 // subsequent default false.
 //
-// auto_import: when true and is_owned_by_me=true, the Phase 3 worker pulls
-// new content for this source automatically. false = passive registry only.
+// auto_import: when true and is_owned_by_me=true, the worker pulls new
+// content for this source automatically. false = passive registry only.
 //
-// deleted_at: soft-delete per SOURCES-02 (60-day retention via RETENTION_DAYS).
-// The unique index `data_sources_user_handle_active_unq` is partial over
-// `WHERE deleted_at IS NULL` so a soft-deleted source does not block re-add
-// of the same handle.
+// deleted_at: soft-delete (60-day retention via RETENTION_DAYS). The
+// unique index `data_sources_user_handle_active_unq` is partial over
+// `WHERE deleted_at IS NULL` so a soft-deleted source does not block
+// re-add of the same handle.
 
 import {
   boolean,
@@ -70,37 +70,33 @@ export const dataSources = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
-    // Phase 03.0.1 Plan 08 — D-13 AdapterError surface. Updated by worker
-    // handlers when an AdapterError of category operator-issue / permanent /
-    // not-found is caught against this source. `transient` and
-    // `rate-limited` errors do NOT touch these columns (transient retries
-    // via pg-boss; rate-limited is a service-wide signal, not a
-    // per-source one). Migration: drizzle/0022_phase03_01_data_sources_error_columns.sql.
+    // AdapterError surface. Updated by worker handlers when an
+    // AdapterError of category operator-issue / permanent / not-found
+    // is caught against this source. `transient` and `rate-limited`
+    // errors do NOT touch these columns (transient retries via pg-boss;
+    // rate-limited is a service-wide signal, not a per-source one).
     needsReconnect: boolean("needs_reconnect").notNull().default(false),
     lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
     lastErrorKind: text("last_error_kind"),
-    // Phase 03.0.1 — per-user backfill preference. Phase 03.0.1 Wave 4
-    // dropped per-source state columns (last_polled_at, backfill_oldest_at,
-    // backfill_complete, metadata.lastBackfillPageToken) — channel-scoped
-    // state lives in `data_source_channel_state` and is shared across
-    // subscribers. See migration 0028.
+    // Per-user backfill preference. Channel-scoped state lives in
+    // `data_source_channel_state` and is shared across subscribers.
     //
-    //   backfillTargetSince   — absolute date — earliest boundary user wants.
-    //                           Per-user preference (different users on the
-    //                           same channel may have different targets).
-    //                           Semantics:
-    //                             NULL  → no historical pull, only newer-than-
-    //                                     frontier incremental
-    //                             date  → pull until events.occurred_at >= date
-    //                             '1970-01-01'  → "everything" sentinel
+    //   backfillTargetSince — absolute date — earliest boundary user
+    //                         wants. Per-user preference (different
+    //                         users on the same channel may have
+    //                         different targets). Semantics:
+    //                           NULL → no historical pull, only
+    //                                  newer-than-frontier incremental
+    //                           date → pull until events.occurred_at >= date
+    //                           '1970-01-01' → "everything" sentinel
     backfillTargetSince: timestamp("backfill_target_since", { withTimezone: true }),
   },
   (t) => ({
     userIdIdx: index("data_sources_user_id_idx").on(t.userId),
     userKindIdx: index("data_sources_user_kind_idx").on(t.userId, t.kind),
     userDeletedAtIdx: index("data_sources_user_deleted_at_idx").on(t.userId, t.deletedAt),
-    // Partial unique index — soft-deleted rows do not block re-adding the
-    // same handle (SOURCES-02 retention semantics).
+    // Partial unique index — soft-deleted rows do not block re-adding
+    // the same handle.
     userHandleActiveUnq: uniqueIndex("data_sources_user_handle_active_unq")
       .on(t.userId, t.handleUrl)
       .where(sql`${t.deletedAt} IS NULL`),

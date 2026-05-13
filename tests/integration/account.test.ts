@@ -18,12 +18,10 @@ import { vi } from "vitest";
 import { seedUserDirectly } from "./helpers.js";
 import { env } from "../../src/lib/server/config/env.js";
 
-// Plan 02.2-03 — live integration tests for in-app account export /
-// soft-delete / restore (D-15 / D-16). Replaces the 11 placeholder it.skip
-// stubs from Plan 02.2-01 with concrete `it(...)` bodies. Names match the
-// placeholder names (lock-step traceability).
+// Live integration tests for in-app account export / soft-delete /
+// restore.
 
-describe("account export / soft-delete / restore (Phase 02.2)", () => {
+describe("account export / soft-delete / restore", () => {
   const validateSpy = vi.spyOn(SteamApi, "validateSteamKey").mockResolvedValue(true);
   const fetchSpy = vi.spyOn(SteamApi, "fetchSteamAppDetails").mockResolvedValue(null);
   void validateSpy;
@@ -31,7 +29,7 @@ describe("account export / soft-delete / restore (Phase 02.2)", () => {
 
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 02.2-03: GET /api/me/export returns JSON envelope with all 7 documented top-level keys", async () => {
+  it("GET /api/me/export returns JSON envelope with all 7 documented top-level keys", async () => {
     const app = createApp();
     const userA = await seedUserDirectly({ email: `exp-shape-${uniq()}@test.local` });
     const res = await app.request("/api/me/export", {
@@ -54,7 +52,7 @@ describe("account export / soft-delete / restore (Phase 02.2)", () => {
     expect(body.exported_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
   });
 
-  it("Plan 02.2-03: GET /api/me/export sends Content-Disposition attachment with diary-export-YYYY-MM-DD.json filename", async () => {
+  it("GET /api/me/export sends Content-Disposition attachment with diary-export-YYYY-MM-DD.json filename", async () => {
     const app = createApp();
     const userA = await seedUserDirectly({ email: `exp-cd-${uniq()}@test.local` });
     const res = await app.request("/api/me/export", {
@@ -65,7 +63,7 @@ describe("account export / soft-delete / restore (Phase 02.2)", () => {
     expect(cd).toMatch(/^attachment; filename="diary-export-\d{4}-\d{2}-\d{2}\.json"$/);
   });
 
-  it("Plan 02.2-03: GET /api/me/export envelope strips ciphertext columns (no secret_ct, wrapped_dek, kek_version, googleSub, refresh_token)", async () => {
+  it("GET /api/me/export envelope strips ciphertext columns (no secret_ct, wrapped_dek, kek_version, googleSub, refresh_token)", async () => {
     const app = createApp();
     const userA = await seedUserDirectly({ email: `exp-strip-${uniq()}@test.local` });
     // Seed a row that DOES carry ciphertext columns.
@@ -98,7 +96,7 @@ describe("account export / soft-delete / restore (Phase 02.2)", () => {
     expect(json).not.toMatch(/id_token|idToken/);
   });
 
-  it("Plan 02.2-03: GET /api/me/export writes account.exported audit event", async () => {
+  it("GET /api/me/export writes account.exported audit event", async () => {
     const app = createApp();
     const userA = await seedUserDirectly({ email: `exp-audit-${uniq()}@test.local` });
     const res = await app.request("/api/me/export", {
@@ -112,7 +110,7 @@ describe("account export / soft-delete / restore (Phase 02.2)", () => {
     expect(audits).toHaveLength(1);
   });
 
-  it("Plan 02.2-03: DELETE /api/me/account soft-cascades to games, game_steam_listings, data_sources, events, api_keys_steam (NOT audit_log)", async () => {
+  it("DELETE /api/me/account soft-cascades to games, game_steam_listings, data_sources, events, api_keys_steam (NOT audit_log)", async () => {
     const app = createApp();
     const userA = await seedUserDirectly({ email: `del-cascade-${uniq()}@test.local` });
 
@@ -161,10 +159,7 @@ describe("account export / soft-delete / restore (Phase 02.2)", () => {
     const [e] = await db.select().from(events).where(eq(events.id, event.id));
     expect(e!.deletedAt!.getTime()).toBe(markerTs!.getTime());
 
-    // api_keys_steam — hard-deleted (no deletedAt column; D-14 hard-delete
-    // semantics; AGENTS-INV-3 soft-cascade text in the plan was advisory
-    // and adapted to schema reality — see commit message for Rule 3
-    // deviation rationale).
+    // api_keys_steam — hard-deleted (no deletedAt column).
     const keysAfter = await db.select().from(apiKeysSteam).where(eq(apiKeysSteam.userId, userA.id));
     expect(keysAfter).toHaveLength(0);
 
@@ -176,7 +171,7 @@ describe("account export / soft-delete / restore (Phase 02.2)", () => {
     }
   });
 
-  it("Plan 02.2-03: DELETE /api/me/account hard-deletes all session rows for that user", async () => {
+  it("DELETE /api/me/account hard-deletes all session rows for that user", async () => {
     const app = createApp();
     const userA = await seedUserDirectly({ email: `del-sess-${uniq()}@test.local` });
     // Confirm precondition: one session row.
@@ -193,7 +188,7 @@ describe("account export / soft-delete / restore (Phase 02.2)", () => {
     expect(sessAfter).toHaveLength(0);
   });
 
-  it("Plan 02.2-03: DELETE /api/me/account writes account.deleted audit event with retentionDays metadata", async () => {
+  it("DELETE /api/me/account writes account.deleted audit event with retentionDays metadata", async () => {
     const app = createApp();
     const userA = await seedUserDirectly({ email: `del-audit-${uniq()}@test.local` });
     const res = await app.request("/api/me/account", {
@@ -211,7 +206,7 @@ describe("account export / soft-delete / restore (Phase 02.2)", () => {
     expect(meta?.retentionDays).toBe(env.RETENTION_DAYS);
   });
 
-  it("Plan 02.2-03: POST /api/me/account/restore reverses ONLY children whose deleted_at === user.deleted_at", async () => {
+  it("POST /api/me/account/restore reverses ONLY children whose deleted_at === user.deleted_at", async () => {
     const app = createApp();
     const userA = await seedUserDirectly({ email: `restore-marker-${uniq()}@test.local` });
 
@@ -261,7 +256,7 @@ describe("account export / soft-delete / restore (Phase 02.2)", () => {
     expect(userFinal!.deletedAt).toBeNull();
   });
 
-  it("Plan 02.2-03: POST /api/me/account/restore writes account.restored audit event", async () => {
+  it("POST /api/me/account/restore writes account.restored audit event", async () => {
     const userA = await seedUserDirectly({ email: `restore-audit-${uniq()}@test.local` });
     // Soft-delete via service (skip HTTP since we want to retain ability to
     // call restore — DELETE clears the session).
@@ -277,7 +272,7 @@ describe("account export / soft-delete / restore (Phase 02.2)", () => {
     expect(audits).toHaveLength(1);
   });
 
-  it("Plan 02.2-03: POST /api/me/account/restore returns 410 Gone when called past RETENTION_DAYS", async () => {
+  it("POST /api/me/account/restore returns 410 Gone when called past RETENTION_DAYS", async () => {
     const app = createApp();
     const userA = await seedUserDirectly({ email: `restore-410-${uniq()}@test.local` });
     // Backdate user.deletedAt to RETENTION_DAYS + 1 day ago — past the
@@ -311,7 +306,7 @@ describe("account export / soft-delete / restore (Phase 02.2)", () => {
     expect(body).toEqual({ error: "account_purge_window_expired" });
   });
 
-  it("Plan 02.2-03: cross-tenant: User A's export does not contain User B's rows", async () => {
+  it("cross-tenant: User A's export does not contain User B's rows", async () => {
     const app = createApp();
     const userA = await seedUserDirectly({ email: `xt-A-${uniq()}@test.local` });
     const userB = await seedUserDirectly({ email: `xt-B-${uniq()}@test.local` });

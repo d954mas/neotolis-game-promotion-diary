@@ -1,23 +1,15 @@
 <script lang="ts">
   // Nav — horizontal navigation. Auto-scrolls the active item into view on
-  // mobile (UI-SPEC §"Layout & Responsive Contract" — no hamburger menu).
+  // mobile (no hamburger menu).
   //
-  // Phase 2.1 reshuffle (UI-SPEC §"<Nav>" delta): replaced the Phase 2 set
-  // with Feed · Sources · Games · Settings (4 visible items in `items[]`).
-  // Phase 02.2 (Plan 02.2-05 follow-up, Issue #14): added "About" as the 5th
-  // visible item so anonymous landings + signed-in users can discover the
-  // public landing page. ActiveKey also includes "events" and "audit" as
-  // type-only members — they're highlightable from /events and /audit
-  // routes but intentionally NOT in `items[]` (deep-link only, fold under
-  // Settings sub-nav per Phase 2.1 polish — Plan 02.1-09).
-  // Removed in Phase 2.1: the Phase 2 per-platform accounts entry (Sources
-  // replaces it — its route is physically gone) and the Phase 2 top-level
-  // Keys entry (folds under Settings).
+  // Visible items: Feed · Sources · Games · Settings · About. ActiveKey also
+  // includes "events" and "audit" as type-only members — they're highlightable
+  // from /events and /audit routes but intentionally NOT in `items[]`
+  // (deep-link only, folded under Settings sub-nav).
   //
   // Nav labels are intentionally English literals here — Paraglide nav-label
-  // keys are not in the Phase 2.1 keyset and would balloon the dictionary
-  // for purely structural strings. A future i18n pass adds nav_* keys; the
-  // pattern stays the same.
+  // keys would balloon the dictionary for purely structural strings. A future
+  // i18n pass adds nav_* keys; the pattern stays the same.
 
   type ActiveKey = "feed" | "sources" | "games" | "events" | "audit" | "settings" | "about";
 
@@ -53,29 +45,18 @@
 </nav>
 
 <style>
-  /* Plan 02.1-39 round-6 #5 (UAT-NOTES.md §5.4 follow-up #5): <Nav> is
-   * NON-STICKY here. Sticky positioning moved UP one level to the
-   * `.sticky-chrome` wrapper in src/routes/+layout.svelte that contains
-   * both AppHeader and Nav. The user-visible behavior (Nav stays pinned
-   * just under AppHeader while content scrolls) is unchanged — AppHeader
-   * and Nav now move as a single DOM unit because the wrapper is the only
-   * sticky element.
+  /* <Nav> is NON-STICKY here. Sticky positioning lives one level up in
+   * the `.sticky-chrome` wrapper in src/routes/+layout.svelte that
+   * contains both AppHeader and Nav. The user-visible behavior (Nav
+   * stays pinned just under AppHeader while content scrolls) is
+   * unchanged — AppHeader and Nav move as a single DOM unit because
+   * the wrapper is the only sticky element.
    *
-   * History: round-6 #1-#4 tried to make Nav independently sticky at
-   * `top: var(--app-header-height) - var(--sticky-overlap)`. That math
-   * never quite worked: at every overlap value some browser-zoom + DPR
-   * combination either left a subpixel gap (overlap too small) or made
-   * Nav visibly slip up on scroll-start (overlap too large, so Nav's
-   * sticky `top:` sat ABOVE its in-flow position by the overlap amount,
-   * forcing it to scroll up by N pixels before the sticky engaged).
-   * User reported the slip after the 4px overlap landed (419e3c7):
-   * "Зазора нет, но есть небольшой скрол табов feed sources что выглядит
-   * как артефакт".
-   *
-   * The fix is architectural: there's no overlap-math sweet spot for two
-   * stacked independent sticky elements. Wrap them in a single sticky
-   * container instead — the AppHeader↔Nav boundary is no longer a sticky
-   * boundary, so it can neither gap nor slip by construction. */
+   * Why one wrapper instead of two independent sticky elements: there's
+   * no overlap-math sweet spot — at every overlap value some browser-zoom
+   * + DPR combination either left a subpixel gap (overlap too small) or
+   * made Nav visibly slip up on scroll-start (overlap too large). Wrapping
+   * removes the sticky boundary between AppHeader and Nav by construction. */
   .nav {
     display: flex;
     gap: var(--space-md);

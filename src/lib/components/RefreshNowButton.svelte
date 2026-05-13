@@ -1,9 +1,9 @@
 <script lang="ts">
-  // RefreshNowButton — Phase 3.0 Plan 11. Icon-only inline button rendered
-  // inside <PollingBadge> for events where (last_polled_at IS NOT NULL) OR
-  // tier=Frozen per CONTEXT D-10.
+  // RefreshNowButton — icon-only inline button rendered inside
+  // <PollingBadge> for events where (last_polled_at IS NOT NULL) OR
+  // tier=Frozen.
   //
-  // UI-SPEC §"Interaction Contracts → RefreshNowButton interaction":
+  // Interaction contract:
   //   - Idle: refresh icon at --color-text-muted; 44×44 hit area; 16×16 glyph.
   //   - Click → POST /api/events/{id}/refresh-poll (no body).
   //   - Pending: spinning rotation 360°/1s, aria-busy="true", aria-live="polite"
@@ -11,17 +11,17 @@
   //   - On 200/202: 2s "Polled just now" state, then invalidateAll() to refresh
   //     server-loaded data so the parent <PollingBadge> reads the new
   //     last_polled_at.
-  //   - On 429: cooldown-disabled state. Reads Retry-After header (Plan 08
-  //     contract) OR falls back to event.metadata.last_user_refresh_at + 5min
-  //     to derive minutesLeft for the tooltip.
+  //   - On 429: cooldown-disabled state. Reads Retry-After header OR
+  //     falls back to event.metadata.last_user_refresh_at + 5min to
+  //     derive minutesLeft for the tooltip.
   //   - On 5xx / network: inline error below the badge via m.polling_refresh_now_error().
   //
   // Cooldown source of truth:
   //   - Initial state derived from event.metadata.last_user_refresh_at.
   //   - setInterval(30s) re-evaluates while mounted; cleared on unmount.
-  //   - 5min cooldown from CONTEXT D-10.
+  //   - 5min cooldown matches the server-side gate.
   //
-  // Accessibility (UI-SPEC §"Accessibility floor delta"):
+  // Accessibility:
   //   - aria-label on the icon-only button.
   //   - aria-busy="true" during pending state.
   //   - Cooldown tooltip via aria-describedby pointing at a sr-only span.
@@ -41,9 +41,9 @@
   let uiState = $state<UiState>("idle");
   let cooldownSecondsLeft = $state(0);
 
-  // 5-min cooldown — CONTEXT D-10. Matches the server-side cooldown enforced
-  // by Plan 04's requestRefreshPoll service (which throws AppError 429
-  // 'too_many_refreshes' with metadata.minutesLeft + retryAfterSeconds).
+  // 5-min cooldown — matches the server-side cooldown enforced by
+  // requestRefreshPoll (which throws AppError 429 'too_many_refreshes'
+  // with metadata.minutesLeft + retryAfterSeconds).
   const COOLDOWN_MS = 5 * 60 * 1000;
   const COOLDOWN_RECHECK_MS = 1_000;
 
@@ -99,7 +99,7 @@
         return;
       }
       if (resp.status === 429) {
-        // Plan 08 sets Retry-After in seconds from err.metadata.retryAfterSeconds.
+        // The server sets Retry-After in seconds from err.metadata.retryAfterSeconds.
         const retryAfter = resp.headers.get("Retry-After");
         const seconds = retryAfter !== null ? Number(retryAfter) : COOLDOWN_MS / 1000;
         const safeSeconds = Number.isFinite(seconds) && seconds > 0 ? seconds : COOLDOWN_MS / 1000;

@@ -1,19 +1,19 @@
 import { describe, it, expect } from "vitest";
 import { createApp } from "../../src/lib/server/http/app.js";
 
-// Plan 01-07 (Wave 4) — VALIDATION 5/6 (anonymous-401 invariant + no-public-route).
-// Revision 1 BLOCKER 2 fix: vacuous-pass guard with MUST_BE_PROTECTED allowlist
-// + non-empty assertion. The sweep is COMPLEMENT to (not REPLACEMENT for)
-// explicit per-route assertions — if no /api/* routes exist in the future, the
+// Anonymous-401 invariant + no-public-route.
+// Vacuous-pass guard with MUST_BE_PROTECTED allowlist + non-empty
+// assertion. The sweep is COMPLEMENT to (not REPLACEMENT for) explicit
+// per-route assertions — if no /api/* routes exist in the future, the
 // sweep would silently pass. The allowlist forces it to fail loudly when
-// expected routes disappear, and the explicit /api/me checks below assert the
-// concrete behavior on the canonical Phase 1 route.
-describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
+// expected routes disappear, and the explicit /api/me checks below assert
+// the concrete behavior on the canonical route.
+describe("anonymous-401 sweep", () => {
   const app = createApp();
 
   // Whitelist of endpoints that are intentionally unauthenticated.
-  // /healthz and /readyz are pure liveness — CONTEXT.md deferred section
-  // explicitly excludes them from "every endpoint refuses anonymous".
+  // /healthz and /readyz are pure liveness — excluded from "every
+  // endpoint refuses anonymous".
   const PUBLIC_PATHS = ["/healthz", "/readyz"];
 
   // Auth handler routes are managed by Better Auth and have their own auth model
@@ -26,49 +26,38 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
   // pass. The allowlist forces the sweep to fail loudly when expected routes
   // disappear.
   //
-  // Plan 02-08 extends MUST_BE_PROTECTED to cover every D-37 Phase 2 route at the
-  // PARAMETERIZED level (/api/games/:id, not /api/games/<concrete-id>). The
-  // strings here are the literal route patterns Hono registered when sub-routers
-  // were mounted — drift between this list and the actual mounts trips the
+  // MUST_BE_PROTECTED covers every route at the PARAMETERIZED level
+  // (/api/games/:id, not /api/games/<concrete-id>). The strings here are
+  // the literal route patterns Hono registers when sub-routers are
+  // mounted — drift between this list and the actual mounts trips the
   // toContain guard below.
-  //
-  // Plan 02.1-06: REMOVED `/api/youtube-channels*`, `/api/items/youtube*`, and
-  // `/api/games/:gameId/youtube-channels*`, `/api/games/:gameId/items`,
-  // `/api/games/:gameId/timeline` (their routes are gone — the underlying
-  // services were retired in Plans 02.1-04 and 02.1-05). ADDED `/api/sources`,
-  // `/api/sources/:id`, `/api/sources/:id/restore`, `/api/events/:id/attach`,
-  // `/api/events/:id/dismiss-inbox` (the new unified-events HTTP surface).
   const MUST_BE_PROTECTED = [
-    // Phase 1
+    // session
     "/api/me",
     "/api/me/sessions/all",
-    // Phase 2 (Plan 02-08; UX-01)
     "/api/me/theme",
-    // Phase 2 — games
+    // games
     "/api/games",
     "/api/games/:id",
     "/api/games/:id/restore",
-    // Phase 2 — game-listings
+    // game-listings
     "/api/games/:gameId/listings",
     "/api/games/:gameId/listings/:listingId",
     "/api/games/:gameId/listings/:listingId/key",
-    // Plan 02.1-39 round-6 polish #12 (UAT-NOTES.md §5.8 follow-up #12):
     // per-game listing restore — same shape as /api/sources/:id/restore.
     "/api/games/:gameId/listings/:listingId/restore",
-    // Phase 2 — api keys (steam)
+    // api keys (steam)
     "/api/api-keys/steam",
     "/api/api-keys/steam/:id",
-    // Phase 2.1 — data_sources (replaces Phase 2 /api/youtube-channels*)
+    // data_sources
     "/api/sources",
     "/api/sources/:id",
     "/api/sources/:id/restore",
-    // Phase 03.0.1 Plan 10 — refresh-content endpoint ("Pull new content"
-    // button on /sources/[id]). Dispatches via registry to per-kind
+    // refresh-content endpoint ("Pull new content" button on
+    // /sources/[id]). Dispatches via registry to per-kind
     // backfillSource; YouTube enqueues into youtube.backfill.user.
     "/api/sources/:id/refresh-content",
-    // Phase 2 + 2.1 — events (extended with feed + attach + dismiss-inbox +
-    // Plan 02.1-14 gap closure: restore + deleted-list +
-    // Plan 02.1-17 gap closure: preview-url)
+    // events
     "/api/events",
     "/api/events/deleted",
     "/api/events/preview-url",
@@ -76,39 +65,29 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     "/api/events/:id/attach",
     "/api/events/:id/dismiss-inbox",
     "/api/events/:id/restore",
-    // Plan 02.1-24 (round-3 gap closure — UAT-NOTES.md §6.1-redesign):
     // markStandalone + unmarkStandalone triage routes.
     "/api/events/:id/mark-standalone",
     "/api/events/:id/unmark-standalone",
     "/api/games/:gameId/events",
-    // Phase 2 — audit
+    // audit
     "/api/audit",
-    // Phase 02.2 — account export / soft-delete / restore (D-16). Plan 02.2-03
-    // landed the routes (services/account.ts + routes/account.ts mounted under
-    // /api/*). The string list here is the path-only pattern Hono registers
-    // when mountin the sub-router; the per-route 401 assertions below cover
-    // the method-specific behaviour.
+    // account export / soft-delete / restore. The string list here is
+    // the path-only pattern Hono registers when mounting the sub-router;
+    // the per-route 401 assertions below cover the method-specific
+    // behaviour.
     "/api/me/export",
     "/api/me/account",
     "/api/me/account/restore",
-    // Plan 03.0-02 (Wave 0) — pre-declared route allowlist for Phase 3.0
-    // Wave 2 routes. Plan 03.0-08 activates two of them (refresh-poll +
-    // account/purge). The /api/admin/quota entry stays commented out
-    // until Plan 03.0-07 lands the route mount — uncommenting before
-    // would trip the toContain guard with "expected protectedPaths to
-    // contain '/api/admin/quota'". The corresponding it.skip blocks
-    // below name the activating plan so a grep flips them on at the
-    // right moment.
-    //
-    // Plan 03.0-08 — refresh-poll + account/purge mounts shipped:
+    // refresh-poll + account/purge:
     "/api/events/:id/refresh-poll",
     "/api/me/account/purge",
-    // Plan 03.0-07 — admin /quota route mounted under /api/admin/* (env-allowlist
-    // gated; auth gate fires first so anonymous → 401 before allowlist sees it).
+    // admin /quota route mounted under /api/admin/* (env-allowlist
+    // gated; auth gate fires first so anonymous → 401 before allowlist
+    // sees it).
     "/api/admin/quota",
-    // Phase 3.0 post-build (UAT 2026-05-06) — /events/new "Get from YouTube"
-    // button calls this. Authenticated only; anonymous → 401 from tenantScope
-    // before the videos.list lookup ever fires.
+    // /events/new "Get from YouTube" button calls this. Authenticated
+    // only; anonymous → 401 from tenantScope before the videos.list
+    // lookup ever fires.
     "/api/youtube/fetch-metadata",
   ];
 
@@ -139,8 +118,8 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     }
   });
 
-  it("VALIDATION 6: no public dashboard / share-link / read-only viewer route exists", async () => {
-    // Phase 1 invariant: PRIV-01 — no public routes anywhere (PITFALL P18).
+  it("no public dashboard / share-link / read-only viewer route exists", async () => {
+    // Invariant: no public routes anywhere.
     const routes = (app as unknown as { routes: Array<{ path: string }> }).routes;
     for (const r of routes) {
       // No route may live under '/share', '/public', '/embed'.
@@ -148,18 +127,18 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     }
   });
 
-  it('AUTH-01: /api/me with no cookie returns 401 + {error:"unauthorized"} (Pattern 3)', async () => {
+  it('AUTH-01: /api/me with no cookie returns 401 + {error:"unauthorized"}', async () => {
     const res = await app.request("/api/me");
     expect(res.status).toBe(401);
     const body = await res.json();
     expect(body).toEqual({ error: "unauthorized" });
   });
 
-  // Plan 02.1-06 — explicit per-route anonymous-401 assertions for the new
-  // unified-events HTTP surface. The sweep above is the vacuous-pass guard;
-  // these assertions are the load-bearing explicit checks (AGENTS.md Privacy
+  // Explicit per-route anonymous-401 assertions for the unified-events
+  // HTTP surface. The sweep above is the vacuous-pass guard; these
+  // assertions are the load-bearing explicit checks (AGENTS.md Privacy
   // invariant 3 requires both layers).
-  it("Plan 02.1-06: anonymous POST /api/sources returns 401 unauthorized", async () => {
+  it("anonymous POST /api/sources returns 401 unauthorized", async () => {
     const res = await app.request("/api/sources", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -172,19 +151,19 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 02.1-06: anonymous GET /api/sources returns 401 unauthorized", async () => {
+  it("anonymous GET /api/sources returns 401 unauthorized", async () => {
     const res = await app.request("/api/sources");
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 02.1-06: anonymous GET /api/sources/:id returns 401 unauthorized", async () => {
+  it("anonymous GET /api/sources/:id returns 401 unauthorized", async () => {
     const res = await app.request("/api/sources/fixture-id");
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 02.1-06: anonymous PATCH /api/sources/:id returns 401 unauthorized", async () => {
+  it("anonymous PATCH /api/sources/:id returns 401 unauthorized", async () => {
     const res = await app.request("/api/sources/fixture-id", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -194,13 +173,13 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 02.1-06: anonymous DELETE /api/sources/:id returns 401 unauthorized", async () => {
+  it("anonymous DELETE /api/sources/:id returns 401 unauthorized", async () => {
     const res = await app.request("/api/sources/fixture-id", { method: "DELETE" });
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 02.1-06: anonymous POST /api/sources/:id/restore returns 401 unauthorized", async () => {
+  it("anonymous POST /api/sources/:id/restore returns 401 unauthorized", async () => {
     const res = await app.request("/api/sources/fixture-id/restore", {
       method: "POST",
     });
@@ -208,7 +187,7 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 03.0.1-10: anonymous POST /api/sources/:id/refresh-content returns 401 unauthorized", async () => {
+  it("anonymous POST /api/sources/:id/refresh-content returns 401 unauthorized", async () => {
     const res = await app.request("/api/sources/fixture-id/refresh-content", {
       method: "POST",
     });
@@ -216,13 +195,13 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 02.1-06: anonymous GET /api/events (feed) returns 401 unauthorized", async () => {
+  it("anonymous GET /api/events (feed) returns 401 unauthorized", async () => {
     const res = await app.request("/api/events");
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 02.1-06: anonymous PATCH /api/events/:id/attach returns 401 unauthorized", async () => {
+  it("anonymous PATCH /api/events/:id/attach returns 401 unauthorized", async () => {
     const res = await app.request("/api/events/fixture-id/attach", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -232,7 +211,7 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 02.1-06: anonymous PATCH /api/events/:id/dismiss-inbox returns 401 unauthorized", async () => {
+  it("anonymous PATCH /api/events/:id/dismiss-inbox returns 401 unauthorized", async () => {
     const res = await app.request("/api/events/fixture-id/dismiss-inbox", {
       method: "PATCH",
     });
@@ -240,13 +219,13 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 02.1-14: anonymous GET /api/events/deleted returns 401 unauthorized", async () => {
+  it("anonymous GET /api/events/deleted returns 401 unauthorized", async () => {
     const res = await app.request("/api/events/deleted");
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 02.1-14: anonymous PATCH /api/events/:id/restore returns 401 unauthorized", async () => {
+  it("anonymous PATCH /api/events/:id/restore returns 401 unauthorized", async () => {
     const res = await app.request("/api/events/fixture-id/restore", {
       method: "PATCH",
     });
@@ -254,7 +233,7 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 02.1-24: anonymous PATCH /api/events/:id/mark-standalone returns 401 unauthorized", async () => {
+  it("anonymous PATCH /api/events/:id/mark-standalone returns 401 unauthorized", async () => {
     const res = await app.request("/api/events/fixture-id/mark-standalone", {
       method: "PATCH",
     });
@@ -262,7 +241,7 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 02.1-24: anonymous PATCH /api/events/:id/unmark-standalone returns 401 unauthorized", async () => {
+  it("anonymous PATCH /api/events/:id/unmark-standalone returns 401 unauthorized", async () => {
     const res = await app.request("/api/events/fixture-id/unmark-standalone", {
       method: "PATCH",
     });
@@ -270,33 +249,32 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  // Plan 02.2-03 — explicit per-route anonymous-401 assertions for the new
-  // /api/me/* account-export-delete-restore surface (AGENTS.md §3 — vacuous-pass
+  // Explicit per-route anonymous-401 assertions for the /api/me/*
+  // account-export-delete-restore surface (AGENTS.md §3 — vacuous-pass
   // sweep + explicit per-route assertions, both layers required).
-  it("Plan 02.2-03: anonymous GET /api/me/export returns 401 unauthorized", async () => {
+  it("anonymous GET /api/me/export returns 401 unauthorized", async () => {
     const res = await app.request("/api/me/export");
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 02.2-03: anonymous DELETE /api/me/account returns 401 unauthorized", async () => {
+  it("anonymous DELETE /api/me/account returns 401 unauthorized", async () => {
     const res = await app.request("/api/me/account", { method: "DELETE" });
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 02.2-03: anonymous POST /api/me/account/restore returns 401 unauthorized", async () => {
+  it("anonymous POST /api/me/account/restore returns 401 unauthorized", async () => {
     const res = await app.request("/api/me/account/restore", { method: "POST" });
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  // Phase 3.0 Plan 03.0-08 — refresh-poll + account/purge anonymous-401
-  // assertions ACTIVATED. The vacuous-pass sweep above carries the bulk of
-  // the contract via the MUST_BE_PROTECTED allowlist; these explicit
-  // assertions are the load-bearing per-route checks (AGENTS.md §3 — both
-  // layers required).
-  it("Plan 03.0-08: anonymous POST /api/events/:id/refresh-poll returns 401 unauthorized", async () => {
+  // Refresh-poll + account/purge anonymous-401 assertions. The
+  // vacuous-pass sweep above carries the bulk of the contract via the
+  // MUST_BE_PROTECTED allowlist; these explicit assertions are the
+  // load-bearing per-route checks (AGENTS.md §3 — both layers required).
+  it("anonymous POST /api/events/:id/refresh-poll returns 401 unauthorized", async () => {
     const res = await app.request("/api/events/fixture-id/refresh-poll", {
       method: "POST",
     });
@@ -304,28 +282,28 @@ describe("anonymous-401 sweep (PRIV-01, VALIDATION 5/6)", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 03.0-08: anonymous DELETE /api/me/account/purge returns 401 unauthorized", async () => {
+  it("anonymous DELETE /api/me/account/purge returns 401 unauthorized", async () => {
     const res = await app.request("/api/me/account/purge", { method: "DELETE" });
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  // Phase 3.0 Plan 03.0-07 — admin-quota anonymous-401 ACTIVATED. The auth
-  // gate (tenantScope mounted on /api/* globally) fires BEFORE the allowlist
-  // gate (adminAllowlist mounted on /api/admin/*), so an anonymous request
-  // gets 401 from tenantScope and never reaches the allowlist check. The
-  // sweep above also covers the path; this explicit assertion is the
-  // load-bearing per-route check (AGENTS.md §3 both layers).
-  it("Plan 03.0-07: anonymous GET /api/admin/quota returns 401 (auth gate fires before allowlist gate)", async () => {
+  // Admin-quota anonymous-401. The auth gate (tenantScope mounted on
+  // /api/* globally) fires BEFORE the allowlist gate (adminAllowlist
+  // mounted on /api/admin/*), so an anonymous request gets 401 from
+  // tenantScope and never reaches the allowlist check. The sweep above
+  // also covers the path; this explicit assertion is the load-bearing
+  // per-route check (AGENTS.md §3 both layers).
+  it("anonymous GET /api/admin/quota returns 401 (auth gate fires before allowlist gate)", async () => {
     const res = await app.request("/api/admin/quota");
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  // Phase 3.0 post-build (UAT 2026-05-06) — /api/youtube/fetch-metadata gate.
-  // Powers the "Get from YouTube" button on /events/new; tenantScope must
-  // refuse anonymous BEFORE the videos.list lookup ever fires.
-  it("post-build: anonymous POST /api/youtube/fetch-metadata returns 401 unauthorized", async () => {
+  // /api/youtube/fetch-metadata gate.
+  // Powers the "Get from YouTube" button on /events/new; tenantScope
+  // must refuse anonymous BEFORE the videos.list lookup ever fires.
+  it("anonymous POST /api/youtube/fetch-metadata returns 401 unauthorized", async () => {
     const res = await app.request("/api/youtube/fetch-metadata", {
       method: "POST",
       headers: { "content-type": "application/json" },

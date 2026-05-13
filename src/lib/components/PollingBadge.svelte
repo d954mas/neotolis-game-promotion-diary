@@ -1,13 +1,7 @@
 <script lang="ts">
-  // PollingBadge — Phase 3.0 Plan 11 LIVE-STATE rewrite.
+  // PollingBadge — live-state polling-freshness indicator.
   //
-  // Replaces the Phase 2.1 placeholder ("Phase 3 will start polling" — retired
-  // in Plan 02; the never-polled-yet branch then fell back to
-  // polling_badge_manual until this rewrite).
-  //
-  // Renders one of FIVE user-facing variants per UI-SPEC §"Component
-  // inventory: PollingBadge REWRITE" + §"Color → variant color rules" +
-  // §"Copywriting Contract":
+  // Renders one of these user-facing variants:
   //
   //   active           → "Hot · checked {hoursAgo}h ago"
   //   cold-yesterday   → "Cold · yesterday"
@@ -16,47 +10,46 @@
   //   unavailable      → "Unavailable · last seen {daysAgo}d ago"
   //   manual           → "Manual entry — no polling"   (lastPolledAt=null AND tier=Active)
   //
-  // The 6th "Throttled" variant from D-NEW lives ONLY in /admin/quota
-  // (DV-3 — service quota state is operator-only); this component does NOT
-  // render it on /feed.
+  // The Throttled variant lives ONLY in /admin/quota (service quota state
+  // is operator-only); this component does NOT render it on /feed.
   //
-  // PITFALL 7 — TIER RESOLUTION SINGLE SOURCE OF TRUTH
+  // TIER RESOLUTION SINGLE SOURCE OF TRUTH
   //
   // The age boundaries (24h Active / 28d Cold / Frozen) and last_poll_status
   // overrides ('not_found' / 'private' / 'auth_error' → unavailable) are
-  // codified in src/lib/server/services/tier-resolver.ts. SvelteKit's $lib/server
-  // boundary forbids client components from importing that module (the
-  // services barrel pulls in Node-only deps via its sibling files). To
-  // preserve the single-source-of-truth invariant we MIRROR the rules
-  // inline here AND ship a unit test (tests/unit/tier-resolver-client-mirror.test.ts)
-  // that asserts the two functions return identical results for the same
-  // battery of inputs as tests/unit/tier-resolver.test.ts. Any change to
-  // the boundaries lands in lock-step in BOTH files, with the mirror test
-  // failing if drift creeps in.
+  // codified in src/lib/server/services/tier-resolver.ts. SvelteKit's
+  // $lib/server boundary forbids client components from importing that
+  // module (the services barrel pulls in Node-only deps via its sibling
+  // files). To preserve the single-source-of-truth invariant we MIRROR the
+  // rules inline here AND ship a unit test
+  // (tests/unit/tier-resolver-client-mirror.test.ts) that asserts the two
+  // functions return identical results for the same battery of inputs as
+  // tests/unit/tier-resolver.test.ts. Any change to the boundaries lands
+  // in lock-step in BOTH files, with the mirror test failing if drift
+  // creeps in.
   //
-  // CONTEXT D-05 (age boundaries):
+  // Age boundaries:
   //   - age <  24h           → 'active'
   //   - age >= 24h && < 28d  → 'cold'
   //   - age >= 28d           → 'frozen'
   //
-  // CONTEXT D-12 (last_poll_status overrides — irrespective of age):
+  // last_poll_status overrides (irrespective of age):
   //   - 'not_found' / 'private' / 'auth_error' → 'unavailable'
   //
-  // PITFALL H — Date | string | null prop type. SvelteKit serializes Date
-  // values to ISO strings when crossing the loader → page boundary; the
-  // component coerces defensively before doing any math.
+  // Date | string | null prop type. SvelteKit serializes Date values to
+  // ISO strings when crossing the loader → page boundary; the component
+  // coerces defensively before doing any math.
   //
-  // Refresh-now affordance visibility (D-10):
+  // Refresh-now affordance visibility:
   //   visible WHEN (last_polled_at IS NOT NULL) OR tier=Frozen
   //   hidden  WHEN  last_polled_at IS NULL  AND tier ≠ Frozen
   //
-  // Accessibility (UI-SPEC §"Accessibility Floor delta"):
-  //   role="status" + aria-live="polite" — preserved from Phase 2.1.
+  // Accessibility: role="status" + aria-live="polite".
 
   import { m } from "$lib/paraglide/messages.js";
   import RefreshNowButton from "./RefreshNowButton.svelte";
 
-  // MIRRORS services/tier-resolver.ts; Pitfall 7 — keep in sync.
+  // MIRRORS services/tier-resolver.ts — keep in sync.
   // tests/unit/tier-resolver-client-mirror.test.ts asserts both functions
   // return identical results for the same battery of inputs.
   const TIER_BOUNDARY_ACTIVE_MS = 86_400_000; // 24h
@@ -65,13 +58,13 @@
 
   type Tier = "pending" | "active" | "cold" | "frozen" | "unavailable";
 
-  // MIRRORS services/tier-resolver.ts; Pitfall 7 — keep in sync.
-  // Per-video refactor (2026-05-06): tier keyed on publishedAt (the video's
-  // age), not occurredAt (the event's age). NULL publishedAt → 'pending'
-  // (channel-context-backfill in flight; show "Pending..." badge).
-  // Phase 03.0.3 follow-up — bootstrap rule: frozen by age + lastPolledAt=null
-  // → upgrade to 'cold' so the scheduler picks the video up once. See the
-  // canonical resolver header for the issue #29 extension rationale.
+  // MIRRORS services/tier-resolver.ts — keep in sync.
+  // Tier keyed on publishedAt (the video's age), not occurredAt (the
+  // event's age). NULL publishedAt → 'pending' (channel-context-backfill
+  // in flight; show "Pending..." badge).
+  // Bootstrap rule: frozen by age + lastPolledAt=null → upgrade to 'cold'
+  // so the scheduler picks the video up once. See the canonical resolver
+  // header for the issue #29 extension rationale.
   function resolveTier(
     publishedAt: Date | null,
     lastPollStatus: string | null,
@@ -93,10 +86,10 @@
     id: string;
     kind: string;
     occurredAt: Date | string;
-    // Per-video refactor (2026-05-06): publishedAt drives tier resolution.
-    // Optional so callers that haven't yet plumbed the youtube_videos JOIN
-    // (older surfaces, stale fixtures) keep compiling. undefined → null
-    // in the $derived coercion below → 'pending' tier.
+    // publishedAt drives tier resolution. Optional so callers that haven't
+    // yet plumbed the youtube_videos JOIN (older surfaces, stale fixtures)
+    // keep compiling. undefined → null in the $derived coercion below →
+    // 'pending' tier.
     publishedAt?: Date | string | null;
     lastPolledAt: Date | string | null;
     lastPollStatus: string | null;
@@ -105,10 +98,10 @@
 
   let { event }: { event: EventForBadge } = $props();
 
-  // UI-SPEC: PollingBadge stays YouTube-only in 3.0; 3.1 adds Reddit.
+  // PollingBadge is YouTube-only today; future source kinds (e.g. Reddit) extend this list.
   const POLLABLE_KINDS = ["youtube_video"];
 
-  // Defensive Date coercion (Pitfall H).
+  // Defensive Date coercion — props may arrive as ISO strings.
   const publishedAt = $derived(
     event.publishedAt == null
       ? null
@@ -156,24 +149,24 @@
     return "frozen";
   });
 
-  // Refresh-now visibility: visible for any pollable event NOT in 'pending'
-  // tier. Pre-Wave-4 also required (lastPolledAt !== null || tier === "frozen")
-  // — that hid refresh on cold/active videos with no prior poll, leaving
-  // manually-pasted videos stuck without a way to fetch stats. Wave 4 adds
-  // synchronous stats-fetch on paste (createEventFromPaste →
-  // adapter.fetchEventStats), so cold/active without prior poll is rare;
-  // when it does happen (rate-limit / auth-error swallow), the user now
-  // has an explicit refresh button to rescue.
+  // Refresh-now visibility: visible for any pollable event NOT in
+  // 'pending' tier. An earlier rule also required
+  // (lastPolledAt !== null || tier === "frozen") — that hid refresh on
+  // cold/active videos with no prior poll, leaving manually-pasted videos
+  // stuck without a way to fetch stats. Synchronous stats-fetch on paste
+  // (createEventFromPaste → adapter.fetchEventStats) made cold/active
+  // without prior poll rare; when it does happen (rate-limit / auth-error
+  // swallow), the user has an explicit refresh button to rescue.
   // 'pending' tier still hides refresh — backfill is in flight, manual
   // poll would race it. Refresh-poll service rejects 'pending' with 422.
   const refreshVisible = $derived(POLLABLE_KINDS.includes(event.kind) && tier !== "pending");
 
-  // Copy resolution. Phase 03.0.1 Wave 4 (post-UAT) — replace tier
-  // vocabulary ("Cold", "Frozen") with user-meaningful "Updated X ago"
-  // relative time. Tier still drives variant CSS (colors), but the
-  // visible text is what the user actually cares about: how stale are
-  // the stats. 'pending' / 'unavailable' / 'manual' still use the
-  // dedicated copy (they signal special states, not just freshness).
+  // Copy resolution. The visible text uses "Updated X ago" relative time
+  // (user-meaningful) rather than tier vocabulary ("Cold", "Frozen").
+  // Tier still drives variant CSS (colors); the text is what the user
+  // actually cares about: how stale are the stats. 'pending' /
+  // 'unavailable' / 'manual' still use the dedicated copy (they signal
+  // special states, not just freshness).
   const copy = $derived.by(() => {
     if (variant === "pending") return m.polling_badge_pending();
     if (variant === "manual") return m.polling_badge_manual();
@@ -284,7 +277,7 @@
   }
 
   /* Manual entry — no polling — neutral icon, muted text, DASHED border
-     (matches Phase 2.1 placeholder visual to signal "no polling lifecycle"). */
+     (signals "no polling lifecycle"). */
   .polling-badge--manual {
     border: 1px dashed var(--color-border);
     color: var(--color-text-muted);

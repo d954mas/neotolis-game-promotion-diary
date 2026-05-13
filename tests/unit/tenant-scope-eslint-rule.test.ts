@@ -33,16 +33,16 @@ tester.run("no-unfiltered-tenant-query", rule, {
     `tx.update(events).set({deletedAt}).where(and(eq(events.userId, userId), eq(events.gameId, gameId)))`,
     // delete with userId
     `db.delete(apiKeysSteam).where(and(eq(apiKeysSteam.userId, userId), eq(apiKeysSteam.id, keyId)))`,
-    // Phase 5 allowlisted table
+    // Allowlisted table
     `db.select().from(subredditRules).where(eq(subredditRules.id, rid))`,
-    // Phase 2.1 dataSources select with userId filter
+    // dataSources select with userId filter
     `db.select().from(dataSources).where(and(eq(dataSources.userId, userId), eq(dataSources.id, sid)))`,
-    // Phase 2.1 dataSources update with userId filter (mirrors Phase 2 single-loop chain walker)
+    // dataSources update with userId filter (single-loop chain walker)
     `tx.update(dataSources).set({autoImport:true}).where(and(eq(dataSources.userId, userId), eq(dataSources.id, sid)))`,
-    // Phase 3.0 Plan 01 — public-data tables (allowlisted): unfiltered queries are
-    // legitimate because the row is shared across all tenants by video_id /
-    // channel_id / date_pacific (CONTEXT D-07 / D-13 / D-14). No userId column
-    // exists on these tables; requiring a userId filter would force a useless join.
+    // Public-data tables (allowlisted): unfiltered queries are legitimate
+    // because the row is shared across all tenants by video_id / channel_id /
+    // date_pacific. No userId column exists on these tables; requiring a
+    // userId filter would force a useless join.
     `db.select().from(youtubeVideoSnapshots).where(eq(youtubeVideoSnapshots.videoId, 'abc'))`,
     `db.select().from(youtubeChannels).where(eq(youtubeChannels.channelId, 'UC123'))`,
     `db.update(youtubeServiceQuotaUsage).set({estimatedUnits:5}).where(eq(youtubeServiceQuotaUsage.apiKeyId, 'k'))`,
@@ -60,13 +60,13 @@ tester.run("no-unfiltered-tenant-query", rule, {
       code: `db.update(apiKeysSteam).set({label:'x'}).where(eq(apiKeysSteam.id, keyId))`,
       errors: [{ messageId: "missingUserIdFilter", data: { table: "apiKeysSteam" } }],
     },
-    // Phase 2.1: dataSources select without userId filter trips the rule.
+    // dataSources select without userId filter trips the rule.
     {
       code: `db.select().from(dataSources).where(eq(dataSources.id, sid))`,
       errors: [{ messageId: "missingUserIdFilter", data: { table: "dataSources" } }],
     },
-    // Phase 2.1: dataSources update form without userId filter trips the rule
-    // (mirrors Phase 2 fix to the single-loop chain walker).
+    // dataSources update form without userId filter trips the rule
+    // (single-loop chain walker).
     {
       code: `tx.update(dataSources).set({autoImport:true}).where(eq(dataSources.id, sid))`,
       errors: [{ messageId: "missingUserIdFilter", data: { table: "dataSources" } }],

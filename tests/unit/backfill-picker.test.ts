@@ -1,10 +1,6 @@
-// Phase 03.0 Plan 12 — BackfillPicker (D-09 / UI-SPEC §"Component inventory").
-//
-// Post-build UX revision (2026-05-06): radio group → <select> → pill-button
-// row matching DateRangeControl on /feed (same visual language for "pick a
-// time window" across the app). Quota-cost hints stay removed (operator
-// concern). Per-preset helper text spells out BOTH limits — date cutoff +
-// 1000-event cap.
+// BackfillPicker — pill-button row matching DateRangeControl on /feed (same
+// visual language for "pick a time window" across the app). Per-preset
+// helper text spells out BOTH limits — date cutoff + 1000-event cap.
 //
 // SSR-render coverage (this file):
 //   - Test 1: 6 pill <button>s with the literal labels
@@ -32,7 +28,7 @@ const sourceText = readFileSync(SOURCE_PATH, "utf8");
 const { render } = await import("svelte/server");
 const BackfillPicker = (await import("../../src/lib/components/BackfillPicker.svelte")).default;
 
-describe("Plan 03.0-12 — BackfillPicker (D-09)", () => {
+describe("BackfillPicker", () => {
   it("renders 6 pill <button>s carrying the literal preset labels", () => {
     const out = render(BackfillPicker, { props: { value: "30d" } });
     expect(out.body).toContain("1 day");
@@ -79,8 +75,8 @@ describe("Plan 03.0-12 — BackfillPicker (D-09)", () => {
   });
 
   it("source no longer references the deprecated quota cost / default-helper Paraglide keys", () => {
-    // UX revision 2026-05-06 — quota cost is operator concern; default-helper
-    // collapsed into per-preset helpers.
+    // Quota cost is operator concern; default-helper collapsed into
+    // per-preset helpers.
     expect(sourceText).not.toContain("backfill_picker_preset_cost");
     expect(sourceText).not.toContain("backfill_picker_helper_default");
   });

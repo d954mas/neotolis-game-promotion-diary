@@ -1,11 +1,10 @@
-// Audit log HTTP routes (Plan 02-08; widened Plan 02.1-20).
+// Audit log HTTP routes.
 //
 // Routes:
 //   GET /api/audit?cursor=&action=A&action=B  — listAuditPage
 //
-// Plan 02.1-20: action filter switches from single-select (?action=A) to
-// multi-select (?action=A&action=B repeated params), mirroring /feed's
-// convention from Plan 02.1-15. Empty array = "all" semantics (default).
+// Action filter is multi-select (?action=A&action=B repeated params),
+// mirroring /feed's convention. Empty array = "all" semantics (default).
 //
 // The cursor is opaque to the client (display-only); the UI submits the
 // `nextCursor` returned in the previous response unchanged. zod validates
@@ -23,9 +22,9 @@ import { AUDIT_ACTIONS, type AuditAction } from "../../audit/actions.js";
 import { toAuditEntryDto } from "../../dto.js";
 import { mapErr, type RouteVars } from "./_shared.js";
 
-// Plan 02.1-20: drop the "all" sentinel; valid values are AUDIT_ACTIONS only.
-// The empty-array branch is the new "all" semantics. Cursor still uses zod
-// for the query schema; multi-action is parsed via c.req.queries('action').
+// Valid values are AUDIT_ACTIONS only. The empty-array branch is "all"
+// semantics. Cursor uses zod for the query schema; multi-action is parsed
+// via c.req.queries('action').
 const auditQuerySchema = z.object({
   cursor: z.string().optional(),
 });

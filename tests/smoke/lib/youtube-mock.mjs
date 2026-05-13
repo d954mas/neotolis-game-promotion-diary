@@ -1,19 +1,18 @@
-// Phase 3.0 Plan 14 — mock YouTube reverse-proxy for the smoke gate.
+// Mock YouTube reverse-proxy for the smoke gate.
 //
-// CONTEXT D-NEW Smoke + RESEARCH "Don't Hand-Roll" §"Mock YouTube":
-// the smoke gate MUST NOT make live YouTube API calls. The Phase 3.0 worker
+// The smoke gate MUST NOT make live YouTube API calls. The worker
 // reaches Google through `env.YOUTUBE_API_BASE_URL` (default
-// `https://www.googleapis.com/youtube/v3`); the smoke shell launches THIS
-// stub on a free port and exports `YOUTUBE_API_BASE_URL=http://localhost:$port`
-// so worker traffic is intercepted here instead of going live.
+// `https://www.googleapis.com/youtube/v3`); the smoke shell launches
+// THIS stub on a free port and exports
+// `YOUTUBE_API_BASE_URL=http://localhost:$port` so worker traffic is
+// intercepted here instead of going live.
 //
-// Pitfall G (recorded fixtures rejected): real fixtures drift on schema
-// changes; a tiny custom stub is the documented choice. The Wave 0 live
-// spike (03.0-RESEARCH.md "Open Questions" #1, run 2026-05-06, VERIFIED)
-// is the schema-shape assertion against real Google; this stub mirrors
-// that exact shape for offline reproducibility.
+// Recorded fixtures were rejected: real fixtures drift on schema
+// changes; a tiny custom stub is the documented choice. A separate live
+// spike pinned the schema-shape assertion against real Google; this stub
+// mirrors that exact shape for offline reproducibility.
 //
-// Endpoints implemented (only what Phase 3.0 worker code actually calls):
+// Endpoints implemented (only what the worker code actually calls):
 //   GET .../videos          → videos.list (50 items, deterministic)
 //   GET .../playlistItems   → playlistItems.list (10 items)
 //   GET .../channels        → channels.list (1 channel with uploadsPlaylistId)

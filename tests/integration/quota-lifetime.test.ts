@@ -1,10 +1,11 @@
-// Phase 03.0.1 (post-review) — getUserQuotaLifetime per-platform filter.
+// getUserQuotaLifetime per-platform filter.
 //
 // Pre-fix the function filtered on `metadata->>'kind'` while writers
-// populated the dedicated `metadata->>'platform'` field (Codex P1 fixed
-// `getUserQuotaUsedToday` to filter on `platform`, but missed the parallel
-// `getUserQuotaLifetime` query). Result: lifetime banner showed 0 even when
-// today's counter was non-zero — same writer rows, two different filters.
+// populated the dedicated `metadata->>'platform'` field. An earlier fix
+// updated `getUserQuotaUsedToday` to filter on `platform`, but missed the
+// parallel `getUserQuotaLifetime` query. Result: lifetime banner showed 0
+// even when today's counter was non-zero — same writer rows, two different
+// filters.
 //
 // This suite is a regression guard ensuring both queries agree on the
 // filter dimension when seeded with the same audit row shape.

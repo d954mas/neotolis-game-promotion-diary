@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Phase 3.0 Plan 14 — wraps youtube-mock.mjs lifecycle for the smoke gate.
+# Wraps youtube-mock.mjs lifecycle for the smoke gate.
 #
-# Pattern matches Phase 1's oauth-mock-driver: a tiny long-lived helper
-# spawned by tests/smoke/self-host.sh, the wrapper exports YOUTUBE_MOCK_PORT
-# + YOUTUBE_MOCK_PID into the parent shell so subsequent assertions can
+# Pattern matches oauth-mock-driver: a tiny long-lived helper spawned by
+# tests/smoke/self-host.sh, the wrapper exports YOUTUBE_MOCK_PORT +
+# YOUTUBE_MOCK_PID into the parent shell so subsequent assertions can
 # point YOUTUBE_API_BASE_URL at it and tear it down on EXIT.
 #
 # Usage:

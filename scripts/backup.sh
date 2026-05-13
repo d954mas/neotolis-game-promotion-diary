@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# diary-backup — daily Postgres dump → S3-compatible push (D-25, D-25a, D-25b).
+# diary-backup — daily Postgres dump → S3-compatible push.
 #
 # Idempotent: flock prevents concurrent runs. Same-day filename means
 # multiple runs the same day overwrite the same key; bucket-side
 # versioning (R2 Object Lock / B2 keep-versions / Wasabi compliance)
 # preserves the prior version.
 #
-# Failures DO NOT page the operator (D-25b — UptimeRobot pings /healthz,
-# not backup status). Operator inspects the bucket manually monthly.
+# Failures DO NOT page the operator (UptimeRobot pings /healthz, not
+# backup status). Operator inspects the bucket manually monthly.
 #
 # rclone reads its own config from ~/.config/rclone/rclone.conf; the
-# application has zero awareness of backup credentials (D-25a). Works
-# against any S3-compatible remote (CF R2, Backblaze B2, Wasabi, MinIO,
-# AWS S3) — the operator picks one in docs/self-host/backups.md.
+# application has zero awareness of backup credentials. Works against
+# any S3-compatible remote (CF R2, Backblaze B2, Wasabi, MinIO, AWS S3)
+# — the operator picks one in docs/self-host/backups.md.
 #
 # RCLONE_REMOTE / RCLONE_BUCKET / COMPOSE_FILE are env-overridable so this
 # script is reusable across self-host and author-instance setups without

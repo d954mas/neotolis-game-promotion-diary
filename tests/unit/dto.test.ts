@@ -7,11 +7,11 @@ import {
   toEventDto,
 } from "../../src/lib/server/dto.js";
 
-// Plan 01-07 (Wave 4) — PITFALL P3 DTO discipline. Round-trip projection
-// asserted to strip every secret-shaped field even when the input row
-// carries them (defense-in-depth — schema-as-types alone is not sufficient,
-// because TypeScript erases at runtime; the projection is the runtime guard).
-describe("DTO discipline (PITFALL P3)", () => {
+// DTO discipline. Round-trip projection asserted to strip every secret-shaped
+// field even when the input row carries them (defense-in-depth — schema-as-types
+// alone is not sufficient, because TypeScript erases at runtime; the projection
+// is the runtime guard).
+describe("DTO discipline", () => {
   it("toUserDto strips google_sub / accountId / passwords / verification", () => {
     const fakeUser = {
       id: "u-1",
@@ -31,10 +31,10 @@ describe("DTO discipline (PITFALL P3)", () => {
     } as unknown as Parameters<typeof toUserDto>[0];
 
     const dto = toUserDto(fakeUser);
-    // Plan 02.2-04: deletedAt added to UserDto for the AccountDeletedBanner
-    // conditional in src/routes/+layout.svelte. Active accounts have null;
-    // soft-deleted accounts carry the timestamp. Not a ciphertext column —
-    // does not violate AGENTS §5 secret-strip invariant.
+    // deletedAt on UserDto powers the AccountDeletedBanner conditional in
+    // src/routes/+layout.svelte. Active accounts have null; soft-deleted
+    // accounts carry the timestamp. Not a ciphertext column — does not
+    // violate AGENTS §5 secret-strip invariant.
     expect(dto).toEqual({ id: "u-1", email: "a@b.test", name: "A", image: null, deletedAt: null });
     expect(dto).not.toHaveProperty("googleSub");
     expect(dto).not.toHaveProperty("refreshToken");
@@ -44,12 +44,12 @@ describe("DTO discipline (PITFALL P3)", () => {
     expect(dto).not.toHaveProperty("emailVerified");
   });
 
-  it("Plan 02.2-04: toUserDto exposes deletedAt for the soft-deleted state", () => {
+  it("toUserDto exposes deletedAt for the soft-deleted state", () => {
     // The AccountDeletedBanner in src/routes/+layout.svelte conditions on
     // `data.user?.deletedAt` — the projection MUST forward the timestamp
     // when set so the banner can compute days-left and render the restore
-    // CTA. The 02.2-03 export envelope test below continues to verify
-    // ciphertext-shaped fields stay stripped.
+    // CTA. The export envelope test below continues to verify ciphertext-
+    // shaped fields stay stripped.
     const deletedAt = new Date("2026-04-01T00:00:00Z");
     const fakeUser = {
       id: "u-2",
@@ -92,16 +92,16 @@ describe("DTO discipline (PITFALL P3)", () => {
   });
 });
 
-// Plan 02-05 (D-39 ciphertext discipline) — the DTO projection function is
-// the load-bearing runtime guard for envelope-encrypted secret tables.
-// TypeScript erases types at runtime; only the projection function decides
-// what crosses the wire. This test asserts the strip happens behaviourally
-// even when a row literal carries every ciphertext-shaped field. If a
-// future contributor adds a ciphertext column to api_keys_steam without
-// updating toApiKeySteamDto's explicit field listing, this test fails
-// loudly instead of silently leaking the new column.
-describe("toApiKeySteamDto strips ciphertext (D-39 behavioural)", () => {
-  it("02-05: returns only DTO keys even when row literal carries ciphertext", () => {
+// The DTO projection function is the load-bearing runtime guard for
+// envelope-encrypted secret tables. TypeScript erases types at runtime;
+// only the projection function decides what crosses the wire. This test
+// asserts the strip happens behaviourally even when a row literal carries
+// every ciphertext-shaped field. If a future contributor adds a ciphertext
+// column to api_keys_steam without updating toApiKeySteamDto's explicit
+// field listing, this test fails loudly instead of silently leaking the
+// new column.
+describe("toApiKeySteamDto strips ciphertext", () => {
+  it("returns only DTO keys even when row literal carries ciphertext", () => {
     const fakeRow = {
       id: "test-id",
       userId: "should-NOT-leak",
@@ -136,13 +136,13 @@ describe("toApiKeySteamDto strips ciphertext (D-39 behavioural)", () => {
   });
 });
 
-// Plan 02.1-04 (Phase 2.1 SOURCES-01) — DTO discipline for the unified
-// `data_sources` table. The toDataSourceDto projection is the runtime guard
-// for cross-tenant userId leakage on the new entity. Mirrors the api_keys_steam
-// behavioural test pattern: a row literal with userId is fed in, and the
-// output object MUST NOT contain `userId` even though it sat in the input.
-describe("toDataSourceDto strips userId (P3 behavioural)", () => {
-  it("02.1-04: strips userId at runtime even when the row carries it", () => {
+// DTO discipline for the unified `data_sources` table. The toDataSourceDto
+// projection is the runtime guard for cross-tenant userId leakage. Mirrors
+// the api_keys_steam behavioural test pattern: a row literal with userId is
+// fed in, and the output object MUST NOT contain `userId` even though it
+// sat in the input.
+describe("toDataSourceDto strips userId", () => {
+  it("strips userId at runtime even when the row carries it", () => {
     const fakeRow = {
       id: "src1",
       userId: "leak-target",
@@ -174,7 +174,7 @@ describe("toDataSourceDto strips userId (P3 behavioural)", () => {
     expect(json).not.toMatch(/userId|user_id|leak-target/);
   });
 
-  it("02.1-04: preserves every documented DTO field across kinds + soft-deleted state", () => {
+  it("preserves every documented DTO field across kinds + soft-deleted state", () => {
     const deletedAt = new Date("2026-04-28T01:00:00Z");
     const fakeRow = {
       id: "src2",
@@ -189,11 +189,11 @@ describe("toDataSourceDto strips userId (P3 behavioural)", () => {
       createdAt: new Date("2026-04-27T00:00:00Z"),
       updatedAt: new Date("2026-04-27T00:00:00Z"),
       deletedAt,
-      // Phase 03.0.1 Plan 08 (D-13) — AdapterError surface columns.
+      // AdapterError surface columns.
       needsReconnect: false,
       lastErrorAt: null,
       lastErrorKind: null,
-      // Phase 03.0.1 — backfill state machine.
+      // Backfill state machine.
       lastPolledAt: null,
       backfillOldestAt: null,
       backfillComplete: false,
@@ -203,7 +203,7 @@ describe("toDataSourceDto strips userId (P3 behavioural)", () => {
 
     expect(Object.keys(dto).sort()).toEqual([
       "autoImport",
-      // Phase 03.0.1 — backfill state machine. Operational fields; non-secret.
+      // Backfill state machine. Operational fields; non-secret.
       // /sources/[id] derives coverage badge + "Pull older to" target from these.
       "backfillComplete",
       "backfillOldestAt",
@@ -217,8 +217,8 @@ describe("toDataSourceDto strips userId (P3 behavioural)", () => {
       "id",
       "isOwnedByMe",
       "kind",
-      // Phase 03.0.1 Plan 08 (D-13) — AdapterError surface fields. Operational
-      // metadata; non-secret. The /sources/[id] page renders banners from these.
+      // AdapterError surface fields. Operational metadata; non-secret.
+      // The /sources/[id] page renders banners from these.
       "lastErrorAt",
       "lastErrorKind",
       "lastPolledAt",
@@ -241,7 +241,7 @@ describe("toDataSourceDto strips userId (P3 behavioural)", () => {
     expect(dto.backfillTargetSince).toBeNull();
   });
 
-  it("02.1-04: coerces null/undefined metadata to empty object", () => {
+  it("coerces null/undefined metadata to empty object", () => {
     const fakeRow = {
       id: "src3",
       userId: "u1",
@@ -262,17 +262,16 @@ describe("toDataSourceDto strips userId (P3 behavioural)", () => {
 });
 
 /**
- * Plan 02.1-28 (UAT-NOTES.md §4.24.G — M:N migration application layer) —
  * toEventDto behavioural test.
  *
- * The signature change (toEventDto now takes (event, gameIds: string[]))
- * is the load-bearing API change. The DTO discipline contract (P3 / D-39):
- * userId must be stripped at runtime even when a row literal carries it.
- * The legacy singular `gameId` field MUST NOT appear on the projected
- * output (it's not in the new EventDto interface).
+ * The signature (toEventDto takes (event, gameIds: string[])) is the load-
+ * bearing API. The DTO discipline contract: userId must be stripped at
+ * runtime even when a row literal carries it. The legacy singular `gameId`
+ * field MUST NOT appear on the projected output (it's not in the EventDto
+ * interface).
  */
-describe("Plan 02.1-28 — toEventDto with gameIds (P3 behavioural)", () => {
-  it("Plan 02.1-28: gameIds is a defensive copy of the input array (caller cannot mutate the source)", () => {
+describe("toEventDto with gameIds", () => {
+  it("gameIds is a defensive copy of the input array (caller cannot mutate the source)", () => {
     const gameIds = ["g1", "g2"];
     const fakeRow = {
       id: "ev1",
@@ -300,7 +299,7 @@ describe("Plan 02.1-28 — toEventDto with gameIds (P3 behavioural)", () => {
     expect(gameIds).toEqual(["g1", "g2"]);
   });
 
-  it("Plan 02.1-28: userId is stripped from the projected DTO (P3 discipline)", () => {
+  it("userId is stripped from the projected DTO", () => {
     const fakeRow = {
       id: "ev2",
       userId: "leak-target",
@@ -326,7 +325,7 @@ describe("Plan 02.1-28 — toEventDto with gameIds (P3 behavioural)", () => {
     expect(json).not.toMatch(/userId|user_id|leak-target/);
   });
 
-  it("Plan 02.1-28: legacy singular gameId field MUST NOT appear on the projected output", () => {
+  it("legacy singular gameId field MUST NOT appear on the projected output", () => {
     // Even when a (legacy) row literal carries `gameId`, the projection
     // function MUST NOT pass it through — the new EventDto interface
     // exposes `gameIds: string[]` only. This is the runtime tripwire for
@@ -357,7 +356,7 @@ describe("Plan 02.1-28 — toEventDto with gameIds (P3 behavioural)", () => {
     expect(dto.gameIds).toEqual(["g1"]);
   });
 
-  it("Plan 02.1-28: empty gameIds array produces gameIds: [] (inbox semantic)", () => {
+  it("empty gameIds array produces gameIds: [] (inbox semantic)", () => {
     const fakeRow = {
       id: "ev4",
       userId: "u1",
@@ -382,11 +381,11 @@ describe("Plan 02.1-28 — toEventDto with gameIds (P3 behavioural)", () => {
   });
 });
 
-// Phase 02.2 D-16 — the export envelope (services/account.ts exportAccountJson)
-// composes per-entity DTO projections into one JSON envelope. Ciphertext
-// columns MUST NOT cross the wire even though the underlying rows carry
-// them (AGENTS.md §5 — DTO projection is the runtime barrier). The
-// HTTP-boundary integration assertion lives in tests/integration/account.test.ts
+// The export envelope (services/account.ts exportAccountJson) composes per-
+// entity DTO projections into one JSON envelope. Ciphertext columns MUST
+// NOT cross the wire even though the underlying rows carry them
+// (AGENTS.md §5 — DTO projection is the runtime barrier). The HTTP-boundary
+// integration assertion lives in tests/integration/account.test.ts
 // (envelope strip test); the four assertions below are the unit-layer
 // projection-invariant guards over the two projection functions that own
 // the secret-shaped fields the envelope risks leaking: toApiKeySteamDto
@@ -394,8 +393,8 @@ describe("Plan 02.1-28 — toEventDto with gameIds (P3 behavioural)", () => {
 // tokens that Better Auth's account table holds). If a future contributor
 // extends either projection in a way that leaks one of these field names,
 // this test fails loudly at unit-test time without booting Postgres.
-describe("account export envelope ciphertext strip (Phase 02.2 D-16)", () => {
-  it("Plan 02.2-03: exportAccountJson envelope contains no secret_ct field anywhere", () => {
+describe("account export envelope ciphertext strip", () => {
+  it("exportAccountJson envelope contains no secret_ct field anywhere", () => {
     const fakeRow = {
       id: "k1",
       userId: "u1",
@@ -417,7 +416,7 @@ describe("account export envelope ciphertext strip (Phase 02.2 D-16)", () => {
     expect(json).not.toMatch(/secret_ct|secretCt/);
   });
 
-  it("Plan 02.2-03: exportAccountJson envelope contains no wrapped_dek field anywhere", () => {
+  it("exportAccountJson envelope contains no wrapped_dek field anywhere", () => {
     const fakeRow = {
       id: "k2",
       userId: "u1",
@@ -439,7 +438,7 @@ describe("account export envelope ciphertext strip (Phase 02.2 D-16)", () => {
     expect(json).not.toMatch(/wrapped_dek|wrappedDek|dek_iv|dekIv|dek_tag|dekTag/);
   });
 
-  it("Plan 02.2-03: exportAccountJson envelope contains no kek_version field anywhere", () => {
+  it("exportAccountJson envelope contains no kek_version field anywhere", () => {
     const fakeRow = {
       id: "k3",
       userId: "u1",
@@ -464,7 +463,7 @@ describe("account export envelope ciphertext strip (Phase 02.2 D-16)", () => {
     // tripwire, not the value).
   });
 
-  it("Plan 02.2-03: exportAccountJson envelope contains no googleSub / refreshToken / accessToken / idToken anywhere", () => {
+  it("exportAccountJson envelope contains no googleSub / refreshToken / accessToken / idToken anywhere", () => {
     // toUserDto is the projection that owns the PII/OAuth-token strip.
     // The Better Auth `account` table carries the OAuth tokens; the user
     // row does not, but the User type literal in dto.ts carries timestamps

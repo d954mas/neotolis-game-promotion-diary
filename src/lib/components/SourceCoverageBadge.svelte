@@ -1,7 +1,6 @@
 <script lang="ts">
-  // SourceCoverageBadge — Phase 03.0.1.
-  //
-  // Compact derived-state chip на SourceRow + /sources/[id] header.
+  // SourceCoverageBadge — compact derived-state chip on SourceRow +
+  // /sources/[id] header.
   // Reads (lastPolledAt, backfillComplete, quotaExhausted) and renders one
   // of four states. No backend round-trip — just label classification.
 
@@ -40,11 +39,10 @@
   );
 </script>
 
-<!-- Phase 03.0.1 (post-review UAT) — «has_more» state hidden. The Refresh
-     button itself is the affordance for «more can be pulled» — surfacing
-     the same idea as a chip is redundant. Other states (never_polled,
-     caught_up, quota_exhausted) carry distinct, non-obvious info and
-     stay visible. -->
+<!-- «has_more» state is hidden. The Refresh button itself is the
+     affordance for «more can be pulled» — surfacing the same idea as a
+     chip is redundant. Other states (never_polled, caught_up,
+     quota_exhausted) carry distinct, non-obvious info and stay visible. -->
 {#if state !== "has_more"}
   <span class="coverage-badge coverage-badge--{state}">
     {label}

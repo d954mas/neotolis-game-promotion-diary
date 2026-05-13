@@ -1,12 +1,12 @@
 // event_games — M:N junction enabling multi-game attachment per event.
 //
-// Plan 02.1-27 (UAT-NOTES.md §4.24.G): replaces the Phase 2.1 events.game_id
-// FK with a true many-to-many relation. user_id is DENORMALIZED so the
-// ESLint tenant-scope rule can require an eq(eventGames.userId, userId)
-// filter on every Drizzle query — the rule cannot inspect FK-chained values.
-// The denorm carries minor write-time consistency cost (insert paths must
-// pass user_id along with event_id + game_id) which is enforced by the
-// service-layer attachEventToGames signature in Plan 02.1-28.
+// Replaces the legacy events.game_id FK with a true many-to-many relation.
+// user_id is DENORMALIZED so the ESLint tenant-scope rule can require an
+// eq(eventGames.userId, userId) filter on every Drizzle query — the rule
+// cannot inspect FK-chained values. The denorm carries minor write-time
+// consistency cost (insert paths must pass user_id along with event_id +
+// game_id) which is enforced by the service-layer attachEventToGames
+// signature.
 //
 // Composite PK (event_id, game_id) prevents duplicate attachments of the
 // same game to the same event. Cross-tenant attempts surface as

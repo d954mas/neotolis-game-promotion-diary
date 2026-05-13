@@ -1,16 +1,15 @@
 <script lang="ts">
-  // SessionsList — active-sessions list for /settings (Plan 02.1-09).
+  // SessionsList — active-sessions list for /settings.
   //
-  // UI-SPEC §"/settings (EXTENDED — sessions list + theme blurb)":
+  // Layout:
   //   - one row per active session (timestamp + IP + abbreviated UA)
   //   - "Current session" badge on the row whose id === currentSessionId
   //   - "Sign out this session" button on every other row
   //   - empty case (only the current session): m.settings_sessions_only_current()
   //
-  // Sign-out call: DELETE /api/sessions/:id → invalidate("/settings"). The
-  // route lands in the same plan (02.1-09 routes/sessions.ts).
+  // Sign-out call: DELETE /api/sessions/:id → invalidate("/settings").
   //
-  // Renders rows that look like AuditRow but are interactive (UI-SPEC).
+  // Renders rows that look like AuditRow but are interactive.
 
   import { invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
@@ -55,12 +54,11 @@
         errorText = m.error_server_generic();
         return;
       }
-      // Plan 02.1-22 (UAT-NOTES.md §6.3-bug closure): use invalidateAll() so
-      // every loader on /settings re-runs (the page's +layout.server.ts
-      // sessions loader IS what populates this list — the previous
-      // invalidate("/settings") only invalidated the page-level loader, not
-      // the broader chain that supplies session data). After the call
-      // SessionsList re-renders without the destroyed session.
+      // Use invalidateAll() so every loader on /settings re-runs (the
+      // page's +layout.server.ts sessions loader IS what populates this
+      // list — a page-scoped invalidate would only re-run the page-level
+      // loader, not the broader chain that supplies session data). After
+      // the call SessionsList re-renders without the destroyed session.
       await invalidateAll();
     } catch {
       errorText = m.error_network();

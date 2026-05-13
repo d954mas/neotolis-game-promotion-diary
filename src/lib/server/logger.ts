@@ -1,7 +1,7 @@
 import pino from "pino";
 import { env } from "./config/env.js";
 
-// D-24 redaction paths. Every secret-shaped key path lives here so a stray
+// Redaction paths. Every secret-shaped key path lives here so a stray
 // `logger.info({ user })` cannot leak an api_key, refresh_token, KEK material,
 // or an Authorization/Cookie header. Add new paths here whenever a new
 // secret-shaped field is introduced anywhere in the codebase.
@@ -11,8 +11,8 @@ import { env } from "./config/env.js";
 // silently ignored, so each `encrypted_<thing>` field is enumerated explicitly.
 //
 // Privacy floor enforcement (AGENTS.md "Privacy & multi-tenancy" item 6):
-// the redact-coverage test in tests/unit/logger.test.ts (Plan 02.1-36) is
-// the load-bearing guarantee — it scans src/lib/server/db/schema/*.ts for
+// the redact-coverage test in tests/unit/logger.test.ts is the
+// load-bearing guarantee — it scans src/lib/server/db/schema/*.ts for
 // every `bytea("...")` ciphertext column declaration AND for the
 // `kek_version` smallint, builds the EXPECTED set as the union of camelCase
 // Drizzle field names and snake_case DB column names, and asserts every
@@ -38,12 +38,11 @@ export const REDACT_PATHS = [
   "*.wrappedDek",
   "*.dek",
   "*.kek",
-  // Plan 02.1-36 / UAT-NOTES.md §5.10 — Phase 2.1 ciphertext column shapes
-  // (api_keys_steam.secret_*/dek_*/kek_version + future ciphertext-bearing
-  // tables). Both camel + snake forms because row dumps surface in either
-  // shape depending on the call site (Drizzle returns camel; raw pg returns
-  // snake). The schema-introspection test enforces this list against the
-  // current schema on every run.
+  // Ciphertext column shapes (api_keys_steam.secret_*/dek_*/kek_version +
+  // future ciphertext-bearing tables). Both camel + snake forms because
+  // row dumps surface in either shape depending on the call site (Drizzle
+  // returns camel; raw pg returns snake). The schema-introspection test
+  // enforces this list against the current schema on every run.
   "*.secret_ct",
   "*.secretCt",
   "*.secret_iv",
@@ -56,8 +55,8 @@ export const REDACT_PATHS = [
   "*.dekTag",
   "*.kek_version",
   "*.kekVersion",
-  // Phase 3.0 post-build review (2026-05-08) — operator's YouTube API key
-  // envelope. Lives plaintext in the parsed env-singleton (env.ts splits
+  // Operator's YouTube API key envelope. Lives plaintext in the parsed
+  // env-singleton (env.ts splits
   // SERVICE_YOUTUBE_API_KEYS on comma into a string[]). scrubKekFromEnv()
   // wipes it from process.env after boot, but the env-singleton itself
   // retains it for the lifetime of the process — a stray
@@ -73,7 +72,7 @@ export const REDACT_PATHS = [
 export const logger = pino({
   level: env.LOG_LEVEL,
   redact: { paths: REDACT_PATHS, censor: "[REDACTED]" },
-  // pino-pretty is dev-only (D-23). Production emits stdout JSON for Loki.
+  // pino-pretty is dev-only. Production emits stdout JSON.
   ...(env.NODE_ENV === "development"
     ? {
         transport: {

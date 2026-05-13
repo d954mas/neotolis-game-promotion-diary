@@ -1,11 +1,11 @@
-// Phase 03.0.3 follow-up — channel-context-backfill on naturally-empty channel.
+// Channel-context-backfill on naturally-empty channel.
 //
 // Pre-fix the handler returned early on `collected.length === 0` and skipped
 // the terminal channel-state writes at the bottom of the function. A
 // brand-new channel with zero uploads (or a window-restricted walk that
 // returned zero items before stopReason was recorded) stayed
 // backfill_complete=false forever, and cron re-walked it every day at 3am
-// Pacific — the very onboarding double-walk D-#29-5 set out to eliminate.
+// Pacific — the very onboarding double-walk we set out to eliminate.
 //
 // This test invokes handleChannelContextBackfill against a mocked YouTube
 // fetch layer that returns:
@@ -76,7 +76,7 @@ const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
-describe("channel-context-backfill — naturally-empty channel (Phase 03.0.3 follow-up)", () => {
+describe("channel-context-backfill — naturally-empty channel", () => {
   beforeEach(async () => {
     await db
       .delete(dataSourceChannelState)

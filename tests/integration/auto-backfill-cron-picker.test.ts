@@ -1,5 +1,4 @@
-// Phase 03.0.1 (post-review) — auto-backfill cron picker integration test.
-// Phase 03.0.1 Wave 2 — channel-scoped picker rewrite.
+// Auto-backfill cron picker integration test (channel-scoped picker).
 //
 // Verifies the daily 03:00 PT cron tick correctly:
 //   1. Skips channels where data_source_channel_state.backfill_complete = true.

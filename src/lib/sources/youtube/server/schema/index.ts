@@ -1,4 +1,4 @@
-// YouTube per-source schema barrel — Phase 03.0.1 D-14.
+// YouTube per-source schema barrel.
 // The cross-source barrel src/lib/server/db/schema/index.ts re-exports
 // from this barrel. Drizzle config glob picks up these files directly,
 // but the cross-source barrel re-export keeps existing

@@ -1,9 +1,8 @@
-// Phase 3.0 post-build (UAT 2026-05-06): the Permanent-delete-now CTA
-// was MOVED from AccountDeletedBanner to /settings. Operator's call:
-// destructive button next to Restore on every page = footgun. The
-// banner now stays minimal (Restore only); /settings owns the
-// immediate-purge UI under the existing danger-zone disclosure when
-// the account is already soft-deleted.
+// The Permanent-delete-now CTA lives on /settings, not on
+// AccountDeletedBanner. Operator's call: destructive button next to
+// Restore on every page = footgun. The banner stays minimal (Restore
+// only); /settings owns the immediate-purge UI under the existing
+// danger-zone disclosure when the account is already soft-deleted.
 //
 // SSR-render coverage (this file):
 //   - Test 1: When deletedAt is set, the banner renders the Restore
@@ -13,7 +12,7 @@
 //             fetch / signOut redirect / ConfirmDialog. (Those move
 //             to /settings; tests/unit/settings-page.test.ts can pick
 //             that up if/when added.)
-//   - Test 3: PUTOFF marker stays gone (was removed in Plan 03.0-12).
+//   - Test 3: PUTOFF marker stays gone.
 
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
@@ -37,7 +36,7 @@ const AccountDeletedBanner = (await import("../../src/lib/components/AccountDele
 const SOURCE_PATH = resolve(__dirname, "../../src/lib/components/AccountDeletedBanner.svelte");
 const sourceText = readFileSync(SOURCE_PATH, "utf8");
 
-describe("AccountDeletedBanner — minimal banner contract (UAT 2026-05-06)", () => {
+describe("AccountDeletedBanner — minimal banner contract", () => {
   it("renders the Restore button when deletedAt is set", () => {
     const out = render(AccountDeletedBanner, {
       props: {
@@ -65,7 +64,7 @@ describe("AccountDeletedBanner — minimal banner contract (UAT 2026-05-06)", ()
     expect(sourceText).not.toContain("signOut");
   });
 
-  it("the Phase 02.2 PUTOFF marker stays gone", () => {
+  it("the PUTOFF marker stays gone", () => {
     expect(sourceText).not.toContain("PUTOFF");
   });
 });

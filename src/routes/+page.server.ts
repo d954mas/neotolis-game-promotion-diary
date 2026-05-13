@@ -5,15 +5,13 @@ import { env } from "$lib/server/config/env.js";
 /**
  * Root `/` server loader.
  *
- * Authenticated users → 303 redirect to /feed (the primary daily workspace
- * per Phase 2.1 default-route swap, RESEARCH §3.6).
+ * Authenticated users → 303 redirect to /feed (the primary daily workspace).
  *
- * Anonymous users → render the marketing landing in-place. Codex PR #15
- * follow-up: previously this redirected to /about, which made search
- * engines index /about as the canonical landing instead of /. Now `/`
- * serves 200 with the same content `<AboutContent>` renders on /about,
- * and `<link rel="canonical" href="/">` on both pages tells Google to
- * pick `/` as the canonical URL.
+ * Anonymous users → render the marketing landing in-place. Previously this
+ * redirected to /about, which made search engines index /about as the
+ * canonical landing instead of /. Now `/` serves 200 with the same content
+ * `<AboutContent>` renders on /about, and `<link rel="canonical" href="/">`
+ * on both pages tells Google to pick `/` as the canonical URL.
  *
  * The data shape matches /about/+page.server.ts so AboutContent can be
  * shared between the two routes without per-page branches.

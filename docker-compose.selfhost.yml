@@ -1,7 +1,7 @@
-# Self-host compose file (DEPLOY-05 invariant — same image runs SaaS and self-host).
-# Three services from one image, plus Postgres 16. No cloudflared sidecar in Phase 1
-# (deferred to Phase 6 per D-13 / D-19). TRUSTED_PROXY_CIDR is empty by default — the
-# self-host bare default per D-20 (use socket peer; no XFF trust).
+# Self-host compose file — same image runs SaaS and self-host.
+# Three services from one image, plus Postgres 16. No cloudflared sidecar.
+# TRUSTED_PROXY_CIDR is empty by default — the self-host bare default
+# (use socket peer; no XFF trust).
 #
 # Use:
 #   APP_KEK_BASE64=$(openssl rand -base64 32) \
@@ -35,7 +35,7 @@ services:
       OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID}
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
       APP_KEK_BASE64: ${APP_KEK_BASE64}
-      # D-20: empty default = trust nothing (use socket peer). Override for self-host
+      # Empty default = trust nothing (use socket peer). Override for self-host
       # behind nginx/Caddy: TRUSTED_PROXY_CIDR=127.0.0.1/32
       TRUSTED_PROXY_CIDR: ${TRUSTED_PROXY_CIDR:-}
       PORT: 3000

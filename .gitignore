@@ -22,6 +22,24 @@ nginx/certs/origin.key
 # Local scratch — `git diff > diff.txt` for ad-hoc review, never committed.
 diff.txt
 
+# Issue #27 — GSD workflow artifacts are local-only.
+#
+# `.planning/` holds CONTEXT.md / RESEARCH.md / PLAN.md / SUMMARY.md /
+# VERIFICATION.md / STATE.md / ROADMAP.md / PROJECT.md / debug sessions /
+# todos / discussion logs — historical context for how a phase came
+# together. None of it is load-bearing for the running application; the
+# squash-merge PR body is the canonical phase record on master (see
+# AGENTS.md "Workflow" section).
+#
+# Old `.planning/` snapshots from previous phases remain in master's
+# pre-#27 history; untracking going forward stops new artifacts from
+# accumulating in the tree.
+#
+# Multi-machine sync (laptop + VPS) is out of scope here — the operator
+# either copies the directory manually or accepts that planning state
+# is single-machine. See AGENTS.md.
+.planning/
+
 # Developer-personal dev helpers — each developer ships their own local
 # .dev-*.ts/.mjs scripts (e.g. .dev-worker.ts to run the worker handler
 # bypassing migrate-at-boot; .dev-oauth-mock.mjs to spin up the OAuth
@@ -30,9 +48,8 @@ diff.txt
 # OUT of source control — they pin a single developer's machine setup
 # (admin user_id, API key paths, queue names) and are not portable. The
 # canonical scripts (e.g. scripts/dev-mock-oauth.mjs) live under
-# scripts/ and ARE committed. Phase 03.0.3 P3 deferred-items.md cites
-# .dev-oauth-mock.mjs as an example of why this exclusion matters
-# (process.env reads outside config/env.ts are intentional in standalone
-# Node scripts; ESLint would otherwise flag every developer's helper).
+# scripts/ and ARE committed. The exclusion lets each developer keep
+# `.dev-*.{ts,mjs}` helpers without ESLint flagging the standalone Node
+# scripts' process.env reads (which are intentional outside config/env.ts).
 .dev-*.ts
 .dev-*.mjs

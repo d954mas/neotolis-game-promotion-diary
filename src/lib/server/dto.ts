@@ -1,11 +1,9 @@
-// PITFALL P3 (DTO discipline) — every response that includes user or session
-// data MUST go through these projections. The point: adding a column to the
+// DTO discipline — every response that includes user or session data
+// MUST go through these projections. The point: adding a column to the
 // schema (a new OAuth-token column or the Google subject identifier on
-// `account.account_id`) does NOT auto-leak it to the browser, because the
-// projection is hand-written and only includes the fields the client should
-// know about.
-//
-// Phase 1 establishes this pattern; every later phase inherits it.
+// `account.account_id`) does NOT auto-leak it to the browser, because
+// the projection is hand-written and only includes the fields the client
+// should know about.
 
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "./db/client.js";
@@ -36,28 +34,28 @@ type AuditEntryRow = typeof auditLog.$inferSelect;
 /**
  * UserDto — what we send to authenticated clients.
  *
- * INTENTIONALLY OMITTED (per PITFALL P3):
- *   - the OAuth provider subject id (lives on `account.account_id` — that
- *     column carries the Google "sub" claim). Leaking it would let an
- *     attacker pivot to other services using the same login.
- *   - all OAuth tokens (lives on the `account` table only); never returned
- *     to the browser under any circumstance.
+ * INTENTIONALLY OMITTED:
+ *   - the OAuth provider subject id (lives on `account.account_id` —
+ *     that column carries the Google "sub" claim). Leaking it would let
+ *     an attacker pivot to other services using the same login.
+ *   - all OAuth tokens (live on the `account` table only); never
+ *     returned to the browser under any circumstance.
  *   - `emailVerified` — PII reveal that has no client-side use in MVP.
- *   - `createdAt` / `updatedAt` — timing reveal (account-age fingerprinting).
+ *   - `createdAt` / `updatedAt` — timing reveal (account-age
+ *     fingerprinting).
  */
 export interface UserDto {
   id: string;
   email: string;
   name: string;
   image: string | null;
-  // Phase 02.2-04: deletedAt exposed for the AccountDeletedBanner conditional
-  // mounted in src/routes/+layout.svelte. Cleared (NULL) means the account is
-  // active; non-null means the user soft-deleted their account and the banner
-  // should render with the restore CTA. Plan 02.2-03's exportAccountJson
-  // envelope-strip test in tests/unit/dto.test.ts continues to pass — deletedAt
-  // is a timestamp, NOT a ciphertext column, so the AGENTS §5 secret-strip
-  // invariant is unaffected (verified: googleSub / refreshToken / accessToken /
-  // idToken / kek_version still asserted absent).
+  // deletedAt is exposed for the AccountDeletedBanner conditional
+  // mounted in src/routes/+layout.svelte. Cleared (NULL) means the
+  // account is active; non-null means the user soft-deleted their
+  // account and the banner should render with the restore CTA.
+  // exportAccountJson's envelope-strip test in tests/unit/dto.test.ts
+  // continues to pass — deletedAt is a timestamp, NOT a ciphertext
+  // column.
   deletedAt: Date | string | null;
 }
 
@@ -67,17 +65,16 @@ export function toUserDto(u: User): UserDto {
     email: u.email,
     name: u.name,
     image: u.image,
-    // Phase 02.2-04: deletedAt exposed for /settings/account banner; export
-    // envelope test in tests/unit/dto.test.ts asserts ciphertext-only fields
-    // are stripped.
+    // deletedAt exposed for /settings/account banner; the export
+    // envelope test in tests/unit/dto.test.ts asserts ciphertext-only
+    // fields are stripped.
     deletedAt: u.deletedAt ?? null,
   };
 }
 
 /**
  * SessionDto — what we send when listing the user's active sessions
- * (Phase 2 / settings UI). Phase 1 establishes the shape; the read endpoint
- * lands later.
+ * (settings UI).
  *
  * INTENTIONALLY OMITTED:
  *   - `token` — the session-cookie value. Returning it would defeat HTTP-only.
@@ -103,22 +100,21 @@ export function toSessionDto(s: Session): SessionDto {
   };
 }
 
-// ---- Phase 2 entity DTOs (D-39 projection discipline) ----
+// ---- entity DTOs (projection discipline) ----
 //
-// Each projection lists fields EXPLICITLY (no spread) so adding a column to
-// the underlying table does NOT auto-leak it to the browser. The `userId`
-// field is intentionally OMITTED from every Phase 2 DTO — the caller already
-// knows their own id (it's their session). Echoing it back adds nothing
-// useful and risks accidentally surfacing OTHER users' ids in a buggy
-// admin/aggregate view.
+// Each projection lists fields EXPLICITLY (no spread) so adding a column
+// to the underlying table does NOT auto-leak it to the browser. The
+// `userId` field is intentionally OMITTED from every entity DTO — the
+// caller already knows their own id (it's their session). Echoing it
+// back adds nothing useful and risks accidentally surfacing OTHER users'
+// ids in a buggy admin/aggregate view.
 
 /**
  * GameDto — the per-game DTO returned by /api/games and embedded in many
- * other endpoints. Mirrors the `games` table minus `userId` (P3 discipline).
+ * other endpoints. Mirrors the `games` table minus `userId`.
  *
- * Plan 02.1-39 round-6 polish #14a: `description` (nullable text) is
- * projected — non-secret per-game prose set by the user via the new
- * GameEditDialog modal on /games/[gameId].
+ * `description` (nullable text) is projected — non-secret per-game prose
+ * set by the user via the GameEditDialog modal on /games/[gameId].
  */
 export interface GameDto {
   id: string;
@@ -154,7 +150,7 @@ export function toGameDto(r: GameRow): GameDto {
  * GameSteamListingDto — DTO for `game_steam_listings` rows.
  *
  * INTENTIONALLY OMITTED:
- *   - `userId` — P3 discipline (caller knows their own id).
+ *   - `userId` — caller knows their own id.
  *   - `rawAppdetails` — the full Steam payload is too large for typical
  *     UI rendering and may carry asset URLs / promo references the UI
  *     doesn't need. Future-proofs against accidental exposure when Steam
@@ -165,9 +161,9 @@ export interface GameSteamListingDto {
   gameId: string;
   appId: number;
   label: string;
-  // Plan 02.1-25: Steam game name (e.g. "Portal 2"). NULL when the
-  // appdetails fetch failed at INSERT time (Steam down) or the row predates
-  // the column. UI fallback: `App {appId}`.
+  // Steam game name (e.g. "Portal 2"). NULL when the appdetails fetch
+  // failed at INSERT time (Steam down) or the row predates the column.
+  // UI fallback: `App {appId}`.
   name: string | null;
   coverUrl: string | null;
   releaseDate: string | null;
@@ -200,23 +196,20 @@ export function toGameSteamListingDto(r: SteamListingRow): GameSteamListingDto {
 }
 
 /**
- * DataSourceDto — DTO for `data_sources` rows (Phase 2.1 SOURCES-01).
+ * DataSourceDto — DTO for `data_sources` rows.
  *
  * INTENTIONALLY OMITTED:
- *   - userId — P3 discipline (caller knows their own id). The behavioural
- *     test in tests/unit/dto.test.ts asserts the strip happens at runtime
- *     even when an input row literal carries userId.
+ *   - userId — caller knows their own id. The behavioural test in
+ *     tests/unit/dto.test.ts asserts the strip happens at runtime even
+ *     when an input row literal carries userId.
  *
  * INTENTIONALLY KEPT:
- *   - metadata — non-secret per-kind config (e.g. `uploads_playlist_id` for
- *     youtube_channel; nothing in 2.1 for the other kinds since they are
- *     schema-only — RESEARCH §5/§10). NOT a secret-shaped field — secrets
- *     live in `api_keys_*`. If a future kind needs a secret, it goes there,
- *     not into `data_sources.metadata`.
+ *   - metadata — non-secret per-kind config (e.g. `uploads_playlist_id`
+ *     for youtube_channel; nothing yet for the other kinds since they
+ *     are schema-only). NOT a secret-shaped field — secrets live in
+ *     `api_keys_*`. If a future kind needs a secret, it goes there, not
+ *     into `data_sources.metadata`.
  *   - deletedAt — soft-delete state surfaces to UI for the restore flow.
- *
- * Replaces the Phase 2 per-platform youtube_channels projection retired in
- * Plan 02.1-01 (the unified data_sources schema).
  */
 export interface DataSourceDto {
   id: string;
@@ -235,37 +228,36 @@ export interface DataSourceDto {
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
-  // Phase 3.0 post-build (UAT 2026-05-06): the YouTube channel's title as
-  // returned by channels.list — distinct from `displayName` (which is the
-  // user's own label for this tracking record). The /feed loader populates
-  // this via JOIN with youtube_channel_metadata_cache when channelId is set.
-  // Null for non-YouTube kinds, for YouTube sources whose channel hasn't
-  // been resolved yet, and for any DTO projected outside the /feed loader
-  // (other call sites just pass it through unchanged).
+  // The YouTube channel's title as returned by channels.list — distinct
+  // from `displayName` (which is the user's own label for this tracking
+  // record). The /feed loader populates this via JOIN with
+  // youtube_channels when channelId is set. Null for non-YouTube kinds,
+  // for YouTube sources whose channel hasn't been resolved yet, and for
+  // any DTO projected outside the /feed loader (other call sites just
+  // pass it through unchanged).
   channelTitle: string | null;
-  // Phase 03.0.1 Plan 08 — D-13 AdapterError surface fields. Operational
-  // metadata (NOT secrets — no envelope-encryption strip applies). The
-  // /sources/[id] page renders a "Reconnect required" banner when
-  // needsReconnect=true, and a "Last error: <kind> @ <time>" badge when
-  // lastErrorAt is non-null. Future Phase 6+ adds a Reconnect CTA that
-  // resets needsReconnect once credentials are refreshed.
+  // AdapterError surface fields. Operational metadata (NOT secrets — no
+  // envelope-encryption strip applies). The /sources/[id] page renders a
+  // "Reconnect required" banner when needsReconnect=true, and a "Last
+  // error: <kind> @ <time>" badge when lastErrorAt is non-null. A future
+  // Reconnect CTA will reset needsReconnect once credentials are
+  // refreshed.
   needsReconnect: boolean;
   lastErrorAt: Date | null;
   lastErrorKind: string | null;
-  // Phase 03.0.1 Wave 4 — channel-scoped state. These fields are populated
-  // by /sources loaders via JOIN with data_source_channel_state on
-  // (kind, channel_id = channel_key). UI components read them as before.
-  // The base toDataSourceDto projection sets null/false defaults — loaders
-  // override with channel-state values.
+  // Channel-scoped state. Populated by /sources loaders via JOIN with
+  // data_source_channel_state on (kind, channel_id = channel_key). UI
+  // components read them as before. The base toDataSourceDto projection
+  // sets null/false defaults — loaders override with channel-state
+  // values.
   lastPolledAt: Date | null;
   backfillOldestAt: Date | null;
   backfillComplete: boolean;
   backfillTargetSince: Date | null;
-  // Phase 03.0.1 (post-review UAT) — populated by the /sources loader from
-  // a separate aggregate-events query (see sources/+page.server.ts). Null
-  // when no events exist for this source. Not part of toDataSourceDto's
-  // base projection — DTO consumers that don't need the range simply leave
-  // these undefined.
+  // Populated by the /sources loader from a separate aggregate-events
+  // query (see sources/+page.server.ts). Null when no events exist for
+  // this source. Not part of toDataSourceDto's base projection — DTO
+  // consumers that don't need the range simply leave these undefined.
   firstEventAt?: Date | null;
   lastEventAt?: Date | null;
   eventCount?: number;
@@ -298,36 +290,37 @@ export function toDataSourceDto(r: DataSourceRow): DataSourceDto {
 }
 
 /**
- * ApiKeySteamDto — DTO for `api_keys_steam` rows. The cornerstone of D-39 /
- * PITFALL P3 ciphertext discipline.
+ * ApiKeySteamDto — DTO for `api_keys_steam` rows. The cornerstone of
+ * ciphertext discipline.
  *
- * INTENTIONALLY OMITTED (every column listed below is a secret-shaped field
- * that MUST NEVER cross the HTTP boundary):
- *   - `userId` — P3 discipline (caller knows their own id).
- *   - `secretCt`, `secretIv`, `secretTag` — AES-256-GCM ciphertext + nonce +
- *     tag for the user's plaintext API key. Returning any of these would
- *     leak the wrapping that envelope encryption is built to hide.
+ * INTENTIONALLY OMITTED (every column listed below is a secret-shaped
+ * field that MUST NEVER cross the HTTP boundary):
+ *   - `userId` — caller knows their own id.
+ *   - `secretCt`, `secretIv`, `secretTag` — AES-256-GCM ciphertext +
+ *     nonce + tag for the user's plaintext API key. Returning any of
+ *     these would leak the wrapping that envelope encryption is built to
+ *     hide.
  *   - `wrappedDek`, `dekIv`, `dekTag` — KEK-wrapped DEK + nonce + tag.
- *     Leaking these turns a stolen DB into a stolen-DB-plus-DEK; with the
- *     KEK still in env, the plaintext key would decrypt offline.
+ *     Leaking these turns a stolen DB into a stolen-DB-plus-DEK; with
+ *     the KEK still in env, the plaintext key would decrypt offline.
  *   - `kekVersion` — operational metadata; the client has no use for the
  *     KEK rotation version and exposing it would aid a planning-phase
  *     attacker.
  *
  * INTENTIONALLY KEPT:
- *   - `last4` — D-34 last-4-of-key forensics aid. Already shown in masked UI;
- *     including it here makes the response self-documenting (the user can
- *     match the masked label visually).
+ *   - `last4` — last-4-of-key forensics aid. Already shown in masked
+ *     UI; including it here makes the response self-documenting (the
+ *     user can match the masked label visually).
  *   - `label` — the user's own free-text name for the key. Not a secret.
  *   - `createdAt` / `updatedAt` / `rotatedAt` — operational timestamps;
  *     `rotatedAt = null` until the user rotates.
  *
  * The projection function is the load-bearing runtime guard (not the
  * TypeScript interface). TypeScript erases types at runtime; only this
- * function decides what crosses the wire. tests/unit/dto.test.ts asserts
- * the strip happens behaviourally — even when a row literal carries
- * ciphertext-shaped Buffers, they MUST NOT appear in the projected
- * output (P3 / D-39).
+ * function decides what crosses the wire. tests/unit/dto.test.ts
+ * asserts the strip happens behaviourally — even when a row literal
+ * carries ciphertext-shaped Buffers, they MUST NOT appear in the
+ * projected output.
  */
 export interface ApiKeySteamDto {
   id: string;
@@ -349,43 +342,30 @@ export function toApiKeySteamDto(r: ApiKeySteamRow): ApiKeySteamDto {
   };
 }
 
-// `toYoutubeVideoDto` was removed in Phase 2.1 Plan 02.1-04 alongside the
-// retirement of the `tracked_youtube_videos` schema (Plan 02.1-01). The
-// unified `events` table now carries `kind=youtube_video` rows; their
-// projection runs through `toEventDto` (Plan 02.1-05 owns the extension).
+// The unified `events` table carries `kind=youtube_video` rows; their
+// projection runs through `toEventDto` below.
 
 /**
- * EventDto — DTO for `events` rows. Kind is the closed picklist from the
- * eventKindEnum. `userId` omitted per P3 discipline.
+ * EventDto — DTO for `events` rows. Kind is the closed picklist from
+ * the eventKindEnum. `userId` omitted per DTO discipline.
  *
- * Phase 2.1 Plan 02.1-05 extension: adds `authorIsMe`, `sourceId`,
- * `metadata`, `externalId`, `lastPolledAt`, `lastPollStatus` per RESEARCH
- * §10.2 — these are the unified-table fields the events service now writes.
- *
- * Plan 02.1-28 (UAT-NOTES.md §4.24.G — M:N migration application layer):
- * the legacy singular `gameId: string | null` is REPLACED with
- * `gameIds: string[]`. Events relate to ZERO-or-MORE games via the
- * `event_games` junction table (Plan 02.1-27 schema). The DTO shape
- * change is wire-breaking; consumers must use the new array shape. The
- * `toEventDto` signature is also extended — it now accepts the loaded
- * gameIds as a second argument so callers explicitly pass the junction
- * row set (the projection function does NOT issue its own DB query —
- * that would tangle DB I/O with pure projection). Callers use the
- * `loadGameIdsForEvent` (single) or `mapEventsToDtos` (batch) helpers
- * below to load the junction efficiently.
+ * Events relate to ZERO-or-MORE games via the `event_games` junction
+ * table — `gameIds: string[]` carries the junction-derived list. The
+ * `toEventDto` signature takes the loaded gameIds as a second argument
+ * so callers explicitly pass the junction row set (the projection
+ * function does NOT issue its own DB query — that would tangle DB I/O
+ * with pure projection). Callers use the `loadGameIdsForEvent` (single)
+ * or `mapEventsToDtos` (batch) helpers below to load the junction
+ * efficiently.
  *
  * `metadata` is kept (jsonb) — it carries `inbox.dismissed=true` for
  * dismissed inbox events plus per-platform fields like `author_url`,
  * `author_name`, `thumbnail_url` for YouTube paste rows. There is no
  * secret-shaped data in `events.metadata`; the redact list in logger.ts
  * does not need an addition.
- *
- * `lastPolledAt` / `lastPollStatus` are NULL on every row in 2.1 (no
- * polling worker yet); Phase 3 fills them in.
  */
 export interface EventDto {
   id: string;
-  // Plan 02.1-28: REPLACES the legacy `gameId: string | null` with the
   // M:N junction-derived list. Empty array === inbox; non-empty === at
   // least one attached game. Order is implementation-defined (matches
   // junction-table SELECT order); UI consumers should not assume
@@ -410,12 +390,11 @@ export interface EventDto {
   notes: string | null;
   metadata: unknown;
   externalId: string | null;
-  // Phase 3.0 post-build refactor (2026-05-06) — polling state migrated
-  // from per-event copies on `events` to per-video columns on
-  // `youtube_videos`. The DTO field names stay for UI compatibility (PollingBadge
-  // and FeedCard read these names); the loader sources them via JOIN on
-  // external_id. Multiple events for the same video share the same values
-  // by construction.
+  // Polling state lives on `youtube_videos` (per-video, not per-event).
+  // The DTO field names stay for UI compatibility (PollingBadge and
+  // FeedCard read these names); the loader sources them via JOIN on
+  // external_id. Multiple events for the same video share the same
+  // values by construction.
   //   - publishedAt — youtube_videos.published_at; NULL while
   //     channel-context-backfill has not yet run for this external_id
   //     (the 'pending' tier window).
@@ -428,38 +407,33 @@ export interface EventDto {
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
-  // Phase 3.0 post-build addition (UAT 2026-05-06): latest stats snapshot
-  // for the event, when one is available. Currently populated by the
-  // /feed loader for kind=youtube_video events only — joins the most-recent
-  // youtube_video_snapshots row by external_id. Other kinds + events without
-  // a snapshot row return null. UI consumers (FeedCard) render an inline
-  // view-count line when present.
+  // Latest stats snapshot for the event, when one is available. The
+  // /feed loader populates this for kind=youtube_video events only —
+  // joining the most-recent youtube_video_snapshots row by external_id.
+  // Other kinds + events without a snapshot row return null. UI
+  // consumers (FeedCard) render an inline view-count line when present.
   stats: { viewCount: number; likeCount: number; commentCount: number; polledAt: Date } | null;
-  // Phase 03.0.1 (post-review UAT 2026-05-10) — channelTitle for
-  // kind=youtube_video events (auto-imported AND manual paste). Loader
-  // joins youtube_videos cache by external_id. FeedCard renders chip
-  // for ALL YouTube events (was only auto-imported pre-fix because chip
-  // depended on source.channelTitle which is null for manual paste).
+  // channelTitle for kind=youtube_video events (auto-imported AND
+  // manual paste). Loader joins youtube_videos cache by external_id.
+  // FeedCard renders the chip for ALL YouTube events.
   channelTitle?: string | null;
 }
 
 /**
- * toEventDto — Plan 02.1-28: signature extended to take the loaded
- * gameIds as a second argument. Pure projection — no DB I/O. Callers
- * MUST load the junction rows separately (via loadGameIdsForEvent for
- * single events or mapEventsToDtos for lists) and pass the result.
+ * toEventDto — pure projection — no DB I/O. Callers MUST load the
+ * junction rows separately (via loadGameIdsForEvent for single events
+ * or mapEventsToDtos for lists) and pass the result.
  *
- * The `userId` field on EventRow is intentionally NOT projected (P3
- * discipline). Defensive copy of `gameIds` so a downstream caller
- * mutating the array doesn't leak back to the source. Tests in
- * tests/unit/dto.test.ts verify the strip happens at runtime even
- * when the input row literal carries userId.
+ * The `userId` field on EventRow is intentionally NOT projected.
+ * Defensive copy of `gameIds` so a downstream caller mutating the array
+ * doesn't leak back to the source. Tests in tests/unit/dto.test.ts
+ * verify the strip happens at runtime even when the input row literal
+ * carries userId.
  *
- * Phase 3.0 post-build refactor (2026-05-06): polling state moved off
- * events. Optional `videoData` carries the joined youtube_videos columns;
+ * Optional `videoData` carries the joined youtube_videos columns;
  * loaders that JOIN pass it, others pass null and the DTO carries null
- * polling fields (UI handles missing data gracefully — PollingBadge falls
- * back to a generic Manual variant).
+ * polling fields (UI handles missing data gracefully — PollingBadge
+ * falls back to a generic Manual variant).
  */
 export function toEventDto(
   r: EventRow,
@@ -493,11 +467,11 @@ export function toEventDto(
 }
 
 /**
- * Plan 02.1-28 — batched junction loader for list response paths.
- * Two queries per request: one for events (caller's responsibility),
- * one for the junction filtered by user_id + event_ids IN (...).
- * Returns Map<eventId, gameIds[]>. Avoids the N+1 query that would
- * fire if every toEventDto call issued its own junction lookup.
+ * Batched junction loader for list response paths. Two queries per
+ * request: one for events (caller's responsibility), one for the
+ * junction filtered by user_id + event_ids IN (...). Returns
+ * Map<eventId, gameIds[]>. Avoids the N+1 query that would fire if
+ * every toEventDto call issued its own junction lookup.
  *
  * Tenant scope: the userId WHERE clause is the literal column the
  * ESLint tenant-scope rule walks for. Cross-tenant eventId values
@@ -534,9 +508,7 @@ export async function loadGameIdsForEvent(userId: string, eventId: string): Prom
 /**
  * Convenience: project a list of EventRows to DTOs with gameIds
  * populated. Two queries: one for the events (caller's), one for the
- * junction (this function). Replaces every Phase 2.1 `rows.map(toEventDto)`
- * call site that no longer compiles after the toEventDto signature
- * extension.
+ * junction (this function).
  */
 export async function mapEventsToDtos(userId: string, rows: EventRow[]): Promise<EventDto[]> {
   const [gameIdsMap, videoMap] = await Promise.all([
@@ -552,19 +524,19 @@ export async function mapEventsToDtos(userId: string, rows: EventRow[]): Promise
 }
 
 /**
- * Per-video refactor (2026-05-06) — batched JOIN loader for the polling
- * state that lives on `youtube_videos`. Returns Map<external_id, videoData>
- * for all youtube_video events in the input list. Skips events with no
+ * Batched JOIN loader for the polling state that lives on
+ * `youtube_videos`. Returns Map<external_id, videoData> for all
+ * youtube_video events in the input list. Skips events with no
  * external_id (manual `other` entries) and non-youtube_video kinds.
  *
  * PUBLIC-DATA TABLE — no userId filter on the youtube_videos query (the
- * table is tenant-agnostic per CONTEXT D-07). However, the function takes
- * `userId` and filters input rows to that tenant before extracting
- * external_ids — defense-in-depth (post-build review 2026-05-07): callers
- * are tenant-scoped today, but a future refactor that hands a cross-tenant
- * EventRow[] to this function would silently load video data for rows the
- * caller had no business reading. Symmetrical with loadGameIdsForEvents
- * which already takes userId for the same reason.
+ * table is tenant-agnostic). However, the function takes `userId` and
+ * filters input rows to that tenant before extracting external_ids —
+ * defense-in-depth: callers are tenant-scoped today, but a future
+ * refactor that hands a cross-tenant EventRow[] to this function would
+ * silently load video data for rows the caller had no business reading.
+ * Symmetrical with loadGameIdsForEvents which already takes userId for
+ * the same reason.
  */
 export async function loadVideoDataForEvents(
   userId: string,
@@ -575,22 +547,23 @@ export async function loadVideoDataForEvents(
     { publishedAt: Date | null; lastPolledAt: Date | null; lastPollStatus: string | null }
   >
 > {
-  // Phase 03.0.1 architecture cleanup — adapter-driven poll-state lookup.
+  // Adapter-driven poll-state lookup.
   //
-  // Cross-source code never queries youtube_videos / reddit_posts / etc.
-  // directly. Each adapter exposes fetchPollStateMap which knows its own
-  // table + key shape. We:
+  // Cross-source code never queries youtube_videos / future per-source
+  // tables directly. Each adapter exposes fetchPollStateMap which knows
+  // its own table + key shape. We:
   //   1. Group input rows by their adapter (via eventKindToSourceKind +
   //      registry), filtering tenant + presence of externalId.
   //   2. Call adapter.fetchPollStateMap(userId, externalIds) per adapter
   //      that has any externalIds in this batch.
   //   3. Merge the per-adapter Maps into one. ExternalId collisions
-  //      across adapters are unlikely (YouTube videoId vs reddit post id
-  //      have different shapes) but the merge is last-write-wins and
-  //      kind-tagged at the call site, so no data leaks.
+  //      across adapters are unlikely (YouTube videoId vs other source
+  //      post ids have different shapes) but the merge is
+  //      last-write-wins and kind-tagged at the call site, so no data
+  //      leaks.
   //
-  // Adding a new pollable kind in Phase 03.1+ = implement
-  // fetchPollStateMap on its adapter; this code stays unchanged.
+  // Adding a new pollable kind = implement fetchPollStateMap on its
+  // adapter; this code stays unchanged.
   const merged = new Map<
     string,
     { publishedAt: Date | null; lastPolledAt: Date | null; lastPollStatus: string | null }
@@ -618,20 +591,20 @@ export async function loadVideoDataForEvents(
 }
 
 /**
- * AuditEntryDto — DTO for `audit_log` rows (PRIV-02 — Plan 02-07).
+ * AuditEntryDto — DTO for `audit_log` rows.
  *
  * INTENTIONALLY OMITTED:
- *   - `userId` — P3 discipline (caller knows their own id; the listing is
- *     scoped to the caller by listAuditPage's WHERE clause).
+ *   - `userId` — caller knows their own id; the listing is scoped to
+ *     the caller by listAuditPage's WHERE clause.
  *
  * INTENTIONALLY KEPT:
- *   - `metadata` — jsonb column. For `key.*` actions D-34 specifies
- *     `{kind, key_id, label, last4}`; the consumer renders the chip. The
- *     metadata is sanitized at the writer layer (see audit.ts file header) —
- *     callers pass only their own tenant's data, so the projection just
- *     forwards the column.
- *   - `ipAddress` — surfaced in the user-visible audit log so the user can
- *     spot a sign-in from an unfamiliar IP.
+ *   - `metadata` — jsonb column. For `key.*` actions, the schema is
+ *     `{kind, key_id, label, last4}`; the consumer renders the chip.
+ *     The metadata is sanitized at the writer layer (see audit.ts
+ *     header) — callers pass only their own tenant's data, so the
+ *     projection just forwards the column.
+ *   - `ipAddress` — surfaced in the user-visible audit log so the user
+ *     can spot a sign-in from an unfamiliar IP.
  */
 export interface AuditEntryDto {
   id: string;
@@ -653,14 +626,14 @@ export function toAuditEntryDto(r: AuditEntryRow): AuditEntryDto {
   };
 }
 
-// ---- Phase 3.0 Plan 01 — public-data DTOs ----
+// ---- public-data DTOs ----
 //
-// These tables carry no `user_id` column (CONTEXT D-07 / D-14) and no
-// secret-shaped fields, so the projection functions are existence-only:
-// they enumerate every column the response wire format includes so a
-// future column addition forces a review touchpoint rather than auto-
-// leaking. Mirrors the discipline established for tenant-owned tables
-// without the strip semantics (nothing to strip).
+// These tables carry no `user_id` column and no secret-shaped fields, so
+// the projection functions are existence-only: they enumerate every
+// column the response wire format includes so a future column addition
+// forces a review touchpoint rather than auto-leaking. Mirrors the
+// discipline for tenant-owned tables without the strip semantics
+// (nothing to strip).
 
 type YoutubeVideoSnapshotRow = typeof youtubeVideoSnapshots.$inferSelect;
 type YoutubeChannelMetadataCacheRow = typeof youtubeChannels.$inferSelect;
@@ -696,12 +669,11 @@ export function toYoutubeVideoSnapshotDto(r: YoutubeVideoSnapshotRow): YoutubeVi
 }
 
 /**
- * YoutubeChannelMetadataCacheDto — DTO for `youtube_channel_metadata_cache`
- * rows.
+ * YoutubeChannelMetadataCacheDto — DTO for `youtube_channels` rows.
  *
- * Public-data cache. The Plan 03.0-10 channel-context-backfill worker
- * populates this on first paste of a video from an unknown channel; the
- * row is shared across all tenants who paste videos from the same channel.
+ * Public-data cache. The channel-context-backfill worker populates this
+ * on first paste of a video from an unknown channel; the row is shared
+ * across all tenants who paste videos from the same channel.
  */
 export interface YoutubeChannelMetadataCacheDto {
   channelId: string;
@@ -725,19 +697,19 @@ export function toYoutubeChannelMetadataCacheDto(
   };
 }
 
-// ---- Phase 3.0 Plan 07 — admin-quota DTOs ----
+// ---- admin-quota DTOs ----
 //
-// Re-export from the service layer so callers can import the projection types
-// + functions from a single barrel (`dto.ts`) consistent with the rest of the
-// Phase 2/3 DTO discipline. The shapes themselves live in
-// `services/admin-quota-read.ts` because they're computed from the row plus
-// the threshold constants exported by `$lib/sources/youtube/server/quota.ts` —
-// keeping them next to the loader avoids a cross-module dance for the
-// pctOfDaily / status derivation.
+// Re-export from the service layer so callers can import the projection
+// types + functions from a single barrel (`dto.ts`) consistent with the
+// rest of the DTO discipline. The shapes themselves live in
+// `services/admin-quota-read.ts` because they're computed from the row
+// plus the threshold constants exported by
+// `$lib/sources/youtube/server/quota.ts`.
 //
 // No ciphertext-strip semantics: youtube_service_quota_usage carries no
-// secret-shaped fields, and the cross-tenant audit projection intentionally
-// surfaces only verb + metadata + time (user_id omitted; see admin-quota-read.ts).
+// secret-shaped fields, and the cross-tenant audit projection
+// intentionally surfaces only verb + metadata + time (user_id omitted;
+// see admin-quota-read.ts).
 
 export {
   type QuotaKeyRow,

@@ -1,7 +1,7 @@
-// Phase 03.0.1 Plan 10 — POST /api/sources/:id/refresh-content endpoint.
+// POST /api/sources/:id/refresh-content endpoint.
 //
-// Activates the 7 it.skip scaffolds from Plan 01 (Wave 0). The endpoint
-// dispatches via getAdapter(source.kind).backfillSource; for YouTube the
+// The endpoint dispatches via getAdapter(source.kind).backfillSource;
+// for YouTube the
 // adapter enqueues a youtube.backfill.user job. pg-boss is mocked the
 // same way refresh-now.test.ts / sources-backfill.test.ts do — vi.mock
 // over queue-client.js with a sentJobs accumulator — so the test runs
@@ -11,7 +11,7 @@
 //   1. Tenant scoping — getSourceById(userId, params.id) is the entry
 //      point; no unfiltered query.
 //   2. Cross-tenant 404 not 403 — body never contains 'forbidden' or
-//      'permission' (PRIV-01 / AGENTS.md invariant 2).
+//      'permission' (AGENTS.md invariant 2).
 //   3. Anonymous-401 — sweep + per-route assertion both fire (the sweep
 //      lives in tests/integration/anonymous-401.test.ts; the explicit
 //      assertion is in this file).
@@ -78,12 +78,12 @@ async function seedYoutubeSource(
   );
 }
 
-describe("POST /api/sources/:id/refresh-content — Phase 03.0.1 Plan 10", () => {
+describe("POST /api/sources/:id/refresh-content", () => {
   beforeEach(() => {
     sentJobs.length = 0;
   });
 
-  it("Plan 03.0.1-10: authenticated + own source returns 202 with body { enqueued: true, queue: 'youtube.backfill.user', jobId }", async () => {
+  it("authenticated + own source returns 202 with body { enqueued: true, queue: 'youtube.backfill.user', jobId }", async () => {
     const app = createApp();
     const u = await seedUserDirectly({ email: `rc-ok-${uniq()}@test.local` });
     const src = await seedYoutubeSource(u.id);
@@ -105,7 +105,7 @@ describe("POST /api/sources/:id/refresh-content — Phase 03.0.1 Plan 10", () =>
     const enqueues = sentJobs.filter((j) => j.queue === "youtube.backfill.channel");
     expect(enqueues).toHaveLength(1);
     const job = enqueues[0]!;
-    // Phase 03.0.1 Wave 2 — channel-scoped payload.
+    // Channel-scoped payload.
     expect(job.data).toMatchObject({
       kind: "youtube_channel",
       channelKey: src.channelId,
@@ -120,7 +120,7 @@ describe("POST /api/sources/:id/refresh-content — Phase 03.0.1 Plan 10", () =>
     expect((job.options as { priority?: number }).priority).toBe(1);
   });
 
-  it("Plan 03.0.1-10: anonymous POST → 401 unauthorized (auth gate fires before route)", async () => {
+  it("anonymous POST → 401 unauthorized (auth gate fires before route)", async () => {
     const app = createApp();
     const res = await app.request("/api/sources/fixture-id/refresh-content", { method: "POST" });
     expect(res.status).toBe(401);
@@ -129,7 +129,7 @@ describe("POST /api/sources/:id/refresh-content — Phase 03.0.1 Plan 10", () =>
     expect(sentJobs.length).toBe(0);
   });
 
-  it("Plan 03.0.1-10: cross-tenant POST returns 404; body NOT containing 'forbidden' or 'permission' (PRIV-01)", async () => {
+  it("cross-tenant POST returns 404; body NOT containing 'forbidden' or 'permission'", async () => {
     const app = createApp();
     const a = await seedUserDirectly({ email: `rc-xtA-${uniq()}@test.local` });
     const b = await seedUserDirectly({ email: `rc-xtB-${uniq()}@test.local` });
@@ -150,7 +150,7 @@ describe("POST /api/sources/:id/refresh-content — Phase 03.0.1 Plan 10", () =>
     expect(sentJobs.length).toBe(0);
   });
 
-  it("Plan 03.0.1-10: non-existent source id returns 404", async () => {
+  it("non-existent source id returns 404", async () => {
     const app = createApp();
     const u = await seedUserDirectly({ email: `rc-nope-${uniq()}@test.local` });
 
@@ -164,7 +164,7 @@ describe("POST /api/sources/:id/refresh-content — Phase 03.0.1 Plan 10", () =>
     expect(sentJobs.length).toBe(0);
   });
 
-  it("Plan 03.0.1-10: soft-deleted source returns 404 (deletedAt is invisible to refresh)", async () => {
+  it("soft-deleted source returns 404 (deletedAt is invisible to refresh)", async () => {
     const app = createApp();
     const u = await seedUserDirectly({ email: `rc-sd-${uniq()}@test.local` });
     const src = await seedYoutubeSource(u.id);
@@ -185,15 +185,15 @@ describe("POST /api/sources/:id/refresh-content — Phase 03.0.1 Plan 10", () =>
     expect(sentJobs.length).toBe(0);
   });
 
-  it("Plan 03.0.1-10: unsupported source kind returns 422 'kind_not_yet_functional'", async () => {
+  it("unsupported source kind returns 422 'kind_not_yet_functional'", async () => {
     const app = createApp();
     const u = await seedUserDirectly({ email: `rc-unsup-${uniq()}@test.local` });
 
     // Direct INSERT bypassing createSource (which gates kind=reddit_account
-    // out at write time per Phase 2.1 FUNCTIONAL_KINDS). The schema enum
-    // accepts all 5 kinds; the registry has only 'youtube_channel' wired
-    // in 03.0.1. This is the only way to exercise the 422 path before
-    // Phase 03.1 lands the Reddit adapter.
+    // out at write time per FUNCTIONAL_KINDS). The schema enum accepts
+    // all 5 kinds; the registry has only 'youtube_channel' wired today.
+    // This is the only way to exercise the 422 path before the Reddit
+    // adapter lands.
     const id = uuidv7();
     await db.insert(dataSources).values({
       id,
@@ -217,7 +217,7 @@ describe("POST /api/sources/:id/refresh-content — Phase 03.0.1 Plan 10", () =>
     expect(sentJobs.length).toBe(0);
   });
 
-  it("Plan 03.0.1-10: audit log records 'source.refresh_content_requested' with metadata.source_id / kind / queue / job_id", async () => {
+  it("audit log records 'source.refresh_content_requested' with metadata.source_id / kind / queue / job_id", async () => {
     const app = createApp();
     const u = await seedUserDirectly({ email: `rc-audit-${uniq()}@test.local` });
     const src = await seedYoutubeSource(u.id);
@@ -245,13 +245,13 @@ describe("POST /api/sources/:id/refresh-content — Phase 03.0.1 Plan 10", () =>
     });
   });
 
-  // Phase 03.0.1 architecture cleanup — per-user rolling rate limit
+  // Per-user rolling rate limit
   // (REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE = 10/min). Counter source is
   // audit_log itself: every successful POST writes a 'source.refresh_content_requested'
   // row, the route's pre-check counts rows in the last 60s. Test:
   //   - 10 successful POSTs → each 202, audit row written.
   //   - 11th POST → 429 'rate_limited' (counter sees 10 prior rows).
-  it("Plan 03.0.1: per-user rolling rate limit fires after 10 POSTs/min, returns 429 'rate_limited'", async () => {
+  it("per-user rolling rate limit fires after 10 POSTs/min, returns 429 'rate_limited'", async () => {
     const app = createApp();
     const u = await seedUserDirectly({ email: `rc-rl-${uniq()}@test.local` });
     const src = await seedYoutubeSource(u.id);
@@ -286,7 +286,7 @@ describe("POST /api/sources/:id/refresh-content — Phase 03.0.1 Plan 10", () =>
     expect(rows).toHaveLength(10);
   });
 
-  it("Plan 03.0.1: rate limit is per-user — user A maxing out does NOT block user B", async () => {
+  it("rate limit is per-user — user A maxing out does NOT block user B", async () => {
     const app = createApp();
     const a = await seedUserDirectly({ email: `rc-rlA-${uniq()}@test.local` });
     const b = await seedUserDirectly({ email: `rc-rlB-${uniq()}@test.local` });

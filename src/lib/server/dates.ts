@@ -1,9 +1,9 @@
 // Pacific calendar day helpers — no-deps module so it can be imported by
 // shared services AND per-platform adapter trees without creating cycles.
 //
-// Operator API quotas (YouTube Data API v3) reset at midnight Pacific; the
-// per-user fair-share cap counter (Phase 03.0.1) syncs to the same boundary;
-// admin /admin/quota uses today's Pacific date string as the row key. All
+// Operator API quotas (YouTube Data API v3) reset at midnight Pacific;
+// the per-user fair-share cap counter syncs to the same boundary;
+// /admin/quota uses today's Pacific date string as the row key. All
 // three consumers need the same DST-aware "today in PT" computation.
 //
 // Why this lives in `src/lib/server/dates.ts` rather than alongside other

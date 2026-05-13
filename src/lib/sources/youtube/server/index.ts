@@ -1,35 +1,31 @@
-// YouTube per-source server barrel — Phase 03.0.1 D-14.
+// YouTube per-source server barrel.
 // Cross-source code (registry, worker entrypoints) imports from here.
 // The internal modules (adapter, http, schema, handlers) are wired
 // together inside this folder; consumers see only the adapter export.
 //
-// Phase 03.0.1 Plan 07 — per-kind queue topology landed (D-10..D-12).
-// Queue rename map (Plan 05 → Plan 07):
-//   poll.active                       → youtube.poll.cron (key=active)
-//   poll.cold                         → youtube.poll.cron (key=cold)
-//   poll.user                         → youtube.poll.user
-//   (NEW)                             → youtube.backfill.user (Plan 10)
-//   youtube.rehab_unavailable         → youtube.rehab (D-11 brevity)
-//   youtube.quota_reset               → unchanged
-//   youtube.channel_context_backfill  → unchanged
+// Per-kind queue topology:
+//   youtube.poll.cron (key=active)
+//   youtube.poll.cron (key=cold)
+//   youtube.poll.user
+//   youtube.backfill.user
+//   youtube.rehab
+//   youtube.quota_reset
+//   youtube.channel_context_backfill
 //
-// Two scheduler.tick.* queues from Phase 03.0 Plan 09 are RETIRED here —
-// collapsed into the youtube.poll.cron schedule via boss.schedule({key})
-// per pg-boss v11+ multiple-schedules-per-queue. The poll-cron handler
-// (./handlers/poll-cron.ts) reads job.data.tier and dispatches to
-// handlePollActive / handlePollCold; the scheduler-tick → enqueue.ts hop
-// is gone. Migration drizzle/0021_phase03_01_per_kind_queue_topology.sql
-// cleans up the orphan pgboss.* rows.
+// Active vs Cold collapse into a single youtube.poll.cron queue via
+// boss.schedule({key}) per pg-boss v11+ multiple-schedules-per-queue. The
+// poll-cron handler (./handlers/poll-cron.ts) reads job.data.tier and
+// dispatches to handlePollActive / handlePollCold.
 //
-// scheduleCronTicks is the REAL implementation — replaces the Plan 03
-// throwing stub in ./adapter.ts. Cross-source crons (purge.daily,
-// internal.healthcheck) stay in src/scheduler/index.ts because they
-// apply across all sources, not just YouTube.
+// scheduleCronTicks is the per-kind cron registration entrypoint.
+// Cross-source crons (purge.daily, internal.healthcheck) stay in
+// src/scheduler/index.ts because they apply across all sources, not just
+// YouTube.
 //
-// batchSize values mirror the Phase 03.0 Plan 09 / Plan 05 contract:
+// batchSize values:
 //   YOUTUBE_POLL_CRON                 batchSize=4 (Active concurrency)
 //   YOUTUBE_POLL_USER                 batchSize=2
-//   YOUTUBE_BACKFILL_USER             batchSize=1 (Plan 10 wires the handler)
+//   YOUTUBE_BACKFILL_USER             batchSize=1
 //   YOUTUBE_CHANNEL_CONTEXT_BACKFILL  batchSize=1
 //   YOUTUBE_QUOTA_RESET               batchSize=1
 //   YOUTUBE_REHAB                     batchSize=1
@@ -66,21 +62,20 @@ import { handlePollUser } from "./handlers/poll-user.js";
 import { handleRehabUnavailable } from "./handlers/rehab-unavailable.js";
 import { handleChannelContextBackfill } from "./handlers/channel-context-backfill.js";
 import { handleQuotaReset } from "./handlers/quota-reset.js";
-// Phase 03.0.1 Wave 2 — channel-scoped backfill handler. Replaces
-// per-source backfill-user.ts. Job payload carries (kind, channelKey,
+// Channel-scoped backfill handler. Job payload carries (kind, channelKey,
 // triggerUserId?, depthBoundIso, flow); handler walks channel once and
 // fans out events INSERT to all active subscribers.
 import { handleBackfillChannel } from "./handlers/backfill-channel.js";
-// Phase 03.0.1 — daily auto-backfill cron picker. Skip-gates на cron pool
-// ≥50% used; enqueues backfill-user with metadata.flow='auto_passive'.
+// Daily auto-backfill cron picker. Skip-gates when the cron pool is
+// >= 50% used; enqueues backfill-user with metadata.flow='auto_passive'.
 import { handleAutoBackfillCron } from "./handlers/auto-backfill-cron.js";
-// Phase 03.0.1 Wave 3 — daily incremental cron. Walks page 1 of every
-// active channel including completed ones to discover new uploads.
+// Daily incremental cron. Walks page 1 of every active channel including
+// completed ones to discover new uploads.
 import { handleIncrementalCron } from "./handlers/incremental-cron.js";
-// Phase 03.0.1 architecture cleanup — adapter-driven create-time hooks +
-// preview metadata + poll-state lookup + per-source HTTP routes. Cross-source
-// services delegate via getAdapter(...) so adding Reddit (Phase 03.1) is a
-// registry entry, not a 6-file edit.
+// Adapter-driven create-time hooks + preview metadata + poll-state
+// lookup + per-source HTTP routes. Cross-source services delegate via
+// getAdapter(...) so adding a new source kind is a registry entry, not a
+// 6-file edit.
 import { fetchVideoMetadataByUrl } from "./metadata.js";
 import { writeSnapshot } from "./snapshots.js";
 import { pickKeyForJob, youtubeQuotaUser } from "./quota.js";
@@ -100,7 +95,7 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
   // bootstrap time for the cross-source roster; this function declares
   // the YouTube-specific queues again (idempotent) so the adapter's
   // registration is self-contained — Reddit/Twitter adapters follow the
-  // same pattern in Phase 03.1+.
+  // same pattern.
   await boss.createQueue(QUEUES.YOUTUBE_POLL_CRON);
   await boss.createQueue(QUEUES.YOUTUBE_POLL_USER);
   await boss.createQueue(QUEUES.YOUTUBE_BACKFILL_CHANNEL);
@@ -111,8 +106,8 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
   await boss.createQueue(QUEUES.YOUTUBE_INCREMENTAL_CRON);
 
   // youtube.poll.cron — Active+Cold collapsed via tier-tagged payload.
-  // batchSize=4 matches Phase 03.0 POLL_ACTIVE concurrency (Cold's daily
-  // cadence keeps it from saturating the budget regardless).
+  // batchSize=4 matches POLL_ACTIVE concurrency (Cold's daily cadence
+  // keeps it from saturating the budget regardless).
   await boss.work(QUEUES.YOUTUBE_POLL_CRON, { batchSize: 4 }, async (jobs) => {
     for (const job of jobs) {
       await handlePollCron(
@@ -127,10 +122,10 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
     }
   });
 
-  // Phase 03.0.1 Wave 2 — youtube.backfill.channel worker subscription.
-  // batchSize=1 keeps the backfill stream single-flight per worker process;
-  // pg-boss singletonKey by channelKey on the producer side dedupes
-  // parallel triggers across multiple users to the same channel.
+  // youtube.backfill.channel worker subscription. batchSize=1 keeps the
+  // backfill stream single-flight per worker process; pg-boss singletonKey
+  // by channelKey on the producer side dedupes parallel triggers across
+  // multiple users to the same channel.
   await boss.work(QUEUES.YOUTUBE_BACKFILL_CHANNEL, { batchSize: 1 }, async (jobs) => {
     for (const job of jobs) {
       await handleBackfillChannel(
@@ -177,20 +172,21 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
     }
   });
 
-  // Phase 03.0.1 — daily auto-backfill cron picker. batchSize=1 — single
-  // tick per day, picks ≤50 sources, enqueues passive jobs into
-  // YOUTUBE_BACKFILL_CHANNEL. Handler does the gate check (skip if pool ≥50%).
+  // Daily auto-backfill cron picker. batchSize=1 — single tick per day,
+  // picks ≤50 sources, enqueues passive jobs into
+  // YOUTUBE_BACKFILL_CHANNEL. Handler does the gate check (skip if pool
+  // ≥50%).
   await boss.work(QUEUES.YOUTUBE_AUTO_BACKFILL_CRON, { batchSize: 1 }, async (jobs) => {
     for (const job of jobs) {
       await handleAutoBackfillCron(job as { id: string; data: object }, boss);
     }
   });
 
-  // Phase 03.0.1 Wave 3 — daily incremental cron. Single tick per day at
-  // 04:00 PT (1h after auto-backfill). Picks complete + incomplete
-  // channels with active auto_import subscribers; enqueues page-1 walks
-  // (1 quota unit each) on YOUTUBE_BACKFILL_CHANNEL. Closes the new-
-  // upload-discovery gap on completed channels.
+  // Daily incremental cron. Single tick per day at 04:00 PT (1h after
+  // auto-backfill). Picks complete + incomplete channels with active
+  // auto_import subscribers; enqueues page-1 walks (1 quota unit each)
+  // on YOUTUBE_BACKFILL_CHANNEL. Closes the new-upload-discovery gap on
+  // completed channels.
   await boss.work(QUEUES.YOUTUBE_INCREMENTAL_CRON, { batchSize: 1 }, async (jobs) => {
     for (const job of jobs) {
       await handleIncrementalCron(job as { id: string; data: object }, boss);
@@ -199,8 +195,7 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
 }
 
 /**
- * Plan 07 — REAL implementation (replaces the Plan 03 throwing stub in
- * ./adapter.ts). Registers the YouTube-specific cron schedules:
+ * Registers the YouTube-specific cron schedules:
  *
  *   - youtube.poll.cron, key=active — every 6 hours UTC default. Sends
  *     `{ tier: "active" }` payload; the poll-cron handler dispatches.
@@ -213,17 +208,16 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
  *
  * Cross-source crons (purge.daily, internal.healthcheck) stay in
  * src/scheduler/index.ts — they apply across all sources, not just
- * YouTube. Plan 07 src/scheduler/index.ts iterates allAdapters and calls
+ * YouTube. src/scheduler/index.ts iterates allAdapters and calls
  * adapter.scheduleCronTicks(boss) for each per-kind set.
  *
  * Pacific-time schedules use `tz: "America/Los_Angeles"` so DST
  * transitions are handled by pg-boss; the active tier's "every 6 hours"
- * cron is left as UTC default per Phase 03.0's existing precedent
- * (operator can revisit if the time-of-day shift matters at higher
- * volumes).
+ * cron is left as UTC default (operator can revisit if the time-of-day
+ * shift matters at higher volumes).
  */
 async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
-  // Active tier — every 6 hours UTC (preserves Phase 03.0 cadence).
+  // Active tier — every 6 hours UTC.
   await boss.schedule(
     QUEUES.YOUTUBE_POLL_CRON,
     "0 */6 * * *",
@@ -241,20 +235,20 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
   await boss.schedule(QUEUES.YOUTUBE_QUOTA_RESET, "0 0 * * *", {}, { tz: "America/Los_Angeles" });
   // Rehab — weekly Sunday 4am Pacific.
   await boss.schedule(QUEUES.YOUTUBE_REHAB, "0 4 * * 0", {}, { tz: "America/Los_Angeles" });
-  // Phase 03.0.1 — auto-backfill picker daily 03:00 Pacific (3h after
-  // quota reset at 00:00 PT — pool fresh, минимальный contention с
-  // active/cold poll). Handler делает gate check (skip if pool ≥50% used)
-  // и picker SELECT incomplete sources, enqueue's passive backfill jobs.
+  // Auto-backfill picker daily 03:00 Pacific (3h after quota reset at
+  // 00:00 PT — pool fresh, minimal contention with active/cold poll).
+  // Handler does the gate check (skip if pool ≥50% used) and picker
+  // SELECTs incomplete sources, enqueuing passive backfill jobs.
   await boss.schedule(
     QUEUES.YOUTUBE_AUTO_BACKFILL_CRON,
     "0 3 * * *",
     {},
     { tz: "America/Los_Angeles" },
   );
-  // Phase 03.0.1 Wave 3 — daily incremental cron at 04:00 Pacific (1h
-  // after auto-backfill). Walks page 1 of every active channel including
-  // completed ones to discover new uploads. Same gate-check as auto-
-  // backfill (skip if cron pool ≥50%).
+  // Daily incremental cron at 04:00 Pacific (1h after auto-backfill).
+  // Walks page 1 of every active channel including completed ones to
+  // discover new uploads. Same gate-check as auto-backfill (skip if cron
+  // pool ≥50%).
   await boss.schedule(
     QUEUES.YOUTUBE_INCREMENTAL_CRON,
     "0 4 * * *",
@@ -264,9 +258,9 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
 }
 
 /**
- * Phase 03.0.1 Wave 2 — channel-scoped backfillSource. Enqueues a
- * channel-level walk job. Triggering user pays quota; ALL active
- * subscribers to the channel receive events.
+ * Channel-scoped backfillSource. Enqueues a channel-level walk job.
+ * Triggering user pays quota; ALL active subscribers to the channel
+ * receive events.
  *
  * singletonKey=`backfill-channel-${channelKey}` dedups concurrent triggers
  * across users — two parallel clicks on the same channel (different users)
@@ -278,7 +272,7 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
  * walk's depth bound (target_since for user-triggered, sentinel for cron).
  *
  * priority=1 puts user-initiated jobs ahead of cron-initiated walks in
- * the same queue (D-09 user-pool reserve).
+ * the same queue (user-pool reserve).
  */
 async function backfillSource(
   source: PollableSource,
@@ -306,18 +300,16 @@ async function backfillSource(
 }
 
 /**
- * Phase 03.0.1 architecture cleanup — canonicalizeOnCreate.
- * Pulls the YouTube channel/video URL canonicalization out of
- * services/data-sources.ts into the adapter. Logic preserved verbatim from
- * the prior data-sources.ts:260-292 inline switch:
+ * canonicalizeOnCreate — YouTube channel/video URL canonicalization
+ * called by services/data-sources.ts on createSource.
  *
  *   - /channel/UC… → resolvedExternalId = channelId, canonicalize URL.
  *   - /watch?v=ID  → fetchVideoMetadataByUrl, dereference channelId, canonicalize.
  *   - /@handle, /c/, /user/ → leave as-is; worker resolves on first backfill.
  *
  * Throws AppError 422 on URLs that don't point at a YouTube
- * channel/handle/video — the same UX the inline code surfaced (the user
- * pasted youtube.com/ or localhost:5173/feed; better fail visibly).
+ * channel/handle/video (better fail visibly than register a phantom
+ * source).
  */
 async function canonicalizeOnCreate(
   input: CanonicalizeInput,
@@ -361,18 +353,14 @@ async function canonicalizeOnCreate(
 }
 
 /**
- * Phase 03.0.1 architecture cleanup — onSourceCreated.
- * Pulls the YOUTUBE_CHANNEL_CONTEXT_BACKFILL enqueue out of
- * services/data-sources.ts into the adapter. Logic preserved verbatim from
- * the prior data-sources.ts:377-400 inline switch.
+ * onSourceCreated — enqueue the channel-context backfill on createSource.
  *
- * Phase 03.0.1 Wave 3 — added zero-quota onboarding. Before enqueueing
- * the channel-context-backfill job, we check if the channel cache already
- * has data (other users have walked this channel before). If yes, we
- * bulk INSERT events for the new subscriber from cache without making any
- * HTTP calls — the user gets an instantly-populated feed and zero quota
- * is consumed. The cron walks (auto-backfill / incremental) still run
- * later to top up new uploads.
+ * Zero-quota onboarding: before enqueueing the channel-context-backfill
+ * job, we check if the channel cache already has data (other users have
+ * walked this channel before). If yes, we bulk INSERT events for the new
+ * subscriber from cache without making any HTTP calls — the user gets an
+ * instantly-populated feed and zero quota is consumed. The cron walks
+ * (auto-backfill / incremental) still run later to top up new uploads.
  *
  * Fire-and-forget: pg-boss / DB errors are logged at WARN. The created
  * source row is the load-bearing return value; backfill enqueue is a
@@ -437,10 +425,9 @@ async function onSourceCreated(
 }
 
 /**
- * Phase 03.0.1 Wave 3 — bulk-INSERT events for a new subscriber from the
- * youtube_videos cache. Triggered by onSourceCreated when channelId is
- * resolved synchronously and another user has previously walked this
- * channel (cache populated).
+ * Bulk-INSERT events for a new subscriber from the youtube_videos cache.
+ * Triggered by onSourceCreated when channelId is resolved synchronously
+ * and another user has previously walked this channel (cache populated).
  *
  * Idempotency UNIQUE on (user_id, source_id, kind, external_id) protects
  * against double-INSERT if multiple createSource calls race.
@@ -498,14 +485,13 @@ async function seedEventsFromChannelCache(args: {
 }
 
 /**
- * Phase 03.0.1 architecture cleanup — fetchEventPreviewMetadata.
- * Pulls the YouTube oEmbed call out of services/events.ts:enrichFromUrl
- * into the adapter. Maps YoutubeOembedResult → EventPreviewMetadata so the
- * cross-source code never sees YouTube-specific result shapes.
+ * fetchEventPreviewMetadata — adapter wrapper around the YouTube oEmbed
+ * call. Maps YoutubeOembedResult → EventPreviewMetadata so the cross-
+ * source code never sees YouTube-specific result shapes.
  *
  * 5xx / network failures are caught here and translated to
- * `{kind:'unreachable'}` — cross-source enrichFromUrl maps to AppError 502
- * `youtube_oembed_unreachable` (legacy contract preserved).
+ * `{kind:'unreachable'}` — cross-source enrichFromUrl maps to AppError
+ * 502 `youtube_oembed_unreachable`.
  */
 async function fetchEventPreviewMetadata(canonicalUrl: string): Promise<EventPreviewMetadata> {
   let result;
@@ -526,9 +512,8 @@ async function fetchEventPreviewMetadata(canonicalUrl: string): Promise<EventPre
 }
 
 /**
- * Phase 03.0.1 architecture cleanup — validateEventInput.
- * Pulls the youtube_video URL-required validation out of services/events.ts
- * into the adapter. Throws AppError 422 on invalid input.
+ * validateEventInput — youtube_video URL-required validation. Throws
+ * AppError 422 on invalid input.
  */
 function validateEventInput(input: { kind: string; url?: string | null }): void {
   if (input.kind !== "youtube_video") return;
@@ -548,9 +533,9 @@ function validateEventInput(input: { kind: string; url?: string | null }): void 
       reason: "url_not_youtube",
     });
   }
-  // Phase 03.0.1 (post-review) — match create-path strictness. Pre-fix
-  // youtubeParseUrl accepted any non-empty path segment (e.g. /shorts/abc),
-  // so PATCH could persist a malformed URL that POST would reject via
+  // Match create-path strictness. youtubeParseUrl on its own accepts any
+  // non-empty path segment (e.g. /shorts/abc), so PATCH could persist a
+  // malformed URL that POST would reject via
   // services/url-parser.ts:parseIngestUrl (which validates 11-char ids
   // against YOUTUBE_VIDEO_ID_RE). Re-applying the same regex here closes
   // the create-vs-update drift.
@@ -565,14 +550,13 @@ function validateEventInput(input: { kind: string; url?: string | null }): void 
 }
 
 /**
- * Phase 03.0.1 architecture cleanup — fetchPollStateMap.
- * Pulls the youtube_videos batch lookup out of dto.ts into the adapter.
- * Cross-source dto.ts iterates allAdapters and merges results.
+ * fetchPollStateMap — youtube_videos batch lookup. Cross-source dto.ts
+ * iterates allAdapters and merges results.
  *
- * youtube_videos is PUBLIC-DATA (CONTEXT D-07) — no user_id column,
- * identical across tenants. Lookup is keyed on the PK only. The userId
- * parameter is present for contract symmetry (Reddit/Twitter adapters
- * may have per-user poll state) but unused here.
+ * youtube_videos is PUBLIC-DATA — no user_id column, identical across
+ * tenants. Lookup is keyed on the PK only. The userId parameter is
+ * present for contract symmetry (other source adapters may have per-user
+ * poll state) but unused here.
  */
 async function fetchPollStateMap(
   _userId: string,
@@ -600,22 +584,20 @@ async function fetchPollStateMap(
 }
 
 /**
- * Phase 03.0.1 architecture cleanup — registerRoutes.
- * Pulls the direct `import { youtubeMetadataRoutes }` from http/app.ts
- * into the adapter. Cross-source createApp() iterates allAdapters and
- * calls registerRoutes; adding Reddit's preview-metadata endpoint in
- * Phase 03.1 means implementing this method on the Reddit adapter, not
- * editing http/app.ts.
+ * registerRoutes — mounts the per-source HTTP routes. Cross-source
+ * createApp() iterates allAdapters and calls registerRoutes; adding a new
+ * source's preview-metadata endpoint means implementing this method on
+ * the new adapter, not editing http/app.ts.
  */
 function registerRoutes(app: Hono<AdapterAppContext>): void {
   app.route("/api", youtubeMetadataRoutes);
 }
 
 /**
- * Phase 03.0.1 Wave 4 (post-UAT) — fetchEventStats. Synchronous stats
- * fetch on manual event paste so /feed shows view/like counts
- * immediately. Calls videos.list (1 unit, charged to user pool via
- * pollStatsByVideoId), writes a youtube_video_snapshots row.
+ * fetchEventStats — synchronous stats fetch on manual event paste so
+ * /feed shows view/like counts immediately. Calls videos.list (1 unit,
+ * charged to user pool via pollStatsByVideoId), writes a
+ * youtube_video_snapshots row.
  *
  * Returns null on rate-limited / auth-error / not-found — caller
  * (createEventFromPaste) treats as «stats unavailable now, will be
@@ -644,11 +626,11 @@ async function fetchEventStats(
     poolKind: "user",
     status: "ok",
   });
-  // Phase 03.0.1 Wave 4 (post-UAT) — write audit row so the per-user cap
-  // counter (services/quota.ts getUserQuotaUsedToday) sees this fetch.
-  // Without this row, chargedFetch deducts from the reservoir but the
-  // SUM-on-audit cap stays at 0, letting users bypass requestsPerDay
-  // by spamming /events/new pastes. Flow=stats_refresh matches the
+  // Write audit row so the per-user cap counter
+  // (services/quota.ts getUserQuotaUsedToday) sees this fetch. Without
+  // this row, chargedFetch deducts from the reservoir but the SUM-on-
+  // audit cap stays at 0, letting users bypass requestsPerDay by
+  // spamming /events/new pastes. Flow=stats_refresh matches the
   // existing per-event poll-user worker semantic.
   const { writeAudit } = await import("$lib/server/audit.js");
   await writeAudit({
@@ -668,11 +650,10 @@ async function fetchEventStats(
 }
 
 /**
- * Phase 03.0.1 architecture cleanup — quotaCounters.
- * Declares youtube_metadata_fetches_per_day. Cross-source services/quota.ts
- * iterates allAdapters[*].observability.quotaCounters; adding Reddit's
- * counters in Phase 03.1 means declaring them on the Reddit adapter, not
- * editing the quota.ts switch.
+ * quotaCounters — declares youtube_metadata_fetches_per_day. Cross-source
+ * services/quota.ts iterates allAdapters[*].observability.quotaCounters;
+ * adding a new source's counters means declaring them on the new
+ * adapter, not editing the quota.ts switch.
  */
 const youtubeQuotaCounters: ReadonlyArray<AdapterQuotaCounter> = [
   {
@@ -694,16 +675,18 @@ const youtubeQuotaCounters: ReadonlyArray<AdapterQuotaCounter> = [
 
 // youtubeAdapter — composes the per-source adapter cross-source code sees.
 //
-// Phase 03.0.1 architecture cleanup: adapter.ts exports `youtubeChannelAdapterCore`
-// typed as `Pick<DataSourceAdapter, ...polling/observability/canRefreshPoll>`
-// — no throwing stubs. This barrel is the SINGLE composition point: it
-// adds infrastructure-touching methods (registerQueues / scheduleCronTicks /
-// backfillSource) and cross-source hooks (canonicalize, onSourceCreated,
-// fetchEventPreviewMetadata, validateEventInput, fetchPollStateMap,
-// registerRoutes) plus extends observability with per-source quotaCounters.
+// adapter.ts exports `youtubeChannelAdapterCore` typed as
+// `Pick<DataSourceAdapter, ...polling/observability/canRefreshPoll>` —
+// no throwing stubs. This barrel is the SINGLE composition point: it
+// adds infrastructure-touching methods (registerQueues /
+// scheduleCronTicks / backfillSource) and cross-source hooks
+// (canonicalize, onSourceCreated, fetchEventPreviewMetadata,
+// validateEventInput, fetchPollStateMap, registerRoutes) plus extends
+// observability with per-source quotaCounters.
 //
-// TypeScript guarantees completeness — the `: DataSourceAdapter` annotation
-// fails the build if any contract method is missing from the spread.
+// TypeScript guarantees completeness — the `: DataSourceAdapter`
+// annotation fails the build if any contract method is missing from the
+// spread.
 export const youtubeAdapter: DataSourceAdapter = {
   ...youtubeChannelAdapterCore,
   observability: {
@@ -720,9 +703,7 @@ export const youtubeAdapter: DataSourceAdapter = {
   validateEventInput,
   fetchPollStateMap,
   registerRoutes,
-  // Phase 03.0.1 — sync RateLimiterMemory reservoirs with persistent
-  // youtube_service_quota_usage counter on worker boot. Adapter-owned hook
-  // replaces the cross-source `import reconcileReservoirsOnBoot from
-  // youtube/server/http.js` that worker/index.ts hardcoded pre-cleanup.
+  // Sync RateLimiterMemory reservoirs with the persistent
+  // youtube_service_quota_usage counter on worker boot.
   reconcileRuntimeState: reconcileReservoirsOnBoot,
 };

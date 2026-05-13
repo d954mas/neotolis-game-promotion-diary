@@ -1,18 +1,15 @@
 <script lang="ts">
-  // FeedQuickNav — chip strip / segmented-control at the TOP of /feed for the
-  // most-common Show axis values. Plan 02.1-26, closing UAT-NOTES.md
-  // §6.2-redesign — the user wants a single-click switch between All / Inbox /
-  // Standalone / per-game views; today they have to open the FiltersSheet,
-  // scroll, choose, apply (4+ taps for a frequent action).
+  // FeedQuickNav — chip strip / segmented-control at the TOP of /feed for
+  // the most-common Show axis values. Single-click switch between All /
+  // Inbox / Standalone / per-game views.
   //
   // SHORTCUT, NOT REPLACEMENT — The full FiltersSheet stays for long-tail
   // filters (kind, source, date range, authorIsMe). FeedQuickNav covers the
   // Show axis only. Click → URL change → loader re-runs → feed list refreshes.
   //
-  // URL contract: this component DOES NOT invent a new param. It consumes the
-  // existing `?show=any|inbox|standalone|specific&game=<id>` URL contract
-  // established by Plan 02.1-19 (any/inbox/specific) + Plan 02.1-24
-  // (standalone). Per-game tab uses `?show=specific&game=<id>` — single value.
+  // URL contract: consumes the existing
+  // `?show=any|inbox|standalone|specific&game=<id>` URL contract.
+  // Per-game tab uses `?show=specific&game=<id>` — single value.
   //
   // Tabs:
   //   - All       (default — show.kind === "any") → clears ?show + ?game
@@ -202,18 +199,15 @@
 
 <style>
   .quick-nav {
-    /* Plan 02.1-39 round-6 reversal (UAT-NOTES.md §5.4): sticky was tried
-     * (round-5 made the tabs strip pin below AppHeader + PageHeader) and
-     * REMOVED on round-6 user reconsideration — the user found the double-
-     * sticky layer visually noisy and asked for the tabs to scroll with
-     * the feed. The chrome wrapper `.sticky-chrome` (top: 0, see
-     * src/routes/+layout.svelte) and PageHeader.sticky (top:
-     * var(--chrome-height) - var(--sticky-overlap)) remain pinned and are
-     * sufficient for orientation; FeedQuickNav now lives inline above the
-     * feed list.
+    /* Not sticky — user found the double-sticky layer visually noisy and
+     * asked for the tabs to scroll with the feed. The chrome wrapper
+     * `.sticky-chrome` (top: 0, see src/routes/+layout.svelte) and
+     * PageHeader.sticky (top: var(--chrome-height) -
+     * var(--sticky-overlap)) remain pinned and are sufficient for
+     * orientation; FeedQuickNav lives inline above the feed list.
      *
-     * Round-6 UAT user quote: "табы не залипают. В эвентах хотелось бы
-     * inbox all тоже не залипали, это лишнее." */
+     * User quote: "табы не залипают. В эвентах хотелось бы inbox all тоже
+     * не залипали, это лишнее." */
 
     display: flex;
     gap: var(--space-sm);

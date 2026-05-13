@@ -1,23 +1,22 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { randomBytes } from "node:crypto";
 
-// Plan 01-04 RED — failing tests for envelope encryption per VALIDATION behaviors
-// 10/11/12/13 (round-trip, tamper detection, missing KEK fail-fast, rotation D-10).
+// Envelope encryption tests.
 //
-// Tests own labels RT1, RT2, RT3, T1, T2, T3, T4, B1, R1, R2, U1 (11 active cases)
-// covering AUTH-03 must_haves:
+// Tests own labels RT1, RT2, RT3, T1, T2, T3, T4, B1, R1, R2, U1 (11 active cases):
 //   - encryptSecret/decryptSecret round-trip (RT1, RT2, RT3, U1)
 //   - tamper detection via AES-256-GCM auth tag (T1, T2, T3, T4)
-//   - missing KEK version causes a clear error (B1 — proxy for PITFALL P2 fail-fast)
-//   - rotateDek re-wraps DEK only and ciphertext is byte-identical (R1, R2 — D-10)
+//   - missing KEK version causes a clear error (B1 — fail-fast on missing KEK)
+//   - rotateDek re-wraps DEK only and ciphertext is byte-identical (R1, R2)
 //
-// Test isolation strategy: env.ts is the SOLE reader of process.env (D-24, AP-6).
+// Test isolation strategy: env.ts is the SOLE reader of process.env.
 // We seed required process.env vars BEFORE the dynamic import so zod parse succeeds.
 // We then mutate `env.KEK_VERSIONS` directly inside `beforeEach` for two-version
 // rotation scenarios — the env module exposes the Map by reference.
 
 // Seed the bare minimum env the schema requires. APP_KEK_BASE64 is decoded then
 // scrubbed by env.ts; KEK_CURRENT_VERSION defaults to 1.
+
 process.env.DATABASE_URL ??= "postgres://test:test@localhost:5432/test";
 process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
 process.env.BETTER_AUTH_SECRET ??= "x".repeat(40);
@@ -30,7 +29,7 @@ const { env } = await import("../../src/lib/server/config/env.js");
 const { encryptSecret, decryptSecret, rotateDek } =
   await import("../../src/lib/server/crypto/envelope.js");
 
-describe("envelope encryption — round-trip (VALIDATION behaviors 10/11)", () => {
+describe("envelope encryption — round-trip", () => {
   it("RT1: decryptSecret(encryptSecret(plaintext)) returns identical plaintext", () => {
     const plaintext = "hello world";
     const enc = encryptSecret(plaintext);
@@ -58,7 +57,7 @@ describe("envelope encryption — round-trip (VALIDATION behaviors 10/11)", () =
   });
 });
 
-describe("envelope encryption — tamper detection (VALIDATION behavior 12)", () => {
+describe("envelope encryption — tamper detection", () => {
   // tsconfig sets `noUncheckedIndexedAccess: true`, so `Buffer[0]` types as
   // `number | undefined`. The Buffers we tamper with are always non-empty
   // (AES-256-GCM tags are 16 bytes, ciphertexts are at least the plaintext
@@ -95,12 +94,12 @@ describe("envelope encryption — tamper detection (VALIDATION behavior 12)", ()
   });
 });
 
-describe("envelope encryption — KEK availability (VALIDATION behavior 13)", () => {
+describe("envelope encryption — KEK availability", () => {
   it("B1: missing KEK version causes clear error mentioning the version number", () => {
     // Encrypt with the current KEK (v1), then forge a row claiming kek v99
     // which is not loaded into env.KEK_VERSIONS. decryptSecret must fail
-    // loudly — proxy for "missing/short KEK at boot" (PITFALL P2 fail-fast):
-    // env.ts itself enforces 32-byte length on boot, but if a stored row was
+    // loudly — proxy for "missing/short KEK at boot" fail-fast: env.ts
+    // itself enforces 32-byte length on boot, but if a stored row was
     // encrypted with v2 and the running process only holds v1, we MUST throw
     // before silently corrupting data.
     const enc = encryptSecret("hello");
@@ -109,11 +108,11 @@ describe("envelope encryption — KEK availability (VALIDATION behavior 13)", ()
   });
 });
 
-describe("envelope encryption — rotation (D-10, AUTH-03)", () => {
+describe("envelope encryption — rotation", () => {
   beforeEach(() => {
     // Seed a v2 KEK so rotation tests can exercise the two-version path.
     // env.KEK_VERSIONS is exported by reference (Map) so this mutation is seen
-    // by the envelope module's per-call loadKek lookup (AP-6: no module-level
+    // by the envelope module's per-call loadKek lookup (no module-level
     // cached KEK in either env.ts or envelope.ts).
     env.KEK_VERSIONS.set(2, randomBytes(32));
   });
@@ -129,7 +128,7 @@ describe("envelope encryption — rotation (D-10, AUTH-03)", () => {
     expect(Buffer.compare(rotated.wrappedDek, enc.wrappedDek)).not.toBe(0);
     expect(Buffer.compare(rotated.dekIv, enc.dekIv)).not.toBe(0);
     expect(Buffer.compare(rotated.dekTag, enc.dekTag)).not.toBe(0);
-    // kek_version column updates to the new version (D-10).
+    // kek_version column updates to the new version.
     expect(rotated.kekVersion).toBe(2);
   });
 

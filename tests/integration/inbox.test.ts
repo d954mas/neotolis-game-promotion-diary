@@ -16,16 +16,11 @@ import { seedUserDirectly } from "./helpers.js";
 import { AppError, NotFoundError } from "../../src/lib/server/services/errors.js";
 
 /**
- * Phase 2.1 Wave 1B (Plan 02.1-05) — dismissFromInbox service-level tests.
- *
- * The Plan 02.1-05 line is the inbox semantics on createEvent (game_id=NULL
- * surfaces in attached=false). The Plan 02.1-06 lines test the dismissal
- * service contract that the route layer wraps. The Phase 3 line stays
- * skipped (CONTEXT D-11: auto-import populates inbox naturally in Phase 3).
+ * dismissFromInbox service-level tests.
  */
 
 describe("INBOX-01: inbox flow + dismissal", () => {
-  it("Plan 02.1-05: an event created via paste with no attached game has game_id=NULL and surfaces in attached=false filter", async () => {
+  it("an event created via paste with no attached game has game_id=NULL and surfaces in attached=false filter", async () => {
     const u = await seedUserDirectly({ email: "inbox1@test.local" });
     const ev = await createEvent(
       u.id,
@@ -37,7 +32,7 @@ describe("INBOX-01: inbox flow + dismissal", () => {
       },
       "127.0.0.1",
     );
-    // Plan 02.1-28: gameId column gone; the inbox criterion is "zero junction
+    // The gameId column is gone; the inbox criterion is "zero junction
     // rows", which the listFeedPage NOT EXISTS subquery surfaces below.
 
     const page = await listFeedPage(u.id, { show: { kind: "inbox" } }, null);
@@ -82,9 +77,9 @@ describe("INBOX-01: inbox flow + dismissal", () => {
     const page = await listFeedPage(u.id, { show: { kind: "inbox" } }, null);
     expect(page.rows.map((r) => r.id)).not.toContain(ev.id);
 
-    // The row still exists; it's just out of the inbox view. Advanced filter
-    // "show all dismissed" is Phase 6 polish (RESEARCH §6.2). We assert
-    // existence via the unfiltered listing (no attached filter).
+    // The row still exists; it's just out of the inbox view. Advanced
+    // filter "show all dismissed" is deferred polish. We assert existence
+    // via the unfiltered listing (no attached filter).
     const all = await listFeedPage(u.id, {}, null);
     expect(all.rows.map((r) => r.id)).toContain(ev.id);
   });
@@ -167,13 +162,13 @@ describe("INBOX-01: inbox flow + dismissal", () => {
   });
 
   it.skip(
-    "Phase 3 Plan: auto-imported events arrive with source_id != NULL AND game_id=NULL — covered in Phase 3 smoke (deferred per CONTEXT D-11)",
+    "auto-imported events arrive with source_id != NULL AND game_id=NULL — covered in smoke (deferred)",
   );
 });
 
-// Plan 02.1-06 — PATCH /api/events/:id/dismiss-inbox HTTP boundary.
-describe("Plan 02.1-06: PATCH /api/events/:id/dismiss-inbox HTTP boundary", () => {
-  it("Plan 02.1-06: PATCH /api/events/:id/dismiss-inbox returns 200 with metadata.inbox.dismissed=true", async () => {
+// PATCH /api/events/:id/dismiss-inbox HTTP boundary.
+describe("PATCH /api/events/:id/dismiss-inbox HTTP boundary", () => {
+  it("PATCH /api/events/:id/dismiss-inbox returns 200 with metadata.inbox.dismissed=true", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-inbox-1@test.local" });
@@ -200,7 +195,7 @@ describe("Plan 02.1-06: PATCH /api/events/:id/dismiss-inbox HTTP boundary", () =
     expect(body.metadata.inbox?.dismissed).toBe(true);
   });
 
-  it("Plan 02.1-06: PATCH /api/events/:id/dismiss-inbox on attached event returns 422 not_in_inbox", async () => {
+  it("PATCH /api/events/:id/dismiss-inbox on attached event returns 422 not_in_inbox", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-inbox-2@test.local" });
@@ -224,7 +219,7 @@ describe("Plan 02.1-06: PATCH /api/events/:id/dismiss-inbox HTTP boundary", () =
     expect((await res.json()).error).toBe("not_in_inbox");
   });
 
-  it("Plan 02.1-06: PATCH /api/events/:id/dismiss-inbox cross-tenant returns 404 not_found", async () => {
+  it("PATCH /api/events/:id/dismiss-inbox cross-tenant returns 404 not_found", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const userA = await seedUserDirectly({ email: "http-inbox-3a@test.local" });
@@ -250,17 +245,16 @@ describe("Plan 02.1-06: PATCH /api/events/:id/dismiss-inbox HTTP boundary", () =
   });
 });
 
-// Plan 02.1-24 — markStandalone + unmarkStandalone service contract per
-// UAT-NOTES.md §6.1-redesign. The user explicitly asked for two changes:
+// markStandalone + unmarkStandalone service contract. The user asked
+// for two changes:
 //   (a) inbox cards get an inline "Standalone" button (exception to the
-//       Plan 02.1-18 read-only contract);
+//       read-only contract);
 //   (b) standalone events render dimmed in /feed so they don't distract.
-// The service mirrors restoreEvent (Plan 02.1-14) and dismissFromInbox
-// (Plan 02.1-05) audit-after-success ordering — non-destructive triage
-// actions write audit AFTER the UPDATE succeeds, so cross-tenant
+// The service uses audit-after-success ordering — non-destructive
+// triage actions write audit AFTER the UPDATE succeeds, so cross-tenant
 // NotFoundError does not generate misleading audit rows.
-describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
-  it("Plan 02.1-24: markStandalone sets metadata.triage.standalone=true + game_id=null + writes event.marked_standalone audit", async () => {
+describe("markStandalone + unmarkStandalone", () => {
+  it("markStandalone sets metadata.triage.standalone=true + game_id=null + writes event.marked_standalone audit", async () => {
     const u = await seedUserDirectly({ email: "standalone1@test.local" });
     // Seed an inbox event (game_id=null, kind=conference — author_is_me
     // implicit false, no source).
@@ -277,7 +271,7 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
 
     const updated = await markStandalone(u.id, ev.id, "10.20.30.40", "ua-test");
     expect(updated.id).toBe(ev.id);
-    // Plan 02.1-28: gameId column gone; standalone events are guaranteed
+    // The gameId column is gone; standalone events are guaranteed
     // junction-empty by the conflict guard (verified separately below).
     const meta = updated.metadata as { triage?: { standalone?: unknown } };
     expect(meta.triage?.standalone).toBe(true);
@@ -295,12 +289,12 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
     expect(audits[0]!.userAgent).toBe("ua-test");
   });
 
-  it("Plan 02.1-28 (UAT-NOTES.md §4.24.C): markStandalone on event with attached games throws AppError 422 'standalone_conflicts_with_game' (replaces Plan 02.1-24 silent-detach behavior)", async () => {
-    // Plan 02.1-28 changes the contract from Plan 02.1-24's "silently
-    // detach + mark standalone" to "reject 422 — user must detach first".
+  it("markStandalone on event with attached games throws AppError 422 'standalone_conflicts_with_game'", async () => {
+    // The contract is "reject 422 — user must detach first" (replacing
+    // an earlier "silently detach + mark standalone" approach).
     // Rationale: silent detach was the wrong UX because the user could
-    // miss that a game was attached; the 422 + UI-hidden affordance
-    // (Plan 02.1-32) is defense-in-depth + user-honest.
+    // miss that a game was attached; the 422 + UI-hidden affordance is
+    // defense-in-depth + user-honest.
     const uniqId = Math.random().toString(36).slice(2, 10);
     const u = await seedUserDirectly({ email: `standalone2-${uniqId}@test.local` });
     const gameId = uuidv7();
@@ -345,7 +339,7 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
     expect(md?.triage?.standalone).toBeUndefined();
   });
 
-  it("Plan 02.1-24: cross-tenant markStandalone throws NotFoundError (404, never 403); no audit row written", async () => {
+  it("cross-tenant markStandalone throws NotFoundError (404, never 403); no audit row written", async () => {
     const userA = await seedUserDirectly({ email: "standalone3a@test.local" });
     const userB = await seedUserDirectly({ email: "standalone3b@test.local" });
     const evA = await createEvent(
@@ -385,7 +379,7 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
     expect(aMeta?.triage?.standalone).toBeUndefined();
   });
 
-  it("Plan 02.1-24: unmarkStandalone clears metadata.triage.standalone=false + writes event.unmarked_standalone audit", async () => {
+  it("unmarkStandalone clears metadata.triage.standalone=false + writes event.unmarked_standalone audit", async () => {
     const u = await seedUserDirectly({ email: "standalone4@test.local" });
     const ev = await createEvent(
       u.id,
@@ -410,7 +404,7 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
     expect(audits.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("Plan 02.1-24: idempotency — markStandalone twice in a row both succeed and both write fresh audit rows", async () => {
+  it("idempotency — markStandalone twice in a row both succeed and both write fresh audit rows", async () => {
     const u = await seedUserDirectly({ email: "standalone5@test.local" });
     const ev = await createEvent(
       u.id,
@@ -436,10 +430,10 @@ describe("Plan 02.1-24 — markStandalone + unmarkStandalone", () => {
   });
 });
 
-// Plan 02.1-24 — PATCH /api/events/:id/mark-standalone + /unmark-standalone
-// HTTP boundary. Mirrors the Plan 02.1-06 dismiss-inbox / restore HTTP tests.
-describe("Plan 02.1-24: PATCH /api/events/:id/mark-standalone + unmark-standalone HTTP boundary", () => {
-  it("Plan 02.1-24: PATCH /api/events/:id/mark-standalone returns 200 with metadata.triage.standalone=true", async () => {
+// PATCH /api/events/:id/mark-standalone + /unmark-standalone HTTP
+// boundary. Mirrors the dismiss-inbox / restore HTTP tests.
+describe("PATCH /api/events/:id/mark-standalone + unmark-standalone HTTP boundary", () => {
+  it("PATCH /api/events/:id/mark-standalone returns 200 with metadata.triage.standalone=true", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-standalone-1@test.local" });
@@ -464,13 +458,13 @@ describe("Plan 02.1-24: PATCH /api/events/:id/mark-standalone + unmark-standalon
       metadata: { triage?: { standalone?: boolean } };
     };
     expect(body.id).toBe(ev.id);
-    // Plan 02.1-28: gameId column gone; standalone events have ZERO junction
+    // The gameId column is gone; standalone events have ZERO junction
     // rows (the conflict guard refuses to standalone an attached event).
     expect(body.gameIds).toEqual([]);
     expect(body.metadata.triage?.standalone).toBe(true);
   });
 
-  it("Plan 02.1-24: PATCH /api/events/:id/mark-standalone cross-tenant returns 404 not_found (no forbidden/permission leak)", async () => {
+  it("PATCH /api/events/:id/mark-standalone cross-tenant returns 404 not_found (no forbidden/permission leak)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const userA = await seedUserDirectly({ email: "http-standalone-2a@test.local" });
@@ -495,7 +489,7 @@ describe("Plan 02.1-24: PATCH /api/events/:id/mark-standalone + unmark-standalon
     expect(JSON.stringify(body)).not.toMatch(/forbidden|permission/i);
   });
 
-  it("Plan 02.1-24: PATCH /api/events/:id/unmark-standalone returns 200 with metadata.triage.standalone=false", async () => {
+  it("PATCH /api/events/:id/unmark-standalone returns 200 with metadata.triage.standalone=false", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-standalone-3@test.local" });
@@ -524,19 +518,18 @@ describe("Plan 02.1-24: PATCH /api/events/:id/mark-standalone + unmark-standalon
 });
 
 /**
- * Plan 02.1-28 (UAT-NOTES.md §4.24.C — standalone↔game mutual exclusion) —
- * standalone conflict guard at the service layer.
+ * Standalone conflict guard at the service layer.
  *
  * markStandalone REJECTS attached events; attachEventToGames(non-empty)
  * REJECTS standalone events. AppError 'standalone_conflicts_with_game'
- * (422). The UI (Plan 02.1-32) hides the conflicting affordances; this
- * service-layer guard is defense-in-depth.
+ * (422). The UI hides the conflicting affordances; this service-layer
+ * guard is defense-in-depth.
  */
-describe("Plan 02.1-28 — standalone conflict guard (mutual exclusion)", () => {
-  // Parallel-executor email-uniqueness coordination (Plan 02.1-17 pattern):
+describe("standalone conflict guard (mutual exclusion)", () => {
+  // Parallel-executor email-uniqueness coordination:
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 02.1-28: markStandalone on event with attached games throws AppError 422 'standalone_conflicts_with_game'; metadata + junction unchanged", async () => {
+  it("markStandalone on event with attached games throws AppError 422 'standalone_conflicts_with_game'; metadata + junction unchanged", async () => {
     const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
     const u = await seedUserDirectly({ email: `inbox28-1-${uniq()}@test.local` });
     const gA = uuidv7();
@@ -586,7 +579,7 @@ describe("Plan 02.1-28 — standalone conflict guard (mutual exclusion)", () => 
     expect(audits).toHaveLength(0);
   });
 
-  it("Plan 02.1-28: attachEventToGames(non-empty) on standalone event throws AppError 422 'standalone_conflicts_with_game'; junction unchanged", async () => {
+  it("attachEventToGames(non-empty) on standalone event throws AppError 422 'standalone_conflicts_with_game'; junction unchanged", async () => {
     const { attachEventToGames: attach28 } =
       await import("../../src/lib/server/services/events.js");
     const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
@@ -623,12 +616,13 @@ describe("Plan 02.1-28 — standalone conflict guard (mutual exclusion)", () => 
     expect(junction).toHaveLength(0);
   });
 
-  it("Plan 02.1-28: attachEventToGames([]) on standalone event SUCCEEDS — empty target set is the no-op detach path", async () => {
+  it("attachEventToGames([]) on standalone event SUCCEEDS — empty target set is the no-op detach path", async () => {
     // The mutual-exclusion guard only fires for NON-EMPTY gameIds. Empty
-    // gameIds is the "move to inbox" affordance; calling it on a standalone
-    // event is a no-op (zero junction rows + zero added/removed → zero
-    // audit rows). This is the path Plan 02.1-32 wires up to "I changed
-    // my mind, this isn't standalone after all" (followed by an explicit
+    // gameIds is the "move to inbox" affordance; calling it on a
+    // standalone event is a no-op (zero junction rows + zero
+    // added/removed → zero audit rows). This is the path the UI wires
+    // up to "I changed my mind, this isn't standalone after all"
+    // (followed by an explicit
     // unmarkStandalone).
     const { attachEventToGames: attach28 } =
       await import("../../src/lib/server/services/events.js");

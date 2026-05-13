@@ -1,14 +1,13 @@
-// Phase 03.0 Plan 12 — /sources/new + createSource backfill-window wiring.
+// /sources/new + createSource backfill-window wiring.
 //
-// The BackfillPicker (Plan 12 Task 2) submits a `backfill_window` field
-// alongside the existing /api/sources POST body. createSource (services/
+// The BackfillPicker submits a `backfill_window` field alongside the
+// existing /api/sources POST body. createSource (services/
 // data-sources.ts) accepts the new optional `backfillWindow` param and,
 // for kind=youtube_channel + autoImport=true sources, enqueues a
 // YOUTUBE_CHANNEL_CONTEXT_BACKFILL job carrying the window. The handler
-// ($lib/sources/youtube/server/handlers/channel-context-backfill.ts —
-// pre-Phase 03.0.1 Plan 05 path:
-// worker/handlers/youtube-channel-context-backfill.ts) reads the
-// job.data.backfillWindow field — the contract is already in place.
+// ($lib/sources/youtube/server/handlers/channel-context-backfill.ts)
+// reads the job.data.backfillWindow field — the contract is already in
+// place.
 //
 // We mock pg-boss the same way tests/integration/ingest.test.ts does
 // (vi.mock("queue-client") with sentJobs accumulator). The mock is hoisted
@@ -45,7 +44,7 @@ import { db } from "../../src/lib/server/db/client.js";
 import { dataSources } from "../../src/lib/server/db/schema/data-sources.js";
 import { seedUserDirectly } from "./helpers.js";
 
-describe("Plan 03.0-12 — createSource backfillWindow → YOUTUBE_CHANNEL_CONTEXT_BACKFILL", () => {
+describe("createSource backfillWindow → YOUTUBE_CHANNEL_CONTEXT_BACKFILL", () => {
   beforeEach(() => {
     sentJobs.length = 0;
   });

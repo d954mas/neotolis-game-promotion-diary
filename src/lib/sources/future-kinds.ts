@@ -1,14 +1,15 @@
-// Future-kinds host hint — Phase 03.0.1 RESEARCH.md § "Pattern 3 SOTA divergence callout".
+// Future-kinds host hint.
 //
-// After Plan 06 moves URL detection into per-adapter parseUrl(url) (D-15
-// first-match-wins iteration), no Reddit adapter exists yet → parseAnyUrl
-// would return { kind: "unsupported" } for reddit.com URLs and the UI
-// would lose the friendly "Reddit ingest arrives in Phase 3" message.
+// URL detection is delegated to per-adapter parseUrl(url) via the registry
+// (first-match-wins iteration). When no adapter matches (e.g. reddit.com
+// has no Reddit adapter wired yet), parseAnyUrl returns
+// { kind: "unsupported" } and the UI would lose context that we recognised
+// the host but can't yet ingest from it.
 //
 // services/ingest.ts uses this map AFTER parseAnyUrl returns
 // unsupported to surface a friendly inline-info AppError(422,
-// 'reddit_pending_phase3') for hosts on the curated future-kinds list.
-// Map entries shrink as adapters land (Phase 03.1 removes the reddit_post entry).
+// 'reddit_not_yet_supported') for hosts on the curated future-kinds list.
+// Map entries shrink as adapters land.
 import type { EventKind } from "./adapter.js";
 
 const FUTURE_KIND_HOSTS = new Map<string, EventKind>([

@@ -1,60 +1,44 @@
-// Events HTTP routes (Plan 02-08, extended in Plan 02.1-06; Plan 02.1-14
-// gap closure adds restore; Plan 02.1-17 adds preview-url + url-required-for-
-// youtube superRefine + authorIsMe in create/update schemas; Plan 02.1-28
-// switches to the M:N event_games junction).
+// Events HTTP routes.
 //
-// Routes (Phase 2.1 unified-events shape):
-//   POST   /api/events                         — createEvent (free-form; D-09 /events/new)
-//   POST   /api/events/preview-url             — enrichFromUrl (Plan 02.1-17; no DB write)
-//   GET    /api/events                         — listFeedPage (FEED-01 chronological pool)
-//   GET    /api/events/deleted                 — listDeletedEvents (Plan 02.1-14 gap closure)
+// Routes:
+//   POST   /api/events                         — createEvent
+//   POST   /api/events/preview-url             — enrichFromUrl (no DB write)
+//   GET    /api/events                         — listFeedPage (chronological pool)
+//   GET    /api/events/deleted                 — listDeletedEvents
 //   GET    /api/events/:id                     — getEventById
 //   PATCH  /api/events/:id                     — updateEvent
 //   DELETE /api/events/:id                     — softDeleteEvent
-//   PATCH  /api/events/:id/attach              — attachEventToGames (Plan 02.1-28 — M:N)
-//   PATCH  /api/events/:id/dismiss-inbox       — dismissFromInbox (INBOX-01)
-//   PATCH  /api/events/:id/restore             — restoreEvent (Plan 02.1-14 gap closure)
+//   PATCH  /api/events/:id/attach              — attachEventToGames (M:N)
+//   PATCH  /api/events/:id/dismiss-inbox       — dismissFromInbox
+//   PATCH  /api/events/:id/restore             — restoreEvent
 //
-// Plan 02.1-28 contract: createEventSchema and attachSchema accept BOTH
-// the canonical {gameIds: string[]} shape AND the deprecated singular
-// {gameId: string | null} alias for one round of UAT. Plan 02.1-32
-// retires the alias on the UI side. The route's transform normalizes
-// to gameIds before calling the service.
+// createEventSchema and attachSchema accept BOTH the canonical
+// {gameIds: string[]} shape AND the deprecated singular
+// {gameId: string | null} alias. The route's transform normalizes to
+// gameIds before calling the service.
 //
-// Plan 02.1-17 deferral: enrichment does NOT auto-fill `occurredAt` in 2.1.
-// YouTube oEmbed has no `published_at`; HTML scraping is fragile; YouTube
-// Data API requires KEYS-01 (Phase 3). Client (Plan 02.1-18 /events/new)
-// shows occurredAt = today (existing default) and lets the user override.
+// Enrichment does NOT auto-fill `occurredAt`. YouTube oEmbed has no
+// `published_at`; HTML scraping is fragile. Client shows occurredAt =
+// today (existing default) and lets the user override.
 //
-// Hono path-precedence note: GET /events/deleted is registered BEFORE
+// Hono path-precedence: GET /events/deleted is registered BEFORE
 // GET /events/:id because Hono matches the first declaration at a given depth.
 // Without this ordering, the parametric `:id` route would consume the literal
 // `deleted` segment and the deleted-events list endpoint would never fire.
 //
-// `/api/games/:gameId/events` and `/api/games/:gameId/timeline` retired here:
-//   - The per-game curated view now lives on /api/games/:gameId/events in
-//     `routes/games.ts` calling `listEventsForGame` (replaces the Phase 2
-//     timeline merge — events table is unified per Plan 02.1-01/05).
-//   - `/api/games/:gameId/timeline` is REMOVED (Phase 2 D-37 timeline merge
-//     retired with `listTimelineForGame`).
-//
 // `kind` mirrors the unified-events pgEnum (eventKindEnum from
-// src/lib/server/db/schema/events.ts) — `youtube_video` / `reddit_post` are
-// added (formerly tracked_youtube_videos rows). Service-layer
-// `assertValidKind` is the second layer (defense-in-depth).
+// src/lib/server/db/schema/events.ts). Service-layer `assertValidKind` is
+// the second layer (defense-in-depth).
 //
 // AppError code mapping is automatic via `mapErr`:
 //   - createEvent / updateEvent kind mismatch → AppError 'validation_failed' 422
-//   - createEvent gameId cross-tenant → NotFoundError 404 (Pitfall 4)
+//   - createEvent gameId cross-tenant → NotFoundError 404
 //   - dismissFromInbox on attached event → AppError 'not_in_inbox' 422
 //   - attachToGame cross-tenant gameId → NotFoundError 404
-//   - cross-tenant /:id access → NotFoundError 404 (PRIV-01)
+//   - cross-tenant /:id access → NotFoundError 404
 //
-// Plan 02.1-19 contract change: GET /api/events query-string switches from
-// ?attached=true|false&game=A&game=B to ?show=any|inbox|specific&game=A&game=B.
-// The ?attached parameter is no longer recognized. Pre-launch destructive
-// change (CONTEXT D-04: zero self-host deployments). UI consumers updated
-// in lockstep — see /feed/+page.server.ts and FiltersSheet.svelte.
+// GET /api/events query-string uses ?show=any|inbox|standalone|specific.
+// The ?attached parameter is not recognized.
 
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
@@ -98,14 +82,13 @@ const eventKindEnum = z.enum([
 ]);
 
 /**
- * Plan 02.1-17 — kind=youtube_video MUST carry a parseable YouTube url.
- * Other kinds accept null/undefined url (free-form events; conferences,
- * posts, etc.). Service-layer createEvent is the second layer of defense
- * (opportunistic external_id derivation); this superRefine is the
- * load-bearing validator.
+ * kind=youtube_video MUST carry a parseable YouTube url. Other kinds accept
+ * null/undefined url (free-form events; conferences, posts, etc.). Service-
+ * layer createEvent is the second layer of defense (opportunistic external_id
+ * derivation); this superRefine is the load-bearing validator.
  *
  * Shared between createEventSchema and updateEventSchema so a kind-change
- * PATCH that drops the url tripwires here too (plan-checker round-2 P0).
+ * PATCH that drops the url tripwires here too.
  */
 function youtubeUrlRequired(
   obj: { kind?: string | undefined; url?: string | null | undefined },
@@ -132,9 +115,8 @@ function youtubeUrlRequired(
 
 const createEventSchema = z
   .object({
-    // Plan 02.1-28: gameId is the DEPRECATED back-compat alias for one round
-    // of UAT (Plan 02.1-32 retires the alias on the UI side). gameIds is
-    // canonical. The transform below normalizes singular → plural.
+    // gameId is the DEPRECATED back-compat alias; gameIds is canonical.
+    // The transform below normalizes singular → plural.
     gameId: z.string().min(1).nullable().optional(),
     gameIds: z.array(z.string().min(1)).optional(),
     kind: eventKindEnum,
@@ -143,18 +125,18 @@ const createEventSchema = z
     url: z.string().url().nullable().optional(),
     notes: z.string().max(5000).nullable().optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
-    // Plan 02.1-17 — authorIsMe round-trips through the schema so the
-    // /events/new client can flip "Author: me / not me" at create time.
-    // Service defaults to false when omitted (preserves existing semantics).
+    // authorIsMe round-trips through the schema so /events/new can flip
+    // "Author: me / not me" at create time. Service defaults to false when
+    // omitted (preserves existing semantics).
     authorIsMe: z.boolean().optional(),
   })
   .superRefine(youtubeUrlRequired)
   .transform((obj) => {
-    // Plan 02.1-28: normalize back-compat alias. When gameIds is absent
-    // and gameId is supplied, internalize gameId → gameIds (single-element
-    // array, or empty array if gameId is null). gameIds wins when both are
-    // supplied (UI consumers migrating to the new shape are expected to
-    // send only gameIds; the alias path is for in-flight legacy callers).
+    // Normalize back-compat alias. When gameIds is absent and gameId is
+    // supplied, internalize gameId → gameIds (single-element array, or
+    // empty array if gameId is null). gameIds wins when both are supplied
+    // (UI consumers migrating to the new shape are expected to send only
+    // gameIds; the alias path is for in-flight legacy callers).
     const out: typeof obj & { gameIds: string[] } = { ...obj, gameIds: [] };
     if (obj.gameIds !== undefined) {
       out.gameIds = obj.gameIds;
@@ -165,14 +147,14 @@ const createEventSchema = z
     return out;
   });
 
-// Plan 02.1-37 (UAT-NOTES.md §5.11): updateEventSchema does NOT call
-// .superRefine(youtubeUrlRequired). The create-side superRefine validates
-// the full body (which IS the full state on create), but on a PATCH the
-// body is partial — a `{url: null}` body with no `kind` field would slip
-// past the body-only check on a row whose existing kind is youtube_video.
-// The merged-state validator lives in the service layer (updateEvent in
-// src/lib/server/services/events.ts), which sees both the input AND the
-// existing row, mirroring the existing assertGameOwnedByUser pattern.
+// updateEventSchema does NOT call .superRefine(youtubeUrlRequired). The
+// create-side superRefine validates the full body (which IS the full state
+// on create), but on a PATCH the body is partial — a `{url: null}` body
+// with no `kind` field would slip past the body-only check on a row whose
+// existing kind is youtube_video. The merged-state validator lives in the
+// service layer (updateEvent in src/lib/server/services/events.ts), which
+// sees both the input AND the existing row, mirroring the existing
+// assertGameOwnedByUser pattern.
 const updateEventSchema = z
   .object({
     kind: eventKindEnum.optional(),
@@ -180,13 +162,12 @@ const updateEventSchema = z
     title: z.string().min(1).max(500).optional(),
     url: z.string().url().nullable().optional(),
     notes: z.string().max(5000).nullable().optional(),
-    // Plan 02.1-17 — authorIsMe is also editable; the /events/[id]/edit form
-    // (Plan 02.1-18) needs to flip the discriminator without re-creating the
-    // event.
+    // authorIsMe is editable; the /events/[id]/edit form flips the
+    // discriminator without re-creating the event.
     authorIsMe: z.boolean().optional(),
-    // Plan 02.1-28: gameIds patch on the edit path. Optional — omitting
-    // leaves the junction unchanged; supplying replaces (set semantics
-    // via attachEventToGames).
+    // gameIds patch on the edit path. Optional — omitting leaves the
+    // junction unchanged; supplying replaces (set semantics via
+    // attachEventToGames).
     gameIds: z.array(z.string().min(1)).optional(),
   })
   .refine((obj) => Object.keys(obj).length > 0, {
@@ -194,22 +175,19 @@ const updateEventSchema = z
   });
 // NOTE: NO .superRefine(youtubeUrlRequired) here — moved to service layer.
 
-// Feed query schema (RESEARCH §3.2 + Plan 02.1-15 multi-select). Multi-value
-// axes (source / kind / game) are NOT validated here because Hono's
-// `c.req.queries(name)` returns string[] for repeated params and the zod
-// validator only sees the FIRST value of a repeated key. The multi-value
-// axes are read separately via `c.req.queries(...)` below; the schema only
-// enforces the single-value back-compat surface (one ?source=, one ?kind=,
-// one ?game=). Defense-in-depth on the kind values lives in-handler against
+// Feed query schema. Multi-value axes (source / kind / game) are NOT
+// validated here because Hono's `c.req.queries(name)` returns string[] for
+// repeated params and the zod validator only sees the FIRST value of a
+// repeated key. The multi-value axes are read separately via
+// `c.req.queries(...)` below; the schema only enforces the single-value
+// back-compat surface (one ?source=, one ?kind=, one ?game=).
+// Defense-in-depth on the kind values lives in-handler against
 // VALID_EVENT_KINDS.
 //
 // Booleans arrive as the strings "true"|"false" because URL query params are
 // stringly-typed; we coerce to real booleans before calling listFeedPage.
 const feedQuerySchema = z.object({
   cursor: z.string().optional(),
-  // Plan 02.1-19: ?show replaces ?attached. ?attached is no longer recognized
-  // (pre-launch destructive contract change — CONTEXT D-04).
-  // Plan 02.1-24: adds 'standalone' branch for the new triage state.
   show: z.enum(["any", "inbox", "standalone", "specific"]).optional(),
   authorIsMe: z.enum(["true", "false"]).optional(),
   from: z.string().optional(),
@@ -217,11 +195,10 @@ const feedQuerySchema = z.object({
   all: z.enum(["1", "0"]).optional(),
 });
 
-// Plan 02.1-28: PATCH /api/events/:id/attach accepts BOTH the canonical
+// PATCH /api/events/:id/attach accepts BOTH the canonical
 // {gameIds: string[]} shape AND the deprecated {gameId: string | null}
-// alias for one round of UAT. The union + transform pattern below
-// normalizes either shape into a `{gameIds: string[]}` payload before
-// the handler reads it. Plan 02.1-32 retires the alias on the UI side.
+// alias. The union + transform pattern below normalizes either shape into
+// a `{gameIds: string[]}` payload before the handler reads it.
 const attachSchema = z.union([
   z.object({ gameIds: z.array(z.string().min(1)) }),
   z
@@ -229,10 +206,10 @@ const attachSchema = z.union([
     .transform((o) => ({ gameIds: o.gameId === null ? [] : [o.gameId] })),
 ]);
 
-// Plan 02.1-17 — read-only enrichment endpoint. Pure URL parse + oEmbed fetch,
-// no DB write. The /events/new client (Plan 02.1-18) calls this before the
-// user submits the form so they see auto-filled title + thumbnail + external_id
-// without committing the row.
+// Read-only enrichment endpoint. Pure URL parse + oEmbed fetch, no DB
+// write. The /events/new client calls this before the user submits the
+// form so they see auto-filled title + thumbnail + external_id without
+// committing the row.
 const previewUrlSchema = z.object({
   url: z.string().url(),
 });
@@ -255,9 +232,9 @@ eventsRoutes.post(
         ctx.ipAddress,
         ctx.userAgent ?? undefined,
       );
-      // Plan 02.1-28: load the freshly-inserted junction rows for the
-      // response DTO. The createEvent service already wrote them in the
-      // same call, so this is a deterministic single-event lookup.
+      // Load the freshly-inserted junction rows for the response DTO. The
+      // createEvent service already wrote them in the same call, so this
+      // is a deterministic single-event lookup.
       const gameIds = await loadGameIdsForEvent(ctx.userId, ev.id);
       return c.json(toEventDto(ev, gameIds), 201);
     } catch (err) {
@@ -275,17 +252,17 @@ eventsRoutes.get(
   }),
   async (c) => {
     const q = c.req.valid("query");
-    // Plan 02.1-15: multi-value axes via Hono's c.req.queries() — repeated
+    // Multi-value axes via Hono's c.req.queries() — repeated
     // ?source=A&source=B query params produce string[]. Single-param /
     // back-compat callers receive a one-element array which the service-layer
     // pushAxis helper collapses to eq() (zero query-plan regression).
     const sourceList = c.req.queries("source") ?? undefined;
     const kindList = c.req.queries("kind") as EventKind[] | undefined;
     const gameList = c.req.queries("game") ?? [];
-    // Defense-in-depth (Pitfall 6): validate each kind value against the
-    // closed enum BEFORE the service. Service-level assertValidKind is the
-    // second layer; the route-layer 422 here keeps the failure mode crisp
-    // for malformed multi-value URLs.
+    // Defense-in-depth: validate each kind value against the closed enum
+    // BEFORE the service. Service-level assertValidKind is the second
+    // layer; the route-layer 422 here keeps the failure mode crisp for
+    // malformed multi-value URLs.
     if (kindList) {
       for (const k of kindList) {
         if (!(VALID_EVENT_KINDS as readonly string[]).includes(k)) {
@@ -296,11 +273,9 @@ eventsRoutes.get(
         }
       }
     }
-    // Plan 02.1-19: discriminated show axis replaces attached + game pair.
-    // A bare ?game= without ?show=specific is ignored — the UI never produces
-    // that combo.
-    // Plan 02.1-24: adds 'standalone' branch (game_id IS NULL AND
-    // metadata.triage.standalone='true').
+    // Discriminated show axis (any | inbox | standalone | specific). A bare
+    // ?game= without ?show=specific is ignored — the UI never produces that
+    // combo. 'standalone' = game_id IS NULL AND metadata.triage.standalone='true'.
     const showParam = q.show ?? "any";
     const showFilter: ShowFilter =
       showParam === "inbox"
@@ -324,15 +299,13 @@ eventsRoutes.get(
         },
         q.cursor ?? null,
       );
-      // Plan 02.1-28: batch-load junction rows for every event in the
-      // page so each EventDto carries its gameIds[] without an N+1
-      // lookup. Two queries total: one for events (page.rows above),
-      // one for the junction (mapEventsToDtos).
+      // Batch-load junction rows for every event in the page so each
+      // EventDto carries its gameIds[] without an N+1 lookup. Two queries
+      // total: one for events (page.rows above), one for the junction
+      // (mapEventsToDtos).
       const dtos = await mapEventsToDtos(c.var.userId, page.rows);
-      // Phase 03.0.3 P2 — adapter-driven feed enrichment. Same loop as the
-      // /feed SSR loader; closes issue #29 Part 2 (cursor-paginated batches
-      // pre-fix dropped stats + channelTitle on every card past the first
-      // SSR batch).
+      // Adapter-driven feed enrichment. Same loop as the /feed SSR loader
+      // so cursor-paginated batches carry stats + channelTitle.
       for (const adapter of allAdapters) {
         if (adapter.enrichFeedDtos) {
           await adapter.enrichFeedDtos(c.var.userId, dtos);
@@ -348,12 +321,11 @@ eventsRoutes.get(
   },
 );
 
-// Plan 02.1-17 — POST /api/events/preview-url. Read-only enrichment; no DB
-// write. Tenant-scoped (mounted under tenantScope) so anonymous → 401, but
-// no tenant-owned data is read (the URL is the only input). HONO PATH-
-// PRECEDENCE: register BEFORE any parametric POST `/events/:id/...` route
-// (none currently exist for POST, but Plan 02.1-14 precedent applies — keep
-// literals first as a discipline).
+// POST /api/events/preview-url. Read-only enrichment; no DB write. Tenant-
+// scoped (mounted under tenantScope) so anonymous → 401, but no tenant-
+// owned data is read (the URL is the only input). HONO PATH-PRECEDENCE:
+// register BEFORE any parametric POST `/events/:id/...` route — keep
+// literals first as a discipline.
 eventsRoutes.post(
   "/events/preview-url",
   zValidator("json", previewUrlSchema, (r, c) => {
@@ -369,7 +341,7 @@ eventsRoutes.post(
         externalId: enriched.externalId,
         title: enriched.title,
         thumbnailUrl: enriched.thumbnailUrl,
-        // ISO string when set; null in 2.1 (Phase 3 fills via YouTube Data API key).
+        // ISO string when set; null when oEmbed has no published_at.
         occurredAt: enriched.occurredAt ? enriched.occurredAt.toISOString() : null,
       });
     } catch (err) {
@@ -378,25 +350,24 @@ eventsRoutes.post(
   },
 );
 
-// Plan 02.1-14: must register BEFORE GET /events/:id because Hono matches
-// the first registration at a given depth. The literal "deleted" segment
-// would otherwise be consumed by the parametric `:id`.
+// Must register BEFORE GET /events/:id because Hono matches the first
+// registration at a given depth. The literal "deleted" segment would
+// otherwise be consumed by the parametric `:id`.
 eventsRoutes.get("/events/deleted", async (c) => {
   try {
     const rows = await listDeletedEvents(c.var.userId);
-    // Plan 02.1-28: batch-load gameIds for the deleted-event list. Soft-
-    // deleted events keep their junction rows (only the events.deletedAt
-    // column carries the deletion marker; the junction has no deletedAt
-    // column by Plan 02.1-27 design), so the DTO will surface the gameIds
-    // they were attached to at delete time.
+    // Batch-load gameIds for the deleted-event list. Soft-deleted events
+    // keep their junction rows (only the events.deletedAt column carries
+    // the deletion marker; the junction has no deletedAt column by design),
+    // so the DTO will surface the gameIds they were attached to at delete
+    // time.
     const dtos = await mapEventsToDtos(c.var.userId, rows);
-    // Phase 03.0.3 P2 — deliberately NOT calling adapter.enrichFeedDtos
-    // here. DeletedEventsPanel.svelte (`src/lib/components/DeletedEventsPanel.svelte`)
-    // renders soft-deleted events with a compact KindIcon + strikethrough-
-    // title view — no stats line, no channel chip. Running the enrichment
-    // query would be wasted I/O. If a future redesign of DeletedEventsPanel
-    // adds the stats/channel chips back, add the same `for-of allAdapters`
-    // loop the GET /api/events handler uses (see ~25 lines up).
+    // Deliberately NOT calling adapter.enrichFeedDtos here.
+    // DeletedEventsPanel.svelte renders soft-deleted events with a compact
+    // KindIcon + strikethrough-title view — no stats line, no channel chip.
+    // Running the enrichment query would be wasted I/O. If a future redesign
+    // of DeletedEventsPanel adds the stats/channel chips back, add the same
+    // `for-of allAdapters` loop the GET /api/events handler uses (above).
     return c.json({ rows: dtos });
   } catch (err) {
     return mapErr(c, err, "GET /api/events/deleted");
@@ -406,8 +377,7 @@ eventsRoutes.get("/events/deleted", async (c) => {
 eventsRoutes.get("/events/:id", async (c) => {
   try {
     const ev = await getEventById(c.var.userId, c.req.param("id"));
-    // Plan 02.1-28: single-event detail loads its gameIds via the
-    // single-event helper.
+    // Single-event detail loads its gameIds via the single-event helper.
     const gameIds = await loadGameIdsForEvent(c.var.userId, ev.id);
     return c.json(toEventDto(ev, gameIds));
   } catch (err) {
@@ -432,10 +402,9 @@ eventsRoutes.patch(
         ctx.ipAddress,
         ctx.userAgent ?? undefined,
       );
-      // Plan 02.1-28: load junction rows AFTER the patch. updateEvent
-      // may have called attachEventToGames internally (when the body
-      // included gameIds), so the post-patch junction state is the
-      // correct source of truth.
+      // Load junction rows AFTER the patch. updateEvent may have called
+      // attachEventToGames internally (when the body included gameIds),
+      // so the post-patch junction state is the correct source of truth.
       const gameIds = await loadGameIdsForEvent(ctx.userId, ev.id);
       return c.json(toEventDto(ev, gameIds));
     } catch (err) {
@@ -463,9 +432,9 @@ eventsRoutes.patch(
   }),
   async (c) => {
     const ctx = getAuditContext(c);
-    // Plan 02.1-28: the schema's union+transform guarantees `body.gameIds`
-    // is a string[] regardless of whether the caller sent {gameIds: [...]}
-    // or the deprecated {gameId: X | null} alias.
+    // The schema's union+transform guarantees `body.gameIds` is a string[]
+    // regardless of whether the caller sent {gameIds: [...]} or the
+    // deprecated {gameId: X | null} alias.
     const body = c.req.valid("json");
     try {
       const ev = await attachEventToGames(
@@ -475,7 +444,7 @@ eventsRoutes.patch(
         ctx.ipAddress,
         ctx.userAgent ?? undefined,
       );
-      // Plan 02.1-28: response carries the post-attach junction state.
+      // Response carries the post-attach junction state.
       const gameIds = await loadGameIdsForEvent(ctx.userId, ev.id);
       return c.json(toEventDto(ev, gameIds));
     } catch (err) {
@@ -500,10 +469,10 @@ eventsRoutes.patch("/events/:id/dismiss-inbox", async (c) => {
   }
 });
 
-// Plan 02.1-14 (gap closure) — restore a soft-deleted event. Cross-tenant /
-// never-deleted / past-retention all return 404 by construction (the service
-// throws NotFoundError for all three cases; mapErr translates to
-// {error: "not_found"} status 404, never 403 — PRIV-01 / CLAUDE.md rule 2).
+// Restore a soft-deleted event. Cross-tenant / never-deleted /
+// past-retention all return 404 by construction (the service throws
+// NotFoundError for all three cases; mapErr translates to
+// {error: "not_found"} status 404, never 403).
 eventsRoutes.patch("/events/:id/restore", async (c) => {
   const ctx = getAuditContext(c);
   try {
@@ -520,13 +489,10 @@ eventsRoutes.patch("/events/:id/restore", async (c) => {
   }
 });
 
-// Plan 02.1-24 (round-3 gap closure — UAT-NOTES.md §6.1-redesign) —
-// markStandalone + unmarkStandalone triage routes. The user explicitly asked
-// for an inline "Mark standalone" affordance on inbox cards (the explicit
-// exception to Plan 02.1-18's read-only contract). Cross-tenant returns 404
-// by construction (the service's UPDATE WHERE clause requires the userId
-// match; B's session never satisfies it); mapErr translates NotFoundError to
-// {error: "not_found"} status 404 (PRIV-01 / CLAUDE.md rule 2).
+// markStandalone + unmarkStandalone triage routes. Inline "Mark standalone"
+// affordance on inbox cards. Cross-tenant returns 404 by construction (the
+// service's UPDATE WHERE clause requires the userId match); mapErr
+// translates NotFoundError to {error: "not_found"} status 404.
 eventsRoutes.patch("/events/:id/mark-standalone", async (c) => {
   const ctx = getAuditContext(c);
   try {
@@ -559,27 +525,25 @@ eventsRoutes.patch("/events/:id/unmark-standalone", async (c) => {
   }
 });
 
-// Phase 3.0 Plan 08 — POST /api/events/:id/refresh-poll. User-side affordance
-// for "refresh this event's stats right now" (CONTEXT D-10). Calls the Plan 04
-// service which enforces the 5-minute cooldown via events.metadata.last_user_
-// refresh_at, gates non-pollable kinds + missing external_id, and enqueues to
-// poll.user with a per-minute singletonKey + priority 10.
+// POST /api/events/:id/refresh-poll. User-side affordance for "refresh
+// this event's stats right now". The service enforces a 5-minute cooldown
+// via events.metadata.last_user_refresh_at, gates non-pollable kinds +
+// missing external_id, and enqueues to youtube.poll.user with a per-minute
+// singletonKey + priority 10.
 //
 // Error mapping (via mapErr — service throws typed errors):
-//   - NotFoundError              → 404 {error: "not_found"}      (PRIV-01 cross-tenant)
-//   - AppError "too_many_refreshes" → 429 + Retry-After header from
-//                                       err.metadata.retryAfterSeconds
-//                                       (UI-SPEC interaction contract: client
-//                                       reads Retry-After to drive the
-//                                       cooldown countdown affordance)
+//   - NotFoundError                     → 404 {error: "not_found"}
+//   - AppError "too_many_refreshes"     → 429 + Retry-After header from
+//                                          err.metadata.retryAfterSeconds
+//                                          (client reads Retry-After to drive
+//                                          the cooldown countdown affordance)
 //   - AppError "event_not_pollable"     → 422
 //   - AppError "event_no_external_id"   → 422
 //
-// On 200 the body is `{enqueued: true, queue: "youtube.poll.user", eventId}`
-// (Phase 03.0.1 Plan 07 per-kind queue rename — was "poll.user").
-// Plan 03.0-11 (RefreshNowButton) consumes this contract: after a 200 it
-// disables the button for 5 minutes; after a 429 it reads Retry-After to
-// drive the same countdown without round-tripping the metadata payload.
+// On 200 the body is `{enqueued: true, queue: "youtube.poll.user", eventId}`.
+// RefreshNowButton consumes this contract: after a 200 it disables the button
+// for 5 minutes; after a 429 it reads Retry-After to drive the same countdown
+// without round-tripping the metadata payload.
 eventsRoutes.post("/events/:id/refresh-poll", async (c) => {
   const ctx = getAuditContext(c);
   try {

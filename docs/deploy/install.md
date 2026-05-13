@@ -851,10 +851,9 @@ memory: "Russian for technical conversations + UAT step-by-step"). Запуск�
 
 ## §7 — FAQ / Pitfalls
 
-A registry of every "if X happens, do Y" rooted in the 12 numbered
-pitfalls from `.planning/phases/02.2-ship-to-prod/02.2-RESEARCH.md`
-"Common Pitfalls" section. If something looks wrong post-deploy, scan
-this section first — there's a high chance it's listed.
+A registry of every "if X happens, do Y" we've hit during deploys. If
+something looks wrong post-deploy, scan this section first — there's a
+high chance it's listed.
 
 ### GHCR image returns 401 on docker pull from a clean machine
 

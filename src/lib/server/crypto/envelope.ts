@@ -1,7 +1,7 @@
-// Envelope encryption (KEK -> DEK -> plaintext) per CONTEXT D-09/D-10/D-11 and
-// RESEARCH.md Pattern 4. AES-256-GCM via Node's built-in `node:crypto` (NEVER a
-// third-party crypto library — see CLAUDE.md "What NOT to Use" for crypto-js,
-// bcrypt/argon2, and KMS SDKs all explicitly excluded).
+// Envelope encryption (KEK -> DEK -> plaintext). AES-256-GCM via Node's
+// built-in `node:crypto` (NEVER a third-party crypto library — see CLAUDE.md
+// "What NOT to Use" for crypto-js, bcrypt/argon2, and KMS SDKs all
+// explicitly excluded).
 //
 // Why envelope: a leaked database without the server's env does not disclose
 // any secret. The KEK is loaded from env at boot (length-checked at 32 bytes
@@ -10,14 +10,14 @@
 // Both wrap and seal are AES-256-GCM with random 12-byte nonces and 16-byte
 // auth tags. Tamper anywhere causes decrypt to throw — no silent corruption.
 //
-// Rotation (D-10): kek_version is recorded on every row. To rotate, load the
-// new KEK as v2, run a background job that calls `rotateDek(row, 2)` on every
+// Rotation: kek_version is recorded on every row. To rotate, load the new
+// KEK as v2, run a background job that calls `rotateDek(row, 2)` on every
 // row where kek_version=1 (re-wraps the DEK only — ciphertext is unchanged
 // and untouched), then drop KEK_V1 from env. Online and reversible.
 //
-// AP-6 anti-pattern explicitly avoided: `loadKek` reads from `env.KEK_VERSIONS`
-// on every call. The KEK is never cached at module scope — that would defeat
-// the env-scrub mitigation in env.ts and prevent rotation hot-swaps.
+// `loadKek` reads from `env.KEK_VERSIONS` on every call. The KEK is never
+// cached at module scope — that would defeat the env-scrub mitigation in
+// env.ts and prevent rotation hot-swaps.
 
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { env } from "../config/env.js";
@@ -40,17 +40,17 @@ export interface EncryptedSecret {
   dekIv: Buffer;
   /** 16-byte GCM authentication tag for the DEK wrap. */
   dekTag: Buffer;
-  /** Which KEK version unwrapped this row. Increments on KEK rotation (D-10). */
+  /** Which KEK version unwrapped this row. Increments on KEK rotation. */
   kekVersion: number;
 }
 
 /**
  * Per-call KEK loader. Reads from `env.KEK_VERSIONS` every time so KEK rotation
  * (Map mutation in env.ts) is picked up immediately and the KEK is never held
- * at module scope (AP-6). Throws a clear `KEK v<n>` error if the requested
- * version is not loaded — proxy for VALIDATION behavior 13 fail-fast (PITFALL
- * P2): if a stored row was encrypted with v2 and the running process only
- * holds v1, decrypt MUST throw before silently corrupting data.
+ * at module scope. Throws a clear `KEK v<n>` error if the requested version
+ * is not loaded — fail-fast: if a stored row was encrypted with v2 and the
+ * running process only holds v1, decrypt MUST throw before silently
+ * corrupting data.
  */
 function loadKek(version: number): Buffer {
   const kek = env.KEK_VERSIONS.get(version);
@@ -66,14 +66,13 @@ function loadKek(version: number): Buffer {
 /**
  * Encrypt a secret with a fresh per-row DEK; wrap the DEK with the current KEK.
  *
- * D-09 random DEK + KEK-wrapped: per-row DEK ensures rotation re-wraps DEK only
- * (D-10) — ciphertext is never re-encrypted, which keeps rotation cheap and
- * online.
+ * Random DEK + KEK-wrapped: per-row DEK ensures rotation re-wraps DEK only —
+ * ciphertext is never re-encrypted, which keeps rotation cheap and online.
  *
  * The DEK Buffer is best-effort wiped (`.fill(0)`) in the `finally` block.
  * V8 strings are immutable so the plaintext argument cannot be wiped here, but
  * keeping the DEK out of long-lived memory closes the most useful attack
- * window for a postmortem heap dump (AP-6).
+ * window for a postmortem heap dump.
  */
 export function encryptSecret(plaintext: string): EncryptedSecret {
   const dek = randomBytes(KEK_BYTES);
@@ -108,7 +107,7 @@ export function encryptSecret(plaintext: string): EncryptedSecret {
       kekVersion,
     };
   } finally {
-    // Best-effort wipe; V8 strings are immutable but Buffers can be zeroed (AP-6).
+    // Best-effort wipe; V8 strings are immutable but Buffers can be zeroed.
     dek.fill(0);
   }
 }
@@ -116,12 +115,12 @@ export function encryptSecret(plaintext: string): EncryptedSecret {
 /**
  * Unwrap the DEK with the row's KEK version; decrypt the secret with the DEK.
  *
- * Throws on auth-tag mismatch (tamper detection — VALIDATION behavior 12). The
- * KEK→DEK auth tag is verified BEFORE the DEK→plaintext step, so a tampered
- * `wrappedDek` or `dekTag` fails first; tampered `secretCt` or `secretTag` fails
- * at the second step. Either way the function throws — never returns garbage.
+ * Throws on auth-tag mismatch (tamper detection). The KEK→DEK auth tag is
+ * verified BEFORE the DEK→plaintext step, so a tampered `wrappedDek` or
+ * `dekTag` fails first; tampered `secretCt` or `secretTag` fails at the
+ * second step. Either way the function throws — never returns garbage.
  *
- * Throws on unknown KEK version (PITFALL P2 fail-fast — VALIDATION behavior 13).
+ * Throws on unknown KEK version (fail-fast).
  */
 export function decryptSecret(s: EncryptedSecret): string {
   const kek = loadKek(s.kekVersion);
@@ -143,7 +142,7 @@ export function decryptSecret(s: EncryptedSecret): string {
 
 /**
  * Rotate the DEK wrap to a new KEK version. Ciphertext is unchanged (only the
- * wrapped DEK is re-wrapped). This is the cheap online rotation per D-10.
+ * wrapped DEK is re-wrapped). This is the cheap online rotation.
  *
  * Returns a new EncryptedSecret where:
  *  - `secretCt`, `secretIv`, `secretTag` are byte-identical to input

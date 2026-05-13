@@ -1,20 +1,19 @@
 <script lang="ts">
   // RenameInline — click-to-edit pattern for the game title on /games/[id].
-  // Closes part of the Phase 2 P0 gap (the other half is AddSteamListingForm).
   //
   // Read mode: a button with the title rendered as <h1>. Click → edit mode.
   // Edit mode: text input + Save name / Discard changes buttons (visible
-  // text labels per UI-SPEC Accessibility Floor delta — no aria-label needed
-  // when the visible label is the accessible name).
+  // text labels — no aria-label needed when the visible label is the
+  // accessible name).
   //
   // Esc on the input fires Discard (matches the visible button); Enter fires
   // Save. Save invokes the parent-supplied onSave callback; on success the
   // component returns to read mode. On error the parent surfaces InlineError.
   //
   // Destructive-cancel context: typed-but-unsaved input is thrown away on
-  // Discard. UI-SPEC reserves m.common_cancel() for non-destructive close;
-  // this component uses the scoped m.game_rename_cta_discard() copy
-  // ("Discard changes") so the affordance is honest.
+  // Discard. m.common_cancel() is reserved for non-destructive close; this
+  // component uses the scoped m.game_rename_cta_discard() copy ("Discard
+  // changes") so the affordance is honest.
 
   import { tick } from "svelte";
   import { m } from "$lib/paraglide/messages.js";

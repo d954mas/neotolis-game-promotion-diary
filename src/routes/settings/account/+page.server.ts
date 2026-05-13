@@ -4,8 +4,8 @@ import { redirect } from "@sveltejs/kit";
 /**
  * /settings/account → 301 redirect to /settings.
  *
- * Phase 02.2 originally split account-management UI (Export + Delete) into
- * a separate `/settings/account` route. UAT feedback: the page was
+ * Account-management UI (Export + Delete) was originally split into a
+ * separate `/settings/account` route. UAT feedback: the page was
  * undiscoverable from `/settings`, and splitting "Account info" from
  * "Account actions" across two URLs confused users.
  *

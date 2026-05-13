@@ -1,4 +1,4 @@
-// Phase 03.0.1 Wave 4 (post-UAT) — fetchEventStats cap-check integration test.
+// fetchEventStats cap-check integration test.
 //
 // createEvent's sync stats-fetch hook must respect the per-user
 // requestsPerDay cap. Pre-fix: a user at 100/100 could paste a new
@@ -169,7 +169,7 @@ describe("createEvent → fetchEventStats cap-check", () => {
   });
 
   it("under cap: writes last_user_refresh_at to event.metadata", async () => {
-    // Phase 03.0.1 Wave 4 — fetchEventStats success path also stamps
+    // fetchEventStats success path also stamps
     // events.metadata.last_user_refresh_at so RefreshNowButton's
     // cooldown gate picks up; without this, immediate post-paste click
     // would re-burn a unit (no cooldown active).

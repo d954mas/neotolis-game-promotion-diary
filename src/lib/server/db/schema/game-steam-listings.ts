@@ -1,21 +1,21 @@
-// game_steam_listings — typed example for the per-store listing pattern (D-06, D-10).
+// game_steam_listings — per-store listing pattern.
 //
 // Multi-listing per game: a publisher's "HADES" entry can have a Demo
 // app_id, a Full app_id, a DLC app_id, and a Soundtrack app_id all
-// attached to the same logical games row. UNIQUE(game_id, app_id) prevents
-// dupes within a game; same Steam appId is allowed across multiple games of
-// the same user (Plan 02.1-27 / UAT-NOTES.md §4.25.J). The constraint is
-// unconditional — soft-deleted-same-game re-add is caught by the
-// service-layer pre-INSERT lookup (Plan 02.1-29 Path B), which surfaces a
-// "restore the soft-deleted listing" UX before the INSERT hits 23505.
+// attached to the same logical games row. UNIQUE(game_id, app_id)
+// prevents dupes within a game; the same Steam appId is allowed across
+// multiple games of the same user. The constraint is unconditional —
+// soft-deleted-same-game re-add is caught by the service-layer
+// pre-INSERT lookup, which surfaces a "restore the soft-deleted
+// listing" UX before the INSERT hits 23505.
 //
 // api_key_id FK -> api_keys_steam.id is the "this listing's wishlist is
-// polled by this Steamworks key" link (D-13). Nullable because P2 ships
-// no polling worker — listings can exist before a key is saved; Phase 3
-// backfills the FK when the user adds a key.
+// polled by this Steamworks key" link. Nullable because no polling
+// worker ships today — listings can exist before a key is saved; a
+// future worker backfills the FK when the user adds a key.
 //
 // raw_appdetails jsonb stores the full Steam appdetails response for
-// forensics + future schema extraction (Phase 6 cache).
+// forensics + future schema extraction.
 
 import { pgTable, text, timestamp, integer, jsonb, unique, index } from "drizzle-orm/pg-core";
 import { user } from "./auth.js";
@@ -37,10 +37,9 @@ export const gameSteamListings = pgTable(
       .references(() => games.id, { onDelete: "cascade" }),
     appId: integer("app_id").notNull(),
     label: text("label").notNull().default(""),
-    // Plan 02.1-25 (UAT-NOTES.md §3.3-polish): Steam game name persisted
-    // from fetchSteamAppDetails (already returned but never written). Nullable
-    // — legacy rows + Steam-down inserts keep NULL; SteamListingRow renders
-    // `App {appId}` fallback when null.
+    // Steam game name persisted from fetchSteamAppDetails. Nullable —
+    // legacy rows + Steam-down inserts keep NULL; SteamListingRow
+    // renders `App {appId}` fallback when null.
     name: text("name"),
     coverUrl: text("cover_url"),
     releaseDate: text("release_date"),

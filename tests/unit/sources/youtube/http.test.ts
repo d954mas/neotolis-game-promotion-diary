@@ -1,6 +1,6 @@
-// Phase 03.0.1 Plan 08 — chargedFetch reservoir + AdapterError taxonomy unit tests.
+// chargedFetch reservoir + AdapterError taxonomy unit tests.
 //
-// Pin the contract surface of the upgraded HTTP wrapper:
+// Pin the contract surface of the HTTP wrapper:
 //   - Reservoir consume (cron pool 8000 / user pool 2000) per origin.
 //   - AdapterError taxonomy: 403 quotaExceeded → rate-limited;
 //     403 other → operator-issue; 404 → not-found; 5xx → transient.
@@ -34,7 +34,7 @@ beforeEach(async () => {
   vi.restoreAllMocks();
 });
 
-describe("chargedFetch — reservoir consume + AdapterError taxonomy (Plan 08)", () => {
+describe("chargedFetch — reservoir consume + AdapterError taxonomy", () => {
   it("returns Response on 2xx (no throw, no error)", async () => {
     vi.stubGlobal(
       "fetch",

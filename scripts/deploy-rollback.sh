@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# pnpm deploy:rollback <git-sha> (D-22 / D-24). Pins the production
-# stack to a specific GHCR image tag (git sha) and restarts services.
+# pnpm deploy:rollback <git-sha>. Pins the production stack to a specific
+# GHCR image tag (git sha) and restarts services.
 #
 # Uses an UNRESTRICTED SSH key (separate from the deploy-only `command=`
 # key). This key edits /opt/diary/.env to set IMAGE_TAG=<sha>, then
 # runs docker compose pull + up -d. The two-key model is documented
-# in docs/deploy/install.md §1 (Plan 02.2-08).
+# in docs/deploy/install.md §1.
 
 set -euo pipefail
 

@@ -1,14 +1,9 @@
 // APP_ROLE=scheduler entrypoint.
 //
-// Phase 1 shipped a no-op stub registering only the internal.healthcheck
-// schedule. Phase 3.0 Plan 09 promoted the scheduler to a thin cron-fire
-// loop that registered the YouTube-specific cron schedules directly here.
-//
-// Phase 03.0.1 Plan 07 — adapter-driven cron registration (D-10..D-12).
-// The scheduler now iterates `allAdapters` from src/lib/sources/registry.ts
-// and calls `adapter.scheduleCronTicks(boss)` for each per-kind set. Adding
-// Reddit (Phase 03.1) means adding the adapter to the registry; the
-// scheduler edits to zero.
+// Adapter-driven cron registration: the scheduler iterates `allAdapters`
+// from src/lib/sources/registry.ts and calls `adapter.scheduleCronTicks(boss)`
+// for each per-kind set. Adding a new source (e.g. Reddit) means adding the
+// adapter to the registry; the scheduler edits to zero.
 //
 // Each adapter owns the schedules for its per-kind queues:
 //   - youtubeAdapter.scheduleCronTicks registers:
@@ -23,10 +18,10 @@
 //   - purge.daily (4 AM Pacific — after backup at 03:00 Pacific so soft-
 //     deleted accounts being hard-deleted are still in the night's backup)
 //
-// Pitfall D: tz-aware Pacific schedules MUST use the {tz} option so
-// pg-boss handles DST transitions — never hard-code the UTC offset.
+// tz-aware Pacific schedules MUST use the {tz} option so pg-boss handles
+// DST transitions — never hard-code the UTC offset.
 //
-// SIGTERM drain inherited from Phase 1 stopBoss + pool.end.
+// SIGTERM drain: stopBoss + pool.end.
 
 import { createBoss, stopBoss } from "../lib/server/queue-client.js";
 import { pool } from "../lib/server/db/client.js";
@@ -39,7 +34,7 @@ export async function startScheduler(): Promise<void> {
   const boss = await createBoss();
   scrubKekFromEnv();
 
-  // Phase 1 — internal healthcheck schedule preserved.
+  // Internal healthcheck schedule.
   try {
     await boss.schedule(QUEUES.INTERNAL_HEALTHCHECK, "*/5 * * * *");
   } catch (err) {
@@ -47,9 +42,9 @@ export async function startScheduler(): Promise<void> {
     throw err;
   }
 
-  // Phase 03.0.1 Plan 07 — per-kind cron schedules owned by each adapter.
-  // Iterate registration order from registry.ts (currently just youtube;
-  // Reddit / Twitter / Telegram / Discord queue here in Phase 03.1+).
+  // Per-kind cron schedules owned by each adapter. Iterate registration
+  // order from registry.ts (currently just youtube; Reddit / Twitter /
+  // Telegram / Discord queue here as their adapters land).
   for (const adapter of allAdapters) {
     try {
       await adapter.scheduleCronTicks(boss);
@@ -61,7 +56,7 @@ export async function startScheduler(): Promise<void> {
 
   // Cross-source / non-per-kind schedules — apply across all sources.
 
-  // purge.daily — 4 AM Pacific (after backup at 03:00 Pacific). Plan 05's
+  // purge.daily — 4 AM Pacific (after backup at 03:00 Pacific).
   // listPurgeEligibleUsers + purgeAccount cascade.
   await boss.schedule(QUEUES.PURGE_DAILY, "0 4 * * *", {}, { tz: "America/Los_Angeles" });
 
@@ -79,11 +74,11 @@ export async function startScheduler(): Promise<void> {
     "scheduler registered cron schedules (adapter-driven)",
   );
 
-  // D-15 smoke assertion #3 — exact string `scheduler ready` on stdout.
+  // Smoke assertion — exact string `scheduler ready` on stdout.
   logger.info({ role: "scheduler" }, "scheduler ready");
   console.log("scheduler ready");
 
-  // D-22 graceful shutdown.
+  // Graceful shutdown.
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "scheduler received shutdown signal");
     try {

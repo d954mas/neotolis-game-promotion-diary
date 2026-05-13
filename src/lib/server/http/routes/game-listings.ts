@@ -1,20 +1,19 @@
-// Game-Steam-listings HTTP routes (Plan 02-08).
+// Game-Steam-listings HTTP routes.
 //
 // Routes:
 //   POST   /api/games/:gameId/listings                       — addSteamListing
 //   GET    /api/games/:gameId/listings                       — listListings
 //   DELETE /api/games/:gameId/listings/:listingId            — removeSteamListing
-//   POST   /api/games/:gameId/listings/:listingId/restore    — restoreListing (Plan 02.1-39 round-6 #12)
+//   POST   /api/games/:gameId/listings/:listingId/restore    — restoreListing
 //   PATCH  /api/games/:gameId/listings/:listingId/key        — attachKeyToListing
 //
 // All routes inherit tenantScope; cross-tenant gameId / listingId surfaces as
 // NotFoundError (404) from the service layer. Service rejects on non-existent
 // gameId BEFORE INSERT (defense-in-depth).
 //
-// Plan 02.1-39 round-6 polish #12 (UAT-NOTES.md §5.8 follow-up #12):
-// `POST /api/games/:gameId/listings/:listingId/restore` exposes the new
-// `restoreListing` service function so the per-game RecoveryDialog can
-// flip soft-deleted listings back to active. Mirrors the pattern of
+// `POST /api/games/:gameId/listings/:listingId/restore` exposes
+// `restoreListing` so the per-game RecoveryDialog can flip soft-deleted
+// listings back to active. Mirrors the pattern of
 // `POST /api/sources/:id/restore` (sources.ts) — same shape, same 404
 // semantics, same DTO projection.
 
@@ -42,12 +41,11 @@ const attachKeySchema = z.object({
   apiKeyId: z.string().min(1).nullable(),
 });
 
-// Plan 02.1-39 round-6 polish #14c (UAT-NOTES.md §5.8 follow-up #14,
-// 2026-04-30): per-listing field edit. Today only `label` is mutable;
-// the schema is shaped to accept future fields without a breaking
-// rename of the route. `label` is `string` not `string.optional()`-only
-// because Zod's `.optional()` on a single property leaves the body
-// type as `{ label?: string }` — that's the contract we want.
+// Per-listing field edit. Today only `label` is mutable; the schema is
+// shaped to accept future fields without a breaking rename of the route.
+// `label` is `string` not `string.optional()`-only because Zod's
+// `.optional()` on a single property leaves the body type as
+// `{ label?: string }` — that's the contract we want.
 const updateListingSchema = z.object({
   label: z.string().max(100).optional(),
 });
@@ -86,11 +84,10 @@ gameListingsRoutes.get("/games/:gameId/listings", async (c) => {
   }
 });
 
-// Plan 02.1-39 round-6 polish #14c (UAT-NOTES.md §5.8 follow-up #14):
-// per-listing label edit. PATCH /api/games/:gameId/listings/:listingId
+// Per-listing label edit. PATCH /api/games/:gameId/listings/:listingId
 // accepts { label?: string }. Cross-tenant gameId/listingId surfaces
-// as 404 (PRIV-01: 404, not 403). Future fields hang off the same
-// route shape via the updateListingSchema extension.
+// as 404 (not 403). Future fields hang off the same route shape via
+// the updateListingSchema extension.
 gameListingsRoutes.patch(
   "/games/:gameId/listings/:listingId",
   zValidator("json", updateListingSchema, (r, c) => {
@@ -124,10 +121,9 @@ gameListingsRoutes.delete("/games/:gameId/listings/:listingId", async (c) => {
   }
 });
 
-// Plan 02.1-39 round-6 polish #12 (UAT-NOTES.md §5.8 follow-up #12,
-// 2026-04-30): per-game listing restore. Returns the restored listing
-// DTO on 200 so the client can update the active list without a separate
-// GET roundtrip (matches the Sources restore endpoint contract).
+// Per-game listing restore. Returns the restored listing DTO on 200 so
+// the client can update the active list without a separate GET
+// roundtrip (matches the Sources restore endpoint contract).
 gameListingsRoutes.post("/games/:gameId/listings/:listingId/restore", async (c) => {
   const ctx = getAuditContext(c);
   try {

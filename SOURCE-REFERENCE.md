@@ -27,7 +27,7 @@ Cross-source plumbing — `events` table, `data_sources` table, `audit_log`, the
 3. **Discoverability.** "Where does Reddit's URL parser live?" → `src/lib/sources/reddit/server/url.ts`. Always.
 4. **Onboarding.** A new contributor reads `src/lib/sources/youtube/` once and can ship `src/lib/sources/reddit/` from there.
 
-The architecture decisions that locked these properties live in `.planning/phases/03.0.1-source-plugin-architecture/03.0.1-CONTEXT.md` (D-01..D-17). This document operationalises them.
+This document is the canonical reference for the shipped architecture.
 
 ## 2. Folder Structure
 
@@ -362,7 +362,7 @@ export async function pickCredentials(ctx: AdapterContext): Promise<Credentials>
 
 NO contract change required. The widened `DataSourceAdapter` interface already passes `ctx.userId` through every method that takes `AdapterContext`. Phase 6 adds a 6th `AdapterError` category `user-auth` (when the per-user key is invalid; revoked; missing) which the cross-source handler routes to "user must reconnect their key" UI.
 
-Other Phase 6 items tracked in the deferred-ideas list (`.planning/phases/03.0.1-source-plugin-architecture/03.0.1-CONTEXT.md` § Deferred Ideas):
+Other deferred items in the per-user-credentials track:
 - Per-user QUOTA-01 dashboards (re-uses `observability.quota.getDailyStats` API contract — no adapter edit).
 - Per-user 429 surfacing UI (toast + badge; reads `adapter.observability` per-user when `ctx.userId` is set).
 - Reddit per-user OAuth (phase trigger; replaces operator app-only with per-user refresh-token flow).

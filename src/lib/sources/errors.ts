@@ -1,10 +1,9 @@
-// AdapterError — Phase 03.0.1 D-13 5-category taxonomy.
+// AdapterError — 5-category taxonomy.
 //
 // Every adapter throws AdapterError on failure (transient | rate-limited |
 // not-found | permanent | operator-issue). The adapter HTTP wrapper, queue
 // handlers, and /admin/quota dashboard all key off `category` for retry,
-// throttle, and surfacing decisions. Phase 6 adds a 6th category `user-auth`
-// when per-user credentials land — adding a category is a breaking change
+// throttle, and surfacing decisions. Adding a category is a breaking change
 // that surfaces as a TypeScript exhaustiveness error in
 // `categoryToSnapshotStatus` (the switch has no default branch).
 

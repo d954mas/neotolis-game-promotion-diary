@@ -1,39 +1,35 @@
-// Phase 03.0.1 Plan 08 — shared YouTube HTTP wrapper with rate-limit reservoir
-// (D-09) + AdapterError taxonomy (D-13) wired in.
+// Shared YouTube HTTP wrapper with rate-limit reservoir + AdapterError
+// taxonomy wired in.
 //
-// Pre-Plan-08: chargedFetch returned a Response unconditionally and let
-// callers inspect `.ok` to shape their own bail (each call site classified
-// errors into a SnapshotStatus or threw an AppError(502) ad-hoc). Plan 08
-// upgrades the wrapper so EVERY non-2xx flows through AdapterError's 5
-// categories — the worker handler's catch block (./handlers/poll-user.ts
-// + Plan 10's backfill-user.ts + channel-context-backfill.ts) routes by
-// category to needs_reconnect / pg-boss retry / silent skip.
+// Every non-2xx flows through AdapterError's 5 categories — the worker
+// handler's catch block routes by category to needs_reconnect / pg-boss
+// retry / silent skip.
 //
-// Two helpers, two accounting boundaries (unchanged from pre-Plan-08):
+// Two helpers, two accounting boundaries:
 //
 //   chargedFetch — canonical wrapper; charges quota + emits throttle audit
-//     at the fetch site. Now also: consumes a rate-limit reservoir
-//     (cron 80% / user 20% pool split per ctx.origin) BEFORE the fetch,
-//     and throws AdapterError on every error path. Used by every YouTube
-//     API call EXCEPT pollStatsBatch (the per-event stats poller — see
-//     adapter.ts header for why).
+//     at the fetch site. Consumes a rate-limit reservoir (cron 80% /
+//     user 20% pool split per ctx.origin) BEFORE the fetch, and throws
+//     AdapterError on every error path. Used by every YouTube API call
+//     EXCEPT pollStatsBatch (the per-event stats poller — see adapter.ts
+//     header for why).
 //
 //   fetchWithTimeout — lower-level primitive used by pollStatsBatch (the
-//     writeSnapshot-accounted path). Unchanged: never throws on status,
-//     never charges. The adapter's pollStatsBatch path emits its own
+//     writeSnapshot-accounted path). Never throws on status, never
+//     charges. The adapter's pollStatsBatch path emits its own
 //     SnapshotStatus rather than going through AdapterError because each
 //     video result needs its own status mapping (the batched videos.list
 //     call returns a 200 with N item-level outcomes; mapping to a single
 //     AdapterError throw would lose the per-video resolution).
 //
-// Rate-limit reservoir (D-09 / RESEARCH.md SOTA divergence #1):
+// Rate-limit reservoir:
 //   In-process RateLimiterMemory split into two pools per Pacific day:
 //     - cronReservoir (8000 points / 24h) — 80% of envelope, consumed by
 //       handlers running in scheduler/cron context (poll-cron tier-batch,
 //       channel-context-backfill on createSource, rehab-unavailable, etc.).
 //     - userReservoir (2000 points / 24h) — 20% of envelope, consumed by
-//       handlers running in user-driven context (poll-user, Plan 10
-//       backfill-user, /events/new metadata fetch).
+//       handlers running in user-driven context (poll-user, backfill-user,
+//       /events/new metadata fetch).
 //   Origin is a property of AdapterContext — NOT the call site. The same
 //   chargedFetch invocation reads ctx.origin from the caller-supplied
 //   context.
@@ -43,14 +39,11 @@
 //   reconcileReservoirsOnBoot() syncs the in-memory reservoirs to the
 //   durable counter at worker boot; mid-process restarts may briefly
 //   over-allow until reconciliation runs.
-//   The "Simpler alternative" in RESEARCH.md notes this is partly redundant
-//   with the existing throttle gate at scheduler-tick (which pauses Cold
-//   + auto-import at 80% of the AGGREGATE counter). The reservoir adds
-//   ORIGIN-SCOPED budget split — the throttle gate alone could let a
-//   user-driven Refresh-now flood eat into the cron's reserve. Per CONTEXT
-//   D-09 (locked) we ship the reservoir as the explicit mechanism.
+//   The reservoir adds ORIGIN-SCOPED budget split — the throttle gate
+//   alone could let a user-driven Refresh-now flood eat into the cron's
+//   reserve. We ship the reservoir as the explicit mechanism.
 //
-// AdapterError taxonomy (D-13 — see $lib/sources/errors.ts):
+// AdapterError taxonomy (see $lib/sources/errors.ts):
 //   - 'rate-limited'  → quota / reservoir exhausted; pg-boss retries with retryAfterMs
 //   - 'not-found'     → 404 from upstream; worker marks event unavailable
 //   - 'operator-issue'→ 403 non-quotaExceeded; worker sets data_sources.needs_reconnect
@@ -67,16 +60,14 @@ import { eq } from "drizzle-orm";
 import { logger } from "$lib/server/logger.js";
 import { AdapterError } from "$lib/sources/errors.js";
 
-// ---- Rate-limit reservoir (D-09 — RESEARCH.md SOTA divergence #1) ----
+// ---- Rate-limit reservoir ----
 //
 // 24-hour reservoirs (one per origin pool) capping the operator's daily
 // envelope. Total across pools = 10000 (one key) — operators with N>1
 // keys still see N×10000 from the persistent counter; reservoirs are a
 // SAFETY FLOOR, not a ceiling-extender. If env.SERVICE_YOUTUBE_API_KEYS
 // has 3 keys the reservoirs cap at 10000 across origins — over-cautious
-// vs. the 30000 actual envelope; acceptable for v0.1 (RESEARCH.md notes
-// this is a "Simpler alternative" candidate; CONTEXT D-09 locks the
-// reservoir mechanism).
+// vs. the 30000 actual envelope; acceptable.
 //
 // `duration: 86400` rolls a sliding 24h window. The youtube.quota_reset
 // cron at midnight Pacific re-resolves alignment with the
@@ -115,7 +106,7 @@ export async function fetchWithTimeout(url: URL, timeoutMs = 30_000): Promise<Re
  *
  * `origin` is required because v0.1's call sites (channel-context-backfill,
  * poll-content auto-import) all run in cron context; threading the value
- * through forces a deliberate decision at every new caller in Phases 6+.
+ * through forces a deliberate decision at every new caller.
  */
 export interface ChargedFetchContext {
   origin: "cron" | "user";
@@ -140,15 +131,13 @@ export interface ChargedFetchContext {
  *      then throw AdapterError(rate-limited) with retryAfterMs honoring
  *      msUntilMidnightPacific.
  *   6. If 403 other — throw AdapterError(operator-issue). Worker handler
- *      flips data_sources.needs_reconnect = true (D-13).
+ *      flips data_sources.needs_reconnect = true.
  *   7. If 404 — throw AdapterError(not-found). Worker handler marks the
- *      event unavailable; source is NOT flagged (D-13 — the upstream
- *      resource is gone, source itself may be fine).
+ *      event unavailable; source is NOT flagged (the upstream resource is
+ *      gone, source itself may be fine).
  *   8. If 5xx — throw AdapterError(transient). pg-boss retries with backoff.
  *   9. Other 4xx (401 / 400 / 429 etc.) — throw AdapterError(transient)
- *      conservatively (default to retry rather than swallow — the existing
- *      pre-Plan-08 callers logged + bailed; AdapterError(transient) gives
- *      pg-boss the same retry posture without swallowing).
+ *      conservatively (default to retry rather than swallow).
  *
  * The reservoir consume happens BEFORE fetch so a flooded cron run is
  * detected without burning a unit upstream. The persistent counter increment
@@ -188,9 +177,9 @@ export async function chargedFetch(
   //    that throw above this line (timeout / connection refused) charge 0
   //    — they never reached YouTube.
   //
-  // Phase 03.0.1 post-review #5 — attribute the charge to the same pool
-  // we consumed from above. Reconciliation reads per-pool sums to debit
-  // each in-memory reservoir accurately on worker boot.
+  // Attribute the charge to the same pool we consumed from above.
+  // Reconciliation reads per-pool sums to debit each in-memory reservoir
+  // accurately on worker boot.
   await incrementUsage({ apiKeyId: picked.apiKeyId, units, poolKind: ctx.origin });
 
   // 4. Success path — return for caller-side body parse.
@@ -250,9 +239,9 @@ export async function chargedFetch(
       context: { apiKeyId: picked.apiKeyId, status: resp.status, logTag: ctx.logTag },
     });
   }
-  // Phase 03.0.1 (post-review) — explicit 4xx classification. Pre-fix all
-  // remaining 4xx fell through to `transient` which made pg-boss retry
-  // forever on permanent errors:
+  // Explicit 4xx classification. Without this, all remaining 4xx would
+  // fall through to `transient` which makes pg-boss retry forever on
+  // permanent errors:
   //   - 401 invalid/expired API key → operator-issue (flag needs_reconnect,
   //     stop retrying, surface to /admin/quota)
   //   - 429 rate-limited per-key (not the daily quota — that's 403
@@ -362,11 +351,9 @@ function msUntilMidnightPacific(): number {
  * start with a fresh 8000-unit cron pool — temporary over-allow until the
  * youtube_service_quota_usage counter catches the next throttle threshold.
  *
- * Reconciliation strategy (RESEARCH.md Pattern 5 paragraph): sum today's
- * persistent counter rows and consume that many points from the cron
- * reservoir at boot (we do NOT split the persistent counter between cron
- * and user — pre-Plan-08 the counter was origin-agnostic, so attributing
- * past usage to a pool would be guesswork). User reservoir starts fresh.
+ * Reconciliation strategy: sum today's persistent counter rows and consume
+ * that many points from the cron reservoir at boot (we do NOT split the
+ * persistent counter between cron and user). User reservoir starts fresh.
  * This is intentionally lossy on the over-cautious side: a worker restart
  * after heavy user activity briefly under-allows user requests until they
  * settle into the user pool's natural cadence; that's safer than over-
@@ -379,11 +366,11 @@ function msUntilMidnightPacific(): number {
  */
 export async function reconcileReservoirsOnBoot(): Promise<void> {
   const todayPT = todayPacific();
-  // Phase 03.0.1 post-review #5 — read per-pool sums separately so each
-  // reservoir gets debited accurately. Pre-fix the function summed across
-  // pools and dumped everything into cron — user pool reset to full on
-  // every restart, allowing user-driven actions to overshoot their daily
-  // share by up to 2000 units / Pacific day.
+  // Read per-pool sums separately so each reservoir gets debited
+  // accurately. Summing across pools and dumping everything into cron
+  // would reset the user pool to full on every restart, allowing
+  // user-driven actions to overshoot their daily share by up to 2000
+  // units / Pacific day.
   const rows = await db
     .select({
       poolKind: youtubeServiceQuotaUsage.poolKind,
@@ -436,7 +423,7 @@ export async function reconcileReservoirsOnBoot(): Promise<void> {
 
 /**
  * Reset both reservoirs to full. Called from quota-reset.ts at midnight
- * Pacific (D-13 alignment with YouTube's daily quota reset boundary —
+ * Pacific (alignment with YouTube's daily quota reset boundary —
  * RateLimiterMemory's 24h sliding window may not align exactly with the
  * YouTube reset, so we reset on the cron tick and follow with
  * reconcileReservoirsOnBoot to seed today's already-burned units), and

@@ -1,6 +1,5 @@
-// /sources/[id] loader — Phase 03.0.1 Plan 10. Renders one source's detail
-// page just enough to host the RefreshContentButton (the user-facing payoff
-// of the Wave 0-8 source-plugin refactor).
+// /sources/[id] loader. Renders one source's detail page just enough to
+// host the RefreshContentButton.
 //
 // AGENTS.md invariants:
 //   1. Tenant scoping — getSourceById(userId, params.id) is the only DB
@@ -43,7 +42,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       error(404);
     }
 
-    // Phase 03.0.1 — quota status per platform (banner на detail page).
+    // Quota status per platform (banner on detail page).
     const resetAt = nextPacificMidnight();
     const resetsInMs = Math.max(0, resetAt.getTime() - Date.now());
     const quotaPlatforms = await Promise.all(
@@ -63,10 +62,10 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       }),
     );
 
-    // Phase 03.0.1 (post-review UAT 2026-05-10) — populate channelTitle
-    // from youtube_channels cache. /sources list loader has this JOIN
-    // already; detail loader was missing it so heading fell back to
-    // handleUrl. Same code path as the list loader (single-row case).
+    // Populate channelTitle from youtube_channels cache. /sources list
+    // loader has this JOIN already; detail loader was missing it so heading
+    // fell back to handleUrl. Same code path as the list loader (single-row
+    // case).
     const dto = toDataSourceDto(row);
     if (dto.channelId !== null) {
       const [cache] = await db
@@ -76,9 +75,9 @@ export const load: PageServerLoad = async ({ params, locals }) => {
         .limit(1);
       dto.channelTitle = cache?.channelTitle ?? null;
 
-      // Phase 03.0.1 Wave 4 — populate channel-scoped state from
-      // data_source_channel_state. Per-source state columns dropped in
-      // migration 0028; channel-level state shared across all subscribers.
+      // Populate channel-scoped state from data_source_channel_state.
+      // Per-source state columns dropped in migration 0028; channel-level
+      // state shared across all subscribers.
       const [state] = await db
         .select({
           lastPolledAt: dataSourceChannelState.lastPolledAt,
@@ -100,10 +99,10 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       }
     }
 
-    // Phase 03.0.1 (post-review UAT) — refresh cooldown state from server.
-    // Same query as /sources list loader: latest INTENT audit row within
-    // the 5-minute singletonKey window. Lets RefreshContentButton resume
-    // the cooldown ticker on page reload (pre-fix it was client-only).
+    // Refresh cooldown state from server. Same query as /sources list
+    // loader: latest INTENT audit row within the 5-minute singletonKey
+    // window. Lets RefreshContentButton resume the cooldown ticker on page
+    // reload (pre-fix it was client-only).
     const COOLDOWN_MS = 5 * 60_000;
     const cooldownSince = new Date(Date.now() - COOLDOWN_MS);
     const [recent] = await db
@@ -122,10 +121,9 @@ export const load: PageServerLoad = async ({ params, locals }) => {
       ? Math.max(0, Math.ceil((COOLDOWN_MS - (Date.now() - recent.latest.getTime())) / 1000))
       : 0;
 
-    // Phase 03.0.1 Wave 4 — channel-scoped pulling state. Spinner
-    // reflects ANY user's walk on this channel (Q1-A semantics). pgboss
-    // schema guard: to_regclass NULL → fall back to false on fresh
-    // self-host where worker hasn't booted.
+    // Channel-scoped pulling state. Spinner reflects ANY user's walk on
+    // this channel. pgboss schema guard: to_regclass NULL → fall back to
+    // false on fresh self-host where worker hasn't booted.
     let pulling = false;
     if (dto.channelId !== null) {
       const activeJobs = await db

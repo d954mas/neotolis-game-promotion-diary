@@ -1,4 +1,4 @@
-// Phase 03.0.1 — Pacific calendar day boundary helpers.
+// Pacific calendar day boundary helpers.
 //
 // `pacificDayStart(now)` returns UTC instant of "00:00 PT today" — the cap
 // window's lower bound. `nextPacificMidnight(now)` returns 00:00 PT tomorrow.

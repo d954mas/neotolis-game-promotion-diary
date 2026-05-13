@@ -2,15 +2,14 @@ import { describe, it, expect, beforeAll } from "vitest";
 import pg from "pg";
 import { runMigrations, migrationsApplied } from "../../src/lib/server/db/migrate.js";
 
-// VALIDATION 14 + 15 (Plan 01-03):
-//   14. migrations idempotent on second boot
-//   15. advisory lock prevents concurrent races (BIGINT 5_494_251_782_888_259_377)
+// Validates two invariants:
+//   1. migrations idempotent on second boot
+//   2. advisory lock prevents concurrent races (BIGINT 5_494_251_782_888_259_377)
 //
-// Plan 02.1-01 collapses the prior Phase 1 + Phase 2 migrations into one new
-// baseline (`0000_phase02_1_baseline.sql`) per CONTEXT D-03 / D-04 / DV-1 / DV-2.
-// AGENTS.md "forward-only" exception accepted for Phase 2.1 ONLY (pre-launch +
-// zero self-host deployments). Phase 3+ resumes strict forward-only from this
-// baseline.
+// The migration tree starts from `0000_phase02_1_baseline.sql`, which
+// collapsed prior pre-launch migrations into a single baseline (a one-time
+// exception to AGENTS.md "forward-only" accepted pre-launch with zero
+// self-host deployments). Subsequent migrations resume strict forward-only.
 //
 // All tests run against the integration Postgres service container that
 // tests/setup.ts boots. TEST_DATABASE_URL is the same connection string the
@@ -68,12 +67,12 @@ describe("migrations", () => {
   });
 });
 
-// Plan 02.1-01: Phase 2.1 baseline schema migration assertions.
+// Baseline schema migration assertions.
 //
 // tests/setup.ts already calls runMigrations() once in beforeAll. We re-run
 // here to cover the case where this file is executed in isolation; the runner
 // is idempotent (verified by the suite above).
-describe("Phase 2.1 baseline schema migration (Plan 02.1-01)", () => {
+describe("baseline schema migration", () => {
   beforeAll(async () => {
     await runMigrations();
   });
@@ -90,10 +89,10 @@ describe("Phase 2.1 baseline schema migration (Plan 02.1-01)", () => {
     }
   });
 
-  it("youtube_channels table EXISTS (Phase 3.0 reintroduced via migration 0014 rename — youtube_channel_metadata_cache → youtube_channels)", async () => {
-    // Phase 2.1 baseline (migration 0000) DROPPED the legacy
-    // youtube_channels table from the v1 schema. Phase 3.0 post-build
-    // (migration 0014, 2026-05-06) RENAMED youtube_channel_metadata_cache
+  it("youtube_channels table EXISTS (reintroduced via migration 0014 rename — youtube_channel_metadata_cache → youtube_channels)", async () => {
+    // The baseline (migration 0000) DROPPED the legacy youtube_channels
+    // table from the v1 schema. Migration 0014 (2026-05-06) RENAMED
+    // youtube_channel_metadata_cache
     // (from migration 0010) to youtube_channels — the "_metadata_cache"
     // suffix was a misnomer; this IS the local copy of public YouTube
     // channel data, not a regeneratable cache. After the rename, the
@@ -183,7 +182,7 @@ describe("Phase 2.1 baseline schema migration (Plan 02.1-01)", () => {
       expect(values).toContain("source.toggled_auto_import");
       expect(values).toContain("event.attached_to_game");
       expect(values).toContain("event.dismissed_from_inbox");
-      // Removed Phase 2 vocabulary absent
+      // Removed vocabulary absent
       expect(values).not.toContain("channel.added");
       expect(values).not.toContain("channel.removed");
       expect(values).not.toContain("channel.attached");
@@ -195,11 +194,11 @@ describe("Phase 2.1 baseline schema migration (Plan 02.1-01)", () => {
     }
   });
 
-  it.skip("makes events.game_id nullable (superseded by Plan 02.1-27 — column DROPPED in 0005)", async () => {
-    // The Phase 2.1 baseline made events.game_id nullable to encode inbox
-    // semantics (game_id IS NULL). Plan 02.1-27 (UAT-NOTES.md §4.24.G)
-    // DROPS the column entirely in favour of the event_games M:N junction.
-    // The Plan 02.1-27 describe block below asserts the column is gone.
+  it.skip("makes events.game_id nullable (superseded — column DROPPED in 0005)", async () => {
+    // The baseline made events.game_id nullable to encode inbox semantics
+    // (game_id IS NULL). Migration 0005 DROPS the column entirely in
+    // favour of the event_games M:N junction. The describe block below
+    // asserts the column is gone.
   });
 
   it("adds events.author_is_me / source_id columns", async () => {
@@ -233,9 +232,9 @@ describe("Phase 2.1 baseline schema migration (Plan 02.1-01)", () => {
     }
   });
 
-  // Phase 02.2 review (post-fix #4): composite index on (user_id, created_at DESC)
-  // for events_per_day quota count. Migration 0009.
-  it("adds the events_user_created_at_idx index (Codex post-fix #4)", async () => {
+  // Composite index on (user_id, created_at DESC) for events_per_day
+  // quota count. Migration 0009.
+  it("adds the events_user_created_at_idx index", async () => {
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const result = await pool.query<{ indexname: string; indexdef: string }>(
@@ -265,7 +264,7 @@ describe("Phase 2.1 baseline schema migration (Plan 02.1-01)", () => {
     }
   });
 
-  it("user.theme_preference column exists with default 'system' (D-40 inheritance)", async () => {
+  it("user.theme_preference column exists with default 'system'", async () => {
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const result = await pool.query<{ column_default: string | null }>(
@@ -302,17 +301,16 @@ describe("Phase 2.1 baseline schema migration (Plan 02.1-01)", () => {
   });
 });
 
-// Plan 02.1-12: forward-only migration `0001_add_post_kind` extends the
-// event_kind pgEnum with a generic platform-agnostic `post` value (Mastodon /
-// LinkedIn / Bluesky / Threads / unmapped). Resumes strict forward-only
-// migration discipline (CONTEXT D-04 / DV-2) — first migration after the 2.1
+// Forward-only migration `0001_add_post_kind` extends the event_kind
+// pgEnum with a generic platform-agnostic `post` value (Mastodon /
+// LinkedIn / Bluesky / Threads / unmapped). First migration after the
 // baseline collapse.
-describe("Phase 2.1 forward-only migrations (Plan 02.1-12)", () => {
+describe("forward-only migrations — 0001_add_post_kind", () => {
   beforeAll(async () => {
     await runMigrations();
   });
 
-  it("02.1-12: event_kind enum extended with 'post' (forward-only migration 0001 — first after baseline)", async () => {
+  it("event_kind enum extended with 'post' (forward-only migration 0001 — first after baseline)", async () => {
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const result = await pool.query<{ enumlabel: string }>(
@@ -331,16 +329,15 @@ describe("Phase 2.1 forward-only migrations (Plan 02.1-12)", () => {
   });
 });
 
-// Plan 02.1-14 (gap closure): forward-only migration
-// `0002_add_event_restored_audit_action` extends the audit_action pgEnum with
-// `event.restored` — the soft-delete recovery audit verb. Closes Gap 2 from
-// 02.1-VERIFICATION.md. Forward-only discipline (CONTEXT D-04 / DV-2) preserved.
-describe("Phase 2.1 forward-only migrations (Plan 02.1-14)", () => {
+// Forward-only migration `0002_add_event_restored_audit_action` extends
+// the audit_action pgEnum with `event.restored` — the soft-delete
+// recovery audit verb.
+describe("forward-only migrations — 0002_add_event_restored_audit_action", () => {
   beforeAll(async () => {
     await runMigrations();
   });
 
-  it("02.1-14: audit_action enum extended with 'event.restored' (forward-only migration 0002)", async () => {
+  it("audit_action enum extended with 'event.restored' (forward-only migration 0002)", async () => {
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const result = await pool.query<{ enumlabel: string }>(
@@ -353,10 +350,10 @@ describe("Phase 2.1 forward-only migrations (Plan 02.1-14)", () => {
       // Sanity: the prior audit verbs are still present.
       expect(values).toContain("event.deleted");
       expect(values).toContain("game.restored");
-      // Total post-Plan-14: 19 (baseline) + 1 (event.restored) = 20.
-      // Plan 02.1-24 adds 2 more verbs (event.marked_standalone +
-      // event.unmarked_standalone). Length assertion moves to that block to
-      // avoid double-counting; here we only assert the lower bound.
+      // Total: 19 (baseline) + 1 (event.restored) = 20.
+      // Later migrations add more verbs (event.marked_standalone +
+      // event.unmarked_standalone). Length assertion moves to that block
+      // to avoid double-counting; here we only assert the lower bound.
       expect(values.length).toBeGreaterThanOrEqual(20);
     } finally {
       await pool.end();
@@ -364,15 +361,14 @@ describe("Phase 2.1 forward-only migrations (Plan 02.1-14)", () => {
   });
 });
 
-// Plan 02.1-27 (round-4 gap closure — UAT-NOTES.md §4.24.G + §4.25.J):
-// SPLIT migration pair. 0005_event_games_and_steam_listing_unique_swap is
-// pure DDL — CREATE TABLE event_games (M:N junction) + DROP COLUMN
+// Split migration pair. 0005_event_games_and_steam_listing_unique_swap
+// is pure DDL — CREATE TABLE event_games (M:N junction) + DROP COLUMN
 // events.game_id + DROP CONSTRAINT game_steam_listings_user_app_id_unq.
 // 0006_add_event_detached_from_game_audit_action is the lone ALTER TYPE
 // (audit_action enum gains 'event.detached_from_game'), isolated in its
-// own migration file per Pitfall 1 (Postgres 16 ALTER TYPE rules) +
-// Plan 02.1-12 precedent.
-describe("Plan 02.1-27 — event_games + steam listing unique swap (0005 + 0006 split)", () => {
+// own migration file (Postgres 16 ALTER TYPE rules require splitting the
+// transaction).
+describe("event_games + steam listing unique swap (0005 + 0006 split)", () => {
   beforeAll(async () => {
     await runMigrations();
   });
@@ -448,16 +444,16 @@ describe("Plan 02.1-27 — event_games + steam listing unique swap (0005 + 0006 
       );
       const values = result.rows.map((r) => r.enumlabel);
       expect(values).toContain("event.detached_from_game");
-      // Sanity: prior verbs from Plans 14 + 24 still present.
+      // Sanity: prior verbs still present.
       expect(values).toContain("event.attached_to_game");
       expect(values).toContain("event.marked_standalone");
-      // Phase 02.2 Plan 02.2-01 (migration 0008) extended the enum with 4
-      // new verbs: account.deleted, account.restored, account.exported,
-      // quota.limit_hit. Phase 3.0 baseline (migration 0010) added 5 more:
-      // quota.service_throttled, purge.completed, auto_import.deferred,
-      // poll.failed, event.poll_refreshed. Phase 03.0.1 Plan 10 (migration
-      // 0023) added 1 more: source.refresh_content_requested.
-      // Total post-Plan-03.0.1-10: 23 (post-Plan-27) + 4 (0008) + 5 (0010) + 1 (0023) = 33.
+      // Migration 0008 extended the enum with 4 new verbs:
+      // account.deleted, account.restored, account.exported, quota.limit_hit.
+      // Migration 0010 added 5 more: quota.service_throttled,
+      // purge.completed, auto_import.deferred, poll.failed,
+      // event.poll_refreshed. Migration 0023 added 1 more:
+      // source.refresh_content_requested.
+      // Total: 23 + 4 (0008) + 5 (0010) + 1 (0023) = 33.
       expect(values).toContain("account.deleted");
       expect(values).toContain("account.restored");
       expect(values).toContain("account.exported");
@@ -490,7 +486,7 @@ describe("Plan 02.1-27 — event_games + steam listing unique swap (0005 + 0006 
   });
 
   it("_journal.json carries idx=5 (0005) and idx=6 (0006) entries", async () => {
-    // Read the journal from disk and assert both Plan 27 entries exist.
+    // Read the journal from disk and assert both entries exist.
     const fs = await import("node:fs/promises");
     const path = await import("node:path");
     const journalPath = path.resolve(process.cwd(), "drizzle/meta/_journal.json");
@@ -501,18 +497,16 @@ describe("Plan 02.1-27 — event_games + steam listing unique swap (0005 + 0006 
   });
 });
 
-// Plan 02.1-24 (round-3 gap closure — UAT-NOTES.md §6.1-redesign): forward-only
-// migration `0003_add_event_standalone_audit_actions` extends the audit_action
-// pgEnum with `event.marked_standalone` and `event.unmarked_standalone` — the
-// two new triage verbs for the user-explicit "not related to any game" state.
-// Forward-only discipline (CONTEXT D-04 / DV-2) preserved — third migration
-// after the 2.1 baseline collapse.
-describe("Phase 2.1 forward-only migrations (Plan 02.1-24)", () => {
+// Forward-only migration `0003_add_event_standalone_audit_actions`
+// extends the audit_action pgEnum with `event.marked_standalone` and
+// `event.unmarked_standalone` — the two new triage verbs for the
+// user-explicit "not related to any game" state.
+describe("forward-only migrations — 0003_add_event_standalone_audit_actions", () => {
   beforeAll(async () => {
     await runMigrations();
   });
 
-  it("02.1-24: audit_action enum extended with 'event.marked_standalone' and 'event.unmarked_standalone' (forward-only migration 0003)", async () => {
+  it("audit_action enum extended with 'event.marked_standalone' and 'event.unmarked_standalone' (forward-only migration 0003)", async () => {
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const result = await pool.query<{ enumlabel: string }>(
@@ -526,11 +520,11 @@ describe("Phase 2.1 forward-only migrations (Plan 02.1-24)", () => {
       // Sanity: prior verbs still present after the additive migration.
       expect(values).toContain("event.restored");
       expect(values).toContain("event.dismissed_from_inbox");
-      // Post-Plan-24 added 2 verbs (post-Plan-14 = 20 → post-Plan-24 = 22).
-      // Plan 02.1-27 adds `event.detached_from_game` for the M:N detach path,
-      // moving the total to 23. The exact-length assertion lives in the Plan
-      // 02.1-27 describe block above to avoid double-counting on every future
-      // additive enum migration; here we only assert the lower bound.
+      // Added 2 verbs (20 → 22). A later migration adds
+      // `event.detached_from_game` for the M:N detach path, moving the
+      // total to 23. The exact-length assertion lives in the describe
+      // block above to avoid double-counting on every future additive
+      // enum migration; here we only assert the lower bound.
       expect(values.length).toBeGreaterThanOrEqual(22);
     } finally {
       await pool.end();
@@ -538,20 +532,21 @@ describe("Phase 2.1 forward-only migrations (Plan 02.1-24)", () => {
   });
 });
 
-// Plan 03.0-01: forward-only migration `0010_phase03_baseline` lands the three
-// new public-data tables (youtube_video_snapshots / youtube_channels
-// / youtube_service_quota_usage), two new partial indexes on `events`, and 5 new
-// audit_action enum verbs (quota.service_throttled, purge.completed,
-// auto_import.deferred, poll.failed, event.poll_refreshed). pgboss legacy queue
-// rows ('poll.hot', 'poll.warm') are also cleaned up, gated on schema existence
-// (pgboss schema is created at boss.start() runtime, not migrate time — so the
+// Forward-only migration `0010_phase03_baseline` lands three new
+// public-data tables (youtube_video_snapshots / youtube_channels /
+// youtube_service_quota_usage), two new partial indexes on `events`, and
+// 5 new audit_action enum verbs (quota.service_throttled,
+// purge.completed, auto_import.deferred, poll.failed,
+// event.poll_refreshed). pgboss legacy queue rows ('poll.hot',
+// 'poll.warm') are also cleaned up, gated on schema existence (pgboss
+// schema is created at boss.start() runtime, not migrate time — so the
 // DELETE is conditional and idempotent).
-describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
+describe("migration 0010 baseline", () => {
   beforeAll(async () => {
     await runMigrations();
   });
 
-  it("creates the youtube_video_snapshots table (no user_id — public data, D-07)", async () => {
+  it("creates the youtube_video_snapshots table (no user_id — public data)", async () => {
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const tableRes = await pool.query<{ tablename: string }>(
@@ -564,7 +559,7 @@ describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
          where table_name='youtube_video_snapshots' and column_name='user_id'`,
       );
       expect(userIdRes.rows.length).toBe(0);
-      // bigint counters for popular videos > 2^31 (RESEARCH.md schema).
+      // bigint counters for popular videos > 2^31.
       const colRes = await pool.query<{ column_name: string; data_type: string }>(
         `select column_name, data_type from information_schema.columns
          where table_name='youtube_video_snapshots' order by ordinal_position`,
@@ -619,8 +614,8 @@ describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
       );
       expect(userIdRes.rows.length).toBe(0);
       // Composite PK columns in order: date_pacific, api_key_id, pool_kind.
-      // Phase 03.0.1 post-review #5: pool_kind discriminator added so
-      // reconcileReservoirsOnBoot debits each in-memory reservoir accurately.
+      // pool_kind discriminator added so reconcileReservoirsOnBoot debits
+      // each in-memory reservoir accurately.
       const pkRes = await pool.query<{ column_name: string; ordinal_position: number }>(
         `select kcu.column_name, kcu.ordinal_position
          from information_schema.table_constraints tc
@@ -665,7 +660,7 @@ describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
   });
 
   it("does NOT carry the events_user_kind_ext_active_unq index (DROPPED in migration 0012)", async () => {
-    // Phase 3.0 post-build (migration 0012, 2026-05-06): the partial unique
+    // Migration 0012 (2026-05-06): the partial unique
     // (user_id, kind, external_id) index was DROPPED. UAT direction —
     // operator wants to log multiple promotion events for the same video
     // (e.g. "Released video X" + "Promo stream for X" + "Reddit post for
@@ -686,7 +681,7 @@ describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
     }
   });
 
-  it("audit_action enum extended with 5 new Phase 3.0 verbs", async () => {
+  it("audit_action enum extended with 5 new verbs", async () => {
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const result = await pool.query<{ enumlabel: string }>(
@@ -703,7 +698,7 @@ describe("Plan 03.0-01 — Phase 3.0 baseline (migration 0010)", () => {
       // Sanity: prior verbs still present.
       expect(values).toContain("quota.limit_hit");
       expect(values).toContain("event.detached_from_game");
-      // 27 (post-Plan-02.2-01) + 5 (Plan 03.0-01) + 1 (Plan 03.0.1-10 migration 0023) = 33.
+      // 27 + 5 (migration 0010) + 1 (migration 0023) = 33.
       expect(values).toContain("source.refresh_content_requested");
       expect(values).toHaveLength(33);
     } finally {

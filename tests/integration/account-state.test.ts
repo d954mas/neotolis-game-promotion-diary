@@ -4,8 +4,8 @@ import { db } from "../../src/lib/server/db/client.js";
 import { user } from "../../src/lib/server/db/schema/auth.js";
 import { seedUserDirectly } from "./helpers.js";
 
-// Phase 02.2 review (Codex P1.2): account-state middleware blocks writes from
-// a soft-deleted account's session. Allowed routes during grace:
+// Account-state middleware blocks writes from a soft-deleted account's
+// session. Allowed routes during grace:
 //   - POST /api/me/account/restore
 //   - GET  /api/me/export
 //   - POST /api/me/sessions/all
@@ -16,7 +16,7 @@ import { seedUserDirectly } from "./helpers.js";
 // can sign back in via Google OAuth at any time during the RETENTION_DAYS
 // grace. Without this guard, the freshly re-authed deleted user could create
 // rows that neither carry the marker timestamp (so restoreAccount won't
-// reverse them) nor get hard-purged by the Phase 3 worker.
+// reverse them) nor get hard-purged by the purge worker.
 
 const uniq = () => Math.random().toString(36).slice(2, 10);
 
@@ -26,7 +26,7 @@ async function softDeleteUser(userId: string): Promise<Date> {
   return deletedAt;
 }
 
-describe("account-state middleware (Phase 02.2 — Codex P1.2)", () => {
+describe("account-state middleware", () => {
   it("active account: POST /api/games passes through (control)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
@@ -170,13 +170,13 @@ describe("account-state middleware (Phase 02.2 — Codex P1.2)", () => {
     expect(res.status).toBe(423);
   });
 
-  // Phase 03.0 Plan 12 — Permanent-delete-now CTA route integration. The
-  // banner CTA fires `DELETE /api/me/account/purge` for a soft-deleted user;
-  // the route is in account-state ALLOWED_WHEN_DELETED and bypasses the
-  // RETENTION_DAYS gate via {ignoreRetention: true}. On success the user's
-  // session rows are cascaded out, so a follow-up request with the
-  // pre-purge cookie returns 401.
-  it("Plan 03.0-12: soft-deleted account: DELETE /api/me/account/purge returns 200 and removes the user row (CTA path)", async () => {
+  // Permanent-delete-now CTA route integration. The banner CTA fires
+  // `DELETE /api/me/account/purge` for a soft-deleted user; the route
+  // is in account-state ALLOWED_WHEN_DELETED and bypasses the
+  // RETENTION_DAYS gate via {ignoreRetention: true}. On success the
+  // user's session rows are cascaded out, so a follow-up request with
+  // the pre-purge cookie returns 401.
+  it("soft-deleted account: DELETE /api/me/account/purge returns 200 and removes the user row (CTA path)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `as-purge-cta-${uniq()}@test.local` });
@@ -202,7 +202,7 @@ describe("account-state middleware (Phase 02.2 — Codex P1.2)", () => {
     expect(followup.status).toBe(401);
   });
 
-  it("Plan 03.0-12: active account: DELETE /api/me/account/purge also succeeds (route exempt; ignoreRetention=true)", async () => {
+  it("active account: DELETE /api/me/account/purge also succeeds (route exempt; ignoreRetention=true)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `as-purge-active-${uniq()}@test.local` });
@@ -216,7 +216,7 @@ describe("account-state middleware (Phase 02.2 — Codex P1.2)", () => {
     expect(body.purged).toBe(true);
   });
 
-  it("layout-load contract: deletedAt is read directly from DB (Codex P1.1)", async () => {
+  it("layout-load contract: deletedAt is read directly from DB", async () => {
     // The +layout.server.ts load now SELECTs user.deletedAt explicitly rather
     // than relying on Better Auth getSession passthrough. This is the same
     // SELECT path the middleware uses, so we exercise it via a 423 response —

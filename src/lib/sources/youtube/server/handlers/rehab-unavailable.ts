@@ -1,5 +1,4 @@
-// Phase 3.0 post-build refactor (2026-05-06) — weekly rehab-unavailable
-// worker handler.
+// Weekly rehab-unavailable worker handler.
 //
 // Recovers videos that went private/inaccessible and later came back
 // public without requiring user manual refresh. Selects up to N

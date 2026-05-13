@@ -1,19 +1,17 @@
 <script lang="ts">
-  // /events/new — full-page free-form event creation (Plan 02.1-09; CONTEXT
-  // D-09). The /events list page is removed in 2.1 (UI-SPEC §"/events
-  // (REMOVED)") so this is the canonical entry point for free-form events;
-  // the paste flow on /games/[id] (and Plan 07's /feed paste affordance)
-  // handles the pollable kinds (youtube_video) for users who already have
-  // the URL.
+  // /events/new — full-page free-form event creation. The canonical entry
+  // point for free-form events; the paste flow on /games/[id] (and the
+  // /feed paste affordance) handles the pollable kinds (youtube_video)
+  // for users who already have the URL.
   //
-  // Plan 02.1-20: kind picker shows ONLY functional kinds (youtube_video,
-  // post, conference, talk, press, other) — non-functional Phase-3+ kinds
+  // Kind picker shows ONLY functional kinds (youtube_video, post,
+  // conference, talk, press, other) — non-functional future kinds
   // (reddit_post, twitter_post, telegram_post, discord_drop) are HIDDEN.
-  // Backend continues to accept all enum values (UI-gate only); legacy rows
-  // of hidden kinds still render correctly via KindIcon + FilterChips.
+  // Backend continues to accept all enum values (UI-gate only); legacy
+  // rows of hidden kinds still render correctly via KindIcon + FilterChips.
   //
   // The paste flow is the FAST path; free-form is the FALLBACK. When a
-  // Phase-3+ adapter ships, add the value back to FUNCTIONAL_KINDS.
+  // new adapter ships, add the value back to FUNCTIONAL_KINDS.
   //
   // Submit → POST /api/events { gameId|null, kind, occurredAt, title, url,
   // notes }. On 201 → goto("/feed") so the user sees their event in the
@@ -48,12 +46,11 @@
   let occurredAt = $state(new Date().toISOString().slice(0, 10));
   let url = $state("");
   let notes = $state("");
-  // Plan 02.1-18 — author_is_me discriminator (default false). Server-side
-  // schema acceptance ships in Plan 02.1-17; this wires the client.
+  // author_is_me discriminator (default false).
   let authorIsMe = $state(false);
   let pending = $state(false);
   let errorText = $state<string | null>(null);
-  // Phase 3.0 post-build (UAT 2026-05-06) — "Get from YouTube" button state.
+  // "Get from YouTube" button state.
   let fetching = $state(false);
   let fetchInfo = $state<string | null>(null);
 
@@ -137,11 +134,11 @@
     occurredAt = d.toISOString().slice(0, 10);
   }
 
-  // Plan 02.1-20: functional-only allowlist + alphabetical-by-label sort.
+  // Functional-only allowlist + alphabetical-by-label sort.
   // Hidden kinds (reddit_post, twitter_post, telegram_post, discord_drop)
-  // re-appear when their adapter ships in Phase 3+ — just add the value
-  // back to FUNCTIONAL_KINDS. Backend continues to accept all enum values;
-  // legacy rows of hidden kinds still render correctly via KindIcon +
+  // re-appear when their adapter ships — just add the value back to
+  // FUNCTIONAL_KINDS. Backend continues to accept all enum values; legacy
+  // rows of hidden kinds still render correctly via KindIcon +
   // FilterChips. UI-gate only — no schema / migration / service change.
   const FUNCTIONAL_KINDS: ReadonlyArray<EventKind> = [
     "youtube_video",
@@ -223,10 +220,9 @@
           code === "validation_failed" ? m.ingest_error_malformed_url() : m.error_server_generic();
         return;
       }
-      // Plan 02.1-19: invalidateAll() forces SvelteKit to re-run /feed's
-      // +page.server.ts loader after the POST succeeds. Without this, /feed
-      // shows stale data and the user must hard-refresh to see the new
-      // event (UAT round-2 gap "feed loader stale after POST /api/events").
+      // invalidateAll() forces SvelteKit to re-run /feed's +page.server.ts
+      // loader after the POST succeeds. Without this, /feed shows stale
+      // data and the user must hard-refresh to see the new event.
       await invalidateAll();
       await goto("/feed");
     } catch {

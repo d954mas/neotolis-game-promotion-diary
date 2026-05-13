@@ -1,16 +1,16 @@
 // Steam Web API integration — store.steampowered.com appdetails fetch +
 // api.steampowered.com IWishlistService key probe.
 //
-// Plan 02-04 landed `fetchSteamAppDetails` (no API key required); Plan 02-05
-// extends this same file with `validateSteamKey` (api.steampowered.com/IWishlistService).
-// We keep both calls in one file so future Steam endpoints (price polling,
-// review counts, ...) have an obvious home.
+// `fetchSteamAppDetails` (no API key required) +
+// `validateSteamKey` (api.steampowered.com/IWishlistService) both live here
+// so future Steam endpoints (price polling, review counts, ...) have an
+// obvious home.
 //
 // Rate limit: ~200 req / 5min on the public store endpoint per
-// steamcommunity folklore. Phase 2 fetches once at listing INSERT time;
-// Phase 6 will add a shared appdetails cache to absorb repeat lookups
-// across users, but that's deferred — single-user instances will not
-// hit the limit at any realistic insert rate.
+// steamcommunity folklore. We fetch once at listing INSERT time; a shared
+// appdetails cache to absorb repeat lookups across users is deferred —
+// single-user instances will not hit the limit at any realistic insert
+// rate.
 //
 // 5-second AbortController timeout: Steam's store endpoint is generally
 // fast (<500ms p95) but occasionally hangs. We never want a slow Steam
@@ -87,7 +87,7 @@ export async function fetchSteamAppDetails(appId: number): Promise<SteamAppDetai
 }
 
 /**
- * D-17 Steam Web API key paste-time validation (KEYS-03).
+ * Steam Web API key paste-time validation.
  *
  * One probe call to `IWishlistService/GetWishlistItemCount/v1/?key=...&steamid=0`.
  * `steamid=0` is a sentinel — Valve accepts the call shape and returns 4xx if
@@ -95,14 +95,14 @@ export async function fetchSteamAppDetails(appId: number): Promise<SteamAppDetai
  * count returned (we don't care about the body, only the status class).
  *
  * Distinguishes 4xx (invalid key — caller maps to AppError 422) vs 5xx
- * (transient — caller maps to AppError 502 with retry hint per RESEARCH.md
- * Pitfall 9). Throws an `Error('steam_api_5xx')` on 5xx so the service-layer
- * try/catch can map cleanly; returns boolean for 2xx (true) vs 4xx (false).
+ * (transient — caller maps to AppError 502 with retry hint). Throws an
+ * `Error('steam_api_5xx')` on 5xx so the service-layer try/catch can map
+ * cleanly; returns boolean for 2xx (true) vs 4xx (false).
  *
  * Network errors (DNS / abort / TLS) escape; the service layer either
- * propagates them (becomes 500 at the route boundary) OR could choose to
- * map them to 502 in a future refinement. Phase 2 keeps the contract
- * narrow: only 5xx is the "Steam unavailable" signal.
+ * propagates them (becomes 500 at the route boundary) or could choose to
+ * map them to 502 in a future refinement. The contract is narrow: only
+ * 5xx is the "Steam unavailable" signal.
  *
  * 5s AbortController timeout matches `fetchSteamAppDetails` so a stuck
  * Steam endpoint never blocks a paste-time validation longer than the

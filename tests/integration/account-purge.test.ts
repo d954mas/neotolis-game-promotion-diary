@@ -1,9 +1,7 @@
-// Phase 3.0 Plan 05 — activated suite for purgeAccount + listPurgeEligibleUsers.
+// Activated suite for purgeAccount + listPurgeEligibleUsers.
 //
-// Replaces the 4 it.skip stubs Plan 02 instantiated. Plan 08 will add the
-// HTTP-level DELETE /api/me/account/purge route + its own integration
-// suite; this file covers the SERVICE layer (the contract Plan 09's worker
-// + Plan 08's route both depend on).
+// Covers the SERVICE layer (the contract the HTTP-level route + the worker
+// both depend on).
 //
 // Cascade chain (FK-respecting order, single tx):
 //   api_keys_steam → event_games → events → game_steam_listings →
@@ -42,8 +40,8 @@ import * as SteamApi from "../../src/lib/server/integrations/steam-api.js";
 import { seedUserDirectly } from "./helpers.js";
 import { env } from "../../src/lib/server/config/env.js";
 
-describe("purgeAccount service (Plan 03.0-05)", () => {
-  // Same Steam API mocks as account.test.ts — Plan 02 createSteamKey path
+describe("purgeAccount service", () => {
+  // Same Steam API mocks as account.test.ts — the createSteamKey path
   // calls validateSteamKey + fetchSteamAppDetails internally.
   const validateSpy = vi.spyOn(SteamApi, "validateSteamKey").mockResolvedValue(true);
   const fetchSpy = vi.spyOn(SteamApi, "fetchSteamAppDetails").mockResolvedValue(null);
@@ -169,7 +167,7 @@ describe("purgeAccount service (Plan 03.0-05)", () => {
 
   /**
    * Test 4 — ignoreRetention=true bypasses the 60-day gate. CTA path
-   * (Permanent-delete-now button on AccountDeletedBanner — Plan 08).
+   * (Permanent-delete-now button on AccountDeletedBanner).
    */
   it("ignoreRetention=true purges immediately even when deletedAt is null", async () => {
     const { user: u, game } = await seedFullFixture("cta-immediate");
@@ -208,8 +206,8 @@ describe("purgeAccount service (Plan 03.0-05)", () => {
       games: 0,
       sessions: 0,
       user: 0,
-      // Phase 03.0.3 round-8 (Codex P1) — outbox is part of the
-      // cascade; an already-purged user has 0 outbox rows.
+      // Outbox is part of the cascade; an already-purged user has 0
+      // outbox rows.
       outbox: 0,
     });
   });
@@ -278,7 +276,7 @@ describe("purgeAccount service (Plan 03.0-05)", () => {
   it("cascade respects FK order — populated fixture purges without constraint violation", async () => {
     const u = await seedUserDirectly({ email: `cascade-order-${uniq()}@test.local` });
     // Two games + two listings + a source + an auto-imported event attached
-    // to BOTH games via the junction (event_games is M:N — Plan 02.1-27).
+    // to BOTH games via the junction (event_games is M:N).
     const g1 = await createGame(u.id, { title: `G1-${uniq()}` }, "127.0.0.1");
     const g2 = await createGame(u.id, { title: `G2-${uniq()}` }, "127.0.0.1");
     await db
@@ -383,7 +381,7 @@ describe("purgeAccount service (Plan 03.0-05)", () => {
     expect(kBs.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("Phase 03.0.3 round-8 (Codex P1): purgeAccount deletes outbox rows that reference the purged user via payload.triggerUserId", async () => {
+  it("purgeAccount deletes outbox rows that reference the purged user via payload.triggerUserId", async () => {
     // Force-deep enqueue lands a row in `outbox` carrying triggerUserId
     // inside the payload. If the user purges before the forwarder has
     // dispatched the row to pg-boss, the dangling row would later
@@ -432,25 +430,25 @@ describe("purgeAccount service (Plan 03.0-05)", () => {
   });
 });
 
-// Phase 3.0 Plan 08 — DELETE /api/me/account/purge route activation.
+// DELETE /api/me/account/purge route.
 //
-// The Permanent-delete-now CTA path (DV-6 / D-NEW Purge worker). The route
-// operates on c.var.userId only — there is NO :userId path parameter (the
-// account-routes precedent from Plan 02.2-03), so cross-tenant access is
-// impossible by construction. Calls purgeAccount({ignoreRetention: true})
-// from the Plan 05 service so it works whether or not the user has been
-// soft-deleted (the soft-deleted variant is the primary CTA target;
-// active-user purge is allowed too — the user is permitted to nuke their
-// account immediately without going through the soft-delete tripwire).
+// The Permanent-delete-now CTA path. The route operates on c.var.userId
+// only — there is NO :userId path parameter (follows the account-routes
+// precedent), so cross-tenant access is impossible by construction. Calls
+// purgeAccount({ignoreRetention: true}) from the service so it works
+// whether or not the user has been soft-deleted (the soft-deleted variant
+// is the primary CTA target; active-user purge is allowed too — the user
+// is permitted to nuke their account immediately without going through
+// the soft-delete tripwire).
 //
-// The HTTP boundary tests below complement Plan 05's service-layer suite.
+// The HTTP boundary tests below complement the service-layer suite.
 // The cascade-correctness invariants are owned by the service tests; these
 // tests assert the wire format, the auth gate, the audit row presence, and
 // the post-purge session invalidation contract.
-describe("account purge route (Plan 03.0-08)", () => {
+describe("account purge route", () => {
   const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
-  it("Plan 03.0-08: DELETE /api/me/account/purge hard-deletes user rows for an active user (CTA path, ignoreRetention=true)", async () => {
+  it("DELETE /api/me/account/purge hard-deletes user rows for an active user (CTA path, ignoreRetention=true)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ap-active-${uniq()}@test.local` });
@@ -477,7 +475,7 @@ describe("account purge route (Plan 03.0-08)", () => {
     expect(g1).toHaveLength(0);
   });
 
-  it("Plan 03.0-08: DELETE /api/me/account/purge works for a soft-deleted user (CTA target — bypasses 60d gate)", async () => {
+  it("DELETE /api/me/account/purge works for a soft-deleted user (CTA target — bypasses 60d gate)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ap-soft-${uniq()}@test.local` });
@@ -502,7 +500,7 @@ describe("account purge route (Plan 03.0-08)", () => {
     expect(u1).toHaveLength(0);
   });
 
-  it("Plan 03.0-08: after 200 purge, subsequent /api/me request with the same session cookie returns 401 (session cascade-deleted)", async () => {
+  it("after 200 purge, subsequent /api/me request with the same session cookie returns 401 (session cascade-deleted)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ap-sess-${uniq()}@test.local` });
@@ -522,7 +520,7 @@ describe("account purge route (Plan 03.0-08)", () => {
     expect(await meRes.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("Plan 03.0-08: audit purge.completed row written under purged user_id with metadata.row_counts (HTTP-layer)", async () => {
+  it("audit purge.completed row written under purged user_id with metadata.row_counts (HTTP-layer)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ap-audit-${uniq()}@test.local` });
@@ -550,7 +548,7 @@ describe("account purge route (Plan 03.0-08)", () => {
     expect(typeof meta?.purged_at).toBe("string");
   });
 
-  it("Plan 03.0-08: anonymous DELETE /api/me/account/purge → 401 unauthorized", async () => {
+  it("anonymous DELETE /api/me/account/purge → 401 unauthorized", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
 

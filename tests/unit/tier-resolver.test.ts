@@ -1,24 +1,19 @@
-// Phase 3.0 Plan 03 + post-build refactor (2026-05-06) — assertions
-// activated.
-//
 // tier-resolver is the single source of truth for the Pending / Active /
-// Cold / Frozen / Unavailable bucket of a YouTube video (CONTEXT DV-2 —
-// Pitfall 7 avoidance: no tier logic in any other service / route /
-// Svelte component). Boundary tests are the load-bearing guard against
-// drift in the cutoffs.
+// Cold / Frozen / Unavailable bucket of a YouTube video — no tier logic
+// in any other service / route / Svelte component. Boundary tests are
+// the load-bearing guard against drift in the cutoffs.
 //
-// Per-video refactor (2026-05-06): tier is keyed on VIDEO age (publishedAt
-// from youtube_videos), not EVENT age. New 'pending' tier covers the
-// window between event creation and channel-context-backfill completion
-// (NULL publishedAt).
+// Tier is keyed on VIDEO age (publishedAt from youtube_videos), not EVENT
+// age. The 'pending' tier covers the window between event creation and
+// channel-context-backfill completion (NULL publishedAt).
 //
-// Tiers (D-05):
+// Tiers:
 //   - publishedAt IS NULL  → 'pending'
 //   - age <  24h           → 'active'
 //   - age >= 24h && < 28d  → 'cold'
 //   - age >= 28d           → 'frozen'
 //
-// lastPollStatus overrides (D-12) — irrespective of age:
+// lastPollStatus overrides — irrespective of age:
 //   - 'not_found' / 'private' / 'auth_error' → 'unavailable'
 //   - any other value (including 'ok', 'rate_limited', null) → falls
 //     through to age rule
@@ -34,7 +29,7 @@ import {
 const NOW = new Date("2026-05-05T12:00:00Z");
 const ago = (ms: number) => new Date(NOW.getTime() - ms);
 
-describe("resolveTier — boundary table (D-05)", () => {
+describe("resolveTier — boundary table", () => {
   test.each([
     ["active boundary low (0ms ago)", ago(0), "active"],
     ["active boundary high (23h59m59s999ms ago)", ago(86_399_999), "active"],
@@ -62,7 +57,7 @@ describe("resolveTier — pending tier (NULL publishedAt)", () => {
   });
 });
 
-describe("resolveTier — last_poll_status overrides (D-12)", () => {
+describe("resolveTier — last_poll_status overrides", () => {
   test("lastPollStatus='not_found' overrides → unavailable", () => {
     expect(resolveTier(ago(1000), "not_found", NOW, NOW)).toBe("unavailable");
   });
@@ -88,7 +83,7 @@ describe("resolveTier — last_poll_status overrides (D-12)", () => {
   });
 });
 
-describe("resolveTier — bootstrap rule (Phase 03.0.3 follow-up)", () => {
+describe("resolveTier — bootstrap rule", () => {
   // Issue #29 extension: a video that is frozen by age (published_at > 28d
   // ago) but has NEVER been polled (last_polled_at IS NULL) is upgraded
   // to 'cold' so the next scheduler tick picks it up exactly once. After
@@ -134,7 +129,7 @@ describe("tier-resolver — exported boundary constants", () => {
     expect(TIER_BOUNDARY_COLD_MS).toBe(28 * 86_400_000);
   });
 
-  test("UNAVAILABLE_POLL_STATUSES is the D-12 override list", () => {
+  test("UNAVAILABLE_POLL_STATUSES is the override list", () => {
     expect([...UNAVAILABLE_POLL_STATUSES].sort()).toEqual(
       ["auth_error", "not_found", "private"].sort(),
     );

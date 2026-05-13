@@ -17,24 +17,20 @@
 //
 // Returns null only for non-YouTube hosts or unparseable strings.
 //
-// Phase 3.0 post-build review (2026-05-07): this module replaces two
-// near-identical implementations (`parseHandleUrl` in
-// $lib/sources/youtube/server/handlers/channel-context-backfill.ts (was
-// worker/handlers/youtube-channel-context-backfill.ts pre-Phase 03.0.1
-// Plan 05) and `parseYoutubeChannelUrl` in
-// $lib/sources/youtube/server/metadata.ts).
-// Both had
-// the same logic; keeping two copies risked drift on every new URL
-// shape (e.g. /live/ if YouTube ever ships it). One module, one truth.
+// This module replaces two near-identical implementations
+// (`parseHandleUrl` in
+// $lib/sources/youtube/server/handlers/channel-context-backfill.ts and
+// `parseYoutubeChannelUrl` in $lib/sources/youtube/server/metadata.ts).
+// Both had the same logic; keeping two copies risked drift on every new
+// URL shape (e.g. /live/ if YouTube ever ships it). One module, one truth.
 //
-// Phase 03.0.1 Plan 06 — adds `youtubeParseUrl(input)` that returns the
-// generic `ParsedUrl` shape consumed by the cross-source `parseAnyUrl`
-// iterator (D-15 first-match-wins). Distinct from `parseYoutubeUrl` above
-// (channelId / handle / videoId discriminator for the channel-context
-// backfill worker): `youtubeParseUrl` returns ONLY for standalone
-// watchable items (videos / shorts / embed / youtu.be) — channels and
-// handles return null because the Phase 03.0 events table only ingests
-// `kind=youtube_video` rows.
+// `youtubeParseUrl(input)` returns the generic `ParsedUrl` shape consumed
+// by the cross-source `parseAnyUrl` iterator (first-match-wins). Distinct
+// from `parseYoutubeUrl` above (channelId / handle / videoId discriminator
+// for the channel-context backfill worker): `youtubeParseUrl` returns
+// ONLY for standalone watchable items (videos / shorts / embed /
+// youtu.be) — channels and handles return null because the events table
+// only ingests `kind=youtube_video` rows.
 
 import type { ParsedUrl } from "$lib/sources/adapter.js";
 
@@ -96,16 +92,15 @@ export function parseYoutubeUrl(url: string): ParsedYoutubeUrl | null {
   return null;
 }
 
-// ---- Phase 03.0.1 Plan 06: D-15 adapter contract for parseAnyUrl ----
+// ---- Adapter contract for parseAnyUrl ----
 
 const YT_HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"]);
 
 /**
- * D-15 contract surface (Phase 03.0.1 Plan 06): returns `ParsedUrl` for
- * any YouTube URL we recognize as a standalone watchable item (video /
- * short / embed / youtu.be link), null otherwise. Channel and playlist
- * URLs return null because the Phase 03.0 data model only ingests events
- * of `kind=youtube_video`.
+ * Returns `ParsedUrl` for any YouTube URL we recognize as a standalone
+ * watchable item (video / short / embed / youtu.be link), null otherwise.
+ * Channel and playlist URLs return null because the events table only
+ * ingests rows of `kind=youtube_video`.
  *
  * Distinct from `parseYoutubeUrl` above — that one decomposes a URL into
  * the channel-context backfill triple (channelId / handle / videoId) for
@@ -113,10 +108,9 @@ const YT_HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtube.com", "yo
  * consumed by `parseAnyUrl` (src/lib/sources/url.ts) and the
  * `youtubeAdapter.parseUrl` adapter method.
  *
- * Pitfall mitigation: hostname check FIRST (rejects e.g.
- * `https://example.com/?v=abc` which would otherwise round-trip through
- * the URL parser unchanged and leak a non-YouTube URL into the
- * youtube_video kind).
+ * Hostname check FIRST rejects e.g. `https://example.com/?v=abc` which
+ * would otherwise round-trip through the URL parser unchanged and leak a
+ * non-YouTube URL into the youtube_video kind.
  */
 export function youtubeParseUrl(input: string): ParsedUrl | null {
   let url: URL;

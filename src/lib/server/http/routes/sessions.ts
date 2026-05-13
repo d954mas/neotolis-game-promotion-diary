@@ -1,4 +1,4 @@
-// Session-management routes (Plan 01-07 surface, D-08 wiring).
+// Session-management routes.
 //
 // `POST /api/me/sessions/all` — implements the "Sign out from all devices"
 // settings action. Behind tenantScope (mounted under /api/* in
@@ -8,9 +8,9 @@
 // caller's current session — the next request from any device sees a stale
 // cookie that no longer maps to a session row and lands on the login page.
 //
-// D-08 rationale (CONTEXT.md): with database-backed sessions (D-05) the
-// server can invalidate all of a user's sessions instantly. This is the free
-// security win that JWE cookies cannot offer.
+// With database-backed sessions the server can invalidate all of a user's
+// sessions instantly. This is the free security win that JWE cookies
+// cannot offer.
 
 import { Hono } from "hono";
 import { signOutAllDevices } from "../../services/users.js";
@@ -29,8 +29,8 @@ sessionRoutes.post("/me/sessions/all", async (c) => {
   return c.json(result);
 });
 
-// Plan 02.1-09 — single-session sign-out from /settings active-sessions list.
-// Cross-tenant deletion attempts surface as 404 (PRIV-01: 404, never 403).
+// Single-session sign-out from /settings active-sessions list.
+// Cross-tenant deletion attempts surface as 404 (404, never 403).
 // Idempotent (second DELETE on the same id also returns 404).
 sessionRoutes.delete("/sessions/:id", async (c) => {
   const userId = c.var.userId;

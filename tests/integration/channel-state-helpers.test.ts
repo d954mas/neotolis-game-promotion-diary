@@ -1,9 +1,9 @@
-// Phase 03.0.1 Wave 1 — channel-state helpers integration test.
+// Channel-state helpers integration test.
 //
 // Exercises the channel-scoped polling state service. Channels are global
 // (not tenant-owned), so this file does not seed users or sources — the
 // helpers operate on (kind, channelKey) keys directly. Worker fan-out to
-// per-user events is covered separately in Wave 2's worker tests.
+// per-user events is covered separately in the worker tests.
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { and, eq } from "drizzle-orm";
@@ -83,9 +83,9 @@ describe("channel-state helpers", () => {
   });
 
   it("markChannelBackfillComplete sets the flag", async () => {
-    // Phase 03.0.3 P1 — the companion reset helper was removed (D-D1).
-    // The "trust-but-verify" toggle was redundant once the three-branch
-    // since-derivation landed (D-#29-6); only the set-true direction is
+    // The companion reset helper was removed. The "trust-but-verify"
+    // toggle was redundant once the three-branch since-derivation
+    // landed; only the set-true direction is
     // exercised here now. Widening a user's backfill_target_since lands
     // in the `deep` branch lazily on the next refresh-content click —
     // no in-band flag flip required.

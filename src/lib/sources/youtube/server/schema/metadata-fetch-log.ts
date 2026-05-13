@@ -1,6 +1,5 @@
-// youtube_metadata_fetch_log — Phase 3.0 post-build review (2026-05-07).
-//
-// Per-user rolling 24h counter for cache-miss YouTube metadata fetches.
+// youtube_metadata_fetch_log — per-user rolling 24h counter for
+// cache-miss YouTube metadata fetches.
 // One row per cache-miss invocation of $lib/sources/youtube/server/metadata.ts ->
 // fetchVideoMetadataByUrl (the "Get from YouTube" button on /events/new).
 // $lib/server/services/quota.ts -> currentCount("youtube_metadata_fetches") counts rows where

@@ -1,7 +1,7 @@
-// Phase 03.0.1 Wave 2 — youtube.backfill.channel queue handler.
+// youtube.backfill.channel queue handler.
 //
-// Channel-scoped polling. Replaces the per-source backfill-user.ts handler.
-// One walk per channel per call; fan-out INSERT to ALL active subscribers.
+// Channel-scoped polling. One walk per channel per call; fan-out INSERT
+// to ALL active subscribers.
 //
 // Triggered by:
 //   - POST /api/sources/:id/refresh-content — user click. Job payload sets
@@ -14,7 +14,7 @@
 //     Cron picker SELECTs DISTINCT channel_key with at least one active
 //     subscriber, enqueues one backfill.channel job per channel.
 //
-// CONTRACT (D-10 per-kind queue topology, channel-scoped revision):
+// CONTRACT:
 //   - Queue:   YOUTUBE_BACKFILL_CHANNEL ("youtube.backfill.channel")
 //   - Payload: { kind, channelKey, triggerUserId?, depthBoundIso, flow }
 //   - Side effects:
@@ -71,12 +71,12 @@ import type { SourceKind } from "$lib/sources/adapter.js";
  *  as poll-active.ts). */
 const YOUTUBE_VIDEOS_BATCH_SIZE = 50;
 
-/** Filler freshness gate (Phase 03.0.3 follow-up). When refresh-content
- *  opportunistically tops the videos.list batch with stale-stat videos
- *  from the same channel, skip videos polled within the last N minutes
- *  to avoid racing with poll-active cron (which runs every 6h but might
- *  have just landed). Worst case on race: +1 redundant videos.list batch
- *  entry — well within the operator's daily envelope. */
+/** Filler freshness gate. When refresh-content opportunistically tops the
+ *  videos.list batch with stale-stat videos from the same channel, skip
+ *  videos polled within the last N minutes to avoid racing with poll-active
+ *  cron (which runs every 6h but might have just landed). Worst case on
+ *  race: +1 redundant videos.list batch entry — well within the operator's
+ *  daily envelope. */
 const FILLER_FRESH_THRESHOLD_MS = 5 * 60_000;
 
 type BackfillFlow = "initial" | "incremental" | "historical" | "auto_passive";
@@ -100,15 +100,14 @@ interface BackfillChannelJob {
      *  toward trigger user's per-user requestsPerDay cap;
      *  auto_passive does NOT count and does not write audit. */
     flow: BackfillFlow;
-    /** Phase 03.0.3 follow-up — force a deep walk regardless of the
-     *  three-branch since-derivation. Set ONLY by `updateSource` after a
-     *  user widens `backfillTargetSince` past the channel's
-     *  `backfill_oldest_at` on a fully-walked channel — without this
-     *  override, branch=exhausted always wins and historical events
-     *  below the prior depth would never surface (D-#29-7 multi-tenant
-     *  fairness was the reason for prioritising exhausted; this flag
-     *  is the single per-user opt-in to override it). The trigger user
-     *  pays quota for the deep walk; subscribers free-ride on fan-out. */
+    /** Force a deep walk regardless of the three-branch since-derivation.
+     *  Set ONLY by `updateSource` after a user widens `backfillTargetSince`
+     *  past the channel's `backfill_oldest_at` on a fully-walked channel —
+     *  without this override, branch=exhausted always wins and historical
+     *  events below the prior depth would never surface (multi-tenant
+     *  fairness was the reason for prioritising exhausted; this flag is
+     *  the single per-user opt-in to override it). The trigger user pays
+     *  quota for the deep walk; subscribers free-ride on fan-out. */
     forceDeep?: boolean;
   };
 }
@@ -157,7 +156,7 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
   // 2. Resolve channel state (auto-create on first walk via mark*/set* helpers).
   const channelState = await getChannelState(kind, channelKey);
 
-  // 3. Compute since — three-branch derivation (Phase 03.0.3 P1; D-#29-2).
+  // 3. Compute since — three-branch derivation.
   //
   // The walker historically used `since = depthBoundIso` unconditionally;
   // that re-walks the full uploads playlist on every click when the user's
@@ -165,7 +164,7 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
   // videos). The branch logic gates the walk depth using the channel's
   // newest-known publishedAt cursor + the channel's prior walk frontier.
   //
-  // Branches (D-#29-2 — applies identically to ctx.origin user AND cron):
+  // Branches (applies identically to ctx.origin user AND cron):
   //   - exhausted   (backfill_complete=true)
   //                 since = max(newestKnown, target)  — steady state
   //   - incremental (!complete && deepestWalked !== null && target >= deepestWalked)
@@ -173,7 +172,7 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
   //   - deep        (else)
   //                 since = target                    — no prior walk OR target deeper
   //
-  // Token clearing rule (D-#29-3): exhausted + incremental branches CLEAR
+  // Token clearing rule: exhausted + incremental branches CLEAR
   // metadata.lastBackfillPageToken before adapter.pollContent. Deep branch
   // preserves it (resume cursor for >MAX_PAGES walks). Without this clear,
   // a stale page-N cursor from a prior deep walk would cause walkedPastSince
@@ -190,11 +189,11 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
   const deepestWalked = channelState?.backfillOldestAt ?? null;
   let branch: "exhausted" | "incremental" | "deep";
   if (job.data.forceDeep === true) {
-    // Phase 03.0.3 follow-up — user-driven override of D-#29-7 fairness
-    // for one walk: widening backfillTargetSince past deepestWalked on a
-    // fully-walked channel does NOT trigger a deep walk under the
-    // three-branch logic (exhausted wins). updateSource enqueues this
-    // override exactly when a widen would otherwise be silently no-op.
+    // User-driven override of the fairness rule for one walk: widening
+    // backfillTargetSince past deepestWalked on a fully-walked channel does
+    // NOT trigger a deep walk under the three-branch logic (exhausted
+    // wins). updateSource enqueues this override exactly when a widen
+    // would otherwise be silently no-op.
     branch = "deep";
   } else if (channelState?.backfillComplete === true) {
     branch = "exhausted";
@@ -210,23 +209,19 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
         ? newestKnown
         : target;
   const incrementalBranchTaken = branch !== "deep";
-  // Phase 03.0.3 follow-up (PR #31 Codex P1) — the resume cursor passed to
-  // pollContent MUST be undefined for incremental/exhausted branches.
-  // Pre-fix only the DB row was cleared (setChannelBackfillPageToken
-  // below); the in-memory channelState.metadata.lastBackfillPageToken
-  // still held the stale token from the prior deep walk, and the
-  // pollContent call below read from THAT in-memory copy — so the
-  // adapter started from page N+1 of the prior deep walk instead of
-  // page 1, missing the recent uploads the incremental walk was
-  // supposed to discover. Deep branch keeps the resume cursor so the
-  // walk continues from where MAX_PAGES cut it off.
+  // The resume cursor passed to pollContent MUST be undefined for
+  // incremental/exhausted branches. Without this, a stale token from
+  // the prior deep walk would start the adapter on page N+1 instead of
+  // page 1, missing the recent uploads the incremental walk is supposed
+  // to discover. Deep branch keeps the resume cursor so the walk
+  // continues from where MAX_PAGES cut it off.
   const pageTokenForPoll: string | undefined = incrementalBranchTaken
     ? undefined
     : (channelState?.metadata as { lastBackfillPageToken?: string } | undefined)
         ?.lastBackfillPageToken;
   if (incrementalBranchTaken) {
-    // D-#29-3 — clear stale resume cursor before incremental walk. Persisted
-    // here so a worker crash mid-walk doesn't leave a dangling token in DB.
+    // Clear stale resume cursor before incremental walk. Persisted here so
+    // a worker crash mid-walk doesn't leave a dangling token in DB.
     await setChannelBackfillPageToken(kind, channelKey, null);
   }
 
@@ -259,12 +254,12 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
       since,
       {
         origin: triggerUserId ? "user" : "cron",
-        // Phase 03.0.3 follow-up — D-#29-1 backdated-upload safety. Deep
-        // walks need the historical floor (since=target), so they stay
-        // on legacy "depth" stop. Incremental/exhausted walks (where
-        // since=newestKnown) MUST not drop backdated cache-miss items;
-        // switch to "overlap" which stops the walker after 3 consecutive
-        // already-cached items past the cutoff. See AdapterContext.walkStop.
+        // Backdated-upload safety. Deep walks need the historical floor
+        // (since=target), so they stay on legacy "depth" stop.
+        // Incremental/exhausted walks (where since=newestKnown) MUST
+        // not drop backdated cache-miss items; switch to "overlap"
+        // which stops the walker after 3 consecutive already-cached
+        // items past the cutoff. See AdapterContext.walkStop.
         walkStop: branch === "deep" ? "depth" : "overlap",
       },
     );
@@ -279,8 +274,8 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
       }
       if (err.category === "operator-issue" || err.category === "permanent") {
         // Platform-level issue affects ALL subscribers — flag every active
-        // source so admin sees it (Phase 6+) and per-user UI surfaces the
-        // reconnect requirement.
+        // source so admin sees it and per-user UI surfaces the reconnect
+        // requirement.
         for (const sub of subscribers) {
           await markSourceNeedsReconnect(sub.userId, sub.id, err.category);
         }
@@ -325,12 +320,11 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
   //    | false         | undefined        | walkedPastSince at depth | complete=unchanged, token=null  |
   //    | false         | defined          | MAX_PAGES interrupted    | complete=unchanged, token=preserved  |
   //
-  //    The "walkedPastSince" branch is the one Phase 03.0.3 cared about:
-  //    a deep walk with since=30d-ago whose page 1 is all older than
-  //    30d-ago means "the channel has no uploads in the last 30 days",
-  //    NOT "the channel is fully exhausted across all history".
-  //    Auto-backfill needs the unchanged complete flag to revisit when
-  //    target widens.
+  //    The "walkedPastSince" branch matters: a deep walk with
+  //    since=30d-ago whose page 1 is all older than 30d-ago means
+  //    "the channel has no uploads in the last 30 days", NOT "the
+  //    channel is fully exhausted across all history". Auto-backfill
+  //    needs the unchanged complete flag to revisit when target widens.
   //
   //    Empty + unitsUsed === 0 means the precondition failed (no API
   //    key / unresolvable playlist) — preserve all state and just stamp
@@ -418,16 +412,16 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
     }
   }
 
-  // 8. youtube_videos cache UPSERT for every fetched event. Phase 03.0.1
-  //    Wave 4 (post-UAT 2026-05-10) — without this the channel-scoped
-  //    polling path INSERTed events but left youtube_videos cache empty
-  //    for those video_ids. PollingBadge tier resolver reads
-  //    youtube_videos.publishedAt; missing → tier=pending → "Pending ·
-  //    fetching video info…" badge with no stats forever (until manual
-  //    refresh-poll click hit the user). channel-context-backfill DOES
-  //    write the cache, but that path runs only at onSourceCreated for
-  //    a single backfill window — it doesn't re-fire for cron walks or
-  //    refresh-content clicks that walk past the original window.
+  // 8. youtube_videos cache UPSERT for every fetched event. Without this
+  //    the channel-scoped polling path INSERTs events but leaves
+  //    youtube_videos cache empty for those video_ids — PollingBadge
+  //    tier resolver reads youtube_videos.publishedAt; missing →
+  //    tier=pending → "Pending · fetching video info…" badge with no
+  //    stats forever (until a manual refresh-poll click hits the user).
+  //    channel-context-backfill DOES write the cache, but that path runs
+  //    only at onSourceCreated for a single backfill window — it doesn't
+  //    re-fire for cron walks or refresh-content clicks that walk past
+  //    the original window.
   //
   //    UPSERT on video_id PK — public-data, no userId scope. Only writes
   //    snippet fields we have from pollContent (title, publishedAt,
@@ -513,17 +507,16 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
     }
   }
 
-  // 8b. Phase 03.0.3 follow-up — inline stats fetch for newly-discovered
-  //     videos. Pre-fix, backfill-channel only INSERTed events; stats
-  //     (view/like/comment) landed via a separate poll-active cron tick
-  //     up to 6 hours later. That created a transient "Manual entry —
-  //     no polling" UX state on every fresh refresh-content click —
-  //     the user explicitly added a tracked source EXPECTING the full
-  //     picture immediately. Mirrors the channel-context-backfill
-  //     pattern that already does playlistItems + videos.list in one
-  //     handler. Quota cost: ceil(N/50) extra units where N = new
-  //     videos collected — 0 in steady-state, 1 batch typical for a
-  //     refresh that surfaced 1-3 new uploads.
+  // 8b. Inline stats fetch for newly-discovered videos. Without this,
+  //     backfill-channel only INSERTs events; stats (view/like/comment)
+  //     would land via a separate poll-active cron tick up to 6 hours
+  //     later — a transient "Manual entry — no polling" UX state on
+  //     every fresh refresh-content click. Mirrors the
+  //     channel-context-backfill pattern that already does
+  //     playlistItems + videos.list in one handler. Quota cost:
+  //     ceil(N/50) extra units where N = new videos collected — 0 in
+  //     steady-state, 1 batch typical for a refresh that surfaced 1-3
+  //     new uploads.
   //
   //     Failure modes:
   //       - pickKeyForJob() returns null → skip silently (self-host
@@ -545,16 +538,15 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
   if (insertedExternalIds.length > 0) {
     const picked = pickKeyForJob();
     if (picked) {
-      // Opportunistic batch-fill (Phase 03.0.3 follow-up): the
-      // videos.list call charges 1 quota unit per batch regardless of
-      // how many ids fit inside (Google caps batch at 50). When a
-      // refresh-content click surfaces only N<50 new videos, the
-      // remaining 50-N capacity is FREE — fill it with same-channel
-      // videos whose stats are stale. User mental model: "refresh =
-      // give me the latest" includes both new events AND fresh stats
-      // on already-known videos. Cron poll-active does this on its
-      // own schedule (every 6h), but a user click between cron ticks
-      // is wasted capacity if we don't fill.
+      // Opportunistic batch-fill: the videos.list call charges 1 quota
+      // unit per batch regardless of how many ids fit inside (Google
+      // caps batch at 50). When a refresh-content click surfaces only
+      // N<50 new videos, the remaining 50-N capacity is FREE — fill
+      // it with same-channel videos whose stats are stale. User mental
+      // model: "refresh = give me the latest" includes both new events
+      // AND fresh stats on already-known videos. Cron poll-active does
+      // this on its own schedule (every 6h), but a user click between
+      // cron ticks is wasted capacity if we don't fill.
       //
       // Filler selection:
       //   - same channel only (refresh-content is scoped to one channel)
@@ -633,8 +625,8 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
           const videoId = allIdsToPoll[i]!;
           const snap = statsSnapshots[i]!;
           // Charge 1 unit on the first video of each batch; rest pass
-          // unitsUsed=0 (mirrors the chargedOnce-per-batch accounting
-          // in poll-active.ts:198-218).
+          // unitsUsed=0 (chargedOnce-per-batch accounting mirrors
+          // poll-active.ts).
           const unitsThisVideo = i % YOUTUBE_VIDEOS_BATCH_SIZE === 0 ? 1 : 0;
           try {
             await writeSnapshot({
@@ -676,15 +668,14 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
   }
 
   // 9. Update channel state. Frontier advance is gated to deep-mode
-  //    walks only (PR #31 Codex P1 #2) — an overlap-mode walk collects
-  //    backdated cache-miss items intentionally (D-#29-1) but those
-  //    items can appear near page 1 of the upload-time-sorted playlist
-  //    while the walker never actually walked the playlist down to
-  //    their publishedAt. Advancing backfill_oldest_at from such an
-  //    arbitrary backdated event would incorrectly tell future
-  //    target-widen decisions that we've already covered that depth,
-  //    routing them to incremental and silently skipping the in-between
-  //    history.
+  //    walks only — an overlap-mode walk collects backdated cache-miss
+  //    items intentionally but those items can appear near page 1 of
+  //    the upload-time-sorted playlist while the walker never actually
+  //    walked the playlist down to their publishedAt. Advancing
+  //    backfill_oldest_at from such an arbitrary backdated event would
+  //    incorrectly tell future target-widen decisions that we've
+  //    already covered that depth, routing them to incremental and
+  //    silently skipping the in-between history.
   //
   //    For deep-mode walks two cases:
   //      - endOfPlaylist=true: walker covered the entire playlist; the
@@ -753,10 +744,10 @@ async function writeBackfillAudit(args: {
   triggerUserId: string;
   requestsUsed: number;
   eventsInserted: number;
-  // Phase 03.0.3 P1 — forensics discriminator for the three-branch
-  // since-derivation. Operator can run `SELECT metadata->>'since_branch',
-  // COUNT(*) FROM audit_log WHERE action='source.refresh_content_requested'
-  // GROUP BY 1` to verify the quota-burn invariant on prod (D-#29-2).
+  // Forensics discriminator for the three-branch since-derivation.
+  // Operator can run `SELECT metadata->>'since_branch', COUNT(*) FROM
+  // audit_log WHERE action='source.refresh_content_requested' GROUP BY 1`
+  // to verify the quota-burn invariant on prod.
   sinceBranch: "exhausted" | "incremental" | "deep";
 }): Promise<void> {
   // STRICT — cap counter sums requests_used + events_inserted from this row;

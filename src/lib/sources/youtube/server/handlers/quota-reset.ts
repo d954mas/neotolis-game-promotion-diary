@@ -1,13 +1,13 @@
-// Phase 3.0 Plan 09 — daily YouTube quota reset cron handler.
+// Daily YouTube quota reset cron handler.
 //
-// Fires at 00:00 America/Los_Angeles (the natural reset boundary for YouTube
-// Data API v3 quota — Pitfall D). Two responsibilities:
+// Fires at 00:00 America/Los_Angeles (the natural reset boundary for
+// YouTube Data API v3 quota). Two responsibilities:
 //
 //   1. Clear the in-process module-level audit-emission guard
 //      (`auditedTransitions` Map + `roundRobinIdx` + `cachedOperatorId`)
-//      via resetThrottleState() — Plan 03.0-03 export. Without this, the
-//      80%/95% audit gate would hold yesterday's "already emitted today"
-//      memory and miss the first crossing of the new day.
+//      via resetThrottleState(). Without this, the 80%/95% audit gate
+//      would hold yesterday's "already emitted today" memory and miss
+//      the first crossing of the new day.
 //
 //   2. Optional housekeeping: trim youtube_service_quota_usage rows older
 //      than 7 days. The /admin/quota page shows the last 7 days; older rows
@@ -36,12 +36,12 @@ export async function handleQuotaReset(job: { id: string; data: object }): Promi
   resetThrottleState();
   logger.info({ jobId: job.id }, "youtube quota reset — module state cleared");
 
-  // 1a. Phase 03.0.1 Plan 08 — reset the in-memory reservoirs to empty,
-  //     then reconcile against the persistent counter. RateLimiterMemory's
-  //     24h sliding window may not align exactly with the YouTube reset
-  //     boundary (Pacific midnight); resetting + reconciling on the cron
-  //     tick keeps drift bounded so tomorrow's first request sees a
-  //     reservoir consistent with today's already-zero counter.
+  // 1a. Reset the in-memory reservoirs to empty, then reconcile against
+  //     the persistent counter. RateLimiterMemory's 24h sliding window
+  //     may not align exactly with the YouTube reset boundary (Pacific
+  //     midnight); resetting + reconciling on the cron tick keeps drift
+  //     bounded so tomorrow's first request sees a reservoir consistent
+  //     with today's already-zero counter.
   try {
     await resetReservoirs();
     await reconcileReservoirsOnBoot();

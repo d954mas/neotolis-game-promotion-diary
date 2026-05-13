@@ -10,23 +10,18 @@ import * as SteamApi from "../../src/lib/server/integrations/steam-api.js";
 import { seedUserDirectly } from "./helpers.js";
 
 /**
- * Plan 02-05 — KEYS-03..06 envelope-encryption integration tests.
- *
- * The 5 placeholder it.skip stubs from Plan 02-01 are replaced with `it(...)`
- * bodies here. Names match exactly so Wave 0 traceability holds: each
- * placeholder belongs to one implementing plan, and each implementing plan
- * fills in the body with no new it() calls.
+ * Envelope-encryption integration tests.
  *
  * Mocking strategy: `vi.spyOn(SteamApi, 'validateSteamKey')` against the
  * imported namespace. ESM partial mocks via `vi.mock` are flaky on
- * @sveltejs/kit + Vitest 4; spyOn against `import * as` is the same
- * pattern Phase 1 helpers use and is robust across rebuilds.
+ * @sveltejs/kit + Vitest 4; spyOn against `import * as` is robust
+ * across rebuilds.
  */
-describe("api_keys_steam envelope encryption (KEYS-03..06)", () => {
+describe("api_keys_steam envelope encryption", () => {
   const validateSpy = vi.spyOn(SteamApi, "validateSteamKey");
   afterEach(() => validateSpy.mockReset());
 
-  it("02-05: KEYS-03 envelope encrypted at rest", async () => {
+  it("envelope encrypted at rest", async () => {
     validateSpy.mockResolvedValue(true);
     const userA = await seedUserDirectly({ email: "k1@test.local" });
     const PLAIN = "STEAM-TEST-KEY-ABCDEFGH-XYZW";
@@ -57,11 +52,11 @@ describe("api_keys_steam envelope encryption (KEYS-03..06)", () => {
     const json = JSON.stringify(raw, (_k, v) => (Buffer.isBuffer(v) ? v.toString("base64") : v));
     expect(json).not.toContain(PLAIN);
 
-    // last4 = the last 4 chars of plaintext (D-34 forensics aid).
+    // last4 = the last 4 chars of plaintext (forensics aid).
     expect(raw!.last4).toBe("XYZW");
   });
 
-  it("02-05: KEYS-04 DTO strips ciphertext", async () => {
+  it("DTO strips ciphertext", async () => {
     validateSpy.mockResolvedValue(true);
     const userA = await seedUserDirectly({ email: "k2@test.local" });
     await createSteamKey(userA.id, { label: "K", plaintext: "1234567890ABCD" }, "127.0.0.1");
@@ -182,10 +177,10 @@ describe("api_keys_steam envelope encryption (KEYS-03..06)", () => {
     });
   });
 
-  it("Codex round-19 P2: concurrent INSERT race maps 23505 to 422 steam_key_label_exists", async () => {
+  it("concurrent INSERT race maps 23505 to 422 steam_key_label_exists", async () => {
     // The pre-check on (userId, label) cannot prevent two concurrent
     // requests from both passing it and racing the INSERT. Before the
-    // round-19 fix, the second INSERT bubbled as a generic 500. Now the
+    // fix, the second INSERT bubbled as a generic 500. Now the
     // service catches isPgUniqueViolation(e) and surfaces the documented
     // 422 contract — same shape the sequential pre-check produces.
     //

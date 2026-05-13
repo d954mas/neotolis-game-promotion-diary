@@ -1,45 +1,23 @@
 <script lang="ts">
-  // RecoveryDialog — modal dialog for soft-delete recovery, replaces the
-  // bottom-of-page DeletedEventsPanel anchor target on /feed.
+  // RecoveryDialog — modal dialog for soft-delete recovery.
   //
-  // Plan 02.1-39 round-6 polish #11 (UAT-NOTES.md §5.8 follow-up #11,
-  // 2026-04-30). User during round-6 UAT, after polish #10 (chip-strip
-  // Clear preserves date) landed:
-  //
-  //   "Да но оно странно работает, оно меня кидает просто вниз страницы.
-  //    А если у меня тут бесконечная лента, то новые эвенты подгрузит и
-  //    меня снова кинет вниз? как будто нужно чтобы там оно раскрывалось
-  //    или в отдельном окне"
-  //   ("Yes but it works oddly, it just throws me to the bottom of the
-  //    page. And if I have an infinite feed, it'll load more events and
-  //    throw me down again? Like it should expand or [open] in a
-  //    separate window.")
-  //
-  // §5.8 Path A (the "Recently deleted (N)" anchor link in PageHeader)
-  // breaks on infinite-scroll surfaces by construction: clicking the
-  // anchor jumps to the bottom of the list, the IntersectionObserver
-  // sentinel fires, the loader appends another page, the bottom moves
-  // further down — the user never reaches the recovery panel.
-  //
-  // The fix is decoupling the recovery UI from scroll position: open
-  // the recovery list inside a modal. Pattern matches the existing
-  // <ConfirmDialog> — native <dialog> element, showModal() traps focus,
-  // Escape closes for free. No focus-trap library needed.
+  // Why a modal instead of a bottom-of-page anchor: an anchor link
+  // breaks on infinite-scroll surfaces by construction — clicking it
+  // jumps to the bottom of the list, the IntersectionObserver sentinel
+  // fires, the loader appends another page, the bottom moves further
+  // down, and the user never reaches the recovery panel. A modal
+  // decouples the recovery UI from scroll position. Pattern matches
+  // the existing <ConfirmDialog> — native <dialog> element, showModal()
+  // traps focus, Escape closes for free. No focus-trap library needed.
   //
   // Generic across entity types (event / game / source / store) — the props
   // are shaped { id, name, deletedAt } per item plus an entityType
-  // discriminator and an onRestore callback. /feed (initial consumer in 2.1)
-  // maps the existing deletedEvents[] (toEventDto-projected, no ciphertext
-  // columns) into this shape; the parity sweep extended adoption to /games
-  // (entityType="game"), /sources (entityType="source"), and the per-game
-  // /games/[gameId] view (entityType="store" — Plan 02.1-39 round-6 polish
-  // #12, UAT-NOTES.md §5.8 follow-up #12, 2026-04-30). User during round-6
-  // UAT after the parity sweep landed (verbatim, ru):
-  //   "и я удалил стор, и теперь нет вохзможности его восстановить"
-  //   ("and I deleted a store, and now there's no way to restore it")
-  // The "store" entityType discriminator covers `game_steam_listings` rows;
-  // the data layer has carried `deletedAt` since Plan 02.1-04, only the
-  // recovery UI/endpoint was missing.
+  // discriminator and an onRestore callback. /feed maps the existing
+  // deletedEvents[] (toEventDto-projected, no ciphertext columns) into
+  // this shape; /games (entityType="game"), /sources (entityType="source"),
+  // and the per-game /games/[gameId] view (entityType="store") each use
+  // the same component. The "store" discriminator covers
+  // `game_steam_listings` rows.
   //
   // Privacy invariant (CLAUDE.md):
   //   - The component receives only DTO-projected items from SSR.
@@ -67,10 +45,9 @@
   }: {
     open: boolean;
     items: RecoveryItem[];
-    // Plan 02.1-39 round-6 polish #12: "store" added for game_steam_listings
-    // recovery on /games/[gameId]. Visual treatment is identical across
-    // entity types today; the discriminator is exposed via data-entity-type
-    // for future per-type styling / a11y hooks (forward-compat from #11).
+    // Visual treatment is identical across entity types today; the
+    // discriminator is exposed via data-entity-type for future per-type
+    // styling / a11y hooks.
     entityType: "game" | "source" | "event" | "store";
     retentionDays: number;
     onClose: () => void;
@@ -118,11 +95,8 @@
     }
   }
 
-  // entityType is part of the prop contract for forward-compat — /games,
-  // /sources adopted this dialog in the polish #11 parity sweep (commit
-  // d4d55eb), and /games/[gameId] adopts it for soft-deleted listings in
-  // polish #12 (entityType="store"). We expose it on the dialog as a data
-  // attribute so future styling / a11y hooks can target per-type.
+  // entityType is exposed on the dialog as a data attribute so future
+  // styling / a11y hooks can target per-type.
 </script>
 
 <dialog
@@ -165,13 +139,14 @@
   /* Mirrors ConfirmDialog's surface tokens (--color-surface / --color-border
    * / 6px radius / 25% shadow) for visual consistency across the two
    * dialog patterns. The recovery list is variable-length (1-N items)
-   * so the dialog is wider and gets a max-height + scrollable body. */
-  /* Round-6 polish #11 follow-up: native <dialog> is hidden by UA
-   * stylesheet via `display: none` UNLESS the [open] attribute is set
-   * (which showModal()/show() add automatically). Declaring `display:
-   * flex` on `.dialog` unconditionally OVERRIDES the UA hide rule and
-   * leaks the dialog into normal flow even when closed. Scope the
-   * flex display to `[open]` so the closed state stays hidden. */
+   * so the dialog is wider and gets a max-height + scrollable body.
+   *
+   * Native <dialog> is hidden by UA stylesheet via `display: none`
+   * UNLESS the [open] attribute is set (which showModal()/show() add
+   * automatically). Declaring `display: flex` on `.dialog`
+   * unconditionally OVERRIDES the UA hide rule and leaks the dialog
+   * into normal flow even when closed. Scope the flex display to
+   * `[open]` so the closed state stays hidden. */
   .dialog[open] {
     display: flex;
     flex-direction: column;

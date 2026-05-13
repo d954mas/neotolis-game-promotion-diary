@@ -1,51 +1,48 @@
-// Error taxonomy for service-layer + HTTP boundary (Plan 01-07 — Wave 4).
+// Error taxonomy for service-layer + HTTP boundary.
 //
-// PRIV-01 cornerstone: cross-tenant access raises `NotFoundError` (status 404),
-// NOT `ForbiddenError`. Per OWASP IDOR guidance and major SaaS practice
-// (Stripe / GitHub), 403 leaks resource existence — an attacker enumerating
-// IDs learns "this id does exist, just not for me". 404 is indistinguishable
-// from "this id never existed", which is the only safe answer.
+// Cross-tenant cornerstone: cross-tenant access raises `NotFoundError`
+// (status 404), NOT `ForbiddenError`. Per OWASP IDOR guidance and major
+// SaaS practice (Stripe / GitHub), 403 leaks resource existence — an
+// attacker enumerating IDs learns "this id does exist, just not for me".
+// 404 is indistinguishable from "this id never existed", which is the
+// only safe answer.
 //
-// `ForbiddenError` is reserved for Phase 6+ admin endpoints where the caller
-// IS authorized to know the resource exists but lacks permission for the
+// `ForbiddenError` is reserved for admin endpoints where the caller IS
+// authorized to know the resource exists but lacks permission for the
 // specific operation. **Tenant-owned resources MUST NEVER throw
-// ForbiddenError on cross-tenant access** — that would defeat the entire P1
-// mitigation. Code review enforces this; the response body is also asserted
-// to never contain the literal strings "forbidden" / "permission" by
-// tests/integration/tenant-scope.test.ts.
+// ForbiddenError on cross-tenant access** — that would defeat the
+// mitigation. Code review enforces this; the response body is also
+// asserted to never contain the literal strings "forbidden" / "permission"
+// by tests/integration/tenant-scope.test.ts.
 //
-// Phase 3.0 Plan 04 — new AppError codes consumed by refresh-poll +
-// manual-paste dedup (no behaviour change to AppError itself; codes are
-// untyped strings). Registered here for grep-traceability only — the route
-// layer (Plan 03.0-08) maps each code to its Paraglide message:
+// Known AppError codes used elsewhere (grep-traceability — the route layer
+// maps each code to its Paraglide message):
 //
-//   - 'too_many_refreshes'      → 429 — refresh-poll within 5-min cooldown
-//                                   (CONTEXT D-10); metadata carries
-//                                   minutesLeft + retryAfterSeconds.
+//   - 'too_many_refreshes'      → 429 — refresh-poll within 5-min cooldown;
+//                                   metadata carries minutesLeft +
+//                                   retryAfterSeconds.
 //   - 'duplicate_event'         → 422 — manual paste hits the partial
-//                                   unique events_user_kind_ext_active_unq
-//                                   (CONTEXT D-15). The pre-existing
-//                                   auto-import dedup constraint
-//                                   events_user_kind_source_ext_unq still
-//                                   maps to 409 'duplicate_event' for
-//                                   back-compat; the route layer surfaces
-//                                   both via the same Paraglide key.
+//                                   unique events_user_kind_ext_active_unq.
+//                                   The pre-existing auto-import dedup
+//                                   constraint events_user_kind_source_ext_unq
+//                                   still maps to 409 'duplicate_event'
+//                                   for back-compat; the route layer
+//                                   surfaces both via the same Paraglide key.
 //   - 'event_not_pollable'      → 422 — refresh-poll on a kind not in
-//                                   { youtube_video } (Phase 3.0 ships
-//                                   YouTube only; Phase 3.1 lands reddit_post).
+//                                   { youtube_video }.
 //   - 'event_no_external_id'    → 422 — refresh-poll on a row without an
-//                                   external_id (legacy pre-Plan 02.1-17).
+//                                   external_id (legacy).
 
 export class AppError extends Error {
   readonly code: string;
   readonly status: number;
   /**
-   * Optional structured metadata. Used by ingest (Plan 02-06) to attach
+   * Optional structured metadata. E.g. ingest attaches
    * `{reason: 'private' | 'unavailable'}` to youtube_unavailable errors so
-   * the route layer (Plan 02-08) can map a single 422 code to two distinct
-   * Paraglide messages without parsing the human-readable message string.
-   * Add new keys here only when the boundary needs to discriminate at
-   * mapping time — message-string parsing is the anti-pattern.
+   * the route layer can map a single 422 code to two distinct Paraglide
+   * messages without parsing the human-readable message string. Add new
+   * keys here only when the boundary needs to discriminate at mapping
+   * time — message-string parsing is the anti-pattern.
    */
   readonly metadata: Record<string, unknown>;
 
@@ -59,7 +56,7 @@ export class AppError extends Error {
 }
 
 /**
- * NotFoundError — used for cross-tenant access (PRIV-01: 404, not 403).
+ * NotFoundError — used for cross-tenant access (404, not 403).
  *
  * Per OWASP IDOR guidance, returning 403 leaks resource existence.
  * Stripe/GitHub also return 404 for cross-account access. This is THE
@@ -75,14 +72,14 @@ export class NotFoundError extends AppError {
 }
 
 /**
- * ForbiddenError — reserved for ADMIN endpoints (Phase 6+).
+ * ForbiddenError — reserved for ADMIN endpoints.
  *
  * Tenant-owned resources MUST throw NotFoundError, not ForbiddenError, on
- * cross-tenant access. The response body for any tenant-scoped 4xx must NEVER
- * contain the strings "forbidden" or "permission" (P1 invariant).
+ * cross-tenant access. The response body for any tenant-scoped 4xx must
+ * NEVER contain the strings "forbidden" or "permission".
  */
 export class ForbiddenError extends AppError {
-  // status: 403 (HTTP) — reserved for admin endpoints (Phase 6+).
+  // status: 403 (HTTP) — reserved for admin endpoints.
   constructor(message = "forbidden") {
     super(message, "forbidden", 403);
   }

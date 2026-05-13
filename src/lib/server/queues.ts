@@ -8,40 +8,15 @@
 //   2. Exposing `declareAllQueues(boss)` so worker boot calls one function
 //      and gets every queue declared idempotently.
 //
-// Phase 03.0.1 Plan 07 — Per-kind queue topology (D-10..D-12). Kind-
-// agnostic queue names (poll.active, poll.cold, poll.user) collapse into
-// per-kind names. Cross-source queues (purge.daily, internal.healthcheck)
-// remain kind-agnostic. New sources (Reddit, Twitter, ...) add their own
+// Per-kind queue topology. Cross-source queues (purge.daily,
+// internal.healthcheck) remain kind-agnostic. New sources add their own
 // per-kind queues here without touching cross-source ones.
 //
 // youtube.poll.cron carries TWO schedules via pg-boss v11+ key-based
-// multiple-schedule-per-queue (RESEARCH.md OQ#2):
+// multiple-schedule-per-queue:
 //   - key: "active" — every 6 hours (Active tier, age < 24h)
 //   - key: "cold"   — daily 5am Pacific (Cold tier, 24h <= age < 28d)
 // The poll-cron handler dispatches on job.data.tier.
-//
-// The two scheduler.tick.* queues (Pattern A from Phase 03.0 Plan 09) are
-// RETIRED — collapsed into the youtube.poll.cron schedule directly. The
-// scheduler-tick → enqueue.ts → per-event jobs hop is gone; the tier-
-// tagged job feeds the per-tier handler directly. Migration 0021 cleans
-// up the orphan pgboss.queue / pgboss.schedule / pgboss.job rows.
-//
-// Queue rename map (Phase 03.0 → Phase 03.0.1 Plan 07):
-//   poll.active                      → youtube.poll.cron (key=active)
-//   poll.cold                        → youtube.poll.cron (key=cold)
-//   poll.user                        → youtube.poll.user
-//   scheduler.tick.active            → (RETIRED — cron drives youtube.poll.cron)
-//   scheduler.tick.cold              → (RETIRED — cron drives youtube.poll.cron)
-//   youtube.rehab_unavailable        → youtube.rehab (D-11 brevity)
-//   youtube.quota_reset              → youtube.quota_reset (UNCHANGED)
-//   youtube.channel_context_backfill → youtube.channel_context_backfill (UNCHANGED)
-//   purge.daily                      → purge.daily (UNCHANGED — cross-source)
-//   internal.healthcheck             → internal.healthcheck (UNCHANGED)
-//
-// New in Plan 07: youtube.backfill.user — Plan 10 user-initiated "Pull new
-// content" backfill per source. Declared here (forward-compat scaffold) so
-// the worker subscribes to it idempotently; the Plan 10 handler lands the
-// actual subscription wire-up.
 //
 // We don't import pg-boss types directly here. The `MinimalBoss` interface
 // keeps this module decoupled from pg-boss's full type surface — useful for
@@ -55,29 +30,29 @@ export const QUEUES = {
   // Per-kind: youtube
   YOUTUBE_POLL_CRON: "youtube.poll.cron",
   YOUTUBE_POLL_USER: "youtube.poll.user",
-  /** Phase 03.0.1 Wave 2 — channel-scoped backfill. Replaces
-   *  YOUTUBE_BACKFILL_USER. Job payload carries (kind, channelKey,
-   *  triggerUserId?, depthBoundIso, flow). One walk per call;
-   *  fan-out INSERT to all active subscribers. Singleton key by
-   *  channelKey dedupes parallel triggers. */
+  /** Channel-scoped backfill. Job payload carries (kind, channelKey,
+   *  triggerUserId?, depthBoundIso, flow). One walk per call; fan-out
+   *  INSERT to all active subscribers. Singleton key by channelKey
+   *  dedupes parallel triggers. */
   YOUTUBE_BACKFILL_CHANNEL: "youtube.backfill.channel",
   YOUTUBE_QUOTA_RESET: "youtube.quota_reset",
   YOUTUBE_REHAB: "youtube.rehab",
   YOUTUBE_CHANNEL_CONTEXT_BACKFILL: "youtube.channel_context_backfill",
-  // Phase 03.0.1 — daily passive backfill cron. Picker selects channels
-  // WHERE backfill_complete=false and enqueue channel-scoped backfill jobs
-  // with flow='auto_passive'. Skip-gates на pctOfDaily ≥ 50% (cron pool
-  // priority floor — active stats poll защищён до 95%, cold poll до 80%,
-  // auto-backfill сдаётся first при contention).
+  // Daily passive backfill cron. Picker selects channels WHERE
+  // backfill_complete=false and enqueues channel-scoped backfill jobs
+  // with flow='auto_passive'. Skip-gates at pctOfDaily ≥ 50% (cron pool
+  // priority floor — active stats poll protected up to 95%, cold poll
+  // to 80%, auto-backfill yields first under contention).
   YOUTUBE_AUTO_BACKFILL_CRON: "youtube.auto_backfill_cron",
-  /** Phase 03.0.1 Wave 3 — daily INCREMENTAL cron for completed channels.
-   *  Auto-backfill cron excludes complete channels (their deep history is
-   *  done); but the channel keeps uploading new videos after completion.
-   *  This cron picks complete channels with active auto_import subscribers
-   *  and triggers a page-1-only walk (cheap: 1 unit/channel/day) to
-   *  discover new uploads. Job lands as flow='auto_passive' on
+  /** Daily INCREMENTAL cron for completed channels. Auto-backfill cron
+   *  excludes complete channels (their deep history is done); but the
+   *  channel keeps uploading new videos after completion. This cron
+   *  picks complete channels with active auto_import subscribers and
+   *  triggers a page-1-only walk (cheap: 1 unit/channel/day) to discover
+   *  new uploads. Job lands as flow='auto_passive' on
    *  YOUTUBE_BACKFILL_CHANNEL with depthBoundIso=now-N-days bound.
-   *  Without this, completed channels go silent until manual refresh-click. */
+   *  Without this, completed channels go silent until manual
+   *  refresh-click. */
   YOUTUBE_INCREMENTAL_CRON: "youtube.incremental_cron",
 } as const satisfies Record<string, string>;
 

@@ -2,12 +2,11 @@ import { randomBytes } from "node:crypto";
 import { makeSignature } from "better-auth/crypto";
 import { pool } from "../setup.js";
 
-// Integration-test helpers. Per RESEARCH.md Pattern 8 ("Test fixtures bypass OAuth"),
+// Integration-test helpers. Test fixtures bypass OAuth —
 // `seedUserDirectly` inserts a user row + session row directly so each test doesn't pay
 // the OAuth dance roundtrip cost. The `fetchAs` helper injects the resulting cookie.
 //
-// Wave 0 shipped stable signatures; Plan 01-05 (this commit) lands the real bodies.
-// Review-blocker fix (I1/I2): Better Auth's session cookie value is HMAC-signed —
+// Better Auth's session cookie value is HMAC-signed —
 // `<token>.<signature>`, where the signature is `makeSignature(token, BETTER_AUTH_SECRET)`.
 // `getSignedCookie` rejects any cookie missing or failing the signature check, so a
 // "raw token" cookie fails session lookup with no error trail (just a null session).
@@ -16,7 +15,7 @@ import { pool } from "../setup.js";
 // token value with the same secret the running auth instance uses.
 
 export async function setupTestDb(): Promise<void> {
-  // Plan 01-03 owns programmatic migrate; here we just confirm the pool is reachable.
+  // Programmatic migrate lives elsewhere; here we just confirm the pool is reachable.
   // The session-level `tests/setup.ts` runs migrations once before the suite starts.
   await pool.query("select 1");
 }
@@ -39,13 +38,13 @@ export interface CreatedUser {
 /**
  * Seed a user + a session directly into the Better Auth canonical tables.
  *
- * Bypasses the full OAuth flow (Plan 01-10 smoke test exercises that path);
- * here we only need a logged-in user to drive AUTH-02 / AUTH-03 / PRIV-01
+ * Bypasses the full OAuth flow (the smoke test exercises that path);
+ * here we only need a logged-in user to drive auth + tenant-scope
  * tests cheaply.
  *
- * Returns the cookie string the SvelteKit hook (Plan 01-06) will recognize —
- * cookie name follows Better Auth's `cookiePrefix + '.session_token'` rule
- * (D-05 — see src/lib/auth.ts `advanced.cookiePrefix = 'neotolis'`). The
+ * Returns the cookie string the SvelteKit hook will recognize — cookie
+ * name follows Better Auth's `cookiePrefix + '.session_token'` rule
+ * (see src/lib/auth.ts `advanced.cookiePrefix = 'neotolis'`). The
  * value is HMAC-signed against `BETTER_AUTH_SECRET` so Better Auth's
  * `getSignedCookie` accepts it on subsequent requests.
  */
@@ -95,15 +94,14 @@ export async function seedUserDirectly(opts: {
   };
 }
 
-/** Backwards-compatible alias for code that wrote `createUser` against the Wave 0 stub. */
+/** Backwards-compatible alias for code that wrote `createUser` against the original stub. */
 export async function createUser(email: string): Promise<CreatedUser> {
   return seedUserDirectly({ email });
 }
 
-// Phase 2 lands the games table; this stub stays so Plan 10's smoke test imports
-// the same module shape that Phase 2 will fill in.
+// Stub kept so the smoke test imports the same module shape.
 export async function createGame(_userId: string, _title: string): Promise<{ id: string }> {
-  throw new Error("games table arrives in Phase 2");
+  throw new Error("games table arrives later");
 }
 
 /**

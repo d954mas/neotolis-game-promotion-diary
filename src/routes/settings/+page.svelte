@@ -1,16 +1,15 @@
 <script lang="ts">
-  // /settings — theme + account + retention info + active sessions
-  // (Phase 2.1 Plan 02.1-09 extension).
+  // /settings — theme + account + retention info + active sessions.
   //
-  // UI-SPEC §"/settings (EXTENDED — sessions list + theme blurb)":
-  //   - Theme (existing) + new sub-blurb (m.settings_theme_blurb()) +
+  // Sections:
+  //   - Theme (existing) + sub-blurb (m.settings_theme_blurb()) +
   //     ThemeToggle (relocated from AppHeader; only here now)
   //   - Account (existing)
   //   - Data retention (existing)
-  //   - Active sessions (NEW — uses <SessionsList>)
+  //   - Active sessions (uses <SessionsList>)
   //
-  // The Phase 2 single-shot sign-out + sign-out-all-devices wiring carries
-  // forward; the new section adds per-session DELETE.
+  // The single-shot sign-out + sign-out-all-devices wiring carries forward;
+  // the sessions section adds per-session DELETE.
 
   import { goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
@@ -44,9 +43,9 @@
   let deleteError = $state<string | null>(null);
   const isDeleted = $derived(data.user?.deletedAt != null);
 
-  // Phase 3.0 post-build (UAT 2026-05-06): immediate-purge UI moved here
-  // from the AccountDeletedBanner. Banner stays minimal (Restore only) so
-  // the destructive action isn't a one-click reach on every page.
+  // Immediate-purge UI lives here, not in the AccountDeletedBanner. Banner
+  // stays minimal (Restore only) so the destructive action isn't a
+  // one-click reach on every page.
   let purgeConfirmOpen = $state(false);
   let purgeInProgress = $state(false);
   let purgeError = $state<string | null>(null);
@@ -225,14 +224,12 @@
 
   <article class="block">
     <h2>{m.settings_credentials_heading()}</h2>
-    <!-- Plan 02.1-22 (UAT-NOTES.md §8.1-bug minimal closure): /keys/steam was
-         unreachable from any nav. This is the MINIMAL fix — a single link from
-         /settings. The unified /settings/credentials hub described in
-         UAT-NOTES.md §8.2-redesign is DEFERRED to Phase 3+ (it pairs with
-         KEYS-01 YouTube + KEYS-02 Reddit which only become functional in
-         Phase 3). The `_credentials_` prefix on the Paraglide keys means the
-         Phase 3+ rebuild is a search-and-restructure, not a from-scratch
-         rewrite. -->
+    <!-- /keys/steam was previously unreachable from any nav. This is the
+         minimal fix — a single link from /settings. The unified
+         /settings/credentials hub is DEFERRED (it pairs with the YouTube +
+         Reddit key flows which are not yet wired). The `_credentials_`
+         prefix on the Paraglide keys means the later rebuild is a
+         search-and-restructure, not a from-scratch rewrite. -->
     <p class="muted">Manage API keys for external services.</p>
     <a href="/keys/steam" class="audit-link">
       {m.settings_credentials_steam_link_label()} →

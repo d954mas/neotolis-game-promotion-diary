@@ -1,11 +1,10 @@
-// Phase 03.0.1 Plan 07 — quota-throttle gate assertions on the new
-// poll-cron path.
+// Quota-throttle gate assertions on the poll-cron path.
 //
-// Pre-Plan-07 (Phase 03.0 Plan 09): src/scheduler/enqueue.ts.{enqueueActivePolls,
+// Historically src/scheduler/enqueue.ts.{enqueueActivePolls,
 // enqueueColdPolls} held the throttle gate; this test pinned the integration
 // by mocking pg-boss send and asserting the queue + skip flag.
 //
-// Plan-07 collapses scheduler/enqueue.ts. The throttle gate moves into
+// scheduler/enqueue.ts is collapsed. The throttle gate moved into
 // handlePollActive / handlePollCold (the tier-batch handlers fed by
 // youtube.poll.cron). This test invokes the handlers directly and asserts
 // that the adapter mock is NOT called when the throttle gate skips, plus
@@ -110,7 +109,7 @@ beforeEach(() => {
   resetThrottleState();
 });
 
-describe("youtube-quota-throttle on youtube.poll.cron path (Plan 03.0.1-07)", () => {
+describe("youtube-quota-throttle on youtube.poll.cron path", () => {
   it(">= 8000 units → handlePollCold skips (no upstream HTTP)", async () => {
     const u = await seedUserDirectly({ email: `qt-cold-${uniq()}@test.local` });
     await insertColdEvent(u.id);

@@ -1,11 +1,11 @@
 <script lang="ts">
-  // /games — list view (Plan 02-10).
+  // /games — list view.
   //
-  // Empty state with Steam URL example (UI-SPEC §"/games (NEW — list)").
-  // Populated state stacks <GameCard> rows; CSS grid breaks to 2-col at
-  // 768px (RetentionBadge appears in the soft-deleted section). The
-  // "+ New game" CTA opens an inline form that POSTs /api/games and
-  // navigates to the new game's detail page on success.
+  // Empty state with Steam URL example. Populated state stacks
+  // <GameCard> rows; CSS grid breaks to 2-col at 768px (RetentionBadge
+  // appears in the soft-deleted section). The "+ New game" CTA opens an
+  // inline form that POSTs /api/games and navigates to the new game's
+  // detail page on success.
 
   import { invalidateAll, goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
@@ -13,22 +13,16 @@
   import GameCard from "$lib/components/GameCard.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
-  // Plan 02.1-25 (UAT-NOTES.md §3.1-polish): shared PageHeader replaces the
-  // inline <header class="head"> + button. Uses the onClick CTA variant so
-  // the toggle behavior (showForm = true) stays a button (not a link).
+  // Shared PageHeader uses the onClick CTA variant so the toggle behavior
+  // (showForm = true) stays a button (not a link).
   import PageHeader from "$lib/components/PageHeader.svelte";
-  // Plan 02.1-39 round-6 polish #11 follow-up (UAT-NOTES.md §5.8 follow-up
-  // #11 extension, 2026-04-30): the RecoveryDialog modal that landed on
-  // /feed in c98eadf is extended to /games — same single recovery surface
-  // across the app. The user surfaced this during UAT (verbatim, ru):
+  // RecoveryDialog modal — same single recovery surface across the app
+  // (/feed, /games, /sources). The user surfaced this during UAT (verbatim, ru):
   //   "и так сделать для всеху удаленных обьектов на других страницах"
   //   ("and do the same for all deleted objects on other pages")
-  // The previous bottom-of-page <details class="trash"> block is REMOVED;
-  // the dialog opens from PageHeader's "Recently deleted (N)" button. This
-  // also matches the pattern for /sources and any future surface that
-  // surfaces soft-deleted entities — entityType="game" lets RecoveryDialog
-  // forward-style per-type even though the visual treatment is identical
-  // today.
+  // The dialog opens from PageHeader's "Recently deleted (N)" button.
+  // entityType="game" lets RecoveryDialog forward-style per-type even though
+  // the visual treatment is identical today.
   import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
   import type { PageData } from "./$types";
 
@@ -96,10 +90,10 @@
     if (res.ok || res.status === 204) await invalidateAll();
   }
 
-  // Plan 02.1-39 round-6 polish #11 follow-up: RecoveryDialog open state.
-  // Opened by PageHeader's "Recently deleted (N)" button; closed by
-  // Escape, backdrop click, the dialog's × button, or auto-closes when
-  // the last recoverable item is restored (same contract as /feed).
+  // RecoveryDialog open state. Opened by PageHeader's "Recently deleted
+  // (N)" button; closed by Escape, backdrop click, the dialog's × button,
+  // or auto-closes when the last recoverable item is restored (same
+  // contract as /feed).
   let recoveryOpen = $state(false);
 
   // Map softDeleted (toGameDto-projected, no ciphertext) into the
@@ -193,13 +187,11 @@
     </ul>
   {/if}
 
-  <!-- Plan 02.1-39 round-6 polish #11 follow-up (UAT-NOTES.md §5.8 follow-up
-       #11 extension): the bottom-of-page <details class="trash"> recovery
-       block is REMOVED. The same flow now lives in <RecoveryDialog> — a
-       modal opened from PageHeader's "Recently deleted (N)" button. The
-       dialog mounts only when softDeleted.length > 0; the dialog itself
-       still defends against the empty case (renders the localized empty
-       message). RetentionBadge is rendered INSIDE the dialog per item. -->
+  <!-- The recovery flow lives in <RecoveryDialog> — a modal opened from
+       PageHeader's "Recently deleted (N)" button. The dialog mounts only
+       when softDeleted.length > 0; the dialog itself still defends against
+       the empty case (renders the localized empty message). RetentionBadge
+       is rendered INSIDE the dialog per item. -->
   {#if softDeleted.length > 0}
     <RecoveryDialog
       open={recoveryOpen}
@@ -230,10 +222,10 @@
     gap: var(--space-lg);
     min-width: 0;
   }
-  /* Plan 02.1-25: inline .head + .cta CSS removed — replaced by the shared
-   * <PageHeader> component (see top of file). PageHeader uses the inline-
-   * on-the-left flex layout per UAT-NOTES.md §3.1-polish. The onClick CTA
-   * variant preserves the inline-form-toggle behavior (showForm = !showForm). */
+  /* Inline .head + .cta CSS were replaced by the shared <PageHeader>
+   * component (see top of file). PageHeader uses the inline-on-the-left
+   * flex layout. The onClick CTA variant preserves the inline-form-toggle
+   * behavior (showForm = !showForm). */
   .grid {
     list-style: none;
     padding: 0;
@@ -305,7 +297,6 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
-  /* Plan 02.1-39 round-6 polish #11 follow-up: .trash + .trashrow CSS
-   * removed alongside the bottom-of-page <details> recovery block.
-   * RecoveryDialog owns the surface (same component on /feed and /sources). */
+  /* The recovery flow uses RecoveryDialog (same component on /feed and
+   * /sources). */
 </style>

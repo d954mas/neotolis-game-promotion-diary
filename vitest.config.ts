@@ -3,34 +3,31 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { playwright } from "@vitest/browser-playwright";
 import path from "node:path";
 
-// Plan 02.1-20: $lib alias mirror — Svelte components imported by tests
-// (audit-render.test.ts and any future SSR-render test) use $lib/*
+// $lib alias mirror — Svelte components imported by tests use $lib/*
 // internally to match svelte.config.js kit.alias. The vitest config does
-// NOT pull the SvelteKit plugin (W-2 honored) so the alias must be declared
-// here; otherwise component SSR rendering fails resolving $lib/paraglide/messages.js.
+// NOT pull the SvelteKit plugin so the alias must be declared here;
+// otherwise component SSR rendering fails resolving
+// $lib/paraglide/messages.js.
 const $libAlias = { $lib: path.resolve("./src/lib") };
 
 // Vitest 4 supports test.projects to split unit (no DB) from integration (with DB).
-// Plan 01-02 (Phase 1 Wave 0) lands the structural split; later plans wire real assertions.
 //
 // - unit:        no setup file, fast, runs without Postgres.
 // - integration: imports tests/setup.ts which boots a pg.Pool and runs migrations.
 //
-// Plan 02-09: integration tests can now import `.svelte` files (Svelte 5
-// SSR via `render` from `svelte/server`) — wires the @sveltejs/vite-plugin-svelte
-// plugin so Vite knows how to transform `.svelte` files at test time. We
-// don't add the full sveltekit() plugin here because that would pull the
-// SvelteKit runtime (handler.js, $app/* aliases) into every test process;
-// the plain svelte() plugin is enough for component SSR rendering.
+// Integration tests can import `.svelte` files (Svelte 5 SSR via `render`
+// from `svelte/server`) — wires the @sveltejs/vite-plugin-svelte plugin
+// so Vite knows how to transform `.svelte` files at test time. We don't
+// add the full sveltekit() plugin here because that would pull the
+// SvelteKit runtime into every test process; the plain svelte() plugin
+// is enough for component SSR rendering.
 //
-// Plan 02-11: third 'browser' project for the UX-02 360px viewport contract
-// (D-42 — every Phase 2 page renders without horizontal scroll at 360px AND
-// the primary CTA is reachable). Browser project uses Vitest 4's built-in
-// browser mode with the Playwright provider — Chromium is the only instance
-// (Firefox / WebKit deferred to Phase 6 if cross-engine layout differences
-// surface). Tests assume a SvelteKit preview server is already running on
-// http://localhost:5173 — CI provisions it before invoking pnpm test:browser
-// (.github/workflows/ci.yml browser-tests job).
+// A third 'browser' project covers the 360px viewport contract (every page
+// renders without horizontal scroll at 360px AND the primary CTA is
+// reachable). Browser project uses Vitest 4's built-in browser mode with
+// the Playwright provider — Chromium is the only instance. Tests assume a
+// SvelteKit preview server is already running on http://localhost:5173 —
+// CI provisions it before invoking pnpm test:browser.
 //
 // Run via:
 //   pnpm test:unit         (vitest --project=unit)
@@ -84,11 +81,11 @@ export default defineConfig({
           // import — the legacy "playwright" string was removed in favor of
           // an explicit `playwright()` call from `@vitest/browser-playwright`.
           // See https://vitest.dev/config/browser/provider.
-          // Phase 2.1 round-17: known upstream issue vitest-dev/vitest#7981 —
-          // "Browser connection was closed while running tests" disconnects
-          // randomly on CI. No upstream fix; ecosystem workaround is `retry`
-          // at the test runner level. 2 retries is what the discussion
-          // contributors converged on.
+          // Known upstream issue vitest-dev/vitest#7981 — "Browser connection
+          // was closed while running tests" disconnects randomly on CI. No
+          // upstream fix; ecosystem workaround is `retry` at the test
+          // runner level. 2 retries is what the discussion contributors
+          // converged on.
           retry: 2,
           browser: {
             enabled: true,
@@ -114,7 +111,7 @@ export default defineConfig({
             // These commands run server-side (in the vitest node process,
             // where the Playwright provider holds the real Page object) and
             // let a test drive the live SvelteKit preview server end-to-end
-            // (UX-02 D-42 needs real navigation against a real server).
+            // (real navigation against a real server is required).
             //
             // Access pattern: the Playwright provider attaches the per-
             // session Playwright Page object to the BrowserCommandContext.
@@ -141,24 +138,24 @@ export default defineConfig({
                 return ctx.page.evaluate(() => document.documentElement.clientWidth);
               },
               async currentUrl(context) {
-                // Plan 02.1-07 — feed-360 placeholder needs to assert the post-
-                // navigation URL after an anonymous /feed visit redirects to
-                // /login. BrowserPage from @vitest/browser/context is a locator
-                // surface and does not expose location/url; fetch from the
-                // underlying Playwright Page directly.
+                // The feed-360 viewport test needs to assert the
+                // post-navigation URL after an anonymous /feed visit
+                // redirects to /login. BrowserPage from
+                // @vitest/browser/context is a locator surface and does
+                // not expose location/url; fetch from the underlying
+                // Playwright Page directly.
                 const ctx = context.provider.getCommandsContext(context.sessionId) as {
                   page: { url: () => string };
                 };
                 return ctx.page.url();
               },
               async measureBodyOverflowX(context) {
-                // Plan 02.1-34 (UAT-NOTES.md §4.22.A regression guard): the
-                // load-bearing distinction is `clip` vs `hidden` on body's
-                // computed overflow-x. `hidden` paired with `overflow-y:
-                // visible` coerces overflow-y to `auto` per CSS spec,
-                // promoting body to a scroll container and breaking
-                // position: sticky on AppHeader. `clip` crops without
-                // promoting, preserving sticky.
+                // The load-bearing distinction is `clip` vs `hidden` on
+                // body's computed overflow-x. `hidden` paired with
+                // `overflow-y: visible` coerces overflow-y to `auto` per
+                // CSS spec, promoting body to a scroll container and
+                // breaking position: sticky on AppHeader. `clip` crops
+                // without promoting, preserving sticky.
                 const ctx = context.provider.getCommandsContext(context.sessionId) as {
                   page: { evaluate: <T>(fn: () => T) => Promise<T> };
                 };

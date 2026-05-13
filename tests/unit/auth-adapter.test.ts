@@ -64,7 +64,7 @@ function reset() {
   calls.length = 0;
 }
 
-describe("encryptedDrizzleAdapter — OAuth token envelope encryption (D-11 / Fix 4)", () => {
+describe("encryptedDrizzleAdapter — OAuth token envelope encryption", () => {
   it("create on `account` writes ciphertext to storage and returns plaintext to Better Auth", async () => {
     reset();
     const factory = encryptedDrizzleAdapter({} as never, { provider: "pg" });

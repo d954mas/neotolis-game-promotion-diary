@@ -1,12 +1,12 @@
-// Phase 03.0.3 P1 — refresh-content quota-burn invariants (issue #29).
+// Refresh-content quota-burn invariants (issue #29).
 //
-// 3 behavioural tests verbatim from CONTEXT D-C1:
+// 3 behavioural tests:
 //   (a) repeated click within 5min on a steady-state channel costs ≤1 page
 //       (not N/50 pages) — branch="exhausted".
 //   (b) backdated upload (publishedAt < newestKnown but > prior session) is
 //       collected on the next click — branch="incremental".
 //   (c) widening backfillTargetSince (30d → epoch) triggers deep walk on
-//       next refresh-content click — branch="deep" (no eager reset; D-#29-6).
+//       next refresh-content click — branch="deep" (no eager reset).
 //
 // Mocks getBoss (no live pg-boss) and youtubeChannelAdapterCore.pollContent
 // (deterministic event payload, captures `since` arg) — same pattern as
@@ -21,9 +21,9 @@ interface CapturedJob {
   options: Record<string, unknown>;
 }
 const sentJobs: CapturedJob[] = [];
-// Phase 03.0.3 follow-up (PR #31 review P2) — test (g) below toggles this
-// to simulate a transient pg-boss failure (queue table missing, network
-// blip) and assert the PATCH aborts without committing the UPDATE.
+// Test (g) below toggles this to simulate a transient pg-boss failure
+// (queue table missing, network blip) and assert the PATCH aborts without
+// committing the UPDATE.
 let bossSendShouldThrow = false;
 
 vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
@@ -61,9 +61,9 @@ const pollContentCalls: { since: Date }[] = [];
 let pollContentResults: RawEventStub[] = [];
 let pollContentEndOfPlaylist = false;
 let pollContentUnitsUsed = 1;
-// Phase 03.0.3 follow-up — tests (d)/(e)/(f) below toggle this to simulate
-// the three distinct empty-result shapes the walker can produce
-// (MAX_PAGES, walkedPastSince, endOfPlaylist).
+// Tests (d)/(e)/(f) below toggle this to simulate the three distinct
+// empty-result shapes the walker can produce (MAX_PAGES, walkedPastSince,
+// endOfPlaylist).
 let pollContentNextPageToken: string | undefined = undefined;
 
 vi.mock("../../src/lib/sources/youtube/server/adapter.js", async (importOriginal) => {
@@ -115,7 +115,7 @@ async function clearChannelFixture(channelKey: string): Promise<void> {
     );
 }
 
-describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
+describe("refresh-content quota burn (issue #29)", () => {
   beforeEach(() => {
     sentJobs.length = 0;
     pollContentCalls.length = 0;
@@ -214,10 +214,10 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
   });
 
   it("(b) incremental branch: since=max(newestKnown, target) + token cleared + adapter events fan out to events.user_id rows", async () => {
-    // What this test actually verifies (Phase 03.0.3 code-review follow-up):
+    // What this test actually verifies:
     //   1. branch selection — backfillComplete=false + deepestWalked=90d-ago
-    //      + target=60d-ago routes to branch="incremental" (D-#29-2:
-    //      `target.getTime() >= deepestWalked.getTime()` is true because
+    //      + target=60d-ago routes to branch="incremental"
+    //      (`target.getTime() >= deepestWalked.getTime()` is true because
     //      60d-ago is a more-recent instant than 90d-ago).
     //   2. since derivation — since=max(newestKnown=now, target=60d-ago)=now.
     //   3. fan-out — whatever events the adapter yields (mocked here with
@@ -231,18 +231,16 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     // receives. The production walker decides whether to yield a backdated
     // item based on its position relative to `since` in the uploads
     // playlist; that decision happens INSIDE pollContent and is not
-    // covered here. The plan's original framing (D-#29-1's promise that
-    // walkedPastSince does not silently drop backdated uploads) requires
-    // a separate unit test against the YouTube adapter's pollContent
-    // implementation with a synthetic playlist fixture — filed as
-    // follow-up TODO below.
+    // covered here. The promise that walkedPastSince does not silently
+    // drop backdated uploads requires a separate unit test against the
+    // YouTube adapter's pollContent implementation with a synthetic
+    // playlist fixture — filed as follow-up TODO below.
     //
-    // TODO(03.0.3 follow-up): add tests/unit/youtube-channel-adapter.test.ts
-    // case that drives pollContent against an in-memory playlist with
-    // one backdated item and asserts the adapter yields it instead of
-    // short-circuiting on walkedPastSince. Requires unmocking the
-    // adapter and feeding fake HTTP responses; out of scope for the
-    // integration suite.
+    // TODO: add tests/unit/youtube-channel-adapter.test.ts case that
+    // drives pollContent against an in-memory playlist with one backdated
+    // item and asserts the adapter yields it instead of short-circuiting
+    // on walkedPastSince. Requires unmocking the adapter and feeding fake
+    // HTTP responses; out of scope for the integration suite.
     const channelKey = newChannelKey();
     await clearChannelFixture(channelKey);
 
@@ -360,13 +358,13 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
   });
 
   it("(c) widening backfillTargetSince past deepestWalked on a fully-walked channel enqueues a force-deep job that bypasses branch=exhausted", async () => {
-    // Phase 03.0.3 follow-up — the original test (c) framing was inconsistent
-    // with D-#29-2's locked branch ordering: once backfill_complete=true,
-    // `branch=exhausted` always wins regardless of target (D-#29-7
-    // multi-tenant fairness). The Plan 01 implementation honoured this
-    // ordering, which meant the original Issue #29 acceptance — "widen
-    // target on a fully-walked channel → next click deep-walks below
-    // prior depth" — was effectively a no-op for completed channels.
+    // The original test (c) framing was inconsistent with the locked
+    // branch ordering: once backfill_complete=true, `branch=exhausted`
+    // always wins regardless of target (multi-tenant fairness). The
+    // earlier implementation honoured this ordering, which meant the
+    // original Issue #29 acceptance — "widen target on a fully-walked
+    // channel → next click deep-walks below prior depth" — was
+    // effectively a no-op for completed channels.
     //
     // The follow-up rewires the path: `updateSource` detects a widen past
     // `backfill_oldest_at` on a complete channel and enqueues a separate
@@ -446,17 +444,16 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     });
     expect(patchRes.status).toBe(200);
 
-    // D-#29-6 — no eager reset. backfill_complete is STILL true after PATCH.
+    // No eager reset. backfill_complete is STILL true after PATCH.
     const stateAfterPatch = await getChannelState("youtube_channel", channelKey);
     expect(stateAfterPatch).toBeDefined();
     expect(stateAfterPatch!.backfillComplete).toBe(true);
 
     // The PATCH path detected widening past deepestWalked + complete=true
-    // → wrote a force-deep intent to the outbox table (PR #31 Codex P2
-    // refactor — atomic with the data_sources UPDATE). The forwarder
-    // would translate this into boss.send asynchronously, but that
-    // half is exercised in test (h). Here we only assert the intent
-    // landed correctly.
+    // → wrote a force-deep intent to the outbox table (atomic with the
+    // data_sources UPDATE). The forwarder would translate this into
+    // boss.send asynchronously, but that half is exercised in test (h).
+    // Here we only assert the intent landed correctly.
     const outboxRows = await db.execute(sql`
       SELECT queue, payload, options
       FROM outbox
@@ -599,9 +596,9 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────
-  // Phase 03.0.3 follow-up (external code review P1 #2) — empty-result
-  // state transitions. Pre-fix, ANY empty result with unitsUsed > 0
-  // marked the channel backfill_complete=true, conflating three distinct
+  // Empty-result state transitions. Pre-fix, ANY empty result with
+  // unitsUsed > 0 marked the channel backfill_complete=true, conflating
+  // three distinct
   // shapes the walker can produce. Tests (d)/(e)/(f) below pin all three.
   // ─────────────────────────────────────────────────────────────────────
 
@@ -705,7 +702,7 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     ).toBe(null);
   });
 
-  it("(g) PATCH widen via outbox: UPDATE and force-deep intent commit atomically; boss never reached at request time (PR #31 Codex P2)", async () => {
+  it("(g) PATCH widen via outbox: UPDATE and force-deep intent commit atomically; boss never reached at request time", async () => {
     // Pre-outbox the PATCH path called boss.send directly inside
     // updateSource. Two failure modes existed in succession:
     //   (i)  pre-Option-G: UPDATE-then-send → boss.send failure
@@ -835,9 +832,9 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     // queue-client layer (see the top-of-file vi.mock); the forwarder
     // collects via the same mock that records into sentJobs.
     //
-    // PR #31 Codex P2 #1 — the forwarder takes the boss instance
-    // injected by the worker. Tests reach for the same mocked boss via
-    // getBoss() (which the queue-client.ts mock exposes).
+    // The forwarder takes the boss instance injected by the worker.
+    // Tests reach for the same mocked boss via getBoss() (which the
+    // queue-client.ts mock exposes).
     const { drainOutboxOnce } = await import("../../src/worker/handlers/outbox-forwarder.js");
     const { getBoss } = await import("../../src/lib/server/queue-client.js");
     const mockBoss = await getBoss();
@@ -1007,7 +1004,7 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     ).toBe("RESUME_AT_PAGE_21");
   });
 
-  it("(j) rapid double-widen produces two outbox rows with DIFFERENT singletonKeys (Codex round-4 P2 fix)", async () => {
+  it("(j) rapid double-widen produces two outbox rows with DIFFERENT singletonKeys", async () => {
     // Pre-fix the singletonKey omitted the target — two rapid widens
     // (e.g. 30d→90d then 90d→epoch before the first walk finished)
     // produced two outbox rows with IDENTICAL singletonKeys. pg-boss's
@@ -1117,7 +1114,7 @@ describe("refresh-content quota burn — Phase 03.0.3 P1 (issue #29)", () => {
     await db.execute(sql`DELETE FROM outbox WHERE payload->>'channelKey' = ${channelKey}`);
   });
 
-  it("(k) PATCH widen on user with exhausted per-user cap → 429 + UPDATE rolled back (Codex round-6 P2)", async () => {
+  it("(k) PATCH widen on user with exhausted per-user cap → 429 + UPDATE rolled back", async () => {
     // Pre-fix the per-user fair-share cap was enforced only on
     // POST /api/sources/:id/refresh-content. A user who had hit the
     // daily 100-request cap could still PATCH backfillTargetSince

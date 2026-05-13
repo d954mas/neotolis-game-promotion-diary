@@ -1,4 +1,4 @@
-// Phase 03.0.1 Plan 07 — manual-paste → auto-poll handoff smoke (D-05 / D-11).
+// Manual-paste → auto-poll handoff smoke.
 //
 // Pasting a YouTube URL creates an event with source_id=NULL; the next
 // youtube.poll.cron tick (key=active) still picks it up because the tier
@@ -17,17 +17,16 @@
 //   5. assert the youtube_video_snapshots row exists + youtube_videos.
 //      last_polled_at + last_poll_status='ok' set
 //
-// Plan 03.0-10 handles the channel-context-trigger half of the paste flow
-// — that's tested in tests/integration/ingest.test.ts. This file owns the
+// The channel-context-trigger half of the paste flow is tested in
+// tests/integration/ingest.test.ts. This file owns the
 // "paste → poll → snapshot + youtube_videos UPDATE" pipeline.
 
 import { describe, it, expect, vi } from "vitest";
 import { eq } from "drizzle-orm";
 
-// Phase 3.0 post-build review (2026-05-07): worker handlers short-circuit
-// to status='auth_error' without invoking the adapter when
-// pickKeyForJob() returns null. Mock pickKeyForJob to return a fixture
-// so this suite reaches the mocked adapter under test.
+// Worker handlers short-circuit to status='auth_error' without invoking
+// the adapter when pickKeyForJob() returns null. Mock pickKeyForJob to
+// return a fixture so this suite reaches the mocked adapter under test.
 vi.mock("../../src/lib/sources/youtube/server/quota.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
@@ -39,9 +38,8 @@ vi.mock("../../src/lib/sources/youtube/server/quota.js", async (importOriginal) 
 const adapterMock = {
   pollStatsByVideoId: vi.fn(),
 };
-// Phase 03.0.1 Plan 07 — handlePollActive imports from ../adapter.js
-// directly. Pre-Plan-07 it imported from the ../index.js barrel; Plan 07
-// changed the path to avoid the barrel→handlers→barrel circular import.
+// handlePollActive imports from ../adapter.js directly to avoid the
+// circular barrel→handlers→barrel import.
 vi.mock("../../src/lib/sources/youtube/server/adapter.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
@@ -64,7 +62,7 @@ const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
-describe("ingest paste-then-poll (Plan 03.0.1-07 + per-video refactor)", () => {
+describe("ingest paste-then-poll (per-video refactor)", () => {
   it("manual-paste event (source_id=NULL) flows through handlePollActive → snapshot row + youtube_videos.last_polled_at populated", async () => {
     const u = await seedUserDirectly({ email: `paste-${uniq()}@test.local` });
 

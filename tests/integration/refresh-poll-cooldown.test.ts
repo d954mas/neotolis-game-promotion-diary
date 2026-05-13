@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
 import { eq, and } from "drizzle-orm";
 
-// Phase 3.0 Plan 04 — refresh-poll service integration tests (CONTEXT D-10).
+// Refresh-poll service integration tests.
 //
 // Mocks pg-boss `getBoss` so the test doesn't spin up a live pg-boss schema
 // (the integration suite has its own test Postgres but pg-boss boot adds
@@ -82,12 +82,12 @@ async function insertEvent(
   return row;
 }
 
-describe("refresh-poll cooldown service (Plan 03.0-04)", () => {
+describe("refresh-poll cooldown service", () => {
   beforeAll(() => {
     sentJobs.length = 0;
   });
 
-  it("Plan 03.0-04: requestRefreshPoll on a fresh event enqueues youtube.poll.user + sets metadata.last_user_refresh_at", async () => {
+  it("requestRefreshPoll on a fresh event enqueues youtube.poll.user + sets metadata.last_user_refresh_at", async () => {
     sentJobs.length = 0;
     const u = await seedUserDirectly({ email: `rp-fresh-${uniq()}@test.local` });
     const ev = await insertEvent(u.id);
@@ -119,7 +119,7 @@ describe("refresh-poll cooldown service (Plan 03.0-04)", () => {
     expect((lastSend.options as { singletonKey: string }).singletonKey).toContain(ev.id);
   });
 
-  it("Plan 03.0-04: service throws AppError 429 too_many_refreshes when within 5min window", async () => {
+  it("service throws AppError 429 too_many_refreshes when within 5min window", async () => {
     sentJobs.length = 0;
     const u = await seedUserDirectly({ email: `rp-cd1-${uniq()}@test.local` });
     // Pre-stamp last_user_refresh_at to 1 minute ago — well within the 5-min window.
@@ -134,7 +134,7 @@ describe("refresh-poll cooldown service (Plan 03.0-04)", () => {
     });
   });
 
-  it("Plan 03.0-04: service.metadata payload includes minutesLeft + retryAfterSeconds", async () => {
+  it("service.metadata payload includes minutesLeft + retryAfterSeconds", async () => {
     sentJobs.length = 0;
     const u = await seedUserDirectly({ email: `rp-meta-${uniq()}@test.local` });
     const ev = await insertEvent(u.id, {
@@ -159,7 +159,7 @@ describe("refresh-poll cooldown service (Plan 03.0-04)", () => {
     expect(err.metadata.retryAfterSeconds as number).toBeGreaterThan(0);
   });
 
-  it("Plan 03.0-04: 5min after last refresh → service permits refresh again", async () => {
+  it("5min after last refresh → service permits refresh again", async () => {
     sentJobs.length = 0;
     const u = await seedUserDirectly({ email: `rp-after-${uniq()}@test.local` });
     // Last refresh was 6 minutes ago — outside the 5-min window.
@@ -171,7 +171,7 @@ describe("refresh-poll cooldown service (Plan 03.0-04)", () => {
     expect(result.enqueued).toBe(true);
   });
 
-  it("Plan 03.0-04: cross-tenant userId/eventId → throws NotFoundError (PRIV-01: 404, never 403)", async () => {
+  it("cross-tenant userId/eventId → throws NotFoundError (404, never 403)", async () => {
     sentJobs.length = 0;
     const a = await seedUserDirectly({ email: `rp-cta-${uniq()}@test.local` });
     const b = await seedUserDirectly({ email: `rp-ctb-${uniq()}@test.local` });
@@ -182,7 +182,7 @@ describe("refresh-poll cooldown service (Plan 03.0-04)", () => {
     );
   });
 
-  it("Plan 03.0-04: kind=conference (or any non-youtube_video) → throws AppError 422 event_not_pollable", async () => {
+  it("kind=conference (or any non-youtube_video) → throws AppError 422 event_not_pollable", async () => {
     sentJobs.length = 0;
     const u = await seedUserDirectly({ email: `rp-kind-${uniq()}@test.local` });
     const ev = await insertEvent(u.id, {
@@ -197,7 +197,7 @@ describe("refresh-poll cooldown service (Plan 03.0-04)", () => {
     });
   });
 
-  it("Plan 03.0-04: kind=youtube_video but external_id NULL → throws AppError 422 event_no_external_id", async () => {
+  it("kind=youtube_video but external_id NULL → throws AppError 422 event_no_external_id", async () => {
     sentJobs.length = 0;
     const u = await seedUserDirectly({ email: `rp-noext-${uniq()}@test.local` });
     const ev = await insertEvent(u.id, { externalId: null });
@@ -208,7 +208,7 @@ describe("refresh-poll cooldown service (Plan 03.0-04)", () => {
     });
   });
 
-  it("Plan 03.0-04: Frozen-age (28d+) youtube_video — refresh STILL permitted (CONTEXT D-10)", async () => {
+  it("Frozen-age (28d+) youtube_video — refresh STILL permitted", async () => {
     sentJobs.length = 0;
     const u = await seedUserDirectly({ email: `rp-frozen-${uniq()}@test.local` });
     // 30 days old — well past the 28-day Frozen boundary. Per-video refactor
@@ -223,13 +223,13 @@ describe("refresh-poll cooldown service (Plan 03.0-04)", () => {
       occurredAt: new Date(Date.now() - 30 * 86_400_000),
     });
 
-    // D-10: tier resolver gates the SCHEDULER's automatic enqueue path; the
+    // Tier resolver gates the SCHEDULER's automatic enqueue path; the
     // user-driven refresh-poll route bypasses tier completely.
     const result = await requestRefreshPoll(u.id, ev.id, "127.0.0.1");
     expect(result.enqueued).toBe(true);
   });
 
-  it("Plan 03.0-04: writes audit event.poll_refreshed scoped to userId on success", async () => {
+  it("writes audit event.poll_refreshed scoped to userId on success", async () => {
     sentJobs.length = 0;
     const u = await seedUserDirectly({ email: `rp-audit-${uniq()}@test.local` });
     const ev = await insertEvent(u.id);
