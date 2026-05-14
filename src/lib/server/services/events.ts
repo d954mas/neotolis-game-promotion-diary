@@ -44,12 +44,6 @@
 // only valid on inbox events (zero junction rows); otherwise throws
 // AppError 'not_in_inbox' (422). Audit-logged `event.dismissed_from_inbox`.
 //
-// createEventFromPaste — unified-events ingest path. The YouTube paste
-// flow writes ONE events row carrying everything. author_is_me inheritance:
-// match oEmbed.author_url against registered data_sources by handleUrl
-// exact match (case-sensitive; case-insensitive is a possible future
-// polish).
-//
 // Audit: event.created on INSERT, event.edited on UPDATE, event.deleted on
 // softDelete, event.attached_to_game on each game added to the junction,
 // event.detached_from_game on each game removed from the junction,
@@ -548,9 +542,9 @@ export async function createEvent(
  * field; auto-fill of the date lands alongside the YouTube Data API key.
  * The /events/new client falls back to today's date.
  *
- * `sourceMatch` carries the matched data_sources row's id + isOwnedByMe so
- * createEventFromPaste can inherit `author_is_me` from a registered source
- * without re-querying.
+ * `sourceMatch` carries the matched data_sources row's id + isOwnedByMe
+ * so callers can inherit `author_is_me` from a registered source without
+ * re-querying.
  */
 export interface EnrichmentResult {
   kind: EventKind;
@@ -565,15 +559,12 @@ export interface EnrichmentResult {
 }
 
 /**
- * enrichFromUrl is the URL → metadata bridge shared by the paste flow
- * (createEventFromPaste) and the POST /api/events/preview-url endpoint.
- * Pure read: parses the URL, calls oEmbed, matches author_url
- * against registered data_sources, returns the enrichment payload. NO DB
- * write happens here — both callers consume the result and either INSERT
- * (paste) or render (preview).
+ * enrichFromUrl is the URL → metadata bridge powering the
+ * POST /api/events/preview-url endpoint. Pure read: parses the URL,
+ * calls oEmbed, matches author_url against registered data_sources,
+ * returns the enrichment payload. NO DB write happens here.
  *
- * Error mapping mirrors createEventFromPaste exactly so the route layer
- * preserves UX:
+ * Error mapping (route layer preserves UX):
  *   - unsupported URL          → AppError 'unsupported_url' 422
  *   - reddit_post              → AppError 'kind_not_yet_functional' 422
  *                                (preview not yet wired through this
@@ -598,13 +589,11 @@ export async function enrichFromUrl(userId: string, url: string): Promise<Enrich
   if (parsed.kind === "unsupported") {
     throw new AppError("URL not yet supported", "unsupported_url", 422, { url });
   }
-  // enrichFromUrl is the YouTube-paste pre-INSERT enrichment path
-  // (POST /api/events/preview-url + the unused createEventFromPaste).
-  // Reddit / Twitter / Telegram have NO preview integration through
-  // enrichFromUrl — Reddit uses /api/reddit/fetch-metadata via its
-  // adapter.registerRoutes (mirroring /api/youtube/fetch-metadata).
-  // Twitter / Telegram fall to kind_not_yet_functional until their
-  // adapters ship.
+  // enrichFromUrl is the YouTube-only preview-URL helper used by
+  // POST /api/events/preview-url. Reddit + Twitter + Telegram get
+  // their preview via adapter.registerRoutes (Reddit:
+  // /api/reddit/fetch-metadata). When a future Twitter / Telegram
+  // adapter ships preview support, it mounts its own route.
   if (
     parsed.kind === "reddit_post" ||
     parsed.kind === "twitter_post" ||
@@ -691,69 +680,6 @@ export async function enrichFromUrl(userId: string, url: string): Promise<Enrich
       ? { id: matchedSource.id, isOwnedByMe: matchedSource.isOwnedByMe }
       : null,
   };
-}
-
-/**
- * createEventFromPaste — unified ingest path. The YouTube paste path
- * writes ONE events row (kind=youtube_video) carrying:
- *   - source_id   = matched data_sources row's id, or NULL on no match
- *   - author_is_me = matched source's is_owned_by_me, or false on no match
- *   - external_id = canonical YouTube videoId (auto-import dedup key)
- *
- * Validate-first invariant: URL parse + oEmbed validation runs BEFORE any
- * INSERT. On unsupported / private / unavailable / Reddit, the database is
- * provably untouched.
- *
- * The URL parse + oEmbed fetch + author-match logic lives in the shared
- * `enrichFromUrl` helper so POST /api/events/preview-url can call it
- * without duplicating the fetch. The paste-specific logic here is gameId
- * validation + the createEvent INSERT.
- *
- * Reddit URLs are NOT routed through this function — services/ingest.ts
- * dispatches `parsed.kind === "reddit_post"` BEFORE calling
- * createEventFromPaste (D-RDT-INGEST-REPLACE, plan 09). The synchronous
- * /comments/<id>.json fetch lives in handlePostSingle and the events
- * INSERT lives directly in the Reddit branch of parsePasteAndCreate.
- */
-export async function createEventFromPaste(
-  userId: string,
-  input: PasteInput,
-  ipAddress: string,
-  userAgent?: string,
-): Promise<EventRow> {
-  const enriched = await enrichFromUrl(userId, input.url);
-
-  // Validate every requested gameId belongs to userId before calling
-  // through to createEvent (which also validates — this is a fast-fail for
-  // the paste-flow's own UX). Set-dedup mirrors createEvent.
-  const pasteGameIds = Array.from(new Set(input.gameIds ?? []));
-  for (const gid of pasteGameIds) {
-    await assertGameOwnedByUser(userId, gid);
-  }
-
-  return createEvent(
-    userId,
-    {
-      gameIds: pasteGameIds,
-      kind: "youtube_video",
-      // Paste flow defaults occurredAt to "now" (the moment the user pasted);
-      // the unified shape preserves this — preview-url callers get null and
-      // the client renders today's date instead.
-      occurredAt: new Date(),
-      title: enriched.title,
-      url: enriched.canonicalUrl,
-      externalId: enriched.externalId,
-      sourceId: enriched.sourceMatch?.id ?? null,
-      authorIsMe: enriched.sourceMatch?.isOwnedByMe ?? false,
-      metadata: {
-        author_name: enriched.authorName ?? "",
-        author_url: enriched.authorUrl ?? "",
-        thumbnail_url: enriched.thumbnailUrl ?? "",
-      },
-    },
-    ipAddress,
-    userAgent,
-  );
 }
 
 /**
