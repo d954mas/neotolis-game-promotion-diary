@@ -90,6 +90,10 @@
   "audit_action_auto_import_deferred": "Auto-import deferred",
   "audit_action_poll_failed": "Poll failed",
   "audit_action_event_poll_refreshed": "Event poll refreshed",
+  "audit_action_reddit_queue_drained": "Reddit queue drained",
+  "audit_action_reddit_deletion_propagated": "Reddit deletion propagated",
+  "audit_action_reddit_cap_exhausted": "Reddit cap exhausted",
+  "audit_action_reddit_adapter_degraded": "Reddit adapter degraded",
 
   "audit_filter_action_axis_label": "Action",
   "audit_filter_date_axis_label": "Date range",

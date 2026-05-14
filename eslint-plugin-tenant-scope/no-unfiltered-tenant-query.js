@@ -83,6 +83,21 @@ const ALLOWLIST_TABLES = new Set([
   // info). Same semantics as youtubeChannels — keyed on video_id, no
   // user_id, shared across all tenants who ever reference this video.
   "youtubeVideos",
+  // Phase 03.1 Reddit — public-data tables (no user_id by design).
+  // Same public-data semantics as the YouTube cache: post score /
+  // upvote ratio / subreddit subscribers etc. are identical regardless
+  // of which tenant looked them up. `reddit_refresh_queue` is the one
+  // queue-table exception — payload carries `user_id` for cap counting
+  // and audit; ESLint disable in callers is unnecessary because the
+  // worker dequeues via raw SQL (FOR UPDATE SKIP LOCKED).
+  "redditPosts", // public external data, no tenant scope
+  "redditUsersCache", // public external data, no tenant scope
+  "redditSubredditsCache", // public external data, no tenant scope
+  "redditPostSnapshots", // public external data, no tenant scope (time-series)
+  "redditUserSnapshots", // public external data, no tenant scope (time-series; OWNED reddit_accounts only — see schema header)
+  "redditSubredditSnapshots", // public external data, no tenant scope (time-series; all cached subs)
+  "redditSubredditBaselines", // public external data, no tenant scope (per-sub aggregates)
+  "redditRefreshQueue", // queue table, payload-scoped (user_id in payload column for audit + cap counters)
 ]);
 
 export default ESLintUtils.RuleCreator.withoutDocs({
