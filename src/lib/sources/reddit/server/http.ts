@@ -38,6 +38,7 @@ import { AdapterError } from "$lib/sources/errors.js";
 import { pickRedditCredentials } from "./credentials.js";
 import { writeAudit } from "$lib/server/audit.js";
 import { logger } from "$lib/server/logger.js";
+import { env } from "$lib/server/config/env.js";
 
 export interface RedditHttpResult<T> {
   data: T;
@@ -45,7 +46,11 @@ export interface RedditHttpResult<T> {
   headers: Headers;
 }
 
-const REDDIT_BASE = "https://www.reddit.com";
+// Production default = the official reddit.com endpoint. The CI smoke gate
+// sets env.REDDIT_BASE_URL_OVERRIDE to a mock reverse-proxy URL so worker
+// traffic is intercepted by tests/smoke/lib/reddit-mock.mjs (no live Reddit
+// calls in CI). Mirrors YouTube's YOUTUBE_API_BASE_URL precedent.
+const REDDIT_BASE = env.REDDIT_BASE_URL_OVERRIDE ?? "https://www.reddit.com";
 
 // 403-burst detection state. Module-scope (single-process under
 // DV-RDT-7 — see header for the WORKER_REPLICA_COUNT guard rationale).

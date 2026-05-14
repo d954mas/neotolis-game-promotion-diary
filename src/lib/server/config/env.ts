@@ -179,6 +179,15 @@ const RawSchema = z.object({
   // Validated as a URL by zod so a typo fails fast at boot.
   YOUTUBE_API_BASE_URL: z.string().url().default("https://www.googleapis.com/youtube/v3"),
 
+  // Reddit base URL — production default = the official reddit.com endpoint.
+  // The CI smoke gate sets this to a mock reverse-proxy URL
+  // (http://localhost:<port>) so the worker's chargedFetch redirects to the
+  // mock without touching live Reddit. Mirrors YOUTUBE_API_BASE_URL precedent.
+  // Validated as a URL so typos fail fast at boot.
+  // DO NOT set in production — leaving unset (or set to the default) is the
+  // only supported live behavior.
+  REDDIT_BASE_URL_OVERRIDE: z.string().url().optional(),
+
   // Multi-replica safety guard. YouTube adapter's chargedFetch reservoir
   // uses RateLimiterMemory (per-process state). With N>1 worker replicas
   // each holds an independent 8000/2000-point pool — daily quota would
@@ -293,6 +302,7 @@ export const env = {
   REDDIT_USER_AGENT: raw.REDDIT_USER_AGENT,
   ADMIN_EMAIL_ALLOWLIST: raw.ADMIN_EMAIL_ALLOWLIST,
   YOUTUBE_API_BASE_URL: raw.YOUTUBE_API_BASE_URL,
+  REDDIT_BASE_URL_OVERRIDE: raw.REDDIT_BASE_URL_OVERRIDE,
   WORKER_REPLICA_COUNT: raw.WORKER_REPLICA_COUNT,
 } as const;
 
