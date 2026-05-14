@@ -13,6 +13,14 @@ import { dataSourceChannelState } from "$lib/server/db/schema/data-source-channe
 import { events } from "$lib/server/db/schema/events.js";
 import { auditLog } from "$lib/server/db/schema/audit-log.js";
 import { and, eq, isNull, inArray, sql, gte, max, count } from "drizzle-orm";
+// Reddit-specific quota helpers (Phase 03.1 plan 08). The per-user
+// two-axis cap declaration lives on redditAdapter.observability.userQuotaCap;
+// the cap COUNTER lives in checkRedditUserCap; the service-load gauge
+// (used / 6 user slots per minute) lives in getRecentLoad. We import all
+// three so QuotaStatusBanner's Reddit tab can render the 3-line block
+// (D-RDT-QUOTA-UI) + the "not configured" empty state (D-RDT-AUTH-EMPTY).
+import { checkRedditUserCap } from "$lib/sources/reddit/server/quota.js";
+import { getRecentLoad, redditAdapter } from "$lib/sources/reddit/server/index.js";
 
 /**
  * /sources loader — list the caller's data_sources, partitioned active vs
@@ -216,10 +224,61 @@ export const load: PageServerLoad = async ({ locals }) => {
     }),
   );
 
+  // Reddit-specific tab block (Phase 03.1 plan 08, D-RDT-QUOTA-UI).
+  // QuotaStatusBanner switches on platform.kind === 'reddit_account'
+  // and renders the 3-line block instead of the YouTube two-axis bars.
+  // When isOperatorConfigured === false (REDDIT_USER_AGENT empty), the
+  // banner shows the "Reddit not configured" empty state (D-RDT-AUTH-EMPTY).
+  //
+  // sourceActions counter source: COUNT(audit_log WHERE
+  //   action='source.refresh_content_requested' AND platform LIKE
+  //   'reddit_%' AND created_at > NOW() - 5min) — performed by
+  //   checkRedditUserCap('source-actions').
+  // postRefreshes counter source: COUNT(reddit_refresh_queue WHERE
+  //   queue_name='user_post' AND user_id=$user AND enqueued_at > NOW()
+  //   - 5min) — checkRedditUserCap('post-refreshes').
+  // serviceLoad counter source: COUNT(reddit_refresh_queue WHERE
+  //   status='done' AND queue_name IN ('user_source','user_post') AND
+  //   last_attempt_at > NOW() - 60s) — getRecentLoad(60).
+  const redditAuth = redditAdapter.observability.auth;
+  let redditQuota:
+    | {
+        isOperatorConfigured: boolean;
+        sourceActions: { used: number; cap: number; windowMinutes: number };
+        postRefreshes: { used: number; cap: number; windowMinutes: number };
+        serviceLoad: { used: number; capacity: number };
+      }
+    | { isOperatorConfigured: false } = { isOperatorConfigured: false };
+
+  if (redditAuth.isOperatorConfigured) {
+    // Two cap counters + service-load gauge. checkRedditUserCap returns
+    // { used, cap, window_minutes }; getRecentLoad returns { used, capacity }.
+    const [sourceActionsResult, postRefreshesResult, serviceLoad] = await Promise.all([
+      checkRedditUserCap(db, userId, "source-actions"),
+      checkRedditUserCap(db, userId, "post-refreshes"),
+      getRecentLoad(60),
+    ]);
+    redditQuota = {
+      isOperatorConfigured: true,
+      sourceActions: {
+        used: sourceActionsResult.used,
+        cap: sourceActionsResult.cap,
+        windowMinutes: sourceActionsResult.window_minutes,
+      },
+      postRefreshes: {
+        used: postRefreshesResult.used,
+        cap: postRefreshesResult.cap,
+        windowMinutes: postRefreshesResult.window_minutes,
+      },
+      serviceLoad,
+    };
+  }
+
   return {
     active: dtos.filter((s) => s.deletedAt === null),
     deleted: dtos.filter((s) => s.deletedAt !== null),
     quotaPlatforms,
+    redditQuota,
     cooldownBySource,
     pullingBySource,
   };
