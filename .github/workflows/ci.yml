@@ -208,6 +208,17 @@ jobs:
       #     here; documented for operator readability).
       SERVICE_YOUTUBE_API_KEYS: mock-key
       ADMIN_EMAIL_ALLOWLIST: ''
+      # Reddit adapter smoke env (Phase 03.1 plan 10, V3+V24+V25).
+      # REDDIT_USER_AGENT is INTENTIONALLY UNSET at the job level so the
+      # baseline smoke-app boots with empty env — Half A asserts the
+      # parity contract (/readyz 200 + /sources HTML "Reddit not configured"
+      # + paste 422 reddit_not_configured). Half B
+      # (tests/smoke/lib/reddit-polling-flow.sh) tears down smoke-app and
+      # re-launches it together with smoke-worker + smoke-scheduler with
+      # REDDIT_USER_AGENT="node:com.neotolis.gpd-smoke:0.1.0 (by /u/smoke)"
+      # and REDDIT_BASE_URL_OVERRIDE=http://localhost:$REDDIT_MOCK_PORT
+      # (allocated by tests/smoke/lib/reddit-mock.sh). NO live Reddit
+      # calls in CI.
       CI: 'true'
     steps:
       - uses: actions/checkout@v4
