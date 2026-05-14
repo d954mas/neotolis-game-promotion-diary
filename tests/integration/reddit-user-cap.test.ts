@@ -28,7 +28,6 @@ import {
   REDDIT_USER_CAP,
 } from "../../src/lib/sources/reddit/server/quota.js";
 import { user } from "../../src/lib/server/db/schema/auth.js";
-import { uuidv7 } from "../../src/lib/server/ids.js";
 
 const userA = `cap-user-A-${Math.random().toString(36).slice(2, 8)}`;
 const userB = `cap-user-B-${Math.random().toString(36).slice(2, 8)}`;
