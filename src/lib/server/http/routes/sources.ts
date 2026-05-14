@@ -373,6 +373,16 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
       }
     }
 
+    // L2-Reddit: two-axis sliding-window cap (windowMinutes +
+    // sourceActionsPerWindow + postRefreshesPerWindow). Reddit declares
+    // this shape instead of requestsPerDay; the branch above (requestsPerDay
+    // / eventsPerDay) silently skips it. For refresh-content the relevant
+    // axis is 'source-action' (1/5min).
+    if (cap?.windowMinutes !== undefined) {
+      const { enforceRedditUserCap } = await import("$lib/server/services/quota.js");
+      await enforceRedditUserCap(db, adapter, ctx.userId, ctx.ipAddress, "source-action");
+    }
+
     // No eager state reset. The three-branch since-derivation in
     // backfill-channel.ts decides at walk-time whether the click is
     // steady-state (exhausted), incremental, or deep. Eagerly resetting

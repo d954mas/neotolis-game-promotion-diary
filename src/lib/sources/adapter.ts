@@ -525,7 +525,18 @@ export interface DataSourceAdapter {
   fetchEventStats?(
     externalId: string,
     ctx: { userId: string },
-  ): Promise<{ viewCount: number; likeCount: number; commentCount: number } | null>;
+  ): Promise<{
+    viewCount: number;
+    likeCount: number;
+    commentCount: number;
+    /** Optional per-adapter signal that the event's author matches one
+     *  of the user's registered, owned sources. When set, createEvent
+     *  UPDATEs events.author_is_me unless the caller passed an explicit
+     *  value. Reddit: t3.author === reddit_account.metadata.username.
+     *  YouTube: inheritance happens via enrichFromUrl's findActiveSourceByHandleUrl,
+     *  NOT via this field — YouTube returns undefined here. */
+    authorIsMe?: boolean;
+  } | null>;
 
   /** Per-adapter event-input validation. Cross-source createEvent /
    *  updateEvent calls this when the merged event.kind matches this

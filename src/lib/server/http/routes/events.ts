@@ -82,33 +82,45 @@ const eventKindEnum = z.enum([
 ]);
 
 /**
- * kind=youtube_video MUST carry a parseable YouTube url. Other kinds accept
- * null/undefined url (free-form events; conferences, posts, etc.). Service-
- * layer createEvent is the second layer of defense (opportunistic external_id
- * derivation); this superRefine is the load-bearing validator.
+ * URL-required validator for pollable event kinds. youtube_video AND
+ * reddit_post both MUST carry a parseable URL of the matching shape;
+ * the service-layer createEvent is the second layer of defense
+ * (opportunistic external_id derivation + adapter.fetchEventStats).
  *
  * Shared between createEventSchema and updateEventSchema so a kind-change
- * PATCH that drops the url tripwires here too.
+ * PATCH that drops the url tripwires here too. Free-form kinds (post,
+ * conference, talk, press, other) accept null/undefined url.
+ *
+ * Adding a new pollable kind = extend the {kind→expected ParsedUrl.kind}
+ * map below. Mirrors the FUNCTIONAL_KINDS expansion in /events/new UI.
  */
-function youtubeUrlRequired(
+const URL_REQUIRED_KINDS: Readonly<Record<string, string>> = {
+  youtube_video: "youtube_video",
+  reddit_post: "reddit_post",
+};
+
+function urlRequiredForPollableKinds(
   obj: { kind?: string | undefined; url?: string | null | undefined },
   ctx: z.RefinementCtx,
 ): void {
-  if (obj.kind !== "youtube_video") return;
+  const kind = obj.kind;
+  if (kind === undefined) return;
+  const expectedParsedKind = URL_REQUIRED_KINDS[kind];
+  if (expectedParsedKind === undefined) return;
   if (!obj.url) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["url"],
-      message: "url is required for kind=youtube_video",
+      message: `url is required for kind=${kind}`,
     });
     return;
   }
   const parsed = parseIngestUrl(obj.url);
-  if (parsed.kind !== "youtube_video") {
+  if (parsed.kind !== expectedParsedKind) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["url"],
-      message: "url must be a recognized YouTube video URL",
+      message: `url must be a recognized ${kind} URL`,
     });
   }
 }
@@ -130,7 +142,7 @@ const createEventSchema = z
     // omitted (preserves existing semantics).
     authorIsMe: z.boolean().optional(),
   })
-  .superRefine(youtubeUrlRequired)
+  .superRefine(urlRequiredForPollableKinds)
   .transform((obj) => {
     // Normalize back-compat alias. When gameIds is absent and gameId is
     // supplied, internalize gameId → gameIds (single-element array, or
@@ -147,7 +159,7 @@ const createEventSchema = z
     return out;
   });
 
-// updateEventSchema does NOT call .superRefine(youtubeUrlRequired). The
+// updateEventSchema does NOT call .superRefine(urlRequiredForPollableKinds). The
 // create-side superRefine validates the full body (which IS the full state
 // on create), but on a PATCH the body is partial — a `{url: null}` body
 // with no `kind` field would slip past the body-only check on a row whose
@@ -173,7 +185,7 @@ const updateEventSchema = z
   .refine((obj) => Object.keys(obj).length > 0, {
     message: "at least one field must be supplied",
   });
-// NOTE: NO .superRefine(youtubeUrlRequired) here — moved to service layer.
+// NOTE: NO .superRefine(urlRequiredForPollableKinds) here — moved to service layer.
 
 // Feed query schema. Multi-value axes (source / kind / game) are NOT
 // validated here because Hono's `c.req.queries(name)` returns string[] for

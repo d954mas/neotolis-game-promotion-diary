@@ -19,12 +19,24 @@
 //   [submissionListing, commentsListing]
 // We consume only [0]: data.children[0].data is the t3 post payload.
 
+import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { redditFetch } from "../http.js";
 import { upsertRedditPost, upsertRedditUser, upsertRedditSubreddit } from "../upsert.js";
 import { writeRedditPostSnapshot, type RedditSnapshotStatus } from "../snapshots.js";
+import { redditPosts, redditPostSnapshots, redditRefreshQueue } from "../schema/index.js";
+import { eq, and, gte, desc } from "drizzle-orm";
 import { AdapterError } from "$lib/sources/errors.js";
 import { logger } from "$lib/server/logger.js";
+
+/** Dedup window — handlePostSingle skips the fetch + UPSERT + snapshot
+ *  + cap-counter write when a fresh snapshot for the same post exists
+ *  within this window. Tuned to 60s to: (a) handle preview→submit
+ *  immediate reuse on /events/new (typical click-through is <30s),
+ *  (b) keep the polled_at timeline coarse enough to fit Reddit's
+ *  per-minute rate-limit bucket, (c) avoid double-counting the
+ *  post-refresh cap when preview and submit fire on the same post. */
+const POST_SINGLE_DEDUP_WINDOW_MS = 60_000;
 
 interface T3Data {
   id: string;
@@ -77,6 +89,28 @@ export async function handlePostSingle(args: {
   paste?: boolean;
 }): Promise<HandlePostSingleResult> {
   const bareId = args.postId.replace(/^t3_/, "");
+  const fullIdGuess = `t3_${bareId}`;
+
+  // Dedup pre-check (paste path only): if a snapshot for this post was
+  // written within the dedup window, reuse it instead of re-fetching.
+  // Skips the Reddit HTTP call, the 4 UPSERTs, the snapshot write, and
+  // the cap-counter increment. Preview→submit on the same /events/new
+  // page goes through this path within seconds; the second call should
+  // not burn a Reddit unit nor count against the post-refresh cap.
+  //
+  // Cron / worker callers (paste !== true) ALWAYS fetch — they're
+  // service-driven polls explicitly meant to refresh stale data.
+  if (args.paste === true) {
+    const cached = await readCachedPost(fullIdGuess);
+    if (cached !== null) {
+      logger.debug(
+        { postId: fullIdGuess, userId: args.userId, paste: true },
+        "reddit post_single: dedup — reused cached snapshot < 60s old",
+      );
+      return cached;
+    }
+  }
+
   const { data } = await redditFetch<unknown>(`/comments/${bareId}.json`);
   const t3 = extractT3FromCommentsResponse(data, bareId);
 
@@ -137,6 +171,26 @@ export async function handlePostSingle(args: {
     status: classifySnapshotStatus(t3),
   });
 
+  // Paste-path cap-counter increment. Every successful handlePostSingle
+  // invoked from a user-facing surface (preview button OR submit
+  // fetchEventStats OR future paste UIs) writes a `done` row in
+  // reddit_refresh_queue on the user_post lane. checkRedditUserCap
+  // (D-RDT-CAP-POST plan 06) reads queue rows in the 5-minute window
+  // to count post-refreshes — without this row, user pastes silently
+  // bypass the 25/5min cap. Dedup above ensures preview+submit on the
+  // same post produces ONE counter tick, not two.
+  if (args.paste === true && args.userId !== null) {
+    await db.insert(redditRefreshQueue).values({
+      queueName: "user_post",
+      type: "post_single",
+      payload: { post_id: fullId, flow: "paste" },
+      userId: args.userId,
+      priority: 0,
+      status: "done",
+      lastAttemptAt: new Date(),
+    });
+  }
+
   logger.debug(
     {
       postId: fullId,
@@ -160,6 +214,64 @@ export async function handlePostSingle(args: {
     numComments: t3.num_comments ?? null,
     upvoteRatio: t3.upvote_ratio ?? null,
     selftext: typeof t3.selftext === "string" ? t3.selftext : "",
+  };
+}
+
+/** Dedup helper — return cached result if a fresh snapshot exists for
+ *  this postId. Returns null when no fresh snapshot is in cache (the
+ *  caller proceeds to fetch). Reads from reddit_posts (UPSERTed
+ *  metadata) + reddit_post_snapshots (timeseries metrics — most recent
+ *  within the dedup window). */
+async function readCachedPost(postId: string): Promise<HandlePostSingleResult | null> {
+  const since = new Date(Date.now() - POST_SINGLE_DEDUP_WINDOW_MS);
+  const snapRows = await db
+    .select({
+      score: redditPostSnapshots.score,
+      numComments: redditPostSnapshots.numComments,
+      upvoteRatio: redditPostSnapshots.upvoteRatio,
+    })
+    .from(redditPostSnapshots)
+    .where(and(eq(redditPostSnapshots.postId, postId), gte(redditPostSnapshots.polledAt, since)))
+    .orderBy(desc(redditPostSnapshots.polledAt))
+    .limit(1);
+  if (snapRows.length === 0) return null;
+  const snap = snapRows[0]!;
+
+  // Pull the post row for title/author/permalink/submittedAt. If the
+  // post row is missing (race window between snapshot write + UPSERT),
+  // fall through and fetch fresh — safer to re-fetch than to return
+  // partial data.
+  const postRows = await db
+    .select({
+      subreddit: redditPosts.subreddit,
+      author: redditPosts.author,
+      authorFullname: redditPosts.authorFullname,
+      permalink: redditPosts.permalink,
+      title: redditPosts.title,
+      submittedAt: redditPosts.submittedAt,
+      metadata: redditPosts.metadata,
+    })
+    .from(redditPosts)
+    .where(eq(redditPosts.postId, postId))
+    .limit(1);
+  if (postRows.length === 0) return null;
+  const post = postRows[0]!;
+
+  const meta = (post.metadata ?? {}) as { selftext?: unknown };
+  const selftext = typeof meta.selftext === "string" ? meta.selftext : "";
+
+  return {
+    postId,
+    subreddit: post.subreddit,
+    author: post.author,
+    authorFullname: post.authorFullname,
+    permalink: post.permalink,
+    title: post.title,
+    submittedAt: post.submittedAt,
+    score: snap.score,
+    numComments: snap.numComments,
+    upvoteRatio: snap.upvoteRatio,
+    selftext,
   };
 }
 

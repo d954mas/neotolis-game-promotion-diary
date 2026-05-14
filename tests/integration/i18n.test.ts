@@ -101,11 +101,6 @@ describe("i18n at runtime", () => {
       "audit_action_theme_changed",
       // Error states (reject-inline)
       "ingest_error_malformed_url",
-      "ingest_error_unsupported_host",
-      "ingest_info_reddit_not_yet_supported",
-      "ingest_error_youtube_unavailable",
-      "ingest_error_oembed_unreachable",
-      "ingest_error_youtube_duplicate",
       "keys_steam_error_invalid",
       "keys_steam_error_label_exists",
       "error_server_generic",
@@ -124,8 +119,6 @@ describe("i18n at runtime", () => {
       "toast_saved",
       "toast_deleted",
       "toast_restored",
-      // PasteBox label
-      "paste_box_label",
     ];
     for (const k of required) {
       expect(raw, `keyset missing key: ${k}`).toHaveProperty(k);

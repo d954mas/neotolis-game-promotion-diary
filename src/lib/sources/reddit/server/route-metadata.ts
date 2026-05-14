@@ -27,6 +27,9 @@ import { handlePostSingle } from "./handlers/post-single.js";
 import { isRedditConfigured } from "./credentials.js";
 import { AppError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
+import { enforceRedditUserCap } from "$lib/server/services/quota.js";
+import { db } from "$lib/server/db/client.js";
+import { getAdapter } from "$lib/sources/registry.js";
 
 const fetchMetadataSchema = z.object({
   url: z.string().url(),
@@ -58,6 +61,15 @@ redditMetadataRoutes.post(
       if (parsed === null) {
         throw new AppError("Not a Reddit post URL", "invalid_url", 422, { url });
       }
+      // Two-axis user-cap enforcement BEFORE the fetch — preview burns
+      // a Reddit unit the same as a paste, so it counts against the
+      // post-refresh axis (25/5min). handlePostSingle's 60s dedup means
+      // a previewed-then-submitted post produces ONE cap tick, but
+      // pre-emptive enforce prevents 100-click attacks from sneaking
+      // through (each click pre-dedup writes one done-row; the 26th
+      // would fire 429 even within the same window).
+      const redditAdapter = getAdapter("reddit_account");
+      await enforceRedditUserCap(db, redditAdapter, ctx.userId, ctx.ipAddress, "post-refresh");
       let result;
       try {
         result = await handlePostSingle({

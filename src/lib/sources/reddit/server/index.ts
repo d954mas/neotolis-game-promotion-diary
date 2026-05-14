@@ -204,13 +204,20 @@ async function onSourceCreated(source: SourceCreatedHookSource): Promise<void> {
 
 /**
  * fetchEventPreviewMetadata — adapter wrapper for the /events/new
- * "Get from Reddit" button. Fetches /comments/<id>.json and returns
- * the post title + author + permalink in the cross-source
- * EventPreviewMetadata shape. Empty REDDIT_USER_AGENT → unreachable
- * (mirrors YouTube's empty-keys oEmbed behavior at the preview surface).
+ * "Get info" button. Fetches /comments/<id>.json via handlePostSingle
+ * (which UPSERTs caches + writes a snapshot row + records a cap-counter
+ * row) and returns the post title + author + permalink in the
+ * cross-source EventPreviewMetadata shape.
  *
- * Preview-only — no UPSERT, no snapshot row, no audit. The actual
- * persistent fetch happens later inside fetchEventStats on Submit.
+ * NOT preview-only — Reddit's /comments/<id>.json is the same fetch
+ * the paste flow uses, so we share the side effects (cache populated,
+ * snapshot recorded) instead of doing a read-only fetch and then
+ * re-fetching on Submit. handlePostSingle's 60s dedup ensures preview
+ * + Submit on the same post produces ONE Reddit request and ONE
+ * cap-counter increment.
+ *
+ * Empty REDDIT_USER_AGENT → unreachable (mirrors YouTube's empty-keys
+ * oEmbed behavior at the preview surface).
  */
 async function fetchEventPreviewMetadata(canonicalUrl: string): Promise<EventPreviewMetadata> {
   if (!isRedditConfigured()) {
@@ -255,14 +262,14 @@ async function fetchEventPreviewMetadata(canonicalUrl: string): Promise<EventPre
  * the cross-source createEvent calls this AFTER the events INSERT, errors
  * are logged-and-swallowed by the caller.
  *
- * Side effects:
+ * Side effects (all owned by handlePostSingle — this wrapper just
+ * shapes the return type to the cross-source contract):
  *   - UPSERTs reddit_posts / reddit_users_cache / reddit_subreddits_cache
- *     via handlePostSingle
  *   - Writes ONE reddit_post_snapshots row (minute-truncated polled_at)
  *   - Writes ONE reddit_refresh_queue row with status='done' on the
- *     user_post lane so the post-refresh cap counter (D-RDT-CAP-POST,
- *     plan 06) sees this fetch. Without this, user pastes silently
- *     bypass the 25/5min cap.
+ *     user_post lane for cap-counter visibility (D-RDT-CAP-POST, plan 06)
+ *   - 60s dedup — preview+submit on the same post collapses to ONE
+ *     Reddit fetch + ONE cap-counter tick
  *
  * Returns {viewCount, likeCount, commentCount} where Reddit semantics
  * map: viewCount=score, likeCount=0 (Reddit has no separate likes —
@@ -277,7 +284,12 @@ async function fetchEventPreviewMetadata(canonicalUrl: string): Promise<EventPre
 async function fetchEventStats(
   externalId: string,
   ctx: { userId: string },
-): Promise<{ viewCount: number; likeCount: number; commentCount: number } | null> {
+): Promise<{
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+  authorIsMe?: boolean;
+} | null> {
   if (!isRedditConfigured()) return null;
   try {
     const result = await handlePostSingle({
@@ -285,25 +297,45 @@ async function fetchEventStats(
       userId: ctx.userId,
       paste: true,
     });
-    // Record the paste in reddit_refresh_queue so the post-refresh cap
-    // counter (which COUNTs queue rows in the 5-minute window) sees this
-    // user action. status='done' from the start — no worker tick will
-    // re-claim it. last_attempt_at=NOW() matches what the worker would
-    // have written, keeping the audit shape uniform across user-paste
-    // and cron-drain code paths.
-    await db.insert(redditRefreshQueue).values({
-      queueName: "user_post",
-      type: "post_single",
-      payload: { post_id: externalId, flow: "paste" },
+    // D-RDT-AUTHOR-IS-ME-INHERITANCE: match t3.author against the user's
+    // owned reddit_account sources. If found, signal author_is_me=true
+    // back to createEvent so the events row is created with proper
+    // attribution. Case-sensitive — Reddit usernames are case-insensitive
+    // by convention but the API returns them as the registered casing,
+    // and registered source metadata.username should match exactly.
+    let authorIsMe: boolean | undefined = undefined;
+    if (result.author !== null) {
+      authorIsMe = await isOwnedRedditAuthor(ctx.userId, result.author);
+    }
+
+    // Cross-source audit parity. YouTube's fetchEventStats writes an
+    // event.poll_refreshed audit row with flow=stats_refresh so the
+    // /admin dashboards' SUM-by-audit-log surface (getUserQuotaUsedToday)
+    // sees the request. Reddit's cap-counter lives on reddit_refresh_queue
+    // (already incremented inside handlePostSingle), so this audit row
+    // is for read-side parity only — it does NOT participate in
+    // enforceRedditUserCap. Without it, getUserQuotaUsedToday(userId,
+    // "reddit_account") would return 0 always.
+    const { writeAudit } = await import("$lib/server/audit.js");
+    await writeAudit({
       userId: ctx.userId,
-      priority: 0,
-      status: "done",
-      lastAttemptAt: new Date(),
+      action: "event.poll_refreshed",
+      ipAddress: "0.0.0.0",
+      metadata: {
+        external_id: externalId,
+        kind: "reddit_post",
+        platform: "reddit_account",
+        flow: "stats_refresh",
+        requests_used: 1,
+        events_inserted: 0,
+      },
     });
+
     return {
       viewCount: result.score ?? 0,
       likeCount: 0,
       commentCount: result.numComments ?? 0,
+      authorIsMe,
     };
   } catch (err) {
     logger.warn(
@@ -312,6 +344,28 @@ async function fetchEventStats(
     );
     return null;
   }
+}
+
+/** Lookup: does the user have an owned, non-soft-deleted reddit_account
+ *  source whose metadata.username matches the post author? Tenant-scoped
+ *  by construction (filters by userId). */
+async function isOwnedRedditAuthor(userId: string, author: string): Promise<boolean> {
+  const { dataSources } = await import("$lib/server/db/schema/data-sources.js");
+  const { eq, and, isNull, sql } = await import("drizzle-orm");
+  const rows = await db
+    .select({ id: dataSources.id })
+    .from(dataSources)
+    .where(
+      and(
+        eq(dataSources.userId, userId),
+        eq(dataSources.kind, "reddit_account"),
+        eq(dataSources.isOwnedByMe, true),
+        isNull(dataSources.deletedAt),
+        sql`${dataSources.metadata}->>'username' = ${author}`,
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
 }
 
 /**

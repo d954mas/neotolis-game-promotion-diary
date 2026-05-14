@@ -127,13 +127,6 @@ export interface UpdateEventInput {
   gameIds?: string[];
 }
 
-export interface PasteInput {
-  url: string;
-  // Aligned with CreateEventInput.gameIds (M:N junction). Empty array =
-  // inbox; non-empty = pre-attached.
-  gameIds?: string[];
-}
-
 /**
  * ShowFilter — discriminated union collapsing the legacy
  * `attached?: boolean` + `game?: string | string[]` pair into one axis. The
@@ -378,6 +371,25 @@ export async function createEvent(
     }
   }
 
+  // Adapter-driven per-user cap check — PRE-INSERT (validate-first).
+  // YouTube uses requestsPerDay (checked POST-INSERT before fetchEventStats,
+  // legacy behavior — stats skip on cap exhaustion, event still created).
+  // Reddit uses the two-axis sliding-window cap (windowMinutes +
+  // postRefreshesPerWindow); when exhausted, throw 429 here so the event
+  // row is NEVER created. This dispatches polymorphically on the adapter's
+  // declared cap shape — every adapter with windowMinutes (Reddit, future
+  // sliding-window adapters) enforces this branch.
+  if (derivedExternalId !== null) {
+    const sourceKindForCap = eventKindToSourceKind(input.kind);
+    if (sourceKindForCap !== null) {
+      const capAdapter = getAdapter(sourceKindForCap);
+      if (capAdapter.observability.userQuotaCap?.windowMinutes !== undefined) {
+        const { enforceRedditUserCap } = await import("./quota.js");
+        await enforceRedditUserCap(db, capAdapter, userId, ipAddress, "post-refresh");
+      }
+    }
+  }
+
   // The events INSERT + junction INSERT loop run in a single tx so a
   // junction-INSERT failure rolls the parent INSERT back. Validation +
   // ownership pre-checks above are pure and stay outside. withQuotaGuard
@@ -502,21 +514,31 @@ export async function createEvent(
           }
           if (allow) {
             const stats = await statsAdapter.fetchEventStats(row.externalId, { userId });
-            // Write last_user_refresh_at into event.metadata so
-            // RefreshNowButton's cooldown gate picks it up. Without this,
-            // paste burns a unit + writes
-            // audit, but the cooldown stays inactive — a user clicking
-            // Refresh right after paste would re-fetch the same stats
-            // (double burn). Source of truth matches refresh-poll
-            // service which writes the same field on user-driven polls.
             if (stats !== null) {
               const now = new Date();
+              // Two things to write: (1) last_user_refresh_at marker for
+              // the RefreshNowButton cooldown gate; (2) author_is_me if
+              // the adapter inherited it AND the caller didn't pass an
+              // explicit value (input.authorIsMe). Adapter inheritance
+              // wins over default-false but never overrides caller intent.
+              const adapterAuthorIsMe = stats.authorIsMe;
+              const shouldUpdateAuthor =
+                adapterAuthorIsMe === true &&
+                (input.authorIsMe === undefined || input.authorIsMe === false);
               await db
                 .update(events)
-                .set({
-                  metadata: sql`jsonb_set(COALESCE(${events.metadata}, '{}'::jsonb), '{last_user_refresh_at}', to_jsonb(${now.toISOString()}::text), true)`,
-                })
+                .set(
+                  shouldUpdateAuthor
+                    ? {
+                        metadata: sql`jsonb_set(COALESCE(${events.metadata}, '{}'::jsonb), '{last_user_refresh_at}', to_jsonb(${now.toISOString()}::text), true)`,
+                        authorIsMe: true,
+                      }
+                    : {
+                        metadata: sql`jsonb_set(COALESCE(${events.metadata}, '{}'::jsonb), '{last_user_refresh_at}', to_jsonb(${now.toISOString()}::text), true)`,
+                      },
+                )
                 .where(and(eq(events.userId, userId), eq(events.id, row.id)));
+              if (shouldUpdateAuthor) row.authorIsMe = true;
             }
           }
         }
