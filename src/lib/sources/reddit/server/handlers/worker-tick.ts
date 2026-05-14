@@ -149,9 +149,7 @@ async function tryClaimAndDispatch(
     const newAttempts = row.attempts + 1;
     try {
       await dispatchByType(row);
-      await tx.execute(
-        sql`UPDATE reddit_refresh_queue SET status = 'done' WHERE id = ${row.id}`,
-      );
+      await tx.execute(sql`UPDATE reddit_refresh_queue SET status = 'done' WHERE id = ${row.id}`);
     } catch (err) {
       const isPermanent =
         err instanceof AdapterError &&
@@ -245,10 +243,7 @@ export async function emitQueueDrainedAudit(stats: {
   try {
     const operatorId = await resolveOperatorUserId();
     if (operatorId === null) {
-      logger.debug(
-        { stats },
-        "reddit.queue_drained: no operator resolvable; skipping audit",
-      );
+      logger.debug({ stats }, "reddit.queue_drained: no operator resolvable; skipping audit");
       return;
     }
     await writeAudit({

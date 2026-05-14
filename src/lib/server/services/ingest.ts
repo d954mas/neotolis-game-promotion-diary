@@ -147,8 +147,7 @@ export async function parsePasteAndCreate(
     //    "[deleted]" author has already been mapped to null in
     //    handlePostSingle, so the null-guard skips the lookup for
     //    deleted-author posts.
-    const authorIsMe =
-      result.author !== null ? await isAuthorOwned(userId, result.author) : false;
+    const authorIsMe = result.author !== null ? await isAuthorOwned(userId, result.author) : false;
 
     // 5) events INSERT. createEvent enforces the cross-tenant gameId
     //    check and the events_per_day cap; either path throws BEFORE

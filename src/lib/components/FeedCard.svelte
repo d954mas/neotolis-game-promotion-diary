@@ -360,11 +360,13 @@
           : null}
       {#if rstats}
         <div class="stats-line">
-          <span class="stat">{m.feed_card_reddit_stats({
-            score: rstats.score,
-            comments: rstats.numComments,
-            ratio: Math.round(rstats.upvoteRatio * 100),
-          })}</span>
+          <span class="stat"
+            >{m.feed_card_reddit_stats({
+              score: rstats.score,
+              comments: rstats.numComments,
+              ratio: Math.round(rstats.upvoteRatio * 100),
+            })}</span
+          >
         </div>
       {/if}
       {#if rmd.author || rmd.subreddit}
@@ -385,9 +387,11 @@
       {/if}
       {#if underperforming && baselinePct !== null}
         <div class="reddit-baseline-badge">
-          <span class="badge badge-warning">{m.feed_card_reddit_baseline_underperforming({
-            pct: baselinePct,
-          })}</span>
+          <span class="badge badge-warning"
+            >{m.feed_card_reddit_baseline_underperforming({
+              pct: baselinePct,
+            })}</span
+          >
         </div>
       {/if}
     {/if}

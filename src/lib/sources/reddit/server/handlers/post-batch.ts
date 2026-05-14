@@ -71,10 +71,9 @@ export async function handlePostBatch(args: {
     // Caller invariant — the cron / route layer must chunk into ≤100.
     // Surfacing as permanent so the queue row dead_letters instead of
     // bashing Reddit with an oversized id list (would 414 anyway).
-    throw new AdapterError(
-      `post_batch received ${args.postIds.length} ids; max ${MAX_BATCH}`,
-      { category: "permanent" },
-    );
+    throw new AdapterError(`post_batch received ${args.postIds.length} ids; max ${MAX_BATCH}`, {
+      category: "permanent",
+    });
   }
 
   // Normalize to t3_<bare> form (Reddit accepts either, but a consistent

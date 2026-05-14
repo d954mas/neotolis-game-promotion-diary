@@ -177,10 +177,7 @@
             })}
           </span>
           <div class="quota-banner__bar quota-banner__bar--{saZone}" aria-hidden="true">
-            <div
-              class="quota-banner__bar-fill"
-              style="width: {pct(sa.used, sa.cap)}%"
-            ></div>
+            <div class="quota-banner__bar-fill" style="width: {pct(sa.used, sa.cap)}%"></div>
           </div>
         </div>
         <div class="quota-banner__axis">
@@ -192,10 +189,7 @@
             })}
           </span>
           <div class="quota-banner__bar quota-banner__bar--{prZone}" aria-hidden="true">
-            <div
-              class="quota-banner__bar-fill"
-              style="width: {pct(pr.used, pr.cap)}%"
-            ></div>
+            <div class="quota-banner__bar-fill" style="width: {pct(pr.used, pr.cap)}%"></div>
           </div>
         </div>
         <div class="quota-banner__axis">
@@ -203,7 +197,9 @@
             {m.quota_banner_reddit_service_load({ used: sl.used, capacity: sl.capacity })}
           </span>
         </div>
-        <small class="quota-banner__reddit-explainer">{m.quota_banner_reddit_limits_explainer()}</small>
+        <small class="quota-banner__reddit-explainer"
+          >{m.quota_banner_reddit_limits_explainer()}</small
+        >
       {/if}
     </section>
   {/if}

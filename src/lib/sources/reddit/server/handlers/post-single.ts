@@ -172,10 +172,9 @@ function extractT3FromCommentsResponse(data: unknown, expectedId: string): T3Dat
   }
   const t3 = children[0]?.data;
   if (!t3 || typeof t3.id !== "string" || typeof t3.created_utc !== "number") {
-    throw new AdapterError(
-      `Reddit /comments/${expectedId}.json: missing required t3 fields`,
-      { category: "permanent" },
-    );
+    throw new AdapterError(`Reddit /comments/${expectedId}.json: missing required t3 fields`, {
+      category: "permanent",
+    });
   }
   return t3;
 }
@@ -187,9 +186,7 @@ function buildPostMetadata(t3: T3Data): Record<string, unknown> {
     is_self: t3.is_self ?? false,
     link_url: t3.url ?? null,
     body_excerpt:
-      typeof t3.selftext === "string" && t3.selftext.length > 0
-        ? t3.selftext.slice(0, 200)
-        : null,
+      typeof t3.selftext === "string" && t3.selftext.length > 0 ? t3.selftext.slice(0, 200) : null,
     over_18: t3.over_18 ?? false,
     spoiler: t3.spoiler ?? false,
     stickied: t3.stickied ?? false,

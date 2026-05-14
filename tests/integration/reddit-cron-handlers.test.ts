@@ -45,7 +45,9 @@ beforeEach(async () => {
   await db.execute(sql`DELETE FROM reddit_post_snapshots`);
   await db.execute(sql`DELETE FROM reddit_posts`);
   await db.execute(sql`DELETE FROM audit_log WHERE action::text LIKE 'reddit.%'`);
-  await db.execute(sql`DELETE FROM data_sources WHERE kind IN ('reddit_account', 'reddit_subreddit')`);
+  await db.execute(
+    sql`DELETE FROM data_sources WHERE kind IN ('reddit_account', 'reddit_subreddit')`,
+  );
 });
 
 /** Insert a user row + return its id. audit_log.user_id is notNull; the
@@ -87,9 +89,7 @@ async function seedRedditSource(args: {
   deletedAt?: Date | null;
 }): Promise<string> {
   const metadata =
-    args.kind === "reddit_account"
-      ? { username: args.handle }
-      : { subreddit: args.handle };
+    args.kind === "reddit_account" ? { username: args.handle } : { subreddit: args.handle };
   const handleUrl =
     args.kind === "reddit_account"
       ? `https://reddit.com/user/${args.handle}`
@@ -136,14 +136,16 @@ describe("handleEnqueueServiceSourcesCron — daily enqueue from data_sources", 
       FROM reddit_refresh_queue
       ORDER BY id ASC
     `);
-    const list = (rows as unknown as {
-      rows: Array<{
-        queue_name: string;
-        type: string;
-        payload: Record<string, unknown>;
-        user_id: string | null;
-      }>;
-    }).rows;
+    const list = (
+      rows as unknown as {
+        rows: Array<{
+          queue_name: string;
+          type: string;
+          payload: Record<string, unknown>;
+          user_id: string | null;
+        }>;
+      }
+    ).rows;
     expect(list.length).toBe(4);
     for (const r of list) {
       expect(r.queue_name).toBe("service_source");
@@ -236,14 +238,16 @@ describe("handleEnqueueServicePostsCron — D-RDT-POST-ELIGIBILITY scan + batche
     const rows = await db.execute(sql`
       SELECT queue_name, type, payload, user_id FROM reddit_refresh_queue
     `);
-    const list = (rows as unknown as {
-      rows: Array<{
-        queue_name: string;
-        type: string;
-        payload: { post_ids: string[] };
-        user_id: string | null;
-      }>;
-    }).rows;
+    const list = (
+      rows as unknown as {
+        rows: Array<{
+          queue_name: string;
+          type: string;
+          payload: { post_ids: string[] };
+          user_id: string | null;
+        }>;
+      }
+    ).rows;
     expect(list.length).toBe(1);
     expect(list[0]!.queue_name).toBe("service_post");
     expect(list[0]!.type).toBe("post_batch");
@@ -252,13 +256,21 @@ describe("handleEnqueueServicePostsCron — D-RDT-POST-ELIGIBILITY scan + batche
   });
 
   it("young post (<24h) + last_snapshot fresh (<6h) → NOT eligible", async () => {
-    await insertPost({ postId: "t3_freshly_polled", submittedHoursAgo: 3, lastSnapshotHoursAgo: 1 });
+    await insertPost({
+      postId: "t3_freshly_polled",
+      submittedHoursAgo: 3,
+      lastSnapshotHoursAgo: 1,
+    });
     const r = await handleEnqueueServicePostsCron();
     expect(r.enqueued).toBe(0);
   });
 
   it("young post (<24h) + no last_snapshot → eligible", async () => {
-    await insertPost({ postId: "t3_never_polled", submittedHoursAgo: 3, lastSnapshotHoursAgo: null });
+    await insertPost({
+      postId: "t3_never_polled",
+      submittedHoursAgo: 3,
+      lastSnapshotHoursAgo: null,
+    });
     const r = await handleEnqueueServicePostsCron();
     expect(r.enqueued).toBe(1);
   });
@@ -314,9 +326,11 @@ describe("handleEnqueueServicePostsCron — D-RDT-POST-ELIGIBILITY scan + batche
       WHERE queue_name = 'service_post' AND type = 'post_batch'
       ORDER BY id ASC
     `);
-    const batches = (rows as unknown as {
-      rows: Array<{ payload: { post_ids: string[] } }>;
-    }).rows.map((r) => r.payload.post_ids);
+    const batches = (
+      rows as unknown as {
+        rows: Array<{ payload: { post_ids: string[] } }>;
+      }
+    ).rows.map((r) => r.payload.post_ids);
     expect(batches.length).toBe(2);
     expect(batches[0]!.length).toBe(100);
     expect(batches[1]!.length).toBe(50);
@@ -361,15 +375,17 @@ describe("handleBaselinesCron — pure-DB PERCENTILE_CONT aggregate", () => {
       FROM reddit_subreddit_baselines
       ORDER BY window_label
     `);
-    const list = (rows as unknown as {
-      rows: Array<{
-        subreddit: string;
-        window_label: string;
-        sample_size: number;
-        median_score_24h: number;
-        p75_score_24h: number;
-      }>;
-    }).rows;
+    const list = (
+      rows as unknown as {
+        rows: Array<{
+          subreddit: string;
+          window_label: string;
+          sample_size: number;
+          median_score_24h: number;
+          p75_score_24h: number;
+        }>;
+      }
+    ).rows;
     expect(list.length).toBe(2);
     expect(list.map((r) => r.window_label).sort()).toEqual(["30d", "all_time"]);
     for (const r of list) {
@@ -411,9 +427,7 @@ describe("handleBaselinesCron — pure-DB PERCENTILE_CONT aggregate", () => {
     const rows = await db.execute(sql`
       SELECT COUNT(*) AS c FROM reddit_subreddit_baselines WHERE subreddit = 'r/repeat'
     `);
-    expect(
-      Number((rows as unknown as { rows: Array<{ c: number | string }> }).rows[0]!.c),
-    ).toBe(2);
+    expect(Number((rows as unknown as { rows: Array<{ c: number | string }> }).rows[0]!.c)).toBe(2);
   });
 });
 
@@ -426,9 +440,8 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
     process.env.ADMIN_EMAIL_ALLOWLIST = email;
     try {
       vi.resetModules();
-      const mod = await import(
-        "../../src/lib/sources/reddit/server/handlers/deletion-propagation-cron.js"
-      );
+      const mod =
+        await import("../../src/lib/sources/reddit/server/handlers/deletion-propagation-cron.js");
       mod.__resetOperatorCacheForTest();
       return await mod.handleDeletionPropagationCron();
     } finally {
@@ -492,15 +505,15 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
     const after = await db.execute(
       sql`SELECT author FROM reddit_posts WHERE post_id = 't3_recent_del'`,
     );
-    expect(
-      (after as unknown as { rows: Array<{ author: string | null }> }).rows[0]!.author,
-    ).toBe("stillthere");
+    expect((after as unknown as { rows: Array<{ author: string | null }> }).rows[0]!.author).toBe(
+      "stillthere",
+    );
     const audit = await db.execute(sql`
       SELECT COUNT(*) AS c FROM audit_log WHERE action = 'reddit.deletion_propagated'
     `);
-    expect(
-      Number((audit as unknown as { rows: Array<{ c: number | string }> }).rows[0]!.c),
-    ).toBe(0);
+    expect(Number((audit as unknown as { rows: Array<{ c: number | string }> }).rows[0]!.c)).toBe(
+      0,
+    );
   });
 
   it("post past 48h but author already NULL → idempotent (no double-audit)", async () => {
@@ -518,9 +531,9 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
     const audit = await db.execute(sql`
       SELECT COUNT(*) AS c FROM audit_log WHERE action = 'reddit.deletion_propagated'
     `);
-    expect(
-      Number((audit as unknown as { rows: Array<{ c: number | string }> }).rows[0]!.c),
-    ).toBe(0);
+    expect(Number((audit as unknown as { rows: Array<{ c: number | string }> }).rows[0]!.c)).toBe(
+      0,
+    );
   });
 
   it("no eligible posts → no-op, no audit row", async () => {
@@ -531,9 +544,9 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
     const audit = await db.execute(sql`
       SELECT COUNT(*) AS c FROM audit_log WHERE action = 'reddit.deletion_propagated'
     `);
-    expect(
-      Number((audit as unknown as { rows: Array<{ c: number | string }> }).rows[0]!.c),
-    ).toBe(0);
+    expect(Number((audit as unknown as { rows: Array<{ c: number | string }> }).rows[0]!.c)).toBe(
+      0,
+    );
   });
 
   it("empty ADMIN_EMAIL_ALLOWLIST → handler still purges but skips audit (silent)", async () => {
@@ -555,8 +568,8 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
     const audit = await db.execute(sql`
       SELECT COUNT(*) AS c FROM audit_log WHERE action = 'reddit.deletion_propagated'
     `);
-    expect(
-      Number((audit as unknown as { rows: Array<{ c: number | string }> }).rows[0]!.c),
-    ).toBe(0);
+    expect(Number((audit as unknown as { rows: Array<{ c: number | string }> }).rows[0]!.c)).toBe(
+      0,
+    );
   });
 });

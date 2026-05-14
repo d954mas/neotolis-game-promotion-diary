@@ -24,10 +24,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { redditFetch } from "../http.js";
 import { upsertRedditPost, upsertRedditUser, upsertRedditSubreddit } from "../upsert.js";
-import {
-  writeRedditPostSnapshot,
-  writeRedditUserSnapshot,
-} from "../snapshots.js";
+import { writeRedditPostSnapshot, writeRedditUserSnapshot } from "../snapshots.js";
 import { redditUsersCache } from "../schema/index.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { events } from "$lib/server/db/schema/events.js";
@@ -287,9 +284,7 @@ async function fanOutToSubscribers(
         isNull(events.deletedAt),
       ),
     );
-  const existingSet = new Set(
-    existingRows.map((r) => `${r.userId}|${r.sourceId}|${r.externalId}`),
-  );
+  const existingSet = new Set(existingRows.map((r) => `${r.userId}|${r.sourceId}|${r.externalId}`));
 
   let inserted = 0;
   for (const t3 of t3s) {
@@ -333,10 +328,7 @@ async function fanOutToSubscribers(
   return inserted;
 }
 
-async function flagNotFoundOnSubscribers(
-  handle: string,
-  errorKind: "not-found",
-): Promise<void> {
+async function flagNotFoundOnSubscribers(handle: string, errorKind: "not-found"): Promise<void> {
   // WHERE spans tenants by design (an external handle has no owning user).
   // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- channel-scoped fan-out: external handle has no owning user
   const subscribers = await db
@@ -366,9 +358,7 @@ function buildPostMetadata(t3: T3Data): Record<string, unknown> {
     is_self: t3.is_self ?? false,
     link_url: t3.url ?? null,
     body_excerpt:
-      typeof t3.selftext === "string" && t3.selftext.length > 0
-        ? t3.selftext.slice(0, 200)
-        : null,
+      typeof t3.selftext === "string" && t3.selftext.length > 0 ? t3.selftext.slice(0, 200) : null,
     over_18: t3.over_18 ?? false,
     spoiler: t3.spoiler ?? false,
     stickied: t3.stickied ?? false,

@@ -169,10 +169,7 @@ describe("Reddit snapshots V20 idempotency", () => {
       submittedAt: new Date("2026-01-01T00:00:00Z"),
       metadata: { v: 2 },
     });
-    const rows = await db
-      .select()
-      .from(redditPosts)
-      .where(eq(redditPosts.postId, "t3_post_upd"));
+    const rows = await db.select().from(redditPosts).where(eq(redditPosts.postId, "t3_post_upd"));
     expect(rows.length).toBe(1);
     expect(rows[0]!.title).toBe("edited title");
     expect(rows[0]!.permalink).toBe("/r/indiedev/comments/post_upd/slug-changed");

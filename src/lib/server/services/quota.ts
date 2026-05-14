@@ -418,9 +418,8 @@ export async function enforceRedditUserCap(
   // Lazy-load: only adapters that declare the two-axis shape pay the
   // import cost. Keeps cross-source code platform-agnostic at module
   // load (no `import "$lib/sources/reddit/..."` at top of file).
-  const { checkRedditUserCap, writeRedditCapExhaustedAudit, redditCapErrorCode } = await import(
-    "$lib/sources/reddit/server/quota.js"
-  );
+  const { checkRedditUserCap, writeRedditCapExhaustedAudit, redditCapErrorCode } =
+    await import("$lib/sources/reddit/server/quota.js");
 
   const axis = flow === "source-action" ? "source-actions" : "post-refreshes";
   const result = await checkRedditUserCap(dbCtx, userId, axis);

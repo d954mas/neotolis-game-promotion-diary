@@ -83,9 +83,7 @@ vi.mock("../../src/lib/sources/reddit/server/handlers/post-single.js", async () 
 });
 
 const { db } = await import("../../src/lib/server/db/client.js");
-const { redditRefreshQueue } = await import(
-  "../../src/lib/sources/reddit/server/schema/index.js"
-);
+const { redditRefreshQueue } = await import("../../src/lib/sources/reddit/server/schema/index.js");
 const {
   redditWorkerTick,
   REDDIT_SLOT_MAPPING,
@@ -118,19 +116,16 @@ async function enqueueRow(args: {
 }
 
 async function statusOf(id: number): Promise<string> {
-  const rows = await db.execute(
-    sql`SELECT status FROM reddit_refresh_queue WHERE id = ${id}`,
-  );
-  return ((rows as unknown as { rows: Array<{ status: string }> }).rows[0]?.status) ?? "missing";
+  const rows = await db.execute(sql`SELECT status FROM reddit_refresh_queue WHERE id = ${id}`);
+  return (rows as unknown as { rows: Array<{ status: string }> }).rows[0]?.status ?? "missing";
 }
 
 async function attemptsOf(id: number): Promise<number> {
-  const rows = await db.execute(
-    sql`SELECT attempts FROM reddit_refresh_queue WHERE id = ${id}`,
-  );
-  return (
-    (rows as unknown as { rows: Array<{ attempts: number }> }).rows[0]?.attempts ?? -1
-  );
+  const rows = await db.execute(sql`SELECT attempts FROM reddit_refresh_queue WHERE id = ${id}`);
+  // db.execute returns raw pg.QueryResult; integers come back as JS strings
+  // in some node-pg configurations. Coerce explicitly so `.toBe(1)` matches.
+  const raw = (rows as unknown as { rows: Array<{ attempts: number | string }> }).rows[0]?.attempts;
+  return raw === undefined ? -1 : Number(raw);
 }
 
 beforeEach(async () => {
@@ -301,9 +296,7 @@ describe("Reddit worker tick — claim + dispatch", () => {
     // can land + the other return null if PG serialisation ordered the
     // tx that way — both shapes are acceptable. The load-bearing
     // assertion is that processedId values are distinct.)
-    expect(ids.size).toBe(
-      [res1.processedId, res2.processedId].filter((x) => x !== null).length,
-    );
+    expect(ids.size).toBe([res1.processedId, res2.processedId].filter((x) => x !== null).length);
     // No row claimed twice — exactly one row per claim.
     const status1 = await statusOf(id1);
     const status2 = await statusOf(id2);
@@ -333,9 +326,7 @@ describe("Reddit worker tick — dispatch by type", () => {
     });
     __setTickCounterForTest(4); // slot 5 = service_post
     await redditWorkerTick();
-    expect(postBatchCalls).toEqual([
-      { postIds: ["t3_a", "t3_b", "t3_c"], userId: null },
-    ]);
+    expect(postBatchCalls).toEqual([{ postIds: ["t3_a", "t3_b", "t3_c"], userId: null }]);
   });
 
   it("unknown type dead-letters via permanent AdapterError", async () => {
