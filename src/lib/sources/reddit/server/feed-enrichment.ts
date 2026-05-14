@@ -26,10 +26,16 @@
 // object. The UI mapper (ui/card-props.ts) reads via the same cast
 // shape; no schema changes to EventDto.
 
-import { sql } from "drizzle-orm";
+import { sql, inArray, eq, and, desc } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { logger } from "$lib/server/logger.js";
 import type { EventDto } from "$lib/server/dto.js";
+import {
+  redditPostSnapshots,
+  redditSubredditsCache,
+  redditSubredditBaselines,
+  redditUsersCache,
+} from "./schema/index.js";
 
 export interface RedditEnrichment {
   /** Latest score / num_comments / upvote_ratio from the most-recent
@@ -99,38 +105,38 @@ export async function enrichRedditFeedDtos(
   }
 
   try {
-    // 1. Latest snapshot per post_id. DISTINCT ON keeps the scan tight.
-    //    reddit_posts.post_id is the FK target on reddit_post_snapshots —
-    //    we look up by post_id IN both shapes (with/without t3_).
-    const snapsResult = await db.execute(sql`
-      SELECT DISTINCT ON (post_id)
-        post_id,
-        score,
-        num_comments,
-        upvote_ratio,
-        awards_total
-      FROM reddit_post_snapshots
-      WHERE post_id = ANY(${lookupArr}::text[])
-      ORDER BY post_id, polled_at DESC
-    `);
-    const snapRows = (
-      snapsResult as unknown as {
-        rows: Array<{
-          post_id: string;
-          score: number | string | null;
-          num_comments: number | string | null;
-          upvote_ratio: number | string | null;
-          awards_total: number | string | null;
-        }>;
-      }
-    ).rows;
+    // 1. Latest snapshot per post_id.
+    //
+    // Drizzle's `sql` template tag spreads JS arrays into N comma-separated
+    // bind params, which breaks `ANY($1::text[])` (the cast sees the wrong
+    // type at the binary protocol level). The schema-builder `inArray`
+    // expands to `IN ($1, $2, ...)` — semantic equivalent for set-membership.
+    // Manual DISTINCT-ON in JS because Drizzle's query-builder doesn't
+    // expose PG's DISTINCT ON; the ORDER BY (post_id, polled_at DESC) makes
+    // the first row per post_id the latest snapshot for that post.
+    const snapRows = await db
+      .select({
+        postId: redditPostSnapshots.postId,
+        score: redditPostSnapshots.score,
+        numComments: redditPostSnapshots.numComments,
+        upvoteRatio: redditPostSnapshots.upvoteRatio,
+        awardsTotal: redditPostSnapshots.awardsTotal,
+      })
+      .from(redditPostSnapshots)
+      .where(inArray(redditPostSnapshots.postId, lookupArr))
+      .orderBy(redditPostSnapshots.postId, desc(redditPostSnapshots.polledAt));
     const statsMap = new Map<string, RedditEnrichment["stats"]>();
     for (const r of snapRows) {
-      statsMap.set(r.post_id, {
+      // First row per post_id is the latest (rows are sorted post_id ASC,
+      // polled_at DESC; subsequent rows for the same post_id are older
+      // and skipped). Equivalent to PG's DISTINCT ON (post_id) ... ORDER BY
+      // post_id, polled_at DESC.
+      if (statsMap.has(r.postId)) continue;
+      statsMap.set(r.postId, {
         score: Number(r.score ?? 0),
-        numComments: Number(r.num_comments ?? 0),
-        upvoteRatio: Number(r.upvote_ratio ?? 0),
-        awardsTotal: Number(r.awards_total ?? 0),
+        numComments: Number(r.numComments ?? 0),
+        upvoteRatio: Number(r.upvoteRatio ?? 0),
+        awardsTotal: Number(r.awardsTotal ?? 0),
       });
     }
 
@@ -140,45 +146,42 @@ export async function enrichRedditFeedDtos(
     const baselineMap = new Map<string, RedditEnrichment["baseline"]>();
     if (subreddits.size > 0) {
       const subArr = Array.from(subreddits);
-      const subsResult = await db.execute(sql`
-        SELECT name, subscribers
-        FROM reddit_subreddits_cache
-        WHERE name = ANY(${subArr}::text[])
-      `);
-      for (const r of (
-        subsResult as unknown as {
-          rows: Array<{ name: string; subscribers: number | string | null }>;
-        }
-      ).rows) {
+      const subsRows = await db
+        .select({
+          name: redditSubredditsCache.name,
+          subscribers: redditSubredditsCache.subscribers,
+        })
+        .from(redditSubredditsCache)
+        .where(inArray(redditSubredditsCache.name, subArr));
+      for (const r of subsRows) {
         if (r.subscribers !== null && r.subscribers !== undefined) {
           subSubscribers.set(r.name, Number(r.subscribers));
         }
       }
 
-      const baselinesResult = await db.execute(sql`
-        SELECT subreddit, median_score_24h, p75_score_24h, sample_size
-        FROM reddit_subreddit_baselines
-        WHERE window_label = '30d'
-          AND subreddit = ANY(${subArr}::text[])
-      `);
-      for (const r of (
-        baselinesResult as unknown as {
-          rows: Array<{
-            subreddit: string;
-            median_score_24h: number | string | null;
-            p75_score_24h: number | string | null;
-            sample_size: number | string;
-          }>;
-        }
-      ).rows) {
-        const sampleSize = Number(r.sample_size ?? 0);
+      const baselineRows = await db
+        .select({
+          subreddit: redditSubredditBaselines.subreddit,
+          medianScore24h: redditSubredditBaselines.medianScore24h,
+          p75Score24h: redditSubredditBaselines.p75Score24h,
+          sampleSize: redditSubredditBaselines.sampleSize,
+        })
+        .from(redditSubredditBaselines)
+        .where(
+          and(
+            eq(redditSubredditBaselines.windowLabel, "30d"),
+            inArray(redditSubredditBaselines.subreddit, subArr),
+          ),
+        );
+      for (const r of baselineRows) {
+        const sampleSize = Number(r.sampleSize ?? 0);
         // Baselines cron only emits rows with sample_size >= 5 per its
         // HAVING clause, but defense-in-depth here too — the UI hides
         // the badge for < 5 anyway.
         if (sampleSize >= 5) {
           baselineMap.set(r.subreddit, {
-            medianScore24h: r.median_score_24h === null ? null : Number(r.median_score_24h),
-            p75Score24h: r.p75_score_24h === null ? null : Number(r.p75_score_24h),
+            medianScore24h: r.medianScore24h === null ? null : Number(r.medianScore24h),
+            p75Score24h: r.p75Score24h === null ? null : Number(r.p75Score24h),
             sampleSize,
           });
         }
@@ -189,18 +192,16 @@ export async function enrichRedditFeedDtos(
     const authorKarma = new Map<string, number>();
     if (authors.size > 0) {
       const authorArr = Array.from(authors);
-      const usersResult = await db.execute(sql`
-        SELECT username, total_karma
-        FROM reddit_users_cache
-        WHERE username = ANY(${authorArr}::text[])
-      `);
-      for (const r of (
-        usersResult as unknown as {
-          rows: Array<{ username: string; total_karma: number | string | null }>;
-        }
-      ).rows) {
-        if (r.total_karma !== null && r.total_karma !== undefined) {
-          authorKarma.set(r.username, Number(r.total_karma));
+      const userRows = await db
+        .select({
+          username: redditUsersCache.username,
+          totalKarma: redditUsersCache.totalKarma,
+        })
+        .from(redditUsersCache)
+        .where(inArray(redditUsersCache.username, authorArr));
+      for (const r of userRows) {
+        if (r.totalKarma !== null && r.totalKarma !== undefined) {
+          authorKarma.set(r.username, Number(r.totalKarma));
         }
       }
     }
