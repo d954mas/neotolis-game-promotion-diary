@@ -224,7 +224,7 @@ reddit_polling_smoke() {
   paste_b=$(curl -sS -X POST "$app_url/api/events" \
     -H "cookie: $session_cookie" \
     -H "content-type: application/json" \
-    -d '{"kind":"reddit_post","url":"https://www.reddit.com/r/IndieDev/comments/abc/test/"}')
+    -d '{"kind":"reddit_post","url":"https://www.reddit.com/r/IndieDev/comments/abc/test/","occurredAt":"2026-05-14T00:00:00.000Z","title":"smoke V25 probe"}')
   local paste_event_id
   paste_event_id=$(echo "$paste_b" | jq -r '.id // empty' 2>/dev/null || true)
   if [[ -z "$paste_event_id" || "$paste_event_id" == "null" ]]; then

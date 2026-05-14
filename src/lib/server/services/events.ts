@@ -556,6 +556,31 @@ export async function createEvent(
     }
   }
 
+  // Reddit synchronous fetch — pulls /comments/<id>.json, UPSERTs into
+  // reddit_posts + reddit_users_cache + reddit_subreddits_cache, and writes
+  // one reddit_post_snapshots row. The full ingest path (parsePasteAndCreate)
+  // does this as part of the paste orchestrator; the generic /api/events
+  // POST bypasses that orchestrator (route-layer migration is deferred),
+  // so we hook the same handler in here. Errors are logged-and-swallowed:
+  // the event row already exists, snapshot/cache population will retry
+  // later via the standard worker path.
+  if (row.kind === "reddit_post" && row.externalId !== null) {
+    try {
+      const { handlePostSingle } =
+        await import("$lib/sources/reddit/server/handlers/post-single.js");
+      await handlePostSingle({
+        postId: row.externalId,
+        userId,
+        paste: true,
+      });
+    } catch (err) {
+      logger.warn(
+        { eventId: row.id, externalId: row.externalId, err: String(err) },
+        "handlePostSingle failed on createEvent; reddit_post_snapshots will be picked up by cron",
+      );
+    }
+  }
+
   return row;
 }
 
