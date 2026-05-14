@@ -120,6 +120,188 @@ async function getRecentAudit(limit: number): Promise<ObservabilityAuditEntry[]>
   }));
 }
 
+/** Valid queue lanes — mirrors the CHECK constraint on
+ *  reddit_refresh_queue.queue_name. */
+export const REDDIT_QUEUE_NAMES = [
+  "service_source",
+  "service_post",
+  "user_source",
+  "user_post",
+] as const;
+export type RedditQueueName = (typeof REDDIT_QUEUE_NAMES)[number];
+
+/** Valid handler types — mirrors the CHECK constraint on
+ *  reddit_refresh_queue.type. */
+export const REDDIT_QUEUE_TYPES = [
+  "sub_poll",
+  "author_poll",
+  "post_single",
+  "post_batch",
+] as const;
+export type RedditQueueType = (typeof REDDIT_QUEUE_TYPES)[number];
+
+/** One row in the live queue-depth snapshot rendered on the /admin
+ *  Reddit Ops panel. Aggregates one queue_name lane across all
+ *  in-flight + alarm states. */
+export interface RedditQueueDepthRow {
+  queueName: RedditQueueName;
+  pending: number;
+  processing: number;
+  deadLetter: number;
+  /** Age of the oldest `pending` row in this lane, in seconds. `null`
+   *  if no pending rows. Drives "Самая старая" column. */
+  oldestPendingAgeSeconds: number | null;
+}
+
+/**
+ * Live queue-depth snapshot. Returns one row per queue_name lane,
+ * counting `pending` + `processing` + `dead_letter` rows. `done` is
+ * excluded — done rows are audit history, not queue depth.
+ *
+ * Operator dashboard signal:
+ *   - pending     — "how many tasks are waiting right now"
+ *   - processing  — usually 0-1 (FOR UPDATE SKIP LOCKED holds the row
+ *                   for milliseconds while the handler runs)
+ *   - dead_letter — alarm — N retry attempts exhausted, manual review
+ *                   needed
+ *   - oldestPendingAgeSeconds — backpressure indicator: a queue with 50
+ *                   pending and oldest=10s is healthy; 50 pending and
+ *                   oldest=10min means the worker can't drain fast
+ *                   enough.
+ *
+ * Cross-tenant aggregation by design — /admin is allowlist-gated.
+ */
+export async function getQueueDepth(): Promise<RedditQueueDepthRow[]> {
+  const result = await db.execute(sql`
+    SELECT
+      queue_name,
+      status,
+      COUNT(*)::int AS count,
+      EXTRACT(EPOCH FROM (NOW() - MIN(enqueued_at)))::int AS oldest_age_seconds
+    FROM reddit_refresh_queue
+    WHERE status IN ('pending', 'processing', 'dead_letter')
+    GROUP BY queue_name, status
+  `);
+  const rows = (
+    result as unknown as {
+      rows: Array<{
+        queue_name: string;
+        status: string;
+        count: number | string;
+        oldest_age_seconds: number | string | null;
+      }>;
+    }
+  ).rows;
+
+  // Start with zero-filled lanes so the operator sees all 4 rows even
+  // when an entire lane is idle (the absence of a lane in the result
+  // set is itself a signal — "nothing has been enqueued today").
+  const byLane = new Map<RedditQueueName, RedditQueueDepthRow>();
+  for (const name of REDDIT_QUEUE_NAMES) {
+    byLane.set(name, {
+      queueName: name,
+      pending: 0,
+      processing: 0,
+      deadLetter: 0,
+      oldestPendingAgeSeconds: null,
+    });
+  }
+  for (const r of rows) {
+    const lane = byLane.get(r.queue_name as RedditQueueName);
+    if (!lane) continue;
+    const count = Number(r.count);
+    if (r.status === "pending") {
+      lane.pending = count;
+      lane.oldestPendingAgeSeconds =
+        r.oldest_age_seconds === null ? null : Number(r.oldest_age_seconds);
+    } else if (r.status === "processing") {
+      lane.processing = count;
+    } else if (r.status === "dead_letter") {
+      lane.deadLetter = count;
+    }
+  }
+  return Array.from(byLane.values());
+}
+
+/**
+ * Daily processed-entries breakdown. Aggregates rows in
+ * reddit_refresh_queue with status='done' and last_attempt_at within
+ * the last 24 hours, grouped by handler type. The per-type counts are
+ * a close proxy for HTTP requests issued to Reddit (each handler
+ * typically performs 1 fetch per drained entry).
+ *
+ * Operator dashboard signal:
+ *   - total                         — "how many entries we processed today"
+ *   - byType.sub_poll               — sub listing walks
+ *   - byType.author_poll            — author submitted-page walks
+ *   - byType.post_single            — paste-driven single-post fetches
+ *   - byType.post_batch             — service post-refresh batches
+ *   - adapterDegradedSince          — last `reddit.adapter_degraded` audit
+ *                                     timestamp within the 24h window
+ *                                     (403-burst warning), or null
+ */
+export interface RedditDailyByType {
+  total: number;
+  byType: Record<RedditQueueType, number>;
+  capExhaustedCount: number;
+  adapterDegradedSince: Date | null;
+}
+
+export async function getDailyByType(): Promise<RedditDailyByType> {
+  const typeResult = await db.execute(sql`
+    SELECT type, COUNT(*)::int AS count
+    FROM reddit_refresh_queue
+    WHERE status = 'done'
+      AND last_attempt_at >= NOW() - INTERVAL '24 hours'
+    GROUP BY type
+  `);
+  const typeRows = (
+    typeResult as unknown as {
+      rows: Array<{ type: string; count: number | string }>;
+    }
+  ).rows;
+  const byType: Record<RedditQueueType, number> = {
+    sub_poll: 0,
+    author_poll: 0,
+    post_single: 0,
+    post_batch: 0,
+  };
+  let total = 0;
+  for (const r of typeRows) {
+    const count = Number(r.count);
+    if ((REDDIT_QUEUE_TYPES as readonly string[]).includes(r.type)) {
+      byType[r.type as RedditQueueType] = count;
+      total += count;
+    }
+  }
+
+  // Cap-exhaustion + adapter-degraded alarms within the same window.
+  // Single round-trip — two COUNT/MAX in one query keeps observability
+  // SSR loaders cheap.
+  const alarmsResult = await db.execute(sql`
+    SELECT
+      COUNT(*) FILTER (WHERE action = 'reddit.cap_exhausted')::int AS cap_exhausted_count,
+      MAX(created_at) FILTER (WHERE action = 'reddit.adapter_degraded') AS adapter_degraded_since
+    FROM audit_log
+    WHERE created_at >= NOW() - INTERVAL '24 hours'
+      AND action IN ('reddit.cap_exhausted', 'reddit.adapter_degraded')
+  `);
+  const alarmRow = (
+    alarmsResult as unknown as {
+      rows: Array<{
+        cap_exhausted_count: number | string | null;
+        adapter_degraded_since: Date | string | null;
+      }>;
+    }
+  ).rows[0];
+  const capExhaustedCount = Number(alarmRow?.cap_exhausted_count ?? 0);
+  const adapterDegradedSince = alarmRow?.adapter_degraded_since
+    ? new Date(alarmRow.adapter_degraded_since)
+    : null;
+
+  return { total, byType, capExhaustedCount, adapterDegradedSince };
+}
+
 /**
  * Service-load gauge for the Reddit tab — D-RDT-QUOTA-UI:
  * "Service load: N / 6 user slots available this minute".

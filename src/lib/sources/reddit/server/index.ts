@@ -219,7 +219,20 @@ export const redditAdapter: DataSourceAdapter = {
   enrichFeedDtos: enrichRedditFeedDtos,
 };
 
-// Re-export the Reddit-only observability helper so /admin/quota's
-// Reddit tab loader (plan 08) can import it from this barrel rather
-// than reaching into observability.ts directly.
-export { getRecentLoad } from "./observability.js";
+// Re-export the Reddit-only observability helpers so /admin's Reddit
+// Ops panel SSR loader (admin-quota-read.ts) and /sources's Reddit tab
+// (plan 08) can import from this barrel rather than reaching into
+// observability.ts directly.
+export {
+  getRecentLoad,
+  getQueueDepth,
+  getDailyByType,
+  REDDIT_QUEUE_NAMES,
+  REDDIT_QUEUE_TYPES,
+} from "./observability.js";
+export type {
+  RedditQueueName,
+  RedditQueueType,
+  RedditQueueDepthRow,
+  RedditDailyByType,
+} from "./observability.js";
