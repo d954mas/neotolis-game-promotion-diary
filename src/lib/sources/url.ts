@@ -13,13 +13,14 @@
 //
 // Reddit is registered as of Phase 03.1 plan 07 — `parseAnyUrl` returns
 // `{ kind: "reddit_post", externalId, metadata }` for reddit.com /
-// redd.it URLs via `redditAdapter.parseUrl`. The transitional
-// `reddit_deferred` shape and the `detectFutureKind` Reddit hosts both
-// went away in plan 09 (D-RDT-INGEST-REPLACE) when services/ingest.ts
-// gained the synchronous /comments/<id>.json paste flow.
+// redd.it URLs via `redditAdapter.parseUrl`. Plan 09 wired
+// services/ingest.ts to the synchronous /comments/<id>.json paste flow
+// (D-RDT-INGEST-REPLACE), so the registry path is fully load-bearing
+// end-to-end for Reddit ingest.
 //
-// `detectFutureKind` stays as the seam for the next deferred adapter
-// (Twitter / Telegram / Discord) — the map is currently empty.
+// `detectFutureKind` (src/lib/sources/future-kinds.ts) stays as the
+// seam for the next deferred adapter (Twitter / Telegram / Discord) —
+// the map is currently empty.
 
 import { allAdapters } from "./registry.js";
 import type { ParsedUrl } from "./adapter.js";
