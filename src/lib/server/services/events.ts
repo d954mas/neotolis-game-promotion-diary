@@ -598,11 +598,33 @@ export async function enrichFromUrl(userId: string, url: string): Promise<Enrich
   if (parsed.kind === "unsupported") {
     throw new AppError("URL not yet supported", "unsupported_url", 422, { url });
   }
-  if (
-    parsed.kind === "reddit_post" ||
-    parsed.kind === "twitter_post" ||
-    parsed.kind === "telegram_post"
-  ) {
+  if (parsed.kind === "reddit_post") {
+    // Reddit paste flow lives in services/ingest.ts parsePasteAndCreate
+    // (plan 09 — D-RDT-INGEST-REPLACE). The HTTP route layer hasn't been
+    // migrated to call parsePasteAndCreate yet — wiring is tracked as a
+    // gap-closure item. Until then, surface a useful error code:
+    //   - empty REDDIT_USER_AGENT → reddit_not_configured (matches the
+    //     ingest.ts contract that the smoke gate asserts)
+    //   - configured but route not wired → kind_not_yet_functional
+    const { isRedditConfigured } = await import(
+      "$lib/sources/reddit/server/credentials.js"
+    );
+    if (!isRedditConfigured()) {
+      throw new AppError(
+        "Reddit ingest disabled — operator has not configured REDDIT_USER_AGENT",
+        "reddit_not_configured",
+        422,
+        { kind: "reddit_post" },
+      );
+    }
+    throw new AppError(
+      `paste flow does not yet handle kind '${parsed.kind}' through enrichFromUrl`,
+      "kind_not_yet_functional",
+      422,
+      { kind: parsed.kind },
+    );
+  }
+  if (parsed.kind === "twitter_post" || parsed.kind === "telegram_post") {
     throw new AppError(
       `paste flow does not yet handle kind '${parsed.kind}' through enrichFromUrl`,
       "kind_not_yet_functional",

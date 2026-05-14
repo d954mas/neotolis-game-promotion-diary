@@ -72,10 +72,13 @@ reddit_polling_smoke() {
   # isRedditConfigured() check, which throws AppError(reddit_not_configured)
   # → mapErr → 422.
   local paste_resp
+  # createEventSchema requires occurredAt + title alongside the URL —
+  # validation runs before enrichFromUrl, so include them so the
+  # reddit-not-configured branch is actually reached.
   paste_resp=$(curl -sS -X POST "$app_url/api/events" \
     -H "cookie: $session_cookie" \
     -H "content-type: application/json" \
-    -d '{"kind":"reddit_post","url":"https://www.reddit.com/r/IndieDev/comments/abc/test/"}' || true)
+    -d '{"kind":"reddit_post","url":"https://www.reddit.com/r/IndieDev/comments/abc/test/","occurredAt":"2026-05-14T00:00:00.000Z","title":"smoke V24 probe"}' || true)
   if ! echo "$paste_resp" | jq -e '.error == "reddit_not_configured"' >/dev/null 2>&1; then
     log "----- POST /api/events response -----"
     echo "$paste_resp"
