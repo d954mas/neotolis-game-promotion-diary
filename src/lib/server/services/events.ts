@@ -611,16 +611,60 @@ export async function enrichFromUrl(userId: string, url: string): Promise<Enrich
   if (parsed.kind === "unsupported") {
     throw new AppError("URL not yet supported", "unsupported_url", 422, { url });
   }
-  // enrichFromUrl is the YouTube-only preview-URL helper used by
-  // POST /api/events/preview-url. Reddit + Twitter + Telegram get
-  // their preview via adapter.registerRoutes (Reddit:
-  // /api/reddit/fetch-metadata). When a future Twitter / Telegram
-  // adapter ships preview support, it mounts its own route.
-  if (
-    parsed.kind === "reddit_post" ||
-    parsed.kind === "twitter_post" ||
-    parsed.kind === "telegram_post"
-  ) {
+
+  // Reddit branch — adapter-driven preview through
+  // redditAdapter.fetchEventPreviewMetadata. /api/events/preview-url
+  // (this endpoint) and /api/reddit/fetch-metadata both go through the
+  // same hook; the EnrichmentResult shape adapts Reddit's response so
+  // POST /api/events/preview-url returns a uniform contract across
+  // adapters.
+  if (parsed.kind === "reddit_post") {
+    const adapter = getAdapter("reddit_account");
+    if (adapter.fetchEventPreviewMetadata === undefined) {
+      throw new AppError(
+        "reddit adapter does not support event preview",
+        "kind_not_yet_functional",
+        422,
+        { kind: parsed.kind },
+      );
+    }
+    const preview = await adapter.fetchEventPreviewMetadata(parsed.canonicalUrl);
+    if (preview.kind === "unreachable") {
+      // Map operator-issue (unconfigured) vs network error vs rate-limit
+      // to a useful response code. `cause` from the adapter carries the
+      // discriminator.
+      if (preview.cause === "reddit_not_configured") {
+        throw new AppError("Reddit ingest is not available", "reddit_not_configured", 503, {
+          cause: preview.cause,
+        });
+      }
+      throw new AppError("Reddit endpoint unreachable", "reddit_unreachable", 502, {
+        cause: preview.cause,
+      });
+    }
+    if (preview.kind === "private" || preview.kind === "unavailable") {
+      throw new AppError("Reddit post unavailable", "reddit_post_not_found", 404, {
+        reason: preview.kind,
+      });
+    }
+    return {
+      kind: "reddit_post",
+      externalId: parsed.externalId,
+      title: preview.title,
+      occurredAt: null, // adapter.fetchEventPreviewMetadata doesn't carry submittedAt
+      thumbnailUrl: preview.thumbnailUrl ?? null,
+      authorName: preview.authorName || null,
+      authorUrl: preview.authorUrl || null,
+      canonicalUrl: parsed.canonicalUrl,
+      // author_is_me inheritance for Reddit lives in fetchEventStats
+      // (matches t3.author against owned reddit_account.metadata.username).
+      // enrichFromUrl is the PREVIEW path — no DB write happens here, so
+      // we don't pre-compute sourceMatch.
+      sourceMatch: null,
+    };
+  }
+
+  if (parsed.kind === "twitter_post" || parsed.kind === "telegram_post") {
     throw new AppError(
       `paste flow does not yet handle kind '${parsed.kind}' through enrichFromUrl`,
       "kind_not_yet_functional",
