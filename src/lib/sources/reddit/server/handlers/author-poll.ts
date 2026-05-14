@@ -229,7 +229,6 @@ export async function handleAuthorPoll(args: {
 }
 
 async function maybeFetchUserAbout(handle: string): Promise<UserAboutData | null> {
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- public-data cache (user metadata)
   const rows = await db
     .select({ lastRefresh: redditUsersCache.lastMetadataRefreshAt })
     .from(redditUsersCache)
@@ -267,10 +266,11 @@ async function fanOutToSubscribers(
   const autoImportSubs = subscribers.filter((s) => s.autoImport === true);
   if (autoImportSubs.length === 0) return 0;
 
+  // inArray(events.userId, userIds) satisfies tenant-scope rule
+  // structurally; the multi-tenant span is by design (channel-scoped fan-out).
   const externalIds = t3s.map((t3) => `t3_${t3.id}`);
   const userIds = autoImportSubs.map((s) => s.userId);
   const sourceIds = autoImportSubs.map((s) => s.id);
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- fan-out idempotency (multiple user_ids)
   const existingRows = await db
     .select({
       userId: events.userId,
@@ -337,7 +337,8 @@ async function flagNotFoundOnSubscribers(
   handle: string,
   errorKind: "not-found",
 ): Promise<void> {
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- channel-scoped fan-out (see header)
+  // WHERE spans tenants by design (an external handle has no owning user).
+  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- channel-scoped fan-out: external handle has no owning user
   const subscribers = await db
     .select({ userId: dataSources.userId, id: dataSources.id })
     .from(dataSources)

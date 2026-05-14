@@ -224,7 +224,6 @@ export async function handleSubPoll(args: {
  *  tick when needed" guidance). Returns null when the cache row is
  *  fresh (<24h) or the fetch fails. */
 async function maybeFetchAbout(sub: string): Promise<AboutData | null> {
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- public-data cache (sub metadata)
   const rows = await db
     .select({ lastRefresh: redditSubredditsCache.lastMetadataRefreshAt })
     .from(redditSubredditsCache)
@@ -272,11 +271,12 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
     );
   if (subscribers.length === 0) return 0;
 
-  // Pre-fetch idempotency map.
+  // Pre-fetch idempotency map. inArray(events.userId, userIds) satisfies
+  // the tenant-scope rule (the where clause carries `userId`); the
+  // multi-tenant span is by design (channel-scoped fan-out — see header).
   const externalIds = t3s.map((t3) => `t3_${t3.id}`);
   const userIds = subscribers.map((s) => s.userId);
   const sourceIds = subscribers.map((s) => s.id);
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- fan-out idempotency (multiple user_ids)
   const existingRows = await db
     .select({
       userId: events.userId,
@@ -345,9 +345,10 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
 }
 
 /** When a sub returns 404 / private, flag every auto_import subscriber's
- *  source row so the user sees the reconnect signal in UI. */
+ *  source row so the user sees the reconnect signal in UI. WHERE spans
+ *  tenants by design — an external sub doesn't have an owning user. */
 async function flagNotFoundOnSubscribers(sub: string, errorKind: "not-found"): Promise<void> {
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- channel-scoped fan-out (see header)
+  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- channel-scoped fan-out: external sub has no owning user
   const subscribers = await db
     .select({ userId: dataSources.userId, id: dataSources.id })
     .from(dataSources)
