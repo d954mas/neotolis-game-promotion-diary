@@ -92,7 +92,32 @@ interface ClaimedRow {
  *  Returns the queue + type of the processed row (for telemetry +
  *  reddit.queue_drained audit accumulation), or all-nulls when every
  *  queue is empty this tick. */
+/** Stale-processing recovery window. A row in status='processing'
+ *  older than this is assumed to belong to a crashed worker process
+ *  and is flipped back to 'pending' so the dequeue can re-claim it.
+ *  Tuned to 5 minutes: longer than any healthy handler run
+ *  (handlePostSingle: ~1s; sub_poll: ~2s) and shorter than
+ *  cron-handler intervals (4 hours minimum), so a slow-but-alive
+ *  worker is NOT preempted from its own row. The `attempts` column
+ *  was incremented in Phase 1 of the prior tick, so a stale row that
+ *  flips back to pending and re-fails N more times still hits
+ *  MAX_ATTEMPTS dead-letter correctly. */
+const STALE_PROCESSING_MS = 5 * 60_000;
+
 export async function redditWorkerTick(): Promise<RedditWorkerTickResult> {
+  // Stale-processing recovery — fires every tick (cheap UPDATE that
+  // touches zero rows on a healthy queue). Without this, a worker
+  // crash between Phase 1 (claim → status='processing' COMMIT) and
+  // Phase 2 (terminal UPDATE) leaves rows stuck forever — the
+  // dequeue only looks at status='pending'.
+  const staleSince = new Date(Date.now() - STALE_PROCESSING_MS);
+  await db.execute(sql`
+    UPDATE reddit_refresh_queue
+    SET status = 'pending'
+    WHERE status = 'processing'
+      AND last_attempt_at < ${staleSince}
+  `);
+
   const slot = REDDIT_SLOT_MAPPING[tickCounter % 8]!;
   tickCounter++;
 

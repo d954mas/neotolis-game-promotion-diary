@@ -42,7 +42,6 @@
 
 import { and, eq, gte, sql } from "drizzle-orm";
 import type { DbOrTx } from "$lib/server/db/client.js";
-import { auditLog } from "$lib/server/db/schema/audit-log.js";
 import { redditRefreshQueue } from "$lib/sources/reddit/server/schema/index.js";
 import { writeAudit } from "$lib/server/audit.js";
 
@@ -96,25 +95,27 @@ export async function checkRedditUserCap(
   const since = new Date(Date.now() - windowMs);
 
   if (axis === "source-actions") {
+    // Queue-based counter (mirrors the post-refreshes axis below). The
+    // earlier audit-log-based counter read `source.refresh_content_requested`
+    // only — which never fires on createSource (writes verb=source.added)
+    // — so register actions slipped through the cap entirely. Migrating
+    // both axes to reddit_refresh_queue gives a uniform source of truth:
+    // any user-initiated Reddit operation enqueues a row on the user_source
+    // lane (createSource → onSourceCreated → backfillSource → user_source
+    // INSERT; refresh-content → backfillSource → user_source INSERT).
+    // user_id NOT NULL + queue_name='user_source' filters out cron-lane
+    // rows by construction (D-RDT-CAP-COUNTER).
     const rows = await dbCtx
       .select({
         used: sql<number>`count(*)::int`,
-        oldestAt: sql<Date | null>`min(${auditLog.createdAt})`,
+        oldestAt: sql<Date | null>`min(${redditRefreshQueue.enqueuedAt})`,
       })
-      .from(auditLog)
+      .from(redditRefreshQueue)
       .where(
         and(
-          // tenant-scope: audit rows scoped to this user only.
-          eq(auditLog.userId, userId),
-          eq(auditLog.action, "source.refresh_content_requested"),
-          sql`${auditLog.metadata}->>'platform' IN ('reddit_account','reddit_subreddit')`,
-          // auto_passive rows are cron-driven and excluded. NULL flow
-          // counts (defense-in-depth — a writer that forgot to set
-          // flow=auto_passive but otherwise wrote a cron-shaped row
-          // would still get counted; acceptable since "no flow set"
-          // for a user-initiated row is the production norm).
-          sql`(${auditLog.metadata}->>'flow' IS NULL OR ${auditLog.metadata}->>'flow' != 'auto_passive')`,
-          gte(auditLog.createdAt, since),
+          eq(redditRefreshQueue.userId, userId),
+          eq(redditRefreshQueue.queueName, "user_source"),
+          gte(redditRefreshQueue.enqueuedAt, since),
         ),
       );
     const used = Number(rows[0]?.used ?? 0);

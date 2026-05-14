@@ -407,12 +407,18 @@ export async function createSource(
     );
   }
 
-  // Reddit source validation: parse handleUrl through the adapter's
-  // URL parser AND enforce that the kind matches. This populates
-  // input.metadata.{username|subreddit} authoritatively — without it,
-  // /sources/new could persist a reddit_account row with no username
-  // (UI fallback) and onSourceCreated would silently skip enqueue.
-  // Validate-at-boundary: reject malformed Reddit source URLs with 422.
+  // Reddit source validation + canonicalization. Parse handleUrl through
+  // the adapter's URL parser, enforce kind match, replace input.handleUrl
+  // with the canonical form (parsed.externalUrl), and authoritatively
+  // inject metadata.{username|subreddit}. Cap-check fires LATER (after
+  // duplicate + source-limit checks), so a retry of an existing source
+  // gets 422 duplicate_source instead of burning a cap unit on a 429.
+  //
+  // Without canonicalization, `https://reddit.com/user/x` and
+  // `https://www.reddit.com/user/x` (and the raw `/user/x` prefix form)
+  // would pass the duplicate check as DIFFERENT rows. The parser
+  // produces a single `https://www.reddit.com/user/<handle>` form which
+  // collapses all spellings.
   if (input.kind === "reddit_account" || input.kind === "reddit_subreddit") {
     const { redditParseSourceUrl } = await import("$lib/sources/reddit/server/url.js");
     const parsed = redditParseSourceUrl(input.handleUrl);
@@ -432,12 +438,12 @@ export async function createSource(
         { declaredKind: input.kind, parsedKind: parsed.kind, handleUrl: input.handleUrl },
       );
     }
-    // Inject metadata authoritatively — callers cannot bypass the parsed
-    // identifier with a hand-crafted metadata blob. Caller-supplied
-    // metadata for non-identifier fields (display_name, etc.) is
-    // preserved by spread-merge.
+    // Canonicalize handleUrl + inject metadata authoritatively. Caller-
+    // supplied metadata for non-identifier fields (display_name, etc.)
+    // is preserved by spread-merge.
     input = {
       ...input,
+      handleUrl: parsed.externalUrl,
       metadata: {
         ...input.metadata,
         ...(parsed.kind === "reddit_account"
@@ -445,14 +451,6 @@ export async function createSource(
           : { subreddit: parsed.handle }),
       },
     };
-
-    // Reddit two-axis cap — register-source counts on the source-action
-    // axis (1/5min). enforceRedditUserCap throws 429 BEFORE the INSERT;
-    // the events row never lands when cap exhausted. Mirrors the
-    // refresh-content cap-check in src/lib/server/http/routes/sources.ts.
-    const { enforceRedditUserCap } = await import("./quota.js");
-    const { getAdapter } = await import("$lib/sources/registry.js");
-    await enforceRedditUserCap(db, getAdapter(input.kind), userId, ipAddress, "source-action");
   }
 
   // Cheap pre-checks BEFORE canonicalize. Pre-fix the adapter's canonicalizeOnCreate (which can
@@ -502,6 +500,18 @@ export async function createSource(
     throw new AppError("You already track this YouTube channel", "duplicate_source", 422, {
       handle_url: input.handleUrl,
     });
+  }
+
+  // Reddit two-axis cap-check — runs AFTER duplicate + source-limit
+  // pre-checks so a retry of an existing source surfaces as
+  // 422 duplicate_source instead of burning a cap unit on 429
+  // reddit_source_quota_exhausted. "Validate-first; reject
+  // impossible/duplicate before quota burn" — the existing-source case
+  // is impossible from the cap's perspective (no new work to enqueue).
+  if (input.kind === "reddit_account" || input.kind === "reddit_subreddit") {
+    const { enforceRedditUserCap } = await import("./quota.js");
+    const { getAdapter } = await import("$lib/sources/registry.js");
+    await enforceRedditUserCap(db, getAdapter(input.kind), userId, ipAddress, "source-action");
   }
 
   // Canonicalize the handle_url for kind=youtube_channel sources BEFORE
