@@ -130,6 +130,32 @@ const RawSchema = z.object({
         .filter(Boolean),
     ),
 
+  // Phase 03.1 — Reddit operator User-Agent (DV-RDT-7: public-`.json` adapter).
+  // Reddit's ToS REQUIRES a compliant UA. Default UAs (urllib, axios, node-fetch)
+  // are aggressively rate-limited. Empty default ⇒ Reddit cleanly disabled
+  // (self-host parity preserved — paste returns 422 reddit_not_configured,
+  // /admin/quota Reddit tab shows "not configured", smoke gate validates).
+  // Non-empty MUST match `<platform>:<id>:<version> (by /u/<handle>)`.
+  // Stored plaintext in env (not envelope-encrypted) — the operator's UA, not
+  // a user secret; Pino redact still covers the field name to keep ops logs
+  // hygienic.
+  REDDIT_USER_AGENT: z
+    .string()
+    .default("")
+    .superRefine((ua, ctx) => {
+      if (ua === "") return;
+      const REDDIT_UA_RE = /^[^\s:]+:[^\s:]+:[^\s:]+\s+\(by\s+\/u\/[A-Za-z0-9_-]+\)$/;
+      if (!REDDIT_UA_RE.test(ua)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "REDDIT_USER_AGENT must match `<platform>:<id>:<version> (by /u/<handle>)` per Reddit ToS (DV-RDT-7). " +
+            "Example: 'node:com.neotolis.gpd:0.1.0 (by /u/operator)'. " +
+            "Default UAs are aggressively rate-limited by Reddit.",
+        });
+      }
+    }),
+
   // Comma-separated admin user emails (case-insensitive — the admin
   // middleware lowercases + trims before lookup). Empty default ⇒
   // /admin/* returns 404 for everyone (self-host parity preserved by
@@ -264,6 +290,7 @@ export const env = {
   IMAGE_TAG: raw.IMAGE_TAG,
   DOMAIN: raw.DOMAIN,
   SERVICE_YOUTUBE_API_KEYS: raw.SERVICE_YOUTUBE_API_KEYS,
+  REDDIT_USER_AGENT: raw.REDDIT_USER_AGENT,
   ADMIN_EMAIL_ALLOWLIST: raw.ADMIN_EMAIL_ALLOWLIST,
   YOUTUBE_API_BASE_URL: raw.YOUTUBE_API_BASE_URL,
   WORKER_REPLICA_COUNT: raw.WORKER_REPLICA_COUNT,
