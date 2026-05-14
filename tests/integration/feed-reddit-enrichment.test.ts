@@ -115,6 +115,11 @@ describe("feed-reddit-enrichment (V21)", () => {
   });
 
   it("baseline JOINed when sample_size >= 5", async () => {
+    // Migration 0034 added FK reddit_subreddit_baselines.subreddit →
+    // reddit_subreddits_cache.name. Seed the cache row first.
+    await db.execute(
+      sql`INSERT INTO reddit_subreddits_cache (name) VALUES ('feedtest') ON CONFLICT DO NOTHING`,
+    );
     await db.execute(sql`
       INSERT INTO reddit_subreddit_baselines (subreddit, window_label, computed_at, sample_size, median_score_24h, p75_score_24h)
       VALUES ('feedtest', '30d', NOW(), 10, 100, 250)
@@ -132,6 +137,10 @@ describe("feed-reddit-enrichment (V21)", () => {
   });
 
   it("baseline omitted (null) when sample_size < 5", async () => {
+    // FK from 0034 — seed cache row before inserting baseline.
+    await db.execute(
+      sql`INSERT INTO reddit_subreddits_cache (name) VALUES ('feedtest') ON CONFLICT DO NOTHING`,
+    );
     await db.execute(sql`
       INSERT INTO reddit_subreddit_baselines (subreddit, window_label, computed_at, sample_size, median_score_24h)
       VALUES ('feedtest', '30d', NOW(), 3, 50)

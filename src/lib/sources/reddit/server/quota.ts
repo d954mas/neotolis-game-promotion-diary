@@ -160,15 +160,23 @@ export async function checkRedditUserCap(
 }
 
 /**
- * Reset-in-seconds = (windowMs - (now - oldestAt)) / 1000, clamped ≥1.
- * For a user with no rows the oldest is null and the full window
- * (300s) remains.
+ * Reset-in-seconds = (windowMs - (now - oldestAt)) / 1000, clamped to
+ * the closed range [1, windowMs/1000]. For a user with no rows the
+ * oldest is null and the full window (300s) remains.
+ *
+ * The upper clamp is load-bearing: when oldestAt comes from a Postgres
+ * NOW()-stamped row but `Date.now()` is read from the Node process,
+ * tiny clock skew between the two can make `elapsed` negative, which
+ * pushes `remaining` above `windowMs` and the reported reset above the
+ * window ceiling. Callers (UI banner, Retry-After header) document the
+ * cap window as ≤ windowMs; surfacing > windowMs would surprise both.
  */
 function computeResetSeconds(oldestAt: Date | null, windowMs: number): number {
-  if (oldestAt === null) return Math.floor(windowMs / 1000);
+  const windowSeconds = Math.floor(windowMs / 1000);
+  if (oldestAt === null) return windowSeconds;
   const elapsed = Date.now() - new Date(oldestAt).getTime();
   const remaining = windowMs - elapsed;
-  return Math.max(1, Math.ceil(remaining / 1000));
+  return Math.min(windowSeconds, Math.max(1, Math.ceil(remaining / 1000)));
 }
 
 /**

@@ -18,6 +18,28 @@
 // Reddit endpoint /comments/<id>.json returns a TWO-ELEMENT array:
 //   [submissionListing, commentsListing]
 // We consume only [0]: data.children[0].data is the t3 post payload.
+//
+// Cap-counter timing — read carefully before touching:
+//   The 25/5min post-refresh cap (D-RDT-CAP-POST plan 06) is enforced by
+//   counting `done`-status rows on the `user_post` queue lane. This file
+//   writes that row in EXACTLY ONE place: the cache-miss path at the end
+//   of the function, after a real Reddit fetch + UPSERT + snapshot. The
+//   cache-hit early-return path at the top of the function writes NO
+//   counter row.
+//
+//   Asymmetry rationale: the cap models "post refreshes that burned a
+//   Reddit unit". A 60s dedup hit returns without an HTTP fetch, so no
+//   unit is burned and no counter increment is owed. Concretely:
+//     - Preview at t=0 (cache miss) → counter row written. Submit at
+//       t=5s (cache hit) → no second row. ONE refresh counted. Correct.
+//     - Preview at t=0 (cache miss) → counter row written. Submit at
+//       t=90s (cache miss, dedup window expired) → second counter row.
+//       TWO refreshes counted, two Reddit units burned. Correct.
+//
+//   The optional `beforeFetch` gate fires ONLY on the cache-miss branch
+//   (gating cap enforcement) for the same reason — cache hits don't
+//   consume any budget and shouldn't be punished by an exhausted cap.
+//   See sources/reddit/server/index.ts fetchEventStats for the wiring.
 
 import { db } from "$lib/server/db/client.js";
 import { redditFetch } from "../http.js";

@@ -419,7 +419,28 @@ export async function createSource(
   // would pass the duplicate check as DIFFERENT rows. The parser
   // produces a single `https://www.reddit.com/user/<handle>` form which
   // collapses all spellings.
+  //
+  // Defense-in-depth: re-check isRedditConfigured() at the service
+  // boundary. /sources/new's load function disables the Reddit chips
+  // when REDDIT_USER_AGENT is empty, but the chip-disable is UI hint
+  // only — a direct POST /api/sources or a form replay against a stale
+  // page can still reach this service. Catching the unconfigured case
+  // here AVOIDS a half-broken source row sitting in the DB whose worker
+  // poll would fail forever with reddit_not_configured. Mirrors the
+  // events.ts paste path which already throws this code on the same
+  // condition. The shared service is the single source of truth — both
+  // /api/sources (Hono) and /sources/new (SvelteKit action) inherit it
+  // without per-route boilerplate.
   if (input.kind === "reddit_account" || input.kind === "reddit_subreddit") {
+    const { isRedditConfigured } = await import("$lib/sources/reddit/server/credentials.js");
+    if (!isRedditConfigured()) {
+      throw new AppError(
+        "Reddit is not configured on this instance (REDDIT_USER_AGENT empty)",
+        "reddit_not_configured",
+        503,
+        { kind: input.kind },
+      );
+    }
     const { redditParseSourceUrl } = await import("$lib/sources/reddit/server/url.js");
     const parsed = redditParseSourceUrl(input.handleUrl);
     if (parsed === null) {

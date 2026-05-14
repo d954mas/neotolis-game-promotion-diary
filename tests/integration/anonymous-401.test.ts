@@ -89,6 +89,11 @@ describe("anonymous-401 sweep", () => {
     // only; anonymous → 401 from tenantScope before the videos.list
     // lookup ever fires.
     "/api/youtube/fetch-metadata",
+    // /events/new "Get from Reddit" button (same pattern as YouTube
+    // above). Phase 03.1 adapter.registerRoutes mounts this; the
+    // tenantScope middleware fires before redditFetch ever reaches
+    // the Reddit servers, so anonymous probes never burn a unit.
+    "/api/reddit/fetch-metadata",
   ];
 
   it("every /api/* route except /api/auth/* refuses anonymous with 401", async () => {

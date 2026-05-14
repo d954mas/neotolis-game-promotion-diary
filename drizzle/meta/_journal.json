@@ -239,6 +239,13 @@
       "when": 1779400000000,
       "tag": "0033_phase03_1_reddit_queue_next_attempt",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1779500000000,
+      "tag": "0034_phase03_1_reddit_snapshot_pks",
+      "breakpoints": true
     }
   ]
 }

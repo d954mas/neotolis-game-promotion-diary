@@ -343,6 +343,18 @@ describe("handleBaselinesCron — pure-DB PERCENTILE_CONT aggregate", () => {
     count: number,
     opts: { submittedDaysAgo: number },
   ): Promise<void> {
+    // Migration 0034 added FK reddit_subreddit_baselines.subreddit →
+    // reddit_subreddits_cache.name. The baselines cron INSERTs INTO that
+    // table grouping by reddit_posts.subreddit, so every subreddit a
+    // seeded post references MUST have a parent cache row. Production
+    // path has this implicit: handlePostSingle UPSERTs the cache row
+    // first; this test bypasses that path with direct SQL INSERTs, so
+    // we mirror the order explicitly.
+    await db.execute(sql`
+      INSERT INTO reddit_subreddits_cache (name)
+      VALUES (${sub})
+      ON CONFLICT (name) DO NOTHING
+    `);
     for (let i = 0; i < count; i++) {
       const postId = `t3_${sub}_${i}_${uniq()}`;
       await db.execute(sql`

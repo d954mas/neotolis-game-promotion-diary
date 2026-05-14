@@ -20,7 +20,7 @@
 // tenant-query.js with the explicit "public external data, no tenant
 // scope (time-series; OWNED reddit_accounts only)" comment.
 
-import { pgTable, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, primaryKey } from "drizzle-orm/pg-core";
 import { redditUsersCache } from "./users.js";
 
 export const redditUserSnapshots = pgTable(
@@ -35,10 +35,9 @@ export const redditUserSnapshots = pgTable(
     totalKarma: integer("total_karma"),
   },
   (t) => ({
-    usernamePolledUnq: uniqueIndex("reddit_user_snapshots_username_polled_at_uq").on(
-      t.username,
-      t.polledAt,
-    ),
+    // Composite PK — see post-snapshots.ts for rationale (PK > uniqueIndex
+    // for replication identity and ORM tooling first-class status).
+    pk: primaryKey({ columns: [t.username, t.polledAt] }),
   }),
 );
 

@@ -333,6 +333,60 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
     expect(meta.flow).toBe("stats_refresh");
   });
 
+  it("Reddit HTTP 429 during fetchEventStats → event row created, no cache row, no snapshot (silent degrade)", async () => {
+    // Distinct from the cap-enforcement test above (which fires PRE-INSERT
+    // and produces 0 events rows). This test pins the OTHER 429 path:
+    // Reddit-side rate-limit during the POST-INSERT fetchEventStats call.
+    // Contract: the event row stays (user's diary intent succeeded);
+    // stats remain unavailable until the next cron tick or RefreshNow
+    // button click. The cap pre-check passed, so we are NOT testing
+    // cap exhaustion — we are testing Reddit's own 429 surfacing.
+    const u = await seedUserDirectly({ email: `reddit-paste-http429-${uuidv7()}@test.local` });
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response('{"error":"rate_limited"}', {
+        status: 429,
+        headers: {
+          "content-type": "application/json",
+          "retry-after": "60",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const ev = await createEvent(
+      u.id,
+      {
+        kind: "reddit_post",
+        title: "Diary note despite 429",
+        occurredAt: new Date(),
+        url: "https://www.reddit.com/r/IndieDev/comments/abc429/test/",
+      },
+      "127.0.0.1",
+    );
+
+    // Event row IS created — fetchEventStats threw, createEvent swallowed.
+    expect(ev.kind).toBe("reddit_post");
+    expect(ev.externalId).toBe("abc429");
+    const evRows = await db.select().from(events).where(eq(events.userId, u.id));
+    expect(evRows).toHaveLength(1);
+    expect(evRows[0]!.id).toBe(ev.id);
+
+    // No reddit_posts cache row — handlePostSingle threw on the 429
+    // before reaching UPSERT.
+    const postRows = await db
+      .select()
+      .from(redditPosts)
+      .where(eq(redditPosts.postId, "t3_abc429"));
+    expect(postRows).toHaveLength(0);
+
+    // No snapshot either.
+    const snapRows = await db
+      .select()
+      .from(redditPostSnapshots)
+      .where(eq(redditPostSnapshots.postId, "t3_abc429"));
+    expect(snapRows).toHaveLength(0);
+  });
+
   it("kind=reddit_post without URL is rejected at the service layer via cap pre-check skip", async () => {
     // No URL → derivedExternalId is null → cap pre-check skips → createEvent
     // proceeds. This documents the current behavior (URL-required guard

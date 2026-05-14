@@ -20,7 +20,7 @@
 // tenant-query.js with the explicit "public external data, no tenant
 // scope (time-series; all cached subs)" comment.
 
-import { pgTable, text, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, primaryKey } from "drizzle-orm/pg-core";
 import { redditSubredditsCache } from "./subreddits.js";
 
 export const redditSubredditSnapshots = pgTable(
@@ -34,10 +34,8 @@ export const redditSubredditSnapshots = pgTable(
     accountsActive: integer("accounts_active"),
   },
   (t) => ({
-    subredditPolledUnq: uniqueIndex("reddit_subreddit_snapshots_subreddit_polled_at_uq").on(
-      t.subreddit,
-      t.polledAt,
-    ),
+    // Composite PK — see post-snapshots.ts for rationale.
+    pk: primaryKey({ columns: [t.subreddit, t.polledAt] }),
   }),
 );
 

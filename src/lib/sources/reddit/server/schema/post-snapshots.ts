@@ -31,7 +31,7 @@
 // tenant-query.js with the explicit "public external data, no tenant
 // scope" comment.
 
-import { pgTable, text, timestamp, integer, real, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, real, primaryKey } from "drizzle-orm/pg-core";
 import { redditPosts } from "./posts.js";
 
 export const redditPostSnapshots = pgTable(
@@ -49,13 +49,15 @@ export const redditPostSnapshots = pgTable(
     removedByCategory: text("removed_by_category"),
   },
   (t) => ({
-    // (post_id, polled_at) — UNIQUE doubles as both the idempotency guard
-    // for INSERT ON CONFLICT DO NOTHING retries AND the read index the
-    // chart loader scans for "show last N points for post X".
-    postPolledUnq: uniqueIndex("reddit_post_snapshots_post_id_polled_at_uq").on(
-      t.postId,
-      t.polledAt,
-    ),
+    // (post_id, polled_at) — composite PRIMARY KEY. Stronger semantic
+    // than the prior uniqueIndex: this row's identity IS the pair.
+    // Pre-fix: 0030 created the table without a PK and added a
+    // uniqueIndex with the same columns; same uniqueness guarantee but
+    // some ORM/replication tooling treats PK-less tables as second-class
+    // (no logical-replication identity, no implicit `tableoid, ctid` PK).
+    // Postgres auto-creates the supporting unique index — same read-path
+    // shape the chart loader walks for "last N points for post X".
+    pk: primaryKey({ columns: [t.postId, t.polledAt] }),
   }),
 );
 
