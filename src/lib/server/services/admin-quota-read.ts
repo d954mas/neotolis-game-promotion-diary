@@ -44,6 +44,11 @@ import {
   type RedditDailyByType,
 } from "$lib/sources/reddit/server/index.js";
 
+// Re-export types so the /admin Svelte components (which can only
+// type-import from this server-service module, not from reddit/server
+// directly) can reference the same shapes the loader returns.
+export type { RedditQueueDepthRow, RedditDailyByType };
+
 export interface QuotaKeyRow {
   /** sha-8 hash of the operator's API key — stable identifier across boots. */
   apiKeyId: string;
@@ -148,10 +153,7 @@ export async function loadAdminQuotaPage(): Promise<{
   if (env.REDDIT_USER_AGENT === "") {
     reddit = { isConfigured: false };
   } else {
-    const [queueDepth, daily] = await Promise.all([
-      getRedditQueueDepth(),
-      getRedditDailyByType(),
-    ]);
+    const [queueDepth, daily] = await Promise.all([getRedditQueueDepth(), getRedditDailyByType()]);
     reddit = { isConfigured: true, queueDepth, daily };
   }
 

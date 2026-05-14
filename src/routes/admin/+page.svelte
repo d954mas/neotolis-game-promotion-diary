@@ -15,6 +15,7 @@
   import PageHeader from "$lib/components/PageHeader.svelte";
   import QuotaKeyTable from "$lib/components/QuotaKeyTable.svelte";
   import QuotaAuditList from "$lib/components/QuotaAuditList.svelte";
+  import RedditOpsPanel from "$lib/components/RedditOpsPanel.svelte";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
@@ -36,6 +37,11 @@
   <section class="admin-quota__section">
     <h2>{m.admin_quota_section_audit_title()}</h2>
     <QuotaAuditList entries={data.audit} />
+  </section>
+
+  <section class="admin-quota__section">
+    <h2>{m.admin_reddit_section_title()}</h2>
+    <RedditOpsPanel data={data.reddit} />
   </section>
 </section>
 

@@ -132,12 +132,7 @@ export type RedditQueueName = (typeof REDDIT_QUEUE_NAMES)[number];
 
 /** Valid handler types — mirrors the CHECK constraint on
  *  reddit_refresh_queue.type. */
-export const REDDIT_QUEUE_TYPES = [
-  "sub_poll",
-  "author_poll",
-  "post_single",
-  "post_batch",
-] as const;
+export const REDDIT_QUEUE_TYPES = ["sub_poll", "author_poll", "post_single", "post_batch"] as const;
 export type RedditQueueType = (typeof REDDIT_QUEUE_TYPES)[number];
 
 /** One row in the live queue-depth snapshot rendered on the /admin
