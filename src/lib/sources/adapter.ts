@@ -538,6 +538,19 @@ export interface DataSourceAdapter {
     authorIsMe?: boolean;
   } | null>;
 
+  /** Adapter-driven Refresh-Now enqueue. The cross-source
+   *  `requestRefreshPoll` service runs the validation / cooldown / cap
+   *  gates uniformly, then asks the adapter to actually enqueue the
+   *  refresh job. YouTube: pg-boss send to YOUTUBE_POLL_USER. Reddit:
+   *  INSERT a user_post row into reddit_refresh_queue. Future adapters
+   *  implement whatever shape fits their backend. */
+  enqueueRefreshPoll?(input: {
+    eventId: string;
+    userId: string;
+    externalId: string;
+    eventKind: EventKind;
+  }): Promise<void>;
+
   /** Per-adapter event-input validation. Cross-source createEvent /
    *  updateEvent calls this when the merged event.kind matches this
    *  adapter's source kind (via eventKindToSourceKind). YouTube: require

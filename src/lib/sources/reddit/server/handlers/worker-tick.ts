@@ -119,6 +119,7 @@ export async function redditWorkerTick(): Promise<RedditWorkerTickResult> {
       AND last_attempt_at < ${staleSince}
   `);
 
+  const tickStartMs = Date.now();
   const slot = REDDIT_SLOT_MAPPING[tickCounter]!;
   tickCounter = (tickCounter + 1) % REDDIT_SLOT_MAPPING.length;
 
@@ -127,6 +128,17 @@ export async function redditWorkerTick(): Promise<RedditWorkerTickResult> {
   for (const queueName of queueOrder) {
     const claimed = await tryClaimAndDispatch(queueName);
     if (claimed !== null) {
+      // Fire-and-forget audit row so /admin/quota Reddit observability
+      // (getDailyStats reads audit_log.action='reddit.queue_drained' to
+      // populate the unitsUsed counter) sees this work. Without the
+      // emit, /admin's daily Reddit stat would stay 0 regardless of
+      // worker activity. Best-effort: writes a single audit row per
+      // processed tick; failures don't block the worker.
+      void emitQueueDrainedAudit({
+        queueName,
+        entriesProcessed: 1,
+        durationMs: Date.now() - tickStartMs,
+      });
       return {
         processedQueue: queueName,
         processedType: claimed.type,
@@ -171,7 +183,8 @@ async function tryClaimAndDispatch(
       FROM reddit_refresh_queue
       WHERE queue_name = ${queueName}
         AND status = 'pending'
-      ORDER BY priority ASC, enqueued_at ASC
+        AND next_attempt_at <= NOW()
+      ORDER BY priority ASC, next_attempt_at ASC, enqueued_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     `);
@@ -212,12 +225,21 @@ async function tryClaimAndDispatch(
         sql`UPDATE reddit_refresh_queue SET status = 'dead_letter' WHERE id = ${row.id}`,
       );
     } else {
-      // Re-queue. attempts was already incremented in phase 1, so a
-      // transient handler crash retries up to MAX_ATTEMPTS but cannot
-      // loop indefinitely.
-      await db.execute(
-        sql`UPDATE reddit_refresh_queue SET status = 'pending' WHERE id = ${row.id}`,
-      );
+      // Re-queue with backoff. attempts was already incremented in
+      // phase 1, so a transient handler crash retries up to MAX_ATTEMPTS
+      // but cannot loop indefinitely. retryAfterMs from the adapter
+      // (Reddit Retry-After header parsed in http.ts parseRetryAfter,
+      // OR the pacer-denial wait) defers the next claim by that many
+      // milliseconds. Without this, 429/403 fail-fast burns through
+      // MAX_ATTEMPTS in seconds instead of respecting backoff.
+      const retryAfterMs =
+        err instanceof AdapterError && err.retryAfterMs !== null ? err.retryAfterMs : 0;
+      await db.execute(sql`
+        UPDATE reddit_refresh_queue
+        SET status = 'pending',
+            next_attempt_at = NOW() + (${retryAfterMs} || ' milliseconds')::interval
+        WHERE id = ${row.id}
+      `);
     }
     logger.warn(
       {

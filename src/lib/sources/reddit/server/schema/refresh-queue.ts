@@ -72,14 +72,20 @@ export const redditRefreshQueue = pgTable(
     enqueuedAt: timestamp("enqueued_at", { withTimezone: true }).notNull().defaultNow(),
     attempts: integer("attempts").notNull().default(0),
     lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    // Earliest timestamp a worker may re-claim this row. On rate-limited
+    // failure (AdapterError.retryAfterMs set), worker bumps this to
+    // NOW() + retryAfterMs so the next dequeue passes over the row until
+    // the backoff window elapses. Default NOW() makes fresh rows
+    // immediately eligible (no behavior change for pending inserts).
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
     status: text("status").notNull().default("pending"),
   },
   (t) => ({
-    // Pending-only partial index — the only read pattern that matters
-    // for the worker tick's FOR UPDATE SKIP LOCKED dequeue path. Order
-    // matches the worker's ORDER BY for cheap index-only scan.
+    // Pending-only partial index. Order matches the worker's
+    // ORDER BY (queue_name, status, priority, next_attempt_at,
+    // enqueued_at) so the dequeue stays index-only.
     pendingIdx: index("idx_reddit_refresh_queue_pending")
-      .on(t.queueName, t.status, t.priority, t.enqueuedAt)
+      .on(t.queueName, t.status, t.priority, t.nextAttemptAt, t.enqueuedAt)
       .where(sql`${t.status} = 'pending'`),
   }),
 );

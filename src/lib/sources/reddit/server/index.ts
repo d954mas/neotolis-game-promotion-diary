@@ -400,6 +400,39 @@ function registerRoutes(app: Hono<AdapterAppContext>): void {
   app.route("/api", redditMetadataRoutes);
 }
 
+/**
+ * enqueueRefreshPoll — adapter-driven Refresh-Now enqueue. The
+ * cross-source `requestRefreshPoll` service runs validation / cap
+ * / cooldown gates, then asks the adapter to actually enqueue the
+ * refresh. Reddit: INSERT a user_post row into reddit_refresh_queue
+ * (the 8-tick worker drains it within ~7.5s of enqueue at the latest
+ * effective ceiling). YouTube's equivalent is `boss.send(YOUTUBE_POLL_USER)`.
+ *
+ * Dedup: refresh-poll.ts has already eager-written
+ * events.metadata.last_user_refresh_at and atomic-checked the cooldown
+ * gate, so two-clicks-in-same-minute is already filtered out upstream.
+ * We do NOT also dedup against pending queue rows here — the user
+ * clicked Refresh-Now consciously and expects a fresh stats fetch,
+ * which dedup against an already-pending row would silently suppress.
+ */
+async function enqueueRefreshPoll(input: {
+  eventId: string;
+  userId: string;
+  externalId: string;
+  eventKind: string;
+}): Promise<void> {
+  // externalId stored on events is the bare Reddit id (e.g. "abc123");
+  // handlePostSingle accepts either form and t3-normalizes internally.
+  await db.insert(redditRefreshQueue).values({
+    queueName: "user_post",
+    type: "post_single",
+    payload: { post_id: input.externalId, flow: "refresh-now" },
+    userId: input.userId,
+    priority: 10, // ahead of cron-default 0; matches YouTube's `priority: 10`.
+    status: "pending",
+  });
+}
+
 export const redditAdapter: DataSourceAdapter = {
   ...redditAdapterCore,
   observability: redditObservability,
@@ -411,6 +444,7 @@ export const redditAdapter: DataSourceAdapter = {
   fetchEventPreviewMetadata,
   fetchEventStats,
   registerRoutes,
+  enqueueRefreshPoll,
 };
 
 // Re-export the Reddit-only observability helpers so /admin's Reddit

@@ -98,6 +98,7 @@ const ALLOWLIST_TABLES = new Set([
   "redditSubredditSnapshots", // public external data, no tenant scope (time-series; all cached subs)
   "redditSubredditBaselines", // public external data, no tenant scope (per-sub aggregates)
   "redditRefreshQueue", // queue table, payload-scoped (user_id in payload column for audit + cap counters)
+  "redditPacer", // singleton rate-limit-token row, no tenant scope
 ]);
 
 export default ESLintUtils.RuleCreator.withoutDocs({

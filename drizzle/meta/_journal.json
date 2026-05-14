@@ -225,6 +225,20 @@
       "when": 1779200000000,
       "tag": "0031_phase03_1_reddit_queue_user_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1779300000000,
+      "tag": "0032_phase03_1_reddit_pacer",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1779400000000,
+      "tag": "0033_phase03_1_reddit_queue_next_attempt",
+      "breakpoints": true
     }
   ]
 }

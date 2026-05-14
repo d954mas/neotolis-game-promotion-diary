@@ -40,6 +40,7 @@ import { writeAudit } from "$lib/server/audit.js";
 import { logger } from "$lib/server/logger.js";
 import { env } from "$lib/server/config/env.js";
 import { resolveOperatorUserId, __resetOperatorIdCacheForTest } from "./operator-resolver.js";
+import { acquireRedditPacerSlot } from "./pacer.js";
 
 export interface RedditHttpResult<T> {
   data: T;
@@ -87,6 +88,20 @@ export async function redditFetch<T = unknown>(
     throw new AdapterError("reddit_not_configured (REDDIT_USER_AGENT env empty)", {
       category: "operator-issue",
       context: { httpStatus: 0 },
+    });
+  }
+
+  // Global pacer — every redditFetch goes through one DB-side token so
+  // the 10 req/min Reddit ceiling is enforced across worker + sync
+  // user paths uniformly. Denial surfaces as rate-limited; caller
+  // (worker re-queues with backoff via next_attempt_at, sync paths
+  // return 429 to the UI).
+  const slot = await acquireRedditPacerSlot();
+  if (!slot.acquired) {
+    throw new AdapterError(`Reddit pacer denied — ${slot.waitMs}ms until next slot`, {
+      category: "rate-limited",
+      retryAfterMs: slot.waitMs,
+      context: { httpStatus: 0, source: "global-pacer" },
     });
   }
 

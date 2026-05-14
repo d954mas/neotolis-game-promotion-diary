@@ -12,3 +12,4 @@ export * from "./user-snapshots.js";
 export * from "./subreddit-snapshots.js";
 export * from "./subreddit-baselines.js";
 export * from "./refresh-queue.js";
+export * from "./pacer.js";

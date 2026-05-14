@@ -135,26 +135,30 @@ export async function requestRefreshPoll(
     );
   }
 
-  // 3a. 'pending' tier gate. If channel-context-backfill has not yet
-  //     run for this external_id, youtube_videos may not have a row yet,
-  //     OR its publishedAt may be NULL. Either way the tier is 'pending'
-  //     and a manual poll would race the in-flight backfill (which will
-  //     populate stats anyway). Reject with 422 — the user can retry
-  //     once the badge transitions.
-  // PUBLIC-DATA TABLE — keyed on PK only, no userId filter.
-  const videoRows = await db
-    .select({ publishedAt: youtubeVideos.publishedAt })
-    .from(youtubeVideos)
-    .where(eq(youtubeVideos.videoId, event.externalId))
-    .limit(1);
-  const videoRow = videoRows[0];
-  if (!videoRow || videoRow.publishedAt === null) {
-    throw new AppError(
-      "video metadata not yet available; backfill in progress",
-      "pending_backfill",
-      422,
-      { event_id: eventId, external_id: event.externalId },
-    );
+  // 3a. 'pending' tier gate — YouTube-only. If channel-context-backfill
+  //     has not yet run for this external_id, youtube_videos may not
+  //     have a row yet, OR its publishedAt may be NULL. Either way the
+  //     tier is 'pending' and a manual poll would race the in-flight
+  //     backfill (which will populate stats anyway). Reject with 422 —
+  //     the user can retry once the badge transitions.
+  //
+  //     Other adapters (Reddit) use the adapter.enqueueRefreshPoll path
+  //     below which has its own readiness semantics; they skip this gate.
+  if (event.kind === "youtube_video") {
+    const videoRows = await db
+      .select({ publishedAt: youtubeVideos.publishedAt })
+      .from(youtubeVideos)
+      .where(eq(youtubeVideos.videoId, event.externalId))
+      .limit(1);
+    const videoRow = videoRows[0];
+    if (!videoRow || videoRow.publishedAt === null) {
+      throw new AppError(
+        "video metadata not yet available; backfill in progress",
+        "pending_backfill",
+        422,
+        { event_id: eventId, external_id: event.externalId },
+      );
+    }
   }
 
   // 4. 5-minute cooldown gate. Reads events.metadata.last_user_refresh_at;
@@ -229,20 +233,33 @@ export async function requestRefreshPoll(
     });
   }
 
-  // 6. Enqueue with singletonKey scoped to per-minute window. pg-boss
-  //    v10 coalesces same-singletonKey jobs across the dedup window,
-  //    preventing accidental flood from a button mash. Priority 10
-  //    ranks ahead of scheduled (default 0) cron-driven work.
-  const boss = await getBoss();
-  const minuteKey = now.toISOString().slice(0, 16); // 'YYYY-MM-DDTHH:MM'
-  await boss.send(
-    QUEUES.YOUTUBE_POLL_USER,
-    { eventId, userId, externalId: event.externalId, kind: event.kind },
-    {
-      singletonKey: `${eventId}-${minuteKey}`,
-      priority: 10,
-    },
-  );
+  // 6. Enqueue refresh — adapter-driven. The adapter owns the
+  //    backend-specific enqueue (pg-boss for YouTube, reddit_refresh_queue
+  //    INSERT for Reddit, ...). When the adapter implements
+  //    enqueueRefreshPoll we use that; otherwise fall back to the
+  //    YouTube-specific pg-boss send (the original behavior, preserved
+  //    for the case where a future adapter hasn't migrated yet).
+  if (pollableAdapter.enqueueRefreshPoll !== undefined) {
+    await pollableAdapter.enqueueRefreshPoll({
+      eventId,
+      userId,
+      externalId: event.externalId,
+      eventKind: event.kind,
+    });
+  } else {
+    // Legacy path — YouTube, pre-adapter-hook. pg-boss singletonKey
+    // scoped to per-minute window dedups button-mash floods.
+    const boss = await getBoss();
+    const minuteKey = now.toISOString().slice(0, 16); // 'YYYY-MM-DDTHH:MM'
+    await boss.send(
+      QUEUES.YOUTUBE_POLL_USER,
+      { eventId, userId, externalId: event.externalId, kind: event.kind },
+      {
+        singletonKey: `${eventId}-${minuteKey}`,
+        priority: 10,
+      },
+    );
+  }
 
   // 7. Audit row scoped to the event owner. Written OUTSIDE any tx
   //    (pool-deadlock-safe pattern). Audit failures are swallowed by

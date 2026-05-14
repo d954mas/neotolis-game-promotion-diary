@@ -95,6 +95,13 @@ beforeEach(() => {
     envMock({ ADMIN_EMAIL_ALLOWLIST: ["op@example.com"] }),
   );
   vi.doMock("$lib/server/audit.js", () => ({ writeAudit: writeAuditSpy }));
+  // Pacer: always allow in unit tests. The acquireRedditPacerSlot helper
+  // hits the DB (UPDATE reddit_pacer) which isn't available in the unit
+  // suite. Integration tests exercise real pacing.
+  vi.doMock("$lib/sources/reddit/server/pacer.js", () => ({
+    acquireRedditPacerSlot: async () => ({ acquired: true, waitMs: 0 }),
+    REDDIT_PACER_SLOT_MS: 7500,
+  }));
   mockOperatorDb("op-user-123");
 });
 
