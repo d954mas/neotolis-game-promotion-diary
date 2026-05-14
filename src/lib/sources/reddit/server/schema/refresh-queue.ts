@@ -54,6 +54,7 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import { user } from "$lib/server/db/schema/auth.js";
 
 export const redditRefreshQueue = pgTable(
   "reddit_refresh_queue",
@@ -62,7 +63,11 @@ export const redditRefreshQueue = pgTable(
     queueName: text("queue_name").notNull(),
     type: text("type").notNull(),
     payload: jsonb("payload").notNull(),
-    userId: text("user_id"),
+    // ON DELETE CASCADE — when a user is purged, their queued entries
+    // vanish with them. Queue rows are ephemeral by design; loss on
+    // user-purge is the correct privacy posture (no orphan PII via
+    // the user_id column). Service-cron entries set user_id = NULL.
+    userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     priority: smallint("priority").notNull(),
     enqueuedAt: timestamp("enqueued_at", { withTimezone: true }).notNull().defaultNow(),
     attempts: integer("attempts").notNull().default(0),
