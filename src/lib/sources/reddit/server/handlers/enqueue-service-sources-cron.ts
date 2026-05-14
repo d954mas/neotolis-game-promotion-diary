@@ -106,10 +106,64 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
     return { enqueued: 0 };
   }
 
-  await db.insert(redditRefreshQueue).values(values);
+  // Dedup against already-pending/in-flight rows on the service_source
+  // lane. Without this, a slow worker drain combined with a 6-hour cron
+  // would pile fresh duplicates on top of unprocessed ones — at 8 req/min
+  // ceiling, 200 sources × 4 cron firings/day = 800 daily rows just for
+  // sub_poll, eating slot-1 capacity that user_post lanes need.
+  // Cheap O(1) query: read existing payload identifiers in one go, filter.
+  const existing = await readPendingServiceSourceIdentifiers();
+  const filtered = values.filter((v) => {
+    const handle = (v.payload as { handle?: string; sub?: string }).handle;
+    const sub = (v.payload as { handle?: string; sub?: string }).sub;
+    const key = v.type === "author_poll" ? `h:${handle}` : `s:${sub}`;
+    return !existing.has(key);
+  });
+  if (filtered.length === 0) {
+    logger.info(
+      { skipped: values.length },
+      "reddit.enqueue_service_sources_cron: all candidates already pending; tick is a no-op",
+    );
+    return { enqueued: 0 };
+  }
+
+  await db.insert(redditRefreshQueue).values(filtered);
   logger.info(
-    { enqueued: values.length, sourcesScanned: sources.length },
+    {
+      enqueued: filtered.length,
+      skipped: values.length - filtered.length,
+      sourcesScanned: sources.length,
+    },
     "reddit.enqueue_service_sources_cron: tick complete",
   );
-  return { enqueued: values.length };
+  return { enqueued: filtered.length };
+}
+
+/** Cheap dedup snapshot — returns the set of (type, identifier) keys
+ *  for rows currently pending/processing on the service_source lane.
+ *  Reads in one query; the caller filters its candidate list against it.
+ *  Key format: `h:<handle>` for author_poll, `s:<sub>` for sub_poll. */
+async function readPendingServiceSourceIdentifiers(): Promise<Set<string>> {
+  const rows = await db.execute<{
+    type: string;
+    handle: string | null;
+    sub: string | null;
+  }>(sql`
+    SELECT type, payload->>'handle' AS handle, payload->>'sub' AS sub
+    FROM reddit_refresh_queue
+    WHERE queue_name = 'service_source'
+      AND status IN ('pending', 'processing')
+  `);
+  const out = new Set<string>();
+  const queryRows =
+    (
+      rows as unknown as {
+        rows?: Array<{ type: string; handle: string | null; sub: string | null }>;
+      }
+    ).rows ?? [];
+  for (const r of queryRows) {
+    if (r.type === "author_poll" && r.handle !== null) out.add(`h:${r.handle}`);
+    else if (r.type === "sub_poll" && r.sub !== null) out.add(`s:${r.sub}`);
+  }
+  return out;
 }

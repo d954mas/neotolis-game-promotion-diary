@@ -316,6 +316,12 @@ async function fetchEventStats(
     // is for read-side parity only — it does NOT participate in
     // enforceRedditUserCap. Without it, getUserQuotaUsedToday(userId,
     // "reddit_account") would return 0 always.
+    // platform is ADAPTER-scoped (not source-scoped) — the Reddit adapter
+    // serves both reddit_account and reddit_subreddit SourceKinds via
+    // the same code path; cross-source dashboards lump them under the
+    // adapter's primary source kind. If a future report needs a
+    // per-SourceKind breakdown, it should JOIN events.source_id →
+    // data_sources.kind instead of reading this audit metadata.
     const { writeAudit } = await import("$lib/server/audit.js");
     await writeAudit({
       userId: ctx.userId,

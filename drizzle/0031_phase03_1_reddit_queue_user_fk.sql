@@ -14,7 +14,11 @@
 -- the user matches the privacy posture (no orphan PII via user_id) and the
 -- queue's intent (drop pending work for purged accounts immediately).
 --
--- Idempotent: IF NOT EXISTS guard on the constraint name (Postgres 16 syntax).
+-- Re-runs prevented by the drizzle migrations journal (each migration
+-- name executes at most once per DB). Postgres has no `ADD CONSTRAINT
+-- IF NOT EXISTS` for FKs — re-applying this SQL directly would fail.
+-- Forward-only invariant + journal guard make that path unreachable in
+-- the supported deploy flow (`drizzle-orm migrate` only).
 
 ALTER TABLE "reddit_refresh_queue"
   ADD CONSTRAINT "reddit_refresh_queue_user_id_user_id_fk"

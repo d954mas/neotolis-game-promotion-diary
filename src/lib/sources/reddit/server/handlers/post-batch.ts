@@ -19,7 +19,8 @@
 import { db } from "$lib/server/db/client.js";
 import { redditFetch } from "../http.js";
 import { upsertRedditPost, upsertRedditUser, upsertRedditSubreddit } from "../upsert.js";
-import { writeRedditPostSnapshot } from "../snapshots.js";
+import { writeRedditPostSnapshot, markPostDeletionDetectedIfNeeded } from "../snapshots.js";
+import { buildPostMetadata } from "../post-metadata.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import { logger } from "$lib/server/logger.js";
 import { classifySnapshotStatus } from "./post-single.js";
@@ -141,23 +142,10 @@ export async function handlePostBatch(args: {
       permalink,
       title: t3.title,
       submittedAt,
-      metadata: {
-        is_self: t3.is_self ?? false,
-        link_url: t3.url ?? null,
-        body_excerpt:
-          typeof t3.selftext === "string" && t3.selftext.length > 0
-            ? t3.selftext.slice(0, 200)
-            : null,
-        over_18: t3.over_18 ?? false,
-        spoiler: t3.spoiler ?? false,
-        stickied: t3.stickied ?? false,
-        locked: t3.locked ?? false,
-        archived: t3.archived ?? false,
-        link_flair_text: t3.link_flair_text ?? null,
-        crosspost_parent_id: t3.crosspost_parent ?? null,
-      },
+      metadata: buildPostMetadata(t3),
     });
 
+    const snapStatus = classifySnapshotStatus(t3);
     await writeRedditPostSnapshot(db, {
       postId: reqId,
       score: t3.score ?? null,
@@ -165,8 +153,9 @@ export async function handlePostBatch(args: {
       awardsTotal: t3.total_awards_received ?? null,
       upvoteRatio: t3.upvote_ratio ?? null,
       removedByCategory: t3.removed_by_category ?? null,
-      status: classifySnapshotStatus(t3),
+      status: snapStatus,
     });
+    await markPostDeletionDetectedIfNeeded(db, reqId, snapStatus);
   }
 
   // Phase 2: status='not_found' snapshot for each missing id. The
@@ -187,6 +176,7 @@ export async function handlePostBatch(args: {
         removedByCategory: null,
         status: "not_found",
       });
+      await markPostDeletionDetectedIfNeeded(db, missingId, "not_found");
     } catch (err) {
       // FK violation — parent row doesn't exist. Should not happen for
       // cron-enqueued ids; possible for synthetic test ids.

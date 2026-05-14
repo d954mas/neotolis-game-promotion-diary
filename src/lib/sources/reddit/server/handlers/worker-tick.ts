@@ -33,6 +33,7 @@ import { handleSubPoll } from "./sub-poll.js";
 import { handleAuthorPoll } from "./author-poll.js";
 import { handlePostBatch } from "./post-batch.js";
 import { handlePostSingle } from "./post-single.js";
+import { resolveOperatorUserId, __resetOperatorIdCacheForTest } from "../operator-resolver.js";
 
 export const REDDIT_SLOT_MAPPING = [
   "service_source",
@@ -118,8 +119,8 @@ export async function redditWorkerTick(): Promise<RedditWorkerTickResult> {
       AND last_attempt_at < ${staleSince}
   `);
 
-  const slot = REDDIT_SLOT_MAPPING[tickCounter % 8]!;
-  tickCounter++;
+  const slot = REDDIT_SLOT_MAPPING[tickCounter]!;
+  tickCounter = (tickCounter + 1) % REDDIT_SLOT_MAPPING.length;
 
   const queueOrder = [slot, ...FALLTHROUGH_ORDER.filter((q) => q !== slot)];
 
@@ -317,36 +318,12 @@ export async function emitQueueDrainedAudit(stats: {
   }
 }
 
-/** Cached operator user_id resolved from ADMIN_EMAIL_ALLOWLIST[0].
- *  Mirrors http.ts's resolveOperatorUserId for consistent audit identity
- *  across reddit.* verbs. `undefined` = not yet resolved; `null` =
- *  resolved-empty; string = resolved successfully. */
-let cachedOperatorId: string | null | undefined = undefined;
-
-async function resolveOperatorUserId(): Promise<string | null> {
-  if (cachedOperatorId !== undefined) return cachedOperatorId;
-  const { env } = await import("$lib/server/config/env.js");
-  const allowlist = [...env.ADMIN_EMAIL_ALLOWLIST];
-  if (allowlist.length === 0) {
-    cachedOperatorId = null;
-    return null;
-  }
-  const { user } = await import("$lib/server/db/schema/auth.js");
-  const rows = await db
-    .select({ id: user.id })
-    .from(user)
-    .where(sql`lower(${user.email}) = ${allowlist[0]}`)
-    .limit(1);
-  cachedOperatorId = rows[0]?.id ?? null;
-  return cachedOperatorId;
-}
-
 /** Test-only helper — resets the tick counter and cached operator id so
  *  each test case starts from slot 1. Not exported through any barrel;
  *  only the worker-tick.test.ts file imports it. */
 export function __resetTickCounterForTest(): void {
   tickCounter = 0;
-  cachedOperatorId = undefined;
+  __resetOperatorIdCacheForTest();
 }
 
 /** Test-only helper — set the tick counter to advance to a specific slot

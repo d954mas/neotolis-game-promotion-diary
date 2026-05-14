@@ -22,7 +22,12 @@
 import { db } from "$lib/server/db/client.js";
 import { redditFetch } from "../http.js";
 import { upsertRedditPost, upsertRedditUser, upsertRedditSubreddit } from "../upsert.js";
-import { writeRedditPostSnapshot, type RedditSnapshotStatus } from "../snapshots.js";
+import {
+  writeRedditPostSnapshot,
+  markPostDeletionDetectedIfNeeded,
+  type RedditSnapshotStatus,
+} from "../snapshots.js";
+import { buildPostMetadata } from "../post-metadata.js";
 import { redditPosts, redditPostSnapshots, redditRefreshQueue } from "../schema/index.js";
 import { eq, and, gte, desc } from "drizzle-orm";
 import { AdapterError } from "$lib/sources/errors.js";
@@ -173,6 +178,7 @@ export async function handlePostSingle(args: {
     metadata: buildPostMetadata(t3),
   });
 
+  const snapStatus = classifySnapshotStatus(t3);
   await writeRedditPostSnapshot(db, {
     postId: fullId,
     score: t3.score ?? null,
@@ -180,8 +186,13 @@ export async function handlePostSingle(args: {
     awardsTotal: t3.total_awards_received ?? null,
     upvoteRatio: t3.upvote_ratio ?? null,
     removedByCategory: t3.removed_by_category ?? null,
-    status: classifySnapshotStatus(t3),
+    status: snapStatus,
   });
+  // Stamp deletion timer on first removed/not_found snapshot. Idempotent
+  // and skipped on 'ok'/'archived'. Closes the gap where dead posts
+  // re-poll forever and Reddit Public Content Policy 48h-purge never
+  // fires.
+  await markPostDeletionDetectedIfNeeded(db, fullId, snapStatus);
 
   // Paste-path cap-counter increment. Every successful handlePostSingle
   // invoked from a user-facing surface (preview button OR submit
@@ -313,24 +324,6 @@ function extractT3FromCommentsResponse(data: unknown, expectedId: string): T3Dat
     });
   }
   return t3;
-}
-
-/** Subset of t3 fields we persist into reddit_posts.metadata for the
- *  diary's per-post detail view. */
-function buildPostMetadata(t3: T3Data): Record<string, unknown> {
-  return {
-    is_self: t3.is_self ?? false,
-    link_url: t3.url ?? null,
-    body_excerpt:
-      typeof t3.selftext === "string" && t3.selftext.length > 0 ? t3.selftext.slice(0, 200) : null,
-    over_18: t3.over_18 ?? false,
-    spoiler: t3.spoiler ?? false,
-    stickied: t3.stickied ?? false,
-    locked: t3.locked ?? false,
-    archived: t3.archived ?? false,
-    link_flair_text: t3.link_flair_text ?? null,
-    crosspost_parent_id: t3.crosspost_parent ?? null,
-  };
 }
 
 /** Map the t3 lifecycle flags onto our 4-value snapshot status vocab. */

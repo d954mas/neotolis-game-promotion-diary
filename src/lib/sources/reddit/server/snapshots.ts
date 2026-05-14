@@ -16,15 +16,57 @@
 // tenant-scope rationale. ESLint allowlist for these tables lives in
 // eslint-plugin-tenant-scope/no-unfiltered-tenant-query.js.
 
-import { sql } from "drizzle-orm";
+import { sql, and, eq, isNull } from "drizzle-orm";
 import type { DbOrTx } from "$lib/server/db/client.js";
 import {
   redditPostSnapshots,
   redditUserSnapshots,
   redditSubredditSnapshots,
+  redditPosts,
 } from "./schema/index.js";
 
 export type RedditSnapshotStatus = "ok" | "removed" | "archived" | "not_found";
+
+/** Statuses that signal the post is gone (removed/deleted/banned/private).
+ *  When a snapshot lands with one of these AND reddit_posts.deletion_detected_at
+ *  is still NULL, the parent row is stamped — this starts the 48h timer
+ *  enforced by handleDeletionPropagationCron (Reddit Public Content Policy).
+ *
+ *  `archived` is NOT a deletion signal — archived posts are visible but
+ *  read-only; their stats keep updating until removed.
+ *  `not_found` includes 404 from /comments/<id>.json which can be either
+ *  removed-by-author or never-existed; the policy treats it as deletion
+ *  signal because we can no longer verify author identity. */
+const POST_DELETION_STATUSES: ReadonlySet<RedditSnapshotStatus> = new Set(["removed", "not_found"]);
+
+/**
+ * Mark reddit_posts.deletion_detected_at = NOW() the FIRST time a snapshot
+ * lands with a deletion status. Idempotent: WHERE deletion_detected_at
+ * IS NULL guards against re-stamping on subsequent polls. Single point
+ * of truth — every snapshot-writing handler must invoke this so the
+ * 48h-purge cron has accurate data to act on.
+ *
+ * Schema-header contract (schema/posts.ts:21 + schema/post-snapshots.ts:25):
+ *   "worker sets deletion_detected_at = NOW() when latest snapshot has
+ *    removed_by_category != NULL". This is the implementation.
+ *
+ * Returns true when the column was just stamped (caller may log the
+ * transition); false when status is non-deletion OR the column was
+ * already set on a prior poll.
+ */
+export async function markPostDeletionDetectedIfNeeded(
+  dbCtx: DbOrTx,
+  postId: string,
+  status: RedditSnapshotStatus,
+): Promise<boolean> {
+  if (!POST_DELETION_STATUSES.has(status)) return false;
+  const result = await dbCtx
+    .update(redditPosts)
+    .set({ deletionDetectedAt: sql`NOW()`, lastSnapshotAt: sql`NOW()` })
+    .where(and(eq(redditPosts.postId, postId), isNull(redditPosts.deletionDetectedAt)))
+    .returning({ id: redditPosts.postId });
+  return result.length > 0;
+}
 
 /** Idempotent post-snapshot writer.
  *

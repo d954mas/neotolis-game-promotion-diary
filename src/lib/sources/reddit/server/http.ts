@@ -39,6 +39,7 @@ import { pickRedditCredentials } from "./credentials.js";
 import { writeAudit } from "$lib/server/audit.js";
 import { logger } from "$lib/server/logger.js";
 import { env } from "$lib/server/config/env.js";
+import { resolveOperatorUserId, __resetOperatorIdCacheForTest } from "./operator-resolver.js";
 
 export interface RedditHttpResult<T> {
   data: T;
@@ -186,7 +187,12 @@ function parseRetryAfter(headers: Headers): number {
     const n = parseInt(reset, 10);
     if (!Number.isNaN(n) && n > 0) return n * 1000;
   }
-  return 60_000;
+  // Default: 60s + 0-5s jitter so a burst of simultaneous 429s does not
+  // thundering-herd retry in the same second when the window opens.
+  // For the 8-tick worker the fan-out is small, but the jitter also
+  // applies to user-driven preview/refresh paths that hit redditFetch
+  // directly without queue claim ordering.
+  return 60_000 + Math.floor(Math.random() * 5000);
 }
 
 /**
@@ -248,37 +254,9 @@ async function maybeEmitBurstAuditAndThrow(headers: Headers): Promise<never> {
   });
 }
 
-/** Cached operator user_id (resolved from ADMIN_EMAIL_ALLOWLIST[0]).
- *  Pattern mirrors quota.markThrottleTransition — single operator identity
- *  for SaaS / single-admin self-host.
- *
- *  `undefined` = not yet resolved; `null` = resolved-empty (no allowlist or
- *  email has no user row); string = resolved successfully. */
-let cachedOperatorId: string | null | undefined = undefined;
-
-async function resolveOperatorUserId(): Promise<string | null> {
-  if (cachedOperatorId !== undefined) return cachedOperatorId;
-  const { env } = await import("$lib/server/config/env.js");
-  const allowlist = [...env.ADMIN_EMAIL_ALLOWLIST];
-  if (allowlist.length === 0) {
-    cachedOperatorId = null;
-    return null;
-  }
-  const { db } = await import("$lib/server/db/client.js");
-  const { user } = await import("$lib/server/db/schema/auth.js");
-  const { sql } = await import("drizzle-orm");
-  const rows = await db
-    .select({ id: user.id })
-    .from(user)
-    .where(sql`lower(${user.email}) = ${allowlist[0]}`)
-    .limit(1);
-  cachedOperatorId = rows[0]?.id ?? null;
-  return cachedOperatorId;
-}
-
 /** Test-only helper — flushes burst state between cases.
  *  Not exported from the package barrel; only the test file imports it. */
 export function __resetBurstStateForTest(): void {
   burstState = { count: 0, windowStartMs: 0, auditEmittedThisBurst: false };
-  cachedOperatorId = undefined;
+  __resetOperatorIdCacheForTest();
 }

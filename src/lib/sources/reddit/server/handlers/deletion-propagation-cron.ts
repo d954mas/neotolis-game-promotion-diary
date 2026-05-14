@@ -26,9 +26,9 @@
 
 import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
-import { user } from "$lib/server/db/schema/auth.js";
 import { writeAudit } from "$lib/server/audit.js";
 import { logger } from "$lib/server/logger.js";
+import { resolveOperatorUserId } from "../operator-resolver.js";
 
 export async function handleDeletionPropagationCron(): Promise<{ purged: number }> {
   // CTE-style UPDATE … RETURNING so we can count rows actually purged
@@ -68,40 +68,30 @@ export async function handleDeletionPropagationCron(): Promise<{ purged: number 
     }
   }
 
-  logger.info({ purged }, "reddit.deletion_propagation_cron: tick complete");
+  // Queue cleanup — `done` and `dead_letter` rows accumulate forever
+  // otherwise. Schema header for reddit_refresh_queue (schema/refresh-queue.ts)
+  // promises "kept ~7 days for audit, then truncated by deletion-propagation
+  // cron" — this is the implementation. Without it, ~4M rows/year on a
+  // healthy instance (8 req/min × 60 × 24 × 365). 7-day window keeps the
+  // forensic audit window long enough to investigate failed batches.
+  const queueCleanup = await db.execute(sql`
+    WITH cleaned AS (
+      DELETE FROM reddit_refresh_queue
+      WHERE status IN ('done', 'dead_letter')
+        AND last_attempt_at IS NOT NULL
+        AND last_attempt_at < NOW() - INTERVAL '7 days'
+      RETURNING id
+    )
+    SELECT COUNT(*)::int AS cleaned FROM cleaned
+  `);
+  const queueRowsCleaned = Number(
+    (queueCleanup as unknown as { rows: Array<{ cleaned: number | string }> }).rows[0]?.cleaned ??
+      0,
+  );
+
+  logger.info({ purged, queueRowsCleaned }, "reddit.deletion_propagation_cron: tick complete");
   return { purged };
 }
 
-/** Cached operator user_id resolved from ADMIN_EMAIL_ALLOWLIST[0].
- *  Mirrors worker-tick.ts's resolveOperatorUserId for consistent audit
- *  identity across reddit.* verbs. `undefined` = not yet resolved;
- *  `null` = resolved-empty; string = resolved successfully.
- *
- *  Cache is invalidated by the __resetOperatorCacheForTest helper —
- *  integration tests that mutate process.env.ADMIN_EMAIL_ALLOWLIST
- *  must call it to re-resolve. */
-let cachedOperatorId: string | null | undefined = undefined;
-
-async function resolveOperatorUserId(): Promise<string | null> {
-  if (cachedOperatorId !== undefined) return cachedOperatorId;
-  const { env } = await import("$lib/server/config/env.js");
-  const allowlist = [...env.ADMIN_EMAIL_ALLOWLIST];
-  if (allowlist.length === 0) {
-    cachedOperatorId = null;
-    return null;
-  }
-  const rows = await db
-    .select({ id: user.id })
-    .from(user)
-    .where(sql`lower(${user.email}) = ${allowlist[0]}`)
-    .limit(1);
-  cachedOperatorId = rows[0]?.id ?? null;
-  return cachedOperatorId;
-}
-
-/** Test-only helper — resets the cached operator id so each test case
- *  starts from a clean resolve. Not exported through any barrel; only
- *  the reddit-cron-handlers.test.ts file imports it. */
-export function __resetOperatorCacheForTest(): void {
-  cachedOperatorId = undefined;
-}
+/** Re-exported for tests — see ../operator-resolver.ts. */
+export { __resetOperatorIdCacheForTest as __resetOperatorCacheForTest } from "../operator-resolver.js";

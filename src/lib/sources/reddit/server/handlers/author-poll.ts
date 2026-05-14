@@ -25,6 +25,7 @@ import { db } from "$lib/server/db/client.js";
 import { redditFetch } from "../http.js";
 import { upsertRedditPost, upsertRedditUser, upsertRedditSubreddit } from "../upsert.js";
 import { writeRedditPostSnapshot, writeRedditUserSnapshot } from "../snapshots.js";
+import { buildPostMetadata } from "../post-metadata.js";
 import { redditUsersCache } from "../schema/index.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { events } from "$lib/server/db/schema/events.js";
@@ -351,20 +352,4 @@ async function flagNotFoundOnSubscribers(handle: string, errorKind: "not-found")
       );
     }
   }
-}
-
-function buildPostMetadata(t3: T3Data): Record<string, unknown> {
-  return {
-    is_self: t3.is_self ?? false,
-    link_url: t3.url ?? null,
-    body_excerpt:
-      typeof t3.selftext === "string" && t3.selftext.length > 0 ? t3.selftext.slice(0, 200) : null,
-    over_18: t3.over_18 ?? false,
-    spoiler: t3.spoiler ?? false,
-    stickied: t3.stickied ?? false,
-    locked: t3.locked ?? false,
-    archived: t3.archived ?? false,
-    link_flair_text: t3.link_flair_text ?? null,
-    crosspost_parent_id: t3.crosspost_parent ?? null,
-  };
 }
