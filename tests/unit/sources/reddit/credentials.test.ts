@@ -23,9 +23,8 @@ describe("Reddit credentials.ts (Phase 03.1 DV-RDT-7)", () => {
   it("returns null when REDDIT_USER_AGENT is empty", async () => {
     vi.resetModules();
     vi.doMock("$lib/server/config/env.js", () => ({ env: { REDDIT_USER_AGENT: "" } }));
-    const { pickRedditCredentials, isRedditConfigured } = await import(
-      "$lib/sources/reddit/server/credentials.js"
-    );
+    const { pickRedditCredentials, isRedditConfigured } =
+      await import("$lib/sources/reddit/server/credentials.js");
     expect(pickRedditCredentials()).toBeNull();
     expect(isRedditConfigured()).toBe(false);
   });
@@ -34,9 +33,8 @@ describe("Reddit credentials.ts (Phase 03.1 DV-RDT-7)", () => {
     vi.resetModules();
     const ua = "node:com.neotolis.gpd:0.1.0 (by /u/operator)";
     vi.doMock("$lib/server/config/env.js", () => ({ env: { REDDIT_USER_AGENT: ua } }));
-    const { pickRedditCredentials, isRedditConfigured } = await import(
-      "$lib/sources/reddit/server/credentials.js"
-    );
+    const { pickRedditCredentials, isRedditConfigured } =
+      await import("$lib/sources/reddit/server/credentials.js");
     expect(pickRedditCredentials()).toEqual({ userAgent: ua });
     expect(isRedditConfigured()).toBe(true);
   });
@@ -47,9 +45,7 @@ describe("Reddit credentials.ts (Phase 03.1 DV-RDT-7)", () => {
     vi.doMock("$lib/server/config/env.js", () => ({ env: { REDDIT_USER_AGENT: ua } }));
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    const { pickRedditCredentials } = await import(
-      "$lib/sources/reddit/server/credentials.js"
-    );
+    const { pickRedditCredentials } = await import("$lib/sources/reddit/server/credentials.js");
     pickRedditCredentials();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -58,9 +54,7 @@ describe("Reddit credentials.ts (Phase 03.1 DV-RDT-7)", () => {
     vi.resetModules();
     const ua = "node:com.neotolis.gpd:0.1.0 (by /u/operator)";
     vi.doMock("$lib/server/config/env.js", () => ({ env: { REDDIT_USER_AGENT: ua } }));
-    const { pickRedditCredentials } = await import(
-      "$lib/sources/reddit/server/credentials.js"
-    );
+    const { pickRedditCredentials } = await import("$lib/sources/reddit/server/credentials.js");
     const a = pickRedditCredentials();
     const b = pickRedditCredentials();
     expect(a).toEqual(b);

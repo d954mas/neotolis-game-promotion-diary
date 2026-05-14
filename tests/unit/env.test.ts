@@ -178,12 +178,9 @@ describe("REDDIT_USER_AGENT validation (Phase 03.1 DV-RDT-7)", () => {
   });
 
   it("compliant UA succeeds: node:com.neotolis.gpd:0.1.0 (by /u/operator)", async () => {
-    await withEnv(
-      { REDDIT_USER_AGENT: "node:com.neotolis.gpd:0.1.0 (by /u/operator)" },
-      (env) => {
-        expect(env.REDDIT_USER_AGENT).toBe("node:com.neotolis.gpd:0.1.0 (by /u/operator)");
-      },
-    );
+    await withEnv({ REDDIT_USER_AGENT: "node:com.neotolis.gpd:0.1.0 (by /u/operator)" }, (env) => {
+      expect(env.REDDIT_USER_AGENT).toBe("node:com.neotolis.gpd:0.1.0 (by /u/operator)");
+    });
   });
 
   it("handle with hyphen + digits + underscore → boot succeeds", async () => {
