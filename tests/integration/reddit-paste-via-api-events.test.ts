@@ -136,8 +136,13 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
     );
 
     expect(ev1.id).not.toBe(ev2.id);
-    expect(ev1.externalId).toBe(fullId);
-    expect(ev2.externalId).toBe(fullId);
+    // events.externalId stores the bare Reddit post id (e.g. "abc123");
+    // reddit_posts.postId stores the t3_-prefixed form ("t3_abc123") —
+    // handlePostSingle adds the prefix on UPSERT. feed-enrichment.ts joins
+    // both forms via a lookup-key Set so callers don't care which form
+    // their cache key takes.
+    expect(ev1.externalId).toBe(postId);
+    expect(ev2.externalId).toBe(postId);
 
     // One reddit_posts row (UPSERTed once, dedup'd the second time).
     const postRows = await db.select().from(redditPosts).where(eq(redditPosts.postId, fullId));
@@ -150,7 +155,7 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
     const evRows = await db
       .select()
       .from(events)
-      .where(and(eq(events.userId, u.id), eq(events.externalId, fullId)));
+      .where(and(eq(events.userId, u.id), eq(events.externalId, postId)));
     expect(evRows).toHaveLength(2);
   });
 
@@ -277,7 +282,7 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
     );
 
     expect(ev.kind).toBe("reddit_post");
-    expect(ev.externalId).toBe("t3_dead404");
+    expect(ev.externalId).toBe("dead404");
 
     // fetch was attempted (one call to /comments/<id>.json).
     expect(fetchSpy).toHaveBeenCalledTimes(1);
