@@ -127,12 +127,24 @@ export interface ParsedUrl {
   metadata?: Record<string, unknown>;
 }
 
+/** Per-adapter source-URL detection result — drives /sources/new auto-detect
+ *  for adapters where one input shape maps to multiple SourceKinds.
+ *  Reddit: `reddit.com/user/X` → reddit_account; `reddit.com/r/X` → reddit_subreddit.
+ *  Implemented optionally — YouTube cross-source flow uses `canonicalizeOnCreate`
+ *  (synchronous + per-URL canonicalization) instead. */
+export interface ParsedSourceUrl {
+  kind: SourceKind;
+  handle: string;
+  externalUrl: string;
+}
+
 export interface ObservabilityAuth {
   kind:
     | "operator-static-key"
     | "operator-oauth-app-only"
     | "scrape"
-    | "operator-oauth-with-user-override";
+    | "operator-oauth-with-user-override"
+    | "public-json-no-auth";
   requiresUserSetup: boolean;
   isOperatorConfigured: boolean;
 }
@@ -183,28 +195,28 @@ export interface AdapterQuotaCounter {
 }
 
 /** Per-user fair-share cap on operator's API budget. Both axes optional —
- *  adapter declares either, both, or neither. Capping prevents one user
- *  from monopolizing operator's shared API quota across all tenants.
+ *  adapter declares either, both, neither, OR the Reddit two-axis shape.
+ *  Capping prevents one user from monopolizing operator's shared API quota
+ *  across all tenants.
  *
- *  - requestsPerDay — cap on API calls (quota units). Hits when one user
- *    has consumed their daily share of operator's API budget. Self-host
- *    operator typically not capped (1 user); SaaS hosted instance caps
- *    so other users get predictable share.
+ *  - requestsPerDay — cap on API calls (YouTube; 24h rolling).
+ *  - eventsPerDay — cap on user-INSERTed events (YouTube; 24h rolling).
  *
- *  - eventsPerDay — cap on events INSERTed via user-initiated actions.
- *    Optional secondary cap для platforms with high events-per-request
- *    variance (Twitter pagination 1-100/req). YouTube has fixed 50:1
- *    ratio so requestsPerDay alone suffices; eventsPerDay omitted.
+ *  Reddit (Phase 03.1, two-axis sliding window — DV-RDT-7):
+ *  - sourceActionsPerWindow — register/refresh-source quota (default 1).
+ *  - postRefreshesPerWindow — manual post refresh quota (default 25).
+ *  - windowMinutes — sliding-window length for source/post axes (default 5).
  *
- *  Counter source: audit_log SUM with metadata.{requests_used, events_inserted}.
- *  Cap kinds: 'initial' | 'incremental' | 'historical' | 'stats_refresh'.
- *  Excluded: 'auto_passive' (cron pool, not user pool). The 'initial' flow
- *  was originally excluded for onboarding UX, but counts now — onboarding
- *  also burns user quota and should reflect in the cap (UAT 2026-05-10
- *  confirmed user expectation). */
+ *  Counter source (Reddit): COUNT(audit_log) with metadata.flow=`source.refresh_content_requested`
+ *  for sourceActionsPerWindow; INSERT into `reddit_refresh_queue` with `user_id=$user`
+ *  rows in last `windowMinutes` for postRefreshesPerWindow. Excluded: cron-driven entries
+ *  (queue rows with user_id IS NULL). */
 export interface AdapterUserQuotaCap {
   requestsPerDay?: number;
   eventsPerDay?: number;
+  sourceActionsPerWindow?: number;
+  postRefreshesPerWindow?: number;
+  windowMinutes?: number;
 }
 
 export interface AdapterObservability {
@@ -430,6 +442,15 @@ export interface DataSourceAdapter {
   ): Promise<StatsSnapshot[]>;
   /** Widened-contract surface. */
   parseUrl(url: string): ParsedUrl | null;
+  /** Adapter-side source URL parsing. Cross-source `/sources/new` flow
+   *  iterates `allAdapters[*].parseSourceUrl?.(input)` (first non-null wins)
+   *  to auto-detect the SourceKind when one input shape maps to multiple
+   *  kinds. YouTube doesn't need this (canonicalizeOnCreate handles its
+   *  single SourceKind=youtube_channel case); Reddit needs it because
+   *  reddit.com/user/X vs reddit.com/r/X resolve to different SourceKinds.
+   *  Default (when undefined): SourceCreateService asks user to pick kind
+   *  via /sources/new UI. */
+  parseSourceUrl?(input: string): ParsedSourceUrl | null;
   readonly observability: AdapterObservability;
   registerQueues(boss: MinimalBoss): Promise<void>;
   scheduleCronTicks(boss: MinimalBoss): Promise<void>;
