@@ -55,9 +55,7 @@ describe("redditParsePostUrl (V6 — 5 URL shapes + V7 host-check-first)", () =>
   });
 
   it("V7 host-check FIRST: example.com/r/IndieDev/comments/abc123 → null", () => {
-    expect(
-      redditParsePostUrl("https://example.com/r/IndieDev/comments/abc123/title"),
-    ).toBeNull();
+    expect(redditParsePostUrl("https://example.com/r/IndieDev/comments/abc123/title")).toBeNull();
   });
 
   it("source URL (no /comments/ segment) on parsePostUrl → null", () => {
