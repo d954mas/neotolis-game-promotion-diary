@@ -65,6 +65,21 @@ export const REDACT_PATHS = [
   // snake) and the singleton field name (lowerCamel).
   "*.SERVICE_YOUTUBE_API_KEYS",
   "*.serviceYoutubeApiKeys",
+  // Phase 03.1 — Reddit response/request opsec (DV-RDT-7).
+  // Reddit doesn't use OAuth under DV-RDT-7 (public-`.json` adapter only),
+  // but the redact list treats these field names as redacted regardless:
+  // defense-in-depth against accidentally logging a future BYO-OAuth bearer,
+  // a stray UA-as-bearer mishap, or rate-limit-header fingerprinting via
+  // `User-Agent` paired with response headers in structured-fetch dumps.
+  // Note: *.access_token / *.refresh_token are already redacted above (D-24);
+  // listed here as comments for the verification grep contract.
+  // - *.access_token   (already above)
+  // - *.refresh_token  (already above)
+  "*.bearer",
+  "*.client_secret",
+  "*.user_agent",
+  "headers.user-agent",
+  "req.headers.user-agent",
   "req.headers.authorization",
   "req.headers.cookie",
 ];
