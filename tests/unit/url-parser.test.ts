@@ -60,18 +60,36 @@ describe("URL parser canonicalization", () => {
     }
   });
 
-  it("parseIngestUrl returns reddit_deferred for reddit POST URLs (Phase 03.1 transitional)", () => {
-    // Phase 03.1: redditAdapter.parseUrl matches POST URLs; url-parser.ts
-    // maps the registry's `reddit_post` → `reddit_deferred` until Plan 09
-    // wires the full paste-flow. The friendly inline-info banner stays
-    // intact for the user across the Plan 07 ↔ Plan 09 gap.
-    expect(parseIngestUrl("https://www.reddit.com/r/IndieDev/comments/abc/foo/").kind).toBe(
-      "reddit_deferred",
-    );
-    expect(parseIngestUrl("https://redd.it/abc").kind).toBe("reddit_deferred");
-    expect(parseIngestUrl("https://old.reddit.com/r/IndieDev/comments/xyz/foo").kind).toBe(
-      "reddit_deferred",
-    );
+  it("parseIngestUrl returns reddit_post for reddit POST URLs (Phase 03.1 plan 09)", () => {
+    // D-RDT-INGEST-REPLACE: redditAdapter.parseUrl matches POST URLs;
+    // url-parser.ts now surfaces `reddit_post` directly (transitional
+    // `reddit_deferred` variant removed in plan 09). services/ingest.ts
+    // dispatches this variant through handlePostSingle → events INSERT.
+    const r1 = parseIngestUrl("https://www.reddit.com/r/IndieDev/comments/abc/foo/");
+    expect(r1.kind).toBe("reddit_post");
+    if (r1.kind === "reddit_post") {
+      expect(r1.externalId).toBe("abc");
+      expect(r1.canonicalUrl).toBe("https://www.reddit.com/r/IndieDev/comments/abc/");
+      expect(r1.metadata).toEqual({ subreddit: "IndieDev" });
+    }
+
+    const r2 = parseIngestUrl("https://redd.it/abc");
+    expect(r2.kind).toBe("reddit_post");
+    if (r2.kind === "reddit_post") {
+      expect(r2.externalId).toBe("abc");
+      // redd.it short-links don't carry the subreddit in the path; the
+      // canonical fallback is the redd.it form itself until the worker
+      // resolves the subreddit on first fetch.
+      expect(r2.canonicalUrl).toBe("https://redd.it/abc");
+      expect(r2.metadata).toEqual({ subreddit: null });
+    }
+
+    const r3 = parseIngestUrl("https://old.reddit.com/r/IndieDev/comments/xyz/foo");
+    expect(r3.kind).toBe("reddit_post");
+    if (r3.kind === "reddit_post") {
+      expect(r3.externalId).toBe("xyz");
+      expect(r3.metadata).toEqual({ subreddit: "IndieDev" });
+    }
   });
 
   it("parseIngestUrl returns unsupported for reddit SOURCE URLs (sub/user, not posts)", () => {

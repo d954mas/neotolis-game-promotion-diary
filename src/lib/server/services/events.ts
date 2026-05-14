@@ -575,7 +575,14 @@ export interface EnrichmentResult {
  * Error mapping mirrors createEventFromPaste exactly so the route layer
  * preserves UX:
  *   - unsupported URL          → AppError 'unsupported_url' 422
- *   - reddit_deferred          → AppError 'reddit_not_yet_supported' 422
+ *   - reddit_post              → AppError 'kind_not_yet_functional' 422
+ *                                (preview not yet wired through this
+ *                                 helper; the paste flow in
+ *                                 services/ingest.ts handles Reddit
+ *                                 URLs directly via handlePostSingle —
+ *                                 see plan 09 D-RDT-INGEST-REPLACE. The
+ *                                 preview-url endpoint adoption lands
+ *                                 in plan 10.)
  *   - twitter_post/telegram_post → AppError 'kind_not_yet_functional' 422
  *   - oEmbed 5xx/network       → AppError 'youtube_oembed_unreachable' 502
  *   - oEmbed 401 (private)     → AppError 'youtube_unavailable' 422
@@ -591,12 +598,13 @@ export async function enrichFromUrl(userId: string, url: string): Promise<Enrich
   if (parsed.kind === "unsupported") {
     throw new AppError("URL not yet supported", "unsupported_url", 422, { url });
   }
-  if (parsed.kind === "reddit_deferred") {
-    throw new AppError("Reddit ingest is not yet supported", "reddit_not_yet_supported", 422);
-  }
-  if (parsed.kind === "twitter_post" || parsed.kind === "telegram_post") {
+  if (
+    parsed.kind === "reddit_post" ||
+    parsed.kind === "twitter_post" ||
+    parsed.kind === "telegram_post"
+  ) {
     throw new AppError(
-      `paste flow does not yet handle kind '${parsed.kind}'`,
+      `paste flow does not yet handle kind '${parsed.kind}' through enrichFromUrl`,
       "kind_not_yet_functional",
       422,
       { kind: parsed.kind },
@@ -694,8 +702,11 @@ export async function enrichFromUrl(userId: string, url: string): Promise<Enrich
  * without duplicating the fetch. The paste-specific logic here is gameId
  * validation + the createEvent INSERT.
  *
- * Reddit URLs throw AppError 'reddit_not_yet_supported' (422) — Reddit
- * ingest waits for the poll.reddit adapter.
+ * Reddit URLs are NOT routed through this function — services/ingest.ts
+ * dispatches `parsed.kind === "reddit_post"` BEFORE calling
+ * createEventFromPaste (D-RDT-INGEST-REPLACE, plan 09). The synchronous
+ * /comments/<id>.json fetch lives in handlePostSingle and the events
+ * INSERT lives directly in the Reddit branch of parsePasteAndCreate.
  */
 export async function createEventFromPaste(
   userId: string,

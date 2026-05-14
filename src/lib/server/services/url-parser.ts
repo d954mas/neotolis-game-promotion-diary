@@ -1,21 +1,24 @@
 // URL ingest parser — orchestrator wrapper around the cross-source
-// `parseAnyUrl` registry iterator + the `detectFutureKind` Reddit-deferral
+// `parseAnyUrl` registry iterator + the `detectFutureKind` host-hint
 // helper.
 //
 // This module is the FIRST step in the validate-first ingest pipeline.
 // It performs zero I/O and zero DB writes — just URL parsing, host
 // classification, and canonicalization. The orchestrator
-// (`services/ingest.ts`) calls oEmbed integrations AFTER this returns a
-// non-`unsupported` kind, then INSERTs ONLY after oEmbed succeeds.
+// (`services/ingest.ts`) calls oEmbed integrations (YouTube) or
+// /comments/<id>.json (Reddit) AFTER this returns a non-`unsupported`
+// kind, then INSERTs ONLY after the per-kind validation succeeds.
 //
 // Internally:
 //
 //   1. `parseAnyUrl(input)` (src/lib/sources/url.ts) — iterates the
 //      adapter registry first-match-wins. YouTube is registered, so
 //      `youtube.com` / `youtu.be` URLs route through
-//      `youtubeAdapter.parseUrl`. Returns `{ kind: "youtube_video",
-//      externalId, metadata }` on hit, `{ kind: "unsupported" }`
-//      otherwise.
+//      `youtubeAdapter.parseUrl`. Reddit is registered as of Phase 03.1
+//      plan 07, so `reddit.com` / `redd.it` URLs route through
+//      `redditAdapter.parseUrl` and return `{ kind: "reddit_post",
+//      externalId, metadata: { subreddit } }` (D-RDT-INGEST-REPLACE).
+//      Returns `{ kind: "unsupported" }` when no adapter matches.
 //
 //   2. Twitter (`twitter.com` / `x.com` / `mobile.twitter.com`) and
 //      Telegram (`t.me`) URL handling stays at the orchestrator layer
@@ -24,20 +27,20 @@
 //      branches move INSIDE the adapter and this file shrinks
 //      correspondingly.
 //
-//   3. `detectFutureKind(input)` (src/lib/sources/future-kinds.ts)
-//      maps remaining DEFERRED-ADAPTER hosts (currently none — Reddit
-//      moved to the registry in Phase 03.1, Twitter/Telegram have their
-//      own host branches above) to friendly `{ kind: "<x>_deferred" }`
-//      shapes. The future-kinds map is currently empty; this branch
-//      stays as the seam for future deferred adapters.
+//   3. `detectFutureKind(input)` (src/lib/sources/future-kinds.ts) maps
+//      remaining DEFERRED-ADAPTER hosts to friendly `{ kind: "<x>_deferred" }`
+//      shapes. The future-kinds map is currently empty (Reddit moved to
+//      the registry in Phase 03.1 plan 07; Twitter/Telegram have their
+//      own host branches above); this branch stays as the seam for any
+//      future deferred adapters that need a friendly inline banner
+//      before their adapter ships.
 //
-// Reddit-specific: parseAnyUrl now returns kind='reddit_post' for
-// reddit URLs (Phase 03.1 D-RDT-INGEST-REPLACE). Step 1 below maps
-// kind='reddit_post' → `{ kind: "reddit_deferred" }` so services/ingest.ts
-// keeps the friendly "reddit_not_yet_supported" 422 banner across the
-// Plan 07 ↔ Plan 09 gap. Plan 09 will widen ingest.ts to fully process
-// reddit_post (handlePostSingle → events INSERT), at which point this
-// transitional mapping flips to the real reddit_post canonicalize path.
+// Reddit is now FIRST-CLASS (Phase 03.1 plan 09 D-RDT-INGEST-REPLACE):
+// parseAnyUrl returns `kind='reddit_post'` for Reddit URLs and we
+// surface that variant directly. The earlier transitional variant
+// (kept during the Plan 07 ↔ Plan 09 gap) has been removed —
+// services/ingest.ts now wires the full paste flow (handlePostSingle →
+// events INSERT) for Reddit.
 //
 // x.com is canonicalized to twitter.com because
 // publish.twitter.com/oembed only accepts the twitter.com host. The
@@ -50,9 +53,14 @@ import { detectFutureKind } from "$lib/sources/future-kinds.js";
 
 export type ParsedUrl =
   | { kind: "youtube_video"; videoId: string; canonicalUrl: string }
+  | {
+      kind: "reddit_post";
+      externalId: string;
+      canonicalUrl: string;
+      metadata: Record<string, unknown>;
+    }
   | { kind: "twitter_post"; canonicalUrl: string }
   | { kind: "telegram_post"; canonicalUrl: string }
-  | { kind: "reddit_deferred" }
   | { kind: "unsupported" };
 
 const X_HOSTS = new Set(["twitter.com", "x.com", "mobile.twitter.com"]);
@@ -97,16 +105,26 @@ export function parseIngestUrl(input: string): ParsedUrl {
       canonicalUrl,
     };
   }
-  // Phase 03.1: Reddit adapter is registered. parseAnyUrl returns
-  // kind='reddit_post' for reddit URLs; we map back to reddit_deferred
-  // here as a transitional shape — services/ingest.ts still throws
-  // `reddit_not_yet_supported` 422 until Plan 09 wires the full
-  // paste-flow (handlePostSingle → events INSERT). The friendly
-  // inline-info UX banner stays intact across the Plan 07 ↔ Plan 09
-  // gap. Once Plan 09 lands, this branch becomes the load-bearing
-  // dispatch for kind='reddit_post' → reddit_post canonicalize.
   if (routed.kind === "reddit_post") {
-    return { kind: "reddit_deferred" };
+    // Reddit's externalId is the base36 post id (without `t3_` prefix
+    // per redditParsePostUrl shape). canonicalUrl is the permalink
+    // form when the subreddit is in the path; for redd.it/<id>
+    // short-links the subreddit isn't known yet (worker resolves it
+    // on first fetch). metadata carries the subreddit hint
+    // transitively.
+    const externalId = routed.externalId;
+    const meta = (routed.metadata ?? {}) as { subreddit?: string | null };
+    const subreddit = meta.subreddit ?? null;
+    const canonicalUrl =
+      subreddit !== null
+        ? `https://www.reddit.com/r/${subreddit}/comments/${externalId}/`
+        : `https://redd.it/${externalId}`;
+    return {
+      kind: "reddit_post",
+      externalId,
+      canonicalUrl,
+      metadata: { subreddit },
+    };
   }
 
   // 2) Host-classification fallback for kinds without an adapter yet
@@ -133,11 +151,13 @@ export function parseIngestUrl(input: string): ParsedUrl {
   }
 
   // 3) detectFutureKind seam for any remaining DEFERRED-ADAPTER hosts.
-  //    Reddit moved to the registry in Phase 03.1 (handled at step 1);
-  //    the future-kinds map is currently empty. Kept as the extension
-  //    point for future deferred adapters.
-  const future = detectFutureKind(input);
-  if (future === "reddit_post") return { kind: "reddit_deferred" };
+  //    Reddit moved to the registry in Phase 03.1 plan 07 (handled at
+  //    step 1); the future-kinds map is currently empty. Kept as the
+  //    extension point for future deferred adapters. The call is a
+  //    pure read of the empty map — left in place so a future
+  //    contributor adding a deferred host populates one file
+  //    (future-kinds.ts) not two.
+  void detectFutureKind(input);
 
   return { kind: "unsupported" };
 }
