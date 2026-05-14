@@ -74,6 +74,9 @@ export interface RedditWorkerTickResult {
 }
 
 interface ClaimedRow {
+  // bigserial comes back from tx.execute() as a JS string in some
+  // node-pg configurations; we coerce to Number at the row-read boundary
+  // (line ~134 below) so downstream consumers always see a number.
   id: number;
   type: string;
   payload: Record<string, unknown>;
@@ -128,9 +131,15 @@ async function tryClaimAndDispatch(
       LIMIT 1
       FOR UPDATE SKIP LOCKED
     `);
-    const queryResult = rows as unknown as { rows?: ClaimedRow[] };
-    const row = queryResult.rows?.[0];
-    if (!row) return null;
+    const queryResult = rows as unknown as {
+      rows?: Array<Omit<ClaimedRow, "id"> & { id: number | string }>;
+    };
+    const rawRow = queryResult.rows?.[0];
+    if (!rawRow) return null;
+    // Coerce bigserial id from string → number at the row-read boundary
+    // (node-pg returns bigint/bigserial as strings). Downstream callers
+    // (test harness, observability, handlers) expect number.
+    const row: ClaimedRow = { ...rawRow, id: Number(rawRow.id) };
 
     // Mark processing + increment attempts BEFORE invoking handler. If
     // the worker process crashes mid-handler, the row stays in
