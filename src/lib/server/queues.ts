@@ -54,6 +54,21 @@ export const QUEUES = {
    *  Without this, completed channels go silent until manual
    *  refresh-click. */
   YOUTUBE_INCREMENTAL_CRON: "youtube.incremental_cron",
+
+  // Per-kind: reddit (Phase 03.1 DV-RDT-7). FOUR cron-only pg-boss
+  // queues — handlers ENQUEUE rows into the SQL-backed
+  // reddit_refresh_queue (ZERO Reddit HTTP per D-RDT-CRON-BURST) and
+  // return; the 8-tick worker setInterval (src/worker/index.ts) drains
+  // reddit_refresh_queue at the 8 req/min effective ceiling.
+  //
+  // The Reddit batch worker does NOT subscribe via pg-boss.work — the
+  // SQL FOR UPDATE SKIP LOCKED tick pattern is the load-bearing answer
+  // to Reddit's 10 req/min hard limit under multi-replica deploys
+  // (D-RDT-WORKER).
+  REDDIT_CRON_ENQUEUE_SERVICE_SOURCES: "reddit.cron.enqueue-service-sources",
+  REDDIT_CRON_ENQUEUE_SERVICE_POSTS: "reddit.cron.enqueue-service-posts",
+  REDDIT_CRON_BASELINES: "reddit.cron.baselines",
+  REDDIT_CRON_DELETION_PROPAGATION: "reddit.cron.deletion-propagation",
 } as const satisfies Record<string, string>;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
