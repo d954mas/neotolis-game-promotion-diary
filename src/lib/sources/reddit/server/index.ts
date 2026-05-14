@@ -29,6 +29,7 @@
 // owns only the four cron queues; the 8-tick drain loop is direct).
 
 import type {
+  AdapterAppContext,
   AdapterContext,
   DataSourceAdapter,
   EventPreviewMetadata,
@@ -36,6 +37,7 @@ import type {
   PollableSource,
   SourceCreatedHookSource,
 } from "$lib/sources/adapter.js";
+import type { Hono } from "hono";
 import { QUEUES } from "$lib/server/queues.js";
 import { db } from "$lib/server/db/client.js";
 import { logger } from "$lib/server/logger.js";
@@ -51,6 +53,7 @@ import { handlePostSingle } from "./handlers/post-single.js";
 import { redditParsePostUrl } from "./url.js";
 import { isRedditConfigured } from "./credentials.js";
 import { AdapterError } from "$lib/sources/errors.js";
+import { redditMetadataRoutes } from "./route-metadata.js";
 
 interface RedditSourceMetadata {
   username?: string;
@@ -326,6 +329,17 @@ async function fetchEventStats(
  * field reads "reddit_account" but cross-source code reads it only for
  * diagnostic logs; functional routing goes through registry lookups.
  */
+/**
+ * registerRoutes — mounts /api/reddit/fetch-metadata on the shared Hono
+ * app. Cross-source createApp() iterates allAdapters and calls
+ * registerRoutes once at boot; adding a new source's preview endpoint
+ * means implementing this method on the new adapter (mirror
+ * src/lib/sources/youtube/server/index.ts registerRoutes).
+ */
+function registerRoutes(app: Hono<AdapterAppContext>): void {
+  app.route("/api", redditMetadataRoutes);
+}
+
 export const redditAdapter: DataSourceAdapter = {
   ...redditAdapterCore,
   observability: redditObservability,
@@ -336,6 +350,7 @@ export const redditAdapter: DataSourceAdapter = {
   enrichFeedDtos: enrichRedditFeedDtos,
   fetchEventPreviewMetadata,
   fetchEventStats,
+  registerRoutes,
 };
 
 // Re-export the Reddit-only observability helpers so /admin's Reddit

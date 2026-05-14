@@ -11,3 +11,32 @@
 // modules must import from ./server.js to avoid bundler crashes pulling
 // server-only deps into the client.
 export * from "./server.js";
+
+/** Client-side URL detection for the /events/new "Get info" paste-preview
+ *  button. Returns true if `url` is a Reddit post URL the adapter knows
+ *  how to preview. Mirrors src/lib/sources/reddit/server/url.ts but
+ *  client-safe (no DB imports). */
+export function detectPreviewUrl(url: string): boolean {
+  try {
+    const p = new URL(url);
+    const host = p.hostname.toLowerCase();
+    // Accept www.reddit.com / old.reddit.com / np.reddit.com / reddit.com
+    // and redd.it short-links. Path must contain a comments segment OR
+    // be a redd.it short-link.
+    if (host === "redd.it") return p.pathname.length > 1;
+    if (host.endsWith("reddit.com")) {
+      const seg = p.pathname.split("/").filter(Boolean);
+      // /r/<sub>/comments/<id>/...
+      const ci = seg.indexOf("comments");
+      if (ci > -1 && ci + 1 < seg.length && seg[ci + 1]!.length > 0) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** Endpoint the universal /events/new preview button POSTs to when
+ *  `detectPreviewUrl` returns true. Server route is mounted by the
+ *  adapter's `registerRoutes` method (see ../server/route-metadata.ts). */
+export const previewEndpoint = "/api/reddit/fetch-metadata";

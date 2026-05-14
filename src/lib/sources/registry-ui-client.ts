@@ -36,6 +36,17 @@ export interface AdapterUiClient {
    *  may want a different visual without bloating the universal card with
    *  kind-specific branches. */
   cardComponent?: FeedCardComponent;
+
+  /** Client-side URL predicate for the /events/new "Get info" paste-
+   *  preview button. Returns true if the adapter can preview this URL
+   *  (host + path heuristic). Pure function — no network calls. */
+  detectPreviewUrl?(url: string): boolean;
+
+  /** Server endpoint the universal /events/new preview button POSTs to
+   *  when `detectPreviewUrl` returns true. Each adapter mounts its own
+   *  route via `registerRoutes` in its server-side index.ts; this is the
+   *  client-side handle for the UI. */
+  previewEndpoint?: string;
 }
 
 const uiClientRegistry = new Map<SourceKind, AdapterUiClient>([
@@ -63,4 +74,36 @@ export function getCardComponent(eventKind: EventKind): FeedCardComponent | unde
   const sourceKind = eventKindToSourceKind(eventKind);
   if (sourceKind === null) return undefined;
   return uiClientRegistry.get(sourceKind)?.cardComponent;
+}
+
+/**
+ * Generic preview-adapter dispatch for the /events/new "Get info" button.
+ * Iterates registered UI clients, returns the first one whose
+ * `detectPreviewUrl` accepts the URL. Returns `{previewEndpoint, sourceKind}`
+ * for the UI to POST to, or `null` if no adapter can preview.
+ *
+ * Each adapter contributes detection via its `<kind>/ui/index.ts`
+ * (detectPreviewUrl + previewEndpoint exports). Adding a new adapter
+ * with paste-preview support is a 2-line change in that file — no UI
+ * code in /events/new needs to know about specific platforms.
+ *
+ * Dedup pass: reddit_account and reddit_subreddit map to the SAME
+ * client module so we iterate distinct modules, not registry entries.
+ */
+export function findPreviewAdapter(
+  url: string,
+): { sourceKind: SourceKind; previewEndpoint: string } | null {
+  const seen = new Set<AdapterUiClient>();
+  for (const [sourceKind, client] of uiClientRegistry.entries()) {
+    if (seen.has(client)) continue;
+    seen.add(client);
+    if (
+      typeof client.detectPreviewUrl === "function" &&
+      typeof client.previewEndpoint === "string" &&
+      client.detectPreviewUrl(url)
+    ) {
+      return { sourceKind, previewEndpoint: client.previewEndpoint };
+    }
+  }
+  return null;
 }
