@@ -373,10 +373,7 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
 
     // No reddit_posts cache row — handlePostSingle threw on the 429
     // before reaching UPSERT.
-    const postRows = await db
-      .select()
-      .from(redditPosts)
-      .where(eq(redditPosts.postId, "t3_abc429"));
+    const postRows = await db.select().from(redditPosts).where(eq(redditPosts.postId, "t3_abc429"));
     expect(postRows).toHaveLength(0);
 
     // No snapshot either.
