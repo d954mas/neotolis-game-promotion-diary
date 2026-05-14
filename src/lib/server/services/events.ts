@@ -351,27 +351,6 @@ export async function createEvent(
   validateTitle(input.title);
   const occurredAt = coerceOccurredAt(input.occurredAt);
 
-  // Reddit ingest gate. The full Reddit paste flow lives in
-  // services/ingest.ts parsePasteAndCreate (plan 09 — D-RDT-INGEST-REPLACE);
-  // the route layer hasn't been migrated to call it yet (tracked as a
-  // follow-up). Meanwhile, when a kind=reddit_post event arrives via the
-  // generic /api/events endpoint with REDDIT_USER_AGENT empty, surface a
-  // useful operator-facing code instead of silently creating an event
-  // that won't be polled. This is the contract the smoke gate asserts
-  // (V24-paste). When configured, the row is created and Reddit ingest
-  // will pick it up via the standard worker path.
-  if (input.kind === "reddit_post" && input.url != null && input.url !== "") {
-    const { isRedditConfigured } = await import("$lib/sources/reddit/server/credentials.js");
-    if (!isRedditConfigured()) {
-      throw new AppError(
-        "Reddit ingest disabled — operator has not configured REDDIT_USER_AGENT",
-        "reddit_not_configured",
-        422,
-        { kind: "reddit_post" },
-      );
-    }
-  }
-
   // Validate every gameId belongs to userId BEFORE any INSERT
   // (validate-first). De-dup the input via Set so the same gameId passed
   // twice doesn't trigger duplicate junction INSERTs (composite PK would
@@ -556,31 +535,6 @@ export async function createEvent(
     }
   }
 
-  // Reddit synchronous fetch — pulls /comments/<id>.json, UPSERTs into
-  // reddit_posts + reddit_users_cache + reddit_subreddits_cache, and writes
-  // one reddit_post_snapshots row. The full ingest path (parsePasteAndCreate)
-  // does this as part of the paste orchestrator; the generic /api/events
-  // POST bypasses that orchestrator (route-layer migration is deferred),
-  // so we hook the same handler in here. Errors are logged-and-swallowed:
-  // the event row already exists, snapshot/cache population will retry
-  // later via the standard worker path.
-  if (row.kind === "reddit_post" && row.externalId !== null) {
-    try {
-      const { handlePostSingle } =
-        await import("$lib/sources/reddit/server/handlers/post-single.js");
-      await handlePostSingle({
-        postId: row.externalId,
-        userId,
-        paste: true,
-      });
-    } catch (err) {
-      logger.warn(
-        { eventId: row.id, externalId: row.externalId, err: String(err) },
-        "handlePostSingle failed on createEvent; reddit_post_snapshots will be picked up by cron",
-      );
-    }
-  }
-
   return row;
 }
 
@@ -644,31 +598,18 @@ export async function enrichFromUrl(userId: string, url: string): Promise<Enrich
   if (parsed.kind === "unsupported") {
     throw new AppError("URL not yet supported", "unsupported_url", 422, { url });
   }
-  if (parsed.kind === "reddit_post") {
-    // Reddit paste flow lives in services/ingest.ts parsePasteAndCreate
-    // (plan 09 — D-RDT-INGEST-REPLACE). The HTTP route layer hasn't been
-    // migrated to call parsePasteAndCreate yet — wiring is tracked as a
-    // gap-closure item. Until then, surface a useful error code:
-    //   - empty REDDIT_USER_AGENT → reddit_not_configured (matches the
-    //     ingest.ts contract that the smoke gate asserts)
-    //   - configured but route not wired → kind_not_yet_functional
-    const { isRedditConfigured } = await import("$lib/sources/reddit/server/credentials.js");
-    if (!isRedditConfigured()) {
-      throw new AppError(
-        "Reddit ingest disabled — operator has not configured REDDIT_USER_AGENT",
-        "reddit_not_configured",
-        422,
-        { kind: "reddit_post" },
-      );
-    }
-    throw new AppError(
-      `paste flow does not yet handle kind '${parsed.kind}' through enrichFromUrl`,
-      "kind_not_yet_functional",
-      422,
-      { kind: parsed.kind },
-    );
-  }
-  if (parsed.kind === "twitter_post" || parsed.kind === "telegram_post") {
+  // enrichFromUrl is the YouTube-paste pre-INSERT enrichment path
+  // (POST /api/events/preview-url + the unused createEventFromPaste).
+  // Reddit / Twitter / Telegram have NO preview integration through
+  // enrichFromUrl — Reddit uses /api/reddit/fetch-metadata via its
+  // adapter.registerRoutes (mirroring /api/youtube/fetch-metadata).
+  // Twitter / Telegram fall to kind_not_yet_functional until their
+  // adapters ship.
+  if (
+    parsed.kind === "reddit_post" ||
+    parsed.kind === "twitter_post" ||
+    parsed.kind === "telegram_post"
+  ) {
     throw new AppError(
       `paste flow does not yet handle kind '${parsed.kind}' through enrichFromUrl`,
       "kind_not_yet_functional",

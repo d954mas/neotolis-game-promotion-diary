@@ -67,25 +67,27 @@ reddit_polling_smoke() {
   fi
   log "V24 PASS — /sources renders 'Reddit not configured'"
 
-  # Assertion A.3: Reddit URL paste → 422 reddit_not_configured.
-  # POST /api/events with a Reddit post URL triggers ingest.ts pre-flight
-  # isRedditConfigured() check, which throws AppError(reddit_not_configured)
-  # → mapErr → 422.
+  # Assertion A.3: paste a Reddit URL with empty REDDIT_USER_AGENT → 201
+  # (mirrors YouTube parity: an unconfigured adapter doesn't BLOCK event
+  # creation, it silently skips the stats fetch — fetchEventStats returns
+  # null, the event row is created without enrichment). The user-facing
+  # signal that Reddit ingest is off lives on /sources (the V24-banner
+  # assertion above), not on the paste path.
   local paste_resp
-  # createEventSchema requires occurredAt + title alongside the URL —
-  # validation runs before enrichFromUrl, so include them so the
-  # reddit-not-configured branch is actually reached.
   paste_resp=$(curl -sS -X POST "$app_url/api/events" \
     -H "cookie: $session_cookie" \
     -H "content-type: application/json" \
+    -w "\n%{http_code}" \
     -d '{"kind":"reddit_post","url":"https://www.reddit.com/r/IndieDev/comments/abc/test/","occurredAt":"2026-05-14T00:00:00.000Z","title":"smoke V24 probe"}' || true)
-  if ! echo "$paste_resp" | jq -e '.error == "reddit_not_configured"' >/dev/null 2>&1; then
+  local paste_code
+  paste_code=$(echo "$paste_resp" | tail -n1)
+  if [[ "$paste_code" != "201" ]]; then
     log "----- POST /api/events response -----"
     echo "$paste_resp"
     log "-------------------------------------"
-    fail "V24: paste should return reddit_not_configured 422 when REDDIT_USER_AGENT empty"
+    fail "V24: paste with empty REDDIT_USER_AGENT should return 201 (YouTube parity — silent stats skip), got $paste_code"
   fi
-  log "V24 PASS — paste returns reddit_not_configured 422"
+  log "V24 PASS — paste returns 201 (stats skipped silently when REDDIT_USER_AGENT empty)"
 
   # ----- Half B: configured + mock-Reddit (V25) -----
   log "Half B (V25) — configured + mock-Reddit pipeline"

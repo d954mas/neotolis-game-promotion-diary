@@ -61,6 +61,14 @@ export interface HandlePostSingleResult {
   permalink: string;
   title: string;
   submittedAt: Date;
+  /** Snapshot metrics — exposed so callers (fetchEventStats) can
+   *  surface live counts without a second SELECT. Fields default to
+   *  null when Reddit omits them (e.g. archived posts hide scores). */
+  score: number | null;
+  numComments: number | null;
+  upvoteRatio: number | null;
+  /** selftext exposed for paste-preview UX. Empty string for link posts. */
+  selftext: string;
 }
 
 export async function handlePostSingle(args: {
@@ -148,6 +156,10 @@ export async function handlePostSingle(args: {
     permalink,
     title: t3.title,
     submittedAt,
+    score: t3.score ?? null,
+    numComments: t3.num_comments ?? null,
+    upvoteRatio: t3.upvote_ratio ?? null,
+    selftext: typeof t3.selftext === "string" ? t3.selftext : "",
   };
 }
 

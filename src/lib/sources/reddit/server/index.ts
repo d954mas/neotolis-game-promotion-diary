@@ -31,6 +31,7 @@
 import type {
   AdapterContext,
   DataSourceAdapter,
+  EventPreviewMetadata,
   MinimalBoss,
   PollableSource,
   SourceCreatedHookSource,
@@ -46,6 +47,10 @@ import { handleEnqueueServiceSourcesCron } from "./handlers/enqueue-service-sour
 import { handleEnqueueServicePostsCron } from "./handlers/enqueue-service-posts-cron.js";
 import { handleBaselinesCron } from "./handlers/baselines-cron.js";
 import { handleDeletionPropagationCron } from "./handlers/deletion-propagation-cron.js";
+import { handlePostSingle } from "./handlers/post-single.js";
+import { redditParsePostUrl } from "./url.js";
+import { isRedditConfigured } from "./credentials.js";
+import { AdapterError } from "$lib/sources/errors.js";
 
 interface RedditSourceMetadata {
   username?: string;
@@ -195,6 +200,118 @@ async function onSourceCreated(source: SourceCreatedHookSource): Promise<void> {
 }
 
 /**
+ * fetchEventPreviewMetadata — adapter wrapper for the /events/new
+ * "Get from Reddit" button. Fetches /comments/<id>.json and returns
+ * the post title + author + permalink in the cross-source
+ * EventPreviewMetadata shape. Empty REDDIT_USER_AGENT → unreachable
+ * (mirrors YouTube's empty-keys oEmbed behavior at the preview surface).
+ *
+ * Preview-only — no UPSERT, no snapshot row, no audit. The actual
+ * persistent fetch happens later inside fetchEventStats on Submit.
+ */
+async function fetchEventPreviewMetadata(canonicalUrl: string): Promise<EventPreviewMetadata> {
+  if (!isRedditConfigured()) {
+    return { kind: "unreachable", cause: "reddit_not_configured" };
+  }
+  const parsed = redditParsePostUrl(canonicalUrl);
+  if (parsed === null) {
+    return { kind: "unreachable", cause: "url_not_reddit_post" };
+  }
+  try {
+    const result = await handlePostSingle({
+      postId: parsed.externalId,
+      userId: null, // preview is read-only; cap not enforced
+      paste: true,
+    });
+    return {
+      kind: "ok",
+      title: result.title,
+      authorName: result.author ?? "[deleted]",
+      authorUrl:
+        result.author !== null ? `https://www.reddit.com/user/${result.author}` : result.permalink,
+      // Reddit doesn't expose thumbnails uniformly across post types;
+      // self-text posts have none, link posts have a Reddit-hosted
+      // preview that needs auth to render. Skip.
+    };
+  } catch (err) {
+    if (err instanceof AdapterError) {
+      if (err.category === "not-found") return { kind: "unavailable" };
+      if (err.category === "rate-limited") return { kind: "unreachable", cause: "rate_limited" };
+      if (err.category === "operator-issue") {
+        return { kind: "unreachable", cause: "reddit_not_configured" };
+      }
+      return { kind: "unreachable", cause: err.message };
+    }
+    return { kind: "unreachable", cause: String((err as Error)?.message ?? err) };
+  }
+}
+
+/**
+ * fetchEventStats — synchronous stats fetch on /api/events POST so /feed
+ * shows score/comments immediately. Mirrors YouTube's fetchEventStats:
+ * the cross-source createEvent calls this AFTER the events INSERT, errors
+ * are logged-and-swallowed by the caller.
+ *
+ * Side effects:
+ *   - UPSERTs reddit_posts / reddit_users_cache / reddit_subreddits_cache
+ *     via handlePostSingle
+ *   - Writes ONE reddit_post_snapshots row (minute-truncated polled_at)
+ *   - Writes ONE reddit_refresh_queue row with status='done' on the
+ *     user_post lane so the post-refresh cap counter (D-RDT-CAP-POST,
+ *     plan 06) sees this fetch. Without this, user pastes silently
+ *     bypass the 25/5min cap.
+ *
+ * Returns {viewCount, likeCount, commentCount} where Reddit semantics
+ * map: viewCount=score, likeCount=0 (Reddit has no separate likes —
+ * score IS net upvotes), commentCount=num_comments. The cross-source
+ * shape is preserved for UI parity; per-kind FeedCard enrichment
+ * (feed-enrichment.ts) re-reads reddit_post_snapshots for the richer
+ * Reddit-specific view (upvote_ratio, awards, removed_by_category).
+ *
+ * Returns null on disabled adapter or fetch failure — caller treats as
+ * "stats unavailable, will be picked up by next cron tick".
+ */
+async function fetchEventStats(
+  externalId: string,
+  ctx: { userId: string },
+): Promise<{ viewCount: number; likeCount: number; commentCount: number } | null> {
+  if (!isRedditConfigured()) return null;
+  try {
+    const result = await handlePostSingle({
+      postId: externalId,
+      userId: ctx.userId,
+      paste: true,
+    });
+    // Record the paste in reddit_refresh_queue so the post-refresh cap
+    // counter (which COUNTs queue rows in the 5-minute window) sees this
+    // user action. status='done' from the start — no worker tick will
+    // re-claim it. last_attempt_at=NOW() matches what the worker would
+    // have written, keeping the audit shape uniform across user-paste
+    // and cron-drain code paths.
+    await db.insert(redditRefreshQueue).values({
+      queueName: "user_post",
+      type: "post_single",
+      payload: { post_id: externalId, flow: "paste" },
+      userId: ctx.userId,
+      priority: 0,
+      status: "done",
+      lastAttemptAt: new Date(),
+    });
+    return {
+      viewCount: result.score ?? 0,
+      likeCount: 0,
+      commentCount: result.numComments ?? 0,
+    };
+  } catch (err) {
+    logger.warn(
+      { externalId, userId: ctx.userId, err: String((err as Error)?.message ?? err) },
+      "redditAdapter.fetchEventStats failed; stats unavailable until next cron tick",
+    );
+    return null;
+  }
+}
+
+/**
  * redditAdapter — composes the polling core (./adapter.ts) with the
  * infrastructure-touching methods (registerQueues / scheduleCronTicks /
  * backfillSource / onSourceCreated) and the cross-source enrichment
@@ -217,6 +334,8 @@ export const redditAdapter: DataSourceAdapter = {
   backfillSource,
   onSourceCreated,
   enrichFeedDtos: enrichRedditFeedDtos,
+  fetchEventPreviewMetadata,
+  fetchEventStats,
 };
 
 // Re-export the Reddit-only observability helpers so /admin's Reddit
