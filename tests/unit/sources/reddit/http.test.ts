@@ -10,29 +10,99 @@
 //
 // Mocks: global fetch + `$lib/server/audit.js` writeAudit + env module.
 // No Postgres I/O — pure unit tests.
+//
+// Module-instance note: `vi.resetModules()` invalidates the module registry
+// between tests. A statically imported `AdapterError` is a DIFFERENT class
+// instance than the one http.ts throws (the dynamic import gets a fresh
+// module evaluation). We assert on `.name === "AdapterError"` + duck-type
+// `.category` rather than `instanceof` to stay robust across instances.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { AdapterError } from "$lib/sources/errors.js";
 
 const REDDIT_UA = "node:com.neotolis.gpd:0.1.0 (by /u/operator)";
 
-const writeAuditSpy = vi.fn(async () => {});
+// Stub the env module shape used transitively by http.ts:
+//   - REDDIT_USER_AGENT (credentials.ts)
+//   - LOG_LEVEL + NODE_ENV (logger.ts via pino constructor)
+//   - ADMIN_EMAIL_ALLOWLIST (resolveOperatorUserId)
+function envMock(
+  overrides: Partial<{
+    REDDIT_USER_AGENT: string;
+    ADMIN_EMAIL_ALLOWLIST: readonly string[];
+  }> = {},
+): { env: Record<string, unknown> } {
+  return {
+    env: {
+      REDDIT_USER_AGENT: REDDIT_UA,
+      ADMIN_EMAIL_ALLOWLIST: [] as readonly string[],
+      LOG_LEVEL: "silent",
+      NODE_ENV: "test",
+      ...overrides,
+    },
+  };
+}
+
+/** Type-narrow err to an AdapterError-shaped object across module instances. */
+interface AdapterErrorLike {
+  name: string;
+  message: string;
+  category: string;
+  retryAfterMs: number | null;
+  context: Record<string, unknown>;
+  cause?: unknown;
+}
+
+function asAdapterError(err: unknown): AdapterErrorLike {
+  expect(err).toBeInstanceOf(Error);
+  const e = err as Record<string, unknown>;
+  expect(e.name).toBe("AdapterError");
+  return err as unknown as AdapterErrorLike;
+}
+
+/** writeAudit signature: `(entry: AuditEntry) => Promise<void>`. The spy
+ *  type carries the same argument so .mock.calls[N][0] narrows to the
+ *  entry shape (not the `never` you get from a parameterless vi.fn). */
+const writeAuditSpy = vi.fn(
+  async (_entry: {
+    userId: string;
+    action: string;
+    ipAddress: string;
+    metadata?: Record<string, unknown>;
+  }) => {},
+);
 const fetchSpy = vi.fn();
 
-beforeEach(async () => {
+/** Mock the drizzle db `select().from().where().limit()` chain to return
+ *  the operator's user_id for `resolveOperatorUserId`. The burst-audit
+ *  code path needs a real user_id (audit_log.user_id is NOT NULL). */
+function mockOperatorDb(operatorId: string | null): void {
+  const limitFn = vi.fn().mockResolvedValue(operatorId === null ? [] : [{ id: operatorId }]);
+  const whereFn = vi.fn().mockReturnValue({ limit: limitFn });
+  const fromFn = vi.fn().mockReturnValue({ where: whereFn });
+  const selectFn = vi.fn().mockReturnValue({ from: fromFn });
+  vi.doMock("$lib/server/db/client.js", () => ({ db: { select: selectFn } }));
+  vi.doMock("$lib/server/db/schema/auth.js", () => ({
+    user: { id: "user.id", email: "user.email" },
+  }));
+}
+
+beforeEach(() => {
   vi.resetModules();
   fetchSpy.mockReset();
   writeAuditSpy.mockReset();
   vi.stubGlobal("fetch", fetchSpy);
-  vi.doMock("$lib/server/config/env.js", () => ({
-    env: { REDDIT_USER_AGENT: REDDIT_UA },
-  }));
+  vi.doMock("$lib/server/config/env.js", () =>
+    envMock({ ADMIN_EMAIL_ALLOWLIST: ["op@example.com"] }),
+  );
   vi.doMock("$lib/server/audit.js", () => ({ writeAudit: writeAuditSpy }));
+  mockOperatorDb("op-user-123");
 });
 
 afterEach(() => {
   vi.doUnmock("$lib/server/config/env.js");
   vi.doUnmock("$lib/server/audit.js");
+  vi.doUnmock("$lib/server/db/client.js");
+  vi.doUnmock("$lib/server/db/schema/auth.js");
   vi.restoreAllMocks();
 });
 
@@ -44,15 +114,14 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
         headers: { "content-type": "application/json" },
       }),
     );
-    const { redditFetch, __resetBurstStateForTest } = await import(
-      "$lib/sources/reddit/server/http.js"
-    );
+    const { redditFetch, __resetBurstStateForTest } =
+      await import("$lib/sources/reddit/server/http.js");
     __resetBurstStateForTest();
     const r = await redditFetch<{ x: number }>("/r/test/new.json?limit=100");
     expect(r.data).toEqual({ x: 1 });
     expect(r.statusCode).toBe(200);
     // User-Agent capture.
-    const callArgs = fetchSpy.mock.calls[0];
+    const callArgs = fetchSpy.mock.calls[0]!;
     expect(callArgs[0]).toBe("https://www.reddit.com/r/test/new.json?limit=100");
     const reqHeaders = callArgs[1].headers as Record<string, string>;
     expect(reqHeaders["User-Agent"]).toBe(REDDIT_UA);
@@ -60,16 +129,14 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
 
   it("404 → AdapterError(not-found)", async () => {
     fetchSpy.mockResolvedValueOnce(new Response("", { status: 404 }));
-    const { redditFetch, __resetBurstStateForTest } = await import(
-      "$lib/sources/reddit/server/http.js"
-    );
+    const { redditFetch, __resetBurstStateForTest } =
+      await import("$lib/sources/reddit/server/http.js");
     __resetBurstStateForTest();
     try {
       await redditFetch("/r/x/comments/abc.json");
       throw new Error("should have thrown");
     } catch (err) {
-      expect(err).toBeInstanceOf(AdapterError);
-      const ae = err as AdapterError;
+      const ae = asAdapterError(err);
       expect(ae.category).toBe("not-found");
       expect(ae.context.httpStatus).toBe(404);
     }
@@ -79,16 +146,14 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
     fetchSpy.mockResolvedValueOnce(
       new Response("", { status: 429, headers: { "retry-after": "30" } }),
     );
-    const { redditFetch, __resetBurstStateForTest } = await import(
-      "$lib/sources/reddit/server/http.js"
-    );
+    const { redditFetch, __resetBurstStateForTest } =
+      await import("$lib/sources/reddit/server/http.js");
     __resetBurstStateForTest();
     try {
       await redditFetch("/r/x/new.json");
       throw new Error("should have thrown");
     } catch (err) {
-      expect(err).toBeInstanceOf(AdapterError);
-      const ae = err as AdapterError;
+      const ae = asAdapterError(err);
       expect(ae.category).toBe("rate-limited");
       expect(ae.retryAfterMs).toBe(30_000);
     }
@@ -98,16 +163,14 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
     fetchSpy.mockResolvedValueOnce(
       new Response("", { status: 429, headers: { "x-ratelimit-reset": "45" } }),
     );
-    const { redditFetch, __resetBurstStateForTest } = await import(
-      "$lib/sources/reddit/server/http.js"
-    );
+    const { redditFetch, __resetBurstStateForTest } =
+      await import("$lib/sources/reddit/server/http.js");
     __resetBurstStateForTest();
     try {
       await redditFetch("/r/x/new.json");
       throw new Error("should have thrown");
     } catch (err) {
-      expect(err).toBeInstanceOf(AdapterError);
-      const ae = err as AdapterError;
+      const ae = asAdapterError(err);
       expect(ae.category).toBe("rate-limited");
       expect(ae.retryAfterMs).toBe(45_000);
     }
@@ -115,16 +178,14 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
 
   it("500 → AdapterError(transient, httpStatus=500)", async () => {
     fetchSpy.mockResolvedValueOnce(new Response("", { status: 500 }));
-    const { redditFetch, __resetBurstStateForTest } = await import(
-      "$lib/sources/reddit/server/http.js"
-    );
+    const { redditFetch, __resetBurstStateForTest } =
+      await import("$lib/sources/reddit/server/http.js");
     __resetBurstStateForTest();
     try {
       await redditFetch("/r/x/new.json");
       throw new Error("should have thrown");
     } catch (err) {
-      expect(err).toBeInstanceOf(AdapterError);
-      const ae = err as AdapterError;
+      const ae = asAdapterError(err);
       expect(ae.category).toBe("transient");
       expect(ae.context.httpStatus).toBe(500);
     }
@@ -132,32 +193,28 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
 
   it("network error (ECONNRESET) → AdapterError(transient)", async () => {
     fetchSpy.mockRejectedValueOnce(new Error("ECONNRESET"));
-    const { redditFetch, __resetBurstStateForTest } = await import(
-      "$lib/sources/reddit/server/http.js"
-    );
+    const { redditFetch, __resetBurstStateForTest } =
+      await import("$lib/sources/reddit/server/http.js");
     __resetBurstStateForTest();
     try {
       await redditFetch("/r/x/new.json");
       throw new Error("should have thrown");
     } catch (err) {
-      expect(err).toBeInstanceOf(AdapterError);
-      const ae = err as AdapterError;
+      const ae = asAdapterError(err);
       expect(ae.category).toBe("transient");
     }
   });
 
   it("single 403 → AdapterError(rate-limited, httpStatus=403); no audit yet (under burst threshold)", async () => {
     fetchSpy.mockResolvedValueOnce(new Response("", { status: 403 }));
-    const { redditFetch, __resetBurstStateForTest } = await import(
-      "$lib/sources/reddit/server/http.js"
-    );
+    const { redditFetch, __resetBurstStateForTest } =
+      await import("$lib/sources/reddit/server/http.js");
     __resetBurstStateForTest();
     try {
       await redditFetch("/r/x/new.json");
       throw new Error("should have thrown");
     } catch (err) {
-      expect(err).toBeInstanceOf(AdapterError);
-      const ae = err as AdapterError;
+      const ae = asAdapterError(err);
       expect(ae.category).toBe("rate-limited");
       expect(ae.context.httpStatus).toBe(403);
     }
@@ -166,52 +223,49 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
 
   it("3 × 403 within 5min window emits exactly ONE reddit.adapter_degraded audit row (V5, D-RDT-AUTH-403)", async () => {
     fetchSpy.mockResolvedValue(new Response("", { status: 403 }));
-    const { redditFetch, __resetBurstStateForTest } = await import(
-      "$lib/sources/reddit/server/http.js"
-    );
+    const { redditFetch, __resetBurstStateForTest } =
+      await import("$lib/sources/reddit/server/http.js");
     __resetBurstStateForTest();
-    await expect(redditFetch("/r/x/new.json")).rejects.toBeInstanceOf(AdapterError);
-    await expect(redditFetch("/r/x/new.json")).rejects.toBeInstanceOf(AdapterError);
-    await expect(redditFetch("/r/x/new.json")).rejects.toBeInstanceOf(AdapterError);
+    await redditFetch("/r/x/new.json").catch((e) => asAdapterError(e));
+    await redditFetch("/r/x/new.json").catch((e) => asAdapterError(e));
+    await redditFetch("/r/x/new.json").catch((e) => asAdapterError(e));
     expect(writeAuditSpy).toHaveBeenCalledTimes(1);
-    expect(writeAuditSpy.mock.calls[0][0]).toMatchObject({
-      action: "reddit.adapter_degraded",
-    });
-    const meta = writeAuditSpy.mock.calls[0][0].metadata as Record<string, unknown>;
+    const firstCall = writeAuditSpy.mock.calls[0]?.[0];
+    expect(firstCall).toMatchObject({ action: "reddit.adapter_degraded" });
+    const meta = firstCall!.metadata!;
     expect(meta.burst_count).toBe(3);
     expect(meta.window_minutes).toBe(5);
 
     // Subsequent 403s within the same burst window do NOT re-emit.
-    await expect(redditFetch("/r/x/new.json")).rejects.toBeInstanceOf(AdapterError);
+    await redditFetch("/r/x/new.json").catch((e) => asAdapterError(e));
     expect(writeAuditSpy).toHaveBeenCalledTimes(1);
   });
 
   it("after burst window expires (5min elapsed), counter resets — next 403 starts new burst", async () => {
     fetchSpy.mockResolvedValue(new Response("", { status: 403 }));
-    const { redditFetch, __resetBurstStateForTest } = await import(
-      "$lib/sources/reddit/server/http.js"
-    );
+    const { redditFetch, __resetBurstStateForTest } =
+      await import("$lib/sources/reddit/server/http.js");
     __resetBurstStateForTest();
 
     // Trigger 3 × 403 → audit emitted.
     const nowSpy = vi.spyOn(Date, "now");
     const T0 = 1_000_000_000_000;
     nowSpy.mockReturnValue(T0);
-    await expect(redditFetch("/r/x/new.json")).rejects.toBeInstanceOf(AdapterError);
-    await expect(redditFetch("/r/x/new.json")).rejects.toBeInstanceOf(AdapterError);
-    await expect(redditFetch("/r/x/new.json")).rejects.toBeInstanceOf(AdapterError);
+    await redditFetch("/r/x/new.json").catch((e) => asAdapterError(e));
+    await redditFetch("/r/x/new.json").catch((e) => asAdapterError(e));
+    await redditFetch("/r/x/new.json").catch((e) => asAdapterError(e));
     expect(writeAuditSpy).toHaveBeenCalledTimes(1);
 
     // Advance time past the 5-min window (window_ms = 300_000).
     nowSpy.mockReturnValue(T0 + 6 * 60_000);
 
     // 1 × 403 — new window started; counter=1, audit NOT re-emitted yet.
-    await expect(redditFetch("/r/x/new.json")).rejects.toBeInstanceOf(AdapterError);
+    await redditFetch("/r/x/new.json").catch((e) => asAdapterError(e));
     expect(writeAuditSpy).toHaveBeenCalledTimes(1);
 
     // 2 more → 3 in new window → 2nd audit.
-    await expect(redditFetch("/r/x/new.json")).rejects.toBeInstanceOf(AdapterError);
-    await expect(redditFetch("/r/x/new.json")).rejects.toBeInstanceOf(AdapterError);
+    await redditFetch("/r/x/new.json").catch((e) => asAdapterError(e));
+    await redditFetch("/r/x/new.json").catch((e) => asAdapterError(e));
     expect(writeAuditSpy).toHaveBeenCalledTimes(2);
 
     nowSpy.mockRestore();
@@ -224,9 +278,8 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
         headers: { "content-type": "application/json" },
       }),
     );
-    const { redditFetch, __resetBurstStateForTest } = await import(
-      "$lib/sources/reddit/server/http.js"
-    );
+    const { redditFetch, __resetBurstStateForTest } =
+      await import("$lib/sources/reddit/server/http.js");
     __resetBurstStateForTest();
     const { z } = await import("zod");
     const schema = z.object({ expected: z.string() });
@@ -234,8 +287,7 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
       await redditFetch("/r/x/new.json", { schema });
       throw new Error("should have thrown");
     } catch (err) {
-      expect(err).toBeInstanceOf(AdapterError);
-      const ae = err as AdapterError;
+      const ae = asAdapterError(err);
       expect(ae.category).toBe("permanent");
       expect(ae.cause).toBeDefined();
     }
@@ -243,18 +295,19 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
 
   it("Reddit not configured (REDDIT_USER_AGENT empty) → AdapterError(operator-issue)", async () => {
     vi.resetModules();
-    vi.doMock("$lib/server/config/env.js", () => ({ env: { REDDIT_USER_AGENT: "" } }));
-    vi.doMock("$lib/server/audit.js", () => ({ writeAudit: writeAuditSpy }));
-    const { redditFetch, __resetBurstStateForTest } = await import(
-      "$lib/sources/reddit/server/http.js"
+    vi.doMock("$lib/server/config/env.js", () =>
+      envMock({ REDDIT_USER_AGENT: "", ADMIN_EMAIL_ALLOWLIST: ["op@example.com"] }),
     );
+    vi.doMock("$lib/server/audit.js", () => ({ writeAudit: writeAuditSpy }));
+    mockOperatorDb("op-user-123");
+    const { redditFetch, __resetBurstStateForTest } =
+      await import("$lib/sources/reddit/server/http.js");
     __resetBurstStateForTest();
     try {
       await redditFetch("/r/x/new.json");
       throw new Error("should have thrown");
     } catch (err) {
-      expect(err).toBeInstanceOf(AdapterError);
-      const ae = err as AdapterError;
+      const ae = asAdapterError(err);
       expect(ae.category).toBe("operator-issue");
       expect(ae.message).toContain("reddit_not_configured");
     }
@@ -269,12 +322,14 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
         headers: { "content-type": "application/json" },
       }),
     );
-    const { redditFetch, __resetBurstStateForTest } = await import(
-      "$lib/sources/reddit/server/http.js"
-    );
+    const { redditFetch, __resetBurstStateForTest } =
+      await import("$lib/sources/reddit/server/http.js");
     __resetBurstStateForTest();
     const { z } = await import("zod");
-    const schema = z.object({ kind: z.literal("Listing"), data: z.object({ children: z.array(z.unknown()) }) });
+    const schema = z.object({
+      kind: z.literal("Listing"),
+      data: z.object({ children: z.array(z.unknown()) }),
+    });
     const r = await redditFetch("/r/x/new.json", { schema });
     expect(r.data).toEqual({ kind: "Listing", data: { children: [] } });
   });
