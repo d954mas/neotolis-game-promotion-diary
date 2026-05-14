@@ -43,8 +43,11 @@ export async function startScheduler(): Promise<void> {
   }
 
   // Per-kind cron schedules owned by each adapter. Iterate registration
-  // order from registry.ts (currently just youtube; Reddit / Twitter /
-  // Telegram / Discord queue here as their adapters land).
+  // order from registry.ts (today: youtube + reddit. Reddit registers
+  // 4 daily cron schedules via redditAdapter.scheduleCronTicks per
+  // D-RDT-CRON-BURST: enqueue-service-sources 00/06/12/18 UTC,
+  // enqueue-service-posts 03/09/15/21 UTC, baselines 04 UTC,
+  // deletion-propagation 05 UTC).
   for (const adapter of allAdapters) {
     try {
       await adapter.scheduleCronTicks(boss);

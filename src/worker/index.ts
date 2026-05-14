@@ -20,7 +20,16 @@
 //   - INTERNAL_HEALTHCHECK
 //   - PURGE_DAILY                       (cross-tenant FK-cascade purge)
 //
-// SIGTERM drain via stopBoss (60s graceful) + pool.end.
+// Reddit batch-worker (Phase 03.1 DV-RDT-7) runs as a setInterval(7.5s)
+// loop alongside pg-boss — NOT a pg-boss subscriber, because pg-boss's
+// concurrency model fights the deterministic 8-tick round-robin we need
+// to stay inside Reddit's 10 req/min hard limit under multi-replica
+// deploys. The setInterval drains reddit_refresh_queue via SQL
+// FOR UPDATE SKIP LOCKED; the four Reddit CRON queues DO go through
+// pg-boss (registered via redditAdapter.registerQueues). Skipped
+// entirely when env.REDDIT_USER_AGENT is empty (self-host parity).
+//
+// SIGTERM drain via stopBoss (60s graceful) + clearInterval(redditTickInterval) + pool.end.
 
 import { createBoss, stopBoss } from "../lib/server/queue-client.js";
 import { pool } from "../lib/server/db/client.js";
@@ -31,6 +40,16 @@ import { env, scrubKekFromEnv } from "../lib/server/config/env.js";
 import { allAdapters } from "../lib/sources/registry.js";
 import { handlePurgeDaily } from "./handlers/purge-daily.js";
 import { startOutboxForwarder } from "./handlers/outbox-forwarder.js";
+
+// Reddit batch-worker (Phase 03.1 DV-RDT-7). The 8-tick setInterval loop
+// drains reddit_refresh_queue at 8 req/min effective ceiling. NOT a
+// pg-boss subscriber — pg-boss's concurrency model doesn't preserve the
+// deterministic round-robin we need to stay inside Reddit's 10 req/min
+// hard limit. The four Reddit CRON queues do go through pg-boss (registered
+// via redditAdapter.registerQueues in the adapter-iteration loop below);
+// only the per-tick drain loop uses setInterval.
+import { redditWorkerTick } from "../lib/sources/reddit/server/handlers/worker-tick.js";
+import { isRedditConfigured } from "../lib/sources/reddit/server/credentials.js";
 
 export async function startWorker(): Promise<void> {
   // Multi-replica safety guard.
@@ -116,6 +135,40 @@ export async function startWorker(): Promise<void> {
   // Returns a teardown closure the shutdown handler awaits.
   const stopOutboxForwarder = await startOutboxForwarder({ boss });
 
+  // Reddit batch-worker setInterval boot (Phase 03.1 DV-RDT-7).
+  //
+  // Skipped when REDDIT_USER_AGENT is empty — self-host parity per
+  // D-RDT-AUTH-EMPTY. Operator can configure REDDIT_USER_AGENT and
+  // restart the worker to enable Reddit ingestion at any time.
+  //
+  // 7.5s tick interval = 8 ticks/min effective ceiling (Reddit's
+  // public-`.json` hard limit is 10 req/min; we target 8 for headroom).
+  // Per-tick: one HTTP call OR zero (queue empty / fallthrough exhausted).
+  // The async catch suppresses worker-process crashes — any
+  // AdapterError or DB transient inside the tick gets logged and the
+  // next tick fires normally.
+  //
+  // Smoke grep contract (plan 10 smoke gate):
+  //   - "reddit batch-worker ready: 8-tick round-robin loop" when
+  //     REDDIT_USER_AGENT is configured.
+  //   - "reddit batch-worker disabled" when REDDIT_USER_AGENT is empty.
+  let redditTickInterval: ReturnType<typeof setInterval> | null = null;
+  if (isRedditConfigured()) {
+    redditTickInterval = setInterval(() => {
+      redditWorkerTick().catch((err) =>
+        logger.warn(
+          { err: String((err as Error)?.message ?? err) },
+          "redditWorkerTick threw — continuing",
+        ),
+      );
+    }, 7500);
+    logger.info({ role: "worker" }, "reddit batch-worker ready: 8-tick round-robin loop");
+    console.log("reddit batch-worker ready: 8-tick round-robin loop");
+  } else {
+    logger.info({ role: "worker" }, "reddit batch-worker disabled (REDDIT_USER_AGENT empty)");
+    console.log("reddit batch-worker disabled");
+  }
+
   // Smoke assertion — exact string `worker ready` on stdout.
   logger.info({ role: "worker" }, "worker ready");
   console.log("worker ready");
@@ -123,6 +176,15 @@ export async function startWorker(): Promise<void> {
   // Graceful shutdown.
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "worker received shutdown signal");
+    // Clear the Reddit tick interval FIRST so no new ticks start after
+    // shutdown begins. In-flight ticks (≤7.5s) complete naturally —
+    // the SQL tx inside tryClaimAndDispatch either commits or rolls
+    // back; FOR UPDATE SKIP LOCKED ensures the row's status reflects
+    // the final outcome.
+    if (redditTickInterval !== null) {
+      clearInterval(redditTickInterval);
+      redditTickInterval = null;
+    }
     try {
       await stopOutboxForwarder();
     } catch (err) {
