@@ -106,64 +106,75 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
     return { enqueued: 0 };
   }
 
-  // Dedup against already-pending/in-flight rows on the service_source
-  // lane. Without this, a slow worker drain combined with a 6-hour cron
-  // would pile fresh duplicates on top of unprocessed ones — at 8 req/min
-  // ceiling, 200 sources × 4 cron firings/day = 800 daily rows just for
-  // sub_poll, eating slot-1 capacity that user_post lanes need.
-  // Cheap O(1) query: read existing payload identifiers in one go, filter.
-  const existing = await readPendingServiceSourceIdentifiers();
-  const filtered = values.filter((v) => {
-    const handle = (v.payload as { handle?: string; sub?: string }).handle;
-    const sub = (v.payload as { handle?: string; sub?: string }).sub;
-    const key = v.type === "author_poll" ? `h:${handle}` : `s:${sub}`;
-    return !existing.has(key);
-  });
-  if (filtered.length === 0) {
+  // Dedup via atomic INSERT … SELECT … WHERE NOT EXISTS — no read-then-
+  // insert race window (a second cron instance, or a user-driven
+  // backfill, cannot slip a duplicate in between our snapshot and our
+  // bulk INSERT). Single statement; ~milliseconds for hundreds of rows.
+  // Each candidate's existence-check is keyed on (queue_name, type,
+  // payload identifier); identifier comes from payload->>'handle' for
+  // author_poll and payload->>'sub' for sub_poll.
+  //
+  // Under singleton-cron + batchSize=1 the previous read-then-insert
+  // pattern was also safe in practice, but the atomic form is the
+  // correct shape — one place to reason about, no implicit invariant
+  // about cron parallelism.
+  const insertedRows = await atomicallyInsertNonDuplicates(values);
+  const skipped = values.length - insertedRows;
+  if (insertedRows === 0) {
     logger.info(
-      { skipped: values.length },
+      { skipped },
       "reddit.enqueue_service_sources_cron: all candidates already pending; tick is a no-op",
     );
     return { enqueued: 0 };
   }
-
-  await db.insert(redditRefreshQueue).values(filtered);
   logger.info(
     {
-      enqueued: filtered.length,
-      skipped: values.length - filtered.length,
+      enqueued: insertedRows,
+      skipped,
       sourcesScanned: sources.length,
     },
     "reddit.enqueue_service_sources_cron: tick complete",
   );
-  return { enqueued: filtered.length };
+  return { enqueued: insertedRows };
 }
 
-/** Cheap dedup snapshot — returns the set of (type, identifier) keys
- *  for rows currently pending/processing on the service_source lane.
- *  Reads in one query; the caller filters its candidate list against it.
- *  Key format: `h:<handle>` for author_poll, `s:<sub>` for sub_poll. */
-async function readPendingServiceSourceIdentifiers(): Promise<Set<string>> {
-  const rows = await db.execute<{
-    type: string;
-    handle: string | null;
-    sub: string | null;
-  }>(sql`
-    SELECT type, payload->>'handle' AS handle, payload->>'sub' AS sub
-    FROM reddit_refresh_queue
-    WHERE queue_name = 'service_source'
-      AND status IN ('pending', 'processing')
-  `);
-  const out = new Set<string>();
-  const queryRows =
-    (
-      rows as unknown as {
-        rows?: Array<{ type: string; handle: string | null; sub: string | null }>;
-      }
-    ).rows ?? [];
-  for (const r of queryRows) {
-    if (r.type === "author_poll" && r.handle !== null) out.add(`h:${r.handle}`);
-    else if (r.type === "sub_poll" && r.sub !== null) out.add(`s:${r.sub}`);
+/** Atomically INSERT each candidate row only when no pending/processing
+ *  row already exists for the same (queue_name, type, identifier).
+ *  Returns the count of rows actually inserted. Single round-trip per
+ *  candidate using `WHERE NOT EXISTS` — Postgres rolls back duplicates
+ *  inside the same transaction window without surfacing them as errors.
+ *
+ *  We loop one INSERT per row instead of one VALUES (...) statement
+ *  because the per-row WHERE NOT EXISTS subquery is row-specific
+ *  (identifier differs). Drizzle's bulk insert API doesn't expose
+ *  per-row WHERE, and raw SQL with a UNION/VALUES set would lose the
+ *  Drizzle type-safety on the column list. At cron's scale (200 sources
+ *  × 4 ticks/day) the loop is in the noise. */
+async function atomicallyInsertNonDuplicates(
+  candidates: Array<typeof redditRefreshQueue.$inferInsert>,
+): Promise<number> {
+  let inserted = 0;
+  for (const row of candidates) {
+    const payload = row.payload as { handle?: string; sub?: string };
+    const isAuthor = row.type === "author_poll";
+    const identifier = isAuthor ? payload.handle : payload.sub;
+    if (identifier === undefined) continue; // already-warned upstream
+    const payloadKey = isAuthor ? "handle" : "sub";
+    const result = await db.execute<{ id: number }>(sql`
+      INSERT INTO reddit_refresh_queue
+        (queue_name, type, payload, user_id, priority)
+      SELECT ${row.queueName}, ${row.type}, ${JSON.stringify(row.payload)}::jsonb, ${row.userId ?? null}, ${row.priority ?? 0}
+      WHERE NOT EXISTS (
+        SELECT 1 FROM reddit_refresh_queue
+        WHERE queue_name = ${row.queueName}
+          AND type = ${row.type}
+          AND payload->>${payloadKey} = ${identifier}
+          AND status IN ('pending', 'processing')
+      )
+      RETURNING id
+    `);
+    const queryRows = (result as unknown as { rows?: Array<{ id: number }> }).rows ?? [];
+    if (queryRows.length > 0) inserted++;
   }
-  return out;
+  return inserted;
 }

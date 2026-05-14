@@ -155,7 +155,10 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
     } catch (err) {
       const ae = asAdapterError(err);
       expect(ae.category).toBe("rate-limited");
-      expect(ae.retryAfterMs).toBe(30_000);
+      // 30s header value + 0-5s jitter — assert range to allow random
+      // smear without making the test flaky.
+      expect(ae.retryAfterMs).toBeGreaterThanOrEqual(30_000);
+      expect(ae.retryAfterMs).toBeLessThan(35_000);
     }
   });
 
@@ -172,7 +175,9 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
     } catch (err) {
       const ae = asAdapterError(err);
       expect(ae.category).toBe("rate-limited");
-      expect(ae.retryAfterMs).toBe(45_000);
+      // 45s header value + 0-5s jitter.
+      expect(ae.retryAfterMs).toBeGreaterThanOrEqual(45_000);
+      expect(ae.retryAfterMs).toBeLessThan(50_000);
     }
   });
 

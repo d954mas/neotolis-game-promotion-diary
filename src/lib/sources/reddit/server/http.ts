@@ -176,23 +176,31 @@ export async function redditFetch<T = unknown>(
  * sometimes an HTTP-date but Reddit's API uses seconds). Default 60s
  * gives the worker a sane backoff when both headers are absent.
  */
+/** Jitter window applied to EVERY retry value — header-supplied or
+ *  default. N concurrent clients (preview button + paste submit + sub_poll
+ *  cron) seeing the same Retry-After otherwise retry in the same second.
+ *  5s smear is small enough not to violate the server's hint, large
+ *  enough to spread thundering-herd hits across multiple ticks of the
+ *  8-tick worker (7.5s tick interval). */
+const RETRY_JITTER_MS = 5_000;
+
+function jitteredRetryMs(base: number): number {
+  return base + Math.floor(Math.random() * RETRY_JITTER_MS);
+}
+
 function parseRetryAfter(headers: Headers): number {
   const retryAfter = headers.get("retry-after");
   if (retryAfter !== null) {
     const n = parseInt(retryAfter, 10);
-    if (!Number.isNaN(n) && n > 0) return n * 1000;
+    if (!Number.isNaN(n) && n > 0) return jitteredRetryMs(n * 1000);
   }
   const reset = headers.get("x-ratelimit-reset");
   if (reset !== null) {
     const n = parseInt(reset, 10);
-    if (!Number.isNaN(n) && n > 0) return n * 1000;
+    if (!Number.isNaN(n) && n > 0) return jitteredRetryMs(n * 1000);
   }
-  // Default: 60s + 0-5s jitter so a burst of simultaneous 429s does not
-  // thundering-herd retry in the same second when the window opens.
-  // For the 8-tick worker the fan-out is small, but the jitter also
-  // applies to user-driven preview/refresh paths that hit redditFetch
-  // directly without queue claim ordering.
-  return 60_000 + Math.floor(Math.random() * 5000);
+  // No header — default to 60s + jitter.
+  return jitteredRetryMs(60_000);
 }
 
 /**

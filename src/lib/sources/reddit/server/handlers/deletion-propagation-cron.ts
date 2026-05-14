@@ -30,7 +30,10 @@ import { writeAudit } from "$lib/server/audit.js";
 import { logger } from "$lib/server/logger.js";
 import { resolveOperatorUserId } from "../operator-resolver.js";
 
-export async function handleDeletionPropagationCron(): Promise<{ purged: number }> {
+export async function handleDeletionPropagationCron(): Promise<{
+  purged: number;
+  queueRowsCleaned: number;
+}> {
   // CTE-style UPDATE … RETURNING so we can count rows actually purged
   // in one round-trip. Drizzle's `db.execute(sql\`…\`)` returns
   // `{ rows: [...] }`; row count = rows.length.
@@ -90,7 +93,7 @@ export async function handleDeletionPropagationCron(): Promise<{ purged: number 
   );
 
   logger.info({ purged, queueRowsCleaned }, "reddit.deletion_propagation_cron: tick complete");
-  return { purged };
+  return { purged, queueRowsCleaned };
 }
 
 /** Re-exported for tests — see ../operator-resolver.ts. */
