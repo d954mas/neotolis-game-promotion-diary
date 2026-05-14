@@ -31,8 +31,7 @@ process.env.DATABASE_URL = dbUrl;
 // need a non-empty value so isRedditConfigured() returns true. Tests that
 // specifically assert the unconfigured behavior (REDDIT_USER_AGENT empty)
 // vi.stubEnv() locally. CI sets this same value in the workflow env.
-process.env.REDDIT_USER_AGENT ??=
-  "node:com.neotolis.gpd:0.1.0-test (by /u/integration-test)";
+process.env.REDDIT_USER_AGENT ??= "node:com.neotolis.gpd:0.1.0-test (by /u/integration-test)";
 
 export const pool = new pg.Pool({ connectionString: dbUrl, max: 5 });
 
