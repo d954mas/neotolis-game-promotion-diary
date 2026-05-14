@@ -324,6 +324,7 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
           `Expected AdapterError but got TypeError: ${err.message}. ` +
             `This usually means the env.js mock did not apply before http.ts loaded — ` +
             `check vi.doMock ordering / module-cache state.`,
+          { cause: err },
         );
       }
       const ae = asAdapterError(err);

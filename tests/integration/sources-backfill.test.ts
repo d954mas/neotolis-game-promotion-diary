@@ -118,14 +118,16 @@ describe("createSource backfillWindow → YOUTUBE_CHANNEL_CONTEXT_BACKFILL", () 
     expect(rows).toHaveLength(1);
   });
 
-  it("non-YouTube kinds reject before the enqueue path runs (kind_not_yet_functional)", async () => {
+  it("non-functional kinds reject before the enqueue path runs (kind_not_yet_functional)", async () => {
+    // Phase 03.1 made reddit_account / reddit_subreddit functional. The
+    // canonical "not-yet-functional" probe is now twitter_account.
     const u = await seedUserDirectly({ email: "p12-bf-nonyt@test.local" });
     await expect(
       createSource(
         u.id,
         {
-          kind: "reddit_account",
-          handleUrl: "https://reddit.com/user/p12",
+          kind: "twitter_account",
+          handleUrl: "https://twitter.com/p12",
           autoImport: true,
           backfillWindow: "everything",
         },

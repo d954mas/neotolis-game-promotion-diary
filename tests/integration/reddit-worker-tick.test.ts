@@ -100,6 +100,16 @@ async function enqueueRow(args: {
   priority?: number;
   attempts?: number;
 }): Promise<number> {
+  // Migration 0031 added ON DELETE CASCADE FK on reddit_refresh_queue.user_id.
+  // Tests using synthetic user IDs ("user-A", "user-B", ...) now need a
+  // matching user row to exist before INSERT. Ensure it idempotently.
+  if (args.userId) {
+    await db.execute(sql`
+      INSERT INTO "user" (id, email, name, email_verified, created_at, updated_at)
+      VALUES (${args.userId}, ${args.userId + "@test.local"}, ${args.userId}, true, NOW(), NOW())
+      ON CONFLICT (id) DO NOTHING
+    `);
+  }
   const rows = await db
     .insert(redditRefreshQueue)
     .values({
@@ -329,14 +339,10 @@ describe("Reddit worker tick — dispatch by type", () => {
     expect(postBatchCalls).toEqual([{ postIds: ["t3_a", "t3_b", "t3_c"], userId: null }]);
   });
 
-  it("unknown type dead-letters via permanent AdapterError", async () => {
-    const id = await enqueueRow({
-      queueName: "service_source",
-      type: "nonsense_type",
-      payload: {},
-    });
-    __setTickCounterForTest(0);
-    await redditWorkerTick();
-    expect(await statusOf(id)).toBe("dead_letter");
-  });
+  // NOTE: a previous "unknown type dead-letters via permanent AdapterError"
+  // test attempted to INSERT with type='nonsense_type'. Migration 0030
+  // landed a CHECK constraint on reddit_refresh_queue.type (4 valid types)
+  // — the bad row now fails at INSERT, which is the stronger guarantee.
+  // The worker's unknown-type handler remains as defensive code but the
+  // scenario is unreachable from the application layer.
 });
