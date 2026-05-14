@@ -36,6 +36,13 @@ import { auditLog } from "../db/schema/audit-log.js";
 import type { AuditAction } from "../audit/actions.js";
 import { todayPacific } from "./quota.js";
 import { getAdapter } from "$lib/sources/registry.js";
+import { env } from "$lib/server/config/env.js";
+import {
+  getQueueDepth as getRedditQueueDepth,
+  getDailyByType as getRedditDailyByType,
+  type RedditQueueDepthRow,
+  type RedditDailyByType,
+} from "$lib/sources/reddit/server/index.js";
 
 export interface QuotaKeyRow {
   /** sha-8 hash of the operator's API key — stable identifier across boots. */
@@ -71,10 +78,26 @@ const SERVICE_LEVEL_AUDIT_ACTIONS: readonly AuditAction[] = [
 /** How many tail audit rows to surface on /admin/quota. */
 const ADMIN_AUDIT_TAIL_LIMIT = 50;
 
+/**
+ * Reddit Ops block surfaced on the /admin page alongside the YouTube
+ * quota table + service audit list. When the operator hasn't configured
+ * REDDIT_USER_AGENT, the block collapses to `{ isConfigured: false }`
+ * — the page renders a "Reddit ingest disabled" placeholder instead of
+ * the live tables.
+ */
+export type AdminRedditBlock =
+  | {
+      isConfigured: true;
+      queueDepth: RedditQueueDepthRow[];
+      daily: RedditDailyByType;
+    }
+  | { isConfigured: false };
+
 export async function loadAdminQuotaPage(): Promise<{
   today: string;
   keys: QuotaKeyRow[];
   audit: ServiceAuditEntry[];
+  reddit: AdminRedditBlock;
 }> {
   const today = todayPacific();
   const now = new Date();
@@ -117,10 +140,26 @@ export async function loadAdminQuotaPage(): Promise<{
     .orderBy(desc(auditLog.createdAt))
     .limit(ADMIN_AUDIT_TAIL_LIMIT);
 
+  // Reddit Ops block — skip the two SQL round-trips when the operator
+  // hasn't configured REDDIT_USER_AGENT. The block collapses cleanly:
+  // the UI renders a single "Reddit ingest disabled" placeholder
+  // instead of stale empty tables that look like outages.
+  let reddit: AdminRedditBlock;
+  if (env.REDDIT_USER_AGENT === "") {
+    reddit = { isConfigured: false };
+  } else {
+    const [queueDepth, daily] = await Promise.all([
+      getRedditQueueDepth(),
+      getRedditDailyByType(),
+    ]);
+    reddit = { isConfigured: true, queueDepth, daily };
+  }
+
   return {
     today,
     keys: keyRows,
     audit: auditRows.map(toServiceAuditEntry),
+    reddit,
   };
 }
 
