@@ -57,23 +57,18 @@ describe("register data sources via POST /api/sources", () => {
     expect(persisted[0]!.deletedAt).toBeNull();
   });
 
-  it("kind=reddit_account rejects with AppError 'kind_not_yet_functional' (422 + metadata)", async () => {
+  it("kind=reddit_account creates a source (Phase 03.1 — adapter functional)", async () => {
     const userA = await seedUserDirectly({ email: "ds2@test.local" });
-    await expect(
-      createSource(
-        userA.id,
-        { kind: "reddit_account", handleUrl: "https://reddit.com/user/me" },
-        "127.0.0.1",
-      ),
-    ).rejects.toMatchObject({
-      code: "kind_not_yet_functional",
-      status: 422,
-      metadata: { kind: "reddit_account", status: "coming soon — pending Reddit OAuth" },
-    });
+    const created = await createSource(
+      userA.id,
+      { kind: "reddit_account", handleUrl: "https://reddit.com/user/d954mas" },
+      "127.0.0.1",
+    );
+    expect(created.kind).toBe("reddit_account");
+    expect(created.userId).toBe(userA.id);
 
-    // No row was inserted.
     const rows = await db.select().from(dataSources).where(eq(dataSources.userId, userA.id));
-    expect(rows).toHaveLength(0);
+    expect(rows).toHaveLength(1);
   });
 
   it("kinds twitter_account / telegram_channel / discord_server reject with 'kind_not_yet_functional'", async () => {
@@ -648,7 +643,7 @@ describe("/api/sources HTTP boundary", () => {
     expect(row!.handleUrl).toBe("https://www.youtube.com/@no-forge-attempt");
   });
 
-  it("POST /api/sources kind=reddit_account returns 422 kind_not_yet_functional", async () => {
+  it("POST /api/sources kind=reddit_account returns 201 (Phase 03.1 — adapter functional)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-src-2@test.local" });
@@ -660,12 +655,12 @@ describe("/api/sources HTTP boundary", () => {
       },
       body: JSON.stringify({
         kind: "reddit_account",
-        handleUrl: "https://reddit.com/user/me",
+        handleUrl: "https://reddit.com/user/d954mas",
       }),
     });
-    expect(res.status).toBe(422);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("kind_not_yet_functional");
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { kind: string };
+    expect(body.kind).toBe("reddit_account");
   });
 
   it("POST /api/sources duplicate handleUrl returns 422 duplicate_source", async () => {

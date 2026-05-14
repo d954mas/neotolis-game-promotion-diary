@@ -189,17 +189,17 @@ describe("POST /api/sources/:id/refresh-content", () => {
     const app = createApp();
     const u = await seedUserDirectly({ email: `rc-unsup-${uniq()}@test.local` });
 
-    // Direct INSERT bypassing createSource (which gates kind=reddit_account
-    // out at write time per FUNCTIONAL_KINDS). The schema enum accepts
-    // all 5 kinds; the registry has only 'youtube_channel' wired today.
-    // This is the only way to exercise the 422 path before the Reddit
-    // adapter lands.
+    // Direct INSERT bypassing createSource (which gates non-functional
+    // kinds out at write time per FUNCTIONAL_KINDS). The schema enum
+    // accepts all 6 kinds; today only youtube_channel + reddit_* are
+    // wired. twitter_account is the canonical "not-yet-supported" probe
+    // until its adapter lands.
     const id = uuidv7();
     await db.insert(dataSources).values({
       id,
       userId: u.id,
-      kind: "reddit_account",
-      handleUrl: `https://reddit.com/user/${uniq()}`,
+      kind: "twitter_account",
+      handleUrl: `https://twitter.com/${uniq()}`,
       isOwnedByMe: false,
       autoImport: false,
       metadata: {},

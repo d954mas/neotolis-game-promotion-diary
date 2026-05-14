@@ -7,13 +7,17 @@ import { randomBytes } from "node:crypto";
 // dynamic import; vi.resetModules() between cases so each test sees a fresh
 // parse of process.env.
 
-// Mock dotenv so env.ts's loadDotenv() calls become no-ops in this test
-// file. Without this, vi.resetModules() invalidates dotenv's module cache,
-// the next env.ts import re-loads .env from disk, and any test that
-// `delete process.env.FOO` to assert the empty/default branch will see
-// FOO repopulated from the developer's local .env. CI has no .env so
-// this only manifests locally — but the assertions matter equally in
-// both environments, so we cut the disk read out of the test path.
+// Mock dotenv (scoped to this file) so env.ts's loadDotenv() calls become
+// no-ops. Without this, vi.resetModules() invalidates dotenv's module
+// cache, the next env.ts import re-loads .env from disk, and any test
+// that `delete process.env.FOO` to assert the empty/default branch will
+// see FOO repopulated from the developer's local .env. CI has no .env
+// so this only manifests locally — but the assertions matter equally
+// in both environments, so we cut the disk read out of the test path.
+//
+// vitest hoists `vi.mock` to the top of the file at compile time and
+// scopes it per-test-file, so this does NOT leak into other test files
+// in the same worker.
 vi.mock("dotenv", () => ({
   config: () => ({ parsed: {} }),
 }));

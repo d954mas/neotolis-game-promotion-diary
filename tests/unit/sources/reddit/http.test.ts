@@ -294,19 +294,38 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
   });
 
   it("Reddit not configured (REDDIT_USER_AGENT empty) → AdapterError(operator-issue)", async () => {
+    // Use vi.doUnmock + vi.doMock (instead of vi.resetModules + vi.doMock)
+    // to override the beforeEach env mock without invalidating the
+    // already-registered audit + db mocks. resetModules invalidates
+    // module cache but doMock REGISTRATIONS persist — however, the
+    // dynamic import of http.js below transitively imports credentials.js
+    // and errors.js, and any race in registration order surfaces as
+    // "TypeError vs AdapterError" on the runner. Re-asserting all mocks
+    // immediately before the import keeps the load order deterministic.
+    vi.doUnmock("$lib/server/config/env.js");
     vi.resetModules();
     vi.doMock("$lib/server/config/env.js", () =>
       envMock({ REDDIT_USER_AGENT: "", ADMIN_EMAIL_ALLOWLIST: ["op@example.com"] }),
     );
     vi.doMock("$lib/server/audit.js", () => ({ writeAudit: writeAuditSpy }));
     mockOperatorDb("op-user-123");
-    const { redditFetch, __resetBurstStateForTest } =
-      await import("$lib/sources/reddit/server/http.js");
+    const httpMod = await import("$lib/sources/reddit/server/http.js");
+    const { redditFetch, __resetBurstStateForTest } = httpMod;
     __resetBurstStateForTest();
     try {
       await redditFetch("/r/x/new.json");
       throw new Error("should have thrown");
     } catch (err) {
+      // If the env mock didn't land, this throws TypeError before reaching
+      // AdapterError. Surface a useful diagnostic instead of the bare name
+      // mismatch.
+      if (err instanceof Error && err.name === "TypeError") {
+        throw new Error(
+          `Expected AdapterError but got TypeError: ${err.message}. ` +
+            `This usually means the env.js mock did not apply before http.ts loaded — ` +
+            `check vi.doMock ordering / module-cache state.`,
+        );
+      }
       const ae = asAdapterError(err);
       expect(ae.category).toBe("operator-issue");
       expect(ae.message).toContain("reddit_not_configured");
