@@ -60,12 +60,27 @@ describe("URL parser canonicalization", () => {
     }
   });
 
-  it("parseIngestUrl returns reddit_deferred for reddit.com", () => {
+  it("parseIngestUrl returns reddit_deferred for reddit POST URLs (Phase 03.1 transitional)", () => {
+    // Phase 03.1: redditAdapter.parseUrl matches POST URLs; url-parser.ts
+    // maps the registry's `reddit_post` → `reddit_deferred` until Plan 09
+    // wires the full paste-flow. The friendly inline-info banner stays
+    // intact for the user across the Plan 07 ↔ Plan 09 gap.
     expect(parseIngestUrl("https://www.reddit.com/r/IndieDev/comments/abc/foo/").kind).toBe(
       "reddit_deferred",
     );
     expect(parseIngestUrl("https://redd.it/abc").kind).toBe("reddit_deferred");
-    expect(parseIngestUrl("https://old.reddit.com/r/foo").kind).toBe("reddit_deferred");
+    expect(parseIngestUrl("https://old.reddit.com/r/IndieDev/comments/xyz/foo").kind).toBe(
+      "reddit_deferred",
+    );
+  });
+
+  it("parseIngestUrl returns unsupported for reddit SOURCE URLs (sub/user, not posts)", () => {
+    // `/r/IndieDev` (subreddit landing) and `/user/anna` (account page)
+    // are SOURCE-shape URLs — they belong to /sources/new flow, not the
+    // EVENT ingest flow. parseAnyUrl returns `unsupported` here; the
+    // user is routed to /sources/new via the friendly empty-state banner.
+    expect(parseIngestUrl("https://old.reddit.com/r/foo").kind).toBe("unsupported");
+    expect(parseIngestUrl("https://www.reddit.com/user/anna").kind).toBe("unsupported");
   });
 
   // Sanity tests — negative complements of the routes above.

@@ -145,9 +145,11 @@ export async function enrichRedditFeedDtos(
         FROM reddit_subreddits_cache
         WHERE name = ANY(${subArr}::text[])
       `);
-      for (const r of (subsResult as unknown as {
-        rows: Array<{ name: string; subscribers: number | string | null }>;
-      }).rows) {
+      for (const r of (
+        subsResult as unknown as {
+          rows: Array<{ name: string; subscribers: number | string | null }>;
+        }
+      ).rows) {
         if (r.subscribers !== null && r.subscribers !== undefined) {
           subSubscribers.set(r.name, Number(r.subscribers));
         }
@@ -159,14 +161,16 @@ export async function enrichRedditFeedDtos(
         WHERE window_label = '30d'
           AND subreddit = ANY(${subArr}::text[])
       `);
-      for (const r of (baselinesResult as unknown as {
-        rows: Array<{
-          subreddit: string;
-          median_score_24h: number | string | null;
-          p75_score_24h: number | string | null;
-          sample_size: number | string;
-        }>;
-      }).rows) {
+      for (const r of (
+        baselinesResult as unknown as {
+          rows: Array<{
+            subreddit: string;
+            median_score_24h: number | string | null;
+            p75_score_24h: number | string | null;
+            sample_size: number | string;
+          }>;
+        }
+      ).rows) {
         const sampleSize = Number(r.sample_size ?? 0);
         // Baselines cron only emits rows with sample_size >= 5 per its
         // HAVING clause, but defense-in-depth here too — the UI hides
@@ -190,9 +194,11 @@ export async function enrichRedditFeedDtos(
         FROM reddit_users_cache
         WHERE username = ANY(${authorArr}::text[])
       `);
-      for (const r of (usersResult as unknown as {
-        rows: Array<{ username: string; total_karma: number | string | null }>;
-      }).rows) {
+      for (const r of (
+        usersResult as unknown as {
+          rows: Array<{ username: string; total_karma: number | string | null }>;
+        }
+      ).rows) {
         if (r.total_karma !== null && r.total_karma !== undefined) {
           authorKarma.set(r.username, Number(r.total_karma));
         }
@@ -204,7 +210,11 @@ export async function enrichRedditFeedDtos(
     // (ui/card-props.ts) reads via the same shape.
     for (const dto of redditDtos) {
       const eid = dto.externalId as string;
-      const stats = statsMap.get(eid) ?? statsMap.get(`t3_${eid}`) ?? statsMap.get(eid.replace(/^t3_/, "")) ?? null;
+      const stats =
+        statsMap.get(eid) ??
+        statsMap.get(`t3_${eid}`) ??
+        statsMap.get(eid.replace(/^t3_/, "")) ??
+        null;
       const md = (dto.metadata ?? {}) as { subreddit?: string; author?: string };
       const sub = md.subreddit;
       const author = md.author;

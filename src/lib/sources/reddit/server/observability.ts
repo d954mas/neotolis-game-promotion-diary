@@ -73,7 +73,10 @@ export const REDDIT_USER_SLOTS_PER_MINUTE = 6 as const;
  * over the verb yields the operator's pool view, not a tenant view.
  */
 async function getDailyStats(_date: Date): Promise<ObservabilityDailyStats> {
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- /admin/quota observability is allowlist-gated; cross-tenant audit aggregation is the intended operator view. Mirrors admin-quota-read.ts.
+  // Cross-tenant audit aggregation by design — /admin/quota observability
+  // is allowlist-gated upstream (see admin-quota-read.ts). The raw-SQL
+  // path doesn't trigger the tenant-scope ESLint rule, but documenting
+  // the rationale here for the next reader.
   const result = await db.execute(sql`
     SELECT COALESCE(SUM((metadata->>'entries_processed')::int), 0) AS units_used
     FROM audit_log
@@ -136,7 +139,9 @@ async function getRecentAudit(limit: number): Promise<ObservabilityAuditEntry[]>
 export async function getRecentLoad(
   seconds = 60,
 ): Promise<{ used: number; capacity: typeof REDDIT_USER_SLOTS_PER_MINUTE }> {
-  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- queue table is operator-pool counter; cross-tenant aggregation by design for the service-load gauge.
+  // Queue table is operator-pool counter; cross-tenant aggregation by
+  // design for the service-load gauge. Raw-SQL path bypasses the
+  // tenant-scope rule, but documenting the rationale here.
   const result = await db.execute(sql`
     SELECT COUNT(*)::int AS used
     FROM reddit_refresh_queue

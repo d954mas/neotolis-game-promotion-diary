@@ -69,13 +69,9 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
   await boss.createQueue(QUEUES.REDDIT_CRON_BASELINES);
   await boss.createQueue(QUEUES.REDDIT_CRON_DELETION_PROPAGATION);
 
-  await boss.work(
-    QUEUES.REDDIT_CRON_ENQUEUE_SERVICE_SOURCES,
-    { batchSize: 1 },
-    async (jobs) => {
-      for (const _ of jobs) await handleEnqueueServiceSourcesCron();
-    },
-  );
+  await boss.work(QUEUES.REDDIT_CRON_ENQUEUE_SERVICE_SOURCES, { batchSize: 1 }, async (jobs) => {
+    for (const _ of jobs) await handleEnqueueServiceSourcesCron();
+  });
   await boss.work(QUEUES.REDDIT_CRON_ENQUEUE_SERVICE_POSTS, { batchSize: 1 }, async (jobs) => {
     for (const _ of jobs) await handleEnqueueServicePostsCron();
   });
@@ -112,12 +108,7 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
     { tz: "UTC" },
   );
   await boss.schedule(QUEUES.REDDIT_CRON_BASELINES, "0 4 * * *", {}, { tz: "UTC" });
-  await boss.schedule(
-    QUEUES.REDDIT_CRON_DELETION_PROPAGATION,
-    "0 5 * * *",
-    {},
-    { tz: "UTC" },
-  );
+  await boss.schedule(QUEUES.REDDIT_CRON_DELETION_PROPAGATION, "0 5 * * *", {}, { tz: "UTC" });
 }
 
 /** backfillSource — user-driven "Pull new content" / cron-driven

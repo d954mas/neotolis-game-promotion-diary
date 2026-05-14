@@ -19,6 +19,7 @@ import type FeedCard from "$lib/components/FeedCard.svelte";
 import type { EventKind, SourceKind } from "./adapter.js";
 import { eventKindToSourceKind } from "./event-to-source-kind.js";
 import * as youtubeUiClient from "./youtube/ui/index.js";
+import * as redditUiClient from "./reddit/ui/index.js";
 
 /** Card-component contract — adapters that override /feed rendering must
  *  ship a Svelte component with the same props as the universal FeedCard.
@@ -39,6 +40,10 @@ export interface AdapterUiClient {
 
 const uiClientRegistry = new Map<SourceKind, AdapterUiClient>([
   ["youtube_channel", youtubeUiClient as unknown as AdapterUiClient],
+  // reddit_account + reddit_subreddit both map to the same Reddit UI
+  // client module — same reasoning as registry-ui.ts.
+  ["reddit_account", redditUiClient as unknown as AdapterUiClient],
+  ["reddit_subreddit", redditUiClient as unknown as AdapterUiClient],
 ]);
 
 /**
