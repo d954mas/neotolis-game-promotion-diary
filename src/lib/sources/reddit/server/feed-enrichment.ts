@@ -26,7 +26,7 @@
 // object. The UI mapper (ui/card-props.ts) reads via the same cast
 // shape; no schema changes to EventDto.
 
-import { sql, inArray, eq, and, desc } from "drizzle-orm";
+import { inArray, eq, and, desc } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { logger } from "$lib/server/logger.js";
 import type { EventDto } from "$lib/server/dto.js";

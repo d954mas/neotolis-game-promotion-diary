@@ -7,6 +7,17 @@ import { randomBytes } from "node:crypto";
 // dynamic import; vi.resetModules() between cases so each test sees a fresh
 // parse of process.env.
 
+// Mock dotenv so env.ts's loadDotenv() calls become no-ops in this test
+// file. Without this, vi.resetModules() invalidates dotenv's module cache,
+// the next env.ts import re-loads .env from disk, and any test that
+// `delete process.env.FOO` to assert the empty/default branch will see
+// FOO repopulated from the developer's local .env. CI has no .env so
+// this only manifests locally — but the assertions matter equally in
+// both environments, so we cut the disk read out of the test path.
+vi.mock("dotenv", () => ({
+  config: () => ({ parsed: {} }),
+}));
+
 // Required env values for the schema's required keys (DATABASE_URL, etc.)
 // Set via ??= so we don't clobber a CI-provided value.
 process.env.DATABASE_URL ??= "postgres://test:test@localhost:5432/test";
