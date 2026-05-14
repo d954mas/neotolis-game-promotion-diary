@@ -63,31 +63,30 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
   });
 
   it("V11: source-actions 1/5min — 2nd attempt within window → allowed=false", async () => {
-    // INSERT one source.refresh_content_requested row for userA with
-    // platform=reddit_account. The first attempt has already consumed the
-    // 1/5min budget; the cap check models the NEXT attempt and reports
-    // it as denied.
+    // INSERT one user_source queue row for userA. The first source-action
+    // (createSource or refresh-content) enqueues the row; the cap check
+    // models the NEXT attempt and reports it as denied.
+    // Note: migrated from audit_log-based counter to queue-based counter
+    // (matches post-refreshes axis). createSource writes verb='source.added'
+    // which the audit-log counter never saw — silent bypass — and queue
+    // rows from onSourceCreated are the actual evidence of work happening.
     await db.execute(sql`
-      INSERT INTO audit_log (id, user_id, action, ip_address, metadata, created_at)
-      VALUES (${uuidv7()}, ${userA}, 'source.refresh_content_requested', '0.0.0.0',
-              '{"platform":"reddit_account","flow":"incremental"}'::jsonb, NOW())
+      INSERT INTO reddit_refresh_queue (queue_name, type, payload, user_id, priority)
+      VALUES ('user_source', 'sub_poll', '{"sub":"IndieDev"}'::jsonb, ${userA}, 1)
     `);
     const result = await checkRedditUserCap(db, userA, "source-actions");
     expect(result.allowed).toBe(false);
     expect(result.used).toBe(1);
     expect(result.cap).toBe(1);
     expect(result.window_minutes).toBe(5);
-    // reset window narrows as time passes; should be ≤ 300 and ≥ 1.
     expect(result.reset_in_seconds).toBeGreaterThanOrEqual(1);
     expect(result.reset_in_seconds).toBeLessThanOrEqual(300);
   });
 
-  it("source-actions: 5+ min old audit rows do NOT count (window slides)", async () => {
-    // Row 10 minutes ago — outside the 5-min sliding window.
+  it("source-actions: 5+ min old queue rows do NOT count (window slides)", async () => {
     await db.execute(sql`
-      INSERT INTO audit_log (id, user_id, action, ip_address, metadata, created_at)
-      VALUES (${uuidv7()}, ${userA}, 'source.refresh_content_requested', '0.0.0.0',
-              '{"platform":"reddit_account","flow":"incremental"}'::jsonb,
+      INSERT INTO reddit_refresh_queue (queue_name, type, payload, user_id, priority, enqueued_at)
+      VALUES ('user_source', 'sub_poll', '{"sub":"old"}'::jsonb, ${userA}, 1,
               NOW() - INTERVAL '10 minutes')
     `);
     const result = await checkRedditUserCap(db, userA, "source-actions");
@@ -95,48 +94,24 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
     expect(result.used).toBe(0);
   });
 
-  it("source-actions: reddit_subreddit platform ALSO counts (both reddit_* platforms)", async () => {
+  it("source-actions: service_source rows (cron lane) do NOT count (cap-exempt)", async () => {
+    // Mirrors V13 — cron-lane rows are user_id NULL OR queue_name=service_*
+    // and don't burn the user-action cap. Counter filters by
+    // queue_name='user_source' so even userId-attributed cron work
+    // (theoretical edge) is excluded if it landed on the wrong lane.
     await db.execute(sql`
-      INSERT INTO audit_log (id, user_id, action, ip_address, metadata, created_at)
-      VALUES (${uuidv7()}, ${userA}, 'source.refresh_content_requested', '0.0.0.0',
-              '{"platform":"reddit_subreddit","flow":"incremental"}'::jsonb, NOW())
-    `);
-    const result = await checkRedditUserCap(db, userA, "source-actions");
-    expect(result.allowed).toBe(false);
-    expect(result.used).toBe(1);
-  });
-
-  it("source-actions: youtube_channel platform does NOT count (per-platform cap isolation)", async () => {
-    await db.execute(sql`
-      INSERT INTO audit_log (id, user_id, action, ip_address, metadata, created_at)
-      VALUES (${uuidv7()}, ${userA}, 'source.refresh_content_requested', '0.0.0.0',
-              '{"platform":"youtube_channel","flow":"incremental"}'::jsonb, NOW())
+      INSERT INTO reddit_refresh_queue (queue_name, type, payload, user_id, priority)
+      VALUES ('service_source', 'sub_poll', '{"sub":"cron"}'::jsonb, ${userA}, 1)
     `);
     const result = await checkRedditUserCap(db, userA, "source-actions");
     expect(result.allowed).toBe(true);
     expect(result.used).toBe(0);
   });
 
-  it("V13: auto_passive flow excluded from source-actions counter", async () => {
-    // 5 audit rows with metadata.flow='auto_passive' for userA → cron-driven,
-    // not counted toward user-action cap.
-    for (let i = 0; i < 5; i++) {
-      await db.execute(sql`
-        INSERT INTO audit_log (id, user_id, action, ip_address, metadata, created_at)
-        VALUES (${uuidv7()}, ${userA}, 'source.refresh_content_requested', '0.0.0.0',
-                '{"platform":"reddit_account","flow":"auto_passive"}'::jsonb, NOW())
-      `);
-    }
-    const result = await checkRedditUserCap(db, userA, "source-actions");
-    expect(result.allowed).toBe(true);
-    expect(result.used).toBe(0);
-  });
-
-  it("source-actions: other user's audit rows do NOT count (tenant scope)", async () => {
+  it("source-actions: other user's queue rows do NOT count (tenant scope)", async () => {
     await db.execute(sql`
-      INSERT INTO audit_log (id, user_id, action, ip_address, metadata, created_at)
-      VALUES (${uuidv7()}, ${userB}, 'source.refresh_content_requested', '0.0.0.0',
-              '{"platform":"reddit_account","flow":"incremental"}'::jsonb, NOW())
+      INSERT INTO reddit_refresh_queue (queue_name, type, payload, user_id, priority)
+      VALUES ('user_source', 'sub_poll', '{"sub":"x"}'::jsonb, ${userB}, 1)
     `);
     const result = await checkRedditUserCap(db, userA, "source-actions");
     expect(result.allowed).toBe(true);
