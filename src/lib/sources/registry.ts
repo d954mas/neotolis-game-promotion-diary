@@ -42,5 +42,16 @@ export function hasAdapter(kind: SourceKind): boolean {
 }
 
 /** Iterating order is registration order — load-bearing for the
- *  first-match-wins URL router. */
-export const allAdapters: DataSourceAdapter[] = Array.from(registry.values());
+ *  first-match-wins URL router. Distinct-by-reference: an adapter that
+ *  serves multiple SourceKinds (Reddit: reddit_account + reddit_subreddit
+ *  → one redditAdapter object) appears ONCE in this array. Without this
+ *  dedup, worker `registerQueues`, scheduler `scheduleCronTicks`,
+ *  registry routes via `registerRoutes`, and feed enrichment would all
+ *  run the Reddit hooks twice on boot/per-event, with predictable
+ *  duplicate-side-effect consequences (Hono throws on duplicate route
+ *  mount; pg-boss .subscribe duplicates handlers; cron schedules pile up).
+ *
+ *  The Map registry keeps both entries so `getAdapter(kind)` resolves
+ *  cleanly for both kinds; this array is the iteration view.
+ */
+export const allAdapters: DataSourceAdapter[] = Array.from(new Set(registry.values()));

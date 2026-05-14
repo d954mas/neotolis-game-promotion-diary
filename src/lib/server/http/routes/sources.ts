@@ -63,6 +63,7 @@ const REFRESH_CONTENT_RATE_WINDOW_MS = 60_000;
 const sourceKindEnum = z.enum([
   "youtube_channel",
   "reddit_account",
+  "reddit_subreddit",
   "twitter_account",
   "telegram_channel",
   "discord_server",

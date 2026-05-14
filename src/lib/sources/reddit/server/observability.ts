@@ -357,10 +357,15 @@ export const redditObservability: AdapterObservability = {
     postRefreshesPerWindow: REDDIT_USER_CAP.postRefreshesPerWindow,
     windowMinutes: REDDIT_USER_CAP.windowMinutes,
   },
-  // Reddit's rate-limit lives on the SQL-backed reddit_refresh_queue
-  // (FOR UPDATE SKIP LOCKED is multi-replica safe). The 8-tick
-  // setInterval is single-process by D-RDT-WORKER, but the QUEUE state
-  // is persistent — adapter declares false so multi-replica scaling
-  // doesn't trip worker bootstrap's in-process-rate-limiter guard.
-  usesInProcessRateLimiter: false,
+  // TRUE — every worker process starts its own `setInterval(tick, 7500)`
+  // (see src/worker/index.ts). FOR UPDATE SKIP LOCKED prevents two replicas
+  // from claiming the SAME row, but it does NOT enforce a global rate-limit:
+  // two replicas each running 8 ticks/min would burn 16 req/min against
+  // Reddit's 10 req/min hard ceiling. The in-process pacer (the setInterval
+  // itself) is the rate-limiter, and it's per-process — so this flag
+  // correctly forces WORKER_REPLICA_COUNT === 1 at boot. A future
+  // multi-replica Reddit deployment would need a database-side pacer
+  // (e.g. a `next_run_at` row on a singleton table that ticks consume
+  // and update in the same tx).
+  usesInProcessRateLimiter: true,
 };

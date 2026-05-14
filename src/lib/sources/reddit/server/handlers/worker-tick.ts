@@ -121,7 +121,25 @@ export async function redditWorkerTick(): Promise<RedditWorkerTickResult> {
 async function tryClaimAndDispatch(
   queueName: string,
 ): Promise<{ id: number; type: string } | null> {
-  return await db.transaction(async (tx) => {
+  // Phase 1 — SHORT transaction. Atomically pick + mark processing +
+  // increment attempts, then COMMIT. The tx holds a row lock for only
+  // the duration of one UPDATE; the connection returns to the pool
+  // before any HTTP work fires.
+  //
+  // Why split: holding `tx` across `dispatchByType` (which does a
+  // Reddit fetch + 4 UPSERTs + a snapshot write) ties up a DB
+  // connection for the full handler duration and serializes
+  // FOR UPDATE work behind slow network. The split makes the claim
+  // O(ms) and lets the connection pool serve other queries while
+  // the handler is in flight.
+  //
+  // Crash recovery: a worker process crashing AFTER claim + COMMIT but
+  // BEFORE the terminal UPDATE leaves status='processing'. The
+  // stale-processing recovery in handleDeletionPropagationCron (or a
+  // future dedicated cron) can scan `WHERE status='processing' AND
+  // last_attempt_at < NOW() - 5min` and flip back to 'pending' —
+  // safe because attempts was incremented, so retries don't loop.
+  const row = await db.transaction(async (tx) => {
     const rows = await tx.execute(sql`
       SELECT id, type, payload, user_id, attempts
       FROM reddit_refresh_queue
@@ -139,54 +157,55 @@ async function tryClaimAndDispatch(
     // Coerce bigserial id from string → number at the row-read boundary
     // (node-pg returns bigint/bigserial as strings). Downstream callers
     // (test harness, observability, handlers) expect number.
-    const row: ClaimedRow = { ...rawRow, id: Number(rawRow.id) };
-
-    // Mark processing + increment attempts BEFORE invoking handler. If
-    // the worker process crashes mid-handler, the row stays in
-    // 'processing' status; a future operator-visible SQL query
-    // (`WHERE status='processing' AND last_attempt_at < NOW() - 5m`)
-    // can manually requeue stuck rows. (Recovery cron is plan 05B+
-    // discretion — out of scope for 05A.)
+    const claimed: ClaimedRow = { ...rawRow, id: Number(rawRow.id) };
     await tx.execute(sql`
       UPDATE reddit_refresh_queue
       SET status = 'processing',
           last_attempt_at = NOW(),
           attempts = attempts + 1
-      WHERE id = ${row.id}
+      WHERE id = ${claimed.id}
     `);
+    return claimed;
+  });
 
-    const newAttempts = row.attempts + 1;
-    try {
-      await dispatchByType(row);
-      await tx.execute(sql`UPDATE reddit_refresh_queue SET status = 'done' WHERE id = ${row.id}`);
-    } catch (err) {
-      const isPermanent =
-        err instanceof AdapterError &&
-        (err.category === "permanent" || err.category === "not-found");
-      if (isPermanent || newAttempts >= MAX_ATTEMPTS) {
-        await tx.execute(
-          sql`UPDATE reddit_refresh_queue SET status = 'dead_letter' WHERE id = ${row.id}`,
-        );
-      } else {
-        // Re-queue. attempts was already incremented above.
-        await tx.execute(
-          sql`UPDATE reddit_refresh_queue SET status = 'pending' WHERE id = ${row.id}`,
-        );
-      }
-      logger.warn(
-        {
-          queueName,
-          type: row.type,
-          id: row.id,
-          category: err instanceof AdapterError ? err.category : "non-adapter",
-          attempts: newAttempts,
-          err: String((err as Error)?.message ?? err),
-        },
-        "reddit worker tick: handler failed",
+  if (row === null) return null;
+  const newAttempts = row.attempts + 1;
+
+  // Phase 2 — HTTP + DB work OUTSIDE any transaction. handlePostSingle
+  // and the other type-handlers each manage their own UPSERT semantics;
+  // the worker's only job here is to mark the terminal state once they
+  // complete (or fail).
+  try {
+    await dispatchByType(row);
+    await db.execute(sql`UPDATE reddit_refresh_queue SET status = 'done' WHERE id = ${row.id}`);
+  } catch (err) {
+    const isPermanent =
+      err instanceof AdapterError && (err.category === "permanent" || err.category === "not-found");
+    if (isPermanent || newAttempts >= MAX_ATTEMPTS) {
+      await db.execute(
+        sql`UPDATE reddit_refresh_queue SET status = 'dead_letter' WHERE id = ${row.id}`,
+      );
+    } else {
+      // Re-queue. attempts was already incremented in phase 1, so a
+      // transient handler crash retries up to MAX_ATTEMPTS but cannot
+      // loop indefinitely.
+      await db.execute(
+        sql`UPDATE reddit_refresh_queue SET status = 'pending' WHERE id = ${row.id}`,
       );
     }
-    return { id: row.id, type: row.type };
-  });
+    logger.warn(
+      {
+        queueName,
+        type: row.type,
+        id: row.id,
+        category: err instanceof AdapterError ? err.category : "non-adapter",
+        attempts: newAttempts,
+        err: String((err as Error)?.message ?? err),
+      },
+      "reddit worker tick: handler failed",
+    );
+  }
+  return { id: row.id, type: row.type };
 }
 
 /** Dispatch by row.type — one of sub_poll / author_poll / post_batch /

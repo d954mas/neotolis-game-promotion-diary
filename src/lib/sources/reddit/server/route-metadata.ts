@@ -61,21 +61,20 @@ redditMetadataRoutes.post(
       if (parsed === null) {
         throw new AppError("Not a Reddit post URL", "invalid_url", 422, { url });
       }
-      // Two-axis user-cap enforcement BEFORE the fetch — preview burns
-      // a Reddit unit the same as a paste, so it counts against the
-      // post-refresh axis (25/5min). handlePostSingle's 60s dedup means
-      // a previewed-then-submitted post produces ONE cap tick, but
-      // pre-emptive enforce prevents 100-click attacks from sneaking
-      // through (each click pre-dedup writes one done-row; the 26th
-      // would fire 429 even within the same window).
+      // Two-axis user-cap enforcement, but ONLY when handlePostSingle is
+      // about to perform a real Reddit fetch (i.e. dedup pre-check missed).
+      // Passing the gate via `beforeFetch` keeps cache hits free — a user
+      // who previews then immediately submits on the same URL doesn't
+      // double-pay the post-refresh cap.
       const redditAdapter = getAdapter("reddit_account");
-      await enforceRedditUserCap(db, redditAdapter, ctx.userId, ctx.ipAddress, "post-refresh");
       let result;
       try {
         result = await handlePostSingle({
           postId: parsed.externalId,
           userId: ctx.userId,
           paste: true,
+          beforeFetch: () =>
+            enforceRedditUserCap(db, redditAdapter, ctx.userId, ctx.ipAddress, "post-refresh"),
         });
       } catch (err) {
         if (err instanceof AdapterError) {

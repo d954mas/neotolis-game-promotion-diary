@@ -86,6 +86,12 @@ export async function handlePostSingle(args: {
   postId: string;
   userId: string | null;
   paste?: boolean;
+  /** Optional gate that fires ONLY when handlePostSingle is about to
+   *  perform a real Reddit fetch (i.e. dedup pre-check missed). Throws
+   *  from the gate propagate up — the fetch is skipped. Callers use
+   *  this to apply cap enforcement that should NOT punish cache hits.
+   *  Cron callers (paste !== true) leave this undefined. */
+  beforeFetch?: () => Promise<void>;
 }): Promise<HandlePostSingleResult> {
   const bareId = args.postId.replace(/^t3_/, "");
   const fullIdGuess = `t3_${bareId}`;
@@ -108,6 +114,13 @@ export async function handlePostSingle(args: {
       );
       return cached;
     }
+  }
+
+  // Cache miss — about to burn a Reddit unit. Fire the optional gate
+  // BEFORE the network call so cap-exhausted users see 429 instead of
+  // a Reddit response they aren't allowed to consume.
+  if (args.beforeFetch !== undefined) {
+    await args.beforeFetch();
   }
 
   const { data } = await redditFetch<unknown>(`/comments/${bareId}.json`);

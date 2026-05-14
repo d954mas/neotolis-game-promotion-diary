@@ -407,6 +407,54 @@ export async function createSource(
     );
   }
 
+  // Reddit source validation: parse handleUrl through the adapter's
+  // URL parser AND enforce that the kind matches. This populates
+  // input.metadata.{username|subreddit} authoritatively — without it,
+  // /sources/new could persist a reddit_account row with no username
+  // (UI fallback) and onSourceCreated would silently skip enqueue.
+  // Validate-at-boundary: reject malformed Reddit source URLs with 422.
+  if (input.kind === "reddit_account" || input.kind === "reddit_subreddit") {
+    const { redditParseSourceUrl } = await import("$lib/sources/reddit/server/url.js");
+    const parsed = redditParseSourceUrl(input.handleUrl);
+    if (parsed === null) {
+      throw new AppError(
+        `handleUrl does not match a Reddit ${input.kind === "reddit_account" ? "user profile" : "subreddit"} URL`,
+        "invalid_handle_url",
+        422,
+        { kind: input.kind, handleUrl: input.handleUrl },
+      );
+    }
+    if (parsed.kind !== input.kind) {
+      throw new AppError(
+        `handleUrl shape (${parsed.kind}) does not match declared kind (${input.kind})`,
+        "kind_url_inconsistent",
+        422,
+        { declaredKind: input.kind, parsedKind: parsed.kind, handleUrl: input.handleUrl },
+      );
+    }
+    // Inject metadata authoritatively — callers cannot bypass the parsed
+    // identifier with a hand-crafted metadata blob. Caller-supplied
+    // metadata for non-identifier fields (display_name, etc.) is
+    // preserved by spread-merge.
+    input = {
+      ...input,
+      metadata: {
+        ...input.metadata,
+        ...(parsed.kind === "reddit_account"
+          ? { username: parsed.handle }
+          : { subreddit: parsed.handle }),
+      },
+    };
+
+    // Reddit two-axis cap — register-source counts on the source-action
+    // axis (1/5min). enforceRedditUserCap throws 429 BEFORE the INSERT;
+    // the events row never lands when cap exhausted. Mirrors the
+    // refresh-content cap-check in src/lib/server/http/routes/sources.ts.
+    const { enforceRedditUserCap } = await import("./quota.js");
+    const { getAdapter } = await import("$lib/sources/registry.js");
+    await enforceRedditUserCap(db, getAdapter(input.kind), userId, ipAddress, "source-action");
+  }
+
   // Cheap pre-checks BEFORE canonicalize. Pre-fix the adapter's canonicalizeOnCreate (which can
   // call YouTube's videos.list for /watch?v= URLs) ran first, so a user
   // hitting the source quota cap or pasting an exact-duplicate handle
