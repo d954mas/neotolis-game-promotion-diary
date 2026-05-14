@@ -351,6 +351,27 @@ export async function createEvent(
   validateTitle(input.title);
   const occurredAt = coerceOccurredAt(input.occurredAt);
 
+  // Reddit ingest gate. The full Reddit paste flow lives in
+  // services/ingest.ts parsePasteAndCreate (plan 09 — D-RDT-INGEST-REPLACE);
+  // the route layer hasn't been migrated to call it yet (tracked as a
+  // follow-up). Meanwhile, when a kind=reddit_post event arrives via the
+  // generic /api/events endpoint with REDDIT_USER_AGENT empty, surface a
+  // useful operator-facing code instead of silently creating an event
+  // that won't be polled. This is the contract the smoke gate asserts
+  // (V24-paste). When configured, the row is created and Reddit ingest
+  // will pick it up via the standard worker path.
+  if (input.kind === "reddit_post" && input.url != null && input.url !== "") {
+    const { isRedditConfigured } = await import("$lib/sources/reddit/server/credentials.js");
+    if (!isRedditConfigured()) {
+      throw new AppError(
+        "Reddit ingest disabled — operator has not configured REDDIT_USER_AGENT",
+        "reddit_not_configured",
+        422,
+        { kind: "reddit_post" },
+      );
+    }
+  }
+
   // Validate every gameId belongs to userId BEFORE any INSERT
   // (validate-first). De-dup the input via Set so the same gameId passed
   // twice doesn't trigger duplicate junction INSERTs (composite PK would
