@@ -265,7 +265,17 @@ describe("URL ingest paste-box — unified events", () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("Reddit paste returns 422 reddit_not_yet_supported — no row inserted", async () => {
+  it("Reddit paste against empty REDDIT_USER_AGENT returns 422 reddit_not_configured — no row inserted", async () => {
+    // Phase 03.1 plan 09 D-RDT-INGEST-REPLACE replaced the legacy
+    // `reddit_not_yet_supported` 422 with a richer paste flow. The empty-env
+    // pre-flight in services/ingest.ts now raises `reddit_not_configured`
+    // 422 BEFORE any HTTP fires (parity with YouTube's empty-keys 422).
+    //
+    // The integration setup leaves REDDIT_USER_AGENT empty (no env wiring
+    // for Reddit in tests/setup.ts), so this is the natural unconfigured
+    // state — no env-doMock dance needed. Positive paste-flow + 25/5min
+    // cap exhaustion + author_is_me inheritance are covered by
+    // tests/integration/reddit-paste.test.ts (plan 09 Task 3).
     const u = await seedUserDirectly({ email: "ing6@test.local" });
     const gameId = uuidv7();
     await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
@@ -277,7 +287,7 @@ describe("URL ingest paste-box — unified events", () => {
         "https://www.reddit.com/r/IndieDev/comments/abc/foo/",
         "127.0.0.1",
       ),
-    ).rejects.toMatchObject({ status: 422, code: "reddit_not_yet_supported" });
+    ).rejects.toMatchObject({ status: 422, code: "reddit_not_configured" });
 
     const rows = await db.select().from(events).where(eq(events.userId, u.id));
     expect(rows).toHaveLength(0);

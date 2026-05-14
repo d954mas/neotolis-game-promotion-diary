@@ -8,19 +8,37 @@
 // free-form social posts (no oEmbed-driven dedup / source attachment), and
 // the orchestrator wires the platform-specific oEmbed call before INSERT.
 //
-// Reddit URLs return AppError 'reddit_not_yet_supported' (422). Reddit
-// ingest waits for the poll.reddit adapter.
+// Reddit paste path (D-RDT-INGEST-REPLACE, plan 09):
+//   1. Pre-flight: isRedditConfigured() — empty REDDIT_USER_AGENT returns
+//      'reddit_not_configured' 422 (parity with YouTube empty-keys behavior).
+//   2. Per-user cap: enforceRedditUserCap('post-refresh') burns one slot
+//      against the 25/5min post-refreshes sliding window (D-RDT-CAP-POST)
+//      via reddit_refresh_queue COUNT. On exhaustion: 429
+//      `reddit_post_quota_exhausted` with retry_in_seconds metadata.
+//   3. Synchronous fetch + UPSERT: handlePostSingle calls
+//      /comments/<id>.json, UPSERTs reddit_posts + reddit_subreddits_cache
+//      + reddit_users_cache, and writes one reddit_post_snapshots row.
+//      Returns the parsed t3 fields (title, author, submittedAt, ...).
+//   4. author_is_me inheritance: match parsed `author` against any owned
+//      reddit_account data_source for this user (case-sensitive on
+//      metadata.username) — sets events.author_is_me=true on match.
+//   5. createEvent INSERT — kind='reddit_post', externalId='t3_<id>',
+//      metadata.{subreddit, author}, occurredAt=submittedAt, title from
+//      Reddit. Validate-first invariant honored: events INSERT only after
+//      caches succeed.
 //
-// Validate-first invariant (AGENTS.md): URL parsing + oEmbed call run
-// BEFORE any INSERT. On 422 / 502 the database is provably untouched.
+// Validate-first invariant (AGENTS.md): URL parsing + per-kind validation
+// (YouTube oEmbed / Reddit /comments/<id>.json) run BEFORE any INSERT. On
+// 422 / 502 the database is provably untouched.
 //
 // Result is a discriminated union the route handler maps to:
 //   { kind: 'event_created', eventId } → 201 + projected DTO
-//   { kind: 'reddit_deferred' }         → legacy-callers compat; new code
-//                                         throws AppError 'reddit_not_yet_supported'.
+//
 // Throws AppError 422 (unsupported_url / youtube_unavailable /
-// reddit_not_yet_supported) or AppError 502 (youtube_oembed_unreachable) for the
-// failure modes.
+// reddit_not_configured) or 429 (reddit_post_quota_exhausted) or 502
+// (youtube_oembed_unreachable) for the failure modes. AdapterError raised
+// by handlePostSingle (rate-limited / not-found / permanent) propagates
+// to the route layer which maps it to the structured response.
 //
 // Channel-context backfill trigger: after the youtube_video event row is
 // created, if the URL's channel is NOT yet in `youtube_channels`, enqueue
@@ -29,16 +47,21 @@
 // any error enqueueing is logged + swallowed so the user-facing paste
 // still returns 201.
 
-import { eq, or, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { parseIngestUrl } from "./url-parser.js";
 import { fetchTwitterOembed } from "../integrations/twitter-oembed.js";
 import { createEvent, createEventFromPaste } from "./events.js";
 import { AppError } from "./errors.js";
+import { enforceRedditUserCap } from "./quota.js";
 import { db } from "../db/client.js";
 import { youtubeChannels } from "../db/schema/index.js";
+import { dataSources } from "../db/schema/data-sources.js";
 import { QUEUES } from "../queues.js";
 import { getBoss } from "../queue-client.js";
 import { logger } from "../logger.js";
+import { isRedditConfigured } from "$lib/sources/reddit/server/credentials.js";
+import { handlePostSingle } from "$lib/sources/reddit/server/handlers/post-single.js";
+import { getAdapter } from "$lib/sources/registry.js";
 
 export type IngestResult = { kind: "event_created"; eventId: string };
 
@@ -48,10 +71,12 @@ export type IngestResult = { kind: "event_created"; eventId: string };
  *   - youtube_video → events.createEventFromPaste (ONE events row carries
  *     everything). source_id and author_is_me are inherited from the
  *     user's registered data_source on author_url match.
+ *   - reddit_post → isRedditConfigured() pre-flight + enforceRedditUserCap
+ *     (D-RDT-CAP-POST) + handlePostSingle synchronous fetch + UPSERT +
+ *     author_is_me inheritance + createEvent INSERT. See file header.
  *   - twitter_post / telegram_post → createEvent directly (free-form
  *     social posts; oEmbed best-effort for Twitter, URL-derived
  *     placeholder title for Telegram).
- *   - reddit_post → AppError 'reddit_not_yet_supported' (422).
  *   - unsupported → AppError 'unsupported_url' (422).
  *
  * gameId is OPTIONAL (nullable) — manual paste with no game lands in the
@@ -73,16 +98,80 @@ export async function parsePasteAndCreate(
     throw new AppError("URL not yet supported", "unsupported_url", 422);
   }
 
-  if (parsed.kind === "reddit_deferred") {
-    // Reddit ingest waits for the poll.reddit adapter. The route layer
-    // maps this to a friendly inline-info body.
-    throw new AppError("Reddit ingest is not yet supported", "reddit_not_yet_supported", 422);
-  }
-
   // The underlying createEvent / createEventFromPaste services accept
   // gameIds[] (M:N junction); the legacy singular gameId is normalized to
   // a single-element array (or empty array on null) before the call.
   const gameIds = gameId === null ? [] : [gameId];
+
+  if (parsed.kind === "reddit_post") {
+    // 1) Operator credential pre-flight — empty REDDIT_USER_AGENT must
+    //    short-circuit BEFORE the cap check so a self-host instance
+    //    without Reddit configured returns a clean 422 (no audit row,
+    //    no quota burn, no HTTP attempt). Mirrors YouTube's empty-key
+    //    422 'youtube_not_configured' shape.
+    if (!isRedditConfigured()) {
+      throw new AppError(
+        "Reddit ingest is not available — operator has not configured REDDIT_USER_AGENT.",
+        "reddit_not_configured",
+        422,
+      );
+    }
+
+    // 2) Per-user post-refresh cap (D-RDT-CAP-POST, plan 06). Paste
+    //    counts as a user_post action against the 25/5min sliding
+    //    window. enforceRedditUserCap reads adapter.observability.
+    //    userQuotaCap, writes the `reddit.cap_exhausted` audit row on
+    //    exhaustion, and throws AppError 429 with code
+    //    `reddit_post_quota_exhausted` + retry_in_seconds metadata.
+    //    The redditAdapter is fetched via the registry; reddit_account
+    //    and reddit_subreddit share one adapter instance so either
+    //    kind retrieves the same observability declaration.
+    const redditAdapter = getAdapter("reddit_account");
+    await enforceRedditUserCap(db, redditAdapter, userId, ipAddress, "post-refresh");
+
+    // 3) Synchronous fetch + UPSERT — validate-first invariant: events
+    //    INSERT does NOT run until /comments/<id>.json succeeds and
+    //    the caches populate. handlePostSingle throws AdapterError on
+    //    not-found / permanent / rate-limited / operator-issue; those
+    //    propagate to the route layer which maps to the structured
+    //    response.
+    const result = await handlePostSingle({
+      postId: parsed.externalId,
+      userId,
+      paste: true,
+    });
+
+    // 4) author_is_me inheritance (D-RDT-AUTHOR-IS-ME-INHERITANCE) —
+    //    match parsed author against an owned reddit_account source
+    //    for this user. Case-sensitive on metadata.username. Reddit's
+    //    "[deleted]" author has already been mapped to null in
+    //    handlePostSingle, so the null-guard skips the lookup for
+    //    deleted-author posts.
+    const authorIsMe =
+      result.author !== null ? await isAuthorOwned(userId, result.author) : false;
+
+    // 5) events INSERT. createEvent enforces the cross-tenant gameId
+    //    check and the events_per_day cap; either path throws BEFORE
+    //    the INSERT runs. external_id encodes the t3_ prefix so the
+    //    refresh-poll dedup index can match server-driven snapshots
+    //    against the same row.
+    const event = await createEvent(
+      userId,
+      {
+        gameIds,
+        kind: "reddit_post",
+        occurredAt: result.submittedAt,
+        title: result.title,
+        url: result.permalink,
+        externalId: result.postId, // already t3_<id> from handlePostSingle
+        authorIsMe,
+        metadata: { subreddit: result.subreddit, author: result.author },
+      },
+      ipAddress,
+      userAgent,
+    );
+    return { kind: "event_created", eventId: event.id };
+  }
 
   if (parsed.kind === "youtube_video") {
     const event = await createEventFromPaste(userId, { url: input, gameIds }, ipAddress, userAgent);
@@ -280,4 +369,44 @@ function extractChannelIdFromAuthorUrl(
   } catch {
     return null;
   }
+}
+
+/**
+ * isAuthorOwned — D-RDT-AUTHOR-IS-ME-INHERITANCE.
+ *
+ * Looks up an active reddit_account data_source for `userId` whose
+ * metadata.username matches the pasted post's `author` (case-sensitive,
+ * matching Reddit's username case semantics). Soft-deleted sources
+ * (deletedAt IS NOT NULL) are excluded so a re-registered handle
+ * doesn't inherit author_is_me from a tombstoned predecessor.
+ *
+ * Returns true when ≥1 owned source matches; false otherwise. The cap
+ * at LIMIT 1 short-circuits the lookup — we only need existence, not
+ * the row.
+ *
+ * Tenant-scope contract: every Drizzle query against `data_sources`
+ * filters `eq(dataSources.userId, userId)`. The custom ESLint rule
+ * `tenant-scope/no-unfiltered-tenant-query` catches drift.
+ *
+ * The match shape mirrors the YouTube paste's handleUrl-based
+ * inheritance (events.ts findActiveSourceByHandleUrl). YouTube matches
+ * on full author_url; Reddit matches on `metadata.username` because the
+ * t3 response carries only the bare handle (not a URL). Both yield the
+ * same UX: "I pasted a post from my own channel → author_is_me=true".
+ */
+async function isAuthorOwned(userId: string, authorUsername: string): Promise<boolean> {
+  const rows = await db
+    .select({ id: dataSources.id })
+    .from(dataSources)
+    .where(
+      and(
+        eq(dataSources.userId, userId),
+        eq(dataSources.kind, "reddit_account"),
+        eq(dataSources.isOwnedByMe, true),
+        isNull(dataSources.deletedAt),
+        sql`${dataSources.metadata}->>'username' = ${authorUsername}`,
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
 }
