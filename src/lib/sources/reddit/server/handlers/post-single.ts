@@ -19,7 +19,6 @@
 //   [submissionListing, commentsListing]
 // We consume only [0]: data.children[0].data is the t3 post payload.
 
-import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { redditFetch } from "../http.js";
 import { upsertRedditPost, upsertRedditUser, upsertRedditSubreddit } from "../upsert.js";
