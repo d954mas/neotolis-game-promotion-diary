@@ -28,25 +28,14 @@
 // Tests seed synthetic DB state and assert per-handler contracts; no
 // Reddit HTTP fires (handlers are pure-DB by construction).
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "../../src/lib/server/db/client.js";
-import {
-  redditRefreshQueue,
-  redditPosts,
-  redditPostSnapshots,
-  redditSubredditBaselines,
-} from "../../src/lib/sources/reddit/server/schema/index.js";
 import { dataSources } from "../../src/lib/server/db/schema/data-sources.js";
-import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
 import { user } from "../../src/lib/server/db/schema/auth.js";
 import { handleEnqueueServiceSourcesCron } from "../../src/lib/sources/reddit/server/handlers/enqueue-service-sources-cron.js";
 import { handleEnqueueServicePostsCron } from "../../src/lib/sources/reddit/server/handlers/enqueue-service-posts-cron.js";
 import { handleBaselinesCron } from "../../src/lib/sources/reddit/server/handlers/baselines-cron.js";
-import {
-  handleDeletionPropagationCron,
-  __resetOperatorCacheForTest,
-} from "../../src/lib/sources/reddit/server/handlers/deletion-propagation-cron.js";
 
 const uniq = () => Math.random().toString(36).slice(2, 10);
 
@@ -55,9 +44,8 @@ beforeEach(async () => {
   await db.execute(sql`DELETE FROM reddit_subreddit_baselines`);
   await db.execute(sql`DELETE FROM reddit_post_snapshots`);
   await db.execute(sql`DELETE FROM reddit_posts`);
-  await db.execute(sql`DELETE FROM audit_log WHERE action LIKE 'reddit.%'`);
+  await db.execute(sql`DELETE FROM audit_log WHERE action::text LIKE 'reddit.%'`);
   await db.execute(sql`DELETE FROM data_sources WHERE kind IN ('reddit_account', 'reddit_subreddit')`);
-  __resetOperatorCacheForTest();
 });
 
 /** Insert a user row + return its id. audit_log.user_id is notNull; the
@@ -430,16 +418,23 @@ describe("handleBaselinesCron — pure-DB PERCENTILE_CONT aggregate", () => {
 });
 
 describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
-  async function withAllowlist<T>(email: string, fn: () => Promise<T>): Promise<T> {
+  /** Reset modules + reload env + reset cache + invoke the cron with a
+   *  fresh ADMIN_EMAIL_ALLOWLIST value. Mirrors admin-quota.test.ts's
+   *  pattern: mutate process.env, vi.resetModules(), then dynamic-import. */
+  async function runCronWithAllowlist(email: string): Promise<{ purged: number }> {
     const saved = process.env.ADMIN_EMAIL_ALLOWLIST;
     process.env.ADMIN_EMAIL_ALLOWLIST = email;
     try {
-      __resetOperatorCacheForTest();
-      return await fn();
+      vi.resetModules();
+      const mod = await import(
+        "../../src/lib/sources/reddit/server/handlers/deletion-propagation-cron.js"
+      );
+      mod.__resetOperatorCacheForTest();
+      return await mod.handleDeletionPropagationCron();
     } finally {
-      __resetOperatorCacheForTest();
       if (saved === undefined) delete process.env.ADMIN_EMAIL_ALLOWLIST;
       else process.env.ADMIN_EMAIL_ALLOWLIST = saved;
+      vi.resetModules();
     }
   }
 
@@ -454,10 +449,8 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
          NOW() - INTERVAL '5 days', NOW() - INTERVAL '49 hours')
     `);
 
-    await withAllowlist(adminEmail, async () => {
-      const r = await handleDeletionPropagationCron();
-      expect(r.purged).toBe(1);
-    });
+    const r = await runCronWithAllowlist(adminEmail);
+    expect(r.purged).toBe(1);
 
     const after = await db.execute(
       sql`SELECT author, author_fullname FROM reddit_posts WHERE post_id = 't3_del1'`,
@@ -494,10 +487,8 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
         ('t3_recent_del', 'r/test', 'stillthere', 't2_stillthere', '/r/test/t3_recent_del', 't',
          NOW() - INTERVAL '3 days', NOW() - INTERVAL '12 hours')
     `);
-    await withAllowlist(adminEmail, async () => {
-      const r = await handleDeletionPropagationCron();
-      expect(r.purged).toBe(0);
-    });
+    const r = await runCronWithAllowlist(adminEmail);
+    expect(r.purged).toBe(0);
     const after = await db.execute(
       sql`SELECT author FROM reddit_posts WHERE post_id = 't3_recent_del'`,
     );
@@ -522,10 +513,8 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
         ('t3_already_null', 'r/test', NULL, NULL, '/r/test/t3_already_null', 't',
          NOW() - INTERVAL '10 days', NOW() - INTERVAL '60 hours')
     `);
-    await withAllowlist(adminEmail, async () => {
-      const r = await handleDeletionPropagationCron();
-      expect(r.purged).toBe(0);
-    });
+    const r = await runCronWithAllowlist(adminEmail);
+    expect(r.purged).toBe(0);
     const audit = await db.execute(sql`
       SELECT COUNT(*) AS c FROM audit_log WHERE action = 'reddit.deletion_propagated'
     `);
@@ -537,10 +526,8 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
   it("no eligible posts → no-op, no audit row", async () => {
     const adminEmail = `admin-${uniq()}@test.local`;
     await seedAdminUser(adminEmail);
-    await withAllowlist(adminEmail, async () => {
-      const r = await handleDeletionPropagationCron();
-      expect(r.purged).toBe(0);
-    });
+    const r = await runCronWithAllowlist(adminEmail);
+    expect(r.purged).toBe(0);
     const audit = await db.execute(sql`
       SELECT COUNT(*) AS c FROM audit_log WHERE action = 'reddit.deletion_propagated'
     `);
@@ -557,17 +544,8 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
         ('t3_no_admin', 'r/test', 'op', 't2_op', '/r/test/t3_no_admin', 't',
          NOW() - INTERVAL '5 days', NOW() - INTERVAL '50 hours')
     `);
-    const saved = process.env.ADMIN_EMAIL_ALLOWLIST;
-    process.env.ADMIN_EMAIL_ALLOWLIST = "";
-    __resetOperatorCacheForTest();
-    try {
-      const r = await handleDeletionPropagationCron();
-      expect(r.purged).toBe(1);
-    } finally {
-      __resetOperatorCacheForTest();
-      if (saved === undefined) delete process.env.ADMIN_EMAIL_ALLOWLIST;
-      else process.env.ADMIN_EMAIL_ALLOWLIST = saved;
-    }
+    const r = await runCronWithAllowlist("");
+    expect(r.purged).toBe(1);
     const after = await db.execute(
       sql`SELECT author FROM reddit_posts WHERE post_id = 't3_no_admin'`,
     );
