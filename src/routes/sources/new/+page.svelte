@@ -39,7 +39,14 @@
     | "source_kind_label_reddit_account"
     | "source_kind_label_twitter_account"
     | "source_kind_label_telegram_channel"
-    | "source_kind_label_discord_server";
+    | "source_kind_label_discord_server"
+    // Reddit kinds paint with distinct labels per D-RDT-SOURCE-DISPLAY
+    // (Phase 03.1 plan 08): reddit_account → "Reddit user" (🧑 prefix
+    // rendered in the chip body); reddit_subreddit → "Subreddit" (🏛
+    // prefix). The labels live under `common_kind_*` keys so other
+    // surfaces (audit log filters, future per-kind chips) can reuse.
+    | "common_kind_reddit_user"
+    | "common_kind_reddit_subreddit";
 
   type KindStatusKey =
     | "source_kind_status_reddit_account"
@@ -56,6 +63,7 @@
 
   let { data }: { data: PageData } = $props();
   const kindMatrix = $derived(data.kindMatrix as KindEntry[]);
+  const redditOperatorConfigured = $derived(data.redditOperatorConfigured ?? false);
 
   // Form defaults are seeded from the loader on the initial render. The
   // form is one-shot, so reading `data.default*` once at init is
@@ -104,6 +112,17 @@
     }
   });
 
+  // Reddit-specific hint visibility (Phase 03.1 plan 08). Shown when EITHER
+  // the user has picked a reddit_* chip OR the typed URL contains "reddit"
+  // (substring, case-insensitive). The latter catches the paste-flow case
+  // where the user pastes reddit.com/r/X before clicking any chip — the
+  // form-action's parseSourceUrl iterator will auto-detect the kind on
+  // submit; the hint signals "we recognize this and will do the right thing".
+  const showRedditHint = $derived.by(() => {
+    if (selectedKind === "reddit_account" || selectedKind === "reddit_subreddit") return true;
+    return handleUrl.toLowerCase().includes("reddit");
+  });
+
   function labelFor(key: KindLabelKey): string {
     switch (key) {
       case "source_kind_label_youtube_channel":
@@ -116,7 +135,22 @@
         return m.source_kind_label_telegram_channel();
       case "source_kind_label_discord_server":
         return m.source_kind_label_discord_server();
+      case "common_kind_reddit_user":
+        return m.common_kind_reddit_user();
+      case "common_kind_reddit_subreddit":
+        return m.common_kind_reddit_subreddit();
     }
+  }
+
+  // Per D-RDT-SOURCE-DISPLAY (Phase 03.1 plan 08): Reddit chips show a
+  // small emoji prefix so reddit_account vs reddit_subreddit read at a
+  // glance. Other kinds return "" (no prefix). aria-hidden on the emoji
+  // span keeps screen readers from announcing the picto twice (the
+  // chip's text label already carries the meaning).
+  function chipPrefixFor(value: SourceKind): string {
+    if (value === "reddit_account") return "🧑";
+    if (value === "reddit_subreddit") return "🏛";
+    return "";
   }
 
   function statusFor(key: KindStatusKey | null): string | null {
@@ -243,6 +277,7 @@
       <legend>Kind</legend>
       <div class="kind-chips">
         {#each kindMatrix as entry (entry.value)}
+          {@const prefix = chipPrefixFor(entry.value)}
           {#if entry.disabled}
             <button
               type="button"
@@ -252,6 +287,7 @@
               tabindex="-1"
               title={disabledTooltip(entry)}
             >
+              {#if prefix}<span aria-hidden="true" class="chip-prefix">{prefix}</span>{/if}
               {labelFor(entry.labelKey)}
               <small class="status">{statusFor(entry.statusKey)}</small>
             </button>
@@ -263,6 +299,7 @@
               aria-pressed={selectedKind === entry.value}
               onclick={() => (selectedKind = entry.value)}
             >
+              {#if prefix}<span aria-hidden="true" class="chip-prefix">{prefix}</span>{/if}
               {labelFor(entry.labelKey)}
             </button>
           {/if}
@@ -280,6 +317,13 @@
         placeholder="https://www.youtube.com/@handle"
       />
     </label>
+
+    {#if showRedditHint}
+      <p class="hint">{m.sources_new_reddit_input_hint()}</p>
+      {#if !redditOperatorConfigured}
+        <p class="hint hint-warning">{m.sources_new_reddit_disabled()}</p>
+      {/if}
+    {/if}
 
     <label class="toggle">
       <input type="checkbox" bind:checked={isOwnedByMe} />
@@ -397,9 +441,26 @@
     opacity: 0.55;
     cursor: not-allowed;
   }
+  .chip-prefix {
+    font-size: 1em;
+    line-height: 1;
+    margin-right: 4px;
+  }
   .status {
     font-size: var(--font-size-label);
     color: var(--color-text-muted);
+  }
+  /* Reddit-specific hint under the URL input — neutral by default,
+   * warning-coloured when REDDIT_USER_AGENT is empty (D-RDT-AUTH-EMPTY).
+   * Sits between the URL input and the owner/auto-import toggles. */
+  .hint {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+    line-height: var(--line-height-body);
+  }
+  .hint.hint-warning {
+    color: var(--color-warning, #d90);
   }
   .field {
     display: flex;

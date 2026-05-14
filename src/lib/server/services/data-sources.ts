@@ -52,8 +52,17 @@ export type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
 export type DataSourceRow = typeof dataSources.$inferSelect;
 
 // Functional kinds. The other four schema-only kinds are rejected at
-// `createSource` with a clean 422.
-const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>(["youtube_channel"]);
+// `createSource` with a clean 422. Reddit (both kinds) joined the set
+// in Phase 03.1 plan 08 — adapter wired into the registry in plan 07
+// (DV-RDT-7 public-`.json` adapter), /sources/new auto-detect flips
+// live in plan 08, paste-flow ingest follows in plan 09. The two
+// Reddit SourceKinds share a single redditAdapter instance with
+// metadata-driven dispatch.
+const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>([
+  "youtube_channel",
+  "reddit_account",
+  "reddit_subreddit",
+]);
 
 // Per-kind status copy for the 'kind_not_yet_functional' error metadata. The
 // /sources page renders the user-facing string from the response code; this
@@ -61,12 +70,11 @@ const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>(["youtube_
 // to hard-code the policy.
 const KIND_STATUS: Readonly<Record<SourceKind, string>> = {
   youtube_channel: "available",
-  // Reddit comes online with Phase 03.1 (public-`.json` adapter, no OAuth).
-  // Until plan 03.1-07 flips the adapter live in the registry, both Reddit
-  // kinds stay outside FUNCTIONAL_KINDS and surface "coming soon" in the
-  // /sources/new picker.
-  reddit_account: "coming soon — Phase 03.1 (Reddit public-JSON adapter)",
-  reddit_subreddit: "coming soon — Phase 03.1 (Reddit public-JSON adapter)",
+  // Reddit kinds went live in Phase 03.1 plan 08 (DV-RDT-7 public-`.json`
+  // adapter). Both share the same redditAdapter instance via registry
+  // double-binding; createSource accepts both with no kind-specific branch.
+  reddit_account: "available",
+  reddit_subreddit: "available",
   twitter_account: "out of scope — Twitter API is paid",
   telegram_channel: "coming soon",
   discord_server: "coming soon",

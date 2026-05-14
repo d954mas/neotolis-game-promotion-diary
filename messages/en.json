@@ -95,6 +95,28 @@
   "audit_action_reddit_cap_exhausted": "Reddit cap exhausted",
   "audit_action_reddit_adapter_degraded": "Reddit adapter degraded",
 
+  "common_kind_reddit_user": "Reddit user",
+  "common_kind_reddit_subreddit": "Subreddit",
+
+  "sources_new_reddit_input_hint": "Paste a Reddit URL (e.g. https://reddit.com/r/IndieDev or https://reddit.com/user/handle) or use raw prefixes r/IndieDev or u/handle.",
+  "sources_new_reddit_disabled": "Reddit is not configured by the operator (REDDIT_USER_AGENT env empty).",
+
+  "quota_banner_reddit_tab_title": "Reddit",
+  "quota_banner_reddit_not_configured": "Reddit not configured",
+  "quota_banner_reddit_source_actions": "Reddit sources: {used} / {cap} source-actions in last {window} min",
+  "quota_banner_reddit_post_refreshes": "Reddit posts: {used} / {cap} post-refreshes in last {window} min",
+  "quota_banner_reddit_service_load": "Service load: {used} / {capacity} user slots available this minute",
+  "quota_banner_reddit_limits_explainer": "Reddit API limits are unusually strict (Reddit's Responsible Builder Policy). Source actions: 1 per 5 min. Post refreshes: 25 per 5 min. Total service throughput: ~8 requests/min. Queued refreshes land within 1-2 min.",
+
+  "feed_card_reddit_stats": "↑{score} 💬{comments} ({ratio}%)",
+  "feed_card_reddit_baseline_underperforming": "⚠ Underperforming median ({pct}% of typical)",
+  "feed_card_reddit_baseline_insufficient": "Insufficient sample — baseline pending",
+
+  "toast_reddit_source_cap": "Reddit cap reached. Try again in {seconds}s.",
+  "toast_reddit_post_cap": "Reddit post-refresh cap reached. Try again in {seconds}s.",
+
+  "ingest_error_reddit_not_configured": "Reddit ingest is not available — operator has not configured REDDIT_USER_AGENT.",
+
   "audit_filter_action_axis_label": "Action",
   "audit_filter_date_axis_label": "Date range",
 
