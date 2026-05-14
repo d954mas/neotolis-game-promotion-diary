@@ -65,6 +65,15 @@ afterEach(async () => {
     if (rows.length === 0) return;
     const names = rows.map((r) => `"${r.tablename}"`).join(", ");
     await pool.query(`TRUNCATE ${names} RESTART IDENTITY CASCADE`);
+
+    // reddit_pacer is a singleton-row global rate-limit token. TRUNCATE
+    // CASCADE empties it; restore the one row + reset next_allowed_at
+    // so the next test starts with an immediately-available slot.
+    // Without this, an integration test that makes >1 redditFetch
+    // would block on the pacer after the first call (slot fires
+    // every 7.5s).
+    await pool.query(`INSERT INTO "reddit_pacer" ("id", "next_allowed_at") VALUES (1, NOW())
+                      ON CONFLICT ("id") DO UPDATE SET next_allowed_at = NOW()`);
   } catch {
     // Pre-migration: nothing to truncate. Swallow — integration tests will skip-with-context.
   }

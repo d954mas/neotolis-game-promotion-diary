@@ -28,8 +28,13 @@ import { db } from "$lib/server/db/client.js";
 import { logger } from "$lib/server/logger.js";
 
 /** Slot interval — matches the worker's setInterval(7500ms). 8 req/min
- *  effective ceiling = 60_000 / 7500. */
-export const REDDIT_PACER_SLOT_MS = 7500;
+ *  effective ceiling = 60_000 / 7500.
+ *
+ *  Test override: NODE_ENV=test sets the slot to 0ms (effectively no
+ *  pacing). Integration tests fire many Reddit fetches per spec; a 7.5s
+ *  slot would block the second call in a single test. Production
+ *  always uses the documented 7500ms ceiling regardless of any env. */
+export const REDDIT_PACER_SLOT_MS = process.env.NODE_ENV === "test" ? 0 : 7500;
 
 export interface RedditPacerSlotResult {
   /** True when the pacer was advanced and the caller may proceed. */

@@ -63,7 +63,7 @@ describe("migration 0030 — Phase 03.1 Reddit schema", () => {
     }
   });
 
-  it("creates 8 Reddit tables (7 public-data + 1 queue) with no user_id columns on public-data tables", async () => {
+  it("creates 9 Reddit tables (7 public-data + 1 queue + 1 pacer) with no user_id columns on public-data tables", async () => {
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const tableResult = await pool.query<{ tablename: string }>(
@@ -73,6 +73,7 @@ describe("migration 0030 — Phase 03.1 Reddit schema", () => {
       );
       const tables = tableResult.rows.map((r) => r.tablename);
       expect(tables).toEqual([
+        "reddit_pacer",
         "reddit_post_snapshots",
         "reddit_posts",
         "reddit_refresh_queue",
