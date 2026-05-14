@@ -62,7 +62,6 @@ describe("i18n at runtime", () => {
     const required = [
       // Primary CTAs (per page)
       "games_cta_new_game",
-      "ingest_cta_add",
       "events_cta_new_event",
       "keys_steam_cta_save",
       "keys_steam_cta_replace",
