@@ -606,9 +606,7 @@ export async function enrichFromUrl(userId: string, url: string): Promise<Enrich
     //   - empty REDDIT_USER_AGENT → reddit_not_configured (matches the
     //     ingest.ts contract that the smoke gate asserts)
     //   - configured but route not wired → kind_not_yet_functional
-    const { isRedditConfigured } = await import(
-      "$lib/sources/reddit/server/credentials.js"
-    );
+    const { isRedditConfigured } = await import("$lib/sources/reddit/server/credentials.js");
     if (!isRedditConfigured()) {
       throw new AppError(
         "Reddit ingest disabled — operator has not configured REDDIT_USER_AGENT",
