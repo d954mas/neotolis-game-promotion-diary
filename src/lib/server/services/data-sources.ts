@@ -61,7 +61,12 @@ const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>(["youtube_
 // to hard-code the policy.
 const KIND_STATUS: Readonly<Record<SourceKind, string>> = {
   youtube_channel: "available",
-  reddit_account: "coming soon — pending Reddit OAuth",
+  // Reddit comes online with Phase 03.1 (public-`.json` adapter, no OAuth).
+  // Until plan 03.1-07 flips the adapter live in the registry, both Reddit
+  // kinds stay outside FUNCTIONAL_KINDS and surface "coming soon" in the
+  // /sources/new picker.
+  reddit_account: "coming soon — Phase 03.1 (Reddit public-JSON adapter)",
+  reddit_subreddit: "coming soon — Phase 03.1 (Reddit public-JSON adapter)",
   twitter_account: "out of scope — Twitter API is paid",
   telegram_channel: "coming soon",
   discord_server: "coming soon",
@@ -74,6 +79,7 @@ const KIND_STATUS: Readonly<Record<SourceKind, string>> = {
 const VALID_SOURCE_KINDS: readonly SourceKind[] = [
   "youtube_channel",
   "reddit_account",
+  "reddit_subreddit",
   "twitter_account",
   "telegram_channel",
   "discord_server",

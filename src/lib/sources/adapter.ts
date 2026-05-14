@@ -33,6 +33,7 @@ export type EventRow = typeof events.$inferSelect;
 export type SourceKind =
   | "youtube_channel"
   | "reddit_account"
+  | "reddit_subreddit"
   | "twitter_account"
   | "telegram_channel"
   | "discord_server";

@@ -30,15 +30,7 @@
 // tenant-query.js with the explicit "public external data, no tenant
 // scope" comment.
 
-import {
-  pgTable,
-  text,
-  timestamp,
-  integer,
-  boolean,
-  jsonb,
-  index,
-} from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, boolean, jsonb, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const redditSubredditsCache = pgTable(

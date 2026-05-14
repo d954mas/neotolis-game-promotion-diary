@@ -41,9 +41,16 @@ import { user } from "./auth.js";
 import { uuidv7 } from "../../ids.js";
 
 // EXPORTED — drizzle-kit silently drops non-exported pgEnums (#5174).
+//
+// `reddit_subreddit` joined `reddit_account` in Phase 03.1: a user can
+// register either an OWNED account (`/user/X` — their own posting
+// activity) OR a subreddit they want to track (`/r/X` — community
+// metadata + growth). Both are non-OAuth, public-`.json` adapter
+// kinds per DV-RDT-7.
 export const sourceKindEnum = pgEnum("source_kind", [
   "youtube_channel",
   "reddit_account",
+  "reddit_subreddit",
   "twitter_account",
   "telegram_channel",
   "discord_server",

@@ -19,6 +19,7 @@
   type SourceKind =
     | "youtube_channel"
     | "reddit_account"
+    | "reddit_subreddit"
     | "twitter_account"
     | "telegram_channel"
     | "discord_server";
@@ -42,7 +43,7 @@
     <rect x="3" y="6" width="18" height="12" rx="2" />
     <path d="M10 9.5l5 2.5-5 2.5z" />
   </svg>
-{:else if kind === "reddit_account"}
+{:else if kind === "reddit_account" || kind === "reddit_subreddit"}
   <svg
     class="icon"
     viewBox="0 0 24 24"
