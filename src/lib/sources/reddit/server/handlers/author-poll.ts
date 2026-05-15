@@ -8,8 +8,8 @@
 // queue work type; the cache row still gets seeded with just `username`.
 //
 // Triggered by:
-//   - service_source cron daily picks (plan 05B) for every registered
-//     reddit_account data_source.
+//   - service_source cron daily picks for every registered reddit_account
+//     data_source.
 //   - user_source — user "refresh source" click on a registered account.
 //
 // Symmetric to sub_poll: same listing-walk + fan-out shape, different

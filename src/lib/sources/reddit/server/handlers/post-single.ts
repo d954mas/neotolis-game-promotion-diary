@@ -2,15 +2,16 @@
 //
 // Two callers:
 //   1. Worker batch-worker tick (queue type='post_single', from user paste).
-//   2. Paste flow (services/ingest.ts — plan 09) calls handlePostSingle
+//   2. Paste flow (services/events.ts createEvent + redditAdapter's
+//      fetchEventStats / fetchEventPreviewMetadata) calls handlePostSingle
 //      synchronously to get parsed fields BEFORE the events INSERT.
 //
 // Contract for the paste-flow consumer:
 //   - All UPSERTs (reddit_posts + reddit_users_cache + reddit_subreddits_cache)
 //     complete BEFORE the function returns. Failure throws — never returns
 //     a partial result.
-//   - One reddit_post_snapshots row is written for the same minute (V20
-//     idempotent — re-poll within 60s collapses).
+//   - One reddit_post_snapshots row per minute (idempotent — the
+//     writer minute-truncates polled_at so re-polls collapse).
 //   - Returns the parsed fields the caller needs to populate the events
 //     row (title / occurredAt / metadata.subreddit / authorIsMe inheritance
 //     by author lookup).
@@ -20,8 +21,8 @@
 // We consume only [0]: data.children[0].data is the t3 post payload.
 //
 // Cap-counter timing — read carefully before touching:
-//   The 25/5min post-refresh cap (D-RDT-CAP-POST plan 06) is enforced by
-//   counting `done`-status rows on the `user_post` queue lane. This file
+//   The 25/5min post-refresh cap is enforced by counting `done`-status
+//   rows on the `user_post` queue lane. This file
 //   writes that row in EXACTLY ONE place: the cache-miss path at the end
 //   of the function, after a real Reddit fetch + UPSERT + snapshot. The
 //   cache-hit early-return path at the top of the function writes NO
@@ -220,7 +221,7 @@ export async function handlePostSingle(args: {
   // invoked from a user-facing surface (preview button OR submit
   // fetchEventStats OR future paste UIs) writes a `done` row in
   // reddit_refresh_queue on the user_post lane. checkRedditUserCap
-  // (D-RDT-CAP-POST plan 06) reads queue rows in the 5-minute window
+  // reads queue rows in the 5-minute window
   // to count post-refreshes — without this row, user pastes silently
   // bypass the 25/5min cap. Dedup above ensures preview+submit on the
   // same post produces ONE counter tick, not two.

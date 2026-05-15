@@ -71,6 +71,31 @@ describe("register data sources via POST /api/sources", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("duplicate kind=reddit_account uses Reddit-specific duplicate_source message", async () => {
+    const userA = await seedUserDirectly({ email: "ds2dup@test.local" });
+    await createSource(
+      userA.id,
+      { kind: "reddit_account", handleUrl: "https://reddit.com/user/d954mas" },
+      "127.0.0.1",
+    );
+
+    await expect(
+      createSource(
+        userA.id,
+        { kind: "reddit_account", handleUrl: "https://reddit.com/user/d954mas" },
+        "127.0.0.1",
+      ),
+    ).rejects.toMatchObject({
+      code: "duplicate_source",
+      status: 422,
+      message: "You already track this Reddit user",
+      metadata: {
+        kind: "reddit_account",
+        handle_url: "https://www.reddit.com/user/d954mas",
+      },
+    });
+  });
+
   it("kinds twitter_account / telegram_channel / discord_server reject with 'kind_not_yet_functional'", async () => {
     const userA = await seedUserDirectly({ email: "ds3@test.local" });
     const rejectedKinds = ["twitter_account", "telegram_channel", "discord_server"] as const;

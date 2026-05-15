@@ -51,28 +51,24 @@ export type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
 
 export type DataSourceRow = typeof dataSources.$inferSelect;
 
-// Functional kinds. The other four schema-only kinds are rejected at
-// `createSource` with a clean 422. Reddit (both kinds) joined the set
-// in Phase 03.1 plan 08 — adapter wired into the registry in plan 07
-// (DV-RDT-7 public-`.json` adapter), /sources/new auto-detect flips
-// live in plan 08, paste-flow ingest follows in plan 09. The two
-// Reddit SourceKinds share a single redditAdapter instance with
-// metadata-driven dispatch.
+// Source kinds whose adapters are wired end-to-end. The other four
+// schema-only kinds get rejected at `createSource` with a clean 422
+// ('kind_not_yet_functional') so a stray POST never plants an orphan
+// row that no worker will ever pick up. Both Reddit kinds share one
+// adapter instance via registry double-binding; the adapter dispatches
+// internally on source.metadata (username vs subreddit).
 const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>([
   "youtube_channel",
   "reddit_account",
   "reddit_subreddit",
 ]);
 
-// Per-kind status copy for the 'kind_not_yet_functional' error metadata. The
-// /sources page renders the user-facing string from the response code; this
-// map supplies the kind-specific "why not yet" hint without forcing the UI
-// to hard-code the policy.
+// Per-kind status copy for the 'kind_not_yet_functional' error metadata.
+// The /sources page renders the user-facing string from the response
+// code; this map supplies the kind-specific "why not yet" hint without
+// forcing the UI to hard-code the policy.
 const KIND_STATUS: Readonly<Record<SourceKind, string>> = {
   youtube_channel: "available",
-  // Reddit kinds went live in Phase 03.1 plan 08 (DV-RDT-7 public-`.json`
-  // adapter). Both share the same redditAdapter instance via registry
-  // double-binding; createSource accepts both with no kind-specific branch.
   reddit_account: "available",
   reddit_subreddit: "available",
   twitter_account: "out of scope — Twitter API is paid",
@@ -545,7 +541,8 @@ export async function createSource(
     )
     .limit(1);
   if (existingDup) {
-    throw new AppError("You already track this YouTube channel", "duplicate_source", 422, {
+    throw new AppError(duplicateSourceMessage(input.kind), "duplicate_source", 422, {
+      kind: input.kind,
       handle_url: input.handleUrl,
     });
   }

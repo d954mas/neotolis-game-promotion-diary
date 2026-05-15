@@ -1,13 +1,12 @@
-// Reddit deletion-propagation cron handler (D-RDT-DELETION-PROPAGATION,
-// Reddit Public Content Policy).
+// Reddit deletion-propagation cron handler — Reddit Public Content
+// Policy compliance.
 //
 // Schedule: 05:00 UTC daily.
 //
-// What this does: ZERO-HTTP pure-DB UPDATE. Posts with
-// `deletion_detected_at < NOW() - INTERVAL '48 hours' AND author IS NOT
-// NULL` have their author / author_fullname fields nulled. Title + body
-// excerpt remain (user's diary context); author-identifying info is
-// removed.
+// ZERO-HTTP pure-DB UPDATE. Posts with `deletion_detected_at < NOW() -
+// INTERVAL '48 hours' AND author IS NOT NULL` have their author /
+// author_fullname fields nulled. Title + body excerpt remain (the
+// user's diary context); author-identifying info is removed.
 //
 // GDPR-grade transactional audit: the UPDATE that nulls author* columns
 // and the `reddit.deletion_propagated` audit INSERT run inside the SAME

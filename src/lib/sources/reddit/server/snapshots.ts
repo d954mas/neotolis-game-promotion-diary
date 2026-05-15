@@ -1,22 +1,22 @@
-// Reddit snapshot writers — V20 idempotency (D-RDT-SNAPSHOTS).
+// Reddit snapshot writers — within-the-minute idempotency.
 //
 // Three time-series writers, all minute-truncating `polled_at` via
 // `date_trunc('minute', NOW())` + ON CONFLICT DO NOTHING on the
-// per-table UNIQUE (subject, polled_at) index. Two writes within the
+// per-table composite PK (subject, polled_at). Two writes within the
 // same minute collapse into one row — idempotent under worker retries
 // inside the same tick window.
 //
-// Pattern mirrors $lib/sources/youtube/server/snapshots.ts's writeSnapshot
-// (Phase 03.0 D-NEW). The Reddit version is leaner: no apiKeyId /
-// poolKind columns because there's no per-key quota counter under
-// DV-RDT-7 (the 8-slot worker is the only rate-limit budget owner).
+// Pattern mirrors $lib/sources/youtube/server/snapshots.ts's writeSnapshot.
+// The Reddit version is leaner: no apiKeyId / poolKind columns because
+// there's no per-key quota counter — the 8-slot worker is the only
+// rate-limit budget owner.
 //
 // All three tables are PUBLIC-DATA (no user_id) — see the per-schema
 // header comments in src/lib/sources/reddit/server/schema/*.ts for the
 // tenant-scope rationale. ESLint allowlist for these tables lives in
 // eslint-plugin-tenant-scope/no-unfiltered-tenant-query.js.
 
-import { sql, and, eq, isNull } from "drizzle-orm";
+import { sql, and, eq, isNull, inArray } from "drizzle-orm";
 import type { DbOrTx } from "$lib/server/db/client.js";
 import {
   redditPostSnapshots,
@@ -68,36 +68,68 @@ export async function markPostDeletionDetectedIfNeeded(
   return result.length > 0;
 }
 
+/** Batch variant. Takes a list of {postId, status} pairs, filters to
+ *  the deletion statuses, and runs ONE UPDATE … WHERE post_id IN (…)
+ *  for the whole set. Used by post_batch to avoid a per-row UPDATE
+ *  per missing-or-removed id. */
+export async function markPostDeletionDetectedIfNeededMany(
+  dbCtx: DbOrTx,
+  rows: ReadonlyArray<{ postId: string; status: RedditSnapshotStatus }>,
+): Promise<void> {
+  const deletionIds = rows.filter((r) => POST_DELETION_STATUSES.has(r.status)).map((r) => r.postId);
+  if (deletionIds.length === 0) return;
+  await dbCtx
+    .update(redditPosts)
+    .set({ deletionDetectedAt: sql`NOW()`, lastSnapshotAt: sql`NOW()` })
+    .where(and(inArray(redditPosts.postId, deletionIds), isNull(redditPosts.deletionDetectedAt)));
+}
+
+export interface RedditPostSnapshotWrite {
+  postId: string;
+  score: number | null;
+  numComments: number | null;
+  awardsTotal: number | null;
+  upvoteRatio: number | null;
+  removedByCategory: string | null;
+  status: RedditSnapshotStatus;
+}
+
 /** Idempotent post-snapshot writer.
  *
- *  V20 contract: `polled_at = date_trunc('minute', NOW())`; UNIQUE on
- *  (post_id, polled_at); ON CONFLICT DO NOTHING. Two worker retries
+ *  `polled_at = date_trunc('minute', NOW())`; composite PK on
+ *  (post_id, polled_at) + ON CONFLICT DO NOTHING. Two worker retries
  *  inside the same minute window collapse into one row at the DB level.
  */
 export async function writeRedditPostSnapshot(
   dbCtx: DbOrTx,
-  args: {
-    postId: string;
-    score: number | null;
-    numComments: number | null;
-    awardsTotal: number | null;
-    upvoteRatio: number | null;
-    removedByCategory: string | null;
-    status: RedditSnapshotStatus;
-  },
+  args: RedditPostSnapshotWrite,
 ): Promise<void> {
+  await writeRedditPostSnapshotsMany(dbCtx, [args]);
+}
+
+/** Multi-row variant — one INSERT for an array of snapshots. Each row
+ *  gets the same date_trunc('minute', NOW()) polled_at (single tick),
+ *  so the (post_id, polled_at) PK collisions across the array are
+ *  impossible if the caller de-duped postIds. */
+export async function writeRedditPostSnapshotsMany(
+  dbCtx: DbOrTx,
+  rows: ReadonlyArray<RedditPostSnapshotWrite>,
+): Promise<void> {
+  if (rows.length === 0) return;
   await dbCtx
     .insert(redditPostSnapshots)
-    .values({
-      postId: args.postId,
-      polledAt: sql`date_trunc('minute', NOW())` as unknown as Date,
-      score: args.score,
-      numComments: args.numComments,
-      awardsTotal: args.awardsTotal,
-      upvoteRatio: args.upvoteRatio,
-      removedByCategory: args.removedByCategory,
-      status: args.status,
-    })
+    .values(
+      rows.map((r) => ({
+        postId: r.postId,
+        polledAt: sql`date_trunc('minute', NOW())` as unknown as Date,
+        score: r.score,
+        numComments: r.numComments,
+        awardsTotal: r.awardsTotal,
+        upvoteRatio: r.upvoteRatio,
+        removedByCategory: r.removedByCategory,
+        status: r.status,
+      })),
+    )
     .onConflictDoNothing({
       target: [redditPostSnapshots.postId, redditPostSnapshots.polledAt],
     });
@@ -131,7 +163,7 @@ export async function writeRedditUserSnapshot(
     });
 }
 
-/** Idempotent subreddit-snapshot writer (per D-RDT-SUB-SNAPSHOTS — all
+/** Idempotent subreddit-snapshot writer (writes for ALL cached subs —
  *  cached subs get tracked over time).
  *
  *  UNIQUE on (subreddit, polled_at) minute-trunc. */

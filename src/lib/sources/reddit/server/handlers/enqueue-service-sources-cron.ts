@@ -1,26 +1,23 @@
-// Reddit service-sources enqueue cron handler (D-RDT-CRON-BURST).
+// Reddit service-sources enqueue cron handler.
 //
 // Schedule: 0/6/12/18 UTC daily — 4 ticks per day.
 //
-// What this does: SCANS data_sources for every reddit_account /
-// reddit_subreddit row with auto_import=true AND deleted_at IS NULL, then
-// INSERTS one row per source into reddit_refresh_queue with:
+// SCANS data_sources for every reddit_account / reddit_subreddit row
+// with auto_import=true AND deleted_at IS NULL, then INSERTS one row
+// per source into reddit_refresh_queue:
 //   - queue_name = 'service_source'
 //   - type       = 'author_poll' (reddit_account) | 'sub_poll' (reddit_subreddit)
 //   - payload    = { handle: <username> } | { sub: <subreddit> }
-//   - user_id    = NULL (cron-driven; user-driven entries set user_id —
-//                  V13 distinguishes the lanes by user_id IS NULL vs NOT
-//                  NULL for cap-exemption purposes).
+//   - user_id    = NULL  (cron-lane marker; user-driven enqueues set it)
 //   - priority   = 0
 //
-// The 8-tick worker (plan 05A) drains the queue at 8 rows/min effective
-// ceiling; this cron just fills the queue.
+// ZERO Reddit HTTP here — pure DB enqueue. The 8-tick worker drains
+// the queue at the 8 req/min ceiling.
 //
-// ZERO Reddit HTTP — pure DB enqueue per D-RDT-CRON-BURST.
-//
-// Cross-tenant by design: the SELECT walks all users' sources to enqueue
-// one service-pool job per source. Per-source tenant identity is preserved
-// inside the worker handler when it fans out events INSERTs.
+// Cross-tenant by design: the SELECT walks every user's sources to
+// enqueue one service-pool job per source. Per-source tenant identity
+// is preserved inside the worker handler when it fans out events
+// INSERTs.
 
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";

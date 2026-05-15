@@ -1,28 +1,18 @@
-// Reddit batch-worker tick body — the 8-slot round-robin loop.
+// Reddit batch-worker tick — the 8-slot round-robin loop.
 //
-// Called every 7.5s by src/worker/index.ts (plan 07 wires the setInterval).
-// Per tick: determine current slot (tickCounter % 8) → lookup target
-// queue in REDDIT_SLOT_MAPPING → SELECT FOR UPDATE SKIP LOCKED 1 pending
-// row → if empty, fall through to next non-empty queue in
-// FALLTHROUGH_ORDER → dispatch to type-specific handler → mark row
-// status and increment attempts on failure.
+// Called every 7.5s. One tick = at most one Reddit HTTP call, enforcing
+// an 8 req/min effective ceiling — Reddit's public-`.json` rate cap is
+// 10 req/min, so we sit two slots below it for safety margin.
 //
-// This pattern is the load-bearing answer to Reddit's 10 req/min hard
-// limit (D-RDT-7): the worker fires AT MOST 1 HTTP call per 7.5s = 8
-// req/min effective ceiling. SELECT FOR UPDATE SKIP LOCKED ensures
-// multi-instance deploys cannot double-claim the same row.
+// Each tick picks a queue lane from REDDIT_SLOT_MAPPING (indexed by
+// tickCounter % 8), claims one pending row via FOR UPDATE SKIP LOCKED,
+// dispatches to the type-specific handler, and marks the row's
+// terminal state. When the slot's lane is empty, the tick falls through
+// to FALLTHROUGH_ORDER so we never burn a slot doing nothing.
 //
-// Slot mapping (D-RDT-QUEUES-V2):
-//   1: service_source   5: service_post
-//   2: user_source      6: user_post
-//   3: user_post        7: user_source
-//   4: user_source      8: user_post
-//
-// Fallthrough (when slot's target queue is empty):
-//   user_post → user_source → service_post → service_source
-//
-// Per-minute distribution: 1×service_source, 1×service_post,
-// 3×user_source, 3×user_post.
+// Slot distribution per minute: 1×service_source, 1×service_post,
+// 3×user_source, 3×user_post — user-driven work gets six of the eight
+// slots since users care about latency more than cron does.
 
 import { db } from "$lib/server/db/client.js";
 import { sql } from "drizzle-orm";
@@ -61,11 +51,11 @@ export type RedditQueueName = (typeof REDDIT_SLOT_MAPPING)[number];
 const MAX_ATTEMPTS = 5;
 
 /** Module-scope tick counter — increments each call; mod 8 → slot index.
- *  Module-scope is acceptable under DV-RDT-7 because D-RDT-WORKER is
- *  single-process (env's WORKER_REPLICA_COUNT guard rejects N>1 when any
- *  adapter sets usesInProcessRateLimiter=true). A worker restart resets
- *  the counter — at worst we re-process slot 1 next tick instead of slot
- *  N+1; the SQL FOR UPDATE SKIP LOCKED still prevents duplicates. */
+ *  Single-process by contract: env's WORKER_REPLICA_COUNT guard rejects
+ *  N>1 when any adapter sets usesInProcessRateLimiter=true. A worker
+ *  restart resets the counter — at worst the round-robin re-aligns on
+ *  slot 0, and FOR UPDATE SKIP LOCKED still prevents duplicate claims
+ *  if anything else races. */
 let tickCounter = 0;
 
 export interface RedditWorkerTickResult {
@@ -96,28 +86,39 @@ interface ClaimedRow {
 /** Stale-processing recovery window. A row in status='processing'
  *  older than this is assumed to belong to a crashed worker process
  *  and is flipped back to 'pending' so the dequeue can re-claim it.
- *  Tuned to 5 minutes: longer than any healthy handler run
- *  (handlePostSingle: ~1s; sub_poll: ~2s) and shorter than
- *  cron-handler intervals (4 hours minimum), so a slow-but-alive
- *  worker is NOT preempted from its own row. The `attempts` column
- *  was incremented in Phase 1 of the prior tick, so a stale row that
- *  flips back to pending and re-fails N more times still hits
- *  MAX_ATTEMPTS dead-letter correctly. */
+ *  5 minutes is longer than any healthy handler run (~1-2s) and
+ *  shorter than cron intervals (≥4h), so a slow-but-alive worker is
+ *  NOT preempted. The `attempts` column was already incremented when
+ *  the row was claimed, so a stale row that flips back to pending and
+ *  re-fails N more times still hits MAX_ATTEMPTS dead-letter. */
 const STALE_PROCESSING_MS = 5 * 60_000;
 
+/** How often the stale-processing recovery scan runs. The worker tick
+ *  itself fires every 7.5s; running the recovery UPDATE on every tick
+ *  is ~12k no-op UPDATEs/day. Gating to once/minute drops that to
+ *  ~1.5k and keeps the no-op cheap regardless of queue size. */
+const STALE_RECOVERY_INTERVAL_MS = 60_000;
+let nextStaleRecoveryAt = 0;
+
 export async function redditWorkerTick(): Promise<RedditWorkerTickResult> {
-  // Stale-processing recovery — fires every tick (cheap UPDATE that
-  // touches zero rows on a healthy queue). Without this, a worker
-  // crash between Phase 1 (claim → status='processing' COMMIT) and
-  // Phase 2 (terminal UPDATE) leaves rows stuck forever — the
-  // dequeue only looks at status='pending'.
-  const staleSince = new Date(Date.now() - STALE_PROCESSING_MS);
-  await db.execute(sql`
-    UPDATE reddit_refresh_queue
-    SET status = 'pending'
-    WHERE status = 'processing'
-      AND last_attempt_at < ${staleSince}
-  `);
+  // Stale-processing recovery. Without this, a worker crash between
+  // claim (Phase 1, COMMIT) and the terminal UPDATE (Phase 2) leaves
+  // rows stuck forever — the dequeue only looks at status='pending'.
+  // Gated to once/minute by nextStaleRecoveryAt (module-scope; same
+  // single-process guarantee as tickCounter). The supporting partial
+  // index `idx_reddit_refresh_queue_processing_last_attempt` keeps
+  // the WHERE scan O(stale rows), not O(table).
+  const now = Date.now();
+  if (now >= nextStaleRecoveryAt) {
+    const staleSince = new Date(now - STALE_PROCESSING_MS);
+    await db.execute(sql`
+      UPDATE reddit_refresh_queue
+      SET status = 'pending'
+      WHERE status = 'processing'
+        AND last_attempt_at < ${staleSince}
+    `);
+    nextStaleRecoveryAt = now + STALE_RECOVERY_INTERVAL_MS;
+  }
 
   const tickStartMs = Date.now();
   const slot = REDDIT_SLOT_MAPPING[tickCounter]!;

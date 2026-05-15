@@ -8,13 +8,13 @@
 // `redditEnrichment` field) to the universal CardProps shape consumed by
 // EventCard.svelte.
 //
-// Per D-RDT-SOURCE-DISPLAY:
+// Card layout:
 //   - Author chip: `/u/<author>` (🧑 icon — rendered by FeedCard alongside
 //     the source row context).
 //   - Subreddit chip: `/r/<subreddit>` (🏛 icon).
 //   - Stats line: `↑<score> 💬<num_comments> (<upvote_ratio>%)`.
-//   - Underperforming-median badge (D-RDT-BASELINES-DISPLAY) when the
-//     latest score < median_score_24h AND sample_size >= 5.
+//   - Underperforming-median badge when the latest score <
+//     median_score_24h AND sample_size >= 5.
 //
 // The universal CardProps shape carries: thumbnail / title / subtitle /
 // badge / metrics[] / href. We map Reddit's emoji-flavoured display via
@@ -59,10 +59,10 @@ export function toCardProps(event: RedditEventLite): CardProps {
   const stats = event.redditEnrichment?.stats ?? null;
   const baseline = event.redditEnrichment?.baseline ?? null;
 
-  // Underperforming-median badge (D-RDT-BASELINES-DISPLAY). Only fires
-  // when we have BOTH a snapshot AND a baseline with the threshold
-  // sample size. "Mine" badge takes precedence (matches the YouTube
-  // priority — owner identity is the load-bearing chip).
+  // Underperforming-median badge — only fires when we have BOTH a
+  // snapshot AND a baseline with sample_size >= 5. "Mine" badge takes
+  // precedence (matches the YouTube priority — owner identity is the
+  // load-bearing chip).
   const isUnderperforming =
     stats !== null &&
     baseline !== null &&

@@ -13,14 +13,14 @@
 // just `name` so reddit_posts FK constraints are satisfied.
 //
 // Triggered by:
-//   - service_source cron daily picks (plan 05B fills the queue 4×/day
-//     for every registered reddit_subreddit data_source).
+//   - service_source cron daily picks (cron fills the queue 4×/day for
+//     every registered reddit_subreddit data_source).
 //   - user_source — user "refresh source" click on a registered sub.
 //
 // Side effects:
 //   1. UPSERT reddit_subreddits_cache (PK name only — bare seed row).
 //   2. UPSERT reddit_posts for each t3 child (up to 100).
-//   3. writeRedditPostSnapshot per t3 (V20 idempotent).
+//   3. writeRedditPostSnapshot per t3 (minute-truncated, idempotent).
 //   4. UPSERT reddit_users_cache for each unique author.
 //   5. Fan-out: for every data_sources row with kind='reddit_subreddit'
 //      AND metadata->>'subreddit'=<sub> AND auto_import=true AND

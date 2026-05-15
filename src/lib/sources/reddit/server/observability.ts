@@ -1,4 +1,4 @@
-// Reddit adapter observability — DV-RDT-7 public-`.json` model.
+// Reddit adapter observability.
 //
 // Three reads expose Reddit-side state to the cross-source /admin/quota
 // dashboard:
@@ -18,7 +18,7 @@
 //      gated by ADMIN_EMAIL_ALLOWLIST upstream).
 //
 //   3. getRecentLoad(seconds) — service-load gauge for the Reddit tab's
-//      "N / 6 user slots available this minute" line (D-RDT-QUOTA-UI).
+//      "N / 6 user slots available this minute" line.
 //      6 = per-minute user-slot capacity from REDDIT_SLOT_MAPPING (3
 //      user_source + 3 user_post slots out of 8 ticks/min). Plan 08's
 //      Reddit tab SSR loader reads this directly (not on the standard
@@ -26,16 +26,17 @@
 //
 // AUTH SHAPE: public-json-no-auth. isOperatorConfigured = true iff
 // env.REDDIT_USER_AGENT is non-empty (the only Reddit-side env var).
-// requiresUserSetup is false (no per-user secrets under DV-RDT-7).
+// requiresUserSetup is false (no per-user secrets in this adapter).
 //
-// userQuotaCap is the two-axis sliding-window cap declared in plan 06's
+// userQuotaCap is the two-axis sliding-window cap declared in the
 // REDDIT_USER_CAP constant; importing from quota.ts keeps the cap
-// DECLARATION and the cap COUNTER co-located (single source of truth).
+// declaration and the cap counter co-located (single source of truth).
 //
 // usesInProcessRateLimiter is false — Reddit's rate-limit budget lives
 // on reddit_refresh_queue (SQL-backed; multi-replica safe via FOR UPDATE
-// SKIP LOCKED). The 8-tick setInterval is single-process by D-RDT-WORKER
-// but the queue itself doesn't carry in-process state.
+// SKIP LOCKED). The 8-tick setInterval is single-process by contract
+// (env's WORKER_REPLICA_COUNT guard), but the queue itself carries no
+// in-process state.
 
 import { sql, desc, like } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
@@ -52,7 +53,7 @@ import { REDDIT_USER_CAP } from "./quota.js";
 const REDDIT_THEORETICAL_DAILY_CEILING = 8 * 60 * 24;
 
 /** Per-minute user-slot capacity from REDDIT_SLOT_MAPPING (3 user_source
- *  + 3 user_post out of 8 ticks/min). Drives the D-RDT-QUOTA-UI
+ *  + 3 user_post out of 8 ticks/min). Drives the QuotaStatusBanner
  *  "Service load: N / 6 user slots available this minute" line. */
 export const REDDIT_USER_SLOTS_PER_MINUTE = 6 as const;
 
@@ -298,7 +299,7 @@ export async function getDailyByType(): Promise<RedditDailyByType> {
 }
 
 /**
- * Service-load gauge for the Reddit tab — D-RDT-QUOTA-UI:
+ * Service-load gauge for the Reddit tab —
  * "Service load: N / 6 user slots available this minute".
  *
  * Counts entries in reddit_refresh_queue with status='done' on the two
@@ -349,9 +350,9 @@ export const redditObservability: AdapterObservability = {
     getDailyStats,
     getRecentAudit,
   },
-  // Two-axis sliding-window cap declared in plan 06's REDDIT_USER_CAP.
-  // Importing from quota.ts keeps the cap DECLARATION (here) and the cap
-  // COUNTER (checkRedditUserCap) co-located: single source of truth.
+  // Two-axis sliding-window cap; the REDDIT_USER_CAP constant in
+  // quota.ts is the single source of truth — both the declaration here
+  // and the counter (checkRedditUserCap) consume the same constant.
   userQuotaCap: {
     sourceActionsPerWindow: REDDIT_USER_CAP.sourceActionsPerWindow,
     postRefreshesPerWindow: REDDIT_USER_CAP.postRefreshesPerWindow,

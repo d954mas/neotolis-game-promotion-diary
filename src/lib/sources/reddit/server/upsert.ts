@@ -1,63 +1,69 @@
-// Reddit cache-table UPSERT helpers (D-RDT-CACHE-POPULATION).
+// Reddit cache-table UPSERT helpers.
 //
 // Three idempotent writers for the three lazy-populated public-data
 // caches:
-//   - upsertRedditPost      — reddit_posts        (PK post_id)
-//   - upsertRedditUser      — reddit_users_cache  (PK username)
+//   - upsertRedditPost      — reddit_posts            (PK post_id)
+//   - upsertRedditUser      — reddit_users_cache      (PK username)
 //   - upsertRedditSubreddit — reddit_subreddits_cache (PK name)
 //
-// All three are called from the worker handlers (sub_poll, author_poll,
-// post_batch, post_single) on first encounter and on every subsequent
-// poll. ON CONFLICT DO UPDATE refreshes the volatile fields (title,
-// metadata, karma, subscribers) without re-inserting; PK clash → row
-// update via SET.
+// Each helper has a singular form (one row per call) used by paste-flow
+// + per-row sub_poll/author_poll loops, AND a Many variant that takes
+// an array and runs ONE multi-row INSERT. The Many variants are the
+// load-bearing optimization for post_batch: a 100-id batch would
+// otherwise do ~500 sequential DB round-trips; batched, it's 4 INSERTs.
 //
-// Deletion-propagation guard (D-RDT-DELETION-PROPAGATION): upsertRedditPost
-// does NOT overwrite `author` / `author_fullname` to NULL — once
-// reddit.cron.deletion-propagation has nulled those, a re-poll of a
-// (still-) deleted post must not restore them. Pattern: omit the
-// author* fields from the SET clause; the existing values persist.
-//
-// Reference: $lib/sources/youtube/server/* doesn't have a parallel
-// helper because youtube_videos is the only public-data cache table
-// and its UPSERT lives inline in backfill-channel.ts (single caller,
-// not yet enough callers for the abstraction per AGENTS.md three-callers
-// rule). Reddit needs three callers (post_single, sub_poll, author_poll)
-// → abstraction earned.
+// ON CONFLICT DO UPDATE refreshes volatile fields (title, metadata,
+// karma, subscribers); the deletion-propagation guard means the
+// post-row SET clause never touches author / author_fullname — once
+// the nightly purge cron nulls those, a re-poll of a still-deleted
+// post must not restore them.
 
 import { sql } from "drizzle-orm";
 import type { DbOrTx } from "$lib/server/db/client.js";
 import { redditPosts, redditUsersCache, redditSubredditsCache } from "./schema/index.js";
 
+export interface RedditPostUpsert {
+  postId: string;
+  subreddit: string;
+  author: string | null;
+  authorFullname: string | null;
+  permalink: string;
+  title: string;
+  submittedAt: Date;
+  metadata: Record<string, unknown>;
+}
+
 /** Upsert reddit_posts on (post_id). Refreshes title / permalink /
  *  metadata / last_snapshot_at on conflict. Does NOT overwrite author
  *  fields — preserves deletion-propagation purges. */
-export async function upsertRedditPost(
+export async function upsertRedditPost(dbCtx: DbOrTx, args: RedditPostUpsert): Promise<void> {
+  await upsertRedditPostsMany(dbCtx, [args]);
+}
+
+/** Multi-row variant. One INSERT … VALUES (…), (…) … ON CONFLICT DO
+ *  UPDATE round-trip for the whole input. Returns the count of input
+ *  rows (post-conflict landed rows may differ but the caller only
+ *  needs to know the operation completed). */
+export async function upsertRedditPostsMany(
   dbCtx: DbOrTx,
-  args: {
-    postId: string;
-    subreddit: string;
-    author: string | null;
-    authorFullname: string | null;
-    permalink: string;
-    title: string;
-    submittedAt: Date;
-    metadata: Record<string, unknown>;
-  },
+  rows: ReadonlyArray<RedditPostUpsert>,
 ): Promise<void> {
+  if (rows.length === 0) return;
   await dbCtx
     .insert(redditPosts)
-    .values({
-      postId: args.postId,
-      subreddit: args.subreddit,
-      author: args.author,
-      authorFullname: args.authorFullname,
-      permalink: args.permalink,
-      title: args.title,
-      submittedAt: args.submittedAt,
-      metadata: args.metadata,
-      lastSnapshotAt: sql`NOW()` as unknown as Date,
-    })
+    .values(
+      rows.map((r) => ({
+        postId: r.postId,
+        subreddit: r.subreddit,
+        author: r.author,
+        authorFullname: r.authorFullname,
+        permalink: r.permalink,
+        title: r.title,
+        submittedAt: r.submittedAt,
+        metadata: r.metadata,
+        lastSnapshotAt: sql`NOW()` as unknown as Date,
+      })),
+    )
     .onConflictDoUpdate({
       target: redditPosts.postId,
       set: {
@@ -77,35 +83,47 @@ export async function upsertRedditPost(
     });
 }
 
+export interface RedditUserUpsert {
+  username: string;
+  redditId: string | null;
+  accountAgeDays: number | null;
+  linkKarma: number | null;
+  commentKarma: number | null;
+  totalKarma: number | null;
+  isSuspended: boolean;
+}
+
 /** Upsert reddit_users_cache on (username). Refreshes karma fields and
- *  last_metadata_refresh_at. Uses COALESCE for reddit_id so a row
- *  populated with a t2_xxx fullname keeps it after a poll that didn't
- *  surface the fullname (sub_poll responses include author_fullname;
- *  some legacy paths only carry the username string). */
-export async function upsertRedditUser(
+ *  last_metadata_refresh_at. Uses COALESCE for the COALESCE-able fields
+ *  so a poll that didn't surface a value (sub_poll responses include
+ *  author_fullname but not karma) keeps existing data. */
+export async function upsertRedditUser(dbCtx: DbOrTx, args: RedditUserUpsert): Promise<void> {
+  await upsertRedditUsersMany(dbCtx, [args]);
+}
+
+/** Multi-row variant. The caller MUST de-duplicate by username before
+ *  passing — Postgres' ON CONFLICT requires the values list to have at
+ *  most one row per conflict target (otherwise: "cannot affect row a
+ *  second time"). post_batch already builds a Set per author. */
+export async function upsertRedditUsersMany(
   dbCtx: DbOrTx,
-  args: {
-    username: string;
-    redditId: string | null;
-    accountAgeDays: number | null;
-    linkKarma: number | null;
-    commentKarma: number | null;
-    totalKarma: number | null;
-    isSuspended: boolean;
-  },
+  rows: ReadonlyArray<RedditUserUpsert>,
 ): Promise<void> {
+  if (rows.length === 0) return;
   await dbCtx
     .insert(redditUsersCache)
-    .values({
-      username: args.username,
-      redditId: args.redditId,
-      accountAgeDays: args.accountAgeDays,
-      linkKarma: args.linkKarma,
-      commentKarma: args.commentKarma,
-      totalKarma: args.totalKarma,
-      isSuspended: args.isSuspended,
-      lastMetadataRefreshAt: sql`NOW()` as unknown as Date,
-    })
+    .values(
+      rows.map((r) => ({
+        username: r.username,
+        redditId: r.redditId,
+        accountAgeDays: r.accountAgeDays,
+        linkKarma: r.linkKarma,
+        commentKarma: r.commentKarma,
+        totalKarma: r.totalKarma,
+        isSuspended: r.isSuspended,
+        lastMetadataRefreshAt: sql`NOW()` as unknown as Date,
+      })),
+    )
     .onConflictDoUpdate({
       target: redditUsersCache.username,
       set: {
@@ -120,43 +138,59 @@ export async function upsertRedditUser(
     });
 }
 
+export interface RedditSubredditUpsert {
+  name: string;
+  subredditId: string | null;
+  subscribers: number | null;
+  accountsActive: number | null;
+  description: string | null;
+  publicDescription: string | null;
+  submissionMetadata?: Record<string, unknown>;
+  rulesRawJson?: unknown;
+  over18?: boolean;
+  subredditType?: string | null;
+}
+
 /** Upsert reddit_subreddits_cache on (name). All optional fields
  *  COALESCE-preserve existing data: a sub_poll handler that didn't fetch
  *  about.json this tick won't clobber subscribers/description populated
- *  from the daily about-fetch. rulesRawJson likewise — only the rule-
+ *  by a previous about-refresh. rulesRawJson likewise — only the rule-
  *  fetcher overwrites it. */
 export async function upsertRedditSubreddit(
   dbCtx: DbOrTx,
-  args: {
-    name: string;
-    subredditId: string | null;
-    subscribers: number | null;
-    accountsActive: number | null;
-    description: string | null;
-    publicDescription: string | null;
-    submissionMetadata?: Record<string, unknown>;
-    rulesRawJson?: unknown;
-    over18?: boolean;
-    subredditType?: string | null;
-  },
+  args: RedditSubredditUpsert,
 ): Promise<void> {
-  const hasRules = args.rulesRawJson !== undefined;
+  await upsertRedditSubredditsMany(dbCtx, [args]);
+}
+
+/** Multi-row variant. Caller must de-dup by `name` before passing.
+ *  See upsertRedditUsersMany header for the Postgres requirement. */
+export async function upsertRedditSubredditsMany(
+  dbCtx: DbOrTx,
+  rows: ReadonlyArray<RedditSubredditUpsert>,
+): Promise<void> {
+  if (rows.length === 0) return;
   await dbCtx
     .insert(redditSubredditsCache)
-    .values({
-      name: args.name,
-      subredditId: args.subredditId,
-      subscribers: args.subscribers,
-      accountsActive: args.accountsActive,
-      description: args.description,
-      publicDescription: args.publicDescription,
-      submissionMetadata: args.submissionMetadata ?? {},
-      rulesRawJson: hasRules ? (args.rulesRawJson as unknown) : null,
-      rulesFetchedAt: hasRules ? (sql`NOW()` as unknown as Date) : null,
-      over18: args.over18 ?? false,
-      subredditType: args.subredditType ?? null,
-      lastMetadataRefreshAt: sql`NOW()` as unknown as Date,
-    })
+    .values(
+      rows.map((r) => {
+        const hasRules = r.rulesRawJson !== undefined;
+        return {
+          name: r.name,
+          subredditId: r.subredditId,
+          subscribers: r.subscribers,
+          accountsActive: r.accountsActive,
+          description: r.description,
+          publicDescription: r.publicDescription,
+          submissionMetadata: r.submissionMetadata ?? {},
+          rulesRawJson: hasRules ? (r.rulesRawJson as unknown) : null,
+          rulesFetchedAt: hasRules ? (sql`NOW()` as unknown as Date) : null,
+          over18: r.over18 ?? false,
+          subredditType: r.subredditType ?? null,
+          lastMetadataRefreshAt: sql`NOW()` as unknown as Date,
+        };
+      }),
+    )
     .onConflictDoUpdate({
       target: redditSubredditsCache.name,
       set: {

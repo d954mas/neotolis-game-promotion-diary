@@ -1,37 +1,34 @@
-// Reddit HTTP wrapper — DV-RDT-7 public-`.json` adapter.
+// Reddit HTTP wrapper — public-`.json` adapter.
 //
 // Responsibilities:
 //   - Add `User-Agent: env.REDDIT_USER_AGENT` to every outgoing fetch
-//     (V4 — Reddit aggressively rate-limits default UAs).
+//     (Reddit aggressively rate-limits the default Node UA).
+//   - Acquire a slot from the global pacer before firing the request.
 //   - Map response codes to AdapterError 5-category taxonomy
 //     (transient | rate-limited | not-found | permanent | operator-issue).
 //   - Detect 403-burst (3 × 403 within a 5-min rolling window) and emit
-//     ONE `reddit.adapter_degraded` audit row per burst window
-//     (D-RDT-AUTH-403, V5 — not per request: per burst).
-//   - Parse `Retry-After` (preferred) or `X-Ratelimit-Reset` for retryAfterMs
-//     (V16).
+//     ONE `reddit.adapter_degraded` audit row per burst window — not
+//     per failed request.
+//   - Parse `Retry-After` (preferred) or `X-Ratelimit-Reset` for
+//     retryAfterMs.
 //
-// Deliberately NOT here:
-//   - Rate-limit budget enforcement — the 8-tick worker in plan 05A owns
-//     this. http.ts is a fetch wrapper, not a scheduler.
-//   - Bearer/OAuth refresh — no OAuth under DV-RDT-7 (Reddit closed
-//     self-service registration Nov 2025; see CONTEXT D-RDT-AUTH-MODEL).
-//   - Key rotation — single operator UA.
-//   - Retry loops — caller (worker tick or paste flow) decides retry policy
-//     based on AdapterError category + retryAfterMs.
+// Not here:
+//   - Rate-limit budget enforcement — owned by the global pacer
+//     (pacer.ts) and the 8-tick worker (worker-tick.ts).
+//   - Bearer/OAuth refresh — no OAuth in this adapter (single UA env var).
+//   - Retry loops — callers decide retry policy from the AdapterError
+//     category + retryAfterMs.
 //
-// Module-scope burst state is in-process. Acceptable under DV-RDT-7
-// because D-RDT-WORKER is single-process (env's WORKER_REPLICA_COUNT
-// guard rejects N>1 when any adapter sets usesInProcessRateLimiter=true).
-// A worker restart loses the burst counter — at worst we emit one extra
-// audit row when the next burst trips; safer than over-suppressing.
+// Module-scope burst state is in-process; single-process by the same
+// contract as worker-tick.ts. A worker restart loses the burst counter
+// — worst case we emit one extra audit row when the next burst trips,
+// which is safer than over-suppressing.
 //
-// Audit row policy: writeAudit requires userId NOT NULL (audit_log schema).
-// We resolve operator user_id via ADMIN_EMAIL_ALLOWLIST[0] — same pattern
-// as YouTube's quota.markThrottleTransition. If no operator is resolvable
-// (empty allowlist or admin hasn't signed in yet), we log at WARN and skip
-// the audit row; the underlying AdapterError still propagates, so the
-// caller sees the rate-limit signal regardless.
+// Audit user-id: `audit_log.user_id` is NOT NULL by schema, so we
+// resolve operator user-id via ADMIN_EMAIL_ALLOWLIST[0] (same pattern
+// YouTube uses). When no operator is resolvable we log at WARN and
+// skip the audit row; the AdapterError still propagates, so the caller
+// always sees the rate-limit signal.
 
 import type { z } from "zod";
 import { AdapterError } from "$lib/sources/errors.js";
@@ -54,8 +51,9 @@ export interface RedditHttpResult<T> {
 // calls in CI). Mirrors YouTube's YOUTUBE_API_BASE_URL precedent.
 const REDDIT_BASE = env.REDDIT_BASE_URL_OVERRIDE ?? "https://www.reddit.com";
 
-// 403-burst detection state. Module-scope (single-process under
-// DV-RDT-7 — see header for the WORKER_REPLICA_COUNT guard rationale).
+// 403-burst detection state. Module-scope is fine because the worker
+// is single-process by contract — env's WORKER_REPLICA_COUNT guard
+// rejects N>1 when any adapter sets usesInProcessRateLimiter=true.
 interface BurstState {
   count: number;
   windowStartMs: number;
@@ -125,8 +123,9 @@ export async function redditFetch<T = unknown>(
   const statusCode = res.status;
   const headers = res.headers;
 
-  // 403-burst detection (D-RDT-AUTH-403). Emit `reddit.adapter_degraded`
-  // audit row ONCE per burst window; always throw AdapterError(rate-limited).
+  // 403-burst detection — Reddit's anti-bot fence. Emit
+  // `reddit.adapter_degraded` audit ONCE per burst window; always throw
+  // AdapterError(rate-limited).
   if (statusCode === 403) {
     await maybeEmitBurstAuditAndThrow(headers);
     // unreachable — maybeEmitBurstAuditAndThrow always throws.

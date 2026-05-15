@@ -1,44 +1,39 @@
-// Reddit per-user two-axis cap (DV-RDT-7): 1 source-action / 5min +
-// 25 post-refresh / 5min sliding window.
+// Reddit per-user two-axis cap: 1 source-action / 5min + 25
+// post-refresh / 5min sliding window.
 //
-// Why a Reddit-specific module (and not in src/lib/server/services/quota.ts):
-// Reddit's cap is a TWO-AXIS SLIDING-WINDOW model that doesn't fit
-// YouTube's per-Pacific-day requestsPerDay/eventsPerDay shape. Source-
-// actions are measured against audit_log (one COUNT query); post-
-// refreshes are measured against reddit_refresh_queue (a different
-// COUNT query). Both have a 5-minute rolling window keyed on UTC, not
-// the Pacific calendar day. Co-locating both axes here keeps the
-// counter and the Reddit-specific error-code naming together. The
-// cross-source services/quota.ts orchestrator lazy-imports this module
-// when adapter.observability.userQuotaCap declares the two-axis shape.
+// Both axes share ONE source of truth: `reddit_refresh_queue`. A user
+// action that costs a Reddit unit enqueues a row on the appropriate
+// lane (user_source or user_post); the cap query just COUNTs rows in
+// the last 5 minutes on the lane it cares about.
 //
-// Source-actions axis (D-RDT-CAP-SOURCE): COUNT(audit_log) WHERE
-//   user_id=$user
-//   AND action='source.refresh_content_requested'
-//   AND metadata->>'platform' IN ('reddit_account','reddit_subreddit')
-//   AND metadata->>'flow' != 'auto_passive'   -- cron flows excluded
-//   AND created_at > NOW() - INTERVAL '5 minutes'
+//   source-actions axis:
+//     SELECT count(*) FROM reddit_refresh_queue
+//     WHERE user_id = $user
+//       AND queue_name = 'user_source'
+//       AND enqueued_at > NOW() - INTERVAL '5 minutes'
 //
-// Post-refreshes axis (D-RDT-CAP-POST): COUNT(reddit_refresh_queue)
-//   WHERE user_id=$user
-//     AND queue_name='user_post'              -- only user lane
-//     AND enqueued_at > NOW() - INTERVAL '5 minutes'
+//   post-refreshes axis:
+//     SELECT count(*) FROM reddit_refresh_queue
+//     WHERE user_id = $user
+//       AND queue_name = 'user_post'
+//       AND enqueued_at > NOW() - INTERVAL '5 minutes'
 //
-// Cron exclusions (D-RDT-CAP-COUNTER):
-//   - Audit rows with metadata.flow='auto_passive' (daily cron picks
-//     burn the operator's cron reservoir, not the per-user cap).
-//   - Queue rows with user_id IS NULL (service_source / service_post
-//     lanes — operator-driven, not user-initiated).
+// Cron rows have `user_id IS NULL` (they live on service_source /
+// service_post lanes), so the user-lane filter excludes them by
+// construction.
 //
-// SOFT FAIRNESS CAP — same caveat as services/quota.ts:
-//   The cap-check pattern (read counter -> compare -> enqueue) is not
-//   atomic. Two concurrent requests from the same user at 0/1 can both
-//   pass the gate before either's audit row settles. Result: brief
-//   overshoot to 2/1 on the source-actions axis under contention.
-//   Accepted: this is a fairness signal protecting shared operator
-//   throughput, not a security-grade ceiling. A strict atomic check
-//   would require pg_advisory_xact_lock(hashtext(userId)) on every
-//   refresh-content / paste click — cost-prohibitive at indie scale.
+// Why this module (and not src/lib/server/services/quota.ts): Reddit's
+// shape doesn't fit YouTube's per-Pacific-day requestsPerDay model —
+// it's a 5-minute UTC sliding window with TWO independent axes. The
+// cross-source orchestrator lazy-imports this module only when an
+// adapter declares the two-axis shape via observability.userQuotaCap.
+//
+// SOFT FAIRNESS CAP — same caveat as services/quota.ts: cap-check +
+// enqueue is not atomic. Two concurrent requests at 0/1 can both pass
+// the gate before either row settles, briefly overshooting to 2/1.
+// Accepted: this is a fairness signal, not a security-grade ceiling.
+// An atomic check would need pg_advisory_xact_lock(hashtext(userId))
+// on every click — cost-prohibitive at indie scale.
 
 import { and, eq, gte, sql } from "drizzle-orm";
 import type { DbOrTx } from "$lib/server/db/client.js";
@@ -74,17 +69,17 @@ export interface RedditCapResult {
 /**
  * Compute the cap state for `userId` on the given `axis`. dbCtx may be
  * a Drizzle db handle OR an inner tx; the count joins the caller's
- * transaction when one is active (callers in a service-tx pass `tx`).
+ * transaction when one is active.
  *
- * Per-axis SQL:
- *   - source-actions: audit_log COUNT + MIN(created_at) under the 5-min
- *     window for this user and the reddit_* platforms, excluding the
- *     cron-driven auto_passive flow.
- *   - post-refreshes: reddit_refresh_queue COUNT + MIN(enqueued_at)
- *     under the 5-min window for this user on the user_post lane.
+ * Both axes COUNT + MIN(enqueued_at) over reddit_refresh_queue under a
+ * 5-minute UTC rolling window. axis only changes which queue_name
+ * lane the WHERE filters to:
+ *   - source-actions  → user_source
+ *   - post-refreshes  → user_post
  *
- * The single COUNT-and-MIN query lets us derive `reset_in_seconds`
- * without a second round-trip — caller surfaces it in the 429 response.
+ * Returning oldestAt lets the caller derive `reset_in_seconds` without
+ * a second round-trip — the cap clears when the oldest counted row
+ * falls out of the window.
  */
 export async function checkRedditUserCap(
   dbCtx: DbOrTx,
@@ -104,7 +99,7 @@ export async function checkRedditUserCap(
     // lane (createSource → onSourceCreated → backfillSource → user_source
     // INSERT; refresh-content → backfillSource → user_source INSERT).
     // user_id NOT NULL + queue_name='user_source' filters out cron-lane
-    // rows by construction (D-RDT-CAP-COUNTER).
+    // rows by construction.
     const rows = await dbCtx
       .select({
         used: sql<number>`count(*)::int`,
@@ -140,7 +135,7 @@ export async function checkRedditUserCap(
     .where(
       and(
         // user_id NOT NULL eliminates cron-lane rows by construction
-        // (D-RDT-CAP-COUNTER). Combined with queue_name='user_post' the
+        //. Combined with queue_name='user_post' the
         // filter narrows to user-initiated post refreshes only.
         eq(redditRefreshQueue.userId, userId),
         eq(redditRefreshQueue.queueName, "user_post"),
@@ -182,7 +177,7 @@ function computeResetSeconds(oldestAt: Date | null, windowMs: number): number {
 /**
  * Write `reddit.cap_exhausted` audit row when caller decides to 429.
  * Called from the cross-source quota orchestrator before throwing the
- * AppError. Audit metadata follows D-RDT-AUDIT-VERBS:
+ * AppError. Audit metadata shape:
  *   { cap_type: 'source' | 'post', cap, used, window_minutes }
  *
  * Uses writeAudit (swallows errors): a failed audit must not break the
@@ -210,7 +205,7 @@ export async function writeRedditCapExhaustedAudit(args: {
 }
 
 /**
- * Maps cap axis to the structured 429 error code (D-RDT-CAP-EXCEED).
+ * Maps cap axis to the structured 429 error code.
  * Cross-source services/quota.ts threads this through AppError.code so
  * the route layer surfaces:
  *   - reddit_source_quota_exhausted  (source-actions axis)

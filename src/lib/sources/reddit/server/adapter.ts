@@ -1,23 +1,23 @@
-// Reddit per-source adapter CORE — DV-RDT-7 public-`.json` model.
+// Reddit per-source adapter CORE — the public-`.json` model.
 //
-// `redditAdapterCore` is the polling-bearing slice of DataSourceAdapter
-// composed into the full `redditAdapter` in ./index.ts (mirrors YouTube's
+// `redditAdapterCore` is the polling slice of DataSourceAdapter composed
+// into the full `redditAdapter` in ./index.ts (mirrors YouTube's
 // adapter.ts → index.ts barrel pattern).
 //
-// Polling under DV-RDT-7 is QUEUE-DRIVEN, not synchronous fetch — the
-// 8-tick worker (handlers/worker-tick.ts) owns the actual HTTP. pollContent
-// and pollStats ENQUEUE rows into reddit_refresh_queue and return
-// placeholder shapes; the worker drains the queue at 8 req/min effective
-// ceiling and writes the real data via the type-specific handlers (sub-poll,
-// author-poll, post-batch, post-single).
+// Polling is QUEUE-DRIVEN, not synchronous fetch. The 8-tick worker
+// (handlers/worker-tick.ts) owns the actual HTTP. pollContent and
+// pollStats ENQUEUE rows into reddit_refresh_queue and return
+// placeholder shapes; the worker drains the queue at 8 req/min
+// effective ceiling and writes real data via the type-specific
+// handlers (sub-poll, author-poll, post-batch, post-single).
 //
-// pollStatsByVideoId returns an empty array — Reddit doesn't use per-video
-// polling (listing endpoints return inline stats; post_batch refreshes
-// stats by post_id directly).
+// pollStatsByVideoId returns an empty array — Reddit doesn't use
+// per-video polling (listing endpoints return inline stats; post_batch
+// refreshes stats by post_id directly).
 //
-// canRefreshPoll claims `reddit_post` only. The adapter's parseUrl /
-// parseSourceUrl methods are exposed for the cross-source URL router
-// (parseAnyUrl) + /sources/new auto-detect (per the plan-01 widening).
+// canRefreshPoll claims `reddit_post` only. parseUrl / parseSourceUrl
+// are exposed for the cross-source URL router (parseAnyUrl) and the
+// /sources/new auto-detect.
 
 import { db } from "$lib/server/db/client.js";
 import type {
@@ -51,7 +51,7 @@ interface RedditSourceMetadata {
   subreddit?: string;
 }
 
-/** Reddit adapter polling core (DV-RDT-7).
+/** Reddit adapter polling core.
  *
  *  pollContent / pollStats enqueue work into reddit_refresh_queue rather
  *  than firing HTTP synchronously. The 8-tick worker (handlers/worker-tick.ts)

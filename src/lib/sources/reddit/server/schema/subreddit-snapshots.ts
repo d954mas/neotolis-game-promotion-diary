@@ -4,17 +4,15 @@
 // per-subreddit growth metrics (`subscribers`, `accounts_active`)
 // captured daily from `/r/X/about.json`.
 //
-// Per D-RDT-SUB-SNAPSHOTS, snapshots are captured by the `sub_poll`
-// worker handler for ALL cached subreddits (not just OWNED — every
-// subreddit a user pastes a post into gets tracked over time so the
-// per-sub baselines and growth-rate context columns stay accurate).
-// Either combined into the same handler tick as the main sub_poll
-// (2 HTTP calls back-to-back) OR split into a separate `sub_metadata_
-// refresh` queue type — planner picks in plan 03.1-05A/05B.
+// Snapshots are captured for ALL cached subreddits (not just OWNED) so
+// the per-sub baselines and growth-rate context columns stay accurate
+// for every subreddit a user pastes into. They land via a dedicated
+// about-refresh queue work item, NOT inline with sub_poll's /new.json
+// fetch — the global pacer would deny a second redditFetch in the
+// same tick.
 //
-// `(subreddit, polled_at)` UNIQUE makes within-the-minute retries
-// idempotent (date_trunc('minute', NOW()) on insert — see D-RDT-
-// SNAPSHOTS).
+// `(subreddit, polled_at)` composite PK makes within-the-minute retries
+// idempotent (insert via date_trunc('minute', NOW())).
 //
 // ESLint allowlist mirror in eslint-plugin-tenant-scope/no-unfiltered-
 // tenant-query.js with the explicit "public external data, no tenant

@@ -1,20 +1,16 @@
-// Reddit operator credentials — DV-RDT-7 public-`.json` model.
+// Reddit operator credentials — public-`.json` model.
 //
-// Single env var (REDDIT_USER_AGENT) covers all Reddit requests. No OAuth,
-// no client_id/secret, no bearer cache (Reddit closed self-service OAuth
-// registration Nov 2025; see .planning/phases/03.1-reddit-adapter/03.1-CONTEXT.md
-// D-RDT-AUTH-MODEL / D-RDT-AUTH-ENV / D-RDT-AUTH-EMPTY for the policy context).
+// One env var (REDDIT_USER_AGENT) covers every Reddit request. No OAuth,
+// no client_id/secret, no bearer cache: Reddit closed self-service OAuth
+// registration in late 2025, so we read its public JSON endpoints with a
+// distinct, identifying User-Agent and stay inside the unauthenticated
+// rate budget (10 req/min, bounded further by the global pacer).
 //
-// pickRedditCredentials returns null when env.REDDIT_USER_AGENT === "" —
-// self-host parity preserved (boot succeeds with empty env; downstream
-// code short-circuits, /admin/quota Reddit tab shows "not configured",
-// smoke gate validates).
-//
-// This module is the ONLY consumer of env.REDDIT_USER_AGENT across the
-// codebase (cross-source code never reads env directly; the adapter's
-// http wrapper threads userAgent through). Mirrors the YouTube pattern
-// in $lib/sources/youtube/server/credentials.ts where pickCredentials is
-// the single contract surface for credential selection.
+// Empty REDDIT_USER_AGENT is the unconfigured state — boot still
+// succeeds, downstream callers short-circuit, /admin/quota's Reddit
+// tab shows "not configured", smoke validates. This module is the
+// ONLY consumer of env.REDDIT_USER_AGENT; cross-source code threads
+// the value through redditFetch instead of reading env directly.
 
 import { env } from "$lib/server/config/env.js";
 
@@ -28,9 +24,9 @@ export function pickRedditCredentials(): { userAgent: string } | null {
   return { userAgent: ua };
 }
 
-/** Boolean form. Used by observability.auth.isOperatorConfigured (plan 07
- *  redditAdapter barrel) and by services/ingest.ts (plan 09 paste flow)
- *  to throw `reddit_not_configured` 422 instead of attempting a request. */
+/** Boolean form. Used by observability.auth.isOperatorConfigured and by
+ *  the paste-flow + preview-flow guards to throw `reddit_not_configured`
+ *  before attempting any HTTP. */
 export function isRedditConfigured(): boolean {
   return env.REDDIT_USER_AGENT !== "";
 }

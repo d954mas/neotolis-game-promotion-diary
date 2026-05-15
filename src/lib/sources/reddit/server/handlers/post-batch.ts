@@ -1,25 +1,36 @@
 // Reddit post_batch handler — refresh up to 100 posts in one HTTP call.
 //
-// Triggered by the service_post cron (plan 05B, D-RDT-POST-ELIGIBILITY)
-// for posts whose snapshots are due (young <24h on a 6h refresh cadence,
-// or missing-baseline backfill at the 24h mark), and by user-driven
-// "refresh all" bulk actions (user_post lane).
+// Triggered by the service_post cron for posts whose snapshots are due
+// (young <24h on a 6h refresh cadence, or missing-baseline backfill at
+// the 24h mark) and by user-driven "refresh all" bulk actions on the
+// user_post lane.
 //
 // Endpoint: /api/info.json?id=t3_a,t3_b,... (up to 100 ids per request).
 //
-// Order is NOT guaranteed (RESEARCH §Probe 4). Reddit silently drops
-// deleted IDs from the response. We match requested vs returned by
-// data.id and write a status='not_found' snapshot for the missing set
-// (V20 — minute-trunc idempotent; multiple refresh ticks for the same
-// gone post collapse into one snapshot per minute).
+// Reddit's response order is NOT guaranteed and missing posts are
+// silently dropped. We match requested vs returned by data.id and
+// write a status='not_found' snapshot for the missing set — the
+// snapshot writer minute-truncates polled_at so multiple refresh
+// ticks for the same gone post collapse into one row per minute.
 //
 // Cost: 1 HTTP call → up to 100 snapshots written. The load-bearing
 // optimization that makes the 8 req/min ceiling work at any scale.
 
 import { db } from "$lib/server/db/client.js";
 import { redditFetch } from "../http.js";
-import { upsertRedditPost, upsertRedditUser, upsertRedditSubreddit } from "../upsert.js";
-import { writeRedditPostSnapshot, markPostDeletionDetectedIfNeeded } from "../snapshots.js";
+import {
+  upsertRedditPostsMany,
+  upsertRedditUsersMany,
+  upsertRedditSubredditsMany,
+  type RedditPostUpsert,
+  type RedditUserUpsert,
+  type RedditSubredditUpsert,
+} from "../upsert.js";
+import {
+  writeRedditPostSnapshotsMany,
+  markPostDeletionDetectedIfNeededMany,
+  type RedditPostSnapshotWrite,
+} from "../snapshots.js";
 import { buildPostMetadata } from "../post-metadata.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import { logger } from "$lib/server/logger.js";
@@ -94,10 +105,21 @@ export async function handlePostBatch(args: {
     }
   }
 
+  // Bucket the response into FK-target rows (subreddits + users) and
+  // post rows + snapshots. Each bucket gets ONE multi-row INSERT below,
+  // so a 100-id batch is ~4 DB round-trips total (subs, users, posts,
+  // snapshots) instead of ~500 with the per-row pattern.
+  const subredditsByName = new Map<string, RedditSubredditUpsert>();
+  const usersByName = new Map<string, RedditUserUpsert>();
+  const postUpserts: RedditPostUpsert[] = [];
+  const snapshotWrites: RedditPostSnapshotWrite[] = [];
+  const snapshotStatuses: Array<{
+    postId: string;
+    status: ReturnType<typeof classifySnapshotStatus>;
+  }> = [];
   const presentIds: string[] = [];
   const missingIds: string[] = [];
 
-  // Phase 1: UPSERT cache + snapshot for each present id.
   for (const reqId of requested) {
     const t3 = returnedById.get(reqId);
     if (!t3) {
@@ -113,17 +135,18 @@ export async function handlePostBatch(args: {
       ? t3.permalink
       : `https://www.reddit.com${t3.permalink}`;
 
-    // UPSERT FK targets first.
-    await upsertRedditSubreddit(db, {
-      name: t3.subreddit,
-      subredditId: t3.subreddit_id ?? null,
-      subscribers: null,
-      accountsActive: null,
-      description: null,
-      publicDescription: null,
-    });
-    if (author !== null) {
-      await upsertRedditUser(db, {
+    if (!subredditsByName.has(t3.subreddit)) {
+      subredditsByName.set(t3.subreddit, {
+        name: t3.subreddit,
+        subredditId: t3.subreddit_id ?? null,
+        subscribers: null,
+        accountsActive: null,
+        description: null,
+        publicDescription: null,
+      });
+    }
+    if (author !== null && !usersByName.has(author)) {
+      usersByName.set(author, {
         username: author,
         redditId: authorFullname,
         accountAgeDays: null,
@@ -134,7 +157,7 @@ export async function handlePostBatch(args: {
       });
     }
 
-    await upsertRedditPost(db, {
+    postUpserts.push({
       postId: reqId,
       subreddit: t3.subreddit,
       author,
@@ -146,7 +169,8 @@ export async function handlePostBatch(args: {
     });
 
     const snapStatus = classifySnapshotStatus(t3);
-    await writeRedditPostSnapshot(db, {
+    snapshotStatuses.push({ postId: reqId, status: snapStatus });
+    snapshotWrites.push({
       postId: reqId,
       score: t3.score ?? null,
       numComments: t3.num_comments ?? null,
@@ -155,37 +179,42 @@ export async function handlePostBatch(args: {
       removedByCategory: t3.removed_by_category ?? null,
       status: snapStatus,
     });
-    await markPostDeletionDetectedIfNeeded(db, reqId, snapStatus);
   }
 
-  // Phase 2: status='not_found' snapshot for each missing id. The
-  // FK on reddit_post_snapshots.post_id → reddit_posts.post_id requires
-  // a parent row exist; for missing-from-batch ids, we DO have the parent
-  // row already (cron picks from reddit_posts; user_post is enqueued from
-  // existing-paste flow). If the FK ever fails (unexpected), log + skip
-  // — the missing-ness is reflected in last_snapshot_at staying old, and
-  // the next eligibility scan picks it up again.
+  // Missing ids → status='not_found' snapshot. The FK on
+  // reddit_post_snapshots.post_id requires a parent reddit_posts row;
+  // cron-enqueued ids always have one (cron picks FROM reddit_posts).
+  // We add the snapshot rows to the same batch; if a synthetic test id
+  // ever sneaks in, Postgres FK error surfaces clearly instead of a
+  // per-row try/catch hiding it.
   for (const missingId of missingIds) {
-    try {
-      await writeRedditPostSnapshot(db, {
-        postId: missingId,
-        score: null,
-        numComments: null,
-        awardsTotal: null,
-        upvoteRatio: null,
-        removedByCategory: null,
-        status: "not_found",
-      });
-      await markPostDeletionDetectedIfNeeded(db, missingId, "not_found");
-    } catch (err) {
-      // FK violation — parent row doesn't exist. Should not happen for
-      // cron-enqueued ids; possible for synthetic test ids.
-      logger.warn(
-        { postId: missingId, err: String((err as Error)?.message ?? err) },
-        "reddit post_batch: not_found snapshot write failed (likely FK miss)",
-      );
-    }
+    snapshotStatuses.push({ postId: missingId, status: "not_found" });
+    snapshotWrites.push({
+      postId: missingId,
+      score: null,
+      numComments: null,
+      awardsTotal: null,
+      upvoteRatio: null,
+      removedByCategory: null,
+      status: "not_found",
+    });
   }
+
+  await upsertRedditSubredditsMany(db, [...subredditsByName.values()]);
+  await upsertRedditUsersMany(db, [...usersByName.values()]);
+  await upsertRedditPostsMany(db, postUpserts);
+  try {
+    await writeRedditPostSnapshotsMany(db, snapshotWrites);
+  } catch (err) {
+    // FK violation — a missing id has no parent reddit_posts row.
+    // Should not happen for cron-enqueued ids; possible for synthetic
+    // test ids. Log + continue so the cache writes above still settle.
+    logger.warn(
+      { err: String((err as Error)?.message ?? err) },
+      "reddit post_batch: snapshot batch write failed (likely FK miss on synthetic id)",
+    );
+  }
+  await markPostDeletionDetectedIfNeededMany(db, snapshotStatuses);
 
   logger.info(
     {

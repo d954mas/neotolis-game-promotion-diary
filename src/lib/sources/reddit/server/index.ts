@@ -1,32 +1,17 @@
-// Reddit per-source server barrel — DV-RDT-7 public-`.json` adapter.
+// Reddit per-source server barrel — the public-`.json` adapter (no
+// OAuth, single User-Agent env var).
 //
-// Cross-source code (registry, scheduler, worker, /admin/quota loader,
-// /feed loader) imports ONLY from this file. Internal modules (adapter,
-// http, schema, handlers, quota, observability, feed-enrichment) wire
-// together inside this folder; consumers see only the `redditAdapter`
-// export plus the `getRecentLoad` Reddit-specific helper.
+// Cross-source code imports ONLY from this file: it sees `redditAdapter`
+// (the DataSourceAdapter implementation) plus a couple of Reddit-only
+// observability helpers re-exported below. Internal modules — adapter,
+// http, schema, handlers, quota, observability, feed-enrichment — wire
+// together inside this folder.
 //
-// Per-kind queue topology (Phase 03.1):
-//   - reddit.cron.enqueue-service-sources  — daily 00/06/12/18 UTC
-//   - reddit.cron.enqueue-service-posts    — daily 03/09/15/21 UTC
-//   - reddit.cron.baselines                — daily 04:00 UTC
-//   - reddit.cron.deletion-propagation     — daily 05:00 UTC
-//
-// All four cron handlers do ZERO Reddit HTTP — they enqueue rows into
-// reddit_refresh_queue (D-RDT-CRON-BURST). The actual HTTP fan-out
-// happens via the 8-tick setInterval worker (D-RDT-WORKER) which drains
-// reddit_refresh_queue at 8 req/min effective ceiling.
-//
-// scheduleCronTicks is the per-kind cron registration entrypoint. The
-// cross-source scheduler (src/scheduler/index.ts) iterates allAdapters
-// and calls adapter.scheduleCronTicks(boss) for each.
-//
-// registerQueues is the per-kind worker registration entrypoint. The
-// cross-source worker (src/worker/index.ts) iterates allAdapters and
-// calls adapter.registerQueues(boss). The Reddit batch-worker
-// setInterval (worker-tick.ts) is booted separately in src/worker/index.ts
-// — see the explicit setInterval block there (the pg-boss work() loop
-// owns only the four cron queues; the 8-tick drain loop is direct).
+// Cron handlers (registered via `scheduleCronTicks`) do ZERO Reddit
+// HTTP themselves: they enqueue rows into `reddit_refresh_queue` and
+// let the 8-tick batch-worker drain them at the 8 req/min ceiling. Cron
+// queue handlers + the setInterval drain loop are bootstrapped from
+// src/worker/index.ts via this barrel's `registerQueues`.
 
 import type {
   AdapterAppContext,
@@ -66,7 +51,7 @@ interface RedditSourceMetadata {
  *  booted separately in src/worker/index.ts; it doesn't go through
  *  pg-boss.work because pg-boss's concurrency model doesn't preserve the
  *  deterministic round-robin we need to stay inside Reddit's 10 req/min
- *  hard ceiling under multi-replica deploys (D-RDT-WORKER).
+ *  hard ceiling under multi-replica deploys.
  *
  *  batchSize=1 on every cron handler — each handler is a once-per-tick
  *  DB scan + INSERT; concurrent runs would just contend on the same
@@ -127,13 +112,16 @@ async function scheduleCronTicks(boss: MinimalBoss): Promise<void> {
  *  contract — the queue is local to Reddit) and a queue label that
  *  matches the lane. The 8-tick worker drains the row asynchronously.
  *
- *  Origin → lane mapping (D-RDT-CAP-COUNTER):
- *    origin='user' → user_source lane (user_id NOT NULL — cap-counted)
- *    origin='cron' → service_source lane (user_id NULL — cap-exempt)
+ *  origin → lane mapping:
+ *    'user' → user_source  (user_id NOT NULL, counted by the user cap)
+ *    'cron' → service_source (user_id NULL, exempt from the user cap)
  *
- *  Priority 1 for user-driven (jumps the in-lane FIFO ahead of any
- *  stragglers); 0 for cron. Cross-lane fairness is owned by the 8-tick
- *  worker's REDDIT_SLOT_MAPPING. */
+ *  Priority is symbolic here. user_source and service_source are
+ *  separate lanes and the worker tick claims rows lane-by-lane via
+ *  REDDIT_SLOT_MAPPING — within a single lane all backfill rows carry
+ *  the same priority, so ordering effectively reduces to enqueued_at
+ *  FIFO. The numeric difference (0 cron / 1 user) is preserved only as
+ *  a hint for any future cross-lane query that might inspect it. */
 async function backfillSource(
   source: PollableSource,
   ctx: AdapterContext,
@@ -284,7 +272,8 @@ async function fetchEventPreviewMetadata(
  *   - UPSERTs reddit_posts / reddit_users_cache / reddit_subreddits_cache
  *   - Writes ONE reddit_post_snapshots row (minute-truncated polled_at)
  *   - Writes ONE reddit_refresh_queue row with status='done' on the
- *     user_post lane for cap-counter visibility (D-RDT-CAP-POST, plan 06)
+ *     user_post lane for cap-counter visibility (the 25/5min post-refresh
+ *     cap reads from this lane).
  *   - 60s dedup — preview+submit on the same post collapses to ONE
  *     Reddit fetch + ONE cap-counter tick
  *
@@ -314,7 +303,7 @@ async function fetchEventStats(
       userId: ctx.userId,
       paste: true,
     });
-    // D-RDT-AUTHOR-IS-ME-INHERITANCE: match t3.author against the user's
+    // author-is-me inheritance: match t3.author against the user's
     // owned reddit_account sources. If found, signal author_is_me=true
     // back to createEvent so the events row is created with proper
     // attribution. Case-sensitive — Reddit usernames are case-insensitive
@@ -474,9 +463,8 @@ export const redditAdapter: DataSourceAdapter = {
 };
 
 // Re-export the Reddit-only observability helpers so /admin's Reddit
-// Ops panel SSR loader (admin-quota-read.ts) and /sources's Reddit tab
-// (plan 08) can import from this barrel rather than reaching into
-// observability.ts directly.
+// Ops panel SSR loader and /sources's Reddit tab import from this
+// barrel rather than reaching into observability.ts directly.
 export {
   getRecentLoad,
   getQueueDepth,

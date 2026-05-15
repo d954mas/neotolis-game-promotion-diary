@@ -15,8 +15,7 @@
 //   - Source listing-walk (`sub_poll` / `author_poll`) returns posts →
 //     same UPSERT + INSERT chain, post-by-post.
 //
-// Deletion-propagation contract (D-RDT-DELETION-PROPAGATION,
-// Reddit Public Content Policy):
+// Deletion-propagation contract (Reddit Public Content Policy):
 //   When the latest snapshot has `removed_by_category != NULL`, the
 //   worker sets `deletion_detected_at = NOW()` (idempotent — only on
 //   first detect) AND `last_snapshot_at = NOW()` (stop polling). The

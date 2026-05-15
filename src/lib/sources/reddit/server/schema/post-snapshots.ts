@@ -10,8 +10,8 @@
 // `(post_id, polled_at)` UNIQUE making within-the-minute retries
 // idempotent. `polled_at` is `date_trunc('minute', NOW())` at insert
 // time so two retries inside the same minute collapse to one row
-// (D-RDT-SNAPSHOTS idempotency contract; mirrors YouTube
-// Phase 03.0 D-NEW pattern).
+// (within-minute idempotency contract; mirrors the YouTube
+// per-video snapshots pattern).
 //
 // `status` column carries the post's live-vs-deleted lifecycle:
 //   - 'ok'        — normal post with live score / comments
@@ -25,7 +25,7 @@
 // where this is non-NULL, the worker handler also sets
 // `reddit_posts.deletion_detected_at = NOW()` (idempotent — first
 // detect only) which starts the 48-hour deletion-propagation clock per
-// D-RDT-DELETION-PROPAGATION.
+// the 48h deletion-propagation clock.
 //
 // ESLint allowlist mirror in eslint-plugin-tenant-scope/no-unfiltered-
 // tenant-query.js with the explicit "public external data, no tenant

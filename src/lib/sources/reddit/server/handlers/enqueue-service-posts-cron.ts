@@ -1,35 +1,33 @@
-// Reddit service-posts enqueue cron handler (D-RDT-CRON-BURST).
+// Reddit service-posts enqueue cron handler.
 //
 // Schedule: 03/09/15/21 UTC daily — 4 ticks per day, staggered against
-// service-sources cron (00/06/12/18 UTC) so the queue is mostly drained
-// between the two enqueue waves.
+// the service-sources cron (00/06/12/18 UTC) so the queue mostly drains
+// between waves.
 //
-// What this does: SCANS reddit_posts via the D-RDT-POST-ELIGIBILITY
-// query — picks posts that need a fresh snapshot:
+// SCANS reddit_posts for rows that need a fresh snapshot:
 //
 //   1. Young posts (<24h since submit) where last_snapshot_at is stale
-//      (>6h old) OR never polled (NULL).
+//      (>6h old) OR never polled.
 //   2. Old posts (>=24h since submit) where no snapshot exists at the
 //      ~24h-after-submit mark (baseline backfill — these snapshots feed
 //      the baselines cron's PERCENTILE_CONT aggregate).
-//
 //   AND deletion_detected_at IS NULL (dead posts are never re-polled).
 //
 // The eligible set is chunked into batches of MAX_BATCH=100 (Reddit's
 // /api/info hard limit on id-list length) and one queue row is INSERTed
-// per chunk with:
+// per chunk:
 //   - queue_name = 'service_post'
 //   - type       = 'post_batch'
 //   - payload    = { post_ids: [...up to 100...] }
-//   - user_id    = NULL (cron-driven; user_post lane is for user-driven).
+//   - user_id    = NULL  (cron lane; user_post is for user-driven work)
 //
-// ZERO Reddit HTTP — pure DB scan + INSERT per D-RDT-CRON-BURST.
+// ZERO Reddit HTTP here — pure DB scan + INSERT. The 8-tick worker
+// drains the resulting batches.
 //
-// LIMIT 500 caps the per-tick work: at 100 ids per batch that's at most
-// 5 queue rows per tick, which at 8 ticks/min worker drain = ~38s of
-// worker time per cron tick. Over a full day's 4 ticks that's 2000
-// snapshots/day across the whole cache — sized to fit a small VPS
-// indie-scale workload.
+// LIMIT 500 caps per-tick work: at 100 ids/batch that's at most 5 queue
+// rows per tick, which at 8 ticks/min worker drain ≈ 38s of worker time
+// per cron tick. Across the full day's 4 ticks that's ~2000 snapshots
+// — sized to fit a small VPS indie-scale workload.
 
 import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
@@ -37,7 +35,7 @@ import { redditRefreshQueue } from "../schema/index.js";
 import { logger } from "$lib/server/logger.js";
 
 /** Max post_ids per queue row — matches Reddit's /api/info hard limit
- *  (RESEARCH §Probe 4). The post_batch handler enforces this limit on
+ *  per request. The post_batch handler enforces this limit on
  *  read; we enforce it on write to keep payloads predictable. */
 const MAX_BATCH = 100;
 
@@ -49,9 +47,9 @@ export async function handleEnqueueServicePostsCron(): Promise<{
   enqueued: number;
   batches: number;
 }> {
-  // D-RDT-POST-ELIGIBILITY query (CONTEXT.md lines 87-103). Verbatim
-  // SQL — written as a raw `sql` literal because the OR + NOT EXISTS
-  // shape is awkward to express in Drizzle's query builder.
+  // Eligibility query — written as a raw `sql` literal because the
+  // OR + NOT EXISTS shape is awkward to express in Drizzle's query
+  // builder.
   //
   // Outer parens around the (young OR old) disjunction are LOAD-BEARING:
   // without them the `AND deletion_detected_at IS NULL` clause binds

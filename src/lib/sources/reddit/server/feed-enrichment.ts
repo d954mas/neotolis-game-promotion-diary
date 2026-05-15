@@ -1,9 +1,9 @@
-// Reddit feed-enrichment hook — D-RDT-BASELINES-DISPLAY.
+// Reddit feed-enrichment hook.
 //
 // Called by the /feed loader via the allAdapters[*].enrichFeedDtos
-// iterator (Phase 03.0.3 §11 contract). Mutates EventDto rows in place
-// for kind='reddit_post' entries; ignores other kinds (callers do NOT
-// pre-filter — internal filtering is the contract).
+// iterator (cross-source contract). Mutates EventDto rows in place for
+// kind='reddit_post' entries; ignores other kinds — callers do NOT
+// pre-filter, internal filtering is the contract.
 //
 // Four batched lookups:
 //   1. reddit_post_snapshots — DISTINCT ON (post_id) latest score /

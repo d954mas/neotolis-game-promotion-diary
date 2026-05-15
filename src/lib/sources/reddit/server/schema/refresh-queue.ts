@@ -7,17 +7,15 @@
 // "queue table, payload-scoped" (NOT public-data).
 //
 // THIS IS THE ONE EXCEPTION to the "no in-process queue tables, use
-// pg-boss" pattern. D-RDT-OUTBOX justification: pg-boss is great for
-// fire-and-forget jobs but its concurrency model fights the
-// 8-tick-per-minute deterministic round-robin we need to stay inside
-// Reddit's 10-req/min public-`.json` ceiling under multi-replica
-// deploys. A simple `SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1` per
-// tick is clearer and correctly preserves rate-limit invariants under
-// multi-instance deploys; pg-boss queues do NOT provide this guarantee
-// out of the box at our scale.
+// pg-boss" pattern: pg-boss is great for fire-and-forget jobs, but its
+// concurrency model fights the 8-tick-per-minute deterministic round-
+// robin we need to stay inside Reddit's 10-req/min public-`.json`
+// ceiling under multi-replica deploys. A `SELECT ... FOR UPDATE SKIP
+// LOCKED LIMIT 1` per tick is clearer and correctly preserves rate-
+// limit invariants; pg-boss queues do NOT provide this guarantee out
+// of the box.
 //
-// Four queue lanes (`queue_name` CHECK constraint, per D-RDT-CACHE-
-// FIELDS):
+// Four queue lanes (`queue_name` CHECK constraint):
 //   - service_source — daily sub_poll / author_poll cron picks
 //   - service_post   — daily post-snapshot cron picks
 //   - user_source    — user-initiated source-refresh-content clicks
@@ -87,6 +85,13 @@ export const redditRefreshQueue = pgTable(
     pendingIdx: index("idx_reddit_refresh_queue_pending")
       .on(t.queueName, t.status, t.priority, t.nextAttemptAt, t.enqueuedAt)
       .where(sql`${t.status} = 'pending'`),
+    // Processing-only partial index. The worker's stale-processing
+    // recovery scan (`WHERE status='processing' AND last_attempt_at < $stale`)
+    // walks this index instead of seq-scanning the whole table as
+    // done/dead_letter rows accumulate between cleanup-cron sweeps.
+    processingLastAttemptIdx: index("idx_reddit_refresh_queue_processing_last_attempt")
+      .on(t.lastAttemptAt)
+      .where(sql`${t.status} = 'processing'`),
   }),
 );
 

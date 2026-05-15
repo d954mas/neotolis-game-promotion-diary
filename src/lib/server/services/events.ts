@@ -648,6 +648,11 @@ export async function enrichFromUrl(
           cause: preview.cause,
         });
       }
+      if (preview.cause === "rate_limited") {
+        throw new AppError("Reddit rate-limited; try again shortly", "reddit_rate_limited", 429, {
+          cause: preview.cause,
+        });
+      }
       throw new AppError("Reddit endpoint unreachable", "reddit_unreachable", 502, {
         cause: preview.cause,
       });

@@ -17,10 +17,8 @@
 // events table as `kind=reddit_post` would be a data-integrity bug.
 //
 // The cross-source `parseAnyUrl` iterator (src/lib/sources/url.ts) calls
-// `redditAdapter.parseUrl` (delegates to redditParsePostUrl); the
-// /sources/new auto-detect calls `redditAdapter.parseSourceUrl` (delegates
-// to redditParseSourceUrl) per the widened DataSourceAdapter contract
-// landed in plan 01.
+// `redditAdapter.parseUrl` → redditParsePostUrl; the /sources/new
+// auto-detect calls `redditAdapter.parseSourceUrl` → redditParseSourceUrl.
 
 import type { ParsedSourceUrl, ParsedUrl } from "$lib/sources/adapter.js";
 

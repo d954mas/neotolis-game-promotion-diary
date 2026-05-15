@@ -4,17 +4,14 @@
 // per-author karma (link_karma / comment_karma / total_karma) captured
 // daily.
 //
-// Per D-RDT-USER-SNAPSHOTS, snapshots are captured opportunistically by
-// the `author_poll` worker handler when polling
-// `/user/X/submitted.json` for OWNED `reddit_account` data_sources
-// (the response payload already includes user-level karma fields, so no
-// extra HTTP call against the 8/min ceiling). For non-owned authors,
-// snapshots are NOT captured today; can be extended later if per-author
-// analytics surface.
+// Snapshots are captured for OWNED reddit_account data_sources only —
+// per-author analytics for arbitrary handles aren't worth the API
+// budget today. They land via a dedicated about-refresh queue work
+// item (NOT inline with author_poll's /submitted.json fetch — the
+// global pacer would deny a second redditFetch in the same tick).
 //
-// `(username, polled_at)` UNIQUE makes within-the-minute retries
-// idempotent (date_trunc('minute', NOW()) on insert — see D-RDT-
-// SNAPSHOTS).
+// `(username, polled_at)` composite PK makes within-the-minute retries
+// idempotent (insert via date_trunc('minute', NOW())).
 //
 // ESLint allowlist mirror in eslint-plugin-tenant-scope/no-unfiltered-
 // tenant-query.js with the explicit "public external data, no tenant
