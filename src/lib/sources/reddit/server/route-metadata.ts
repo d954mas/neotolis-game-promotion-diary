@@ -8,12 +8,13 @@
 // (which is YouTube-only by current contract) — this endpoint is the
 // adapter-owned counterpart for Reddit's paste-preview UX.
 //
-// Auth: tenantScope chain (anonymous → 401). No per-user rate-limit here
-// today — the public-`.json` endpoint has its own 10 req/min ceiling
-// enforced inside redditFetch, and the preview fetch counts as ONE
-// adapter request against that pool. (A future enhancement could enforce
-// the post-refresh user cap here too, but the spam-attack vector is
-// thin: preview is read-only, no DB write happens here.)
+// Auth: tenantScope chain (anonymous → 401). Per-user cap enforced via
+// enforceRedditUserCap on the post-refreshes axis (25/5min) — the same
+// gate the events INSERT path uses. The cap-counter row is written by
+// handlePostSingle on the cache-miss branch (paste=true + non-null
+// userId; see post-single.ts header for the cache-hit-vs-miss timing).
+// Below the user cap, redditFetch's global pacer (7.5s slot) bounds
+// overall throughput.
 //
 // Mount: redditAdapter.registerRoutes(app) calls app.route("/api", redditMetadataRoutes).
 

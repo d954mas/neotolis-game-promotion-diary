@@ -1,32 +1,32 @@
-// Reddit author_poll handler — fetch /user/<handle>/submitted.json?limit=100
-// and (opportunistically) /user/<handle>/about.json for OWNED accounts.
+// Reddit author_poll handler — fetch /user/<handle>/submitted.json?limit=100.
+//
+// ONE Reddit HTTP request per tick by design (same pacer-driven rule as
+// sub-poll.ts; see that file header for the full rationale). A previous
+// version paired /submitted.json with /about.json in the same call frame
+// and the pacer denied the second call → karma + user_snapshots stayed
+// empty forever. User-about refresh is deferred to a future per-user
+// queue work type; the cache row still gets seeded with just `username`.
 //
 // Triggered by:
 //   - service_source cron daily picks (plan 05B) for every registered
 //     reddit_account data_source.
 //   - user_source — user "refresh source" click on a registered account.
 //
-// Symmetric to sub_poll but for the /user/X listing surface. Differences:
-//   - Endpoint shapes: /user/<handle>/submitted.json + /user/<handle>/about.json
-//   - User-snapshots: when the about.json fetch succeeds and at least one
-//     data_source for this handle has is_owned_by_me=true (i.e. the user
-//     owns this account), write writeRedditUserSnapshot for the karma
-//     time-series (D-RDT-USER-SNAPSHOTS — owned accounts only).
-//   - Fan-out filter: kind='reddit_account' AND metadata->>'username'=<handle>
+// Symmetric to sub_poll: same listing-walk + fan-out shape, different
+// endpoint and different metadata key. Fan-out filter:
+//   kind='reddit_account' AND metadata->>'username'=<handle>.
 //
-// Suspended-account handling: /user/<suspended>/about.json returns 200 OK
-// with data: { is_suspended: true, ... } (truncated profile). The submitted
-// listing may return 200+empty children OR 404 (RESEARCH §Probe 5). We
-// upsert isSuspended=true on the cache row and let the empty children
-// path proceed normally (no fan-out work).
+// Suspended-account handling: when /user/<suspended>/submitted.json
+// returns 404, flagNotFoundOnSubscribers marks the source as needs-reconnect.
+// (Detecting is_suspended via about.json is deferred to the future
+// about-refresh queue type.)
 
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { redditFetch } from "../http.js";
 import { upsertRedditPost, upsertRedditUser, upsertRedditSubreddit } from "../upsert.js";
-import { writeRedditPostSnapshot, writeRedditUserSnapshot } from "../snapshots.js";
+import { writeRedditPostSnapshot } from "../snapshots.js";
 import { buildPostMetadata } from "../post-metadata.js";
-import { redditUsersCache } from "../schema/index.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { events } from "$lib/server/db/schema/events.js";
 import { AdapterError } from "$lib/sources/errors.js";
@@ -61,19 +61,6 @@ interface T3Data {
   link_flair_text?: string | null;
 }
 
-interface UserAboutData {
-  name: string;
-  id?: string;
-  link_karma?: number;
-  comment_karma?: number;
-  total_karma?: number;
-  created_utc?: number;
-  is_suspended?: boolean;
-}
-
-/** Daily refresh on user about. */
-const ABOUT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
-
 export async function handleAuthorPoll(args: {
   handle: string;
   userId: string | null;
@@ -99,13 +86,10 @@ export async function handleAuthorPoll(args: {
     throw err;
   }
 
-  // 2. Opportunistic /user/<handle>/about.json — once per day. Surfaces
-  //    karma + is_suspended + account creation date.
-  const aboutData = await maybeFetchUserAbout(handle);
-
-  // 3. Are any of the registered sources for this handle owned-by-me?
-  //    Drives writeRedditUserSnapshot (owned-only) AND the fan-out's
-  //    authorIsMe assignment for the inserted events row.
+  // 2. Resolve subscribers for this handle. Used by step 4's fan-out
+  //    (per-subscriber authorIsMe = sub_row.isOwnedByMe — for an account
+  //    listing the subscriber claimed-as-mine, every post by that
+  //    handle IS theirs).
   // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- channel-scoped fan-out (see header)
   const subscribers = await db
     .select()
@@ -117,49 +101,21 @@ export async function handleAuthorPoll(args: {
         isNull(dataSources.deletedAt),
       ),
     );
-  const ownedByAnySubscriber = subscribers.some((s) => s.isOwnedByMe);
 
-  // 4. UPSERT the author cache row. about.json adds karma + suspended +
-  //    account-age; without about, we just touch lastMetadataRefreshAt
-  //    via the snapshot writes' UPSERT-equivalent.
-  if (aboutData) {
-    const accountAgeDays =
-      typeof aboutData.created_utc === "number"
-        ? Math.floor((Date.now() / 1000 - aboutData.created_utc) / (60 * 60 * 24))
-        : null;
-    await upsertRedditUser(db, {
-      username: handle,
-      redditId: aboutData.id ? `t2_${aboutData.id}` : null,
-      accountAgeDays,
-      linkKarma: aboutData.link_karma ?? null,
-      commentKarma: aboutData.comment_karma ?? null,
-      totalKarma: aboutData.total_karma ?? null,
-      isSuspended: aboutData.is_suspended ?? false,
-    });
-    // OWNED user snapshot — D-RDT-USER-SNAPSHOTS narrows to owned only.
-    if (ownedByAnySubscriber) {
-      await writeRedditUserSnapshot(db, {
-        username: handle,
-        linkKarma: aboutData.link_karma ?? null,
-        commentKarma: aboutData.comment_karma ?? null,
-        totalKarma: aboutData.total_karma ?? null,
-      });
-    }
-  } else {
-    // Even without about.json, ensure a row exists (other code may JOIN
-    // on the username PK).
-    await upsertRedditUser(db, {
-      username: handle,
-      redditId: null,
-      accountAgeDays: null,
-      linkKarma: null,
-      commentKarma: null,
-      totalKarma: null,
-      isSuspended: false,
-    });
-  }
+  // 3. UPSERT the author cache row with bare seed — karma + suspended +
+  //    account-age fields require /user/<handle>/about.json which can't
+  //    share a tick with /submitted.json under the pacer slot.
+  await upsertRedditUser(db, {
+    username: handle,
+    redditId: null,
+    accountAgeDays: null,
+    linkKarma: null,
+    commentKarma: null,
+    totalKarma: null,
+    isSuspended: false,
+  });
 
-  // 5. UPSERT subreddit caches for every unique sub in the listing —
+  // 4. UPSERT subreddit caches for every unique sub in the listing —
   //    listing surfaces a user's posts across many subs; each needs at
   //    least the (name) PK to satisfy reddit_posts FK constraints.
   const uniqueSubs = new Set<string>();
@@ -177,7 +133,7 @@ export async function handleAuthorPoll(args: {
     }
   }
 
-  // 6. UPSERT posts + snapshots.
+  // 5. UPSERT posts + snapshots.
   for (const t3 of listingChildren) {
     const author = t3.author === "[deleted]" ? null : t3.author;
     const authorFullname = author === null ? null : (t3.author_fullname ?? null);
@@ -208,7 +164,7 @@ export async function handleAuthorPoll(args: {
     });
   }
 
-  // 7. Fan-out events INSERT to auto_import=true subscribers.
+  // 6. Fan-out events INSERT to auto_import=true subscribers.
   const eventsInserted = await fanOutToSubscribers(handle, listingChildren, subscribers);
 
   logger.info(
@@ -217,39 +173,11 @@ export async function handleAuthorPoll(args: {
       userId: args.userId,
       postsFetched: listingChildren.length,
       eventsInserted,
-      aboutFetched: aboutData !== null,
-      ownedByAnySubscriber,
     },
     "reddit author_poll: complete",
   );
 
   return { postsUpserted: listingChildren.length, eventsInserted };
-}
-
-async function maybeFetchUserAbout(handle: string): Promise<UserAboutData | null> {
-  const rows = await db
-    .select({ lastRefresh: redditUsersCache.lastMetadataRefreshAt })
-    .from(redditUsersCache)
-    .where(eq(redditUsersCache.username, handle))
-    .limit(1);
-  const lastRefresh = rows[0]?.lastRefresh ?? null;
-  if (lastRefresh !== null) {
-    const age = Date.now() - new Date(lastRefresh).getTime();
-    if (age < ABOUT_REFRESH_INTERVAL_MS) return null;
-  }
-  try {
-    const { data } = await redditFetch<{ data?: UserAboutData }>(
-      `/user/${encodeURIComponent(handle)}/about.json`,
-    );
-    return data?.data ?? null;
-  } catch (err) {
-    // about.json failure must not block the main submitted.json path.
-    logger.warn(
-      { handle, err: String((err as Error)?.message ?? err) },
-      "reddit author_poll: about.json fetch failed; submitted.json result still landed",
-    );
-    return null;
-  }
 }
 
 async function fanOutToSubscribers(

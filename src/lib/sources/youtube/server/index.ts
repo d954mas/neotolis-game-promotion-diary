@@ -492,8 +492,15 @@ async function seedEventsFromChannelCache(args: {
  * 5xx / network failures are caught here and translated to
  * `{kind:'unreachable'}` — cross-source enrichFromUrl maps to AppError
  * 502 `youtube_oembed_unreachable`.
+ *
+ * `ctx` (userId, ipAddress) is accepted for contract parity with Reddit
+ * (which uses it for the per-user cap), but YouTube's oEmbed is keyless +
+ * uncounted on the operator pool — the values are intentionally unused.
  */
-async function fetchEventPreviewMetadata(canonicalUrl: string): Promise<EventPreviewMetadata> {
+async function fetchEventPreviewMetadata(
+  canonicalUrl: string,
+  _ctx: { userId: string; ipAddress: string },
+): Promise<EventPreviewMetadata> {
   let result;
   try {
     result = await fetchYoutubeOembed(canonicalUrl);

@@ -582,26 +582,33 @@ export interface EnrichmentResult {
 
 /**
  * enrichFromUrl is the URL → metadata bridge powering the
- * POST /api/events/preview-url endpoint. Pure read: parses the URL,
- * calls oEmbed, matches author_url against registered data_sources,
- * returns the enrichment payload. NO DB write happens here.
+ * POST /api/events/preview-url endpoint. Adapter-driven: parses the URL,
+ * dispatches to the matched adapter's fetchEventPreviewMetadata, and
+ * shapes the result into the cross-source EnrichmentResult contract.
+ *
+ * Side effects vary per adapter. YouTube's preview is a keyless oEmbed
+ * read — no DB write, no cap consumed. Reddit's preview is the same
+ * /comments/<id>.json call the paste flow uses (see fetchEventPreviewMetadata
+ * in $lib/sources/reddit/server/index.ts) — it UPSERTs the reddit_posts /
+ * reddit_users / reddit_subreddits caches, writes a snapshot row, AND
+ * writes the user_post cap-counter row gated by enforceRedditUserCap.
+ * `userId` + `ipAddress` are required for cap enforcement on Reddit;
+ * YouTube ignores them.
  *
  * Error mapping (route layer preserves UX):
- *   - unsupported URL          → AppError 'unsupported_url' 422
- *   - reddit_post              → AppError 'kind_not_yet_functional' 422
- *                                (preview not yet wired through this
- *                                 helper; the paste flow in
- *                                 services/ingest.ts handles Reddit
- *                                 URLs directly via handlePostSingle —
- *                                 see plan 09 D-RDT-INGEST-REPLACE. The
- *                                 preview-url endpoint adoption lands
- *                                 in plan 10.)
- *   - twitter_post/telegram_post → AppError 'kind_not_yet_functional' 422
- *   - oEmbed 5xx/network       → AppError 'youtube_oembed_unreachable' 502
- *   - oEmbed 401 (private)     → AppError 'youtube_unavailable' 422
- *   - oEmbed 404 (unavailable) → AppError 'youtube_unavailable' 422
+ *   - unsupported URL                → AppError 'unsupported_url' 422
+ *   - reddit_post unreachable        → AppError 'reddit_unreachable' 502
+ *   - reddit_post private/unavailable → AppError 'reddit_post_not_found' 404
+ *   - twitter_post/telegram_post     → AppError 'kind_not_yet_functional' 422
+ *   - oEmbed 5xx/network             → AppError 'youtube_oembed_unreachable' 502
+ *   - oEmbed 401 (private)           → AppError 'youtube_unavailable' 422
+ *   - oEmbed 404 (unavailable)       → AppError 'youtube_unavailable' 422
  */
-export async function enrichFromUrl(userId: string, url: string): Promise<EnrichmentResult> {
+export async function enrichFromUrl(
+  userId: string,
+  url: string,
+  ipAddress: string,
+): Promise<EnrichmentResult> {
   const { parseIngestUrl } = await import("./url-parser.js");
   const { eventKindToSourceKind } = await import("$lib/sources/event-to-source-kind.js");
   const { getAdapter } = await import("$lib/sources/registry.js");
@@ -628,7 +635,10 @@ export async function enrichFromUrl(userId: string, url: string): Promise<Enrich
         { kind: parsed.kind },
       );
     }
-    const preview = await adapter.fetchEventPreviewMetadata(parsed.canonicalUrl);
+    const preview = await adapter.fetchEventPreviewMetadata(parsed.canonicalUrl, {
+      userId,
+      ipAddress,
+    });
     if (preview.kind === "unreachable") {
       // Map operator-issue (unconfigured) vs network error vs rate-limit
       // to a useful response code. `cause` from the adapter carries the
@@ -707,7 +717,10 @@ export async function enrichFromUrl(userId: string, url: string): Promise<Enrich
       { kind: parsed.kind },
     );
   }
-  const preview = await adapter.fetchEventPreviewMetadata(parsed.canonicalUrl);
+  const preview = await adapter.fetchEventPreviewMetadata(parsed.canonicalUrl, {
+    userId,
+    ipAddress,
+  });
   if (preview.kind === "unreachable") {
     throw new AppError("youtube oembed unreachable", "youtube_oembed_unreachable", 502, {
       cause: preview.cause,

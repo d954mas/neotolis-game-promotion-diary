@@ -204,10 +204,11 @@ async function onSourceCreated(source: SourceCreatedHookSource): Promise<void> {
 
 /**
  * fetchEventPreviewMetadata — adapter wrapper for the /events/new
- * "Get info" button. Fetches /comments/<id>.json via handlePostSingle
+ * "Get info" button + the generic POST /api/events/preview-url
+ * cross-source endpoint. Fetches /comments/<id>.json via handlePostSingle
  * (which UPSERTs caches + writes a snapshot row + records a cap-counter
- * row) and returns the post title + author + permalink in the
- * cross-source EventPreviewMetadata shape.
+ * row when userId is non-null) and returns the post title + author +
+ * permalink in the cross-source EventPreviewMetadata shape.
  *
  * NOT preview-only — Reddit's /comments/<id>.json is the same fetch
  * the paste flow uses, so we share the side effects (cache populated,
@@ -216,10 +217,22 @@ async function onSourceCreated(source: SourceCreatedHookSource): Promise<void> {
  * + Submit on the same post produces ONE Reddit request and ONE
  * cap-counter increment.
  *
+ * Cap enforcement: ctx.userId is threaded into handlePostSingle's
+ * userId param. Both the Reddit-specific route
+ * (/api/reddit/fetch-metadata) and the generic preview-url route
+ * (/api/events/preview-url) flow through here, so both paths land the
+ * user_post `done` row that feeds the 25/5min post-refresh cap and
+ * fire the `beforeFetch` gate that throws 429 on cap exhaustion. Pre-
+ * fix: the generic preview endpoint called this with userId=null,
+ * burning a Reddit unit without writing the counter — a silent bypass.
+ *
  * Empty REDDIT_USER_AGENT → unreachable (mirrors YouTube's empty-keys
  * oEmbed behavior at the preview surface).
  */
-async function fetchEventPreviewMetadata(canonicalUrl: string): Promise<EventPreviewMetadata> {
+async function fetchEventPreviewMetadata(
+  canonicalUrl: string,
+  ctx: { userId: string; ipAddress: string },
+): Promise<EventPreviewMetadata> {
   if (!isRedditConfigured()) {
     return { kind: "unreachable", cause: "reddit_not_configured" };
   }
@@ -230,8 +243,12 @@ async function fetchEventPreviewMetadata(canonicalUrl: string): Promise<EventPre
   try {
     const result = await handlePostSingle({
       postId: parsed.externalId,
-      userId: null, // preview is read-only; cap not enforced
+      userId: ctx.userId,
       paste: true,
+      beforeFetch: async () => {
+        const { enforceRedditUserCap } = await import("$lib/server/services/quota.js");
+        await enforceRedditUserCap(db, redditAdapter, ctx.userId, ctx.ipAddress, "post-refresh");
+      },
     });
     return {
       kind: "ok",
@@ -423,12 +440,21 @@ async function enqueueRefreshPoll(input: {
 }): Promise<void> {
   // externalId stored on events is the bare Reddit id (e.g. "abc123");
   // handlePostSingle accepts either form and t3-normalizes internally.
+  //
+  // priority is signed smallint; the worker tick sorts ORDER BY priority
+  // ASC (lower = ahead — see schema/refresh-queue.ts header). Cron-
+  // enqueued rows ship priority=0 / paste rows priority=0/1; refresh-now
+  // is the user's "I'm waiting on /feed to repaint" path, so it gets
+  // ahead of everything pending with a negative value. -10 mirrors the
+  // size of the cron-default 0 distance YouTube's refresh-now uses on
+  // its own ordering, just inverted because Reddit's worker is ASC
+  // (YouTube's pg-boss is DESC on priority).
   await db.insert(redditRefreshQueue).values({
     queueName: "user_post",
     type: "post_single",
     payload: { post_id: input.externalId, flow: "refresh-now" },
     userId: input.userId,
-    priority: 10, // ahead of cron-default 0; matches YouTube's `priority: 10`.
+    priority: -10,
     status: "pending",
   });
 }

@@ -333,11 +333,13 @@ eventsRoutes.get(
   },
 );
 
-// POST /api/events/preview-url. Read-only enrichment; no DB write. Tenant-
-// scoped (mounted under tenantScope) so anonymous → 401, but no tenant-
-// owned data is read (the URL is the only input). HONO PATH-PRECEDENCE:
-// register BEFORE any parametric POST `/events/:id/...` route — keep
-// literals first as a discipline.
+// POST /api/events/preview-url. Adapter-driven preview. Tenant-scoped
+// (mounted under tenantScope) so anonymous → 401; the auth gate is also
+// load-bearing because the Reddit adapter's preview writes cache rows
+// + a cap-counter row keyed on userId. YouTube's preview is keyless +
+// uncounted, so the auth gate there is purely for anti-abuse. HONO
+// PATH-PRECEDENCE: register BEFORE any parametric POST `/events/:id/...`
+// route — keep literals first as a discipline.
 eventsRoutes.post(
   "/events/preview-url",
   zValidator("json", previewUrlSchema, (r, c) => {
@@ -347,7 +349,8 @@ eventsRoutes.post(
   }),
   async (c) => {
     try {
-      const enriched = await enrichFromUrl(c.var.userId, c.req.valid("json").url);
+      const ctx = getAuditContext(c);
+      const enriched = await enrichFromUrl(ctx.userId, c.req.valid("json").url, ctx.ipAddress);
       return c.json({
         kind: enriched.kind,
         externalId: enriched.externalId,

@@ -504,8 +504,20 @@ export interface DataSourceAdapter {
   /** Adapter-driven event preview (POST /api/events/preview-url + ingest
    *  paste flow). After URL is parsed + routed, the adapter is asked
    *  to fetch a friendly preview (title / authorName / authorUrl).
+   *
+   *  `ctx.userId` is the authenticated viewer (cross-source layer always
+   *  has it — both call paths are mounted under tenantScope). Adapters
+   *  whose preview burns a rate-limited unit (Reddit's /comments/<id>.json)
+   *  use it to enforce per-user caps and write the cap-counter row;
+   *  adapters whose preview is a cheap oEmbed (YouTube) accept it but
+   *  ignore it. The optional shape lets older adapters land before they
+   *  thread the field through their implementations.
+   *
    *  YouTube: fetchYoutubeOembed wrapper. */
-  fetchEventPreviewMetadata?(canonicalUrl: string): Promise<EventPreviewMetadata>;
+  fetchEventPreviewMetadata?(
+    canonicalUrl: string,
+    ctx: { userId: string; ipAddress: string },
+  ): Promise<EventPreviewMetadata>;
 
   /** Sync stats fetch on manual event paste.
    *

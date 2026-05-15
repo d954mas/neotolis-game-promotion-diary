@@ -1,5 +1,16 @@
-// Reddit sub_poll handler — fetch /r/<sub>/new.json?limit=100 and
-// (opportunistically) /r/<sub>/about.json once per day per sub.
+// Reddit sub_poll handler — fetch /r/<sub>/new.json?limit=100.
+//
+// ONE Reddit HTTP request per tick by design. The global DB pacer
+// (src/lib/sources/reddit/server/pacer.ts) advances `next_allowed_at`
+// by REDDIT_PACER_SLOT_MS (7500ms) on every fetch; the worker tick
+// interval is the same 7500ms — so a second redditFetch in the same
+// tick is always denied. A previous version of this handler did
+// `/new.json` followed by `/about.json` in the same call frame and
+// silently swallowed the pacer denial, which left
+// subscribers/accounts_active/description NULL forever. about-data
+// refresh is deferred to a future per-sub queue type (see follow-up
+// task in the phase tracker); the cache row still gets seeded with
+// just `name` so reddit_posts FK constraints are satisfied.
 //
 // Triggered by:
 //   - service_source cron daily picks (plan 05B fills the queue 4×/day
@@ -7,15 +18,11 @@
 //   - user_source — user "refresh source" click on a registered sub.
 //
 // Side effects:
-//   1. UPSERT reddit_subreddits_cache (PK name) — opportunistic about.json
-//      refresh writes subscribers/description/submission_metadata when
-//      last_metadata_refresh_at is older than 24h.
+//   1. UPSERT reddit_subreddits_cache (PK name only — bare seed row).
 //   2. UPSERT reddit_posts for each t3 child (up to 100).
 //   3. writeRedditPostSnapshot per t3 (V20 idempotent).
 //   4. UPSERT reddit_users_cache for each unique author.
-//   5. writeRedditSubredditSnapshot (subscribers / accounts_active) when
-//      we did fetch about.json this tick.
-//   6. Fan-out: for every data_sources row with kind='reddit_subreddit'
+//   5. Fan-out: for every data_sources row with kind='reddit_subreddit'
 //      AND metadata->>'subreddit'=<sub> AND auto_import=true AND
 //      deleted_at IS NULL, INSERT one events row per (post × subscriber)
 //      that isn't already present (idempotency via
@@ -32,9 +39,8 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { redditFetch } from "../http.js";
 import { upsertRedditPost, upsertRedditUser, upsertRedditSubreddit } from "../upsert.js";
-import { writeRedditPostSnapshot, writeRedditSubredditSnapshot } from "../snapshots.js";
+import { writeRedditPostSnapshot } from "../snapshots.js";
 import { buildPostMetadata } from "../post-metadata.js";
-import { redditSubredditsCache } from "../schema/index.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { events } from "$lib/server/db/schema/events.js";
 import { AdapterError } from "$lib/sources/errors.js";
@@ -69,23 +75,6 @@ interface T3Data {
   link_flair_text?: string | null;
 }
 
-interface AboutData {
-  display_name: string;
-  id?: string;
-  subscribers?: number;
-  accounts_active?: number | null;
-  description?: string | null;
-  public_description?: string | null;
-  over18?: boolean;
-  subreddit_type?: string | null;
-  submission_type?: string;
-  allow_videos?: boolean;
-  allow_galleries?: boolean;
-}
-
-/** Refresh the about.json once per 24h per sub. */
-const ABOUT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
-
 export async function handleSubPoll(args: {
   sub: string;
   userId: string | null;
@@ -112,46 +101,21 @@ export async function handleSubPoll(args: {
     throw err;
   }
 
-  // 2. Opportunistic about.json fetch — once per 24h per sub. Surface
-  //    as a SECOND HTTP call within the same worker tick when due, but
-  //    only one /new.json fetch per tick — the about budget folds into
-  //    the same "slot" per D-RDT-SUB-SNAPSHOTS planner-discretion note.
-  //    Failures are logged + swallowed: the new.json work already
-  //    succeeded; about staleness can wait until the next tick.
-  const aboutData = await maybeFetchAbout(sub);
-
-  // 3. UPSERT the sub cache (also seeds the row before snapshot write).
-  //    Always at least the (name) PK; about-data writes additional fields
-  //    when fetched this tick.
+  // 2. UPSERT the sub cache with a bare seed row — name only. Richer
+  //    fields (subscribers / description / submission_metadata) require
+  //    /r/<sub>/about.json which can't share a worker tick with /new.json
+  //    under the 7.5s pacer slot; that's a separate queue work item in a
+  //    future phase.
   await upsertRedditSubreddit(db, {
     name: sub,
-    subredditId: aboutData?.id ? `t5_${aboutData.id}` : null,
-    subscribers: aboutData?.subscribers ?? null,
-    accountsActive: aboutData?.accounts_active ?? null,
-    description: aboutData?.description ?? null,
-    publicDescription: aboutData?.public_description ?? null,
-    submissionMetadata: aboutData
-      ? {
-          submission_type: aboutData.submission_type ?? null,
-          allow_videos: aboutData.allow_videos ?? null,
-          allow_galleries: aboutData.allow_galleries ?? null,
-        }
-      : undefined,
-    over18: aboutData?.over18 ?? false,
-    subredditType: aboutData?.subreddit_type ?? null,
+    subredditId: null,
+    subscribers: null,
+    accountsActive: null,
+    description: null,
+    publicDescription: null,
   });
 
-  // 4. If we fetched about.json this tick, also write the daily snapshot
-  //    for the growth-rate time-series.
-  if (aboutData) {
-    await writeRedditSubredditSnapshot(db, {
-      subreddit: sub,
-      subscribers: aboutData.subscribers ?? null,
-      accountsActive: aboutData.accounts_active ?? null,
-    });
-  }
-
-  // 5. UPSERT authors + posts + snapshots for each t3.
+  // 3. UPSERT authors + posts + snapshots for each t3.
   const uniqueAuthors = new Set<string>();
   for (const t3 of listingChildren) {
     const author = t3.author === "[deleted]" ? null : t3.author;
@@ -199,7 +163,7 @@ export async function handleSubPoll(args: {
     });
   }
 
-  // 6. Fan-out events INSERT for auto_import=true subscribers.
+  // 4. Fan-out events INSERT for auto_import=true subscribers.
   const eventsInserted = await fanOutToSubscribers(sub, listingChildren);
 
   logger.info(
@@ -208,43 +172,11 @@ export async function handleSubPoll(args: {
       userId: args.userId,
       postsFetched: listingChildren.length,
       eventsInserted,
-      aboutFetched: aboutData !== null,
     },
     "reddit sub_poll: complete",
   );
 
   return { postsUpserted: listingChildren.length, eventsInserted };
-}
-
-/** Decide whether to fetch /r/<sub>/about.json this tick. Costs +1 HTTP
- *  call (same worker slot, sequential after /new.json — accepted under
- *  D-RDT-CACHE-POPULATION's "we batch-pipeline 2 sequential calls per
- *  tick when needed" guidance). Returns null when the cache row is
- *  fresh (<24h) or the fetch fails. */
-async function maybeFetchAbout(sub: string): Promise<AboutData | null> {
-  const rows = await db
-    .select({ lastRefresh: redditSubredditsCache.lastMetadataRefreshAt })
-    .from(redditSubredditsCache)
-    .where(eq(redditSubredditsCache.name, sub))
-    .limit(1);
-  const lastRefresh = rows[0]?.lastRefresh ?? null;
-  if (lastRefresh !== null) {
-    const age = Date.now() - new Date(lastRefresh).getTime();
-    if (age < ABOUT_REFRESH_INTERVAL_MS) return null;
-  }
-  try {
-    const { data } = await redditFetch<{ data?: AboutData }>(
-      `/r/${encodeURIComponent(sub)}/about.json`,
-    );
-    return data?.data ?? null;
-  } catch (err) {
-    // about.json failure must not block the main /new.json path.
-    logger.warn(
-      { sub, err: String((err as Error)?.message ?? err) },
-      "reddit sub_poll: about.json fetch failed; new.json result still landed",
-    );
-    return null;
-  }
 }
 
 /** INSERT events rows for every auto_import=true subscriber × every
@@ -293,6 +225,44 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
     );
   const existingSet = new Set(existingRows.map((r) => `${r.userId}|${r.sourceId}|${r.externalId}`));
 
+  // Per-subscriber owned-username map. authorIsMe for a sub_poll fan-out
+  // row must require BOTH (a) the subscriber registered some Reddit
+  // account as is_owned_by_me=true, and (b) the post's t3.author matches
+  // that registered handle. Pre-fix: authorIsMe was `sub_row.isOwnedByMe
+  // && author !== null` — but the subreddit source's is_owned_by_me bit
+  // only claims "I post in this sub", not "I authored this specific
+  // post". With /sources/new's default `defaultIsOwnedByMe: true` (line
+  // 32 of +page.server.ts), every imported subreddit post would have been
+  // marked authorIsMe=true regardless of who actually posted it.
+  //
+  // Lookup is scoped to the same userId set we already pin via the
+  // events INSERT — no extra tenant span. One query for all subscribers
+  // (avoids a per-row roundtrip in the hot fan-out loop).
+  const ownedRedditAccounts = await db
+    .select({
+      userId: dataSources.userId,
+      username: sql<string | null>`${dataSources.metadata}->>'username'`,
+    })
+    .from(dataSources)
+    .where(
+      and(
+        inArray(dataSources.userId, userIds),
+        eq(dataSources.kind, "reddit_account"),
+        eq(dataSources.isOwnedByMe, true),
+        isNull(dataSources.deletedAt),
+      ),
+    );
+  const ownedHandlesByUser = new Map<string, Set<string>>();
+  for (const r of ownedRedditAccounts) {
+    if (r.username == null) continue;
+    let set = ownedHandlesByUser.get(r.userId);
+    if (!set) {
+      set = new Set<string>();
+      ownedHandlesByUser.set(r.userId, set);
+    }
+    set.add(r.username);
+  }
+
   let inserted = 0;
   for (const t3 of t3s) {
     const fullId = `t3_${t3.id}`;
@@ -306,15 +276,10 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
       const key = `${sub_row.userId}|${sub_row.id}|${fullId}`;
       if (existingSet.has(key)) continue;
 
-      // authorIsMe: subscriber owns this sub-source (is_owned_by_me=true,
-      // i.e. they ARE a poster in this sub) AND the post author matches
-      // the subscriber's other registered reddit_account handle. The
-      // simpler heuristic available here: inherit the subscriber's
-      // is_owned_by_me flag. Stricter author-match (resolve to the
-      // owning user's reddit_account handle) is handled by paste-flow's
-      // findSourceByAuthorUrl already; sub_poll fan-out uses the source's
-      // own is_owned_by_me bit.
-      const authorIsMe = sub_row.isOwnedByMe && author !== null;
+      // Strict author-match — see ownedHandlesByUser computation above
+      // for the rationale.
+      const authorIsMe =
+        author !== null && (ownedHandlesByUser.get(sub_row.userId)?.has(author) ?? false);
 
       const ins = await db
         .insert(events)

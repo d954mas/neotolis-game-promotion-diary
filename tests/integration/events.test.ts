@@ -757,7 +757,11 @@ describe("createEvent kind-aware enrichment", () => {
     });
 
     try {
-      const result = await enrichFromUrl(u.id, "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+      const result = await enrichFromUrl(
+        u.id,
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "127.0.0.1",
+      );
       expect(result.kind).toBe("youtube_video");
       expect(result.externalId).toBe("dQw4w9WgXcQ");
       expect(result.title).toBe("Never Gonna Give You Up");
@@ -774,7 +778,7 @@ describe("createEvent kind-aware enrichment", () => {
 
   it("enrichFromUrl with garbage URL throws AppError 'unsupported_url' 422", async () => {
     const u = await seedUserDirectly({ email: `ev17t6-${uniq()}@test.local` });
-    await expect(enrichFromUrl(u.id, "not-a-url-at-all")).rejects.toMatchObject({
+    await expect(enrichFromUrl(u.id, "not-a-url-at-all", "127.0.0.1")).rejects.toMatchObject({
       code: "unsupported_url",
       status: 422,
     });

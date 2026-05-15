@@ -93,6 +93,33 @@ const VALID_SOURCE_KINDS: readonly SourceKind[] = [
   "discord_server",
 ] as const;
 
+/**
+ * Per-kind text for the duplicate_source 422 thrown by the PG-unique
+ * catch block. The error CODE stays the same across kinds
+ * ("duplicate_source") so callers (UI toast, JSON consumers) discriminate
+ * structurally; only the human-readable message varies so the user sees
+ * "You already track this subreddit" instead of "You already track this
+ * YouTube channel" when they re-add a Reddit source. Adding a new kind
+ * here is the right place — kind_not_yet_functional gates rejection at
+ * the boundary, this is the post-rejection text.
+ */
+function duplicateSourceMessage(kind: SourceKind): string {
+  switch (kind) {
+    case "youtube_channel":
+      return "You already track this YouTube channel";
+    case "reddit_account":
+      return "You already track this Reddit user";
+    case "reddit_subreddit":
+      return "You already track this subreddit";
+    case "twitter_account":
+      return "You already track this Twitter account";
+    case "telegram_channel":
+      return "You already track this Telegram channel";
+    case "discord_server":
+      return "You already track this Discord server";
+  }
+}
+
 export interface CreateSourceInput {
   kind: SourceKind;
   handleUrl: string;
@@ -611,7 +638,8 @@ export async function createSource(
       //     channel-id resolution to the worker, so the channel-gate
       //     above can't see it; only the handle-level unique catches it.
       // 422 (not 409) for raw-PG-unique paths.
-      throw new AppError("You already track this YouTube channel", "duplicate_source", 422, {
+      throw new AppError(duplicateSourceMessage(input.kind), "duplicate_source", 422, {
+        kind: input.kind,
         handle_url: canonicalHandleUrl,
       });
     }
