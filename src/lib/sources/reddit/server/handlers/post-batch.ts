@@ -203,17 +203,7 @@ export async function handlePostBatch(args: {
   await upsertRedditSubredditsMany(db, [...subredditsByName.values()]);
   await upsertRedditUsersMany(db, [...usersByName.values()]);
   await upsertRedditPostsMany(db, postUpserts);
-  try {
-    await writeRedditPostSnapshotsMany(db, snapshotWrites);
-  } catch (err) {
-    // FK violation — a missing id has no parent reddit_posts row.
-    // Should not happen for cron-enqueued ids; possible for synthetic
-    // test ids. Log + continue so the cache writes above still settle.
-    logger.warn(
-      { err: String((err as Error)?.message ?? err) },
-      "reddit post_batch: snapshot batch write failed (likely FK miss on synthetic id)",
-    );
-  }
+  await writeRedditPostSnapshotsMany(db, snapshotWrites);
   await markPostDeletionDetectedIfNeededMany(db, snapshotStatuses);
 
   logger.info(

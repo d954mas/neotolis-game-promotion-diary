@@ -46,6 +46,7 @@ import type {
   CanonicalizeResult,
   CreateContext,
   DataSourceAdapter,
+  EventKind,
   EventPreviewMetadata,
   MinimalBoss,
   PollableSource,
@@ -657,6 +658,45 @@ async function fetchEventStats(
 }
 
 /**
+ * enqueueRefreshPoll — adapter-driven Refresh-Now enqueue for YouTube.
+ *
+ * Sends a job onto `youtube.poll.user` via pg-boss. The singletonKey is
+ * scoped to a per-minute window keyed on the event id so a user mashing
+ * the button within the same minute collapses into ONE poll job. The
+ * 5-minute cooldown gate in requestRefreshPoll is the user-visible
+ * limiter; this singletonKey is a defence-in-depth dedup at the queue
+ * layer (parallel requests inside the cooldown race window).
+ *
+ * Returns the boss-assigned job id so the cross-source caller can
+ * surface it in the response body. Mirrors Reddit's enqueueRefreshPoll
+ * shape; the unified contract lets refresh-poll.ts drop its
+ * adapter-vs-legacy branch entirely.
+ */
+async function enqueueRefreshPoll(input: {
+  eventId: string;
+  userId: string;
+  externalId: string;
+  eventKind: EventKind;
+}): Promise<{ queue: string; jobId: string | null }> {
+  const boss = await getBoss();
+  const minuteKey = new Date().toISOString().slice(0, 16); // 'YYYY-MM-DDTHH:MM'
+  const jobId = await boss.send(
+    QUEUES.YOUTUBE_POLL_USER,
+    {
+      eventId: input.eventId,
+      userId: input.userId,
+      externalId: input.externalId,
+      kind: input.eventKind,
+    },
+    {
+      singletonKey: `${input.eventId}-${minuteKey}`,
+      priority: 10,
+    },
+  );
+  return { queue: QUEUES.YOUTUBE_POLL_USER, jobId: jobId ?? null };
+}
+
+/**
  * quotaCounters — declares youtube_metadata_fetches_per_day. Cross-source
  * services/quota.ts iterates allAdapters[*].observability.quotaCounters;
  * adding a new source's counters means declaring them on the new
@@ -710,6 +750,7 @@ export const youtubeAdapter: DataSourceAdapter = {
   validateEventInput,
   fetchPollStateMap,
   registerRoutes,
+  enqueueRefreshPoll,
   // Sync RateLimiterMemory reservoirs with the persistent
   // youtube_service_quota_usage counter on worker boot.
   reconcileRuntimeState: reconcileReservoirsOnBoot,

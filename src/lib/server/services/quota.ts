@@ -334,90 +334,134 @@ export async function getUserQuotaLifetime(
   };
 }
 
-// ───── Reddit two-axis sliding-window cap orchestrator (DV-RDT-7) ─────
+// ───── Adapter-driven per-user quota orchestrator ─────
 //
-// Why this is here (cross-source services/quota.ts) and not in the Reddit
-// folder: the adapter declares the two-axis shape via
-// observability.userQuotaCap; cross-source endpoint callsites
-// (refresh-content route in plan 09, paste flow in plan 10) need a
-// single uniform call site that handles BOTH the YouTube
-// requestsPerDay / eventsPerDay shape AND the Reddit
-// sourceActionsPerWindow / postRefreshesPerWindow shape without
-// importing platform-specific modules. This helper checks the cap
-// declaration, lazy-imports Reddit's quota.ts ONLY when the two-axis
-// shape is present, and throws the structured AppError on exhaustion.
+// Single cross-source entry point for per-user cap enforcement. The
+// caller passes any DataSourceAdapter and a semantic action; we read
+// `adapter.observability.userQuotaCap` and dispatch:
 //
-// Lazy import keeps cross-source code adapter-agnostic at module-load
-// time. `await import("$lib/sources/reddit/server/quota.js")` only
-// resolves the file when the Reddit adapter is in play. YouTube
-// callsites that pass a YouTube adapter never load Reddit code.
+//   - cap.windowMinutes set  → Reddit-style two-axis sliding window
+//                              (sourceActionsPerWindow / postRefreshesPerWindow),
+//                              counter lives in reddit_refresh_queue;
+//                              reachable via internal _enforceSlidingWindowCap.
+//   - cap.requestsPerDay /   → YouTube-style per-Pacific-day caps;
+//     cap.eventsPerDay set     counter via getUserQuotaUsedToday's
+//                              audit_log SUM.
+//   - neither                → no-op (adapter declares no per-user cap).
 //
-// Discrimination between source-action vs post-refresh axes: the
-// CALLER tells us which axis applies via the `flow` parameter (the
-// refresh-content / paste endpoints know which axis they're consuming).
-// We don't infer from the adapter — that would conflate cap
-// DECLARATION with cap CONSUMPTION (a single adapter declares both
-// axes simultaneously; only the endpoint knows which one its action
-// burns).
+// Lazy import: cap-axis-specific helpers (Reddit's counter +
+// audit writer) load only when the matching adapter shape is present.
+// Cross-source code stays adapter-agnostic at module-load time.
 
 /**
- * Cap axis the caller is consuming. Maps 1:1 to the Reddit two-axis
- * model (D-RDT-CAP-SOURCE, D-RDT-CAP-POST):
- *   - "source-action"  : register / refresh source (sub_poll or
- *                        author_poll work — counted in audit_log).
- *   - "post-refresh"   : enqueue a post_single / post_batch row to
- *                        the user_post lane (paste, refresh-card,
- *                        bulk refresh).
+ * Action vocabulary the caller is consuming. Generic across adapters:
+ *   - "source-action"  : registering or refreshing a source
+ *                        (createSource, /sources/:id/refresh-content).
+ *   - "post-refresh"   : an event-level stats refresh
+ *                        (paste with externalId, Refresh-Now,
+ *                        bulk post refresh).
  *
- * Adapter declarations:
- *   - sourceActionsPerWindow ⇒ accepts "source-action".
- *   - postRefreshesPerWindow ⇒ accepts "post-refresh".
- * When the declared axis doesn't match the caller's flow, the helper
- * is a no-op (cap not configured for THIS flow).
+ * Per-axis declaration on the adapter:
+ *   - cap.sourceActionsPerWindow declared ⇒ accepts "source-action".
+ *   - cap.postRefreshesPerWindow declared ⇒ accepts "post-refresh".
+ * When the declared shape doesn't include the caller's action, the
+ * helper is a no-op.
  */
-export type RedditCapFlow = "source-action" | "post-refresh";
+export type AdapterQuotaAction = "source-action" | "post-refresh";
 
 /**
- * Enforce per-user fair-share cap when the adapter declares the Reddit
- * two-axis shape. No-op when the adapter declares only the YouTube
- * requestsPerDay / eventsPerDay shape (those callsites enforce their
- * own caps inline today — see http/routes/sources.ts L1/L2 gate).
+ * Enforce the adapter's per-user cap (if any) and throw structured
+ * AppError 429 on exhaustion. Adapter-agnostic dispatch: dispatches
+ * on `cap.windowMinutes !== undefined` for the sliding-window shape,
+ * otherwise treats the cap as the per-Pacific-day shape.
  *
- * On exhaustion:
- *   1. Write `reddit.cap_exhausted` audit row (D-RDT-AUDIT-VERBS).
- *   2. Throw AppError 429 with structured metadata
- *      { cap, used, window, reset_in_seconds }. AppError.code carries
- *      the axis-specific error string per D-RDT-CAP-EXCEED:
- *        - 'reddit_source_quota_exhausted'
- *        - 'reddit_post_quota_exhausted'
- *
- * Called by:
- *   - POST /api/sources/:id/refresh-content (plan 09) — flow='source-action'.
- *   - POST /api/events/preview-url + paste flow (plan 10) — flow='post-refresh'.
- *   - POST /api/sources/:id/posts/refresh (plan 10) — flow='post-refresh'.
+ * Parameters:
+ *   - dbCtx     — Drizzle db handle or active tx; the sliding-window
+ *                 counter joins the caller's transaction when one is
+ *                 active.
+ *   - adapter   — the source-kind adapter whose cap to enforce.
+ *   - userId    — tenant owner of the action.
+ *   - ipAddress — for the audit row on exhaustion.
+ *   - action    — which axis the caller is consuming.
+ *   - opts.platform — platform key for the per-day audit-log SUM
+ *                     query. Defaults to adapter.kind; callers pass an
+ *                     override when one adapter instance serves
+ *                     multiple SourceKinds (Reddit: reddit_account
+ *                     adapter answers for both reddit_account and
+ *                     reddit_subreddit createSource paths).
  */
-export async function enforceRedditUserCap(
+export async function enforceAdapterUserQuota(
   dbCtx: DbOrTx,
   adapter: DataSourceAdapter,
   userId: string,
   ipAddress: string,
-  flow: RedditCapFlow,
+  action: AdapterQuotaAction,
+  opts: { platform?: string } = {},
 ): Promise<void> {
   const cap = adapter.observability.userQuotaCap;
   if (!cap) return;
 
-  // The Reddit two-axis shape uses sourceActionsPerWindow /
-  // postRefreshesPerWindow + windowMinutes. When ALL three are absent
-  // the adapter is NOT declaring the Reddit cap — short-circuit so
-  // YouTube callers (requestsPerDay only) don't fall through.
-  if (cap.windowMinutes === undefined) return;
+  if (cap.windowMinutes !== undefined) {
+    await _enforceSlidingWindowCap(dbCtx, adapter, userId, ipAddress, action);
+    return;
+  }
+
+  if (cap.requestsPerDay === undefined && cap.eventsPerDay === undefined) return;
+
+  const platform = opts.platform ?? adapter.kind;
+  const used = await getUserQuotaUsedToday(userId, platform);
+  const resetAt = nextPacificMidnight();
+  const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
+
+  if (cap.requestsPerDay !== undefined && used.requests >= cap.requestsPerDay) {
+    throw new AppError(
+      `daily request quota exhausted: ${used.requests}/${cap.requestsPerDay}`,
+      "requests_quota_exhausted",
+      429,
+      { cap: cap.requestsPerDay, used: used.requests, reset_in_seconds: resetInSeconds },
+    );
+  }
+  if (cap.eventsPerDay !== undefined && used.events >= cap.eventsPerDay) {
+    throw new AppError(
+      `daily events quota exhausted: ${used.events}/${cap.eventsPerDay}`,
+      "events_quota_exhausted",
+      429,
+      { cap: cap.eventsPerDay, used: used.events, reset_in_seconds: resetInSeconds },
+    );
+  }
+}
+
+/**
+ * Sliding-window-cap dispatcher used only by `enforceAdapterUserQuota`
+ * above. Reddit is the sole adapter declaring this shape today;
+ * Reddit-specific counter + error-code mapping + audit writer live in
+ * `$lib/sources/reddit/server/quota.ts` and are lazy-imported so
+ * cross-source code never resolves Reddit modules at boot.
+ *
+ * On exhaustion:
+ *   1. Write `reddit.cap_exhausted` audit row (forensic trail).
+ *   2. Throw AppError 429 with structured metadata
+ *      { cap, used, window, reset_in_seconds }. AppError.code carries
+ *      the axis-specific error string:
+ *        - 'reddit_source_quota_exhausted'
+ *        - 'reddit_post_quota_exhausted'
+ */
+async function _enforceSlidingWindowCap(
+  dbCtx: DbOrTx,
+  adapter: DataSourceAdapter,
+  userId: string,
+  ipAddress: string,
+  flow: AdapterQuotaAction,
+): Promise<void> {
+  const cap = adapter.observability.userQuotaCap;
+  if (!cap || cap.windowMinutes === undefined) return;
 
   if (flow === "source-action" && cap.sourceActionsPerWindow === undefined) return;
   if (flow === "post-refresh" && cap.postRefreshesPerWindow === undefined) return;
 
-  // Lazy-load: only adapters that declare the two-axis shape pay the
-  // import cost. Keeps cross-source code platform-agnostic at module
-  // load (no `import "$lib/sources/reddit/..."` at top of file).
+  // Lazy-load: only the sliding-window adapter (Reddit today) pays the
+  // import cost. Cross-source code stays adapter-agnostic at module
+  // load — no `import "$lib/sources/reddit/..."` at the top of file.
   const { checkRedditUserCap, writeRedditCapExhaustedAudit, redditCapErrorCode } =
     await import("$lib/sources/reddit/server/quota.js");
 

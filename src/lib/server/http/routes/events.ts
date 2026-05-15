@@ -540,11 +540,12 @@ eventsRoutes.patch("/events/:id/unmark-standalone", async (c) => {
   }
 });
 
-// POST /api/events/:id/refresh-poll. User-side affordance for "refresh
-// this event's stats right now". The service enforces a 5-minute cooldown
-// via events.metadata.last_user_refresh_at, gates non-pollable kinds +
-// missing external_id, and enqueues to youtube.poll.user with a per-minute
-// singletonKey + priority 10.
+// POST /api/events/:id/refresh-poll. User-side "refresh this event's
+// stats right now". The service enforces a 5-minute cooldown via
+// events.metadata.last_user_refresh_at, gates non-pollable kinds +
+// missing external_id + per-user cap, then asks the adapter to enqueue
+// (YouTube → pg-boss YOUTUBE_POLL_USER, Reddit → reddit_refresh_queue
+// user_post lane).
 //
 // Error mapping (via mapErr — service throws typed errors):
 //   - NotFoundError                     → 404 {error: "not_found"}
@@ -555,10 +556,11 @@ eventsRoutes.patch("/events/:id/unmark-standalone", async (c) => {
 //   - AppError "event_not_pollable"     → 422
 //   - AppError "event_no_external_id"   → 422
 //
-// On 200 the body is `{enqueued: true, queue: "youtube.poll.user", eventId}`.
-// RefreshNowButton consumes this contract: after a 200 it disables the button
-// for 5 minutes; after a 429 it reads Retry-After to drive the same countdown
-// without round-tripping the metadata payload.
+// On 200 the body is `{enqueued: true, queue: <adapter-specific>, eventId,
+// jobId?}`. RefreshNowButton consumes the success: it disables the button
+// for 5 minutes; after a 429 it reads Retry-After to drive the same
+// countdown without round-tripping the metadata payload. The `queue` /
+// `jobId` fields are operator/diagnostic-facing (the UI ignores them).
 eventsRoutes.post("/events/:id/refresh-poll", async (c) => {
   const ctx = getAuditContext(c);
   try {

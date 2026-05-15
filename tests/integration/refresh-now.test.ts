@@ -97,7 +97,12 @@ describe("refresh-now route", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body).toEqual({ enqueued: true, queue: "youtube.poll.user", eventId: ev.id });
+    expect(body).toMatchObject({ enqueued: true, queue: "youtube.poll.user", eventId: ev.id });
+    // jobId is the pg-boss-assigned id surfaced from the adapter's
+    // enqueueRefreshPoll. The mock returns "mock-job-id"; pinning the
+    // exact string would couple this test to the mock factory, so we
+    // just assert it landed as a string in the response.
+    expect(typeof body.jobId).toBe("string");
 
     // pg-boss send was called.
     expect(sentJobs.length).toBeGreaterThanOrEqual(1);

@@ -17,6 +17,7 @@ import type {
   AdapterAppContext,
   AdapterContext,
   DataSourceAdapter,
+  EventKind,
   EventPreviewMetadata,
   MinimalBoss,
   PollableSource,
@@ -38,6 +39,7 @@ import { handlePostSingle } from "./handlers/post-single.js";
 import { redditParsePostUrl } from "./url.js";
 import { isRedditConfigured } from "./credentials.js";
 import { AdapterError } from "$lib/sources/errors.js";
+import { AppError } from "$lib/server/services/errors.js";
 import { redditMetadataRoutes } from "./route-metadata.js";
 
 interface RedditSourceMetadata {
@@ -234,8 +236,17 @@ async function fetchEventPreviewMetadata(
       userId: ctx.userId,
       paste: true,
       beforeFetch: async () => {
-        const { enforceRedditUserCap } = await import("$lib/server/services/quota.js");
-        await enforceRedditUserCap(db, redditAdapter, ctx.userId, ctx.ipAddress, "post-refresh");
+        const { enforceAdapterUserQuota } = await import("$lib/server/services/quota.js");
+        await enforceAdapterUserQuota(
+          db,
+          redditAdapter,
+          ctx.userId,
+          ctx.ipAddress,
+          "post-refresh",
+          {
+            platform: "reddit_account",
+          },
+        );
       },
     });
     return {
@@ -320,7 +331,7 @@ async function fetchEventStats(
     // sees the request. Reddit's cap-counter lives on reddit_refresh_queue
     // (already incremented inside handlePostSingle), so this audit row
     // is for read-side parity only — it does NOT participate in
-    // enforceRedditUserCap. Without it, getUserQuotaUsedToday(userId,
+    // enforceAdapterUserQuota. Without it, getUserQuotaUsedToday(userId,
     // "reddit_account") would return 0 always.
     // platform is ADAPTER-scoped (not source-scoped) — the Reddit adapter
     // serves both reddit_account and reddit_subreddit SourceKinds via
@@ -406,6 +417,21 @@ function registerRoutes(app: Hono<AdapterAppContext>): void {
   app.route("/api", redditMetadataRoutes);
 }
 
+function validateEventInput(input: { kind: string; url?: string | null }): void {
+  if (input.kind !== "reddit_post") return;
+  if (!input.url) {
+    throw new AppError("url is required when kind=reddit_post", "kind_url_inconsistent", 422, {
+      reason: "reddit_post_requires_url",
+    });
+  }
+  const parsed = redditParsePostUrl(input.url);
+  if (parsed === null || parsed.kind !== "reddit_post") {
+    throw new AppError("url is not a recognized Reddit post URL", "kind_url_inconsistent", 422, {
+      reason: "url_not_reddit_post",
+    });
+  }
+}
+
 /**
  * enqueueRefreshPoll — adapter-driven Refresh-Now enqueue. The
  * cross-source `requestRefreshPoll` service runs validation / cap
@@ -425,8 +451,8 @@ async function enqueueRefreshPoll(input: {
   eventId: string;
   userId: string;
   externalId: string;
-  eventKind: string;
-}): Promise<void> {
+  eventKind: EventKind;
+}): Promise<{ queue: string; jobId: string | null }> {
   // externalId stored on events is the bare Reddit id (e.g. "abc123");
   // handlePostSingle accepts either form and t3-normalizes internally.
   //
@@ -438,14 +464,21 @@ async function enqueueRefreshPoll(input: {
   // size of the cron-default 0 distance YouTube's refresh-now uses on
   // its own ordering, just inverted because Reddit's worker is ASC
   // (YouTube's pg-boss is DESC on priority).
-  await db.insert(redditRefreshQueue).values({
-    queueName: "user_post",
-    type: "post_single",
-    payload: { post_id: input.externalId, flow: "refresh-now" },
-    userId: input.userId,
-    priority: -10,
-    status: "pending",
-  });
+  const [row] = await db
+    .insert(redditRefreshQueue)
+    .values({
+      queueName: "user_post",
+      type: "post_single",
+      payload: { post_id: input.externalId, flow: "refresh-now" },
+      userId: input.userId,
+      priority: -10,
+      status: "pending",
+    })
+    .returning({ id: redditRefreshQueue.id });
+  return {
+    queue: "reddit_refresh_queue:user_post",
+    jobId: row ? String(row.id) : null,
+  };
 }
 
 export const redditAdapter: DataSourceAdapter = {
@@ -460,6 +493,7 @@ export const redditAdapter: DataSourceAdapter = {
   fetchEventStats,
   registerRoutes,
   enqueueRefreshPoll,
+  validateEventInput,
 };
 
 // Re-export the Reddit-only observability helpers so /admin's Reddit

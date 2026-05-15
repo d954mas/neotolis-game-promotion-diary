@@ -9,7 +9,7 @@
 // adapter-owned counterpart for Reddit's paste-preview UX.
 //
 // Auth: tenantScope chain (anonymous → 401). Per-user cap enforced via
-// enforceRedditUserCap on the post-refreshes axis (25/5min) — the same
+// enforceAdapterUserQuota on the post-refreshes axis (25/5min) — the same
 // gate the events INSERT path uses. The cap-counter row is written by
 // handlePostSingle on the cache-miss branch (paste=true + non-null
 // userId; see post-single.ts header for the cache-hit-vs-miss timing).
@@ -28,7 +28,7 @@ import { handlePostSingle } from "./handlers/post-single.js";
 import { isRedditConfigured } from "./credentials.js";
 import { AppError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
-import { enforceRedditUserCap } from "$lib/server/services/quota.js";
+import { enforceAdapterUserQuota } from "$lib/server/services/quota.js";
 import { db } from "$lib/server/db/client.js";
 import { getAdapter } from "$lib/sources/registry.js";
 
@@ -75,7 +75,9 @@ redditMetadataRoutes.post(
           userId: ctx.userId,
           paste: true,
           beforeFetch: () =>
-            enforceRedditUserCap(db, redditAdapter, ctx.userId, ctx.ipAddress, "post-refresh"),
+            enforceAdapterUserQuota(db, redditAdapter, ctx.userId, ctx.ipAddress, "post-refresh", {
+              platform: "reddit_account",
+            }),
         });
       } catch (err) {
         if (err instanceof AdapterError) {

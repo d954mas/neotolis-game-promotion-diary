@@ -39,17 +39,16 @@ import { events } from "../db/schema/events.js";
 import { youtubeVideos } from "../db/schema/index.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { writeAudit } from "../audit.js";
-import { QUEUES } from "../queues.js";
-import { getBoss } from "../queue-client.js";
 import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
 import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
-import { getUserQuotaUsedToday, nextPacificMidnight } from "./quota.js";
+import { enforceAdapterUserQuota } from "./quota.js";
 
 const COOLDOWN_MS = 5 * 60 * 1000;
 
 export interface RefreshPollResult {
   enqueued: true;
-  queue: "youtube.poll.user";
+  queue: string;
+  jobId?: string | null;
   eventId: string;
 }
 
@@ -97,31 +96,6 @@ export async function requestRefreshPoll(
       429,
       { platform: sourceKindForPoll, pct_of_daily: stats.pctOfDaily },
     );
-  }
-
-  // L2 per-user fair-share cap. Refresh-card action consumes shared
-  // operator API budget; per-user cap protects fairness.
-  const cap = pollableAdapter.observability.userQuotaCap;
-  if (cap?.requestsPerDay !== undefined || cap?.eventsPerDay !== undefined) {
-    const used = await getUserQuotaUsedToday(userId, sourceKindForPoll ?? undefined);
-    const resetAt = nextPacificMidnight();
-    const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
-    if (cap.requestsPerDay !== undefined && used.requests >= cap.requestsPerDay) {
-      throw new AppError(
-        `daily request quota exhausted: ${used.requests}/${cap.requestsPerDay}`,
-        "requests_quota_exhausted",
-        429,
-        { cap: cap.requestsPerDay, used: used.requests, reset_in_seconds: resetInSeconds },
-      );
-    }
-    if (cap.eventsPerDay !== undefined && used.events >= cap.eventsPerDay) {
-      throw new AppError(
-        `daily events quota exhausted: ${used.events}/${cap.eventsPerDay}`,
-        "events_quota_exhausted",
-        429,
-        { cap: cap.eventsPerDay, used: used.events, reset_in_seconds: resetInSeconds },
-      );
-    }
   }
 
   // 3. External-id gate. The poll worker keys upstream calls by external_id
@@ -187,6 +161,10 @@ export async function requestRefreshPoll(
     });
   }
 
+  await enforceAdapterUserQuota(db, pollableAdapter, userId, ipAddress, "post-refresh", {
+    platform: sourceKindForPoll ?? event.kind,
+  });
+
   // 5. Persist last_user_refresh_at BEFORE enqueueing so a crash
   //    mid-enqueue still honors the cooldown on the next attempt.
   //    Eager-write pattern ("claim the slot, then do the work").
@@ -233,33 +211,17 @@ export async function requestRefreshPoll(
     });
   }
 
-  // 6. Enqueue refresh — adapter-driven. The adapter owns the
-  //    backend-specific enqueue (pg-boss for YouTube, reddit_refresh_queue
-  //    INSERT for Reddit, ...). When the adapter implements
-  //    enqueueRefreshPoll we use that; otherwise fall back to the
-  //    YouTube-specific pg-boss send (the original behavior, preserved
-  //    for the case where a future adapter hasn't migrated yet).
-  if (pollableAdapter.enqueueRefreshPoll !== undefined) {
-    await pollableAdapter.enqueueRefreshPoll({
-      eventId,
-      userId,
-      externalId: event.externalId,
-      eventKind: event.kind,
-    });
-  } else {
-    // Legacy path — YouTube, pre-adapter-hook. pg-boss singletonKey
-    // scoped to per-minute window dedups button-mash floods.
-    const boss = await getBoss();
-    const minuteKey = now.toISOString().slice(0, 16); // 'YYYY-MM-DDTHH:MM'
-    await boss.send(
-      QUEUES.YOUTUBE_POLL_USER,
-      { eventId, userId, externalId: event.externalId, kind: event.kind },
-      {
-        singletonKey: `${eventId}-${minuteKey}`,
-        priority: 10,
-      },
-    );
-  }
+  // 6. Enqueue refresh — adapter-driven. Every adapter that can be
+  //    refresh-polled (canRefreshPoll returns true) MUST implement
+  //    enqueueRefreshPoll; the contract is non-optional. YouTube sends
+  //    to its pg-boss queue, Reddit INSERTs into reddit_refresh_queue —
+  //    same shape returned to the caller either way.
+  const { queue, jobId: adapterJobId } = await pollableAdapter.enqueueRefreshPoll({
+    eventId,
+    userId,
+    externalId: event.externalId,
+    eventKind: event.kind,
+  });
 
   // 7. Audit row scoped to the event owner. Written OUTSIDE any tx
   //    (pool-deadlock-safe pattern). Audit failures are swallowed by
@@ -292,5 +254,7 @@ export async function requestRefreshPoll(
     },
   });
 
-  return { enqueued: true, queue: "youtube.poll.user", eventId };
+  return adapterJobId === null
+    ? { enqueued: true, queue, eventId }
+    : { enqueued: true, queue, jobId: adapterJobId, eventId };
 }

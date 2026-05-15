@@ -34,7 +34,12 @@ import type { SourceKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { withQuotaGuard, getUserQuotaUsedToday, nextPacificMidnight } from "./quota.js";
+import {
+  withQuotaGuard,
+  getUserQuotaUsedToday,
+  nextPacificMidnight,
+  enforceAdapterUserQuota,
+} from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
 import { getAdapter } from "$lib/sources/registry.js";
 import { youtubeChannels } from "../db/schema/index.js";
@@ -554,9 +559,9 @@ export async function createSource(
   // impossible/duplicate before quota burn" — the existing-source case
   // is impossible from the cap's perspective (no new work to enqueue).
   if (input.kind === "reddit_account" || input.kind === "reddit_subreddit") {
-    const { enforceRedditUserCap } = await import("./quota.js");
-    const { getAdapter } = await import("$lib/sources/registry.js");
-    await enforceRedditUserCap(db, getAdapter(input.kind), userId, ipAddress, "source-action");
+    await enforceAdapterUserQuota(db, getAdapter(input.kind), userId, ipAddress, "source-action", {
+      platform: input.kind,
+    });
   }
 
   // Canonicalize the handle_url for kind=youtube_channel sources BEFORE

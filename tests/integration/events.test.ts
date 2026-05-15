@@ -2225,6 +2225,77 @@ describe("PATCH /api/events/:id youtube invariant (merged-state validator)", () 
     expect(row!.url).toBe("https://youtu.be/bbb22222222");
   });
 
+  it("PATCH {url: null} on kind=reddit_post event returns 422 with code=kind_url_inconsistent", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev-reddit-url-${uniq()}@test.local` });
+    const [ev] = await db
+      .insert(events)
+      .values({
+        id: uuidv7(),
+        userId: u.id,
+        kind: "reddit_post",
+        authorIsMe: false,
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+        title: "Reddit post",
+        url: "https://www.reddit.com/r/IndieDev/comments/abc123/test/",
+        externalId: "abc123",
+        metadata: {},
+      })
+      .returning();
+
+    const res = await app.request(`/api/events/${ev!.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ url: null }),
+    });
+
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string; metadata?: { reason?: string } };
+    expect(body.error).toBe("kind_url_inconsistent");
+    expect(body.metadata?.reason).toBe("reddit_post_requires_url");
+
+    const [row] = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.userId, u.id), eq(events.id, ev!.id)));
+    expect(row!.url).toBe("https://www.reddit.com/r/IndieDev/comments/abc123/test/");
+  });
+
+  it("PATCH {kind: 'reddit_post'} on event with non-Reddit URL returns 422", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `ev-reddit-kind-${uniq()}@test.local` });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "other",
+        occurredAt: new Date("2026-04-28T12:00:00Z"),
+        title: "Not yet Reddit",
+        url: "https://example.com/post",
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(`/api/events/${ev.id}`, {
+      method: "PATCH",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ kind: "reddit_post" }),
+    });
+
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string; metadata?: { reason?: string } };
+    expect(body.error).toBe("kind_url_inconsistent");
+    expect(body.metadata?.reason).toBe("url_not_reddit_post");
+  });
+
   it("cross-tenant PATCH /api/events/:id returns 404 (never reaches merged-state validator) — AGENTS.md item 2", async () => {
     // PRIV-01 invariant: a forged eventId belonging to user A surfaces as 404
     // when user B PATCHes it. The merged-state validator must NOT introduce

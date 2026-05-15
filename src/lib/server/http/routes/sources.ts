@@ -30,7 +30,7 @@ import {
   softDeleteSource,
   restoreSource,
 } from "../../services/data-sources.js";
-import { getUserQuotaUsedToday, nextPacificMidnight } from "../../services/quota.js";
+import { enforceAdapterUserQuota } from "../../services/quota.js";
 import { toDataSourceDto } from "../../dto.js";
 import { db } from "../../db/client.js";
 import { auditLog } from "../../db/schema/audit-log.js";
@@ -339,50 +339,9 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
       );
     }
 
-    // L2 per-user fair-share cap. When adapter declares userQuotaCap,
-    // check audit-log SUM against cap. Per-axis denial:
-    // requests_quota_exhausted vs events_quota_exhausted (banner UI shows
-    // a distinct toast).
-    const cap = adapter.observability.userQuotaCap;
-    if (cap?.requestsPerDay !== undefined || cap?.eventsPerDay !== undefined) {
-      const used = await getUserQuotaUsedToday(ctx.userId, source.kind);
-      const resetAt = nextPacificMidnight();
-      const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
-      if (cap.requestsPerDay !== undefined && used.requests >= cap.requestsPerDay) {
-        throw new AppError(
-          `daily request quota exhausted: ${used.requests}/${cap.requestsPerDay}`,
-          "requests_quota_exhausted",
-          429,
-          {
-            cap: cap.requestsPerDay,
-            used: used.requests,
-            reset_in_seconds: resetInSeconds,
-          },
-        );
-      }
-      if (cap.eventsPerDay !== undefined && used.events >= cap.eventsPerDay) {
-        throw new AppError(
-          `daily events quota exhausted: ${used.events}/${cap.eventsPerDay}`,
-          "events_quota_exhausted",
-          429,
-          {
-            cap: cap.eventsPerDay,
-            used: used.events,
-            reset_in_seconds: resetInSeconds,
-          },
-        );
-      }
-    }
-
-    // L2-Reddit: two-axis sliding-window cap (windowMinutes +
-    // sourceActionsPerWindow + postRefreshesPerWindow). Reddit declares
-    // this shape instead of requestsPerDay; the branch above (requestsPerDay
-    // / eventsPerDay) silently skips it. For refresh-content the relevant
-    // axis is 'source-action' (1/5min).
-    if (cap?.windowMinutes !== undefined) {
-      const { enforceRedditUserCap } = await import("$lib/server/services/quota.js");
-      await enforceRedditUserCap(db, adapter, ctx.userId, ctx.ipAddress, "source-action");
-    }
+    await enforceAdapterUserQuota(db, adapter, ctx.userId, ctx.ipAddress, "source-action", {
+      platform: source.kind,
+    });
 
     // No eager state reset. The three-branch since-derivation in
     // backfill-channel.ts decides at walk-time whether the click is

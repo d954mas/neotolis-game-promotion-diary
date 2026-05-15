@@ -61,7 +61,7 @@ import type { EventKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { withQuotaGuard, getUserQuotaUsedToday } from "./quota.js";
+import { withQuotaGuard, getUserQuotaUsedToday, enforceAdapterUserQuota } from "./quota.js";
 import { encodeCursor, decodeCursor } from "./audit-read.js";
 import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
 import { getAdapter } from "$lib/sources/registry.js";
@@ -384,8 +384,9 @@ export async function createEvent(
     if (sourceKindForCap !== null) {
       const capAdapter = getAdapter(sourceKindForCap);
       if (capAdapter.observability.userQuotaCap?.windowMinutes !== undefined) {
-        const { enforceRedditUserCap } = await import("./quota.js");
-        await enforceRedditUserCap(db, capAdapter, userId, ipAddress, "post-refresh");
+        await enforceAdapterUserQuota(db, capAdapter, userId, ipAddress, "post-refresh", {
+          platform: sourceKindForCap,
+        });
       }
     }
   }
@@ -591,7 +592,7 @@ export interface EnrichmentResult {
  * /comments/<id>.json call the paste flow uses (see fetchEventPreviewMetadata
  * in $lib/sources/reddit/server/index.ts) — it UPSERTs the reddit_posts /
  * reddit_users / reddit_subreddits caches, writes a snapshot row, AND
- * writes the user_post cap-counter row gated by enforceRedditUserCap.
+ * writes the user_post cap-counter row gated by enforceAdapterUserQuota.
  * `userId` + `ipAddress` are required for cap enforcement on Reddit;
  * YouTube ignores them.
  *

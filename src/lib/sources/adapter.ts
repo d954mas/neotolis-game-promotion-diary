@@ -554,14 +554,20 @@ export interface DataSourceAdapter {
    *  `requestRefreshPoll` service runs the validation / cooldown / cap
    *  gates uniformly, then asks the adapter to actually enqueue the
    *  refresh job. YouTube: pg-boss send to YOUTUBE_POLL_USER. Reddit:
-   *  INSERT a user_post row into reddit_refresh_queue. Future adapters
-   *  implement whatever shape fits their backend. */
-  enqueueRefreshPoll?(input: {
+   *  INSERT a user_post row into reddit_refresh_queue.
+   *
+   *  Required for every adapter whose canRefreshPoll can return true —
+   *  if you can be polled, you must enqueue. The cross-source surface
+   *  has no fallback path. Return the backend's queue label + opaque
+   *  job id so the route layer can surface them to the UI.
+   *
+   *  `jobId` may be null when the backend doesn't expose one. */
+  enqueueRefreshPoll(input: {
     eventId: string;
     userId: string;
     externalId: string;
     eventKind: EventKind;
-  }): Promise<void>;
+  }): Promise<{ queue: string; jobId: string | null }>;
 
   /** Per-adapter event-input validation. Cross-source createEvent /
    *  updateEvent calls this when the merged event.kind matches this
