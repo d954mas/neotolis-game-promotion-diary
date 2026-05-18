@@ -51,6 +51,21 @@ export const redditSubredditsCache = pgTable(
     subredditType: text("subreddit_type"),
     lastMetadataRefreshAt: timestamp("last_metadata_refresh_at", { withTimezone: true }),
     firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Reddit listing pagination cursor (`data.after` from /new.json).
+     *  Non-NULL while a deep walk is in progress; NULL means either the
+     *  walk is complete (see backfillComplete) or we haven't started yet.
+     *  Saved cross-tenant on the public cache row — one walk per
+     *  subreddit, all subscribers free-ride on the same fan-out. */
+    backfillAfterCursor: text("backfill_after_cursor"),
+    /** True once the walker reached `data.after === null` — Reddit either
+     *  ran out of listing entries OR hit its ~1000-item public cap. From
+     *  this point on sub_poll switches to incremental (no cursor) and
+     *  only picks up new posts at the top of /new. */
+    backfillComplete: boolean("backfill_complete").notNull().default(false),
+    /** Oldest `created_utc` we've fetched during the deep walk. Surfaces
+     *  on the operator dashboard so we can see "how far back into r/X
+     *  history have we gone" without scanning reddit_posts. */
+    backfillDeepestAt: timestamp("backfill_deepest_at", { withTimezone: true }),
   },
   (t) => ({
     // Daily refresh-cron picks stale rows for /r/X/about.json walk.

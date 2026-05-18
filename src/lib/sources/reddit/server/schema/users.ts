@@ -33,6 +33,17 @@ export const redditUsersCache = pgTable(
     isSuspended: boolean("is_suspended").notNull().default(false),
     lastMetadataRefreshAt: timestamp("last_metadata_refresh_at", { withTimezone: true }),
     firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Reddit listing pagination cursor for /user/X/submitted.json
+     *  (`data.after`). Same semantics as redditSubredditsCache: non-NULL
+     *  while a deep walk is in progress, NULL when complete or never
+     *  started. */
+    backfillAfterCursor: text("backfill_after_cursor"),
+    /** Walk done — Reddit hit end-of-listing (typically ~1000 posts for
+     *  /user/X/submitted; less if the author has fewer submissions).
+     *  Incremental author_poll runs after this point. */
+    backfillComplete: boolean("backfill_complete").notNull().default(false),
+    /** Oldest `created_utc` fetched during the deep walk. */
+    backfillDeepestAt: timestamp("backfill_deepest_at", { withTimezone: true }),
   },
   (t) => ({
     // Refresh-cron scan: pick stale rows for re-fetch. Cheap btree on a

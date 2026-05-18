@@ -33,6 +33,11 @@ import { AdapterError } from "$lib/sources/errors.js";
 import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
 import { logger } from "$lib/server/logger.js";
 import { classifySnapshotStatus } from "./post-single.js";
+import {
+  getAuthorWalkState,
+  persistAuthorWalkProgress,
+  enqueueWalkerContinuation,
+} from "../walker-state.js";
 
 interface T3Data {
   id: string;
@@ -65,21 +70,44 @@ export async function handleAuthorPoll(args: {
   handle: string;
   userId: string | null;
   pacer?: "acquire" | "already-acquired";
-}): Promise<{ postsUpserted: number; eventsInserted: number }> {
+}): Promise<{
+  postsUpserted: number;
+  eventsInserted: number;
+  /** True while the deep walk is still advancing through pages. Flips
+   *  to false on the tick that drains data.after to null. Telemetry only;
+   *  worker-tick ignores it. */
+  walking: boolean;
+}> {
   const handle = args.handle;
   if (typeof handle !== "string" || handle.length === 0) {
     throw new AdapterError("author_poll: missing handle in payload", { category: "permanent" });
   }
 
+  // 0. Read walker state (mirror of sub_poll — see walker-state.ts).
+  const state = await getAuthorWalkState(db, handle);
+  const inDeepWalk = !state.backfillComplete;
+  const afterParam =
+    inDeepWalk && state.afterCursor !== null
+      ? `&after=${encodeURIComponent(state.afterCursor)}`
+      : "";
+
   // 1. /user/<handle>/submitted.json — listing fetch. 404 on deleted user.
   let listingChildren: T3Data[];
+  let nextAfterCursor: string | null;
   try {
     const { data } = await redditFetch<{
-      data?: { children?: Array<{ kind?: string; data?: T3Data }> };
-    }>(`/user/${encodeURIComponent(handle)}/submitted.json?limit=100`, { pacer: args.pacer });
+      data?: {
+        children?: Array<{ kind?: string; data?: T3Data }>;
+        after?: string | null;
+      };
+    }>(`/user/${encodeURIComponent(handle)}/submitted.json?limit=100${afterParam}`, {
+      pacer: args.pacer,
+    });
     listingChildren = (data?.data?.children ?? [])
       .filter((c) => c?.kind === "t3" && c?.data)
       .map((c) => c.data as T3Data);
+    const after = data?.data?.after;
+    nextAfterCursor = typeof after === "string" && after.length > 0 ? after : null;
   } catch (err) {
     if (err instanceof AdapterError && err.category === "not-found") {
       await flagNotFoundOnSubscribers(handle, "not-found");
@@ -168,17 +196,45 @@ export async function handleAuthorPoll(args: {
   // 6. Fan-out events INSERT to auto_import=true subscribers.
   const eventsInserted = await fanOutToSubscribers(handle, listingChildren, subscribers);
 
+  // 7. Walker state + continuation enqueue — same shape as sub_poll.
+  let walking = false;
+  if (inDeepWalk) {
+    const oldestSubmittedAt = oldestT3SubmittedAt(listingChildren);
+    const walkerDone = nextAfterCursor === null;
+    await persistAuthorWalkProgress(db, handle, {
+      afterCursor: walkerDone ? null : nextAfterCursor,
+      backfillComplete: walkerDone,
+      oldestSubmittedAt,
+    });
+    walking = !walkerDone;
+    if (!walkerDone) {
+      await enqueueWalkerContinuation(db, "author_poll", { handle });
+    }
+  }
+
   logger.info(
     {
       handle,
       userId: args.userId,
       postsFetched: listingChildren.length,
       eventsInserted,
+      walking,
+      backfillComplete: !inDeepWalk || nextAfterCursor === null,
     },
     "reddit author_poll: complete",
   );
 
-  return { postsUpserted: listingChildren.length, eventsInserted };
+  return { postsUpserted: listingChildren.length, eventsInserted, walking };
+}
+
+/** See sub-poll.ts oldestT3SubmittedAt — same shape. */
+function oldestT3SubmittedAt(t3s: T3Data[]): Date | null {
+  if (t3s.length === 0) return null;
+  let oldest = t3s[0]!.created_utc;
+  for (const t3 of t3s) {
+    if (t3.created_utc < oldest) oldest = t3.created_utc;
+  }
+  return new Date(oldest * 1000);
 }
 
 async function fanOutToSubscribers(

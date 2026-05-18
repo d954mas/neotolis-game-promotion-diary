@@ -47,6 +47,11 @@ import { AdapterError } from "$lib/sources/errors.js";
 import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
 import { logger } from "$lib/server/logger.js";
 import { classifySnapshotStatus } from "./post-single.js";
+import {
+  getSubredditWalkState,
+  persistSubredditWalkProgress,
+  enqueueWalkerContinuation,
+} from "../walker-state.js";
 
 interface T3Data {
   id: string;
@@ -79,22 +84,51 @@ export async function handleSubPoll(args: {
   sub: string;
   userId: string | null;
   pacer?: "acquire" | "already-acquired";
-}): Promise<{ postsUpserted: number; eventsInserted: number }> {
+}): Promise<{
+  postsUpserted: number;
+  eventsInserted: number;
+  /** True when this fetch advanced the deep walk (cursor was non-null
+   *  going in OR the next page cursor is non-null going out). False when
+   *  the walker is fully drained (subsequent fetches are top-of-listing
+   *  incremental polls). Exposed for telemetry; not load-bearing. */
+  walking: boolean;
+}> {
   const sub = args.sub;
   if (typeof sub !== "string" || sub.length === 0) {
     throw new AdapterError("sub_poll: missing sub in payload", { category: "permanent" });
   }
 
+  // 0. Read walker state. Existing rows return their saved cursor +
+  //    complete flag; missing rows fall through to a fresh walk. The seed
+  //    UPSERT below adopts the row, so the next tick (continuation) sees
+  //    real state in the table.
+  const state = await getSubredditWalkState(db, sub);
+  // Deep walk continues while NOT complete. When complete=true the walker
+  // is "done" — top-of-listing incremental from this tick on.
+  const inDeepWalk = !state.backfillComplete;
+  const afterParam =
+    inDeepWalk && state.afterCursor !== null
+      ? `&after=${encodeURIComponent(state.afterCursor)}`
+      : "";
+
   // 1. Fetch the listing. AdapterError categories bubble — worker tick
   //    catches and routes to status (pending → retry, dead_letter, etc.).
   let listingChildren: T3Data[];
+  let nextAfterCursor: string | null;
   try {
     const { data } = await redditFetch<{
-      data?: { children?: Array<{ kind?: string; data?: T3Data }> };
-    }>(`/r/${encodeURIComponent(sub)}/new.json?limit=100`, { pacer: args.pacer });
+      data?: {
+        children?: Array<{ kind?: string; data?: T3Data }>;
+        after?: string | null;
+      };
+    }>(`/r/${encodeURIComponent(sub)}/new.json?limit=100${afterParam}`, { pacer: args.pacer });
     listingChildren = (data?.data?.children ?? [])
       .filter((c) => c?.kind === "t3" && c?.data)
       .map((c) => c.data as T3Data);
+    // Reddit returns `data.after` as the next-page cursor (`t3_xxx` form)
+    // or null when the listing is exhausted (end of /new OR ~1000 cap).
+    const after = data?.data?.after;
+    nextAfterCursor = typeof after === "string" && after.length > 0 ? after : null;
   } catch (err) {
     if (err instanceof AdapterError && err.category === "not-found") {
       await flagNotFoundOnSubscribers(sub, "not-found");
@@ -167,17 +201,59 @@ export async function handleSubPoll(args: {
   // 4. Fan-out events INSERT for auto_import=true subscribers.
   const eventsInserted = await fanOutToSubscribers(sub, listingChildren);
 
+  // 5. Walker state update + continuation enqueue.
+  //    - Incremental mode (state.backfillComplete=true): nothing to do
+  //      here. Walker stays "complete"; next refresh runs the same
+  //      top-of-listing fetch and the cursor stays NULL.
+  //    - Deep walk in progress (state.backfillComplete=false): persist
+  //      the new cursor. When Reddit returns data.after=null we've hit
+  //      end-of-listing OR the ~1000-item cap; flip the complete flag
+  //      and stop enqueuing continuations. Otherwise enqueue another
+  //      service_source row so the next worker tick continues the walk.
+  let walking = false;
+  if (inDeepWalk) {
+    const oldestSubmittedAt = oldestT3SubmittedAt(listingChildren);
+    const walkerDone = nextAfterCursor === null;
+    await persistSubredditWalkProgress(db, sub, {
+      afterCursor: walkerDone ? null : nextAfterCursor,
+      backfillComplete: walkerDone,
+      oldestSubmittedAt,
+    });
+    walking = !walkerDone;
+    if (!walkerDone) {
+      // Operator-pool continuation — the user's initial click already
+      // counted toward their source-action cap; subsequent pages are
+      // service-lane work (user_id=NULL).
+      await enqueueWalkerContinuation(db, "sub_poll", { sub });
+    }
+  }
+
   logger.info(
     {
       sub,
       userId: args.userId,
       postsFetched: listingChildren.length,
       eventsInserted,
+      walking,
+      backfillComplete: !inDeepWalk || nextAfterCursor === null,
     },
     "reddit sub_poll: complete",
   );
 
-  return { postsUpserted: listingChildren.length, eventsInserted };
+  return { postsUpserted: listingChildren.length, eventsInserted, walking };
+}
+
+/** Min `created_utc` across the fetched batch, expressed as a Date.
+ *  Used to advance backfill_deepest_at monotonically downward. NULL when
+ *  the listing came back empty (e.g. quiet subreddit with no posts in
+ *  the current page). */
+function oldestT3SubmittedAt(t3s: T3Data[]): Date | null {
+  if (t3s.length === 0) return null;
+  let oldest = t3s[0]!.created_utc;
+  for (const t3 of t3s) {
+    if (t3.created_utc < oldest) oldest = t3.created_utc;
+  }
+  return new Date(oldest * 1000);
 }
 
 /** INSERT events rows for every auto_import=true subscriber × every
