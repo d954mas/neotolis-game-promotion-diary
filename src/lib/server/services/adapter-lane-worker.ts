@@ -103,7 +103,21 @@ export interface AdapterBatchLaneWorkerPolicy<TLane extends string, TPermit = un
   slots: readonly TLane[];
   fallthrough: readonly TLane[];
   maxAttempts: number;
-  maxBatchSize: number;
+  /** Max rows claimed per tick.
+   *
+   *  - `number`: applies to ALL lanes uniformly (the common case;
+   *    YouTube videos.list takes ≤50 IDs regardless of lane).
+   *  - `Partial<Record<Lane, number>>`: per-lane limits, used when
+   *    different lanes call different upstream endpoints with different
+   *    batch tolerances. Reddit's `service_post`/`user_post` lanes can
+   *    claim 100 (one `/api/info` call), but `service_source`/
+   *    `user_source` MUST stay at 1 because each row needs its own
+   *    `/r/<sub>/new.json` or `/user/<h>/submitted.json` listing fetch
+   *    and a single tick only acquires one pacer slot.
+   *
+   *  Lanes not present in the record default to 1 (no batching).
+   *  Every value must be a positive integer. */
+  maxBatchSize: number | Partial<Record<TLane, number>>;
   /** Batch claim strategy.
    *
    *  - "global": claim rows across users inside the same lane. Use when the
@@ -149,6 +163,23 @@ export function adapterRefreshQueueLabel(adapterKind: string, queueName: string)
 
 function defaultRetryBackoffMs(attempts: number): number {
   return Math.min(5 * 60_000, 5_000 * 2 ** Math.max(0, attempts - 1));
+}
+
+/** Resolve the effective batch size for a specific lane.
+ *
+ *  - When `maxBatchSize` is a number → that's the limit for every lane.
+ *  - When it's a record → look up the lane; unmapped lanes default to 1
+ *    (no batching, single-row tick). Default-to-1 makes "I forgot to
+ *    declare batch size for this lane" the safe behavior — at worst the
+ *    lane processes one row at a time, never claiming more than the
+ *    pacer/quota can support.
+ */
+function resolveMaxBatchSizeForLane<TLane extends string>(
+  maxBatchSize: number | Partial<Record<TLane, number>>,
+  lane: TLane,
+): number {
+  if (typeof maxBatchSize === "number") return maxBatchSize;
+  return maxBatchSize[lane] ?? 1;
 }
 
 function assertPositiveInteger(name: string, value: number): void {
@@ -206,7 +237,17 @@ function validateBatchLaneWorkerPolicy<TLane extends string>(
 ): void {
   validateLaneShape(policy);
   assertPositiveInteger("maxAttempts", policy.maxAttempts);
-  assertPositiveInteger("maxBatchSize", policy.maxBatchSize);
+  if (typeof policy.maxBatchSize === "number") {
+    assertPositiveInteger("maxBatchSize", policy.maxBatchSize);
+  } else {
+    const slotLanes = new Set(policy.slots);
+    for (const [lane, value] of Object.entries(policy.maxBatchSize)) {
+      if (!slotLanes.has(lane as TLane)) {
+        throw new Error(`maxBatchSize record contains lane '${lane}' not present in slots`);
+      }
+      assertPositiveInteger(`maxBatchSize[${lane}]`, value as number);
+    }
+  }
   assertPositiveInteger("staleProcessingMs", policy.staleProcessingMs);
   assertPositiveInteger("staleRecoveryIntervalMs", policy.staleRecoveryIntervalMs);
 }
@@ -550,7 +591,8 @@ export function createAdapterBatchLaneWorker<TLane extends string, TPermit = unk
 
       const first: ClaimedRow = { ...firstRaw, id: Number(firstRaw.id) };
       const batch: ClaimedRow[] = [first];
-      if (policy.maxBatchSize > 1) {
+      const laneMaxBatch = resolveMaxBatchSizeForLane(policy.maxBatchSize, queueName);
+      if (laneMaxBatch > 1) {
         const userFilter =
           policy.batchScope === "user"
             ? sql`AND user_id IS NOT DISTINCT FROM ${first.user_id}`
@@ -565,7 +607,7 @@ export function createAdapterBatchLaneWorker<TLane extends string, TPermit = unk
             ${userFilter}
             AND id <> ${first.id}
           ORDER BY priority ASC, next_attempt_at ASC, enqueued_at ASC
-          LIMIT ${policy.maxBatchSize - 1}
+          LIMIT ${laneMaxBatch - 1}
           FOR UPDATE SKIP LOCKED
         `);
         const restQuery = restResult as unknown as {
