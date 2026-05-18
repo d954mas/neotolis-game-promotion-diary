@@ -126,10 +126,17 @@
         //     wait, then naturally falls back to the regular variant).
         //
         // Stop conditions:
-        //   1. lastPolledAt > lastUserRefreshAt — worker wrote a snapshot
-        //      after the eager-write of last_user_refresh_at (the refresh-
-        //      poll service writes it BEFORE the enqueue). Loader picked
-        //      up the new value.
+        //   1. lastPolledAt > refreshAt — worker wrote a snapshot after
+        //      the click instant. refreshAt = Date.now() at the moment
+        //      the 200/202 returned is the right reference: the server
+        //      writes last_user_refresh_at = NOW() inside the same
+        //      transaction as the enqueue, so worker polls landing
+        //      AFTER that wall-clock moment imply our enqueued row has
+        //      drained. Reading event.metadata.last_user_refresh_at
+        //      from props would lag a tick (we haven't awaited the
+        //      invalidateAll below yet) AND would risk an early exit
+        //      when an older prior refresh + a still-stale polledAt
+        //      already satisfy polledAt > prior_refresh_at.
         //   2. mounted === false — user navigated away. No more
         //      invalidateAll() calls against a dead component.
         //
@@ -139,7 +146,7 @@
         //   (5 min), and the user can hard-reload or revisit the page
         //   to see the eventual snapshot. Adding more polling iterations
         //   would just burn loader cycles in a dead-letter scenario.
-        const refreshAt = readMetadataLastRefresh(event.metadata) ?? Date.now();
+        const refreshAt = Date.now();
         void invalidateAll();
         const FAST_ITERATIONS = 15;
         const TOTAL_ITERATIONS = FAST_ITERATIONS + 21; // ~120s budget

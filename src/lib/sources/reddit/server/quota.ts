@@ -1,22 +1,25 @@
-// Reddit per-user two-axis cap: 1 source-action / 5min + 25
-// post-refresh / 5min sliding window.
+// Reddit per-user two-axis cap: 5 source-actions / 15min + 30
+// post-refreshes / 15min sliding window. Calibration in
+// `REDDIT_USER_CAP` below is the single source of truth — these
+// numbers feed both the counter (this file) and the cap declaration
+// (observability.userQuotaCap).
 //
 // Both axes share ONE source of truth: `adapter_refresh_queue`. A user
 // action that costs a Reddit unit enqueues a row on the appropriate
 // lane (user_source or user_post); the cap query just COUNTs rows in
-// the last 5 minutes on the lane it cares about.
+// the rolling window on the lane it cares about.
 //
 //   source-actions axis:
 //     SELECT count(*) FROM adapter_refresh_queue
 //     WHERE user_id = $user
 //       AND queue_name = 'user_source'
-//       AND enqueued_at > NOW() - INTERVAL '5 minutes'
+//       AND enqueued_at > NOW() - INTERVAL '15 minutes'
 //
 //   post-refreshes axis:
 //     SELECT count(*) FROM adapter_refresh_queue
 //     WHERE user_id = $user
 //       AND queue_name = 'user_post'
-//       AND enqueued_at > NOW() - INTERVAL '5 minutes'
+//       AND enqueued_at > NOW() - INTERVAL '15 minutes'
 //
 // Cron rows have `user_id IS NULL` (they live on service_source /
 // service_post lanes), so the user-lane filter excludes them by
@@ -24,15 +27,15 @@
 //
 // Why this module (and not src/lib/server/services/quota.ts): Reddit's
 // shape doesn't fit YouTube's per-Pacific-day requestsPerDay model —
-// it's a 5-minute UTC sliding window with TWO independent axes. The
-// cross-source orchestrator lazy-imports this module only when an
-// adapter declares the two-axis shape via observability.userQuotaCap.
+// it's a UTC sliding window with TWO independent axes. The cross-source
+// orchestrator lazy-imports this module only when an adapter declares
+// the two-axis shape via observability.userQuotaCap.
 //
 // SOFT FAIRNESS CAP — same caveat as services/quota.ts: cap-check +
-// enqueue is not atomic. Two concurrent requests at 0/1 can both pass
-// the gate before either row settles, briefly overshooting to 2/1.
-// Accepted: this is a fairness signal, not a security-grade ceiling.
-// An atomic check would need pg_advisory_xact_lock(hashtext(userId))
+// enqueue is not atomic. Two concurrent requests just under cap can
+// both pass the gate before either row settles, briefly overshooting
+// by 1. Accepted: this is a fairness signal, not a security-grade
+// ceiling. An atomic check would need pg_advisory_xact_lock(hashtext(userId))
 // on every click — cost-prohibitive at indie scale.
 
 import { and, eq, gte, sql } from "drizzle-orm";
@@ -68,10 +71,11 @@ export interface RedditCapResult {
   used: number;
   window_minutes: number;
   /**
-   * Seconds until the OLDEST counted row falls out of the rolling 5-min
-   * window. For a fresh user with no rows it's the full window (300s).
-   * For a user one row deep at +3min in, it's 120s. Clamped to ≥1 so
-   * Retry-After / setTimeout never receive 0.
+   * Seconds until the OLDEST counted row falls out of the rolling
+   * window. For a fresh user with no rows it's the full window
+   * (windowMinutes * 60). For a user one row deep at +5min in on a
+   * 15min window, it's 600s. Clamped to ≥1 so Retry-After / setTimeout
+   * never receive 0.
    */
   reset_in_seconds: number;
 }
@@ -81,9 +85,9 @@ export interface RedditCapResult {
  * a Drizzle db handle OR an inner tx; the count joins the caller's
  * transaction when one is active.
  *
- * Both axes COUNT + MIN(enqueued_at) over adapter_refresh_queue under a
- * 5-minute UTC rolling window. axis only changes which queue_name
- * lane the WHERE filters to:
+ * Both axes COUNT + MIN(enqueued_at) over adapter_refresh_queue under
+ * the `REDDIT_USER_CAP.windowMinutes` UTC rolling window. axis only
+ * changes which queue_name lane the WHERE filters to:
  *   - source-actions  → user_source
  *   - post-refreshes  → user_post
  *
@@ -169,7 +173,8 @@ export async function checkRedditUserCap(
 /**
  * Reset-in-seconds = (windowMs - (now - oldestAt)) / 1000, clamped to
  * the closed range [1, windowMs/1000]. For a user with no rows the
- * oldest is null and the full window (300s) remains.
+ * oldest is null and the full window (REDDIT_USER_CAP.windowMinutes ×
+ * 60s) remains.
  *
  * The upper clamp is load-bearing: when oldestAt comes from a Postgres
  * NOW()-stamped row but `Date.now()` is read from the Node process,

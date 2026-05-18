@@ -309,6 +309,73 @@ describe("handleEnqueueServicePostsCron — D-RDT-POST-ELIGIBILITY scan + batche
     expect(r.enqueued).toBe(0);
   });
 
+  it("pending post_batch already contains the post_id → NOT re-enqueued", async () => {
+    // Pre-seed: post is eligible (young + stale snapshot) AND there's
+    // already a pending post_batch row covering it. The cron must skip
+    // re-enqueueing — pre-fix the same post would land in a fresh batch
+    // every 6h tick, burning slots on duplicate work.
+    await insertPost({
+      postId: "t3_already_pending",
+      submittedHoursAgo: 3,
+      lastSnapshotHoursAgo: 8,
+    });
+    await db.execute(sql`
+      INSERT INTO adapter_refresh_queue
+        (adapter_kind, queue_name, type, payload, user_id, priority, status)
+      VALUES
+        ('reddit_account', 'service_post', 'post_batch',
+         '{"post_ids":["t3_already_pending"]}'::jsonb, NULL, 0, 'pending')
+    `);
+    const r = await handleEnqueueServicePostsCron();
+    expect(r.enqueued).toBe(0);
+    expect(r.batches).toBe(0);
+    // Sanity: original pending row still present (only one queue row).
+    const rows = await db.execute(sql`
+      SELECT COUNT(*)::int AS n FROM adapter_refresh_queue
+      WHERE queue_name = 'service_post' AND type = 'post_batch'
+    `);
+    const count = Number((rows as unknown as { rows: Array<{ n: number }> }).rows[0]?.n ?? 0);
+    expect(count).toBe(1);
+  });
+
+  it("pending post_single (refresh-now) for the same post → NOT re-enqueued by cron", async () => {
+    // User just hit Refresh-Now on a young post; that path enqueues a
+    // post_single on user_post lane. The service-posts cron must NOT
+    // also pick it for a post_batch — the worker would otherwise burn
+    // two slots for the same fetch.
+    await insertPost({ postId: "t3_user_inflight", submittedHoursAgo: 3, lastSnapshotHoursAgo: 8 });
+    await db.execute(sql`
+      INSERT INTO adapter_refresh_queue
+        (adapter_kind, queue_name, type, payload, user_id, priority, status)
+      VALUES
+        ('reddit_account', 'user_post', 'post_single',
+         '{"post_id":"t3_user_inflight","flow":"refresh-now"}'::jsonb,
+         '00000000-0000-0000-0000-000000000001', -10, 'pending')
+    `);
+    const r = await handleEnqueueServicePostsCron();
+    expect(r.enqueued).toBe(0);
+  });
+
+  it("only DONE post_batch for the post → cron RE-enqueues (the prior run finished)", async () => {
+    // Negative case for the dedup: the exclusion is only for
+    // pending/processing rows. A previously-drained done row must NOT
+    // prevent the next eligibility tick from re-enqueueing.
+    await insertPost({
+      postId: "t3_drained_already",
+      submittedHoursAgo: 3,
+      lastSnapshotHoursAgo: 8,
+    });
+    await db.execute(sql`
+      INSERT INTO adapter_refresh_queue
+        (adapter_kind, queue_name, type, payload, user_id, priority, status)
+      VALUES
+        ('reddit_account', 'service_post', 'post_batch',
+         '{"post_ids":["t3_drained_already"]}'::jsonb, NULL, 0, 'done')
+    `);
+    const r = await handleEnqueueServicePostsCron();
+    expect(r.enqueued).toBe(1);
+  });
+
   it("chunks more than 100 eligible posts into batches of 100", async () => {
     // 150 young eligible posts → 2 batches (100 + 50).
     for (let i = 0; i < 150; i++) {
@@ -559,6 +626,91 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
     expect(Number((audit as unknown as { rows: Array<{ c: number | string }> }).rows[0]!.c)).toBe(
       0,
     );
+  });
+
+  it("queue cleanup is cross-adapter — both reddit and youtube done/dead_letter rows >7d are purged", async () => {
+    // The deletion-propagation cron also drains stale adapter_refresh_queue
+    // rows across ALL adapter_kind values (not just reddit). Pre-fix the
+    // DELETE was filtered to `adapter_kind = 'reddit_account'`, which
+    // left YouTube's done/dead_letter rows growing forever. This test
+    // pins the cross-adapter behaviour so a future regression bringing
+    // the filter back gets caught.
+    const adminEmail = `admin-${uniq()}@test.local`;
+    await seedAdminUser(adminEmail);
+    // Reddit done row, last_attempt_at 8 days ago → SHOULD be deleted.
+    await db.execute(sql`
+      INSERT INTO adapter_refresh_queue
+        (adapter_kind, queue_name, type, payload, user_id, priority, status, last_attempt_at)
+      VALUES
+        ('reddit_account', 'service_post', 'post_batch',
+         '{"post_ids":["t3_stale_rd"]}'::jsonb, NULL, 0, 'done',
+         NOW() - INTERVAL '8 days')
+    `);
+    // YouTube done row, last_attempt_at 9 days ago → SHOULD be deleted
+    // (this is the case the pre-fix Reddit-only filter would skip).
+    await db.execute(sql`
+      INSERT INTO adapter_refresh_queue
+        (adapter_kind, queue_name, type, payload, user_id, priority, status, last_attempt_at)
+      VALUES
+        ('youtube_channel', 'user_video', 'video_stats',
+         '{"video_id":"abc"}'::jsonb, NULL, 0, 'done',
+         NOW() - INTERVAL '9 days')
+    `);
+    // YouTube dead_letter row, 10 days ago → SHOULD be deleted.
+    await db.execute(sql`
+      INSERT INTO adapter_refresh_queue
+        (adapter_kind, queue_name, type, payload, user_id, priority, status, last_attempt_at)
+      VALUES
+        ('youtube_channel', 'user_video', 'video_stats',
+         '{"video_id":"def"}'::jsonb, NULL, 0, 'dead_letter',
+         NOW() - INTERVAL '10 days')
+    `);
+    // Young done row (< 7 days) → MUST be preserved (audit window).
+    await db.execute(sql`
+      INSERT INTO adapter_refresh_queue
+        (adapter_kind, queue_name, type, payload, user_id, priority, status, last_attempt_at)
+      VALUES
+        ('youtube_channel', 'user_video', 'video_stats',
+         '{"video_id":"young"}'::jsonb, NULL, 0, 'done',
+         NOW() - INTERVAL '3 days')
+    `);
+    // Pending row of any age → MUST be preserved (not terminal).
+    await db.execute(sql`
+      INSERT INTO adapter_refresh_queue
+        (adapter_kind, queue_name, type, payload, user_id, priority, status, last_attempt_at)
+      VALUES
+        ('reddit_account', 'service_post', 'post_batch',
+         '{"post_ids":["pending_old"]}'::jsonb, NULL, 0, 'pending',
+         NOW() - INTERVAL '30 days')
+    `);
+
+    const adminId = await seedAdminUser(adminEmail);
+    process.env.ADMIN_EMAIL_ALLOWLIST = adminEmail;
+    vi.resetModules();
+    const mod =
+      await import("../../src/lib/sources/reddit/server/handlers/deletion-propagation-cron.js");
+    mod.__resetOperatorCacheForTest();
+    const r = await mod.handleDeletionPropagationCron();
+    vi.resetModules();
+    expect(adminId).toBeDefined();
+    expect(r.queueRowsCleaned).toBe(3);
+
+    const remaining = await db.execute(sql`
+      SELECT adapter_kind, status, payload FROM adapter_refresh_queue
+      ORDER BY id ASC
+    `);
+    const rows = (
+      remaining as unknown as {
+        rows: Array<{
+          adapter_kind: string;
+          status: string;
+          payload: { post_ids?: string[]; video_id?: string };
+        }>;
+      }
+    ).rows;
+    expect(rows).toHaveLength(2);
+    // Surviving rows: the young done + the ancient pending.
+    expect(rows.map((r) => r.status).sort()).toEqual(["pending", "done"].sort());
   });
 
   it("empty ADMIN_EMAIL_ALLOWLIST → handler still purges but skips audit (silent)", async () => {

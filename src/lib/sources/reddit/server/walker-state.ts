@@ -56,6 +56,18 @@
 // fetch (which IS user_source), every subsequent page is operator-pool
 // work.
 //
+// Why user-driven first page → service-driven continuations: the user
+// pays the source-action cap exactly once when they paste a new
+// subreddit or widen `backfillTargetSince`. From that single user-budget
+// transaction the walker may need 5–10 follow-up fetches to drain
+// Reddit's ~1000-item listing. Charging the user once per page would
+// either exhaust the cap (5 source-actions per 15min budget) after the
+// first deep walk, or force a per-page cap that's too high to be
+// meaningful. The operator-pool model says "user opt-in is the cap
+// event; the operator absorbs the rest" — same shape as YouTube's
+// onboarding-backfill, which spends one user click + N cron-pool API
+// units to drain the channel.
+//
 // CAP: when the walker terminates we cannot tell whether Reddit ran out of
 // posts (small subreddit) or hit its ~1000 listing cap (big subreddit);
 // both surface as `data.after === null`. Backfill is "complete enough" in
