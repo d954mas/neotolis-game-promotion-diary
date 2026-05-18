@@ -35,18 +35,11 @@ import type { SourceAdapter, SourceKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import {
-  withQuotaGuard,
-  getUserQuotaUsedToday,
-  nextPacificMidnight,
-  enforceAdapterUserQuota,
-} from "./quota.js";
+import { withQuotaGuard, enforceAdapterUserQuota } from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
 import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
 import { youtubeChannels } from "../db/schema/index.js";
-import { ensureChannelState, getChannelState } from "./channel-state.js";
-import { QUEUES } from "../queues.js";
-import { enqueueViaOutbox } from "./outbox.js";
+import { ensureChannelState } from "./channel-state.js";
 
 // Initial-backfill window presets accepted by createSource for
 // kind=youtube_channel + autoImport. The worker handler reads
