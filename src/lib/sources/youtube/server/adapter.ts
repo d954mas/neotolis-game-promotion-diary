@@ -1,14 +1,14 @@
-﻿// youtube_channel adapter.
+// youtube_channel adapter.
 //
 // Local YouTube Data API v3 client helpers:
 //
 //   - playlistItems.list?playlistId=<uploadsPlaylistId>&part=snippet
-//     &maxResults=50  (1 quota unit per call) вЂ” used by pollContent for
+//     &maxResults=50  (1 quota unit per call) - used by pollContent for
 //     backfill + auto-import. Filters response items to publishedAt > since.
 //
-//   - videos.list?id=<в‰¤50 comma-joined ids>&part=snippet,statistics,
+//   - videos.list?id=<<=50 comma-joined ids>&part=snippet,statistics,
 //     contentDetails  (1 quota unit per call regardless of batch size;
-//     8 calls = 8 units) вЂ” used by pollStats for per-event metrics +
+//     8 calls = 8 units) - used by pollStats for per-event metrics +
 //     Shorts detection.
 //
 // HTTP discipline:
@@ -27,12 +27,12 @@
 // layer or explicitly passed in as a quota permit for batched calls.
 //
 // Error mapping (status codes):
-//   - 200 + item present in response.items     в†’ status:'ok' + metrics + metadata
-//   - 200 + item missing from response.items   в†’ status:'not_found' (private/deleted/embedded-disabled)
-//   - 403 with errors[].reason='quotaExceeded' в†’ status:'rate_limited' (worker defers; scheduler pauses)
-//   - 403 any other reason                     в†’ status:'auth_error' (event tier flips to Unavailable)
-//   - 404                                      в†’ status:'not_found'
-//   - other 4xx/5xx                            в†’ status:'auth_error' (placeholder; caller logs + retries)
+//   - 200 + item present in response.items     -> status:'ok' + metrics + metadata
+//   - 200 + item missing from response.items   -> status:'not_found' (private/deleted/embedded-disabled)
+//   - 403 with errors[].reason='quotaExceeded' -> status:'rate_limited' (worker defers; scheduler pauses)
+//   - 403 any other reason                     -> status:'auth_error' (event tier flips to Unavailable)
+//   - 404                                      -> status:'not_found'
+//   - other 4xx/5xx                            -> status:'auth_error' (placeholder; caller logs + retries)
 
 import { hasYoutubeApiKeys, youtubeQuotaUser } from "./quota.js";
 import { chargedFetch, fetchWithTimeout } from "./http.js";
@@ -58,7 +58,7 @@ import type {
 import type { EventDto } from "$lib/server/dto.js";
 
 /**
- * Google's videos.list cap вЂ” max 50 IDs per call. pollStatsByVideoId chunks
+ * Google's videos.list cap - max 50 IDs per call. pollStatsByVideoId chunks
  * input to this size. Each chunk = 1 quota unit. Handlers use this constant
  * to align persistent quota charges with chunk boundaries (charge on first
  * video of every chunk-of-50, not just the very first video of the run).
@@ -66,8 +66,8 @@ import type { EventDto } from "$lib/server/dto.js";
 export const YOUTUBE_VIDEOS_BATCH_SIZE = 50;
 
 /**
- * youtubeChannelAdapterCore вЂ” the YouTube adapter's *core* surface:
- * methods that are pure polling / URL-parsing / observability вЂ” everything
+ * youtubeChannelAdapterCore - the YouTube adapter's *core* surface:
+ * methods that are pure polling / URL-parsing / observability - everything
  * that's safe for any caller (handlers, tests, scheduler dispatch hint)
  * to use directly.
  *
@@ -76,7 +76,7 @@ export const YOUTUBE_VIDEOS_BATCH_SIZE = 50;
  * onSourceCreated / fetchEventPreviewMetadata / validateEventInput /
  * fetchPollStateMap / registerRoutes / observability.quotaCounters) are
  * COMPOSED in `./index.ts` to produce the full `youtubeAdapter`. Cross-source
- * code always imports `youtubeAdapter` from the barrel вЂ” never this Core
+ * code always imports `youtubeAdapter` from the barrel - never this Core
  * directly.
  *
  * The Core's TypeScript shape is local to this module. Cross-source adapter
@@ -113,7 +113,7 @@ interface YoutubeChannelAdapterCore {
 // Key identity is owned by quota.ts. Adapter code should only use the
 // permit/key object it receives from the queue worker or chargedFetch.
 
-// ---- Zod schemas вЂ” defense against API drift ----
+// ---- Zod schemas - defense against API drift ----
 
 const VIDEOS_LIST_RESPONSE = z.object({
   kind: z.literal("youtube#videoListResponse"),
@@ -136,7 +136,7 @@ const VIDEOS_LIST_RESPONSE = z.object({
         .optional(),
       contentDetails: z
         .object({
-          duration: z.string(), // ISO 8601 вЂ” "PT15S" / "PT4M13S" / "PT1H02M03S"
+          duration: z.string(), // ISO 8601 - "PT15S" / "PT4M13S" / "PT1H02M03S"
         })
         .optional(),
     }),
@@ -173,7 +173,7 @@ const ERROR_RESPONSE = z
 
 // ---- Helpers ----
 
-/** Parse ISO 8601 duration "PT4M13S" / "PT15S" / "PT1H2M3S" в†’ seconds.
+/** Parse ISO 8601 duration "PT4M13S" / "PT15S" / "PT1H2M3S" -> seconds.
  *  Returns 0 on parse failure. */
 function durationToSeconds(iso: string): number {
   const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso);
@@ -190,14 +190,14 @@ function durationToSeconds(iso: string): number {
 //     worker, which charges quota via writeSnapshot's
 //     per-video `unitsUsed` accounting and emit throttle audits via
 //     the SnapshotStatus="rate_limited" path. This method MUST use the
-//     lower-level fetchWithTimeout вЂ” routing it through chargedFetch
+//     lower-level fetchWithTimeout - routing it through chargedFetch
 //     would double-charge (adapter +1 then writeSnapshot +1).
 //
-//   pollContent вЂ” auto-import path. No writeSnapshot equivalent at the
+//   pollContent - auto-import path. No writeSnapshot equivalent at the
 //     caller side, so this method DOES use chargedFetch and accounts
 //     at the fetch boundary. (When auto-import lands as a worker
 //     handler, that handler trusts pollContent to charge.) The earlier
-//     fetchWithTimeout-only pattern would have been a future trap вЂ”
+//     fetchWithTimeout-only pattern would have been a future trap  -
 //     auto-import quota burn would not land in
 //     youtube_service_quota_usage at all.
 //
@@ -263,7 +263,7 @@ async function pollStatsBatch(
   return videoIds.map((videoId) => {
     const item = json.items.find((i) => i.id === videoId);
     if (!item) {
-      // Not in response вЂ” private, deleted, embedded-disabled, or never existed.
+      // Not in response - private, deleted, embedded-disabled, or never existed.
       return { polledAt: now, status: "not_found" as const };
     }
     const dur = item.contentDetails?.duration
@@ -288,7 +288,7 @@ async function pollStatsBatch(
 export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
   kind: "youtube_channel" as const,
 
-  /** Backfill + auto-import вЂ” playlistItems.list against uploads playlist.
+  /** Backfill + auto-import - playlistItems.list against uploads playlist.
    *  1 quota unit per call. Filters to publishedAt > since. */
   async pollContent(
     source: PollableSource,
@@ -327,26 +327,26 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     if (!uploadsPlaylistId) {
       logger.warn(
         { sourceId: source.id, userId: source.userId },
-        "pollContent: uploadsPlaylistId not resolvable вЂ” channel-context backfill required",
+        "pollContent: uploadsPlaylistId not resolvable - channel-context backfill required",
       );
       return { events: [], unitsUsed: 0 };
     }
     if (!hasYoutubeApiKeys()) return { events: [], unitsUsed: 0 };
 
     // Paginate playlistItems.list using nextPageToken until either:
-    //   - no more pages (json.nextPageToken absent вЂ” end of playlist)
+    //   - no more pages (json.nextPageToken absent - end of playlist)
     //   - oldest item on page is at-or-before `since` (we walked past target)
     //   - hard cap MAX_PAGES (prevents runaway quota burn on /sources with
-    //     pathological histories вЂ” 20 pages Г— 50 items = 1000 events
+    //     pathological histories - 20 pages x 50 items = 1000 events
     //     per single refresh click)
     //
     // unitsUsed = pages fetched (1 quota unit per playlistItems.list call).
-    // Origin from ctx вЂ” user-initiated clicks consume user pool, cron-driven
+    // Origin from ctx - user-initiated clicks consume user pool, cron-driven
     // jobs consume cron pool.
     //
-    // Persistent pagination cursor for В«all historyВ» backfill of channels
-    // with >MAX_PAGESГ—50 (1000) videos. Without it, every refresh-content
-    // click would start from page 1 вЂ” for a 5000-video channel the worker
+    // Persistent pagination cursor for "all history" backfill of channels
+    // with >MAX_PAGESx50 (1000) videos. Without it, every refresh-content
+    // click would start from page 1 - for a 5000-video channel the worker
     // would re-fetch the same 1000 newest items every click, idempotency
     // UNIQUE would skip them all, frontier would never advance past page 20.
     //
@@ -360,7 +360,7 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     //   - Next click resumes from saved cursor.
     //
     // Edge case: items between "since" cutoff and current cursor get
-    // skipped on subsequent calls. Acceptable for В«all historyВ» pull
+    // skipped on subsequent calls. Acceptable for "all history" pull
     // (we walk linearly back); for narrower windows the original
     // pagination still terminates quickly enough that resume isn't
     // needed.
@@ -378,7 +378,7 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     // Backdated-upload safety. The legacy "depth" walk drops every item
     // with publishedAt <= since unconditionally; that silently loses
     // videos whose publishedAt is older than newestKnown (e.g. uploaded
-    // today but with a custom publishedAt months back вЂ” unlisted-then-
+    // today but with a custom publishedAt months back - unlisted-then-
     // public, podcast schedule, channel takeover migration).
     //
     // The "overlap" mode does a per-page cache lookup against
@@ -391,10 +391,10 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     // because the counter resets on every unknown item.
     //
     // Mode is chosen by the orchestrator (backfill-channel.ts) per branch:
-    //   - branch="deep"        в†’ walkStop="depth"   (since = historical floor)
-    //   - branch="exhausted"   в†’ walkStop="overlap" (since = newestKnown)
-    //   - branch="incremental" в†’ walkStop="overlap" (since = max(newestKnown, target))
-    // Cron paths default to "depth" вЂ” they pass since=epoch and rely on
+    //   - branch="deep"        -> walkStop="depth"   (since = historical floor)
+    //   - branch="exhausted"   -> walkStop="overlap" (since = newestKnown)
+    //   - branch="incremental" -> walkStop="overlap" (since = max(newestKnown, target))
+    // Cron paths default to "depth" - they pass since=epoch and rely on
     // endOfPlaylist / MAX_PAGES as their natural floors; overlap would
     // be no-op for cron's epoch-since anyway.
     const walkStop = ctx?.walkStop ?? "depth";
@@ -420,7 +420,7 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
       const json = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await resp.json());
 
       // Overlap-mode: one indexed SELECT per page against the public-data
-      // youtube_videos cache (no userId scope вЂ” every tenant shares the
+      // youtube_videos cache (no userId scope - every tenant shares the
       // row). Empty page short-circuits the query to avoid Postgres `IN ()`.
       let knownByPage: Set<string> = new Set<string>();
       if (walkStop === "overlap" && json.items.length > 0) {
@@ -455,7 +455,7 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
           }
           // Unknown-OR-fresh item resets the counter. Known-and-fresh
           // (a video the cache already saw but published AFTER since)
-          // is rare вЂ” we still skip it (dedup) without breaking. Backdated
+          // is rare - we still skip it (dedup) without breaking. Backdated
           // cache-miss lands here and IS collected.
           consecutiveKnownPastSince = 0;
           if (isKnown) {
@@ -489,13 +489,13 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
       events: collected,
       unitsUsed,
       // Resume marker for next call. Cleared (undefined) when we hit end-
-      // of-playlist OR walked past the В«sinceВ» cutoff (target reached).
+      // of-playlist OR walked past the "since" cutoff (target reached).
       nextPageToken: endOfPlaylist || walkedPastSince ? undefined : nextPageToken,
       endOfPlaylist,
     };
   },
 
-  /** Stats polling вЂ” user-driven path (Refresh now button в†’ refresh queue worker).
+  /** Stats polling - user-driven path (Refresh now button -> refresh queue worker).
    *  Caller passes events of `kind=youtube_video`; source MAY be null (manual
    *  paste). Returns StatsSnapshot[] aligned to input order.
    *
@@ -546,10 +546,10 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
   },
 
   /**
-   * Stats polling вЂ” service-driven path (service_video queue worker).
+   * Stats polling - service-driven path (service_video queue worker).
    *
    * Per-video, not per-event. The scheduler hands a flat list of videoIds
-   * (already deduplicated across tenants); the adapter chunks it into в‰¤50
+   * (already deduplicated across tenants); the adapter chunks it into <=50
    * batches and issues one HTTP per batch with the caller-supplied
    * quotaUser fingerprint. For service_video this is the service queue
    * constant, distinct from user-driven Refresh now work.
@@ -571,7 +571,7 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
     return result;
   },
 
-  /** parseUrl вЂ” first-match-wins URL detection. Delegates to ./url.ts
+  /** parseUrl - first-match-wins URL detection. Delegates to ./url.ts
    *  youtubeParseUrl which is also used by the registry's parseAnyUrl
    *  iterator. */
   parseUrl(url: string): ParsedUrl | null {
@@ -581,7 +581,7 @@ export const youtubeChannelAdapterCore: YoutubeChannelAdapterCore = {
    *  quotaCounters via spread+override so cross-source services/quota.ts
    *  can iterate them without knowing about youtube_metadata_fetch_log. */
   observability: youtubeObservability,
-  /** enrichFeedDtos вЂ” internal filter to kind=youtube_video; mutates stats +
+  /** enrichFeedDtos - internal filter to kind=youtube_video; mutates stats +
    *  channelTitle in place. The barrel spreads this into the exported
    *  youtubeAdapter alongside the rest of the Core surface. */
   enrichFeedDtos: youtubeEnrichFeedDtos,

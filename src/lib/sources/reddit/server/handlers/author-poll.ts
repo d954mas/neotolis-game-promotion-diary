@@ -33,11 +33,7 @@ import { AdapterError } from "$lib/sources/errors.js";
 import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
 import { logger } from "$lib/server/logger.js";
 import { classifySnapshotStatus } from "./post-single.js";
-import {
-  getAuthorWalkState,
-  persistAuthorWalkProgress,
-  enqueueWalkerContinuation,
-} from "../walker-state.js";
+import { getAuthorWalkState, commitAuthorWalkProgress } from "../walker-state.js";
 
 interface T3Data {
   id: string;
@@ -196,20 +192,22 @@ export async function handleAuthorPoll(args: {
   // 6. Fan-out events INSERT to auto_import=true subscribers.
   const eventsInserted = await fanOutToSubscribers(handle, listingChildren, subscribers);
 
-  // 7. Walker state + continuation enqueue — same shape as sub_poll.
+  // 7. Walker state + continuation enqueue — same CAS + tx shape as
+  // sub_poll. See walker-state.ts header for the multi-replica
+  // concurrency rationale.
   let walking = false;
+  let casLost = false;
   if (inDeepWalk) {
     const oldestSubmittedAt = oldestT3SubmittedAt(listingChildren);
     const walkerDone = nextAfterCursor === null;
-    await persistAuthorWalkProgress(db, handle, {
-      afterCursor: walkerDone ? null : nextAfterCursor,
+    const persistResult = await commitAuthorWalkProgress(handle, {
+      expectedAfterCursor: state.afterCursor,
+      nextAfterCursor: walkerDone ? null : nextAfterCursor,
       backfillComplete: walkerDone,
       oldestSubmittedAt,
     });
-    walking = !walkerDone;
-    if (!walkerDone) {
-      await enqueueWalkerContinuation(db, "author_poll", { handle });
-    }
+    casLost = !persistResult.committed;
+    walking = persistResult.committed && !walkerDone;
   }
 
   logger.info(
@@ -219,6 +217,7 @@ export async function handleAuthorPoll(args: {
       postsFetched: listingChildren.length,
       eventsInserted,
       walking,
+      casLost,
       backfillComplete: !inDeepWalk || nextAfterCursor === null,
     },
     "reddit author_poll: complete",

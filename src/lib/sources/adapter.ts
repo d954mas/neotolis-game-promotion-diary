@@ -1,12 +1,12 @@
-﻿// SourceAdapter вЂ” the per-source interface implementations register
+// SourceAdapter - the per-source interface implementations register
 // against the registry.
 //
 // Surface includes:
-//   - parseUrl(url) вЂ” per-adapter URL detection (first-match-wins).
-//   - observability вЂ” per-adapter quota/audit/auth API for /admin/quota tabs.
-//   - registerQueues / scheduleCronTicks / backfillSource вЂ” adapter owns its
+//   - parseUrl(url) - per-adapter URL detection (first-match-wins).
+//   - observability - per-adapter quota/audit/auth API for /admin/quota tabs.
+//   - registerQueues / scheduleCronTicks / backfillSource - adapter owns its
 //     queue topology and cron schedules (per-kind queues).
-//   - refreshQueue вЂ” optional Refresh Now capability for pollable event kinds.
+//   - refreshQueue - optional Refresh Now capability for pollable event kinds.
 //
 // AdapterContext is defined here because parseUrl-iteration callers and
 // backfillSource consume it directly.
@@ -82,14 +82,14 @@ export interface AdapterContext {
   /** How the playlist walker decides when to stop.
    *  - "depth" (default): items with publishedAt <= since are dropped AND
    *    end the walk. Use for deep walks where `since` is the historical floor
-   *    (e.g. user widened backfill_target_since to epoch вЂ” walker stops at
+   *    (e.g. user widened backfill_target_since to epoch - walker stops at
    *    epoch via endOfPlaylist, or at 30d-ago when since=30d-ago).
    *  - "overlap": items are NOT dropped by publishedAt alone. Walker stops
    *    after K consecutive items that are BOTH already in the youtube_videos
    *    cache AND have publishedAt <= since. Use for incremental walks
    *    (channel previously walked; we just want what's new). Backdated
    *    uploads with publishedAt below newestKnown but NOT yet in cache
-   *    survive вЂ” they get collected because cache-miss means "we have not
+   *    survive - they get collected because cache-miss means "we have not
    *    seen this video before". */
   walkStop?: "depth" | "overlap";
 }
@@ -105,17 +105,17 @@ export interface PickedKey {
   apiKeyId: string;
 }
 
-/** Per-adapter URL detection result вЂ” first-match-wins iteration. */
+/** Per-adapter URL detection result - first-match-wins iteration. */
 export interface ParsedUrl {
   kind: EventKind;
   externalId: string;
   metadata?: Record<string, unknown>;
 }
 
-/** Per-adapter source-URL detection result вЂ” drives /sources/new auto-detect
+/** Per-adapter source-URL detection result - drives /sources/new auto-detect
  *  for adapters where one input shape maps to multiple SourceKinds.
- *  Reddit: `reddit.com/user/X` в†’ reddit_account; `reddit.com/r/X` в†’ reddit_subreddit.
- *  Implemented optionally вЂ” YouTube cross-source flow uses `canonicalizeOnCreate`
+ *  Reddit: `reddit.com/user/X` -> reddit_account; `reddit.com/r/X` -> reddit_subreddit.
+ *  Implemented optionally - YouTube cross-source flow uses `canonicalizeOnCreate`
  *  (synchronous + per-URL canonicalization) instead. */
 export interface ParsedSourceUrl {
   kind: SourceKind;
@@ -143,7 +143,7 @@ export interface ObservabilityDailyStats {
    * Per-key breakdown. `throttleState` is computed by the adapter using its
    * own internal thresholds (YouTube: 80%/95% of 10 000 daily; future Reddit
    * may use rolling-window thresholds). Consumers (admin /admin/quota) must
-   * NOT recompute throttleState вЂ” they trust the adapter's classification.
+   * NOT recompute throttleState - they trust the adapter's classification.
    */
   keys?: Array<{
     apiKeyId: string;
@@ -159,7 +159,7 @@ export interface ObservabilityAuditEntry {
   metadata: Record<string, unknown>;
 }
 
-/** Per-adapter quota counter declaration вЂ” adapters expose their per-user
+/** Per-adapter quota counter declaration - adapters expose their per-user
  *  rolling quotas (e.g. youtube_metadata_fetches_per_day) so cross-source
  *  services/quota.ts iterates `allAdapters[*].observability.quotaCounters`
  *  instead of switching on a hard-coded list. New adapters declare their
@@ -168,10 +168,10 @@ export interface ObservabilityAuditEntry {
  *  count() receives `dbCtx: DbOrTx` so it can be invoked under the per-user
  *  advisory lock inside withQuotaGuard's transaction (race-safe limit check).
  *  Counters that don't need in-tx semantics can ignore the parameter and
- *  query via the top-level `db` вЂ” but standard pattern is to pass `dbCtx`
+ *  query via the top-level `db` - but standard pattern is to pass `dbCtx`
  *  through so concurrent same-user requests serialize correctly. */
 export interface AdapterQuotaCounter {
-  /** Quota key вЂ” must match a key in services/quota.ts QUOTA_LIMITS. */
+  /** Quota key - must match a key in services/quota.ts QUOTA_LIMITS. */
   kind: string;
   /** Count rows for `userId` since `since` (typically rolling 24h window).
    *  Uses `dbCtx` (db OR active tx) so the count joins the caller's
@@ -179,13 +179,13 @@ export interface AdapterQuotaCounter {
   count(dbCtx: DbOrTx, userId: string, since: Date): Promise<number>;
 }
 
-/** Per-user fair-share cap on operator's API budget. Both axes optional вЂ”
+/** Per-user fair-share cap on operator's API budget. Both axes optional  -
  *  adapter declares either, both, neither, OR the Reddit two-axis shape.
  *  Capping prevents one user from monopolizing operator's shared API quota
  *  across all tenants.
  *
- *  - requestsPerDay вЂ” cap on API calls (YouTube; 24h rolling).
- *  - eventsPerDay вЂ” cap on user-INSERTed events (YouTube; 24h rolling).
+ *  - requestsPerDay - cap on API calls (YouTube; 24h rolling).
+ *  - eventsPerDay - cap on user-INSERTed events (YouTube; 24h rolling).
  *
  *  Reddit (Phase 03.1, two-axis sliding window — DV-RDT-7):
  *  - sourceActionsPerWindow — register/refresh-source quota (default 5,
@@ -221,8 +221,8 @@ export interface AdapterObservability {
   quotaCounters?: ReadonlyArray<AdapterQuotaCounter>;
   /** Per-user fair-share cap. When present, refresh-content / refresh-poll
    *  endpoints check usage SUM from audit_log before enqueue and 429 on
-   *  exhaustion. When undefined, cap not enforced (usage still tracked РІ
-   *  audit metadata РґР»СЏ visibility РЅРѕ РЅРµ denial). */
+   *  exhaustion. When undefined, cap not enforced (usage still tracked in
+   *  audit metadata for visibility but not denial). */
   userQuotaCap?: AdapterUserQuotaCap;
   /** Adapter-owned sliding-window quota implementation. Declare this when
    *  userQuotaCap.windowMinutes is set so the generic quota service does not
@@ -268,13 +268,13 @@ export interface AdapterObservability {
   requiresSingletonRuntime?: boolean;
 }
 
-/** Backfill window options вЂ” accepted by createSource and threaded into
+/** Backfill window options - accepted by createSource and threaded into
  *  onSourceCreated. Forward-compatible with future adapter-specific extensions
- *  (e.g. Reddit may add "this_subreddit_ever" вЂ” opt-in per-adapter). */
+ *  (e.g. Reddit may add "this_subreddit_ever" - opt-in per-adapter). */
 export type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
 
-/** Result of canonicalizeOnCreate вЂ” the adapter's chance to:
- *  - Rewrite handle_url to its canonical form (e.g. /watch?v=XYZ в†’ /channel/UCвЂ¦)
+/** Result of canonicalizeOnCreate - the adapter's chance to:
+ *  - Rewrite handle_url to its canonical form (e.g. /watch?v=XYZ -> /channel/UC...)
  *  - Resolve an external id (channel_id, account_id) at create time so the
  *    worker takes the fast path (no resolve quota burn on first backfill).
  *
@@ -322,7 +322,7 @@ export interface NormalizeSourceResult {
   metadata?: Record<string, unknown>;
 }
 
-/** Post-create hook payload вЂ” minimum set the YouTube context-backfill enqueue
+/** Post-create hook payload - minimum set the YouTube context-backfill enqueue
  *  needs. Adapters that don't need this fields ignore them.
  *
  *  Includes channelId, backfillTargetSince, isOwnedByMe so adapters can
@@ -340,9 +340,9 @@ export interface SourceCreatedHookSource {
    *  resolution to the worker). Required for zero-quota onboarding. */
   channelId: string | null;
   /** Per-user backfill target boundary. Adapter filters cache rows
-   *  в‰Ґ this date when seeding events for the new subscriber. */
+   *  >= this date when seeding events for the new subscriber. */
   backfillTargetSince: Date | null;
-  /** Whether the new subscriber owns this channel вЂ” drives events.author_is_me
+  /** Whether the new subscriber owns this channel - drives events.author_is_me
    *  on the seeded rows. Default true. */
   isOwnedByMe: boolean;
 }
@@ -367,14 +367,14 @@ export type EventPreviewMetadata =
 
 /** Live poll-state row consumed by dto.ts's per-event overlay (lastPolledAt /
  *  lastPollStatus rendering on /feed and /audit). Adapters that don't poll
- *  return an empty Map вЂ” the cross-source code merges per-adapter results. */
+ *  return an empty Map - the cross-source code merges per-adapter results. */
 export interface AdapterPollState {
   publishedAt: Date | null;
   lastPolledAt: Date | null;
   lastPollStatus: string | null;
 }
 
-/** Hono app context type вЂ” re-exported here so adapter.registerRoutes can be
+/** Hono app context type - re-exported here so adapter.registerRoutes can be
  *  typed without making cross-source code import server-internal types. */
 export type AdapterAppContext = {
   Variables: {
@@ -385,7 +385,7 @@ export type AdapterAppContext = {
   };
 };
 
-/** Minimal pg-boss surface the adapter consumes вЂ” keeps the adapter decoupled
+/** Minimal pg-boss surface the adapter consumes - keeps the adapter decoupled
  *  from pg-boss major-version type drift. Widen if a new adapter needs more
  *  verbs. */
 export interface MinimalBoss {
@@ -500,7 +500,7 @@ export interface SyncStatsCapability {
      *  UPDATEs events.author_is_me unless the caller passed an explicit
      *  value. Reddit: t3.author === reddit_account.metadata.username.
      *  YouTube: inheritance happens via enrichFromUrl's findActiveSourceByHandleUrl,
-     *  NOT via this field вЂ” YouTube returns undefined here. */
+     *  NOT via this field - YouTube returns undefined here. */
     authorIsMe?: boolean;
   } | null>;
 }
@@ -570,7 +570,7 @@ export interface SourceAdapter {
   ): Promise<NormalizeSourceResult>;
 
   /** Resolve handle_url to canonical form + extract external id, if applicable.
-   *  YouTube: parse `/watch?v=вЂ¦` / `/channel/UCвЂ¦` / `@handle` URLs; for video
+   *  YouTube: parse `/watch?v=...` / `/channel/UC...` / `@handle` URLs; for video
    *  URLs dereference the channel via fetchVideoMetadataByUrl.
    *  Default (when not implemented): cross-source code passes input through. */
   canonicalizeOnCreate?(input: CanonicalizeInput, ctx: CreateContext): Promise<CanonicalizeResult>;
@@ -616,7 +616,7 @@ export interface SourceAdapter {
    *  to fetch a friendly preview (title / authorName / authorUrl).
    *
    *  `ctx.userId` is the authenticated viewer (cross-source layer always
-   *  has it вЂ” both call paths are mounted under tenantScope). Adapters
+   *  has it - both call paths are mounted under tenantScope). Adapters
    *  whose preview burns a rate-limited unit (Reddit's /comments/<id>.json)
    *  use it to enforce per-user caps and write the cap-counter row;
    *  adapters whose preview is a cheap oEmbed (YouTube) accept it but
@@ -646,7 +646,7 @@ export interface SourceAdapter {
   /** Batch lookup of live poll-state for events of this adapter's kinds.
    *  dto.ts's overlayPollStateOnEvents iterates allAdapters and merges
    *  results. YouTube: SELECT publishedAt/lastPolledAt/lastPollStatus
-   *  from youtube_videos by externalId IN (вЂ¦). */
+   *  from youtube_videos by externalId IN (...). */
   fetchPollStateMap?(
     userId: string,
     externalIds: readonly string[],
@@ -665,19 +665,19 @@ export interface SourceAdapter {
    *
    * Cross-source callsites (/feed loader, GET /api/events, /games/[id])
    * iterate allAdapters and call this method per adapter. The adapter
-   * MUST filter internally to its own kind(s) вЂ” callers do NOT pre-filter
+   * MUST filter internally to its own kind(s) - callers do NOT pre-filter
    * (avoids the "did I forget to filter for adapter X?" footgun).
    *
    * Mutates `dtos` in place; returns void. Errors are swallowed by the
    * adapter (logged at WARN); a failed enrichment query MUST NOT break
-   * the feed render вЂ” the cards just render without the enrichment.
+   * the feed render - the cards just render without the enrichment.
    *
    * Future adapters (Reddit / Twitter / Telegram / Discord) implement this
    * against their own metadata tables. Adapters that have no enrichment
    * can omit the method entirely (optional via `?:`); the caller's
    * `if (adapter.enrichFeedDtos)` gate skips undefined methods.
    *
-   * Deliberately NOT called from GET /api/events/deleted вЂ” DeletedEventsPanel
+   * Deliberately NOT called from GET /api/events/deleted - DeletedEventsPanel
    * renders a compact KindIcon + strikethrough-title view that needs none
    * of the enrichment data. See events.ts for the load-bearing skip comment.
    */

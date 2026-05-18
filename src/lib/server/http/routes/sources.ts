@@ -28,6 +28,7 @@ import {
   updateSource,
   softDeleteSource,
   restoreSource,
+  enforceRefreshContentCooldown,
   enforceRefreshContentIntentRateLimit,
   enforceSourceActionQuota,
 } from "../../services/data-sources.js";
@@ -43,7 +44,7 @@ import { getAdapter } from "$lib/sources/registry.js";
 // reddit_account and reddit_subreddit by URL shape. We resolve it here
 // before handing off to createSource; the DB column never stores "reddit".
 // Existing programmatic callers (tests, integrations) can still send the
-// concrete reddit_account / reddit_subreddit values directly — both
+// concrete reddit_account / reddit_subreddit values directly - both
 // surfaces remain accepted.
 const sourceKindEnum = z.enum([
   "youtube_channel",
@@ -145,7 +146,7 @@ sourcesRoutes.post(
 /** Resolve the synthetic UI kind "reddit" into the concrete reddit_account
  *  or reddit_subreddit by parsing the URL with redditParseSourceUrl. Any
  *  other kind passes through unchanged. Throws AppError 422 when the URL
- *  cannot be classified — the UI surfaces this as
+ *  cannot be classified - the UI surfaces this as
  *  `sources_error_not_a_reddit_url`. */
 function resolveSyntheticRedditKind(body: z.infer<typeof createSourceSchema>): z.infer<
   typeof createSourceSchema
@@ -309,6 +310,7 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
     }
 
     await enforceRefreshContentIntentRateLimit(ctx.userId);
+    await enforceRefreshContentCooldown(ctx.userId, source.id);
 
     let adapter;
     try {
@@ -403,6 +405,12 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
 
     return c.json({ enqueued: true, queue: result.queue, jobId: result.jobId }, 202);
   } catch (err) {
+    if (err instanceof AppError && err.code === "too_many_refreshes") {
+      const retryAfterSeconds = err.metadata.retryAfterSeconds;
+      if (typeof retryAfterSeconds === "number") {
+        c.header("Retry-After", String(retryAfterSeconds));
+      }
+    }
     return mapErr(c, err, "POST /api/sources/:id/refresh-content");
   }
 });

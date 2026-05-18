@@ -1,23 +1,23 @@
-﻿// Reddit adapter observability.
+// Reddit adapter observability.
 //
 // Three reads expose Reddit-side state to the cross-source /admin/quota
 // dashboard:
 //
-//   1. getDailyStats(date) вЂ” synthetic daily aggregate. Reddit's quota is
+//   1. getDailyStats(date) - synthetic daily aggregate. Reddit's quota is
 //      per-MINUTE (10 req/min hard ceiling; 8 req/min effective via the
 //      worker tick). YouTube's getDailyStats returns a daily Pacific
-//      envelope; we report a parallel "8 req/min Г— 60 Г— 24" = 11520
+//      envelope; we report a parallel "8 req/min x 60 x 24" = 11520
 //      theoretical ceiling and compute used from
 //      audit_log.action='reddit.queue_drained' aggregation in the last 24
-//      hours. The pctOfDaily fraction here is informational only вЂ”
+//      hours. The pctOfDaily fraction here is informational only  -
 //      Reddit's per-minute drain pacing is the load-bearing rate-limit
 //      gate, not a daily envelope.
 //
-//   2. getRecentAudit(limit) вЂ” last N audit rows with `reddit.*` actions.
+//   2. getRecentAudit(limit) - last N audit rows with `reddit.*` actions.
 //      Aggregates across tenants by design (operator-facing dashboard,
 //      gated by ADMIN_EMAIL_ALLOWLIST upstream).
 //
-//   3. getRecentLoad(seconds) вЂ” service-load gauge for the Reddit tab's
+//   3. getRecentLoad(seconds) - service-load gauge for the Reddit tab's
 //      "N / 6 user slots available this minute" line.
 //      6 = per-minute user-slot capacity from REDDIT_SLOT_MAPPING (3
 //      user_source + 3 user_post slots out of 8 ticks/min). Plan 08's
@@ -55,7 +55,7 @@ import {
 } from "./quota.js";
 import { getRedditAdapterPauseState } from "./pacer.js";
 
-/** Synthetic daily ceiling: 8 req/min effective Г— 60 min Г— 24 h. */
+/** Synthetic daily ceiling: 8 req/min effective x 60 min x 24 h. */
 const REDDIT_THEORETICAL_DAILY_CEILING = 8 * 60 * 24;
 
 /** Per-minute user-slot capacity from REDDIT_SLOT_MAPPING (3 user_source
@@ -68,19 +68,19 @@ export const REDDIT_USER_SLOTS_PER_MINUTE = 6 as const;
  * `reddit.queue_drained` audit rows in the last 24 hours.
  *
  * `_date` is honored for the symmetry with YouTube's getDailyStats(date)
- * вЂ” callers usually pass `new Date()` and we treat it as "now". A future
+ * - callers usually pass `new Date()` and we treat it as "now". A future
  * dashboard-history view could pass a backfilled date; for that case
  * we'd need a window_start/window_end pair. Keeping it as a single point
  * here matches the YouTube semantics.
  *
  * Cross-tenant aggregation by design: /admin/quota is operator-facing
- * (allowlist-gated upstream вЂ” see admin-quota-read.ts header). The
+ * (allowlist-gated upstream - see admin-quota-read.ts header). The
  * `reddit.queue_drained` verb is system-emitted under the operator's
  * resolved user_id (worker-tick.ts emitQueueDrainedAudit), so the SUM
  * over the verb yields the operator's pool view, not a tenant view.
  */
 async function getDailyStats(_date: Date): Promise<ObservabilityDailyStats> {
-  // Cross-tenant audit aggregation by design вЂ” /admin/quota observability
+  // Cross-tenant audit aggregation by design - /admin/quota observability
   // is allowlist-gated upstream (see admin-quota-read.ts). The raw-SQL
   // path doesn't trigger the tenant-scope ESLint rule, but documenting
   // the rationale here for the next reader.
@@ -96,7 +96,7 @@ async function getDailyStats(_date: Date): Promise<ObservabilityDailyStats> {
   );
   const dailyLimit = REDDIT_THEORETICAL_DAILY_CEILING;
   const pctOfDaily = dailyLimit > 0 ? unitsUsed / dailyLimit : 0;
-  // 95% / 80% thresholds mirror the YouTube model semantically вЂ” Reddit's
+  // 95% / 80% thresholds mirror the YouTube model semantically - Reddit's
   // actual rate-limit lives in the per-minute tick pacing; these are
   // dashboard signals only ("operator's pool is busy today").
   const throttleState: "ok" | "eighty" | "ninetyfive" =
@@ -105,7 +105,7 @@ async function getDailyStats(_date: Date): Promise<ObservabilityDailyStats> {
 }
 
 /** Last N audit rows with action LIKE 'reddit.%'. Same shape as
- *  YouTube's getRecentAudit вЂ” operator-facing view of the four Reddit
+ *  YouTube's getRecentAudit - operator-facing view of the four Reddit
  *  audit verbs (queue_drained, deletion_propagated, cap_exhausted,
  *  adapter_degraded). */
 async function getRecentAudit(limit: number): Promise<ObservabilityAuditEntry[]> {
@@ -151,27 +151,27 @@ export interface RedditQueueDepthRow {
   processing: number;
   deadLetter: number;
   /** Age of the oldest `pending` row in this lane, in seconds. `null`
-   *  if no pending rows. Drives "РЎР°РјР°СЏ СЃС‚Р°СЂР°СЏ" column. */
+   *  if no pending rows. Drives the "oldest pending" column. */
   oldestPendingAgeSeconds: number | null;
 }
 
 /**
  * Live queue-depth snapshot. Returns one row per queue_name lane,
  * counting `pending` + `processing` + `dead_letter` rows. `done` is
- * excluded вЂ” done rows are audit history, not queue depth.
+ * excluded - done rows are audit history, not queue depth.
  *
  * Operator dashboard signal:
- *   - pending     вЂ” "how many tasks are waiting right now"
- *   - processing  вЂ” usually 0-1 (FOR UPDATE SKIP LOCKED holds the row
+ *   - pending - "how many tasks are waiting right now"
+ *   - processing - usually 0-1 (FOR UPDATE SKIP LOCKED holds the row
  *                   for milliseconds while the handler runs)
- *   - dead_letter вЂ” alarm вЂ” N retry attempts exhausted, manual review
+ *   - dead_letter - alarm - N retry attempts exhausted, manual review
  *                   needed
- *   - oldestPendingAgeSeconds вЂ” backpressure indicator: a queue with 50
+ *   - oldestPendingAgeSeconds - backpressure indicator: a queue with 50
  *                   pending and oldest=10s is healthy; 50 pending and
  *                   oldest=10min means the worker can't drain fast
  *                   enough.
  *
- * Cross-tenant aggregation by design вЂ” /admin is allowlist-gated.
+ * Cross-tenant aggregation by design - /admin is allowlist-gated.
  */
 export async function getQueueDepth(): Promise<RedditQueueDepthRow[]> {
   const result = await db.execute(sql`
@@ -198,7 +198,7 @@ export async function getQueueDepth(): Promise<RedditQueueDepthRow[]> {
 
   // Start with zero-filled lanes so the operator sees all 4 rows even
   // when an entire lane is idle (the absence of a lane in the result
-  // set is itself a signal вЂ” "nothing has been enqueued today").
+  // set is itself a signal - "nothing has been enqueued today").
   const byLane = new Map<RedditQueueName, RedditQueueDepthRow>();
   for (const name of REDDIT_QUEUE_NAMES) {
     byLane.set(name, {
@@ -234,12 +234,12 @@ export async function getQueueDepth(): Promise<RedditQueueDepthRow[]> {
  * typically performs 1 fetch per drained entry).
  *
  * Operator dashboard signal:
- *   - total                         вЂ” "how many entries we processed today"
- *   - byType.sub_poll               вЂ” sub listing walks
- *   - byType.author_poll            вЂ” author submitted-page walks
- *   - byType.post_single            вЂ” paste-driven single-post fetches
- *   - byType.post_batch             вЂ” service post-refresh batches
- *   - adapterDegradedSince          вЂ” last `reddit.adapter_degraded` audit
+ *   - total - "how many entries we processed today"
+ *   - byType.sub_poll - sub listing walks
+ *   - byType.author_poll - author submitted-page walks
+ *   - byType.post_single - paste-driven single-post fetches
+ *   - byType.post_batch - service post-refresh batches
+ *   - adapterDegradedSince - last `reddit.adapter_degraded` audit
  *                                     timestamp within the 24h window
  *                                     (403-burst warning), or null
  */
@@ -285,7 +285,7 @@ export async function getDailyByType(): Promise<RedditDailyByType> {
   }
 
   // Cap-exhaustion + adapter-degraded alarms within the same window.
-  // Single round-trip вЂ” two COUNT/MAX in one query keeps observability
+  // Single round-trip - two COUNT/MAX in one query keeps observability
   // SSR loaders cheap.
   const alarmsResult = await db.execute(sql`
     SELECT
@@ -332,7 +332,7 @@ export async function getDailyByType(): Promise<RedditDailyByType> {
 }
 
 /**
- * Service-load gauge for the Reddit tab вЂ”
+ * Service-load gauge for the Reddit tab  -
  * "Service load: N / 6 user slots available this minute".
  *
  * Counts entries in adapter_refresh_queue with status='done' on the two
@@ -377,7 +377,7 @@ export async function getRecentLoad(
 }
 
 /**
- * redditObservability вЂ” surface composed into redditAdapter via the
+ * redditObservability - surface composed into redditAdapter via the
  * barrel (index.ts). isOperatorConfigured is computed at module load
  * time: env.REDDIT_USER_AGENT is parsed once via $lib/server/config/env.ts
  * and doesn't change mid-process (operator restart required to flip,
@@ -394,7 +394,7 @@ export const redditObservability: AdapterObservability = {
     getRecentAudit,
   },
   // Two-axis sliding-window cap; the REDDIT_USER_CAP constant in
-  // quota.ts is the single source of truth вЂ” both the declaration here
+  // quota.ts is the single source of truth - both the declaration here
   // and the counter (checkRedditUserCap) consume the same constant.
   userQuotaCap: {
     sourceActionsPerWindow: REDDIT_USER_CAP.sourceActionsPerWindow,

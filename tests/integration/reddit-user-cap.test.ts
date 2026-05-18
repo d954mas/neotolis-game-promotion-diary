@@ -1,19 +1,17 @@
 // Phase 03.1 Plan 06 — Reddit per-user two-axis cap (DV-RDT-7).
 //
 // Reddit's adapter declares the two-axis sliding-window cap shape:
-//   - source-actions  : 1 / 5min (audit_log COUNT of
-//                       'source.refresh_content_requested' rows w/
-//                       metadata.platform IN ('reddit_account','reddit_subreddit')
-//                       AND metadata.flow != 'auto_passive')
-//   - post-refreshes  : 25 / 5min (adapter_refresh_queue COUNT of rows
+//   - source-actions  : 5 / 15min (adapter_refresh_queue COUNT of rows
+//                       WHERE user_id=$user AND queue_name='user_source')
+//   - post-refreshes  : 30 / 15min (adapter_refresh_queue COUNT of rows
 //                       WHERE user_id=$user AND queue_name='user_post')
 //
 // Both axes EXCLUDE cron-driven entries (D-RDT-CAP-COUNTER) — audit rows
 // with metadata.flow='auto_passive' AND queue rows with user_id IS NULL.
 //
 // V-row coverage:
-//   V11 (DV-RDT-7) — source-actions 1/5min — 2nd attempt within window → 429
-//   V12 (DV-RDT-7) — post-refreshes 25/5min — 26th attempt within window → 429
+//   V11 (DV-RDT-7) — source-actions 5/15min — 6th attempt within window → 429
+//   V12 (DV-RDT-7) — post-refreshes 30/15min — 31st attempt within window → 429
 //   V13           — auto_passive flow + service-cron queue rows excluded
 //
 // Real Postgres via the integration service container; no mocks.

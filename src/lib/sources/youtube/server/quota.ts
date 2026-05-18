@@ -1,4 +1,4 @@
-﻿// YouTube Data API v3 service-quota tracker.
+// YouTube Data API v3 service-quota tracker.
 //
 // Operator-side counter: YouTube quota is per-API-key, per-Pacific-day, NOT
 // per-tenant. Multiple users sharing one operator API key share the same
@@ -15,7 +15,7 @@
 // Consumers:
 //   - $lib/sources/youtube/server/http.ts       (reserveYoutubeQuota before HTTP)
 //   - $lib/sources/youtube/server/snapshots.ts  (optional incrementUsage fallback)
-//   - src/scheduler/enqueue.ts                   (getThrottleState вЂ” pause Cold/auto-import at 80%)
+//   - src/scheduler/enqueue.ts                   (getThrottleState - pause Cold/auto-import at 80%)
 //   - $lib/sources/youtube/server/handlers/quota-reset.ts (resetThrottleState at 00:01 Pacific daily)
 //
 // YouTube quota resets at midnight America/Los_Angeles, which floats
@@ -24,9 +24,9 @@
 // us.
 //
 // Threshold values:
-//   - 80% (>= 8000 units on any key) в†’ throttle 'eighty':
+//   - 80% (>= 8000 units on any key) -> throttle 'eighty':
 //       scheduler pauses Cold-tier polls + auto-import; refresh-now still works.
-//   - 95% (>= 9500 units on any key) в†’ throttle 'ninetyfive':
+//   - 95% (>= 9500 units on any key) -> throttle 'ninetyfive':
 //       scheduler pauses everything except refresh-now; safety margin to avoid
 //       the hard 10 000 ceiling that would 403 every subsequent call.
 //
@@ -48,7 +48,7 @@ import { logger } from "$lib/server/logger.js";
 
 export { todayPacific };
 
-// Drizzle's transaction generic surface. Same pattern as services/quota.ts вЂ”
+// Drizzle's transaction generic surface. Same pattern as services/quota.ts  -
 // avoids leaking PgTransaction's huge type parameter list across the public
 // function signature.
 type DbCtx = typeof db | Parameters<Parameters<(typeof db)["transaction"]>[0]>[0];
@@ -56,9 +56,9 @@ type DbCtx = typeof db | Parameters<Parameters<(typeof db)["transaction"]>[0]>[0
 export type ThrottleState = "ok" | "eighty" | "ninetyfive";
 
 export interface PickedKey {
-  /** The actual YouTube API key string вЂ” passed to fetch(); never logged. */
+  /** The actual YouTube API key string - passed to fetch(); never logged. */
   apiKey: string;
-  /** sha-8 of `apiKey` вЂ” what we store in youtube_service_quota_usage and surface in /admin/quota. */
+  /** sha-8 of `apiKey` - what we store in youtube_service_quota_usage and surface in /admin/quota. */
   apiKeyId: string;
 }
 
@@ -69,10 +69,10 @@ export interface YoutubeQuotaPermit extends PickedKey {
   units: number;
 }
 
-/** Threshold вЂ” 80% of YouTube's 10 000 units/key/day budget. */
+/** Threshold - 80% of YouTube's 10 000 units/key/day budget. */
 export const THROTTLE_EIGHTY_THRESHOLD = 8000;
 
-/** Threshold вЂ” 95% of YouTube's 10 000 units/key/day budget (hard-pause boundary). */
+/** Threshold - 95% of YouTube's 10 000 units/key/day budget (hard-pause boundary). */
 export const THROTTLE_NINETYFIVE_THRESHOLD = 9500;
 
 export const YOUTUBE_CRON_POOL_DAILY_LIMIT = 8000;
@@ -105,7 +105,7 @@ export function hashApiKeyId(apiKey: string): string {
 
 /**
  * Compute the value to send on the `quotaUser` URL parameter for every
- * YouTube Data API request вЂ” Google's anti-burst rate-limiter shard key.
+ * YouTube Data API request - Google's anti-burst rate-limiter shard key.
  *
  * NOT a per-user quota allocation. The 10000 units/day envelope is shared
  * across all our users on the operator's keys; this function is purely
@@ -115,7 +115,7 @@ export function hashApiKeyId(apiKey: string): string {
  * (IP + API key + optional `quotaUser`) into one short-burst token bucket.
  * Without `quotaUser`, 50 concurrent worker pollings from our single
  * backend IP look like ONE greedy client and Google 403s half of them
- * with `userRateLimitExceeded` вЂ” even though we're nowhere near the
+ * with `userRateLimitExceeded` - even though we're nowhere near the
  * daily envelope. Sending `quotaUser=<stable per-user hash>` makes
  * Google see 50 distinct fingerprints, so each user's burst is shaped
  * independently and the daily envelope is the only ceiling that matters.
@@ -130,7 +130,7 @@ export function hashApiKeyId(apiKey: string): string {
  *   - Stable across requests for the same user (deterministic sha-256).
  *   - Privacy-safe: 8 hex of sha-256 doesn't leak the userId.
  *   - Distinct from hashApiKeyId(apiKey) which produces the row-identifier
- *     for OUR `youtube_service_quota_usage` table вЂ” same hash function,
+ *     for OUR `youtube_service_quota_usage` table - same hash function,
  *     different input, different downstream system.
  */
 export function youtubeQuotaUser(userId: string): string {
@@ -368,25 +368,25 @@ export function msUntilMidnightPacific(now = new Date()): number {
  * Write audit `quota.service_throttled` ONCE per (date_pacific, state).
  *
  * Idempotency layered:
- *   1. Module-level Set вЂ” fast path within container lifetime.
- *   2. audit_log lookup вЂ” handles container restart (Set is empty but the row
+ *   1. Module-level Set - fast path within container lifetime.
+ *   2. audit_log lookup - handles container restart (Set is empty but the row
  *      already exists for today).
  *
  * The audit row carries a real user_id (audit_log.user_id is NOT NULL).
- * We resolve to ADMIN_EMAIL_ALLOWLIST[0]'s user record вЂ” that's the
+ * We resolve to ADMIN_EMAIL_ALLOWLIST[0]'s user record - that's the
  * canonical operator identity for SaaS / single-admin self-host.
  * If the allowlist is empty OR the email has no user row yet (operator hasn't
  * signed in), we log a warn and skip the audit; the throttle state itself
  * still applies via getThrottleState. Self-host parity holds: operators
- * without an admin allowlist simply never see the audit row вЂ” and they
+ * without an admin allowlist simply never see the audit row - and they
  * cannot view /admin/quota anyway, so the absence is moot.
  */
 export async function markThrottleTransition(args: {
   state: "eighty" | "ninetyfive";
   // Optional: a real 8-char SHA-8 of the API key that triggered the
-  // detection (worker-context вЂ” we know which key was just used).
+  // detection (worker-context - we know which key was just used).
   // The scheduler-tick path sees the threshold cross via the AGGREGATE
-  // counter across all keys, so it has no single key to attribute вЂ”
+  // counter across all keys, so it has no single key to attribute  -
   // omit the field rather than emit a synthetic placeholder. Audit
   // metadata stays honest about the source.
   apiKeyId?: string;
@@ -396,13 +396,13 @@ export async function markThrottleTransition(args: {
   const seen = auditedTransitions.get(datePacific) ?? new Set<"eighty" | "ninetyfive">();
   if (seen.has(args.state)) return;
 
-  // Defense in depth вЂ” handles container restart where the Set is empty but
+  // Defense in depth - handles container restart where the Set is empty but
   // the row was already written earlier today.
   //
   // ESLint tenant-scope-eslint-rule: this audit_log lookup is INTENTIONALLY
   // not user-id scoped. quota.service_throttled is a system-emitted (operator)
   // audit row; the (date_pacific, state) composite is the natural idempotency
-  // key вЂ” adding a userId filter here would defeat the cross-restart guard.
+  // key - adding a userId filter here would defeat the cross-restart guard.
   // The row IS still written under a real operator user_id by writeAudit
   // below (audit_log.user_id NOT NULL contract holds).
   // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query
@@ -435,7 +435,7 @@ export async function markThrottleTransition(args: {
   await writeAudit({
     userId: operatorId,
     action: "quota.service_throttled",
-    // No real client IP вЂ” this is a system-emitted audit (cron-context). Use
+    // No real client IP - this is a system-emitted audit (cron-context). Use
     // the loopback sentinel; consistent with other system-emitted audit rows.
     ipAddress: "127.0.0.1",
     metadata: {
@@ -443,7 +443,7 @@ export async function markThrottleTransition(args: {
       state: args.state,
       // Omit api_key_id entirely when the caller has no specific key to
       // attribute (scheduler-tick path). A literal "scheduler-tick" string
-      // would be synthetic noise вЂ” admins reading /admin/quota would
+      // would be synthetic noise - admins reading /admin/quota would
       // mistake it for a hashed key id.
       ...(args.apiKeyId !== undefined ? { api_key_id: args.apiKeyId } : {}),
       estimated_units: args.estimatedUnits,
@@ -466,7 +466,7 @@ export function resetThrottleState(): void {
 }
 
 /**
- * Resolve operator's user_id by email вЂ” picks ADMIN_EMAIL_ALLOWLIST[0] as
+ * Resolve operator's user_id by email - picks ADMIN_EMAIL_ALLOWLIST[0] as
  * canonical operator. Cached at module scope (one-time lookup; container
  * restart re-resolves). Returns null if allowlist is empty OR the email
  * has no matching user row yet.

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   createSource,
   listSources,
@@ -9,10 +9,12 @@ import {
   restoreSource,
   assertNoChannelConflict,
 } from "../../src/lib/server/services/data-sources.js";
+import { loadSourceDetailPage } from "../../src/lib/server/services/sources-page-read.js";
 import { toDataSourceDto } from "../../src/lib/server/dto.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { dataSources } from "../../src/lib/server/db/schema/data-sources.js";
 import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
+import { redditUsersCache } from "../../src/lib/sources/reddit/server/schema/index.js";
 import * as Audit from "../../src/lib/server/audit.js";
 import { NotFoundError, AppError } from "../../src/lib/server/services/errors.js";
 import { seedUserDirectly } from "./helpers.js";
@@ -69,6 +71,59 @@ describe("register data sources via POST /api/sources", () => {
 
     const rows = await db.select().from(dataSources).where(eq(dataSources.userId, userA.id));
     expect(rows).toHaveLength(1);
+  });
+
+  it("kind=reddit_account with autoImport=false skips source-action cap", async () => {
+    const userA = await seedUserDirectly({ email: "ds2passive@test.local" });
+    for (let i = 0; i < 5; i++) {
+      await db.execute(sql`
+        INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority)
+        VALUES ('reddit_account', 'user_source', 'author_poll',
+                ${`{"handle":"existing_${i}"}`}::jsonb, ${userA.id}, 1)
+      `);
+    }
+
+    const created = await createSource(
+      userA.id,
+      {
+        kind: "reddit_account",
+        handleUrl: "https://reddit.com/user/passive-source",
+        autoImport: false,
+      },
+      "127.0.0.1",
+    );
+
+    expect(created.autoImport).toBe(false);
+    const queueRows = await db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM adapter_refresh_queue
+      WHERE adapter_kind = 'reddit_account'
+        AND queue_name = 'user_source'
+        AND user_id = ${userA.id}
+    `);
+    expect(Number((queueRows.rows[0] as { count: number | string }).count)).toBe(5);
+  });
+
+  it("source detail read-model enriches reddit_account lastPolledAt", async () => {
+    const userA = await seedUserDirectly({ email: "ds2detail@test.local" });
+    const created = await createSource(
+      userA.id,
+      {
+        kind: "reddit_account",
+        handleUrl: "https://reddit.com/user/detailpolled",
+        autoImport: false,
+      },
+      "127.0.0.1",
+    );
+    const lastMetadataRefreshAt = new Date("2026-05-18T10:00:00.000Z");
+    await db.insert(redditUsersCache).values({
+      username: "detailpolled",
+      lastMetadataRefreshAt,
+    });
+
+    const detail = await loadSourceDetailPage(userA.id, created.id);
+
+    expect(detail.source.lastPolledAt?.toISOString()).toBe(lastMetadataRefreshAt.toISOString());
   });
 
   it("duplicate kind=reddit_account uses Reddit-specific duplicate_source message", async () => {

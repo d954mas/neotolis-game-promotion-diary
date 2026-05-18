@@ -47,11 +47,7 @@ import { AdapterError } from "$lib/sources/errors.js";
 import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
 import { logger } from "$lib/server/logger.js";
 import { classifySnapshotStatus } from "./post-single.js";
-import {
-  getSubredditWalkState,
-  persistSubredditWalkProgress,
-  enqueueWalkerContinuation,
-} from "../walker-state.js";
+import { getSubredditWalkState, commitSubredditWalkProgress } from "../walker-state.js";
 
 interface T3Data {
   id: string;
@@ -211,21 +207,24 @@ export async function handleSubPoll(args: {
   //      and stop enqueuing continuations. Otherwise enqueue another
   //      service_source row so the next worker tick continues the walk.
   let walking = false;
+  let casLost = false;
   if (inDeepWalk) {
     const oldestSubmittedAt = oldestT3SubmittedAt(listingChildren);
     const walkerDone = nextAfterCursor === null;
-    await persistSubredditWalkProgress(db, sub, {
-      afterCursor: walkerDone ? null : nextAfterCursor,
+    // Persist + continuation enqueue under one transaction. CAS on the
+    // expected prior cursor means a concurrent walker tick (multi-replica
+    // deploy) that fetched the same page only enqueues continuation once.
+    // The crash-between-persist-and-enqueue window is also closed:
+    // either both happen or neither, and the next cron tick picks up
+    // from the still-pending cursor.
+    const persistResult = await commitSubredditWalkProgress(sub, {
+      expectedAfterCursor: state.afterCursor,
+      nextAfterCursor: walkerDone ? null : nextAfterCursor,
       backfillComplete: walkerDone,
       oldestSubmittedAt,
     });
-    walking = !walkerDone;
-    if (!walkerDone) {
-      // Operator-pool continuation — the user's initial click already
-      // counted toward their source-action cap; subsequent pages are
-      // service-lane work (user_id=NULL).
-      await enqueueWalkerContinuation(db, "sub_poll", { sub });
-    }
+    casLost = !persistResult.committed;
+    walking = persistResult.committed && !walkerDone;
   }
 
   logger.info(
@@ -235,6 +234,7 @@ export async function handleSubPoll(args: {
       postsFetched: listingChildren.length,
       eventsInserted,
       walking,
+      casLost,
       backfillComplete: !inDeepWalk || nextAfterCursor === null,
     },
     "reddit sub_poll: complete",

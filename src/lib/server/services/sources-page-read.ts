@@ -110,6 +110,7 @@ export async function loadSourceDetailPage(
 
   await enrichDataSourceDtosWithYoutubeChannelTitles([dto]);
   await enrichWithChannelState([dto], channelIds);
+  await enrichRedditSourcesWithLastPolled([dto]);
 
   const [quotaPlatforms, cooldownBySource, pullingBySource] = await Promise.all([
     loadQuotaPlatforms(userId),
@@ -298,13 +299,13 @@ async function loadRefreshContentCooldown(
         gte(auditLog.createdAt, cooldownSince),
       ),
     )
-    .groupBy(sql`metadata->>'source_id'`)
-    .catch(() => [] as { sourceId: string; latest: Date | null }[]);
+    .groupBy(sql`metadata->>'source_id'`);
   const cooldown: Record<string, number> = {};
   const now = Date.now();
   for (const r of recent) {
     if (r.sourceId === null || r.latest === null) continue;
-    const elapsed = now - r.latest.getTime();
+    const latest = r.latest instanceof Date ? r.latest : new Date(r.latest as string | number);
+    const elapsed = now - latest.getTime();
     const remaining = Math.max(0, Math.ceil((REFRESH_CONTENT_COOLDOWN_MS - elapsed) / 1000));
     if (remaining > 0) cooldown[r.sourceId] = remaining;
   }
@@ -323,22 +324,24 @@ async function loadPullingChannels(
   channelIds: string[],
 ): Promise<Record<string, boolean>> {
   if (channelIds.length === 0) return {};
+  const regclass = await db.execute<{ exists: boolean }>(
+    sql`SELECT to_regclass('pgboss.job') IS NOT NULL AS exists`,
+  );
+  if (regclass.rows[0]?.exists !== true) return {};
+
   const channelKeyList = sql.join(
     channelIds.map((c) => sql`${c}`),
     sql`, `,
   );
-  const active = await db
-    .execute<{ channel_key: string }>(
-      sql`
+  const active = await db.execute<{ channel_key: string }>(
+    sql`
       SELECT DISTINCT data->>'channelKey' AS channel_key
       FROM pgboss.job
       WHERE name = 'youtube.backfill.channel'
         AND state IN ('active', 'created', 'retry')
         AND data->>'channelKey' IN (${channelKeyList})
-        AND to_regclass('pgboss.job') IS NOT NULL
     `,
-    )
-    .catch(() => ({ rows: [] as { channel_key: string }[] }));
+  );
   const pullingChannelKeys = new Set(active.rows.map((r) => r.channel_key).filter(Boolean));
   const pulling: Record<string, boolean> = {};
   for (const s of dtos) {

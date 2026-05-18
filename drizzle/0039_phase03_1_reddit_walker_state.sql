@@ -11,13 +11,9 @@
 --   backfill_complete      defaults false (= "walker hasn't finished yet")
 --   backfill_deepest_at    starts NULL (= "no posts fetched yet")
 --
--- Hand-written rather than `drizzle-kit generate` because this branch's
--- snapshot history is incomplete (0014..0037 snapshots were never
--- committed; `pnpm db:check` is the only invariant CI relies on and it
--- passes by linear-journal validation, not per-column comparison). The
--- corresponding Drizzle schema definitions in
--- src/lib/sources/reddit/server/schema/subreddits.ts and users.ts mirror
--- this DDL exactly.
+-- Matching Drizzle snapshot: drizzle/meta/0039_snapshot.json.
+-- Keep the DDL and snapshot in the same PR so future drizzle-kit generate
+-- runs see these columns as already applied.
 
 ALTER TABLE "reddit_subreddits_cache"
   ADD COLUMN "backfill_after_cursor" text,

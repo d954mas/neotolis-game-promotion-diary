@@ -1,6 +1,6 @@
-﻿// youtube_service_quota_usage.
+// youtube_service_quota_usage.
 //
-// OPERATOR-SIDE COUNTER вЂ” no `user_id` column by design. YouTube Data API
+// OPERATOR-SIDE COUNTER - no `user_id` column by design. YouTube Data API
 // v3 quota is service-level (per API key, per Pacific calendar day), not
 // per-tenant. Runtime code reserves units in this table before upstream
 // HTTP so the daily budget is shared safely across worker replicas.

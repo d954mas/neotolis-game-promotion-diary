@@ -161,13 +161,14 @@ describe("cap exhaustion error codes (POST /api/sources/:id/refresh-content)", (
       "127.0.0.1",
     );
 
-    // 5 intent rows (no flow).
+    // 5 intent rows (no flow) for other sources: this test isolates the
+    // per-user rate counter from the per-source refresh cooldown.
     for (let i = 0; i < 5; i++) {
       await db.execute(sql`
         INSERT INTO audit_log (id, user_id, action, ip_address, metadata)
         VALUES (
           ${uuidv7()}, ${u.id}, 'source.refresh_content_requested', '127.0.0.1',
-          ${JSON.stringify({ source_id: src.id, kind: "youtube_channel" })}::jsonb
+          ${JSON.stringify({ source_id: `seeded-${i}`, kind: "youtube_channel" })}::jsonb
         )
       `);
     }

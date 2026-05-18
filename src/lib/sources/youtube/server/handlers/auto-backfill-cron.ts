@@ -1,14 +1,14 @@
-﻿// Auto-backfill daily cron handler.
+// Auto-backfill daily cron handler.
 //
 // Picks up incomplete sources (backfill_complete=false) and enqueues
 // passive channel backfill jobs into youtube.backfill.channel (with
 // metadata.flow='auto_passive'). The worker handler distinguishes
 // auto_passive from user-initiated flows:
-//   - cache hydration in the shared youtube_videos table (always вЂ”
+//   - cache hydration in the shared youtube_videos table (always  -
 //     benefits the whole system; a future paste from another user gets a
 //     cache hit).
 //   - per-user events INSERT only when source.auto_import = true (user
-//     opted in to passive feed updates). With auto_import=false вЂ” pure
+//     opted in to passive feed updates). With auto_import=false - pure
 //     cache work.
 //
 // Schedule: 03:00 Pacific daily, after the operator's quota reset at
@@ -17,7 +17,7 @@
 //
 // Priority gate: skip the entire tick when the cron pool is >= 50% used.
 // This is lower priority than cold poll (skip >= 80%) and active poll
-// (skip >= 95%) вЂ” stats polling protects freshness of existing videos;
+// (skip >= 95%) - stats polling protects freshness of existing videos;
 // auto-backfill only adds historical depth. Under contention,
 // auto-backfill steps aside first.
 //
@@ -28,7 +28,7 @@
 //   ORDER BY last_polled_at NULLS FIRST
 //   LIMIT 50;
 //
-// Idempotency: enqueue with singletonKey=`auto-backfill-${sourceId}` вЂ”
+// Idempotency: enqueue with singletonKey=`auto-backfill-${sourceId}`  -
 // pg-boss dedups per-source if a cron tick double-triggers. The job is
 // processed in the shared channel-backfill queue with priority=0 (lowest);
 // user-driven jobs at priority=1 go first.
@@ -43,7 +43,7 @@ import { youtubeObservability } from "../observability.js";
 import type { MinimalBoss } from "$lib/sources/adapter.js";
 
 /** Cron pool usage threshold above which auto-backfill defers tick.
- *  Lower priority than cold poll (skip в‰Ґ0.80) and active poll (skip в‰Ґ0.95).
+ *  Lower priority than cold poll (skip >=0.80) and active poll (skip >=0.95).
  *
  *  IMPORTANT: this is a FRACTION (0..1) matching `pctOfDaily` shape returned
  *  by `observability.quota.getDailyStats` (see adapter.ts ObservabilityDailyStats
@@ -66,14 +66,14 @@ export async function handleAutoBackfillCron(
   job: AutoBackfillCronJob,
   boss: MinimalBoss,
 ): Promise<void> {
-  // Priority gate вЂ” defer tick when overall operator quota under load.
+  // Priority gate - defer tick when overall operator quota under load.
   //
-  // `pctOfDaily` aggregates ALL keys Г— ALL pools (cron 80% reservation +
+  // `pctOfDaily` aggregates ALL keys x ALL pools (cron 80% reservation +
   // user 20% reservation hit the same `youtube_service_quota_usage`
-  // rows). The threshold being 50% means В«if ANY portion of operator's
-  // daily budget is half-spent, auto-backfill cedesВ». This is
+  // rows). The threshold being 50% means "if ANY portion of operator's
+  // daily budget is half-spent, auto-backfill cedes". This is
   // over-cautious vs. cron-pool-only check (50% cron + 0% user is 62.5%
-  // of cron's slice, but 50% operator-wide) вЂ” that's intentional:
+  // of cron's slice, but 50% operator-wide) - that's intentional:
   // auto-backfill is the LOWEST priority work and should yield first
   // under contention.
   const stats = await youtubeObservability.quota.getDailyStats(new Date());
@@ -85,7 +85,7 @@ export async function handleAutoBackfillCron(
     return;
   }
 
-  // Picker вЂ” incomplete sources, soft-deleted excluded, oldest-poll-first.
+  // Picker - incomplete sources, soft-deleted excluded, oldest-poll-first.
   //
   // CROSS-TENANT BY DESIGN (scheduler fan-out). This SELECT intentionally
   // walks all users' incomplete sources to enqueue passive backfill jobs.
@@ -98,10 +98,10 @@ export async function handleAutoBackfillCron(
   // T-1d and user B has 1 incomplete source at T-1d+1m, user A wins this
   // tick (older), but once A's sources advance to today, B's becomes
   // the oldest and wins next tick. Power users (more sources = more
-  // catch-up work) consume proportionally more cron budget вЂ” correct
+  // catch-up work) consume proportionally more cron budget - correct
   // semantics, not a fairness violation.
   //
-  // NULLS FIRST вЂ” newly-onboarded sources (last_polled_at IS NULL) are
+  // NULLS FIRST - newly-onboarded sources (last_polled_at IS NULL) are
   // always the highest-priority pick. Ensures bootstrap walk happens
   // before any incremental refreshes.
   //
@@ -111,13 +111,13 @@ export async function handleAutoBackfillCron(
   // (orphan channels with all subscribers soft-deleted are skipped).
   // Worker fans out to all subscribers per job.
   //
-  // Cross-tenant by design вЂ” channel state is global; subscribers joined
+  // Cross-tenant by design - channel state is global; subscribers joined
   // for liveness check. The worker handler re-applies fan-out logic to
   // active subscribers (per-user filter on auto_import + target_since).
   // The tenant-scope ESLint rule does NOT fire here because the primary
   // SELECT is from data_source_channel_state (not in TENANT_TABLES); the
   // join against data_sources references userId only via its column path,
-  // not as a WHERE filter вЂ” the rule's regex requires a userId filter on
+  // not as a WHERE filter - the rule's regex requires a userId filter on
   // tenant tables and this query intentionally has none.
   const candidates = await db
     .selectDistinct({
@@ -147,7 +147,7 @@ export async function handleAutoBackfillCron(
   if (candidates.length === 0) {
     logger.info(
       { jobId: job.id },
-      "youtube.auto_backfill_cron: no incomplete channels to pick вЂ” all caught up",
+      "youtube.auto_backfill_cron: no incomplete channels to pick - all caught up",
     );
     return;
   }
@@ -160,7 +160,7 @@ export async function handleAutoBackfillCron(
         {
           kind: ch.kind,
           channelKey: ch.channelKey,
-          // No triggerUserId вЂ” cron flow consumes operator cron pool, no
+          // No triggerUserId - cron flow consumes operator cron pool, no
           // per-user audit row, free fan-out to subscribers.
           depthBoundIso: "1970-01-01T00:00:00Z",
           flow: "auto_passive",

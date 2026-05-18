@@ -3,19 +3,19 @@
 // The endpoint dispatches via getAdapter(source.kind).backfillSource;
 // for YouTube the
 // adapter enqueues a youtube.backfill.channel job. pg-boss is mocked the
-// same way refresh-now.test.ts / sources-backfill.test.ts do — vi.mock
-// over queue-client.js with a sentJobs accumulator — so the test runs
+// same way refresh-now.test.ts / sources-backfill.test.ts do - vi.mock
+// over queue-client.js with a sentJobs accumulator - so the test runs
 // without a live boss schema.
 //
 // AGENTS.md invariants pinned here:
-//   1. Tenant scoping — getSourceById(userId, params.id) is the entry
+//   1. Tenant scoping - getSourceById(userId, params.id) is the entry
 //      point; no unfiltered query.
-//   2. Cross-tenant 404 not 403 — body never contains 'forbidden' or
+//   2. Cross-tenant 404 not 403 - body never contains 'forbidden' or
 //      'permission' (AGENTS.md invariant 2).
-//   3. Anonymous-401 — sweep + per-route assertion both fire (the sweep
+//   3. Anonymous-401 - sweep + per-route assertion both fire (the sweep
 //      lives in tests/integration/anonymous-401.test.ts; the explicit
 //      assertion is in this file).
-//   4. Audit INSERT-only — writeAuditStrict fires before the enqueue with
+//   4. Audit INSERT-only - writeAuditStrict fires before the enqueue with
 //      action 'source.refresh_content_requested'; metadata carries
 //      source_id + kind. Worker completion rows carry usage/flow metadata.
 
@@ -56,7 +56,7 @@ const { seedUserDirectly } = await import("./helpers.js");
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
 /**
- * Seed a youtube_channel source via createSource with a /channel/UC… URL so
+ * Seed a youtube_channel source via createSource with a /channel/UC... URL so
  * the canonicalizer takes the synchronous path (no videos.list lookup, no
  * network). Returns the row.
  */
@@ -120,7 +120,7 @@ describe("POST /api/sources/:id/refresh-content", () => {
     expect((job.options as { priority?: number }).priority).toBe(1);
   });
 
-  it("anonymous POST → 401 unauthorized (auth gate fires before route)", async () => {
+  it("anonymous POST -> 401 unauthorized (auth gate fires before route)", async () => {
     const app = createApp();
     const res = await app.request("/api/sources/fixture-id/refresh-content", { method: "POST" });
     expect(res.status).toBe(401);
@@ -213,7 +213,7 @@ describe("POST /api/sources/:id/refresh-content", () => {
     expect(res.status).toBe(422);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("kind_not_yet_functional");
-    // No enqueue happened — getAdapter throws before backfillSource runs.
+    // No enqueue happened - getAdapter throws before backfillSource runs.
     expect(sentJobs.length).toBe(0);
   });
 
@@ -247,26 +247,63 @@ describe("POST /api/sources/:id/refresh-content", () => {
     expect(row.metadata).not.toHaveProperty("job_id");
   });
 
+  it("same-source cooldown returns 429 too_many_refreshes and does not enqueue", async () => {
+    const app = createApp();
+    const u = await seedUserDirectly({ email: `rc-cd-${uniq()}@test.local` });
+    const src = await seedYoutubeSource(u.id);
+
+    const first = await app.request(`/api/sources/${src.id}/refresh-content`, {
+      method: "POST",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(first.status).toBe(202);
+    expect(sentJobs).toHaveLength(1);
+
+    const second = await app.request(`/api/sources/${src.id}/refresh-content`, {
+      method: "POST",
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(second.status).toBe(429);
+    expect(second.headers.get("Retry-After")).toBeTruthy();
+    const body = (await second.json()) as { error: string; metadata?: Record<string, unknown> };
+    expect(body.error).toBe("too_many_refreshes");
+    expect(body.metadata).toMatchObject({ source_id: src.id });
+    expect(sentJobs).toHaveLength(1);
+
+    const auditRows = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(eq(auditLog.userId, u.id), eq(auditLog.action, "source.refresh_content_requested")),
+      );
+    expect(auditRows).toHaveLength(1);
+  });
+
   // Per-user rolling rate limit
   // (REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE = 10/min). Counter source is
   // audit_log itself: every successful POST writes a 'source.refresh_content_requested'
   // row, the route's pre-check counts rows in the last 60s. Test:
-  //   - 10 successful POSTs → each 202, audit row written.
-  //   - 11th POST → 429 'rate_limited' (counter sees 10 prior rows).
+  //   - 10 seeded audit rows -> next POST sees the limit.
+  //   - 11th POST -> 429 'rate_limited' (counter sees 10 prior rows).
   it("per-user rolling rate limit fires after 10 POSTs/min, returns 429 'rate_limited'", async () => {
     const app = createApp();
     const u = await seedUserDirectly({ email: `rc-rl-${uniq()}@test.local` });
     const src = await seedYoutubeSource(u.id);
 
-    // Drain the budget — 10 POSTs sequentially. Each writes an audit row;
-    // the 10th leaves the counter at 10 = LIMIT. The 11th should 429.
-    for (let i = 0; i < 10; i++) {
-      const res = await app.request(`/api/sources/${src.id}/refresh-content`, {
-        method: "POST",
-        headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
-      });
-      expect(res.status, `request #${i + 1} should succeed (under limit)`).toBe(202);
-    }
+    // Seed the budget counter directly: 10 recent intent rows put the
+    // user at LIMIT without tripping the same-source cooldown path.
+    await db.insert(auditLog).values(
+      Array.from({ length: 10 }, (_, i) => ({
+        userId: u.id,
+        action: "source.refresh_content_requested" as const,
+        ipAddress: "127.0.0.1",
+        metadata: {
+          source_id: `seeded-${i}`,
+          kind: "youtube_channel",
+          platform: "youtube_channel",
+        },
+      })),
+    );
 
     const denied = await app.request(`/api/sources/${src.id}/refresh-content`, {
       method: "POST",
@@ -277,7 +314,7 @@ describe("POST /api/sources/:id/refresh-content", () => {
     expect(body.error).toBe("rate_limited");
     expect(body.metadata).toMatchObject({ limit: 10, window_seconds: 60 });
 
-    // Audit log shows exactly 10 rows for this user — the rate-limit denial
+    // Audit log shows exactly 10 rows for this user - the rate-limit denial
     // does NOT write an audit row (would muddy the counter for forensics).
     const rows = await db
       .select()
@@ -288,29 +325,34 @@ describe("POST /api/sources/:id/refresh-content", () => {
     expect(rows).toHaveLength(10);
   });
 
-  it("rate limit is per-user — user A maxing out does NOT block user B", async () => {
+  it("rate limit is per-user - user A maxing out does NOT block user B", async () => {
     const app = createApp();
     const a = await seedUserDirectly({ email: `rc-rlA-${uniq()}@test.local` });
     const b = await seedUserDirectly({ email: `rc-rlB-${uniq()}@test.local` });
     const srcA = await seedYoutubeSource(a.id);
     const srcB = await seedYoutubeSource(b.id);
 
-    // User A drains their budget.
-    for (let i = 0; i < 10; i++) {
-      const res = await app.request(`/api/sources/${srcA.id}/refresh-content`, {
-        method: "POST",
-        headers: { cookie: `neotolis.session_token=${a.signedSessionCookieValue}` },
-      });
-      expect(res.status).toBe(202);
-    }
-    // User A's 11th — denied.
+    // User A is already at the per-minute budget.
+    await db.insert(auditLog).values(
+      Array.from({ length: 10 }, (_, i) => ({
+        userId: a.id,
+        action: "source.refresh_content_requested" as const,
+        ipAddress: "127.0.0.1",
+        metadata: {
+          source_id: `seeded-a-${i}`,
+          kind: "youtube_channel",
+          platform: "youtube_channel",
+        },
+      })),
+    );
+    // User A's 11th - denied.
     const aDenied = await app.request(`/api/sources/${srcA.id}/refresh-content`, {
       method: "POST",
       headers: { cookie: `neotolis.session_token=${a.signedSessionCookieValue}` },
     });
     expect(aDenied.status).toBe(429);
 
-    // User B's 1st — succeeds. Tenant scope on the rate-limit query holds.
+    // User B's 1st - succeeds. Tenant scope on the rate-limit query holds.
     const bOk = await app.request(`/api/sources/${srcB.id}/refresh-content`, {
       method: "POST",
       headers: { cookie: `neotolis.session_token=${b.signedSessionCookieValue}` },

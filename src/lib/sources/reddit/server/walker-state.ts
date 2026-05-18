@@ -26,13 +26,35 @@
 //                                                 just pick up new posts
 //                                                 at the top of /new.
 //
+// Concurrency model (multi-replica safe via CAS, not FOR UPDATE):
+//   The handler reads the cursor BEFORE the network fetch, then persists
+//   the next cursor AFTER. Holding a transaction across the HTTP call is
+//   an anti-pattern (connection pinned for seconds, slow drain under
+//   load). Instead we use compare-and-swap on persist:
+//     UPDATE … SET after_cursor = $next
+//       WHERE … AND after_cursor IS NOT DISTINCT FROM $expected
+//   Two replicas reading cursor=X both fetch the same page (one wasted
+//   Reddit unit — soft-fairness loss, accepted) but only ONE persist
+//   succeeds. The CAS-loser skips its continuation enqueue, leaving the
+//   walk at a consistent state. Without the CAS the second persist would
+//   overwrite the first with the same cursor (idempotent today) BUT the
+//   continuation enqueue would double-fire — two service_source rows for
+//   the same page. The CAS closes that doubling.
+//
+//   `persistWalkProgress` + `enqueueWalkerContinuation` run inside the
+//   SAME caller-supplied transaction so a process crash between the two
+//   either commits both (continuation queued) or neither (next cron tick
+//   picks up the walk from the still-pending cursor). Pre-fix: walker
+//   crash AFTER persist but BEFORE enqueue would leave a stalled walk
+//   that only the daily cron could resurrect — up to a 6h tail.
+//
 // Continuation enqueue: when a walker fetch ends with after !== null AND
 // backfill_complete=false, the handler enqueues another row on the SAME
 // adapter_refresh_queue with `user_id=NULL` on the cron-side lane
-// (service_source / service_post). This keeps the per-user source-action
-// cap from charging the user once per page — one user click triggers the
-// initial fetch (which IS user_source), every subsequent page is operator-
-// pool work.
+// (service_source). This keeps the per-user source-action cap from
+// charging the user once per page — one user click triggers the initial
+// fetch (which IS user_source), every subsequent page is operator-pool
+// work.
 //
 // CAP: when the walker terminates we cannot tell whether Reddit ran out of
 // posts (small subreddit) or hit its ~1000 listing cap (big subreddit);
@@ -40,8 +62,8 @@
 // either case — Reddit doesn't expose deeper history through the public
 // API, so there's nothing more to fetch even if a deeper cap existed.
 
-import { eq, sql } from "drizzle-orm";
-import type { DbOrTx } from "$lib/server/db/client.js";
+import { and, eq, sql } from "drizzle-orm";
+import { db, type DbOrTx } from "$lib/server/db/client.js";
 import { redditSubredditsCache, redditUsersCache } from "./schema/index.js";
 import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 
@@ -84,17 +106,31 @@ export async function getAuthorWalkState(dbCtx: DbOrTx, handle: string): Promise
   };
 }
 
-/** Persist the post-fetch state. Cursor=null + complete=true mark the
- *  listing as fully drained; cursor=non-null + complete=false advance the
- *  walk. `deepestAt` is the oldest `submitted_at` we've seen across all
- *  fetched pages — surfaced on the admin dashboard. Always advances
- *  monotonically (lower wins) via GREATEST(NULL, x) -> x semantics. */
+/** Result of a CAS persist call. `committed=false` means a concurrent
+ *  walker tick advanced the cursor between our read and our UPDATE;
+ *  the caller MUST skip its continuation enqueue to avoid double-firing
+ *  on the same page. */
+export interface PersistResult {
+  committed: boolean;
+}
+
+/** Compare-and-swap persist of subreddit walker progress. The UPDATE
+ *  matches only when `backfill_after_cursor` still equals what the
+ *  caller observed at the start of the tick (`expectedAfterCursor`).
+ *  Two simultaneous ticks reading cursor=X both attempt to UPDATE to
+ *  cursor=Y; only one succeeds. The other returns `committed=false`
+ *  and the caller skips its enqueueWalkerContinuation. */
 export async function persistSubredditWalkProgress(
   dbCtx: DbOrTx,
   sub: string,
-  next: { afterCursor: string | null; backfillComplete: boolean; oldestSubmittedAt: Date | null },
-): Promise<void> {
-  await dbCtx
+  next: {
+    expectedAfterCursor: string | null;
+    afterCursor: string | null;
+    backfillComplete: boolean;
+    oldestSubmittedAt: Date | null;
+  },
+): Promise<PersistResult> {
+  const result = await dbCtx
     .update(redditSubredditsCache)
     .set({
       backfillAfterCursor: next.afterCursor,
@@ -104,15 +140,31 @@ export async function persistSubredditWalkProgress(
           ? sql`${redditSubredditsCache.backfillDeepestAt}`
           : sql`LEAST(COALESCE(${redditSubredditsCache.backfillDeepestAt}, ${next.oldestSubmittedAt}), ${next.oldestSubmittedAt})`,
     })
-    .where(eq(redditSubredditsCache.name, sub));
+    .where(
+      and(
+        eq(redditSubredditsCache.name, sub),
+        // `IS NOT DISTINCT FROM` treats NULL=NULL as equal — needed because
+        // the first walker tick reads afterCursor=NULL and any non-CAS
+        // approach (`= $expected`) would silently fail when expected is
+        // NULL.
+        sql`${redditSubredditsCache.backfillAfterCursor} IS NOT DISTINCT FROM ${next.expectedAfterCursor}`,
+      ),
+    )
+    .returning({ name: redditSubredditsCache.name });
+  return { committed: result.length > 0 };
 }
 
 export async function persistAuthorWalkProgress(
   dbCtx: DbOrTx,
   handle: string,
-  next: { afterCursor: string | null; backfillComplete: boolean; oldestSubmittedAt: Date | null },
-): Promise<void> {
-  await dbCtx
+  next: {
+    expectedAfterCursor: string | null;
+    afterCursor: string | null;
+    backfillComplete: boolean;
+    oldestSubmittedAt: Date | null;
+  },
+): Promise<PersistResult> {
+  const result = await dbCtx
     .update(redditUsersCache)
     .set({
       backfillAfterCursor: next.afterCursor,
@@ -122,23 +174,24 @@ export async function persistAuthorWalkProgress(
           ? sql`${redditUsersCache.backfillDeepestAt}`
           : sql`LEAST(COALESCE(${redditUsersCache.backfillDeepestAt}, ${next.oldestSubmittedAt}), ${next.oldestSubmittedAt})`,
     })
-    .where(eq(redditUsersCache.username, handle));
+    .where(
+      and(
+        eq(redditUsersCache.username, handle),
+        sql`${redditUsersCache.backfillAfterCursor} IS NOT DISTINCT FROM ${next.expectedAfterCursor}`,
+      ),
+    )
+    .returning({ username: redditUsersCache.username });
+  return { committed: result.length > 0 };
 }
 
 /** Enqueue a continuation row on the service lane (user_id=NULL → cap-
- *  exempt). The initial click already burned the user's source-action
- *  budget; subsequent pages are operator-pool work. The worker dequeues
- *  cron rows just like service-cron-driven walks. */
+ *  exempt). Both work types share `service_source`; user_post is paste/
+ *  refresh-now only and never carries listing pagination work. */
 export async function enqueueWalkerContinuation(
   dbCtx: DbOrTx,
   type: "sub_poll" | "author_poll",
   payload: { sub?: string; handle?: string },
 ): Promise<void> {
-  // Both work types continue on the same service_source lane — the
-  // service lane is "operator-pool" by construction (user_id=NULL), so
-  // sub_poll and author_poll share it. The continuation never lands on
-  // user_post; that lane is for paste/refresh-now post fetches, not
-  // listing pagination.
   await dbCtx.insert(adapterRefreshQueue).values({
     adapterKind: "reddit_account",
     queueName: "service_source",
@@ -146,5 +199,60 @@ export async function enqueueWalkerContinuation(
     payload,
     userId: null,
     priority: 0,
+  });
+}
+
+/** Atomic persist + continuation enqueue. The caller already finished
+ *  the network fetch + cache writes; this helper runs the bookkeeping
+ *  pair inside ONE db.transaction so a crash between them leaves the
+ *  walker in a consistent recoverable state (either both happen — the
+ *  walk continues — or neither happens — the next cron tick picks it
+ *  up from the still-pending cursor).
+ *
+ *  Returns the persist's CAS result so the caller's logging can report
+ *  "lost the race; no continuation enqueued for this tick". */
+export async function commitSubredditWalkProgress(
+  sub: string,
+  payload: {
+    expectedAfterCursor: string | null;
+    nextAfterCursor: string | null;
+    backfillComplete: boolean;
+    oldestSubmittedAt: Date | null;
+  },
+): Promise<PersistResult> {
+  return db.transaction(async (tx) => {
+    const persistResult = await persistSubredditWalkProgress(tx, sub, {
+      expectedAfterCursor: payload.expectedAfterCursor,
+      afterCursor: payload.nextAfterCursor,
+      backfillComplete: payload.backfillComplete,
+      oldestSubmittedAt: payload.oldestSubmittedAt,
+    });
+    if (persistResult.committed && !payload.backfillComplete && payload.nextAfterCursor !== null) {
+      await enqueueWalkerContinuation(tx, "sub_poll", { sub });
+    }
+    return persistResult;
+  });
+}
+
+export async function commitAuthorWalkProgress(
+  handle: string,
+  payload: {
+    expectedAfterCursor: string | null;
+    nextAfterCursor: string | null;
+    backfillComplete: boolean;
+    oldestSubmittedAt: Date | null;
+  },
+): Promise<PersistResult> {
+  return db.transaction(async (tx) => {
+    const persistResult = await persistAuthorWalkProgress(tx, handle, {
+      expectedAfterCursor: payload.expectedAfterCursor,
+      afterCursor: payload.nextAfterCursor,
+      backfillComplete: payload.backfillComplete,
+      oldestSubmittedAt: payload.oldestSubmittedAt,
+    });
+    if (persistResult.committed && !payload.backfillComplete && payload.nextAfterCursor !== null) {
+      await enqueueWalkerContinuation(tx, "author_poll", { handle });
+    }
+    return persistResult;
   });
 }

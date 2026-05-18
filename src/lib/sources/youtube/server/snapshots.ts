@@ -1,17 +1,17 @@
-﻿// Idempotent per-video snapshot writer.
+// Idempotent per-video snapshot writer.
 //
 // Atomic across 3 ops in a single short db.transaction:
 //   1. INSERT row in youtube_video_snapshots with polled_at = date_trunc('minute', now())
-//      вЂ” UNIQUE (video_id, polled_at) ON CONFLICT DO NOTHING makes within-the-minute
+// - UNIQUE (video_id, polled_at) ON CONFLICT DO NOTHING makes within-the-minute
 //      retries no-op at the row level (idempotent at retry boundary).
 //   2. UPDATE youtube_videos.last_polled_at + last_poll_status + poll_failure_count
-//      keyed on video_id. PUBLIC-DATA вЂ” no userId filter (multiple tenants share
+//      keyed on video_id. PUBLIC-DATA - no userId filter (multiple tenants share
 //      one row). poll_failure_count increments on non-ok statuses so the rehab
 //      cron's exit gate can fire at >= 5; resets to 0 on 'ok'.
 //   3. Optionally UPSERT youtube_service_quota_usage += unitsUsed for callers
 //      that did not already reserve quota before HTTP.
 //
-// Caller is responsible for the HTTP call (which happens OUTSIDE this tx вЂ”
+// Caller is responsible for the HTTP call (which happens OUTSIDE this tx  -
 // tx-boundary < 50ms; never hold a row lock while waiting on a 5s HTTP
 // request). This service expects the metrics + status as already-resolved
 // inputs.
@@ -52,14 +52,14 @@ async function incrementUsage(args: {
 export type SnapshotStatus = "ok" | "not_found" | "private" | "auth_error" | "rate_limited";
 
 export interface WriteSnapshotArgs {
-  /** youtube_videos.video_id вЂ” keys the public-data UPDATE + snapshot INSERT. */
+  /** youtube_videos.video_id - keys the public-data UPDATE + snapshot INSERT. */
   videoId: string;
   /**
    * Resolved metrics from the upstream API. NULL when status !== 'ok' (no
    * snapshot row inserted in that case; only the youtube_videos row updates).
    */
   metrics: { view_count: number; like_count: number; comment_count: number } | null;
-  /** sha-8 from the quota tracker вЂ” identifies which API key burned units. */
+  /** sha-8 from the quota tracker - identifies which API key burned units. */
   apiKeyId: string;
   /** Units consumed by the upstream call (1 per videos.list call per VERIFIED FACT). */
   unitsUsed: number;
@@ -74,7 +74,7 @@ export interface WriteSnapshotArgs {
 
 export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
   await db.transaction(async (tx) => {
-    // 1. Snapshot row вЂ” only on success. ON CONFLICT DO NOTHING makes
+    // 1. Snapshot row - only on success. ON CONFLICT DO NOTHING makes
     //    within-the-same-minute retries idempotent (a worker that crashes
     //    AFTER the upstream HTTP call but BEFORE commit will retry on the
     //    next tick and the second insert is a no-op).
@@ -91,11 +91,11 @@ export async function writeSnapshot(args: WriteSnapshotArgs): Promise<void> {
         .onConflictDoNothing();
     }
 
-    // 2. youtube_videos UPDATE вЂ” public-data, single source of truth for
+    // 2. youtube_videos UPDATE - public-data, single source of truth for
     //    polling state across all tenants who reference this video.
     //    poll_failure_count increments on non-ok, resets on ok. The
     //    rehab-unavailable cron's exit gate fires at >= 5.
-    //    PUBLIC-DATA TABLE вЂ” no userId filter (videos are tenant-agnostic).
+    //    PUBLIC-DATA TABLE - no userId filter (videos are tenant-agnostic).
     //    ESLint tenant-scope rule allowlists youtubeVideos via the schema's
     //    "no tenant scope" header comment.
     await tx
