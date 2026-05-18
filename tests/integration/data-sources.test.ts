@@ -688,6 +688,68 @@ describe("/api/sources HTTP boundary", () => {
     expect(body.kind).toBe("reddit_account");
   });
 
+  it("POST /api/sources kind=reddit synthetic — user URL resolves to reddit_account", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-src-reddit-syn-1@test.local" });
+    const res = await app.request("/api/sources", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "reddit",
+        handleUrl: "https://reddit.com/user/d954mas",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { kind: string; handleUrl: string };
+    expect(body.kind).toBe("reddit_account");
+    expect(body.handleUrl).toBe("https://www.reddit.com/user/d954mas");
+  });
+
+  it("POST /api/sources kind=reddit synthetic — sub URL resolves to reddit_subreddit", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-src-reddit-syn-2@test.local" });
+    const res = await app.request("/api/sources", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "reddit",
+        handleUrl: "https://www.reddit.com/r/IndieDev",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { kind: string; handleUrl: string };
+    expect(body.kind).toBe("reddit_subreddit");
+    expect(body.handleUrl).toBe("https://www.reddit.com/r/IndieDev");
+  });
+
+  it("POST /api/sources kind=reddit synthetic — non-Reddit URL returns 422 invalid_reddit_url", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-src-reddit-syn-3@test.local" });
+    const res = await app.request("/api/sources", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "reddit",
+        handleUrl: "https://example.com/r/IndieDev",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("invalid_reddit_url");
+  });
+
   it("POST /api/sources duplicate handleUrl returns 422 duplicate_source", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();

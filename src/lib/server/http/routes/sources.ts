@@ -37,9 +37,18 @@ import { mapErr, type RouteVars } from "./_shared.js";
 import { writeAuditStrict } from "../../audit.js";
 import { AppError, NotFoundError } from "../../services/errors.js";
 import { getAdapter } from "$lib/sources/registry.js";
+import { redditParseSourceUrl } from "$lib/sources/reddit/server/url.js";
 
+// `"reddit"` is a synthetic, request-only kind. The UI picker on
+// /sources/new sends it when the user wants the platform to choose between
+// reddit_account and reddit_subreddit by URL shape. We resolve it here
+// before handing off to createSource; the DB column never stores "reddit".
+// Existing programmatic callers (tests, integrations) can still send the
+// concrete reddit_account / reddit_subreddit values directly — both
+// surfaces remain accepted.
 const sourceKindEnum = z.enum([
   "youtube_channel",
+  "reddit",
   "reddit_account",
   "reddit_subreddit",
   "twitter_account",
@@ -120,13 +129,53 @@ sourcesRoutes.post(
     const ctx = getAuditContext(c);
     const body = c.req.valid("json");
     try {
-      const row = await createSource(ctx.userId, body, ctx.ipAddress, ctx.userAgent ?? undefined);
+      const resolved = resolveSyntheticRedditKind(body);
+      const row = await createSource(
+        ctx.userId,
+        resolved,
+        ctx.ipAddress,
+        ctx.userAgent ?? undefined,
+      );
       return c.json(toDataSourceDto(row), 201);
     } catch (err) {
       return mapErr(c, err, "POST /api/sources");
     }
   },
 );
+
+/** Resolve the synthetic UI kind "reddit" into the concrete reddit_account
+ *  or reddit_subreddit by parsing the URL with redditParseSourceUrl. Any
+ *  other kind passes through unchanged. Throws AppError 422 when the URL
+ *  cannot be classified — the UI surfaces this as
+ *  `sources_error_not_a_reddit_url`. */
+function resolveSyntheticRedditKind(
+  body: z.infer<typeof createSourceSchema>,
+): z.infer<typeof createSourceSchema> & {
+  kind: Exclude<z.infer<typeof sourceKindEnum>, "reddit">;
+} {
+  if (body.kind !== "reddit") {
+    return body as z.infer<typeof createSourceSchema> & {
+      kind: Exclude<z.infer<typeof sourceKindEnum>, "reddit">;
+    };
+  }
+  const parsed = redditParseSourceUrl(body.handleUrl);
+  if (parsed === null) {
+    throw new AppError(
+      "URL does not look like a Reddit subreddit or user profile",
+      "invalid_reddit_url",
+      422,
+      { handleUrl: body.handleUrl },
+    );
+  }
+  const metadataKey = parsed.kind === "reddit_account" ? "username" : "subreddit";
+  return {
+    ...body,
+    kind: parsed.kind,
+    handleUrl: parsed.externalUrl,
+    metadata: { ...(body.metadata ?? {}), [metadataKey]: parsed.handle },
+    displayName: body.displayName ?? parsed.handle,
+  };
+}
 
 sourcesRoutes.get(
   "/sources",

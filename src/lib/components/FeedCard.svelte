@@ -137,6 +137,8 @@
         p75Score24h: number | null;
         sampleSize: number;
       } | null;
+      linkUrl?: string | null;
+      bodyExcerpt?: string | null;
     };
   };
   type SourceLite = {
@@ -182,16 +184,32 @@
     return typeof url === "string" && url.length > 0 ? url : null;
   }
 
+  // Image-URL heuristic for Reddit link posts. Reddit's `t3.url` for an
+  // image post points at i.redd.it/<id>.jpg or preview.redd.it/...; for
+  // crossposts on imgur / external CDNs the URL ends in a recognizable
+  // image extension. Link-posts to articles fall through and we render
+  // the kind icon instead of a broken image.
+  function isImageLikeUrl(url: string): boolean {
+    const lower = url.toLowerCase();
+    if (lower.startsWith("https://i.redd.it/")) return true;
+    if (lower.startsWith("https://preview.redd.it/")) return true;
+    return /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(lower);
+  }
+
   const thumbnailUrl = $derived.by((): string | null => {
     if (event.kind === "youtube_video") {
       if (!event.externalId) return null;
       return `https://img.youtube.com/vi/${event.externalId}/mqdefault.jpg`;
     }
-    if (
-      event.kind === "reddit_post" ||
-      event.kind === "twitter_post" ||
-      event.kind === "telegram_post"
-    ) {
+    if (event.kind === "reddit_post") {
+      // Prefer the link_url we eagerly load in enrichRedditFeedDtos
+      // (resolved from reddit_posts.metadata.link_url). Falls back to
+      // legacy metadata.media.url for any historical rows that carried it.
+      const link = event.redditEnrichment?.linkUrl ?? null;
+      if (link && isImageLikeUrl(link)) return link;
+      return readMediaUrlFromMetadata(event.metadata);
+    }
+    if (event.kind === "twitter_post" || event.kind === "telegram_post") {
       return readMediaUrlFromMetadata(event.metadata);
     }
     return null;

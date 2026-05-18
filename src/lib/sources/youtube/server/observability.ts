@@ -31,6 +31,129 @@ import { db } from "$lib/server/db/client.js";
 import { youtubeServiceQuotaUsage } from "$lib/server/db/schema/index.js";
 import { auditLog } from "$lib/server/db/schema/audit-log.js";
 import { env } from "$lib/server/config/env.js";
+
+export const YOUTUBE_QUEUE_NAMES = ["user_video", "service_video"] as const;
+export type YoutubeQueueName = (typeof YOUTUBE_QUEUE_NAMES)[number];
+export const YOUTUBE_QUEUE_TYPES = ["video_stats"] as const;
+export type YoutubeQueueType = (typeof YOUTUBE_QUEUE_TYPES)[number];
+
+export interface YoutubeQueueDepthRow {
+  queueName: YoutubeQueueName;
+  pending: number;
+  processing: number;
+  deadLetter: number;
+  oldestPendingAgeSeconds: number | null;
+}
+
+export interface YoutubeDailyByType {
+  total: number;
+  byType: Record<YoutubeQueueType, number>;
+  /** All-time count of done rows on user_video lane — exposes the
+   *  "all the user-initiated refreshes we've ever processed" total
+   *  the admin asked for alongside the 24h breakdown. */
+  lifetimeUserVideos: number;
+}
+
+/**
+ * Live per-lane queue depth (pending / processing / dead_letter).
+ * `done` rows are excluded — they're history, not depth.
+ *
+ * Reads the shared `adapter_refresh_queue` filtered by
+ * `adapter_kind='youtube_channel'`. Mirrors getQueueDepth from the
+ * Reddit observability surface so /admin can render an analogous panel.
+ */
+export async function getYoutubeQueueDepth(): Promise<YoutubeQueueDepthRow[]> {
+  const result = await db.execute(sql`
+    SELECT
+      queue_name,
+      status,
+      COUNT(*)::int AS count,
+      EXTRACT(EPOCH FROM (NOW() - MIN(enqueued_at)))::int AS oldest_age_seconds
+    FROM adapter_refresh_queue
+    WHERE adapter_kind = 'youtube_channel'
+      AND status IN ('pending', 'processing', 'dead_letter')
+    GROUP BY queue_name, status
+  `);
+  const rows = (
+    result as unknown as {
+      rows: Array<{
+        queue_name: string;
+        status: string;
+        count: number | string;
+        oldest_age_seconds: number | string | null;
+      }>;
+    }
+  ).rows;
+
+  const byLane = new Map<YoutubeQueueName, YoutubeQueueDepthRow>();
+  for (const name of YOUTUBE_QUEUE_NAMES) {
+    byLane.set(name, {
+      queueName: name,
+      pending: 0,
+      processing: 0,
+      deadLetter: 0,
+      oldestPendingAgeSeconds: null,
+    });
+  }
+  for (const r of rows) {
+    const lane = byLane.get(r.queue_name as YoutubeQueueName);
+    if (!lane) continue;
+    const count = Number(r.count);
+    if (r.status === "pending") {
+      lane.pending = count;
+      lane.oldestPendingAgeSeconds =
+        r.oldest_age_seconds === null ? null : Number(r.oldest_age_seconds);
+    } else if (r.status === "processing") {
+      lane.processing = count;
+    } else if (r.status === "dead_letter") {
+      lane.deadLetter = count;
+    }
+  }
+  return Array.from(byLane.values());
+}
+
+/**
+ * 24h done-row breakdown by handler type + lifetime user_video total.
+ * Per-type count is a close proxy for YouTube `videos.list` calls
+ * (each row drained = one batched API request).
+ */
+export async function getYoutubeDailyByType(): Promise<YoutubeDailyByType> {
+  const typeResult = await db.execute(sql`
+    SELECT type, COUNT(*)::int AS count
+    FROM adapter_refresh_queue
+    WHERE adapter_kind = 'youtube_channel'
+      AND status = 'done'
+      AND last_attempt_at >= NOW() - INTERVAL '24 hours'
+    GROUP BY type
+  `);
+  const typeRows = (
+    typeResult as unknown as {
+      rows: Array<{ type: string; count: number | string }>;
+    }
+  ).rows;
+  const byType: Record<YoutubeQueueType, number> = { video_stats: 0 };
+  let total = 0;
+  for (const r of typeRows) {
+    const count = Number(r.count);
+    if ((YOUTUBE_QUEUE_TYPES as readonly string[]).includes(r.type)) {
+      byType[r.type as YoutubeQueueType] = count;
+      total += count;
+    }
+  }
+
+  const lifetimeResult = await db.execute(sql`
+    SELECT COUNT(*)::bigint AS count
+    FROM adapter_refresh_queue
+    WHERE adapter_kind = 'youtube_channel'
+      AND queue_name = 'user_video'
+      AND status = 'done'
+  `);
+  const lifetimeUserVideos = Number(
+    (lifetimeResult as unknown as { rows: Array<{ count: string | number }> }).rows[0]?.count ?? 0,
+  );
+
+  return { total, byType, lifetimeUserVideos };
+}
 import type {
   AdapterObservability,
   ObservabilityDailyStats,

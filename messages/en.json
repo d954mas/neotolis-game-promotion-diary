@@ -94,6 +94,7 @@
   "audit_action_reddit_cap_exhausted": "Reddit cap exhausted",
   "audit_action_reddit_adapter_degraded": "Reddit adapter degraded",
 
+  "common_kind_reddit": "Reddit",
   "common_kind_reddit_user": "Reddit user",
   "common_kind_reddit_subreddit": "Subreddit",
 
@@ -336,6 +337,7 @@
   "sources_error_duplicate_channel": "You already track \"{channelName}\" — open it on /sources to edit.",
   "sources_error_duplicate_channel_soft_deleted": "You previously deleted \"{channelName}\". Open /sources, click \"Recently deleted\", and press Restore — that brings back the source plus all its history.",
   "sources_error_not_a_youtube_url": "Paste a YouTube channel URL (e.g. https://www.youtube.com/@handle or /channel/UC… or any video URL).",
+  "sources_error_not_a_reddit_url": "Paste a Reddit subreddit (https://reddit.com/r/IndieDev) or user URL (https://reddit.com/user/handle). Raw r/X or u/X prefixes also work.",
   "sources_error_video_not_found": "That URL doesn't point at a real YouTube video. Check the URL and try again.",
   "sources_error_youtube_unreachable": "YouTube is unreachable right now. Try again in a moment.",
   "sources_error_no_youtube_keys": "YouTube auto-resolution is unavailable — operator hasn't configured an API key.",

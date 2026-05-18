@@ -43,11 +43,22 @@ import {
   type RedditQueueDepthRow,
   type RedditDailyByType,
 } from "$lib/sources/reddit/server/index.js";
+import {
+  getYoutubeQueueDepth,
+  getYoutubeDailyByType,
+  type YoutubeQueueDepthRow,
+  type YoutubeDailyByType,
+} from "$lib/sources/youtube/server/observability.js";
 
 // Re-export types so the /admin Svelte components (which can only
 // type-import from this server-service module, not from reddit/server
 // directly) can reference the same shapes the loader returns.
-export type { RedditQueueDepthRow, RedditDailyByType };
+export type {
+  RedditQueueDepthRow,
+  RedditDailyByType,
+  YoutubeQueueDepthRow,
+  YoutubeDailyByType,
+};
 
 export interface QuotaKeyRow {
   /** sha-8 hash of the operator's API key — stable identifier across boots. */
@@ -98,11 +109,17 @@ export type AdminRedditBlock =
     }
   | { isConfigured: false };
 
+export interface AdminYoutubeBlock {
+  queueDepth: YoutubeQueueDepthRow[];
+  daily: YoutubeDailyByType;
+}
+
 export async function loadAdminQuotaPage(): Promise<{
   today: string;
   keys: QuotaKeyRow[];
   audit: ServiceAuditEntry[];
   reddit: AdminRedditBlock;
+  youtube: AdminYoutubeBlock;
 }> {
   const today = todayPacific();
   const now = new Date();
@@ -157,11 +174,22 @@ export async function loadAdminQuotaPage(): Promise<{
     reddit = { isConfigured: true, queueDepth, daily };
   }
 
+  // YouTube ops block. Read from the shared adapter_refresh_queue with
+  // adapter_kind='youtube_channel' — same shape the Reddit panel uses,
+  // surfacing queue depth + 24h breakdown + lifetime user-refresh total
+  // so the operator has parity with the Reddit Ops view.
+  const [ytQueueDepth, ytDaily] = await Promise.all([
+    getYoutubeQueueDepth(),
+    getYoutubeDailyByType(),
+  ]);
+  const youtube: AdminYoutubeBlock = { queueDepth: ytQueueDepth, daily: ytDaily };
+
   return {
     today,
     keys: keyRows,
     audit: auditRows.map(toServiceAuditEntry),
     reddit,
+    youtube,
   };
 }
 

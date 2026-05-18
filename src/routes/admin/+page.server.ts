@@ -25,6 +25,7 @@ import type {
   QuotaKeyRow,
   ServiceAuditEntry,
   AdminRedditBlock,
+  AdminYoutubeBlock,
 } from "$lib/server/services/admin-quota-read.js";
 
 interface AdminQuotaResponse {
@@ -32,6 +33,7 @@ interface AdminQuotaResponse {
   keys: QuotaKeyRow[];
   audit: ServiceAuditEntry[];
   reddit: AdminRedditBlock;
+  youtube: AdminYoutubeBlock;
 }
 
 export const load: PageServerLoad = async ({ fetch }) => {

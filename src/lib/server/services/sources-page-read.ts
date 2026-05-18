@@ -15,6 +15,10 @@ import { and, eq, isNull, inArray, sql, gte, max, count } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { youtubeChannels } from "../db/schema/index.js";
 import { dataSourceChannelState } from "../db/schema/data-source-channel-state.js";
+import {
+  redditSubredditsCache,
+  redditUsersCache,
+} from "$lib/sources/reddit/server/schema/index.js";
 import { events } from "../db/schema/events.js";
 import { auditLog } from "../db/schema/audit-log.js";
 import { allAdapters } from "$lib/sources/registry.js";
@@ -74,6 +78,7 @@ export async function loadSourcesPage(userId: string): Promise<SourcesPageData> 
 
   await enrichDataSourceDtosWithYoutubeChannelTitles(dtos);
   await enrichWithChannelState(dtos, channelIds);
+  await enrichRedditSourcesWithLastPolled(dtos);
   await enrichWithEventStats(dtos, userId, sourceIds);
 
   const cooldownBySource = await loadRefreshContentCooldown(userId, sourceIds);
@@ -136,6 +141,68 @@ export async function enrichDataSourceDtosWithYoutubeChannelTitles(
   for (const r of cache) titleByChannel.set(r.channelId, r.channelTitle);
   for (const s of dtos) {
     if (s.channelId) s.channelTitle = titleByChannel.get(s.channelId) ?? null;
+  }
+}
+
+/**
+ * Reddit sources don't have a channelId (they key on metadata.username
+ * for reddit_account or metadata.subreddit for reddit_subreddit), so
+ * `enrichWithChannelState` above misses them — they would show
+ * "Never pulled" on /sources even after the worker has been polling
+ * for days. Read last_metadata_refresh_at from the per-kind PUBLIC-
+ * DATA caches and stamp it onto the DTO.
+ *
+ * reddit_subreddits_cache / reddit_users_cache are upserted by the
+ * adapter's poll handlers (sub_poll, author_poll, post_single) on
+ * every successful drain, so last_metadata_refresh_at is the same
+ * "when did we last hear from Reddit about this subject" signal that
+ * data_source_channel_state.last_polled_at gives YouTube.
+ */
+async function enrichRedditSourcesWithLastPolled(dtos: DataSourceDto[]): Promise<void> {
+  const subreddits: string[] = [];
+  const usernames: string[] = [];
+  for (const s of dtos) {
+    const md = (s.metadata ?? {}) as { subreddit?: unknown; username?: unknown };
+    if (s.kind === "reddit_subreddit" && typeof md.subreddit === "string" && md.subreddit) {
+      subreddits.push(md.subreddit);
+    } else if (s.kind === "reddit_account" && typeof md.username === "string" && md.username) {
+      usernames.push(md.username);
+    }
+  }
+  if (subreddits.length === 0 && usernames.length === 0) return;
+
+  const subBySubreddit = new Map<string, Date | null>();
+  if (subreddits.length > 0) {
+    const rows = await db
+      .select({
+        name: redditSubredditsCache.name,
+        lastMetadataRefreshAt: redditSubredditsCache.lastMetadataRefreshAt,
+      })
+      .from(redditSubredditsCache)
+      .where(inArray(redditSubredditsCache.name, subreddits));
+    for (const r of rows) subBySubreddit.set(r.name, r.lastMetadataRefreshAt);
+  }
+
+  const subByUsername = new Map<string, Date | null>();
+  if (usernames.length > 0) {
+    const rows = await db
+      .select({
+        username: redditUsersCache.username,
+        lastMetadataRefreshAt: redditUsersCache.lastMetadataRefreshAt,
+      })
+      .from(redditUsersCache)
+      .where(inArray(redditUsersCache.username, usernames));
+    for (const r of rows) subByUsername.set(r.username, r.lastMetadataRefreshAt);
+  }
+
+  for (const s of dtos) {
+    if (s.lastPolledAt !== null && s.lastPolledAt !== undefined) continue;
+    const md = (s.metadata ?? {}) as { subreddit?: unknown; username?: unknown };
+    if (s.kind === "reddit_subreddit" && typeof md.subreddit === "string") {
+      s.lastPolledAt = subBySubreddit.get(md.subreddit) ?? null;
+    } else if (s.kind === "reddit_account" && typeof md.username === "string") {
+      s.lastPolledAt = subByUsername.get(md.username) ?? null;
+    }
   }
 }
 

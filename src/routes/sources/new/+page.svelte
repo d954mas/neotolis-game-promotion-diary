@@ -26,27 +26,25 @@
   import BackfillPicker from "$lib/components/BackfillPicker.svelte";
   import type { PageData } from "./$types";
 
+  // `"reddit"` is a synthetic, UI-only kind. The /sources/new chip picker
+  // exposes a single "Reddit" entry; on submit, POST /api/sources receives
+  // `kind: "reddit"` and the route handler dispatches to
+  // redditAdapter.parseSourceUrl to resolve the real DB kind
+  // (reddit_account vs reddit_subreddit) from the URL shape. The DB
+  // column never stores "reddit".
   type SourceKind =
     | "youtube_channel"
-    | "reddit_account"
-    | "reddit_subreddit"
+    | "reddit"
     | "twitter_account"
     | "telegram_channel"
     | "discord_server";
 
   type KindLabelKey =
     | "source_kind_label_youtube_channel"
-    | "source_kind_label_reddit_account"
     | "source_kind_label_twitter_account"
     | "source_kind_label_telegram_channel"
     | "source_kind_label_discord_server"
-    // Reddit kinds paint with distinct labels per D-RDT-SOURCE-DISPLAY
-    // (Phase 03.1 plan 08): reddit_account → "Reddit user" (🧑 prefix
-    // rendered in the chip body); reddit_subreddit → "Subreddit" (🏛
-    // prefix). The labels live under `common_kind_*` keys so other
-    // surfaces (audit log filters, future per-kind chips) can reuse.
-    | "common_kind_reddit_user"
-    | "common_kind_reddit_subreddit";
+    | "common_kind_reddit";
 
   type KindStatusKey =
     | "source_kind_status_reddit_account"
@@ -119,7 +117,7 @@
   // form-action's parseSourceUrl iterator will auto-detect the kind on
   // submit; the hint signals "we recognize this and will do the right thing".
   const showRedditHint = $derived.by(() => {
-    if (selectedKind === "reddit_account" || selectedKind === "reddit_subreddit") return true;
+    if (selectedKind === "reddit") return true;
     return handleUrl.toLowerCase().includes("reddit");
   });
 
@@ -127,29 +125,23 @@
     switch (key) {
       case "source_kind_label_youtube_channel":
         return m.source_kind_label_youtube_channel();
-      case "source_kind_label_reddit_account":
-        return m.source_kind_label_reddit_account();
       case "source_kind_label_twitter_account":
         return m.source_kind_label_twitter_account();
       case "source_kind_label_telegram_channel":
         return m.source_kind_label_telegram_channel();
       case "source_kind_label_discord_server":
         return m.source_kind_label_discord_server();
-      case "common_kind_reddit_user":
-        return m.common_kind_reddit_user();
-      case "common_kind_reddit_subreddit":
-        return m.common_kind_reddit_subreddit();
+      case "common_kind_reddit":
+        return m.common_kind_reddit();
     }
   }
 
-  // Per D-RDT-SOURCE-DISPLAY (Phase 03.1 plan 08): Reddit chips show a
-  // small emoji prefix so reddit_account vs reddit_subreddit read at a
-  // glance. Other kinds return "" (no prefix). aria-hidden on the emoji
-  // span keeps screen readers from announcing the picto twice (the
-  // chip's text label already carries the meaning).
+  // Reddit chip carries both 🧑 and 🏛 so the user understands that the
+  // single chip handles both subreddits and user profiles — the backend
+  // resolves which by URL shape on submit. aria-hidden because the text
+  // label already carries the meaning.
   function chipPrefixFor(value: SourceKind): string {
-    if (value === "reddit_account") return "🧑";
-    if (value === "reddit_subreddit") return "🏛";
+    if (value === "reddit") return "🧑🏛";
     return "";
   }
 
@@ -248,10 +240,18 @@
         formError = m.sources_error_no_youtube_keys();
         return;
       }
+      if (res.status === 422 && body.error === "invalid_reddit_url") {
+        formError = m.sources_error_not_a_reddit_url();
+        return;
+      }
       if (res.status === 422 && body.error === "validation_failed") {
         // Generic 422 — most commonly "URL doesn't parse as a YouTube
-        // channel / handle / video URL" from createSource.
-        formError = m.sources_error_not_a_youtube_url();
+        // channel / handle / video URL" from createSource. For Reddit
+        // we surface `invalid_reddit_url` (above) before falling through.
+        formError =
+          selectedKind === "reddit"
+            ? m.sources_error_not_a_reddit_url()
+            : m.sources_error_not_a_youtube_url();
         return;
       }
       formError = m.error_server_generic();

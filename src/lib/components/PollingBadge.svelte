@@ -100,7 +100,7 @@
   let { event }: { event: EventForBadge } = $props();
 
   // PollingBadge is YouTube-only today; future source kinds (e.g. Reddit) extend this list.
-  const POLLABLE_KINDS = ["youtube_video"];
+  const POLLABLE_KINDS = ["youtube_video", "reddit_post"];
 
   // Defensive Date coercion — props may arrive as ISO strings.
   const publishedAt = $derived(
@@ -145,11 +145,20 @@
     | "refreshing"
     | "manual";
 
+  // 5s tolerance closes a paste-flow race: services/events.ts writes
+  // `last_user_refresh_at` AFTER syncStats.fetch's snapshot lands, so a
+  // freshly-pasted YouTube/Reddit row briefly looks like
+  // lastUserRefreshAt > lastPolledAt (by ~20–200ms) even though the poll
+  // actually completed. Real refresh-now flows take ≥ a full worker
+  // tick (Reddit pacer 7.5s, YouTube tick interval) before the badge
+  // is supposed to flip off, so a 5s tolerance keeps that case intact
+  // while removing the false-positive "Refresh queued" on paste.
+  const REFRESH_QUEUE_TOLERANCE_MS = 5_000;
   const refreshQueued = $derived.by(() => {
     if (lastUserRefreshAt === null) return false;
     if (now.getTime() - lastUserRefreshAt.getTime() > REFRESH_QUEUE_VISIBLE_MS) return false;
     if (lastPolledAt === null) return true;
-    return lastUserRefreshAt.getTime() > lastPolledAt.getTime();
+    return lastUserRefreshAt.getTime() > lastPolledAt.getTime() + REFRESH_QUEUE_TOLERANCE_MS;
   });
 
   const variant: Variant = $derived.by((): Variant => {

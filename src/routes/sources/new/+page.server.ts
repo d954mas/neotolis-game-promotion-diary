@@ -2,6 +2,7 @@ import type { Actions, PageServerLoad } from "./$types";
 import { fail, redirect } from "@sveltejs/kit";
 import { allAdapters } from "$lib/sources/registry.js";
 import { isRedditConfigured } from "$lib/sources/reddit/server/credentials.js";
+import { redditParseSourceUrl } from "$lib/sources/reddit/server/url.js";
 import { createSource } from "$lib/server/services/data-sources.js";
 import { AppError } from "$lib/server/services/errors.js";
 
@@ -40,20 +41,13 @@ export const load: PageServerLoad = async ({ locals, url }) => {
         disabled: false,
       },
       {
-        // reddit_account = Reddit user (/u/<handle>). Enabled iff operator
-        // configured REDDIT_USER_AGENT — D-RDT-AUTH-EMPTY. Per
-        // D-RDT-SOURCE-DISPLAY the chip paints with 🧑 + "Reddit user".
-        value: "reddit_account" as const,
-        labelKey: "common_kind_reddit_user" as const,
-        statusKey: redditOperatorConfigured ? null : "source_kind_status_reddit_account",
-        disabled: !redditOperatorConfigured,
-      },
-      {
-        // reddit_subreddit = Subreddit (/r/<sub>). Mirrors reddit_account
-        // enablement; per D-RDT-SOURCE-DISPLAY the chip paints with 🏛 +
-        // "Subreddit".
-        value: "reddit_subreddit" as const,
-        labelKey: "common_kind_reddit_subreddit" as const,
+        // Single "Reddit" chip — the backend resolves subreddit vs account
+        // from the URL shape via redditAdapter.parseSourceUrl. The user
+        // doesn't pre-pick; pasting reddit.com/r/X creates a subreddit
+        // source, reddit.com/user/X creates an account source. The /sources
+        // list still paints them distinctly (🏛 vs 🧑) via SourceRow.
+        value: "reddit" as const,
+        labelKey: "common_kind_reddit" as const,
         statusKey: redditOperatorConfigured ? null : "source_kind_status_reddit_account",
         disabled: !redditOperatorConfigured,
       },
@@ -158,8 +152,23 @@ export const actions: Actions = {
     if (resolvedKind === null) {
       // No adapter auto-detected. Fall back to the user-picked kind from
       // the chip selector — preserves the YouTube flow + future
-      // platforms that don't implement parseSourceUrl.
-      if (
+      // platforms that don't implement parseSourceUrl. The synthetic
+      // "reddit" picker entry needs a second pass through redditParseSourceUrl
+      // — if the URL was already auto-detectable the iterator above would
+      // have caught it, so reaching this branch with kindRaw="reddit"
+      // means the input is not a recognizable Reddit URL.
+      if (kindRaw === "reddit") {
+        const parsed = redditParseSourceUrl(handleUrl);
+        if (parsed === null) {
+          return fail(422, {
+            error: "invalid_reddit_url",
+            message: "URL does not look like a Reddit subreddit or user profile",
+          });
+        }
+        resolvedKind = parsed.kind;
+        resolvedHandleUrl = parsed.externalUrl;
+        resolvedDisplayName ??= parsed.handle;
+      } else if (
         kindRaw !== "youtube_channel" &&
         kindRaw !== "reddit_account" &&
         kindRaw !== "reddit_subreddit" &&
@@ -168,8 +177,9 @@ export const actions: Actions = {
         kindRaw !== "discord_server"
       ) {
         return fail(422, { error: "validation_failed", message: "kind required" });
+      } else {
+        resolvedKind = kindRaw;
       }
-      resolvedKind = kindRaw;
     }
 
     // SvelteKit's getClientAddress() returns the trusted-proxy-resolved

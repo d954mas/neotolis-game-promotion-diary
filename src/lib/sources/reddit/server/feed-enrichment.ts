@@ -31,6 +31,7 @@ import { db } from "$lib/server/db/client.js";
 import { logger } from "$lib/server/logger.js";
 import type { EventDto } from "$lib/server/dto.js";
 import {
+  redditPosts,
   redditPostSnapshots,
   redditSubredditsCache,
   redditSubredditBaselines,
@@ -61,6 +62,16 @@ export interface RedditEnrichment {
     p75Score24h: number | null;
     sampleSize: number;
   } | null;
+  /** Outbound link the post points at (t3.url). For self-text posts this
+   *  is the post permalink (Reddit normalises). For image posts on
+   *  i.redd.it / preview.redd.it / *.jpg|png|gif|webp the FeedCard
+   *  thumbnail resolver renders it as `<img>`. NULL until the worker /
+   *  paste flow has written the reddit_posts row. */
+  linkUrl: string | null;
+  /** First ≤200 chars of selftext when the post is self-text (NULL for
+   *  link posts). buildPostMetadata stores this in reddit_posts.metadata
+   *  so the diary stays metadata-thin (no novella-length blobs). */
+  bodyExcerpt: string | null;
 }
 
 /** Discriminator key for the in-place decoration. The card-props mapper
@@ -206,6 +217,27 @@ export async function enrichRedditFeedDtos(
       }
     }
 
+    // 5. Post metadata (link_url + body_excerpt) for FeedCard preview.
+    //    Keyed on the t3_-form post_id in reddit_posts; the JS Map keys on
+    //    BOTH t3 and bare forms so the dto-side lookup hits regardless of
+    //    which form events.externalId stores.
+    const postLinkMap = new Map<string, { linkUrl: string | null; bodyExcerpt: string | null }>();
+    const postRows = await db
+      .select({
+        postId: redditPosts.postId,
+        metadata: redditPosts.metadata,
+      })
+      .from(redditPosts)
+      .where(inArray(redditPosts.postId, lookupArr));
+    for (const r of postRows) {
+      const meta = (r.metadata ?? {}) as { link_url?: unknown; body_excerpt?: unknown };
+      const linkUrl = typeof meta.link_url === "string" ? meta.link_url : null;
+      const bodyExcerpt = typeof meta.body_excerpt === "string" ? meta.body_excerpt : null;
+      const value = { linkUrl, bodyExcerpt };
+      postLinkMap.set(r.postId, value);
+      if (r.postId.startsWith("t3_")) postLinkMap.set(r.postId.slice(3), value);
+    }
+
     // In-place decoration. Iterate redditDtos (the filtered subset)
     // and attach redditEnrichment to each. The card-props mapper
     // (ui/card-props.ts) reads via the same shape.
@@ -216,6 +248,7 @@ export async function enrichRedditFeedDtos(
         statsMap.get(`t3_${eid}`) ??
         statsMap.get(eid.replace(/^t3_/, "")) ??
         null;
+      const post = postLinkMap.get(eid) ?? null;
       const md = (dto.metadata ?? {}) as { subreddit?: string; author?: string };
       const sub = md.subreddit;
       const author = md.author;
@@ -224,6 +257,8 @@ export async function enrichRedditFeedDtos(
         subredditSubscribers: sub ? (subSubscribers.get(sub) ?? null) : null,
         authorKarma: author ? (authorKarma.get(author) ?? null) : null,
         baseline: sub ? (baselineMap.get(sub) ?? null) : null,
+        linkUrl: post?.linkUrl ?? null,
+        bodyExcerpt: post?.bodyExcerpt ?? null,
       };
     }
   } catch (err) {

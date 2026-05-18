@@ -42,11 +42,21 @@ import { writeAudit } from "$lib/server/audit.js";
 
 /** Two-axis sliding-window cap. Adapter declares the same shape via
  *  observability.userQuotaCap so cross-source code can read the cap
- *  values without hard-coding them. */
+ *  values without hard-coding them.
+ *
+ *  v0.1 calibration (15-min window, shared across both axes):
+ *    - sourceActionsPerWindow=5 — covers indie onboarding (paste 2-3
+ *      subreddits + 1-2 user profiles in one sitting) without forcing
+ *      delays between adds.
+ *    - postRefreshesPerWindow=30 — typical indie users hit refresh on
+ *      a handful of recent posts; 2/min sustained throughput is
+ *      plenty. Lower than the original 25/5min ratio on purpose:
+ *      v0.1 doesn't have enough multi-tenant signal to justify
+ *      letting one user burn 75 Reddit slots in 15 minutes. */
 export const REDDIT_USER_CAP = {
-  sourceActionsPerWindow: 1,
-  postRefreshesPerWindow: 25,
-  windowMinutes: 5,
+  sourceActionsPerWindow: 5,
+  postRefreshesPerWindow: 30,
+  windowMinutes: 15,
 } as const;
 
 export type RedditCapAxis = "source-actions" | "post-refreshes";

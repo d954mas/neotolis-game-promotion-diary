@@ -246,6 +246,9 @@ export async function getQueueDepth(): Promise<RedditQueueDepthRow[]> {
 export interface RedditDailyByType {
   total: number;
   byType: Record<RedditQueueType, number>;
+  /** All-time count of done rows across every lane — exposes the
+   *  cumulative request total alongside the 24h window. */
+  lifetimeTotal: number;
   capExhaustedCount: number;
   adapterDegradedSince: Date | null;
   adapterPausedUntil: Date | null;
@@ -307,9 +310,20 @@ export async function getDailyByType(): Promise<RedditDailyByType> {
 
   const pauseState = await getRedditAdapterPauseState();
 
+  const lifetimeResult = await db.execute(sql`
+    SELECT COUNT(*)::bigint AS count
+    FROM adapter_refresh_queue
+    WHERE adapter_kind = 'reddit_account'
+      AND status = 'done'
+  `);
+  const lifetimeTotal = Number(
+    (lifetimeResult as unknown as { rows: Array<{ count: string | number }> }).rows[0]?.count ?? 0,
+  );
+
   return {
     total,
     byType,
+    lifetimeTotal,
     capExhaustedCount,
     adapterDegradedSince,
     adapterPausedUntil: pauseState.isPaused ? pauseState.pausedUntil : null,

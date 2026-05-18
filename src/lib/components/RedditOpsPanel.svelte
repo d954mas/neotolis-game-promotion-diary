@@ -131,10 +131,16 @@
       <p class="reddit-ops__intro">{m.admin_reddit_daily_block_intro()}</p>
 
       {#if daily}
-        <p class="reddit-ops__total">
-          <span class="reddit-ops__total-num">{daily.total.toLocaleString()}</span>
-          <span class="reddit-ops__total-label">{m.admin_reddit_daily_total_label()}</span>
-        </p>
+        <div class="reddit-ops__totals">
+          <div class="reddit-ops__total-card">
+            <span class="reddit-ops__total-num">{daily.total.toLocaleString()}</span>
+            <span class="reddit-ops__total-label">за последние 24h</span>
+          </div>
+          <div class="reddit-ops__total-card">
+            <span class="reddit-ops__total-num">{daily.lifetimeTotal.toLocaleString()}</span>
+            <span class="reddit-ops__total-label">всего за всё время</span>
+          </div>
+        </div>
 
         <table class="reddit-ops__table">
           <thead>
@@ -273,11 +279,19 @@
     font-size: var(--font-size-small);
     margin-top: 2px;
   }
-  .reddit-ops__total {
-    margin: 0;
+  .reddit-ops__totals {
     display: flex;
-    align-items: baseline;
-    gap: var(--space-sm);
+    flex-wrap: wrap;
+    gap: var(--space-md);
+  }
+  .reddit-ops__total-card {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--space-sm) var(--space-md);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm, 4px);
+    min-width: 12rem;
   }
   .reddit-ops__total-num {
     font-size: var(--font-size-h2, 1.5rem);

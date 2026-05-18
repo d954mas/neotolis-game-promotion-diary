@@ -21,6 +21,7 @@
 import type {
   AdapterAppContext,
   AdapterContext,
+  AdapterPollState,
   SourceAdapter,
   EventKind,
   EventPreviewMetadata,
@@ -31,7 +32,8 @@ import type {
   SourceCreatedHookSource,
 } from "$lib/sources/adapter.js";
 import type { Hono } from "hono";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql, desc } from "drizzle-orm";
+import { redditPosts, redditPostSnapshots } from "./schema/index.js";
 import { QUEUES } from "$lib/server/queues.js";
 import { db, type DbOrTx, type Tx } from "$lib/server/db/client.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
@@ -489,6 +491,85 @@ function registerRoutes(app: Hono<AdapterAppContext>): void {
   app.route("/api", redditMetadataRoutes);
 }
 
+/**
+ * fetchPollStateMap — batch lookup of {publishedAt, lastPolledAt, lastPollStatus}
+ * keyed by externalId, consumed by the cross-source `loadVideoDataForEvents` overlay
+ * in `dto.ts`. PollingBadge + RefreshNowButton wake up once these three fields are
+ * non-null on the EventDto.
+ *
+ * Inputs may come in either Reddit id form — bare `abc123` or t3 `t3_abc123` —
+ * because events.externalId is written in either form depending on which ingest
+ * path created the row. `reddit_posts.post_id` is the t3 form; we normalize to it
+ * for the SELECT and then return BOTH forms in the result Map so the caller's
+ * lookup hits regardless of which form the events row carries.
+ *
+ * Reddit's per-post tables are PUBLIC-DATA (no user_id). The userId argument is
+ * accepted for the contract but unused — upstream `loadVideoDataForEvents`
+ * already filters by tenant before this is called.
+ */
+async function fetchPollStateMap(
+  _userId: string,
+  externalIds: readonly string[],
+): Promise<Map<string, AdapterPollState>> {
+  const map = new Map<string, AdapterPollState>();
+  if (externalIds.length === 0) return map;
+
+  // Normalize both directions: caller may pass bare id or t3 form; DB stores t3.
+  const tFormIds = new Set<string>();
+  for (const id of externalIds) {
+    tFormIds.add(id.startsWith("t3_") ? id : `t3_${id}`);
+  }
+  const lookup = [...tFormIds];
+
+  // `last_snapshot_at` on reddit_posts is an EXACT (non-truncated) wall-clock
+  // timestamp stamped by upsertRedditPost on every UPSERT (i.e. every successful
+  // poll). `reddit_post_snapshots.polled_at` is minute-truncated for in-bucket
+  // idempotency, so it's NOT usable for the "did the poll finish after the
+  // user's refresh click?" comparison that PollingBadge.refreshQueued runs.
+  // Using last_snapshot_at here lets the badge correctly flip from
+  // "Refresh queued" → "Updated just now" within seconds of the worker tick.
+  const postRows = await db
+    .select({
+      postId: redditPosts.postId,
+      submittedAt: redditPosts.submittedAt,
+      lastSnapshotAt: redditPosts.lastSnapshotAt,
+    })
+    .from(redditPosts)
+    .where(inArray(redditPosts.postId, lookup));
+
+  // Latest snapshot row still scanned for `status` — that field doesn't live
+  // on reddit_posts (it's per-snapshot lifecycle: ok / removed / archived /
+  // not_found). ORDER BY post_id, polled_at DESC + manual DISTINCT ON picks
+  // the freshest row per post.
+  const snapRows = await db
+    .select({
+      postId: redditPostSnapshots.postId,
+      status: redditPostSnapshots.status,
+    })
+    .from(redditPostSnapshots)
+    .where(inArray(redditPostSnapshots.postId, lookup))
+    .orderBy(redditPostSnapshots.postId, desc(redditPostSnapshots.polledAt));
+
+  const latestStatus = new Map<string, string>();
+  for (const r of snapRows) {
+    if (latestStatus.has(r.postId)) continue;
+    latestStatus.set(r.postId, r.status);
+  }
+
+  for (const p of postRows) {
+    const state: AdapterPollState = {
+      publishedAt: p.submittedAt,
+      lastPolledAt: p.lastSnapshotAt,
+      lastPollStatus: latestStatus.get(p.postId) ?? null,
+    };
+    map.set(p.postId, state);
+    // Also publish under the bare-id key so callers that key on the form
+    // stored on events.externalId hit regardless of which form was used.
+    if (p.postId.startsWith("t3_")) map.set(p.postId.slice(3), state);
+  }
+  return map;
+}
+
 function validateEventInput(input: { kind: string; url?: string | null }): void {
   if (input.kind !== "reddit_post") return;
   if (!input.url) {
@@ -591,6 +672,7 @@ export const redditAdapter: SourceAdapter & typeof redditAdapterCore = {
     ],
   },
   validateEventInput,
+  fetchPollStateMap,
 };
 
 // Re-export the Reddit-only observability helpers so /admin's Reddit
