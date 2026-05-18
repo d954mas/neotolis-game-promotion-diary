@@ -246,8 +246,16 @@ export async function getQueueDepth(): Promise<RedditQueueDepthRow[]> {
 export interface RedditDailyByType {
   total: number;
   byType: Record<RedditQueueType, number>;
-  /** All-time count of done rows across every lane — exposes the
-   *  cumulative request total alongside the 24h window. */
+  /** Count of done rows across every lane in `adapter_refresh_queue`.
+   *  NOTE: despite the field name, this is effectively a 7-day rolling
+   *  count — the `deletion-propagation-cron` purges done/dead_letter
+   *  rows older than 7 days. The UI surfaces this as "за последние 7
+   *  дней" rather than "lifetime". A genuine all-time counter would
+   *  need a dedicated table or an audit row written from every fetch
+   *  path (including paste-flow `claimUserPostRefreshAttempt`, which
+   *  bypasses the worker's `reddit.queue_drained` audit). Deferred to
+   *  Phase 03.2; the operator-only panel can live with the rolling
+   *  window for now. */
   lifetimeTotal: number;
   capExhaustedCount: number;
   adapterDegradedSince: Date | null;

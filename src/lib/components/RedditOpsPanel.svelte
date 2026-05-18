@@ -138,7 +138,8 @@
           </div>
           <div class="reddit-ops__total-card">
             <span class="reddit-ops__total-num">{daily.lifetimeTotal.toLocaleString()}</span>
-            <span class="reddit-ops__total-label">всего за всё время</span>
+            <span class="reddit-ops__total-label">за последние 7 дней</span>
+            <span class="reddit-ops__total-hint"> done-строки очереди чистятся через 7 дней </span>
           </div>
         </div>
 
@@ -301,6 +302,12 @@
   .reddit-ops__total-label {
     color: var(--color-text-muted);
     font-size: var(--font-size-small);
+  }
+  .reddit-ops__total-hint {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-xs, 0.75rem);
+    opacity: 0.7;
+    margin-top: var(--space-2xs, 2px);
   }
   .reddit-ops__alarm {
     margin: var(--space-xs) 0 0 0;
