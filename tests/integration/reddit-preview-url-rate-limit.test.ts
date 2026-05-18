@@ -110,7 +110,9 @@ describe("Reddit preview-url rate-limit mapping", () => {
       email: `reddit-preview-cap-${uuidv7()}@test.local`,
     });
     const now = new Date();
-    for (let i = 0; i < 25; i++) {
+    // Seed up to REDDIT_USER_CAP.postRefreshesPerWindow rows so the next
+    // preview call lands ON the cap. Recalibrated v0.1 cap = 30 / 15 min.
+    for (let i = 0; i < 30; i++) {
       await db.insert(adapterRefreshQueue).values({
         adapterKind: "reddit_account",
         queueName: "user_post",

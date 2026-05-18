@@ -45,48 +45,50 @@ beforeEach(async () => {
 });
 
 describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
-  it("REDDIT_USER_CAP constants — 1 / 25 / 5", () => {
-    expect(REDDIT_USER_CAP.sourceActionsPerWindow).toBe(1);
-    expect(REDDIT_USER_CAP.postRefreshesPerWindow).toBe(25);
-    expect(REDDIT_USER_CAP.windowMinutes).toBe(5);
+  it("REDDIT_USER_CAP constants — 5 / 30 / 15 (v0.1 UAT recalibration)", () => {
+    expect(REDDIT_USER_CAP.sourceActionsPerWindow).toBe(5);
+    expect(REDDIT_USER_CAP.postRefreshesPerWindow).toBe(30);
+    expect(REDDIT_USER_CAP.windowMinutes).toBe(15);
   });
 
-  it("fresh user with 0 history — allowed=true, used=0, reset_in_seconds=300", async () => {
+  it("fresh user with 0 history — allowed=true, used=0, reset_in_seconds=900", async () => {
     const result = await checkRedditUserCap(db, userA, "source-actions");
     expect(result.allowed).toBe(true);
     expect(result.used).toBe(0);
-    expect(result.cap).toBe(1);
-    expect(result.window_minutes).toBe(5);
-    expect(result.reset_in_seconds).toBe(300);
+    expect(result.cap).toBe(5);
+    expect(result.window_minutes).toBe(15);
+    expect(result.reset_in_seconds).toBe(900);
     expect(result.axis).toBe("source-actions");
   });
 
-  it("V11: source-actions 1/5min — 2nd attempt within window → allowed=false", async () => {
-    // INSERT one user_source queue row for userA. The first source-action
-    // (createSource or refresh-content) enqueues the row; the cap check
-    // models the NEXT attempt and reports it as denied.
+  it("V11: source-actions 5/15min — 6th attempt within window → allowed=false", async () => {
+    // INSERT five user_source queue rows for userA. The cap models the
+    // NEXT attempt; with 5 prior actions on the lane the 6th must deny.
     // Note: migrated from audit_log-based counter to queue-based counter
     // (matches post-refreshes axis). createSource writes verb='source.added'
     // which the audit-log counter never saw — silent bypass — and queue
     // rows from onSourceCreated are the actual evidence of work happening.
-    await db.execute(sql`
-      INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority)
-      VALUES ('reddit_account', 'user_source', 'sub_poll', '{"sub":"IndieDev"}'::jsonb, ${userA}, 1)
-    `);
+    for (let i = 0; i < 5; i++) {
+      await db.execute(sql`
+        INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority)
+        VALUES ('reddit_account', 'user_source', 'sub_poll',
+                ${`{"sub":"IndieDev_${i}"}`}::jsonb, ${userA}, 1)
+      `);
+    }
     const result = await checkRedditUserCap(db, userA, "source-actions");
     expect(result.allowed).toBe(false);
-    expect(result.used).toBe(1);
-    expect(result.cap).toBe(1);
-    expect(result.window_minutes).toBe(5);
+    expect(result.used).toBe(5);
+    expect(result.cap).toBe(5);
+    expect(result.window_minutes).toBe(15);
     expect(result.reset_in_seconds).toBeGreaterThanOrEqual(1);
-    expect(result.reset_in_seconds).toBeLessThanOrEqual(300);
+    expect(result.reset_in_seconds).toBeLessThanOrEqual(900);
   });
 
-  it("source-actions: 5+ min old queue rows do NOT count (window slides)", async () => {
+  it("source-actions: 15+ min old queue rows do NOT count (window slides)", async () => {
     await db.execute(sql`
       INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority, enqueued_at)
       VALUES ('reddit_account', 'user_source', 'sub_poll', '{"sub":"old"}'::jsonb, ${userA}, 1,
-              NOW() - INTERVAL '10 minutes')
+              NOW() - INTERVAL '20 minutes')
     `);
     const result = await checkRedditUserCap(db, userA, "source-actions");
     expect(result.allowed).toBe(true);
@@ -117,8 +119,8 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
     expect(result.used).toBe(0);
   });
 
-  it("V12: post-refreshes 25/5min — 26th in user_post queue → allowed=false", async () => {
-    for (let i = 0; i < 25; i++) {
+  it("V12: post-refreshes 30/15min — 31st in user_post queue → allowed=false", async () => {
+    for (let i = 0; i < 30; i++) {
       await db.execute(sql`
         INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority)
         VALUES ('reddit_account', 'user_post', 'post_single',
@@ -127,14 +129,14 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
     }
     const result = await checkRedditUserCap(db, userA, "post-refreshes");
     expect(result.allowed).toBe(false);
-    expect(result.used).toBe(25);
-    expect(result.cap).toBe(25);
-    expect(result.window_minutes).toBe(5);
+    expect(result.used).toBe(30);
+    expect(result.cap).toBe(30);
+    expect(result.window_minutes).toBe(15);
     expect(result.axis).toBe("post-refreshes");
   });
 
-  it("post-refreshes: 24 rows in window → 25th still allowed", async () => {
-    for (let i = 0; i < 24; i++) {
+  it("post-refreshes: 29 rows in window → 30th still allowed", async () => {
+    for (let i = 0; i < 29; i++) {
       await db.execute(sql`
         INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority)
         VALUES ('reddit_account', 'user_post', 'post_single',
@@ -143,7 +145,7 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
     }
     const result = await checkRedditUserCap(db, userA, "post-refreshes");
     expect(result.allowed).toBe(true);
-    expect(result.used).toBe(24);
+    expect(result.used).toBe(29);
   });
 
   it("V13: service-cron rows (user_id IS NULL) excluded from post-refreshes counter", async () => {
@@ -171,11 +173,11 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
     expect(result.used).toBe(0);
   });
 
-  it("post-refreshes: 6+ min old queue rows do NOT count (window slides)", async () => {
+  it("post-refreshes: 15+ min old queue rows do NOT count (window slides)", async () => {
     await db.execute(sql`
       INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority, enqueued_at)
       VALUES ('reddit_account', 'user_post', 'post_single', '{"post_id":"t3_old"}'::jsonb, ${userA}, 1,
-              NOW() - INTERVAL '10 minutes')
+              NOW() - INTERVAL '20 minutes')
     `);
     const result = await checkRedditUserCap(db, userA, "post-refreshes");
     expect(result.allowed).toBe(true);
@@ -187,8 +189,8 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
       userId: userA,
       ipAddress: "127.0.0.1",
       axis: "source-actions",
-      cap: 1,
-      used: 1,
+      cap: 5,
+      used: 5,
     });
     const result = await db.execute(sql`
       SELECT action, metadata FROM audit_log
@@ -201,9 +203,9 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
     expect(rows.length).toBe(1);
     expect(rows[0]!.action).toBe("reddit.cap_exhausted");
     expect(rows[0]!.metadata.cap_type).toBe("source");
-    expect(rows[0]!.metadata.cap).toBe(1);
-    expect(rows[0]!.metadata.used).toBe(1);
-    expect(rows[0]!.metadata.window_minutes).toBe(5);
+    expect(rows[0]!.metadata.cap).toBe(5);
+    expect(rows[0]!.metadata.used).toBe(5);
+    expect(rows[0]!.metadata.window_minutes).toBe(15);
   });
 
   it("writeRedditCapExhaustedAudit emits audit_log row with cap_type='post' for post axis", async () => {
@@ -211,8 +213,8 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
       userId: userA,
       ipAddress: "127.0.0.1",
       axis: "post-refreshes",
-      cap: 25,
-      used: 25,
+      cap: 30,
+      used: 30,
     });
     const result = await db.execute(sql`
       SELECT metadata FROM audit_log
@@ -223,8 +225,8 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
     }>;
     expect(rows.length).toBe(1);
     expect(rows[0]!.metadata.cap_type).toBe("post");
-    expect(rows[0]!.metadata.cap).toBe(25);
-    expect(rows[0]!.metadata.used).toBe(25);
+    expect(rows[0]!.metadata.cap).toBe(30);
+    expect(rows[0]!.metadata.used).toBe(30);
   });
 
   it("redditCapErrorCode maps axes to D-RDT-CAP-EXCEED error codes", () => {

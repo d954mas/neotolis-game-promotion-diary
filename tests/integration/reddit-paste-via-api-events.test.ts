@@ -160,11 +160,12 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
     expect(evRows).toHaveLength(2);
   });
 
-  it("cap enforcement — 25 prior user_post done-rows → 26th paste creates event but skips Reddit fetch", async () => {
+  it("cap enforcement — 30 prior user_post done-rows → 31st paste creates event but skips Reddit fetch", async () => {
     const u = await seedUserDirectly({ email: `reddit-paste-cap-${uuidv7()}@test.local` });
-    // Pre-seed 25 done-rows on user_post lane within last 5 min.
+    // Pre-seed 30 done-rows on user_post lane within the 15-min window
+    // (REDDIT_USER_CAP.postRefreshesPerWindow=30 / windowMinutes=15).
     const now = new Date();
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < 30; i++) {
       await db.insert(adapterRefreshQueue).values({
         adapterKind: "reddit_account",
         queueName: "user_post",
@@ -184,7 +185,7 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
       u.id,
       {
         kind: "reddit_post",
-        title: "26th paste",
+        title: "31st paste",
         occurredAt: new Date(),
         url: "https://www.reddit.com/r/IndieDev/comments/blocked/test/",
       },

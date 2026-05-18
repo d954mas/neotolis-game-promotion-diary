@@ -299,7 +299,9 @@ describe("refresh-poll cooldown service", () => {
       url: "https://www.reddit.com/r/IndieDev/comments/abc_blocked/test/",
     });
     const now = new Date();
-    for (let i = 0; i < 25; i++) {
+    // Seed REDDIT_USER_CAP.postRefreshesPerWindow rows so the next refresh
+    // hits the cap (recalibrated v0.1: 30 per 15-min window).
+    for (let i = 0; i < 30; i++) {
       await db.insert(adapterRefreshQueue).values({
         adapterKind: "reddit_account",
         queueName: "user_post",
