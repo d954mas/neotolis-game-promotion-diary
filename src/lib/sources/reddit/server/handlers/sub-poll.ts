@@ -353,6 +353,19 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
       const key = `${sub_row.userId}|${sub_row.id}|${fullId}`;
       if (existingSet.has(key)) continue;
 
+      // Per-subscriber backfill window — every subscriber chose a depth
+      // (everything / 1y / 90d / 30d / 7d / 1d) at /sources/new time.
+      // The walker fetches up to Reddit's ~1000-item public cap into
+      // the cross-tenant reddit_posts cache, but each subscriber only
+      // gets events back to their personal target. NULL means no
+      // restriction (default for legacy rows pre-backfill_target_since).
+      if (
+        sub_row.backfillTargetSince !== null &&
+        submittedAt < sub_row.backfillTargetSince
+      ) {
+        continue;
+      }
+
       // Strict author-match — see ownedHandlesByUser computation above
       // for the rationale.
       const authorIsMe =

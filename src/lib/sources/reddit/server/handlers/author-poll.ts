@@ -285,6 +285,17 @@ async function fanOutToSubscribers(
       const key = `${sub_row.userId}|${sub_row.id}|${fullId}`;
       if (existingSet.has(key)) continue;
 
+      // Per-subscriber backfill window — see sub-poll.ts for the same
+      // filter on the subreddit fan-out path. Walker fetches up to
+      // Reddit's ~1000-item cap into reddit_posts; each subscriber's
+      // events only go back to their personal backfillTargetSince.
+      if (
+        sub_row.backfillTargetSince !== null &&
+        submittedAt < sub_row.backfillTargetSince
+      ) {
+        continue;
+      }
+
       const authorIsMe = sub_row.isOwnedByMe;
 
       const ins = await db
