@@ -18,6 +18,7 @@ export async function enqueueServiceVideoStats(
       );
     }
 
+    // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- service_video lane scan: cron writes user_id=NULL across all tenants
     const existing = await tx
       .select({
         videoId: sql<string>`${adapterRefreshQueue.payload}->>'video_id'`,

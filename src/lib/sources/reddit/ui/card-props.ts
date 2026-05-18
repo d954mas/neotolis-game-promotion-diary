@@ -81,7 +81,9 @@ export function toCardProps(event: RedditEventLite): CardProps {
     badge: event.authorIsMe
       ? m.card_reddit_badge_mine()
       : isUnderperforming
-        ? "⚠ Underperforming median"
+        ? m.feed_card_reddit_baseline_underperforming({
+            pct: String(Math.round((stats!.score / baseline!.medianScore24h!) * 100)),
+          })
         : null,
     metrics: stats
       ? [

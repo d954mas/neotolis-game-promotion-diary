@@ -1,4 +1,5 @@
--- Phase 03.1 case-insensitive Reddit identifiers — data-only migration.
+-- Phase 03.1 case-insensitive Reddit identifiers — schema FK CASCADE +
+-- data lowercase migration.
 --
 -- Reddit treats subreddit names and usernames as case-insensitive:
 -- `r/IndieDev`, `r/indiedev`, and `r/INDIEDEV` all resolve to the same
@@ -9,21 +10,68 @@
 --
 -- Going forward the parser + upsert helpers lowercase at the write
 -- boundary (see src/lib/sources/reddit/server/url.ts +
--- src/lib/sources/reddit/server/upsert.ts). This migration backfills
--- existing rows to the canonical lowercase form so the new code path
--- and the historical data agree.
+-- src/lib/sources/reddit/server/upsert.ts). This migration:
+--
+--   (a) ALTERs the three child→parent FKs on the cache PKs to use
+--       ON UPDATE CASCADE / ON DELETE CASCADE. Pre-fix the FKs were
+--       NO ACTION which would FAIL the cache-PK lowercase UPDATE when
+--       any snapshot/baseline rows already existed. CASCADE is the
+--       correct long-term semantics for case-insensitive identifiers:
+--       a parent PK rename re-points children automatically; a parent
+--       row drop (collision dedup) also drops its derived snapshots.
+--
+--   (b) Backfills existing rows to the canonical lowercase form so the
+--       new code path and the historical data agree (cache PKs +
+--       descriptive columns + jsonb metadata on data_sources + events).
+--
+--   (c) Lowercases data_sources.handle_url for Reddit kinds so the
+--       (user_id, handle_url) unique index in
+--       `data_sources_user_handle_active_unq` actually catches the
+--       case-insensitive duplicate that the duplicate-source check in
+--       services/data-sources.ts compares exact-equality against.
+--       Without this, a pre-existing `.../r/IndieDev` row would coexist
+--       with a freshly canonicalised `.../r/indiedev` paste.
 --
 -- Collision handling: where the same lowercase identifier already
 -- exists with a different display case (e.g. cache row for both
--- "IndieDev" and "indiedev"), the older row is dropped — losing a few
--- minutes of stale snapshot data is acceptable; the next poll
--- repopulates the surviving row. ctid comparison picks the newer
--- physical row deterministically.
---
--- No schema change: drizzle/meta/0040_snapshot.json is identical to
--- 0039 (data migration only).
+-- "IndieDev" and "indiedev"), the older row is dropped. With ON DELETE
+-- CASCADE the loser's derived snapshots cascade with it — losing a
+-- handful of stale rows is acceptable; the next poll repopulates from
+-- the surviving canonical row.
 
--- 1. reddit_subreddits_cache.name (PK). Drop collisions first.
+-- ---------------------------------------------------------------------
+-- 0. ALTER FKs to ON UPDATE CASCADE / ON DELETE CASCADE before any
+--    UPDATE/DELETE on the parent PKs. Three child FKs need this:
+--      reddit_subreddit_snapshots.subreddit  → reddit_subreddits_cache.name
+--      reddit_subreddit_baselines.subreddit  → reddit_subreddits_cache.name
+--      reddit_user_snapshots.username        → reddit_users_cache.username
+-- ---------------------------------------------------------------------
+ALTER TABLE "reddit_subreddit_snapshots"
+  DROP CONSTRAINT IF EXISTS "reddit_subreddit_snapshots_subreddit_fk";
+ALTER TABLE "reddit_subreddit_snapshots"
+  ADD CONSTRAINT "reddit_subreddit_snapshots_subreddit_fk"
+    FOREIGN KEY ("subreddit") REFERENCES "reddit_subreddits_cache"("name")
+    ON UPDATE CASCADE ON DELETE CASCADE;
+
+ALTER TABLE "reddit_subreddit_baselines"
+  DROP CONSTRAINT IF EXISTS "reddit_subreddit_baselines_subreddit_fk";
+ALTER TABLE "reddit_subreddit_baselines"
+  ADD CONSTRAINT "reddit_subreddit_baselines_subreddit_fk"
+    FOREIGN KEY ("subreddit") REFERENCES "reddit_subreddits_cache"("name")
+    ON UPDATE CASCADE ON DELETE CASCADE;
+
+ALTER TABLE "reddit_user_snapshots"
+  DROP CONSTRAINT IF EXISTS "reddit_user_snapshots_username_fk";
+ALTER TABLE "reddit_user_snapshots"
+  ADD CONSTRAINT "reddit_user_snapshots_username_fk"
+    FOREIGN KEY ("username") REFERENCES "reddit_users_cache"("username")
+    ON UPDATE CASCADE ON DELETE CASCADE;
+
+-- ---------------------------------------------------------------------
+-- 1. reddit_subreddits_cache.name (PK). Drop collisions first (cascade
+--    drops their derived snapshot/baseline rows). Then UPDATE remaining
+--    rows — the cascade re-points child snapshots to the lowercase PK.
+-- ---------------------------------------------------------------------
 DELETE FROM reddit_subreddits_cache a
 USING reddit_subreddits_cache b
 WHERE a.name <> b.name
@@ -33,7 +81,7 @@ UPDATE reddit_subreddits_cache
 SET name = LOWER(name)
 WHERE name <> LOWER(name);
 
--- 2. reddit_users_cache.username (PK). Same collision drop + lowercase.
+-- 2. reddit_users_cache.username (PK). Same collision + cascade flow.
 DELETE FROM reddit_users_cache a
 USING reddit_users_cache b
 WHERE a.username <> b.username
@@ -43,8 +91,8 @@ UPDATE reddit_users_cache
 SET username = LOWER(username)
 WHERE username <> LOWER(username);
 
--- 3. reddit_posts.subreddit + reddit_posts.author. No collisions
---    possible — post_id is the PK; these columns are descriptive.
+-- 3. reddit_posts.subreddit + reddit_posts.author. No FK on these
+--    columns (free-text descriptive); UPDATE is direct.
 UPDATE reddit_posts
 SET subreddit = LOWER(subreddit)
 WHERE subreddit <> LOWER(subreddit);
@@ -76,7 +124,42 @@ WHERE kind::text = 'reddit_account'
   AND metadata ? 'username'
   AND metadata->>'username' <> LOWER(metadata->>'username');
 
--- 5. events.metadata.{subreddit,author} for reddit_post events. Display
+-- 5. data_sources.handle_url for Reddit kinds.
+--    Lowercased so the unique-index dup check
+--    `(user_id, handle_url) WHERE deleted_at IS NULL` actually catches a
+--    second paste of the same subreddit in different case. Without this
+--    step `'.../r/IndieDev'` and `'.../r/indiedev'` are distinct strings
+--    and both rows would coexist for one user.
+--
+--    Collision: if the unique index would be violated (the SAME user
+--    has BOTH casings of the same handle as active rows), soft-delete
+--    the loser (older `last_metadata_refresh_at`-style proxy via
+--    created_at) so the active-row partial index has room for the
+--    surviving lowercase form. ON CONFLICT path is needed because the
+--    unique index is partial (`WHERE deleted_at IS NULL`); a plain
+--    UPDATE would 23505 on the collision.
+WITH collisions AS (
+  SELECT a.id AS loser_id
+  FROM data_sources a
+  JOIN data_sources b
+    ON a.user_id = b.user_id
+    AND a.id <> b.id
+    AND a.deleted_at IS NULL
+    AND b.deleted_at IS NULL
+    AND LOWER(a.handle_url) = LOWER(b.handle_url)
+    AND a.created_at < b.created_at
+  WHERE a.kind::text IN ('reddit_account', 'reddit_subreddit')
+)
+UPDATE data_sources
+SET deleted_at = NOW()
+WHERE id IN (SELECT loser_id FROM collisions);
+
+UPDATE data_sources
+SET handle_url = LOWER(handle_url)
+WHERE kind::text IN ('reddit_account', 'reddit_subreddit')
+  AND handle_url <> LOWER(handle_url);
+
+-- 6. events.metadata.{subreddit,author} for reddit_post events. Display
 --    surface only; chips render the canonical lowercase form. Same enum
 --    cast rationale as above — `reddit_post` may have been freshly
 --    ADDed to the event_kind enum earlier in the same drizzle batch tx.
