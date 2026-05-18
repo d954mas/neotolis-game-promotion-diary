@@ -187,10 +187,15 @@ export interface AdapterQuotaCounter {
  *  - requestsPerDay вЂ” cap on API calls (YouTube; 24h rolling).
  *  - eventsPerDay вЂ” cap on user-INSERTed events (YouTube; 24h rolling).
  *
- *  Reddit (Phase 03.1, two-axis sliding window вЂ” DV-RDT-7):
- *  - sourceActionsPerWindow вЂ” register/refresh-source quota (default 1).
- *  - postRefreshesPerWindow вЂ” manual post refresh quota (default 25).
- *  - windowMinutes вЂ” sliding-window length for source/post axes (default 5).
+ *  Reddit (Phase 03.1, two-axis sliding window — DV-RDT-7):
+ *  - sourceActionsPerWindow — register/refresh-source quota (default 5,
+ *    v0.1 UAT recalibration; was 1 in the initial draft).
+ *  - postRefreshesPerWindow — manual post refresh quota (default 30,
+ *    v0.1 UAT recalibration; was 25).
+ *  - windowMinutes — sliding-window length for source/post axes (default 15,
+ *    v0.1 UAT recalibration; was 5). Authoritative value lives in
+ *    src/lib/sources/reddit/server/quota.ts REDDIT_USER_CAP — both
+ *    surfaces import from there so this jsdoc stays informational.
  *
  *  Counter source (Reddit): adapter_refresh_queue rows with
  *  adapter_kind='reddit_account' and user_id=$user in the last

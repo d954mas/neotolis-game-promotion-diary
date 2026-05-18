@@ -352,6 +352,15 @@ export async function getRecentLoad(
   // Queue table is operator-pool counter; cross-tenant aggregation by
   // design for the service-load gauge. Raw-SQL path bypasses the
   // tenant-scope rule, but documenting the rationale here.
+  //
+  // Filter out paste-flow done-rows: handlePostSingle writes a
+  // status='done' row directly on user_post for cap-counter bookkeeping
+  // (post-single.ts claimUserPostRefreshAttempt), bypassing the 8-tick
+  // worker. Those rows are pacer-driven, not slot-driven, so mixing
+  // them into the slot-load gauge would over-report the worker's actual
+  // throughput. The payload->>'flow' = 'paste' marker is written by
+  // claimUserPostRefreshAttempt; everything else (sub_poll, author_poll,
+  // post_batch, refresh-now) is genuine slot usage and counts.
   const result = await db.execute(sql`
     SELECT COUNT(*)::int AS used
     FROM adapter_refresh_queue
@@ -359,6 +368,7 @@ export async function getRecentLoad(
       AND status = 'done'
       AND queue_name IN ('user_source', 'user_post')
       AND last_attempt_at >= NOW() - make_interval(secs => ${seconds})
+      AND (payload->>'flow' IS NULL OR payload->>'flow' <> 'paste')
   `);
   const used = Number(
     (result as unknown as { rows: Array<{ used: number | string }> }).rows[0]?.used ?? 0,

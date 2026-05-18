@@ -12,7 +12,7 @@
 // burn attempts.
 
 import { sql } from "drizzle-orm";
-import { db, type DbOrTx } from "../db/client.js";
+import { db, type DbOrTx, type Tx } from "../db/client.js";
 import { logger } from "../logger.js";
 import { AdapterError } from "$lib/sources/errors.js";
 
@@ -59,7 +59,11 @@ export interface AdapterLaneClaimGateContext<TLane extends string> {
   queueName: TLane;
   rows: readonly AdapterLaneWorkerRow[];
   now: Date;
-  tx: DbOrTx;
+  // tryClaimAndDispatch always invokes claimGate inside an open
+  // transaction (FOR UPDATE SKIP LOCKED has already pinned the row),
+  // so the gate sees a real Tx, not a top-level db handle. Narrow type
+  // makes that contract explicit.
+  tx: Tx;
 }
 
 export interface AdapterLaneDispatchContext<TPermit = unknown> {

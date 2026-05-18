@@ -173,58 +173,68 @@ export async function handlePostSingle(args: {
     ? t3.permalink
     : `https://www.reddit.com${t3.permalink}`;
 
-  // UPSERT subreddit cache first (FK target). Minimum-info INSERT —
-  // sub_poll cron later fills in subscribers / description / rules.
-  await upsertRedditSubreddit(db, {
-    name: t3.subreddit,
-    subredditId: t3.subreddit_id ?? null,
-    subscribers: null,
-    accountsActive: null,
-    description: null,
-    publicDescription: null,
-  });
-
-  // UPSERT author cache (FK target for reddit_user_snapshots, even though
-  // we don't write a user snapshot here — that's author_poll's job).
-  if (author !== null) {
-    await upsertRedditUser(db, {
-      username: author,
-      redditId: authorFullname,
-      accountAgeDays: null,
-      linkKarma: null,
-      commentKarma: null,
-      totalKarma: null,
-      isSuspended: false,
-    });
-  }
-
-  // UPSERT the post row + write one snapshot in the same minute window.
-  await upsertRedditPost(db, {
-    postId: fullId,
-    subreddit: t3.subreddit,
-    author,
-    authorFullname,
-    permalink,
-    title: t3.title,
-    submittedAt,
-    metadata: buildPostMetadata(t3),
-  });
-
+  // All five cache writes go through one transaction so a crash mid-
+  // chain leaves no intermediate state (e.g. reddit_posts written but
+  // reddit_post_snapshots missing — readCachedPost would have to
+  // re-fetch). Pre-fix the writes were sequential at the top-level db
+  // handle, which left a small window between upsertRedditPost and
+  // writeRedditPostSnapshot where the cache row existed without a
+  // snapshot.
   const snapStatus = classifySnapshotStatus(t3);
-  await writeRedditPostSnapshot(db, {
-    postId: fullId,
-    score: t3.score ?? null,
-    numComments: t3.num_comments ?? null,
-    awardsTotal: t3.total_awards_received ?? null,
-    upvoteRatio: t3.upvote_ratio ?? null,
-    removedByCategory: t3.removed_by_category ?? null,
-    status: snapStatus,
+  await db.transaction(async (tx) => {
+    // UPSERT subreddit cache first (FK target). Minimum-info INSERT —
+    // sub_poll cron later fills in subscribers / description / rules.
+    await upsertRedditSubreddit(tx, {
+      name: t3.subreddit,
+      subredditId: t3.subreddit_id ?? null,
+      subscribers: null,
+      accountsActive: null,
+      description: null,
+      publicDescription: null,
+    });
+
+    // UPSERT author cache (FK target for reddit_user_snapshots, even
+    // though we don't write a user snapshot here — that's author_poll's
+    // job).
+    if (author !== null) {
+      await upsertRedditUser(tx, {
+        username: author,
+        redditId: authorFullname,
+        accountAgeDays: null,
+        linkKarma: null,
+        commentKarma: null,
+        totalKarma: null,
+        isSuspended: false,
+      });
+    }
+
+    // UPSERT the post row + write one snapshot in the same minute window.
+    await upsertRedditPost(tx, {
+      postId: fullId,
+      subreddit: t3.subreddit,
+      author,
+      authorFullname,
+      permalink,
+      title: t3.title,
+      submittedAt,
+      metadata: buildPostMetadata(t3),
+    });
+
+    await writeRedditPostSnapshot(tx, {
+      postId: fullId,
+      score: t3.score ?? null,
+      numComments: t3.num_comments ?? null,
+      awardsTotal: t3.total_awards_received ?? null,
+      upvoteRatio: t3.upvote_ratio ?? null,
+      removedByCategory: t3.removed_by_category ?? null,
+      status: snapStatus,
+    });
+    // Stamp deletion timer on first removed/not_found snapshot.
+    // Idempotent and skipped on 'ok'/'archived'. Closes the gap where
+    // dead posts re-poll forever and Reddit Public Content Policy
+    // 48h-purge never fires.
+    await markPostDeletionDetectedIfNeeded(tx, fullId, snapStatus);
   });
-  // Stamp deletion timer on first removed/not_found snapshot. Idempotent
-  // and skipped on 'ok'/'archived'. Closes the gap where dead posts
-  // re-poll forever and Reddit Public Content Policy 48h-purge never
-  // fires.
-  await markPostDeletionDetectedIfNeeded(db, fullId, snapStatus);
 
   logger.debug(
     {

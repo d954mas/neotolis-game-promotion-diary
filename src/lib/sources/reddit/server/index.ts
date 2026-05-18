@@ -70,15 +70,18 @@ interface RedditSourceMetadata {
   subreddit?: string;
 }
 
-async function enforceRedditPostRefreshQuota(args: {
+/** Shared Reddit cap gate. Both axes go through the same cross-source
+ *  orchestrator (enforceAdapterUserQuota); the action argument picks the
+ *  sliding-window axis ("post-refresh" or "source-action"). CYCLE-BREAKER:
+ *  services/quota.ts imports the adapter registry which resolves this
+ *  barrel — lazy import keeps the graph acyclic at module init. */
+async function enforceRedditCap(args: {
   userId: string;
   ipAddress: string;
+  action: "post-refresh" | "source-action";
 }): Promise<void> {
-  // CYCLE-BREAKER: services/quota.ts imports the adapter registry, which
-  // resolves this Reddit barrel. Keeping this import lazy avoids making the
-  // registry/quota/adapter graph cyclic at module initialization.
   const { enforceAdapterUserQuota } = await import("$lib/server/services/quota.js");
-  await enforceAdapterUserQuota(db, redditAdapter, args.userId, args.ipAddress, "post-refresh", {
+  await enforceAdapterUserQuota(db, redditAdapter, args.userId, args.ipAddress, args.action, {
     platform: "reddit_account",
   });
 }
@@ -93,9 +96,10 @@ async function handlePostSingleWithCapGate(args: {
     userId: args.userId,
     paste: true,
     beforeFetch: () =>
-      enforceRedditPostRefreshQuota({
+      enforceRedditCap({
         userId: args.userId,
         ipAddress: args.ipAddress,
+        action: "post-refresh",
       }),
   });
 }
@@ -545,9 +549,10 @@ async function resetWalkerStateOnWidening(
   // is the exact bypass already closed for the YouTube widen path. Runs
   // BEFORE the enqueue so the 429 surface stays consistent with other
   // refresh-content flows.
-  await enforceRedditSourceActionQuota({
+  await enforceRedditCap({
     userId: ctx.triggerUserId,
     ipAddress: ctx.ipAddress,
+    action: "source-action",
   });
 
   // Enqueue an immediate user_source kick. user_id=triggerUserId so the
@@ -560,20 +565,6 @@ async function resetWalkerStateOnWidening(
     payload: queuePayload,
     userId: ctx.triggerUserId,
     priority: 1,
-  });
-}
-
-/** Source-action axis of the Reddit two-axis cap. Wrapped to keep the
- *  cycle-breaker lazy-import out of resetWalkerStateOnWidening's hot
- *  path while still delegating to the cross-source quota orchestrator. */
-async function enforceRedditSourceActionQuota(args: {
-  userId: string;
-  ipAddress: string;
-}): Promise<void> {
-  // CYCLE-BREAKER: same rationale as enforceRedditPostRefreshQuota above.
-  const { enforceAdapterUserQuota } = await import("$lib/server/services/quota.js");
-  await enforceAdapterUserQuota(db, redditAdapter, args.userId, args.ipAddress, "source-action", {
-    platform: "reddit_account",
   });
 }
 

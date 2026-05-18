@@ -134,9 +134,14 @@ export async function enqueueWalkerContinuation(
   type: "sub_poll" | "author_poll",
   payload: { sub?: string; handle?: string },
 ): Promise<void> {
+  // Both work types continue on the same service_source lane — the
+  // service lane is "operator-pool" by construction (user_id=NULL), so
+  // sub_poll and author_poll share it. The continuation never lands on
+  // user_post; that lane is for paste/refresh-now post fetches, not
+  // listing pagination.
   await dbCtx.insert(adapterRefreshQueue).values({
     adapterKind: "reddit_account",
-    queueName: type === "sub_poll" ? "service_source" : "service_source",
+    queueName: "service_source",
     type,
     payload,
     userId: null,
