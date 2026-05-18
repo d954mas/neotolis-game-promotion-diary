@@ -200,14 +200,31 @@
       });
       if (!res.ok) {
         let code = "error_server_generic";
+        let firstField: string | null = null;
         try {
-          const body = (await res.json()) as { error?: string };
+          const body = (await res.json()) as {
+            error?: string;
+            details?: Array<{ path?: unknown }>;
+          };
           if (body.error) code = body.error;
+          const path = body.details?.[0]?.path;
+          if (Array.isArray(path) && typeof path[0] === "string") {
+            firstField = path[0];
+          }
         } catch {
           /* ignore */
         }
-        errorText =
-          code === "validation_failed" ? m.ingest_error_malformed_url() : m.error_server_generic();
+        if (code === "validation_failed") {
+          // Field-aware messaging — "notes too long" is the common
+          // path for long-form Reddit selftext pastes (the limit is
+          // 50 000 chars). The legacy fallback is the URL-shape error,
+          // which covers the kind=reddit_post / kind=youtube_video
+          // gate when the user typed a bad URL.
+          errorText =
+            firstField === "notes" ? m.ingest_error_notes_too_long() : m.ingest_error_malformed_url();
+        } else {
+          errorText = m.error_server_generic();
+        }
         return;
       }
       // invalidateAll() forces SvelteKit to re-run /feed's +page.server.ts

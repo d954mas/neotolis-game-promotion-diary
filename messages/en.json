@@ -349,6 +349,7 @@
   "feed_dismiss_error_not_in_inbox": "Only inbox events (no game attached) can be marked not game-related.",
 
   "ingest_error_malformed_url": "That doesn't look like a URL. Paste a full link starting with https://",
+  "ingest_error_notes_too_long": "Notes are too long. The limit is 50 000 characters — trim the text or paste a shorter excerpt.",
   "keys_steam_error_invalid": "Steam Web API rejected that key. Double-check the value and try again.",
   "keys_steam_error_label_exists": "A key with this label already exists. Pick a different label.",
   "error_server_generic": "Something went wrong on our side. Try again in a moment.",

@@ -365,6 +365,7 @@ describe("paraglide i18n", () => {
       "inbox_badge",
       "inbox_badge_tooltip",
       "ingest_error_malformed_url",
+      "ingest_error_notes_too_long",
       "keys_steam_cta_add_another",
       "keys_steam_cta_replace",
       "keys_steam_cta_save",

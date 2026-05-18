@@ -135,7 +135,7 @@ const createEventSchema = z
     occurredAt: z.string().datetime(),
     title: z.string().min(1).max(500),
     url: z.string().url().nullable().optional(),
-    notes: z.string().max(5000).nullable().optional(),
+    notes: z.string().max(50_000).nullable().optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
     // authorIsMe round-trips through the schema so /events/new can flip
     // "Author: me / not me" at create time. Service defaults to false when
@@ -173,7 +173,7 @@ const updateEventSchema = z
     occurredAt: z.string().datetime().optional(),
     title: z.string().min(1).max(500).optional(),
     url: z.string().url().nullable().optional(),
-    notes: z.string().max(5000).nullable().optional(),
+    notes: z.string().max(50_000).nullable().optional(),
     // authorIsMe is editable; the /events/[id]/edit form flips the
     // discriminator without re-creating the event.
     authorIsMe: z.boolean().optional(),
