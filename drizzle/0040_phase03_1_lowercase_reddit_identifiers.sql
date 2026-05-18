@@ -56,26 +56,37 @@ WHERE author IS NOT NULL
 -- 4. data_sources.metadata.{subreddit,username} for Reddit sources.
 --    These are the fan-out lookup keys; the queue payload + cache
 --    primary key both flow from this jsonb value so it must match.
+--
+--    Enum cast through text (`kind::text = '…'`) is load-bearing: drizzle
+--    wraps all pending migrations in one transaction, and the
+--    `reddit_subreddit` / `reddit_account` values may have been ADDed to
+--    the source_kind enum earlier in the same batch. Postgres
+--    error 55P04 ("unsafe use of new value") forbids referencing a
+--    not-yet-committed enum value as a literal in the same tx — the
+--    text cast sidesteps the safety check by treating each row's value
+--    as a string before comparison.
 UPDATE data_sources
 SET metadata = jsonb_set(metadata, '{subreddit}', to_jsonb(LOWER(metadata->>'subreddit')))
-WHERE kind = 'reddit_subreddit'
+WHERE kind::text = 'reddit_subreddit'
   AND metadata ? 'subreddit'
   AND metadata->>'subreddit' <> LOWER(metadata->>'subreddit');
 UPDATE data_sources
 SET metadata = jsonb_set(metadata, '{username}', to_jsonb(LOWER(metadata->>'username')))
-WHERE kind = 'reddit_account'
+WHERE kind::text = 'reddit_account'
   AND metadata ? 'username'
   AND metadata->>'username' <> LOWER(metadata->>'username');
 
 -- 5. events.metadata.{subreddit,author} for reddit_post events. Display
---    surface only; chips render the canonical lowercase form.
+--    surface only; chips render the canonical lowercase form. Same enum
+--    cast rationale as above — `reddit_post` may have been freshly
+--    ADDed to the event_kind enum earlier in the same drizzle batch tx.
 UPDATE events
 SET metadata = jsonb_set(metadata, '{subreddit}', to_jsonb(LOWER(metadata->>'subreddit')))
-WHERE kind = 'reddit_post'
+WHERE kind::text = 'reddit_post'
   AND metadata ? 'subreddit'
   AND metadata->>'subreddit' <> LOWER(metadata->>'subreddit');
 UPDATE events
 SET metadata = jsonb_set(metadata, '{author}', to_jsonb(LOWER(metadata->>'author')))
-WHERE kind = 'reddit_post'
+WHERE kind::text = 'reddit_post'
   AND metadata ? 'author'
   AND metadata->>'author' <> LOWER(metadata->>'author');
