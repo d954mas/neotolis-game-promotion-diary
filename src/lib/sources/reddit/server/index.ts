@@ -230,6 +230,23 @@ async function backfillSource(
   source: PollableSource,
   ctx: AdapterContext,
 ): Promise<{ jobId: string | null; queue: string }> {
+  // Worker-config gate. The 8-tick batch-worker only boots when
+  // isRedditConfigured() is true (workQueue.isEnabled in the
+  // adapter exports below); without the gate here, refresh paths
+  // would enqueue user_source rows on an instance with an empty
+  // REDDIT_USER_AGENT — those rows would sit pending forever
+  // because no worker drains them, and the UI would show
+  // "queued" indefinitely. Mirrors the normalizeSourceOnCreate
+  // gate so both create-time and refresh-time paths fail loudly
+  // with the same 503 / reddit_not_configured error.
+  if (!isRedditConfigured()) {
+    throw new AppError(
+      "Reddit is not configured on this instance (REDDIT_USER_AGENT empty)",
+      "reddit_not_configured",
+      503,
+      { sourceId: source.id },
+    );
+  }
   const md = (source.metadata ?? {}) as RedditSourceMetadata;
   const isAccount = typeof md.username === "string" && md.username.length > 0;
   const isSub = typeof md.subreddit === "string" && md.subreddit.length > 0;
@@ -488,6 +505,18 @@ async function resetWalkerStateOnWidening(
     tx: Tx;
   },
 ): Promise<void> {
+  // Worker-config gate — same rationale as backfillSource. Without
+  // this, a PATCH widening on a pre-existing Reddit source against an
+  // instance with empty REDDIT_USER_AGENT would enqueue a user_source
+  // kick that no worker would ever drain.
+  if (!isRedditConfigured()) {
+    throw new AppError(
+      "Reddit is not configured on this instance (REDDIT_USER_AGENT empty)",
+      "reddit_not_configured",
+      503,
+      { sourceId: source.id },
+    );
+  }
   const meta = (source.metadata ?? {}) as { subreddit?: string; username?: string };
   let resetCount: number;
   let queuePayload: { sub?: string; handle?: string };
@@ -766,6 +795,19 @@ async function enqueueRefreshNow(input: {
   eventKind: EventKind;
   tx?: DbOrTx;
 }): Promise<{ queue: string; jobId: string | null }> {
+  // Worker-config gate — same rationale as backfillSource /
+  // resetWalkerStateOnWidening. Without REDDIT_USER_AGENT the
+  // 8-tick batch-worker never starts; a user_post refresh-now row
+  // would otherwise sit pending forever, surfacing as "queued"
+  // in the UI with no terminal state.
+  if (!isRedditConfigured()) {
+    throw new AppError(
+      "Reddit is not configured on this instance (REDDIT_USER_AGENT empty)",
+      "reddit_not_configured",
+      503,
+      { eventId: input.eventId },
+    );
+  }
   // externalId stored on events is the bare Reddit id (e.g. "abc123");
   // handlePostSingle accepts either form and t3-normalizes internally.
   //
