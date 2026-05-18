@@ -16,6 +16,15 @@
 // rejected before pattern-matching — leaking non-Reddit URLs into the
 // events table as `kind=reddit_post` would be a data-integrity bug.
 //
+// Case normalization: subreddit and username identifiers come out
+// LOWERCASE regardless of input casing. Reddit treats `r/IndieDev` and
+// `r/indiedev` as the same subreddit (and same for usernames); the
+// public-data caches (reddit_subreddits_cache.name, reddit_users_cache.
+// username, data_sources.metadata.subreddit/username) all key on the
+// lowercase form so two subscribers pasting different-case spellings
+// land on the same cache row and same fan-out lane. Display-case is
+// not preserved — chips render the canonical lowercase.
+//
 // The cross-source `parseAnyUrl` iterator (src/lib/sources/url.ts) calls
 // `redditAdapter.parseUrl` → redditParsePostUrl; the /sources/new
 // auto-detect calls `redditAdapter.parseSourceUrl` → redditParseSourceUrl.
@@ -81,7 +90,7 @@ export function redditParsePostUrl(input: string): ParsedUrl | null {
 
   const m = POST_URL_RE.exec(u.pathname);
   if (m === null) return null;
-  const subreddit = m[1]!;
+  const subreddit = m[1]!.toLowerCase();
   const externalId = m[2]!;
   return {
     kind: "reddit_post",
@@ -117,7 +126,7 @@ export function redditParseSourceUrl(input: string): ParsedSourceUrl | null {
   // reject them; check them before the URL parse attempt.
   const rawSub = RAW_SUB_RE.exec(trimmed);
   if (rawSub !== null) {
-    const handle = rawSub[1]!;
+    const handle = rawSub[1]!.toLowerCase();
     return {
       kind: "reddit_subreddit",
       handle,
@@ -126,7 +135,7 @@ export function redditParseSourceUrl(input: string): ParsedSourceUrl | null {
   }
   const rawUser = RAW_USER_RE.exec(trimmed);
   if (rawUser !== null) {
-    const handle = rawUser[1]!;
+    const handle = rawUser[1]!.toLowerCase();
     return {
       kind: "reddit_account",
       handle,
@@ -150,7 +159,7 @@ export function redditParseSourceUrl(input: string): ParsedSourceUrl | null {
 
   const userMatch = SOURCE_USER_RE.exec(u.pathname);
   if (userMatch !== null) {
-    const handle = userMatch[1]!;
+    const handle = userMatch[1]!.toLowerCase();
     return {
       kind: "reddit_account",
       handle,
@@ -159,7 +168,7 @@ export function redditParseSourceUrl(input: string): ParsedSourceUrl | null {
   }
   const subMatch = SOURCE_SUB_RE.exec(u.pathname);
   if (subMatch !== null) {
-    const handle = subMatch[1]!;
+    const handle = subMatch[1]!.toLowerCase();
     return {
       kind: "reddit_subreddit",
       handle,

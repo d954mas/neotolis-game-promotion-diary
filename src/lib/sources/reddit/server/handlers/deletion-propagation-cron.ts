@@ -83,16 +83,23 @@ export async function handleDeletionPropagationCron(): Promise<{
   });
 
   // Queue cleanup — `done` and `dead_letter` rows accumulate forever
-  // otherwise. adapter_refresh_queue carries user_id for the purge cascade
-  // promises "kept ~7 days for audit, then truncated by deletion-propagation
-  // cron" — this is the implementation. Without it, ~4M rows/year on a
-  // healthy instance (8 req/min × 60 × 24 × 365). 7-day window keeps the
+  // otherwise. adapter_refresh_queue is cross-adapter (Reddit + YouTube
+  // both write rows on it via the shared 8-tick worker lanes), so the
+  // purge runs across all adapter_kind values — there's no Reddit-
+  // specific reason to skip YouTube's stale rows. Pre-fix the filter
+  // was `adapter_kind = 'reddit_account'`, which left YouTube done/
+  // dead_letter rows growing indefinitely. 7-day window keeps the
   // forensic audit window long enough to investigate failed batches.
+  //
+  // This cron is the only daily cross-source cleanup hook today; the
+  // Reddit author-purge above is the unrelated GDPR concern that
+  // happens to share the schedule. If a future adapter wants its own
+  // cleanup cron, this DELETE can move out to src/scheduler/index.ts —
+  // for now, one daily caller is enough.
   const queueCleanup = await db.execute(sql`
     WITH cleaned AS (
       DELETE FROM adapter_refresh_queue
-      WHERE adapter_kind = 'reddit_account'
-        AND status IN ('done', 'dead_letter')
+      WHERE status IN ('done', 'dead_letter')
         AND last_attempt_at IS NOT NULL
         AND last_attempt_at < NOW() - INTERVAL '7 days'
       RETURNING id

@@ -164,8 +164,11 @@ export async function handlePostSingle(args: {
   const t3 = extractT3FromCommentsResponse(data, bareId);
 
   // Author identity. Reddit literally writes "[deleted]" when account is
-  // gone. Treat as NULL — the schema convention.
-  const author = t3.author === "[deleted]" ? null : t3.author;
+  // gone. Treat as NULL — the schema convention. Reddit usernames are
+  // case-insensitive; lowercase on entry so cache keys + owner-match
+  // joins are consistent (see url.ts header).
+  const author = t3.author === "[deleted]" ? null : t3.author.toLowerCase();
+  const subreddit = t3.subreddit.toLowerCase();
   const authorFullname = author === null ? null : (t3.author_fullname ?? null);
   const submittedAt = new Date(t3.created_utc * 1000);
   const fullId = `t3_${t3.id}`;
@@ -185,7 +188,7 @@ export async function handlePostSingle(args: {
     // UPSERT subreddit cache first (FK target). Minimum-info INSERT —
     // sub_poll cron later fills in subscribers / description / rules.
     await upsertRedditSubreddit(tx, {
-      name: t3.subreddit,
+      name: subreddit,
       subredditId: t3.subreddit_id ?? null,
       subscribers: null,
       accountsActive: null,
@@ -211,7 +214,7 @@ export async function handlePostSingle(args: {
     // UPSERT the post row + write one snapshot in the same minute window.
     await upsertRedditPost(tx, {
       postId: fullId,
-      subreddit: t3.subreddit,
+      subreddit,
       author,
       authorFullname,
       permalink,
@@ -239,7 +242,7 @@ export async function handlePostSingle(args: {
   logger.debug(
     {
       postId: fullId,
-      subreddit: t3.subreddit,
+      subreddit,
       author,
       userId: args.userId,
       paste: args.paste ?? false,
@@ -249,7 +252,7 @@ export async function handlePostSingle(args: {
 
   return {
     postId: fullId,
-    subreddit: t3.subreddit,
+    subreddit,
     author,
     authorFullname,
     permalink,
@@ -341,7 +344,15 @@ async function readCachedPost(postId: string): Promise<HandlePostSingleResult | 
 /** Extract the t3 child from /comments/<id>.json's two-element array
  *  shape. Throws AdapterError(permanent) when the shape is unexpected —
  *  unrecoverable (a Reddit API breaking change would surface this; the
- *  worker tick downgrades the queue row to dead_letter). */
+ *  worker tick downgrades the queue row to dead_letter).
+ *
+ *  Required-field validation runs at the boundary so the rest of the
+ *  handler can use the typed shape without per-access null checks:
+ *  id / created_utc are load-bearing for the cache PK + submittedAt;
+ *  subreddit / permalink / title are load-bearing for the events.metadata
+ *  write + display surfaces. Missing any of these = malformed Reddit
+ *  response, and falling through with `undefined as string` would crash
+ *  later in the chain with a less obvious stack. */
 function extractT3FromCommentsResponse(data: unknown, expectedId: string): T3Data {
   if (!Array.isArray(data) || data.length < 1) {
     throw new AdapterError(
@@ -358,7 +369,15 @@ function extractT3FromCommentsResponse(data: unknown, expectedId: string): T3Dat
     throw new AdapterError(`Reddit post ${expectedId} not found`, { category: "not-found" });
   }
   const t3 = children[0]?.data;
-  if (!t3 || typeof t3.id !== "string" || typeof t3.created_utc !== "number") {
+  if (
+    !t3 ||
+    typeof t3.id !== "string" ||
+    typeof t3.created_utc !== "number" ||
+    typeof t3.subreddit !== "string" ||
+    typeof t3.permalink !== "string" ||
+    typeof t3.title !== "string" ||
+    typeof t3.author !== "string"
+  ) {
     throw new AdapterError(`Reddit /comments/${expectedId}.json: missing required t3 fields`, {
       category: "permanent",
     });

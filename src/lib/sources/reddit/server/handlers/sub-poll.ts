@@ -89,7 +89,10 @@ export async function handleSubPoll(args: {
    *  incremental polls). Exposed for telemetry; not load-bearing. */
   walking: boolean;
 }> {
-  const sub = args.sub;
+  // Defense-in-depth lowercase. The parser already canonicalizes,
+  // but older queue payloads may carry display-case strings — the cache
+  // keys + fan-out joins are all lowercase, so coerce here too.
+  const sub = typeof args.sub === "string" ? args.sub.toLowerCase() : args.sub;
   if (typeof sub !== "string" || sub.length === 0) {
     throw new AdapterError("sub_poll: missing sub in payload", { category: "permanent" });
   }
@@ -149,7 +152,7 @@ export async function handleSubPoll(args: {
   // 3. UPSERT authors + posts + snapshots for each t3.
   const uniqueAuthors = new Set<string>();
   for (const t3 of listingChildren) {
-    const author = t3.author === "[deleted]" ? null : t3.author;
+    const author = t3.author === "[deleted]" ? null : t3.author.toLowerCase();
     if (author !== null && !uniqueAuthors.has(author)) {
       uniqueAuthors.add(author);
       const authorFullname = t3.author_fullname ?? null;
@@ -165,7 +168,7 @@ export async function handleSubPoll(args: {
     }
   }
   for (const t3 of listingChildren) {
-    const author = t3.author === "[deleted]" ? null : t3.author;
+    const author = t3.author === "[deleted]" ? null : t3.author.toLowerCase();
     const authorFullname = author === null ? null : (t3.author_fullname ?? null);
     const fullId = `t3_${t3.id}`;
     const permalink = t3.permalink.startsWith("http")
@@ -175,7 +178,7 @@ export async function handleSubPoll(args: {
 
     await upsertRedditPost(db, {
       postId: fullId,
-      subreddit: t3.subreddit,
+      subreddit: t3.subreddit.toLowerCase(),
       author,
       authorFullname,
       permalink,
@@ -349,7 +352,7 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
   let inserted = 0;
   for (const t3 of t3s) {
     const fullId = `t3_${t3.id}`;
-    const author = t3.author === "[deleted]" ? null : t3.author;
+    const author = t3.author === "[deleted]" ? null : t3.author.toLowerCase();
     const submittedAt = new Date(t3.created_utc * 1000);
     const permalink = t3.permalink.startsWith("http")
       ? t3.permalink
@@ -370,10 +373,9 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
       }
 
       // Strict author-match — see ownedHandlesByUser computation above
-      // for the rationale.
+      // for the rationale. `author` is already lowercased on entry.
       const authorIsMe =
-        author !== null &&
-        (ownedHandlesByUser.get(sub_row.userId)?.has(author.toLowerCase()) ?? false);
+        author !== null && (ownedHandlesByUser.get(sub_row.userId)?.has(author) ?? false);
 
       const ins = await db
         .insert(events)
@@ -387,7 +389,7 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
           url: permalink,
           externalId: fullId,
           metadata: {
-            subreddit: t3.subreddit,
+            subreddit: t3.subreddit.toLowerCase(),
             author,
           },
         })

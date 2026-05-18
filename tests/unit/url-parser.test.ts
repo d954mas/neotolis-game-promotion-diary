@@ -65,12 +65,16 @@ describe("URL parser canonicalization", () => {
     // url-parser.ts now surfaces `reddit_post` directly (transitional
     // `reddit_deferred` variant removed in plan 09). services/ingest.ts
     // dispatches this variant through handlePostSingle → events INSERT.
+    // Reddit identifiers are case-insensitive; the adapter lowercases
+    // subreddit / username at the parser boundary so both the metadata
+    // hint AND the canonicalUrl come out in lowercase form. Mixed-case
+    // input ("IndieDev") normalizes to "indiedev".
     const r1 = parseIngestUrl("https://www.reddit.com/r/IndieDev/comments/abc/foo/");
     expect(r1.kind).toBe("reddit_post");
     if (r1.kind === "reddit_post") {
       expect(r1.externalId).toBe("abc");
-      expect(r1.canonicalUrl).toBe("https://www.reddit.com/r/IndieDev/comments/abc/");
-      expect(r1.metadata).toEqual({ subreddit: "IndieDev" });
+      expect(r1.canonicalUrl).toBe("https://www.reddit.com/r/indiedev/comments/abc/");
+      expect(r1.metadata).toEqual({ subreddit: "indiedev" });
     }
 
     const r2 = parseIngestUrl("https://redd.it/abc");
@@ -88,7 +92,7 @@ describe("URL parser canonicalization", () => {
     expect(r3.kind).toBe("reddit_post");
     if (r3.kind === "reddit_post") {
       expect(r3.externalId).toBe("xyz");
-      expect(r3.metadata).toEqual({ subreddit: "IndieDev" });
+      expect(r3.metadata).toEqual({ subreddit: "indiedev" });
     }
   });
 

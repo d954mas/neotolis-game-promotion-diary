@@ -74,7 +74,10 @@ export async function handleAuthorPoll(args: {
    *  worker-tick ignores it. */
   walking: boolean;
 }> {
-  const handle = args.handle;
+  // Defense-in-depth lowercase — Reddit usernames are case-insensitive
+  // and the cache + fan-out joins all use lowercase keys (parser
+  // normalizes on the way in; this catches legacy queue payloads).
+  const handle = typeof args.handle === "string" ? args.handle.toLowerCase() : args.handle;
   if (typeof handle !== "string" || handle.length === 0) {
     throw new AdapterError("author_poll: missing handle in payload", { category: "permanent" });
   }
@@ -145,10 +148,11 @@ export async function handleAuthorPoll(args: {
   //    least the (name) PK to satisfy reddit_posts FK constraints.
   const uniqueSubs = new Set<string>();
   for (const t3 of listingChildren) {
-    if (!uniqueSubs.has(t3.subreddit)) {
-      uniqueSubs.add(t3.subreddit);
+    const subLower = t3.subreddit.toLowerCase();
+    if (!uniqueSubs.has(subLower)) {
+      uniqueSubs.add(subLower);
       await upsertRedditSubreddit(db, {
-        name: t3.subreddit,
+        name: subLower,
         subredditId: t3.subreddit_id ?? null,
         subscribers: null,
         accountsActive: null,
@@ -160,7 +164,7 @@ export async function handleAuthorPoll(args: {
 
   // 5. UPSERT posts + snapshots.
   for (const t3 of listingChildren) {
-    const author = t3.author === "[deleted]" ? null : t3.author;
+    const author = t3.author === "[deleted]" ? null : t3.author.toLowerCase();
     const authorFullname = author === null ? null : (t3.author_fullname ?? null);
     const fullId = `t3_${t3.id}`;
     const permalink = t3.permalink.startsWith("http")
@@ -170,7 +174,7 @@ export async function handleAuthorPoll(args: {
 
     await upsertRedditPost(db, {
       postId: fullId,
-      subreddit: t3.subreddit,
+      subreddit: t3.subreddit.toLowerCase(),
       author,
       authorFullname,
       permalink,
@@ -274,7 +278,7 @@ async function fanOutToSubscribers(
   let inserted = 0;
   for (const t3 of t3s) {
     const fullId = `t3_${t3.id}`;
-    const author = t3.author === "[deleted]" ? null : t3.author;
+    const author = t3.author === "[deleted]" ? null : t3.author.toLowerCase();
     const submittedAt = new Date(t3.created_utc * 1000);
     const permalink = t3.permalink.startsWith("http")
       ? t3.permalink
@@ -306,7 +310,7 @@ async function fanOutToSubscribers(
           url: permalink,
           externalId: fullId,
           metadata: {
-            subreddit: t3.subreddit,
+            subreddit: t3.subreddit.toLowerCase(),
             author,
           },
         })

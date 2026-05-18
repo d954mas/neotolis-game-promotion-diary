@@ -56,6 +56,14 @@ export async function handleEnqueueServicePostsCron(): Promise<{
   // only to the second branch (SQL AND > OR precedence), so young dead
   // posts would still be picked. Tested in
   // tests/integration/reddit-cron-handlers.test.ts.
+  //
+  // Pending-queue exclusion (the two `NOT EXISTS` clauses at the bottom):
+  // skip any post that's already queued for refresh on the service_post
+  // lane (post_batch, payload.post_ids) or the user_post lane
+  // (post_single, payload.post_id). Pre-fix the cron would re-INSERT a
+  // post_batch row containing post X every tick until the previous batch
+  // drained — Reddit's 8 req/min slots are scarce so duplicating work is
+  // load-bearing budget waste, not just churn.
   const result = await db.execute(sql`
     SELECT post_id FROM reddit_posts
     WHERE
@@ -75,6 +83,22 @@ export async function handleEnqueueServicePostsCron(): Promise<{
         )
       )
       AND deletion_detected_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM adapter_refresh_queue q,
+             jsonb_array_elements_text(q.payload->'post_ids') AS pid
+        WHERE q.adapter_kind = 'reddit_account'
+          AND q.type = 'post_batch'
+          AND q.status IN ('pending', 'processing')
+          AND pid = reddit_posts.post_id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM adapter_refresh_queue q
+        WHERE q.adapter_kind = 'reddit_account'
+          AND q.type = 'post_single'
+          AND q.status IN ('pending', 'processing')
+          AND q.payload->>'post_id' = reddit_posts.post_id
+      )
     ORDER BY submitted_at DESC
     LIMIT ${sql.raw(String(PICK_LIMIT))}
   `);

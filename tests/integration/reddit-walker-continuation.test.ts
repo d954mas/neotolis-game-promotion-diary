@@ -111,7 +111,7 @@ describe("Reddit walker continuation", () => {
   });
 
   it("first tick — never-walked sub: persists cursor + enqueues continuation on service_source", async () => {
-    const sub = "WalkerSubOne";
+    const sub = "walkersubone";
     const fetchSpy = mockFetchSequence([
       () =>
         buildListingResponse({
@@ -166,7 +166,7 @@ describe("Reddit walker continuation", () => {
   });
 
   it("final tick — Reddit returns data.after=null: flips backfill_complete=true and DOES NOT enqueue continuation", async () => {
-    const sub = "WalkerSubTwo";
+    const sub = "walkersubtwo";
     // Pre-seed the cache row as if the walker had already advanced to a
     // mid-walk cursor. The second tick reads that cursor, fetches the
     // next page, and receives data.after=null — the listing is drained.
@@ -217,7 +217,7 @@ describe("Reddit walker continuation", () => {
   });
 
   it("incremental tick — backfill_complete=true: no cursor used, no continuation enqueued", async () => {
-    const sub = "WalkerSubThree";
+    const sub = "walkersubthree";
     await db.insert(redditSubredditsCache).values({
       name: sub,
       backfillAfterCursor: null,
@@ -263,7 +263,7 @@ describe("Reddit walker continuation", () => {
   });
 
   it("CAS race — two simultaneous persists with same expected cursor: only one commits + one continuation enqueued", async () => {
-    const sub = "WalkerCasRace";
+    const sub = "walkercasrace";
     await db.insert(redditSubredditsCache).values({
       name: sub,
       backfillAfterCursor: "t3_priorX",
@@ -309,8 +309,40 @@ describe("Reddit walker continuation", () => {
     expect(cacheRow!.backfillAfterCursor).toBe("t3_nextY");
   });
 
+  it("case-coercion — mixed-case sub input lands on the lowercase cache row", async () => {
+    // Two subscribers paste different-case spellings of the same sub.
+    // Pre-fix the walker would have created two parallel cache rows
+    // ("IndieDev" and "indiedev"), two cursors, two fan-out lanes, and
+    // doubled every Reddit fetch. Post-fix the handler coerces the
+    // input on entry so both spellings land on the canonical lowercase
+    // row.
+    const fetchSpy = mockFetchSequence([
+      () =>
+        buildListingResponse({
+          after: null,
+          children: [
+            {
+              postId: "casepost",
+              subreddit: "IndieDev",
+              author: "Someone",
+              title: "Mixed-case ingest",
+              createdUtcSeconds: 1779100000,
+            },
+          ],
+        }),
+    ]);
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await handleSubPoll({ sub: "IndieDev", userId: null });
+    expect(result.postsUpserted).toBe(1);
+
+    // Cache row keyed lowercase; the mixed-case spelling never appears.
+    const rows = await db.select().from(redditSubredditsCache);
+    expect(rows.map((r) => r.name)).toEqual(["indiedev"]);
+  });
+
   it("CAS race — loser tries to commit against stale expected cursor: no persist, no continuation", async () => {
-    const sub = "WalkerCasStale";
+    const sub = "walkercasstale";
     // Cache row has already moved past the cursor the caller observed.
     await db.insert(redditSubredditsCache).values({
       name: sub,

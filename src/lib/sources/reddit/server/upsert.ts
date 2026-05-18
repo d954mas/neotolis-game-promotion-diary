@@ -17,6 +17,14 @@
 // post-row SET clause never touches author / author_fullname — once
 // the nightly purge cron nulls those, a re-poll of a still-deleted
 // post must not restore them.
+//
+// Case normalization: subreddit / username / author columns are written
+// LOWERCASE. Reddit treats these identifiers as case-insensitive, so the
+// canonical cache key is lowercase — and the upstream parser already
+// normalizes its output. Reddit API responses (t3.subreddit / t3.author)
+// can come back in display case, so the upsert helpers re-normalize at
+// the write boundary as defense: any input that slips through with
+// display case still lands on the canonical row.
 
 import { sql } from "drizzle-orm";
 import type { DbOrTx } from "$lib/server/db/client.js";
@@ -54,8 +62,8 @@ export async function upsertRedditPostsMany(
     .values(
       rows.map((r) => ({
         postId: r.postId,
-        subreddit: r.subreddit,
-        author: r.author,
+        subreddit: r.subreddit.toLowerCase(),
+        author: r.author === null ? null : r.author.toLowerCase(),
         authorFullname: r.authorFullname,
         permalink: r.permalink,
         title: r.title,
@@ -114,7 +122,7 @@ export async function upsertRedditUsersMany(
     .insert(redditUsersCache)
     .values(
       rows.map((r) => ({
-        username: r.username,
+        username: r.username.toLowerCase(),
         redditId: r.redditId,
         accountAgeDays: r.accountAgeDays,
         linkKarma: r.linkKarma,
@@ -176,7 +184,7 @@ export async function upsertRedditSubredditsMany(
       rows.map((r) => {
         const hasRules = r.rulesRawJson !== undefined;
         return {
-          name: r.name,
+          name: r.name.toLowerCase(),
           subredditId: r.subredditId,
           subscribers: r.subscribers,
           accountsActive: r.accountsActive,
