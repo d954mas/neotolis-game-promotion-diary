@@ -42,10 +42,7 @@
 
 import { eq, sql } from "drizzle-orm";
 import type { DbOrTx } from "$lib/server/db/client.js";
-import {
-  redditSubredditsCache,
-  redditUsersCache,
-} from "./schema/index.js";
+import { redditSubredditsCache, redditUsersCache } from "./schema/index.js";
 import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 
 export interface WalkerState {
@@ -57,10 +54,7 @@ export interface WalkerState {
   backfillComplete: boolean;
 }
 
-export async function getSubredditWalkState(
-  dbCtx: DbOrTx,
-  sub: string,
-): Promise<WalkerState> {
+export async function getSubredditWalkState(dbCtx: DbOrTx, sub: string): Promise<WalkerState> {
   const [row] = await dbCtx
     .select({
       afterCursor: redditSubredditsCache.backfillAfterCursor,
@@ -75,10 +69,7 @@ export async function getSubredditWalkState(
   };
 }
 
-export async function getAuthorWalkState(
-  dbCtx: DbOrTx,
-  handle: string,
-): Promise<WalkerState> {
+export async function getAuthorWalkState(dbCtx: DbOrTx, handle: string): Promise<WalkerState> {
   const [row] = await dbCtx
     .select({
       afterCursor: redditUsersCache.backfillAfterCursor,
