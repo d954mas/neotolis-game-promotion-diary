@@ -38,10 +38,7 @@ interface T3FactoryArg {
   createdUtcSeconds: number;
 }
 
-function buildListingResponse(args: {
-  children: T3FactoryArg[];
-  after: string | null;
-}): unknown {
+function buildListingResponse(args: { children: T3FactoryArg[]; after: string | null }): unknown {
   return {
     data: {
       after: args.after,
