@@ -329,6 +329,12 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
         isNull(dataSources.deletedAt),
       ),
     );
+  // Lowercase-normalised set per user. Reddit usernames are case-
+  // insensitive (e.g. "MyHandle" === "myhandle" as far as Reddit is
+  // concerned); the syncStats path already lower-cases both sides
+  // (isOwnedRedditAuthor in this barrel). Mirror that here so a
+  // subscriber registered as "MyHandle" still matches a t3.author
+  // returned as "myhandle".
   const ownedHandlesByUser = new Map<string, Set<string>>();
   for (const r of ownedRedditAccounts) {
     if (r.username == null) continue;
@@ -337,7 +343,7 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
       set = new Set<string>();
       ownedHandlesByUser.set(r.userId, set);
     }
-    set.add(r.username);
+    set.add(r.username.toLowerCase());
   }
 
   let inserted = 0;
@@ -359,17 +365,15 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
       // the cross-tenant reddit_posts cache, but each subscriber only
       // gets events back to their personal target. NULL means no
       // restriction (default for legacy rows pre-backfill_target_since).
-      if (
-        sub_row.backfillTargetSince !== null &&
-        submittedAt < sub_row.backfillTargetSince
-      ) {
+      if (sub_row.backfillTargetSince !== null && submittedAt < sub_row.backfillTargetSince) {
         continue;
       }
 
       // Strict author-match — see ownedHandlesByUser computation above
       // for the rationale.
       const authorIsMe =
-        author !== null && (ownedHandlesByUser.get(sub_row.userId)?.has(author) ?? false);
+        author !== null &&
+        (ownedHandlesByUser.get(sub_row.userId)?.has(author.toLowerCase()) ?? false);
 
       const ins = await db
         .insert(events)

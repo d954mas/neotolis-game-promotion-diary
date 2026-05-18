@@ -538,6 +538,18 @@ async function resetWalkerStateOnWidening(
     return;
   }
 
+  // Per-user fair-share cap check — mirrors the source-action gate that
+  // POST /api/sources/:id/refresh-content runs before enqueue. Without
+  // this, a user already exhausted on the Reddit source-action sliding
+  // window could trigger a fresh deep walk through PATCH widening, which
+  // is the exact bypass already closed for the YouTube widen path. Runs
+  // BEFORE the enqueue so the 429 surface stays consistent with other
+  // refresh-content flows.
+  await enforceRedditSourceActionQuota({
+    userId: ctx.triggerUserId,
+    ipAddress: ctx.ipAddress,
+  });
+
   // Enqueue an immediate user_source kick. user_id=triggerUserId so the
   // PATCH counts the same as a refresh-content click against the user's
   // source-action cap (and surfaces as such in observability audit).
@@ -548,6 +560,20 @@ async function resetWalkerStateOnWidening(
     payload: queuePayload,
     userId: ctx.triggerUserId,
     priority: 1,
+  });
+}
+
+/** Source-action axis of the Reddit two-axis cap. Wrapped to keep the
+ *  cycle-breaker lazy-import out of resetWalkerStateOnWidening's hot
+ *  path while still delegating to the cross-source quota orchestrator. */
+async function enforceRedditSourceActionQuota(args: {
+  userId: string;
+  ipAddress: string;
+}): Promise<void> {
+  // CYCLE-BREAKER: same rationale as enforceRedditPostRefreshQuota above.
+  const { enforceAdapterUserQuota } = await import("$lib/server/services/quota.js");
+  await enforceAdapterUserQuota(db, redditAdapter, args.userId, args.ipAddress, "source-action", {
+    platform: "reddit_account",
   });
 }
 

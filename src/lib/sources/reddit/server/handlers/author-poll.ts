@@ -289,10 +289,7 @@ async function fanOutToSubscribers(
       // filter on the subreddit fan-out path. Walker fetches up to
       // Reddit's ~1000-item cap into reddit_posts; each subscriber's
       // events only go back to their personal backfillTargetSince.
-      if (
-        sub_row.backfillTargetSince !== null &&
-        submittedAt < sub_row.backfillTargetSince
-      ) {
+      if (sub_row.backfillTargetSince !== null && submittedAt < sub_row.backfillTargetSince) {
         continue;
       }
 

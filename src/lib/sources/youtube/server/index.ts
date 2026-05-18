@@ -92,10 +92,7 @@ import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 import { adapterRefreshQueueLabel } from "$lib/server/services/adapter-lane-worker.js";
 import { enqueueViaOutbox } from "$lib/server/services/outbox.js";
 import { getChannelState } from "$lib/server/services/channel-state.js";
-import {
-  getUserQuotaUsedToday,
-  nextPacificMidnight,
-} from "$lib/server/services/quota.js";
+import { getUserQuotaUsedToday, nextPacificMidnight } from "$lib/server/services/quota.js";
 import { AppError } from "$lib/server/services/errors.js";
 import {
   youtubeRefreshQueueTick,
@@ -794,10 +791,7 @@ async function resetWalkerStateOnWidening(
   // updateSource already gates on patch.backfillTargetSince <
   // existing.backfillTargetSince, but defend-in-depth here lets future
   // call paths reuse the hook without re-implementing the predicate.
-  if (
-    ctx.previousTarget !== null &&
-    ctx.newTarget.getTime() >= ctx.previousTarget.getTime()
-  ) {
+  if (ctx.previousTarget !== null && ctx.newTarget.getTime() >= ctx.previousTarget.getTime()) {
     return;
   }
   const state = await getChannelState("youtube_channel", source.channelId);
