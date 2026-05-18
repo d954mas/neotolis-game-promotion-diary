@@ -47,7 +47,7 @@ Open `src/lib/sources/adapter.ts` and read `interface SourceAdapter`. Implement 
 Implement only those that apply to your platform.
 
 - [ ] `syncStats?: { fetch(externalId, ctx) }` - opt into an explicit fast path for paste/preview flows. This is allowed only when the caller runs quota/accounting gates first; never hide upstream HTTP behind a generic route fallback.
-- [ ] SQL lane workers - when queue order/cadence is part of quota safety, declare it through `workQueue.scheduledWorkers[].laneQueue` and use `createAdapterLaneWorker` / `createAdapterBatchLaneWorker`. Batch workers must choose `batchScope: "global"` when one upstream request can safely serve many tenants (quota-efficient shared requests), or `batchScope: "user"` when the upstream identity is tenant-bound (per-user OAuth/token).
+- [ ] SQL lane workers - when queue order/cadence is part of quota safety, declare it through `workQueue.scheduledWorkers[].laneQueue` and use `createAdapterBatchLaneWorker`. Pick `maxBatchSize` per the upstream API's batch tolerance (number for uniform across lanes, per-lane record when lanes have different batching characteristics). `batchScope: "global"` when one upstream request can safely serve many tenants (quota-efficient shared requests), or `"user"` when the upstream identity is tenant-bound (per-user OAuth/token).
 
 - [ ] `refreshQueue?: { canRefresh(eventKind), enqueue(input) }` — opt into the «Refresh now» button per event kind.
 - [ ] `workQueue?: { scheduledWorkers[] }` — opt into adapter-owned interval workers when queue order/cadence is part of the quota contract. Use `laneQueue.strategy="fixed-slot-round-robin"` for SQL lane workers like Reddit.

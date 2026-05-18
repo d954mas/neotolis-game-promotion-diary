@@ -1,15 +1,24 @@
-// Shared SQL lane workers for adapter-owned refresh queues.
+// Shared SQL lane worker for adapter-owned refresh queues.
 //
-// Use `createAdapterLaneWorker` when one queue row maps to one upstream
-// request. Use `createAdapterBatchLaneWorker` when one upstream request can
-// process several rows from the same lane, such as YouTube videos.list.
+// `createAdapterBatchLaneWorker` is the single factory every adapter
+// uses. Each tick claims up to `maxBatchSize` rows from a lane and
+// dispatches them together. `maxBatchSize` can be a number (uniform
+// across lanes — YouTube's videos.list always takes ≤50 ids) or a
+// per-lane record (Reddit's post lanes batch up to 100 via /api/info
+// while listing lanes stay at 1 because each row needs its own
+// endpoint).
 //
-// The worker owns common lifecycle and retry behavior over
-// adapter_refresh_queue; adapters own lane names, payload shape, dispatch,
-// and optional claim gates. `claimGate` runs inside the claim transaction
-// before attempts/status are touched. That is the load-bearing extension for
-// DB-backed global limits: a denied gate leaves the row pending and does not
-// burn attempts.
+// A previous `createAdapterLaneWorker` (single-row factory, retired
+// in Phase 03.1) was a duplicate of the batch factory with the
+// implicit constraint maxBatchSize=1; the per-lane batch shape covers
+// both cases by setting the lane to 1 when no batching is appropriate.
+//
+// The factory owns common lifecycle and retry behavior over
+// adapter_refresh_queue; adapters own lane names, payload shape,
+// dispatch, and optional claim gates. `claimGate` runs inside the
+// claim transaction before attempts/status are touched. That is the
+// load-bearing extension for DB-backed global limits: a denied gate
+// leaves the row pending and does not burn attempts.
 
 import { sql } from "drizzle-orm";
 import { db, type Tx } from "../db/client.js";
@@ -70,27 +79,7 @@ export interface AdapterLaneDispatchContext<TPermit = unknown> {
   permit?: TPermit;
 }
 
-export interface AdapterLaneWorkerPolicy<TLane extends string, TPermit = unknown> {
-  adapterKind: string;
-  slots: readonly TLane[];
-  fallthrough: readonly TLane[];
-  maxAttempts: number;
-  staleProcessingMs: number;
-  staleRecoveryIntervalMs: number;
-  retryBackoffMs?(ctx: AdapterLaneWorkerRetryContext<TLane>): number;
-  claimGate?(ctx: AdapterLaneClaimGateContext<TLane>): Promise<AdapterLaneClaimGateResult<TPermit>>;
-  guardDispatch?(ctx: AdapterLaneGuardContext<TLane>): Promise<AdapterLaneGuardResult>;
-  dispatch(row: AdapterLaneWorkerRow, ctx: AdapterLaneDispatchContext<TPermit>): Promise<void>;
-  emitDrained?(stats: { queueName: TLane; entriesProcessed: number; durationMs: number }): void;
-}
-
 export type AdapterBatchScope = "global" | "user";
-
-export interface AdapterLaneWorker {
-  tick(): Promise<AdapterLaneWorkerTickResult>;
-  resetForTest(): void;
-  setSlotForTest(slotIndex: number): void;
-}
 
 export interface AdapterBatchLaneWorkerTickResult {
   processedQueue: string | null;
@@ -223,15 +212,6 @@ function validateLaneShape<TLane extends string>(policy: {
   }
 }
 
-function validateLaneWorkerPolicy<TLane extends string>(
-  policy: AdapterLaneWorkerPolicy<TLane>,
-): void {
-  validateLaneShape(policy);
-  assertPositiveInteger("maxAttempts", policy.maxAttempts);
-  assertPositiveInteger("staleProcessingMs", policy.staleProcessingMs);
-  assertPositiveInteger("staleRecoveryIntervalMs", policy.staleRecoveryIntervalMs);
-}
-
 function validateBatchLaneWorkerPolicy<TLane extends string>(
   policy: AdapterBatchLaneWorkerPolicy<TLane>,
 ): void {
@@ -280,268 +260,6 @@ async function deferRows(
       `);
     }
   });
-}
-
-export function createAdapterLaneWorker<TLane extends string, TPermit = unknown>(
-  policy: AdapterLaneWorkerPolicy<TLane, TPermit>,
-): AdapterLaneWorker {
-  validateLaneWorkerPolicy(policy);
-  let tickCounter = 0;
-  let nextStaleRecoveryAt = 0;
-
-  async function runStaleRecovery(now: number): Promise<void> {
-    if (now < nextStaleRecoveryAt) return;
-    const staleSince = new Date(now - policy.staleProcessingMs);
-    await db.execute(sql`
-      UPDATE ${sql.raw(ADAPTER_REFRESH_QUEUE_TABLE)}
-      SET status = 'pending'
-      WHERE status = 'processing'
-        AND adapter_kind = ${policy.adapterKind}
-        AND last_attempt_at < ${staleSince}
-    `);
-    nextStaleRecoveryAt = now + policy.staleRecoveryIntervalMs;
-  }
-
-  async function tryClaimAndDispatch(
-    queueName: TLane,
-  ): Promise<
-    | { kind: "none" }
-    | { kind: "gated"; retryAfterMs: number; reason: string }
-    | { kind: "claimed"; id: number; type: string; dispatched: boolean }
-  > {
-    const claim = await db.transaction(async (tx) => {
-      const rows = await tx.execute(sql`
-        SELECT id, adapter_kind, type, payload, user_id, attempts
-        FROM ${sql.raw(ADAPTER_REFRESH_QUEUE_TABLE)}
-        WHERE adapter_kind = ${policy.adapterKind}
-          AND queue_name = ${queueName}
-          AND status = 'pending'
-          AND next_attempt_at <= NOW()
-        ORDER BY priority ASC, next_attempt_at ASC, enqueued_at ASC
-        LIMIT 1
-        FOR UPDATE SKIP LOCKED
-      `);
-      const queryResult = rows as unknown as {
-        rows?: Array<Omit<ClaimedRow, "id"> & { id: number | string }>;
-      };
-      const rawRow = queryResult.rows?.[0];
-      if (!rawRow) return { kind: "none" as const };
-
-      const claimed: ClaimedRow = { ...rawRow, id: Number(rawRow.id) };
-      const normalized: AdapterLaneWorkerRow = {
-        id: claimed.id,
-        adapterKind: claimed.adapter_kind,
-        queueName,
-        type: claimed.type,
-        payload: claimed.payload,
-        userId: claimed.user_id,
-        attempts: claimed.attempts,
-      };
-      let gate: AdapterLaneClaimGateResult<TPermit> | undefined;
-      try {
-        gate = await policy.claimGate?.({
-          adapterKind: policy.adapterKind,
-          queueName,
-          rows: [normalized],
-          now: new Date(),
-          tx,
-        });
-      } catch (err) {
-        const retryAfterMs = defaultRetryBackoffMs(1);
-        await tx.execute(sql`
-          UPDATE ${sql.raw(ADAPTER_REFRESH_QUEUE_TABLE)}
-          SET next_attempt_at = NOW() + (${retryAfterMs} || ' milliseconds')::interval
-          WHERE id = ${claimed.id}
-            AND adapter_kind = ${policy.adapterKind}
-        `);
-        logger.warn(
-          {
-            adapter: policy.adapterKind,
-            queueName,
-            type: claimed.type,
-            id: claimed.id,
-            retryAfterMs,
-            err: String((err as Error)?.message ?? err),
-          },
-          "adapter lane worker: claim gate failed; claim deferred",
-        );
-        return {
-          kind: "gated" as const,
-          retryAfterMs,
-          reason: "claim_gate_error",
-        };
-      }
-      if (gate?.action === "defer") {
-        await tx.execute(sql`
-          UPDATE ${sql.raw(ADAPTER_REFRESH_QUEUE_TABLE)}
-          SET next_attempt_at = NOW() + (${gate.retryAfterMs} || ' milliseconds')::interval
-          WHERE id = ${claimed.id}
-            AND adapter_kind = ${policy.adapterKind}
-        `);
-        return {
-          kind: "gated" as const,
-          retryAfterMs: gate.retryAfterMs,
-          reason: gate.reason,
-        };
-      }
-      await tx.execute(sql`
-        UPDATE ${sql.raw(ADAPTER_REFRESH_QUEUE_TABLE)}
-        SET status = 'processing',
-            last_attempt_at = NOW(),
-            attempts = attempts + 1
-        WHERE id = ${claimed.id}
-          AND adapter_kind = ${policy.adapterKind}
-      `);
-      return { kind: "claimed" as const, row: claimed, permit: gate?.permit };
-    });
-
-    if (claim.kind === "none" || claim.kind === "gated") return claim;
-    const row = claim.row;
-    const newAttempts = row.attempts + 1;
-    const normalized: AdapterLaneWorkerRow = {
-      id: row.id,
-      adapterKind: row.adapter_kind,
-      queueName,
-      type: row.type,
-      payload: row.payload,
-      userId: row.user_id,
-      attempts: row.attempts,
-    };
-
-    let guard: AdapterLaneGuardResult | undefined;
-    try {
-      guard = await policy.guardDispatch?.({
-        queueName,
-        rows: [normalized],
-        now: new Date(),
-      });
-    } catch (err) {
-      const retryAfterMs = defaultRetryBackoffMs(1);
-      await deferRows([normalized], retryAfterMs);
-      logger.warn(
-        {
-          adapter: policy.adapterKind,
-          queueName,
-          type: row.type,
-          id: row.id,
-          retryAfterMs,
-          err: String((err as Error)?.message ?? err),
-        },
-        "adapter lane worker: guard failed; dispatch deferred",
-      );
-      return { kind: "claimed", id: row.id, type: row.type, dispatched: false };
-    }
-    if (guard?.action === "defer") {
-      await deferRows([normalized], guard.retryAfterMs);
-      logger.info(
-        {
-          adapter: policy.adapterKind,
-          queueName,
-          type: row.type,
-          id: row.id,
-          retryAfterMs: guard.retryAfterMs,
-          reason: guard.reason,
-        },
-        "adapter lane worker: dispatch deferred by guard",
-      );
-      return { kind: "claimed", id: row.id, type: row.type, dispatched: false };
-    }
-
-    try {
-      await policy.dispatch(normalized, { permit: claim.permit });
-      await db.execute(
-        sql`UPDATE ${sql.raw(ADAPTER_REFRESH_QUEUE_TABLE)} SET status = 'done' WHERE id = ${row.id} AND adapter_kind = ${policy.adapterKind}`,
-      );
-    } catch (err) {
-      const isPermanent =
-        err instanceof AdapterError &&
-        (err.category === "permanent" || err.category === "not-found");
-      if (isPermanent || newAttempts >= policy.maxAttempts) {
-        await db.execute(
-          sql`UPDATE ${sql.raw(ADAPTER_REFRESH_QUEUE_TABLE)} SET status = 'dead_letter' WHERE id = ${row.id} AND adapter_kind = ${policy.adapterKind}`,
-        );
-      } else {
-        const retryAfterMs = retryDelayMs(policy, {
-          queueName,
-          type: row.type,
-          id: row.id,
-          attempts: newAttempts,
-          error: err,
-        });
-        await db.execute(sql`
-          UPDATE ${sql.raw(ADAPTER_REFRESH_QUEUE_TABLE)}
-          SET status = 'pending',
-              next_attempt_at = NOW() + (${retryAfterMs} || ' milliseconds')::interval
-          WHERE id = ${row.id}
-            AND adapter_kind = ${policy.adapterKind}
-        `);
-      }
-      logger.warn(
-        {
-          adapter: policy.adapterKind,
-          queueName,
-          type: row.type,
-          id: row.id,
-          category: err instanceof AdapterError ? err.category : "non-adapter",
-          attempts: newAttempts,
-          err: String((err as Error)?.message ?? err),
-        },
-        "adapter lane worker: handler failed",
-      );
-    }
-
-    return { kind: "claimed", id: row.id, type: row.type, dispatched: true };
-  }
-
-  return {
-    async tick(): Promise<AdapterLaneWorkerTickResult> {
-      await runStaleRecovery(Date.now());
-
-      const tickStartMs = Date.now();
-      const slot = policy.slots[tickCounter]!;
-      tickCounter = (tickCounter + 1) % policy.slots.length;
-      const queueOrder = [slot, ...policy.fallthrough.filter((q) => q !== slot)];
-
-      for (const queueName of queueOrder) {
-        const claimed = await tryClaimAndDispatch(queueName);
-        if (claimed.kind === "gated") {
-          logger.debug(
-            {
-              adapter: policy.adapterKind,
-              queueName,
-              retryAfterMs: claimed.retryAfterMs,
-              reason: claimed.reason,
-            },
-            "adapter lane worker: claim gate deferred tick",
-          );
-          return { processedQueue: null, processedType: null, processedId: null };
-        }
-        if (claimed.kind === "claimed") {
-          if (claimed.dispatched) {
-            policy.emitDrained?.({
-              queueName,
-              entriesProcessed: 1,
-              durationMs: Date.now() - tickStartMs,
-            });
-          }
-          return {
-            processedQueue: queueName,
-            processedType: claimed.type,
-            processedId: claimed.id,
-          };
-        }
-      }
-
-      return { processedQueue: null, processedType: null, processedId: null };
-    },
-    resetForTest(): void {
-      tickCounter = 0;
-      nextStaleRecoveryAt = 0;
-    },
-    setSlotForTest(slotIndex: number): void {
-      tickCounter = slotIndex;
-    },
-  };
 }
 
 export function createAdapterBatchLaneWorker<TLane extends string, TPermit = unknown>(

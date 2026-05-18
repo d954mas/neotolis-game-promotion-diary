@@ -1,17 +1,16 @@
 import { describe, expect, it } from "vitest";
-import {
-  createAdapterBatchLaneWorker,
-  createAdapterLaneWorker,
-} from "../../src/lib/server/services/adapter-lane-worker.js";
+import { createAdapterBatchLaneWorker } from "../../src/lib/server/services/adapter-lane-worker.js";
 
 describe("adapter lane worker policy validation", () => {
   it("accepts weighted slots when fallthrough names each lane once", () => {
     expect(() =>
-      createAdapterLaneWorker({
+      createAdapterBatchLaneWorker({
         adapterKind: "youtube_channel",
         slots: ["service", "user", "user"] as const,
         fallthrough: ["user", "service"] as const,
         maxAttempts: 3,
+        maxBatchSize: 1,
+        batchScope: "global",
         staleProcessingMs: 60_000,
         staleRecoveryIntervalMs: 60_000,
         dispatch: async () => {},
@@ -21,11 +20,13 @@ describe("adapter lane worker policy validation", () => {
 
   it("rejects an empty slot map before the first tick can hit undefined lanes", () => {
     expect(() =>
-      createAdapterLaneWorker({
+      createAdapterBatchLaneWorker({
         adapterKind: "youtube_channel",
         slots: [],
         fallthrough: ["user"],
         maxAttempts: 3,
+        maxBatchSize: 1,
+        batchScope: "global",
         staleProcessingMs: 60_000,
         staleRecoveryIntervalMs: 60_000,
         dispatch: async () => {},
@@ -35,11 +36,13 @@ describe("adapter lane worker policy validation", () => {
 
   it("rejects fallthrough lanes that are not declared in slots", () => {
     expect(() =>
-      createAdapterLaneWorker({
+      createAdapterBatchLaneWorker({
         adapterKind: "youtube_channel",
         slots: ["user"] as const,
         fallthrough: ["user", "service"] as const,
         maxAttempts: 3,
+        maxBatchSize: 1,
+        batchScope: "global",
         staleProcessingMs: 60_000,
         staleRecoveryIntervalMs: 60_000,
         dispatch: async () => {},
