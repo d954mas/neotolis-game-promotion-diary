@@ -782,7 +782,11 @@ describe("/api/sources HTTP boundary", () => {
     expect(res.status).toBe(201);
     const body = (await res.json()) as { kind: string; handleUrl: string };
     expect(body.kind).toBe("reddit_subreddit");
-    expect(body.handleUrl).toBe("https://www.reddit.com/r/IndieDev");
+    // Reddit identifiers are case-insensitive; the adapter lowercases
+    // subreddit / username at the parser boundary so two subscribers
+    // pasting different-case spellings land on the same canonical
+    // cache row and fan-out lane.
+    expect(body.handleUrl).toBe("https://www.reddit.com/r/indiedev");
   });
 
   it("POST /api/sources kind=reddit synthetic — non-Reddit URL returns 422 invalid_reddit_url", async () => {
