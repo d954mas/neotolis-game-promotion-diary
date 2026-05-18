@@ -187,26 +187,36 @@ async function atomicallyInsertNonDuplicates(
 }
 
 /** Single-statement bulk INSERT for one (type, identifier-key) pair.
- *  `unnest($ids::text[])` projects the identifier array as rows; each
- *  row builds its own jsonb payload and checks `NOT EXISTS` against
- *  the queue. Returns RETURNING id rowcount. */
+ *  `VALUES (...)` projects the identifier array as rows; each row builds
+ *  its own jsonb payload and checks `NOT EXISTS` against the queue.
+ *  Returns RETURNING id rowcount.
+ *
+ *  Why VALUES + sql.join over `unnest($ids::text[])`: drizzle 0.45
+ *  serializes the JS array parameter via the pg driver, which encodes
+ *  it as a JSON-shaped parameter rather than the native pg array
+ *  format. The downstream `::text[]` cast then fails with 42846. And
+ *  `jsonb_build_object($key, value)` can't infer $key's type (variadic
+ *  "any") so we'd hit 42P18 separately. Inline VALUES (one parameter
+ *  per identifier) sidesteps both: each identifier is its own text-
+ *  inferred parameter, and the payloadKey is cast explicitly to text. */
 async function insertNonDuplicateBatch(
   type: "author_poll" | "sub_poll",
   payloadKey: "handle" | "sub",
   identifiers: string[],
 ): Promise<number> {
+  const valuesList = identifiers.map((id) => sql`(${id})`);
   const result = await db.execute<{ id: number }>(sql`
     INSERT INTO adapter_refresh_queue
       (adapter_kind, queue_name, type, payload, user_id, priority)
     SELECT 'reddit_account', 'service_source', ${type},
-           jsonb_build_object(${payloadKey}, c.identifier), NULL, 0
-    FROM unnest(${identifiers}::text[]) AS c(identifier)
+           jsonb_build_object(${payloadKey}::text, c.identifier), NULL, 0
+    FROM (VALUES ${sql.join(valuesList, sql`, `)}) AS c(identifier)
     WHERE NOT EXISTS (
       SELECT 1 FROM adapter_refresh_queue
       WHERE adapter_kind = 'reddit_account'
         AND queue_name = 'service_source'
         AND type = ${type}
-        AND payload->>${payloadKey} = c.identifier
+        AND payload->>${payloadKey}::text = c.identifier
         AND status IN ('pending', 'processing')
     )
     RETURNING id
