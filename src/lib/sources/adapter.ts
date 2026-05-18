@@ -579,6 +579,33 @@ export interface SourceAdapter {
     opts: { backfillWindow: BackfillWindow; tx: Tx },
   ): Promise<void>;
 
+  /** Hook fired by `updateSource` when the user widens `backfillTargetSince`
+   *  past the prior value (e.g. "30 days" → "everything"). Adapters with
+   *  walker state — be it per-user (YouTube channel state) or cross-tenant
+   *  (Reddit cache rows) — reset their pagination cursor and re-enqueue
+   *  whatever they need to deepen the walk.
+   *
+   *  Cross-source code knows nothing about how each adapter persists its
+   *  walker state: it just calls this hook on the right registry adapter
+   *  whenever a widen is detected. Adapters without walker state (no-op
+   *  default).
+   *
+   *  Runs inside the updateSource transaction. Failures bubble up — the
+   *  PATCH on data_sources rolls back too, so the user can retry without
+   *  inconsistent state. Use the supplied `tx` for DB writes; enqueue
+   *  durable jobs through the shared outbox if the adapter is pg-boss-
+   *  backed. */
+  resetWalkerStateOnWidening?(
+    source: SourceCreatedHookSource,
+    ctx: {
+      previousTarget: Date | null;
+      newTarget: Date;
+      triggerUserId: string;
+      ipAddress: string;
+      tx: Tx;
+    },
+  ): Promise<void>;
+
   /** Adapter-driven event preview (POST /api/events/preview-url + ingest
    *  paste flow). After URL is parsed + routed, the adapter is asked
    *  to fetch a friendly preview (title / authorName / authorUrl).

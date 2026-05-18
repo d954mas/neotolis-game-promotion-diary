@@ -42,7 +42,7 @@ import {
   enforceAdapterUserQuota,
 } from "./quota.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
-import { getAdapter } from "$lib/sources/registry.js";
+import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
 import { youtubeChannels } from "../db/schema/index.js";
 import { ensureChannelState, getChannelState } from "./channel-state.js";
 import { QUEUES } from "../queues.js";
@@ -319,132 +319,6 @@ export async function assertNoChannelConflict(
  * route validation (sources.ts) rejects user-pasted dates older than 2005
  * to prevent the sentinel being indistinguishable from legitimate input.
  */
-/**
- * When a user widens `backfillTargetSince` past the channel's recorded
- * `backfill_oldest_at` on a fully-walked channel, enqueue a one-shot
- * force-deep walk for this user. Without this override, the three-branch
- * since-derivation in `handleBackfillChannel` always routes to
- * `branch=exhausted` (multi-tenant fairness prioritises the channel
- * state's exhausted flag over the per-user target), so historical events
- * below the prior depth would never surface on the next refresh-content
- * click. This function is the single per-user opt-in to override that.
- *
- * Skipped when:
- *   - new target is NOT deeper than the previous target (no widening);
- *   - channel state row missing (no prior walk — three-branch logic
- *     naturally routes to `branch=deep` on its own);
- *   - channel state's `backfillComplete` is false (three-branch logic
- *     already routes to `incremental` or `deep` based on `backfillOldestAt`);
- *   - new target is NOT deeper than `backfill_oldest_at` (we already walked
- *     past the requested depth — nothing new to find).
- *
- * Quota attribution: the trigger user (this PATCH author) pays. Subscribers
- * on the same channel free-ride on fan-out — same as a normal refresh-content
- * click. `singletonKey` is `force-deep-{channelKey}-{userId}` so each user
- * gets one job per channel, but two users widening on the same channel
- * concurrently both get their own walk.
- */
-async function maybeEnqueueForceDeepWalk(
-  tx: Tx,
-  opts: {
-    channelKey: string;
-    triggerUserId: string;
-    previousTarget: Date | null;
-    newTarget: Date;
-  },
-): Promise<void> {
-  if (opts.previousTarget !== null && opts.newTarget.getTime() >= opts.previousTarget.getTime()) {
-    return;
-  }
-  const state = await getChannelState("youtube_channel", opts.channelKey);
-  if (!state) return;
-  if (state.backfillComplete !== true) return;
-  if (state.backfillOldestAt === null) return;
-  if (opts.newTarget.getTime() >= state.backfillOldestAt.getTime()) return;
-
-  // Per-user fair-share cap check. Force-deep walks consume the same
-  // user quota as a refresh-content click (the worker audits them as a
-  // capped 'historical' flow). The POST /api/sources/:id/refresh-content
-  // path runs this check before enqueueing; without the equivalent guard
-  // here, a user who already hit their daily cap could trigger a deep
-  // historical walk through PATCH /api/sources/:id widening — the cap
-  // counter would only observe the overage post-walk, by which time
-  // operator quota is already spent. Mirror the refresh-content check
-  // verbatim so both paths fail-loud with the same 429 envelope.
-  const adapter = getAdapter("youtube_channel");
-  const cap = adapter?.observability.userQuotaCap;
-  if (cap?.requestsPerDay !== undefined || cap?.eventsPerDay !== undefined) {
-    const used = await getUserQuotaUsedToday(opts.triggerUserId, "youtube_channel");
-    const resetAt = nextPacificMidnight();
-    const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
-    if (cap.requestsPerDay !== undefined && used.requests >= cap.requestsPerDay) {
-      throw new AppError(
-        `daily request quota exhausted: ${used.requests}/${cap.requestsPerDay}`,
-        "requests_quota_exhausted",
-        429,
-        {
-          cap: cap.requestsPerDay,
-          used: used.requests,
-          reset_in_seconds: resetInSeconds,
-        },
-      );
-    }
-    if (cap.eventsPerDay !== undefined && used.events >= cap.eventsPerDay) {
-      throw new AppError(
-        `daily events quota exhausted: ${used.events}/${cap.eventsPerDay}`,
-        "events_quota_exhausted",
-        429,
-        {
-          cap: cap.eventsPerDay,
-          used: used.events,
-          reset_in_seconds: resetInSeconds,
-        },
-      );
-    }
-  }
-
-  // Write the force-deep intent through the transactional outbox so it
-  // commits atomically
-  // with the data_sources UPDATE in the enclosing transaction. The
-  // forwarder picks the row up via LISTEN/NOTIFY (typically <10ms) and
-  // calls boss.send asynchronously. If boss.send fails the row stays
-  // pending and the forwarder retries on every NOTIFY + 30s sweep.
-  // Pre-outbox the same code path did a direct boss.send which:
-  //   - could win the race against the UPDATE (worker reads pre-UPDATE
-  //     state of data_sources, fan-out filters old events out, silent
-  //     loss of widen intent), and
-  //   - committed UPDATE before send so a transient queue failure was
-  //     a permanent silent loss with no user-side recovery.
-  await enqueueViaOutbox(
-    tx,
-    QUEUES.YOUTUBE_BACKFILL_CHANNEL,
-    {
-      kind: "youtube_channel" as const,
-      channelKey: opts.channelKey,
-      triggerUserId: opts.triggerUserId,
-      depthBoundIso: opts.newTarget.toISOString(),
-      flow: "historical" as const,
-      forceDeep: true,
-    },
-    {
-      // Include target in the singleton key. The key dedupes IN-FLIGHT pg-boss jobs (queued
-      // or active). Without `newTarget` in the key, two rapid widens
-      // (e.g. 30d→90d, then 90d→epoch before the first walk finishes)
-      // share the same key; pg-boss rejects the second send with a
-      // null return value, the forwarder marks the row forwarded
-      // anyway, and the deeper user intent is silently lost — later
-      // refresh-content clicks land in branch=exhausted because the
-      // first walk already set complete=true at the shallower depth.
-      // Including the target gives each unique widen its own key:
-      // back-to-back widens with different targets both run; an
-      // idempotent re-PATCH with the same target stays correctly
-      // deduped.
-      singletonKey: `force-deep-${opts.channelKey}-${opts.triggerUserId}-${opts.newTarget.getTime()}`,
-      priority: 1,
-    },
-  );
-}
-
 function backfillWindowToDate(window: BackfillWindow): Date {
   const now = Date.now();
   switch (window) {
@@ -798,15 +672,16 @@ export async function updateSource(
     }
     update.backfillTargetSince = patch.backfillTargetSince;
     // Widening backfillTargetSince is handled in TWO places, depending on
-    // whether the channel was previously walked to exhaustion:
+    // whether the source was previously walked to exhaustion:
     //
-    //   1. If channel_state.backfill_complete === true AND newTarget
-    //      crosses past backfill_oldest_at: immediate force-deep job
-    //      enqueued for THIS user via maybeEnqueueForceDeepWalk below.
-    //      The user pays quota for the deep walk; other subscribers
-    //      free-ride on fan-out. The enqueue runs BEFORE the UPDATE for
-    //      atomicity-of-intent — see the inline rationale block on the
-    //      enqueue call itself.
+    //   1. If adapter walker state is "complete" AND newTarget crosses
+    //      past whatever depth-frontier the adapter recorded: the
+    //      adapter's resetWalkerStateOnWidening hook fires (see the
+    //      transaction below). YouTube enqueues a force-deep walk; Reddit
+    //      clears the cursor + flag and queues a continuation; future
+    //      adapters do whatever their walker needs. The user pays quota
+    //      for the deep walk; other subscribers free-ride on fan-out.
+    //      The hook runs BEFORE the UPDATE for atomicity-of-intent.
     //
     //   2. Otherwise (channel still has unwalked history below the
     //      previous target — backfill_complete=false): no enqueue here.
@@ -843,15 +718,37 @@ export async function updateSource(
   const row = await db.transaction(async (tx) => {
     if (
       patch.backfillTargetSince !== undefined &&
-      existing.kind === "youtube_channel" &&
-      existing.channelId !== null
+      (existing.backfillTargetSince === null ||
+        patch.backfillTargetSince.getTime() < existing.backfillTargetSince.getTime()) &&
+      hasAdapter(existing.kind)
     ) {
-      await maybeEnqueueForceDeepWalk(tx, {
-        channelKey: existing.channelId,
-        triggerUserId: userId,
-        previousTarget: existing.backfillTargetSince,
-        newTarget: patch.backfillTargetSince,
-      });
+      // Adapter-driven walker reset on widening. Each adapter knows how
+      // its walker state lives (YouTube: per-channel state + force-deep
+      // backfill enqueue via outbox; Reddit: cross-tenant cache row +
+      // service-lane continuation row). Cross-source code stays agnostic.
+      const adapter = getAdapter(existing.kind);
+      if (adapter.resetWalkerStateOnWidening !== undefined) {
+        await adapter.resetWalkerStateOnWidening(
+          {
+            id: existing.id,
+            userId,
+            autoImport: existing.autoImport,
+            handleUrl: existing.handleUrl,
+            metadata: (existing.metadata ?? {}) as Record<string, unknown>,
+            kind: existing.kind,
+            channelId: existing.channelId,
+            backfillTargetSince: patch.backfillTargetSince,
+            isOwnedByMe: existing.isOwnedByMe,
+          },
+          {
+            previousTarget: existing.backfillTargetSince,
+            newTarget: patch.backfillTargetSince,
+            triggerUserId: userId,
+            ipAddress,
+            tx,
+          },
+        );
+      }
     }
 
     const [updated] = await tx

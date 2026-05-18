@@ -33,7 +33,12 @@ import type {
 } from "$lib/sources/adapter.js";
 import type { Hono } from "hono";
 import { and, eq, inArray, isNull, sql, desc } from "drizzle-orm";
-import { redditPosts, redditPostSnapshots } from "./schema/index.js";
+import {
+  redditPosts,
+  redditPostSnapshots,
+  redditSubredditsCache,
+  redditUsersCache,
+} from "./schema/index.js";
 import { QUEUES } from "$lib/server/queues.js";
 import { db, type DbOrTx, type Tx } from "$lib/server/db/client.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
@@ -445,6 +450,107 @@ async function fetchSyncStats(
   }
 }
 
+/**
+ * resetWalkerStateOnWidening — cross-source hook fired by updateSource
+ * when the user widens `backfillTargetSince` past the prior value. For
+ * Reddit the walker state lives on the public cross-tenant cache row
+ * (reddit_subreddits_cache / reddit_users_cache); resetting it means:
+ *   1. Clear backfill_after_cursor + flip backfill_complete=false so
+ *      sub_poll / author_poll re-enter "deep walk" mode on the next tick.
+ *   2. Enqueue a user_source row to kick the walker off immediately —
+ *      same lane the user's original click would have used, same cap
+ *      bookkeeping. After this initial click runs through one page,
+ *      sub_poll's continuation enqueue takes over on the service lane.
+ *
+ * Cap: counts toward the user's source-action cap via enforceAdapterUserQuota
+ * — a PATCH widen burns the same kind of budget as a refresh-content click.
+ * Other subscribers of the same subreddit / user free-ride on the resulting
+ * fan-out (events show up in their feeds too, filtered to their own
+ * backfillTargetSince via the inner-loop window check in sub-poll.ts).
+ *
+ * Skips when: source.metadata doesn't carry the lookup key (defensive —
+ * createSource pipeline always sets it), OR the cache row is missing
+ * (handler will create the row on first walk anyway), OR walker already
+ * marked NOT-complete (next refresh will continue the deep walk on its
+ * own without needing a reset).
+ */
+async function resetWalkerStateOnWidening(
+  source: SourceCreatedHookSource,
+  ctx: {
+    previousTarget: Date | null;
+    newTarget: Date;
+    triggerUserId: string;
+    ipAddress: string;
+    tx: Tx;
+  },
+): Promise<void> {
+  const meta = (source.metadata ?? {}) as { subreddit?: string; username?: string };
+  let resetCount: number;
+  let queuePayload: { sub?: string; handle?: string };
+  let pollType: "sub_poll" | "author_poll";
+
+  if (source.kind === "reddit_subreddit" && typeof meta.subreddit === "string") {
+    const result = await ctx.tx
+      .update(redditSubredditsCache)
+      .set({ backfillAfterCursor: null, backfillComplete: false })
+      .where(
+        and(
+          eq(redditSubredditsCache.name, meta.subreddit),
+          eq(redditSubredditsCache.backfillComplete, true),
+        ),
+      )
+      .returning({ name: redditSubredditsCache.name });
+    resetCount = result.length;
+    queuePayload = { sub: meta.subreddit };
+    pollType = "sub_poll";
+  } else if (source.kind === "reddit_account" && typeof meta.username === "string") {
+    const result = await ctx.tx
+      .update(redditUsersCache)
+      .set({ backfillAfterCursor: null, backfillComplete: false })
+      .where(
+        and(
+          eq(redditUsersCache.username, meta.username),
+          eq(redditUsersCache.backfillComplete, true),
+        ),
+      )
+      .returning({ username: redditUsersCache.username });
+    resetCount = result.length;
+    queuePayload = { handle: meta.username };
+    pollType = "author_poll";
+  } else {
+    // No metadata key to look up — never-walked source (first walk hasn't
+    // landed yet) or non-Reddit kind. updateSource only routes to the
+    // adapter for `source.kind` matching the adapter registry entry so
+    // the else-branch effectively never fires for Reddit; defense-in-depth.
+    return;
+  }
+
+  if (resetCount === 0) {
+    // The cache row was either missing OR backfill_complete was already
+    // false — in either case the next worker tick already does the right
+    // thing (deep walk runs against the existing-or-fresh cursor). No
+    // continuation enqueue needed; the user's natural next refresh OR
+    // the daily service_source cron picks it up.
+    logger.debug(
+      { kind: source.kind, meta, triggerUserId: ctx.triggerUserId },
+      "reddit.resetWalkerStateOnWidening: cache row not in complete state; no-op",
+    );
+    return;
+  }
+
+  // Enqueue an immediate user_source kick. user_id=triggerUserId so the
+  // PATCH counts the same as a refresh-content click against the user's
+  // source-action cap (and surfaces as such in observability audit).
+  await ctx.tx.insert(adapterRefreshQueue).values({
+    adapterKind: "reddit_account",
+    queueName: "user_source",
+    type: pollType,
+    payload: queuePayload,
+    userId: ctx.triggerUserId,
+    priority: 1,
+  });
+}
+
 /** Lookup: does the user have an owned, non-soft-deleted reddit_account
  *  source whose metadata.username matches the post author? Tenant-scoped
  *  by construction (filters by userId). */
@@ -642,6 +748,7 @@ export const redditAdapter: SourceAdapter & typeof redditAdapterCore = {
   backfillSource,
   normalizeSourceOnCreate,
   onSourceCreated,
+  resetWalkerStateOnWidening,
   enrichFeedDtos: enrichRedditFeedDtos,
   fetchEventPreviewMetadata,
   syncStats: {

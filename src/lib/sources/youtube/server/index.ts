@@ -91,6 +91,12 @@ import { youtubeVideos, youtubeMetadataFetchLog } from "./schema/index.js";
 import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 import { adapterRefreshQueueLabel } from "$lib/server/services/adapter-lane-worker.js";
 import { enqueueViaOutbox } from "$lib/server/services/outbox.js";
+import { getChannelState } from "$lib/server/services/channel-state.js";
+import {
+  getUserQuotaUsedToday,
+  nextPacificMidnight,
+} from "$lib/server/services/quota.js";
+import { AppError } from "$lib/server/services/errors.js";
 import {
   youtubeRefreshQueueTick,
   YOUTUBE_REFRESH_SLOT_MAPPING,
@@ -99,7 +105,6 @@ import {
 import { events } from "$lib/server/db/schema/events.js";
 import { db } from "$lib/server/db/client.js";
 import { eq, and, gte, count, inArray, sql } from "drizzle-orm";
-import { AppError } from "$lib/server/services/errors.js";
 import { logger } from "$lib/server/logger.js";
 import { writeAudit } from "$lib/server/audit.js";
 
@@ -761,6 +766,92 @@ const youtubeQuotaCounters: ReadonlyArray<AdapterQuotaCounter> = [
 // validateEventInput, fetchPollStateMap, refreshQueue, registerRoutes) plus extends
 // observability with per-source quotaCounters.
 //
+/**
+ * resetWalkerStateOnWidening — fired by cross-source updateSource when a
+ * user widens `backfillTargetSince` past the prior value. Enqueues a
+ * one-shot force-deep walk through the same outbox path the
+ * refresh-content button uses; per-user fair-share cap is enforced here
+ * so a user who already hit their daily cap can't sneak around it by
+ * PATCHing the source. The trigger user pays quota; other subscribers
+ * free-ride on the channel-wide fan-out.
+ *
+ * Pre-existing maybeEnqueueForceDeepWalk logic moved here so cross-source
+ * code stays adapter-agnostic. Same skip predicates: missing state /
+ * incomplete / target already deeper than backfill_oldest_at all no-op.
+ */
+async function resetWalkerStateOnWidening(
+  source: SourceCreatedHookSource,
+  ctx: {
+    previousTarget: Date | null;
+    newTarget: Date;
+    triggerUserId: string;
+    ipAddress: string;
+    tx: Tx;
+  },
+): Promise<void> {
+  if (source.kind !== "youtube_channel" || source.channelId === null) return;
+
+  // updateSource already gates on patch.backfillTargetSince <
+  // existing.backfillTargetSince, but defend-in-depth here lets future
+  // call paths reuse the hook without re-implementing the predicate.
+  if (
+    ctx.previousTarget !== null &&
+    ctx.newTarget.getTime() >= ctx.previousTarget.getTime()
+  ) {
+    return;
+  }
+  const state = await getChannelState("youtube_channel", source.channelId);
+  if (!state) return;
+  if (state.backfillComplete !== true) return;
+  if (state.backfillOldestAt === null) return;
+  if (ctx.newTarget.getTime() >= state.backfillOldestAt.getTime()) return;
+
+  // Per-user fair-share cap check — mirrors refresh-content's gate so
+  // PATCH widening cannot bypass the daily request/events cap.
+  const cap = youtubeChannelAdapterCore.observability.userQuotaCap;
+  if (cap?.requestsPerDay !== undefined || cap?.eventsPerDay !== undefined) {
+    const used = await getUserQuotaUsedToday(ctx.triggerUserId, "youtube_channel");
+    const resetAt = nextPacificMidnight();
+    const resetInSeconds = Math.max(0, Math.floor((resetAt.getTime() - Date.now()) / 1000));
+    if (cap.requestsPerDay !== undefined && used.requests >= cap.requestsPerDay) {
+      throw new AppError(
+        `daily request quota exhausted: ${used.requests}/${cap.requestsPerDay}`,
+        "requests_quota_exhausted",
+        429,
+        { cap: cap.requestsPerDay, used: used.requests, reset_in_seconds: resetInSeconds },
+      );
+    }
+    if (cap.eventsPerDay !== undefined && used.events >= cap.eventsPerDay) {
+      throw new AppError(
+        `daily events quota exhausted: ${used.events}/${cap.eventsPerDay}`,
+        "events_quota_exhausted",
+        429,
+        { cap: cap.eventsPerDay, used: used.events, reset_in_seconds: resetInSeconds },
+      );
+    }
+  }
+
+  await enqueueViaOutbox(
+    ctx.tx,
+    QUEUES.YOUTUBE_BACKFILL_CHANNEL,
+    {
+      kind: "youtube_channel" as const,
+      channelKey: source.channelId,
+      triggerUserId: ctx.triggerUserId,
+      depthBoundIso: ctx.newTarget.toISOString(),
+      flow: "historical" as const,
+      forceDeep: true,
+    },
+    {
+      // Include target in the singleton key so back-to-back widens with
+      // different targets each get their own pg-boss job (the key
+      // dedupes in-flight queued+active jobs only).
+      singletonKey: `force-deep-${source.channelId}-${ctx.triggerUserId}-${ctx.newTarget.getTime()}`,
+      priority: 1,
+    },
+  );
+}
+
 // TypeScript guarantees completeness — the `SourceAdapter & typeof core`
 // annotation fails the build if any contract method is missing from the
 // spread.
@@ -776,6 +867,7 @@ export const youtubeAdapter: SourceAdapter & typeof youtubeChannelAdapterCore = 
   canBackfillSource: canRunSyncStats,
   canonicalizeOnCreate,
   onSourceCreated,
+  resetWalkerStateOnWidening,
   fetchEventPreviewMetadata,
   syncStats: {
     canRun: canRunSyncStats,
