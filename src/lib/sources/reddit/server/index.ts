@@ -233,7 +233,6 @@ async function backfillSource(
   const queueName = isUser ? "user_source" : "service_source";
   const type = isAccount ? "author_poll" : "sub_poll";
   const payload = isAccount ? { handle: md.username! } : { sub: md.subreddit! };
-  const idempotencyKey = isUser ? `source-refresh:${source.id}:${ctx.origin}` : null;
   const dbCtx = ctx.tx ?? db;
   const result = await dbCtx
     .insert(adapterRefreshQueue)
@@ -242,20 +241,8 @@ async function backfillSource(
       queueName,
       type,
       payload,
-      idempotencyKey,
       userId: isUser ? ctx.userId : null,
       priority: isUser ? 1 : 0,
-    })
-    .onConflictDoUpdate({
-      target: [
-        adapterRefreshQueue.adapterKind,
-        adapterRefreshQueue.queueName,
-        adapterRefreshQueue.idempotencyKey,
-      ],
-      targetWhere: sql`${adapterRefreshQueue.idempotencyKey} IS NOT NULL`,
-      set: {
-        nextAttemptAt: sql`${adapterRefreshQueue.nextAttemptAt}`,
-      },
     })
     .returning({ id: adapterRefreshQueue.id });
   return {

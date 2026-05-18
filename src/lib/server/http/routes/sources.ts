@@ -225,12 +225,11 @@ sourcesRoutes.post("/sources/:id/restore", async (c) => {
 //      Body never contains "forbidden" / "permission".
 //   3. Anonymous-401 sweep - extended in tests/integration/anonymous-401.test.ts
 //      MUST_BE_PROTECTED with this route's path pattern.
-//   4. Audit INSERT-only - writeAuditStrict fires after the enqueue with
+//   4. Audit INSERT-only - writeAuditStrict fires BEFORE the enqueue with
 //      action "source.refresh_content_requested". STRICT variant: a failed
-//      audit surfaces as 5xx so the caller retries; the queue's singletonKey
-//      dedupes the re-enqueue (no-op) and the second writeAuditStrict
-//      succeeds. This preserves the audit-row-per-action contract without
-//      a transactional enqueue.
+//      audit surfaces as 5xx before any adapter side effect occurs. This is
+//      load-bearing for SQL-backed adapters (Reddit) whose queue rows also
+//      serve as quota counters and are not pg-boss singletonKey-deduped.
 //
 // 422 path: getAdapter throws on unregistered kinds. We re-throw as
 // AppError('kind_not_yet_functional', 422) so mapErr emits a clean wire
@@ -310,25 +309,21 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
 
     await enforceSourceActionQuota(ctx.userId, adapter, ctx.ipAddress, source.kind);
 
-    // No eager state reset. The three-branch since-derivation in
-    // backfill-channel.ts decides at walk-time whether the click is
-    // steady-state (exhausted), incremental, or deep. Eagerly resetting
-    // here would re-open the walk for ALL subscribers whenever one user
-    // clicked refresh - a multi-tenant fairness violation.
-    const result = await adapter.backfillSource(adapterSource, {
-      userId: ctx.userId,
-      origin: "user",
-    });
-
-    // STRICT - failed audit returns 5xx; user retry hits singletonKey dedup
-    // on the queue (no-op enqueue) and the audit INSERT retries. Audit-row-
-    // per-action contract honored without a transactional enqueue.
+    // STRICT INTENT AUDIT BEFORE ENQUEUE.
     //
-    // This is the INTENT row - written pre-completion for immediate forensics
-    // ("user X clicked refresh on source Y at time T"). Worker writes a
-    // SECOND row at completion with full metadata (events_inserted,
-    // requests_used, flow). Cap query (services/quota.ts) filters by
-    // metadata->>'flow' so it counts ONLY worker rows, not intent rows.
+    // The audit row is the rate-limit counter and the forensics record for
+    // "user X clicked refresh on source Y". It must exist before the adapter
+    // mutates its queue. This matters for Reddit: adapter_refresh_queue rows
+    // are also sliding-window quota counters and are not singletonKey-deduped.
+    // If we enqueued first and audit failed, a retry would be poisoned by the
+    // prior queue row (429 instead of a clean retry) and the first side effect
+    // would have no audit row. Auditing first makes the failure direction sane:
+    // failed audit -> no side effect; failed enqueue -> audited intent.
+    //
+    // Worker completion writes a SECOND row with full usage metadata
+    // (events_inserted, requests_used, flow). Cap query (services/quota.ts)
+    // filters by metadata->>'flow' so it counts ONLY worker rows, not this
+    // intent row.
     await writeAuditStrict({
       userId: ctx.userId,
       action: "source.refresh_content_requested",
@@ -342,9 +337,17 @@ sourcesRoutes.post("/sources/:id/refresh-content", async (c) => {
         // completion audit), but we set `platform` anyway so any future
         // query that aggregates intent + completion stays consistent.
         platform: source.kind,
-        queue: result.queue,
-        job_id: result.jobId,
       },
+    });
+
+    // No eager state reset. The three-branch since-derivation in
+    // backfill-channel.ts decides at walk-time whether the click is
+    // steady-state (exhausted), incremental, or deep. Eagerly resetting
+    // here would re-open the walk for ALL subscribers whenever one user
+    // clicked refresh - a multi-tenant fairness violation.
+    const result = await adapter.backfillSource(adapterSource, {
+      userId: ctx.userId,
+      origin: "user",
     });
 
     return c.json({ enqueued: true, queue: result.queue, jobId: result.jobId }, 202);

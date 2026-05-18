@@ -15,9 +15,9 @@
 //   3. Anonymous-401 — sweep + per-route assertion both fire (the sweep
 //      lives in tests/integration/anonymous-401.test.ts; the explicit
 //      assertion is in this file).
-//   4. Audit INSERT-only — writeAudit fires after the enqueue with
+//   4. Audit INSERT-only — writeAuditStrict fires before the enqueue with
 //      action 'source.refresh_content_requested'; metadata carries
-//      source_id, kind, queue, job_id.
+//      source_id + kind. Worker completion rows carry usage/flow metadata.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { and, eq } from "drizzle-orm";
@@ -217,7 +217,7 @@ describe("POST /api/sources/:id/refresh-content", () => {
     expect(sentJobs.length).toBe(0);
   });
 
-  it("audit log records 'source.refresh_content_requested' with metadata.source_id / kind / queue / job_id", async () => {
+  it("audit log records 'source.refresh_content_requested' intent before worker completion metadata", async () => {
     const app = createApp();
     const u = await seedUserDirectly({ email: `rc-audit-${uniq()}@test.local` });
     const src = await seedYoutubeSource(u.id);
@@ -240,9 +240,11 @@ describe("POST /api/sources/:id/refresh-content", () => {
       // Intent rows still carry source_id (per-user click forensics).
       source_id: src.id,
       kind: "youtube_channel",
-      queue: "youtube.backfill.channel",
-      job_id: "mock-job-id",
+      platform: "youtube_channel",
     });
+    expect(row.metadata).not.toHaveProperty("flow");
+    expect(row.metadata).not.toHaveProperty("queue");
+    expect(row.metadata).not.toHaveProperty("job_id");
   });
 
   // Per-user rolling rate limit
