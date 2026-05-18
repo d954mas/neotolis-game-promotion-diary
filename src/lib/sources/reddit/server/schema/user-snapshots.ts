@@ -23,9 +23,17 @@ import { redditUsersCache } from "./users.js";
 export const redditUserSnapshots = pgTable(
   "reddit_user_snapshots",
   {
+    // ON UPDATE CASCADE / ON DELETE CASCADE — see migration
+    // 0040_phase03_1_lowercase_reddit_identifiers.sql header. Username
+    // is the PK of reddit_users_cache; lowercase normalisation must
+    // re-point children automatically, and a cache row drop (collision
+    // dedup or future cleanup path) drops derived snapshots too.
     username: text("username")
       .notNull()
-      .references(() => redditUsersCache.username),
+      .references(() => redditUsersCache.username, {
+        onUpdate: "cascade",
+        onDelete: "cascade",
+      }),
     polledAt: timestamp("polled_at", { withTimezone: true }).notNull(),
     linkKarma: integer("link_karma"),
     commentKarma: integer("comment_karma"),

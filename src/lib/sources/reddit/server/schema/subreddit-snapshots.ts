@@ -24,9 +24,17 @@ import { redditSubredditsCache } from "./subreddits.js";
 export const redditSubredditSnapshots = pgTable(
   "reddit_subreddit_snapshots",
   {
+    // ON UPDATE CASCADE / ON DELETE CASCADE — see migration
+    // 0040_phase03_1_lowercase_reddit_identifiers.sql header for the
+    // case-insensitive identifier rationale: parent PK rename
+    // (lowercase normalisation) must re-point children automatically;
+    // parent row drop (collision dedup) drops derived snapshots too.
     subreddit: text("subreddit")
       .notNull()
-      .references(() => redditSubredditsCache.name),
+      .references(() => redditSubredditsCache.name, {
+        onUpdate: "cascade",
+        onDelete: "cascade",
+      }),
     polledAt: timestamp("polled_at", { withTimezone: true }).notNull(),
     subscribers: integer("subscribers"),
     accountsActive: integer("accounts_active"),

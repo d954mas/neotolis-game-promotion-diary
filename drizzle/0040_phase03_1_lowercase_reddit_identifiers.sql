@@ -133,11 +133,11 @@ WHERE kind::text = 'reddit_account'
 --
 --    Collision: if the unique index would be violated (the SAME user
 --    has BOTH casings of the same handle as active rows), soft-delete
---    the loser (older `last_metadata_refresh_at`-style proxy via
---    created_at) so the active-row partial index has room for the
---    surviving lowercase form. ON CONFLICT path is needed because the
---    unique index is partial (`WHERE deleted_at IS NULL`); a plain
---    UPDATE would 23505 on the collision.
+--    the loser (older created_at, with id as a deterministic tie-breaker)
+--    so the active-row partial index has room for the surviving lowercase
+--    form. ON CONFLICT path is needed because the unique index is partial
+--    (`WHERE deleted_at IS NULL`); a plain UPDATE would 23505 on the
+--    collision.
 WITH collisions AS (
   SELECT a.id AS loser_id
   FROM data_sources a
@@ -147,7 +147,10 @@ WITH collisions AS (
     AND a.deleted_at IS NULL
     AND b.deleted_at IS NULL
     AND LOWER(a.handle_url) = LOWER(b.handle_url)
-    AND a.created_at < b.created_at
+    AND (
+      a.created_at < b.created_at
+      OR (a.created_at = b.created_at AND a.id < b.id)
+    )
   WHERE a.kind::text IN ('reddit_account', 'reddit_subreddit')
 )
 UPDATE data_sources

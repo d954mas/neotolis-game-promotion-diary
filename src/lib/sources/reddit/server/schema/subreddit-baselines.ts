@@ -34,19 +34,21 @@ import { redditSubredditsCache } from "./subreddits.js";
 export const redditSubredditBaselines = pgTable(
   "reddit_subreddit_baselines",
   {
-    // FK to reddit_subreddits_cache.name — every baseline row refers to a
-    // cached subreddit by name. Pre-fix: 0030 created this column as a
-    // bare text with no FK, so an orphan baseline could survive after
-    // the cache row for that subreddit was deleted (no cascade path
-    // exists today, but the orphan is silently misleading: /feed would
-    // try to render baselines for a sub the worker no longer tracks).
-    // ON DELETE matches the sibling snapshot tables (no cascade — same
-    // as reddit_post_snapshots.post_id and reddit_user_snapshots.username
-    // FKs; the deletion cleanup path is the responsibility of the
-    // deletion-propagation cron, not blind CASCADE).
+    // FK to reddit_subreddits_cache.name with ON UPDATE CASCADE /
+    // ON DELETE CASCADE — see migration
+    // 0040_phase03_1_lowercase_reddit_identifiers.sql for the
+    // case-insensitive identifier rationale: parent PK rename
+    // (lowercase normalisation) must re-point children automatically;
+    // parent row drop (collision dedup) drops derived baselines too.
+    // The 0040 migration also retroactively re-binds the FK on existing
+    // DBs; this declaration keeps schema-as-code aligned so future
+    // drizzle-kit generate runs don't re-introduce the no-action drift.
     subreddit: text("subreddit")
       .notNull()
-      .references(() => redditSubredditsCache.name),
+      .references(() => redditSubredditsCache.name, {
+        onUpdate: "cascade",
+        onDelete: "cascade",
+      }),
     windowLabel: text("window_label").notNull(),
     computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
     sampleSize: integer("sample_size").notNull(),

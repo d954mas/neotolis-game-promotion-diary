@@ -139,16 +139,27 @@ export async function handlePostsRefresh(args: {
     }
     presentIds.push(reqId);
 
-    const author = t3.author === "[deleted]" ? null : t3.author;
+    // Lowercase Reddit identifiers at the API boundary — matches the
+    // pattern in sub-poll.ts / author-poll.ts. The upsert helpers
+    // lowercase again as defense, but doing it here makes Map keys
+    // (subredditsByName / usersByName) consistent with the canonical
+    // PK shape: a single /api/info response that returned both
+    // "IndieDev" and "indiedev" for the same logical sub would
+    // otherwise create 2 Map entries → 2 rows in the multi-row INSERT
+    // → ON CONFLICT "cannot affect row a second time" 23501 error.
+    // Reddit API is canonical-per-response in practice, but defending
+    // costs one .toLowerCase() per t3.
+    const author = t3.author === "[deleted]" ? null : t3.author.toLowerCase();
+    const subreddit = t3.subreddit.toLowerCase();
     const authorFullname = author === null ? null : (t3.author_fullname ?? null);
     const submittedAt = new Date(t3.created_utc * 1000);
     const permalink = t3.permalink.startsWith("http")
       ? t3.permalink
       : `https://www.reddit.com${t3.permalink}`;
 
-    if (!subredditsByName.has(t3.subreddit)) {
-      subredditsByName.set(t3.subreddit, {
-        name: t3.subreddit,
+    if (!subredditsByName.has(subreddit)) {
+      subredditsByName.set(subreddit, {
+        name: subreddit,
         subredditId: t3.subreddit_id ?? null,
         subscribers: null,
         accountsActive: null,
@@ -170,7 +181,7 @@ export async function handlePostsRefresh(args: {
 
     postUpserts.push({
       postId: reqId,
-      subreddit: t3.subreddit,
+      subreddit,
       author,
       authorFullname,
       permalink,
