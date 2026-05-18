@@ -41,7 +41,7 @@
 // API, so there's nothing more to fetch even if a deeper cap existed.
 
 import { eq, sql } from "drizzle-orm";
-import { db, type DbOrTx } from "$lib/server/db/client.js";
+import type { DbOrTx } from "$lib/server/db/client.js";
 import {
   redditSubredditsCache,
   redditUsersCache,
