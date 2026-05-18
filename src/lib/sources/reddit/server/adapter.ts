@@ -16,11 +16,7 @@
 // `parseAnyUrl` iterator and the /sources/new auto-detect can dispatch
 // without instantiating the full barrel.
 
-import type {
-  AdapterObservability,
-  ParsedSourceUrl,
-  ParsedUrl,
-} from "$lib/sources/adapter.js";
+import type { AdapterObservability, ParsedSourceUrl, ParsedUrl } from "$lib/sources/adapter.js";
 import { redditParsePostUrl, redditParseSourceUrl } from "./url.js";
 import { redditObservability } from "./observability.js";
 

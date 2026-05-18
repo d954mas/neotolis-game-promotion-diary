@@ -296,10 +296,13 @@ async function readCachedPost(postId: string): Promise<HandlePostSingleResult | 
   if (snapRows.length === 0) return null;
   const snap = snapRows[0]!;
 
-  // Pull the post row for title/author/permalink/submittedAt. If the
-  // post row is missing (race window between snapshot write + UPSERT),
-  // fall through and fetch fresh — safer to re-fetch than to return
-  // partial data.
+  // Pull the post row for title/author/permalink/submittedAt. The
+  // snapshot+UPSERT race that this branch originally guarded against
+  // was closed when the five cache writes moved into a single tx
+  // (see the db.transaction in handlePostSingle above) — new writes
+  // are now atomic. The check is kept defensively for pre-tx-wrap rows
+  // that may carry a snapshot without a matching post row; falling
+  // through to a fresh fetch is safer than returning partial data.
   const postRows = await db
     .select({
       subreddit: redditPosts.subreddit,
