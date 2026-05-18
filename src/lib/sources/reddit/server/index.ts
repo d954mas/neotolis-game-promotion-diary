@@ -291,17 +291,17 @@ async function onSourceCreated(source: SourceCreatedHookSource, opts: { tx: Tx }
 /**
  * fetchEventPreviewMetadata — adapter wrapper for the /events/new
  * "Get info" button + the generic POST /api/events/preview-url
- * cross-source endpoint. Fetches /comments/<id>.json via handlePostSingle
- * (which UPSERTs caches + writes a snapshot row + records a cap-counter
- * row when userId is non-null) and returns the post title + author +
- * permalink in the cross-source EventPreviewMetadata shape.
+ * cross-source endpoint. Fetches /api/info.json?id=t3_X via
+ * handlePostSingle (which UPSERTs caches + writes a snapshot row +
+ * records a cap-counter row when userId is non-null) and returns the
+ * post title + author + permalink in the cross-source
+ * EventPreviewMetadata shape.
  *
- * NOT preview-only — Reddit's /comments/<id>.json is the same fetch
- * the paste flow uses, so we share the side effects (cache populated,
- * snapshot recorded) instead of doing a read-only fetch and then
- * re-fetching on Submit. handlePostSingle's 60s dedup ensures preview
- * + Submit on the same post produces ONE Reddit request and ONE
- * cap-counter increment.
+ * NOT preview-only — /api/info is the same fetch the paste flow uses,
+ * so we share the side effects (cache populated, snapshot recorded)
+ * instead of doing a read-only fetch and then re-fetching on Submit.
+ * handlePostSingle's 60s dedup ensures preview + Submit on the same
+ * post produces ONE Reddit request and ONE cap-counter increment.
  *
  * Cap enforcement: ctx.userId is threaded into handlePostSingle's
  * userId param. Both the Reddit-specific route

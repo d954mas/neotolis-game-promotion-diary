@@ -15,35 +15,36 @@ describe("Reddit preview-url rate-limit mapping", () => {
     const user = await seedUserDirectly({
       email: `reddit-preview-ok-${uuidv7()}@test.local`,
     });
+    // /api/info.json?id=t3_X Listing shape — single child for the
+    // single-id query. Same shape as the batch path (just length=1).
     const fetchSpy = vi.fn().mockResolvedValue(
       new Response(
-        JSON.stringify([
-          {
-            data: {
-              children: [
-                {
-                  data: {
-                    id: "abc123",
-                    name: "t3_abc123",
-                    subreddit: "IndieDev",
-                    subreddit_id: "t5_IndieDev",
-                    author: "maker",
-                    author_fullname: "t2_maker",
-                    permalink: "/r/IndieDev/comments/abc123/test/",
-                    title: "Launch notes",
-                    selftext: "",
-                    created_utc: 1_781_081_130,
-                    score: 42,
-                    num_comments: 7,
-                    upvote_ratio: 0.91,
-                    total_awards_received: 0,
-                  },
+        JSON.stringify({
+          kind: "Listing",
+          data: {
+            children: [
+              {
+                kind: "t3",
+                data: {
+                  id: "abc123",
+                  name: "t3_abc123",
+                  subreddit: "IndieDev",
+                  subreddit_id: "t5_IndieDev",
+                  author: "maker",
+                  author_fullname: "t2_maker",
+                  permalink: "/r/IndieDev/comments/abc123/test/",
+                  title: "Launch notes",
+                  selftext: "",
+                  created_utc: 1_781_081_130,
+                  score: 42,
+                  num_comments: 7,
+                  upvote_ratio: 0.91,
+                  total_awards_received: 0,
                 },
-              ],
-            },
+              },
+            ],
           },
-          { data: { children: [] } },
-        ]),
+        }),
         {
           status: 200,
           headers: { "content-type": "application/json" },

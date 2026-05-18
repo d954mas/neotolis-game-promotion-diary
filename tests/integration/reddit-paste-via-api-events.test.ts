@@ -41,8 +41,11 @@ import { AppError } from "../../src/lib/server/services/errors.js";
  *      user_post cap-counter row remains because upstream I/O was attempted.
  */
 
-// Reddit /comments/<id>.json response shape — minimal subset
-// handlePostSingle's extractT3FromCommentsResponse looks at.
+// Reddit /api/info.json?id=t3_X response shape — minimal subset
+// handlePostSingle's extractT3FromInfoResponse looks at. Single Listing
+// with one t3 child (same shape as the multi-id batch response, just
+// length=1). /api/info replaced /comments/<id>.json so paste flow shares
+// one endpoint with the cron batch path.
 function buildRedditResponse(opts: {
   postId: string;
   subreddit: string;
@@ -51,33 +54,32 @@ function buildRedditResponse(opts: {
   score?: number;
   numComments?: number;
 }): unknown {
-  return [
-    {
-      data: {
-        children: [
-          {
-            data: {
-              id: opts.postId.replace(/^t3_/, ""),
-              name: opts.postId.startsWith("t3_") ? opts.postId : `t3_${opts.postId}`,
-              subreddit: opts.subreddit,
-              subreddit_id: `t5_${opts.subreddit}`,
-              author: opts.author,
-              author_fullname: `t2_${opts.author}`,
-              permalink: `/r/${opts.subreddit}/comments/${opts.postId.replace(/^t3_/, "")}/test/`,
-              title: opts.title,
-              selftext: "",
-              created_utc: Math.floor(Date.now() / 1000) - 3600,
-              score: opts.score ?? 100,
-              num_comments: opts.numComments ?? 10,
-              upvote_ratio: 0.95,
-              total_awards_received: 0,
-            },
+  return {
+    kind: "Listing",
+    data: {
+      children: [
+        {
+          kind: "t3",
+          data: {
+            id: opts.postId.replace(/^t3_/, ""),
+            name: opts.postId.startsWith("t3_") ? opts.postId : `t3_${opts.postId}`,
+            subreddit: opts.subreddit,
+            subreddit_id: `t5_${opts.subreddit}`,
+            author: opts.author,
+            author_fullname: `t2_${opts.author}`,
+            permalink: `/r/${opts.subreddit}/comments/${opts.postId.replace(/^t3_/, "")}/test/`,
+            title: opts.title,
+            selftext: "",
+            created_utc: Math.floor(Date.now() / 1000) - 3600,
+            score: opts.score ?? 100,
+            num_comments: opts.numComments ?? 10,
+            upvote_ratio: 0.95,
+            total_awards_received: 0,
           },
-        ],
-      },
+        },
+      ],
     },
-    { data: { children: [] } },
-  ];
+  };
 }
 
 function mockFetchSequence(responses: Array<() => unknown>): ReturnType<typeof vi.fn> {
@@ -289,7 +291,7 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
     expect(ev.kind).toBe("reddit_post");
     expect(ev.externalId).toBe("dead404");
 
-    // fetch was attempted (one call to /comments/<id>.json).
+    // fetch was attempted (one call to /api/info.json?id=t3_X).
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
     // No reddit_posts cache row — fetchEventStats swallowed the error.

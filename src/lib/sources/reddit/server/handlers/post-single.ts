@@ -1,4 +1,4 @@
-// Reddit post_single handler — fetch ONE post via /comments/<id>.json.
+// Reddit post_single handler — fetch ONE post via /api/info.json.
 //
 // Two callers:
 //   1. Worker batch-worker tick (queue type='post_single', from user paste).
@@ -16,9 +16,16 @@
 //     row (title / occurredAt / metadata.subreddit / authorIsMe inheritance
 //     by author lookup).
 //
-// Reddit endpoint /comments/<id>.json returns a TWO-ELEMENT array:
-//   [submissionListing, commentsListing]
-// We consume only [0]: data.children[0].data is the t3 post payload.
+// Endpoint choice: Reddit exposes two ways to fetch a post —
+//   - /comments/<id>.json returns [submissionListing, commentsListing]
+//     (single post + full comment tree).
+//   - /api/info.json?id=t3_X returns a Listing with up to 100 t3 children.
+// We use /api/info because: (a) it's the same endpoint handlePostBatch
+// uses, so paste + cron + refresh-now all share one Reddit shape, (b)
+// it returns ALL fields paste flow needs (selftext, score, num_comments,
+// permalink, title, author, subreddit) — we never consumed the comments
+// tree from /comments anyway, (c) one endpoint means one mock surface
+// in tests + smoke + one place to maintain extractor logic.
 //
 // Cap-counter timing — read carefully before touching:
 //   The 25/5min post-refresh cap is enforced by counting rows on the
@@ -160,8 +167,11 @@ export async function handlePostSingle(args: {
     await claimUserPostRefreshAttempt(args.userId, fullIdGuess);
   }
 
-  const { data } = await redditFetch<unknown>(`/comments/${bareId}.json`, { pacer: args.pacer });
-  const t3 = extractT3FromCommentsResponse(data, bareId);
+  const { data } = await redditFetch<unknown>(
+    `/api/info.json?id=t3_${encodeURIComponent(bareId)}`,
+    { pacer: args.pacer },
+  );
+  const t3 = extractT3FromInfoResponse(data, bareId);
 
   // Author identity. Reddit literally writes "[deleted]" when account is
   // gone. Treat as NULL — the schema convention. Reddit usernames are
@@ -341,10 +351,16 @@ async function readCachedPost(postId: string): Promise<HandlePostSingleResult | 
   };
 }
 
-/** Extract the t3 child from /comments/<id>.json's two-element array
- *  shape. Throws AdapterError(permanent) when the shape is unexpected —
- *  unrecoverable (a Reddit API breaking change would surface this; the
- *  worker tick downgrades the queue row to dead_letter).
+/** Extract the t3 child from /api/info.json's Listing response shape.
+ *
+ *  Response form:
+ *    { kind: "Listing", data: { children: [ { kind: "t3", data: t3 } ] } }
+ *
+ *  For a single-id query Reddit returns 0 or 1 children (200 OK with
+ *  empty `children` = post not found; we surface this as not-found).
+ *  Throws AdapterError(permanent) on unexpected shape — unrecoverable
+ *  (a Reddit API breaking change would surface this; the worker tick
+ *  downgrades the queue row to dead_letter).
  *
  *  Required-field validation runs at the boundary so the rest of the
  *  handler can use the typed shape without per-access null checks:
@@ -353,19 +369,12 @@ async function readCachedPost(postId: string): Promise<HandlePostSingleResult | 
  *  write + display surfaces. Missing any of these = malformed Reddit
  *  response, and falling through with `undefined as string` would crash
  *  later in the chain with a less obvious stack. */
-function extractT3FromCommentsResponse(data: unknown, expectedId: string): T3Data {
-  if (!Array.isArray(data) || data.length < 1) {
-    throw new AdapterError(
-      `Reddit /comments/${expectedId}.json: unexpected response shape (not an array)`,
-      { category: "permanent" },
-    );
-  }
-  const submissionListing = data[0] as { data?: { children?: Array<{ data?: T3Data }> } };
-  const children = submissionListing?.data?.children ?? [];
+function extractT3FromInfoResponse(data: unknown, expectedId: string): T3Data {
+  const listing = data as { data?: { children?: Array<{ kind?: string; data?: T3Data }> } };
+  const children = listing?.data?.children ?? [];
   if (children.length === 0) {
     // 200 OK with empty children — the post id doesn't exist (Reddit's
-    // graceful 404 shape for permalink fetches; some private subs also
-    // surface this way).
+    // graceful 404 shape for /api/info; private subs surface the same way).
     throw new AdapterError(`Reddit post ${expectedId} not found`, { category: "not-found" });
   }
   const t3 = children[0]?.data;
@@ -378,7 +387,7 @@ function extractT3FromCommentsResponse(data: unknown, expectedId: string): T3Dat
     typeof t3.title !== "string" ||
     typeof t3.author !== "string"
   ) {
-    throw new AdapterError(`Reddit /comments/${expectedId}.json: missing required t3 fields`, {
+    throw new AdapterError(`Reddit /api/info.json?id=${expectedId}: missing required t3 fields`, {
       category: "permanent",
     });
   }
