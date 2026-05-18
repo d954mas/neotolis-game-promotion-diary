@@ -292,13 +292,40 @@ export function createAdapterLaneWorker<TLane extends string, TPermit = unknown>
         userId: claimed.user_id,
         attempts: claimed.attempts,
       };
-      const gate = await policy.claimGate?.({
-        adapterKind: policy.adapterKind,
-        queueName,
-        rows: [normalized],
-        now: new Date(),
-        tx,
-      });
+      let gate: AdapterLaneClaimGateResult<TPermit> | undefined;
+      try {
+        gate = await policy.claimGate?.({
+          adapterKind: policy.adapterKind,
+          queueName,
+          rows: [normalized],
+          now: new Date(),
+          tx,
+        });
+      } catch (err) {
+        const retryAfterMs = defaultRetryBackoffMs(1);
+        await tx.execute(sql`
+          UPDATE ${sql.raw(ADAPTER_REFRESH_QUEUE_TABLE)}
+          SET next_attempt_at = NOW() + (${retryAfterMs} || ' milliseconds')::interval
+          WHERE id = ${claimed.id}
+            AND adapter_kind = ${policy.adapterKind}
+        `);
+        logger.warn(
+          {
+            adapter: policy.adapterKind,
+            queueName,
+            type: claimed.type,
+            id: claimed.id,
+            retryAfterMs,
+            err: String((err as Error)?.message ?? err),
+          },
+          "adapter lane worker: claim gate failed; claim deferred",
+        );
+        return {
+          kind: "gated" as const,
+          retryAfterMs,
+          reason: "claim_gate_error",
+        };
+      }
       if (gate?.action === "defer") {
         await tx.execute(sql`
           UPDATE ${sql.raw(ADAPTER_REFRESH_QUEUE_TABLE)}
@@ -554,13 +581,40 @@ export function createAdapterBatchLaneWorker<TLane extends string, TPermit = unk
         userId: row.user_id,
         attempts: row.attempts,
       }));
-      const gate = await policy.claimGate?.({
-        adapterKind: policy.adapterKind,
-        queueName,
-        rows: normalized,
-        now: new Date(),
-        tx,
-      });
+      let gate: AdapterLaneClaimGateResult<TPermit> | undefined;
+      try {
+        gate = await policy.claimGate?.({
+          adapterKind: policy.adapterKind,
+          queueName,
+          rows: normalized,
+          now: new Date(),
+          tx,
+        });
+      } catch (err) {
+        const ids = batch.map((row) => row.id);
+        const retryAfterMs = defaultRetryBackoffMs(1);
+        await tx.execute(sql`
+          UPDATE ${sql.raw(ADAPTER_REFRESH_QUEUE_TABLE)}
+          SET next_attempt_at = NOW() + (${retryAfterMs} || ' milliseconds')::interval
+          WHERE adapter_kind = ${policy.adapterKind}
+            AND id IN (${sql.join(ids, sql`, `)})
+        `);
+        logger.warn(
+          {
+            adapter: policy.adapterKind,
+            queueName,
+            ids,
+            retryAfterMs,
+            err: String((err as Error)?.message ?? err),
+          },
+          "adapter batch lane worker: claim gate failed; claim deferred",
+        );
+        return {
+          status: "gated" as const,
+          retryAfterMs,
+          reason: "claim_gate_error",
+        };
+      }
       if (gate?.action === "defer") {
         const ids = batch.map((row) => row.id);
         await tx.execute(sql`
