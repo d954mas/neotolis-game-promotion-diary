@@ -343,6 +343,7 @@ describe("handleEnqueueServicePostsCron — D-RDT-POST-ELIGIBILITY scan + batche
     // post_single on user_post lane. The service-posts cron must NOT
     // also pick it for a post_batch — the worker would otherwise burn
     // two slots for the same fetch.
+    const userId = await seedTenantUser();
     await insertPost({ postId: "t3_user_inflight", submittedHoursAgo: 3, lastSnapshotHoursAgo: 8 });
     await db.execute(sql`
       INSERT INTO adapter_refresh_queue
@@ -350,7 +351,7 @@ describe("handleEnqueueServicePostsCron — D-RDT-POST-ELIGIBILITY scan + batche
       VALUES
         ('reddit_account', 'user_post', 'post_single',
          '{"post_id":"t3_user_inflight","flow":"refresh-now"}'::jsonb,
-         '00000000-0000-0000-0000-000000000001', -10, 'pending')
+         ${userId}, -10, 'pending')
     `);
     const r = await handleEnqueueServicePostsCron();
     expect(r.enqueued).toBe(0);
@@ -636,7 +637,7 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
     // pins the cross-adapter behaviour so a future regression bringing
     // the filter back gets caught.
     const adminEmail = `admin-${uniq()}@test.local`;
-    await seedAdminUser(adminEmail);
+    const adminId = await seedAdminUser(adminEmail);
     // Reddit done row, last_attempt_at 8 days ago → SHOULD be deleted.
     await db.execute(sql`
       INSERT INTO adapter_refresh_queue
@@ -684,7 +685,6 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
          NOW() - INTERVAL '30 days')
     `);
 
-    const adminId = await seedAdminUser(adminEmail);
     process.env.ADMIN_EMAIL_ALLOWLIST = adminEmail;
     vi.resetModules();
     const mod =
