@@ -13,31 +13,29 @@
 //      the baselines cron's PERCENTILE_CONT aggregate).
 //   AND deletion_detected_at IS NULL (dead posts are never re-polled).
 //
-// The eligible set is chunked into batches of MAX_BATCH=100 (Reddit's
-// /api/info hard limit on id-list length) and one queue row is INSERTed
-// per chunk:
+// Per-row enqueue (YouTube-shaped storage): each eligible post becomes
+// ONE queue row.
 //   - queue_name = 'service_post'
-//   - type       = 'post_batch'
-//   - payload    = { post_ids: [...up to 100...] }
+//   - type       = 'post_single'
+//   - payload    = { post_id: 't3_<base36>' }
 //   - user_id    = NULL  (cron lane; user_post is for user-driven work)
 //
-// ZERO Reddit HTTP here — pure DB scan + INSERT. The 8-tick worker
-// drains the resulting batches.
+// Claim-time batching: the worker tick claims up to 100 rows on the
+// service_post lane (per-lane `maxBatchSize: 100`) and dispatches them
+// to ONE `/api/info?id=t3_a,t3_b,...` call. Same throughput as the
+// pre-refactor `post_batch` payload-bundle shape — just stored
+// per-row so dedup is trivial.
 //
-// LIMIT 500 caps per-tick work: at 100 ids/batch that's at most 5 queue
-// rows per tick, which at 8 ticks/min worker drain ≈ 38s of worker time
-// per cron tick. Across the full day's 4 ticks that's ~2000 snapshots
-// — sized to fit a small VPS indie-scale workload.
+// ZERO Reddit HTTP here — pure DB scan + INSERT. The 8-tick worker
+// drains the resulting rows.
+//
+// LIMIT 500 caps per-tick work: 100 rows / claim × ~5 claims per tick.
+// Across the full day's 4 ticks that's ~2000 snapshots — sized to fit
+// a small VPS indie-scale workload.
 
 import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
-import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 import { logger } from "$lib/server/logger.js";
-
-/** Max post_ids per queue row — matches Reddit's /api/info hard limit
- *  per request. The post_batch handler enforces this limit on
- *  read; we enforce it on write to keep payloads predictable. */
-const MAX_BATCH = 100;
 
 /** Per-tick LIMIT on eligible posts — bounds the worker drain time per
  *  cron tick. See header for the napkin math. */
@@ -45,7 +43,6 @@ const PICK_LIMIT = 500;
 
 export async function handleEnqueueServicePostsCron(): Promise<{
   enqueued: number;
-  batches: number;
 }> {
   // Eligibility query — written as a raw `sql` literal because the
   // OR + NOT EXISTS shape is awkward to express in Drizzle's query
@@ -57,13 +54,11 @@ export async function handleEnqueueServicePostsCron(): Promise<{
   // posts would still be picked. Tested in
   // tests/integration/reddit-cron-handlers.test.ts.
   //
-  // Pending-queue exclusion (the two `NOT EXISTS` clauses at the bottom):
-  // skip any post that's already queued for refresh on the service_post
-  // lane (post_batch, payload.post_ids) or the user_post lane
-  // (post_single, payload.post_id). Pre-fix the cron would re-INSERT a
-  // post_batch row containing post X every tick until the previous batch
-  // drained — Reddit's 8 req/min slots are scarce so duplicating work is
-  // load-bearing budget waste, not just churn.
+  // Pending-queue exclusion — ONE clean NOT EXISTS now that every
+  // pending row has its own payload->>'post_id'. Pre-refactor we
+  // needed two clauses: one for bundled `post_batch` payloads (using
+  // `jsonb_array_elements_text` to unfold the array) and one for
+  // per-row `post_single`. The unified per-row shape collapses both.
   const result = await db.execute(sql`
     SELECT post_id FROM reddit_posts
     WHERE
@@ -84,15 +79,6 @@ export async function handleEnqueueServicePostsCron(): Promise<{
       )
       AND deletion_detected_at IS NULL
       AND NOT EXISTS (
-        SELECT 1
-        FROM adapter_refresh_queue q,
-             jsonb_array_elements_text(q.payload->'post_ids') AS pid
-        WHERE q.adapter_kind = 'reddit_account'
-          AND q.type = 'post_batch'
-          AND q.status IN ('pending', 'processing')
-          AND pid = reddit_posts.post_id
-      )
-      AND NOT EXISTS (
         SELECT 1 FROM adapter_refresh_queue q
         WHERE q.adapter_kind = 'reddit_account'
           AND q.type = 'post_single'
@@ -106,29 +92,23 @@ export async function handleEnqueueServicePostsCron(): Promise<{
   const rows = (result as unknown as { rows: Array<{ post_id: string }> }).rows;
   if (rows.length === 0) {
     logger.info({}, "reddit.enqueue_service_posts_cron: no eligible posts");
-    return { enqueued: 0, batches: 0 };
+    return { enqueued: 0 };
   }
 
-  // Chunk into batches of MAX_BATCH.
   const postIds = rows.map((r) => r.post_id);
-  const chunks: string[][] = [];
-  for (let i = 0; i < postIds.length; i += MAX_BATCH) {
-    chunks.push(postIds.slice(i, i + MAX_BATCH));
-  }
 
-  const values: Array<typeof adapterRefreshQueue.$inferInsert> = chunks.map((ids) => ({
-    adapterKind: "reddit_account",
-    queueName: "service_post",
-    type: "post_batch",
-    payload: { post_ids: ids },
-    userId: null,
-    priority: 0,
-  }));
+  // One per-row INSERT via VALUES + sql.join — same shape as the
+  // service-sources cron's atomicallyInsertNonDuplicates batch path.
+  // Single statement, no per-row round-trip.
+  const valuesList = postIds.map((id) => sql`(${id})`);
+  await db.execute(sql`
+    INSERT INTO adapter_refresh_queue
+      (adapter_kind, queue_name, type, payload, user_id, priority)
+    SELECT 'reddit_account', 'service_post', 'post_single',
+           jsonb_build_object('post_id', c.post_id), NULL, 0
+    FROM (VALUES ${sql.join(valuesList, sql`, `)}) AS c(post_id)
+  `);
 
-  await db.insert(adapterRefreshQueue).values(values);
-  logger.info(
-    { enqueued: postIds.length, batches: chunks.length },
-    "reddit.enqueue_service_posts_cron: tick complete",
-  );
-  return { enqueued: postIds.length, batches: chunks.length };
+  logger.info({ enqueued: postIds.length }, "reddit.enqueue_service_posts_cron: tick complete");
+  return { enqueued: postIds.length };
 }

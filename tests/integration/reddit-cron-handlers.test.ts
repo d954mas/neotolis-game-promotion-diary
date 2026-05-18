@@ -10,9 +10,10 @@
 //
 //   2. handleEnqueueServicePostsCron — 03/09/15/21 UTC.
 //      Runs D-RDT-POST-ELIGIBILITY scan against reddit_posts and INSERTs
-//      batched payloads (chunks of <=100 post_ids) into
-//      adapter_refresh_queue with queue_name='service_post' +
-//      type='post_batch'.
+//      per-post rows into adapter_refresh_queue with
+//      queue_name='service_post' + type='post_single'. The worker tick
+//      batches them at claim time via per-lane maxBatchSize=100 → one
+//      /api/info call covers up to 100 posts per tick.
 //
 //   3. handleBaselinesCron — 04:00 UTC.
 //      Runs D-RDT-BASELINES-COMPUTE PERCENTILE_CONT aggregate against
@@ -249,14 +250,12 @@ describe("handleEnqueueServicePostsCron — D-RDT-POST-ELIGIBILITY scan + batche
   it("no eligible posts → no enqueue", async () => {
     const r = await handleEnqueueServicePostsCron();
     expect(r.enqueued).toBe(0);
-    expect(r.batches).toBe(0);
   });
 
-  it("young post (<24h) + last_snapshot >6h old → eligible; enqueues one post_batch row", async () => {
+  it("young post (<24h) + last_snapshot >6h old → eligible; enqueues one post_single row", async () => {
     await insertPost({ postId: "t3_young1", submittedHoursAgo: 3, lastSnapshotHoursAgo: 8 });
     const r = await handleEnqueueServicePostsCron();
     expect(r.enqueued).toBe(1);
-    expect(r.batches).toBe(1);
     const rows = await db.execute(sql`
       SELECT queue_name, type, payload, user_id FROM adapter_refresh_queue
     `);
@@ -265,16 +264,16 @@ describe("handleEnqueueServicePostsCron — D-RDT-POST-ELIGIBILITY scan + batche
         rows: Array<{
           queue_name: string;
           type: string;
-          payload: { post_ids: string[] };
+          payload: { post_id?: string };
           user_id: string | null;
         }>;
       }
     ).rows;
     expect(list.length).toBe(1);
     expect(list[0]!.queue_name).toBe("service_post");
-    expect(list[0]!.type).toBe("post_batch");
+    expect(list[0]!.type).toBe("post_single");
     expect(list[0]!.user_id).toBeNull();
-    expect(list[0]!.payload.post_ids).toEqual(["t3_young1"]);
+    expect(list[0]!.payload.post_id).toBe("t3_young1");
   });
 
   it("young post (<24h) + last_snapshot fresh (<6h) → NOT eligible", async () => {
@@ -331,11 +330,11 @@ describe("handleEnqueueServicePostsCron — D-RDT-POST-ELIGIBILITY scan + batche
     expect(r.enqueued).toBe(0);
   });
 
-  it("pending post_batch already contains the post_id → NOT re-enqueued", async () => {
-    // Pre-seed: post is eligible (young + stale snapshot) AND there's
-    // already a pending post_batch row covering it. The cron must skip
-    // re-enqueueing — pre-fix the same post would land in a fresh batch
-    // every 6h tick, burning slots on duplicate work.
+  it("pending post_single for the post on service_post lane → NOT re-enqueued", async () => {
+    // Pre-seed: post is eligible AND there's already a pending row
+    // covering it on the service_post lane. The cron must skip — pre-
+    // refactor the same post would land in a fresh queue row every
+    // 6h tick, burning slots on duplicate work.
     await insertPost({
       postId: "t3_already_pending",
       submittedHoursAgo: 3,
@@ -345,26 +344,25 @@ describe("handleEnqueueServicePostsCron — D-RDT-POST-ELIGIBILITY scan + batche
       INSERT INTO adapter_refresh_queue
         (adapter_kind, queue_name, type, payload, user_id, priority, status)
       VALUES
-        ('reddit_account', 'service_post', 'post_batch',
-         '{"post_ids":["t3_already_pending"]}'::jsonb, NULL, 0, 'pending')
+        ('reddit_account', 'service_post', 'post_single',
+         '{"post_id":"t3_already_pending"}'::jsonb, NULL, 0, 'pending')
     `);
     const r = await handleEnqueueServicePostsCron();
     expect(r.enqueued).toBe(0);
-    expect(r.batches).toBe(0);
     // Sanity: original pending row still present (only one queue row).
     const rows = await db.execute(sql`
       SELECT COUNT(*)::int AS n FROM adapter_refresh_queue
-      WHERE queue_name = 'service_post' AND type = 'post_batch'
+      WHERE queue_name = 'service_post' AND type = 'post_single'
     `);
     const count = Number((rows as unknown as { rows: Array<{ n: number }> }).rows[0]?.n ?? 0);
     expect(count).toBe(1);
   });
 
-  it("pending post_single (refresh-now) for the same post → NOT re-enqueued by cron", async () => {
-    // User just hit Refresh-Now on a young post; that path enqueues a
-    // post_single on user_post lane. The service-posts cron must NOT
-    // also pick it for a post_batch — the worker would otherwise burn
-    // two slots for the same fetch.
+  it("pending post_single (refresh-now) for the same post on user_post lane → NOT re-enqueued by cron", async () => {
+    // User just hit Refresh-Now on a young post; that path enqueues
+    // a post_single on user_post lane. The service-posts cron must
+    // NOT also pick it for the service_post lane — the worker would
+    // otherwise burn two slots for the same fetch.
     const userId = await seedTenantUser();
     await insertPost({ postId: "t3_user_inflight", submittedHoursAgo: 3, lastSnapshotHoursAgo: 8 });
     await db.execute(sql`
@@ -379,7 +377,7 @@ describe("handleEnqueueServicePostsCron — D-RDT-POST-ELIGIBILITY scan + batche
     expect(r.enqueued).toBe(0);
   });
 
-  it("only DONE post_batch for the post → cron RE-enqueues (the prior run finished)", async () => {
+  it("only DONE post_single for the post → cron RE-enqueues (the prior run finished)", async () => {
     // Negative case for the dedup: the exclusion is only for
     // pending/processing rows. A previously-drained done row must NOT
     // prevent the next eligibility tick from re-enqueueing.
@@ -392,15 +390,19 @@ describe("handleEnqueueServicePostsCron — D-RDT-POST-ELIGIBILITY scan + batche
       INSERT INTO adapter_refresh_queue
         (adapter_kind, queue_name, type, payload, user_id, priority, status)
       VALUES
-        ('reddit_account', 'service_post', 'post_batch',
-         '{"post_ids":["t3_drained_already"]}'::jsonb, NULL, 0, 'done')
+        ('reddit_account', 'service_post', 'post_single',
+         '{"post_id":"t3_drained_already"}'::jsonb, NULL, 0, 'done')
     `);
     const r = await handleEnqueueServicePostsCron();
     expect(r.enqueued).toBe(1);
   });
 
-  it("chunks more than 100 eligible posts into batches of 100", async () => {
-    // 150 young eligible posts → 2 batches (100 + 50).
+  it("writes one queue row per eligible post (per-row storage, no bundling)", async () => {
+    // 150 young eligible posts → 150 queue rows (worker claims up to
+    // 100 per tick via per-lane maxBatchSize=100). Pre-refactor this
+    // test asserted "150 posts → 2 bundled `post_batch` rows of 100+50";
+    // per-row storage made the bundle redundant — claim-time batching
+    // in the worker tick replaces it with the same throughput.
     for (let i = 0; i < 150; i++) {
       await insertPost({
         postId: `t3_b${i.toString().padStart(3, "0")}`,
@@ -410,20 +412,19 @@ describe("handleEnqueueServicePostsCron — D-RDT-POST-ELIGIBILITY scan + batche
     }
     const r = await handleEnqueueServicePostsCron();
     expect(r.enqueued).toBe(150);
-    expect(r.batches).toBe(2);
     const rows = await db.execute(sql`
       SELECT payload FROM adapter_refresh_queue
-      WHERE queue_name = 'service_post' AND type = 'post_batch'
+      WHERE queue_name = 'service_post' AND type = 'post_single'
       ORDER BY id ASC
     `);
-    const batches = (
+    const allRows = (
       rows as unknown as {
-        rows: Array<{ payload: { post_ids: string[] } }>;
+        rows: Array<{ payload: { post_id: string } }>;
       }
-    ).rows.map((r) => r.payload.post_ids);
-    expect(batches.length).toBe(2);
-    expect(batches[0]!.length).toBe(100);
-    expect(batches[1]!.length).toBe(50);
+    ).rows.map((r) => r.payload.post_id);
+    expect(allRows.length).toBe(150);
+    // Every payload carries a single post_id (no bundled lists).
+    expect(allRows.every((id) => typeof id === "string" && id.startsWith("t3_"))).toBe(true);
   });
 });
 
@@ -665,8 +666,8 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
       INSERT INTO adapter_refresh_queue
         (adapter_kind, queue_name, type, payload, user_id, priority, status, last_attempt_at)
       VALUES
-        ('reddit_account', 'service_post', 'post_batch',
-         '{"post_ids":["t3_stale_rd"]}'::jsonb, NULL, 0, 'done',
+        ('reddit_account', 'service_post', 'post_single',
+         '{"post_id":"t3_stale_rd"}'::jsonb, NULL, 0, 'done',
          NOW() - INTERVAL '8 days')
     `);
     // YouTube done row, last_attempt_at 9 days ago → SHOULD be deleted
@@ -702,8 +703,8 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
       INSERT INTO adapter_refresh_queue
         (adapter_kind, queue_name, type, payload, user_id, priority, status, last_attempt_at)
       VALUES
-        ('reddit_account', 'service_post', 'post_batch',
-         '{"post_ids":["pending_old"]}'::jsonb, NULL, 0, 'pending',
+        ('reddit_account', 'service_post', 'post_single',
+         '{"post_id":"pending_old"}'::jsonb, NULL, 0, 'pending',
          NOW() - INTERVAL '30 days')
     `);
 

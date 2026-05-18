@@ -138,8 +138,13 @@ export const REDDIT_QUEUE_NAMES = [
 export type RedditQueueName = (typeof REDDIT_QUEUE_NAMES)[number];
 
 /** Valid handler types. Runtime rows live in adapter_refresh_queue, while the
- * adapter still owns the legal work types at the TypeScript boundary. */
-export const REDDIT_QUEUE_TYPES = ["sub_poll", "author_poll", "post_single", "post_batch"] as const;
+ * adapter still owns the legal work types at the TypeScript boundary.
+ *
+ * `post_batch` was retired in Phase 03.1: per-row storage (one row per
+ * post_id) plus claim-time batching in the worker tick replaced the
+ * old payload-bundling shape. All post fetches now flow through
+ * `post_single` rows. */
+export const REDDIT_QUEUE_TYPES = ["sub_poll", "author_poll", "post_single"] as const;
 export type RedditQueueType = (typeof REDDIT_QUEUE_TYPES)[number];
 
 /** One row in the live queue-depth snapshot rendered on the /admin
@@ -281,7 +286,6 @@ export async function getDailyByType(): Promise<RedditDailyByType> {
     sub_poll: 0,
     author_poll: 0,
     post_single: 0,
-    post_batch: 0,
   };
   let total = 0;
   for (const r of typeRows) {

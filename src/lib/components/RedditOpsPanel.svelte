@@ -178,15 +178,6 @@
                 {daily.byType.post_single.toLocaleString()}
               </td>
             </tr>
-            <tr>
-              <td data-label={m.admin_reddit_col_type()}>
-                <span class="reddit-ops__lane-name">post_batch</span>
-                <span class="reddit-ops__lane-desc">{m.admin_reddit_type_post_batch()}</span>
-              </td>
-              <td data-label={m.admin_reddit_col_count()} class="reddit-ops__num">
-                {daily.byType.post_batch.toLocaleString()}
-              </td>
-            </tr>
           </tbody>
         </table>
 

@@ -13,12 +13,20 @@
 // Slot distribution per minute: 1×service_source, 1×service_post,
 // 3×user_source, 3×user_post — user-driven work gets six of the eight
 // slots since users care about latency more than cron does.
+//
+// Per-lane batching (maxBatchSize):
+//   - service_source / user_source (sub_poll / author_poll): 1.
+//     Each row needs its own /r/<sub>/new.json or /user/<h>/submitted.json
+//     listing fetch and a single tick only acquires one pacer slot.
+//   - service_post / user_post (post_single via /api/info): up to 100.
+//     Reddit's /api/info accepts batched id lists; one tick = one HTTP
+//     = up to 100 fresh snapshots.
 
 import { AdapterError } from "$lib/sources/errors.js";
 import { writeAudit } from "$lib/server/audit.js";
 import { logger } from "$lib/server/logger.js";
 import {
-  createAdapterLaneWorker,
+  createAdapterBatchLaneWorker,
   type AdapterLaneClaimGateResult,
   type AdapterLaneDispatchContext,
   type AdapterLaneClaimGateContext,
@@ -28,11 +36,14 @@ import {
 import { handleSubPoll } from "./sub-poll.js";
 import { handleAuthorPoll } from "./author-poll.js";
 import { handlePostBatch } from "./post-batch.js";
-import { handlePostSingle } from "./post-single.js";
 import { resolveOperatorUserId, __resetOperatorIdCacheForTest } from "../operator-resolver.js";
 import { acquireRedditPacerSlotWith } from "../pacer.js";
 
 type RedditPacerPermit = { pacer: "already-acquired" };
+
+/** Reddit /api/info hard limit on id-list length per request. Drives
+ *  per-lane maxBatchSize for the post lanes. */
+const REDDIT_POST_BATCH_LIMIT = 100;
 
 export const REDDIT_SLOT_MAPPING = [
   "service_source",
@@ -85,15 +96,23 @@ const STALE_PROCESSING_MS = 5 * 60_000;
  *  ~1.5k and keeps the no-op cheap regardless of queue size. */
 const STALE_RECOVERY_INTERVAL_MS = 60_000;
 
-const redditLaneWorker = createAdapterLaneWorker<RedditQueueName, RedditPacerPermit>({
+const redditLaneWorker = createAdapterBatchLaneWorker<RedditQueueName, RedditPacerPermit>({
   adapterKind: "reddit_account",
   slots: REDDIT_SLOT_MAPPING,
   fallthrough: FALLTHROUGH_ORDER,
   maxAttempts: MAX_ATTEMPTS,
+  // Per-lane batch limit: post lanes batch via /api/info (≤100 IDs),
+  // listing lanes stay single-row (each call has its own endpoint).
+  // Lanes omitted default to 1 — same effect as explicit 1.
+  maxBatchSize: {
+    service_post: REDDIT_POST_BATCH_LIMIT,
+    user_post: REDDIT_POST_BATCH_LIMIT,
+  },
+  batchScope: "global",
   staleProcessingMs: STALE_PROCESSING_MS,
   staleRecoveryIntervalMs: STALE_RECOVERY_INTERVAL_MS,
   claimGate: claimRedditPacerSlot,
-  dispatch: dispatchByType,
+  dispatch: dispatchByLane,
   emitDrained(stats) {
     // Fire-and-forget audit row so /admin/quota Reddit observability
     // (getDailyStats reads audit_log.action='reddit.queue_drained' to
@@ -105,8 +124,24 @@ const redditLaneWorker = createAdapterLaneWorker<RedditQueueName, RedditPacerPer
   },
 });
 
+/** Adapt the batch worker's tick result back to the singular shape
+ *  Reddit's public API has shipped with. The batch worker always
+ *  returns arrays; for Reddit:
+ *   - service_post / user_post lanes: rows length 1..100 — caller
+ *     observes the FIRST row's type/id (telemetry only — not used to
+ *     drive any logic; the per-row terminal state is set inside the
+ *     factory regardless of result shape).
+ *   - other lanes: rows length 1 by config.
+ *  This wrapper preserves the existing test surface
+ *  (`result.processedType` / `result.processedId`) while the storage
+ *  evolves under it. */
 export async function redditWorkerTick(): Promise<RedditWorkerTickResult> {
-  return redditLaneWorker.tick();
+  const r = await redditLaneWorker.tick();
+  return {
+    processedQueue: r.processedQueue,
+    processedType: r.processedTypes[0] ?? null,
+    processedId: r.processedIds[0] ?? null,
+  };
 }
 
 async function claimRedditPacerSlot(
@@ -123,56 +158,66 @@ async function claimRedditPacerSlot(
   };
 }
 
-/** Dispatch by row.type — one of sub_poll / author_poll / post_batch /
- *  post_single. Unknown type throws (will dead_letter via the catch
- *  branch in tryClaimAndDispatch). */
-async function dispatchByType(
-  row: AdapterLaneWorkerRow,
+/** Dispatch claimed rows for the current tick.
+ *
+ *  Listing lanes (service_source / user_source) always carry exactly
+ *  one row (maxBatchSize=1 by config). Post lanes
+ *  (service_post / user_post) may carry up to 100; we collect their
+ *  post_ids and make ONE `/api/info` call via handlePostBatch.
+ *
+ *  All rows in a single dispatch call belong to the same queue lane
+ *  (the factory claims them per-lane). Mixing types within a single
+ *  claimed batch would be a factory-level bug. */
+async function dispatchByLane(
+  rows: AdapterLaneWorkerRow[],
   ctx: AdapterLaneDispatchContext<RedditPacerPermit>,
 ): Promise<void> {
+  if (rows.length === 0) return;
   const pacer = ctx.permit?.pacer ?? "acquire";
-  switch (row.type) {
-    case "sub_poll": {
-      const sub = row.payload?.sub as string | undefined;
-      if (typeof sub !== "string") {
-        throw new AdapterError("sub_poll payload missing 'sub'", { category: "permanent" });
-      }
-      await handleSubPoll({ sub, userId: row.userId, pacer });
-      return;
+  const first = rows[0]!;
+
+  // Listing lanes: maxBatchSize=1 ensures one row exactly.
+  if (first.type === "sub_poll") {
+    const sub = first.payload?.sub as string | undefined;
+    if (typeof sub !== "string") {
+      throw new AdapterError("sub_poll payload missing 'sub'", { category: "permanent" });
     }
-    case "author_poll": {
-      const handle = row.payload?.handle as string | undefined;
-      if (typeof handle !== "string") {
-        throw new AdapterError("author_poll payload missing 'handle'", {
-          category: "permanent",
-        });
-      }
-      await handleAuthorPoll({ handle, userId: row.userId, pacer });
-      return;
+    await handleSubPoll({ sub, userId: first.userId, pacer });
+    return;
+  }
+  if (first.type === "author_poll") {
+    const handle = first.payload?.handle as string | undefined;
+    if (typeof handle !== "string") {
+      throw new AdapterError("author_poll payload missing 'handle'", {
+        category: "permanent",
+      });
     }
-    case "post_batch": {
-      const postIds = row.payload?.post_ids as string[] | undefined;
-      if (!Array.isArray(postIds)) {
-        throw new AdapterError("post_batch payload missing 'post_ids'", {
-          category: "permanent",
-        });
-      }
-      await handlePostBatch({ postIds, userId: row.userId, pacer });
-      return;
-    }
-    case "post_single": {
+    await handleAuthorPoll({ handle, userId: first.userId, pacer });
+    return;
+  }
+
+  // Post lanes: claim-time batch via /api/info. All rows of this
+  // dispatch share the same lane (and hence the same `type`); collect
+  // their post_ids and make ONE upstream call.
+  if (first.type === "post_single") {
+    const postIds: string[] = [];
+    for (const row of rows) {
       const postId = row.payload?.post_id as string | undefined;
       if (typeof postId !== "string") {
         throw new AdapterError("post_single payload missing 'post_id'", {
           category: "permanent",
         });
       }
-      await handlePostSingle({ postId, userId: row.userId, pacer });
-      return;
+      postIds.push(postId);
     }
-    default:
-      throw new AdapterError(`unknown queue row type: ${row.type}`, { category: "permanent" });
+    // For a single-row claim we still go through handlePostBatch — same
+    // endpoint, identical behavior; cache writes are idempotent. This
+    // keeps ONE code path for "fetch post info via /api/info".
+    await handlePostBatch({ postIds, userId: first.userId, pacer });
+    return;
   }
+
+  throw new AdapterError(`unknown queue row type: ${first.type}`, { category: "permanent" });
 }
 
 /** Emit `reddit.queue_drained` audit row (best-effort). Caller typically

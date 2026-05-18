@@ -233,19 +233,21 @@ describe("Reddit worker tick — claim + dispatch", () => {
   });
 
   it("fallthrough: slot=service_post empty + user_post non-empty → claims user_post", async () => {
-    // Slot 5 = service_post per mapping. Enqueue 2 user_post rows; 0
+    // Slot 5 = service_post per mapping. Enqueue 1 user_post row; 0
     // service_post rows. Per FALLTHROUGH_ORDER, user_post is first
-    // fallback (highest priority).
+    // fallback (highest priority). Post-refactor: post_batch type is
+    // retired — all post rows are `post_single`, the worker claim-
+    // batches up to 100 per tick on the post lanes.
     const userPostId = await enqueueRow({
       queueName: "user_post",
-      type: "post_batch",
-      payload: { post_ids: ["t3_a", "t3_b"] },
+      type: "post_single",
+      payload: { post_id: "t3_a" },
       userId: "user-A",
     });
     __setTickCounterForTest(4); // slotIndex 4 → slot 5 = service_post
     const result = await redditWorkerTick();
     expect(result.processedQueue).toBe("user_post");
-    expect(result.processedType).toBe("post_batch");
+    expect(result.processedType).toBe("post_single");
     expect(result.processedId).toBe(userPostId);
     expect(postBatchCalls.length).toBe(1);
     expect(await statusOf(userPostId)).toBe("done");
@@ -269,7 +271,11 @@ describe("Reddit worker tick — claim + dispatch", () => {
     expect(result.processedQueue).toBe("user_post");
     expect(result.processedType).toBe("post_single");
     expect(result.processedId).toBe(userPostId);
-    expect(postSingleCalls).toEqual([{ postId: "t3_xyz", userId: "user-B" }]);
+    // Post lanes dispatch through handlePostBatch (claim-time batching
+    // via /api/info). A single-row claim still flows the same code path
+    // — postIds carries one entry. handlePostSingle is reserved for
+    // the synchronous paste-flow caller, not the worker.
+    expect(postBatchCalls).toEqual([{ postIds: ["t3_xyz"], userId: "user-B" }]);
   });
 
   it("transient AdapterError → row returned to pending; attempts incremented", async () => {
@@ -365,11 +371,27 @@ describe("Reddit worker tick — dispatch by type", () => {
     expect(authorPollCalls).toEqual([{ handle: "rickastleyyt", userId: null }]);
   });
 
-  it("post_batch type dispatches to handlePostBatch", async () => {
+  it("claim-time batching: 3 post_single rows on service_post → ONE handlePostBatch call", async () => {
+    // Per-lane maxBatchSize=100 on the service_post lane: a single
+    // worker tick claims up to 100 pending post_single rows and
+    // dispatches them as ONE /api/info call (handlePostBatch with the
+    // collected post_ids array). This is the YouTube-shaped claim-time
+    // batching that replaced the pre-refactor `post_batch` bundled
+    // payload.
     await enqueueRow({
       queueName: "service_post",
-      type: "post_batch",
-      payload: { post_ids: ["t3_a", "t3_b", "t3_c"] },
+      type: "post_single",
+      payload: { post_id: "t3_a" },
+    });
+    await enqueueRow({
+      queueName: "service_post",
+      type: "post_single",
+      payload: { post_id: "t3_b" },
+    });
+    await enqueueRow({
+      queueName: "service_post",
+      type: "post_single",
+      payload: { post_id: "t3_c" },
     });
     __setTickCounterForTest(4); // slot 5 = service_post
     await redditWorkerTick();
@@ -378,8 +400,8 @@ describe("Reddit worker tick — dispatch by type", () => {
 
   // NOTE: a previous "unknown type dead-letters via permanent AdapterError"
   // test attempted to INSERT with type='nonsense_type'. Migration 0030
-  // landed a CHECK constraint on adapter_refresh_queue.type (4 valid types)
-  // — the bad row now fails at INSERT, which is the stronger guarantee.
-  // The worker's unknown-type handler remains as defensive code but the
+  // landed a CHECK constraint on adapter_refresh_queue.type — the bad
+  // row now fails at INSERT, which is the stronger guarantee. The
+  // worker's unknown-type handler remains as defensive code but the
   // scenario is unreachable from the application layer.
 });
