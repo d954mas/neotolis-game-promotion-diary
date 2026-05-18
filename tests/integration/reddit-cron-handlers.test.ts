@@ -183,6 +183,28 @@ describe("handleEnqueueServiceSourcesCron — daily enqueue from data_sources", 
     ).toBe("active");
   });
 
+  it("two users subscribed to the same subreddit → ONE queue row (within-batch dedup)", async () => {
+    // Walker fan-out treats one queue row as serving every subscriber
+    // for the same lookup key (cache row is cross-tenant). Two users
+    // both with auto_import=true on the same subreddit must collapse
+    // into one queue tick — otherwise the worker burns two Reddit
+    // slots fetching the same /r/<sub>/new.json listing.
+    const u1 = await seedTenantUser();
+    const u2 = await seedTenantUser();
+    await seedRedditSource({ userId: u1, kind: "reddit_subreddit", handle: "samesubreddit" });
+    await seedRedditSource({ userId: u2, kind: "reddit_subreddit", handle: "samesubreddit" });
+
+    const r = await handleEnqueueServiceSourcesCron();
+    expect(r.enqueued).toBe(1);
+
+    const rows = await db.execute(sql`
+      SELECT COUNT(*)::int AS n FROM adapter_refresh_queue
+      WHERE queue_name = 'service_source' AND type = 'sub_poll'
+    `);
+    const count = Number((rows as unknown as { rows: Array<{ n: number }> }).rows[0]?.n ?? 0);
+    expect(count).toBe(1);
+  });
+
   it("soft-deleted rows are skipped", async () => {
     const u = await seedTenantUser();
     await seedRedditSource({

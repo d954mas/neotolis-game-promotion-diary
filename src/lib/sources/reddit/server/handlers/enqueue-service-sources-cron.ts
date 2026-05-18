@@ -137,44 +137,80 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
   return { enqueued: insertedRows };
 }
 
-/** Atomically INSERT each candidate row only when no pending/processing
- *  row already exists for the same (queue_name, type, identifier).
- *  Returns the count of rows actually inserted. Single round-trip per
- *  candidate using `WHERE NOT EXISTS` — Postgres rolls back duplicates
- *  inside the same transaction window without surfacing them as errors.
+/** Atomically INSERT candidates that aren't already pending/processing
+ *  on the queue. Returns the count of rows actually inserted.
  *
- *  We loop one INSERT per row instead of one VALUES (...) statement
- *  because the per-row WHERE NOT EXISTS subquery is row-specific
- *  (identifier differs). Drizzle's bulk insert API doesn't expose
- *  per-row WHERE, and raw SQL with a UNION/VALUES set would lose the
- *  Drizzle type-safety on the column list. At cron's scale (200 sources
- *  × 4 ticks/day) the loop is in the noise. */
+ *  Implementation: two batch INSERTs (one per `type`), each driven by
+ *  `unnest($1::text[])` over the identifier array. Postgres evaluates
+ *  the per-row `NOT EXISTS` once per candidate inside the same
+ *  statement — atomically, no read-then-insert race window. Replaces
+ *  the prior per-candidate loop (N round-trips at indie scale was fine;
+ *  at 500+ sources the round-trip overhead becomes the dominant cost
+ *  of every cron tick).
+ *
+ *  Identifier key is `payload->>'handle'` for author_poll and
+ *  `payload->>'sub'` for sub_poll — these are the only two `type`
+ *  values this cron emits, so the type→key map is local + exhaustive. */
 async function atomicallyInsertNonDuplicates(
   candidates: Array<typeof adapterRefreshQueue.$inferInsert>,
 ): Promise<number> {
-  let inserted = 0;
+  // De-duplicate within the input batch via Set. Two users subscribing
+  // to the same subreddit (both auto_import=true) generate two
+  // candidates with the same identifier. The walker fan-out treats one
+  // queue row as serving every subscriber for the same lookup key (the
+  // cache row is cross-tenant), so a single queue row is the correct
+  // outcome. The OLD per-row loop got this right by accident — each
+  // INSERT was its own statement, so the second row's NOT EXISTS saw
+  // the first row already pending and skipped it. The batched INSERT
+  // evaluates NOT EXISTS against pre-statement state for every row, so
+  // duplicates within the input array would BOTH pass. Set dedup
+  // restores the prior semantics.
+  const handles = new Set<string>();
+  const subs = new Set<string>();
   for (const row of candidates) {
     const payload = row.payload as { handle?: string; sub?: string };
-    const isAuthor = row.type === "author_poll";
-    const identifier = isAuthor ? payload.handle : payload.sub;
-    if (identifier === undefined) continue; // already-warned upstream
-    const payloadKey = isAuthor ? "handle" : "sub";
-    const result = await db.execute<{ id: number }>(sql`
-      INSERT INTO adapter_refresh_queue
-        (adapter_kind, queue_name, type, payload, user_id, priority)
-      SELECT ${row.adapterKind}, ${row.queueName}, ${row.type}, ${JSON.stringify(row.payload)}::jsonb, ${row.userId ?? null}, ${row.priority ?? 0}
-      WHERE NOT EXISTS (
-        SELECT 1 FROM adapter_refresh_queue
-        WHERE adapter_kind = ${row.adapterKind}
-          AND queue_name = ${row.queueName}
-          AND type = ${row.type}
-          AND payload->>${payloadKey} = ${identifier}
-          AND status IN ('pending', 'processing')
-      )
-      RETURNING id
-    `);
-    const queryRows = (result as unknown as { rows?: Array<{ id: number }> }).rows ?? [];
-    if (queryRows.length > 0) inserted++;
+    if (row.type === "author_poll" && payload.handle !== undefined) {
+      handles.add(payload.handle);
+    } else if (row.type === "sub_poll" && payload.sub !== undefined) {
+      subs.add(payload.sub);
+    }
+  }
+
+  let inserted = 0;
+  if (handles.size > 0) {
+    inserted += await insertNonDuplicateBatch("author_poll", "handle", [...handles]);
+  }
+  if (subs.size > 0) {
+    inserted += await insertNonDuplicateBatch("sub_poll", "sub", [...subs]);
   }
   return inserted;
+}
+
+/** Single-statement bulk INSERT for one (type, identifier-key) pair.
+ *  `unnest($ids::text[])` projects the identifier array as rows; each
+ *  row builds its own jsonb payload and checks `NOT EXISTS` against
+ *  the queue. Returns RETURNING id rowcount. */
+async function insertNonDuplicateBatch(
+  type: "author_poll" | "sub_poll",
+  payloadKey: "handle" | "sub",
+  identifiers: string[],
+): Promise<number> {
+  const result = await db.execute<{ id: number }>(sql`
+    INSERT INTO adapter_refresh_queue
+      (adapter_kind, queue_name, type, payload, user_id, priority)
+    SELECT 'reddit_account', 'service_source', ${type},
+           jsonb_build_object(${payloadKey}, c.identifier), NULL, 0
+    FROM unnest(${identifiers}::text[]) AS c(identifier)
+    WHERE NOT EXISTS (
+      SELECT 1 FROM adapter_refresh_queue
+      WHERE adapter_kind = 'reddit_account'
+        AND queue_name = 'service_source'
+        AND type = ${type}
+        AND payload->>${payloadKey} = c.identifier
+        AND status IN ('pending', 'processing')
+    )
+    RETURNING id
+  `);
+  const rows = (result as unknown as { rows?: Array<{ id: number }> }).rows ?? [];
+  return rows.length;
 }
