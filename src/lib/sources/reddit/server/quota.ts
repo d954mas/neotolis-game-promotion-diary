@@ -1,19 +1,19 @@
 // Reddit per-user two-axis cap: 1 source-action / 5min + 25
 // post-refresh / 5min sliding window.
 //
-// Both axes share ONE source of truth: `reddit_refresh_queue`. A user
+// Both axes share ONE source of truth: `adapter_refresh_queue`. A user
 // action that costs a Reddit unit enqueues a row on the appropriate
 // lane (user_source or user_post); the cap query just COUNTs rows in
 // the last 5 minutes on the lane it cares about.
 //
 //   source-actions axis:
-//     SELECT count(*) FROM reddit_refresh_queue
+//     SELECT count(*) FROM adapter_refresh_queue
 //     WHERE user_id = $user
 //       AND queue_name = 'user_source'
 //       AND enqueued_at > NOW() - INTERVAL '5 minutes'
 //
 //   post-refreshes axis:
-//     SELECT count(*) FROM reddit_refresh_queue
+//     SELECT count(*) FROM adapter_refresh_queue
 //     WHERE user_id = $user
 //       AND queue_name = 'user_post'
 //       AND enqueued_at > NOW() - INTERVAL '5 minutes'
@@ -37,7 +37,7 @@
 
 import { and, eq, gte, sql } from "drizzle-orm";
 import type { DbOrTx } from "$lib/server/db/client.js";
-import { redditRefreshQueue } from "$lib/sources/reddit/server/schema/index.js";
+import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 import { writeAudit } from "$lib/server/audit.js";
 
 /** Two-axis sliding-window cap. Adapter declares the same shape via
@@ -71,7 +71,7 @@ export interface RedditCapResult {
  * a Drizzle db handle OR an inner tx; the count joins the caller's
  * transaction when one is active.
  *
- * Both axes COUNT + MIN(enqueued_at) over reddit_refresh_queue under a
+ * Both axes COUNT + MIN(enqueued_at) over adapter_refresh_queue under a
  * 5-minute UTC rolling window. axis only changes which queue_name
  * lane the WHERE filters to:
  *   - source-actions  → user_source
@@ -94,7 +94,7 @@ export async function checkRedditUserCap(
     // earlier audit-log-based counter read `source.refresh_content_requested`
     // only — which never fires on createSource (writes verb=source.added)
     // — so register actions slipped through the cap entirely. Migrating
-    // both axes to reddit_refresh_queue gives a uniform source of truth:
+    // both axes to adapter_refresh_queue gives a uniform source of truth:
     // any user-initiated Reddit operation enqueues a row on the user_source
     // lane (createSource → onSourceCreated → backfillSource → user_source
     // INSERT; refresh-content → backfillSource → user_source INSERT).
@@ -103,14 +103,15 @@ export async function checkRedditUserCap(
     const rows = await dbCtx
       .select({
         used: sql<number>`count(*)::int`,
-        oldestAt: sql<Date | null>`min(${redditRefreshQueue.enqueuedAt})`,
+        oldestAt: sql<Date | null>`min(${adapterRefreshQueue.enqueuedAt})`,
       })
-      .from(redditRefreshQueue)
+      .from(adapterRefreshQueue)
       .where(
         and(
-          eq(redditRefreshQueue.userId, userId),
-          eq(redditRefreshQueue.queueName, "user_source"),
-          gte(redditRefreshQueue.enqueuedAt, since),
+          eq(adapterRefreshQueue.adapterKind, "reddit_account"),
+          eq(adapterRefreshQueue.userId, userId),
+          eq(adapterRefreshQueue.queueName, "user_source"),
+          gte(adapterRefreshQueue.enqueuedAt, since),
         ),
       );
     const used = Number(rows[0]?.used ?? 0);
@@ -129,17 +130,18 @@ export async function checkRedditUserCap(
   const rows = await dbCtx
     .select({
       used: sql<number>`count(*)::int`,
-      oldestAt: sql<Date | null>`min(${redditRefreshQueue.enqueuedAt})`,
+      oldestAt: sql<Date | null>`min(${adapterRefreshQueue.enqueuedAt})`,
     })
-    .from(redditRefreshQueue)
+    .from(adapterRefreshQueue)
     .where(
       and(
         // user_id NOT NULL eliminates cron-lane rows by construction
         //. Combined with queue_name='user_post' the
         // filter narrows to user-initiated post refreshes only.
-        eq(redditRefreshQueue.userId, userId),
-        eq(redditRefreshQueue.queueName, "user_post"),
-        gte(redditRefreshQueue.enqueuedAt, since),
+        eq(adapterRefreshQueue.adapterKind, "reddit_account"),
+        eq(adapterRefreshQueue.userId, userId),
+        eq(adapterRefreshQueue.queueName, "user_post"),
+        gte(adapterRefreshQueue.enqueuedAt, since),
       ),
     );
   const used = Number(rows[0]?.used ?? 0);

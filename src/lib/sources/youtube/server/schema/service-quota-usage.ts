@@ -1,19 +1,16 @@
-// youtube_service_quota_usage.
+﻿// youtube_service_quota_usage.
 //
-// OPERATOR-SIDE COUNTER — no `user_id` column by design. YouTube Data API
+// OPERATOR-SIDE COUNTER вЂ” no `user_id` column by design. YouTube Data API
 // v3 quota is service-level (per API key, per Pacific calendar day), not
-// per-tenant. The poller increments this row in the same transaction as
-// a snapshot insert so the counter can never disagree with the work that
-// consumed quota.
+// per-tenant. Runtime code reserves units in this table before upstream
+// HTTP so the daily budget is shared safely across worker replicas.
 //
 // Composite PK `(date_pacific, api_key_id, pool_kind)`:
 //   - `date_pacific`: YYYY-MM-DD in America/Los_Angeles (Google's quota
 //     reset boundary). Stored as Postgres `date` to avoid TZ confusion.
 //   - `api_key_id`: sha-8 of the API key string (operator may rotate keys
 //     mid-day; each gets its own counter row).
-//   - `pool_kind`: 'cron' | 'user' — which in-memory reservoir burned the
-//     units. Lets reconcileReservoirsOnBoot debit each pool accurately
-//     after a worker crash.
+//   - pool_kind: 'cron' | 'user' - origin pool attribution.
 //
 // The `youtube.quota_reset` cron runs at 00:01 Pacific daily to seed the
 // new day's row at zero (UPSERT with ON CONFLICT DO NOTHING). Old rows

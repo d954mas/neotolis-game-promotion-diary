@@ -21,7 +21,7 @@ export interface AdapterUiServer {
 // callers don't have to know the per-kind shape. The cast here is the
 // boundary where the per-kind narrow type meets the registry's generic
 // surface — same pattern as src/lib/sources/registry.ts's adapter map for
-// the server-side DataSourceAdapter contract.
+// the server-side SourceAdapter contract.
 //
 // reddit_account and reddit_subreddit BOTH map to the same redditUiServer
 // module — UI rendering for a reddit_post event is the same regardless

@@ -17,37 +17,20 @@
 // Idempotent: a re-run within the same Pacific day is harmless. The Set
 // clear is no-op if already empty; the DELETE finds zero rows on re-run.
 //
-// Note on multi-replica: pg-boss's schedule + boss.work flow guarantees only
-// ONE worker receives the job per scheduled tick. If we ever scale to N
-// worker replicas, only one of them will process this job — the in-process
-// Set clear in the ONE replica that processes the job is sufficient because
-// the audit_log lookup in markThrottleTransition handles cross-replica
-// drift (see $lib/sources/youtube/server/quota.ts header).
+// Note on multi-replica: the quota budget itself is DB-backed. This handler
+// only clears local audit/id caches and trims old rows; duplicate execution
+// would be harmless.
 
 import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { youtubeServiceQuotaUsage } from "$lib/server/db/schema/index.js";
 import { resetThrottleState } from "../quota.js";
-import { resetReservoirs, reconcileReservoirsOnBoot } from "../http.js";
 import { logger } from "$lib/server/logger.js";
 
 export async function handleQuotaReset(job: { id: string; data: object }): Promise<void> {
   // 1. Clear in-process state (Set + round-robin + cached operator id).
   resetThrottleState();
   logger.info({ jobId: job.id }, "youtube quota reset — module state cleared");
-
-  // 1a. Reset the in-memory reservoirs to empty, then reconcile against
-  //     the persistent counter. RateLimiterMemory's 24h sliding window
-  //     may not align exactly with the YouTube reset boundary (Pacific
-  //     midnight); resetting + reconciling on the cron tick keeps drift
-  //     bounded so tomorrow's first request sees a reservoir consistent
-  //     with today's already-zero counter.
-  try {
-    await resetReservoirs();
-    await reconcileReservoirsOnBoot();
-  } catch (err) {
-    logger.warn({ jobId: job.id, err }, "youtube quota reset: reservoir reset/reconcile failed");
-  }
 
   // 2. Optional housekeeping — trim rows older than 7 days. Safe DELETE
   //    with a stable WHERE; date_pacific is text in 'YYYY-MM-DD' format

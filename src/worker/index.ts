@@ -20,63 +20,26 @@
 //   - INTERNAL_HEALTHCHECK
 //   - PURGE_DAILY                       (cross-tenant FK-cascade purge)
 //
-// Reddit batch-worker (Phase 03.1 DV-RDT-7) runs as a setInterval(7.5s)
-// loop alongside pg-boss — NOT a pg-boss subscriber, because pg-boss's
-// concurrency model fights the deterministic 8-tick round-robin we need
-// to stay inside Reddit's 10 req/min hard limit under multi-replica
-// deploys. The setInterval drains reddit_refresh_queue via SQL
-// FOR UPDATE SKIP LOCKED; the four Reddit CRON queues DO go through
-// pg-boss (registered via redditAdapter.registerQueues). Skipped
-// entirely when env.REDDIT_USER_AGENT is empty (self-host parity).
+// Adapter-owned workQueue loops run alongside pg-boss when dequeue
+// order itself is part of the quota contract. Reddit uses this for its
+// fixed 8-slot/min lane worker; future adapters can declare their own
+// loops from the adapter instead of adding source-specific imports here.
 //
-// SIGTERM drain via stopBoss (60s graceful) + clearInterval(redditTickInterval) + pool.end.
+// SIGTERM drain via stopBoss (60s graceful) + adapter interval cleanup + pool.end.
 
 import { createBoss, stopBoss } from "../lib/server/queue-client.js";
-import { pool } from "../lib/server/db/client.js";
+import { db, pool } from "../lib/server/db/client.js";
 import { logger } from "../lib/server/logger.js";
 import { QUEUES } from "../lib/server/queues.js";
-import { env, scrubKekFromEnv } from "../lib/server/config/env.js";
+import { scrubKekFromEnv } from "../lib/server/config/env.js";
+import { sql } from "drizzle-orm";
 
 import { allAdapters } from "../lib/sources/registry.js";
 import { handlePurgeDaily } from "./handlers/purge-daily.js";
 import { startOutboxForwarder } from "./handlers/outbox-forwarder.js";
-
-// Reddit batch-worker (Phase 03.1 DV-RDT-7). The 8-tick setInterval loop
-// drains reddit_refresh_queue at 8 req/min effective ceiling. NOT a
-// pg-boss subscriber — pg-boss's concurrency model doesn't preserve the
-// deterministic round-robin we need to stay inside Reddit's 10 req/min
-// hard limit. The four Reddit CRON queues do go through pg-boss (registered
-// via redditAdapter.registerQueues in the adapter-iteration loop below);
-// only the per-tick drain loop uses setInterval.
-import { redditWorkerTick } from "../lib/sources/reddit/server/handlers/worker-tick.js";
-import { isRedditConfigured } from "../lib/sources/reddit/server/credentials.js";
+import type { PoolClient } from "pg";
 
 export async function startWorker(): Promise<void> {
-  // Multi-replica safety guard.
-  //
-  // Adapters that use in-process rate-limit state (e.g., RateLimiterMemory
-  // reservoirs) declare it via observability.usesInProcessRateLimiter.
-  // With N>1 worker replicas, each replica holds independent budgets →
-  // N × envelope burn, quota overshoot in production. The assertion lists
-  // every offending adapter so the operator knows which ones need migration
-  // to a persistent backend (RateLimiterPostgres, DB-backed counter)
-  // before scaling replicas.
-  if (env.WORKER_REPLICA_COUNT > 1) {
-    const offending = allAdapters
-      .filter((a) => a.observability.usesInProcessRateLimiter === true)
-      .map((a) => a.kind);
-    if (offending.length > 0) {
-      throw new Error(
-        `WORKER_REPLICA_COUNT=${env.WORKER_REPLICA_COUNT} but the following adapter(s) ` +
-          `use per-process rate-limit state: ${offending.join(", ")}. ` +
-          `Migrate each adapter's reservoir to a persistent backend ` +
-          `(RateLimiterPostgres or DB-backed counter) and flip ` +
-          `observability.usesInProcessRateLimiter to false before scaling worker replicas — ` +
-          `otherwise daily quota budgets burn N× the envelope.`,
-      );
-    }
-  }
-
   const boss = await createBoss();
   // KEK scrub: worker has no bundled second copy of env.ts (no SvelteKit
   // handler.js import), so it's safe to scrub immediately after createBoss
@@ -93,14 +56,33 @@ export async function startWorker(): Promise<void> {
     }
   });
 
-  // Adapter-owned runtime-state reconcile.
-  // Each adapter that maintains in-process state (e.g., RateLimiterMemory
-  // reservoirs that lose state on worker restart) declares
-  // `reconcileRuntimeState` to sync against persistent counters BEFORE jobs
-  // start dispatching. Adapters with only persistent state (DB-backed
-  // counters, RateLimiterPostgres) omit the hook. Best-effort: errors are
-  // logged-and-continued; a failed reconcile does NOT block worker boot.
+  // Adapter-owned bootstrap locks. Adapters that declare a singleton runtime
+  // need one worker replica to own their pg-boss handlers and scheduled
+  // workers. A session advisory lock lets unrelated adapters keep running
+  // in parallel on the same deployment.
+  const adapterRuntimeLocks: PoolClient[] = [];
+  const activeAdapters: Array<(typeof allAdapters)[number]> = [];
   for (const adapter of allAdapters) {
+    if (adapter.observability.requiresSingletonRuntime === true) {
+      const lockClient = await tryAcquireAdapterRuntimeLock(adapter.kind);
+      if (lockClient === null) {
+        logger.info(
+          { role: "worker", adapter: adapter.kind },
+          "adapter runtime lock busy; skipping adapter queue registration on this replica",
+        );
+        continue;
+      }
+      adapterRuntimeLocks.push(lockClient);
+    }
+    activeAdapters.push(adapter);
+  }
+
+  // Adapter-owned runtime-state reconcile.
+  // Adapters that still keep process-local runtime state can reconcile it
+  // against persistent counters BEFORE jobs start dispatching. Adapters
+  // with only persistent state omit the hook. Best-effort: errors are
+  // logged-and-continued; a failed reconcile does NOT block worker boot.
+  for (const adapter of activeAdapters) {
     if (!adapter.reconcileRuntimeState) continue;
     try {
       await adapter.reconcileRuntimeState();
@@ -116,7 +98,7 @@ export async function startWorker(): Promise<void> {
   // boss.createQueue + boss.work for the queues it owns; the worker process
   // sees them all because we iterate the registry. Order is registration
   // order from registry.ts.
-  for (const adapter of allAdapters) {
+  for (const adapter of activeAdapters) {
     await adapter.registerQueues(boss);
   }
 
@@ -135,38 +117,53 @@ export async function startWorker(): Promise<void> {
   // Returns a teardown closure the shutdown handler awaits.
   const stopOutboxForwarder = await startOutboxForwarder({ boss });
 
-  // Reddit batch-worker setInterval boot (Phase 03.1 DV-RDT-7).
-  //
-  // Skipped when REDDIT_USER_AGENT is empty — self-host parity per
-  // D-RDT-AUTH-EMPTY. Operator can configure REDDIT_USER_AGENT and
-  // restart the worker to enable Reddit ingestion at any time.
-  //
-  // 7.5s tick interval = 8 ticks/min effective ceiling (Reddit's
-  // public-`.json` hard limit is 10 req/min; we target 8 for headroom).
-  // Per-tick: one HTTP call OR zero (queue empty / fallthrough exhausted).
-  // The async catch suppresses worker-process crashes — any
-  // AdapterError or DB transient inside the tick gets logged and the
-  // next tick fires normally.
-  //
-  // Smoke grep contract (plan 10 smoke gate):
-  //   - "reddit batch-worker ready: 8-tick round-robin loop" when
-  //     REDDIT_USER_AGENT is configured.
-  //   - "reddit batch-worker disabled" when REDDIT_USER_AGENT is empty.
-  let redditTickInterval: ReturnType<typeof setInterval> | null = null;
-  if (isRedditConfigured()) {
-    redditTickInterval = setInterval(() => {
-      redditWorkerTick().catch((err) =>
-        logger.warn(
-          { err: String((err as Error)?.message ?? err) },
-          "redditWorkerTick threw — continuing",
-        ),
-      );
-    }, 7500);
-    logger.info({ role: "worker" }, "reddit batch-worker ready: 8-tick round-robin loop");
-    console.log("reddit batch-worker ready: 8-tick round-robin loop");
-  } else {
-    logger.info({ role: "worker" }, "reddit batch-worker disabled (REDDIT_USER_AGENT empty)");
-    console.log("reddit batch-worker disabled");
+  // Adapter-owned scheduled workers. These are not pg-boss subscribers:
+  // their tick cadence and dequeue order are part of the adapter's quota
+  // policy. Smoke keeps reading the adapter-provided ready/disabled
+  // messages, so Reddit's existing boot contract stays stable.
+  const adapterWorkerIntervals: ReturnType<typeof setInterval>[] = [];
+  for (const adapter of activeAdapters) {
+    for (const worker of adapter.workQueue?.scheduledWorkers ?? []) {
+      if (worker.isEnabled()) {
+        let tickInFlight = false;
+        const interval = setInterval(() => {
+          if (tickInFlight) {
+            logger.debug(
+              { adapter: adapter.kind, worker: worker.name },
+              "adapter scheduled worker tick skipped because prior tick is still running",
+            );
+            return;
+          }
+          tickInFlight = true;
+          runAdapterScheduledTick(adapter.kind, worker)
+            .catch((err) =>
+              logger.warn(
+                {
+                  adapter: adapter.kind,
+                  worker: worker.name,
+                  err: String((err as Error)?.message ?? err),
+                },
+                "adapter scheduled worker tick threw - continuing",
+              ),
+            )
+            .finally(() => {
+              tickInFlight = false;
+            });
+        }, worker.intervalMs);
+        adapterWorkerIntervals.push(interval);
+        logger.info(
+          { role: "worker", adapter: adapter.kind, worker: worker.name },
+          worker.readyMessage,
+        );
+        console.log(worker.readyMessage);
+      } else {
+        logger.info(
+          { role: "worker", adapter: adapter.kind, worker: worker.name },
+          worker.disabledMessage,
+        );
+        console.log(worker.disabledMessage);
+      }
+    }
   }
 
   // Smoke assertion — exact string `worker ready` on stdout.
@@ -176,14 +173,16 @@ export async function startWorker(): Promise<void> {
   // Graceful shutdown.
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "worker received shutdown signal");
-    // Clear the Reddit tick interval FIRST so no new ticks start after
-    // shutdown begins. In-flight ticks (≤7.5s) complete naturally —
+    // Clear adapter worker intervals FIRST so no new ticks start after
+    // shutdown begins. In-flight ticks complete naturally —
     // the SQL tx inside tryClaimAndDispatch either commits or rolls
     // back; FOR UPDATE SKIP LOCKED ensures the row's status reflects
     // the final outcome.
-    if (redditTickInterval !== null) {
-      clearInterval(redditTickInterval);
-      redditTickInterval = null;
+    while (adapterWorkerIntervals.length > 0) {
+      const interval = adapterWorkerIntervals.pop();
+      if (interval !== undefined) {
+        clearInterval(interval);
+      }
     }
     try {
       await stopOutboxForwarder();
@@ -194,6 +193,9 @@ export async function startWorker(): Promise<void> {
       await stopBoss(boss);
     } catch (err) {
       logger.warn({ err }, "pg-boss stop failed");
+    }
+    for (const client of adapterRuntimeLocks.splice(0)) {
+      client.release();
     }
     try {
       await pool.end();
@@ -212,5 +214,59 @@ export async function startWorker(): Promise<void> {
   // Worker idles forever — pg-boss owns the polling loop.
   return new Promise<void>(() => {
     /* never resolves — process lives until SIGTERM */
+  });
+}
+
+async function tryAcquireAdapterRuntimeLock(adapterKind: string): Promise<PoolClient | null> {
+  const client = await pool.connect();
+  try {
+    const lockKey = `adapter-runtime:${adapterKind}`;
+    const result = await client.query<{ locked: boolean }>(
+      "SELECT pg_try_advisory_lock(hashtext($1)) AS locked",
+      [lockKey],
+    );
+    if (result.rows[0]?.locked === true) {
+      logger.info(
+        { role: "worker", adapter: adapterKind },
+        "adapter runtime lock acquired on this replica",
+      );
+      return client;
+    }
+    client.release();
+    return null;
+  } catch (err) {
+    client.release();
+    throw err;
+  }
+}
+
+async function runAdapterScheduledTick(
+  adapterKind: string,
+  worker: {
+    name: string;
+    replicaPolicy: "singleton" | "parallel";
+    tick(): Promise<unknown>;
+  },
+): Promise<void> {
+  if (worker.replicaPolicy === "parallel") {
+    await worker.tick();
+    return;
+  }
+
+  await db.transaction(async (tx) => {
+    const lockKey = `adapter-worker:${worker.name}`;
+    const result = await tx.execute<{ locked: boolean }>(sql`
+      SELECT pg_try_advisory_xact_lock(hashtext(${lockKey})) AS locked
+    `);
+    const locked =
+      (result as unknown as { rows?: Array<{ locked: boolean }> }).rows?.[0]?.locked === true;
+    if (!locked) {
+      logger.debug(
+        { adapter: adapterKind, worker: worker.name },
+        "adapter scheduled worker singleton lock busy; skipping tick on this replica",
+      );
+      return;
+    }
+    await worker.tick();
   });
 }

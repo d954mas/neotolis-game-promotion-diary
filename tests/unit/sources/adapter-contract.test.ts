@@ -1,6 +1,6 @@
 import { describe, it, expectTypeOf } from "vitest";
 import type {
-  DataSourceAdapter,
+  SourceAdapter,
   ParsedSourceUrl,
   AdapterUserQuotaCap,
   ObservabilityAuth,
@@ -12,7 +12,7 @@ import type {
 //  1. `ParsedSourceUrl` — new exported type. Drives /sources/new auto-detect
 //     when one input shape maps to multiple SourceKinds (Reddit:
 //     reddit.com/user/X → reddit_account; reddit.com/r/X → reddit_subreddit).
-//  2. `DataSourceAdapter.parseSourceUrl?(input)` — optional method; YouTube
+//  2. `SourceAdapter.parseSourceUrl?(input)` — optional method; YouTube
 //     adapter intentionally does NOT implement it (canonicalizeOnCreate
 //     handles its single-SourceKind case).
 //  3. `AdapterUserQuotaCap` — three new optional fields for Reddit's
@@ -34,14 +34,23 @@ describe("Phase 03.1 contract widenings", () => {
     }>();
   });
 
-  it("parseSourceUrl is optional on DataSourceAdapter", () => {
-    type WithoutParse = Omit<DataSourceAdapter, "parseSourceUrl">;
-    expectTypeOf<DataSourceAdapter["parseSourceUrl"]>().toEqualTypeOf<
+  it("parseSourceUrl is optional on SourceAdapter", () => {
+    type WithoutParse = Omit<SourceAdapter, "parseSourceUrl">;
+    expectTypeOf<SourceAdapter["parseSourceUrl"]>().toEqualTypeOf<
       ((input: string) => ParsedSourceUrl | null) | undefined
     >();
     // WithoutParse must still be a valid adapter shape (legacy YouTube path).
-    const _unused: WithoutParse = {} as DataSourceAdapter;
+    const _unused: WithoutParse = {} as SourceAdapter;
     void _unused;
+  });
+
+  it("platform-specific polling methods are not part of SourceAdapter", () => {
+    type HasPollContent = "pollContent" extends keyof SourceAdapter ? true : false;
+    type HasPollStats = "pollStats" extends keyof SourceAdapter ? true : false;
+    type HasPollStatsByVideoId = "pollStatsByVideoId" extends keyof SourceAdapter ? true : false;
+    expectTypeOf<HasPollContent>().toEqualTypeOf<false>();
+    expectTypeOf<HasPollStats>().toEqualTypeOf<false>();
+    expectTypeOf<HasPollStatsByVideoId>().toEqualTypeOf<false>();
   });
 
   it("AdapterUserQuotaCap accepts Reddit two-axis fields alongside YouTube fields", () => {

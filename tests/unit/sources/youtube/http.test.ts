@@ -1,41 +1,43 @@
-// chargedFetch reservoir + AdapterError taxonomy unit tests.
+// chargedFetch DB-reservation + AdapterError taxonomy unit tests.
 //
-// Pin the contract surface of the HTTP wrapper:
-//   - Reservoir consume (cron pool 8000 / user pool 2000) per origin.
-//   - AdapterError taxonomy: 403 quotaExceeded → rate-limited;
-//     403 other → operator-issue; 404 → not-found; 5xx → transient.
-//
-// Mocks fetch (global) and ./quota.js (incrementUsage / markThrottleTransition)
-// so the test does NOT touch Postgres. The reservoir state is reset between
-// tests via __resetReservoirsForTest().
+// Mocks fetch (global) and ./quota.js so the test does not touch Postgres.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { AdapterError } from "$lib/sources/errors.js";
 
-// Mock the quota module so chargedFetch's incrementUsage + markThrottleTransition
-// calls don't try to hit Postgres. Each test resets the mock counters.
 vi.mock("$lib/sources/youtube/server/quota.js", async () => {
   const actual = await vi.importActual<typeof import("$lib/sources/youtube/server/quota.js")>(
     "$lib/sources/youtube/server/quota.js",
   );
   return {
     ...actual,
-    incrementUsage: vi.fn(async () => {}),
+    hasYoutubeApiKeys: vi.fn(() => true),
+    reserveYoutubeQuota: vi.fn(async (args: { origin: "cron" | "user"; units: number }) => ({
+      apiKey: "test-key",
+      apiKeyId: "key-abc",
+      poolKind: args.origin,
+      units: args.units,
+    })),
     markThrottleTransition: vi.fn(async () => {}),
   };
 });
 
-const PICKED = { apiKey: "test-key", apiKeyId: "key-abc" };
-
 beforeEach(async () => {
-  // Reset both reservoirs to full so tests are independent.
-  const { __resetReservoirsForTest } = await import("$lib/sources/youtube/server/http.js");
-  await __resetReservoirsForTest();
-  vi.restoreAllMocks();
+  vi.clearAllMocks();
+  const quota = await import("$lib/sources/youtube/server/quota.js");
+  vi.mocked(quota.hasYoutubeApiKeys).mockReturnValue(true);
+  vi.mocked(quota.reserveYoutubeQuota).mockImplementation(
+    async (args: { origin: "cron" | "user"; units: number }) => ({
+      apiKey: "test-key",
+      apiKeyId: "key-abc",
+      poolKind: args.origin,
+      units: args.units,
+    }),
+  );
 });
 
-describe("chargedFetch — reservoir consume + AdapterError taxonomy", () => {
-  it("returns Response on 2xx (no throw, no error)", async () => {
+describe("chargedFetch - DB reservation + AdapterError taxonomy", () => {
+  it("returns Response on 2xx", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -48,15 +50,13 @@ describe("chargedFetch — reservoir consume + AdapterError taxonomy", () => {
     );
     const { chargedFetch } = await import("$lib/sources/youtube/server/http.js");
     const url = new URL("https://example.com/foo");
-    const resp = await chargedFetch(url, PICKED, 1, {
-      origin: "user",
-      logTag: "test",
-    });
+    const resp = await chargedFetch(url, 1, { origin: "user", logTag: "test" });
     expect(resp.status).toBe(200);
     expect(resp.ok).toBe(true);
+    expect(url.searchParams.get("key")).toBe("test-key");
   });
 
-  it("403 with errors[].reason='quotaExceeded' → AdapterError(rate-limited) with retryAfterMs > 0", async () => {
+  it("403 quotaExceeded -> AdapterError(rate-limited)", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -69,11 +69,11 @@ describe("chargedFetch — reservoir consume + AdapterError taxonomy", () => {
     );
     const { chargedFetch } = await import("$lib/sources/youtube/server/http.js");
     const url = new URL("https://example.com/foo");
-    await expect(chargedFetch(url, PICKED, 1, { origin: "cron", logTag: "test" })).rejects.toThrow(
+    await expect(chargedFetch(url, 1, { origin: "cron", logTag: "test" })).rejects.toThrow(
       AdapterError,
     );
     try {
-      await chargedFetch(url, PICKED, 1, { origin: "cron", logTag: "test" });
+      await chargedFetch(url, 1, { origin: "cron", logTag: "test" });
     } catch (err) {
       expect(err).toBeInstanceOf(AdapterError);
       const ae = err as AdapterError;
@@ -83,7 +83,7 @@ describe("chargedFetch — reservoir consume + AdapterError taxonomy", () => {
     }
   });
 
-  it("403 with non-quotaExceeded reason → AdapterError(operator-issue)", async () => {
+  it("403 non-quotaExceeded -> AdapterError(operator-issue)", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -96,82 +96,65 @@ describe("chargedFetch — reservoir consume + AdapterError taxonomy", () => {
     );
     const { chargedFetch } = await import("$lib/sources/youtube/server/http.js");
     const url = new URL("https://example.com/foo");
-    try {
-      await chargedFetch(url, PICKED, 1, { origin: "cron", logTag: "test" });
-      expect.fail("expected AdapterError");
-    } catch (err) {
-      expect(err).toBeInstanceOf(AdapterError);
-      expect((err as AdapterError).category).toBe("operator-issue");
-    }
+    await expect(chargedFetch(url, 1, { origin: "cron", logTag: "test" })).rejects.toMatchObject({
+      category: "operator-issue",
+    });
   });
 
-  it("404 → AdapterError(not-found)", async () => {
+  it("404 -> AdapterError(not-found)", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response("", { status: 404 })),
     );
     const { chargedFetch } = await import("$lib/sources/youtube/server/http.js");
     const url = new URL("https://example.com/foo");
-    try {
-      await chargedFetch(url, PICKED, 1, { origin: "user", logTag: "test" });
-      expect.fail("expected AdapterError");
-    } catch (err) {
-      expect(err).toBeInstanceOf(AdapterError);
-      expect((err as AdapterError).category).toBe("not-found");
-    }
+    await expect(chargedFetch(url, 1, { origin: "user", logTag: "test" })).rejects.toMatchObject({
+      category: "not-found",
+    });
   });
 
-  it("5xx → AdapterError(transient)", async () => {
+  it("5xx -> AdapterError(transient)", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response("", { status: 503 })),
     );
     const { chargedFetch } = await import("$lib/sources/youtube/server/http.js");
     const url = new URL("https://example.com/foo");
-    try {
-      await chargedFetch(url, PICKED, 1, { origin: "cron", logTag: "test" });
-      expect.fail("expected AdapterError");
-    } catch (err) {
-      expect(err).toBeInstanceOf(AdapterError);
-      expect((err as AdapterError).category).toBe("transient");
-    }
+    await expect(chargedFetch(url, 1, { origin: "cron", logTag: "test" })).rejects.toMatchObject({
+      category: "transient",
+    });
   });
 
-  it("user reservoir exhaustion → AdapterError(rate-limited) before fetch fires", async () => {
+  it("reservation exhaustion -> AdapterError(rate-limited) before fetch fires", async () => {
     const fetchSpy = vi.fn(async () => new Response("ok", { status: 200 }));
     vi.stubGlobal("fetch", fetchSpy);
+    const quota = await import("$lib/sources/youtube/server/quota.js");
+    vi.mocked(quota.reserveYoutubeQuota).mockResolvedValueOnce(null);
     const { chargedFetch } = await import("$lib/sources/youtube/server/http.js");
     const url = new URL("https://example.com/foo");
-    // user pool = 2000 points. Drain all of it in one call.
-    await chargedFetch(url, PICKED, 2000, { origin: "user", logTag: "drain" });
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    // Next call must throw rate-limited WITHOUT firing fetch.
-    try {
-      await chargedFetch(url, PICKED, 1, { origin: "user", logTag: "second" });
-      expect.fail("expected AdapterError(rate-limited)");
-    } catch (err) {
-      expect(err).toBeInstanceOf(AdapterError);
-      const ae = err as AdapterError;
-      expect(ae.category).toBe("rate-limited");
-      expect(ae.retryAfterMs!).toBeGreaterThan(0);
-    }
-    // Crucially: the second call did NOT touch fetch.
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    await expect(chargedFetch(url, 1, { origin: "user", logTag: "test" })).rejects.toMatchObject({
+      category: "rate-limited",
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("cron reservoir is independent from user reservoir", async () => {
+  it("passes origin through to the DB reservation", async () => {
     const fetchSpy = vi.fn(async () => new Response("ok", { status: 200 }));
     vi.stubGlobal("fetch", fetchSpy);
+    const quota = await import("$lib/sources/youtube/server/quota.js");
     const { chargedFetch } = await import("$lib/sources/youtube/server/http.js");
     const url = new URL("https://example.com/foo");
-    // Drain user pool entirely.
-    await chargedFetch(url, PICKED, 2000, { origin: "user", logTag: "drain-user" });
-    // cron pool (8000) should still allow a 100-unit call.
-    const resp = await chargedFetch(url, PICKED, 100, {
+
+    await chargedFetch(url, 2000, { origin: "user", logTag: "drain-user" });
+    const resp = await chargedFetch(url, 100, {
       origin: "cron",
       logTag: "cron-after-user-drained",
     });
+
     expect(resp.status).toBe(200);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(quota.reserveYoutubeQuota).toHaveBeenNthCalledWith(1, { origin: "user", units: 2000 });
+    expect(quota.reserveYoutubeQuota).toHaveBeenNthCalledWith(2, { origin: "cron", units: 100 });
   });
 });

@@ -4,6 +4,7 @@
 
 export * from "./auth.js";
 export * from "./audit-log.js";
+export * from "./adapter-refresh-queue.js";
 // Order is alphabetical within the active block; FK dependency order is
 // resolved by drizzle-kit at generate time via `references()`.
 export * from "./api-keys-steam.js";

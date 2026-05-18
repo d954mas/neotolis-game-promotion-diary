@@ -10,9 +10,10 @@ For deeper conceptual context (why backfill state machine, why two-layer cap, wh
 
 Before any code:
 
-- [ ] **Quota model.** Document the platform's API rate-limit shape: per-key daily envelope (YouTube), per-OAuth-token rolling window (Reddit), per-app-bearer (Twitter), unlimited (Telegram). Determines `userQuotaCap` shape and `usesInProcessRateLimiter` declaration.
+- [ ] **Quota model.** Document the platform's API rate-limit shape: per-key daily envelope (YouTube), per-OAuth-token rolling window (Reddit), per-app-bearer (Twitter), unlimited (Telegram). Determines `userQuotaCap`, DB claim gates, and whether `requiresSingletonRuntime` is needed.
 - [ ] **Auth shape.** Operator static keys (YouTube), per-user OAuth (Reddit/Twitter), unauthenticated scrape (Telegram public). Determines `observability.auth` declaration.
 - [ ] **Pool attribution.** Will adapter use cron pool, user pool, or both? See §9 of SOURCE-REFERENCE.md. YouTube uses both.
+- [ ] **API safety posture.** For unauthenticated/public endpoints, document conservative cadence, User-Agent requirements, retry/backoff semantics, and UI degraded-state behavior before wiring the worker.
 - [ ] **External id stability.** What's the canonical id for posts/videos? Are URLs immutable? Determines `parseUrl` regex and `events.external_id` semantics.
 - [ ] **Rolling-window cap shape.** If platform's quota is rolling (e.g., 600 req / 10 min), pick one of three documented options in `SOURCE-REFERENCE.md` §9 «Window-shape extensibility»: daily-equivalent / undefined / contract-extension.
 
@@ -30,28 +31,30 @@ Before any code:
 
 ---
 
-## 2. Adapter contract — required methods
+## 2. Adapter contract - required methods
 
-Open `src/lib/sources/adapter.ts` and read `interface DataSourceAdapter`. Implement every required method in `<kind>/server/adapter.ts`. Reference: `src/lib/sources/youtube/server/adapter.ts`.
+Open `src/lib/sources/adapter.ts` and read `interface SourceAdapter`. Implement the cross-source surface in `<kind>/server/index.ts`. Keep platform-specific upstream methods local to that adapter's server tree; do not add them to `SourceAdapter` unless at least three adapters need the same call shape.
 
-- [ ] `kind: SourceKind` — literal type from `SourceKind` enum in `db/schema/data-sources.ts`. Must be added to the enum if not already present (separate migration).
-- [ ] `parseUrl(url): ParsedUrl | null` — first-match-wins URL recognizer. Returns `{kind, externalId}` on match, `null` otherwise. **Must be pure and side-effect-free** — registry iterates all adapters until one matches.
-- [ ] `pollContent(source, since): Promise<{events, unitsUsed}>` — pull events newer than `since`. Returns exact `unitsUsed` count of upstream HTTP requests made. Empty `events` array means platform CONFIRMED no events newer than `since` (worker marks `backfill_complete=true`). Throws `AdapterError` for inability-to-fetch (rate-limit, network, parse error).
-- [ ] `pollStats(events[], source, picked)` — user-driven stats refresh batch.
-- [ ] `pollStatsByVideoId(externalIds[], quotaUser, picked)` — service-driven stats refresh (cron tier polls). May not apply to all platforms; YouTube uses this for video stats.
-- [ ] `observability: AdapterObservability` — auth + quota + per-user cap declaration. Spread it from a separate file (`<kind>/server/observability.ts`).
-- [ ] `registerQueues(boss)` — adapter owns its pg-boss queues. Worker bootstrap iterates all adapters and calls each.
-- [ ] `scheduleCronTicks(boss)` — adapter owns its cron schedules.
-- [ ] `backfillSource(source, ctx)` — enqueue a backfill job for this source. Returns `{jobId, queue}`.
+- [ ] `kind: SourceKind` - literal type from `SourceKind` enum in `db/schema/data-sources.ts`. Must be added to the enum if not already present (separate migration).
+- [ ] `parseUrl(url): ParsedUrl | null` - first-match-wins URL recognizer. Returns `{kind, externalId}` on match, `null` otherwise. **Must be pure and side-effect-free** - registry iterates all adapters until one matches.
+- [ ] `observability: AdapterObservability` - auth + quota + per-user cap declaration. Spread it from a separate file (`<kind>/server/observability.ts`).
+- [ ] `registerQueues(boss)` - adapter owns its pg-boss queues. Worker bootstrap iterates all adapters and calls each.
+- [ ] `scheduleCronTicks(boss)` - adapter owns its cron schedules.
+- [ ] `backfillSource(source, ctx)` - enqueue source discovery/backfill work. Returns `{jobId, queue}`.
 
 ## 2a. Adapter contract — optional methods
 
 Implement only those that apply to your platform.
 
-- [ ] `canRefreshPoll?(eventKind)` — opt into the «Refresh now» button per event kind.
-- [ ] `reconcileRuntimeState?()` — sync in-process state (e.g., RateLimiterMemory reservoirs) with persistent counters at worker boot. Skip if adapter uses persistent state only.
+- [ ] `syncStats?: { fetch(externalId, ctx) }` - opt into an explicit fast path for paste/preview flows. This is allowed only when the caller runs quota/accounting gates first; never hide upstream HTTP behind a generic route fallback.
+- [ ] SQL lane workers - when queue order/cadence is part of quota safety, declare it through `workQueue.scheduledWorkers[].laneQueue` and use `createAdapterLaneWorker` / `createAdapterBatchLaneWorker`. Batch workers must choose `batchScope: "global"` when one upstream request can safely serve many tenants (quota-efficient shared requests), or `batchScope: "user"` when the upstream identity is tenant-bound (per-user OAuth/token).
+
+- [ ] `refreshQueue?: { canRefresh(eventKind), enqueue(input) }` — opt into the «Refresh now» button per event kind.
+- [ ] `workQueue?: { scheduledWorkers[] }` — opt into adapter-owned interval workers when queue order/cadence is part of the quota contract. Use `laneQueue.strategy="fixed-slot-round-robin"` for SQL lane workers like Reddit.
+- [ ] `reconcileRuntimeState?()` — sync process-local runtime state with persistent counters at worker boot. Skip if adapter uses persistent state only.
+- [ ] `normalizeSourceOnCreate?(input, ctx)` — pure/cheap local source URL normalization before duplicate/quota prechecks. No upstream I/O here. Use it for canonical URL spelling and metadata injection (Reddit `u/name` -> canonical user URL + `metadata.username`).
 - [ ] `canonicalizeOnCreate?(input, ctx)` — URL canonicalization at create time (e.g., resolve handle → channel id).
-- [ ] `onSourceCreated?(source, opts)` — fire-and-forget hook after createSource (e.g., enqueue first backfill).
+- [ ] `onSourceCreated?(source, opts)` — transactional hook inside createSource; use `opts.tx` and the shared outbox for first backfill enqueue.
 - [ ] `fetchEventPreviewMetadata?(canonicalUrl)` — manual paste preview (oEmbed equivalent).
 - [ ] `validateEventInput?(input)` — adapter-specific input shape validation.
 - [ ] `fetchPollStateMap?(userId, externalIds)` — read poll state for the «Refresh now» button display.
@@ -68,7 +71,7 @@ In `<kind>/server/observability.ts`:
 - [ ] `quota.getRecentAudit(limit)` — recent platform-specific audit_log entries for the /admin/quota dashboard.
 - [ ] `quotaCounters?` — declare per-user cap counters here (e.g., `<kind>_metadata_fetches_per_day`).
 - [ ] `userQuotaCap?` — declare per-user fair-share cap. Adapters with no daily cap declare `undefined` and the UI renders «no limit» (counter still shown).
-- [ ] `usesInProcessRateLimiter?` — true if adapter holds in-process state (RateLimiterMemory). Worker bootstrap refuses to start with `WORKER_REPLICA_COUNT > 1` if any adapter has this set.
+- [ ] `requiresSingletonRuntime?` — true only if adapter still has load-bearing process-local state that cannot be protected by a DB claim gate or persistent counter. Worker bootstrap will register that adapter's pg-boss queues/scheduled workers on only one replica via a DB advisory lock.
 
 ---
 
@@ -76,7 +79,7 @@ In `<kind>/server/observability.ts`:
 
 In `<kind>/server/handlers/`:
 
-- [ ] **Backfill handler.** Reference: `src/lib/sources/youtube/server/handlers/backfill-user.ts`. Required logic:
+- [ ] **Backfill/source-discovery handler.** Reference: `src/lib/sources/youtube/server/handlers/backfill-channel.ts`. Required logic:
   - [ ] Tenant-scoped source lookup (filter by `userId`).
   - [ ] `computeSinceForRefresh` to derive newSide / oldSide boundaries (shared helper, no adapter-specific code needed).
   - [ ] `flow` upgrade: if `oldSide !== null && flow === 'incremental'`, upgrade to `'historical'`.
@@ -85,7 +88,8 @@ In `<kind>/server/handlers/`:
   - [ ] Audit metadata MUST include `platform: '<kind>'` (cap query filter — see SOURCE-REFERENCE.md §9.1) AND `flow: AuditFlow` (closed enum — see `src/lib/server/audit.ts`).
 - [ ] **Auto-backfill cron handler** (if applicable). Picks incomplete sources, enqueues passive backfill jobs.
 - [ ] **Stats poll handlers** (if applicable). Tier-based (Active/Cold) for platforms with stable refresh windows.
-- [ ] **Refresh-now handler** (if applicable). User-driven single-event poll. Bypasses cooldown gates handled at endpoint.
+- [ ] **Refresh-now enqueue** (if applicable). Implement through `adapter.refreshQueue.enqueue`. Cooldown/cap gates live in `services/refresh-poll.ts`; adapter code only enqueues platform work.
+- [ ] **Lane worker** (if applicable). Use shared `adapter_refresh_queue` with `adapterKind`, ordered slots, fallthrough, `replicaPolicy`, and an optional DB-backed `claimGate` for global pacers. For batch queues, document whether batching is global for quota efficiency or user-scoped for tenant-bound upstream credentials.
 
 ---
 
@@ -116,7 +120,7 @@ Reference patterns:
 Per-platform required tests:
 
 - [ ] **Cross-tenant scoping.** Verify every service function rejects cross-tenant access with NotFoundError (404, not 403).
-- [ ] **End-to-end catch-up flow.** Click refresh-content → endpoint → boss enqueue → handler → events INSERT → audit row → cap counter increments. Mock `getBoss` and adapter's `pollContent`.
+- [ ] **End-to-end catch-up flow.** Click refresh-content -> endpoint -> enqueue -> handler -> events INSERT -> audit row -> cap counter increments. Mock queue dispatch and the adapter's local upstream client.
 - [ ] **Cap exhaustion error codes.** Seed audit rows at cap, verify endpoint returns 429 with correct error code (`requests_quota_exhausted` / `events_quota_exhausted` / `platform_quota_exhausted` / `rate_limited`).
 - [ ] **parseUrl coverage.** Each URL shape supported by the platform.
 - [ ] **AuditFlow sync.** Update `tests/unit/audit-flow-sync.test.ts` if adding new flow values (also requires migration to extend the CHECK constraint — TS const + migration in lockstep).
@@ -126,7 +130,7 @@ Per-platform required tests:
 ## 7. Documentation
 
 - [ ] Update `SOURCE-REFERENCE.md` if adapter introduces new patterns (rolling-window cap, OAuth refresh logic, etc.). Add platform-specific notes to existing sections.
-- [ ] Document quota model in adapter's `observability.ts` header (cap shape, why `usesInProcessRateLimiter` is set or not).
+- [ ] Document quota model in adapter's `observability.ts` header (cap shape, claim gates, and why `requiresSingletonRuntime` is set or not).
 - [ ] Document migration rollback in each migration's header comment.
 
 ---
@@ -148,8 +152,9 @@ Before merging the platform PR:
 
 These are documented gaps that future platform authors may bump into. None are blockers — workarounds exist — but flagging here so you're not surprised:
 
-- **PickedKey threading.** `pollContent` / `pollStats` / `pollStatsByVideoId` accept `PickedKey` from the caller (caller-side credential picking). YouTube round-robins across multiple operator API keys. If your platform has N≥2 OAuth tokens and wants round-robin per request, you'll need to thread PickedKey through the same way. A future refactor may move picking into the adapter; until then, copy the YouTube pattern verbatim.
+- **Platform-specific upstream clients.** Keep upstream fetch methods local to the adapter server tree and call them from explicit handlers/capabilities. `SourceAdapter` should expose cross-source orchestration only; queue/quota/accounting boundaries must be visible at the call site.
 - **Rolling-window quota shapes.** `userQuotaCap` only supports daily windows. Platforms with rolling caps (Reddit 600/10min) pick one of three documented options in `SOURCE-REFERENCE.md` §9.
+- **Reddit public `.json` safety.** Current Reddit uses unauthenticated public JSON with conservative cadence. Before increasing usage, add UA validation, header-aware backoff, escalating adapter pause windows (10m/1h/3h/12h), and a UI degraded state that disables remote refresh chips while still allowing local URL/event/source creation.
 - **UI server cast** (registry-ui.ts). `as unknown as AdapterUiServer` cast is a known type-narrowing smell. Will be cleaned up when the second UI adapter lands and the actual abstraction shape becomes concrete.
 
 ---
@@ -161,10 +166,10 @@ For copy-paste reference, the YouTube tree organizes as:
 ```
 src/lib/sources/youtube/
 ├── server/
-│   ├── adapter.ts                     ← core contract methods
+│   ├── adapter.ts                     ← local upstream client/helpers
 │   ├── observability.ts               ← AdapterObservability declaration
-│   ├── http.ts                        ← chargedFetch + RateLimiterMemory
-│   ├── quota.ts                       ← incrementUsage + threshold gates
+│   ├── http.ts                        ← chargedFetch + AdapterError taxonomy
+│   ├── quota.ts                       ← DB quota reservation + threshold gates
 │   ├── snapshots.ts                   ← writeSnapshot (per-event stats UPSERT)
 │   ├── metadata.ts                    ← oEmbed / video metadata fetch
 │   ├── url.ts                         ← parseUrl regex
@@ -172,15 +177,15 @@ src/lib/sources/youtube/
 │   ├── index.ts                       ← barrel + youtubeAdapter declaration
 │   ├── schema/                        ← per-source tables
 │   └── handlers/
-│       ├── backfill-user.ts           ← refresh-content + auto-passive
+│       ├── backfill-channel.ts        ← refresh-content source discovery
 │       ├── channel-context-backfill.ts ← onboarding (initial pull)
 │       ├── auto-backfill-cron.ts      ← daily passive backfill picker
-│       ├── poll-active.ts             ← Active-tier stats refresh (24h)
-│       ├── poll-cold.ts               ← Cold-tier stats refresh (28d)
-│       ├── poll-user.ts               ← Refresh-now button
+│       ├── poll-active.ts             ← Active-tier service_video producer
+│       ├── poll-cold.ts               ← Cold-tier service_video producer
+│       ├── refresh-queue-tick.ts      ← user_video/service_video SQL worker
 │       ├── poll-cron.ts               ← cron dispatcher
 │       ├── quota-reset.ts             ← daily quota reset hook
-│       └── rehab-unavailable.ts       ← weekly privacy-flip recovery
+│       └── rehab-unavailable.ts       ← weekly service_video rehab producer
 └── ui/
     ├── server.ts                      ← toCardProps
     └── index.ts                       ← optional client-side override

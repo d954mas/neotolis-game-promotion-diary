@@ -75,6 +75,7 @@ const MAX_BATCH = 100;
 export async function handlePostBatch(args: {
   postIds: string[];
   userId: string | null;
+  pacer?: "acquire" | "already-acquired";
 }): Promise<{ presentIds: string[]; missingIds: string[] }> {
   if (args.postIds.length === 0) {
     return { presentIds: [], missingIds: [] };
@@ -93,7 +94,7 @@ export async function handlePostBatch(args: {
   const requested = args.postIds.map((id) => (id.startsWith("t3_") ? id : `t3_${id}`));
   const url = `/api/info.json?id=${encodeURIComponent(requested.join(","))}`;
 
-  const { data } = await redditFetch<ListingResponse>(url);
+  const { data } = await redditFetch<ListingResponse>(url, { pacer: args.pacer });
   const children = data?.data?.children ?? [];
 
   // Index returned t3s by t3_<id> for O(1) match by-id (NOT by index).

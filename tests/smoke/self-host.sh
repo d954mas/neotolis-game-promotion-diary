@@ -457,7 +457,7 @@ log "=== Unified-events smoke extension PASSED ==="
 #      (scheduler.tick.active / .cold, youtube.quota_reset, purge.daily,
 #      youtube.rehab_unavailable).
 #   4. Creates a kind=youtube_video event + drives /api/events/:id/refresh-poll
-#      so the worker drains a real poll.user job through the mock;
+#      so the worker drains a real adapter_refresh_queue row through the mock;
 #      asserts the youtube_video_snapshots row + youtube_videos.last_polled_at
 #      land within 60s.
 #   5. Asserts /api/admin/quota and /admin/quota HTML page both return

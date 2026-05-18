@@ -58,6 +58,12 @@
     return formatAge(ageSeconds);
   }
 
+  function formatPauseUntil(d: Date | string | null): string {
+    if (d === null) return "";
+    const ts = typeof d === "string" ? new Date(d) : d;
+    return ts.toLocaleString();
+  }
+
   // Derived totals — only meaningful when configured.
   let configured = $derived(data.isConfigured);
   let queueDepth = $derived(data.isConfigured ? data.queueDepth : []);
@@ -177,7 +183,7 @@
           </tbody>
         </table>
 
-        {#if daily.capExhaustedCount > 0 || daily.adapterDegradedSince}
+        {#if daily.capExhaustedCount > 0 || daily.adapterDegradedSince || daily.adapterPausedUntil}
           <ul class="reddit-ops__alarms">
             {#if daily.capExhaustedCount > 0}
               <li class="reddit-ops__alarm-chip">
@@ -188,6 +194,14 @@
               <li class="reddit-ops__alarm-chip reddit-ops__alarm-chip--degraded">
                 {m.admin_reddit_adapter_degraded_chip({
                   age: formatDegradedSince(daily.adapterDegradedSince),
+                })}
+              </li>
+            {/if}
+            {#if daily.adapterPausedUntil}
+              <li class="reddit-ops__alarm-chip reddit-ops__alarm-chip--degraded">
+                {m.admin_reddit_adapter_paused_chip({
+                  time: formatPauseUntil(daily.adapterPausedUntil),
+                  reason: daily.adapterPauseReason ?? "rate-limit",
                 })}
               </li>
             {/if}

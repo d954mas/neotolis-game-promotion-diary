@@ -20,9 +20,10 @@ import { auditLog } from "../db/schema/audit-log.js";
 import { allAdapters } from "$lib/sources/registry.js";
 import { redditAdapter, getRecentLoad } from "$lib/sources/reddit/server/index.js";
 import { checkRedditUserCap } from "$lib/sources/reddit/server/quota.js";
-import { listSources } from "./data-sources.js";
+import { getSourceById, listSources } from "./data-sources.js";
 import { toDataSourceDto, type DataSourceDto } from "../dto.js";
 import { getUserQuotaUsedToday, getUserQuotaLifetime, nextPacificMidnight } from "./quota.js";
+import { NotFoundError } from "./errors.js";
 
 const REFRESH_CONTENT_COOLDOWN_MS = 5 * 60_000;
 
@@ -52,6 +53,13 @@ export interface SourcesPageData {
   pullingBySource: Record<string, boolean>;
 }
 
+export interface SourceDetailPageData {
+  source: DataSourceDto;
+  quotaPlatforms: QuotaPlatformView[];
+  cooldownSec: number;
+  pulling: boolean;
+}
+
 /**
  * Top-level read for /sources. Composes the per-aspect loaders below.
  * Keeping each block in its own helper lets future tests target one
@@ -64,7 +72,7 @@ export async function loadSourcesPage(userId: string): Promise<SourcesPageData> 
   const channelIds = dtos.map((s) => s.channelId).filter((c): c is string => c !== null);
   const sourceIds = dtos.map((s) => s.id);
 
-  await enrichWithYoutubeChannelTitles(dtos, channelIds);
+  await enrichDataSourceDtosWithYoutubeChannelTitles(dtos);
   await enrichWithChannelState(dtos, channelIds);
   await enrichWithEventStats(dtos, userId, sourceIds);
 
@@ -83,10 +91,39 @@ export async function loadSourcesPage(userId: string): Promise<SourcesPageData> 
   };
 }
 
-async function enrichWithYoutubeChannelTitles(
+export async function loadSourceDetailPage(
+  userId: string,
+  sourceId: string,
+): Promise<SourceDetailPageData> {
+  const row = await getSourceById(userId, sourceId);
+  if (row.deletedAt !== null) {
+    throw new NotFoundError();
+  }
+
+  const dto = toDataSourceDto(row);
+  const channelIds = dto.channelId === null ? [] : [dto.channelId];
+
+  await enrichDataSourceDtosWithYoutubeChannelTitles([dto]);
+  await enrichWithChannelState([dto], channelIds);
+
+  const [quotaPlatforms, cooldownBySource, pullingBySource] = await Promise.all([
+    loadQuotaPlatforms(userId),
+    loadRefreshContentCooldown(userId, [dto.id]),
+    loadPullingChannels([dto], channelIds),
+  ]);
+
+  return {
+    source: dto,
+    quotaPlatforms,
+    cooldownSec: cooldownBySource[dto.id] ?? 0,
+    pulling: pullingBySource[dto.id] ?? false,
+  };
+}
+
+export async function enrichDataSourceDtosWithYoutubeChannelTitles(
   dtos: DataSourceDto[],
-  channelIds: string[],
 ): Promise<void> {
+  const channelIds = dtos.map((s) => s.channelId).filter((c): c is string => c !== null);
   if (channelIds.length === 0) return;
   const cache = await db
     .select({

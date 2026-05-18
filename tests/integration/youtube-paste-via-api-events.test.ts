@@ -12,14 +12,14 @@
 //      row, and writes the cross-source event.poll_refreshed audit row
 //      (flow=stats_refresh) — load-bearing for the per-user requestsPerDay
 //      cap counter.
-//   3. fetchEventStats failure (pickKeyForJob returns null / adapter
+//   3. fetchEventStats failure (quota gate returns null / adapter
 //      throws) leaves the events row intact (silent degradation; cron
 //      tick picks up stats later).
 //   4. URL-shape mismatch → derivedExternalId is null → no fetchEventStats
 //      call → no snapshot row + no audit row.
 //
 // Mocking strategy mirrors tests/integration/ingest-paste-then-poll.test.ts:
-//   - vi.mock pickKeyForJob to return a fake key so fetchEventStats does
+//   - vi.mock the quota gate to return a fake key so fetchEventStats does
 //     not short-circuit at the auth gate.
 //   - vi.mock youtubeChannelAdapterCore.pollStatsByVideoId to return a
 //     known snapshot WITHOUT calling the real googleapis client.
@@ -30,14 +30,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { eq, and } from "drizzle-orm";
 
-// Mock pickKeyForJob — fetchEventStats short-circuits to null when no
+// Mock quota reservation — fetchEventStats short-circuits to null when no
 // API key is configured (self-host parity). Returning a fake key lets
 // the test reach the pollStatsByVideoId mock below.
 vi.mock("../../src/lib/sources/youtube/server/quota.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    pickKeyForJob: () => ({ apiKey: "test-key-yt-paste", apiKeyId: "ytpaste001" }),
+    hasYoutubeApiKeys: () => true,
+    reserveYoutubeQuota: async (args: { origin: "cron" | "user"; units: number }) => ({
+      apiKey: "test-key-yt-paste",
+      apiKeyId: "ytpaste001",
+      poolKind: args.origin,
+      units: args.units,
+    }),
   };
 });
 

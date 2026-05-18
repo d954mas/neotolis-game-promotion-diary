@@ -61,7 +61,7 @@ import type { EventKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { withQuotaGuard, getUserQuotaUsedToday, enforceAdapterUserQuota } from "./quota.js";
+import { withQuotaGuard, getUserQuotaUsedToday } from "./quota.js";
 import { encodeCursor, decodeCursor } from "./audit-read.js";
 import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
 import { getAdapter } from "$lib/sources/registry.js";
@@ -364,30 +364,13 @@ export async function createEvent(
   // malformed kind/URL pairs before the service is called.
   let derivedExternalId: string | null = input.externalId ?? null;
   if (derivedExternalId == null && input.url != null && input.url !== "") {
+    // CYCLE-BREAKER: source URL parsing imports the adapter registry, and
+    // the registry resolves adapter barrels that call back into event
+    // services through syncStats/create flows.
     const { parseAnyUrl } = await import("$lib/sources/url.js");
     const parsed = parseAnyUrl(input.url);
     if (parsed !== null && parsed.kind === input.kind) {
       derivedExternalId = parsed.externalId;
-    }
-  }
-
-  // Adapter-driven per-user cap check — PRE-INSERT (validate-first).
-  // YouTube uses requestsPerDay (checked POST-INSERT before fetchEventStats,
-  // legacy behavior — stats skip on cap exhaustion, event still created).
-  // Reddit uses the two-axis sliding-window cap (windowMinutes +
-  // postRefreshesPerWindow); when exhausted, throw 429 here so the event
-  // row is NEVER created. This dispatches polymorphically on the adapter's
-  // declared cap shape — every adapter with windowMinutes (Reddit, future
-  // sliding-window adapters) enforces this branch.
-  if (derivedExternalId !== null) {
-    const sourceKindForCap = eventKindToSourceKind(input.kind);
-    if (sourceKindForCap !== null) {
-      const capAdapter = getAdapter(sourceKindForCap);
-      if (capAdapter.observability.userQuotaCap?.windowMinutes !== undefined) {
-        await enforceAdapterUserQuota(db, capAdapter, userId, ipAddress, "post-refresh", {
-          platform: sourceKindForCap,
-        });
-      }
     }
   }
 
@@ -484,7 +467,7 @@ export async function createEvent(
   // stats immediately. Errors swallowed — event row already exists;
   // stats will land via cron tick if this path failed.
   //
-  // Cap check FIRST. fetchEventStats writes an audit row with
+  // Cap check FIRST. syncStats.fetch writes an audit row with
   // flow=stats_refresh which counts toward the per-user requestsPerDay
   // cap. Without a pre-check, a user at 100/100 could push to 101 by
   // pasting a new event — letting them silently bypass the cap.
@@ -495,10 +478,29 @@ export async function createEvent(
     if (sourceKindForStats !== null) {
       try {
         const statsAdapter = getAdapter(sourceKindForStats);
-        if (statsAdapter.fetchEventStats !== undefined) {
-          const cap = statsAdapter.observability.userQuotaCap;
+        if (statsAdapter.syncStats !== undefined) {
           let allow = true;
-          if (cap?.requestsPerDay !== undefined) {
+          const guard = await statsAdapter.syncStats.canRun?.({
+            externalId: row.externalId,
+            userId,
+            eventKind: row.kind,
+            now: new Date(),
+          });
+          if (guard?.action === "skip") {
+            logger.info(
+              {
+                eventId: row.id,
+                externalId: row.externalId,
+                reason: guard.reason,
+                retryAfterMs: guard.retryAfterMs,
+              },
+              "syncStats.fetch skipped by adapter guard",
+            );
+            allow = false;
+          }
+
+          const cap = statsAdapter.observability.userQuotaCap;
+          if (allow && cap?.requestsPerDay !== undefined) {
             const used = await getUserQuotaUsedToday(userId, sourceKindForStats);
             if (used.requests >= cap.requestsPerDay) {
               logger.info(
@@ -508,13 +510,16 @@ export async function createEvent(
                   used: used.requests,
                   cap: cap.requestsPerDay,
                 },
-                "fetchEventStats skipped — per-user requestsPerDay cap reached",
+                "syncStats.fetch skipped — per-user requestsPerDay cap reached",
               );
               allow = false;
             }
           }
           if (allow) {
-            const stats = await statsAdapter.fetchEventStats(row.externalId, { userId });
+            const stats = await statsAdapter.syncStats.fetch(row.externalId, {
+              userId,
+              ipAddress,
+            });
             if (stats !== null) {
               const now = new Date();
               // Two things to write: (1) last_user_refresh_at marker for
@@ -546,7 +551,7 @@ export async function createEvent(
       } catch (err) {
         logger.warn(
           { eventId: row.id, externalId: row.externalId, err: String(err) },
-          "fetchEventStats failed on createEvent; UI will rely on cron polling",
+          "syncStats.fetch failed on createEvent; UI will rely on cron polling",
         );
       }
     }
@@ -610,6 +615,8 @@ export async function enrichFromUrl(
   url: string,
   ipAddress: string,
 ): Promise<EnrichmentResult> {
+  // CYCLE-BREAKER: URL parsing and adapter lookup load the adapter
+  // registry; adapter barrels call this service from create/preview flows.
   const { parseIngestUrl } = await import("./url-parser.js");
   const { eventKindToSourceKind } = await import("$lib/sources/event-to-source-kind.js");
   const { getAdapter } = await import("$lib/sources/registry.js");
@@ -667,12 +674,12 @@ export async function enrichFromUrl(
       kind: "reddit_post",
       externalId: parsed.externalId,
       title: preview.title,
-      occurredAt: null, // adapter.fetchEventPreviewMetadata doesn't carry submittedAt
+      occurredAt: preview.occurredAt ?? null,
       thumbnailUrl: preview.thumbnailUrl ?? null,
       authorName: preview.authorName || null,
       authorUrl: preview.authorUrl || null,
       canonicalUrl: parsed.canonicalUrl,
-      // author_is_me inheritance for Reddit lives in fetchEventStats
+      // author_is_me inheritance for Reddit lives in syncStats.fetch
       // (matches t3.author against owned reddit_account.metadata.username).
       // enrichFromUrl is the PREVIEW path — no DB write happens here, so
       // we don't pre-compute sourceMatch.
@@ -881,6 +888,8 @@ export async function updateEvent(
   // (via eventKindToSourceKind) owns its kind-specific input validation
   // (e.g. youtube_video requires a parseable YouTube URL). Adapters that
   // don't impose constraints simply omit validateEventInput.
+  // CYCLE-BREAKER: registry imports adapter barrels, while adapters call
+  // back into event services for sync stats and validation workflows.
   const { eventKindToSourceKind } = await import("$lib/sources/event-to-source-kind.js");
   const { getAdapter, hasAdapter } = await import("$lib/sources/registry.js");
   const sourceKindForValidation = eventKindToSourceKind(mergedKind);

@@ -21,6 +21,8 @@
 
 import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
+import { env } from "$lib/server/config/env.js";
+import { user } from "$lib/server/db/schema/auth.js";
 
 let cachedOperatorId: string | null | undefined = undefined;
 
@@ -32,13 +34,11 @@ let cachedOperatorId: string | null | undefined = undefined;
  */
 export async function resolveOperatorUserId(): Promise<string | null> {
   if (cachedOperatorId !== undefined) return cachedOperatorId;
-  const { env } = await import("$lib/server/config/env.js");
   const allowlist = [...env.ADMIN_EMAIL_ALLOWLIST];
   if (allowlist.length === 0) {
     cachedOperatorId = null;
     return null;
   }
-  const { user } = await import("$lib/server/db/schema/auth.js");
   const rows = await db
     .select({ id: user.id })
     .from(user)

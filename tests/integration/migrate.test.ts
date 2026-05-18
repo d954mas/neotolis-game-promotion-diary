@@ -720,7 +720,7 @@ describe("migration 0010 baseline", () => {
       const insert = async () =>
         pool.query(
           `insert into youtube_video_snapshots (id, video_id, polled_at, view_count, like_count, comment_count)
-           values ($1, $2, $3, $4, $5, $6)
+           VALUES ($1, $2, $3, $4, $5, $6)
            on conflict (video_id, polled_at) do nothing`,
           ["01HX0000000000000000000001", "dQw4w9WgXcQ", polledAt, 100, 10, 5],
         );

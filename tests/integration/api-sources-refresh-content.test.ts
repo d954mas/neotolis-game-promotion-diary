@@ -2,7 +2,7 @@
 //
 // The endpoint dispatches via getAdapter(source.kind).backfillSource;
 // for YouTube the
-// adapter enqueues a youtube.backfill.user job. pg-boss is mocked the
+// adapter enqueues a youtube.backfill.channel job. pg-boss is mocked the
 // same way refresh-now.test.ts / sources-backfill.test.ts do — vi.mock
 // over queue-client.js with a sentJobs accumulator — so the test runs
 // without a live boss schema.
@@ -83,7 +83,7 @@ describe("POST /api/sources/:id/refresh-content", () => {
     sentJobs.length = 0;
   });
 
-  it("authenticated + own source returns 202 with body { enqueued: true, queue: 'youtube.backfill.user', jobId }", async () => {
+  it("authenticated + own source returns 202 with body { enqueued: true, queue: 'youtube.backfill.channel', jobId }", async () => {
     const app = createApp();
     const u = await seedUserDirectly({ email: `rc-ok-${uniq()}@test.local` });
     const src = await seedYoutubeSource(u.id);

@@ -1,12 +1,12 @@
 // Reddit per-source adapter CORE — the public-`.json` model.
 //
-// `redditAdapterCore` is the polling slice of DataSourceAdapter composed
+// `redditAdapterCore` is the polling slice composed
 // into the full `redditAdapter` in ./index.ts (mirrors YouTube's
 // adapter.ts → index.ts barrel pattern).
 //
 // Polling is QUEUE-DRIVEN, not synchronous fetch. The 8-tick worker
 // (handlers/worker-tick.ts) owns the actual HTTP. pollContent and
-// pollStats ENQUEUE rows into reddit_refresh_queue and return
+// pollStats ENQUEUE rows into adapter_refresh_queue and return
 // placeholder shapes; the worker drains the queue at 8 req/min
 // effective ceiling and writes real data via the type-specific
 // handlers (sub-poll, author-poll, post-batch, post-single).
@@ -15,14 +15,12 @@
 // per-video polling (listing endpoints return inline stats; post_batch
 // refreshes stats by post_id directly).
 //
-// canRefreshPoll claims `reddit_post` only. parseUrl / parseSourceUrl
-// are exposed for the cross-source URL router (parseAnyUrl) and the
-// /sources/new auto-detect.
+// parseUrl / parseSourceUrl are exposed for the cross-source URL router
+// (parseAnyUrl) and the /sources/new auto-detect.
 
 import { db } from "$lib/server/db/client.js";
 import type {
-  DataSourceAdapter,
-  EventKind,
+  AdapterObservability,
   ParsedSourceUrl,
   ParsedUrl,
   PollableEvent,
@@ -31,20 +29,24 @@ import type {
   StatsSnapshot,
 } from "$lib/sources/adapter.js";
 import { redditParsePostUrl, redditParseSourceUrl } from "./url.js";
-import { redditRefreshQueue } from "./schema/index.js";
+import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 import { redditObservability } from "./observability.js";
 
-type RedditAdapterCore = Pick<
-  DataSourceAdapter,
-  | "kind"
-  | "parseUrl"
-  | "parseSourceUrl"
-  | "pollContent"
-  | "pollStats"
-  | "pollStatsByVideoId"
-  | "canRefreshPoll"
-  | "observability"
->;
+interface RedditAdapterCore {
+  readonly kind: "reddit_account";
+  parseUrl(url: string): ParsedUrl | null;
+  parseSourceUrl(input: string): ParsedSourceUrl | null;
+  pollContent(
+    source: PollableSource,
+    since: Date,
+  ): Promise<{ events: RawEvent[]; unitsUsed: number }>;
+  pollStats(
+    events: PollableEvent[],
+    source: { id: string; userId: string } | null,
+  ): Promise<StatsSnapshot[]>;
+  pollStatsByVideoId(): Promise<StatsSnapshot[]>;
+  readonly observability: AdapterObservability;
+}
 
 interface RedditSourceMetadata {
   username?: string;
@@ -53,7 +55,7 @@ interface RedditSourceMetadata {
 
 /** Reddit adapter polling core.
  *
- *  pollContent / pollStats enqueue work into reddit_refresh_queue rather
+ *  pollContent / pollStats enqueue work into adapter_refresh_queue rather
  *  than firing HTTP synchronously. The 8-tick worker (handlers/worker-tick.ts)
  *  drains the queue and writes events + snapshots via the type-specific
  *  handlers. From the cross-source code's view this is a normal adapter;
@@ -79,11 +81,11 @@ export const redditAdapterCore: RedditAdapterCore = {
   },
 
   /** Enqueue an author_poll (reddit_account) or sub_poll (reddit_subreddit)
-   *  row into reddit_refresh_queue. Returns empty events — the worker
+   *  row into adapter_refresh_queue. Returns empty events — the worker
    *  populates the events table out-of-band when it drains the queue.
    *
    *  Origin maps to queue lane:
-   *    origin='user' → user_source (cap-counted via redditRefreshQueue)
+   *    origin='user' → user_source (cap-counted via adapterRefreshQueue)
    *    origin='cron' → service_source (user_id NULL; cron-exempt)
    *
    *  Priority 1 for user-driven (jumps ahead of service-cron rows on the
@@ -114,7 +116,8 @@ export const redditAdapterCore: RedditAdapterCore = {
     const type = isAccount ? "author_poll" : "sub_poll";
     const payload = isAccount ? { handle: md.username! } : { sub: md.subreddit! };
 
-    await db.insert(redditRefreshQueue).values({
+    await db.insert(adapterRefreshQueue).values({
+      adapterKind: "reddit_account",
       queueName,
       type,
       payload,
@@ -151,7 +154,8 @@ export const redditAdapterCore: RedditAdapterCore = {
 
     const userId = source?.userId ?? events[0]?.userId ?? null;
 
-    await db.insert(redditRefreshQueue).values({
+    await db.insert(adapterRefreshQueue).values({
+      adapterKind: "reddit_account",
       queueName: "user_post",
       type: "post_batch",
       payload: { post_ids: postIds },
@@ -174,13 +178,6 @@ export const redditAdapterCore: RedditAdapterCore = {
    *  Reddit's own cron schedules via redditAdapter.scheduleCronTicks). */
   async pollStatsByVideoId(): Promise<StatsSnapshot[]> {
     return [];
-  },
-
-  /** True only for reddit_post events. Cross-source refresh-poll
-   *  (services/refresh-poll.ts) dispatches via this hint — Reddit
-   *  refreshes get enqueued through pollStats above. */
-  canRefreshPoll(eventKind: EventKind): boolean {
-    return eventKind === "reddit_post";
   },
 
   observability: redditObservability,

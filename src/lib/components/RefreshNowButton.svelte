@@ -8,9 +8,9 @@
   //   - Click → POST /api/events/{id}/refresh-poll (no body).
   //   - Pending: spinning rotation 360°/1s, aria-busy="true", aria-live="polite"
   //     announces m.polling_refresh_now_pending().
-  //   - On 200/202: 2s "Polled just now" state, then invalidateAll() to refresh
-  //     server-loaded data so the parent <PollingBadge> reads the new
-  //     last_polled_at.
+  //   - On 200/202: enter cooldown and invalidateAll(); PollingBadge reads
+  //     metadata.last_user_refresh_at and shows "Refresh queued" until
+  //     youtube_videos.last_polled_at catches up.
   //   - On 429: cooldown-disabled state. Reads Retry-After header OR
   //     falls back to event.metadata.last_user_refresh_at + 5min to
   //     derive minutesLeft for the tooltip.
@@ -89,13 +89,9 @@
     try {
       const resp = await fetch(`/api/events/${event.id}/refresh-poll`, { method: "POST" });
       if (resp.status === 200 || resp.status === 202) {
-        uiState = "done";
-        // 2s "Polled just now" → invalidateAll() so the parent loader re-runs
-        // and the badge picks up the fresh server-side last_polled_at.
-        setTimeout(() => {
-          uiState = "idle";
-          void invalidateAll();
-        }, 2000);
+        cooldownSecondsLeft = COOLDOWN_MS / 1000;
+        uiState = "cooldown";
+        await invalidateAll();
         return;
       }
       if (resp.status === 429) {

@@ -78,6 +78,7 @@ interface T3Data {
 export async function handleSubPoll(args: {
   sub: string;
   userId: string | null;
+  pacer?: "acquire" | "already-acquired";
 }): Promise<{ postsUpserted: number; eventsInserted: number }> {
   const sub = args.sub;
   if (typeof sub !== "string" || sub.length === 0) {
@@ -90,7 +91,7 @@ export async function handleSubPoll(args: {
   try {
     const { data } = await redditFetch<{
       data?: { children?: Array<{ kind?: string; data?: T3Data }> };
-    }>(`/r/${encodeURIComponent(sub)}/new.json?limit=100`);
+    }>(`/r/${encodeURIComponent(sub)}/new.json?limit=100`, { pacer: args.pacer });
     listingChildren = (data?.data?.children ?? [])
       .filter((c) => c?.kind === "t3" && c?.data)
       .map((c) => c.data as T3Data);

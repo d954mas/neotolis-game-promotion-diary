@@ -83,15 +83,16 @@ export async function handleDeletionPropagationCron(): Promise<{
   });
 
   // Queue cleanup — `done` and `dead_letter` rows accumulate forever
-  // otherwise. Schema header for reddit_refresh_queue (schema/refresh-queue.ts)
+  // otherwise. adapter_refresh_queue carries user_id for the purge cascade
   // promises "kept ~7 days for audit, then truncated by deletion-propagation
   // cron" — this is the implementation. Without it, ~4M rows/year on a
   // healthy instance (8 req/min × 60 × 24 × 365). 7-day window keeps the
   // forensic audit window long enough to investigate failed batches.
   const queueCleanup = await db.execute(sql`
     WITH cleaned AS (
-      DELETE FROM reddit_refresh_queue
-      WHERE status IN ('done', 'dead_letter')
+      DELETE FROM adapter_refresh_queue
+      WHERE adapter_kind = 'reddit_account'
+        AND status IN ('done', 'dead_letter')
         AND last_attempt_at IS NOT NULL
         AND last_attempt_at < NOW() - INTERVAL '7 days'
       RETURNING id

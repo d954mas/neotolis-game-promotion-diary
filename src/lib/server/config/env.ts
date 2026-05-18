@@ -1,4 +1,4 @@
-// This module is the SOLE reader of process.env in the entire codebase.
+﻿// This module is the SOLE reader of process.env in the entire codebase.
 // Every other module imports `env` from here. Boot fails fast on missing
 // or malformed values; KEKs are decoded, length-checked, and the source
 // env vars are scrubbed from process.env after consumption so they cannot
@@ -12,7 +12,7 @@ import { z } from "zod";
 
 // Load `.env` first, then layer `.env.local` on top with override. Mirrors
 // vite's standard convention (.env shared, .env.local for per-machine
-// overrides — gitignored). In production containers neither file exists;
+// overrides вЂ” gitignored). In production containers neither file exists;
 // dotenv silently no-ops and `process.env` is populated by docker. Keeping
 // this in the SOLE env.ts reader so we don't sprinkle dotenv calls
 // across the codebase.
@@ -37,7 +37,7 @@ const RawSchema = z.object({
   DATABASE_URL: z.string().url(),
   BETTER_AUTH_URL: z.string().url(),
   BETTER_AUTH_SECRET: z.string().min(32),
-  // OAuth identity provider — Google by default in both SaaS and self-host.
+  // OAuth identity provider вЂ” Google by default in both SaaS and self-host.
   // Self-host operators MAY override OAUTH_DISCOVERY_URL + OAUTH_PROVIDER_ID
   // to point at any OIDC-compatible IdP (Keycloak, Authentik, Auth0, ...).
   // This is unsupported / advanced for self-host: SaaS only ships Google,
@@ -46,7 +46,7 @@ const RawSchema = z.object({
   //
   // OAUTH_PROVIDER_ID is the value written to `account.providerId` in the
   // Better Auth schema and the value passed to genericOAuth's `providerId`.
-  // If you switch IdP, switch this too — otherwise rows are mislabelled
+  // If you switch IdP, switch this too вЂ” otherwise rows are mislabelled
   // ("google" against a Keycloak realm) and Better Auth treats them as the
   // same logical provider (which can be intentional for migrations, but is
   // a foot-gun by default).
@@ -71,7 +71,7 @@ const RawSchema = z.object({
   // "production"). Self-host operators running the production image behind a
   // TLS-terminating proxy over plain HTTP between proxy and app must set this
   // to "false" or Better Auth refuses to set the `__Secure-` cookie prefix
-  // over HTTP. Smoke tests do the same — they exercise the production image
+  // over HTTP. Smoke tests do the same вЂ” they exercise the production image
   // over plain HTTP. Leave unset in real production deployments.
   BETTER_AUTH_SECURE_COOKIES: z
     .enum(["true", "false"])
@@ -80,7 +80,7 @@ const RawSchema = z.object({
 
   // Support contact email shown on /privacy, /terms, /about, footer.
   // Self-host operators MUST configure for GDPR compliance. Empty default
-  // preserves self-host parity — boot succeeds with empty value; pages
+  // preserves self-host parity вЂ” boot succeeds with empty value; pages
   // render "support email not configured" placeholder via Paraglide
   // message picker.
   SUPPORT_EMAIL: z.string().default(""),
@@ -115,9 +115,9 @@ const RawSchema = z.object({
 
   // Comma-separated operator-owned YouTube Data API v3 keys. The polling
   // worker rotates across this set when the per-key 10k units/day ceiling
-  // is approached. Empty default ⇒ auto-import + scheduled polling are
+  // is approached. Empty default в‡’ auto-import + scheduled polling are
   // disabled (smoke + self-host parity preserved by construction).
-  // Stored plaintext in env (not envelope-encrypted) — these are the
+  // Stored plaintext in env (not envelope-encrypted) вЂ” these are the
   // operator's own keys, not user secrets; existing pino redact paths cover
   // the field name `apiKey` and the YouTube response surface.
   SERVICE_YOUTUBE_API_KEYS: z
@@ -130,13 +130,13 @@ const RawSchema = z.object({
         .filter(Boolean),
     ),
 
-  // Phase 03.1 — Reddit operator User-Agent (DV-RDT-7: public-`.json` adapter).
+  // Phase 03.1 вЂ” Reddit operator User-Agent (DV-RDT-7: public-`.json` adapter).
   // Reddit's ToS REQUIRES a compliant UA. Default UAs (urllib, axios, node-fetch)
-  // are aggressively rate-limited. Empty default ⇒ Reddit cleanly disabled
-  // (self-host parity preserved — paste returns 422 reddit_not_configured,
+  // are aggressively rate-limited. Empty default в‡’ Reddit cleanly disabled
+  // (self-host parity preserved вЂ” paste returns 422 reddit_not_configured,
   // /admin/quota Reddit tab shows "not configured", smoke gate validates).
   // Non-empty MUST match `<platform>:<id>:<version> (by /u/<handle>)`.
-  // Stored plaintext in env (not envelope-encrypted) — the operator's UA, not
+  // Stored plaintext in env (not envelope-encrypted) вЂ” the operator's UA, not
   // a user secret; Pino redact still covers the field name to keep ops logs
   // hygienic.
   REDDIT_USER_AGENT: z
@@ -156,10 +156,10 @@ const RawSchema = z.object({
       }
     }),
 
-  // Comma-separated admin user emails (case-insensitive — the admin
-  // middleware lowercases + trims before lookup). Empty default ⇒
+  // Comma-separated admin user emails (case-insensitive вЂ” the admin
+  // middleware lowercases + trims before lookup). Empty default в‡’
   // /admin/* returns 404 for everyone (self-host parity preserved by
-  // construction — no admin UI exists for self-host operators by default).
+  // construction вЂ” no admin UI exists for self-host operators by default).
   // Changes require a container restart (parsed once at boot).
   ADMIN_EMAIL_ALLOWLIST: z
     .string()
@@ -179,25 +179,18 @@ const RawSchema = z.object({
   // Validated as a URL by zod so a typo fails fast at boot.
   YOUTUBE_API_BASE_URL: z.string().url().default("https://www.googleapis.com/youtube/v3"),
 
-  // Reddit base URL — production default = the official reddit.com endpoint.
+  // Reddit base URL вЂ” production default = the official reddit.com endpoint.
   // The CI smoke gate sets this to a mock reverse-proxy URL
   // (http://localhost:<port>) so the worker's chargedFetch redirects to the
   // mock without touching live Reddit. Mirrors YOUTUBE_API_BASE_URL precedent.
   // Validated as a URL so typos fail fast at boot.
-  // DO NOT set in production — leaving unset (or set to the default) is the
+  // DO NOT set in production вЂ” leaving unset (or set to the default) is the
   // only supported live behavior.
   REDDIT_BASE_URL_OVERRIDE: z.string().url().optional(),
 
-  // Multi-replica safety guard. YouTube adapter's chargedFetch reservoir
-  // uses RateLimiterMemory (per-process state). With N>1 worker replicas
-  // each holds an independent 8000/2000-point pool — daily quota would
-  // be N×budget, burning the operator envelope past the 10000 daily cap
-  // and tripping 95% throttle prematurely. Today's compose runs
-  // WORKER_REPLICA_COUNT=1 (no replicas: directive); the worker boot
-  // asserts this until the reservoir migrates to a shared backend
-  // (RateLimiterPostgres — same library, swap one constructor). The
-  // assert is the safety floor: operators bumping replicas accidentally
-  // crash the worker boot instead of silently overshooting quota.
+  // Deployment hint for operators. Adapter-owned workers are protected by
+  // per-adapter singleton locks or DB-backed claim gates; this value is no
+  // longer a global quota safety guard.
   WORKER_REPLICA_COUNT: z.coerce.number().int().min(1).default(1),
 });
 
@@ -234,7 +227,7 @@ if (!kekVersions.has(raw.KEK_CURRENT_VERSION)) {
 // cannot leak via accidental console.log(process.env) or debug dumps.
 // The decoded buffers live in `kekVersions` Map only.
 //
-// IMPORTANT — call this AFTER all bundles that depend on env have loaded.
+// IMPORTANT вЂ” call this AFTER all bundles that depend on env have loaded.
 // SvelteKit's vite build produces its own bundled copy of this module
 // (inside build/server/chunks/...). When build/handler.js is dynamically
 // imported, SvelteKit's bundled env.ts re-parses process.env. If we scrub
@@ -242,13 +235,13 @@ if (!kekVersions.has(raw.KEK_CURRENT_VERSION)) {
 // APP_KEK_BASE64=undefined and throws.
 //
 // Boot sequence is therefore:
-//   1. import env (this module) → kekVersions populated, process.env still
+//   1. import env (this module) в†’ kekVersions populated, process.env still
 //      carries the raw values
-//   2. import handler.js → bundled env.ts parses process.env successfully
+//   2. import handler.js в†’ bundled env.ts parses process.env successfully
 //   3. server.ts calls scrubKekFromEnv() once startup is complete
 export function scrubKekFromEnv(): void {
   // env.ts is the SOLE legitimate process.env reader; scrub is the
-  // inverse — clearing the secret fields after they've been parsed into
+  // inverse вЂ” clearing the secret fields after they've been parsed into
   // the env-singleton so a later console.log(process.env) at runtime
   // can't leak them. Scrub coverage spans every credential/secret env
   // var landed via the schema. Pino redact still covers logger output;

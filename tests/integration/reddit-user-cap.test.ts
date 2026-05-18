@@ -5,7 +5,7 @@
 //                       'source.refresh_content_requested' rows w/
 //                       metadata.platform IN ('reddit_account','reddit_subreddit')
 //                       AND metadata.flow != 'auto_passive')
-//   - post-refreshes  : 25 / 5min (reddit_refresh_queue COUNT of rows
+//   - post-refreshes  : 25 / 5min (adapter_refresh_queue COUNT of rows
 //                       WHERE user_id=$user AND queue_name='user_post')
 //
 // Both axes EXCLUDE cron-driven entries (D-RDT-CAP-COUNTER) — audit rows
@@ -70,8 +70,8 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
     // which the audit-log counter never saw — silent bypass — and queue
     // rows from onSourceCreated are the actual evidence of work happening.
     await db.execute(sql`
-      INSERT INTO reddit_refresh_queue (queue_name, type, payload, user_id, priority)
-      VALUES ('user_source', 'sub_poll', '{"sub":"IndieDev"}'::jsonb, ${userA}, 1)
+      INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority)
+      VALUES ('reddit_account', 'user_source', 'sub_poll', '{"sub":"IndieDev"}'::jsonb, ${userA}, 1)
     `);
     const result = await checkRedditUserCap(db, userA, "source-actions");
     expect(result.allowed).toBe(false);
@@ -84,8 +84,8 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
 
   it("source-actions: 5+ min old queue rows do NOT count (window slides)", async () => {
     await db.execute(sql`
-      INSERT INTO reddit_refresh_queue (queue_name, type, payload, user_id, priority, enqueued_at)
-      VALUES ('user_source', 'sub_poll', '{"sub":"old"}'::jsonb, ${userA}, 1,
+      INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority, enqueued_at)
+      VALUES ('reddit_account', 'user_source', 'sub_poll', '{"sub":"old"}'::jsonb, ${userA}, 1,
               NOW() - INTERVAL '10 minutes')
     `);
     const result = await checkRedditUserCap(db, userA, "source-actions");
@@ -99,8 +99,8 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
     // queue_name='user_source' so even userId-attributed cron work
     // (theoretical edge) is excluded if it landed on the wrong lane.
     await db.execute(sql`
-      INSERT INTO reddit_refresh_queue (queue_name, type, payload, user_id, priority)
-      VALUES ('service_source', 'sub_poll', '{"sub":"cron"}'::jsonb, ${userA}, 1)
+      INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority)
+      VALUES ('reddit_account', 'service_source', 'sub_poll', '{"sub":"cron"}'::jsonb, ${userA}, 1)
     `);
     const result = await checkRedditUserCap(db, userA, "source-actions");
     expect(result.allowed).toBe(true);
@@ -109,8 +109,8 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
 
   it("source-actions: other user's queue rows do NOT count (tenant scope)", async () => {
     await db.execute(sql`
-      INSERT INTO reddit_refresh_queue (queue_name, type, payload, user_id, priority)
-      VALUES ('user_source', 'sub_poll', '{"sub":"x"}'::jsonb, ${userB}, 1)
+      INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority)
+      VALUES ('reddit_account', 'user_source', 'sub_poll', '{"sub":"x"}'::jsonb, ${userB}, 1)
     `);
     const result = await checkRedditUserCap(db, userA, "source-actions");
     expect(result.allowed).toBe(true);
@@ -120,8 +120,8 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
   it("V12: post-refreshes 25/5min — 26th in user_post queue → allowed=false", async () => {
     for (let i = 0; i < 25; i++) {
       await db.execute(sql`
-        INSERT INTO reddit_refresh_queue (queue_name, type, payload, user_id, priority)
-        VALUES ('user_post', 'post_single',
+        INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority)
+        VALUES ('reddit_account', 'user_post', 'post_single',
                 ${`{"post_id":"t3_test_${i}"}`}::jsonb, ${userA}, 1)
       `);
     }
@@ -136,8 +136,8 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
   it("post-refreshes: 24 rows in window → 25th still allowed", async () => {
     for (let i = 0; i < 24; i++) {
       await db.execute(sql`
-        INSERT INTO reddit_refresh_queue (queue_name, type, payload, user_id, priority)
-        VALUES ('user_post', 'post_single',
+        INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority)
+        VALUES ('reddit_account', 'user_post', 'post_single',
                 ${`{"post_id":"t3_test_${i}"}`}::jsonb, ${userA}, 1)
       `);
     }
@@ -149,8 +149,8 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
   it("V13: service-cron rows (user_id IS NULL) excluded from post-refreshes counter", async () => {
     for (let i = 0; i < 50; i++) {
       await db.execute(sql`
-        INSERT INTO reddit_refresh_queue (queue_name, type, payload, user_id, priority)
-        VALUES ('service_post', 'post_batch', '{}'::jsonb, NULL, 0)
+        INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority)
+        VALUES ('reddit_account', 'service_post', 'post_batch', '{}'::jsonb, NULL, 0)
       `);
     }
     const result = await checkRedditUserCap(db, userA, "post-refreshes");
@@ -162,8 +162,8 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
     // Defense in depth — only `user_post` queue rows count, not service_post.
     for (let i = 0; i < 50; i++) {
       await db.execute(sql`
-        INSERT INTO reddit_refresh_queue (queue_name, type, payload, user_id, priority)
-        VALUES ('service_post', 'post_batch', '{}'::jsonb, ${userA}, 0)
+        INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority)
+        VALUES ('reddit_account', 'service_post', 'post_batch', '{}'::jsonb, ${userA}, 0)
       `);
     }
     const result = await checkRedditUserCap(db, userA, "post-refreshes");
@@ -173,8 +173,8 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
 
   it("post-refreshes: 6+ min old queue rows do NOT count (window slides)", async () => {
     await db.execute(sql`
-      INSERT INTO reddit_refresh_queue (queue_name, type, payload, user_id, priority, enqueued_at)
-      VALUES ('user_post', 'post_single', '{"post_id":"t3_old"}'::jsonb, ${userA}, 1,
+      INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority, enqueued_at)
+      VALUES ('reddit_account', 'user_post', 'post_single', '{"post_id":"t3_old"}'::jsonb, ${userA}, 1,
               NOW() - INTERVAL '10 minutes')
     `);
     const result = await checkRedditUserCap(db, userA, "post-refreshes");

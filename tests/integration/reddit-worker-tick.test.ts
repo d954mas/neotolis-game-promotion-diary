@@ -4,7 +4,7 @@
 // + permanent vs transient → dead_letter / re-pending state machine.
 //
 // Tests mock the 4 handler functions so no real Reddit HTTP fires.
-// Each test seeds reddit_refresh_queue rows directly, advances the
+// Each test seeds adapter_refresh_queue rows directly, advances the
 // tick counter, and asserts both the dispatch (which handler was
 // called with which payload) AND the final status of the row.
 //
@@ -31,7 +31,7 @@ let subPollShouldThrow: "transient" | "permanent" | null = null;
 vi.mock("../../src/lib/sources/reddit/server/handlers/sub-poll.js", async () => {
   return {
     handleSubPoll: async (args: { sub: string; userId: string | null }) => {
-      subPollCalls.push(args);
+      subPollCalls.push({ sub: args.sub, userId: args.userId });
       if (subPollShouldThrow !== null) {
         const { AdapterError } = await import("../../src/lib/sources/errors.js");
         throw new AdapterError(`mock sub_poll throw (${subPollShouldThrow})`, {
@@ -46,7 +46,7 @@ vi.mock("../../src/lib/sources/reddit/server/handlers/sub-poll.js", async () => 
 vi.mock("../../src/lib/sources/reddit/server/handlers/author-poll.js", async () => {
   return {
     handleAuthorPoll: async (args: { handle: string; userId: string | null }) => {
-      authorPollCalls.push(args);
+      authorPollCalls.push({ handle: args.handle, userId: args.userId });
       return { postsUpserted: 0, eventsInserted: 0 };
     },
   };
@@ -55,7 +55,7 @@ vi.mock("../../src/lib/sources/reddit/server/handlers/author-poll.js", async () 
 vi.mock("../../src/lib/sources/reddit/server/handlers/post-batch.js", async () => {
   return {
     handlePostBatch: async (args: { postIds: string[]; userId: string | null }) => {
-      postBatchCalls.push(args);
+      postBatchCalls.push({ postIds: args.postIds, userId: args.userId });
       return { presentIds: args.postIds, missingIds: [] };
     },
   };
@@ -64,7 +64,7 @@ vi.mock("../../src/lib/sources/reddit/server/handlers/post-batch.js", async () =
 vi.mock("../../src/lib/sources/reddit/server/handlers/post-single.js", async () => {
   return {
     handlePostSingle: async (args: { postId: string; userId: string | null }) => {
-      postSingleCalls.push(args);
+      postSingleCalls.push({ postId: args.postId, userId: args.userId });
       return {
         postId: args.postId,
         subreddit: "test",
@@ -83,7 +83,7 @@ vi.mock("../../src/lib/sources/reddit/server/handlers/post-single.js", async () 
 });
 
 const { db } = await import("../../src/lib/server/db/client.js");
-const { redditRefreshQueue } = await import("../../src/lib/sources/reddit/server/schema/index.js");
+const { adapterRefreshQueue } = await import("../../src/lib/server/db/schema/index.js");
 const {
   redditWorkerTick,
   REDDIT_SLOT_MAPPING,
@@ -91,6 +91,7 @@ const {
   __resetTickCounterForTest,
   __setTickCounterForTest,
 } = await import("../../src/lib/sources/reddit/server/handlers/worker-tick.js");
+const { __resetRedditPacerForTest } = await import("../../src/lib/sources/reddit/server/pacer.js");
 
 async function enqueueRow(args: {
   queueName: string;
@@ -100,7 +101,7 @@ async function enqueueRow(args: {
   priority?: number;
   attempts?: number;
 }): Promise<number> {
-  // Migration 0031 added ON DELETE CASCADE FK on reddit_refresh_queue.user_id.
+  // Migration 0031 added ON DELETE CASCADE FK on adapter_refresh_queue.user_id.
   // Tests using synthetic user IDs ("user-A", "user-B", ...) now need a
   // matching user row to exist before INSERT. Ensure it idempotently.
   if (args.userId) {
@@ -111,8 +112,9 @@ async function enqueueRow(args: {
     `);
   }
   const rows = await db
-    .insert(redditRefreshQueue)
+    .insert(adapterRefreshQueue)
     .values({
+      adapterKind: "reddit_account",
       queueName: args.queueName,
       type: args.type,
       payload: args.payload,
@@ -121,21 +123,30 @@ async function enqueueRow(args: {
       attempts: args.attempts ?? 0,
       status: "pending",
     })
-    .returning({ id: redditRefreshQueue.id });
+    .returning({ id: adapterRefreshQueue.id });
   return rows[0]!.id;
 }
 
 async function statusOf(id: number): Promise<string> {
-  const rows = await db.execute(sql`SELECT status FROM reddit_refresh_queue WHERE id = ${id}`);
+  const rows = await db.execute(sql`SELECT status FROM adapter_refresh_queue WHERE id = ${id}`);
   return (rows as unknown as { rows: Array<{ status: string }> }).rows[0]?.status ?? "missing";
 }
 
 async function attemptsOf(id: number): Promise<number> {
-  const rows = await db.execute(sql`SELECT attempts FROM reddit_refresh_queue WHERE id = ${id}`);
+  const rows = await db.execute(sql`SELECT attempts FROM adapter_refresh_queue WHERE id = ${id}`);
   // db.execute returns raw pg.QueryResult; integers come back as JS strings
   // in some node-pg configurations. Coerce explicitly so `.toBe(1)` matches.
   const raw = (rows as unknown as { rows: Array<{ attempts: number | string }> }).rows[0]?.attempts;
   return raw === undefined ? -1 : Number(raw);
+}
+
+async function nextAttemptAtOf(id: number): Promise<Date | null> {
+  const rows = await db.execute(
+    sql`SELECT next_attempt_at FROM adapter_refresh_queue WHERE id = ${id}`,
+  );
+  const raw = (rows as unknown as { rows: Array<{ next_attempt_at: Date | string | null }> })
+    .rows[0]?.next_attempt_at;
+  return raw === null || raw === undefined ? null : new Date(raw);
 }
 
 beforeEach(async () => {
@@ -145,7 +156,8 @@ beforeEach(async () => {
   postSingleCalls.length = 0;
   subPollShouldThrow = null;
   __resetTickCounterForTest();
-  await db.execute(sql`DELETE FROM reddit_refresh_queue`);
+  await __resetRedditPacerForTest();
+  await db.execute(sql`DELETE FROM adapter_refresh_queue`);
 });
 
 describe("REDDIT_SLOT_MAPPING + FALLTHROUGH_ORDER constants", () => {
@@ -194,6 +206,30 @@ describe("Reddit worker tick — claim + dispatch", () => {
     expect(subPollCalls).toEqual([{ sub: "indiedev", userId: null }]);
     expect(await statusOf(id)).toBe("done");
     expect(await attemptsOf(id)).toBe(1);
+  });
+
+  it("DB pacer denial leaves the row pending and does not burn attempts", async () => {
+    const id = await enqueueRow({
+      queueName: "service_source",
+      type: "sub_poll",
+      payload: { sub: "indiedev" },
+    });
+    await db.execute(sql`
+      UPDATE reddit_pacer
+      SET paused_until = NOW() + INTERVAL '10 minutes',
+          last_pause_reason = 'http_429',
+          next_allowed_at = NOW() + INTERVAL '10 minutes'
+      WHERE id = 1
+    `);
+    __setTickCounterForTest(0);
+
+    const result = await redditWorkerTick();
+
+    expect(result.processedId).toBeNull();
+    expect(subPollCalls).toEqual([]);
+    expect(await statusOf(id)).toBe("pending");
+    expect(await attemptsOf(id)).toBe(0);
+    expect((await nextAttemptAtOf(id))!.getTime()).toBeGreaterThan(Date.now());
   });
 
   it("fallthrough: slot=service_post empty + user_post non-empty → claims user_post", async () => {
@@ -248,6 +284,7 @@ describe("Reddit worker tick — claim + dispatch", () => {
     expect(subPollCalls.length).toBe(1);
     expect(await statusOf(id)).toBe("pending");
     expect(await attemptsOf(id)).toBe(1);
+    expect((await nextAttemptAtOf(id))!.getTime()).toBeGreaterThan(Date.now());
   });
 
   it("permanent AdapterError → row → dead_letter regardless of attempts", async () => {
@@ -341,7 +378,7 @@ describe("Reddit worker tick — dispatch by type", () => {
 
   // NOTE: a previous "unknown type dead-letters via permanent AdapterError"
   // test attempted to INSERT with type='nonsense_type'. Migration 0030
-  // landed a CHECK constraint on reddit_refresh_queue.type (4 valid types)
+  // landed a CHECK constraint on adapter_refresh_queue.type (4 valid types)
   // — the bad row now fails at INSERT, which is the stronger guarantee.
   // The worker's unknown-type handler remains as defensive code but the
   // scenario is unreachable from the application layer.

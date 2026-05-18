@@ -29,7 +29,6 @@ export const QUEUES = {
 
   // Per-kind: youtube
   YOUTUBE_POLL_CRON: "youtube.poll.cron",
-  YOUTUBE_POLL_USER: "youtube.poll.user",
   /** Channel-scoped backfill. Job payload carries (kind, channelKey,
    *  triggerUserId?, depthBoundIso, flow). One walk per call; fan-out
    *  INSERT to all active subscribers. Singleton key by channelKey
@@ -56,10 +55,10 @@ export const QUEUES = {
   YOUTUBE_INCREMENTAL_CRON: "youtube.incremental_cron",
 
   // Per-kind: reddit (Phase 03.1 DV-RDT-7). FOUR cron-only pg-boss
-  // queues — handlers ENQUEUE rows into the SQL-backed
-  // reddit_refresh_queue (ZERO Reddit HTTP per D-RDT-CRON-BURST) and
-  // return; the 8-tick worker setInterval (src/worker/index.ts) drains
-  // reddit_refresh_queue at the 8 req/min effective ceiling.
+  // queues — handlers ENQUEUE rows into adapter_refresh_queue (ZERO
+  // Reddit HTTP per D-RDT-CRON-BURST) and return; the 8-tick worker
+  // setInterval (src/worker/index.ts) drains the reddit_account lanes at
+  // the 8 req/min effective ceiling.
   //
   // The Reddit batch worker does NOT subscribe via pg-boss.work — the
   // SQL FOR UPDATE SKIP LOCKED tick pattern is the load-bearing answer

@@ -1,6 +1,6 @@
 // YouTube feed enrichment.
 //
-// Implements DataSourceAdapter.enrichFeedDtos for the youtube_channel
+// Implements SourceAdapter.enrichFeedDtos for the youtube_channel
 // adapter. Internally filters dtos to kind=youtube_video; ignores other
 // kinds (caller does NOT pre-filter).
 //
@@ -27,7 +27,7 @@ import type { EventDto } from "$lib/server/dto.js";
 
 export async function youtubeEnrichFeedDtos(
   /**
-   * userId is required by the DataSourceAdapter.enrichFeedDtos contract but
+   * userId is required by the SourceAdapter.enrichFeedDtos contract but
    * is intentionally unused here: youtube_video_snapshots and youtube_videos
    * are PUBLIC-DATA tables (no userId column — already in the ESLint
    * tenant-scope allowlist). The tenant guarantee comes from the upstream

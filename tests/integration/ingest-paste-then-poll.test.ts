@@ -10,28 +10,35 @@
 //   2. insert a youtube_videos row (publishedAt=Active tier window) + a
 //      youtube_video event with source_id=NULL referencing it
 //   3. mock the adapter's pollStatsByVideoId to return a known snapshot
-//   4. invoke handlePollActive directly with { tier: "active" } — the
+//   4. invoke handlePollActive directly with { tier: "active" }; the
 //      handler internally enumerates eligible videos via
 //      selectEligibleVideoIds and the seeded video should land in the
 //      tier's eligible set.
-//   5. assert the youtube_video_snapshots row exists + youtube_videos.
-//      last_polled_at + last_poll_status='ok' set
+//   5. run one SQL refresh worker tick and assert the
+//      youtube_video_snapshots row exists + youtube_videos.
 //
 // The channel-context-trigger half of the paste flow is tested in
 // tests/integration/ingest.test.ts. This file owns the
-// "paste → poll → snapshot + youtube_videos UPDATE" pipeline.
+// "paste -> enqueue -> worker tick -> snapshot + youtube_videos UPDATE"
+// pipeline.
 
 import { describe, it, expect, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 // Worker handlers short-circuit to status='auth_error' without invoking
-// the adapter when pickKeyForJob() returns null. Mock pickKeyForJob to
-// return a fixture so this suite reaches the mocked adapter under test.
+// the adapter when the DB-backed quota gate returns null. Mock that gate
+// so this suite reaches the mocked adapter under test.
 vi.mock("../../src/lib/sources/youtube/server/quota.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    pickKeyForJob: () => ({ apiKey: "test-key-paste-then-poll", apiKeyId: "ptp00001" }),
+    hasYoutubeApiKeys: () => true,
+    reserveYoutubeQuota: async (args: { origin: "cron" | "user"; units: number }) => ({
+      apiKey: "test-key-paste-then-poll",
+      apiKeyId: "ptp00001",
+      poolKind: args.origin,
+      units: args.units,
+    }),
   };
 });
 
@@ -53,17 +60,21 @@ vi.mock("../../src/lib/sources/youtube/server/adapter.js", async (importOriginal
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { youtubeVideos, youtubeVideoSnapshots } =
+const { adapterRefreshQueue, youtubeVideos, youtubeVideoSnapshots } =
   await import("../../src/lib/server/db/schema/index.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { handlePollActive } =
   await import("../../src/lib/sources/youtube/server/handlers/poll-active.js");
+const { youtubeRefreshQueueTick, __resetYoutubeRefreshQueueWorkerForTest } =
+  await import("../../src/lib/sources/youtube/server/handlers/refresh-queue-tick.js");
 const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
 describe("ingest paste-then-poll (per-video refactor)", () => {
-  it("manual-paste event (source_id=NULL) flows through handlePollActive → snapshot row + youtube_videos.last_polled_at populated", async () => {
+  it("manual-paste event (source_id=NULL) flows through service_video queue into snapshot row", async () => {
+    __resetYoutubeRefreshQueueWorkerForTest();
+    await db.execute(sql`DELETE FROM adapter_refresh_queue`);
     const u = await seedUserDirectly({ email: `paste-${uniq()}@test.local` });
 
     // Step 1: insert a youtube_videos row + a manual-paste event (source_id
@@ -103,16 +114,19 @@ describe("ingest paste-then-poll (per-video refactor)", () => {
       },
     ]);
 
-    // Step 3: invoke the worker handler directly with the Plan-07 tier-tagged
-    // job shape. In production the youtube.poll.cron schedule (key=active)
-    // sends `{ tier: "active" }` payloads; the handler enumerates eligible
-    // videos via selectEligibleVideoIds and runs the two-phase tx pattern.
-    // We skip the queue boundary and call the handler directly so the test
-    // does not depend on a live pg-boss singleton.
+    // Step 3: invoke the cron producer directly, then run one SQL refresh
+    // worker tick. In production pg-boss triggers the producer, but the
+    // upstream videos.list call happens only in youtubeRefreshQueueTick.
     await handlePollActive({
       id: "test-paste-job",
       data: { tier: "active" },
     });
+    await db
+      .update(adapterRefreshQueue)
+      .set({ priority: -100 })
+      .where(sql`${adapterRefreshQueue.payload}->>'video_id' = ${externalId}`);
+    const tickResult = await youtubeRefreshQueueTick();
+    expect(tickResult.processedQueue).toBe("service_video");
 
     // Step 4: snapshot row written.
     const snaps = await db
@@ -143,9 +157,9 @@ describe("ingest paste-then-poll (per-video refactor)", () => {
       allCallVideoIds.push(...(call[0] as string[]));
     }
     expect(allCallVideoIds).toContain(externalId);
-    // Service-tier quotaUser fingerprint on every call.
+    // Service queue quotaUser fingerprint on every call.
     for (const call of adapterMock.pollStatsByVideoId.mock.calls) {
-      expect(call[1]).toBe("neotolis-svc-active");
+      expect(call[1]).toBe("neotolis-svc-video");
     }
   });
 });

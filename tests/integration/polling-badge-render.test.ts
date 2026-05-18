@@ -89,6 +89,16 @@ describe("PollingBadge — live state", () => {
     expect(out.body).toMatch(/polling-badge--active/);
   });
 
+  it("Queued refresh: request newer than last poll renders transient queued state", () => {
+    const ev = mkEvent({
+      lastPolledAt: ago(3_600_000),
+      metadata: { last_user_refresh_at: ago(60_000).toISOString() },
+    });
+    const out = render(PollingBadge, { props: { event: ev } });
+    expect(out.body).toMatch(/Refresh queued/);
+    expect(out.body).toMatch(/polling-badge--refreshing/);
+  });
+
   it("Cold tier (5d published, 30h polled): renders 'Updated Xd ago' + cold variant", () => {
     const ev = mkEvent({
       occurredAt: ago(5 * 86_400_000),

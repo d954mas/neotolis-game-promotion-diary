@@ -1,8 +1,8 @@
 // POST /api/events/:id/refresh-poll route.
 //
 // The user-side affordance for "refresh this event's stats right now". The
-// route enqueues to poll.user (its own queue so user-pressed work doesn't
-// compete with Active / Cold cron-scheduled work) and persists
+// route enqueues to adapter_refresh_queue:youtube_channel:user_video (its own SQL queue
+// so user-pressed work doesn't compete with Active / Cold cron work) and persists
 // last_user_refresh_at for the 5-min cooldown gate. Cross-tenant + anonymous
 // + cooldown behaviors are all asserted here at the HTTP boundary; the
 // service-level cooldown behavior is in refresh-poll-cooldown.test.ts.
@@ -38,7 +38,8 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { youtubeVideos } = await import("../../src/lib/server/db/schema/index.js");
+const { youtubeVideos, adapterRefreshQueue } =
+  await import("../../src/lib/server/db/schema/index.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { createApp } = await import("../../src/lib/server/http/app.js");
 const { seedUserDirectly } = await import("./helpers.js");
@@ -84,7 +85,7 @@ async function insertEvent(
 }
 
 describe("refresh-now route", () => {
-  it("POST /api/events/:id/refresh-poll 200 enqueues to poll.user", async () => {
+  it("POST /api/events/:id/refresh-poll 200 enqueues to adapter_refresh_queue", async () => {
     sentJobs.length = 0;
     const app = createApp();
     const u = await seedUserDirectly({ email: `rn-ok-${uniq()}@test.local` });
@@ -97,22 +98,29 @@ describe("refresh-now route", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body).toMatchObject({ enqueued: true, queue: "youtube.poll.user", eventId: ev.id });
-    // jobId is the pg-boss-assigned id surfaced from the adapter's
-    // enqueueRefreshPoll. The mock returns "mock-job-id"; pinning the
-    // exact string would couple this test to the mock factory, so we
-    // just assert it landed as a string in the response.
+    expect(body).toMatchObject({
+      enqueued: true,
+      queue: "adapter_refresh_queue:youtube_channel:user_video",
+      eventId: ev.id,
+    });
     expect(typeof body.jobId).toBe("string");
 
-    // pg-boss send was called.
-    expect(sentJobs.length).toBeGreaterThanOrEqual(1);
-    const lastSend = sentJobs[sentJobs.length - 1]!;
-    expect(lastSend.queue).toBe("youtube.poll.user");
-    expect(lastSend.data).toMatchObject({
-      eventId: ev.id,
+    const [queueRow] = await db
+      .select()
+      .from(adapterRefreshQueue)
+      .where(eq(adapterRefreshQueue.id, Number(body.jobId)));
+    expect(queueRow).toMatchObject({
+      queueName: "user_video",
+      type: "video_stats",
       userId: u.id,
-      externalId: ev.externalId,
+      status: "pending",
+      priority: -10,
+    });
+    expect(queueRow?.payload).toMatchObject({
+      event_id: ev.id,
+      video_id: ev.externalId,
       kind: "youtube_video",
+      flow: "refresh-now",
     });
   });
 

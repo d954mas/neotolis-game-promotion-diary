@@ -14,16 +14,25 @@
 // 3×user_source, 3×user_post — user-driven work gets six of the eight
 // slots since users care about latency more than cron does.
 
-import { db } from "$lib/server/db/client.js";
-import { sql } from "drizzle-orm";
 import { AdapterError } from "$lib/sources/errors.js";
 import { writeAudit } from "$lib/server/audit.js";
 import { logger } from "$lib/server/logger.js";
+import {
+  createAdapterLaneWorker,
+  type AdapterLaneClaimGateResult,
+  type AdapterLaneDispatchContext,
+  type AdapterLaneClaimGateContext,
+  type AdapterLaneWorkerRow,
+  type AdapterLaneWorkerTickResult,
+} from "$lib/server/services/adapter-lane-worker.js";
 import { handleSubPoll } from "./sub-poll.js";
 import { handleAuthorPoll } from "./author-poll.js";
 import { handlePostBatch } from "./post-batch.js";
 import { handlePostSingle } from "./post-single.js";
 import { resolveOperatorUserId, __resetOperatorIdCacheForTest } from "../operator-resolver.js";
+import { acquireRedditPacerSlotWith } from "../pacer.js";
+
+type RedditPacerPermit = { pacer: "already-acquired" };
 
 export const REDDIT_SLOT_MAPPING = [
   "service_source",
@@ -50,30 +59,7 @@ export type RedditQueueName = (typeof REDDIT_SLOT_MAPPING)[number];
  *  short-circuits to dead_letter regardless of attempts. */
 const MAX_ATTEMPTS = 5;
 
-/** Module-scope tick counter — increments each call; mod 8 → slot index.
- *  Single-process by contract: env's WORKER_REPLICA_COUNT guard rejects
- *  N>1 when any adapter sets usesInProcessRateLimiter=true. A worker
- *  restart resets the counter — at worst the round-robin re-aligns on
- *  slot 0, and FOR UPDATE SKIP LOCKED still prevents duplicate claims
- *  if anything else races. */
-let tickCounter = 0;
-
-export interface RedditWorkerTickResult {
-  processedQueue: string | null;
-  processedType: string | null;
-  processedId: number | null;
-}
-
-interface ClaimedRow {
-  // bigserial comes back from tx.execute() as a JS string in some
-  // node-pg configurations; we coerce to Number at the row-read boundary
-  // (line ~134 below) so downstream consumers always see a number.
-  id: number;
-  type: string;
-  payload: Record<string, unknown>;
-  user_id: string | null;
-  attempts: number;
-}
+export type RedditWorkerTickResult = AdapterLaneWorkerTickResult;
 
 /** One worker tick. Picks the slot's queue (or falls through to next
  *  non-empty queue in priority order), claims one pending row via
@@ -98,176 +84,60 @@ const STALE_PROCESSING_MS = 5 * 60_000;
  *  is ~12k no-op UPDATEs/day. Gating to once/minute drops that to
  *  ~1.5k and keeps the no-op cheap regardless of queue size. */
 const STALE_RECOVERY_INTERVAL_MS = 60_000;
-let nextStaleRecoveryAt = 0;
+
+const redditLaneWorker = createAdapterLaneWorker<RedditQueueName, RedditPacerPermit>({
+  adapterKind: "reddit_account",
+  slots: REDDIT_SLOT_MAPPING,
+  fallthrough: FALLTHROUGH_ORDER,
+  maxAttempts: MAX_ATTEMPTS,
+  staleProcessingMs: STALE_PROCESSING_MS,
+  staleRecoveryIntervalMs: STALE_RECOVERY_INTERVAL_MS,
+  claimGate: claimRedditPacerSlot,
+  dispatch: dispatchByType,
+  emitDrained(stats) {
+    // Fire-and-forget audit row so /admin/quota Reddit observability
+    // (getDailyStats reads audit_log.action='reddit.queue_drained' to
+    // populate the unitsUsed counter) sees this work. Without the
+    // emit, /admin's daily Reddit stat would stay 0 regardless of
+    // worker activity. Best-effort: writes a single audit row per
+    // processed tick; failures don't block the worker.
+    void emitQueueDrainedAudit(stats);
+  },
+});
 
 export async function redditWorkerTick(): Promise<RedditWorkerTickResult> {
-  // Stale-processing recovery. Without this, a worker crash between
-  // claim (Phase 1, COMMIT) and the terminal UPDATE (Phase 2) leaves
-  // rows stuck forever — the dequeue only looks at status='pending'.
-  // Gated to once/minute by nextStaleRecoveryAt (module-scope; same
-  // single-process guarantee as tickCounter). The supporting partial
-  // index `idx_reddit_refresh_queue_processing_last_attempt` keeps
-  // the WHERE scan O(stale rows), not O(table).
-  const now = Date.now();
-  if (now >= nextStaleRecoveryAt) {
-    const staleSince = new Date(now - STALE_PROCESSING_MS);
-    await db.execute(sql`
-      UPDATE reddit_refresh_queue
-      SET status = 'pending'
-      WHERE status = 'processing'
-        AND last_attempt_at < ${staleSince}
-    `);
-    nextStaleRecoveryAt = now + STALE_RECOVERY_INTERVAL_MS;
-  }
-
-  const tickStartMs = Date.now();
-  const slot = REDDIT_SLOT_MAPPING[tickCounter]!;
-  tickCounter = (tickCounter + 1) % REDDIT_SLOT_MAPPING.length;
-
-  const queueOrder = [slot, ...FALLTHROUGH_ORDER.filter((q) => q !== slot)];
-
-  for (const queueName of queueOrder) {
-    const claimed = await tryClaimAndDispatch(queueName);
-    if (claimed !== null) {
-      // Fire-and-forget audit row so /admin/quota Reddit observability
-      // (getDailyStats reads audit_log.action='reddit.queue_drained' to
-      // populate the unitsUsed counter) sees this work. Without the
-      // emit, /admin's daily Reddit stat would stay 0 regardless of
-      // worker activity. Best-effort: writes a single audit row per
-      // processed tick; failures don't block the worker.
-      void emitQueueDrainedAudit({
-        queueName,
-        entriesProcessed: 1,
-        durationMs: Date.now() - tickStartMs,
-      });
-      return {
-        processedQueue: queueName,
-        processedType: claimed.type,
-        processedId: claimed.id,
-      };
-    }
-  }
-  return { processedQueue: null, processedType: null, processedId: null };
+  return redditLaneWorker.tick();
 }
 
-/** Claim one pending row from `queueName` via FOR UPDATE SKIP LOCKED;
- *  dispatch to the type-specific handler; mark terminal state inside
- *  the same tx so the row's status reflects the handler's outcome
- *  atomically.
- *
- *  Returns the claimed row's {id,type} on success, or null when the
- *  queue had no pending rows (caller falls through to the next queue). */
-async function tryClaimAndDispatch(
-  queueName: string,
-): Promise<{ id: number; type: string } | null> {
-  // Phase 1 — SHORT transaction. Atomically pick + mark processing +
-  // increment attempts, then COMMIT. The tx holds a row lock for only
-  // the duration of one UPDATE; the connection returns to the pool
-  // before any HTTP work fires.
-  //
-  // Why split: holding `tx` across `dispatchByType` (which does a
-  // Reddit fetch + 4 UPSERTs + a snapshot write) ties up a DB
-  // connection for the full handler duration and serializes
-  // FOR UPDATE work behind slow network. The split makes the claim
-  // O(ms) and lets the connection pool serve other queries while
-  // the handler is in flight.
-  //
-  // Crash recovery: a worker process crashing AFTER claim + COMMIT but
-  // BEFORE the terminal UPDATE leaves status='processing'. The
-  // stale-processing recovery in handleDeletionPropagationCron (or a
-  // future dedicated cron) can scan `WHERE status='processing' AND
-  // last_attempt_at < NOW() - 5min` and flip back to 'pending' —
-  // safe because attempts was incremented, so retries don't loop.
-  const row = await db.transaction(async (tx) => {
-    const rows = await tx.execute(sql`
-      SELECT id, type, payload, user_id, attempts
-      FROM reddit_refresh_queue
-      WHERE queue_name = ${queueName}
-        AND status = 'pending'
-        AND next_attempt_at <= NOW()
-      ORDER BY priority ASC, next_attempt_at ASC, enqueued_at ASC
-      LIMIT 1
-      FOR UPDATE SKIP LOCKED
-    `);
-    const queryResult = rows as unknown as {
-      rows?: Array<Omit<ClaimedRow, "id"> & { id: number | string }>;
-    };
-    const rawRow = queryResult.rows?.[0];
-    if (!rawRow) return null;
-    // Coerce bigserial id from string → number at the row-read boundary
-    // (node-pg returns bigint/bigserial as strings). Downstream callers
-    // (test harness, observability, handlers) expect number.
-    const claimed: ClaimedRow = { ...rawRow, id: Number(rawRow.id) };
-    await tx.execute(sql`
-      UPDATE reddit_refresh_queue
-      SET status = 'processing',
-          last_attempt_at = NOW(),
-          attempts = attempts + 1
-      WHERE id = ${claimed.id}
-    `);
-    return claimed;
-  });
-
-  if (row === null) return null;
-  const newAttempts = row.attempts + 1;
-
-  // Phase 2 — HTTP + DB work OUTSIDE any transaction. handlePostSingle
-  // and the other type-handlers each manage their own UPSERT semantics;
-  // the worker's only job here is to mark the terminal state once they
-  // complete (or fail).
-  try {
-    await dispatchByType(row);
-    await db.execute(sql`UPDATE reddit_refresh_queue SET status = 'done' WHERE id = ${row.id}`);
-  } catch (err) {
-    const isPermanent =
-      err instanceof AdapterError && (err.category === "permanent" || err.category === "not-found");
-    if (isPermanent || newAttempts >= MAX_ATTEMPTS) {
-      await db.execute(
-        sql`UPDATE reddit_refresh_queue SET status = 'dead_letter' WHERE id = ${row.id}`,
-      );
-    } else {
-      // Re-queue with backoff. attempts was already incremented in
-      // phase 1, so a transient handler crash retries up to MAX_ATTEMPTS
-      // but cannot loop indefinitely. retryAfterMs from the adapter
-      // (Reddit Retry-After header parsed in http.ts parseRetryAfter,
-      // OR the pacer-denial wait) defers the next claim by that many
-      // milliseconds. Without this, 429/403 fail-fast burns through
-      // MAX_ATTEMPTS in seconds instead of respecting backoff.
-      const retryAfterMs =
-        err instanceof AdapterError && err.retryAfterMs !== null ? err.retryAfterMs : 0;
-      await db.execute(sql`
-        UPDATE reddit_refresh_queue
-        SET status = 'pending',
-            next_attempt_at = NOW() + (${retryAfterMs} || ' milliseconds')::interval
-        WHERE id = ${row.id}
-      `);
-    }
-    logger.warn(
-      {
-        queueName,
-        type: row.type,
-        id: row.id,
-        category: err instanceof AdapterError ? err.category : "non-adapter",
-        attempts: newAttempts,
-        err: String((err as Error)?.message ?? err),
-      },
-      "reddit worker tick: handler failed",
-    );
+async function claimRedditPacerSlot(
+  ctx: AdapterLaneClaimGateContext<RedditQueueName>,
+): Promise<AdapterLaneClaimGateResult<RedditPacerPermit>> {
+  const slot = await acquireRedditPacerSlotWith(ctx.tx);
+  if (slot.acquired) {
+    return { action: "run", permit: { pacer: "already-acquired" } };
   }
-  return { id: row.id, type: row.type };
+  return {
+    action: "defer",
+    retryAfterMs: slot.waitMs,
+    reason: slot.paused ? "reddit adapter paused" : "reddit global pacer busy",
+  };
 }
 
 /** Dispatch by row.type — one of sub_poll / author_poll / post_batch /
  *  post_single. Unknown type throws (will dead_letter via the catch
  *  branch in tryClaimAndDispatch). */
-async function dispatchByType(row: ClaimedRow): Promise<void> {
+async function dispatchByType(
+  row: AdapterLaneWorkerRow,
+  ctx: AdapterLaneDispatchContext<RedditPacerPermit>,
+): Promise<void> {
+  const pacer = ctx.permit?.pacer ?? "acquire";
   switch (row.type) {
     case "sub_poll": {
       const sub = row.payload?.sub as string | undefined;
       if (typeof sub !== "string") {
         throw new AdapterError("sub_poll payload missing 'sub'", { category: "permanent" });
       }
-      await handleSubPoll({ sub, userId: row.user_id });
+      await handleSubPoll({ sub, userId: row.userId, pacer });
       return;
     }
     case "author_poll": {
@@ -277,7 +147,7 @@ async function dispatchByType(row: ClaimedRow): Promise<void> {
           category: "permanent",
         });
       }
-      await handleAuthorPoll({ handle, userId: row.user_id });
+      await handleAuthorPoll({ handle, userId: row.userId, pacer });
       return;
     }
     case "post_batch": {
@@ -287,7 +157,7 @@ async function dispatchByType(row: ClaimedRow): Promise<void> {
           category: "permanent",
         });
       }
-      await handlePostBatch({ postIds, userId: row.user_id });
+      await handlePostBatch({ postIds, userId: row.userId, pacer });
       return;
     }
     case "post_single": {
@@ -297,7 +167,7 @@ async function dispatchByType(row: ClaimedRow): Promise<void> {
           category: "permanent",
         });
       }
-      await handlePostSingle({ postId, userId: row.user_id });
+      await handlePostSingle({ postId, userId: row.userId, pacer });
       return;
     }
     default:
@@ -345,7 +215,7 @@ export async function emitQueueDrainedAudit(stats: {
  *  each test case starts from slot 1. Not exported through any barrel;
  *  only the worker-tick.test.ts file imports it. */
 export function __resetTickCounterForTest(): void {
-  tickCounter = 0;
+  redditLaneWorker.resetForTest();
   __resetOperatorIdCacheForTest();
 }
 
@@ -353,5 +223,5 @@ export function __resetTickCounterForTest(): void {
  *  without firing the prior slots. Slot index is 0-based here (slot 1
  *  in the docs = slotIndex 0). */
 export function __setTickCounterForTest(slotIndex: number): void {
-  tickCounter = slotIndex;
+  redditLaneWorker.setSlotForTest(slotIndex);
 }

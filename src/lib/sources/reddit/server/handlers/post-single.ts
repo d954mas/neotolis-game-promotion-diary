@@ -3,7 +3,7 @@
 // Two callers:
 //   1. Worker batch-worker tick (queue type='post_single', from user paste).
 //   2. Paste flow (services/events.ts createEvent + redditAdapter's
-//      fetchEventStats / fetchEventPreviewMetadata) calls handlePostSingle
+//      syncStats.fetch / fetchEventPreviewMetadata) calls handlePostSingle
 //      synchronously to get parsed fields BEFORE the events INSERT.
 //
 // Contract for the paste-flow consumer:
@@ -21,16 +21,17 @@
 // We consume only [0]: data.children[0].data is the t3 post payload.
 //
 // Cap-counter timing — read carefully before touching:
-//   The 25/5min post-refresh cap is enforced by counting `done`-status
-//   rows on the `user_post` queue lane. This file
-//   writes that row in EXACTLY ONE place: the cache-miss path at the end
-//   of the function, after a real Reddit fetch + UPSERT + snapshot. The
-//   cache-hit early-return path at the top of the function writes NO
-//   counter row.
+//   The 25/5min post-refresh cap is enforced by counting rows on the
+//   `user_post` queue lane. This file writes that row in EXACTLY ONE
+//   place: the cache-miss path, after the cap gate passes and BEFORE the
+//   Reddit HTTP call. The cache-hit early-return path at the top of the
+//   function writes NO counter row.
 //
-//   Asymmetry rationale: the cap models "post refreshes that burned a
-//   Reddit unit". A 60s dedup hit returns without an HTTP fetch, so no
-//   unit is burned and no counter increment is owed. Concretely:
+//   Asymmetry rationale: the cap models "post refresh attempts that burn
+//   or are about to burn a Reddit unit". A 60s dedup hit returns without
+//   an HTTP fetch, so no unit is burned and no counter increment is owed.
+//   A 404/429/network failure after the claim still counts because the
+//   user consumed a pacer slot and attempted upstream I/O. Concretely:
 //     - Preview at t=0 (cache miss) → counter row written. Submit at
 //       t=5s (cache hit) → no second row. ONE refresh counted. Correct.
 //     - Preview at t=0 (cache miss) → counter row written. Submit at
@@ -40,7 +41,7 @@
 //   The optional `beforeFetch` gate fires ONLY on the cache-miss branch
 //   (gating cap enforcement) for the same reason — cache hits don't
 //   consume any budget and shouldn't be punished by an exhausted cap.
-//   See sources/reddit/server/index.ts fetchEventStats for the wiring.
+//   See sources/reddit/server/index.ts syncStats.fetch for the wiring.
 
 import { db } from "$lib/server/db/client.js";
 import { redditFetch } from "../http.js";
@@ -51,7 +52,8 @@ import {
   type RedditSnapshotStatus,
 } from "../snapshots.js";
 import { buildPostMetadata } from "../post-metadata.js";
-import { redditPosts, redditPostSnapshots, redditRefreshQueue } from "../schema/index.js";
+import { redditPosts, redditPostSnapshots } from "../schema/index.js";
+import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 import { eq, and, gte, desc } from "drizzle-orm";
 import { AdapterError } from "$lib/sources/errors.js";
 import { logger } from "$lib/server/logger.js";
@@ -100,7 +102,7 @@ export interface HandlePostSingleResult {
   permalink: string;
   title: string;
   submittedAt: Date;
-  /** Snapshot metrics — exposed so callers (fetchEventStats) can
+  /** Snapshot metrics — exposed so callers (syncStats.fetch) can
    *  surface live counts without a second SELECT. Fields default to
    *  null when Reddit omits them (e.g. archived posts hide scores). */
   score: number | null;
@@ -108,12 +110,15 @@ export interface HandlePostSingleResult {
   upvoteRatio: number | null;
   /** selftext exposed for paste-preview UX. Empty string for link posts. */
   selftext: string;
+  /** True when this call performed a real Reddit HTTP fetch. False on dedup cache hit. */
+  fetched: boolean;
 }
 
 export async function handlePostSingle(args: {
   postId: string;
   userId: string | null;
   paste?: boolean;
+  pacer?: "acquire" | "already-acquired";
   /** Optional gate that fires ONLY when handlePostSingle is about to
    *  perform a real Reddit fetch (i.e. dedup pre-check missed). Throws
    *  from the gate propagate up — the fetch is skipped. Callers use
@@ -151,7 +156,11 @@ export async function handlePostSingle(args: {
     await args.beforeFetch();
   }
 
-  const { data } = await redditFetch<unknown>(`/comments/${bareId}.json`);
+  if (args.paste === true && args.userId !== null) {
+    await claimUserPostRefreshAttempt(args.userId, fullIdGuess);
+  }
+
+  const { data } = await redditFetch<unknown>(`/comments/${bareId}.json`, { pacer: args.pacer });
   const t3 = extractT3FromCommentsResponse(data, bareId);
 
   // Author identity. Reddit literally writes "[deleted]" when account is
@@ -217,26 +226,6 @@ export async function handlePostSingle(args: {
   // fires.
   await markPostDeletionDetectedIfNeeded(db, fullId, snapStatus);
 
-  // Paste-path cap-counter increment. Every successful handlePostSingle
-  // invoked from a user-facing surface (preview button OR submit
-  // fetchEventStats OR future paste UIs) writes a `done` row in
-  // reddit_refresh_queue on the user_post lane. checkRedditUserCap
-  // reads queue rows in the 5-minute window
-  // to count post-refreshes — without this row, user pastes silently
-  // bypass the 25/5min cap. Dedup above ensures preview+submit on the
-  // same post produces ONE counter tick, not two.
-  if (args.paste === true && args.userId !== null) {
-    await db.insert(redditRefreshQueue).values({
-      queueName: "user_post",
-      type: "post_single",
-      payload: { post_id: fullId, flow: "paste" },
-      userId: args.userId,
-      priority: 0,
-      status: "done",
-      lastAttemptAt: new Date(),
-    });
-  }
-
   logger.debug(
     {
       postId: fullId,
@@ -260,7 +249,21 @@ export async function handlePostSingle(args: {
     numComments: t3.num_comments ?? null,
     upvoteRatio: t3.upvote_ratio ?? null,
     selftext: typeof t3.selftext === "string" ? t3.selftext : "",
+    fetched: true,
   };
+}
+
+async function claimUserPostRefreshAttempt(userId: string, postId: string): Promise<void> {
+  await db.insert(adapterRefreshQueue).values({
+    adapterKind: "reddit_account",
+    queueName: "user_post",
+    type: "post_single",
+    payload: { post_id: postId, flow: "paste" },
+    userId,
+    priority: 0,
+    status: "done",
+    lastAttemptAt: new Date(),
+  });
 }
 
 /** Dedup helper — return cached result if a fresh snapshot exists for
@@ -318,6 +321,7 @@ async function readCachedPost(postId: string): Promise<HandlePostSingleResult | 
     numComments: snap.numComments,
     upvoteRatio: snap.upvoteRatio,
     selftext,
+    fetched: false,
   };
 }
 

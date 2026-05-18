@@ -1,91 +1,229 @@
-// Global Reddit rate-limit pacer — single-row DB token bucket.
+// Global Reddit rate-limit pacer and adapter pause state.
 //
-// One acquireRedditPacerSlot() invocation per outgoing Reddit HTTP. The
-// helper performs an ATOMIC `UPDATE … RETURNING` that bumps
-// reddit_pacer.next_allowed_at when it's reached or passed, otherwise
-// reports the wait remaining. Both worker (async, 7.5s interval) and
-// user-driven sync paths (preview button, paste Submit) share the same
-// token, so the 10 req/min Reddit ceiling is enforced ONCE, globally,
-// regardless of how many concurrent sessions exist.
-//
-// Design notes:
-//   - 7500ms slot interval matches the worker's setInterval cadence —
-//     the worker NEVER hits the pacer denial path on a healthy system.
-//   - Sync paths CAN hit denial under burst (multiple users pasting at
-//     once). We surface that as AdapterError(rate-limited) with
-//     retryAfterMs set — UI maps to "Reddit busy, try again in Ns".
-//   - The CTE form (`UPDATE … RETURNING prior` semantics emulated via
-//     a SELECT … FOR UPDATE + conditional UPDATE) keeps the entire
-//     operation atomic per row, multi-replica safe.
-//
-// usesInProcessRateLimiter=true forces N=1 worker today, but the pacer
-// is intentionally multi-replica safe: a future Reddit deployment that
-// drops that flag (e.g. moves the worker setInterval into a DB-driven
-// next_tick_at table) keeps correctness without code changes here.
+// Every outgoing Reddit HTTP call must acquire this single DB-backed token
+// before it touches public `.json`. This protects both the async worker and
+// sync user paths such as preview/paste. When Reddit itself returns 403/429,
+// the same row records an escalating degraded pause so we stop sending
+// requests for a conservative window.
 
 import { sql } from "drizzle-orm";
-import { db } from "$lib/server/db/client.js";
+import { db, type DbOrTx } from "$lib/server/db/client.js";
 import { logger } from "$lib/server/logger.js";
 import { env } from "$lib/server/config/env.js";
 
-/** Slot interval — matches the worker's setInterval(7500ms). 8 req/min
- *  effective ceiling = 60_000 / 7500.
- *
- *  Test override: env.NODE_ENV === 'test' sets the slot to 0ms
- *  (effectively no pacing). Integration tests fire many Reddit fetches
- *  per spec; a 7.5s slot would block the second call in a single test.
- *  Production always uses the documented 7500ms ceiling. env.NODE_ENV
- *  is the single project-wide gate for env-derived behavior — see
- *  AGENTS.md "env reads only in src/lib/server/config/env.ts". */
+/** Slot interval. Production uses 7500ms = 8 req/min. Tests disable the
+ * pacing slot so suites do not wait seconds between mocked Reddit calls. */
 export const REDDIT_PACER_SLOT_MS = env.NODE_ENV === "test" ? 0 : 7500;
 
+/** Escalating adapter-wide pauses after real upstream 403/429 responses. */
+export const REDDIT_ADAPTER_PAUSE_BACKOFF_MS = [
+  10 * 60_000,
+  60 * 60_000,
+  3 * 60 * 60_000,
+  12 * 60 * 60_000,
+] as const;
+
+const REDDIT_PAUSE_ESCALATION_WINDOW_MS = 24 * 60 * 60_000;
+
+export type RedditAdapterPauseReason = "http_403" | "http_429";
+
 export interface RedditPacerSlotResult {
-  /** True when the pacer was advanced and the caller may proceed. */
   acquired: boolean;
-  /** Milliseconds the caller should wait before retrying — only
-   *  meaningful when `acquired` is false. */
   waitMs: number;
+  paused: boolean;
+  pauseReason: string | null;
+  pausedUntil: Date | null;
 }
 
-/**
- * Atomically acquire one Reddit rate-limit slot. Returns
- * `{acquired: true}` and advances the pacer when the current `now()`
- * is at or past `next_allowed_at`. Otherwise returns
- * `{acquired: false, waitMs}` — caller decides whether to throw,
- * await, or backoff.
- *
- * Single round-trip via `UPDATE … WHERE next_allowed_at <= NOW()
- * RETURNING (NOW() - prior_next_allowed_at)`. When no row matches the
- * predicate, the UPDATE affects zero rows — we read the row separately
- * to surface the remaining wait.
- */
+export interface RedditAdapterPauseState {
+  pausedUntil: Date;
+  pauseLevel: number;
+  waitMs: number;
+  reason: RedditAdapterPauseReason;
+}
+
 export async function acquireRedditPacerSlot(): Promise<RedditPacerSlotResult> {
-  // Single-statement atomic update — bumps the row only when the slot
-  // window has elapsed. RETURNING tells us whether we won.
-  const updateResult = await db.execute<{ next_allowed_at: Date }>(sql`
+  return acquireRedditPacerSlotWith(db);
+}
+
+export async function acquireRedditPacerSlotWith(dbCtx: DbOrTx): Promise<RedditPacerSlotResult> {
+  const updateResult = await dbCtx.execute<{ next_allowed_at: Date }>(sql`
     UPDATE reddit_pacer
     SET next_allowed_at = NOW() + (${REDDIT_PACER_SLOT_MS} || ' milliseconds')::interval
     WHERE id = 1
       AND next_allowed_at <= NOW()
+      AND (paused_until IS NULL OR paused_until <= NOW())
     RETURNING next_allowed_at
   `);
   const updated =
     (updateResult as unknown as { rows?: Array<{ next_allowed_at: Date }> }).rows ?? [];
   if (updated.length === 1) {
-    return { acquired: true, waitMs: 0 };
+    return { acquired: true, waitMs: 0, paused: false, pauseReason: null, pausedUntil: null };
   }
-  // UPDATE matched zero rows — slot still ahead. Read the current
-  // next_allowed_at to compute the wait.
-  const readResult = await db.execute<{
+
+  const readResult = await dbCtx.execute<{
     wait_ms: number | string;
+    paused: boolean;
+    pause_reason: string | null;
+    paused_until: Date | string | null;
   }>(sql`
-    SELECT GREATEST(0, EXTRACT(EPOCH FROM (next_allowed_at - NOW())) * 1000)::int AS wait_ms
+    SELECT
+      GREATEST(
+        0,
+        EXTRACT(EPOCH FROM (GREATEST(next_allowed_at, COALESCE(paused_until, next_allowed_at)) - NOW())) * 1000
+      )::int AS wait_ms,
+      (paused_until IS NOT NULL AND paused_until > NOW()) AS paused,
+      last_pause_reason AS pause_reason,
+      paused_until
     FROM reddit_pacer
     WHERE id = 1
   `);
   const readRows =
-    (readResult as unknown as { rows?: Array<{ wait_ms: number | string }> }).rows ?? [];
-  const waitMs = readRows.length === 1 ? Number(readRows[0]!.wait_ms) : REDDIT_PACER_SLOT_MS;
-  logger.debug({ waitMs }, "reddit pacer: denied; next slot ahead");
-  return { acquired: false, waitMs };
+    (
+      readResult as unknown as {
+        rows?: Array<{
+          wait_ms: number | string;
+          paused: boolean;
+          pause_reason: string | null;
+          paused_until: Date | string | null;
+        }>;
+      }
+    ).rows ?? [];
+  const row = readRows[0];
+  const waitMs = row ? Number(row.wait_ms) : REDDIT_PACER_SLOT_MS;
+  const paused = row?.paused === true;
+  const pausedUntil =
+    row?.paused_until == null
+      ? null
+      : row.paused_until instanceof Date
+        ? row.paused_until
+        : new Date(row.paused_until);
+  logger.debug({ waitMs, paused }, "reddit pacer: denied; next slot ahead");
+  return {
+    acquired: false,
+    waitMs,
+    paused,
+    pauseReason: row?.pause_reason ?? null,
+    pausedUntil,
+  };
+}
+
+/** Record an adapter-wide degraded pause after a real upstream 403/429.
+ *
+ *  The backoff is consciously conservative: every pause inside the 24h
+ *  escalation window ratchets from 10m -> 1h -> 3h -> 12h, even when the
+ *  upstream failures are isolated. That can over-pause under a flaky Reddit
+ *  anti-bot fence, but it avoids hammering a degraded public endpoint from
+ *  user and worker paths. */
+export async function recordRedditAdapterPause(
+  reason: RedditAdapterPauseReason,
+  upstreamRetryAfterMs = 0,
+): Promise<RedditAdapterPauseState> {
+  return db.transaction(async (tx) => {
+    const currentResult = await tx.execute<{
+      pause_level: number | string;
+      last_paused_at: Date | string | null;
+    }>(sql`
+      SELECT pause_level, last_paused_at
+      FROM reddit_pacer
+      WHERE id = 1
+      FOR UPDATE
+    `);
+    const current = (
+      currentResult as unknown as {
+        rows?: Array<{ pause_level: number | string; last_paused_at: Date | string | null }>;
+      }
+    ).rows?.[0];
+    const lastPausedAt =
+      current?.last_paused_at == null
+        ? null
+        : current.last_paused_at instanceof Date
+          ? current.last_paused_at
+          : new Date(current.last_paused_at);
+    const escalates =
+      lastPausedAt !== null &&
+      Date.now() - lastPausedAt.getTime() <= REDDIT_PAUSE_ESCALATION_WINDOW_MS;
+    const currentLevel = Number(current?.pause_level ?? 0);
+    const pauseLevel = escalates
+      ? Math.min(currentLevel + 1, REDDIT_ADAPTER_PAUSE_BACKOFF_MS.length - 1)
+      : 0;
+    const waitMs = Math.max(REDDIT_ADAPTER_PAUSE_BACKOFF_MS[pauseLevel]!, upstreamRetryAfterMs);
+    const pausedUntil = new Date(Date.now() + waitMs);
+
+    await tx.execute(sql`
+      UPDATE reddit_pacer
+      SET paused_until = ${pausedUntil},
+          pause_level = ${pauseLevel},
+          last_pause_reason = ${reason},
+          last_paused_at = NOW(),
+          next_allowed_at = GREATEST(next_allowed_at, ${pausedUntil})
+      WHERE id = 1
+    `);
+    logger.warn(
+      { reason, pauseLevel, waitMs, pausedUntil: pausedUntil.toISOString() },
+      "reddit adapter paused after upstream rate-limit/degraded response",
+    );
+    return { pausedUntil, pauseLevel, waitMs, reason };
+  });
+}
+
+export async function getRedditAdapterPauseState(): Promise<{
+  pausedUntil: Date | null;
+  pauseLevel: number;
+  pauseReason: string | null;
+  isPaused: boolean;
+  waitMs: number;
+}> {
+  const result = await db.execute<{
+    paused_until: Date | string | null;
+    pause_level: number | string;
+    last_pause_reason: string | null;
+    wait_ms: number | string;
+    is_paused: boolean;
+  }>(sql`
+    SELECT
+      paused_until,
+      pause_level,
+      last_pause_reason,
+      (paused_until IS NOT NULL AND paused_until > NOW()) AS is_paused,
+      GREATEST(0, EXTRACT(EPOCH FROM (COALESCE(paused_until, NOW()) - NOW())) * 1000)::int AS wait_ms
+    FROM reddit_pacer
+    WHERE id = 1
+  `);
+  const row = (
+    result as unknown as {
+      rows?: Array<{
+        paused_until: Date | string | null;
+        pause_level: number | string;
+        last_pause_reason: string | null;
+        wait_ms: number | string;
+        is_paused: boolean;
+      }>;
+    }
+  ).rows?.[0];
+  const pausedUntil =
+    row?.paused_until == null
+      ? null
+      : row.paused_until instanceof Date
+        ? row.paused_until
+        : new Date(row.paused_until);
+  return {
+    pausedUntil,
+    pauseLevel: Number(row?.pause_level ?? 0),
+    pauseReason: row?.last_pause_reason ?? null,
+    isPaused: row?.is_paused === true,
+    waitMs: Number(row?.wait_ms ?? 0),
+  };
+}
+
+export async function __resetRedditPacerForTest(): Promise<void> {
+  await db.execute(sql`
+    UPDATE reddit_pacer
+    SET next_allowed_at = NOW(),
+        paused_until = NULL,
+        pause_level = 0,
+        last_pause_reason = NULL,
+        last_paused_at = NULL
+    WHERE id = 1
+  `);
 }

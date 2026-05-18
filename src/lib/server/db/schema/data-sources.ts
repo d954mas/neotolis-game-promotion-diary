@@ -2,7 +2,7 @@
 //
 // One row per (user, kind, handle): YouTube channels, Reddit accounts,
 // Twitter accounts, Telegram channels, Discord servers. Pollable via
-// per-kind `DataSourceAdapter`; today only YouTube has a functional
+// per-kind `SourceAdapter`; today only YouTube has a functional
 // adapter implementation.
 //
 // Lives at user level (NOT cascaded by game soft-delete). Two ways the user can

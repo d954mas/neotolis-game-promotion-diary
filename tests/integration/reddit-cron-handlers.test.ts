@@ -4,14 +4,14 @@
 //
 //   1. handleEnqueueServiceSourcesCron — 0/6/12/18 UTC.
 //      Scans data_sources for auto_import=true reddit_account /
-//      reddit_subreddit rows and INSERTs one reddit_refresh_queue row
+//      reddit_subreddit rows and INSERTs one adapter_refresh_queue row
 //      per source with queue_name='service_source' + type='author_poll'
 //      or 'sub_poll'.
 //
 //   2. handleEnqueueServicePostsCron — 03/09/15/21 UTC.
 //      Runs D-RDT-POST-ELIGIBILITY scan against reddit_posts and INSERTs
 //      batched payloads (chunks of <=100 post_ids) into
-//      reddit_refresh_queue with queue_name='service_post' +
+//      adapter_refresh_queue with queue_name='service_post' +
 //      type='post_batch'.
 //
 //   3. handleBaselinesCron — 04:00 UTC.
@@ -40,7 +40,7 @@ import { handleBaselinesCron } from "../../src/lib/sources/reddit/server/handler
 const uniq = () => Math.random().toString(36).slice(2, 10);
 
 beforeEach(async () => {
-  await db.execute(sql`DELETE FROM reddit_refresh_queue`);
+  await db.execute(sql`DELETE FROM adapter_refresh_queue`);
   await db.execute(sql`DELETE FROM reddit_subreddit_baselines`);
   await db.execute(sql`DELETE FROM reddit_post_snapshots`);
   await db.execute(sql`DELETE FROM reddit_posts`);
@@ -115,7 +115,7 @@ describe("handleEnqueueServiceSourcesCron — daily enqueue from data_sources", 
   it("no Reddit sources → no-op (enqueued=0)", async () => {
     const r = await handleEnqueueServiceSourcesCron();
     expect(r.enqueued).toBe(0);
-    const queueRows = await db.execute(sql`SELECT COUNT(*) AS c FROM reddit_refresh_queue`);
+    const queueRows = await db.execute(sql`SELECT COUNT(*) AS c FROM adapter_refresh_queue`);
     expect(
       Number((queueRows as unknown as { rows: Array<{ c: number | string }> }).rows[0]!.c),
     ).toBe(0);
@@ -133,7 +133,7 @@ describe("handleEnqueueServiceSourcesCron — daily enqueue from data_sources", 
 
     const rows = await db.execute(sql`
       SELECT queue_name, type, payload, user_id
-      FROM reddit_refresh_queue
+      FROM adapter_refresh_queue
       ORDER BY id ASC
     `);
     const list = (
@@ -176,7 +176,7 @@ describe("handleEnqueueServiceSourcesCron — daily enqueue from data_sources", 
     const r = await handleEnqueueServiceSourcesCron();
     expect(r.enqueued).toBe(1);
     const rows = await db.execute(
-      sql`SELECT payload FROM reddit_refresh_queue WHERE type = 'sub_poll'`,
+      sql`SELECT payload FROM adapter_refresh_queue WHERE type = 'sub_poll'`,
     );
     expect(
       (rows as unknown as { rows: Array<{ payload: { sub: string } }> }).rows[0]!.payload.sub,
@@ -236,7 +236,7 @@ describe("handleEnqueueServicePostsCron — D-RDT-POST-ELIGIBILITY scan + batche
     expect(r.enqueued).toBe(1);
     expect(r.batches).toBe(1);
     const rows = await db.execute(sql`
-      SELECT queue_name, type, payload, user_id FROM reddit_refresh_queue
+      SELECT queue_name, type, payload, user_id FROM adapter_refresh_queue
     `);
     const list = (
       rows as unknown as {
@@ -322,7 +322,7 @@ describe("handleEnqueueServicePostsCron — D-RDT-POST-ELIGIBILITY scan + batche
     expect(r.enqueued).toBe(150);
     expect(r.batches).toBe(2);
     const rows = await db.execute(sql`
-      SELECT payload FROM reddit_refresh_queue
+      SELECT payload FROM adapter_refresh_queue
       WHERE queue_name = 'service_post' AND type = 'post_batch'
       ORDER BY id ASC
     `);

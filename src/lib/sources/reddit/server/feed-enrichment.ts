@@ -68,7 +68,7 @@ export interface RedditEnrichment {
 type RedditDecorated = EventDto & { redditEnrichment?: RedditEnrichment };
 
 export async function enrichRedditFeedDtos(
-  /** userId required by DataSourceAdapter.enrichFeedDtos contract;
+  /** userId required by SourceAdapter.enrichFeedDtos contract;
    *  unused here because all four Reddit cache tables are PUBLIC-DATA.
    *  Tenant scope comes from the upstream events SELECT in
    *  mapEventsToDtos. */

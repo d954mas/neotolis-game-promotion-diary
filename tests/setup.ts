@@ -73,7 +73,12 @@ afterEach(async () => {
     // would block on the pacer after the first call (slot fires
     // every 7.5s).
     await pool.query(`INSERT INTO "reddit_pacer" ("id", "next_allowed_at") VALUES (1, NOW())
-                      ON CONFLICT ("id") DO UPDATE SET next_allowed_at = NOW()`);
+                      ON CONFLICT ("id") DO UPDATE
+                      SET next_allowed_at = NOW(),
+                          paused_until = NULL,
+                          pause_level = 0,
+                          last_pause_reason = NULL,
+                          last_paused_at = NULL`);
   } catch {
     // Pre-migration: nothing to truncate. Swallow — integration tests will skip-with-context.
   }

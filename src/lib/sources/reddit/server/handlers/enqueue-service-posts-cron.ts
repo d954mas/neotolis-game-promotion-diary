@@ -31,7 +31,7 @@
 
 import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
-import { redditRefreshQueue } from "../schema/index.js";
+import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 import { logger } from "$lib/server/logger.js";
 
 /** Max post_ids per queue row — matches Reddit's /api/info hard limit
@@ -92,7 +92,8 @@ export async function handleEnqueueServicePostsCron(): Promise<{
     chunks.push(postIds.slice(i, i + MAX_BATCH));
   }
 
-  const values: Array<typeof redditRefreshQueue.$inferInsert> = chunks.map((ids) => ({
+  const values: Array<typeof adapterRefreshQueue.$inferInsert> = chunks.map((ids) => ({
+    adapterKind: "reddit_account",
     queueName: "service_post",
     type: "post_batch",
     payload: { post_ids: ids },
@@ -100,7 +101,7 @@ export async function handleEnqueueServicePostsCron(): Promise<{
     priority: 0,
   }));
 
-  await db.insert(redditRefreshQueue).values(values);
+  await db.insert(adapterRefreshQueue).values(values);
   logger.info(
     { enqueued: postIds.length, batches: chunks.length },
     "reddit.enqueue_service_posts_cron: tick complete",

@@ -8,8 +8,8 @@ import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
 import {
   redditPosts,
   redditPostSnapshots,
-  redditRefreshQueue,
-} from "../../src/lib/sources/reddit/server/schema/index.js";
+  adapterRefreshQueue,
+} from "../../src/lib/server/db/schema/index.js";
 import { uuidv7 } from "../../src/lib/server/ids.js";
 import { seedUserDirectly } from "./helpers.js";
 import { AppError } from "../../src/lib/server/services/errors.js";
@@ -25,9 +25,9 @@ import { AppError } from "../../src/lib/server/services/errors.js";
  *
  *   1. Idempotent paste — same URL twice produces 1 reddit_posts row +
  *      1 reddit_post_snapshots row (60s dedup) + 2 events rows.
- *   2. Cap enforcement — pre-seed 25 done-rows in reddit_refresh_queue
- *      on user_post lane → 26th paste throws 429 BEFORE INSERT
- *      (validate-first; no events row created).
+ *   2. Cap enforcement — pre-seed 25 done-rows in adapter_refresh_queue
+ *      on user_post lane → 26th paste still writes the diary event, but
+ *      skips the live Reddit fetch (diary-first; quota gates upstream I/O).
  *   3. author_is_me inheritance — paste a URL whose author matches an
  *      owned reddit_account source → events.author_is_me=true via
  *      fetchEventStats's authorIsMe signal.
@@ -37,7 +37,8 @@ import { AppError } from "../../src/lib/server/services/errors.js";
  *      returns null → event created without reddit_posts cache row
  *      (YouTube-parity silent degradation, per project decision).
  *   6. Reddit 404 — fetch throws AdapterError(not-found) → swallowed by
- *      createEvent → event row exists, no reddit_posts cache row.
+ *      createEvent → event row exists, no reddit_posts cache row, but the
+ *      user_post cap-counter row remains because upstream I/O was attempted.
  */
 
 // Reddit /comments/<id>.json response shape — minimal subset
@@ -159,12 +160,13 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
     expect(evRows).toHaveLength(2);
   });
 
-  it("cap enforcement — 25 prior user_post done-rows → 26th paste throws 429 BEFORE INSERT", async () => {
+  it("cap enforcement — 25 prior user_post done-rows → 26th paste creates event but skips Reddit fetch", async () => {
     const u = await seedUserDirectly({ email: `reddit-paste-cap-${uuidv7()}@test.local` });
     // Pre-seed 25 done-rows on user_post lane within last 5 min.
     const now = new Date();
     for (let i = 0; i < 25; i++) {
-      await db.insert(redditRefreshQueue).values({
+      await db.insert(adapterRefreshQueue).values({
+        adapterKind: "reddit_account",
         queueName: "user_post",
         type: "post_single",
         payload: { post_id: `t3_seed${i}`, flow: "paste" },
@@ -178,26 +180,28 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
 
-    await expect(
-      createEvent(
-        u.id,
-        {
-          kind: "reddit_post",
-          title: "26th paste",
-          occurredAt: new Date(),
-          url: "https://www.reddit.com/r/IndieDev/comments/blocked/test/",
-        },
-        "127.0.0.1",
-      ),
-    ).rejects.toMatchObject({
-      status: 429,
-      code: "reddit_post_quota_exhausted",
-    });
+    const ev = await createEvent(
+      u.id,
+      {
+        kind: "reddit_post",
+        title: "26th paste",
+        occurredAt: new Date(),
+        url: "https://www.reddit.com/r/IndieDev/comments/blocked/test/",
+      },
+      "127.0.0.1",
+    );
 
-    // No fetch attempt; no events row.
+    // No fetch attempt; the local diary row still exists.
     expect(fetchSpy).not.toHaveBeenCalled();
     const evRows = await db.select().from(events).where(eq(events.userId, u.id));
-    expect(evRows).toHaveLength(0);
+    expect(evRows).toHaveLength(1);
+    expect(evRows[0]?.id).toBe(ev.id);
+
+    const postRows = await db
+      .select()
+      .from(redditPosts)
+      .where(eq(redditPosts.postId, "t3_blocked"));
+    expect(postRows).toHaveLength(0);
   });
 
   it("author_is_me=true — paste matches owned reddit_account source", async () => {
@@ -300,6 +304,19 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
       .from(redditPostSnapshots)
       .where(eq(redditPostSnapshots.postId, "t3_dead404"));
     expect(snapRows).toHaveLength(0);
+
+    const capRows = await db
+      .select()
+      .from(adapterRefreshQueue)
+      .where(
+        and(
+          eq(adapterRefreshQueue.userId, u.id),
+          eq(adapterRefreshQueue.queueName, "user_post"),
+          eq(adapterRefreshQueue.type, "post_single"),
+        ),
+      );
+    expect(capRows).toHaveLength(1);
+    expect(capRows[0]!.payload).toMatchObject({ post_id: "t3_dead404", flow: "paste" });
   });
 
   it("writes cross-source audit row (event.poll_refreshed flow=stats_refresh) on success", async () => {
@@ -382,6 +399,19 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
       .from(redditPostSnapshots)
       .where(eq(redditPostSnapshots.postId, "t3_abc429"));
     expect(snapRows).toHaveLength(0);
+
+    const capRows = await db
+      .select()
+      .from(adapterRefreshQueue)
+      .where(
+        and(
+          eq(adapterRefreshQueue.userId, u.id),
+          eq(adapterRefreshQueue.queueName, "user_post"),
+          eq(adapterRefreshQueue.type, "post_single"),
+        ),
+      );
+    expect(capRows).toHaveLength(1);
+    expect(capRows[0]!.payload).toMatchObject({ post_id: "t3_abc429", flow: "paste" });
   });
 
   it("kind=reddit_post without URL is rejected at the service layer via cap pre-check skip", async () => {

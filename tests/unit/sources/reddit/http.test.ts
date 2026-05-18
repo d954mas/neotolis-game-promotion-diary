@@ -71,6 +71,12 @@ const writeAuditSpy = vi.fn(
   }) => {},
 );
 const fetchSpy = vi.fn();
+const recordPauseSpy = vi.fn(async () => ({
+  pausedUntil: new Date(Date.now() + 600_000),
+  pauseLevel: 0,
+  waitMs: 600_000,
+  reason: "http_429",
+}));
 
 /** Mock the drizzle db `select().from().where().limit()` chain to return
  *  the operator's user_id for `resolveOperatorUserId`. The burst-audit
@@ -90,6 +96,7 @@ beforeEach(() => {
   vi.resetModules();
   fetchSpy.mockReset();
   writeAuditSpy.mockReset();
+  recordPauseSpy.mockClear();
   vi.stubGlobal("fetch", fetchSpy);
   vi.doMock("$lib/server/config/env.js", () =>
     envMock({ ADMIN_EMAIL_ALLOWLIST: ["op@example.com"] }),
@@ -99,7 +106,14 @@ beforeEach(() => {
   // hits the DB (UPDATE reddit_pacer) which isn't available in the unit
   // suite. Integration tests exercise real pacing.
   vi.doMock("$lib/sources/reddit/server/pacer.js", () => ({
-    acquireRedditPacerSlot: async () => ({ acquired: true, waitMs: 0 }),
+    acquireRedditPacerSlot: async () => ({
+      acquired: true,
+      waitMs: 0,
+      paused: false,
+      pauseReason: null,
+      pausedUntil: null,
+    }),
+    recordRedditAdapterPause: recordPauseSpy,
     REDDIT_PACER_SLOT_MS: 7500,
   }));
   mockOperatorDb("op-user-123");
@@ -167,6 +181,7 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
       expect(ae.retryAfterMs).toBeGreaterThanOrEqual(30_000);
       expect(ae.retryAfterMs).toBeLessThan(35_000);
     }
+    expect(recordPauseSpy).toHaveBeenCalledWith("http_429", expect.any(Number));
   });
 
   it("429 with X-Ratelimit-Reset fallback → AdapterError(rate-limited, retryAfterMs=45000)", async () => {
@@ -186,6 +201,7 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
       expect(ae.retryAfterMs).toBeGreaterThanOrEqual(45_000);
       expect(ae.retryAfterMs).toBeLessThan(50_000);
     }
+    expect(recordPauseSpy).toHaveBeenCalledWith("http_429", expect.any(Number));
   });
 
   it("500 → AdapterError(transient, httpStatus=500)", async () => {
@@ -230,6 +246,7 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
       expect(ae.category).toBe("rate-limited");
       expect(ae.context.httpStatus).toBe(403);
     }
+    expect(recordPauseSpy).toHaveBeenCalledWith("http_403", expect.any(Number));
     expect(writeAuditSpy).not.toHaveBeenCalled();
   });
 

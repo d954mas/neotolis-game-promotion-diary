@@ -19,7 +19,7 @@
 #      depend on the runner having psql installed).
 #   5. Creates a kind=youtube_video event via POST /api/events (external_id
 #      auto-derived from the URL); calls POST /api/events/:id/refresh-poll
-#      so the worker drains a real poll.user job through the mock; waits
+#      so the worker drains a real adapter_refresh_queue row through the mock; waits
 #      up to 60s for the youtube_video_snapshots row +
 #      youtube_videos.last_polled_at to land.
 #   6. Asserts /api/admin/quota and /admin return 404 with the empty
@@ -177,12 +177,12 @@ youtube_polling_smoke() {
   # `http://localhost:$YOUTUBE_MOCK_PORT/videos` (intercepted by our
   # stub) and write a snapshot row.
   #
-  # The refresh-poll route enqueues to QUEUES.YOUTUBE_POLL_USER which is
-  # one of the worker subscriptions. We use the refresh-now route instead
+  # The refresh-poll route inserts into adapter_refresh_queue:youtube_channel:user_video,
+  # drained by the adapter-owned worker loop. We use the refresh-now route instead
   # of the scheduler tick because:
   #   - it's deterministic (no waiting for a 6-hour cron tick)
   #   - it bypasses the throttle gate (refresh-now is independent)
-  #   - it exercises the same poll.user handler the UI button drives
+  #   - it exercises the same SQL refresh queue the UI button drives
   log "creating kind=youtube_video event for poll round-trip"
   local create_body
   create_body=$(curl -sS -X POST "$app_url/api/events" \
@@ -205,7 +205,7 @@ youtube_polling_smoke() {
   # exercise the full channels.list + playlistItems.list discovery path.
   # Pre-seed the youtube_videos row directly so the pending-tier gate
   # sees a populated publishedAt and the smoke round-trip exercises the
-  # actual poll-user → snapshot path.
+  # actual refresh queue → snapshot path.
   log "pre-seeding youtube_videos row for mockvideo00 (skip pending tier)"
   docker exec smoke-app node -e '
     import("./node_modules/pg/lib/index.js").then(async (pgMod) => {
@@ -221,7 +221,7 @@ youtube_polling_smoke() {
     }).catch((e) => { console.error(e); process.exit(1); });
   ' >/dev/null || fail "youtube_videos pre-seed failed"
 
-  log "POST /api/events/$event_id/refresh-poll (enqueues poll.user)"
+  log "POST /api/events/$event_id/refresh-poll (enqueues adapter_refresh_queue)"
   local refresh_body
   refresh_body=$(curl -sS -X POST "$app_url/api/events/$event_id/refresh-poll" \
     -H "cookie: $session_cookie")

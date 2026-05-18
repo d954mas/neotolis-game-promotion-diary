@@ -4,7 +4,7 @@
 //
 // SCANS data_sources for every reddit_account / reddit_subreddit row
 // with auto_import=true AND deleted_at IS NULL, then INSERTS one row
-// per source into reddit_refresh_queue:
+// per source into adapter_refresh_queue:
 //   - queue_name = 'service_source'
 //   - type       = 'author_poll' (reddit_account) | 'sub_poll' (reddit_subreddit)
 //   - payload    = { handle: <username> } | { sub: <subreddit> }
@@ -22,7 +22,7 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
-import { redditRefreshQueue } from "../schema/index.js";
+import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 import { logger } from "$lib/server/logger.js";
 
 interface RedditSourceMetadata {
@@ -61,7 +61,7 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
   // Build one queue row per source. Drop rows whose metadata is missing
   // the expected handle field — those are seed-data bugs, not runtime
   // failures, and surface as a WARN log + skipped row.
-  const values: Array<typeof redditRefreshQueue.$inferInsert> = [];
+  const values: Array<typeof adapterRefreshQueue.$inferInsert> = [];
   for (const s of sources) {
     const meta = (s.metadata ?? {}) as RedditSourceMetadata;
     if (s.kind === "reddit_account") {
@@ -74,6 +74,7 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
         continue;
       }
       values.push({
+        adapterKind: "reddit_account",
         queueName: "service_source",
         type: "author_poll",
         payload: { handle },
@@ -90,6 +91,7 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
         continue;
       }
       values.push({
+        adapterKind: "reddit_account",
         queueName: "service_source",
         type: "sub_poll",
         payload: { sub },
@@ -148,7 +150,7 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
  *  Drizzle type-safety on the column list. At cron's scale (200 sources
  *  × 4 ticks/day) the loop is in the noise. */
 async function atomicallyInsertNonDuplicates(
-  candidates: Array<typeof redditRefreshQueue.$inferInsert>,
+  candidates: Array<typeof adapterRefreshQueue.$inferInsert>,
 ): Promise<number> {
   let inserted = 0;
   for (const row of candidates) {
@@ -158,12 +160,13 @@ async function atomicallyInsertNonDuplicates(
     if (identifier === undefined) continue; // already-warned upstream
     const payloadKey = isAuthor ? "handle" : "sub";
     const result = await db.execute<{ id: number }>(sql`
-      INSERT INTO reddit_refresh_queue
-        (queue_name, type, payload, user_id, priority)
-      SELECT ${row.queueName}, ${row.type}, ${JSON.stringify(row.payload)}::jsonb, ${row.userId ?? null}, ${row.priority ?? 0}
+      INSERT INTO adapter_refresh_queue
+        (adapter_kind, queue_name, type, payload, user_id, priority)
+      SELECT ${row.adapterKind}, ${row.queueName}, ${row.type}, ${JSON.stringify(row.payload)}::jsonb, ${row.userId ?? null}, ${row.priority ?? 0}
       WHERE NOT EXISTS (
-        SELECT 1 FROM reddit_refresh_queue
-        WHERE queue_name = ${row.queueName}
+        SELECT 1 FROM adapter_refresh_queue
+        WHERE adapter_kind = ${row.adapterKind}
+          AND queue_name = ${row.queueName}
           AND type = ${row.type}
           AND payload->>${payloadKey} = ${identifier}
           AND status IN ('pending', 'processing')

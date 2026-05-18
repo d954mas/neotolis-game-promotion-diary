@@ -271,6 +271,7 @@
   "admin_reddit_type_post_batch": "Post refresh batch",
   "admin_reddit_cap_exhausted_chip": "{count} user-cap hit(s) (429) in last 24h",
   "admin_reddit_adapter_degraded_chip": "Adapter degraded {age} ago (403-burst from Reddit)",
+  "admin_reddit_adapter_paused_chip": "Remote sync paused until {time} ({reason})",
 
   "account_deleted_banner_permanent_delete_failed": "Permanent delete failed. Try again or contact support.",
   "account_deleted_banner_permanent_delete_pending": "Deleting…",

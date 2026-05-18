@@ -23,7 +23,7 @@ vi.mock("../../src/lib/sources/youtube/server/quota.js", async (importOriginal) 
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    pickKeyForJob: async () => ({ apiKey: "TEST_KEY", apiKeyId: "test-key-1" }),
+    hasYoutubeApiKeys: () => true,
     youtubeQuotaUser: () => "test-quota-user",
   };
 });

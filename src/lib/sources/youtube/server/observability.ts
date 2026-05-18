@@ -164,7 +164,7 @@ async function getRecentAudit(limit: number): Promise<ObservabilityAuditEntry[]>
 
 /**
  * youtubeObservability — surface consumed by ./adapter.ts (which spreads
- * it into the DataSourceAdapter contract) and (transitively) by
+ * it into the SourceAdapter contract) and (transitively) by
  * /admin/quota's loadAdminQuotaPage via getAdapter("youtube_channel").observability.
  *
  * `isOperatorConfigured` is computed at module load time. env is parsed
@@ -199,11 +199,7 @@ export const youtubeObservability: AdapterObservability = {
   userQuotaCap: {
     requestsPerDay: 100,
   },
-  // YouTube uses RateLimiterMemory reservoirs (in-process state, see
-  // http.ts cronReservoir / userReservoir). Multiple worker replicas
-  // would each hold independent budgets — N × envelope burn. Worker
-  // bootstrap reads this flag and refuses to start with
-  // WORKER_REPLICA_COUNT > 1. Migration path: swap to RateLimiterPostgres
-  // (same library, persistent shared backend) and flip this to false.
-  usesInProcessRateLimiter: true,
+  // Quota reservation lives in youtube_service_quota_usage under row locks,
+  // so the adapter does not need a singleton runtime.
+  requiresSingletonRuntime: false,
 };

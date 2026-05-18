@@ -85,7 +85,7 @@ const eventKindEnum = z.enum([
  * URL-required validator for pollable event kinds. youtube_video AND
  * reddit_post both MUST carry a parseable URL of the matching shape;
  * the service-layer createEvent is the second layer of defense
- * (opportunistic external_id derivation + adapter.fetchEventStats).
+ * (opportunistic external_id derivation + adapter.syncStats.fetch).
  *
  * Shared between createEventSchema and updateEventSchema so a kind-change
  * PATCH that drops the url tripwires here too. Free-form kinds (post,
@@ -544,8 +544,8 @@ eventsRoutes.patch("/events/:id/unmark-standalone", async (c) => {
 // stats right now". The service enforces a 5-minute cooldown via
 // events.metadata.last_user_refresh_at, gates non-pollable kinds +
 // missing external_id + per-user cap, then asks the adapter to enqueue
-// (YouTube → pg-boss YOUTUBE_POLL_USER, Reddit → reddit_refresh_queue
-// user_post lane).
+// (YouTube -> adapter_refresh_queue youtube_channel/user_video lane, Reddit ->
+// adapter_refresh_queue reddit_account/user_post lane).
 //
 // Error mapping (via mapErr — service throws typed errors):
 //   - NotFoundError                     → 404 {error: "not_found"}

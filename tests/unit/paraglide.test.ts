@@ -102,6 +102,7 @@ describe("paraglide i18n", () => {
       "admin_quota_table_col_status",
       "admin_quota_table_col_units_used",
       "admin_reddit_adapter_degraded_chip",
+      "admin_reddit_adapter_paused_chip",
       "admin_reddit_cap_exhausted_chip",
       "admin_reddit_col_count",
       "admin_reddit_col_dead_letter",

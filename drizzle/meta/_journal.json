@@ -253,6 +253,27 @@
       "when": 1779600000000,
       "tag": "0035_reddit_refresh_queue_processing_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1779700000000,
+      "tag": "0036_youtube_refresh_queue",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1779800000000,
+      "tag": "0037_reddit_adapter_pause",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1779041861241,
+      "tag": "0038_adapter-refresh-queue-foundation",
+      "breakpoints": true
     }
   ]
 }

@@ -12,9 +12,7 @@ import {
 } from "$lib/server/dto.js";
 import { allAdapters } from "$lib/sources/registry.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
-import { db } from "$lib/server/db/client.js";
-import { youtubeChannels } from "$lib/server/db/schema/index.js";
-import { inArray } from "drizzle-orm";
+import { enrichDataSourceDtosWithYoutubeChannelTitles } from "$lib/server/services/sources-page-read.js";
 
 /**
  * /games/[gameId] loader — unified-events curated layout.
@@ -86,21 +84,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
   // (always null per toDataSourceDto default) to source.handleUrl
   // (the raw URL) — visually inconsistent with /feed for the same event.
   const sourceDtos = sources.map(toDataSourceDto);
-  const channelIds = sourceDtos.map((s) => s.channelId).filter((c): c is string => c !== null);
-  if (channelIds.length > 0) {
-    const channelCache = await db
-      .select({
-        channelId: youtubeChannels.channelId,
-        channelTitle: youtubeChannels.channelTitle,
-      })
-      .from(youtubeChannels)
-      .where(inArray(youtubeChannels.channelId, channelIds));
-    const titleByChannel = new Map<string, string | null>();
-    for (const r of channelCache) titleByChannel.set(r.channelId, r.channelTitle);
-    for (const s of sourceDtos) {
-      if (s.channelId) s.channelTitle = titleByChannel.get(s.channelId) ?? null;
-    }
-  }
+  await enrichDataSourceDtosWithYoutubeChannelTitles(sourceDtos);
 
   return {
     game: toGameDto(game),

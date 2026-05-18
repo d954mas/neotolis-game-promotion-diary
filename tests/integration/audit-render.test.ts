@@ -605,7 +605,7 @@ describe("FeedCard restructured layout", () => {
  * FeedQuickNav SSR render-time guards.
  *
  * Chip strip / segmented control at the TOP of /feed for the most-common
- * Show axis values (All / Inbox / Standalone / per-game). The end-to-end
+ * Show axis VALUES (All / Inbox / Standalone / per-game). The end-to-end
  * browser flow at 360px (computed overflow-x: auto, click→URL change) is
  * stub-skipped in tests/browser/feed-360.test.ts pending the
  * cookie-injection auth harness; the SSR-render-time contract is locked

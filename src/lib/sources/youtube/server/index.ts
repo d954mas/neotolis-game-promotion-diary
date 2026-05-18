@@ -6,8 +6,8 @@
 // Per-kind queue topology:
 //   youtube.poll.cron (key=active)
 //   youtube.poll.cron (key=cold)
-//   youtube.poll.user
-//   youtube.backfill.user
+//   adapter_refresh_queue:youtube_channel:user_video
+//   youtube.backfill.channel
 //   youtube.rehab
 //   youtube.quota_reset
 //   youtube.channel_context_backfill
@@ -24,8 +24,7 @@
 //
 // batchSize values:
 //   YOUTUBE_POLL_CRON                 batchSize=4 (Active concurrency)
-//   YOUTUBE_POLL_USER                 batchSize=2
-//   YOUTUBE_BACKFILL_USER             batchSize=1
+//   YOUTUBE_BACKFILL_CHANNEL          batchSize=1
 //   YOUTUBE_CHANNEL_CONTEXT_BACKFILL  batchSize=1
 //   YOUTUBE_QUOTA_RESET               batchSize=1
 //   YOUTUBE_REHAB                     batchSize=1
@@ -39,27 +38,26 @@
 import type {
   AdapterAppContext,
   AdapterContext,
+  AdapterCapabilityGuardResult,
   AdapterPollState,
   AdapterQuotaCounter,
   BackfillWindow,
   CanonicalizeInput,
   CanonicalizeResult,
   CreateContext,
-  DataSourceAdapter,
+  SourceAdapter,
   EventKind,
   EventPreviewMetadata,
   MinimalBoss,
   PollableSource,
   SourceCreatedHookSource,
 } from "$lib/sources/adapter.js";
-import type { DbOrTx } from "$lib/server/db/client.js";
+import type { DbOrTx, Tx } from "$lib/server/db/client.js";
 import type { Hono } from "hono";
 import { QUEUES } from "$lib/server/queues.js";
 import { getBoss } from "$lib/server/queue-client.js";
 import { youtubeChannelAdapterCore } from "./adapter.js";
-import { reconcileReservoirsOnBoot } from "./http.js";
 import { handlePollCron } from "./handlers/poll-cron.js";
-import { handlePollUser } from "./handlers/poll-user.js";
 import { handleRehabUnavailable } from "./handlers/rehab-unavailable.js";
 import { handleChannelContextBackfill } from "./handlers/channel-context-backfill.js";
 import { handleQuotaReset } from "./handlers/quota-reset.js";
@@ -68,7 +66,7 @@ import { handleQuotaReset } from "./handlers/quota-reset.js";
 // fans out events INSERT to all active subscribers.
 import { handleBackfillChannel } from "./handlers/backfill-channel.js";
 // Daily auto-backfill cron picker. Skip-gates when the cron pool is
-// >= 50% used; enqueues backfill-user with metadata.flow='auto_passive'.
+// >= 50% used; enqueues channel backfill with metadata.flow='auto_passive'.
 import { handleAutoBackfillCron } from "./handlers/auto-backfill-cron.js";
 // Daily incremental cron. Walks page 1 of every active channel including
 // completed ones to discover new uploads.
@@ -79,16 +77,31 @@ import { handleIncrementalCron } from "./handlers/incremental-cron.js";
 // 6-file edit.
 import { fetchVideoMetadataByUrl } from "./metadata.js";
 import { writeSnapshot } from "./snapshots.js";
-import { pickKeyForJob, youtubeQuotaUser } from "./quota.js";
+import {
+  getThrottleState,
+  hasYoutubeApiKeys,
+  msUntilMidnightPacific,
+  reserveYoutubeQuota,
+  youtubeQuotaUser,
+} from "./quota.js";
 import { parseYoutubeUrl, youtubeParseUrl } from "./url.js";
 import { fetchYoutubeOembed } from "$lib/server/integrations/youtube-oembed.js";
 import { youtubeMetadataRoutes } from "./route-metadata.js";
 import { youtubeVideos, youtubeMetadataFetchLog } from "./schema/index.js";
+import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
+import { adapterRefreshQueueLabel } from "$lib/server/services/adapter-lane-worker.js";
+import { enqueueViaOutbox } from "$lib/server/services/outbox.js";
+import {
+  youtubeRefreshQueueTick,
+  YOUTUBE_REFRESH_SLOT_MAPPING,
+  YOUTUBE_REFRESH_FALLTHROUGH_ORDER,
+} from "./handlers/refresh-queue-tick.js";
 import { events } from "$lib/server/db/schema/events.js";
 import { db } from "$lib/server/db/client.js";
 import { eq, and, gte, count, inArray, sql } from "drizzle-orm";
 import { AppError } from "$lib/server/services/errors.js";
 import { logger } from "$lib/server/logger.js";
+import { writeAudit } from "$lib/server/audit.js";
 
 async function registerQueues(boss: MinimalBoss): Promise<void> {
   // pg-boss v10+ requires createQueue before send/work — idempotent on
@@ -98,7 +111,6 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
   // registration is self-contained — Reddit/Twitter adapters follow the
   // same pattern.
   await boss.createQueue(QUEUES.YOUTUBE_POLL_CRON);
-  await boss.createQueue(QUEUES.YOUTUBE_POLL_USER);
   await boss.createQueue(QUEUES.YOUTUBE_BACKFILL_CHANNEL);
   await boss.createQueue(QUEUES.YOUTUBE_QUOTA_RESET);
   await boss.createQueue(QUEUES.YOUTUBE_REHAB);
@@ -114,12 +126,6 @@ async function registerQueues(boss: MinimalBoss): Promise<void> {
       await handlePollCron(
         job as { id?: string; data: { tier: "active" | "cold" } & Record<string, unknown> },
       );
-    }
-  });
-
-  await boss.work(QUEUES.YOUTUBE_POLL_USER, { batchSize: 2 }, async (jobs) => {
-    for (const job of jobs) {
-      await handlePollUser(job as { id: string; data: { eventId: string; userId: string } });
     }
   });
 
@@ -363,14 +369,13 @@ async function canonicalizeOnCreate(
  * instantly-populated feed and zero quota is consumed. The cron walks
  * (auto-backfill / incremental) still run later to top up new uploads.
  *
- * Fire-and-forget: pg-boss / DB errors are logged at WARN. The created
- * source row is the load-bearing return value; backfill enqueue is a
- * nice-to-have that the user can re-trigger by re-toggling auto-import
- * (PATCH /api/sources/:id) if it ever silently fails.
+ * The enqueue happens through the shared outbox in the same transaction as
+ * source creation. If cache seeding or outbox insert fails, the source row
+ * rolls back too; the first backfill is part of successful onboarding.
  */
 async function onSourceCreated(
   source: SourceCreatedHookSource,
-  opts: { backfillWindow: BackfillWindow },
+  opts: { backfillWindow: BackfillWindow; tx: Tx },
 ): Promise<void> {
   if (!source.autoImport) return;
 
@@ -380,49 +385,33 @@ async function onSourceCreated(
   // resolves channelId AFTER the HTTP call, so this branch is skipped
   // and the worker takes the normal HTTP path.
   if (source.channelId !== null) {
-    try {
-      const seeded = await seedEventsFromChannelCache({
-        userId: source.userId,
-        sourceId: source.id,
-        channelId: source.channelId,
-        targetSince: source.backfillTargetSince,
-        isOwnedByMe: source.isOwnedByMe,
-      });
-      if (seeded > 0) {
-        logger.info(
-          { sourceId: source.id, channelId: source.channelId, seeded },
-          "youtube.onSourceCreated: zero-quota seed from cache",
-        );
-      }
-    } catch (err) {
-      logger.warn(
-        { sourceId: source.id, err: String((err as Error)?.message ?? err) },
-        "youtube.onSourceCreated: cache-seed failed; falling through to HTTP backfill",
+    const seeded = await seedEventsFromChannelCache({
+      userId: source.userId,
+      sourceId: source.id,
+      channelId: source.channelId,
+      targetSince: source.backfillTargetSince,
+      isOwnedByMe: source.isOwnedByMe,
+      dbCtx: opts.tx,
+    });
+    if (seeded > 0) {
+      logger.info(
+        { sourceId: source.id, channelId: source.channelId, seeded },
+        "youtube.onSourceCreated: zero-quota seed from cache",
       );
     }
   }
 
-  try {
-    const boss = await getBoss();
-    await boss.send(
-      QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL,
-      {
-        sourceId: source.id,
-        userId: source.userId,
-        handleUrl: source.handleUrl,
-        backfillWindow: opts.backfillWindow,
-      },
-      { singletonKey: `source-${source.id}` },
-    );
-  } catch (err) {
-    logger.warn(
-      {
-        sourceId: source.id,
-        err: String((err as Error)?.message ?? err),
-      },
-      "channel-context-backfill enqueue on createSource failed; ignoring",
-    );
-  }
+  await enqueueViaOutbox(
+    opts.tx,
+    QUEUES.YOUTUBE_CHANNEL_CONTEXT_BACKFILL,
+    {
+      sourceId: source.id,
+      userId: source.userId,
+      handleUrl: source.handleUrl,
+      backfillWindow: opts.backfillWindow,
+    },
+    { singletonKey: `source-${source.id}` },
+  );
 }
 
 /**
@@ -442,12 +431,14 @@ async function seedEventsFromChannelCache(args: {
   channelId: string;
   targetSince: Date | null;
   isOwnedByMe: boolean;
+  dbCtx?: DbOrTx;
 }): Promise<number> {
+  const dbCtx = args.dbCtx ?? db;
   // Cache lookup — youtube_videos is global (PK=video_id). Filter by
   // channel + target_since boundary so we don't seed events older than
   // the user's preference.
   const sinceFilter = args.targetSince ?? new Date("1970-01-01T00:00:00Z");
-  const cached = await db
+  const cached = await dbCtx
     .select({
       videoId: youtubeVideos.videoId,
       title: youtubeVideos.title,
@@ -481,7 +472,7 @@ async function seedEventsFromChannelCache(args: {
     externalId: c.videoId,
     metadata: { channelId: c.channelId } as Record<string, unknown>,
   }));
-  await db.insert(events).values(rowsToInsert).onConflictDoNothing();
+  await dbCtx.insert(events).values(rowsToInsert).onConflictDoNothing();
   return rowsToInsert.length;
 }
 
@@ -602,7 +593,7 @@ function registerRoutes(app: Hono<AdapterAppContext>): void {
 }
 
 /**
- * fetchEventStats — synchronous stats fetch on manual event paste so
+ * fetchSyncStats — synchronous stats fetch on manual event paste so
  * /feed shows view/like counts immediately. Calls videos.list (1 unit,
  * charged to user pool via pollStatsByVideoId), writes a
  * youtube_video_snapshots row.
@@ -611,15 +602,16 @@ function registerRoutes(app: Hono<AdapterAppContext>): void {
  * (createEventFromPaste) treats as «stats unavailable now, will be
  * picked up by next active/cold cron tick».
  */
-async function fetchEventStats(
+async function fetchSyncStats(
   externalId: string,
   ctx: { userId: string },
 ): Promise<{ viewCount: number; likeCount: number; commentCount: number } | null> {
-  const picked = pickKeyForJob();
-  if (!picked) return null;
+  if (!hasYoutubeApiKeys()) return null;
+  const permit = await reserveYoutubeQuota({ origin: "user", units: 1 });
+  if (permit === null) return null;
   const quotaUser = youtubeQuotaUser(ctx.userId);
   const snapshots = await youtubeChannelAdapterCore
-    .pollStatsByVideoId([externalId], quotaUser, picked)
+    .pollStatsByVideoId([externalId], quotaUser, permit)
     .catch(() => [] as Awaited<ReturnType<typeof youtubeChannelAdapterCore.pollStatsByVideoId>>);
   const snap = snapshots[0];
   if (!snap || snap.status !== "ok" || !snap.metrics) return null;
@@ -629,18 +621,14 @@ async function fetchEventStats(
   await writeSnapshot({
     videoId: externalId,
     metrics: { view_count: viewCount, like_count: likeCount, comment_count: commentCount },
-    apiKeyId: picked.apiKeyId,
-    unitsUsed: 1,
+    apiKeyId: permit.apiKeyId,
+    unitsUsed: 0,
     poolKind: "user",
     status: "ok",
   });
-  // Write audit row so the per-user cap counter
-  // (services/quota.ts getUserQuotaUsedToday) sees this fetch. Without
-  // this row, chargedFetch deducts from the reservoir but the SUM-on-
-  // audit cap stays at 0, letting users bypass requestsPerDay by
-  // spamming /events/new pastes. Flow=stats_refresh matches the
-  // existing per-event poll-user worker semantic.
-  const { writeAudit } = await import("$lib/server/audit.js");
+  // Write audit row so the per-user cap counter sees this fetch. DB quota
+  // reservation protects the operator pool, but the user cap is audit-log
+  // based. Flow=stats_refresh matches the queued refresh-now semantic.
   await writeAudit({
     userId: ctx.userId,
     action: "event.poll_refreshed",
@@ -657,43 +645,86 @@ async function fetchEventStats(
   return { viewCount, likeCount, commentCount };
 }
 
+async function canRunSyncStats(): Promise<AdapterCapabilityGuardResult> {
+  const throttle = await getThrottleState();
+  if (throttle !== "ninetyfive") {
+    return { action: "run" };
+  }
+  return {
+    action: "skip",
+    reason: "youtube quota at 95%",
+    retryAfterMs: msUntilMidnightPacific(),
+  };
+}
+
+async function canRunRefreshNow(ctx: {
+  eventId?: string;
+  externalId: string;
+}): Promise<AdapterCapabilityGuardResult> {
+  const throttle = await canRunSyncStats();
+  if (throttle.action === "skip") return throttle;
+
+  const [videoRow] = await db
+    .select({ publishedAt: youtubeVideos.publishedAt })
+    .from(youtubeVideos)
+    .where(eq(youtubeVideos.videoId, ctx.externalId))
+    .limit(1);
+  if (!videoRow || videoRow.publishedAt === null) {
+    return {
+      action: "skip",
+      reason: "video metadata not yet available; backfill in progress",
+      code: "pending_backfill",
+      status: 422,
+      metadata: {
+        event_id: ctx.eventId,
+        external_id: ctx.externalId,
+      },
+    };
+  }
+
+  return { action: "run" };
+}
+
 /**
- * enqueueRefreshPoll — adapter-driven Refresh-Now enqueue for YouTube.
+ * enqueueRefreshNow — adapter-driven Refresh-Now enqueue for YouTube.
  *
- * Sends a job onto `youtube.poll.user` via pg-boss. The singletonKey is
- * scoped to a per-minute window keyed on the event id so a user mashing
- * the button within the same minute collapses into ONE poll job. The
- * 5-minute cooldown gate in requestRefreshPoll is the user-visible
- * limiter; this singletonKey is a defence-in-depth dedup at the queue
- * layer (parallel requests inside the cooldown race window).
+ * Inserts a row into adapter_refresh_queue:youtube_channel:user_video. The SQL worker
+ * claims up to 50 rows globally and makes one videos.list call. Per-user
+ * quota accounting has already happened at the endpoint before enqueue.
  *
- * Returns the boss-assigned job id so the cross-source caller can
- * surface it in the response body. Mirrors Reddit's enqueueRefreshPoll
- * shape; the unified contract lets refresh-poll.ts drop its
- * adapter-vs-legacy branch entirely.
+ * requestRefreshPoll already atomically stamps last_user_refresh_at and
+ * enforces the 5-minute cooldown, so this enqueue path does not need a
+ * second singleton/dedup layer.
  */
-async function enqueueRefreshPoll(input: {
+async function enqueueRefreshNow(input: {
   eventId: string;
   userId: string;
   externalId: string;
   eventKind: EventKind;
+  tx?: DbOrTx;
 }): Promise<{ queue: string; jobId: string | null }> {
-  const boss = await getBoss();
-  const minuteKey = new Date().toISOString().slice(0, 16); // 'YYYY-MM-DDTHH:MM'
-  const jobId = await boss.send(
-    QUEUES.YOUTUBE_POLL_USER,
-    {
-      eventId: input.eventId,
+  const dbCtx = input.tx ?? db;
+  const [row] = await dbCtx
+    .insert(adapterRefreshQueue)
+    .values({
+      adapterKind: "youtube_channel",
+      queueName: "user_video",
+      type: "video_stats",
+      payload: {
+        event_id: input.eventId,
+        video_id: input.externalId,
+        kind: input.eventKind,
+        flow: "refresh-now",
+      },
       userId: input.userId,
-      externalId: input.externalId,
-      kind: input.eventKind,
-    },
-    {
-      singletonKey: `${input.eventId}-${minuteKey}`,
-      priority: 10,
-    },
-  );
-  return { queue: QUEUES.YOUTUBE_POLL_USER, jobId: jobId ?? null };
+      priority: -10,
+      status: "pending",
+    })
+    .returning({ id: adapterRefreshQueue.id });
+  return {
+    queue: adapterRefreshQueueLabel("youtube_channel", "user_video"),
+    jobId: row ? String(row.id) : null,
+  };
 }
 
 /**
@@ -722,19 +753,18 @@ const youtubeQuotaCounters: ReadonlyArray<AdapterQuotaCounter> = [
 
 // youtubeAdapter — composes the per-source adapter cross-source code sees.
 //
-// adapter.ts exports `youtubeChannelAdapterCore` typed as
-// `Pick<DataSourceAdapter, ...polling/observability/canRefreshPoll>` —
-// no throwing stubs. This barrel is the SINGLE composition point: it
+// adapter.ts exports `youtubeChannelAdapterCore` with YouTube-local upstream
+// methods; those are not part of SourceAdapter. This barrel is the SINGLE composition point: it
 // adds infrastructure-touching methods (registerQueues /
 // scheduleCronTicks / backfillSource) and cross-source hooks
 // (canonicalize, onSourceCreated, fetchEventPreviewMetadata,
-// validateEventInput, fetchPollStateMap, registerRoutes) plus extends
+// validateEventInput, fetchPollStateMap, refreshQueue, registerRoutes) plus extends
 // observability with per-source quotaCounters.
 //
-// TypeScript guarantees completeness — the `: DataSourceAdapter`
+// TypeScript guarantees completeness — the `SourceAdapter & typeof core`
 // annotation fails the build if any contract method is missing from the
 // spread.
-export const youtubeAdapter: DataSourceAdapter = {
+export const youtubeAdapter: SourceAdapter & typeof youtubeChannelAdapterCore = {
   ...youtubeChannelAdapterCore,
   observability: {
     ...youtubeChannelAdapterCore.observability,
@@ -743,15 +773,40 @@ export const youtubeAdapter: DataSourceAdapter = {
   registerQueues,
   scheduleCronTicks,
   backfillSource,
+  canBackfillSource: canRunSyncStats,
   canonicalizeOnCreate,
   onSourceCreated,
   fetchEventPreviewMetadata,
-  fetchEventStats,
+  syncStats: {
+    canRun: canRunSyncStats,
+    fetch: fetchSyncStats,
+  },
   validateEventInput,
   fetchPollStateMap,
   registerRoutes,
-  enqueueRefreshPoll,
-  // Sync RateLimiterMemory reservoirs with the persistent
-  // youtube_service_quota_usage counter on worker boot.
-  reconcileRuntimeState: reconcileReservoirsOnBoot,
+  refreshQueue: {
+    canRefresh: (eventKind: EventKind): boolean => eventKind === "youtube_video",
+    canRun: canRunRefreshNow,
+    enqueue: enqueueRefreshNow,
+  },
+  workQueue: {
+    scheduledWorkers: [
+      {
+        name: "youtube.refresh",
+        intervalMs: 1000,
+        readyMessage: "youtube refresh queue worker ready",
+        disabledMessage: "youtube refresh queue worker disabled",
+        laneQueue: {
+          strategy: "fixed-slot-round-robin",
+          adapterKind: "youtube_channel",
+          slots: YOUTUBE_REFRESH_SLOT_MAPPING,
+          fallthrough: YOUTUBE_REFRESH_FALLTHROUGH_ORDER,
+          batchScope: "global",
+        },
+        replicaPolicy: "parallel",
+        isEnabled: () => true,
+        tick: youtubeRefreshQueueTick,
+      },
+    ],
+  },
 };

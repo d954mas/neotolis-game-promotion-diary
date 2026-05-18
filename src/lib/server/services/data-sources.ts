@@ -27,10 +27,11 @@
 // BEFORE the soft-delete UPDATE so the security signal lands even if the
 // UPDATE later fails. (Same pattern removeSteamKey uses.)
 
-import { and, eq, isNull, count } from "drizzle-orm";
+import { and, eq, isNull, count, gte, sql } from "drizzle-orm";
 import { db, type Tx } from "../db/client.js";
 import { dataSources } from "../db/schema/data-sources.js";
-import type { SourceKind } from "$lib/sources/adapter.js";
+import { auditLog } from "../db/schema/audit-log.js";
+import type { SourceAdapter, SourceKind } from "$lib/sources/adapter.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
@@ -93,6 +94,50 @@ const VALID_SOURCE_KINDS: readonly SourceKind[] = [
   "telegram_channel",
   "discord_server",
 ] as const;
+
+// Cap on per-user POST /api/sources/:id/refresh-content calls in any
+// rolling 1-min window. Counter source: intent-only audit rows
+// (source.refresh_content_requested with no metadata.flow).
+const REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE = 10;
+const REFRESH_CONTENT_RATE_WINDOW_MS = 60_000;
+
+export async function enforceRefreshContentIntentRateLimit(
+  userId: string,
+  now: Date = new Date(),
+): Promise<void> {
+  const since = new Date(now.getTime() - REFRESH_CONTENT_RATE_WINDOW_MS);
+  const [recent] = await db
+    .select({ c: count() })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.userId, userId),
+        eq(auditLog.action, "source.refresh_content_requested"),
+        gte(auditLog.createdAt, since),
+        sql`${auditLog.metadata}->>'flow' IS NULL`,
+      ),
+    );
+  if (Number(recent?.c ?? 0) < REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE) return;
+
+  throw new AppError(
+    `refresh-content rate limit exceeded: ${REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE}/min per user`,
+    "rate_limited",
+    429,
+    {
+      limit: REFRESH_CONTENT_RATE_LIMIT_PER_MINUTE,
+      window_seconds: REFRESH_CONTENT_RATE_WINDOW_MS / 1000,
+    },
+  );
+}
+
+export async function enforceSourceActionQuota(
+  userId: string,
+  adapter: SourceAdapter,
+  ipAddress: string,
+  platform: SourceKind,
+): Promise<void> {
+  await enforceAdapterUserQuota(db, adapter, userId, ipAddress, "source-action", { platform });
+}
 
 /**
  * Per-kind text for the duplicate_source 422 thrown by the PG-unique
@@ -435,70 +480,27 @@ export async function createSource(
     );
   }
 
-  // Reddit source validation + canonicalization. Parse handleUrl through
-  // the adapter's URL parser, enforce kind match, replace input.handleUrl
-  // with the canonical form (parsed.externalUrl), and authoritatively
-  // inject metadata.{username|subreddit}. Cap-check fires LATER (after
-  // duplicate + source-limit checks), so a retry of an existing source
-  // gets 422 duplicate_source instead of burning a cap unit on a 429.
-  //
-  // Without canonicalization, `https://reddit.com/user/x` and
-  // `https://www.reddit.com/user/x` (and the raw `/user/x` prefix form)
-  // would pass the duplicate check as DIFFERENT rows. The parser
-  // produces a single `https://www.reddit.com/user/<handle>` form which
-  // collapses all spellings.
-  //
-  // Defense-in-depth: re-check isRedditConfigured() at the service
-  // boundary. /sources/new's load function disables the Reddit chips
-  // when REDDIT_USER_AGENT is empty, but the chip-disable is UI hint
-  // only — a direct POST /api/sources or a form replay against a stale
-  // page can still reach this service. Catching the unconfigured case
-  // here AVOIDS a half-broken source row sitting in the DB whose worker
-  // poll would fail forever with reddit_not_configured. Mirrors the
-  // events.ts paste path which already throws this code on the same
-  // condition. The shared service is the single source of truth — both
-  // /api/sources (Hono) and /sources/new (SvelteKit action) inherit it
-  // without per-route boilerplate.
-  if (input.kind === "reddit_account" || input.kind === "reddit_subreddit") {
-    const { isRedditConfigured } = await import("$lib/sources/reddit/server/credentials.js");
-    if (!isRedditConfigured()) {
-      throw new AppError(
-        "Reddit is not configured on this instance (REDDIT_USER_AGENT empty)",
-        "reddit_not_configured",
-        503,
-        { kind: input.kind },
-      );
-    }
-    const { redditParseSourceUrl } = await import("$lib/sources/reddit/server/url.js");
-    const parsed = redditParseSourceUrl(input.handleUrl);
-    if (parsed === null) {
-      throw new AppError(
-        `handleUrl does not match a Reddit ${input.kind === "reddit_account" ? "user profile" : "subreddit"} URL`,
-        "invalid_handle_url",
-        422,
-        { kind: input.kind, handleUrl: input.handleUrl },
-      );
-    }
-    if (parsed.kind !== input.kind) {
-      throw new AppError(
-        `handleUrl shape (${parsed.kind}) does not match declared kind (${input.kind})`,
-        "kind_url_inconsistent",
-        422,
-        { declaredKind: input.kind, parsedKind: parsed.kind, handleUrl: input.handleUrl },
-      );
-    }
-    // Canonicalize handleUrl + inject metadata authoritatively. Caller-
-    // supplied metadata for non-identifier fields (display_name, etc.)
-    // is preserved by spread-merge.
+  const adapter = getAdapter(input.kind);
+
+  // Adapter-owned local normalization BEFORE cheap duplicate/quota checks.
+  // This hook is explicitly no-upstream-I/O: it is for deterministic URL
+  // shape canonicalization and metadata injection that would otherwise leak
+  // platform-specific branches into this cross-source service.
+  if (adapter.normalizeSourceOnCreate !== undefined) {
+    const normalized = await adapter.normalizeSourceOnCreate(
+      {
+        kind: input.kind,
+        handleUrl: input.handleUrl,
+        channelId: input.channelId ?? null,
+        metadata: input.metadata ?? {},
+      },
+      { userId, ipAddress },
+    );
     input = {
       ...input,
-      handleUrl: parsed.externalUrl,
-      metadata: {
-        ...input.metadata,
-        ...(parsed.kind === "reddit_account"
-          ? { username: parsed.handle }
-          : { subreddit: parsed.handle }),
-      },
+      handleUrl: normalized.handleUrl,
+      channelId: normalized.channelId ?? input.channelId ?? null,
+      metadata: normalized.metadata ?? input.metadata,
     };
   }
 
@@ -527,6 +529,12 @@ export async function createSource(
     .where(and(eq(dataSources.userId, userId), isNull(dataSources.deletedAt)));
   const currentCount = Number(countRow?.c ?? 0);
   if (currentCount >= sourceLimit) {
+    await writeAudit({
+      userId,
+      action: "quota.limit_hit",
+      ipAddress,
+      metadata: { kind: "data_sources", limit: sourceLimit, current: currentCount },
+    });
     throw new AppError(
       `data_sources quota exceeded: ${currentCount}/${sourceLimit}`,
       "quota_exceeded",
@@ -552,30 +560,24 @@ export async function createSource(
     });
   }
 
-  // Reddit two-axis cap-check — runs AFTER duplicate + source-limit
-  // pre-checks so a retry of an existing source surfaces as
-  // 422 duplicate_source instead of burning a cap unit on 429
-  // reddit_source_quota_exhausted. "Validate-first; reject
-  // impossible/duplicate before quota burn" — the existing-source case
-  // is impossible from the cap's perspective (no new work to enqueue).
-  if (input.kind === "reddit_account" || input.kind === "reddit_subreddit") {
-    await enforceAdapterUserQuota(db, getAdapter(input.kind), userId, ipAddress, "source-action", {
+  // Adapter source-action cap-check — runs AFTER duplicate + source-limit
+  // pre-checks so a retry of an existing source surfaces as duplicate_source
+  // instead of burning a cap unit on a 429. New adapters opt into this by
+  // declaring observability.userQuotaCap.sourceActionsPerWindow.
+  if (adapter.observability.userQuotaCap?.sourceActionsPerWindow !== undefined) {
+    await enforceAdapterUserQuota(db, adapter, userId, ipAddress, "source-action", {
       platform: input.kind,
     });
   }
 
-  // Canonicalize the handle_url for kind=youtube_channel sources BEFORE
-  // insert. Adapter-driven — per-source URL canonicalization (parse handle
-  // URL, dereference video URL → channelId via videos.list, leave legacy
-  // /@handle / /c/ URLs to be resolved on first worker backfill). A future
-  // Reddit adapter implements canonicalizeOnCreate to resolve /user/ URLs
-  // to user_id; this code stays unchanged.
+  // Adapter-owned I/O-backed canonicalization BEFORE insert. YouTube may
+  // dereference a video URL to its channelId here; cheap local URL
+  // normalization already happened above via normalizeSourceOnCreate.
   let canonicalHandleUrl = input.handleUrl;
   let resolvedChannelId = input.channelId ?? null;
-  const adapter = getAdapter(input.kind);
   if (adapter.canonicalizeOnCreate !== undefined) {
     const result = await adapter.canonicalizeOnCreate(
-      { handleUrl: input.handleUrl, channelId: input.channelId ?? null },
+      { kind: input.kind, handleUrl: input.handleUrl, channelId: input.channelId ?? null },
       { userId, ipAddress },
     );
     canonicalHandleUrl = result.canonicalHandleUrl;
@@ -624,6 +626,29 @@ export async function createSource(
           backfillTargetSince: backfillWindowToDate(input.backfillWindow ?? "30d"),
         })
         .returning();
+      if (!r) {
+        throw new Error("createSource: INSERT returned no row");
+      }
+      if (resolvedChannelId !== null) {
+        await ensureChannelState(input.kind, resolvedChannelId, tx);
+      }
+      if (adapter.onSourceCreated !== undefined) {
+        const backfillWindow: BackfillWindow = input.backfillWindow ?? "30d";
+        await adapter.onSourceCreated(
+          {
+            id: r.id,
+            userId: r.userId,
+            autoImport: r.autoImport,
+            handleUrl: r.handleUrl,
+            metadata: (r.metadata ?? {}) as Record<string, unknown>,
+            kind: r.kind,
+            channelId: r.channelId,
+            backfillTargetSince: r.backfillTargetSince,
+            isOwnedByMe: r.isOwnedByMe,
+          },
+          { backfillWindow, tx },
+        );
+      }
       return r;
     });
   } catch (err) {
@@ -658,53 +683,6 @@ export async function createSource(
     userAgent,
     metadata: { source_id: row.id, kind: row.kind, handle_url: row.handleUrl },
   });
-
-  // Ensure channel state row exists for the cron picker. Without this row,
-  // the auto-backfill cron's INNER JOIN against
-  // data_source_channel_state filters out brand-new sources entirely until
-  // the first walk auto-creates the row. Idempotent — concurrent
-  // createSource calls for the same (kind, channel_id) collide on the PK
-  // and ON CONFLICT DO NOTHING absorbs.
-  if (resolvedChannelId !== null) {
-    await ensureChannelState(input.kind, resolvedChannelId);
-  }
-
-  // When the new source is a YouTube channel with auto-import ON, enqueue
-  // ONE channel-context backfill job carrying the user's chosen window.
-  // The handler ($lib/sources/youtube/server/handlers/channel-context-backfill.ts)
-  // reads `job.data.backfillWindow` and seeds the snapshot table
-  // accordingly.
-  //
-  // Idempotent via `singletonKey: source-{row.id}` — a duplicate INSERT
-  // can't reach this point (PG 23505 maps to duplicate_source above), but
-  // a retried request that lands on the same row id (race-window edge)
-  // gets coalesced by pg-boss.
-  //
-  // Fire-and-forget: pg-boss / DB errors are logged at WARN. The created
-  // source row is the load-bearing return value; backfill enqueue is a
-  // nice-to-have that the user can re-trigger by re-toggling auto-import
-  // (PATCH /api/sources/:id) if it ever silently fails.
-  // Adapter-driven post-create hook. YouTube enqueues
-  // YOUTUBE_CHANNEL_CONTEXT_BACKFILL when autoImport=true. A future Reddit
-  // adapter could enqueue subreddit-rules-cache prereq. Adapters that don't
-  // need a hook simply don't implement onSourceCreated.
-  if (adapter.onSourceCreated !== undefined) {
-    const backfillWindow: BackfillWindow = input.backfillWindow ?? "30d";
-    await adapter.onSourceCreated(
-      {
-        id: row.id,
-        userId: row.userId,
-        autoImport: row.autoImport,
-        handleUrl: row.handleUrl,
-        metadata: (row.metadata ?? {}) as Record<string, unknown>,
-        kind: row.kind,
-        channelId: row.channelId,
-        backfillTargetSince: row.backfillTargetSince,
-        isOwnedByMe: row.isOwnedByMe,
-      },
-      { backfillWindow },
-    );
-  }
 
   return row;
 }

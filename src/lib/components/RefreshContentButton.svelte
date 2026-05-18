@@ -2,11 +2,11 @@
   // RefreshContentButton — "Pull new content" button on /sources/[id]
   // that POSTs to /api/sources/:id/refresh-content. The route dispatches
   // via getAdapter(source.kind).backfillSource — for YouTube this
-  // enqueues a youtube.backfill.user job (singletonKey-deduped ~5min).
+  // enqueues a youtube.backfill.channel job (singletonKey-deduped ~5min).
   // Adding a new source kind requires zero edits to this component.
   //
   // CONTRACT (matches the route's wire format):
-  //   - 202 → { enqueued: true, queue: 'youtube.backfill.user', jobId: <string|null> }
+  //   - 202 → { enqueued: true, queue: 'youtube.backfill.channel', jobId: <string|null> }
   //   - 401 → never seen here (the page loader gates anonymous access; if
   //           the cookie expires mid-session the layout-level handler picks
   //           it up and routes the user to /login).

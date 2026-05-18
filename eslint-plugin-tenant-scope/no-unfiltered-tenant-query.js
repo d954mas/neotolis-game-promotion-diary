@@ -79,17 +79,17 @@ const ALLOWLIST_TABLES = new Set([
   "youtubeVideoSnapshots",
   "youtubeChannels",
   "youtubeServiceQuotaUsage",
+  "adapterRefreshQueue", // shared adapter queue; lane contract defines user_id semantics
   // Public-data cache for video metadata (title / description / channel
   // info). Same semantics as youtubeChannels — keyed on video_id, no
   // user_id, shared across all tenants who ever reference this video.
   "youtubeVideos",
-  // Phase 03.1 Reddit — public-data tables (no user_id by design).
+  // Phase 03.1 Reddit public-data tables (no user_id by design).
   // Same public-data semantics as the YouTube cache: post score /
   // upvote ratio / subreddit subscribers etc. are identical regardless
-  // of which tenant looked them up. `reddit_refresh_queue` is the one
-  // queue-table exception — payload carries `user_id` for cap counting
-  // and audit; ESLint disable in callers is unnecessary because the
-  // worker dequeues via raw SQL (FOR UPDATE SKIP LOCKED).
+  // of which tenant looked them up. `adapter_refresh_queue` is the queue
+  // exception: user lanes carry user_id for purge/caps; service lanes
+  // intentionally do not.
   "redditPosts", // public external data, no tenant scope
   "redditUsersCache", // public external data, no tenant scope
   "redditSubredditsCache", // public external data, no tenant scope
@@ -97,7 +97,6 @@ const ALLOWLIST_TABLES = new Set([
   "redditUserSnapshots", // public external data, no tenant scope (time-series; OWNED reddit_accounts only — see schema header)
   "redditSubredditSnapshots", // public external data, no tenant scope (time-series; all cached subs)
   "redditSubredditBaselines", // public external data, no tenant scope (per-sub aggregates)
-  "redditRefreshQueue", // queue table, payload-scoped (user_id in payload column for audit + cap counters)
   "redditPacer", // singleton rate-limit-token row, no tenant scope
 ]);
 

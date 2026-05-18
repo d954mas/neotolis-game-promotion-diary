@@ -1,7 +1,7 @@
 // Refresh-poll service.
 //
-// User-driven "Refresh now" button enqueues an upstream poll on
-// `youtube.poll.user` with a 5-minute cooldown gate. The cooldown is
+// User-driven "Refresh now" button enqueues an adapter-owned upstream
+// poll queue with a 5-minute cooldown gate. The cooldown is
 // per-event and persisted in `events.metadata.last_user_refresh_at`
 // (eager-write; survives container restart so the next attempt still
 // honors it). Frozen-tier events ARE permitted to refresh — the tier
@@ -36,7 +36,6 @@
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { events } from "../db/schema/events.js";
-import { youtubeVideos } from "../db/schema/index.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { writeAudit } from "../audit.js";
 import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
@@ -71,31 +70,23 @@ export async function requestRefreshPoll(
   //    SourceKind maps to this event's kind whether it can refresh-poll.
   //    Adding a new pollable source kind requires no edit here. Kinds
   //    with no adapter (event kinds that are never poll-driven —
-  //    conference, talk, press, other) and adapters whose canRefreshPoll
-  //    returns false are blocked uniformly.
+  //    conference, talk, press, other) and adapters without a matching
+  //    refreshQueue capability are blocked uniformly.
   const sourceKindForPoll = eventKindToSourceKind(event.kind);
   const pollableAdapter =
     sourceKindForPoll !== null && hasAdapter(sourceKindForPoll)
       ? getAdapter(sourceKindForPoll)
       : null;
-  if (pollableAdapter === null || pollableAdapter.canRefreshPoll?.(event.kind) !== true) {
+  const refreshQueue = pollableAdapter?.refreshQueue;
+  if (
+    pollableAdapter === null ||
+    refreshQueue === undefined ||
+    refreshQueue.canRefresh(event.kind) !== true
+  ) {
     throw new AppError(`event kind '${event.kind}' is not pollable`, "event_not_pollable", 422, {
       kind: event.kind,
       event_id: eventId,
     });
-  }
-
-  // L1 throttle check (operator-side reservoir). System-wide signal —
-  // all users receive 429 simultaneously when the operator quota
-  // approaches 95%.
-  const stats = await pollableAdapter.observability.quota.getDailyStats(new Date());
-  if (stats.throttleState === "ninetyfive") {
-    throw new AppError(
-      `platform quota exhausted at ${stats.pctOfDaily}%`,
-      "platform_quota_exhausted",
-      429,
-      { platform: sourceKindForPoll, pct_of_daily: stats.pctOfDaily },
-    );
   }
 
   // 3. External-id gate. The poll worker keys upstream calls by external_id
@@ -108,31 +99,34 @@ export async function requestRefreshPoll(
       { event_id: eventId, kind: event.kind },
     );
   }
+  const externalId = event.externalId;
 
-  // 3a. 'pending' tier gate — YouTube-only. If channel-context-backfill
-  //     has not yet run for this external_id, youtube_videos may not
-  //     have a row yet, OR its publishedAt may be NULL. Either way the
-  //     tier is 'pending' and a manual poll would race the in-flight
-  //     backfill (which will populate stats anyway). Reject with 422 —
-  //     the user can retry once the badge transitions.
-  //
-  //     Other adapters (Reddit) use the adapter.enqueueRefreshPoll path
-  //     below which has its own readiness semantics; they skip this gate.
-  if (event.kind === "youtube_video") {
-    const videoRows = await db
-      .select({ publishedAt: youtubeVideos.publishedAt })
-      .from(youtubeVideos)
-      .where(eq(youtubeVideos.videoId, event.externalId))
-      .limit(1);
-    const videoRow = videoRows[0];
-    if (!videoRow || videoRow.publishedAt === null) {
-      throw new AppError(
-        "video metadata not yet available; backfill in progress",
-        "pending_backfill",
-        422,
-        { event_id: eventId, external_id: event.externalId },
-      );
-    }
+  // Adapter-owned hard gate. YouTube uses this for the 95% daily hard stop.
+  // Reddit deliberately omits it: its getDailyStats() throttleState is an
+  // operator dashboard signal, while the load-bearing write-path limit lives
+  // in the DB pacer + sliding-window per-user cap.
+  const runGuard = await refreshQueue.canRun?.({
+    eventId,
+    externalId,
+    userId,
+    eventKind: event.kind,
+    now: new Date(),
+  });
+  if (runGuard?.action === "skip") {
+    throw new AppError(
+      runGuard.reason,
+      runGuard.code ?? "platform_quota_exhausted",
+      runGuard.status ?? 429,
+      {
+        platform: sourceKindForPoll,
+        reason: runGuard.reason,
+        retryAfterSeconds:
+          runGuard.retryAfterMs === undefined
+            ? undefined
+            : Math.max(1, Math.ceil(runGuard.retryAfterMs / 1000)),
+        ...(runGuard.metadata ?? {}),
+      },
+    );
   }
 
   // 4. 5-minute cooldown gate. Reads events.metadata.last_user_refresh_at;
@@ -181,46 +175,47 @@ export async function requestRefreshPoll(
   //       returns 0 rows. The 0-rows path treats the slot as "lost" and
   //       throws the same 429 as the in-window check above.
   const cutoffIso = new Date(now.getTime() - COOLDOWN_MS).toISOString();
-  const updateRes = await db
-    .update(events)
-    .set({
-      // Cast to ::text — `jsonb_build_object`'s value parameter is variadic
-      // "any" so PG cannot infer the placeholder type without a hint.
-      metadata: sql`${events.metadata} || jsonb_build_object('last_user_refresh_at', ${now.toISOString()}::text)`,
-    })
-    .where(
-      and(
-        eq(events.id, eventId),
-        eq(events.userId, userId),
-        // Wrap the OR explicitly: drizzle's `and()` injects AND between
-        // its arguments, so a bare `A IS NULL OR A < cutoff` term ends up
-        // as `(prev AND prev2 AND A IS NULL) OR A < cutoff` — wrong shape.
-        // Cast $cutoff to text so PG can infer parameter type when the
-        // left side is the jsonb `->>` extraction.
-        sql`((${events.metadata} ->> 'last_user_refresh_at') IS NULL OR (${events.metadata} ->> 'last_user_refresh_at') < ${cutoffIso}::text)`,
-      ),
-    )
-    .returning({ id: events.id });
-  if (updateRes.length === 0) {
-    // A concurrent refresh-poll won the race. Same response as if we'd
-    // detected the cooldown above; the user retries after the window.
-    throw new AppError("refresh-poll cooldown active", "too_many_refreshes", 429, {
-      minutesLeft: 1,
-      retryAfterSeconds: 60,
-      event_id: eventId,
-    });
-  }
+  const { queue, jobId: adapterJobId } = await db.transaction(async (tx) => {
+    const updateRes = await tx
+      .update(events)
+      .set({
+        // Cast to ::text — `jsonb_build_object`'s value parameter is variadic
+        // "any" so PG cannot infer the placeholder type without a hint.
+        metadata: sql`${events.metadata} || jsonb_build_object('last_user_refresh_at', ${now.toISOString()}::text)`,
+      })
+      .where(
+        and(
+          eq(events.id, eventId),
+          eq(events.userId, userId),
+          // Wrap the OR explicitly: drizzle's `and()` injects AND between
+          // its arguments, so a bare `A IS NULL OR A < cutoff` term ends up
+          // as `(prev AND prev2 AND A IS NULL) OR A < cutoff` — wrong shape.
+          // Cast $cutoff to text so PG can infer parameter type when the
+          // left side is the jsonb `->>` extraction.
+          sql`((${events.metadata} ->> 'last_user_refresh_at') IS NULL OR (${events.metadata} ->> 'last_user_refresh_at') < ${cutoffIso}::text)`,
+        ),
+      )
+      .returning({ id: events.id });
+    if (updateRes.length === 0) {
+      // A concurrent refresh-poll won the race. Same response as if we'd
+      // detected the cooldown above; the user retries after the window.
+      throw new AppError("refresh-poll cooldown active", "too_many_refreshes", 429, {
+        minutesLeft: 1,
+        retryAfterSeconds: 60,
+        event_id: eventId,
+      });
+    }
 
-  // 6. Enqueue refresh — adapter-driven. Every adapter that can be
-  //    refresh-polled (canRefreshPoll returns true) MUST implement
-  //    enqueueRefreshPoll; the contract is non-optional. YouTube sends
-  //    to its pg-boss queue, Reddit INSERTs into reddit_refresh_queue —
-  //    same shape returned to the caller either way.
-  const { queue, jobId: adapterJobId } = await pollableAdapter.enqueueRefreshPoll({
-    eventId,
-    userId,
-    externalId: event.externalId,
-    eventKind: event.kind,
+    // 6. Enqueue refresh — adapter-driven. Every adapter that can be
+    //    refresh-polled exposes refreshQueue. YouTube and Reddit both INSERT
+    //    into adapter-owned SQL queues; the response shape stays the same.
+    return refreshQueue.enqueue({
+      eventId,
+      userId,
+      externalId,
+      eventKind: event.kind,
+      tx,
+    });
   });
 
   // 7. Audit row scoped to the event owner. Written OUTSIDE any tx
@@ -247,7 +242,7 @@ export async function requestRefreshPoll(
       // semantics; `platform` carries the cap-window dimension. See
       // audit.ts AuditMetadata.platform.
       platform: sourceKindForPoll ?? event.kind,
-      external_id: event.externalId,
+      external_id: externalId,
       flow: "stats_refresh",
       requests_used: 1,
       events_inserted: 0,

@@ -33,8 +33,8 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { youtubeVideos } = await import("../../src/lib/server/db/schema/index.js");
-const { redditRefreshQueue } = await import("../../src/lib/sources/reddit/server/schema/index.js");
+const { youtubeVideos, adapterRefreshQueue } =
+  await import("../../src/lib/server/db/schema/index.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { AppError, NotFoundError } = await import("../../src/lib/server/services/errors.js");
@@ -88,7 +88,7 @@ describe("refresh-poll cooldown service", () => {
     sentJobs.length = 0;
   });
 
-  it("requestRefreshPoll on a fresh event enqueues youtube.poll.user + sets metadata.last_user_refresh_at", async () => {
+  it("requestRefreshPoll on a fresh event enqueues adapter_refresh_queue + sets metadata.last_user_refresh_at", async () => {
     sentJobs.length = 0;
     const u = await seedUserDirectly({ email: `rp-fresh-${uniq()}@test.local` });
     const ev = await insertEvent(u.id);
@@ -97,8 +97,11 @@ describe("refresh-poll cooldown service", () => {
     const result = await requestRefreshPoll(u.id, ev.id, "127.0.0.1");
     const after = Date.now();
 
-    expect(result).toMatchObject({ enqueued: true, queue: "youtube.poll.user", eventId: ev.id });
-    // jobId surfaced from pg-boss send via the adapter's enqueueRefreshPoll.
+    expect(result).toMatchObject({
+      enqueued: true,
+      queue: "adapter_refresh_queue:youtube_channel:user_video",
+      eventId: ev.id,
+    });
     expect(typeof result.jobId).toBe("string");
 
     // Metadata.last_user_refresh_at written within the call's window.
@@ -109,17 +112,23 @@ describe("refresh-poll cooldown service", () => {
     expect(ts).toBeGreaterThanOrEqual(before);
     expect(ts).toBeLessThanOrEqual(after);
 
-    // pg-boss send was called with the right queue + payload.
-    const lastSend = sentJobs[sentJobs.length - 1]!;
-    expect(lastSend.queue).toBe("youtube.poll.user");
-    expect(lastSend.data).toMatchObject({
-      eventId: ev.id,
+    const [queueRow] = await db
+      .select()
+      .from(adapterRefreshQueue)
+      .where(eq(adapterRefreshQueue.id, Number(result.jobId)));
+    expect(queueRow).toMatchObject({
+      queueName: "user_video",
+      type: "video_stats",
       userId: u.id,
-      externalId: ev.externalId,
-      kind: "youtube_video",
+      status: "pending",
+      priority: -10,
     });
-    expect(lastSend.options).toMatchObject({ priority: 10 });
-    expect((lastSend.options as { singletonKey: string }).singletonKey).toContain(ev.id);
+    expect(queueRow?.payload).toMatchObject({
+      event_id: ev.id,
+      video_id: ev.externalId,
+      kind: "youtube_video",
+      flow: "refresh-now",
+    });
   });
 
   it("service throws AppError 429 too_many_refreshes when within 5min window", async () => {
@@ -254,7 +263,7 @@ describe("refresh-poll cooldown service", () => {
     expect(auditMeta?.external_id).toBe(ev.externalId);
   });
 
-  it("reddit_post refresh-poll enqueues into reddit_refresh_queue and returns the real queue label", async () => {
+  it("reddit_post refresh-poll enqueues into adapter_refresh_queue and returns the real queue label", async () => {
     sentJobs.length = 0;
     const u = await seedUserDirectly({ email: `rp-reddit-ok-${uniq()}@test.local` });
     const ev = await insertEvent(u.id, {
@@ -266,15 +275,15 @@ describe("refresh-poll cooldown service", () => {
     const result = await requestRefreshPoll(u.id, ev.id, "127.0.0.1");
 
     expect(result.enqueued).toBe(true);
-    expect(result.queue).toBe("reddit_refresh_queue:user_post");
+    expect(result.queue).toBe("adapter_refresh_queue:reddit_account:user_post");
     expect(result.jobId).toBeTruthy();
     expect(sentJobs).toHaveLength(0);
 
     const rows = await db
       .select()
-      .from(redditRefreshQueue)
+      .from(adapterRefreshQueue)
       .where(
-        and(eq(redditRefreshQueue.userId, u.id), eq(redditRefreshQueue.queueName, "user_post")),
+        and(eq(adapterRefreshQueue.userId, u.id), eq(adapterRefreshQueue.queueName, "user_post")),
       );
     expect(rows.some((r) => (r.payload as { post_id?: string }).post_id === "abc_refresh")).toBe(
       true,
@@ -291,7 +300,8 @@ describe("refresh-poll cooldown service", () => {
     });
     const now = new Date();
     for (let i = 0; i < 25; i++) {
-      await db.insert(redditRefreshQueue).values({
+      await db.insert(adapterRefreshQueue).values({
+        adapterKind: "reddit_account",
         queueName: "user_post",
         type: "post_single",
         payload: { post_id: `t3_seed_refresh_${i}`, flow: "refresh-now" },

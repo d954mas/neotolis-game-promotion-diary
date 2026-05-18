@@ -68,15 +68,16 @@ describe("migration 0030 — Phase 03.1 Reddit schema", () => {
     try {
       const tableResult = await pool.query<{ tablename: string }>(
         `select tablename from pg_tables
-         where schemaname='public' and tablename like 'reddit_%'
+         where schemaname='public'
+           and (tablename like 'reddit_%' or tablename = 'adapter_refresh_queue')
          order by tablename`,
       );
       const tables = tableResult.rows.map((r) => r.tablename);
       expect(tables).toEqual([
+        "adapter_refresh_queue",
         "reddit_pacer",
         "reddit_post_snapshots",
         "reddit_posts",
-        "reddit_refresh_queue",
         "reddit_subreddit_baselines",
         "reddit_subreddit_snapshots",
         "reddit_subreddits_cache",
@@ -85,7 +86,7 @@ describe("migration 0030 — Phase 03.1 Reddit schema", () => {
       ]);
 
       // Public-data invariant: 7 tables MUST NOT have a user_id column.
-      // reddit_refresh_queue is the one exception (queue payload-scoped).
+      // adapter_refresh_queue is the one exception (queue payload-scoped).
       const publicDataTables = [
         "reddit_posts",
         "reddit_post_snapshots",
@@ -104,13 +105,26 @@ describe("migration 0030 — Phase 03.1 Reddit schema", () => {
         expect(userIdRes.rows.length, `${t} must NOT have user_id`).toBe(0);
       }
 
-      // reddit_refresh_queue MUST have user_id (nullable, payload-scoped).
+      // adapter_refresh_queue MUST have user_id (nullable, payload-scoped).
       const queueUserIdRes = await pool.query<{ column_name: string; is_nullable: string }>(
         `select column_name, is_nullable from information_schema.columns
-         where table_schema='public' and table_name='reddit_refresh_queue' and column_name='user_id'`,
+         where table_schema='public' and table_name='adapter_refresh_queue' and column_name='user_id'`,
       );
       expect(queueUserIdRes.rows.length).toBe(1);
       expect(queueUserIdRes.rows[0]?.is_nullable).toBe("YES");
+
+      const pacerColumns = await pool.query<{ column_name: string }>(
+        `select column_name from information_schema.columns
+         where table_schema='public' and table_name='reddit_pacer'
+           and column_name in ('paused_until', 'pause_level', 'last_pause_reason', 'last_paused_at')
+         order by column_name`,
+      );
+      expect(pacerColumns.rows.map((row) => row.column_name)).toEqual([
+        "last_pause_reason",
+        "last_paused_at",
+        "pause_level",
+        "paused_until",
+      ]);
     } finally {
       await pool.end();
     }
@@ -122,12 +136,12 @@ describe("migration 0030 — Phase 03.1 Reddit schema", () => {
       // Seed the parent reddit_posts row first (FK target).
       await pool.query(
         `insert into reddit_posts (post_id, subreddit, permalink, title, submitted_at)
-         values ('t3_test_uniq', 'IndieDev', '/r/IndieDev/comments/test_uniq/', 'test', now())`,
+         VALUES ('t3_test_uniq', 'IndieDev', '/r/IndieDev/comments/test_uniq/', 'test', now())`,
       );
       const polledAt = new Date("2026-05-14T05:30:00.000Z");
       const first = await pool.query(
         `insert into reddit_post_snapshots (post_id, polled_at, status, score)
-         values ('t3_test_uniq', $1, 'ok', 5)
+         VALUES ('t3_test_uniq', $1, 'ok', 5)
          on conflict (post_id, polled_at) do nothing`,
         [polledAt],
       );
@@ -136,7 +150,7 @@ describe("migration 0030 — Phase 03.1 Reddit schema", () => {
       // under ON CONFLICT DO NOTHING.
       const second = await pool.query(
         `insert into reddit_post_snapshots (post_id, polled_at, status, score)
-         values ('t3_test_uniq', $1, 'ok', 7)
+         VALUES ('t3_test_uniq', $1, 'ok', 7)
          on conflict (post_id, polled_at) do nothing`,
         [polledAt],
       );
@@ -153,53 +167,28 @@ describe("migration 0030 — Phase 03.1 Reddit schema", () => {
     }
   });
 
-  it("reddit_refresh_queue.queue_name CHECK rejects values outside the 4 lanes", async () => {
+  it("adapter_refresh_queue leaves adapter-owned lane names as text", async () => {
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
-      let caught: Error | null = null;
-      try {
-        await pool.query(
-          `insert into reddit_refresh_queue (queue_name, type, payload, priority)
-           values ('bogus_lane', 'sub_poll', '{}'::jsonb, 0)`,
-        );
-      } catch (err) {
-        caught = err as Error;
-      }
-      expect(caught).not.toBeNull();
-      const errCode = (caught as { code?: string } | null)?.code;
-      expect(errCode).toBe("23514");
+      await expect(
+        pool.query(
+          `INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, priority)
+           VALUES ('reddit_account', 'custom_lane', 'custom_type', '{}'::jsonb, 0)`,
+        ),
+      ).resolves.toBeDefined();
     } finally {
       await pool.end();
     }
   });
 
-  it("reddit_refresh_queue.type CHECK rejects values outside the 4 work types", async () => {
-    const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
-    try {
-      let caught: Error | null = null;
-      try {
-        await pool.query(
-          `insert into reddit_refresh_queue (queue_name, type, payload, priority)
-           values ('user_source', 'bogus_type', '{}'::jsonb, 0)`,
-        );
-      } catch (err) {
-        caught = err as Error;
-      }
-      expect(caught).not.toBeNull();
-      expect((caught as { code?: string } | null)?.code).toBe("23514");
-    } finally {
-      await pool.end();
-    }
-  });
-
-  it("reddit_refresh_queue.status CHECK accepts the 4 lifecycle states and rejects others", async () => {
+  it("adapter_refresh_queue.status CHECK accepts the 4 lifecycle states and rejects others", async () => {
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       // Accept: pending (default), processing, done, dead_letter.
       for (const status of ["pending", "processing", "done", "dead_letter"]) {
         await pool.query(
-          `insert into reddit_refresh_queue (queue_name, type, payload, priority, status)
-           values ('service_source', 'sub_poll', '{}'::jsonb, 0, $1)`,
+          `INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, priority, status)
+           VALUES ('reddit_account', 'service_source', 'sub_poll', '{}'::jsonb, 0, $1)`,
           [status],
         );
       }
@@ -207,8 +196,8 @@ describe("migration 0030 — Phase 03.1 Reddit schema", () => {
       let caught: Error | null = null;
       try {
         await pool.query(
-          `insert into reddit_refresh_queue (queue_name, type, payload, priority, status)
-           values ('service_source', 'sub_poll', '{}'::jsonb, 0, 'in_flight')`,
+          `INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, priority, status)
+           VALUES ('reddit_account', 'service_source', 'sub_poll', '{}'::jsonb, 0, 'in_flight')`,
         );
       } catch (err) {
         caught = err as Error;
@@ -227,7 +216,7 @@ describe("migration 0030 — Phase 03.1 Reddit schema", () => {
       // so any non-null string works).
       const result = await pool.query<{ id: string }>(
         `insert into audit_log (id, user_id, action, ip_address, metadata)
-         values (gen_random_uuid()::text, 'test-user-reddit', 'reddit.queue_drained',
+         VALUES (gen_random_uuid()::text, 'test-user-reddit', 'reddit.queue_drained',
                  '127.0.0.1', '{}'::jsonb)
          returning id`,
       );
@@ -238,12 +227,12 @@ describe("migration 0030 — Phase 03.1 Reddit schema", () => {
     }
   });
 
-  it("partial pending index exists on reddit_refresh_queue", async () => {
+  it("partial pending index exists on adapter_refresh_queue", async () => {
     const pool = new pg.Pool({ connectionString: TEST_URL, max: 2 });
     try {
       const result = await pool.query<{ indexname: string; indexdef: string }>(
         `select indexname, indexdef from pg_indexes
-         where tablename='reddit_refresh_queue' and indexname='idx_reddit_refresh_queue_pending'`,
+         where tablename='adapter_refresh_queue' and indexname='idx_adapter_refresh_queue_pending'`,
       );
       expect(result.rows.length).toBe(1);
       const def = result.rows[0]!.indexdef;

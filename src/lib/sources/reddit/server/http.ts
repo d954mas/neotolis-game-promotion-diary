@@ -37,7 +37,7 @@ import { writeAudit } from "$lib/server/audit.js";
 import { logger } from "$lib/server/logger.js";
 import { env } from "$lib/server/config/env.js";
 import { resolveOperatorUserId, __resetOperatorIdCacheForTest } from "./operator-resolver.js";
-import { acquireRedditPacerSlot } from "./pacer.js";
+import { acquireRedditPacerSlot, recordRedditAdapterPause } from "./pacer.js";
 
 export interface RedditHttpResult<T> {
   data: T;
@@ -51,9 +51,9 @@ export interface RedditHttpResult<T> {
 // calls in CI). Mirrors YouTube's YOUTUBE_API_BASE_URL precedent.
 const REDDIT_BASE = env.REDDIT_BASE_URL_OVERRIDE ?? "https://www.reddit.com";
 
-// 403-burst detection state. Module-scope is fine because the worker
-// is single-process by contract — env's WORKER_REPLICA_COUNT guard
-// rejects N>1 when any adapter sets usesInProcessRateLimiter=true.
+// 403-burst detection state. Module-scope is acceptable because this is
+// degraded-audit coalescing, not the quota gate. The DB pacer in pacer.ts is
+// the load-bearing multi-replica rate limiter.
 interface BurstState {
   count: number;
   windowStartMs: number;
@@ -75,7 +75,7 @@ const BURST_THRESHOLD = 3;
  */
 export async function redditFetch<T = unknown>(
   path: string,
-  opts: { schema?: z.ZodTypeAny; method?: "GET" } = {},
+  opts: { schema?: z.ZodTypeAny; method?: "GET"; pacer?: "acquire" | "already-acquired" } = {},
 ): Promise<RedditHttpResult<T>> {
   const creds = pickRedditCredentials();
   if (creds === null) {
@@ -94,13 +94,20 @@ export async function redditFetch<T = unknown>(
   // user paths uniformly. Denial surfaces as rate-limited; caller
   // (worker re-queues with backoff via next_attempt_at, sync paths
   // return 429 to the UI).
-  const slot = await acquireRedditPacerSlot();
-  if (!slot.acquired) {
-    throw new AdapterError(`Reddit pacer denied — ${slot.waitMs}ms until next slot`, {
-      category: "rate-limited",
-      retryAfterMs: slot.waitMs,
-      context: { httpStatus: 0, source: "global-pacer" },
-    });
+  if (opts.pacer !== "already-acquired") {
+    const slot = await acquireRedditPacerSlot();
+    if (!slot.acquired) {
+      throw new AdapterError(`Reddit pacer denied -- ${slot.waitMs}ms until next slot`, {
+        category: "rate-limited",
+        retryAfterMs: slot.waitMs,
+        context: {
+          httpStatus: 0,
+          source: slot.paused ? "adapter-pause" : "global-pacer",
+          pauseReason: slot.pauseReason,
+          pausedUntil: slot.pausedUntil?.toISOString() ?? null,
+        },
+      });
+    }
   }
 
   const url = path.startsWith("http") ? path : REDDIT_BASE + path;
@@ -132,6 +139,7 @@ export async function redditFetch<T = unknown>(
   }
   if (statusCode === 429) {
     const retryAfterMs = parseRetryAfter(headers);
+    await recordRedditAdapterPause("http_429", retryAfterMs);
     throw new AdapterError("Reddit 429 — rate limited", {
       category: "rate-limited",
       retryAfterMs,
@@ -269,6 +277,7 @@ async function maybeEmitBurstAuditAndThrow(headers: Headers): Promise<never> {
     }
   }
   const retryAfterMs = parseRetryAfter(headers);
+  await recordRedditAdapterPause("http_403", retryAfterMs);
   throw new AdapterError("Reddit 403 (anti-bot fence?) — adapter may be degraded", {
     category: "rate-limited",
     retryAfterMs,

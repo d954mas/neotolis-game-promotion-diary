@@ -36,7 +36,7 @@ import {
   redditUserSnapshots,
   redditSubredditsCache,
   redditSubredditSnapshots,
-} from "../../src/lib/sources/reddit/server/schema/index.js";
+} from "../../src/lib/server/db/schema/index.js";
 
 beforeEach(async () => {
   // afterEach TRUNCATE in tests/setup.ts wipes everything between specs;

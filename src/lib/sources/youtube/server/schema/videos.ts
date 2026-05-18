@@ -27,14 +27,11 @@
 // separate refactor.
 //
 // Populated by:
-//   - youtube-channel-context-backfill worker — initial seed on each
-//     video discovered during a channel backfill.
-//   - poll-active / poll-cold workers — UPDATE last_polled_at +
-//     last_poll_status + poll_failure_count after each scheduler-driven
-//     poll, plus snapshot append.
-//   - poll-user worker — same UPDATE on Refresh now button.
-//   - rehab-unavailable cron — same UPDATE on weekly retry of 'not_found'
-//     videos with poll_failure_count < 5.
+//   - youtube-channel-context-backfill worker: initial seed on each video
+//     discovered during a channel backfill.
+//   - refresh queue worker: updates last_polled_at + last_poll_status +
+//     poll_failure_count and appends snapshots.
+//   - poll-active / poll-cold / rehab-unavailable enqueue service_video rows.
 //   - fetch-metadata service (POST /api/youtube/fetch-metadata) on the
 //     "Get from YouTube" button in /events/new — lookup-first; cache hit
 //     returns directly (zero quota), cache miss writes here.

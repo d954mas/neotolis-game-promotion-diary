@@ -55,8 +55,7 @@ import {
 } from "$lib/server/services/channel-state.js";
 import { youtubeChannelAdapterCore as adapter } from "../adapter.js";
 import { getNewestKnownPublishedAt } from "../newest-known.js";
-import { writeSnapshot } from "../snapshots.js";
-import { pickKeyForJob } from "../quota.js";
+import { enqueueServiceVideoStats } from "./enqueue-service-video-stats.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import {
   TIER_BOUNDARY_COLD_MS,
@@ -228,7 +227,7 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
   // 4. Build PollableSource shape for adapter (legacy name; semantically a
   //    channel context now). userId is the quotaUser fingerprint:
   //    - user click: trigger user's id (per-user Google fairness bucket)
-  //    - cron: service-tier constant (one bucket for all cron walks)
+  //    - cron: service_video constant (one bucket for all cron walks)
   let pollResult: {
     events: {
       externalId?: string;
@@ -507,27 +506,9 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
     }
   }
 
-  // 8b. Inline stats fetch for newly-discovered videos. Without this,
-  //     backfill-channel only INSERTs events; stats (view/like/comment)
-  //     would land via a separate poll-active cron tick up to 6 hours
-  //     later — a transient "Manual entry — no polling" UX state on
-  //     every fresh refresh-content click. Mirrors the
-  //     channel-context-backfill pattern that already does
-  //     playlistItems + videos.list in one handler. Quota cost:
-  //     ceil(N/50) extra units where N = new videos collected — 0 in
-  //     steady-state, 1 batch typical for a refresh that surfaced 1-3
-  //     new uploads.
-  //
-  //     Failure modes:
-  //       - pickKeyForJob() returns null → skip silently (self-host
-  //         without keys gets graceful no-op; the per-event polling
-  //         cron's auth_error writeSnapshot path covers the rare
-  //         "keys configured but rejected" case).
-  //       - adapter.pollStatsByVideoId throws → log and continue.
-  //         Events are already INSERTed; stats poll can retry via the
-  //         cron or "Refresh now" button per card.
-  //       - per-video writeSnapshot throws → log and continue; other
-  //         videos in the batch still land.
+  // 8b. Enqueue stats refresh for newly discovered videos. Backfill owns
+  //     source discovery; the service_video lane owns videos.list batching,
+  //     quota accounting, retries, and snapshot writes.
   const insertedExternalIds = Array.from(
     new Set(
       pollResult.events
@@ -536,135 +517,91 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
     ),
   );
   if (insertedExternalIds.length > 0) {
-    const picked = pickKeyForJob();
-    if (picked) {
-      // Opportunistic batch-fill: the videos.list call charges 1 quota
-      // unit per batch regardless of how many ids fit inside (Google
-      // caps batch at 50). When a refresh-content click surfaces only
-      // N<50 new videos, the remaining 50-N capacity is FREE — fill
-      // it with same-channel videos whose stats are stale. User mental
-      // model: "refresh = give me the latest" includes both new events
-      // AND fresh stats on already-known videos. Cron poll-active does
-      // this on its own schedule (every 6h), but a user click between
-      // cron ticks is wasted capacity if we don't fill.
-      //
-      // Filler selection:
-      //   - same channel only (refresh-content is scoped to one channel)
-      //   - publishedAt within cold-tier window (28d) — frozen videos
-      //     don't move stats meaningfully; cron skips them too
-      //   - last_poll_status NOT in unavailable overrides (not_found /
-      //     private / auth_error) — re-polling a confirmed-gone video
-      //     burns quota with no benefit
-      //   - last_polled_at older than FILLER_FRESH_THRESHOLD_MS (or NULL)
-      //     — avoids the rare race where poll-active cron just polled
-      //     the same video; NULLs sort first (never-polled wins).
-      const newSet = new Set(insertedExternalIds);
-      const capacity = YOUTUBE_VIDEOS_BATCH_SIZE - insertedExternalIds.length;
-      let allIdsToPoll: string[] = insertedExternalIds;
-      if (capacity > 0) {
-        const nowMs = Date.now();
-        const coldCutoff = new Date(nowMs - TIER_BOUNDARY_COLD_MS);
-        const freshCutoff = new Date(nowMs - FILLER_FRESH_THRESHOLD_MS);
-        try {
-          const fillerRows = await db
-            .select({ videoId: youtubeVideosTable.videoId })
-            .from(youtubeVideosTable)
-            .where(
-              and(
-                eq(youtubeVideosTable.channelId, channelKey),
-                isNotNull(youtubeVideosTable.publishedAt),
-                gt(youtubeVideosTable.publishedAt, coldCutoff),
-                // Exclude permanent-failure videos.
-                drizzleOr(
-                  isNull(youtubeVideosTable.lastPollStatus),
-                  not(
-                    inArray(
-                      youtubeVideosTable.lastPollStatus,
-                      UNAVAILABLE_POLL_STATUSES as unknown as string[],
-                    ),
+    // Opportunistic batch-fill: the videos.list call charges 1 quota
+    // unit per batch regardless of how many ids fit inside (Google
+    // caps batch at 50). When a refresh-content click surfaces only
+    // N<50 new videos, the remaining 50-N capacity is FREE — fill
+    // it with same-channel videos whose stats are stale. User mental
+    // model: "refresh = give me the latest" includes both new events
+    // AND fresh stats on already-known videos. Cron poll-active does
+    // this on its own schedule (every 6h), but a user click between
+    // cron ticks is wasted capacity if we don't fill.
+    //
+    // Filler selection:
+    //   - same channel only (refresh-content is scoped to one channel)
+    //   - publishedAt within cold-tier window (28d) — frozen videos
+    //     don't move stats meaningfully; cron skips them too
+    //   - last_poll_status NOT in unavailable overrides (not_found /
+    //     private / auth_error) — re-polling a confirmed-gone video
+    //     burns quota with no benefit
+    //   - last_polled_at older than FILLER_FRESH_THRESHOLD_MS (or NULL)
+    //     — avoids the rare race where poll-active cron just polled
+    //     the same video; NULLs sort first (never-polled wins).
+    const newSet = new Set(insertedExternalIds);
+    const capacity = YOUTUBE_VIDEOS_BATCH_SIZE - insertedExternalIds.length;
+    let allIdsToPoll: string[] = insertedExternalIds;
+    if (capacity > 0) {
+      const nowMs = Date.now();
+      const coldCutoff = new Date(nowMs - TIER_BOUNDARY_COLD_MS);
+      const freshCutoff = new Date(nowMs - FILLER_FRESH_THRESHOLD_MS);
+      try {
+        const fillerRows = await db
+          .select({ videoId: youtubeVideosTable.videoId })
+          .from(youtubeVideosTable)
+          .where(
+            and(
+              eq(youtubeVideosTable.channelId, channelKey),
+              isNotNull(youtubeVideosTable.publishedAt),
+              gt(youtubeVideosTable.publishedAt, coldCutoff),
+              // Exclude permanent-failure videos.
+              drizzleOr(
+                isNull(youtubeVideosTable.lastPollStatus),
+                not(
+                  inArray(
+                    youtubeVideosTable.lastPollStatus,
+                    UNAVAILABLE_POLL_STATUSES as unknown as string[],
                   ),
                 ),
-                // Race guard: skip videos polled in the last 5min.
-                drizzleOr(
-                  isNull(youtubeVideosTable.lastPolledAt),
-                  sql`${youtubeVideosTable.lastPolledAt} < ${freshCutoff}`,
-                ),
               ),
-            )
-            .orderBy(asc(youtubeVideosTable.lastPolledAt))
-            .limit(capacity);
-          const filler = fillerRows.map((r) => r.videoId).filter((id) => !newSet.has(id));
-          if (filler.length > 0) {
-            allIdsToPoll = [...insertedExternalIds, ...filler];
-            logger.debug(
-              {
-                jobId: job.id,
-                channelKey,
-                newCount: insertedExternalIds.length,
-                fillerCount: filler.length,
-              },
-              "youtube.backfill.channel: opportunistic batch fill",
-            );
-          }
-        } catch (err) {
-          logger.warn(
+              // Race guard: skip videos polled in the last 5min.
+              drizzleOr(
+                isNull(youtubeVideosTable.lastPolledAt),
+                sql`${youtubeVideosTable.lastPolledAt} < ${freshCutoff}`,
+              ),
+            ),
+          )
+          .orderBy(asc(youtubeVideosTable.lastPolledAt))
+          .limit(capacity);
+        const filler = fillerRows.map((r) => r.videoId).filter((id) => !newSet.has(id));
+        if (filler.length > 0) {
+          allIdsToPoll = [...insertedExternalIds, ...filler];
+          logger.debug(
             {
               jobId: job.id,
               channelKey,
-              err: String((err as Error).message ?? err),
+              newCount: insertedExternalIds.length,
+              fillerCount: filler.length,
             },
-            "youtube.backfill.channel: filler-select failed; proceeding with new ids only",
+            "youtube.backfill.channel: service_video batch fill",
           );
-        }
-      }
-
-      try {
-        const quotaUser = triggerUserId ?? QUOTA_USER_BACKFILL;
-        const statsSnapshots = await adapter.pollStatsByVideoId(allIdsToPoll, quotaUser, picked);
-        for (let i = 0; i < allIdsToPoll.length; i++) {
-          const videoId = allIdsToPoll[i]!;
-          const snap = statsSnapshots[i]!;
-          // Charge 1 unit on the first video of each batch; rest pass
-          // unitsUsed=0 (chargedOnce-per-batch accounting mirrors
-          // poll-active.ts).
-          const unitsThisVideo = i % YOUTUBE_VIDEOS_BATCH_SIZE === 0 ? 1 : 0;
-          try {
-            await writeSnapshot({
-              videoId,
-              metrics:
-                snap.status === "ok" && snap.metrics
-                  ? {
-                      view_count: snap.metrics.view_count ?? 0,
-                      like_count: snap.metrics.like_count ?? 0,
-                      comment_count: snap.metrics.comment_count ?? 0,
-                    }
-                  : null,
-              apiKeyId: picked.apiKeyId,
-              unitsUsed: unitsThisVideo,
-              // user-trigger → user pool; cron-trigger → cron pool.
-              // Mirrors backfill-channel's overall quota attribution.
-              poolKind: triggerUserId ? "user" : "cron",
-              status: snap.status,
-            });
-          } catch (err) {
-            logger.warn(
-              { jobId: job.id, videoId, err: String((err as Error).message ?? err) },
-              "youtube.backfill.channel: inline writeSnapshot failed; continuing",
-            );
-          }
         }
       } catch (err) {
         logger.warn(
-          { jobId: job.id, kind, channelKey, err: String((err as Error).message ?? err) },
-          "youtube.backfill.channel: inline pollStatsByVideoId failed; stats will fetch on next poll cron",
+          {
+            jobId: job.id,
+            channelKey,
+            err: String((err as Error).message ?? err),
+          },
+          "youtube.backfill.channel: filler-select failed; proceeding with new ids only",
         );
       }
-    } else {
-      logger.debug(
-        { jobId: job.id, count: insertedExternalIds.length },
-        "youtube.backfill.channel: SERVICE_YOUTUBE_API_KEYS empty; skipping inline stats fetch (will retry via cron)",
-      );
     }
+
+    const enqueued = await enqueueServiceVideoStats(allIdsToPoll, "backfill");
+    logger.info(
+      { jobId: job.id, channelKey, selected: allIdsToPoll.length, enqueued },
+      "youtube.backfill.channel: service_video rows enqueued",
+    );
   }
 
   // 9. Update channel state. Frontier advance is gated to deep-mode

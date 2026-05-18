@@ -55,7 +55,7 @@ describe("anonymous-401 sweep", () => {
     "/api/sources/:id/restore",
     // refresh-content endpoint ("Pull new content" button on
     // /sources/[id]). Dispatches via registry to per-kind
-    // backfillSource; YouTube enqueues into youtube.backfill.user.
+    // backfillSource; YouTube enqueues into youtube.backfill.channel.
     "/api/sources/:id/refresh-content",
     // events
     "/api/events",

@@ -50,7 +50,7 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
 const { createSource } = await import("../../src/lib/server/services/data-sources.js");
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { youtubeVideos } = await import("../../src/lib/sources/youtube/server/schema/index.js");
+const { youtubeVideos } = await import("../../src/lib/server/db/schema/index.js");
 const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
@@ -113,20 +113,22 @@ describe("zero-quota onboarding (channel cache → events fan-in)", () => {
     // Re-trigger by simulating onSourceCreated path — call the adapter
     // hook directly with explicit target.
     const adapterModule = await import("../../src/lib/sources/youtube/server/index.js");
-    await adapterModule.youtubeAdapter.onSourceCreated!(
-      {
-        id: src.id,
-        userId: newUser.id,
-        autoImport: true,
-        handleUrl: src.handleUrl,
-        metadata: {},
-        kind: "youtube_channel",
-        channelId,
-        backfillTargetSince: new Date("2026-01-01T00:00:00Z"),
-        isOwnedByMe: true,
-      },
-      { backfillWindow: "30d" },
-    );
+    await db.transaction(async (tx) => {
+      await adapterModule.youtubeAdapter.onSourceCreated!(
+        {
+          id: src.id,
+          userId: newUser.id,
+          autoImport: true,
+          handleUrl: src.handleUrl,
+          metadata: {},
+          kind: "youtube_channel",
+          channelId,
+          backfillTargetSince: new Date("2026-01-01T00:00:00Z"),
+          isOwnedByMe: true,
+        },
+        { backfillWindow: "30d", tx },
+      );
+    });
 
     // Events landed for new subscriber, filtered by target_since.
     const seededEvents = await db
