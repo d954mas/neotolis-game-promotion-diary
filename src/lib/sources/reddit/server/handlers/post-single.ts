@@ -20,7 +20,7 @@
 //   - /comments/<id>.json returns [submissionListing, commentsListing]
 //     (single post + full comment tree).
 //   - /api/info.json?id=t3_X returns a Listing with up to 100 t3 children.
-// We use /api/info because: (a) it's the same endpoint handlePostBatch
+// We use /api/info because: (a) it's the same endpoint handlePostsRefresh
 // uses, so paste + cron + refresh-now all share one Reddit shape, (b)
 // it returns ALL fields paste flow needs (selftext, score, num_comments,
 // permalink, title, author, subreddit) — we never consumed the comments

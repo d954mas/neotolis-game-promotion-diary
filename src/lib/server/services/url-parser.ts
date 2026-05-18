@@ -5,9 +5,8 @@
 // First step in the validate-first ingest pipeline. Performs zero I/O
 // and zero DB writes — just URL parsing, host classification, and
 // canonicalization. Downstream callers fire oEmbed (YouTube) or
-// /comments/<id>.json (Reddit) only after this returns a non-
-// `unsupported` kind, and INSERT only after the per-kind validation
-// succeeds.
+// /api/info.json (Reddit) only after this returns a non-`unsupported`
+// kind, and INSERT only after the per-kind validation succeeds.
 //
 // Internally:
 //

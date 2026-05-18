@@ -242,8 +242,11 @@ export async function getQueueDepth(): Promise<RedditQueueDepthRow[]> {
  *   - total - "how many entries we processed today"
  *   - byType.sub_poll - sub listing walks
  *   - byType.author_poll - author submitted-page walks
- *   - byType.post_single - paste-driven single-post fetches
- *   - byType.post_batch - service post-refresh batches
+ *   - byType.post_single - post snapshot fetches (paste + refresh-now +
+ *                           service cron all collapsed into one type
+ *                           after the Phase 03.1 storage refactor; the
+ *                           queue_name in getQueueDepth distinguishes
+ *                           service_post vs user_post lanes)
  *   - adapterDegradedSince - last `reddit.adapter_degraded` audit
  *                                     timestamp within the 24h window
  *                                     (403-burst warning), or null

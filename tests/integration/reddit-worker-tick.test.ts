@@ -52,9 +52,9 @@ vi.mock("../../src/lib/sources/reddit/server/handlers/author-poll.js", async () 
   };
 });
 
-vi.mock("../../src/lib/sources/reddit/server/handlers/post-batch.js", async () => {
+vi.mock("../../src/lib/sources/reddit/server/handlers/posts-refresh.js", async () => {
   return {
-    handlePostBatch: async (args: { postIds: string[]; userId: string | null }) => {
+    handlePostsRefresh: async (args: { postIds: string[]; userId: string | null }) => {
       postBatchCalls.push({ postIds: args.postIds, userId: args.userId });
       return { presentIds: args.postIds, missingIds: [] };
     },
@@ -271,7 +271,7 @@ describe("Reddit worker tick — claim + dispatch", () => {
     expect(result.processedQueue).toBe("user_post");
     expect(result.processedType).toBe("post_single");
     expect(result.processedId).toBe(userPostId);
-    // Post lanes dispatch through handlePostBatch (claim-time batching
+    // Post lanes dispatch through handlePostsRefresh (claim-time batching
     // via /api/info). A single-row claim still flows the same code path
     // — postIds carries one entry. handlePostSingle is reserved for
     // the synchronous paste-flow caller, not the worker.
@@ -371,10 +371,10 @@ describe("Reddit worker tick — dispatch by type", () => {
     expect(authorPollCalls).toEqual([{ handle: "rickastleyyt", userId: null }]);
   });
 
-  it("claim-time batching: 3 post_single rows on service_post → ONE handlePostBatch call", async () => {
+  it("claim-time batching: 3 post_single rows on service_post → ONE handlePostsRefresh call", async () => {
     // Per-lane maxBatchSize=100 on the service_post lane: a single
     // worker tick claims up to 100 pending post_single rows and
-    // dispatches them as ONE /api/info call (handlePostBatch with the
+    // dispatches them as ONE /api/info call (handlePostsRefresh with the
     // collected post_ids array). This is the YouTube-shaped claim-time
     // batching that replaced the pre-refactor `post_batch` bundled
     // payload.

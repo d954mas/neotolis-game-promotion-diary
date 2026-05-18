@@ -1,9 +1,18 @@
-// Reddit post_batch handler — refresh up to 100 posts in one HTTP call.
+// Reddit posts-refresh handler — fetch 1..100 posts in one HTTP call.
 //
-// Triggered by the service_post cron for posts whose snapshots are due
-// (young <24h on a 6h refresh cadence, or missing-baseline backfill at
-// the 24h mark) and by user-driven "refresh all" bulk actions on the
-// user_post lane.
+// Single entry point for the worker's post-fetch paths after the
+// Phase 03.1 storage refactor. Triggered by:
+//   - service_post cron rows (snapshot is due: young <24h on a 6h
+//     refresh cadence, or missing-baseline backfill at the 24h mark);
+//   - user_post refresh-now rows.
+// Both lanes carry `type='post_single'` per-row in adapter_refresh_queue;
+// the worker tick claims up to 100 rows per lane and passes their
+// `post_id` array here — one /api/info HTTP serves all of them.
+//
+// (The pre-refactor name was `handlePostBatch` and the queue type was
+// `post_batch` with a bundled payload. Per-row + claim-time batching
+// makes 1 vs N rows identical at the handler boundary, so the
+// `*Batch` suffix is misleading.)
 //
 // Endpoint: /api/info.json?id=t3_a,t3_b,... (up to 100 ids per request).
 //
@@ -72,7 +81,7 @@ interface ListingResponse {
 
 const MAX_BATCH = 100;
 
-export async function handlePostBatch(args: {
+export async function handlePostsRefresh(args: {
   postIds: string[];
   userId: string | null;
   pacer?: "acquire" | "already-acquired";
@@ -81,10 +90,11 @@ export async function handlePostBatch(args: {
     return { presentIds: [], missingIds: [] };
   }
   if (args.postIds.length > MAX_BATCH) {
-    // Caller invariant — the cron / route layer must chunk into ≤100.
-    // Surfacing as permanent so the queue row dead_letters instead of
-    // bashing Reddit with an oversized id list (would 414 anyway).
-    throw new AdapterError(`post_batch received ${args.postIds.length} ids; max ${MAX_BATCH}`, {
+    // Caller invariant — the worker's per-lane maxBatchSize must cap
+    // at MAX_BATCH (Reddit's /api/info limit). Surfacing as permanent
+    // so the queue row dead_letters instead of bashing Reddit with an
+    // oversized id list (would 414 anyway).
+    throw new AdapterError(`posts-refresh received ${args.postIds.length} ids; max ${MAX_BATCH}`, {
       category: "permanent",
     });
   }
@@ -214,7 +224,7 @@ export async function handlePostBatch(args: {
       present: presentIds.length,
       missing: missingIds.length,
     },
-    "reddit post_batch: complete",
+    "reddit posts-refresh: complete",
   );
 
   return { presentIds, missingIds };

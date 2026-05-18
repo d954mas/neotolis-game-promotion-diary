@@ -594,7 +594,7 @@ export interface EnrichmentResult {
  *
  * Side effects vary per adapter. YouTube's preview is a keyless oEmbed
  * read — no DB write, no cap consumed. Reddit's preview is the same
- * /comments/<id>.json call the paste flow uses (see fetchEventPreviewMetadata
+ * /api/info.json call the paste flow uses (see fetchEventPreviewMetadata
  * in $lib/sources/reddit/server/index.ts) — it UPSERTs the reddit_posts /
  * reddit_users / reddit_subreddits caches, writes a snapshot row, AND
  * writes the user_post cap-counter row gated by enforceAdapterUserQuota.

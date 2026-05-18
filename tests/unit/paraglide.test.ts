@@ -125,7 +125,6 @@ describe("paraglide i18n", () => {
       "admin_reddit_queue_block_title",
       "admin_reddit_section_title",
       "admin_reddit_type_author_poll",
-      "admin_reddit_type_post_batch",
       "admin_reddit_type_post_single",
       "admin_reddit_type_sub_poll",
       "app_title",

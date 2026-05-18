@@ -35,7 +35,7 @@ import {
 } from "$lib/server/services/adapter-lane-worker.js";
 import { handleSubPoll } from "./sub-poll.js";
 import { handleAuthorPoll } from "./author-poll.js";
-import { handlePostBatch } from "./post-batch.js";
+import { handlePostsRefresh } from "./posts-refresh.js";
 import { resolveOperatorUserId, __resetOperatorIdCacheForTest } from "../operator-resolver.js";
 import { acquireRedditPacerSlotWith } from "../pacer.js";
 
@@ -163,11 +163,13 @@ async function claimRedditPacerSlot(
  *  Listing lanes (service_source / user_source) always carry exactly
  *  one row (maxBatchSize=1 by config). Post lanes
  *  (service_post / user_post) may carry up to 100; we collect their
- *  post_ids and make ONE `/api/info` call via handlePostBatch.
+ *  post_ids and make ONE `/api/info` call via handlePostsRefresh.
  *
  *  All rows in a single dispatch call belong to the same queue lane
  *  (the factory claims them per-lane). Mixing types within a single
- *  claimed batch would be a factory-level bug. */
+ *  claimed batch would be a factory-level bug — sub_poll / author_poll
+ *  paths assert `rows.length === 1` defensively in case a future
+ *  maxBatchSize misconfig (>1 for a listing lane) leaks through. */
 async function dispatchByLane(
   rows: AdapterLaneWorkerRow[],
   ctx: AdapterLaneDispatchContext<RedditPacerPermit>,
@@ -176,8 +178,18 @@ async function dispatchByLane(
   const pacer = ctx.permit?.pacer ?? "acquire";
   const first = rows[0]!;
 
-  // Listing lanes: maxBatchSize=1 ensures one row exactly.
+  // Listing lanes: maxBatchSize=1 ensures one row exactly. We assert
+  // here because the factory has no per-type batch enforcement — a
+  // misconfigured policy that sets `maxBatchSize.service_source = 2`
+  // would silently waste the second claim. Permanent error dead-
+  // letters the rows and surfaces the bug loudly.
   if (first.type === "sub_poll") {
+    if (rows.length > 1) {
+      throw new AdapterError(
+        `sub_poll dispatch claimed ${rows.length} rows; listing lanes require maxBatchSize=1`,
+        { category: "permanent" },
+      );
+    }
     const sub = first.payload?.sub as string | undefined;
     if (typeof sub !== "string") {
       throw new AdapterError("sub_poll payload missing 'sub'", { category: "permanent" });
@@ -186,6 +198,12 @@ async function dispatchByLane(
     return;
   }
   if (first.type === "author_poll") {
+    if (rows.length > 1) {
+      throw new AdapterError(
+        `author_poll dispatch claimed ${rows.length} rows; listing lanes require maxBatchSize=1`,
+        { category: "permanent" },
+      );
+    }
     const handle = first.payload?.handle as string | undefined;
     if (typeof handle !== "string") {
       throw new AdapterError("author_poll payload missing 'handle'", {
@@ -210,10 +228,11 @@ async function dispatchByLane(
       }
       postIds.push(postId);
     }
-    // For a single-row claim we still go through handlePostBatch — same
-    // endpoint, identical behavior; cache writes are idempotent. This
-    // keeps ONE code path for "fetch post info via /api/info".
-    await handlePostBatch({ postIds, userId: first.userId, pacer });
+    // Single-row claims still flow through handlePostsRefresh — same
+    // endpoint, identical behavior; cache writes are idempotent. One
+    // code path for "fetch post info via /api/info" regardless of
+    // batch size.
+    await handlePostsRefresh({ postIds, userId: first.userId, pacer });
     return;
   }
 

@@ -150,7 +150,7 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
     for (let i = 0; i < 50; i++) {
       await db.execute(sql`
         INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority)
-        VALUES ('reddit_account', 'service_post', 'post_batch', '{}'::jsonb, NULL, 0)
+        VALUES ('reddit_account', 'service_post', 'post_single', '{}'::jsonb, NULL, 0)
       `);
     }
     const result = await checkRedditUserCap(db, userA, "post-refreshes");
@@ -163,7 +163,7 @@ describe("Reddit user cap (Phase 03.1 DV-RDT-7)", () => {
     for (let i = 0; i < 50; i++) {
       await db.execute(sql`
         INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority)
-        VALUES ('reddit_account', 'service_post', 'post_batch', '{}'::jsonb, ${userA}, 0)
+        VALUES ('reddit_account', 'service_post', 'post_single', '{}'::jsonb, ${userA}, 0)
       `);
     }
     const result = await checkRedditUserCap(db, userA, "post-refreshes");
