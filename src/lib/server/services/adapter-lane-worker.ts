@@ -12,7 +12,7 @@
 // burn attempts.
 
 import { sql } from "drizzle-orm";
-import { db, type DbOrTx, type Tx } from "../db/client.js";
+import { db, type Tx } from "../db/client.js";
 import { logger } from "../logger.js";
 import { AdapterError } from "$lib/sources/errors.js";
 
