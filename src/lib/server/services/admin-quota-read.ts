@@ -53,12 +53,7 @@ import {
 // Re-export types so the /admin Svelte components (which can only
 // type-import from this server-service module, not from reddit/server
 // directly) can reference the same shapes the loader returns.
-export type {
-  RedditQueueDepthRow,
-  RedditDailyByType,
-  YoutubeQueueDepthRow,
-  YoutubeDailyByType,
-};
+export type { RedditQueueDepthRow, RedditDailyByType, YoutubeQueueDepthRow, YoutubeDailyByType };
 
 export interface QuotaKeyRow {
   /** sha-8 hash of the operator's API key — stable identifier across boots. */

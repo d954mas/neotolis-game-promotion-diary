@@ -148,9 +148,9 @@ sourcesRoutes.post(
  *  other kind passes through unchanged. Throws AppError 422 when the URL
  *  cannot be classified — the UI surfaces this as
  *  `sources_error_not_a_reddit_url`. */
-function resolveSyntheticRedditKind(
-  body: z.infer<typeof createSourceSchema>,
-): z.infer<typeof createSourceSchema> & {
+function resolveSyntheticRedditKind(body: z.infer<typeof createSourceSchema>): z.infer<
+  typeof createSourceSchema
+> & {
   kind: Exclude<z.infer<typeof sourceKindEnum>, "reddit">;
 } {
   if (body.kind !== "reddit") {

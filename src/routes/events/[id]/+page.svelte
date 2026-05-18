@@ -241,8 +241,8 @@
         {/if}
       {:else}
         <p class="reddit-pending">
-          Reddit post details not yet fetched — click <strong>Refresh now</strong> above or wait for
-          the next worker tick.
+          Reddit post details not yet fetched — click <strong>Refresh now</strong> above or wait for the
+          next worker tick.
         </p>
       {/if}
     </section>
