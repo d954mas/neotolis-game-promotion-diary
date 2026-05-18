@@ -577,6 +577,41 @@ async function enforceRedditSourceActionQuota(args: {
   });
 }
 
+/** Shape consumed by /events/[id] page UI. Cross-source `+page.server.ts`
+ *  imports `loadRedditEventDetailPreview` from this barrel rather than
+ *  reaching into `reddit_posts` directly — keeps the per-source DB schema
+ *  encapsulated behind the adapter. NULL means the worker / paste flow
+ *  hasn't populated the row yet; the UI falls back to event.title alone. */
+export interface RedditEventDetailPreview {
+  author: string | null;
+  subreddit: string;
+  permalink: string;
+  title: string;
+  metadata: unknown;
+}
+
+/** Read the `reddit_posts` cache row for the event-detail page preview
+ *  (link_url, body_excerpt, is_self, flair carried in `metadata`). Accepts
+ *  either bare ("abc123") or t3-form ("t3_abc123") external id and
+ *  normalises to the t3 form the cache PK uses. */
+export async function loadRedditEventDetailPreview(
+  externalId: string,
+): Promise<RedditEventDetailPreview | null> {
+  const tFormId = externalId.startsWith("t3_") ? externalId : `t3_${externalId}`;
+  const [r] = await db
+    .select({
+      author: redditPosts.author,
+      subreddit: redditPosts.subreddit,
+      permalink: redditPosts.permalink,
+      title: redditPosts.title,
+      metadata: redditPosts.metadata,
+    })
+    .from(redditPosts)
+    .where(eq(redditPosts.postId, tFormId))
+    .limit(1);
+  return r ?? null;
+}
+
 /** Lookup: does the user have an owned, non-soft-deleted reddit_account
  *  source whose metadata.username matches the post author? Tenant-scoped
  *  by construction (filters by userId). */

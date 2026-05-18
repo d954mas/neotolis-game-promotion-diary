@@ -1,8 +1,6 @@
 import type { Actions, PageServerLoad } from "./$types";
 import { fail, redirect } from "@sveltejs/kit";
-import { allAdapters } from "$lib/sources/registry.js";
-import { isRedditConfigured } from "$lib/sources/reddit/server/credentials.js";
-import { redditParseSourceUrl } from "$lib/sources/reddit/server/url.js";
+import { allAdapters, getAdapter, hasAdapter } from "$lib/sources/registry.js";
 import { createSource } from "$lib/server/services/data-sources.js";
 import { AppError } from "$lib/server/services/errors.js";
 
@@ -14,7 +12,7 @@ import { AppError } from "$lib/server/services/errors.js";
  * carry `aria-disabled="true"` and `tabindex="-1"`.
  *
  * Reddit kinds (`reddit_account` + `reddit_subreddit`) are enabled iff
- * `isRedditConfigured()` is true (env.REDDIT_USER_AGENT non-empty). When
+ * the Reddit adapter reports `observability.auth.isOperatorConfigured` (env.REDDIT_USER_AGENT non-empty). When
  * the operator has not configured Reddit (e.g., self-host before env
  * setup), Reddit chips remain disabled with a "not configured" tooltip
  * (D-RDT-AUTH-EMPTY); the form's auto-detect path still fires server-side
@@ -28,7 +26,12 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   if (!locals.user) {
     throw redirect(303, `/login?next=${encodeURIComponent(url.pathname)}`);
   }
-  const redditOperatorConfigured = isRedditConfigured();
+  // Read configured-ness through the adapter contract instead of a
+  // direct env probe — same fact, no per-source import leak into the
+  // SvelteKit loader.
+  const redditOperatorConfigured = hasAdapter("reddit_account")
+    ? getAdapter("reddit_account").observability.auth.isOperatorConfigured
+    : false;
   return {
     defaultIsOwnedByMe: true,
     defaultAutoImport: true,
@@ -88,7 +91,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
  * MUST have selected a kind via the chip picker; we fall through to
  * the user-selected kind path.
  *
- * Reddit specifically: when isRedditConfigured() is false we still
+ * Reddit specifically: when the adapter reports not-configured we still
  * accept the auto-detect path so the typed error
  * (`reddit_not_configured` 422) flows through to the UI; the user sees
  * the "Reddit not configured" hint AND a structured 422 toast.
@@ -153,12 +156,14 @@ export const actions: Actions = {
       // No adapter auto-detected. Fall back to the user-picked kind from
       // the chip selector — preserves the YouTube flow + future
       // platforms that don't implement parseSourceUrl. The synthetic
-      // "reddit" picker entry needs a second pass through redditParseSourceUrl
+      // "reddit" picker entry needs a second pass through the Reddit adapter's parseSourceUrl
       // — if the URL was already auto-detectable the iterator above would
       // have caught it, so reaching this branch with kindRaw="reddit"
       // means the input is not a recognizable Reddit URL.
       if (kindRaw === "reddit") {
-        const parsed = redditParseSourceUrl(handleUrl);
+        const parsed = hasAdapter("reddit_account")
+          ? (getAdapter("reddit_account").parseSourceUrl?.(handleUrl) ?? null)
+          : null;
         if (parsed === null) {
           return fail(422, {
             error: "invalid_reddit_url",

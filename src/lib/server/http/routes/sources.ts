@@ -37,7 +37,6 @@ import { mapErr, type RouteVars } from "./_shared.js";
 import { writeAuditStrict } from "../../audit.js";
 import { AppError, NotFoundError } from "../../services/errors.js";
 import { getAdapter } from "$lib/sources/registry.js";
-import { redditParseSourceUrl } from "$lib/sources/reddit/server/url.js";
 
 // `"reddit"` is a synthetic, request-only kind. The UI picker on
 // /sources/new sends it when the user wants the platform to choose between
@@ -158,7 +157,10 @@ function resolveSyntheticRedditKind(body: z.infer<typeof createSourceSchema>): z
       kind: Exclude<z.infer<typeof sourceKindEnum>, "reddit">;
     };
   }
-  const parsed = redditParseSourceUrl(body.handleUrl);
+  // parseSourceUrl is a SourceAdapter capability; reading it through the
+  // registry keeps the cross-source route from importing per-adapter
+  // internals. Reddit is the only adapter that declares it today.
+  const parsed = getAdapter("reddit_account").parseSourceUrl?.(body.handleUrl) ?? null;
   if (parsed === null) {
     throw new AppError(
       "URL does not look like a Reddit subreddit or user profile",

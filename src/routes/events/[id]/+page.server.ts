@@ -9,10 +9,11 @@ import {
   loadVideoDataForEvents,
 } from "$lib/server/dto.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
-import { eq } from "drizzle-orm";
-import { db } from "$lib/server/db/client.js";
-import { redditPosts } from "$lib/sources/reddit/server/schema/index.js";
 import { allAdapters } from "$lib/sources/registry.js";
+import {
+  loadRedditEventDetailPreview,
+  type RedditEventDetailPreview,
+} from "$lib/sources/reddit/server/index.js";
 
 /**
  * /events/[id] loader — full detail surface.
@@ -52,32 +53,12 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
       gameIds.length > 0 ? (games.find((g) => g.id === gameIds[0]) ?? null) : null;
     const dto = toEventDto(row, gameIds, pollData);
 
-    // Reddit-specific cache lookup for the detail-page preview. The
-    // reddit_posts row is a metadata-thin cache (link_url, body_excerpt,
-    // is_self, flair) populated by the worker / paste flow. NULL when
-    // the worker hasn't drained the queue for this post yet — UI then
-    // falls back to event.title alone.
-    let redditPost: {
-      author: string | null;
-      subreddit: string;
-      permalink: string;
-      title: string;
-      metadata: unknown;
-    } | null = null;
+    // Reddit-specific detail-page preview. The adapter owns the DB
+    // query against `reddit_posts`; this loader stays at routes-call-
+    // adapters granularity (no direct schema imports here).
+    let redditPost: RedditEventDetailPreview | null = null;
     if (row.kind === "reddit_post" && row.externalId !== null) {
-      const tFormId = row.externalId.startsWith("t3_") ? row.externalId : `t3_${row.externalId}`;
-      const [r] = await db
-        .select({
-          author: redditPosts.author,
-          subreddit: redditPosts.subreddit,
-          permalink: redditPosts.permalink,
-          title: redditPosts.title,
-          metadata: redditPosts.metadata,
-        })
-        .from(redditPosts)
-        .where(eq(redditPosts.postId, tFormId))
-        .limit(1);
-      if (r) redditPost = r;
+      redditPost = await loadRedditEventDetailPreview(row.externalId);
     }
 
     // Adapter-driven feed enrichment. Mirrors /feed loader's overlay so
