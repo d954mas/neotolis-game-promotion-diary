@@ -221,7 +221,9 @@
           // which covers the kind=reddit_post / kind=youtube_video
           // gate when the user typed a bad URL.
           errorText =
-            firstField === "notes" ? m.ingest_error_notes_too_long() : m.ingest_error_malformed_url();
+            firstField === "notes"
+              ? m.ingest_error_notes_too_long()
+              : m.ingest_error_malformed_url();
         } else {
           errorText = m.error_server_generic();
         }
