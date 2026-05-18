@@ -99,6 +99,7 @@
   "common_kind_reddit_subreddit": "Subreddit",
 
   "sources_new_reddit_input_hint": "Paste a Reddit URL (e.g. https://reddit.com/r/IndieDev or https://reddit.com/user/handle) or use raw prefixes r/IndieDev or u/handle.",
+  "sources_new_reddit_listing_limit": "Reddit caps each subreddit and user listing at ~1000 most recent posts. Older posts can't be backfilled — Reddit doesn't expose them through the public API.",
   "sources_new_reddit_disabled": "Reddit is not configured by the operator (REDDIT_USER_AGENT env empty).",
 
   "quota_banner_reddit_tab_title": "Reddit",

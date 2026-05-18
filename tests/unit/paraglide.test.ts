@@ -508,6 +508,7 @@ describe("paraglide i18n", () => {
       "sources_kind_disabled_tooltip",
       "sources_new_reddit_disabled",
       "sources_new_reddit_input_hint",
+      "sources_new_reddit_listing_limit",
       "sources_owned_by_me",
       "sources_owned_by_other",
       "sources_status_auto_off",

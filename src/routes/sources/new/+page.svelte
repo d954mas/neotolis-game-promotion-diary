@@ -320,6 +320,7 @@
 
     {#if showRedditHint}
       <p class="hint">{m.sources_new_reddit_input_hint()}</p>
+      <p class="hint hint-warning">⚠ {m.sources_new_reddit_listing_limit()}</p>
       {#if !redditOperatorConfigured}
         <p class="hint hint-warning">{m.sources_new_reddit_disabled()}</p>
       {/if}
