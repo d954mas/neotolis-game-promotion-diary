@@ -85,15 +85,21 @@
   let submitting = $state(false);
   let formError = $state<string | null>(null);
 
-  // Initial-backfill window for YouTube channels. Defaults to '30d'. The
-  // picker is conditionally rendered ONLY when the chosen kind is
-  // 'youtube_channel' AND auto-import is ON; toggling either off collapses
-  // the picker AND resets the value to '30d'. The reset is what the server
-  // expects (createSource defaults undefined → '30d' but resetting here
-  // keeps the form-state clean if the user toggles back on).
+  // Initial-backfill window. Defaults to '30d'. Safety feature — without
+  // a hard cap, registering an active source with auto-import ON could
+  // pull "everything" into the user's feed accidentally.
+  //
+  // The picker is rendered for ANY enabled, ingestable kind (driven by
+  // kindMatrix; disabled kinds without an adapter aren't pickable).
+  // Toggling auto_import off OR switching to a disabled kind collapses
+  // the picker and resets the value to '30d' so the form-state stays
+  // clean if the user toggles back on.
   type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
   let backfillWindow = $state<BackfillWindow>("30d");
-  const showPicker = $derived(selectedKind === "youtube_channel" && autoImport);
+  const selectedKindEnabled = $derived(
+    kindMatrix.find((k) => k.value === selectedKind)?.disabled !== true,
+  );
+  const showPicker = $derived(selectedKindEnabled && autoImport);
 
   // No auto-link between is_owned_by_me and auto_import — auto-import is
   // available for any channel, not just owned ones. Both checkboxes are
