@@ -366,7 +366,12 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
     set.add(r.username.toLowerCase());
   }
 
-  let inserted = 0;
+  // Collect every eligible (post × subscriber) pair into one array, then
+  // issue a single multi-row INSERT. Pre-fix this loop did per-pair
+  // INSERTs with .returning() — ~500 round-trips on a 100-post × 5-sub
+  // fan-out. Batched, it's one INSERT regardless of fan-out size.
+  type EventInsert = typeof events.$inferInsert;
+  const candidates: EventInsert[] = [];
   for (const t3 of t3s) {
     const fullId = `t3_${t3.id}`;
     const author = t3.author === "[deleted]" ? null : t3.author.toLowerCase();
@@ -374,6 +379,7 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
     const permalink = t3.permalink.startsWith("http")
       ? t3.permalink
       : `https://www.reddit.com${t3.permalink}`;
+    const subredditLower = t3.subreddit.toLowerCase();
 
     for (const sub_row of subscribers) {
       const key = `${sub_row.userId}|${sub_row.id}|${fullId}`;
@@ -381,41 +387,34 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
 
       // Per-subscriber backfill window — every subscriber chose a depth
       // (everything / 1y / 90d / 30d / 7d / 1d) at /sources/new time.
-      // The walker fetches up to Reddit's ~1000-item public cap into
-      // the cross-tenant reddit_posts cache, but each subscriber only
-      // gets events back to their personal target. NULL means no
-      // restriction (default for legacy rows pre-backfill_target_since).
       if (sub_row.backfillTargetSince !== null && submittedAt < sub_row.backfillTargetSince) {
         continue;
       }
 
-      // Strict author-match — see ownedHandlesByUser computation above
-      // for the rationale. `author` is already lowercased on entry.
       const authorIsMe =
         author !== null && (ownedHandlesByUser.get(sub_row.userId)?.has(author) ?? false);
 
-      const ins = await db
-        .insert(events)
-        .values({
-          userId: sub_row.userId,
-          sourceId: sub_row.id,
-          kind: "reddit_post",
-          authorIsMe,
-          occurredAt: submittedAt,
-          title: t3.title,
-          url: permalink,
-          externalId: fullId,
-          metadata: {
-            subreddit: t3.subreddit.toLowerCase(),
-            author,
-          },
-        })
-        .onConflictDoNothing()
-        .returning({ id: events.id });
-      if (ins.length > 0) inserted++;
+      candidates.push({
+        userId: sub_row.userId,
+        sourceId: sub_row.id,
+        kind: "reddit_post",
+        authorIsMe,
+        occurredAt: submittedAt,
+        title: t3.title,
+        url: permalink,
+        externalId: fullId,
+        metadata: { subreddit: subredditLower, author },
+      });
     }
   }
-  return inserted;
+
+  if (candidates.length === 0) return 0;
+  const ins = await db
+    .insert(events)
+    .values(candidates)
+    .onConflictDoNothing()
+    .returning({ id: events.id });
+  return ins.length;
 }
 
 /** When a sub returns 404 / private, flag every auto_import subscriber's

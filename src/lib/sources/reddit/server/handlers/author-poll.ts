@@ -291,7 +291,11 @@ async function fanOutToSubscribers(
     );
   const existingSet = new Set(existingRows.map((r) => `${r.userId}|${r.sourceId}|${r.externalId}`));
 
-  let inserted = 0;
+  // Collect every eligible pair, then one multi-row INSERT — matches
+  // the sub-poll.ts pattern. Pre-fix per-pair INSERT loops were O(N*M)
+  // round-trips on each listing fetch.
+  type EventInsert = typeof events.$inferInsert;
+  const candidates: EventInsert[] = [];
   for (const t3 of t3s) {
     const fullId = `t3_${t3.id}`;
     const author = t3.author === "[deleted]" ? null : t3.author.toLowerCase();
@@ -299,46 +303,42 @@ async function fanOutToSubscribers(
     const permalink = t3.permalink.startsWith("http")
       ? t3.permalink
       : `https://www.reddit.com${t3.permalink}`;
+    const subredditLower = t3.subreddit.toLowerCase();
 
     for (const sub_row of autoImportSubs) {
       const key = `${sub_row.userId}|${sub_row.id}|${fullId}`;
       if (existingSet.has(key)) continue;
 
       // Per-subscriber backfill window — see sub-poll.ts for the same
-      // filter on the subreddit fan-out path. Walker fetches up to
-      // Reddit's ~1000-item cap into reddit_posts; each subscriber's
-      // events only go back to their personal backfillTargetSince.
+      // filter on the subreddit fan-out path.
       if (sub_row.backfillTargetSince !== null && submittedAt < sub_row.backfillTargetSince) {
         continue;
       }
 
-      const authorIsMe = sub_row.isOwnedByMe;
-
-      const ins = await db
-        .insert(events)
-        .values({
-          userId: sub_row.userId,
-          sourceId: sub_row.id,
-          kind: "reddit_post",
-          authorIsMe,
-          occurredAt: submittedAt,
-          title: t3.title,
-          url: permalink,
-          externalId: fullId,
-          metadata: {
-            subreddit: t3.subreddit.toLowerCase(),
-            author,
-          },
-        })
-        .onConflictDoNothing()
-        .returning({ id: events.id });
-      if (ins.length > 0) inserted++;
+      candidates.push({
+        userId: sub_row.userId,
+        sourceId: sub_row.id,
+        kind: "reddit_post",
+        authorIsMe: sub_row.isOwnedByMe,
+        occurredAt: submittedAt,
+        title: t3.title,
+        url: permalink,
+        externalId: fullId,
+        metadata: { subreddit: subredditLower, author },
+      });
     }
   }
+
+  if (candidates.length === 0) return 0;
+  const ins = await db
+    .insert(events)
+    .values(candidates)
+    .onConflictDoNothing()
+    .returning({ id: events.id });
   // Silence unused-parameter lint (kept for parity with sub-poll and
   // future use — e.g. structured handle-specific audit metadata).
   void handle;
-  return inserted;
+  return ins.length;
 }
 
 async function flagNotFoundOnSubscribers(handle: string, errorKind: "not-found"): Promise<void> {
