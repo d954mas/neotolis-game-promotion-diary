@@ -652,89 +652,11 @@ describe("handleDeletionPropagationCron — 48h author purge + audit", () => {
     );
   });
 
-  it("queue cleanup is cross-adapter — both reddit and youtube done/dead_letter rows >7d are purged", async () => {
-    // The deletion-propagation cron also drains stale adapter_refresh_queue
-    // rows across ALL adapter_kind values (not just reddit). Pre-fix the
-    // DELETE was filtered to `adapter_kind = 'reddit_account'`, which
-    // left YouTube's done/dead_letter rows growing forever. This test
-    // pins the cross-adapter behaviour so a future regression bringing
-    // the filter back gets caught.
-    const adminEmail = `admin-${uniq()}@test.local`;
-    const adminId = await seedAdminUser(adminEmail);
-    // Reddit done row, last_attempt_at 8 days ago → SHOULD be deleted.
-    await db.execute(sql`
-      INSERT INTO adapter_refresh_queue
-        (adapter_kind, queue_name, type, payload, user_id, priority, status, last_attempt_at)
-      VALUES
-        ('reddit_account', 'service_post', 'post_single',
-         '{"post_id":"t3_stale_rd"}'::jsonb, NULL, 0, 'done',
-         NOW() - INTERVAL '8 days')
-    `);
-    // YouTube done row, last_attempt_at 9 days ago → SHOULD be deleted
-    // (this is the case the pre-fix Reddit-only filter would skip).
-    await db.execute(sql`
-      INSERT INTO adapter_refresh_queue
-        (adapter_kind, queue_name, type, payload, user_id, priority, status, last_attempt_at)
-      VALUES
-        ('youtube_channel', 'user_video', 'video_stats',
-         '{"video_id":"abc"}'::jsonb, NULL, 0, 'done',
-         NOW() - INTERVAL '9 days')
-    `);
-    // YouTube dead_letter row, 10 days ago → SHOULD be deleted.
-    await db.execute(sql`
-      INSERT INTO adapter_refresh_queue
-        (adapter_kind, queue_name, type, payload, user_id, priority, status, last_attempt_at)
-      VALUES
-        ('youtube_channel', 'user_video', 'video_stats',
-         '{"video_id":"def"}'::jsonb, NULL, 0, 'dead_letter',
-         NOW() - INTERVAL '10 days')
-    `);
-    // Young done row (< 7 days) → MUST be preserved (audit window).
-    await db.execute(sql`
-      INSERT INTO adapter_refresh_queue
-        (adapter_kind, queue_name, type, payload, user_id, priority, status, last_attempt_at)
-      VALUES
-        ('youtube_channel', 'user_video', 'video_stats',
-         '{"video_id":"young"}'::jsonb, NULL, 0, 'done',
-         NOW() - INTERVAL '3 days')
-    `);
-    // Pending row of any age → MUST be preserved (not terminal).
-    await db.execute(sql`
-      INSERT INTO adapter_refresh_queue
-        (adapter_kind, queue_name, type, payload, user_id, priority, status, last_attempt_at)
-      VALUES
-        ('reddit_account', 'service_post', 'post_single',
-         '{"post_id":"pending_old"}'::jsonb, NULL, 0, 'pending',
-         NOW() - INTERVAL '30 days')
-    `);
-
-    process.env.ADMIN_EMAIL_ALLOWLIST = adminEmail;
-    vi.resetModules();
-    const mod =
-      await import("../../src/lib/sources/reddit/server/handlers/deletion-propagation-cron.js");
-    mod.__resetOperatorCacheForTest();
-    const r = await mod.handleDeletionPropagationCron();
-    vi.resetModules();
-    expect(adminId).toBeDefined();
-    expect(r.queueRowsCleaned).toBe(3);
-
-    const remaining = await db.execute(sql`
-      SELECT adapter_kind, status, payload FROM adapter_refresh_queue
-      ORDER BY id ASC
-    `);
-    const rows = (
-      remaining as unknown as {
-        rows: Array<{
-          adapter_kind: string;
-          status: string;
-          payload: { post_ids?: string[]; video_id?: string };
-        }>;
-      }
-    ).rows;
-    expect(rows).toHaveLength(2);
-    // Surviving rows: the young done + the ancient pending.
-    expect(rows.map((r) => r.status).sort()).toEqual(["pending", "done"].sort());
-  });
+  // Queue-cleanup behaviour migrated to the cross-source janitor at
+  // services/adapter-refresh-queue-janitor.ts (14-day retention,
+  // scheduled separately). The deletion-propagation cron now only
+  // owns the GDPR author purge. Regression coverage for the janitor
+  // lives in tests/integration/adapter-refresh-queue-janitor.test.ts.
 
   it("empty ADMIN_EMAIL_ALLOWLIST → handler still purges but skips audit (silent)", async () => {
     await db.execute(sql`

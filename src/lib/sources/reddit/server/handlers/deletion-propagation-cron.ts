@@ -30,6 +30,14 @@
 // guard in upsert.ts's upsertRedditPost ensures a later re-poll of a
 // deleted post won't restore the nulled author (the SET clause omits
 // the author* fields).
+//
+// Scope: this handler ONLY handles the GDPR-author-purge. Cross-source
+// `adapter_refresh_queue` cleanup lives in
+// `services/adapter-refresh-queue-janitor.ts` (separate cron at 06:30
+// UTC). Pre-fix this handler also DELETEd terminal-state queue rows
+// across both Reddit + YouTube adapters — Reddit handler reaching into
+// YouTube's lane violated "modules don't leak", and two owners for the
+// same cleanup broke "one source of truth".
 
 import { sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
@@ -39,7 +47,6 @@ import { resolveOperatorUserId } from "../operator-resolver.js";
 
 export async function handleDeletionPropagationCron(): Promise<{
   purged: number;
-  queueRowsCleaned: number;
 }> {
   // Transactional UPDATE + audit INSERT. Both succeed together or both
   // roll back. See file header for the GDPR rationale.
@@ -82,37 +89,8 @@ export async function handleDeletionPropagationCron(): Promise<{
     return purgedCount;
   });
 
-  // Queue cleanup — `done` and `dead_letter` rows accumulate forever
-  // otherwise. adapter_refresh_queue is cross-adapter (Reddit + YouTube
-  // both write rows on it via the shared 8-tick worker lanes), so the
-  // purge runs across all adapter_kind values — there's no Reddit-
-  // specific reason to skip YouTube's stale rows. Pre-fix the filter
-  // was `adapter_kind = 'reddit_account'`, which left YouTube done/
-  // dead_letter rows growing indefinitely. 7-day window keeps the
-  // forensic audit window long enough to investigate failed batches.
-  //
-  // This cron is the only daily cross-source cleanup hook today; the
-  // Reddit author-purge above is the unrelated GDPR concern that
-  // happens to share the schedule. If a future adapter wants its own
-  // cleanup cron, this DELETE can move out to src/scheduler/index.ts —
-  // for now, one daily caller is enough.
-  const queueCleanup = await db.execute(sql`
-    WITH cleaned AS (
-      DELETE FROM adapter_refresh_queue
-      WHERE status IN ('done', 'dead_letter')
-        AND last_attempt_at IS NOT NULL
-        AND last_attempt_at < NOW() - INTERVAL '7 days'
-      RETURNING id
-    )
-    SELECT COUNT(*)::int AS cleaned FROM cleaned
-  `);
-  const queueRowsCleaned = Number(
-    (queueCleanup as unknown as { rows: Array<{ cleaned: number | string }> }).rows[0]?.cleaned ??
-      0,
-  );
-
-  logger.info({ purged, queueRowsCleaned }, "reddit.deletion_propagation_cron: tick complete");
-  return { purged, queueRowsCleaned };
+  logger.info({ purged }, "reddit.deletion_propagation_cron: tick complete");
+  return { purged };
 }
 
 /** Re-exported for tests — see ../operator-resolver.ts. */
