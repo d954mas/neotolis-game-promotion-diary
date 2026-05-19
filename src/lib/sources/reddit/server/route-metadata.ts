@@ -1,12 +1,16 @@
-// POST /api/reddit/fetch-metadata — on-demand Reddit /comments/<id>.json
-// call from the /events/new paste form.
+// POST /api/reddit/fetch-metadata — on-demand Reddit post preview call
+// from the /events/new paste form.
 //
 // This is the "Get from Reddit" button (mirrors /api/youtube/fetch-metadata).
-// User pastes a Reddit post URL, taps the button, we resolve the post id
-// → fetch /comments/<id>.json → return title + selftext + submittedAt
-// for the form to pre-fill. Distinct from POST /api/events/preview-url
-// (which is YouTube-only by current contract) — this endpoint is the
-// adapter-owned counterpart for Reddit's paste-preview UX.
+// Routed via handlePostSingle → /api/info?id=t3_X (same endpoint the
+// cron + refresh-now paths use). Returns title + selftext + submittedAt
+// for the form to pre-fill.
+//
+// The generic cross-source POST /api/events/preview-url ALSO supports
+// Reddit (via adapter.fetchEventPreviewMetadata); this Reddit-specific
+// route stays for clients that prefer the per-adapter shape and as
+// parity with YouTube. Both surfaces share the same cap gate so a
+// preview never bypasses the user_post counter.
 //
 // Auth: tenantScope chain (anonymous → 401). Per-user cap enforcement is
 // injected by the adapter barrel so this route stays HTTP-only and does
