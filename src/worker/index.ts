@@ -36,6 +36,7 @@ import { sql } from "drizzle-orm";
 
 import { allAdapters } from "../lib/sources/registry.js";
 import { handlePurgeDaily } from "./handlers/purge-daily.js";
+import { handleAdapterRefreshQueueJanitor } from "../lib/server/services/adapter-refresh-queue-janitor.js";
 import { startOutboxForwarder } from "./handlers/outbox-forwarder.js";
 import type { PoolClient } from "pg";
 
@@ -109,6 +110,11 @@ export async function startWorker(): Promise<void> {
     for (const job of jobs) {
       await handlePurgeDaily(job as { id: string; data: object });
     }
+  });
+
+  await boss.createQueue(QUEUES.ADAPTER_REFRESH_QUEUE_JANITOR);
+  await boss.work(QUEUES.ADAPTER_REFRESH_QUEUE_JANITOR, { batchSize: 1 }, async (jobs) => {
+    for (const _ of jobs) await handleAdapterRefreshQueueJanitor();
   });
 
   // Transactional outbox forwarder. Long-running async loop that translates

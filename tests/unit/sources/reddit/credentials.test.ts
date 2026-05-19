@@ -65,9 +65,7 @@ describe("Reddit credentials.ts (Phase 03.1 DV-RDT-7)", () => {
   it("assertRedditConfigured throws AppError(503, reddit_not_configured) when UA is empty", async () => {
     vi.resetModules();
     vi.doMock("$lib/server/config/env.js", () => ({ env: { REDDIT_USER_AGENT: "" } }));
-    const { assertRedditConfigured } = await import(
-      "$lib/sources/reddit/server/credentials.js"
-    );
+    const { assertRedditConfigured } = await import("$lib/sources/reddit/server/credentials.js");
     const { AppError } = await import("$lib/server/services/errors.js");
     let caught: unknown = null;
     try {
@@ -89,9 +87,7 @@ describe("Reddit credentials.ts (Phase 03.1 DV-RDT-7)", () => {
     vi.doMock("$lib/server/config/env.js", () => ({
       env: { REDDIT_USER_AGENT: "node:test (by /u/op)" },
     }));
-    const { assertRedditConfigured } = await import(
-      "$lib/sources/reddit/server/credentials.js"
-    );
+    const { assertRedditConfigured } = await import("$lib/sources/reddit/server/credentials.js");
     expect(() => assertRedditConfigured({ anything: "ok" })).not.toThrow();
   });
 });

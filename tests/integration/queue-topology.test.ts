@@ -52,6 +52,7 @@ describe("queue topology (per-kind rename)", () => {
     const expected = [
       QUEUES.INTERNAL_HEALTHCHECK,
       QUEUES.PURGE_DAILY,
+      QUEUES.ADAPTER_REFRESH_QUEUE_JANITOR,
       QUEUES.YOUTUBE_POLL_CRON,
       QUEUES.YOUTUBE_BACKFILL_CHANNEL,
       QUEUES.YOUTUBE_QUOTA_RESET,

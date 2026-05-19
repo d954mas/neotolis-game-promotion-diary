@@ -26,6 +26,15 @@ export const QUEUES = {
   // Cross-source / non-per-kind:
   PURGE_DAILY: "purge.daily",
   INTERNAL_HEALTHCHECK: "internal.healthcheck",
+  /** Daily DELETE of terminal-state rows from `adapter_refresh_queue`. The
+   *  cap counter (services/quota.ts) reads only the 15-min rolling window,
+   *  so `status IN ('done','dead_letter')` rows older than 14 days are
+   *  dead weight. Without the janitor the table grows unbounded
+   *  (~525k rows/year at 8 req/min baseline). 14 days keeps a forensic
+   *  window for "my refresh failed last week" investigation, well past
+   *  the cap horizon. Authoritative SQL lives in
+   *  services/adapter-refresh-queue-janitor.ts. */
+  ADAPTER_REFRESH_QUEUE_JANITOR: "adapter-refresh-queue.janitor",
 
   // Per-kind: youtube
   YOUTUBE_POLL_CRON: "youtube.poll.cron",
