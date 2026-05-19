@@ -26,6 +26,7 @@
 // optimization that makes the 8 req/min ceiling work at any scale.
 
 import { db } from "$lib/server/db/client.js";
+import { inArray } from "drizzle-orm";
 import { redditFetch } from "../http.js";
 import {
   upsertRedditPostsMany,
@@ -41,6 +42,7 @@ import {
   type RedditPostSnapshotWrite,
 } from "../snapshots.js";
 import { buildPostMetadata } from "../post-metadata.js";
+import { redditPosts } from "../schema/index.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import { logger } from "$lib/server/logger.js";
 import { classifySnapshotStatus } from "./post-single.js";
@@ -203,13 +205,40 @@ export async function handlePostsRefresh(args: {
     });
   }
 
-  // Missing ids → status='not_found' snapshot. The FK on
-  // reddit_post_snapshots.post_id requires a parent reddit_posts row;
-  // cron-enqueued ids always have one (cron picks FROM reddit_posts).
-  // We add the snapshot rows to the same batch; if a synthetic test id
-  // ever sneaks in, Postgres FK error surfaces clearly instead of a
-  // per-row try/catch hiding it.
-  for (const missingId of missingIds) {
+  // Missing ids → status='not_found' snapshot, but ONLY for ids we've
+  // previously seen (parent reddit_posts row exists). The FK on
+  // reddit_post_snapshots.post_id would otherwise 23503-fail and the
+  // worker would retry the whole batch into dead_letter.
+  //
+  // The "no parent" path is reachable: createEvent swallows a failed
+  // syncStats.fetch silently (the event row commits without the cache
+  // ever populating). A subsequent user Refresh-Now on that event
+  // sends a user_post row with the externalId; Reddit returns empty
+  // children (the post never existed, was always private, etc.); the
+  // unconditional not_found snapshot then FK-fails.
+  //
+  // Pre-filter via one SELECT keeps the bulk INSERT simple. Skipped
+  // ids surface in the log so the operator can see "we tried to refresh
+  // a post we never saw".
+  let missingIdsWithParent: string[];
+  if (missingIds.length === 0) {
+    missingIdsWithParent = [];
+  } else {
+    const parents = await db
+      .select({ postId: redditPosts.postId })
+      .from(redditPosts)
+      .where(inArray(redditPosts.postId, missingIds));
+    const parentSet = new Set(parents.map((p) => p.postId));
+    missingIdsWithParent = missingIds.filter((id) => parentSet.has(id));
+    const orphanCount = missingIds.length - missingIdsWithParent.length;
+    if (orphanCount > 0) {
+      logger.info(
+        { orphanCount, requested: requested.length },
+        "reddit posts-refresh: skipping not_found snapshot for ids without parent reddit_posts row",
+      );
+    }
+  }
+  for (const missingId of missingIdsWithParent) {
     snapshotStatuses.push({ postId: missingId, status: "not_found" });
     snapshotWrites.push({
       postId: missingId,
