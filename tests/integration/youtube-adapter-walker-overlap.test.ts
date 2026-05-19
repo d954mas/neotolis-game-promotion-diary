@@ -28,7 +28,7 @@ vi.mock("../../src/lib/sources/youtube/server/quota.js", async (importOriginal) 
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    pickKeyForJob: async () => ({ apiKey: "TEST_KEY", apiKeyId: "test-walker-key" }),
+    hasYoutubeApiKeys: () => true,
     youtubeQuotaUser: () => "test-walker-quota-user",
   };
 });
@@ -52,7 +52,7 @@ vi.mock("../../src/lib/sources/youtube/server/http.js", async (importOriginal) =
 });
 
 const { db } = await import("../../src/lib/server/db/client.js");
-const { youtubeVideos } = await import("../../src/lib/sources/youtube/server/schema/index.js");
+const { youtubeVideos } = await import("../../src/lib/server/db/schema/index.js");
 const { youtubeChannelAdapterCore } =
   await import("../../src/lib/sources/youtube/server/adapter.js");
 

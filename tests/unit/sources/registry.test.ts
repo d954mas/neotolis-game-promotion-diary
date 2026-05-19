@@ -20,14 +20,73 @@ describe("SourceRegistry", () => {
     expect(allAdapters.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("youtubeAdapter.canRefreshPoll('youtube_video') returns true", () => {
+  it("youtubeAdapter.refreshQueue.canRefresh('youtube_video') returns true", () => {
     const adapter = getAdapter("youtube_channel");
-    expect(adapter.canRefreshPoll?.("youtube_video")).toBe(true);
+    expect(adapter.refreshQueue?.canRefresh("youtube_video")).toBe(true);
   });
 
-  it("youtubeAdapter.canRefreshPoll('reddit_post') returns false", () => {
+  it("youtubeAdapter.refreshQueue.canRefresh('reddit_post') returns false", () => {
     const adapter = getAdapter("youtube_channel");
-    expect(adapter.canRefreshPoll?.("reddit_post")).toBe(false);
+    expect(adapter.refreshQueue?.canRefresh("reddit_post")).toBe(false);
+  });
+
+  it("redditAdapter declares its fixed lane worker schedule", () => {
+    const adapter = getAdapter("reddit_account");
+    const worker = adapter.workQueue?.scheduledWorkers[0];
+    expect(worker?.name).toBe("reddit.refresh");
+    expect(worker?.intervalMs).toBe(7500);
+    expect(worker?.replicaPolicy).toBe("parallel");
+    expect(worker?.laneQueue).toMatchObject({
+      strategy: "fixed-slot-round-robin",
+      adapterKind: "reddit_account",
+      slots: [
+        "service_source",
+        "user_source",
+        "user_post",
+        "user_source",
+        "service_post",
+        "user_post",
+        "user_source",
+        "user_post",
+      ],
+      fallthrough: ["user_post", "user_source", "service_post", "service_source"],
+    });
+  });
+
+  it("youtubeAdapter declares its SQL refresh worker schedule", () => {
+    const adapter = getAdapter("youtube_channel");
+    const worker = adapter.workQueue?.scheduledWorkers.find(
+      (entry) => entry.name === "youtube.refresh",
+    );
+    expect(worker?.intervalMs).toBe(1000);
+    expect(worker?.replicaPolicy).toBe("parallel");
+    expect(worker?.laneQueue).toMatchObject({
+      strategy: "fixed-slot-round-robin",
+      adapterKind: "youtube_channel",
+      slots: ["user_video", "service_video"],
+      fallthrough: ["user_video", "service_video"],
+      batchScope: "global",
+    });
+  });
+
+  it("youtubeAdapter declares a syncStats quota guard", () => {
+    const adapter = getAdapter("youtube_channel");
+    expect(typeof adapter.syncStats?.canRun).toBe("function");
+  });
+
+  it("youtubeAdapter declares a source-backfill quota guard", () => {
+    const adapter = getAdapter("youtube_channel");
+    expect(typeof adapter.canBackfillSource).toBe("function");
+  });
+
+  it("redditAdapter does not treat synthetic daily observability as a syncStats hard stop", () => {
+    const adapter = getAdapter("reddit_account");
+    expect(adapter.syncStats?.canRun).toBeUndefined();
+  });
+
+  it("redditAdapter does not treat synthetic daily observability as a source-backfill hard stop", () => {
+    const adapter = getAdapter("reddit_account");
+    expect(adapter.canBackfillSource).toBeUndefined();
   });
 
   // Observability surface assertions: auth.kind / requiresUserSetup /

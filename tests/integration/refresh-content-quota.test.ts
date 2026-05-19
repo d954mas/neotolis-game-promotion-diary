@@ -90,7 +90,7 @@ const { db } = await import("../../src/lib/server/db/client.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { dataSourceChannelState } =
   await import("../../src/lib/server/db/schema/data-source-channel-state.js");
-const { youtubeVideos } = await import("../../src/lib/sources/youtube/server/schema/index.js");
+const { youtubeVideos } = await import("../../src/lib/server/db/schema/index.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
 const { createApp } = await import("../../src/lib/server/http/app.js");

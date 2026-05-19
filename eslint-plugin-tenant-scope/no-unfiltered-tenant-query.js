@@ -44,6 +44,17 @@ import { ESLintUtils } from "@typescript-eslint/utils";
 // `eventGames` is the M:N junction with userId denormalized so this rule
 // can require a userId WHERE clause on every Drizzle query (the rule
 // cannot inspect FK-chained values).
+//
+// `adapterRefreshQueue` is a hybrid: service lanes (queue_name LIKE
+// 'service_%') write `user_id=NULL` and ARE cross-tenant by design;
+// user lanes (queue_name LIKE 'user_%') write `user_id NOT NULL` and
+// are tenant data feeding per-user quota counters + purge cascades.
+// Treating it as a tenant table makes the default-safe choice — any
+// query without `eq(.userId, userId)` MUST opt out explicitly with
+// `eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query --
+// service-lane scan / cross-tenant operator view`. Pre-fix the table
+// was blanket-allowlisted so a future bug reading user-lane rows
+// without userId would slip past.
 const TENANT_TABLES = new Set([
   "games",
   "gameSteamListings",
@@ -52,6 +63,7 @@ const TENANT_TABLES = new Set([
   "events",
   "eventGames",
   "auditLog",
+  "adapterRefreshQueue",
 ]);
 
 const ALLOWLIST_TABLES = new Set([
@@ -83,6 +95,22 @@ const ALLOWLIST_TABLES = new Set([
   // info). Same semantics as youtubeChannels — keyed on video_id, no
   // user_id, shared across all tenants who ever reference this video.
   "youtubeVideos",
+  // Phase 03.1 Reddit public-data tables (no user_id by design).
+  // Same public-data semantics as the YouTube cache: post score /
+  // upvote ratio / subreddit subscribers etc. are identical regardless
+  // of which tenant looked them up. NOTE: `adapterRefreshQueue` is
+  // intentionally NOT here — it lives in TENANT_TABLES because user
+  // lanes carry user_id; cross-tenant scans (service lanes) must
+  // opt out with an inline `eslint-disable-next-line ... -- …`
+  // justification per call-site.
+  "redditPosts", // public external data, no tenant scope
+  "redditUsersCache", // public external data, no tenant scope
+  "redditSubredditsCache", // public external data, no tenant scope
+  "redditPostSnapshots", // public external data, no tenant scope (time-series)
+  "redditUserSnapshots", // public external data, no tenant scope (time-series; OWNED reddit_accounts only — see schema header)
+  "redditSubredditSnapshots", // public external data, no tenant scope (time-series; all cached subs)
+  "redditSubredditBaselines", // public external data, no tenant scope (per-sub aggregates)
+  "redditPacer", // singleton rate-limit-token row, no tenant scope
 ]);
 
 export default ESLintUtils.RuleCreator.withoutDocs({

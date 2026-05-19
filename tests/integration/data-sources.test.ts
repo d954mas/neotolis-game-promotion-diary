@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   createSource,
   listSources,
@@ -9,10 +9,12 @@ import {
   restoreSource,
   assertNoChannelConflict,
 } from "../../src/lib/server/services/data-sources.js";
+import { loadSourceDetailPage } from "../../src/lib/server/services/sources-page-read.js";
 import { toDataSourceDto } from "../../src/lib/server/dto.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { dataSources } from "../../src/lib/server/db/schema/data-sources.js";
 import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
+import { redditUsersCache } from "../../src/lib/sources/reddit/server/schema/index.js";
 import * as Audit from "../../src/lib/server/audit.js";
 import { NotFoundError, AppError } from "../../src/lib/server/services/errors.js";
 import { seedUserDirectly } from "./helpers.js";
@@ -57,23 +59,96 @@ describe("register data sources via POST /api/sources", () => {
     expect(persisted[0]!.deletedAt).toBeNull();
   });
 
-  it("kind=reddit_account rejects with AppError 'kind_not_yet_functional' (422 + metadata)", async () => {
+  it("kind=reddit_account creates a source (Phase 03.1 — adapter functional)", async () => {
     const userA = await seedUserDirectly({ email: "ds2@test.local" });
+    const created = await createSource(
+      userA.id,
+      { kind: "reddit_account", handleUrl: "https://reddit.com/user/d954mas" },
+      "127.0.0.1",
+    );
+    expect(created.kind).toBe("reddit_account");
+    expect(created.userId).toBe(userA.id);
+
+    const rows = await db.select().from(dataSources).where(eq(dataSources.userId, userA.id));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("kind=reddit_account with autoImport=false skips source-action cap", async () => {
+    const userA = await seedUserDirectly({ email: "ds2passive@test.local" });
+    for (let i = 0; i < 5; i++) {
+      await db.execute(sql`
+        INSERT INTO adapter_refresh_queue (adapter_kind, queue_name, type, payload, user_id, priority)
+        VALUES ('reddit_account', 'user_source', 'author_poll',
+                ${`{"handle":"existing_${i}"}`}::jsonb, ${userA.id}, 1)
+      `);
+    }
+
+    const created = await createSource(
+      userA.id,
+      {
+        kind: "reddit_account",
+        handleUrl: "https://reddit.com/user/passive-source",
+        autoImport: false,
+      },
+      "127.0.0.1",
+    );
+
+    expect(created.autoImport).toBe(false);
+    const queueRows = await db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM adapter_refresh_queue
+      WHERE adapter_kind = 'reddit_account'
+        AND queue_name = 'user_source'
+        AND user_id = ${userA.id}
+    `);
+    expect(Number((queueRows.rows[0] as { count: number | string }).count)).toBe(5);
+  });
+
+  it("source detail read-model enriches reddit_account lastPolledAt", async () => {
+    const userA = await seedUserDirectly({ email: "ds2detail@test.local" });
+    const created = await createSource(
+      userA.id,
+      {
+        kind: "reddit_account",
+        handleUrl: "https://reddit.com/user/detailpolled",
+        autoImport: false,
+      },
+      "127.0.0.1",
+    );
+    const lastMetadataRefreshAt = new Date("2026-05-18T10:00:00.000Z");
+    await db.insert(redditUsersCache).values({
+      username: "detailpolled",
+      lastMetadataRefreshAt,
+    });
+
+    const detail = await loadSourceDetailPage(userA.id, created.id);
+
+    expect(detail.source.lastPolledAt?.toISOString()).toBe(lastMetadataRefreshAt.toISOString());
+  });
+
+  it("duplicate kind=reddit_account uses Reddit-specific duplicate_source message", async () => {
+    const userA = await seedUserDirectly({ email: "ds2dup@test.local" });
+    await createSource(
+      userA.id,
+      { kind: "reddit_account", handleUrl: "https://reddit.com/user/d954mas" },
+      "127.0.0.1",
+    );
+
     await expect(
       createSource(
         userA.id,
-        { kind: "reddit_account", handleUrl: "https://reddit.com/user/me" },
+        { kind: "reddit_account", handleUrl: "https://reddit.com/user/d954mas" },
         "127.0.0.1",
       ),
     ).rejects.toMatchObject({
-      code: "kind_not_yet_functional",
+      code: "duplicate_source",
       status: 422,
-      metadata: { kind: "reddit_account", status: "coming soon — pending Reddit OAuth" },
+      message: "You already track this Reddit user",
+      metadata: {
+        kind: "reddit_account",
+        handle_url: "https://www.reddit.com/user/d954mas",
+      },
     });
-
-    // No row was inserted.
-    const rows = await db.select().from(dataSources).where(eq(dataSources.userId, userA.id));
-    expect(rows).toHaveLength(0);
   });
 
   it("kinds twitter_account / telegram_channel / discord_server reject with 'kind_not_yet_functional'", async () => {
@@ -648,7 +723,7 @@ describe("/api/sources HTTP boundary", () => {
     expect(row!.handleUrl).toBe("https://www.youtube.com/@no-forge-attempt");
   });
 
-  it("POST /api/sources kind=reddit_account returns 422 kind_not_yet_functional", async () => {
+  it("POST /api/sources kind=reddit_account returns 201 (Phase 03.1 — adapter functional)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-src-2@test.local" });
@@ -660,12 +735,78 @@ describe("/api/sources HTTP boundary", () => {
       },
       body: JSON.stringify({
         kind: "reddit_account",
-        handleUrl: "https://reddit.com/user/me",
+        handleUrl: "https://reddit.com/user/d954mas",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { kind: string };
+    expect(body.kind).toBe("reddit_account");
+  });
+
+  it("POST /api/sources kind=reddit synthetic — user URL resolves to reddit_account", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-src-reddit-syn-1@test.local" });
+    const res = await app.request("/api/sources", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "reddit",
+        handleUrl: "https://reddit.com/user/d954mas",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { kind: string; handleUrl: string };
+    expect(body.kind).toBe("reddit_account");
+    expect(body.handleUrl).toBe("https://www.reddit.com/user/d954mas");
+  });
+
+  it("POST /api/sources kind=reddit synthetic — sub URL resolves to reddit_subreddit", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-src-reddit-syn-2@test.local" });
+    const res = await app.request("/api/sources", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "reddit",
+        handleUrl: "https://www.reddit.com/r/IndieDev",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { kind: string; handleUrl: string };
+    expect(body.kind).toBe("reddit_subreddit");
+    // Reddit identifiers are case-insensitive; the adapter lowercases
+    // subreddit / username at the parser boundary so two subscribers
+    // pasting different-case spellings land on the same canonical
+    // cache row and fan-out lane.
+    expect(body.handleUrl).toBe("https://www.reddit.com/r/indiedev");
+  });
+
+  it("POST /api/sources kind=reddit synthetic — non-Reddit URL returns 422 invalid_reddit_url", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "http-src-reddit-syn-3@test.local" });
+    const res = await app.request("/api/sources", {
+      method: "POST",
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        kind: "reddit",
+        handleUrl: "https://example.com/r/IndieDev",
       }),
     });
     expect(res.status).toBe(422);
     const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("kind_not_yet_functional");
+    expect(body.error).toBe("invalid_reddit_url");
   });
 
   it("POST /api/sources duplicate handleUrl returns 422 duplicate_source", async () => {

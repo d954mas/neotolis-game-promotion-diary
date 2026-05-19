@@ -82,33 +82,45 @@ const eventKindEnum = z.enum([
 ]);
 
 /**
- * kind=youtube_video MUST carry a parseable YouTube url. Other kinds accept
- * null/undefined url (free-form events; conferences, posts, etc.). Service-
- * layer createEvent is the second layer of defense (opportunistic external_id
- * derivation); this superRefine is the load-bearing validator.
+ * URL-required validator for pollable event kinds. youtube_video AND
+ * reddit_post both MUST carry a parseable URL of the matching shape;
+ * the service-layer createEvent is the second layer of defense
+ * (opportunistic external_id derivation + adapter.syncStats.fetch).
  *
  * Shared between createEventSchema and updateEventSchema so a kind-change
- * PATCH that drops the url tripwires here too.
+ * PATCH that drops the url tripwires here too. Free-form kinds (post,
+ * conference, talk, press, other) accept null/undefined url.
+ *
+ * Adding a new pollable kind = extend the {kind→expected ParsedUrl.kind}
+ * map below. Mirrors the FUNCTIONAL_KINDS expansion in /events/new UI.
  */
-function youtubeUrlRequired(
+const URL_REQUIRED_KINDS: Readonly<Record<string, string>> = {
+  youtube_video: "youtube_video",
+  reddit_post: "reddit_post",
+};
+
+function urlRequiredForPollableKinds(
   obj: { kind?: string | undefined; url?: string | null | undefined },
   ctx: z.RefinementCtx,
 ): void {
-  if (obj.kind !== "youtube_video") return;
+  const kind = obj.kind;
+  if (kind === undefined) return;
+  const expectedParsedKind = URL_REQUIRED_KINDS[kind];
+  if (expectedParsedKind === undefined) return;
   if (!obj.url) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["url"],
-      message: "url is required for kind=youtube_video",
+      message: `url is required for kind=${kind}`,
     });
     return;
   }
   const parsed = parseIngestUrl(obj.url);
-  if (parsed.kind !== "youtube_video") {
+  if (parsed.kind !== expectedParsedKind) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["url"],
-      message: "url must be a recognized YouTube video URL",
+      message: `url must be a recognized ${kind} URL`,
     });
   }
 }
@@ -123,14 +135,14 @@ const createEventSchema = z
     occurredAt: z.string().datetime(),
     title: z.string().min(1).max(500),
     url: z.string().url().nullable().optional(),
-    notes: z.string().max(5000).nullable().optional(),
+    notes: z.string().max(50_000).nullable().optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
     // authorIsMe round-trips through the schema so /events/new can flip
     // "Author: me / not me" at create time. Service defaults to false when
     // omitted (preserves existing semantics).
     authorIsMe: z.boolean().optional(),
   })
-  .superRefine(youtubeUrlRequired)
+  .superRefine(urlRequiredForPollableKinds)
   .transform((obj) => {
     // Normalize back-compat alias. When gameIds is absent and gameId is
     // supplied, internalize gameId → gameIds (single-element array, or
@@ -147,7 +159,7 @@ const createEventSchema = z
     return out;
   });
 
-// updateEventSchema does NOT call .superRefine(youtubeUrlRequired). The
+// updateEventSchema does NOT call .superRefine(urlRequiredForPollableKinds). The
 // create-side superRefine validates the full body (which IS the full state
 // on create), but on a PATCH the body is partial — a `{url: null}` body
 // with no `kind` field would slip past the body-only check on a row whose
@@ -161,7 +173,7 @@ const updateEventSchema = z
     occurredAt: z.string().datetime().optional(),
     title: z.string().min(1).max(500).optional(),
     url: z.string().url().nullable().optional(),
-    notes: z.string().max(5000).nullable().optional(),
+    notes: z.string().max(50_000).nullable().optional(),
     // authorIsMe is editable; the /events/[id]/edit form flips the
     // discriminator without re-creating the event.
     authorIsMe: z.boolean().optional(),
@@ -173,7 +185,7 @@ const updateEventSchema = z
   .refine((obj) => Object.keys(obj).length > 0, {
     message: "at least one field must be supplied",
   });
-// NOTE: NO .superRefine(youtubeUrlRequired) here — moved to service layer.
+// NOTE: NO .superRefine(urlRequiredForPollableKinds) here — moved to service layer.
 
 // Feed query schema. Multi-value axes (source / kind / game) are NOT
 // validated here because Hono's `c.req.queries(name)` returns string[] for
@@ -321,11 +333,13 @@ eventsRoutes.get(
   },
 );
 
-// POST /api/events/preview-url. Read-only enrichment; no DB write. Tenant-
-// scoped (mounted under tenantScope) so anonymous → 401, but no tenant-
-// owned data is read (the URL is the only input). HONO PATH-PRECEDENCE:
-// register BEFORE any parametric POST `/events/:id/...` route — keep
-// literals first as a discipline.
+// POST /api/events/preview-url. Adapter-driven preview. Tenant-scoped
+// (mounted under tenantScope) so anonymous → 401; the auth gate is also
+// load-bearing because the Reddit adapter's preview writes cache rows
+// + a cap-counter row keyed on userId. YouTube's preview is keyless +
+// uncounted, so the auth gate there is purely for anti-abuse. HONO
+// PATH-PRECEDENCE: register BEFORE any parametric POST `/events/:id/...`
+// route — keep literals first as a discipline.
 eventsRoutes.post(
   "/events/preview-url",
   zValidator("json", previewUrlSchema, (r, c) => {
@@ -335,7 +349,8 @@ eventsRoutes.post(
   }),
   async (c) => {
     try {
-      const enriched = await enrichFromUrl(c.var.userId, c.req.valid("json").url);
+      const ctx = getAuditContext(c);
+      const enriched = await enrichFromUrl(ctx.userId, c.req.valid("json").url, ctx.ipAddress);
       return c.json({
         kind: enriched.kind,
         externalId: enriched.externalId,
@@ -525,11 +540,12 @@ eventsRoutes.patch("/events/:id/unmark-standalone", async (c) => {
   }
 });
 
-// POST /api/events/:id/refresh-poll. User-side affordance for "refresh
-// this event's stats right now". The service enforces a 5-minute cooldown
-// via events.metadata.last_user_refresh_at, gates non-pollable kinds +
-// missing external_id, and enqueues to youtube.poll.user with a per-minute
-// singletonKey + priority 10.
+// POST /api/events/:id/refresh-poll. User-side "refresh this event's
+// stats right now". The service enforces a 5-minute cooldown via
+// events.metadata.last_user_refresh_at, gates non-pollable kinds +
+// missing external_id + per-user cap, then asks the adapter to enqueue
+// (YouTube -> adapter_refresh_queue youtube_channel/user_video lane, Reddit ->
+// adapter_refresh_queue reddit_account/user_post lane).
 //
 // Error mapping (via mapErr — service throws typed errors):
 //   - NotFoundError                     → 404 {error: "not_found"}
@@ -540,10 +556,11 @@ eventsRoutes.patch("/events/:id/unmark-standalone", async (c) => {
 //   - AppError "event_not_pollable"     → 422
 //   - AppError "event_no_external_id"   → 422
 //
-// On 200 the body is `{enqueued: true, queue: "youtube.poll.user", eventId}`.
-// RefreshNowButton consumes this contract: after a 200 it disables the button
-// for 5 minutes; after a 429 it reads Retry-After to drive the same countdown
-// without round-tripping the metadata payload.
+// On 200 the body is `{enqueued: true, queue: <adapter-specific>, eventId,
+// jobId?}`. RefreshNowButton consumes the success: it disables the button
+// for 5 minutes; after a 429 it reads Retry-After to drive the same
+// countdown without round-tripping the metadata payload. The `queue` /
+// `jobId` fields are operator/diagnostic-facing (the UI ignores them).
 eventsRoutes.post("/events/:id/refresh-poll", async (c) => {
   const ctx = getAuditContext(c);
   try {

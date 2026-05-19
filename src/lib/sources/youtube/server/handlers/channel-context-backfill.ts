@@ -5,17 +5,17 @@
 // and seeds the youtube_video_snapshots table with the last 50 videos so
 // the chart loader has historical context immediately.
 //
-// Quota cost: 1 (channels.list) + N (playlistItems pages, 1≤N≤MAX_PAGES) +
-// M (videos.list batches of ≤50 ids each, 1≤M≤MAX_PAGES). Hard upper bound:
+// Quota cost: 1 (channels.list) + N (playlistItems pages, 1<=N<=MAX_PAGES) +
+// M (videos.list batches of <=50 ids each, 1<=M<=MAX_PAGES). Hard upper bound:
 // 1 + 4 + 4 = 9 units per backfill. Actual cost depends on backfillWindow:
 //   - "1d" / "7d" with low-volume channel: typically 3 units (1+1+1)
-//   - "30d" / "90d" with active channel: typically 5–7 units
+//   - "30d" / "90d" with active channel: typically 5 - 7 units
 //   - "everything" or huge channel: capped at 9 units (200 video ceiling)
 //
-// The pagination loop walks playlistItems pages newest→oldest and stops on
+// The pagination loop walks playlistItems pages newest->oldest and stops on
 // the first page whose oldest item crosses the cutoff (uploads playlists
 // are sorted publishedAt DESC). For "everything" there is no cutoff but
-// the MAX_PAGES bound still applies — the chart loader doesn't need a
+// the MAX_PAGES bound still applies - the chart loader doesn't need a
 // channel's full history, just its visible recency.
 //
 // Idempotency: youtube_channels UPSERT on channel_id PK; a re-run of this
@@ -23,8 +23,8 @@
 // youtube_video_snapshots UNIQUE(video_id, polled_at) makes the snapshot
 // inserts idempotent within the same minute.
 //
-// Auth gate: pickKeyForJob() returning null = SERVICE_YOUTUBE_API_KEYS
-// empty. We log+skip rather than throw — preserves self-host parity (a
+// Auth gate: empty SERVICE_YOUTUBE_API_KEYS. We log+skip rather than
+// throw, preserving self-host parity: a
 // self-hoster who never sets the env var sees a graceful no-op on first
 // paste, not a worker crash).
 
@@ -38,7 +38,7 @@ import {
 } from "$lib/server/db/schema/index.js";
 import { events } from "$lib/server/db/schema/events.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
-import { pickKeyForJob, youtubeQuotaUser } from "../quota.js";
+import { hasYoutubeApiKeys, youtubeQuotaUser } from "../quota.js";
 import { chargedFetch } from "../http.js";
 import { env } from "$lib/server/config/env.js";
 import { parseYoutubeUrl } from "../url.js";
@@ -53,7 +53,7 @@ import {
 } from "$lib/server/services/channel-state.js";
 import { writeAudit } from "$lib/server/audit.js";
 
-// Zod schemas for the three endpoints — defense against API drift.
+// Zod schemas for the three endpoints - defense against API drift.
 const CHANNELS_LIST_RESPONSE = z.object({
   kind: z.literal("youtube#channelListResponse"),
   items: z.array(
@@ -87,7 +87,7 @@ const PLAYLIST_ITEMS_LIST_RESPONSE = z.object({
   ),
 });
 
-// Map UI backfill-window preset → cutoff (or null for "everything"). Uploads
+// Map UI backfill-window preset -> cutoff (or null for "everything"). Uploads
 // playlists are sorted publishedAt DESC, so we walk pages from newest down
 // and stop the first time we cross the cutoff.
 const WINDOW_DAYS: Record<"1d" | "7d" | "30d" | "90d" | "1y", number> = {
@@ -99,13 +99,13 @@ const WINDOW_DAYS: Record<"1d" | "7d" | "30d" | "90d" | "1y", number> = {
 };
 
 // Hard upper bound on pages walked (covers the "active channel + everything"
-// case where no cutoff is ever crossed). 20 pages × 50 videos = 1000 videos =
+// case where no cutoff is ever crossed). 20 pages x 50 videos = 1000 videos =
 // 20 quota units for playlistItems.list. Combined with 20 batched videos.list
 // calls (1 unit each) and the upfront channels.list (1 unit), total quota
 // cost per backfill is bounded at 41 units (~0.4% of a 10000 daily envelope).
 // For channels with >1000 videos that an operator wants to fully ingest,
 // this becomes a follow-up: a per-source "continue backfill" job that picks
-// up from the last walked pageToken — out of scope for the MVP.
+// up from the last walked pageToken - out of scope for the MVP.
 const MAX_PAGES = 20;
 const PAGE_SIZE = 50;
 
@@ -143,7 +143,7 @@ const VIDEOS_LIST_RESPONSE = z.object({
 // $lib/sources/youtube/server/adapter.ts share the same charge-on-Response +
 // throttle-audit-on-403-quotaExceeded contract.
 
-// YouTube URL parsing lives in $lib/sources/youtube/server/url.ts — see
+// YouTube URL parsing lives in $lib/sources/youtube/server/url.ts - see
 // that module's header for the rationale.
 
 const CHANNELS_LIST_FOR_HANDLE_RESPONSE = z.object({
@@ -164,7 +164,7 @@ const CHANNELS_LIST_FOR_HANDLE_RESPONSE = z.object({
 // Unified backfill job shape. Either { channelId } (ingest paste flow
 // already knows the channelId from the parsed video URL) or
 // { handleUrl, sourceId } (createSource flow only knows the URL the user
-// typed). Handler resolves handle→channelId in the second case using a
+// typed). Handler resolves handle->channelId in the second case using a
 // channels.list?forHandle= call (1 quota unit) and persists the resolved
 // channelId back to data_sources so subsequent polls skip the resolution.
 export async function handleChannelContextBackfill(job: {
@@ -179,12 +179,12 @@ export async function handleChannelContextBackfill(job: {
 }): Promise<void> {
   // AdapterError envelope. The body throws AdapterError on upstream
   // non-2xx; route by category:
-  //   - rate-limited → re-throw (pg-boss retries with retryAfterMs)
-  //   - operator-issue / permanent → mark source needs_reconnect and swallow
+  //   - rate-limited -> re-throw (pg-boss retries with retryAfterMs)
+  //   - operator-issue / permanent -> mark source needs_reconnect and swallow
   //     (the operator must intervene; pg-boss retries are pointless)
-  //   - not-found → swallow (the channel/video is gone; the source itself
-  //     may be fine — we don't flag it)
-  //   - transient → re-throw (pg-boss retries with backoff)
+  //   - not-found -> swallow (the channel/video is gone; the source itself
+  //     may be fine - we don't flag it)
+  //   - transient -> re-throw (pg-boss retries with backoff)
   // Cron-context handler: only flips needs_reconnect when sourceId is in
   // the job payload (createSource flow). Ingest-flow jobs (channelId-only)
   // don't carry a sourceId, so non-transient errors there log+swallow.
@@ -196,7 +196,7 @@ export async function handleChannelContextBackfill(job: {
       if (err.category === "rate-limited" || err.category === "transient") {
         logger.info(
           { jobId: job.id, category: err.category, retryAfterMs: err.retryAfterMs },
-          "channel-context-backfill: AdapterError → pg-boss retry",
+          "channel-context-backfill: AdapterError -> pg-boss retry",
         );
         throw err;
       }
@@ -226,7 +226,7 @@ async function handleChannelContextBackfillImpl(job: {
   const { userId, handleUrl, sourceId } = job.data;
   let channelId = job.data.channelId;
   // Track the alias input that triggered this backfill. After resolving
-  // handle/legacy/video URL → UC id we write the alias into
+  // handle/legacy/video URL -> UC id we write the alias into
   // youtube_channels.handle_aliases so the next ingest paste of the same
   // alias hits the cache directly. Captured BEFORE resolution because
   // `channelId` is reassigned to the UC id mid-flow.
@@ -245,8 +245,7 @@ async function handleChannelContextBackfillImpl(job: {
     return;
   }
 
-  const picked = pickKeyForJob();
-  if (!picked) {
+  if (!hasYoutubeApiKeys()) {
     logger.warn(
       { jobId: job.id, channelId, handleUrl },
       "channel-context-backfill: SERVICE_YOUTUBE_API_KEYS empty; skipping",
@@ -254,12 +253,12 @@ async function handleChannelContextBackfillImpl(job: {
     return;
   }
 
-  // 0. Resolve handleUrl → channelId if needed (createSource flow). Handle
+  // 0. Resolve handleUrl -> channelId if needed (createSource flow). Handle
   //    URLs come in 4 shapes:
-  //      - https://www.youtube.com/channel/UCxxx  → direct channelId
-  //      - https://www.youtube.com/@handle         → forHandle lookup
-  //      - https://www.youtube.com/c/legacy        → forHandle lookup
-  //      - https://www.youtube.com/user/legacy     → forHandle lookup
+  //      - https://www.youtube.com/channel/UCxxx  -> direct channelId
+  //      - https://www.youtube.com/@handle         -> forHandle lookup
+  //      - https://www.youtube.com/c/legacy        -> forHandle lookup
+  //      - https://www.youtube.com/user/legacy     -> forHandle lookup
   if (!channelId && handleUrl) {
     const parsed = parseYoutubeUrl(handleUrl);
     if (!parsed) {
@@ -272,24 +271,23 @@ async function handleChannelContextBackfillImpl(job: {
     if (parsed.kind === "channelId") {
       channelId = parsed.value;
     } else if (parsed.kind === "videoId") {
-      // /watch, /shorts, /embed, youtu.be — user pasted a video URL into
+      // /watch, /shorts, /embed, youtu.be - user pasted a video URL into
       // the source registration form. Resolve via videos.list?part=snippet
-      // (1 quota unit) → snippet.channelId. More user-friendly than
+      // (1 quota unit) -> snippet.channelId. More user-friendly than
       // rejecting; users routinely paste any YouTube URL when adding a
       // channel.
       const videoUrl = new URL(`${env.YOUTUBE_API_BASE_URL}/videos`);
       videoUrl.searchParams.set("id", parsed.value);
       videoUrl.searchParams.set("part", "snippet");
-      videoUrl.searchParams.set("key", picked.apiKey);
       videoUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
-      const videoResp = await chargedFetch(videoUrl, picked, 1, {
+      const videoResp = await chargedFetch(videoUrl, 1, {
         jobId: job.id,
         videoId: parsed.value,
         origin: "cron",
         logTag: "channel-context-backfill: videos.list lookup",
       });
-      if (!videoResp.ok) return; // chargedFetch throws on non-2xx; this is dead-code defense — caught by the outer try/catch.
+      if (!videoResp.ok) return; // chargedFetch throws on non-2xx; this is dead-code defense - caught by the outer try/catch.
       const videoJson = VIDEOS_LIST_RESPONSE.parse(await videoResp.json());
       const v = videoJson.items[0];
       if (!v || !v.snippet?.channelId) {
@@ -301,20 +299,19 @@ async function handleChannelContextBackfillImpl(job: {
       }
       channelId = v.snippet.channelId;
     } else {
-      // forHandle resolution — 1 quota unit.
+      // forHandle resolution - 1 quota unit.
       const lookupUrl = new URL(`${env.YOUTUBE_API_BASE_URL}/channels`);
       lookupUrl.searchParams.set("forHandle", parsed.value);
       lookupUrl.searchParams.set("part", "snippet,contentDetails");
-      lookupUrl.searchParams.set("key", picked.apiKey);
       lookupUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
-      const lookupResp = await chargedFetch(lookupUrl, picked, 1, {
+      const lookupResp = await chargedFetch(lookupUrl, 1, {
         jobId: job.id,
         handle: parsed.value,
         origin: "cron",
         logTag: "channel-context-backfill: forHandle lookup",
       });
-      if (!lookupResp.ok) return; // dead-code defense — chargedFetch throws on non-2xx.
+      if (!lookupResp.ok) return; // dead-code defense - chargedFetch throws on non-2xx.
       const lookupJson = CHANNELS_LIST_FOR_HANDLE_RESPONSE.parse(await lookupResp.json());
       const item = lookupJson.items[0];
       if (!item) {
@@ -327,7 +324,7 @@ async function handleChannelContextBackfillImpl(job: {
       channelId = item.id;
     }
     // Persist resolved channelId back to data_sources so re-toggles skip
-    // resolution. NULL→non-NULL only — never overwrite a stored value with a
+    // resolution. NULL->non-NULL only - never overwrite a stored value with a
     // different one (would mask a renamed channel; out of scope for MVP).
     if (sourceId && channelId) {
       await db
@@ -351,20 +348,19 @@ async function handleChannelContextBackfillImpl(job: {
     return;
   }
 
-  // 1. channels.list — 1 quota unit. Resolve uploadsPlaylistId + channelTitle.
+  // 1. channels.list - 1 quota unit. Resolve uploadsPlaylistId + channelTitle.
   const channelsUrl = new URL(`${env.YOUTUBE_API_BASE_URL}/channels`);
   channelsUrl.searchParams.set("id", channelId);
   channelsUrl.searchParams.set("part", "snippet,contentDetails");
-  channelsUrl.searchParams.set("key", picked.apiKey);
   channelsUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
-  const channelsResp = await chargedFetch(channelsUrl, picked, 1, {
+  const channelsResp = await chargedFetch(channelsUrl, 1, {
     jobId: job.id,
     channelId,
     origin: "cron",
     logTag: "channel-context-backfill: channels.list",
   });
-  if (!channelsResp.ok) return; // dead-code defense — chargedFetch throws on non-2xx.
+  if (!channelsResp.ok) return; // dead-code defense - chargedFetch throws on non-2xx.
   const channelsJson = CHANNELS_LIST_RESPONSE.parse(await channelsResp.json());
   const channelItem = channelsJson.items[0];
   const uploadsPlaylistId = channelItem?.contentDetails?.relatedPlaylists?.uploads;
@@ -400,7 +396,7 @@ async function handleChannelContextBackfillImpl(job: {
   // 2a. Append the resolved-from URL to handle_aliases. Fixes the
   //     handle-URL cache miss: ingest's cache lookup widens with
   //     `OR $key = ANY(handle_aliases)`, so any future paste of the same
-  //     handle URL hits the row directly — no enqueue, no quota.
+  //     handle URL hits the row directly - no enqueue, no quota.
   //     Skip writes when:
   //       - aliasInputCandidate is null (no input URL captured);
   //       - the alias equals the resolved channelId (UC-only path: already
@@ -422,7 +418,7 @@ async function handleChannelContextBackfillImpl(job: {
       );
   }
 
-  // 3. playlistItems.list — paginated walk of the uploads playlist, filtered
+  // 3. playlistItems.list - paginated walk of the uploads playlist, filtered
   //    by `backfillWindow` cutoff. 1 quota unit per page. Stops on first page
   //    crossing cutoff (uploads playlists are sorted publishedAt DESC) or at
   //    MAX_PAGES (4 = 200 video hard cap). For "everything", no cutoff but
@@ -443,18 +439,17 @@ async function handleChannelContextBackfillImpl(job: {
     playlistUrl.searchParams.set("playlistId", uploadsPlaylistId);
     playlistUrl.searchParams.set("part", "snippet");
     playlistUrl.searchParams.set("maxResults", String(PAGE_SIZE));
-    playlistUrl.searchParams.set("key", picked.apiKey);
     playlistUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
     if (pageToken) playlistUrl.searchParams.set("pageToken", pageToken);
 
-    const playlistResp = await chargedFetch(playlistUrl, picked, 1, {
+    const playlistResp = await chargedFetch(playlistUrl, 1, {
       jobId: job.id,
       channelId,
       page,
       origin: "cron",
       logTag: "channel-context-backfill: playlistItems.list",
     });
-    if (!playlistResp.ok) break; // dead-code defense — chargedFetch throws on non-2xx.
+    if (!playlistResp.ok) break; // dead-code defense - chargedFetch throws on non-2xx.
     const playlistJson = PLAYLIST_ITEMS_LIST_RESPONSE.parse(await playlistResp.json());
 
     let crossedCutoffOnThisPage = false;
@@ -505,7 +500,7 @@ async function handleChannelContextBackfillImpl(job: {
 
   const videoIds = collected.map((c) => c.videoId);
 
-  // 4. videos.list — batched in chunks of 50 (one quota unit per chunk).
+  // 4. videos.list - batched in chunks of 50 (one quota unit per chunk).
   //    Sequential to keep quota accounting simple and pg-boss singleton-key
   //    contention bounded.
   const allItems: z.infer<typeof VIDEOS_LIST_RESPONSE>["items"] = [];
@@ -514,22 +509,21 @@ async function handleChannelContextBackfillImpl(job: {
     const videosUrl = new URL(`${env.YOUTUBE_API_BASE_URL}/videos`);
     videosUrl.searchParams.set("id", chunk.join(","));
     videosUrl.searchParams.set("part", "snippet,statistics");
-    videosUrl.searchParams.set("key", picked.apiKey);
     videosUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
-    const videosResp = await chargedFetch(videosUrl, picked, 1, {
+    const videosResp = await chargedFetch(videosUrl, 1, {
       jobId: job.id,
       channelId,
       batch: i / 50,
       origin: "cron",
       logTag: "channel-context-backfill: videos.list",
     });
-    if (!videosResp.ok) continue; // dead-code defense — chargedFetch throws on non-2xx.
+    if (!videosResp.ok) continue; // dead-code defense - chargedFetch throws on non-2xx.
     const videosJson = VIDEOS_LIST_RESPONSE.parse(await videosResp.json());
     allItems.push(...videosJson.items);
   }
 
-  // 5a. UPSERT youtube_videos. One row per video, no time-series —
+  // 5a. UPSERT youtube_videos. One row per video, no time-series  -
   //     title / description / channel only. The snippet half of
   //     videos.list lands here so the /events/new "Get from YouTube"
   //     button can read it for free on a re-paste of the same video.
@@ -563,7 +557,7 @@ async function handleChannelContextBackfillImpl(job: {
   }
 
   // 5b. INSERT snapshot rows. ON CONFLICT DO NOTHING on (video_id, polled_at)
-  //     UNIQUE — re-run within the same minute is a no-op at row level.
+  //     UNIQUE - re-run within the same minute is a no-op at row level.
   for (const item of allItems) {
     const stats = item.statistics;
     if (!stats) continue;
@@ -582,7 +576,7 @@ async function handleChannelContextBackfillImpl(job: {
   // 6. Auto-import event creation. When this backfill was triggered by
   //    /sources/new (sourceId provided + handleUrl path), the user expects
   //    each discovered video to surface in /feed. Read author_is_me from
-  //    the parent data_source — its is_owned_by_me flag determines whether
+  //    the parent data_source - its is_owned_by_me flag determines whether
   //    these events count as the user's own posts (Mine) or as tracked
   //    coverage (Tracking). For the ingest paste path (sourceId NOT provided)
   //    the event is already created by the ingest service, so we skip this
@@ -610,18 +604,18 @@ async function handleChannelContextBackfillImpl(job: {
     // match regardless of sourceId, which silently dropped backfill
     // writes when:
     //   - the user previously manually pasted the same video (sourceId=NULL
-    //     — backfill saw it and skipped, source page showed "0 imported"),
+    // - backfill saw it and skipped, source page showed "0 imported"),
     //   - a different source already auto-imported the same video (rare,
     //     requires two sources pointing at the same upstream channel).
     //
     // Schema unique `events_user_kind_source_ext_unq` already permits
-    // multiple rows for the same external_id when sourceId differs — it
+    // multiple rows for the same external_id when sourceId differs - it
     // ONLY blocks duplicate inserts within a single source. Scoping the
     // pre-insert SELECT to match makes backfill honest:
     //   - A re-run of THIS source's backfill is idempotent (sourceId-scoped
-    //     SELECT finds existing → skip).
-    //   - Cross-source double-import is preserved (different sourceId →
-    //     SELECT misses → INSERT proceeds → schema unique permits).
+    //     SELECT finds existing -> skip).
+    //   - Cross-source double-import is preserved (different sourceId ->
+    //     SELECT misses -> INSERT proceeds -> schema unique permits).
     //   - Manual paste events (sourceId=NULL) live in their own world and
     //     never collide with auto-import (sourceId-scoped SELECT excludes
     //     them by construction).
@@ -655,7 +649,7 @@ async function handleChannelContextBackfillImpl(job: {
 
     for (const c of collected) {
       if (existingIds.has(c.videoId)) continue;
-      // onConflictDoNothing — race-safe against parallel
+      // onConflictDoNothing - race-safe against parallel
       // channel-context-backfill jobs (singletonKey window edge,
       // pgboss restart). Optimistic SELECT is the fast path; UNIQUE
       // is the DB-level defense.
@@ -681,7 +675,7 @@ async function handleChannelContextBackfillImpl(job: {
   //    fetched_at} for every collected video. We extend it here by stamping
   //    last_polled_at + last_poll_status='ok' on those rows so the tier
   //    resolver classifies them as Active/Cold/Frozen (not 'pending') as
-  //    soon as the backfill completes. PUBLIC-DATA TABLE — no userId filter.
+  //    soon as the backfill completes. PUBLIC-DATA TABLE - no userId filter.
   if (videoIds.length > 0) {
     await db
       .update(youtubeVideos)
@@ -700,14 +694,14 @@ async function handleChannelContextBackfillImpl(job: {
 
   // Backfill state machine + audit metadata for cap counter. State updates
   // only happen when sourceId is present (createSource flow, not generic
-  // ingest path). Audit row written in both cases — ingest flow (no
+  // ingest path). Audit row written in both cases - ingest flow (no
   // sourceId) gets minimal metadata (no source_id field).
   if (sourceId && channelId !== null) {
     // Terminal channel-state writes per stopReason. An earlier version
     // set frontier + last_polled_at but left backfill_complete=false even
     // for channels that finished naturally (`no_more_pages`), causing the
     // cron auto-backfill picker to re-walk them at 3am Pacific the next
-    // day — the typical onboarding double-walk.
+    // day - the typical onboarding double-walk.
     //
     // | stopReason       | complete | frontier            | token              |
     // |------------------|----------|---------------------|--------------------|
@@ -716,7 +710,7 @@ async function handleChannelContextBackfillImpl(job: {
     // | cutoff_crossed   | false    | cutoff              | null               |
     await markChannelLastPolledAt("youtube_channel", channelId);
 
-    // Frontier write — depends on stopReason. `cutoff_crossed` uses the
+    // Frontier write - depends on stopReason. `cutoff_crossed` uses the
     // window boundary directly because the frontier represents how far
     // back we walked, which IS the cutoff when we stopped because we
     // crossed it; oldest-seen would lie about the boundary.
@@ -728,12 +722,12 @@ async function handleChannelContextBackfillImpl(job: {
     // cache. The next refresh-content click then routed to
     // branch="incremental" (target >= deepestWalked) and the
     // overlap-mode walker, having no cache rows to compare against,
-    // never triggered the overlap-stop threshold — it walked to
+    // never triggered the overlap-stop threshold - it walked to
     // MAX_PAGES (20 quota units) and fan-out dropped every event for
     // being before the user's target. Skipping the frontier write
     // when nothing landed in cache means the next click routes to
     // branch="deep" (walkStop="depth") and terminates on the first
-    // page past the cutoff — 1 quota unit instead of 20.
+    // page past the cutoff - 1 quota unit instead of 20.
     if (stopReason === "cutoff_crossed" && cutoff !== null && videoIds.length > 0) {
       await markChannelBackfillFrontier("youtube_channel", channelId, cutoff);
     } else if (videoIds.length > 0) {
@@ -754,7 +748,7 @@ async function handleChannelContextBackfillImpl(job: {
       }
     }
 
-    // Complete + token writes — depends on stopReason.
+    // Complete + token writes - depends on stopReason.
     if (stopReason === "no_more_pages") {
       await markChannelBackfillComplete("youtube_channel", channelId);
       await setChannelBackfillPageToken("youtube_channel", channelId, null);
@@ -762,7 +756,7 @@ async function handleChannelContextBackfillImpl(job: {
       // Complete stays false; preserve resume cursor for next walk.
       await setChannelBackfillPageToken("youtube_channel", channelId, hardCapResumeToken);
     } else {
-      // cutoff_crossed — complete stays false (more history is available
+      // cutoff_crossed - complete stays false (more history is available
       // past the cutoff if the user later widens backfillTargetSince);
       // clear token because we did NOT exhaust pagination, we just
       // stopped at the window boundary.
@@ -770,9 +764,9 @@ async function handleChannelContextBackfillImpl(job: {
     }
   }
 
-  // Audit row — counted ONLY when sourceId is present (per-source cap accounting).
+  // Audit row - counted ONLY when sourceId is present (per-source cap accounting).
   // Ingest-paste channel-context (no sourceId) is operator-side cache hydration,
-  // not user-initiated quota burn — we skip the audit row to avoid polluting cap
+  // not user-initiated quota burn - we skip the audit row to avoid polluting cap
   // queries with rows that have no source_id.
   if (sourceId) {
     // Estimate quota units burned: 1 (channels.list) + N pages of playlistItems

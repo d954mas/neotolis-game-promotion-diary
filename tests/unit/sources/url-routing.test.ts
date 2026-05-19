@@ -3,18 +3,23 @@ import { detectFutureKind } from "$lib/sources/future-kinds.js";
 import { parseAnyUrl } from "$lib/sources/url.js";
 import { allAdapters } from "$lib/sources/registry.js";
 
-describe("detectFutureKind — Reddit deferral preservation", () => {
-  it("reddit.com → 'reddit_post'", () => {
-    expect(detectFutureKind("https://reddit.com/r/IndieDev/comments/x/y")).toBe("reddit_post");
+describe("detectFutureKind — empty map post Phase 03.1 (D-RDT-INGEST-REPLACE)", () => {
+  // Phase 03.1 landed the Reddit adapter and removed reddit hosts from
+  // FUTURE_KIND_HOSTS — the registry-driven parseAnyUrl iterator now
+  // matches reddit.com / redd.it via redditAdapter.parseUrl. The map is
+  // currently empty; future deferred adapters (Twitter / Telegram /
+  // Discord) repopulate it as their hosts surface.
+  it("reddit.com → null (handled by registry; no longer a future-kind)", () => {
+    expect(detectFutureKind("https://reddit.com/r/IndieDev/comments/x/y")).toBeNull();
   });
-  it("www.reddit.com → 'reddit_post'", () => {
-    expect(detectFutureKind("https://www.reddit.com/r/IndieDev/foo")).toBe("reddit_post");
+  it("www.reddit.com → null (handled by registry)", () => {
+    expect(detectFutureKind("https://www.reddit.com/r/IndieDev/foo")).toBeNull();
   });
-  it("old.reddit.com → 'reddit_post'", () => {
-    expect(detectFutureKind("https://old.reddit.com/r/IndieDev/foo")).toBe("reddit_post");
+  it("old.reddit.com → null (handled by registry)", () => {
+    expect(detectFutureKind("https://old.reddit.com/r/IndieDev/foo")).toBeNull();
   });
-  it("redd.it → 'reddit_post'", () => {
-    expect(detectFutureKind("https://redd.it/abc123")).toBe("reddit_post");
+  it("redd.it → null (handled by registry)", () => {
+    expect(detectFutureKind("https://redd.it/abc123")).toBeNull();
   });
   it("twitter.com → null (twitter not on the future-kinds map)", () => {
     expect(detectFutureKind("https://twitter.com/x/status/123")).toBeNull();
@@ -63,7 +68,21 @@ describe("parseAnyUrl — first-match-wins iterate-registry", () => {
     expect(parseAnyUrl("https://twitter.com/x/status/123").kind).toBe("unsupported");
   });
 
-  it("reddit.com URL → kind: 'unsupported' (registry layer; ingest.ts maps to reddit_not_yet_supported)", () => {
+  it("reddit.com /r/X/comments/<id> POST URL → kind: 'reddit_post' via redditAdapter (Phase 03.1)", () => {
+    const r = parseAnyUrl("https://reddit.com/r/IndieDev/comments/abc123/foo-slug");
+    expect(r.kind).toBe("reddit_post");
+    expect((r as { externalId: string }).externalId).toBe("abc123");
+  });
+
+  it("redd.it short-link → kind: 'reddit_post' via redditAdapter (Phase 03.1)", () => {
+    const r = parseAnyUrl("https://redd.it/abc123");
+    expect(r.kind).toBe("reddit_post");
+    expect((r as { externalId: string }).externalId).toBe("abc123");
+  });
+
+  it("reddit.com /r/X (subreddit landing) → kind: 'unsupported' (sources, not events)", () => {
+    // /sources/new uses redditAdapter.parseSourceUrl for the SOURCE form;
+    // the EVENT-shape parseAnyUrl iterator only recognizes POST URLs.
     expect(parseAnyUrl("https://reddit.com/r/IndieDev").kind).toBe("unsupported");
   });
 

@@ -457,7 +457,7 @@ log "=== Unified-events smoke extension PASSED ==="
 #      (scheduler.tick.active / .cold, youtube.quota_reset, purge.daily,
 #      youtube.rehab_unavailable).
 #   4. Creates a kind=youtube_video event + drives /api/events/:id/refresh-poll
-#      so the worker drains a real poll.user job through the mock;
+#      so the worker drains a real adapter_refresh_queue row through the mock;
 #      asserts the youtube_video_snapshots row + youtube_videos.last_polled_at
 #      land within 60s.
 #   5. Asserts /api/admin/quota and /admin/quota HTML page both return
@@ -471,5 +471,35 @@ log "=== YouTube polling smoke extension ==="
 source "$(dirname "$0")/lib/youtube-polling-flow.sh"
 youtube_polling_smoke "http://localhost:$APP_PORT" "$SESSION_COOKIE_A"
 log "=== YouTube polling smoke extension PASSED ==="
+
+# ============================================================
+# Reddit adapter (Phase 03.1 plan 10 — V3 + V24 + V25)
+# ============================================================
+# The full assertion chain lives in tests/smoke/lib/reddit-polling-flow.sh
+# (sourced below). Summary of what it covers:
+#
+#   Half A — empty REDDIT_USER_AGENT (V3 + V24):
+#     - /readyz still 200 with empty env (parity preserved).
+#     - /sources HTML renders "Reddit not configured" empty state.
+#     - POST /api/events with Reddit URL → 422 reddit_not_configured.
+#
+#   Half B — configured + mock-Reddit (V25):
+#     - Boots tests/smoke/lib/reddit-mock.{mjs,sh} on a free local port;
+#       restarts smoke-app + smoke-worker + smoke-scheduler with
+#       REDDIT_USER_AGENT + REDDIT_BASE_URL_OVERRIDE pointing at it.
+#     - Asserts worker grep contract
+#       "reddit batch-worker ready: 8-tick round-robin loop".
+#     - Asserts 4 reddit.cron.* schedules in pgboss.schedule.
+#     - Paste a Reddit post URL → 201 event_created → reddit_post_snapshots
+#       row lands (handlePostSingle UPSERT + snapshot end-to-end through
+#       the mock).
+#
+# All Reddit HTTP traffic is intercepted by reddit-mock — NO live Reddit
+# calls in CI.
+log "=== Reddit adapter smoke extension ==="
+# shellcheck source=tests/smoke/lib/reddit-polling-flow.sh
+source "$(dirname "$0")/lib/reddit-polling-flow.sh"
+reddit_polling_smoke "http://localhost:$APP_PORT" "$SESSION_COOKIE_A"
+log "=== Reddit adapter smoke extension PASSED ==="
 
 log "ALL SMOKE ASSERTIONS PASSED"

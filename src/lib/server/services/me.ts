@@ -30,11 +30,36 @@ import { NotFoundError } from "./errors.js";
 
 export type Theme = "light" | "dark" | "system";
 
+export interface LayoutUserState {
+  themePreference: Theme;
+  deletedAt: Date | null;
+}
+
 /** Return the DTO for the authenticated user. Throws NotFoundError if missing. */
 export async function getMe(userId: string): Promise<UserDto> {
   const u = await getUserById(userId);
   if (!u) throw new NotFoundError();
   return toUserDto(u);
+}
+
+export async function getLayoutUserState(userId: string): Promise<LayoutUserState> {
+  const [row] = await db
+    .select({ themePreference: user.themePreference, deletedAt: user.deletedAt })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
+  if (!row) throw new NotFoundError();
+  return {
+    themePreference: row.themePreference as Theme,
+    deletedAt: row.deletedAt,
+  };
+}
+
+export async function syncUserThemePreference(userId: string, theme: Theme): Promise<void> {
+  await db
+    .update(user)
+    .set({ themePreference: theme, updatedAt: new Date() })
+    .where(eq(user.id, userId));
 }
 
 /**

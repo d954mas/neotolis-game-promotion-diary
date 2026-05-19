@@ -9,26 +9,24 @@
 // That hop has been collapsed. The cron schedule sends tier-tagged jobs
 // DIRECTLY to youtube.poll.cron; the poll-cron handler dispatches by
 // job.data.tier and the per-tier handlers (handlePollActive /
-// handlePollCold) now own the eligibility query + writeSnapshot pipeline.
+// handlePollCold) now own the eligibility query and enqueue service_video
+// rows. The SQL refresh worker owns upstream fetch + writeSnapshot.
 // scheduler/enqueue.ts is deleted.
-//
 // This test is rewritten to invoke handlePollActive / handlePollCold
 // directly with tier-tagged jobs and assert the SAME tier-eligibility
 // behavior (Frozen / Unavailable / per-video-decoupled-from-source-state)
-// via the youtubeChannelAdapter.pollStatsByVideoId mock — which captures
-// the videoIds the handler resolved for each tier.
+// by reading the service_video queue rows the handlers produce.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { eq, sql } from "drizzle-orm";
 
-// Capture videoIds passed to the adapter so we can assert tier eligibility.
+// Kept as a guard: producer-only handlers should not invoke the adapter.
 const pollStatsCalls: Array<{ videoIds: string[]; quotaUser: string }> = [];
 
 vi.mock("../../src/lib/sources/youtube/server/adapter.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
-  // The handler uses `youtubeChannelAdapter.pollStatsByVideoId`. Replace it
-  // with a stub that records the call and returns 'ok' snapshots so
-  // writeSnapshot succeeds (we don't care about the actual snapshot
-  // contents here — only that the handler resolved the right videoIds).
+  // If a producer-only handler regresses into direct upstream polling, this
+  // stub records it so the assertions can catch the contract break.
   return {
     ...actual,
     youtubeChannelAdapterCore: {
@@ -45,21 +43,26 @@ vi.mock("../../src/lib/sources/youtube/server/adapter.js", async (importOriginal
   };
 });
 
-// Force pickKeyForJob to return a deterministic fixture so the handler
-// reaches the adapter mock above (env.SERVICE_YOUTUBE_API_KEYS is empty
-// in the test env; pre-Plan-07 enqueue.ts didn't need a key, but the
-// handler does).
+// Force the quota gate to return a deterministic fixture if this producer
+// ever regresses into direct adapter polling.
 vi.mock("../../src/lib/sources/youtube/server/quota.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    pickKeyForJob: () => ({ apiKey: "test-key-sched", apiKeyId: "schedfix1" }),
+    hasYoutubeApiKeys: () => true,
+    reserveYoutubeQuota: async (args: { origin: "cron" | "user"; units: number }) => ({
+      apiKey: "test-key-sched",
+      apiKeyId: "schedfix1",
+      poolKind: args.origin,
+      units: args.units,
+    }),
   };
 });
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { youtubeVideos } = await import("../../src/lib/server/db/schema/index.js");
+const { adapterRefreshQueue, youtubeVideos } =
+  await import("../../src/lib/server/db/schema/index.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { resetThrottleState } = await import("../../src/lib/sources/youtube/server/quota.js");
@@ -67,6 +70,8 @@ const { handlePollActive } =
   await import("../../src/lib/sources/youtube/server/handlers/poll-active.js");
 const { handlePollCold } =
   await import("../../src/lib/sources/youtube/server/handlers/poll-cold.js");
+const { handleRehabUnavailable } =
+  await import("../../src/lib/sources/youtube/server/handlers/rehab-unavailable.js");
 const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
@@ -106,40 +111,44 @@ async function insertEventWithVideo(
   return { eventId: id, videoId };
 }
 
-beforeEach(() => {
+async function queuedServiceVideoIds(): Promise<string[]> {
+  const rows = await db
+    .select({ videoId: sql<string>`${adapterRefreshQueue.payload}->>'video_id'` })
+    .from(adapterRefreshQueue)
+    .where(eq(adapterRefreshQueue.queueName, "service_video"));
+  return rows.map((row) => row.videoId);
+}
+
+beforeEach(async () => {
   pollStatsCalls.length = 0;
   resetThrottleState();
+  await db.execute(sql`DELETE FROM adapter_refresh_queue`);
 });
 
 describe("youtube.poll.cron tier-eligibility (per-video refactor)", () => {
-  it("handlePollActive picks Active-tier videos (publishedAt < 24h) and polls them", async () => {
+  it("handlePollActive picks Active-tier videos (publishedAt < 24h) and enqueues them", async () => {
     const u = await seedUserDirectly({ email: `sch-active-${uniq()}@test.local` });
     // The handler reads the LIVE clock (no `now` injection in Plan-07
-    // model — eligibility uses `new Date()` inside the handler). Seed
+    // model - eligibility uses `new Date()` inside the handler). Seed
     // the fixture with a recent publishedAt so it falls in Active tier.
     const recent = new Date(Date.now() - 12 * 60 * 60 * 1000); // 12h ago
     const { videoId } = await insertEventWithVideo(u.id, recent);
 
     await handlePollActive({ id: "test", data: { tier: "active" } });
 
-    expect(pollStatsCalls.length).toBeGreaterThanOrEqual(1);
-    const allVideoIds = pollStatsCalls.flatMap((c) => c.videoIds);
-    expect(allVideoIds).toContain(videoId);
-    // quotaUser fingerprint is the service-tier constant.
-    expect(pollStatsCalls[0]!.quotaUser).toBe("neotolis-svc-active");
+    await expect(queuedServiceVideoIds()).resolves.toContain(videoId);
+    expect(pollStatsCalls).toHaveLength(0);
   });
 
-  it("handlePollCold picks Cold-tier videos (24h-28d) and polls them", async () => {
+  it("handlePollCold picks Cold-tier videos (24h-28d) and enqueues them", async () => {
     const u = await seedUserDirectly({ email: `sch-cold-${uniq()}@test.local` });
     const fiveDaysAgo = new Date(Date.now() - 5 * 86_400_000);
     const { videoId } = await insertEventWithVideo(u.id, fiveDaysAgo);
 
     await handlePollCold({ id: "test", data: { tier: "cold" } });
 
-    expect(pollStatsCalls.length).toBeGreaterThanOrEqual(1);
-    const allVideoIds = pollStatsCalls.flatMap((c) => c.videoIds);
-    expect(allVideoIds).toContain(videoId);
-    expect(pollStatsCalls[0]!.quotaUser).toBe("neotolis-svc-cold");
+    await expect(queuedServiceVideoIds()).resolves.toContain(videoId);
+    expect(pollStatsCalls).toHaveLength(0);
   });
 
   it("Frozen videos that have already been polled (publishedAt > 28d, lastPolledAt set) are NOT polled by either tier handler", async () => {
@@ -156,8 +165,19 @@ describe("youtube.poll.cron tier-eligibility (per-video refactor)", () => {
     await handlePollActive({ id: "test", data: { tier: "active" } });
     await handlePollCold({ id: "test", data: { tier: "cold" } });
 
-    const allPolledIds = pollStatsCalls.flatMap((c) => c.videoIds);
-    expect(allPolledIds).not.toContain(videoId);
+    await expect(queuedServiceVideoIds()).resolves.not.toContain(videoId);
+  });
+
+  it("rehab-unavailable enqueues unavailable videos into service_video", async () => {
+    const u = await seedUserDirectly({ email: `sch-rehab-${uniq()}@test.local` });
+    const recent = new Date(Date.now() - 12 * 60 * 60 * 1000);
+    const { videoId } = await insertEventWithVideo(u.id, recent, {
+      videoOverrides: { lastPollStatus: "private", pollFailureCount: 2 },
+    });
+
+    await handleRehabUnavailable({ id: "test-rehab" });
+
+    await expect(queuedServiceVideoIds()).resolves.toContain(videoId);
   });
 
   it("Frozen videos that have NEVER been polled (publishedAt > 28d, lastPolledAt IS NULL) ARE polled once by cold tier (bootstrap)", async () => {
@@ -171,8 +191,7 @@ describe("youtube.poll.cron tier-eligibility (per-video refactor)", () => {
 
     await handlePollCold({ id: "test", data: { tier: "cold" } });
 
-    const allPolledIds = pollStatsCalls.flatMap((c) => c.videoIds);
-    expect(allPolledIds).toContain(videoId);
+    await expect(queuedServiceVideoIds()).resolves.toContain(videoId);
   });
 
   it("Bootstrap is dormant on active tier — never-polled active videos still classify as active, NOT cold (no double-poll across both crons)", async () => {
@@ -184,8 +203,7 @@ describe("youtube.poll.cron tier-eligibility (per-video refactor)", () => {
 
     // handlePollCold's eligibility filter must reject this video — it's
     // active-tier by age and the bootstrap rule only fires for frozen.
-    const allPolledIds = pollStatsCalls.flatMap((c) => c.videoIds);
-    expect(allPolledIds).not.toContain(videoId);
+    await expect(queuedServiceVideoIds()).resolves.not.toContain(videoId);
   });
 
   it("Unavailable videos (last_poll_status='not_found') are NOT polled by either tier handler", async () => {
@@ -198,8 +216,7 @@ describe("youtube.poll.cron tier-eligibility (per-video refactor)", () => {
     await handlePollActive({ id: "test", data: { tier: "active" } });
     await handlePollCold({ id: "test", data: { tier: "cold" } });
 
-    const allPolledIds = pollStatsCalls.flatMap((c) => c.videoIds);
-    expect(allPolledIds).not.toContain(videoId);
+    await expect(queuedServiceVideoIds()).resolves.not.toContain(videoId);
   });
 
   it("stats polling is per-video — source state (deletedAt, auto_import) does NOT gate eligibility", async () => {
@@ -247,9 +264,9 @@ describe("youtube.poll.cron tier-eligibility (per-video refactor)", () => {
 
     await handlePollActive({ id: "test", data: { tier: "active" } });
 
-    const allPolledIds = pollStatsCalls.flatMap((c) => c.videoIds);
-    expect(allPolledIds).toContain(fromDeletedSourceVideo);
-    expect(allPolledIds).toContain(fromNoAutoSourceVideo);
-    expect(allPolledIds).toContain(manualPasteVideo);
+    const queuedIds = await queuedServiceVideoIds();
+    expect(queuedIds).toContain(fromDeletedSourceVideo);
+    expect(queuedIds).toContain(fromNoAutoSourceVideo);
+    expect(queuedIds).toContain(manualPasteVideo);
   });
 });

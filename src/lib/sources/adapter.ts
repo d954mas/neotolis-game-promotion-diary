@@ -1,29 +1,18 @@
-// DataSourceAdapter — the per-source interface implementations register
+// SourceAdapter - the per-source interface implementations register
 // against the registry.
 //
 // Surface includes:
-//   - parseUrl(url) — per-adapter URL detection (first-match-wins).
-//   - observability — per-adapter quota/audit/auth API for /admin/quota tabs.
-//   - registerQueues / scheduleCronTicks / backfillSource — adapter owns its
+//   - parseUrl(url) - per-adapter URL detection (first-match-wins).
+//   - observability - per-adapter quota/audit/auth API for /admin/quota tabs.
+//   - registerQueues / scheduleCronTicks / backfillSource - adapter owns its
 //     queue topology and cron schedules (per-kind queues).
-//   - canRefreshPoll — optional dispatch hint for the generic
-//     POST /api/sources/:id/refresh-content endpoint.
-//
-// The v0.1 adapter methods (pollContent / pollStats / pollStatsByVideoId)
-// keep legacy `PickedKey` + `quotaUser` signatures because callers
-// (poll-active / poll-cold / poll-user / rehab-unavailable) still thread
-// a pre-resolved key down for the `youtube_service_quota_usage` row keyed
-// under the same apiKeyId the adapter burned (load-bearing with N≥2 keys).
-// Moving picking INSIDE the adapter requires either returning apiKeyId
-// on every StatsSnapshot or threading ctx into pickCredentials — both
-// are non-trivial behavioral changes deferred until the supporting
-// infrastructure is in place.
+//   - refreshQueue - optional Refresh Now capability for pollable event kinds.
 //
 // AdapterContext is defined here because parseUrl-iteration callers and
-// backfillSource consume it directly; the legacy methods don't take it yet.
+// backfillSource consume it directly.
 
 import type { dataSources, events } from "$lib/server/db/schema/index.js";
-import type { DbOrTx } from "$lib/server/db/client.js";
+import type { DbOrTx, Tx } from "$lib/server/db/client.js";
 import type { EventDto } from "$lib/server/dto.js";
 import type { Hono } from "hono";
 
@@ -33,6 +22,7 @@ export type EventRow = typeof events.$inferSelect;
 export type SourceKind =
   | "youtube_channel"
   | "reddit_account"
+  | "reddit_subreddit"
   | "twitter_account"
   | "telegram_channel"
   | "discord_server";
@@ -87,44 +77,50 @@ export interface PollableSource {
 export interface AdapterContext {
   userId: string | null;
   origin: "cron" | "user";
+  /** Optional transaction handle for adapter-owned durable enqueue paths. */
+  tx?: DbOrTx;
   /** How the playlist walker decides when to stop.
    *  - "depth" (default): items with publishedAt <= since are dropped AND
    *    end the walk. Use for deep walks where `since` is the historical floor
-   *    (e.g. user widened backfill_target_since to epoch — walker stops at
+   *    (e.g. user widened backfill_target_since to epoch - walker stops at
    *    epoch via endOfPlaylist, or at 30d-ago when since=30d-ago).
    *  - "overlap": items are NOT dropped by publishedAt alone. Walker stops
    *    after K consecutive items that are BOTH already in the youtube_videos
    *    cache AND have publishedAt <= since. Use for incremental walks
    *    (channel previously walked; we just want what's new). Backdated
    *    uploads with publishedAt below newestKnown but NOT yet in cache
-   *    survive — they get collected because cache-miss means "we have not
+   *    survive - they get collected because cache-miss means "we have not
    *    seen this video before". */
   walkStop?: "depth" | "overlap";
 }
 
 /**
- * PickedKey — adapter callers pre-pick a key from the quota tracker and
- * thread it down. Without this, the adapter would call `pickKeyForJob`
- * internally per chunk and drift the round-robin index against the
- * caller's tracking — counter rows in `youtube_service_quota_usage` would
- * end up keyed under the caller's pick while the actual HTTP burned a
- * different key (visible only with N≥2 keys; silent at indie scale).
- *
- * Threading the pick through the call chain ties one batch to one key:
- * a 100-video batch fans out into 2 chunks but both HTTP calls hit the
- * same key, the same counter row updates, and the operator's
- * /admin/quota dashboard reflects predictable round-robin balance.
+ * PickedKey - YouTube operator key selected by a DB quota reservation or
+ * explicit quota helper. Batched videos.list calls receive this object from
+ * their caller so the key used for HTTP matches the apiKeyId recorded in
+ * youtube_service_quota_usage.
  */
 export interface PickedKey {
   apiKey: string;
   apiKeyId: string;
 }
 
-/** Per-adapter URL detection result — first-match-wins iteration. */
+/** Per-adapter URL detection result - first-match-wins iteration. */
 export interface ParsedUrl {
   kind: EventKind;
   externalId: string;
   metadata?: Record<string, unknown>;
+}
+
+/** Per-adapter source-URL detection result - drives /sources/new auto-detect
+ *  for adapters where one input shape maps to multiple SourceKinds.
+ *  Reddit: `reddit.com/user/X` -> reddit_account; `reddit.com/r/X` -> reddit_subreddit.
+ *  Implemented optionally - YouTube cross-source flow uses `canonicalizeOnCreate`
+ *  (synchronous + per-URL canonicalization) instead. */
+export interface ParsedSourceUrl {
+  kind: SourceKind;
+  handle: string;
+  externalUrl: string;
 }
 
 export interface ObservabilityAuth {
@@ -132,7 +128,8 @@ export interface ObservabilityAuth {
     | "operator-static-key"
     | "operator-oauth-app-only"
     | "scrape"
-    | "operator-oauth-with-user-override";
+    | "operator-oauth-with-user-override"
+    | "public-json-no-auth";
   requiresUserSetup: boolean;
   isOperatorConfigured: boolean;
 }
@@ -146,7 +143,7 @@ export interface ObservabilityDailyStats {
    * Per-key breakdown. `throttleState` is computed by the adapter using its
    * own internal thresholds (YouTube: 80%/95% of 10 000 daily; future Reddit
    * may use rolling-window thresholds). Consumers (admin /admin/quota) must
-   * NOT recompute throttleState — they trust the adapter's classification.
+   * NOT recompute throttleState - they trust the adapter's classification.
    */
   keys?: Array<{
     apiKeyId: string;
@@ -162,7 +159,7 @@ export interface ObservabilityAuditEntry {
   metadata: Record<string, unknown>;
 }
 
-/** Per-adapter quota counter declaration — adapters expose their per-user
+/** Per-adapter quota counter declaration - adapters expose their per-user
  *  rolling quotas (e.g. youtube_metadata_fetches_per_day) so cross-source
  *  services/quota.ts iterates `allAdapters[*].observability.quotaCounters`
  *  instead of switching on a hard-coded list. New adapters declare their
@@ -171,10 +168,10 @@ export interface ObservabilityAuditEntry {
  *  count() receives `dbCtx: DbOrTx` so it can be invoked under the per-user
  *  advisory lock inside withQuotaGuard's transaction (race-safe limit check).
  *  Counters that don't need in-tx semantics can ignore the parameter and
- *  query via the top-level `db` — but standard pattern is to pass `dbCtx`
+ *  query via the top-level `db` - but standard pattern is to pass `dbCtx`
  *  through so concurrent same-user requests serialize correctly. */
 export interface AdapterQuotaCounter {
-  /** Quota key — must match a key in services/quota.ts QUOTA_LIMITS. */
+  /** Quota key - must match a key in services/quota.ts QUOTA_LIMITS. */
   kind: string;
   /** Count rows for `userId` since `since` (typically rolling 24h window).
    *  Uses `dbCtx` (db OR active tx) so the count joins the caller's
@@ -182,29 +179,34 @@ export interface AdapterQuotaCounter {
   count(dbCtx: DbOrTx, userId: string, since: Date): Promise<number>;
 }
 
-/** Per-user fair-share cap on operator's API budget. Both axes optional —
- *  adapter declares either, both, or neither. Capping prevents one user
- *  from monopolizing operator's shared API quota across all tenants.
+/** Per-user fair-share cap on operator's API budget. Both axes optional  -
+ *  adapter declares either, both, neither, OR the Reddit two-axis shape.
+ *  Capping prevents one user from monopolizing operator's shared API quota
+ *  across all tenants.
  *
- *  - requestsPerDay — cap on API calls (quota units). Hits when one user
- *    has consumed their daily share of operator's API budget. Self-host
- *    operator typically not capped (1 user); SaaS hosted instance caps
- *    so other users get predictable share.
+ *  - requestsPerDay - cap on API calls (YouTube; 24h rolling).
+ *  - eventsPerDay - cap on user-INSERTed events (YouTube; 24h rolling).
  *
- *  - eventsPerDay — cap on events INSERTed via user-initiated actions.
- *    Optional secondary cap для platforms with high events-per-request
- *    variance (Twitter pagination 1-100/req). YouTube has fixed 50:1
- *    ratio so requestsPerDay alone suffices; eventsPerDay omitted.
+ *  Reddit (Phase 03.1, two-axis sliding window — DV-RDT-7):
+ *  - sourceActionsPerWindow — register/refresh-source quota (default 5,
+ *    v0.1 UAT recalibration; was 1 in the initial draft).
+ *  - postRefreshesPerWindow — manual post refresh quota (default 30,
+ *    v0.1 UAT recalibration; was 25).
+ *  - windowMinutes — sliding-window length for source/post axes (default 15,
+ *    v0.1 UAT recalibration; was 5). Authoritative value lives in
+ *    src/lib/sources/reddit/server/quota.ts REDDIT_USER_CAP — both
+ *    surfaces import from there so this jsdoc stays informational.
  *
- *  Counter source: audit_log SUM with metadata.{requests_used, events_inserted}.
- *  Cap kinds: 'initial' | 'incremental' | 'historical' | 'stats_refresh'.
- *  Excluded: 'auto_passive' (cron pool, not user pool). The 'initial' flow
- *  was originally excluded for onboarding UX, but counts now — onboarding
- *  also burns user quota and should reflect in the cap (UAT 2026-05-10
- *  confirmed user expectation). */
+ *  Counter source (Reddit): adapter_refresh_queue rows with
+ *  adapter_kind='reddit_account' and user_id=$user in the last
+ *  `windowMinutes`. Excluded: cron-driven entries
+ *  (queue rows with user_id IS NULL). */
 export interface AdapterUserQuotaCap {
   requestsPerDay?: number;
   eventsPerDay?: number;
+  sourceActionsPerWindow?: number;
+  postRefreshesPerWindow?: number;
+  windowMinutes?: number;
 }
 
 export interface AdapterObservability {
@@ -219,33 +221,60 @@ export interface AdapterObservability {
   quotaCounters?: ReadonlyArray<AdapterQuotaCounter>;
   /** Per-user fair-share cap. When present, refresh-content / refresh-poll
    *  endpoints check usage SUM from audit_log before enqueue and 429 on
-   *  exhaustion. When undefined, cap not enforced (usage still tracked в
-   *  audit metadata для visibility но не denial). */
+   *  exhaustion. When undefined, cap not enforced (usage still tracked in
+   *  audit metadata for visibility but not denial). */
   userQuotaCap?: AdapterUserQuotaCap;
+  /** Adapter-owned sliding-window quota implementation. Declare this when
+   *  userQuotaCap.windowMinutes is set so the generic quota service does not
+   *  import source-specific modules. */
+  slidingWindowQuota?: {
+    check(
+      dbCtx: DbOrTx,
+      userId: string,
+      action: "source-action" | "post-refresh",
+    ): Promise<{
+      allowed: boolean;
+      cap: number;
+      used: number;
+      window: string;
+      resetInSeconds: number;
+      errorCode: string;
+      message: string;
+      audit: {
+        userId: string;
+        axis: string;
+        cap: number;
+        used: number;
+      };
+    }>;
+    writeExhaustedAudit(args: {
+      userId: string;
+      ipAddress: string;
+      axis: string;
+      cap: number;
+      used: number;
+    }): Promise<void>;
+  };
   /**
-   * Adapter declares whether it maintains in-process rate-limit state
-   * (e.g., RateLimiterMemory reservoirs that lose state on worker
-   * restart). Worker bootstrap iterates and refuses to start with
-   * WORKER_REPLICA_COUNT > 1 if ANY adapter sets this true, because
-   * per-process reservoirs would each hold independent budgets →
-   * N × envelope burn → quota overshoot. Making the property
-   * adapter-declared lets the generic worker bootstrap accumulate
-   * offending adapters and surface a truthful error message when
-   * N>1 platforms ship in-process state.
+   * Adapter declares that its whole runtime must be owned by one worker
+   * replica. Use this only when some load-bearing state is still
+   * process-local and cannot be protected by a DB claim gate or persistent
+   * counter. Worker bootstrap uses a per-adapter session advisory lock so
+   * unrelated adapters can still run in parallel.
    *
-   * When false / omitted: adapter uses persistent counters only
-   * (RateLimiterPostgres, DB-backed) — replica scaling is safe.
+   * When false / omitted: adapter uses persistent counters or DB claim gates
+   * for load-bearing limits, so parallel worker replicas can be clean-safe.
    */
-  usesInProcessRateLimiter?: boolean;
+  requiresSingletonRuntime?: boolean;
 }
 
-/** Backfill window options — accepted by createSource and threaded into
+/** Backfill window options - accepted by createSource and threaded into
  *  onSourceCreated. Forward-compatible with future adapter-specific extensions
- *  (e.g. Reddit may add "this_subreddit_ever" — opt-in per-adapter). */
+ *  (e.g. Reddit may add "this_subreddit_ever" - opt-in per-adapter). */
 export type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
 
-/** Result of canonicalizeOnCreate — the adapter's chance to:
- *  - Rewrite handle_url to its canonical form (e.g. /watch?v=XYZ → /channel/UC…)
+/** Result of canonicalizeOnCreate - the adapter's chance to:
+ *  - Rewrite handle_url to its canonical form (e.g. /watch?v=XYZ -> /channel/UC...)
  *  - Resolve an external id (channel_id, account_id) at create time so the
  *    worker takes the fast path (no resolve quota burn on first backfill).
  *
@@ -258,6 +287,7 @@ export interface CanonicalizeResult {
 /** Input shape consumed by canonicalizeOnCreate. Mirrors the relevant slice
  *  of CreateSourceInput; adapters never touch tenant-scoped fields. */
 export interface CanonicalizeInput {
+  kind: SourceKind;
   handleUrl: string;
   channelId?: string | null;
 }
@@ -270,7 +300,29 @@ export interface CreateContext {
   ipAddress: string;
 }
 
-/** Post-create hook payload — minimum set the YouTube context-backfill enqueue
+/** Local, no-upstream source input normalization before createSource's cheap
+ *  duplicate/quota gates.
+ *
+ *  Use this for deterministic parsing/canonicalization that must happen
+ *  before exact handle_url duplicate checks, such as Reddit's
+ *  reddit.com/u/X -> https://www.reddit.com/user/X and metadata.username
+ *  injection. This hook MUST NOT burn upstream API quota; use
+ *  canonicalizeOnCreate for I/O-backed canonicalization such as resolving
+ *  a YouTube video URL to its channel id. */
+export interface NormalizeSourceInput {
+  kind: SourceKind;
+  handleUrl: string;
+  channelId?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface NormalizeSourceResult {
+  handleUrl: string;
+  channelId?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+/** Post-create hook payload - minimum set the YouTube context-backfill enqueue
  *  needs. Adapters that don't need this fields ignore them.
  *
  *  Includes channelId, backfillTargetSince, isOwnedByMe so adapters can
@@ -288,9 +340,9 @@ export interface SourceCreatedHookSource {
    *  resolution to the worker). Required for zero-quota onboarding. */
   channelId: string | null;
   /** Per-user backfill target boundary. Adapter filters cache rows
-   *  ≥ this date when seeding events for the new subscriber. */
+   *  >= this date when seeding events for the new subscriber. */
   backfillTargetSince: Date | null;
-  /** Whether the new subscriber owns this channel — drives events.author_is_me
+  /** Whether the new subscriber owns this channel - drives events.author_is_me
    *  on the seeded rows. Default true. */
   isOwnedByMe: boolean;
 }
@@ -305,6 +357,7 @@ export type EventPreviewMetadata =
       title: string;
       authorName: string;
       authorUrl: string;
+      occurredAt?: Date;
       thumbnailUrl?: string;
       html?: string;
     }
@@ -314,14 +367,14 @@ export type EventPreviewMetadata =
 
 /** Live poll-state row consumed by dto.ts's per-event overlay (lastPolledAt /
  *  lastPollStatus rendering on /feed and /audit). Adapters that don't poll
- *  return an empty Map — the cross-source code merges per-adapter results. */
+ *  return an empty Map - the cross-source code merges per-adapter results. */
 export interface AdapterPollState {
   publishedAt: Date | null;
   lastPolledAt: Date | null;
   lastPollStatus: string | null;
 }
 
-/** Hono app context type — re-exported here so adapter.registerRoutes can be
+/** Hono app context type - re-exported here so adapter.registerRoutes can be
  *  typed without making cross-source code import server-internal types. */
 export type AdapterAppContext = {
   Variables: {
@@ -332,7 +385,7 @@ export type AdapterAppContext = {
   };
 };
 
-/** Minimal pg-boss surface the adapter consumes — keeps the adapter decoupled
+/** Minimal pg-boss surface the adapter consumes - keeps the adapter decoupled
  *  from pg-boss major-version type drift. Widen if a new adapter needs more
  *  verbs. */
 export interface MinimalBoss {
@@ -355,81 +408,115 @@ export interface MinimalBoss {
   createQueue(name: string): Promise<unknown>;
 }
 
-export interface DataSourceAdapter {
-  readonly kind: SourceKind;
-  /**
-   * Pull events newer than `since` from the upstream platform.
+export interface RefreshQueueCapability {
+  canRefresh(eventKind: EventKind): boolean;
+  /** Optional adapter-owned hard gate before enqueueing a user refresh.
+   *  Use this only for platform envelopes that are load-bearing for the
+   *  adapter (YouTube 95% daily hard stop). Dashboard-only observability
+   *  signals must not be wired as write-path policy. */
+  canRun?(ctx: SyncStatsGuardContext): Promise<AdapterCapabilityGuardResult>;
+  enqueue(input: {
+    eventId: string;
+    userId: string;
+    externalId: string;
+    eventKind: EventKind;
+    /** Optional transaction handle from the caller when enqueue must commit
+     *  atomically with caller-owned state such as cooldown markers. SQL-backed
+     *  queues write directly through it; pg-boss-backed adapters should use
+     *  the transactional outbox from the same tx. */
+    tx?: DbOrTx;
+  }): Promise<{ queue: string; jobId: string | null }>;
+}
+
+export interface AdapterLaneQueueDeclaration<TLane extends string = string> {
+  readonly strategy: "fixed-slot-round-robin";
+  readonly adapterKind: SourceKind;
+  readonly slots: readonly TLane[];
+  readonly fallthrough: readonly TLane[];
+  readonly batchScope?: "global" | "user";
+}
+
+export type AdapterScheduledWorkerReplicaPolicy = "singleton" | "parallel";
+
+export interface AdapterScheduledWorker {
+  readonly name: string;
+  readonly intervalMs: number;
+  readonly replicaPolicy: AdapterScheduledWorkerReplicaPolicy;
+  readonly readyMessage: string;
+  readonly disabledMessage: string;
+  readonly laneQueue?: AdapterLaneQueueDeclaration;
+  isEnabled(): boolean;
+  tick(): Promise<unknown>;
+}
+
+export interface AdapterWorkQueueCapability {
+  readonly scheduledWorkers: ReadonlyArray<AdapterScheduledWorker>;
+}
+
+export type AdapterCapabilityGuardResult =
+  | { action: "run" }
+  | {
+      action: "skip";
+      reason: string;
+      retryAfterMs?: number;
+      status?: number;
+      code?: string;
+      metadata?: Record<string, unknown>;
+    };
+
+export interface SyncStatsGuardContext {
+  eventId?: string;
+  externalId: string;
+  userId: string;
+  eventKind: EventKind;
+  now: Date;
+}
+
+export interface BackfillSourceGuardContext {
+  source: PollableSource;
+  userId: string;
+  origin: AdapterContext["origin"];
+  now: Date;
+}
+
+export interface SyncStatsCapability {
+  /** Optional adapter-owned guard for the sync fast path.
    *
-   * Returns:
-   *   - `events`: RawEvent[] — items pulled. Empty array means platform
-   *     CONFIRMED no events newer than `since` (worker marks
-   *     backfill_complete=true). NEVER return `[]` for inability-to-fetch
-   *     — that mis-signals «no more events». Use throw instead.
-   *   - `unitsUsed`: exact upstream HTTP request count made by the adapter
-   *     (1 per chargedFetch call for YouTube; varies per platform). Worker
-   *     writes this to audit_log.metadata.requests_used for the per-user
-   *     cap counter. Estimating via `ceil(events/page_size)` would
-   *     under-count multi-page walks.
-   *
-   * Throws `AdapterError` when the adapter could NOT determine the answer
-   * (rate-limit, network failure, parse error, auth-issue). Worker leaves
-   * backfill_complete unchanged; pg-boss retries.
-   *
-   * Empty-vs-throws contract:
-   *   YouTube / Reddit / Twitter satisfy this naturally — their listing
-   *   endpoints return distinct `{items: []}` vs HTTP 4xx/5xx. Scrape-based
-   *   platforms (Telegram, Discord) where empty page can't be distinguished
-   *   from rate-limit failure may need a richer return type — see
-   *   SOURCE-REFERENCE.md §8 for the proposed `hasMore` extension.
-   *
-   * v0.1 surface: caller threads PickedKey down. Credential picking may
-   * later move INSIDE the adapter (thick-adapter direction).
-   */
-  pollContent(
-    source: PollableSource,
-    since: Date,
-    ctx?: { origin?: "cron" | "user"; walkStop?: "depth" | "overlap" },
+   *  Cross-source callers run generic tenant/per-user gates, then ask the
+   *  adapter whether this specific fast-path call may burn upstream quota.
+   *  Use this for platform envelopes that are load-bearing for the adapter
+   *  (YouTube 95% daily hard stop). Omit it when observability thresholds
+   *  are dashboard-only signals (Reddit synthetic daily usage). */
+  canRun?(ctx: SyncStatsGuardContext): Promise<AdapterCapabilityGuardResult>;
+  fetch(
+    externalId: string,
+    ctx: { userId: string; ipAddress?: string },
   ): Promise<{
-    events: RawEvent[];
-    unitsUsed: number;
-    /**
-     * Optional resume cursor. Adapter that paginates internally MAY return a
-     * nextPageToken so the next pollContent call resumes from the saved
-     * position. Worker persists in source.metadata.lastBackfillPageToken
-     * and threads back through PollableSource.metadata on the next call.
-     * Undefined means «no resume needed» (single-page adapters or
-     * end-of-playlist reached).
-     */
-    nextPageToken?: string;
-    /**
-     * Adapter signaled the underlying source has no more older content
-     * (e.g., walked off end of YouTube uploads playlist). Worker uses
-     * this to set backfill_complete=true regardless of «walked past
-     * since» heuristics.
-     */
-    endOfPlaylist?: boolean;
-  }>;
-  /** User-driven stats polling (Refresh now button). quotaUser fingerprint
-   *  is derived from userId inside the adapter (per-user burst-shaper
-   *  bucket). Caller pre-picks a key and threads it through; adapter never
-   *  picks on its own (avoids round-robin drift — see PickedKey jsdoc). */
-  pollStats(
-    events: PollableEvent[],
-    source: { id: string; userId: string } | null,
-    picked: PickedKey,
-  ): Promise<StatsSnapshot[]>;
-  /** Service-driven stats polling (poll-active / poll-cold cron tick).
-   *  Per-video, not per-event — multiple tenants referencing one video share
-   *  the same HTTP. quotaUser is a constant per tier ("neotolis-svc-active"
-   *  or "neotolis-svc-cold") so Google's burst-shaper buckets service polls
-   *  away from user-driven Refresh now polls. */
-  pollStatsByVideoId(
-    videoIds: string[],
-    quotaUser: string,
-    picked: PickedKey,
-  ): Promise<StatsSnapshot[]>;
-  /** Widened-contract surface. */
+    viewCount: number;
+    likeCount: number;
+    commentCount: number;
+    /** Optional per-adapter signal that the event's author matches one
+     *  of the user's registered, owned sources. When set, createEvent
+     *  UPDATEs events.author_is_me unless the caller passed an explicit
+     *  value. Reddit: t3.author === reddit_account.metadata.username.
+     *  YouTube: inheritance happens via enrichFromUrl's findActiveSourceByHandleUrl,
+     *  NOT via this field - YouTube returns undefined here. */
+    authorIsMe?: boolean;
+  } | null>;
+}
+
+export interface SourceAdapter {
+  readonly kind: SourceKind;
   parseUrl(url: string): ParsedUrl | null;
+  /** Adapter-side source URL parsing. Cross-source `/sources/new` flow
+   *  iterates `allAdapters[*].parseSourceUrl?.(input)` (first non-null wins)
+   *  to auto-detect the SourceKind when one input shape maps to multiple
+   *  kinds. YouTube doesn't need this (canonicalizeOnCreate handles its
+   *  single SourceKind=youtube_channel case); Reddit needs it because
+   *  reddit.com/user/X vs reddit.com/r/X resolve to different SourceKinds.
+   *  Default (when undefined): SourceCreateService asks user to pick kind
+   *  via /sources/new UI. */
+  parseSourceUrl?(input: string): ParsedSourceUrl | null;
   readonly observability: AdapterObservability;
   registerQueues(boss: MinimalBoss): Promise<void>;
   scheduleCronTicks(boss: MinimalBoss): Promise<void>;
@@ -437,22 +524,34 @@ export interface DataSourceAdapter {
     source: PollableSource,
     ctx: AdapterContext,
   ): Promise<{ jobId: string | null; queue: string }>;
-  /** Whether this adapter can handle a refresh-poll for the given event kind. */
-  canRefreshPoll?(eventKind: EventKind): boolean;
+  /** Optional adapter-owned hard gate before enqueueing source backfill.
+   *  Use this only for platform envelopes that are load-bearing for the
+   *  adapter. Dashboard-only observability signals must not be wired as
+   *  write-path policy. */
+  canBackfillSource?(ctx: BackfillSourceGuardContext): Promise<AdapterCapabilityGuardResult>;
+  /** Adapter-owned Refresh Now capability. The cross-source
+   *  `requestRefreshPoll` service runs tenant/cooldown/quota gates and
+   *  delegates the backend-specific enqueue here. Adapters that cannot
+   *  refresh events omit the capability. */
+  refreshQueue?: RefreshQueueCapability;
+  /** Adapter-owned non-pg-boss worker loops. Use this for API calls where
+   *  the dequeue order itself is part of the quota contract (for example
+   *  Reddit's fixed 8-slot/min lane schedule). Generic worker bootstrap
+   *  starts each declared loop and owns shutdown; the adapter owns the
+   *  queue table, lane policy, and tick implementation. */
+  workQueue?: AdapterWorkQueueCapability;
 
   /**
    * Reconcile in-process runtime state with persistent counters BEFORE the
-   * worker processes any jobs. Called once at worker bootstrap, after queue
-   * registration but before pg-boss starts dispatching.
+   * worker processes any jobs. Called once at worker bootstrap, before
+   * queue handlers are registered, so pg-boss cannot dispatch jobs with
+   * stale runtime state.
    *
-   * When to declare: adapters that maintain in-process rate-limit reservoirs
-   * (e.g., RateLimiterMemory) lose state on worker restart. Without
-   * reconciliation, a worker that crashed at 7000/8000 cron units re-starts
-   * with a fresh 8000-unit pool and overshoots before the next throttle
-   * threshold catches up.
+   * When to declare: adapters that maintain process-local load-bearing
+   * state and can reconstruct it from persistent counters at boot.
    *
-   * When to omit: adapters using only persistent state (RateLimiterPostgres,
-   * DB-backed counters) — restart loses no state.
+   * When to omit: adapters using only persistent state or DB-backed claim
+   * gates. Restart loses no state.
    *
    * Best-effort contract: errors are logged-and-continued by the bootstrap
    * caller. A failed reconciliation MUST NOT block worker boot.
@@ -463,47 +562,80 @@ export interface DataSourceAdapter {
    *  (services/data-sources.ts) calls these so per-source URL canonicalization
    *  + auto-import init don't live in the cross-source code. */
 
+  /** Pure/cheap source input normalization before duplicate/quota prechecks.
+   *  Must not perform upstream I/O. */
+  normalizeSourceOnCreate?(
+    input: NormalizeSourceInput,
+    ctx: CreateContext,
+  ): Promise<NormalizeSourceResult>;
+
   /** Resolve handle_url to canonical form + extract external id, if applicable.
-   *  YouTube: parse `/watch?v=…` / `/channel/UC…` / `@handle` URLs; for video
+   *  YouTube: parse `/watch?v=...` / `/channel/UC...` / `@handle` URLs; for video
    *  URLs dereference the channel via fetchVideoMetadataByUrl.
    *  Default (when not implemented): cross-source code passes input through. */
   canonicalizeOnCreate?(input: CanonicalizeInput, ctx: CreateContext): Promise<CanonicalizeResult>;
 
   /** Post-create side effects (auto-import init, prerequisite cache warming).
-   *  YouTube: enqueue YOUTUBE_CHANNEL_CONTEXT_BACKFILL when autoImport=true.
-   *  Default (when not implemented): no-op. Failures logged at WARN by the
-   *  adapter; never throw — fire-and-forget, the source row is the load-bearing
-   *  return value. */
+   *  Runs inside the createSource transaction. Use the provided tx for DB
+   *  writes and enqueue durable jobs through the shared outbox. Default
+   *  (when not implemented): no-op. */
   onSourceCreated?(
     source: SourceCreatedHookSource,
-    opts: { backfillWindow: BackfillWindow },
+    opts: { backfillWindow: BackfillWindow; tx: Tx },
+  ): Promise<void>;
+
+  /** Hook fired by `updateSource` when the user widens `backfillTargetSince`
+   *  past the prior value (e.g. "30 days" → "everything"). Adapters with
+   *  walker state — be it per-user (YouTube channel state) or cross-tenant
+   *  (Reddit cache rows) — reset their pagination cursor and re-enqueue
+   *  whatever they need to deepen the walk.
+   *
+   *  Cross-source code knows nothing about how each adapter persists its
+   *  walker state: it just calls this hook on the right registry adapter
+   *  whenever a widen is detected. Adapters without walker state (no-op
+   *  default).
+   *
+   *  Runs inside the updateSource transaction. Failures bubble up — the
+   *  PATCH on data_sources rolls back too, so the user can retry without
+   *  inconsistent state. Use the supplied `tx` for DB writes; enqueue
+   *  durable jobs through the shared outbox if the adapter is pg-boss-
+   *  backed. */
+  resetWalkerStateOnWidening?(
+    source: SourceCreatedHookSource,
+    ctx: {
+      previousTarget: Date | null;
+      newTarget: Date;
+      triggerUserId: string;
+      ipAddress: string;
+      tx: Tx;
+    },
   ): Promise<void>;
 
   /** Adapter-driven event preview (POST /api/events/preview-url + ingest
    *  paste flow). After URL is parsed + routed, the adapter is asked
    *  to fetch a friendly preview (title / authorName / authorUrl).
+   *
+   *  `ctx.userId` is the authenticated viewer (cross-source layer always
+   *  has it - both call paths are mounted under tenantScope). Adapters
+   *  whose preview burns a rate-limited unit (Reddit's /api/info.json)
+   *  use it to enforce per-user caps and write the cap-counter row;
+   *  adapters whose preview is a cheap oEmbed (YouTube) accept it but
+   *  ignore it. The optional shape lets older adapters land before they
+   *  thread the field through their implementations.
+   *
    *  YouTube: fetchYoutubeOembed wrapper. */
-  fetchEventPreviewMetadata?(canonicalUrl: string): Promise<EventPreviewMetadata>;
+  fetchEventPreviewMetadata?(
+    canonicalUrl: string,
+    ctx: { userId: string; ipAddress: string },
+  ): Promise<EventPreviewMetadata>;
 
-  /** Sync stats fetch on manual event paste.
+  /** Explicit sync stats capability for manual event paste.
    *
-   *  After createEventFromPaste creates the events row from oEmbed data
-   *  (title only, no stats), this method is called to fetch view/like/
-   *  comment counts via videos.list and write a snapshot row. UI's /feed
-   *  loader JOINs youtube_video_snapshots so the user sees stats
-   *  immediately after paste — no «click Refresh now» round-trip required.
-   *
-   *  Cost: 1 quota unit (charged to user pool via chargedFetch with
-   *  origin='user'). Cache-aware via youtube_video_snapshots
-   *  on-conflict-do-nothing (per-minute uniqueness). Errors swallowed by
-   *  caller — paste is the load-bearing path, stats are nice-to-have.
-   *
-   *  Returns null on rate-limited / auth-error / not-found — caller
-   *  treats as «stats unavailable, will be polled later». */
-  fetchEventStats?(
-    externalId: string,
-    ctx: { userId: string },
-  ): Promise<{ viewCount: number; likeCount: number; commentCount: number } | null>;
+   *  This is the allowed fast path: the caller runs quota gates before
+   *  invoking it, and the adapter implementation must write the same
+   *  snapshot/audit/accounting rows the queued path would. Adapters that
+   *  cannot or should not do sync upstream work omit the capability. */
+  syncStats?: SyncStatsCapability;
 
   /** Per-adapter event-input validation. Cross-source createEvent /
    *  updateEvent calls this when the merged event.kind matches this
@@ -514,7 +646,7 @@ export interface DataSourceAdapter {
   /** Batch lookup of live poll-state for events of this adapter's kinds.
    *  dto.ts's overlayPollStateOnEvents iterates allAdapters and merges
    *  results. YouTube: SELECT publishedAt/lastPolledAt/lastPollStatus
-   *  from youtube_videos by externalId IN (…). */
+   *  from youtube_videos by externalId IN (...). */
   fetchPollStateMap?(
     userId: string,
     externalIds: readonly string[],
@@ -533,19 +665,19 @@ export interface DataSourceAdapter {
    *
    * Cross-source callsites (/feed loader, GET /api/events, /games/[id])
    * iterate allAdapters and call this method per adapter. The adapter
-   * MUST filter internally to its own kind(s) — callers do NOT pre-filter
+   * MUST filter internally to its own kind(s) - callers do NOT pre-filter
    * (avoids the "did I forget to filter for adapter X?" footgun).
    *
    * Mutates `dtos` in place; returns void. Errors are swallowed by the
    * adapter (logged at WARN); a failed enrichment query MUST NOT break
-   * the feed render — the cards just render without the enrichment.
+   * the feed render - the cards just render without the enrichment.
    *
    * Future adapters (Reddit / Twitter / Telegram / Discord) implement this
    * against their own metadata tables. Adapters that have no enrichment
    * can omit the method entirely (optional via `?:`); the caller's
    * `if (adapter.enrichFeedDtos)` gate skips undefined methods.
    *
-   * Deliberately NOT called from GET /api/events/deleted — DeletedEventsPanel
+   * Deliberately NOT called from GET /api/events/deleted - DeletedEventsPanel
    * renders a compact KindIcon + strikethrough-title view that needs none
    * of the enrichment data. See events.ts for the load-bearing skip comment.
    */

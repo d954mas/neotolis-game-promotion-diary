@@ -20,6 +20,7 @@
 //      - resolves all subscribers for (kind, channelKey)
 //      - calls adapter.pollContent (mocked here)
 //      - fans out events INSERT per subscriber (1 in this test)
+//      - enqueues discovered video ids into adapter_refresh_queue:service_video
 //      - updates channel state: last_polled_at, frontier, complete, cursor
 //      - writes ONE completion audit row attributed to triggerUserId
 //
@@ -97,6 +98,7 @@ const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
 const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
+const { adapterRefreshQueue } = await import("../../src/lib/server/db/schema/index.js");
 const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
@@ -215,11 +217,10 @@ describe("end-to-end channel-scoped catch-up flow", () => {
     expect(externalIds.length).toBe(3);
     const cacheRows = await db
       .select()
-      .from((await import("../../src/lib/sources/youtube/server/schema/index.js")).youtubeVideos)
+      .from((await import("../../src/lib/server/db/schema/index.js")).youtubeVideos)
       .where(
         (await import("drizzle-orm")).inArray(
-          (await import("../../src/lib/sources/youtube/server/schema/index.js")).youtubeVideos
-            .videoId,
+          (await import("../../src/lib/server/db/schema/index.js")).youtubeVideos.videoId,
           externalIds,
         ),
       );
@@ -233,6 +234,21 @@ describe("end-to-end channel-scoped catch-up flow", () => {
       // stats and stamp last_polled_at. Distinguishes from the
       // channel-context-backfill seed path which DOES stamp it.
       expect(row.lastPolledAt).toBeNull();
+    }
+
+    const statsQueueRows = (
+      await db
+        .select()
+        .from(adapterRefreshQueue)
+        .where(eq(adapterRefreshQueue.queueName, "service_video"))
+    ).filter((row) =>
+      externalIds.includes((row.payload as Record<string, unknown>).video_id as string),
+    );
+    expect(statsQueueRows).toHaveLength(3);
+    for (const row of statsQueueRows) {
+      expect(row.userId).toBeNull();
+      expect(row.type).toBe("video_stats");
+      expect((row.payload as Record<string, unknown>).flow).toBe("backfill");
     }
 
     // Channel state advanced.

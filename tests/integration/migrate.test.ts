@@ -453,7 +453,9 @@ describe("event_games + steam listing unique swap (0005 + 0006 split)", () => {
       // purge.completed, auto_import.deferred, poll.failed,
       // event.poll_refreshed. Migration 0023 added 1 more:
       // source.refresh_content_requested.
-      // Total: 23 + 4 (0008) + 5 (0010) + 1 (0023) = 33.
+      // Plan 03.1-02 added 4 Reddit verbs (queue_drained, deletion_propagated,
+      // cap_exhausted, adapter_degraded).
+      // Total: 23 + 4 (0008) + 5 (0010) + 1 (0023) + 4 (0030) = 37.
       expect(values).toContain("account.deleted");
       expect(values).toContain("account.restored");
       expect(values).toContain("account.exported");
@@ -464,7 +466,11 @@ describe("event_games + steam listing unique swap (0005 + 0006 split)", () => {
       expect(values).toContain("poll.failed");
       expect(values).toContain("event.poll_refreshed");
       expect(values).toContain("source.refresh_content_requested");
-      expect(values).toHaveLength(33);
+      expect(values).toContain("reddit.queue_drained");
+      expect(values).toContain("reddit.deletion_propagated");
+      expect(values).toContain("reddit.cap_exhausted");
+      expect(values).toContain("reddit.adapter_degraded");
+      expect(values).toHaveLength(37);
     } finally {
       await pool.end();
     }
@@ -698,9 +704,10 @@ describe("migration 0010 baseline", () => {
       // Sanity: prior verbs still present.
       expect(values).toContain("quota.limit_hit");
       expect(values).toContain("event.detached_from_game");
-      // 27 + 5 (migration 0010) + 1 (migration 0023) = 33.
+      // 27 + 5 (migration 0010) + 1 (migration 0023) + 4 (migration 0030 Reddit) = 37.
       expect(values).toContain("source.refresh_content_requested");
-      expect(values).toHaveLength(33);
+      expect(values).toContain("reddit.queue_drained");
+      expect(values).toHaveLength(37);
     } finally {
       await pool.end();
     }
@@ -713,7 +720,7 @@ describe("migration 0010 baseline", () => {
       const insert = async () =>
         pool.query(
           `insert into youtube_video_snapshots (id, video_id, polled_at, view_count, like_count, comment_count)
-           values ($1, $2, $3, $4, $5, $6)
+           VALUES ($1, $2, $3, $4, $5, $6)
            on conflict (video_id, polled_at) do nothing`,
           ["01HX0000000000000000000001", "dQw4w9WgXcQ", polledAt, 100, 10, 5],
         );

@@ -160,6 +160,20 @@ Mirror the YouTube test files under `tests/unit/sources/reddit/` (HTTP wrapper, 
 
 The CI gates (`lint-typecheck` / `unit-integration` / `smoke`) cover the new adapter the moment it's registered.
 
+### §3.X Reddit (Phase 03.1) — public-`.json` deviation from the YouTube pattern
+
+Reddit's source plugin diverges from the YouTube canonical layout in five load-bearing ways. Every divergence is per CONTEXT.md DV-RDT-7 (Nov 2025 Reddit RBP closed self-service OAuth → public-`.json`-only).
+
+1. **Transport**: no OAuth bearer. Native fetch to `https://www.reddit.com/r/X/new.json` etc., User-Agent header from `REDDIT_USER_AGENT` env (regex-validated `by /u/<handle>`). NO `oauth.reddit.com` host, NO `chargedFetch` key-rotation reservoir.
+2. **Rate-limit budget**: hard 10 req/min ceiling (vs OAuth's 60). Adapter enforces 8 req/min effective ceiling (-2 safety margin) via a **single batch-worker** (NOT pg-boss subscriber) — `setInterval(tick, 7500)` in `src/worker/index.ts` claims 1 entry per tick from the next-priority queue.
+3. **Queue model**: ONE SQL-backed table `reddit_refresh_queue` with 4 priority lanes (`service_source`, `service_post`, `user_source`, `user_post`) — NOT 7 pg-boss queues like YouTube. Worker round-robins through 8 slots/min (mapping: 1 service_source, 1 service_post, 3 user_source, 3 user_post). Fallthrough: empty slot → next non-empty queue in priority order.
+4. **Cron pattern**: 4 cron tasks (pg-boss schedules at 00/06/12/18 UTC for sources; 03/09/15/21 UTC for posts; @04 baselines; @05 deletion-propagation) ONLY enqueue rows into `reddit_refresh_queue`. They do NOT make Reddit HTTP calls.
+5. **Per-user quota**: two-axis sliding window — 1 source-action / 5min + 25 post-refreshes / 5min. Implemented via `AdapterUserQuotaCap.sourceActionsPerWindow + postRefreshesPerWindow + windowMinutes` (interface widened in plan 03.1-01).
+
+See `.planning/phases/03.1-reddit-adapter/03.1-CONTEXT.md` for the 22 D-RDT-* decisions that produced this divergence + DV-RDT-7 for the Nov 2025 policy context.
+
+§3.4 reservoir reference is unchanged for YouTube (rate-limiter-flexible in-process); Reddit uses the SQL queue + 8-tick worker pattern instead. Both are valid implementations of "Adapter owns its rate limit" per Phase 03.0.1 D-09.
+
 ## 4. Common Patterns
 
 ### 4.1 chargedFetch with token bucket reservoir

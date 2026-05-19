@@ -44,12 +44,6 @@
 // only valid on inbox events (zero junction rows); otherwise throws
 // AppError 'not_in_inbox' (422). Audit-logged `event.dismissed_from_inbox`.
 //
-// createEventFromPaste — unified-events ingest path. The YouTube paste
-// flow writes ONE events row carrying everything. author_is_me inheritance:
-// match oEmbed.author_url against registered data_sources by handleUrl
-// exact match (case-sensitive; case-insensitive is a possible future
-// polish).
-//
 // Audit: event.created on INSERT, event.edited on UPDATE, event.deleted on
 // softDelete, event.attached_to_game on each game added to the junction,
 // event.detached_from_game on each game removed from the junction,
@@ -130,13 +124,6 @@ export interface UpdateEventInput {
   // gameIds patch. When supplied, calls attachEventToGames BEFORE the main
   // UPDATE so the standalone-conflict guard fires first. Omit to leave the
   // junction unchanged.
-  gameIds?: string[];
-}
-
-export interface PasteInput {
-  url: string;
-  // Aligned with CreateEventInput.gameIds (M:N junction). Empty array =
-  // inbox; non-empty = pre-attached.
   gameIds?: string[];
 }
 
@@ -377,6 +364,9 @@ export async function createEvent(
   // malformed kind/URL pairs before the service is called.
   let derivedExternalId: string | null = input.externalId ?? null;
   if (derivedExternalId == null && input.url != null && input.url !== "") {
+    // CYCLE-BREAKER: source URL parsing imports the adapter registry, and
+    // the registry resolves adapter barrels that call back into event
+    // services through syncStats/create flows.
     const { parseAnyUrl } = await import("$lib/sources/url.js");
     const parsed = parseAnyUrl(input.url);
     if (parsed !== null && parsed.kind === input.kind) {
@@ -477,7 +467,7 @@ export async function createEvent(
   // stats immediately. Errors swallowed — event row already exists;
   // stats will land via cron tick if this path failed.
   //
-  // Cap check FIRST. fetchEventStats writes an audit row with
+  // Cap check FIRST. syncStats.fetch writes an audit row with
   // flow=stats_refresh which counts toward the per-user requestsPerDay
   // cap. Without a pre-check, a user at 100/100 could push to 101 by
   // pasting a new event — letting them silently bypass the cap.
@@ -488,10 +478,29 @@ export async function createEvent(
     if (sourceKindForStats !== null) {
       try {
         const statsAdapter = getAdapter(sourceKindForStats);
-        if (statsAdapter.fetchEventStats !== undefined) {
-          const cap = statsAdapter.observability.userQuotaCap;
+        if (statsAdapter.syncStats !== undefined) {
           let allow = true;
-          if (cap?.requestsPerDay !== undefined) {
+          const guard = await statsAdapter.syncStats.canRun?.({
+            externalId: row.externalId,
+            userId,
+            eventKind: row.kind,
+            now: new Date(),
+          });
+          if (guard?.action === "skip") {
+            logger.info(
+              {
+                eventId: row.id,
+                externalId: row.externalId,
+                reason: guard.reason,
+                retryAfterMs: guard.retryAfterMs,
+              },
+              "syncStats.fetch skipped by adapter guard",
+            );
+            allow = false;
+          }
+
+          const cap = statsAdapter.observability.userQuotaCap;
+          if (allow && cap?.requestsPerDay !== undefined) {
             const used = await getUserQuotaUsedToday(userId, sourceKindForStats);
             if (used.requests >= cap.requestsPerDay) {
               logger.info(
@@ -501,35 +510,48 @@ export async function createEvent(
                   used: used.requests,
                   cap: cap.requestsPerDay,
                 },
-                "fetchEventStats skipped — per-user requestsPerDay cap reached",
+                "syncStats.fetch skipped — per-user requestsPerDay cap reached",
               );
               allow = false;
             }
           }
           if (allow) {
-            const stats = await statsAdapter.fetchEventStats(row.externalId, { userId });
-            // Write last_user_refresh_at into event.metadata so
-            // RefreshNowButton's cooldown gate picks it up. Without this,
-            // paste burns a unit + writes
-            // audit, but the cooldown stays inactive — a user clicking
-            // Refresh right after paste would re-fetch the same stats
-            // (double burn). Source of truth matches refresh-poll
-            // service which writes the same field on user-driven polls.
+            const stats = await statsAdapter.syncStats.fetch(row.externalId, {
+              userId,
+              ipAddress,
+            });
             if (stats !== null) {
               const now = new Date();
+              // Two things to write: (1) last_user_refresh_at marker for
+              // the RefreshNowButton cooldown gate; (2) author_is_me if
+              // the adapter inherited it AND the caller didn't pass an
+              // explicit value (input.authorIsMe). Adapter inheritance
+              // wins over default-false but never overrides caller intent.
+              const adapterAuthorIsMe = stats.authorIsMe;
+              const shouldUpdateAuthor =
+                adapterAuthorIsMe === true &&
+                (input.authorIsMe === undefined || input.authorIsMe === false);
               await db
                 .update(events)
-                .set({
-                  metadata: sql`jsonb_set(COALESCE(${events.metadata}, '{}'::jsonb), '{last_user_refresh_at}', to_jsonb(${now.toISOString()}::text), true)`,
-                })
+                .set(
+                  shouldUpdateAuthor
+                    ? {
+                        metadata: sql`jsonb_set(COALESCE(${events.metadata}, '{}'::jsonb), '{last_user_refresh_at}', to_jsonb(${now.toISOString()}::text), true)`,
+                        authorIsMe: true,
+                      }
+                    : {
+                        metadata: sql`jsonb_set(COALESCE(${events.metadata}, '{}'::jsonb), '{last_user_refresh_at}', to_jsonb(${now.toISOString()}::text), true)`,
+                      },
+                )
                 .where(and(eq(events.userId, userId), eq(events.id, row.id)));
+              if (shouldUpdateAuthor) row.authorIsMe = true;
             }
           }
         }
       } catch (err) {
         logger.warn(
           { eventId: row.id, externalId: row.externalId, err: String(err) },
-          "fetchEventStats failed on createEvent; UI will rely on cron polling",
+          "syncStats.fetch failed on createEvent; UI will rely on cron polling",
         );
       }
     }
@@ -548,9 +570,9 @@ export async function createEvent(
  * field; auto-fill of the date lands alongside the YouTube Data API key.
  * The /events/new client falls back to today's date.
  *
- * `sourceMatch` carries the matched data_sources row's id + isOwnedByMe so
- * createEventFromPaste can inherit `author_is_me` from a registered source
- * without re-querying.
+ * `sourceMatch` carries the matched data_sources row's id + isOwnedByMe
+ * so callers can inherit `author_is_me` from a registered source without
+ * re-querying.
  */
 export interface EnrichmentResult {
   kind: EventKind;
@@ -565,23 +587,36 @@ export interface EnrichmentResult {
 }
 
 /**
- * enrichFromUrl is the URL → metadata bridge shared by the paste flow
- * (createEventFromPaste) and the POST /api/events/preview-url endpoint.
- * Pure read: parses the URL, calls oEmbed, matches author_url
- * against registered data_sources, returns the enrichment payload. NO DB
- * write happens here — both callers consume the result and either INSERT
- * (paste) or render (preview).
+ * enrichFromUrl is the URL → metadata bridge powering the
+ * POST /api/events/preview-url endpoint. Adapter-driven: parses the URL,
+ * dispatches to the matched adapter's fetchEventPreviewMetadata, and
+ * shapes the result into the cross-source EnrichmentResult contract.
  *
- * Error mapping mirrors createEventFromPaste exactly so the route layer
- * preserves UX:
- *   - unsupported URL          → AppError 'unsupported_url' 422
- *   - reddit_deferred          → AppError 'reddit_not_yet_supported' 422
- *   - twitter_post/telegram_post → AppError 'kind_not_yet_functional' 422
- *   - oEmbed 5xx/network       → AppError 'youtube_oembed_unreachable' 502
- *   - oEmbed 401 (private)     → AppError 'youtube_unavailable' 422
- *   - oEmbed 404 (unavailable) → AppError 'youtube_unavailable' 422
+ * Side effects vary per adapter. YouTube's preview is a keyless oEmbed
+ * read — no DB write, no cap consumed. Reddit's preview is the same
+ * /api/info.json call the paste flow uses (see fetchEventPreviewMetadata
+ * in $lib/sources/reddit/server/index.ts) — it UPSERTs the reddit_posts /
+ * reddit_users / reddit_subreddits caches, writes a snapshot row, AND
+ * writes the user_post cap-counter row gated by enforceAdapterUserQuota.
+ * `userId` + `ipAddress` are required for cap enforcement on Reddit;
+ * YouTube ignores them.
+ *
+ * Error mapping (route layer preserves UX):
+ *   - unsupported URL                → AppError 'unsupported_url' 422
+ *   - reddit_post unreachable        → AppError 'reddit_unreachable' 502
+ *   - reddit_post private/unavailable → AppError 'reddit_post_not_found' 404
+ *   - twitter_post/telegram_post     → AppError 'kind_not_yet_functional' 422
+ *   - oEmbed 5xx/network             → AppError 'youtube_oembed_unreachable' 502
+ *   - oEmbed 401 (private)           → AppError 'youtube_unavailable' 422
+ *   - oEmbed 404 (unavailable)       → AppError 'youtube_unavailable' 422
  */
-export async function enrichFromUrl(userId: string, url: string): Promise<EnrichmentResult> {
+export async function enrichFromUrl(
+  userId: string,
+  url: string,
+  ipAddress: string,
+): Promise<EnrichmentResult> {
+  // CYCLE-BREAKER: URL parsing and adapter lookup load the adapter
+  // registry; adapter barrels call this service from create/preview flows.
   const { parseIngestUrl } = await import("./url-parser.js");
   const { eventKindToSourceKind } = await import("$lib/sources/event-to-source-kind.js");
   const { getAdapter } = await import("$lib/sources/registry.js");
@@ -591,12 +626,70 @@ export async function enrichFromUrl(userId: string, url: string): Promise<Enrich
   if (parsed.kind === "unsupported") {
     throw new AppError("URL not yet supported", "unsupported_url", 422, { url });
   }
-  if (parsed.kind === "reddit_deferred") {
-    throw new AppError("Reddit ingest is not yet supported", "reddit_not_yet_supported", 422);
+
+  // Reddit branch — adapter-driven preview through
+  // redditAdapter.fetchEventPreviewMetadata. /api/events/preview-url
+  // (this endpoint) and /api/reddit/fetch-metadata both go through the
+  // same hook; the EnrichmentResult shape adapts Reddit's response so
+  // POST /api/events/preview-url returns a uniform contract across
+  // adapters.
+  if (parsed.kind === "reddit_post") {
+    const adapter = getAdapter("reddit_account");
+    if (adapter.fetchEventPreviewMetadata === undefined) {
+      throw new AppError(
+        "reddit adapter does not support event preview",
+        "kind_not_yet_functional",
+        422,
+        { kind: parsed.kind },
+      );
+    }
+    const preview = await adapter.fetchEventPreviewMetadata(parsed.canonicalUrl, {
+      userId,
+      ipAddress,
+    });
+    if (preview.kind === "unreachable") {
+      // Map operator-issue (unconfigured) vs network error vs rate-limit
+      // to a useful response code. `cause` from the adapter carries the
+      // discriminator.
+      if (preview.cause === "reddit_not_configured") {
+        throw new AppError("Reddit ingest is not available", "reddit_not_configured", 503, {
+          cause: preview.cause,
+        });
+      }
+      if (preview.cause === "rate_limited") {
+        throw new AppError("Reddit rate-limited; try again shortly", "reddit_rate_limited", 429, {
+          cause: preview.cause,
+        });
+      }
+      throw new AppError("Reddit endpoint unreachable", "reddit_unreachable", 502, {
+        cause: preview.cause,
+      });
+    }
+    if (preview.kind === "private" || preview.kind === "unavailable") {
+      throw new AppError("Reddit post unavailable", "reddit_post_not_found", 404, {
+        reason: preview.kind,
+      });
+    }
+    return {
+      kind: "reddit_post",
+      externalId: parsed.externalId,
+      title: preview.title,
+      occurredAt: preview.occurredAt ?? null,
+      thumbnailUrl: preview.thumbnailUrl ?? null,
+      authorName: preview.authorName || null,
+      authorUrl: preview.authorUrl || null,
+      canonicalUrl: parsed.canonicalUrl,
+      // author_is_me inheritance for Reddit lives in syncStats.fetch
+      // (matches t3.author against owned reddit_account.metadata.username).
+      // enrichFromUrl is the PREVIEW path — no DB write happens here, so
+      // we don't pre-compute sourceMatch.
+      sourceMatch: null,
+    };
   }
+
   if (parsed.kind === "twitter_post" || parsed.kind === "telegram_post") {
     throw new AppError(
-      `paste flow does not yet handle kind '${parsed.kind}'`,
+      `paste flow does not yet handle kind '${parsed.kind}' through enrichFromUrl`,
       "kind_not_yet_functional",
       422,
       { kind: parsed.kind },
@@ -637,7 +730,10 @@ export async function enrichFromUrl(userId: string, url: string): Promise<Enrich
       { kind: parsed.kind },
     );
   }
-  const preview = await adapter.fetchEventPreviewMetadata(parsed.canonicalUrl);
+  const preview = await adapter.fetchEventPreviewMetadata(parsed.canonicalUrl, {
+    userId,
+    ipAddress,
+  });
   if (preview.kind === "unreachable") {
     throw new AppError("youtube oembed unreachable", "youtube_oembed_unreachable", 502, {
       cause: preview.cause,
@@ -676,66 +772,6 @@ export async function enrichFromUrl(userId: string, url: string): Promise<Enrich
       ? { id: matchedSource.id, isOwnedByMe: matchedSource.isOwnedByMe }
       : null,
   };
-}
-
-/**
- * createEventFromPaste — unified ingest path. The YouTube paste path
- * writes ONE events row (kind=youtube_video) carrying:
- *   - source_id   = matched data_sources row's id, or NULL on no match
- *   - author_is_me = matched source's is_owned_by_me, or false on no match
- *   - external_id = canonical YouTube videoId (auto-import dedup key)
- *
- * Validate-first invariant: URL parse + oEmbed validation runs BEFORE any
- * INSERT. On unsupported / private / unavailable / Reddit, the database is
- * provably untouched.
- *
- * The URL parse + oEmbed fetch + author-match logic lives in the shared
- * `enrichFromUrl` helper so POST /api/events/preview-url can call it
- * without duplicating the fetch. The paste-specific logic here is gameId
- * validation + the createEvent INSERT.
- *
- * Reddit URLs throw AppError 'reddit_not_yet_supported' (422) — Reddit
- * ingest waits for the poll.reddit adapter.
- */
-export async function createEventFromPaste(
-  userId: string,
-  input: PasteInput,
-  ipAddress: string,
-  userAgent?: string,
-): Promise<EventRow> {
-  const enriched = await enrichFromUrl(userId, input.url);
-
-  // Validate every requested gameId belongs to userId before calling
-  // through to createEvent (which also validates — this is a fast-fail for
-  // the paste-flow's own UX). Set-dedup mirrors createEvent.
-  const pasteGameIds = Array.from(new Set(input.gameIds ?? []));
-  for (const gid of pasteGameIds) {
-    await assertGameOwnedByUser(userId, gid);
-  }
-
-  return createEvent(
-    userId,
-    {
-      gameIds: pasteGameIds,
-      kind: "youtube_video",
-      // Paste flow defaults occurredAt to "now" (the moment the user pasted);
-      // the unified shape preserves this — preview-url callers get null and
-      // the client renders today's date instead.
-      occurredAt: new Date(),
-      title: enriched.title,
-      url: enriched.canonicalUrl,
-      externalId: enriched.externalId,
-      sourceId: enriched.sourceMatch?.id ?? null,
-      authorIsMe: enriched.sourceMatch?.isOwnedByMe ?? false,
-      metadata: {
-        author_name: enriched.authorName ?? "",
-        author_url: enriched.authorUrl ?? "",
-        thumbnail_url: enriched.thumbnailUrl ?? "",
-      },
-    },
-    ipAddress,
-    userAgent,
-  );
 }
 
 /**
@@ -852,6 +888,8 @@ export async function updateEvent(
   // (via eventKindToSourceKind) owns its kind-specific input validation
   // (e.g. youtube_video requires a parseable YouTube URL). Adapters that
   // don't impose constraints simply omit validateEventInput.
+  // CYCLE-BREAKER: registry imports adapter barrels, while adapters call
+  // back into event services for sync stats and validation workflows.
   const { eventKindToSourceKind } = await import("$lib/sources/event-to-source-kind.js");
   const { getAdapter, hasAdapter } = await import("$lib/sources/registry.js");
   const sourceKindForValidation = eventKindToSourceKind(mergedKind);

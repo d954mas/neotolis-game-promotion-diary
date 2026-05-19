@@ -2,7 +2,7 @@
 // pastes a YouTube URL, taps "Get from YouTube", we resolve the video_id,
 // call videos.list?part=snippet (1 quota unit), return title +
 // description + channel title for the form to pre-fill. Manual paste
-// flow only — auto-import has its own metadata path in the worker
+// flow only - auto-import has its own metadata path in the worker
 // (channel_context_backfill).
 //
 // Quota model: counts against the same operator-key envelope as polling
@@ -11,18 +11,18 @@
 // the 500/day cap before it can drain the operator's YouTube envelope.
 //
 // Idempotency: stateless. The caller (route handler) decides what to do
-// with the response — fill the form, swallow on error, surface a toast.
+// with the response - fill the form, swallow on error, surface a toast.
 
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { pickKeyForJob, youtubeQuotaUser } from "./quota.js";
+import { hasYoutubeApiKeys, youtubeQuotaUser } from "./quota.js";
 import { chargedFetch } from "./http.js";
 import { db } from "$lib/server/db/client.js";
 import { youtubeVideos, youtubeMetadataFetchLog } from "$lib/server/db/schema/index.js";
 import { env } from "$lib/server/config/env.js";
 import { AppError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
-// withQuotaGuard is the cross-source events_per_day per-user abuse quota —
+// withQuotaGuard is the cross-source events_per_day per-user abuse quota  -
 // distinct from the YouTube operator-side per-key counter exported by ./quota.js
 // in this folder. Disambiguated via the $lib path.
 import { withQuotaGuard } from "$lib/server/services/quota.js";
@@ -97,11 +97,11 @@ export function parseYoutubeVideoId(url: string): string | null {
 /**
  * Fetch metadata for a YouTube video by URL. Returns the parsed snippet
  * fields the /events/new form needs to pre-fill. Throws AppError on:
- *   - unparseable URL → 422 (caller surfaces "not a YouTube URL")
- *   - empty SERVICE_YOUTUBE_API_KEYS → 503 (caller surfaces "operator
+ *   - unparseable URL -> 422 (caller surfaces "not a YouTube URL")
+ *   - empty SERVICE_YOUTUBE_API_KEYS -> 503 (caller surfaces "operator
  *     hasn't configured YouTube yet")
- *   - YouTube API non-2xx → 502 (caller surfaces "YouTube unreachable")
- *   - YouTube returned no items (deleted / private / wrong id) → 404
+ *   - YouTube API non-2xx -> 502 (caller surfaces "YouTube unreachable")
+ *   - YouTube returned no items (deleted / private / wrong id) -> 404
  *
  * userId is passed through to the quotaUser query parameter so YouTube's
  * per-quotaUser dashboard shows which account drove which call.
@@ -116,11 +116,11 @@ export async function fetchVideoMetadataByUrl(
     throw new AppError("not a YouTube video URL", "validation_failed", 422, { url });
   }
 
-  // Cache hit path — 0 quota burn AND no per-user rate-limit gate. The
+  // Cache hit path - 0 quota burn AND no per-user rate-limit gate. The
   // youtube_videos cache is the single source of truth for "we already
   // know about this video". Backfill handler keeps it warm when channel-
   // context backfills run; this branch also catches the case where the
-  // user pastes the same URL twice. Cache hits are free — they don't
+  // user pastes the same URL twice. Cache hits are free - they don't
   // ping Google, don't burn the operator's envelope, and don't count
   // against the user's youtube_metadata_fetches_per_day cap.
   const cached = await db
@@ -141,69 +141,65 @@ export async function fetchVideoMetadataByUrl(
     };
   }
 
-  // Cache miss → real Google call. Two-phase pattern (never hold a tx
+  // Cache miss -> real Google call. Two-phase pattern (never hold a tx
   // across an HTTP call):
   //
-  //   Step A (inside withQuotaGuard tx): claim the slot — count + INSERT
+  //   Step A (inside withQuotaGuard tx): claim the slot - count + INSERT
   //     a row into youtube_metadata_fetch_log. The pg_advisory_xact_lock
   //     on userId serializes concurrent claims so the cap is race-safe.
   //     Eager-write semantics: the slot is consumed regardless of whether
   //     the upstream call later succeeds. This prevents an attacker from
   //     bypassing the cap via deliberately-failing requests (paste 1000
-  //     bad URLs in a loop → all 1000 get 422/404 from Google → without
+  //     bad URLs in a loop -> all 1000 get 422/404 from Google -> without
   //     eager-write, none of them count against the user's 50/day cap).
   //
   //   Step B (outside tx): HTTP call to YouTube. Slow operations live
   //     here so the tx-boundary stays under 50ms.
   //
-  //   Step C (no tx — single statement): UPSERT youtube_videos cache.
-  const picked = pickKeyForJob();
-  if (!picked) {
+  //   Step C (no tx - single statement): UPSERT youtube_videos cache.
+  if (!hasYoutubeApiKeys()) {
     throw new AppError(
-      "YouTube metadata fetch is unavailable — operator has not configured SERVICE_YOUTUBE_API_KEYS",
+      "YouTube metadata fetch is unavailable - operator has not configured SERVICE_YOUTUBE_API_KEYS",
       "service_unavailable",
       503,
       { videoId },
     );
   }
 
-  // Step A — claim slot under per-user lock.
+  // Step A - claim slot under per-user lock.
   await withQuotaGuard(userId, "youtube_metadata_fetches_per_day", ipAddress, async (tx) => {
     await tx.insert(youtubeMetadataFetchLog).values({ userId });
   });
 
-  // Step B — HTTP call OUTSIDE any tx.
+  // Step B - HTTP call OUTSIDE any tx.
   const apiUrl = new URL(`${env.YOUTUBE_API_BASE_URL}/videos`);
   apiUrl.searchParams.set("id", videoId);
   apiUrl.searchParams.set("part", "snippet");
-  apiUrl.searchParams.set("key", picked.apiKey);
   apiUrl.searchParams.set("quotaUser", youtubeQuotaUser(userId));
 
-  // chargedFetch: charge + reservoir consume + AdapterError on non-2xx.
-  // The 10s timeout is tighter than the worker default — this is a
+  // chargedFetch: DB quota reservation + AdapterError on non-2xx.
+  // The 10s timeout is tighter than the worker default because this is a
   // user-facing form path, not a worker-internal call. origin='user' so
-  // this fetch consumes from the user reservoir (20% pool) instead of
-  // cron (80%) — keeps the user-driven envelope distinct from worker-
-  // driven backfills.
+  // this fetch reserves against the user pool instead of cron.
+  //
   //
   // AdapterError taxonomy translation: this user-facing path predates
   // AdapterError and the form expects AppError(502 / 404 / 503). Translate
-  // the throw rather than ripple AdapterError into the route layer — the
+  // the throw rather than ripple AdapterError into the route layer - the
   // form copy / status code is part of the user-facing contract that the
   // /api/youtube/fetch-metadata route handler maps to UX strings.
   let resp: Response;
   try {
     resp = await chargedFetch(
       apiUrl,
-      picked,
       1,
       { videoId, origin: "user", logTag: "youtube-metadata: videos.list" },
       10_000,
     );
   } catch (err) {
     if (err instanceof AdapterError) {
-      // rate-limited / operator-issue / transient → 502 upstream_error to
-      // preserve the existing form UX. not-found → 404 (video missing).
+      // rate-limited / operator-issue / transient -> 502 upstream_error to
+      // preserve the existing form UX. not-found -> 404 (video missing).
       if (err.category === "not-found") {
         throw new AppError("video not found on YouTube", "not_found", 404, { videoId });
       }
@@ -221,7 +217,7 @@ export async function fetchVideoMetadataByUrl(
     throw new AppError("video not found on YouTube", "not_found", 404, { videoId });
   }
 
-  // Step C — write-through to cache so the next paste of this URL (by
+  // Step C - write-through to cache so the next paste of this URL (by
   // anyone) is a hit. UPSERT on video_id PK; no tenant scope on the
   // cache row (public-data table).
   const publishedAtDate = item.snippet.publishedAt ? new Date(item.snippet.publishedAt) : null;

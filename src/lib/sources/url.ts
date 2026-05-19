@@ -11,15 +11,16 @@
 // `youtu.be` host matches and any future overlap is resolved by moving
 // the more-specific adapter ahead of the more-general one.
 //
-// The friendly Reddit deferral message is NOT added here. `parseAnyUrl`
-// returns `{ kind: "unsupported" }` for reddit.com URLs (no Reddit
-// adapter exists yet) and the orchestrator
-// (`src/lib/server/services/url-parser.ts`) maps that to
-// `{ kind: "reddit_deferred" }` via `detectFutureKind` from
-// `./future-kinds.ts`. Keeping the Reddit-specific friendly path out
-// of the registry-iteration layer means the iterator stays pure —
-// adding Reddit later is a single registry entry and the
-// `detectFutureKind` map shrinks accordingly.
+// Reddit is registered as of Phase 03.1 plan 07 — `parseAnyUrl` returns
+// `{ kind: "reddit_post", externalId, metadata }` for reddit.com /
+// redd.it URLs via `redditAdapter.parseUrl`. Plan 09 wired
+// services/ingest.ts to the synchronous /comments/<id>.json paste flow
+// (D-RDT-INGEST-REPLACE), so the registry path is fully load-bearing
+// end-to-end for Reddit ingest.
+//
+// `detectFutureKind` (src/lib/sources/future-kinds.ts) stays as the
+// seam for the next deferred adapter (Twitter / Telegram / Discord) —
+// the map is currently empty.
 
 import { allAdapters } from "./registry.js";
 import type { ParsedUrl } from "./adapter.js";

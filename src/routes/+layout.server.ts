@@ -1,9 +1,7 @@
 import type { LayoutServerLoad } from "./$types";
 import { redirect } from "@sveltejs/kit";
-import { eq } from "drizzle-orm";
-import { db } from "$lib/server/db/client.js";
-import { user } from "$lib/server/db/schema/auth.js";
 import { env } from "$lib/server/config/env.js";
+import { getLayoutUserState, syncUserThemePreference } from "$lib/server/services/me.js";
 
 /**
  * SvelteKit layout load.
@@ -64,23 +62,16 @@ export const load: LayoutServerLoad = async ({ locals, url, cookies, request }) 
     const cookieThemeValid =
       cookieTheme !== undefined && (VALID_THEMES as Set<string>).has(cookieTheme);
 
-    const [row] = await db
-      .select({ themePreference: user.themePreference, deletedAt: user.deletedAt })
-      .from(user)
-      .where(eq(user.id, locals.user.id))
-      .limit(1);
-    const dbTheme = row?.themePreference ?? "system";
-    deletedAt = row?.deletedAt ?? null;
+    const state = await getLayoutUserState(locals.user.id);
+    const dbTheme = state.themePreference;
+    deletedAt = state.deletedAt;
 
     if (cookieThemeValid && cookieTheme !== dbTheme) {
       // Cookie wins. Write the cookie value back to the DB so the next
       // signin from a different browser sees the user's most recent
       // intent. No audit (this is a sync, not a user action). Bump
       // updatedAt so admin tooling can spot the reconciliation moment.
-      await db
-        .update(user)
-        .set({ themePreference: cookieTheme as string, updatedAt: new Date() })
-        .where(eq(user.id, locals.user.id));
+      await syncUserThemePreference(locals.user.id, cookieTheme as "light" | "dark" | "system");
       theme = cookieTheme as "light" | "dark" | "system";
     } else if (!cookieThemeValid && dbTheme !== "system") {
       // No (or rogue) cookie + non-default DB value → hydrate the cookie

@@ -63,6 +63,13 @@ const LABELS: Record<AuditAction, () => string> = {
   "auto_import.deferred": () => m.audit_action_auto_import_deferred(),
   "poll.failed": () => m.audit_action_poll_failed(),
   "event.poll_refreshed": () => m.audit_action_event_poll_refreshed(),
+  // Phase 03.1 Reddit — adapter audit verbs. Worker-emitted (queue
+  // drained / deletion propagated) + cap enforcement (cap exhausted) +
+  // health flag (adapter degraded).
+  "reddit.queue_drained": () => m.audit_action_reddit_queue_drained(),
+  "reddit.deletion_propagated": () => m.audit_action_reddit_deletion_propagated(),
+  "reddit.cap_exhausted": () => m.audit_action_reddit_cap_exhausted(),
+  "reddit.adapter_degraded": () => m.audit_action_reddit_adapter_degraded(),
 };
 
 /**

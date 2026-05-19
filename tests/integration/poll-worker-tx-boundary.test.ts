@@ -5,28 +5,35 @@
 // (HTTP OUTSIDE tx → write tx) keeps the tx boundary short (< 50ms)
 // regardless of upstream latency.
 //
-// Strategy: stub the youtube-channel-adapter.pollStatsByVideoId to inject
+// Strategy: have the cron producer enqueue service_video work, stub the
+// SQL refresh worker's youtube-channel-adapter.pollStatsByVideoId to inject
 // a delay before returning, then verify writeSnapshot's tx-time stays
 // short. The test ALSO asserts that a concurrent SELECT on the
-// youtube_videos row succeeds DURING the simulated HTTP delay — proving
+// youtube_videos row succeeds DURING the simulated HTTP delay, proving
 // the row is not locked while the adapter sleeps.
 
 import { describe, it, expect, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
-// Worker handlers now require pickKeyForJob() to return a non-null
+// Worker handlers now require reserveYoutubeQuota() to return a non-null
 // PickedKey — the no-key path short-circuits without invoking the
 // adapter (matches production self-host parity for the
 // env.SERVICE_YOUTUBE_API_KEYS-empty case).
-// Mock pickKeyForJob to return a fixture so this suite reaches the
+// Mock the quota gate so this suite reaches the
 // adapter mock under test. ESM hoisting prevents seeding env at module
-// top from being picked up by env.ts; mocking the picker directly is
+// top from being picked up by env.ts; mocking quota directly is
 // the same approach the existing adapter tests use for env-control.
 vi.mock("../../src/lib/sources/youtube/server/quota.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    pickKeyForJob: () => ({ apiKey: "test-key-tx-boundary", apiKeyId: "txbound1" }),
+    hasYoutubeApiKeys: () => true,
+    reserveYoutubeQuota: async (args: { origin: "cron" | "user"; units: number }) => ({
+      apiKey: "test-key-tx-boundary",
+      apiKeyId: "txbound1",
+      poolKind: args.origin,
+      units: args.units,
+    }),
   };
 });
 
@@ -48,11 +55,13 @@ vi.mock("../../src/lib/sources/youtube/server/adapter.js", async (importOriginal
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { youtubeVideos, youtubeVideoSnapshots } =
+const { adapterRefreshQueue, youtubeVideos, youtubeVideoSnapshots } =
   await import("../../src/lib/server/db/schema/index.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { handlePollActive } =
   await import("../../src/lib/sources/youtube/server/handlers/poll-active.js");
+const { youtubeRefreshQueueTick, __resetYoutubeRefreshQueueWorkerForTest } =
+  await import("../../src/lib/sources/youtube/server/handlers/refresh-queue-tick.js");
 const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
@@ -87,13 +96,14 @@ async function insertEventAndVideo(userId: string, externalId: string): Promise<
 
 describe("poll worker tx boundary (per-video refactor)", () => {
   it("snapshot write tx stays short even with 100ms simulated upstream latency", async () => {
+    __resetYoutubeRefreshQueueWorkerForTest();
+    await db.execute(sql`DELETE FROM adapter_refresh_queue`);
     const u = await seedUserDirectly({ email: `tx-bound-${uniq()}@test.local` });
     const externalId = `vid_${uniq()}`;
     await insertEventAndVideo(u.id, externalId);
 
-    // Return one snapshot per requested videoId — handlePollActive
-    // enumerates eligibility itself so it may pass multiple videoIds (any
-    // other Active-tier videos in the test DB from sibling tests). We map
+    // Return one snapshot per requested videoId. The SQL refresh worker may
+    // batch multiple queued service_video rows from sibling fixtures. We map
     // every requested id to a viewCount=42 snapshot; the assertion below
     // narrows to the seeded externalId via WHERE.
     adapterMock.pollStatsByVideoId.mockImplementation(async (videoIds: string[]) => {
@@ -107,6 +117,11 @@ describe("poll worker tx boundary (per-video refactor)", () => {
 
     const handlerStart = Date.now();
     await handlePollActive({ id: "test-job", data: { tier: "active" } });
+    await db
+      .update(adapterRefreshQueue)
+      .set({ priority: -100 })
+      .where(sql`${adapterRefreshQueue.payload}->>'video_id' = ${externalId}`);
+    await youtubeRefreshQueueTick();
     const handlerEnd = Date.now();
     const totalMs = handlerEnd - handlerStart;
 
@@ -132,6 +147,8 @@ describe("poll worker tx boundary (per-video refactor)", () => {
   });
 
   it("youtube_videos row is NOT locked during the upstream HTTP call (concurrent SELECT succeeds)", async () => {
+    __resetYoutubeRefreshQueueWorkerForTest();
+    await db.execute(sql`DELETE FROM adapter_refresh_queue`);
     const u = await seedUserDirectly({ email: `tx-bound-conc-${uniq()}@test.local` });
     const externalId = `vid_${uniq()}`;
     await insertEventAndVideo(u.id, externalId);
@@ -162,6 +179,11 @@ describe("poll worker tx boundary (per-video refactor)", () => {
 
     const handlerStart = Date.now();
     await handlePollActive({ id: "test-job-conc", data: { tier: "active" } });
+    await db
+      .update(adapterRefreshQueue)
+      .set({ priority: -100 })
+      .where(sql`${adapterRefreshQueue.payload}->>'video_id' = ${externalId}`);
+    await youtubeRefreshQueueTick();
     const handlerEnd = Date.now();
 
     expect(concurrentSelectMs).toBeGreaterThanOrEqual(0);

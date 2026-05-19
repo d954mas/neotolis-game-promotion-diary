@@ -37,7 +37,13 @@ vi.mock("../../src/lib/sources/youtube/server/quota.js", async (importOriginal) 
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    pickKeyForJob: () => ({ apiKey: "test-key-throttle", apiKeyId: "thrfix1" }),
+    hasYoutubeApiKeys: () => true,
+    reserveYoutubeQuota: async (args: { origin: "cron" | "user"; units: number }) => ({
+      apiKey: "test-key-throttle",
+      apiKeyId: "thrfix1",
+      poolKind: args.origin,
+      units: args.units,
+    }),
   };
 });
 
@@ -45,7 +51,8 @@ const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
-const { youtubeVideos } = await import("../../src/lib/server/db/schema/index.js");
+const { adapterRefreshQueue, youtubeVideos } =
+  await import("../../src/lib/server/db/schema/index.js");
 const { incrementUsage, resetThrottleState, todayPacific, hashApiKeyId } =
   await import("../../src/lib/sources/youtube/server/quota.js");
 const { handlePollActive } =
@@ -77,7 +84,7 @@ async function insertActiveEvent(userId: string): Promise<string> {
     externalId,
     metadata: {},
   });
-  return id;
+  return externalId;
 }
 
 async function insertColdEvent(userId: string): Promise<string> {
@@ -101,18 +108,27 @@ async function insertColdEvent(userId: string): Promise<string> {
     externalId,
     metadata: {},
   });
-  return id;
+  return externalId;
 }
 
-beforeEach(() => {
+async function queuedServiceVideoIds(): Promise<string[]> {
+  const rows = await db
+    .select({ videoId: sql<string>`${adapterRefreshQueue.payload}->>'video_id'` })
+    .from(adapterRefreshQueue)
+    .where(sql`${adapterRefreshQueue.queueName} = 'service_video'`);
+  return rows.map((row) => row.videoId);
+}
+
+beforeEach(async () => {
   pollStatsCalls.length = 0;
   resetThrottleState();
+  await db.execute(sql`DELETE FROM adapter_refresh_queue`);
 });
 
 describe("youtube-quota-throttle on youtube.poll.cron path", () => {
   it(">= 8000 units → handlePollCold skips (no upstream HTTP)", async () => {
     const u = await seedUserDirectly({ email: `qt-cold-${uniq()}@test.local` });
-    await insertColdEvent(u.id);
+    const externalId = await insertColdEvent(u.id);
 
     // Push the operator quota counter to 8000 units → state 'eighty'.
     const apiKeyId = hashApiKeyId("k-throttle-80");
@@ -122,11 +138,12 @@ describe("youtube-quota-throttle on youtube.poll.cron path", () => {
 
     // Cold pauses at eighty — no upstream call should land.
     expect(pollStatsCalls).toHaveLength(0);
+    expect(await queuedServiceVideoIds()).not.toContain(externalId);
   });
 
-  it(">= 8000 units does NOT skip handlePollActive (Active runs through 'eighty')", async () => {
+  it(">= 8000 units does NOT skip handlePollActive (Active enqueues through 'eighty')", async () => {
     const u = await seedUserDirectly({ email: `qt-active-${uniq()}@test.local` });
-    await insertActiveEvent(u.id);
+    const externalId = await insertActiveEvent(u.id);
 
     const apiKeyId = hashApiKeyId("k-throttle-80b");
     await incrementUsage({ apiKeyId, units: 8200, poolKind: "cron" });
@@ -134,13 +151,13 @@ describe("youtube-quota-throttle on youtube.poll.cron path", () => {
     await handlePollActive({ id: "test", data: { tier: "active" } });
 
     // Active runs through 'eighty' — only Cold pauses there.
-    expect(pollStatsCalls.length).toBeGreaterThanOrEqual(1);
-    expect(pollStatsCalls[0]!.quotaUser).toBe("neotolis-svc-active");
+    expect(pollStatsCalls).toHaveLength(0);
+    expect(await queuedServiceVideoIds()).toContain(externalId);
   });
 
   it(">= 9500 units → handlePollActive also skips (no upstream HTTP)", async () => {
     const u = await seedUserDirectly({ email: `qt-95-${uniq()}@test.local` });
-    await insertActiveEvent(u.id);
+    const externalId = await insertActiveEvent(u.id);
 
     const apiKeyId = hashApiKeyId("k-throttle-95");
     await incrementUsage({ apiKeyId, units: 9500, poolKind: "cron" });
@@ -149,6 +166,7 @@ describe("youtube-quota-throttle on youtube.poll.cron path", () => {
 
     // ninetyfive pauses Active too.
     expect(pollStatsCalls).toHaveLength(0);
+    expect(await queuedServiceVideoIds()).not.toContain(externalId);
   });
 
   it("first 'eighty' crossing emits one quota.service_throttled audit row; second crossing same day does NOT re-emit", async () => {

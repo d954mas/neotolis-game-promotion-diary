@@ -4,6 +4,7 @@
 
 export * from "./auth.js";
 export * from "./audit-log.js";
+export * from "./adapter-refresh-queue.js";
 // Order is alphabetical within the active block; FK dependency order is
 // resolved by drizzle-kit at generate time via `references()`.
 export * from "./api-keys-steam.js";
@@ -19,3 +20,9 @@ export * from "./outbox.js";
 // existing call sites (`import { youtubeVideos } from
 // "$lib/server/db/schema/index.js"`) continue to compile without edit.
 export * from "$lib/sources/youtube/server/schema/index.js";
+// Reddit schemas — same per-source plugin layout. Drizzle's schema glob
+// (`./src/lib/sources/*/server/schema/*.ts`) discovers these tables
+// independently for migrate; the re-export here keeps cross-source call
+// sites (`import { redditPosts } from "$lib/server/db/schema/index.js"`)
+// compiling.
+export * from "$lib/sources/reddit/server/schema/index.js";

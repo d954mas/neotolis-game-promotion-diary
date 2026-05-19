@@ -26,19 +26,25 @@
   import BackfillPicker from "$lib/components/BackfillPicker.svelte";
   import type { PageData } from "./$types";
 
+  // `"reddit"` is a synthetic, UI-only kind. The /sources/new chip picker
+  // exposes a single "Reddit" entry; on submit, POST /api/sources receives
+  // `kind: "reddit"` and the route handler dispatches to
+  // redditAdapter.parseSourceUrl to resolve the real DB kind
+  // (reddit_account vs reddit_subreddit) from the URL shape. The DB
+  // column never stores "reddit".
   type SourceKind =
     | "youtube_channel"
-    | "reddit_account"
+    | "reddit"
     | "twitter_account"
     | "telegram_channel"
     | "discord_server";
 
   type KindLabelKey =
     | "source_kind_label_youtube_channel"
-    | "source_kind_label_reddit_account"
     | "source_kind_label_twitter_account"
     | "source_kind_label_telegram_channel"
-    | "source_kind_label_discord_server";
+    | "source_kind_label_discord_server"
+    | "common_kind_reddit";
 
   type KindStatusKey =
     | "source_kind_status_reddit_account"
@@ -55,6 +61,7 @@
 
   let { data }: { data: PageData } = $props();
   const kindMatrix = $derived(data.kindMatrix as KindEntry[]);
+  const redditOperatorConfigured = $derived(data.redditOperatorConfigured ?? false);
 
   // Form defaults are seeded from the loader on the initial render. The
   // form is one-shot, so reading `data.default*` once at init is
@@ -78,15 +85,21 @@
   let submitting = $state(false);
   let formError = $state<string | null>(null);
 
-  // Initial-backfill window for YouTube channels. Defaults to '30d'. The
-  // picker is conditionally rendered ONLY when the chosen kind is
-  // 'youtube_channel' AND auto-import is ON; toggling either off collapses
-  // the picker AND resets the value to '30d'. The reset is what the server
-  // expects (createSource defaults undefined → '30d' but resetting here
-  // keeps the form-state clean if the user toggles back on).
+  // Initial-backfill window. Defaults to '30d'. Safety feature — without
+  // a hard cap, registering an active source with auto-import ON could
+  // pull "everything" into the user's feed accidentally.
+  //
+  // The picker is rendered for ANY enabled, ingestable kind (driven by
+  // kindMatrix; disabled kinds without an adapter aren't pickable).
+  // Toggling auto_import off OR switching to a disabled kind collapses
+  // the picker and resets the value to '30d' so the form-state stays
+  // clean if the user toggles back on.
   type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
   let backfillWindow = $state<BackfillWindow>("30d");
-  const showPicker = $derived(selectedKind === "youtube_channel" && autoImport);
+  const selectedKindEnabled = $derived(
+    kindMatrix.find((k) => k.value === selectedKind)?.disabled !== true,
+  );
+  const showPicker = $derived(selectedKindEnabled && autoImport);
 
   // No auto-link between is_owned_by_me and auto_import — auto-import is
   // available for any channel, not just owned ones. Both checkboxes are
@@ -103,19 +116,39 @@
     }
   });
 
+  // Reddit-specific hint visibility (Phase 03.1 plan 08). Shown when EITHER
+  // the user has picked a reddit_* chip OR the typed URL contains "reddit"
+  // (substring, case-insensitive). The latter catches the paste-flow case
+  // where the user pastes reddit.com/r/X before clicking any chip — the
+  // form-action's parseSourceUrl iterator will auto-detect the kind on
+  // submit; the hint signals "we recognize this and will do the right thing".
+  const showRedditHint = $derived.by(() => {
+    if (selectedKind === "reddit") return true;
+    return handleUrl.toLowerCase().includes("reddit");
+  });
+
   function labelFor(key: KindLabelKey): string {
     switch (key) {
       case "source_kind_label_youtube_channel":
         return m.source_kind_label_youtube_channel();
-      case "source_kind_label_reddit_account":
-        return m.source_kind_label_reddit_account();
       case "source_kind_label_twitter_account":
         return m.source_kind_label_twitter_account();
       case "source_kind_label_telegram_channel":
         return m.source_kind_label_telegram_channel();
       case "source_kind_label_discord_server":
         return m.source_kind_label_discord_server();
+      case "common_kind_reddit":
+        return m.common_kind_reddit();
     }
+  }
+
+  // Reddit chip carries both 🧑 and 🏛 so the user understands that the
+  // single chip handles both subreddits and user profiles — the backend
+  // resolves which by URL shape on submit. aria-hidden because the text
+  // label already carries the meaning.
+  function chipPrefixFor(value: SourceKind): string {
+    if (value === "reddit") return "🧑🏛";
+    return "";
   }
 
   function statusFor(key: KindStatusKey | null): string | null {
@@ -213,10 +246,18 @@
         formError = m.sources_error_no_youtube_keys();
         return;
       }
+      if (res.status === 422 && body.error === "invalid_reddit_url") {
+        formError = m.sources_error_not_a_reddit_url();
+        return;
+      }
       if (res.status === 422 && body.error === "validation_failed") {
         // Generic 422 — most commonly "URL doesn't parse as a YouTube
-        // channel / handle / video URL" from createSource.
-        formError = m.sources_error_not_a_youtube_url();
+        // channel / handle / video URL" from createSource. For Reddit
+        // we surface `invalid_reddit_url` (above) before falling through.
+        formError =
+          selectedKind === "reddit"
+            ? m.sources_error_not_a_reddit_url()
+            : m.sources_error_not_a_youtube_url();
         return;
       }
       formError = m.error_server_generic();
@@ -242,6 +283,7 @@
       <legend>Kind</legend>
       <div class="kind-chips">
         {#each kindMatrix as entry (entry.value)}
+          {@const prefix = chipPrefixFor(entry.value)}
           {#if entry.disabled}
             <button
               type="button"
@@ -251,6 +293,7 @@
               tabindex="-1"
               title={disabledTooltip(entry)}
             >
+              {#if prefix}<span aria-hidden="true" class="chip-prefix">{prefix}</span>{/if}
               {labelFor(entry.labelKey)}
               <small class="status">{statusFor(entry.statusKey)}</small>
             </button>
@@ -262,6 +305,7 @@
               aria-pressed={selectedKind === entry.value}
               onclick={() => (selectedKind = entry.value)}
             >
+              {#if prefix}<span aria-hidden="true" class="chip-prefix">{prefix}</span>{/if}
               {labelFor(entry.labelKey)}
             </button>
           {/if}
@@ -279,6 +323,14 @@
         placeholder="https://www.youtube.com/@handle"
       />
     </label>
+
+    {#if showRedditHint}
+      <p class="hint">{m.sources_new_reddit_input_hint()}</p>
+      <p class="hint hint-warning">⚠ {m.sources_new_reddit_listing_limit()}</p>
+      {#if !redditOperatorConfigured}
+        <p class="hint hint-warning">{m.sources_new_reddit_disabled()}</p>
+      {/if}
+    {/if}
 
     <label class="toggle">
       <input type="checkbox" bind:checked={isOwnedByMe} />
@@ -396,9 +448,26 @@
     opacity: 0.55;
     cursor: not-allowed;
   }
+  .chip-prefix {
+    font-size: 1em;
+    line-height: 1;
+    margin-right: 4px;
+  }
   .status {
     font-size: var(--font-size-label);
     color: var(--color-text-muted);
+  }
+  /* Reddit-specific hint under the URL input — neutral by default,
+   * warning-coloured when REDDIT_USER_AGENT is empty (D-RDT-AUTH-EMPTY).
+   * Sits between the URL input and the owner/auto-import toggles. */
+  .hint {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-label);
+    line-height: var(--line-height-body);
+  }
+  .hint.hint-warning {
+    color: var(--color-warning, #d90);
   }
   .field {
     display: flex;

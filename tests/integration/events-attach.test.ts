@@ -322,8 +322,10 @@ describe("attachEventToGames (M:N junction service)", () => {
     );
     const beforeTs = ev.updatedAt;
 
-    // Wait a bit to let the timestamp advance.
-    await new Promise((r) => setTimeout(r, 5));
+    // Wait long enough for the Postgres NOW() clock to advance past
+    // beforeTs even under CI scheduling jitter — 5ms occasionally
+    // missed the bar when the kernel delayed our timer.
+    await new Promise((r) => setTimeout(r, 50));
     const after = await attachEventToGames(u.id, ev.id, [gA], "127.0.0.1");
     expect(after.updatedAt.getTime()).toBeGreaterThanOrEqual(beforeTs.getTime());
   });

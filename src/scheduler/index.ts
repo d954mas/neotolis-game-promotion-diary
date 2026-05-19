@@ -43,8 +43,11 @@ export async function startScheduler(): Promise<void> {
   }
 
   // Per-kind cron schedules owned by each adapter. Iterate registration
-  // order from registry.ts (currently just youtube; Reddit / Twitter /
-  // Telegram / Discord queue here as their adapters land).
+  // order from registry.ts (today: youtube + reddit. Reddit registers
+  // 4 daily cron schedules via redditAdapter.scheduleCronTicks per
+  // D-RDT-CRON-BURST: enqueue-service-sources 00/06/12/18 UTC,
+  // enqueue-service-posts 03/09/15/21 UTC, baselines 04 UTC,
+  // deletion-propagation 05 UTC).
   for (const adapter of allAdapters) {
     try {
       await adapter.scheduleCronTicks(boss);
@@ -59,6 +62,13 @@ export async function startScheduler(): Promise<void> {
   // purge.daily — 4 AM Pacific (after backup at 03:00 Pacific).
   // listPurgeEligibleUsers + purgeAccount cascade.
   await boss.schedule(QUEUES.PURGE_DAILY, "0 4 * * *", {}, { tz: "America/Los_Angeles" });
+
+  // adapter_refresh_queue janitor — 06:30 UTC daily. Sits between the
+  // Reddit service-source cron at 06:00 UTC (which INSERTs `pending`
+  // rows) and the next cron tick. DELETE only `done`/`dead_letter`
+  // rows older than the retention window, so the janitor + cron touch
+  // disjoint status rows anyway — the 30-min stagger is belt-and-braces.
+  await boss.schedule(QUEUES.ADAPTER_REFRESH_QUEUE_JANITOR, "30 6 * * *", {}, { tz: "UTC" });
 
   logger.info(
     {

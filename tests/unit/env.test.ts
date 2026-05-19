@@ -7,6 +7,21 @@ import { randomBytes } from "node:crypto";
 // dynamic import; vi.resetModules() between cases so each test sees a fresh
 // parse of process.env.
 
+// Mock dotenv (scoped to this file) so env.ts's loadDotenv() calls become
+// no-ops. Without this, vi.resetModules() invalidates dotenv's module
+// cache, the next env.ts import re-loads .env from disk, and any test
+// that `delete process.env.FOO` to assert the empty/default branch will
+// see FOO repopulated from the developer's local .env. CI has no .env
+// so this only manifests locally — but the assertions matter equally
+// in both environments, so we cut the disk read out of the test path.
+//
+// vitest hoists `vi.mock` to the top of the file at compile time and
+// scopes it per-test-file, so this does NOT leak into other test files
+// in the same worker.
+vi.mock("dotenv", () => ({
+  config: () => ({ parsed: {} }),
+}));
+
 // Required env values for the schema's required keys (DATABASE_URL, etc.)
 // Set via ??= so we don't clobber a CI-provided value.
 process.env.DATABASE_URL ??= "postgres://test:test@localhost:5432/test";
@@ -134,5 +149,77 @@ describe("env additions — YouTube + admin allowlist", () => {
     await withEnv({ YOUTUBE_API_BASE_URL: "http://localhost:9999/youtube/v3" }, (env) => {
       expect(env.YOUTUBE_API_BASE_URL).toBe("http://localhost:9999/youtube/v3");
     });
+  });
+});
+
+describe("REDDIT_USER_AGENT validation (Phase 03.1 DV-RDT-7)", () => {
+  // Helper for expected-throw cases — must NOT use withEnv (which awaits import
+  // inside a try/finally and would swallow the synchronous-import error path
+  // through the fn callback). Pattern: stage process.env, vi.resetModules, then
+  // await expect(import(...)).rejects to surface the zod ZodError.
+  async function expectBootFailure(redditUserAgent: string, errorMatcher?: RegExp): Promise<void> {
+    const saved = process.env.REDDIT_USER_AGENT;
+    process.env.REDDIT_USER_AGENT = redditUserAgent;
+    vi.resetModules();
+    // env.ts scrubs KEK from process.env on a prior successful import; the
+    // re-import below needs a fresh KEK to reach the REDDIT_USER_AGENT check.
+    process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
+    try {
+      const importPromise = import("../../src/lib/server/config/env.js");
+      if (errorMatcher) {
+        await expect(importPromise).rejects.toThrow(errorMatcher);
+      } else {
+        await expect(importPromise).rejects.toThrow();
+      }
+    } finally {
+      if (saved === undefined) {
+        delete process.env.REDDIT_USER_AGENT;
+      } else {
+        process.env.REDDIT_USER_AGENT = saved;
+      }
+    }
+  }
+
+  it("empty REDDIT_USER_AGENT → boot succeeds (Reddit cleanly disabled)", async () => {
+    await withEnv({ REDDIT_USER_AGENT: undefined }, (env) => {
+      expect(env.REDDIT_USER_AGENT).toBe("");
+    });
+  });
+
+  it("explicit empty string REDDIT_USER_AGENT → boot succeeds", async () => {
+    await withEnv({ REDDIT_USER_AGENT: "" }, (env) => {
+      expect(env.REDDIT_USER_AGENT).toBe("");
+    });
+  });
+
+  it("compliant UA succeeds: node:com.neotolis.gpd:0.1.0 (by /u/operator)", async () => {
+    await withEnv({ REDDIT_USER_AGENT: "node:com.neotolis.gpd:0.1.0 (by /u/operator)" }, (env) => {
+      expect(env.REDDIT_USER_AGENT).toBe("node:com.neotolis.gpd:0.1.0 (by /u/operator)");
+    });
+  });
+
+  it("handle with hyphen + digits + underscore → boot succeeds", async () => {
+    await withEnv(
+      { REDDIT_USER_AGENT: "node:com.neotolis.gpd:0.1.0 (by /u/op-erator_99)" },
+      (env) => {
+        expect(env.REDDIT_USER_AGENT).toMatch(/op-erator_99/);
+      },
+    );
+  });
+
+  it("missing `by /u/` → boot fails", async () => {
+    await expectBootFailure("MyApp 1.0", /by \/u\//i);
+  });
+
+  it("missing <platform>:<id>:<version> shape → boot fails", async () => {
+    await expectBootFailure("MyApp 1.0 (by /u/operator)");
+  });
+
+  it("malformed (no parens around `by /u/...`) → boot fails", async () => {
+    await expectBootFailure("node:test:1 by /u/operator");
+  });
+
+  it("handle with space → boot fails", async () => {
+    await expectBootFailure("python:Test:1.0 (by /u/spaces in handle)");
   });
 });

@@ -7,7 +7,7 @@
 // test pins that gate so a future regression (drop the pre-check,
 // reorder the gate, lift the cap somewhere else) trips loudly.
 //
-// Mocks the YouTube adapter's fetchEventStats so we don't need real
+// Mocks the YouTube adapter's syncStats.fetch so we don't need real
 // HTTP, but verifies the AUDIT-LOG side-effect — i.e., the cap query
 // (services/quota.ts getUserQuotaUsedToday) reflects the result the
 // way the endpoints expect.
@@ -20,32 +20,38 @@ let fetchEventStatsCallCount = 0;
 vi.mock("../../src/lib/sources/youtube/server/index.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   const real = actual.youtubeAdapter as Record<string, unknown>;
+  const realSyncStats = real.syncStats as
+    | { canRun?: (ctx: unknown) => Promise<unknown> }
+    | undefined;
   return {
     ...actual,
     youtubeAdapter: {
       ...real,
       // Track invocations + emit a stats_refresh audit row mirroring the
       // real impl so the cap counter ticks correctly. We don't make HTTP.
-      fetchEventStats: async (
-        externalId: string,
-        ctx: { userId: string },
-      ): Promise<{ viewCount: number; likeCount: number; commentCount: number }> => {
-        fetchEventStatsCallCount += 1;
-        const { writeAudit } = await import("../../src/lib/server/audit.js");
-        await writeAudit({
-          userId: ctx.userId,
-          action: "event.poll_refreshed",
-          ipAddress: "0.0.0.0",
-          metadata: {
-            external_id: externalId,
-            kind: "youtube_video",
-            platform: "youtube_channel",
-            flow: "stats_refresh",
-            requests_used: 1,
-            events_inserted: 0,
-          },
-        });
-        return { viewCount: 100, likeCount: 10, commentCount: 5 };
+      syncStats: {
+        canRun: realSyncStats?.canRun,
+        fetch: async (
+          externalId: string,
+          ctx: { userId: string },
+        ): Promise<{ viewCount: number; likeCount: number; commentCount: number }> => {
+          fetchEventStatsCallCount += 1;
+          const { writeAudit } = await import("../../src/lib/server/audit.js");
+          await writeAudit({
+            userId: ctx.userId,
+            action: "event.poll_refreshed",
+            ipAddress: "0.0.0.0",
+            metadata: {
+              external_id: externalId,
+              kind: "youtube_video",
+              platform: "youtube_channel",
+              flow: "stats_refresh",
+              requests_used: 1,
+              events_inserted: 0,
+            },
+          });
+          return { viewCount: 100, likeCount: 10, commentCount: 5 };
+        },
       },
     },
   };
@@ -56,6 +62,8 @@ const { getUserQuotaUsedToday } = await import("../../src/lib/server/services/qu
 const { db } = await import("../../src/lib/server/db/client.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
+const { youtubeServiceQuotaUsage } = await import("../../src/lib/server/db/schema/index.js");
+const { todayPacific } = await import("../../src/lib/sources/youtube/server/quota.js");
 const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
@@ -83,8 +91,9 @@ async function seedCappedAuditRows(userId: string, count: number): Promise<void>
 }
 
 describe("createEvent → fetchEventStats cap-check", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     fetchEventStatsCallCount = 0;
+    await db.delete(youtubeServiceQuotaUsage);
   });
 
   it("user under cap: createEvent triggers fetchEventStats", async () => {
@@ -166,6 +175,34 @@ describe("createEvent → fetchEventStats cap-check", () => {
     expect(fetchEventStatsCallCount).toBe(0);
     const after = await getUserQuotaUsedToday(u.id, "youtube_channel");
     expect(after.requests).toBe(105);
+  });
+
+  it("operator quota at 95 percent: createEvent skips syncStats without failing paste", async () => {
+    const u = await seedUserDirectly({ email: `fes-opquota-${uniq()}@test.local` });
+    await db.insert(youtubeServiceQuotaUsage).values({
+      datePacific: todayPacific(),
+      apiKeyId: `quota_${uniq()}`,
+      poolKind: "user",
+      estimatedUnits: 9500,
+    });
+
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "youtube_video",
+        occurredAt: new Date(),
+        title: "test",
+        url: "https://www.youtube.com/watch?v=QuotaStop1",
+        externalId: "QuotaStop1",
+      },
+      "127.0.0.1",
+    );
+
+    expect(ev.id).toBeDefined();
+    expect(fetchEventStatsCallCount).toBe(0);
+    const after = await getUserQuotaUsedToday(u.id, "youtube_channel");
+    expect(after.requests).toBe(0);
   });
 
   it("under cap: writes last_user_refresh_at to event.metadata", async () => {

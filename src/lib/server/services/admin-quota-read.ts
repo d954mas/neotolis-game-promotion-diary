@@ -36,6 +36,24 @@ import { auditLog } from "../db/schema/audit-log.js";
 import type { AuditAction } from "../audit/actions.js";
 import { todayPacific } from "./quota.js";
 import { getAdapter } from "$lib/sources/registry.js";
+import { env } from "$lib/server/config/env.js";
+import {
+  getQueueDepth as getRedditQueueDepth,
+  getDailyByType as getRedditDailyByType,
+  type RedditQueueDepthRow,
+  type RedditDailyByType,
+} from "$lib/sources/reddit/server/index.js";
+import {
+  getYoutubeQueueDepth,
+  getYoutubeDailyByType,
+  type YoutubeQueueDepthRow,
+  type YoutubeDailyByType,
+} from "$lib/sources/youtube/server/observability.js";
+
+// Re-export types so the /admin Svelte components (which can only
+// type-import from this server-service module, not from reddit/server
+// directly) can reference the same shapes the loader returns.
+export type { RedditQueueDepthRow, RedditDailyByType, YoutubeQueueDepthRow, YoutubeDailyByType };
 
 export interface QuotaKeyRow {
   /** sha-8 hash of the operator's API key — stable identifier across boots. */
@@ -71,10 +89,32 @@ const SERVICE_LEVEL_AUDIT_ACTIONS: readonly AuditAction[] = [
 /** How many tail audit rows to surface on /admin/quota. */
 const ADMIN_AUDIT_TAIL_LIMIT = 50;
 
+/**
+ * Reddit Ops block surfaced on the /admin page alongside the YouTube
+ * quota table + service audit list. When the operator hasn't configured
+ * REDDIT_USER_AGENT, the block collapses to `{ isConfigured: false }`
+ * — the page renders a "Reddit ingest disabled" placeholder instead of
+ * the live tables.
+ */
+export type AdminRedditBlock =
+  | {
+      isConfigured: true;
+      queueDepth: RedditQueueDepthRow[];
+      daily: RedditDailyByType;
+    }
+  | { isConfigured: false };
+
+export interface AdminYoutubeBlock {
+  queueDepth: YoutubeQueueDepthRow[];
+  daily: YoutubeDailyByType;
+}
+
 export async function loadAdminQuotaPage(): Promise<{
   today: string;
   keys: QuotaKeyRow[];
   audit: ServiceAuditEntry[];
+  reddit: AdminRedditBlock;
+  youtube: AdminYoutubeBlock;
 }> {
   const today = todayPacific();
   const now = new Date();
@@ -117,10 +157,34 @@ export async function loadAdminQuotaPage(): Promise<{
     .orderBy(desc(auditLog.createdAt))
     .limit(ADMIN_AUDIT_TAIL_LIMIT);
 
+  // Reddit Ops block — skip the two SQL round-trips when the operator
+  // hasn't configured REDDIT_USER_AGENT. The block collapses cleanly:
+  // the UI renders a single "Reddit ingest disabled" placeholder
+  // instead of stale empty tables that look like outages.
+  let reddit: AdminRedditBlock;
+  if (env.REDDIT_USER_AGENT === "") {
+    reddit = { isConfigured: false };
+  } else {
+    const [queueDepth, daily] = await Promise.all([getRedditQueueDepth(), getRedditDailyByType()]);
+    reddit = { isConfigured: true, queueDepth, daily };
+  }
+
+  // YouTube ops block. Read from the shared adapter_refresh_queue with
+  // adapter_kind='youtube_channel' — same shape the Reddit panel uses,
+  // surfacing queue depth + 24h breakdown + lifetime user-refresh total
+  // so the operator has parity with the Reddit Ops view.
+  const [ytQueueDepth, ytDaily] = await Promise.all([
+    getYoutubeQueueDepth(),
+    getYoutubeDailyByType(),
+  ]);
+  const youtube: AdminYoutubeBlock = { queueDepth: ytQueueDepth, daily: ytDaily };
+
   return {
     today,
     keys: keyRows,
     audit: auditRows.map(toServiceAuditEntry),
+    reddit,
+    youtube,
   };
 }
 

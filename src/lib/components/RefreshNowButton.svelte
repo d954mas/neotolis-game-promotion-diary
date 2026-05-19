@@ -8,9 +8,9 @@
   //   - Click → POST /api/events/{id}/refresh-poll (no body).
   //   - Pending: spinning rotation 360°/1s, aria-busy="true", aria-live="polite"
   //     announces m.polling_refresh_now_pending().
-  //   - On 200/202: 2s "Polled just now" state, then invalidateAll() to refresh
-  //     server-loaded data so the parent <PollingBadge> reads the new
-  //     last_polled_at.
+  //   - On 200/202: enter cooldown and invalidateAll(); PollingBadge reads
+  //     metadata.last_user_refresh_at and shows "Refresh queued" until
+  //     youtube_videos.last_polled_at catches up.
   //   - On 429: cooldown-disabled state. Reads Retry-After header OR
   //     falls back to event.metadata.last_user_refresh_at + 5min to
   //     derive minutesLeft for the tooltip.
@@ -33,13 +33,21 @@
   type EventForRefresh = {
     id: string;
     metadata: Record<string, unknown> | null;
+    lastPolledAt?: Date | string | null;
   };
 
   let { event }: { event: EventForRefresh } = $props();
 
-  type UiState = "idle" | "pending" | "cooldown" | "done" | "error";
-  let uiState = $state<UiState>("idle");
-  let cooldownSecondsLeft = $state(0);
+  // Set to false on component unmount so a running poll-loop bails out
+  // when the user navigates away mid-refresh. Without this, setTimeout
+  // chains keep firing invalidateAll() against a dead component until
+  // the budget exhausts — a soft leak under high traffic.
+  let mounted = $state(true);
+  $effect(() => {
+    return () => {
+      mounted = false;
+    };
+  });
 
   // 5-min cooldown — matches the server-side cooldown enforced by
   // requestRefreshPoll (which throws AppError 429 'too_many_refreshes'
@@ -47,8 +55,7 @@
   const COOLDOWN_MS = 5 * 60 * 1000;
   const COOLDOWN_RECHECK_MS = 1_000;
 
-  function readMetadataLastRefresh(): number | null {
-    const meta = event.metadata;
+  function readMetadataLastRefresh(meta: Record<string, unknown> | null): number | null {
     if (meta === null || typeof meta !== "object") return null;
     const v = (meta as { last_user_refresh_at?: unknown }).last_user_refresh_at;
     if (typeof v !== "string") return null;
@@ -56,17 +63,33 @@
     return Number.isFinite(ts) ? ts : null;
   }
 
-  function computeCooldownSeconds(): number {
-    const last = readMetadataLastRefresh();
+  function computeCooldownSecondsFor(meta: Record<string, unknown> | null): number {
+    const last = readMetadataLastRefresh(meta);
     if (last === null) return 0;
     const elapsed = Date.now() - last;
     if (elapsed >= COOLDOWN_MS) return 0;
     return Math.ceil((COOLDOWN_MS - elapsed) / 1000);
   }
 
-  // Initial cooldown evaluation + per-second interval re-evaluation so
-  // the visible countdown ticks down smoothly. $effect cleanup clears
-  // the interval on unmount so we don't leak timers.
+  // Synchronous init from props — avoids the post-mount flicker where
+  // the button briefly renders as "idle" before the $effect promotes
+  // it to "cooldown". `untrack` decouples the read from the reactive
+  // graph: the value at first paint is what we want; subsequent prop
+  // changes go through the $effect-driven interval below.
+  type UiState = "idle" | "pending" | "cooldown" | "done" | "error";
+  const initialCooldown = computeCooldownSecondsFor(event.metadata);
+  let uiState = $state<UiState>(initialCooldown > 0 ? "cooldown" : "idle");
+  let cooldownSecondsLeft = $state(initialCooldown);
+
+  function computeCooldownSeconds(): number {
+    return computeCooldownSecondsFor(event.metadata);
+  }
+
+  // Per-second tick so the visible countdown decrements smoothly and
+  // flips back to idle when the window closes. Initial state already
+  // reflects metadata (see above) so the effect's job is purely the
+  // tick + reactive prop changes (e.g. POST 200/202 invalidateAll
+  // mutates event.metadata.last_user_refresh_at).
   $effect(() => {
     cooldownSecondsLeft = computeCooldownSeconds();
     if (cooldownSecondsLeft > 0 && uiState !== "pending" && uiState !== "done") {
@@ -89,13 +112,61 @@
     try {
       const resp = await fetch(`/api/events/${event.id}/refresh-poll`, { method: "POST" });
       if (resp.status === 200 || resp.status === 202) {
-        uiState = "done";
-        // 2s "Polled just now" → invalidateAll() so the parent loader re-runs
-        // and the badge picks up the fresh server-side last_polled_at.
-        setTimeout(() => {
-          uiState = "idle";
-          void invalidateAll();
-        }, 2000);
+        cooldownSecondsLeft = COOLDOWN_MS / 1000;
+        uiState = "cooldown";
+        // Adaptive poll-loop:
+        //   - first 15s: 1s cadence (covers fast case — YouTube ~2s,
+        //     Reddit pacer ≤7.5s + API ≤1s when the queue is empty);
+        //   - next ~105s: 5s cadence (covers busy queue — Reddit's 8 req/min
+        //     ceiling means 1000 concurrent refresh-clicks drain over
+        //     ~125 minutes WORST case, but a typical busy queue clears
+        //     in 1–2 minutes);
+        //   - hard cap at 2 minutes (PollingBadge's REFRESH_QUEUE_VISIBLE_MS
+        //     is 5 minutes, so the badge keeps showing "queued" while we
+        //     wait, then naturally falls back to the regular variant).
+        //
+        // Stop conditions:
+        //   1. lastPolledAt > refreshAt — worker wrote a snapshot after
+        //      the click instant. refreshAt = Date.now() at the moment
+        //      the 200/202 returned is the right reference: the server
+        //      writes last_user_refresh_at = NOW() inside the same
+        //      transaction as the enqueue, so worker polls landing
+        //      AFTER that wall-clock moment imply our enqueued row has
+        //      drained. Reading event.metadata.last_user_refresh_at
+        //      from props would lag a tick (we haven't awaited the
+        //      invalidateAll below yet) AND would risk an early exit
+        //      when an older prior refresh + a still-stale polledAt
+        //      already satisfy polledAt > prior_refresh_at.
+        //   2. mounted === false — user navigated away. No more
+        //      invalidateAll() calls against a dead component.
+        //
+        // Pacer paused / cap exhausted / 1000 concurrent users:
+        //   beyond 2min the poll-loop gives up. The PollingBadge falls
+        //   back to its regular variant after REFRESH_QUEUE_VISIBLE_MS
+        //   (5 min), and the user can hard-reload or revisit the page
+        //   to see the eventual snapshot. Adding more polling iterations
+        //   would just burn loader cycles in a dead-letter scenario.
+        const refreshAt = Date.now();
+        void invalidateAll();
+        const FAST_ITERATIONS = 15;
+        const TOTAL_ITERATIONS = FAST_ITERATIONS + 21; // ~120s budget
+        for (let i = 0; i < TOTAL_ITERATIONS; i++) {
+          if (!mounted) break;
+          const sleepMs = i < FAST_ITERATIONS ? 1_000 : 5_000;
+          await new Promise((r) => setTimeout(r, sleepMs));
+          if (!mounted) break;
+          await invalidateAll();
+          const polledRaw = event.lastPolledAt;
+          const polledAt =
+            polledRaw == null
+              ? null
+              : typeof polledRaw === "string"
+                ? Date.parse(polledRaw)
+                : polledRaw instanceof Date
+                  ? polledRaw.getTime()
+                  : null;
+          if (polledAt !== null && polledAt > refreshAt) break;
+        }
         return;
       }
       if (resp.status === 429) {

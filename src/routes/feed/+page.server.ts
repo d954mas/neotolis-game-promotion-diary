@@ -10,10 +10,8 @@ import { listGames } from "$lib/server/services/games.js";
 import { listSources } from "$lib/server/services/data-sources.js";
 import { mapEventsToDtos, toGameDto, toDataSourceDto } from "$lib/server/dto.js";
 import { filterValidKinds } from "$lib/util/filter-event-kinds.js";
-import { db } from "$lib/server/db/client.js";
-import { youtubeChannels } from "$lib/server/db/schema/index.js";
-import { inArray } from "drizzle-orm";
 import { allAdapters } from "$lib/sources/registry.js";
+import { enrichDataSourceDtosWithYoutubeChannelTitles } from "$lib/server/services/sources-page-read.js";
 
 // URL contract: /feed accepts ?show=any|inbox|specific + ?game=A&game=B
 // (when show=specific). The legacy ?attached=true|false is no longer
@@ -164,21 +162,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   // displayName. One batched lookup keyed on every distinct channelId
   // across all loaded sources.
   const sourceDtos = sourceRows.map(toDataSourceDto);
-  const channelIds = sourceDtos.map((s) => s.channelId).filter((c): c is string => c !== null);
-  if (channelIds.length > 0) {
-    const cacheRows = await db
-      .select({
-        channelId: youtubeChannels.channelId,
-        channelTitle: youtubeChannels.channelTitle,
-      })
-      .from(youtubeChannels)
-      .where(inArray(youtubeChannels.channelId, channelIds));
-    const titleByChannel = new Map<string, string | null>();
-    for (const r of cacheRows) titleByChannel.set(r.channelId, r.channelTitle);
-    for (const s of sourceDtos) {
-      if (s.channelId) s.channelTitle = titleByChannel.get(s.channelId) ?? null;
-    }
-  }
+  await enrichDataSourceDtosWithYoutubeChannelTitles(sourceDtos);
 
   return {
     rows: rowDtos,

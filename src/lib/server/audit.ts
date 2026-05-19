@@ -6,7 +6,7 @@
 // docs but the writer never even offers the mechanism.
 //
 // Metadata sanitization convention: callers pass ONLY their own tenant's
-// data. We do not introspect — that would require a sanitizer that sees
+// data. We do not introspect - that would require a sanitizer that sees
 // other tenants' identifiers, creating a different leak. The convention is
 // enforced by code review; field-shape patterns are caught by Pino redact
 // at log time.
@@ -26,17 +26,16 @@ import { logger } from "./logger.js";
  * (services/quota.ts:getUserQuotaUsedToday filters on these values).
  *
  * Capped (counted in user fair-share cap query):
- *   - 'initial'        — onboarding channel-context-backfill. User-initiated
+ *   - 'initial' - onboarding channel-context-backfill. User-initiated
  *                        (they explicitly added the source); API budget burned
  *                        under their identity. MUST count.
- *   - 'incremental'    — refresh-content default (catch-up newer events)
- *   - 'historical'     — refresh-content with explicit older boundary
- *   - 'stats_refresh'  — refresh-poll endpoint (Refresh now button)
+ *   - 'incremental' - refresh-content default (catch-up newer events)
+ *   - 'historical' - refresh-content with explicit older boundary
+ *   - 'stats_refresh' - refresh-poll endpoint (Refresh now button)
  *
  * Excluded (uses operator cron pool, not user pool):
- *   - 'auto_passive'   — daily auto-backfill cron pick (cron-driven, no
- *                        user-initiated trigger; runs against operator's
- *                        cron reservoir).
+ *   - 'auto_passive' - daily auto-backfill cron pick (cron-driven,
+ *                        operator cron pool).
  *
  * Adding a new flow value requires (a) extending this union AND (b) adding
  * to the audit_log CHECK constraint migration. Both steps land in the
@@ -64,7 +63,7 @@ export interface AuditMetadata {
    * semantics clean and the cap counter accurate.
    */
   platform?: string;
-  // Open shape — callers may pass additional bag fields (source_id, kind,
+  // Open shape - callers may pass additional bag fields (source_id, kind,
   // job_id, etc.). Only `flow` carries a closed enum; everything else is
   // free-form per audit-action convention.
   [extra: string]: unknown;
@@ -84,7 +83,7 @@ export interface AuditEntry {
 /**
  * Append a row to audit_log. INSERT-only by design.
  *
- * Never throws — audit failures are logged and swallowed so a transient DB
+ * Never throws - audit failures are logged and swallowed so a transient DB
  * error cannot cascade into a failed login or 500 response. The trade-off
  * accepts silent loss as preferable to cascade failure.
  */
@@ -99,16 +98,16 @@ export async function writeAudit(entry: AuditEntry): Promise<void> {
     });
   } catch (err) {
     // Never let an audit failure break the user-facing request.
-    // But log loudly — silent audit drops are a risk.
+    // But log loudly - silent audit drops are a risk.
     logger.error({ err, action: entry.action, userId: entry.userId }, "audit write failed");
   }
 }
 
 /**
- * Strict variant of writeAudit — propagates errors instead of swallowing.
+ * Strict variant of writeAudit - propagates errors instead of swallowing.
  *
  * Use when the audit-row-per-action invariant is load-bearing for the
- * request semantics — i.e. a side effect that's already happened (queue
+ * request semantics - i.e. a side effect that's already happened (queue
  * enqueue, irreversible DB write) MUST have an accompanying audit row,
  * and a failed audit should surface as 5xx so the caller knows to retry.
  * Idempotent side effects (singletonKey-deduped queue sends; conditional
@@ -117,7 +116,7 @@ export async function writeAudit(entry: AuditEntry): Promise<void> {
  * The default `writeAudit` swallows errors because the inverse trade-off
  * fits the login flow: a missing audit row is less disruptive than a failed
  * sign-in. For action-pin contracts and compliance-critical actions the
- * trade-off flips — use this strict form.
+ * trade-off flips - use this strict form.
  */
 export async function writeAuditStrict(entry: AuditEntry): Promise<void> {
   await db.insert(auditLog).values({

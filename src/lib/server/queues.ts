@@ -26,10 +26,18 @@ export const QUEUES = {
   // Cross-source / non-per-kind:
   PURGE_DAILY: "purge.daily",
   INTERNAL_HEALTHCHECK: "internal.healthcheck",
+  /** Daily DELETE of terminal-state rows from `adapter_refresh_queue`. The
+   *  cap counter (services/quota.ts) reads only the 15-min rolling window,
+   *  so `status IN ('done','dead_letter')` rows older than 14 days are
+   *  dead weight. Without the janitor the table grows unbounded
+   *  (~525k rows/year at 8 req/min baseline). 14 days keeps a forensic
+   *  window for "my refresh failed last week" investigation, well past
+   *  the cap horizon. Authoritative SQL lives in
+   *  services/adapter-refresh-queue-janitor.ts. */
+  ADAPTER_REFRESH_QUEUE_JANITOR: "adapter-refresh-queue.janitor",
 
   // Per-kind: youtube
   YOUTUBE_POLL_CRON: "youtube.poll.cron",
-  YOUTUBE_POLL_USER: "youtube.poll.user",
   /** Channel-scoped backfill. Job payload carries (kind, channelKey,
    *  triggerUserId?, depthBoundIso, flow). One walk per call; fan-out
    *  INSERT to all active subscribers. Singleton key by channelKey
@@ -54,6 +62,21 @@ export const QUEUES = {
    *  Without this, completed channels go silent until manual
    *  refresh-click. */
   YOUTUBE_INCREMENTAL_CRON: "youtube.incremental_cron",
+
+  // Per-kind: reddit (Phase 03.1 DV-RDT-7). FOUR cron-only pg-boss
+  // queues — handlers ENQUEUE rows into adapter_refresh_queue (ZERO
+  // Reddit HTTP per D-RDT-CRON-BURST) and return; the 8-tick worker
+  // setInterval (src/worker/index.ts) drains the reddit_account lanes at
+  // the 8 req/min effective ceiling.
+  //
+  // The Reddit batch worker does NOT subscribe via pg-boss.work — the
+  // SQL FOR UPDATE SKIP LOCKED tick pattern is the load-bearing answer
+  // to Reddit's 10 req/min hard limit under multi-replica deploys
+  // (D-RDT-WORKER).
+  REDDIT_CRON_ENQUEUE_SERVICE_SOURCES: "reddit.cron.enqueue-service-sources",
+  REDDIT_CRON_ENQUEUE_SERVICE_POSTS: "reddit.cron.enqueue-service-posts",
+  REDDIT_CRON_BASELINES: "reddit.cron.baselines",
+  REDDIT_CRON_DELETION_PROPAGATION: "reddit.cron.deletion-propagation",
 } as const satisfies Record<string, string>;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

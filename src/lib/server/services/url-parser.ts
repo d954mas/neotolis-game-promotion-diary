@@ -1,34 +1,35 @@
 // URL ingest parser — orchestrator wrapper around the cross-source
-// `parseAnyUrl` registry iterator + the `detectFutureKind` Reddit-deferral
+// `parseAnyUrl` registry iterator + the `detectFutureKind` host-hint
 // helper.
 //
-// This module is the FIRST step in the validate-first ingest pipeline.
-// It performs zero I/O and zero DB writes — just URL parsing, host
-// classification, and canonicalization. The orchestrator
-// (`services/ingest.ts`) calls oEmbed integrations AFTER this returns a
-// non-`unsupported` kind, then INSERTs ONLY after oEmbed succeeds.
+// First step in the validate-first ingest pipeline. Performs zero I/O
+// and zero DB writes — just URL parsing, host classification, and
+// canonicalization. Downstream callers fire oEmbed (YouTube) or
+// /api/info.json (Reddit) only after this returns a non-`unsupported`
+// kind, and INSERT only after the per-kind validation succeeds.
 //
 // Internally:
 //
-//   1. `parseAnyUrl(input)` (src/lib/sources/url.ts) — iterates the
-//      adapter registry first-match-wins. YouTube is registered, so
-//      `youtube.com` / `youtu.be` URLs route through
-//      `youtubeAdapter.parseUrl`. Returns `{ kind: "youtube_video",
-//      externalId, metadata }` on hit, `{ kind: "unsupported" }`
-//      otherwise.
+//   1. `parseAnyUrl(input)` (src/lib/sources/url.ts) iterates the
+//      adapter registry first-match-wins. YouTube + Reddit are
+//      registered: `youtube.com` / `youtu.be` route through
+//      `youtubeAdapter.parseUrl`, `reddit.com` / `redd.it` through
+//      `redditAdapter.parseUrl` (returning `{kind: "reddit_post",
+//      externalId, metadata: {subreddit}}`). `{kind: "unsupported"}`
+//      when no adapter matches.
 //
 //   2. Twitter (`twitter.com` / `x.com` / `mobile.twitter.com`) and
 //      Telegram (`t.me`) URL handling stays at the orchestrator layer
 //      ("parser of last resort" for kinds without an adapter yet). When
-//      Twitter / Telegram adapters land in later phases, those host
-//      branches move INSIDE the adapter and this file shrinks
-//      correspondingly.
+//      Twitter / Telegram adapters land, those host branches move
+//      INSIDE the adapter and this file shrinks correspondingly.
 //
 //   3. `detectFutureKind(input)` (src/lib/sources/future-kinds.ts) maps
-//      reddit hosts to the friendly `{ kind: "reddit_deferred" }` shape.
-//      Without this, a Reddit paste would land in `unsupported_url` and
-//      lose the UX promise of a friendly inline-info banner. The
-//      future-kinds map shrinks as adapters land.
+//      remaining deferred-adapter hosts to friendly
+//      `{kind: "<x>_deferred"}` shapes. The future-kinds map is empty
+//      today (Reddit moved to the registry; Twitter/Telegram have host
+//      branches above); the branch stays as a seam for future deferred
+//      adapters that need an inline banner before their adapter ships.
 //
 // x.com is canonicalized to twitter.com because
 // publish.twitter.com/oembed only accepts the twitter.com host. The
@@ -41,9 +42,14 @@ import { detectFutureKind } from "$lib/sources/future-kinds.js";
 
 export type ParsedUrl =
   | { kind: "youtube_video"; videoId: string; canonicalUrl: string }
+  | {
+      kind: "reddit_post";
+      externalId: string;
+      canonicalUrl: string;
+      metadata: Record<string, unknown>;
+    }
   | { kind: "twitter_post"; canonicalUrl: string }
   | { kind: "telegram_post"; canonicalUrl: string }
-  | { kind: "reddit_deferred" }
   | { kind: "unsupported" };
 
 const X_HOSTS = new Set(["twitter.com", "x.com", "mobile.twitter.com"]);
@@ -66,7 +72,8 @@ const YOUTUBE_VIDEO_ID_RE = /^[\w-]{11}$/;
 
 export function parseIngestUrl(input: string): ParsedUrl {
   // 1) Adapter registry first (first-match-wins). YouTube wins on
-  //    `youtube.com` / `youtu.be` host matches.
+  //    `youtube.com` / `youtu.be` host matches; Reddit wins on
+  //    `reddit.com` / `redd.it` host matches.
   const routed = parseAnyUrl(input);
   if (routed.kind === "youtube_video") {
     if (!YOUTUBE_VIDEO_ID_RE.test(routed.externalId)) {
@@ -85,6 +92,27 @@ export function parseIngestUrl(input: string): ParsedUrl {
       kind: "youtube_video",
       videoId: routed.externalId,
       canonicalUrl,
+    };
+  }
+  if (routed.kind === "reddit_post") {
+    // Reddit's externalId is the base36 post id (without `t3_` prefix
+    // per redditParsePostUrl shape). canonicalUrl is the permalink
+    // form when the subreddit is in the path; for redd.it/<id>
+    // short-links the subreddit isn't known yet (worker resolves it
+    // on first fetch). metadata carries the subreddit hint
+    // transitively.
+    const externalId = routed.externalId;
+    const meta = (routed.metadata ?? {}) as { subreddit?: string | null };
+    const subreddit = meta.subreddit ?? null;
+    const canonicalUrl =
+      subreddit !== null
+        ? `https://www.reddit.com/r/${subreddit}/comments/${externalId}/`
+        : `https://redd.it/${externalId}`;
+    return {
+      kind: "reddit_post",
+      externalId,
+      canonicalUrl,
+      metadata: { subreddit },
     };
   }
 
@@ -111,12 +139,13 @@ export function parseIngestUrl(input: string): ParsedUrl {
     return { kind: "telegram_post", canonicalUrl: url.toString() };
   }
 
-  // 3) Reddit-deferred friendly path. `detectFutureKind` covers
-  //    reddit.com / www.reddit.com / old.reddit.com / redd.it. Once a
-  //    Reddit adapter lands, `parseAnyUrl` above will handle Reddit and
-  //    this branch becomes dead code.
-  const future = detectFutureKind(input);
-  if (future === "reddit_post") return { kind: "reddit_deferred" };
+  // 3) detectFutureKind seam for any remaining deferred-adapter hosts.
+  //    The future-kinds map is currently empty (Reddit moved to the
+  //    registry, handled at step 1). Kept as the extension point for
+  //    future deferred adapters — the call is a pure read of the empty
+  //    map so adding a deferred host means editing one file
+  //    (future-kinds.ts) not two.
+  void detectFutureKind(input);
 
   return { kind: "unsupported" };
 }

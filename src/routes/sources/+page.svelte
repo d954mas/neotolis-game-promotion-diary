@@ -32,6 +32,7 @@
   type SourceKind =
     | "youtube_channel"
     | "reddit_account"
+    | "reddit_subreddit"
     | "twitter_account"
     | "telegram_channel"
     | "discord_server";
@@ -142,10 +143,10 @@
        during normal use; collapsed under a disclosure to reduce noise on
        the list view. User opens when wanting to check quota state
        explicitly. -->
-  {#if data.quotaPlatforms.length > 0}
+  {#if data.quotaPlatforms.length > 0 || data.redditQuota}
     <details class="quota-disclosure">
       <summary>API usage today</summary>
-      <QuotaStatusBanner platforms={data.quotaPlatforms} />
+      <QuotaStatusBanner platforms={data.quotaPlatforms} redditQuota={data.redditQuota} />
     </details>
   {/if}
 

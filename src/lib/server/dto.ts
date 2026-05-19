@@ -216,6 +216,7 @@ export interface DataSourceDto {
   kind:
     | "youtube_channel"
     | "reddit_account"
+    | "reddit_subreddit"
     | "twitter_account"
     | "telegram_channel"
     | "discord_server";

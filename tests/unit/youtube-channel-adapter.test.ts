@@ -33,23 +33,29 @@ process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
 // Non-default base URL so the suite asserts the env-routed HTTP path
 // (AGENTS.md — env reads only via env.ts).
 process.env.YOUTUBE_API_BASE_URL = "https://yt-mock.test/youtube/v3";
-// Stub a single operator key so pickKeyForJob() returns non-null.
+// Stub a single operator key for DB-reservation mocks.
 process.env.SERVICE_YOUTUBE_API_KEYS = "test-operator-key-A";
 
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { youtubeAdapter as YoutubeChannelAdapterT } from "../../src/lib/sources/youtube/server/index.js";
 
-// pollContent flows through chargedFetch ($lib/sources/youtube/server/http.ts),
-// which calls incrementUsage + markThrottleTransition. Both touch the DB,
-// which these unit tests neither have nor want. Stub them; pickKeyForJob /
-// youtubeQuotaUser / hashApiKeyId stay real because the test asserts on
-// their outputs (the quotaUser fingerprint, the apiKeyId-keyed fetch URL).
+// pollContent flows through chargedFetch, which reserves quota in Postgres.
+// These unit tests stub the DB-touching pieces and keep youtubeQuotaUser /
+// hashApiKeyId real because the suite asserts on their outputs.
 vi.mock("../../src/lib/sources/youtube/server/quota.js", async () => {
   const actual = await vi.importActual<
     typeof import("../../src/lib/sources/youtube/server/quota.js")
   >("../../src/lib/sources/youtube/server/quota.js");
   return {
     ...actual,
+    reserveYoutubeQuota: vi
+      .fn()
+      .mockImplementation(async (args: { origin: "cron" | "user"; units: number }) => ({
+        apiKey: "test-operator-key-A",
+        apiKeyId: actual.hashApiKeyId("test-operator-key-A"),
+        poolKind: args.origin,
+        units: args.units,
+      })),
     incrementUsage: vi.fn().mockResolvedValue(undefined),
     markThrottleTransition: vi.fn().mockResolvedValue(undefined),
   };
@@ -297,7 +303,7 @@ describe("youtubeChannelAdapter.pollStats — quotaUser fairness param", () => {
 
   it("Test 8a: URL `key=` matches the threaded PickedKey.apiKey (regression test — double-pick drift)", async () => {
     // Without the threaded-key contract the adapter would call
-    // pickKeyForJob() internally inside pollStatsBatch, advancing the
+    // reserveYoutubeQuota() internally inside pollStatsBatch, advancing the
     // round-robin index independently from the worker's pre-pick. The
     // HTTP would burn the adapter's pick while writeSnapshot stored the
     // worker's pick in youtube_service_quota_usage — invisible at indie
@@ -458,7 +464,7 @@ describe("youtubeChannelAdapter.pollStats — env-key absence", () => {
   it("Test 15: no SERVICE_YOUTUBE_API_KEYS configured → snapshots status='auth_error'", async () => {
     // Unstub the test key for this case by mocking the picker via a fresh import
     // is tricky because env is parsed once at boot. Instead we rely on the
-    // documented contract: when pickKeyForJob() returns null, the adapter
+    // documented contract: when reserveYoutubeQuota() returns null, the adapter
     // degrades to all-auth-error snapshots without calling fetch.
     //
     // Because env was parsed with SERVICE_YOUTUBE_API_KEYS=test-operator-key-A,

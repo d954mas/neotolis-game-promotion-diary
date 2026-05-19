@@ -52,6 +52,24 @@
     lastPollStatus?: string | null;
     externalId?: string | null;
     metadata?: Record<string, unknown> | null;
+    redditEnrichment?: {
+      stats: {
+        score: number;
+        numComments: number;
+        upvoteRatio: number;
+        awardsTotal: number;
+      } | null;
+      subredditSubscribers: number | null;
+      authorKarma: number | null;
+    } | null;
+  };
+
+  type RedditPostCache = {
+    author: string | null;
+    subreddit: string;
+    permalink: string;
+    title: string;
+    metadata: { link_url?: string | null; body_excerpt?: string | null; is_self?: boolean } | null;
   };
 
   type GameLite = { id: string; title: string };
@@ -59,6 +77,22 @@
   let { data }: { data: PageData } = $props();
   const event = $derived(data.event as EventDtoLocal);
   const game = $derived(data.game as GameLite | null);
+  const redditPost = $derived(data.redditPost as RedditPostCache | null);
+
+  // Reddit image preview: if the link_url looks like a direct image URL
+  // (i.redd.it / preview.redd.it / common image extensions), we can
+  // <img>-render it. Other link types (external articles, link-posts to
+  // generic URLs) fall back to a "Visit link" affordance.
+  const redditImageUrl = $derived.by((): string | null => {
+    if (event.kind !== "reddit_post") return null;
+    const url = redditPost?.metadata?.link_url ?? null;
+    if (!url) return null;
+    const lower = url.toLowerCase();
+    if (lower.startsWith("https://i.redd.it/")) return url;
+    if (lower.startsWith("https://preview.redd.it/")) return url;
+    if (/\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(lower)) return url;
+    return null;
+  });
 
   const occurredIso = $derived(
     typeof event.occurredAt === "string" ? event.occurredAt : event.occurredAt.toISOString(),
@@ -170,6 +204,49 @@
       </div>
     </div>
   </header>
+
+  {#if event.kind === "reddit_post"}
+    <section class="reddit-preview" aria-label="Reddit post preview">
+      {#if redditPost}
+        <div class="reddit-meta">
+          {#if redditPost.author}
+            <span class="chip" title="Author">🧑 /u/{redditPost.author}</span>
+          {/if}
+          <span class="chip" title="Subreddit">🏛 /r/{redditPost.subreddit}</span>
+        </div>
+        {#if event.redditEnrichment?.stats}
+          {@const s = event.redditEnrichment.stats}
+          <div class="reddit-stats">
+            ↑{s.score} 💬{s.numComments} ({Math.round(s.upvoteRatio * 100)}%)
+            {#if s.awardsTotal > 0}🏆{s.awardsTotal}{/if}
+          </div>
+        {/if}
+        {#if redditImageUrl}
+          <a href={redditPost.permalink} target="_blank" rel="noopener noreferrer">
+            <img class="reddit-image" src={redditImageUrl} alt={redditPost.title} />
+          </a>
+        {/if}
+        {#if redditPost.metadata?.body_excerpt}
+          <p class="reddit-body">{redditPost.metadata.body_excerpt}</p>
+        {/if}
+        {#if !redditImageUrl && redditPost.metadata?.link_url && !redditPost.metadata?.is_self}
+          <a
+            class="reddit-link"
+            href={redditPost.metadata.link_url}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {redditPost.metadata.link_url}
+          </a>
+        {/if}
+      {:else}
+        <p class="reddit-pending">
+          Reddit post details not yet fetched — click <strong>Refresh now</strong> above or wait for the
+          next worker tick.
+        </p>
+      {/if}
+    </section>
+  {/if}
 
   {#if event.notes}
     <section class="notes">
@@ -322,6 +399,47 @@
     margin: 0;
     white-space: pre-wrap;
     line-height: var(--line-height-body);
+  }
+  .reddit-preview {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    padding: var(--space-md);
+  }
+  .reddit-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    align-items: center;
+  }
+  .reddit-stats {
+    font-size: var(--font-size-label);
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .reddit-image {
+    max-width: 100%;
+    max-height: 480px;
+    border-radius: 4px;
+    display: block;
+  }
+  .reddit-body {
+    margin: 0;
+    white-space: pre-wrap;
+    line-height: var(--line-height-body);
+    color: var(--color-text);
+  }
+  .reddit-link {
+    color: var(--color-link);
+    word-break: break-all;
+  }
+  .reddit-pending {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-style: italic;
   }
   .actions {
     display: flex;

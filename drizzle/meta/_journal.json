@@ -211,6 +211,90 @@
       "when": 1779000000000,
       "tag": "0029_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1779100000000,
+      "tag": "0030_phase03_1_reddit_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1779200000000,
+      "tag": "0031_phase03_1_reddit_queue_user_fk",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1779300000000,
+      "tag": "0032_phase03_1_reddit_pacer",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1779400000000,
+      "tag": "0033_phase03_1_reddit_queue_next_attempt",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1779500000000,
+      "tag": "0034_phase03_1_reddit_snapshot_pks",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1779600000000,
+      "tag": "0035_reddit_refresh_queue_processing_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1779700000000,
+      "tag": "0036_youtube_refresh_queue",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1779800000000,
+      "tag": "0037_reddit_adapter_pause",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1779041861241,
+      "tag": "0038_adapter-refresh-queue-foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1779900000000,
+      "tag": "0039_phase03_1_reddit_walker_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1779950000000,
+      "tag": "0040_phase03_1_lowercase_reddit_identifiers",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1779173640452,
+      "tag": "0041_phase03_1_reddit_404_threshold",
+      "breakpoints": true
     }
   ]
 }

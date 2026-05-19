@@ -67,6 +67,21 @@ export const AUDIT_ACTIONS = [
   // button on /sources/[id]). Metadata payload:
   // { source_id, kind, queue, job_id }.
   "source.refresh_content_requested",
+  // Phase 03.1 Reddit (DV-RDT-7 — public-`.json` adapter). Audit verbs:
+  //   - reddit.queue_drained         — worker tick completed >0 entries.
+  //     metadata: { queue_name, entries_processed, duration_ms }.
+  //   - reddit.deletion_propagated   — daily @05:00 UTC cron purged author
+  //     fields for N posts past 48h since deletion-detect.
+  //     metadata: { posts_purged }.
+  //   - reddit.cap_exhausted         — user hit 1/5min source cap OR
+  //     25/5min post cap. metadata: { cap_type: 'source'|'post',
+  //     window_minutes, cap, reset_in_seconds }.
+  //   - reddit.adapter_degraded      — burst of 403s detected; adapter
+  //     health flagged. metadata: { burst_count, since }.
+  "reddit.queue_drained",
+  "reddit.deletion_propagated",
+  "reddit.cap_exhausted",
+  "reddit.adapter_degraded",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

@@ -33,7 +33,8 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { youtubeVideos } = await import("../../src/lib/server/db/schema/index.js");
+const { youtubeVideos, adapterRefreshQueue } =
+  await import("../../src/lib/server/db/schema/index.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { AppError, NotFoundError } = await import("../../src/lib/server/services/errors.js");
@@ -87,7 +88,7 @@ describe("refresh-poll cooldown service", () => {
     sentJobs.length = 0;
   });
 
-  it("requestRefreshPoll on a fresh event enqueues youtube.poll.user + sets metadata.last_user_refresh_at", async () => {
+  it("requestRefreshPoll on a fresh event enqueues adapter_refresh_queue + sets metadata.last_user_refresh_at", async () => {
     sentJobs.length = 0;
     const u = await seedUserDirectly({ email: `rp-fresh-${uniq()}@test.local` });
     const ev = await insertEvent(u.id);
@@ -96,7 +97,12 @@ describe("refresh-poll cooldown service", () => {
     const result = await requestRefreshPoll(u.id, ev.id, "127.0.0.1");
     const after = Date.now();
 
-    expect(result).toEqual({ enqueued: true, queue: "youtube.poll.user", eventId: ev.id });
+    expect(result).toMatchObject({
+      enqueued: true,
+      queue: "adapter_refresh_queue:youtube_channel:user_video",
+      eventId: ev.id,
+    });
+    expect(typeof result.jobId).toBe("string");
 
     // Metadata.last_user_refresh_at written within the call's window.
     const [row] = await db.select().from(events).where(eq(events.id, ev.id));
@@ -106,17 +112,23 @@ describe("refresh-poll cooldown service", () => {
     expect(ts).toBeGreaterThanOrEqual(before);
     expect(ts).toBeLessThanOrEqual(after);
 
-    // pg-boss send was called with the right queue + payload.
-    const lastSend = sentJobs[sentJobs.length - 1]!;
-    expect(lastSend.queue).toBe("youtube.poll.user");
-    expect(lastSend.data).toMatchObject({
-      eventId: ev.id,
+    const [queueRow] = await db
+      .select()
+      .from(adapterRefreshQueue)
+      .where(eq(adapterRefreshQueue.id, Number(result.jobId)));
+    expect(queueRow).toMatchObject({
+      queueName: "user_video",
+      type: "video_stats",
       userId: u.id,
-      externalId: ev.externalId,
-      kind: "youtube_video",
+      status: "pending",
+      priority: -10,
     });
-    expect(lastSend.options).toMatchObject({ priority: 10 });
-    expect((lastSend.options as { singletonKey: string }).singletonKey).toContain(ev.id);
+    expect(queueRow?.payload).toMatchObject({
+      event_id: ev.id,
+      video_id: ev.externalId,
+      kind: "youtube_video",
+      flow: "refresh-now",
+    });
   });
 
   it("service throws AppError 429 too_many_refreshes when within 5min window", async () => {
@@ -249,5 +261,68 @@ describe("refresh-poll cooldown service", () => {
     expect(auditMeta?.event_id).toBe(ev.id);
     expect(auditMeta?.kind).toBe("youtube_video");
     expect(auditMeta?.external_id).toBe(ev.externalId);
+  });
+
+  it("reddit_post refresh-poll enqueues into adapter_refresh_queue and returns the real queue label", async () => {
+    sentJobs.length = 0;
+    const u = await seedUserDirectly({ email: `rp-reddit-ok-${uniq()}@test.local` });
+    const ev = await insertEvent(u.id, {
+      kind: "reddit_post",
+      externalId: "abc_refresh",
+      url: "https://www.reddit.com/r/IndieDev/comments/abc_refresh/test/",
+    });
+
+    const result = await requestRefreshPoll(u.id, ev.id, "127.0.0.1");
+
+    expect(result.enqueued).toBe(true);
+    expect(result.queue).toBe("adapter_refresh_queue:reddit_account:user_post");
+    expect(result.jobId).toBeTruthy();
+    expect(sentJobs).toHaveLength(0);
+
+    const rows = await db
+      .select()
+      .from(adapterRefreshQueue)
+      .where(
+        and(eq(adapterRefreshQueue.userId, u.id), eq(adapterRefreshQueue.queueName, "user_post")),
+      );
+    expect(rows.some((r) => (r.payload as { post_id?: string }).post_id === "abc_refresh")).toBe(
+      true,
+    );
+  });
+
+  it("reddit_post refresh-poll enforces the post-refresh sliding-window cap before cooldown metadata write", async () => {
+    sentJobs.length = 0;
+    const u = await seedUserDirectly({ email: `rp-reddit-cap-${uniq()}@test.local` });
+    const ev = await insertEvent(u.id, {
+      kind: "reddit_post",
+      externalId: "abc_blocked",
+      url: "https://www.reddit.com/r/IndieDev/comments/abc_blocked/test/",
+    });
+    const now = new Date();
+    // Seed REDDIT_USER_CAP.postRefreshesPerWindow rows so the next refresh
+    // hits the cap (recalibrated v0.1: 30 per 15-min window).
+    for (let i = 0; i < 30; i++) {
+      await db.insert(adapterRefreshQueue).values({
+        adapterKind: "reddit_account",
+        queueName: "user_post",
+        type: "post_single",
+        payload: { post_id: `t3_seed_refresh_${i}`, flow: "refresh-now" },
+        userId: u.id,
+        priority: 0,
+        status: "done",
+        enqueuedAt: new Date(now.getTime() - 60_000),
+        lastAttemptAt: new Date(now.getTime() - 60_000),
+      });
+    }
+
+    await expect(requestRefreshPoll(u.id, ev.id, "127.0.0.1")).rejects.toMatchObject({
+      code: "reddit_post_quota_exhausted",
+      status: 429,
+    });
+    expect(sentJobs).toHaveLength(0);
+
+    const [row] = await db.select().from(events).where(eq(events.id, ev.id));
+    const meta = (row!.metadata ?? {}) as { last_user_refresh_at?: string };
+    expect(meta.last_user_refresh_at).toBeUndefined();
   });
 });

@@ -89,6 +89,16 @@ describe("PollingBadge — live state", () => {
     expect(out.body).toMatch(/polling-badge--active/);
   });
 
+  it("Queued refresh: request newer than last poll renders transient queued state", () => {
+    const ev = mkEvent({
+      lastPolledAt: ago(3_600_000),
+      metadata: { last_user_refresh_at: ago(60_000).toISOString() },
+    });
+    const out = render(PollingBadge, { props: { event: ev } });
+    expect(out.body).toMatch(/Refresh queued/);
+    expect(out.body).toMatch(/polling-badge--refreshing/);
+  });
+
   it("Cold tier (5d published, 30h polled): renders 'Updated Xd ago' + cold variant", () => {
     const ev = mkEvent({
       occurredAt: ago(5 * 86_400_000),
@@ -181,14 +191,14 @@ describe("PollingBadge — live state", () => {
     expect(out.body).not.toMatch(/Hot|Cold|Frozen|Unavailable|Manual entry/);
   });
 
-  it("Non-pollable kind (kind=reddit_post): component renders nothing", () => {
-    // PollingBadge stays YouTube-only for now. A future iteration will
-    // extend POLLABLE_KINDS with 'reddit_post' once the Reddit adapter
-    // ships. The current contract: any non-youtube_video kind renders
-    // nothing.
+  it("Pollable kind (kind=reddit_post): renders polling-badge with refresh-now button", () => {
+    // Phase 03.1 v0.1 UAT: reddit_post joined POLLABLE_KINDS so the
+    // RefreshNowButton + tier-coloured status text show up on the event
+    // detail surface for Reddit posts (same shape as youtube_video).
     const ev = mkEvent({ kind: "reddit_post" });
     const out = render(PollingBadge, { props: { event: ev } });
-    expect(out.body).not.toMatch(/class="polling-badge[^_]/);
+    expect(out.body).toMatch(/class="polling-badge[^_]/);
+    expect(out.body).toMatch(/refresh-now/);
   });
 
   it("a11y: rendered badge carries role='status' + aria-live='polite'", () => {

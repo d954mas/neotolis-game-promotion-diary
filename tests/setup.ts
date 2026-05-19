@@ -26,6 +26,13 @@ const dbUrl =
   process.env.TEST_DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/neotolis_test";
 process.env.DATABASE_URL = dbUrl;
 
+// REDDIT_USER_AGENT compliant default — integration tests that exercise
+// the Reddit adapter (paste path, fetchEventStats, /api/reddit/fetch-metadata)
+// need a non-empty value so isRedditConfigured() returns true. Tests that
+// specifically assert the unconfigured behavior (REDDIT_USER_AGENT empty)
+// vi.stubEnv() locally. CI sets this same value in the workflow env.
+process.env.REDDIT_USER_AGENT ??= "node:com.neotolis.gpd:0.1.0-test (by /u/integration-test)";
+
 export const pool = new pg.Pool({ connectionString: dbUrl, max: 5 });
 
 beforeAll(async () => {
@@ -58,6 +65,20 @@ afterEach(async () => {
     if (rows.length === 0) return;
     const names = rows.map((r) => `"${r.tablename}"`).join(", ");
     await pool.query(`TRUNCATE ${names} RESTART IDENTITY CASCADE`);
+
+    // reddit_pacer is a singleton-row global rate-limit token. TRUNCATE
+    // CASCADE empties it; restore the one row + reset next_allowed_at
+    // so the next test starts with an immediately-available slot.
+    // Without this, an integration test that makes >1 redditFetch
+    // would block on the pacer after the first call (slot fires
+    // every 7.5s).
+    await pool.query(`INSERT INTO "reddit_pacer" ("id", "next_allowed_at") VALUES (1, NOW())
+                      ON CONFLICT ("id") DO UPDATE
+                      SET next_allowed_at = NOW(),
+                          paused_until = NULL,
+                          pause_level = 0,
+                          last_pause_reason = NULL,
+                          last_paused_at = NULL`);
   } catch {
     // Pre-migration: nothing to truncate. Swallow — integration tests will skip-with-context.
   }

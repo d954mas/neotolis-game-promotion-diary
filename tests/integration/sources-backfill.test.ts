@@ -1,55 +1,35 @@
 // /sources/new + createSource backfill-window wiring.
 //
 // The BackfillPicker submits a `backfill_window` field alongside the
-// existing /api/sources POST body. createSource (services/
-// data-sources.ts) accepts the new optional `backfillWindow` param and,
-// for kind=youtube_channel + autoImport=true sources, enqueues a
-// YOUTUBE_CHANNEL_CONTEXT_BACKFILL job carrying the window. The handler
-// ($lib/sources/youtube/server/handlers/channel-context-backfill.ts)
-// reads the job.data.backfillWindow field — the contract is already in
-// place.
-//
-// We mock pg-boss the same way tests/integration/ingest.test.ts does
-// (vi.mock("queue-client") with sentJobs accumulator). The mock is hoisted
-// by vitest, which is why the static import of createSource below works.
+// existing /api/sources POST body. createSource accepts the optional
+// `backfillWindow` param and, for kind=youtube_channel + autoImport=true
+// sources, writes a YOUTUBE_CHANNEL_CONTEXT_BACKFILL intent to the
+// transactional outbox. The forwarder later calls pg-boss; this test
+// asserts the atomic DB contract instead of mocking the queue client.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { eq } from "drizzle-orm";
-
-const sentJobs: Array<{
-  queue: string;
-  data: Record<string, unknown>;
-  options: Record<string, unknown>;
-}> = [];
-
-vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
-  return {
-    ...actual,
-    getBoss: async () => ({
-      send: async (
-        queue: string,
-        data: Record<string, unknown>,
-        options: Record<string, unknown>,
-      ) => {
-        sentJobs.push({ queue, data, options });
-        return "mock-job-id";
-      },
-    }),
-  };
-});
+import { describe, it, expect } from "vitest";
+import { and, eq, sql } from "drizzle-orm";
 
 import { createSource } from "../../src/lib/server/services/data-sources.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { dataSources } from "../../src/lib/server/db/schema/data-sources.js";
+import { outbox } from "../../src/lib/server/db/schema/outbox.js";
 import { seedUserDirectly } from "./helpers.js";
 
-describe("createSource backfillWindow → YOUTUBE_CHANNEL_CONTEXT_BACKFILL", () => {
-  beforeEach(() => {
-    sentJobs.length = 0;
-  });
+async function loadChannelContextBackfillRows(sourceId: string) {
+  return db
+    .select()
+    .from(outbox)
+    .where(
+      and(
+        eq(outbox.queue, "youtube.channel_context_backfill"),
+        sql`${outbox.payload}->>'sourceId' = ${sourceId}`,
+      ),
+    );
+}
 
-  it("kind=youtube_channel + autoImport=true + backfillWindow='90d' → enqueues backfill job carrying the window", async () => {
+describe("createSource backfillWindow -> YOUTUBE_CHANNEL_CONTEXT_BACKFILL", () => {
+  it("kind=youtube_channel + autoImport=true + backfillWindow='90d' -> writes outbox job carrying the window", async () => {
     const u = await seedUserDirectly({ email: "p12-bf-90d@test.local" });
     const src = await createSource(
       u.id,
@@ -65,22 +45,21 @@ describe("createSource backfillWindow → YOUTUBE_CHANNEL_CONTEXT_BACKFILL", () 
     expect(src.kind).toBe("youtube_channel");
     expect(src.autoImport).toBe(true);
 
-    const enqueues = sentJobs.filter((j) => j.queue === "youtube.channel_context_backfill");
-    expect(enqueues).toHaveLength(1);
-    const job = enqueues[0]!;
-    expect(job.data).toMatchObject({
+    const rows = await loadChannelContextBackfillRows(src.id);
+    expect(rows).toHaveLength(1);
+    const job = rows[0]!;
+    expect(job.payload).toMatchObject({
       sourceId: src.id,
       userId: u.id,
       handleUrl: "https://www.youtube.com/@p12bf90",
       backfillWindow: "90d",
     });
-    // singletonKey scopes the dedup window to this source row.
-    expect((job.options as { singletonKey?: string }).singletonKey).toBe(`source-${src.id}`);
+    expect(job.options.singletonKey).toBe(`source-${src.id}`);
   });
 
-  it("kind=youtube_channel + autoImport=true + no backfillWindow → defaults to '30d'", async () => {
+  it("kind=youtube_channel + autoImport=true + no backfillWindow -> outbox job defaults to '30d'", async () => {
     const u = await seedUserDirectly({ email: "p12-bf-default@test.local" });
-    await createSource(
+    const src = await createSource(
       u.id,
       {
         kind: "youtube_channel",
@@ -90,12 +69,12 @@ describe("createSource backfillWindow → YOUTUBE_CHANNEL_CONTEXT_BACKFILL", () 
       "127.0.0.1",
     );
 
-    const enqueues = sentJobs.filter((j) => j.queue === "youtube.channel_context_backfill");
-    expect(enqueues).toHaveLength(1);
-    expect(enqueues[0]!.data).toMatchObject({ backfillWindow: "30d" });
+    const rows = await loadChannelContextBackfillRows(src.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.payload).toMatchObject({ backfillWindow: "30d" });
   });
 
-  it("kind=youtube_channel + autoImport=false → ZERO backfill enqueues (auto-import OFF gates the trigger)", async () => {
+  it("kind=youtube_channel + autoImport=false -> ZERO backfill outbox rows (auto-import OFF gates the trigger)", async () => {
     const u = await seedUserDirectly({ email: "p12-bf-noauto@test.local" });
     const src = await createSource(
       u.id,
@@ -109,31 +88,27 @@ describe("createSource backfillWindow → YOUTUBE_CHANNEL_CONTEXT_BACKFILL", () 
     );
 
     expect(src.autoImport).toBe(false);
-    const enqueues = sentJobs.filter((j) => j.queue === "youtube.channel_context_backfill");
-    expect(enqueues).toHaveLength(0);
+    const rows = await loadChannelContextBackfillRows(src.id);
+    expect(rows).toHaveLength(0);
 
-    // Source row still created — the BackfillPicker is a UX nicety, not
-    // a precondition for source creation.
-    const rows = await db.select().from(dataSources).where(eq(dataSources.id, src.id));
-    expect(rows).toHaveLength(1);
+    const sourceRows = await db.select().from(dataSources).where(eq(dataSources.id, src.id));
+    expect(sourceRows).toHaveLength(1);
   });
 
-  it("non-YouTube kinds reject before the enqueue path runs (kind_not_yet_functional)", async () => {
+  it("non-functional kinds reject before the enqueue path runs (kind_not_yet_functional)", async () => {
     const u = await seedUserDirectly({ email: "p12-bf-nonyt@test.local" });
     await expect(
       createSource(
         u.id,
         {
-          kind: "reddit_account",
-          handleUrl: "https://reddit.com/user/p12",
+          kind: "twitter_account",
+          handleUrl: "https://twitter.com/p12",
           autoImport: true,
           backfillWindow: "everything",
         },
         "127.0.0.1",
       ),
     ).rejects.toMatchObject({ code: "kind_not_yet_functional" });
-
-    expect(sentJobs).toHaveLength(0);
   });
 
   it("HTTP boundary: POST /api/sources accepts backfill_window in JSON body and returns 201", async () => {
@@ -154,9 +129,10 @@ describe("createSource backfillWindow → YOUTUBE_CHANNEL_CONTEXT_BACKFILL", () 
       }),
     });
     expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string };
 
-    const enqueues = sentJobs.filter((j) => j.queue === "youtube.channel_context_backfill");
-    expect(enqueues).toHaveLength(1);
-    expect(enqueues[0]!.data).toMatchObject({ backfillWindow: "7d" });
+    const rows = await loadChannelContextBackfillRows(body.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.payload).toMatchObject({ backfillWindow: "7d" });
   });
 });

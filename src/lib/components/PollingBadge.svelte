@@ -55,6 +55,7 @@
   const TIER_BOUNDARY_ACTIVE_MS = 86_400_000; // 24h
   const TIER_BOUNDARY_COLD_MS = 28 * 86_400_000; // 28d
   const UNAVAILABLE_POLL_STATUSES: readonly string[] = ["not_found", "private", "auth_error"];
+  const REFRESH_QUEUE_VISIBLE_MS = 5 * 60 * 1000;
 
   type Tier = "pending" | "active" | "cold" | "frozen" | "unavailable";
 
@@ -99,7 +100,7 @@
   let { event }: { event: EventForBadge } = $props();
 
   // PollingBadge is YouTube-only today; future source kinds (e.g. Reddit) extend this list.
-  const POLLABLE_KINDS = ["youtube_video"];
+  const POLLABLE_KINDS = ["youtube_video", "reddit_post"];
 
   // Defensive Date coercion — props may arrive as ISO strings.
   const publishedAt = $derived(
@@ -116,6 +117,14 @@
         ? new Date(event.lastPolledAt)
         : event.lastPolledAt,
   );
+  const lastUserRefreshAt = $derived.by((): Date | null => {
+    const meta = event.metadata;
+    if (meta === null || typeof meta !== "object") return null;
+    const raw = (meta as { last_user_refresh_at?: unknown }).last_user_refresh_at;
+    if (typeof raw !== "string") return null;
+    const ts = Date.parse(raw);
+    return Number.isFinite(ts) ? new Date(ts) : null;
+  });
 
   // `now` re-evaluated on each render. The badge is mounted inside FeedCard
   // which re-renders on loader invalidation (RefreshNowButton calls
@@ -133,10 +142,28 @@
     | "cold-days-ago"
     | "frozen"
     | "unavailable"
+    | "refreshing"
     | "manual";
+
+  // 5s tolerance closes a paste-flow race: services/events.ts writes
+  // `last_user_refresh_at` AFTER syncStats.fetch's snapshot lands, so a
+  // freshly-pasted YouTube/Reddit row briefly looks like
+  // lastUserRefreshAt > lastPolledAt (by ~20–200ms) even though the poll
+  // actually completed. Real refresh-now flows take ≥ a full worker
+  // tick (Reddit pacer 7.5s, YouTube tick interval) before the badge
+  // is supposed to flip off, so a 5s tolerance keeps that case intact
+  // while removing the false-positive "Refresh queued" on paste.
+  const REFRESH_QUEUE_TOLERANCE_MS = 5_000;
+  const refreshQueued = $derived.by(() => {
+    if (lastUserRefreshAt === null) return false;
+    if (now.getTime() - lastUserRefreshAt.getTime() > REFRESH_QUEUE_VISIBLE_MS) return false;
+    if (lastPolledAt === null) return true;
+    return lastUserRefreshAt.getTime() > lastPolledAt.getTime() + REFRESH_QUEUE_TOLERANCE_MS;
+  });
 
   const variant: Variant = $derived.by((): Variant => {
     if (tier === "pending") return "pending";
+    if (refreshQueued) return "refreshing";
     if (tier === "unavailable") return "unavailable";
     if (lastPolledAt === null && tier === "active") return "manual";
     if (tier === "active") return "active";
@@ -154,7 +181,7 @@
   // (lastPolledAt !== null || tier === "frozen") — that hid refresh on
   // cold/active videos with no prior poll, leaving manually-pasted videos
   // stuck without a way to fetch stats. Synchronous stats-fetch on paste
-  // (createEventFromPaste → adapter.fetchEventStats) made cold/active
+  // (createEventFromPaste → adapter.syncStats.fetch) made cold/active
   // without prior poll rare; when it does happen (rate-limit / auth-error
   // swallow), the user has an explicit refresh button to rescue.
   // 'pending' tier still hides refresh — backfill is in flight, manual
@@ -169,6 +196,7 @@
   // special states, not just freshness).
   const copy = $derived.by(() => {
     if (variant === "pending") return m.polling_badge_pending();
+    if (variant === "refreshing") return "Refresh queued";
     if (variant === "manual") return m.polling_badge_manual();
     if (lastPolledAt === null) {
       // Active without prior poll — manual-paste fallback for swallowed
@@ -291,6 +319,14 @@
      dashed Frozen/Manual which are stable end-states). The badge clears
      within seconds of paste once channel-context-backfill writes the
      youtube_videos row. */
+  .polling-badge--refreshing {
+    border: 1px dotted var(--color-info, #2563eb);
+    color: var(--color-text);
+  }
+  .polling-badge--refreshing .polling-badge__icon {
+    color: var(--color-info, #2563eb);
+  }
+
   .polling-badge--pending {
     border: 1px dotted var(--color-border);
     color: var(--color-text-muted);

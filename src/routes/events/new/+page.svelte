@@ -21,6 +21,8 @@
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "$lib/components/InlineError.svelte";
   import { sortByLabel } from "$lib/util/sort-kinds.js";
+  import { findPreviewAdapter } from "$lib/sources/registry-ui-client.js";
+  import { sourceKindToEventKind } from "$lib/sources/event-to-source-kind.js";
   import type { PageData } from "./$types";
 
   type EventKind =
@@ -50,80 +52,67 @@
   let authorIsMe = $state(false);
   let pending = $state(false);
   let errorText = $state<string | null>(null);
-  // "Get from YouTube" button state.
+  // Generic paste-preview button state. The button appears when any
+  // registered adapter's `detectPreviewUrl` accepts the input URL —
+  // see findPreviewAdapter() in registry-ui-client.ts. Adding a new
+  // adapter with paste-preview support is a 2-line change in that
+  // adapter's ui/index.ts; no UI code here needs to change.
   let fetching = $state(false);
   let fetchInfo = $state<string | null>(null);
 
-  async function fetchFromYouTube(): Promise<void> {
+  const previewAdapter = $derived(findPreviewAdapter(url.trim()));
+  const canFetch = $derived(previewAdapter !== null && !fetching && !pending);
+
+  async function fetchFromUrl(): Promise<void> {
     if (fetching) return;
-    if (!url.trim()) return;
+    if (previewAdapter === null) return;
     fetching = true;
     fetchInfo = null;
     errorText = null;
     try {
-      const res = await fetch("/api/youtube/fetch-metadata", {
+      const res = await fetch(previewAdapter.previewEndpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ url: url.trim() }),
       });
       if (!res.ok) {
-        if (res.status === 422) errorText = m.events_new_youtube_fetch_err_invalid_url();
-        else if (res.status === 404) errorText = m.events_new_youtube_fetch_err_not_found();
-        else if (res.status === 503) errorText = m.events_new_youtube_fetch_err_no_keys();
-        else errorText = m.events_new_youtube_fetch_err_generic();
+        if (res.status === 422) errorText = m.events_new_fetch_err_invalid_url();
+        else if (res.status === 404) errorText = m.events_new_fetch_err_not_found();
+        else if (res.status === 503) errorText = m.events_new_fetch_err_unavailable();
+        else if (res.status === 429) errorText = m.events_new_fetch_err_rate_limited();
+        else errorText = m.events_new_fetch_err_generic();
         return;
       }
+      // Cross-adapter response shape:
+      //   YouTube /api/youtube/fetch-metadata: {title, description, publishedAt, cached, ...}
+      //   Reddit  /api/reddit/fetch-metadata:  {title, description, publishedAt, cached, ...}
+      // Both adapters return the same shape — UI doesn't switch on kind.
       const meta = (await res.json()) as {
-        title: string;
-        description: string | null;
-        publishedAt: string | null;
-        cached: boolean;
+        title?: string | null;
+        description?: string | null;
+        publishedAt?: string | null;
+        cached?: boolean;
       };
-      // Pre-fill: don't overwrite a title the user already typed.
-      if (!title.trim()) title = meta.title;
+      // Pre-fill: don't overwrite values the user already typed.
+      if (meta.title && !title.trim()) title = meta.title;
       if (meta.description && !notes.trim()) notes = meta.description;
-      // Auto-fill occurredAt from publishedAt — the user-meaningful timestamp
-      // for a YouTube video event IS its upload date. The "in the past" hint
-      // under the date input fires generically when occurredAt != today, so
-      // we don't need a separate "videoPublishedAt" piece of state here.
       if (meta.publishedAt) {
         occurredAt = meta.publishedAt.slice(0, 10);
       }
-      // Force kind to youtube_video — they pasted a YouTube URL.
-      kind = "youtube_video";
-      fetchInfo = meta.cached
-        ? m.events_new_youtube_fetch_cached()
-        : m.events_new_youtube_fetch_fresh();
+      // Force the event kind to whatever the adapter detected — they
+      // pasted a URL the adapter knows how to handle, so the kind is
+      // unambiguous from the URL itself.
+      const detectedEventKind = sourceKindToEventKind(previewAdapter.sourceKind);
+      if (detectedEventKind !== null) {
+        kind = detectedEventKind as EventKind;
+      }
+      fetchInfo = meta.cached ? m.events_new_fetch_info_cached() : m.events_new_fetch_info_fresh();
     } catch {
-      errorText = m.events_new_youtube_fetch_err_network();
+      errorText = m.events_new_fetch_err_network();
     } finally {
       fetching = false;
     }
   }
-
-  // True only for a fully-formed YouTube watch URL (or share URL or short
-  // form) — not just a youtube.com hostname. Drives whether the "Get from
-  // YouTube" button is rendered at all. Reusing the parser logic keeps the
-  // client-side detection in lock-step with the server-side route's
-  // expectations: if `isYoutubeWatchUrl(u)` is true here, the route's
-  // parseYoutubeVideoId() will accept the same URL.
-  function isYoutubeWatchUrl(u: string): boolean {
-    try {
-      const p = new URL(u);
-      const host = p.hostname.toLowerCase();
-      if (host === "youtu.be") return p.pathname.length > 1;
-      if (host === "youtube.com" || host === "www.youtube.com" || host === "m.youtube.com") {
-        if (p.pathname === "/watch" && p.searchParams.get("v")) return true;
-        const seg = p.pathname.split("/").filter(Boolean);
-        if (seg.length >= 2 && (seg[0] === "shorts" || seg[0] === "embed")) return true;
-      }
-      return false;
-    } catch {
-      return false;
-    }
-  }
-  const isYoutube = $derived(isYoutubeWatchUrl(url.trim()));
-  const canFetch = $derived(isYoutube && !fetching && !pending);
 
   function setToday(): void {
     occurredAt = new Date().toISOString().slice(0, 10);
@@ -135,13 +124,14 @@
   }
 
   // Functional-only allowlist + alphabetical-by-label sort.
-  // Hidden kinds (reddit_post, twitter_post, telegram_post, discord_drop)
-  // re-appear when their adapter ships — just add the value back to
-  // FUNCTIONAL_KINDS. Backend continues to accept all enum values; legacy
-  // rows of hidden kinds still render correctly via KindIcon +
-  // FilterChips. UI-gate only — no schema / migration / service change.
+  // Hidden kinds (twitter_post, telegram_post, discord_drop) re-appear
+  // when their adapter ships — just add the value back to FUNCTIONAL_KINDS.
+  // Backend continues to accept all enum values; legacy rows of hidden
+  // kinds still render correctly via KindIcon + FilterChips. UI-gate
+  // only — no schema / migration / service change.
   const FUNCTIONAL_KINDS: ReadonlyArray<EventKind> = [
     "youtube_video",
+    "reddit_post",
     "post",
     "conference",
     "talk",
@@ -210,14 +200,33 @@
       });
       if (!res.ok) {
         let code = "error_server_generic";
+        let firstField: string | null = null;
         try {
-          const body = (await res.json()) as { error?: string };
+          const body = (await res.json()) as {
+            error?: string;
+            details?: Array<{ path?: unknown }>;
+          };
           if (body.error) code = body.error;
+          const path = body.details?.[0]?.path;
+          if (Array.isArray(path) && typeof path[0] === "string") {
+            firstField = path[0];
+          }
         } catch {
           /* ignore */
         }
-        errorText =
-          code === "validation_failed" ? m.ingest_error_malformed_url() : m.error_server_generic();
+        if (code === "validation_failed") {
+          // Field-aware messaging — "notes too long" is the common
+          // path for long-form Reddit selftext pastes (the limit is
+          // 50 000 chars). The legacy fallback is the URL-shape error,
+          // which covers the kind=reddit_post / kind=youtube_video
+          // gate when the user typed a bad URL.
+          errorText =
+            firstField === "notes"
+              ? m.ingest_error_notes_too_long()
+              : m.ingest_error_malformed_url();
+        } else {
+          errorText = m.error_server_generic();
+        }
         return;
       }
       // invalidateAll() forces SvelteKit to re-run /feed's +page.server.ts
@@ -308,15 +317,15 @@
           placeholder="https://"
           disabled={pending}
         />
-        {#if isYoutube}
+        {#if previewAdapter !== null}
           <button
             type="button"
             class="fetch-btn"
-            onclick={fetchFromYouTube}
+            onclick={fetchFromUrl}
             disabled={!canFetch}
-            title={m.events_new_youtube_fetch_title()}
+            title={m.events_new_fetch_title()}
           >
-            {fetching ? m.events_new_youtube_fetch_loading() : m.events_new_youtube_fetch_button()}
+            {fetching ? m.events_new_fetch_loading() : m.events_new_fetch_button()}
           </button>
         {/if}
       </div>

@@ -26,6 +26,14 @@ let boss: Awaited<ReturnType<typeof getBoss>>;
 beforeAll(async () => {
   // Force a fresh boot so the queue declarations land against THIS test DB.
   resetBossSingletonForTesting();
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'pgboss' AND table_name = 'queue') THEN
+        DELETE FROM pgboss.queue WHERE name = 'youtube.poll.user';
+      END IF;
+    END $$;
+  `);
   boss = await getBoss();
 });
 
@@ -40,12 +48,12 @@ afterAll(async () => {
 });
 
 describe("queue topology (per-kind rename)", () => {
-  it("declares all queues — INTERNAL_HEALTHCHECK, PURGE_DAILY, YOUTUBE_POLL_CRON, YOUTUBE_POLL_USER, YOUTUBE_BACKFILL_CHANNEL, YOUTUBE_QUOTA_RESET, YOUTUBE_REHAB, YOUTUBE_CHANNEL_CONTEXT_BACKFILL", async () => {
+  it("declares all pg-boss queues — YouTube refresh-now is SQL-backed, not pg-boss", async () => {
     const expected = [
       QUEUES.INTERNAL_HEALTHCHECK,
       QUEUES.PURGE_DAILY,
+      QUEUES.ADAPTER_REFRESH_QUEUE_JANITOR,
       QUEUES.YOUTUBE_POLL_CRON,
-      QUEUES.YOUTUBE_POLL_USER,
       QUEUES.YOUTUBE_BACKFILL_CHANNEL,
       QUEUES.YOUTUBE_QUOTA_RESET,
       QUEUES.YOUTUBE_REHAB,
@@ -85,6 +93,7 @@ describe("queue topology (per-kind rename)", () => {
       "youtube.rehab_unavailable",
       // Channel-scoped polling replaced per-source.
       "youtube.backfill.user",
+      "youtube.poll.user",
     ];
     const { rows } = await pool.query<{ name: string }>(
       `SELECT name FROM pgboss.queue WHERE name = ANY($1::text[])`,

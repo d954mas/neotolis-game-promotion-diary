@@ -118,6 +118,28 @@
     // enriched by /feed loader from youtube_videos cache. Used by the
     // single-chip render below.
     channelTitle?: string | null;
+    // Reddit-specific enrichment (Phase 03.1 plan 08, D-RDT-BASELINES-DISPLAY).
+    // Attached in-place by enrichRedditFeedDtos in the /feed loader's
+    // allAdapters[*].enrichFeedDtos iterator. Missing on freshly-pasted
+    // posts that haven't been polled yet, or on non-reddit kinds; the
+    // card falls back to a stats-less render in that case.
+    redditEnrichment?: {
+      stats: {
+        score: number;
+        numComments: number;
+        upvoteRatio: number;
+        awardsTotal: number;
+      } | null;
+      subredditSubscribers: number | null;
+      authorKarma: number | null;
+      baseline: {
+        medianScore24h: number | null;
+        p75Score24h: number | null;
+        sampleSize: number;
+      } | null;
+      linkUrl?: string | null;
+      bodyExcerpt?: string | null;
+    };
   };
   type SourceLite = {
     id: string;
@@ -162,16 +184,32 @@
     return typeof url === "string" && url.length > 0 ? url : null;
   }
 
+  // Image-URL heuristic for Reddit link posts. Reddit's `t3.url` for an
+  // image post points at i.redd.it/<id>.jpg or preview.redd.it/...; for
+  // crossposts on imgur / external CDNs the URL ends in a recognizable
+  // image extension. Link-posts to articles fall through and we render
+  // the kind icon instead of a broken image.
+  function isImageLikeUrl(url: string): boolean {
+    const lower = url.toLowerCase();
+    if (lower.startsWith("https://i.redd.it/")) return true;
+    if (lower.startsWith("https://preview.redd.it/")) return true;
+    return /\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(lower);
+  }
+
   const thumbnailUrl = $derived.by((): string | null => {
     if (event.kind === "youtube_video") {
       if (!event.externalId) return null;
       return `https://img.youtube.com/vi/${event.externalId}/mqdefault.jpg`;
     }
-    if (
-      event.kind === "reddit_post" ||
-      event.kind === "twitter_post" ||
-      event.kind === "telegram_post"
-    ) {
+    if (event.kind === "reddit_post") {
+      // Prefer the link_url we eagerly load in enrichRedditFeedDtos
+      // (resolved from reddit_posts.metadata.link_url). Falls back to
+      // legacy metadata.media.url for any historical rows that carried it.
+      const link = event.redditEnrichment?.linkUrl ?? null;
+      if (link && isImageLikeUrl(link)) return link;
+      return readMediaUrlFromMetadata(event.metadata);
+    }
+    if (event.kind === "twitter_post" || event.kind === "telegram_post") {
       return readMediaUrlFromMetadata(event.metadata);
     }
     return null;
@@ -312,6 +350,68 @@
         <span class="sep">·</span>
         <span class="stat">{formatStat(event.stats.commentCount)} comments</span>
       </div>
+    {/if}
+
+    {#if event.kind === "reddit_post"}
+      <!-- Reddit-specific render (Phase 03.1 plan 08, D-RDT-SOURCE-DISPLAY +
+           D-RDT-BASELINES-DISPLAY). Stats line ↑score 💬comments (upvote%)
+           when the worker has drained at least one snapshot; author chip
+           (/u/author 🧑) + subreddit chip (/r/sub 🏛) from metadata;
+           "Underperforming median" badge when score < median_score_24h AND
+           baseline.sample_size >= 5 (insufficient samples hide the badge
+           entirely per D-RDT-BASELINES-DISPLAY). -->
+      {@const rstats = event.redditEnrichment?.stats ?? null}
+      {@const rbaseline = event.redditEnrichment?.baseline ?? null}
+      {@const rmd = (event.metadata ?? {}) as { author?: string; subreddit?: string }}
+      {@const underperforming =
+        rstats !== null &&
+        rbaseline !== null &&
+        rbaseline.sampleSize >= 5 &&
+        rbaseline.medianScore24h !== null &&
+        rstats.score < rbaseline.medianScore24h}
+      {@const baselinePct =
+        rstats !== null &&
+        rbaseline !== null &&
+        rbaseline.medianScore24h !== null &&
+        rbaseline.medianScore24h > 0
+          ? Math.round((rstats.score / rbaseline.medianScore24h) * 100)
+          : null}
+      {#if rstats}
+        <div class="stats-line">
+          <span class="stat"
+            >{m.feed_card_reddit_stats({
+              score: rstats.score,
+              comments: rstats.numComments,
+              ratio: Math.round(rstats.upvoteRatio * 100),
+            })}</span
+          >
+        </div>
+      {/if}
+      {#if rmd.author || rmd.subreddit}
+        <div class="chips-line">
+          {#if rmd.author}
+            <span class="chip" title="Reddit user">
+              <span aria-hidden="true" class="chip-prefix">🧑</span>
+              /u/{rmd.author}
+            </span>
+          {/if}
+          {#if rmd.subreddit}
+            <span class="chip" title="Subreddit">
+              <span aria-hidden="true" class="chip-prefix">🏛</span>
+              /r/{rmd.subreddit}
+            </span>
+          {/if}
+        </div>
+      {/if}
+      {#if underperforming && baselinePct !== null}
+        <div class="reddit-baseline-badge">
+          <span class="badge badge-warning"
+            >{m.feed_card_reddit_baseline_underperforming({
+              pct: baselinePct,
+            })}</span
+          >
+        </div>
+      {/if}
     {/if}
 
     {#if event.kind === "youtube_video" && (event.channelTitle || source)}
@@ -570,6 +670,38 @@
   .chip-channel__icon {
     font-size: 0.85em;
     opacity: 0.7;
+  }
+  /* Reddit chip emoji prefix (Phase 03.1 plan 08, D-RDT-SOURCE-DISPLAY).
+   * /u/author chip paints 🧑 + handle; /r/sub chip paints 🏛 + sub name.
+   * Decorative — aria-hidden on the emoji span keeps screen readers
+   * announcing only the chip text. */
+  .chip-prefix {
+    font-size: 0.9em;
+    line-height: 1;
+    margin-right: 4px;
+  }
+  /* Underperforming-median badge (D-RDT-BASELINES-DISPLAY).
+   * Renders only when score < median_score_24h AND sample_size >= 5;
+   * sits below the chips line so it doesn't clobber the stat-bearing
+   * row. Warning-coloured to communicate the comparison. */
+  .reddit-baseline-badge {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    align-items: center;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px var(--space-sm);
+    border-radius: 4px;
+    font-size: var(--font-size-label);
+    line-height: 1.2;
+  }
+  .badge-warning {
+    background: var(--color-warning-bg, rgba(217, 153, 0, 0.15));
+    color: var(--color-warning, #d90);
+    border: 1px solid var(--color-warning, #d90);
   }
   /* Game chip stands out a bit more than the source chip (slightly stronger
    * border) since it represents the primary association. */

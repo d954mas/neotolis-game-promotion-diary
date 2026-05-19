@@ -37,3 +37,25 @@ export function eventKindToSourceKind(eventKind: EventKind): SourceKind | null {
       return null;
   }
 }
+
+/** Reverse mapping — used by the /events/new generic preview flow to set
+ *  event.kind after the adapter has confirmed the URL is one of its own.
+ *  Returns null for source kinds that don't have a 1:1 event kind (Reddit
+ *  has two source kinds → one event kind; this picks reddit_post for
+ *  both reddit_account and reddit_subreddit by convention). */
+export function sourceKindToEventKind(sourceKind: SourceKind): EventKind | null {
+  switch (sourceKind) {
+    case "youtube_channel":
+      return "youtube_video";
+    case "reddit_account":
+      return "reddit_post";
+    case "reddit_subreddit":
+      return "reddit_post";
+    case "twitter_account":
+      return "twitter_post";
+    case "telegram_channel":
+      return "telegram_post";
+    case "discord_server":
+      return "discord_drop";
+  }
+}

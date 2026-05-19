@@ -21,12 +21,19 @@
 
 import { error } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
-import type { QuotaKeyRow, ServiceAuditEntry } from "$lib/server/services/admin-quota-read.js";
+import type {
+  QuotaKeyRow,
+  ServiceAuditEntry,
+  AdminRedditBlock,
+  AdminYoutubeBlock,
+} from "$lib/server/services/admin-quota-read.js";
 
 interface AdminQuotaResponse {
   today: string;
   keys: QuotaKeyRow[];
   audit: ServiceAuditEntry[];
+  reddit: AdminRedditBlock;
+  youtube: AdminYoutubeBlock;
 }
 
 export const load: PageServerLoad = async ({ fetch }) => {
