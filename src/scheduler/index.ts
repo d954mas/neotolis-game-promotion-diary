@@ -63,11 +63,12 @@ export async function startScheduler(): Promise<void> {
   // listPurgeEligibleUsers + purgeAccount cascade.
   await boss.schedule(QUEUES.PURGE_DAILY, "0 4 * * *", {}, { tz: "America/Los_Angeles" });
 
-  // adapter_refresh_queue janitor — 06:00 UTC daily (after the Reddit
-  // service-source cron at 06 UTC has populated the day's queue, so we
-  // never compete for the same rows). DELETE only terminal-state rows
-  // older than the retention window (services/adapter-refresh-queue-janitor.ts).
-  await boss.schedule(QUEUES.ADAPTER_REFRESH_QUEUE_JANITOR, "0 6 * * *", {}, { tz: "UTC" });
+  // adapter_refresh_queue janitor — 06:30 UTC daily. Sits between the
+  // Reddit service-source cron at 06:00 UTC (which INSERTs `pending`
+  // rows) and the next cron tick. DELETE only `done`/`dead_letter`
+  // rows older than the retention window, so the janitor + cron touch
+  // disjoint status rows anyway — the 30-min stagger is belt-and-braces.
+  await boss.schedule(QUEUES.ADAPTER_REFRESH_QUEUE_JANITOR, "30 6 * * *", {}, { tz: "UTC" });
 
   logger.info(
     {

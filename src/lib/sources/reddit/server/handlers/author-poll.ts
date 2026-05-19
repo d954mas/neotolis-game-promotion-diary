@@ -156,9 +156,6 @@ export async function handleAuthorPoll(args: {
     isSuspended: false,
   });
 
-  // Successful poll → clear the consecutive-404 counter.
-  await resetNotFoundOnSuccess(db, "user", handle);
-
   // 4. UPSERT subreddit caches for every unique sub in the listing —
   //    listing surfaces a user's posts across many subs; each needs at
   //    least the (name) PK to satisfy reddit_posts FK constraints.
@@ -229,6 +226,11 @@ export async function handleAuthorPoll(args: {
     casLost = !persistResult.committed;
     walking = persistResult.committed && !walkerDone;
   }
+
+  // Successful end-to-end poll → clear the consecutive-404 counter.
+  // Runs AFTER fan-out + walker commit; see sub-poll.ts for the same
+  // reasoning.
+  await resetNotFoundOnSuccess(db, "user", handle);
 
   logger.info(
     {

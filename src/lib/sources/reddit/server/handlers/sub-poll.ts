@@ -162,10 +162,6 @@ export async function handleSubPoll(args: {
     publicDescription: null,
   });
 
-  // Successful poll → clear the consecutive-404 counter. A previously
-  // failing sub that recovers immediately drops the threshold pressure.
-  await resetNotFoundOnSuccess(db, "subreddit", sub);
-
   // 3. UPSERT authors + posts + snapshots for each t3.
   const uniqueAuthors = new Set<string>();
   for (const t3 of listingChildren) {
@@ -246,6 +242,12 @@ export async function handleSubPoll(args: {
     casLost = !persistResult.committed;
     walking = persistResult.committed && !walkerDone;
   }
+
+  // Successful end-to-end poll → clear the consecutive-404 counter. Runs
+  // AFTER fan-out + walker commit so a partial-success poll (any earlier
+  // step threw and the handler bailed) leaves the counter intact — the
+  // threshold gate still reflects "this sub keeps failing".
+  await resetNotFoundOnSuccess(db, "subreddit", sub);
 
   logger.info(
     {
@@ -368,8 +370,10 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
 
   // Collect every eligible (post × subscriber) pair into one array, then
   // issue a single multi-row INSERT. Pre-fix this loop did per-pair
-  // INSERTs with .returning() — ~500 round-trips on a 100-post × 5-sub
-  // fan-out. Batched, it's one INSERT regardless of fan-out size.
+  // INSERTs with .returning(). Worst case (first walk, no dedup hits,
+  // 100 posts × 5 subs) was ~500 round-trips per tick; typical cron
+  // re-poll with existingSet dedup was much lower. Batched, it's one
+  // INSERT regardless of fan-out size.
   type EventInsert = typeof events.$inferInsert;
   const candidates: EventInsert[] = [];
   for (const t3 of t3s) {
