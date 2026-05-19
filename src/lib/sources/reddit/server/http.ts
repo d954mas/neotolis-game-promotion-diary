@@ -153,19 +153,29 @@ export async function redditFetch<T = unknown>(
   const dispatcher = getProxyDispatcher();
   let res: Response;
   try {
-    // undiciFetch is API-compatible with global fetch but accepts the
-    // `dispatcher` option that routes the request through ProxyAgent.
-    // When env.REDDIT_PROXY_URL is empty, dispatcher is null and undici
-    // uses its default agent — behaviour identical to a direct
-    // global fetch call.
-    res = (await undiciFetch(url, {
-      method: opts.method ?? "GET",
-      headers: {
-        "User-Agent": creds.userAgent,
-        Accept: "application/json",
-      },
-      ...(dispatcher ? { dispatcher } : {}),
-    })) as unknown as Response;
+    if (dispatcher !== null) {
+      // Proxy path. undiciFetch is API-compatible with global fetch but
+      // accepts the `dispatcher` option that routes through ProxyAgent.
+      res = (await undiciFetch(url, {
+        method: opts.method ?? "GET",
+        headers: {
+          "User-Agent": creds.userAgent,
+          Accept: "application/json",
+        },
+        dispatcher,
+      })) as unknown as Response;
+    } else {
+      // No proxy → use global fetch so tests can mock via vi.stubGlobal.
+      // Behaviour identical (Node 18+ global fetch is undici under the
+      // hood); only the test surface differs.
+      res = await fetch(url, {
+        method: opts.method ?? "GET",
+        headers: {
+          "User-Agent": creds.userAgent,
+          Accept: "application/json",
+        },
+      });
+    }
   } catch (cause) {
     throw new AdapterError(`Reddit fetch network error: ${String(cause)}`, {
       category: "transient",

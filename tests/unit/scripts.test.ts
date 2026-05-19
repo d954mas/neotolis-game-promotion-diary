@@ -2,18 +2,14 @@ import { describe, it, expect } from "vitest";
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-// Tests for scripts/deploy.sh, scripts/deploy-rollback.sh, scripts/backup.sh,
-// nginx/refresh-cf-ips.sh.
+// Tests for scripts/backup.sh, nginx/refresh-cf-ips.sh, nginx config.
+//
+// scripts/deploy.sh and scripts/deploy-rollback.sh were removed in PR #35
+// — they assumed a `command="..."`-restricted SSH key on the VPS that was
+// never set up. Manual deploy via docs/deploy/MANUAL-DEPLOY.md is the
+// supported path. If automation comes back later, restore the assertions.
 
-describe("deploy + backup scripts syntax + invariants", () => {
-  it("scripts/deploy.sh syntax-validates via `bash -n`", () => {
-    expect(() => execSync("bash -n scripts/deploy.sh", { stdio: "pipe" })).not.toThrow();
-  });
-
-  it("scripts/deploy-rollback.sh syntax-validates via `bash -n`", () => {
-    expect(() => execSync("bash -n scripts/deploy-rollback.sh", { stdio: "pipe" })).not.toThrow();
-  });
-
+describe("backup script + nginx config syntax + invariants", () => {
   it("scripts/backup.sh syntax-validates via `bash -n`", () => {
     expect(() => execSync("bash -n scripts/backup.sh", { stdio: "pipe" })).not.toThrow();
   });
