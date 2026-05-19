@@ -19,10 +19,23 @@
 //   - Retry loops — callers decide retry policy from the AdapterError
 //     category + retryAfterMs.
 //
-// Module-scope burst state is in-process; single-process by the same
-// contract as worker-tick.ts. A worker restart loses the burst counter
-// — worst case we emit one extra audit row when the next burst trips,
-// which is safer than over-suppressing.
+// Module-scope burst state is in-process. Under multi-replica deploys
+// each replica counts independently — a real 403 burst that trips on
+// K replicas writes K `reddit.adapter_degraded` audit rows instead of
+// one. Conscious trade-off:
+//   - Load-bearing concerns (rate-limit, per-user cap, adapter pause)
+//     all live in DB rows — multi-replica safe by construction.
+//   - This counter only coalesces a forensic audit signal; dup rows on
+//     a catastrophic path (Reddit fenced us out) are an acceptable cost
+//     vs the cleaner-but-heavier alternatives below.
+// Fix paths if dup rows ever become annoying:
+//   (a) Set requiresSingletonRuntime=true on the adapter — 1-line change;
+//       Reddit-loop runs on one replica only. YouTube still parallel.
+//   (b) Move counter into reddit_pacer (new columns + SQL writer) — keeps
+//       Reddit-loop on every replica.
+// A worker restart loses the in-memory counter — worst case one extra
+// audit row when the next burst trips, which is safer than over-
+// suppressing.
 //
 // Audit user-id: `audit_log.user_id` is NOT NULL by schema, so we
 // resolve operator user-id via ADMIN_EMAIL_ALLOWLIST[0] (same pattern
@@ -51,9 +64,10 @@ export interface RedditHttpResult<T> {
 // calls in CI). Mirrors YouTube's YOUTUBE_API_BASE_URL precedent.
 const REDDIT_BASE = env.REDDIT_BASE_URL_OVERRIDE ?? "https://www.reddit.com";
 
-// 403-burst detection state. Module-scope is acceptable because this is
-// degraded-audit coalescing, not the quota gate. The DB pacer in pacer.ts is
-// the load-bearing multi-replica rate limiter.
+// 403-burst detection state. Module-scope is conscious — see the
+// "multi-replica trade-off" section in the file header. The load-bearing
+// rate-limit gate lives in pacer.ts (DB row, atomic). This counter just
+// coalesces the forensic `reddit.adapter_degraded` audit signal.
 interface BurstState {
   count: number;
   windowStartMs: number;
