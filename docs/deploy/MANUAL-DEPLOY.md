@@ -100,8 +100,29 @@ Add any new keys to `.env`. **Phase 03.1 (Reddit) added:**
 
 | Var | Required? | What to set |
 |---|---|---|
-| `REDDIT_USER_AGENT` | yes for Reddit features | `node:com.neotolis.gpd:0.1.0 (by /u/<your-handle>)` — see `.env.example` for the convention. Leave empty to disable Reddit cleanly. |
+| `REDDIT_USER_AGENT` | yes for Reddit features | `node:com.neotolis.gpd:0.1.0 (by /u/<your-handle>)` — see `.env.example` for the convention. **Leave empty to disable Reddit cleanly** — see warning below. |
 | `REDDIT_BASE_URL_OVERRIDE` | no | TEST-ONLY. Leave **unset** in production. |
+
+> **⚠️ Reddit + cloud-hosted VPS reality check.** Reddit's edge
+> (Fastly/Varnish) aggressively 403's traffic from datacenter IP ranges
+> — Hetzner, DigitalOcean, Linode, AWS. If your VPS is in one of those
+> blocklists, setting `REDDIT_USER_AGENT` to a valid value will NOT help
+> — Reddit returns `HTTP/2 403 server: snooserv` before any UA check.
+> The adapter then triggers an escalating pause (10m → 1h → 3h → 12h)
+> and dead-letters queue rows forever.
+>
+> **Diagnose** with one curl from the VPS BEFORE setting the UA:
+> ```bash
+> curl -A "node:com.neotolis.gpd:0.1.0 (by /u/test)" -i \
+>   'https://www.reddit.com/r/IndieDev/new.json?limit=1' | head -1
+> ```
+> - `HTTP/2 200` → IP is clean, set the UA normally.
+> - `HTTP/2 403` → IP is fenced. **Leave `REDDIT_USER_AGENT` empty.**
+>   Reddit features cleanly disable (paste returns 422
+>   `reddit_not_configured`, /sources/new shows "not configured");
+>   nothing degraded, nothing dead-lettered. Self-host operators on
+>   residential IPs are unaffected. Long-term fix (proxy / OAuth) is
+>   tracked separately.
 
 Save and close.
 
@@ -120,6 +141,16 @@ What this does:
   the new image. Postgres + nginx stay up.
 - App container boot runs `runMigrations()` automatically (advisory-
   locked, idempotent — see `src/server.ts`). Schema changes land here.
+
+**Env-only changes (same image).** If you only edited `.env` and didn't
+pull a new image, `up -d` will skip the restart because Compose sees no
+config drift. Force-recreate the affected services explicitly:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --force-recreate app worker scheduler
+```
+
+(Postgres and nginx never need env-driven recreate from this guide.)
 
 ### 6. Nginx upstream-IP cache workaround
 
@@ -211,6 +242,45 @@ upstream timeout vs upstream resolution failure. If app container is
 healthy (`curl -fsS http://localhost:3000/healthz` inside the network
 returns 200), the issue is nginx config — `nginx -t` inside the
 container, or restore previous `nginx.conf.template` from `git`.
+
+### Reddit logs `403 (anti-bot fence?)` / `adapter paused`
+
+Worker logs show entries like:
+```
+reddit adapter paused after upstream rate-limit/degraded response
+adapter batch lane worker: handler failed  err: Reddit 403 (anti-bot fence?)
+```
+Reddit blocks the VPS IP — see Step 4's warning. The adapter ratchets
+its `paused_until` from 10m → 1h → 3h → 12h with each fresh 403, so
+left alone it'll spend most of the day paused and never serve content.
+
+**Cleanly disable Reddit and stop the cycle:**
+
+```bash
+nano .env                                                        # comment out / remove REDDIT_USER_AGENT
+docker compose -f docker-compose.prod.yml up -d --force-recreate app worker scheduler
+
+# Reset the pacer + dead-letter any pending Reddit work so the queue
+# doesn't keep nibbling at the (now-empty) UA on retry:
+docker compose -f docker-compose.prod.yml exec -T postgres psql -U postgres -d neotolis -c "
+UPDATE reddit_pacer
+SET paused_until = NULL, pause_level = 0, last_pause_reason = NULL, last_paused_at = NULL
+WHERE id = 1;
+UPDATE adapter_refresh_queue
+SET status = 'dead_letter'
+WHERE adapter_kind = 'reddit_account' AND status IN ('pending','processing');
+"
+```
+
+After this:
+- `/sources/new` Reddit chip shows "not configured" (UX-explicit).
+- Paste of a Reddit URL returns 422 `reddit_not_configured`.
+- Existing `reddit_post` events stay in the feed (just no new updates).
+- No more 403 noise in logs.
+
+Long-term unblock — outbound HTTP proxy on a residential IP, or
+Cloudflare Worker as proxy (Reddit sees Cloudflare edge). Not a
+blocker for v0.1; track separately.
 
 ---
 
