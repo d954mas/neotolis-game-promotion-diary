@@ -37,8 +37,10 @@ import { AppError } from "../../src/lib/server/services/errors.js";
  *      returns null → event created without reddit_posts cache row
  *      (YouTube-parity silent degradation, per project decision).
  *   6. Reddit 404 — fetch throws AdapterError(not-found) → swallowed by
- *      createEvent → event row exists, no reddit_posts cache row, but the
- *      user_post cap-counter row remains because upstream I/O was attempted.
+ *      createEvent → event row exists, no reddit_posts cache row, and NO
+ *      cap-counter row (counter is INSERTed inside the same tx as the
+ *      cache writes; a failed fetch never reaches the tx, so the user
+ *      isn't charged for upstream failures outside their control).
  */
 
 // Reddit /api/info.json?id=t3_X response shape — minimal subset
@@ -308,6 +310,10 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
       .where(eq(redditPostSnapshots.postId, "t3_dead404"));
     expect(snapRows).toHaveLength(0);
 
+    // Cap-counter row IS NOT written: the counter INSERT lives inside the
+    // same tx as the cache writes, and a 404 from redditFetch throws
+    // before the tx starts. The user is not charged for a refresh that
+    // produced no data — fairer UX when Reddit returns 404/429/5xx.
     const capRows = await db
       .select()
       .from(adapterRefreshQueue)
@@ -318,8 +324,7 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
           eq(adapterRefreshQueue.type, "post_single"),
         ),
       );
-    expect(capRows).toHaveLength(1);
-    expect(capRows[0]!.payload).toMatchObject({ post_id: "t3_dead404", flow: "paste" });
+    expect(capRows).toHaveLength(0);
   });
 
   it("writes cross-source audit row (event.poll_refreshed flow=stats_refresh) on success", async () => {

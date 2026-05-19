@@ -28,29 +28,33 @@
 // in tests + smoke + one place to maintain extractor logic.
 //
 // Cap-counter timing — read carefully before touching:
-//   The 25/5min post-refresh cap is enforced by counting rows on the
-//   `user_post` queue lane. This file writes that row in EXACTLY ONE
-//   place: the cache-miss path, after the cap gate passes and BEFORE the
-//   Reddit HTTP call. The cache-hit early-return path at the top of the
-//   function writes NO counter row.
+//   The 30/15min post-refresh cap is enforced by counting rows on the
+//   `user_post` queue lane. The counter row is INSERTed inside the same
+//   transaction as the cache writes, AFTER the Reddit fetch returns
+//   successfully. A failed fetch (404, 429, network error, JSON-parse
+//   error from extractT3FromInfoResponse) leaves NO counter row — the
+//   transaction never starts. The cache-hit early-return path also
+//   writes no counter row.
 //
-//   Asymmetry rationale: the cap models "post refresh attempts that burn
-//   or are about to burn a Reddit unit". A 60s dedup hit returns without
-//   an HTTP fetch, so no unit is burned and no counter increment is owed.
-//   A 404/429/network failure after the claim still counts because the
-//   user consumed a pacer slot and attempted upstream I/O. Concretely:
+//   Asymmetry: the cap models "post refreshes that successfully consumed
+//   a Reddit unit and produced cache data". Failures don't count — the
+//   user shouldn't be charged for upstream issues outside their control.
+//   The pacer slot itself protects the operator's rate-limit budget;
+//   the cap protects user fairness.
 //     - Preview at t=0 (cache miss) → counter row written. Submit at
-//       t=5s (cache hit) → no second row. ONE refresh counted. Correct.
+//       t=5s (cache hit) → no second row. ONE refresh counted.
 //     - Preview at t=0 (cache miss) → counter row written. Submit at
 //       t=90s (cache miss, dedup window expired) → second counter row.
-//       TWO refreshes counted, two Reddit units burned. Correct.
+//       TWO refreshes counted, two Reddit units burned.
+//     - Preview at t=0 (cache miss) → Reddit returns 429 → counter row
+//       NOT written (tx never started). User retries unpenalized.
 //
 //   The optional `beforeFetch` gate fires ONLY on the cache-miss branch
-//   (gating cap enforcement) for the same reason — cache hits don't
-//   consume any budget and shouldn't be punished by an exhausted cap.
-//   See sources/reddit/server/index.ts syncStats.fetch for the wiring.
+//   so cache hits don't consume budget and aren't punished by an
+//   exhausted cap. See sources/reddit/server/index.ts syncStats.fetch
+//   for the wiring.
 
-import { db } from "$lib/server/db/client.js";
+import { db, type DbOrTx } from "$lib/server/db/client.js";
 import { redditFetch } from "../http.js";
 import { upsertRedditPost, upsertRedditUser, upsertRedditSubreddit } from "../upsert.js";
 import {
@@ -163,10 +167,6 @@ export async function handlePostSingle(args: {
     await args.beforeFetch();
   }
 
-  if (args.paste === true && args.userId !== null) {
-    await claimUserPostRefreshAttempt(args.userId, fullIdGuess);
-  }
-
   const { data } = await redditFetch<unknown>(
     `/api/info.json?id=t3_${encodeURIComponent(bareId)}`,
     { pacer: args.pacer },
@@ -186,15 +186,22 @@ export async function handlePostSingle(args: {
     ? t3.permalink
     : `https://www.reddit.com${t3.permalink}`;
 
-  // All five cache writes go through one transaction so a crash mid-
-  // chain leaves no intermediate state (e.g. reddit_posts written but
-  // reddit_post_snapshots missing — readCachedPost would have to
-  // re-fetch). Pre-fix the writes were sequential at the top-level db
-  // handle, which left a small window between upsertRedditPost and
-  // writeRedditPostSnapshot where the cache row existed without a
-  // snapshot.
+  // All cache writes + the cap-counter row commit in one transaction
+  // so:
+  //   1. A crash mid-chain leaves no intermediate state (e.g. reddit_posts
+  //      written but reddit_post_snapshots missing).
+  //   2. A failed cache write rolls back the cap-counter row — the user
+  //      isn't charged for a refresh that didn't actually land data.
   const snapStatus = classifySnapshotStatus(t3);
   await db.transaction(async (tx) => {
+    // Cap-counter ledger row. Lives on user_post lane with status='done'
+    // (no work to do; the row IS the accounting entry). Only paste-path
+    // calls with a known userId write here; cron / worker paths leave
+    // the cap untouched.
+    if (args.paste === true && args.userId !== null) {
+      await claimUserPostRefreshAttempt(tx, args.userId, fullIdGuess);
+    }
+
     // UPSERT subreddit cache first (FK target). Minimum-info INSERT —
     // sub_poll cron later fills in subscribers / description / rules.
     await upsertRedditSubreddit(tx, {
@@ -276,8 +283,12 @@ export async function handlePostSingle(args: {
   };
 }
 
-async function claimUserPostRefreshAttempt(userId: string, postId: string): Promise<void> {
-  await db.insert(adapterRefreshQueue).values({
+async function claimUserPostRefreshAttempt(
+  dbCtx: DbOrTx,
+  userId: string,
+  postId: string,
+): Promise<void> {
+  await dbCtx.insert(adapterRefreshQueue).values({
     adapterKind: "reddit_account",
     queueName: "user_post",
     type: "post_single",
