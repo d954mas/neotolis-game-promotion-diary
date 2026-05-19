@@ -22,6 +22,7 @@ import type {
   AdapterAppContext,
   AdapterContext,
   AdapterPollState,
+  BackfillWindow,
   SourceAdapter,
   EventKind,
   EventPreviewMetadata,
@@ -264,8 +265,17 @@ async function backfillSource(
  *  roll back with the new source.
  *
  *  Only fires when autoImport=true — passive registration (just
- *  tracking, no auto-pull) skips the enqueue. */
-async function onSourceCreated(source: SourceCreatedHookSource, opts: { tx: Tx }): Promise<void> {
+ *  tracking, no auto-pull) skips the enqueue.
+ *
+ *  `backfillWindow` is part of the contract but not consumed here: Reddit's
+ *  walker already gates each subscriber's fan-out against
+ *  `source.backfillTargetSince` (which createSource derives from the same
+ *  window), so re-reading the window here would be redundant. Accepted for
+ *  contract conformance and forward-compat with future per-window tuning. */
+async function onSourceCreated(
+  source: SourceCreatedHookSource,
+  opts: { backfillWindow: BackfillWindow; tx: Tx },
+): Promise<void> {
   if (!source.autoImport) return;
   await backfillSource(
     {
