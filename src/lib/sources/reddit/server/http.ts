@@ -44,6 +44,7 @@
 // always sees the rate-limit signal.
 
 import type { z } from "zod";
+import { fetch as undiciFetch, ProxyAgent } from "undici";
 import { AdapterError } from "$lib/sources/errors.js";
 import { pickRedditCredentials } from "./credentials.js";
 import { writeAudit } from "$lib/server/audit.js";
@@ -76,6 +77,30 @@ interface BurstState {
 let burstState: BurstState = { count: 0, windowStartMs: 0, auditEmittedThisBurst: false };
 const BURST_WINDOW_MS = 5 * 60_000;
 const BURST_THRESHOLD = 3;
+
+// Outbound HTTP proxy for Reddit. Lazily constructed on first use so the
+// undici ProxyAgent's connection pool is created once and reused across
+// every redditFetch (keep-alive is what makes residential-proxy latency
+// tolerable — TCP+TLS handshake per call would dominate).
+// Empty/unset env var → null → direct fetch (self-host parity).
+let cachedProxyAgent: ProxyAgent | null = null;
+function getProxyDispatcher(): ProxyAgent | null {
+  if (!env.REDDIT_PROXY_URL) return null;
+  if (cachedProxyAgent === null) {
+    cachedProxyAgent = new ProxyAgent(env.REDDIT_PROXY_URL);
+    logger.info(
+      { proxyHost: new URL(env.REDDIT_PROXY_URL).host },
+      "reddit outbound proxy configured",
+    );
+  }
+  return cachedProxyAgent;
+}
+
+/** Test-only helper — drop the cached ProxyAgent so tests can swap
+ *  REDDIT_PROXY_URL via vi.stubEnv and pick up the new value. */
+export function __resetProxyAgentForTest(): void {
+  cachedProxyAgent = null;
+}
 
 /**
  * Wraps native fetch with Reddit-specific behavior:
@@ -125,15 +150,22 @@ export async function redditFetch<T = unknown>(
   }
 
   const url = path.startsWith("http") ? path : REDDIT_BASE + path;
+  const dispatcher = getProxyDispatcher();
   let res: Response;
   try {
-    res = await fetch(url, {
+    // undiciFetch is API-compatible with global fetch but accepts the
+    // `dispatcher` option that routes the request through ProxyAgent.
+    // When env.REDDIT_PROXY_URL is empty, dispatcher is null and undici
+    // uses its default agent — behaviour identical to a direct
+    // global fetch call.
+    res = (await undiciFetch(url, {
       method: opts.method ?? "GET",
       headers: {
         "User-Agent": creds.userAgent,
         Accept: "application/json",
       },
-    });
+      ...(dispatcher ? { dispatcher } : {}),
+    })) as unknown as Response;
   } catch (cause) {
     throw new AdapterError(`Reddit fetch network error: ${String(cause)}`, {
       category: "transient",

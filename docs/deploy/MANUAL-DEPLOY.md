@@ -100,29 +100,39 @@ Add any new keys to `.env`. **Phase 03.1 (Reddit) added:**
 
 | Var | Required? | What to set |
 |---|---|---|
-| `REDDIT_USER_AGENT` | yes for Reddit features | `node:com.neotolis.gpd:0.1.0 (by /u/<your-handle>)` — see `.env.example` for the convention. **Leave empty to disable Reddit cleanly** — see warning below. |
+| `REDDIT_USER_AGENT` | yes for Reddit features | `node:com.neotolis.gpd:0.1.0 (by /u/<your-handle>)` — see `.env.example` for the convention. Leave empty to disable Reddit cleanly. |
+| `REDDIT_PROXY_URL` | conditional — see below | `http://user:pass@host:port`. Required only when your VPS IP is in Reddit's datacenter blocklist. |
 | `REDDIT_BASE_URL_OVERRIDE` | no | TEST-ONLY. Leave **unset** in production. |
 
 > **⚠️ Reddit + cloud-hosted VPS reality check.** Reddit's edge
 > (Fastly/Varnish) aggressively 403's traffic from datacenter IP ranges
-> — Hetzner, DigitalOcean, Linode, AWS. If your VPS is in one of those
-> blocklists, setting `REDDIT_USER_AGENT` to a valid value will NOT help
-> — Reddit returns `HTTP/2 403 server: snooserv` before any UA check.
-> The adapter then triggers an escalating pause (10m → 1h → 3h → 12h)
-> and dead-letters queue rows forever.
+> — Hetzner, DigitalOcean, Linode, AWS, even Cloudflare Workers. If
+> your VPS is in one of those blocklists, setting `REDDIT_USER_AGENT`
+> to a valid value will NOT help — Reddit returns `HTTP/2 403 server:
+> snooserv` before any UA check. The adapter then triggers an
+> escalating pause (10m → 1h → 3h → 12h) and dead-letters queue rows
+> forever.
 >
 > **Diagnose** with one curl from the VPS BEFORE setting the UA:
 > ```bash
 > curl -A "node:com.neotolis.gpd:0.1.0 (by /u/test)" -i \
 >   'https://www.reddit.com/r/IndieDev/new.json?limit=1' | head -1
 > ```
-> - `HTTP/2 200` → IP is clean, set the UA normally.
-> - `HTTP/2 403` → IP is fenced. **Leave `REDDIT_USER_AGENT` empty.**
->   Reddit features cleanly disable (paste returns 422
->   `reddit_not_configured`, /sources/new shows "not configured");
->   nothing degraded, nothing dead-lettered. Self-host operators on
->   residential IPs are unaffected. Long-term fix (proxy / OAuth) is
->   tracked separately.
+> - `HTTP/2 200` → IP is clean. Set `REDDIT_USER_AGENT` only; leave
+>   `REDDIT_PROXY_URL` unset. Typical for self-host operators on
+>   residential IPs.
+> - `HTTP/2 403` → IP is fenced. Two options:
+>   - **Disable cleanly:** leave `REDDIT_USER_AGENT` empty. Reddit
+>     features show as "not configured" in the UI; nothing degraded,
+>     nothing dead-lettered.
+>   - **Route through residential proxy:** set both
+>     `REDDIT_USER_AGENT` AND `REDDIT_PROXY_URL`. Tested working with
+>     Webshare static-residential ($6/mo, 20 IPs, 250GB bandwidth) —
+>     the cheapest path the author found. Other residential providers
+>     (Bright Data, Smartproxy, Decodo) work the same shape. Confirm
+>     by re-running the curl ABOVE with `--proxy
+>     http://user:pass@host:port` and `--ssl-no-revoke` before saving
+>     to `.env`; if THAT returns 200, you're set.
 
 Save and close.
 
