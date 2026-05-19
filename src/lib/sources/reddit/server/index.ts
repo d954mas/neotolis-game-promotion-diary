@@ -73,9 +73,26 @@ interface RedditSourceMetadata {
 
 /** Shared Reddit cap gate. Both axes go through the same cross-source
  *  orchestrator (enforceAdapterUserQuota); the action argument picks the
- *  sliding-window axis ("post-refresh" or "source-action"). CYCLE-BREAKER:
- *  services/quota.ts imports the adapter registry which resolves this
- *  barrel — lazy import keeps the graph acyclic at module init. */
+ *  sliding-window axis ("post-refresh" or "source-action").
+ *
+ *  CYCLE-BREAKER (load-bearing — verified by investigation):
+ *    reddit/server/index.ts → services/quota.ts → sources/registry.ts → reddit/server/index.ts
+ *  is a real circular import. Static `import { enforceAdapterUserQuota } …`
+ *  at module-init time would resolve `redditAdapter` to `undefined` inside
+ *  registry.ts's Map (ES Modules return a partial namespace for the
+ *  second-leg import; the `redditAdapter` const isn't evaluated yet),
+ *  and registry boot would TDZ-fault on Map insertion.
+ *
+ *  The `await import` form defers the resolution until the adapter is
+ *  actually called — after registry.ts has finished initialization and
+ *  `redditAdapter` has its real value. This is the targeted fix for
+ *  Reddit's specific self-call pattern (it's the only adapter that asks
+ *  the quota orchestrator about its OWN cap from inside its own barrel).
+ *  YouTube doesn't have the cycle because it never self-calls.
+ *
+ *  Alternatives (dependency injection of enforceFn, lazy `allAdapters`
+ *  getter) were considered and rejected: they spread boilerplate across
+ *  3+ files to save one `await` here. Not worth it. */
 async function enforceRedditCap(args: {
   userId: string;
   ipAddress: string;
