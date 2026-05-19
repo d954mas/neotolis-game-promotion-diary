@@ -61,14 +61,17 @@ All five jobs must be `success`. If `docker-build-publish` is
 `skipped`, that's wrong on master and means the image wasn't pushed —
 re-run the workflow or investigate.
 
-### 2. SSH to the server
+### 2. SSH to the server and `cd` into the app dir
 
 ```bash
 ssh neotolis-diary
+cd /opt/diary
 ```
 
-You land in the `deploy` user's home. From here, all commands are run
-on the server unless noted.
+Every subsequent command in this guide assumes the working directory
+is `/opt/diary` — `docker compose` reads `docker-compose.prod.yml` and
+`.env` from cwd, and skipping the `cd` is the easiest way to "deploy"
+nothing.
 
 ### 3. Pull repo changes (only if needed)
 
@@ -82,7 +85,6 @@ the new release:
 - `docs/deploy/*` — operator-facing docs
 
 ```bash
-cd /opt/diary
 git pull
 ```
 
