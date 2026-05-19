@@ -38,6 +38,26 @@
 -- CASCADE the loser's derived snapshots cascade with it — losing a
 -- handful of stale rows is acceptable; the next poll repopulates from
 -- the surviving canonical row.
+--
+-- KNOWN LIMITATION (accepted, not fixed):
+--   For data_sources collisions in step 5 below, the loser row is
+--   soft-deleted but `events.source_id` keeps pointing at the loser.
+--   A subscriber who had pasted the same subreddit in both casings
+--   would see events from BOTH rows in their feed (the loser is
+--   soft-deleted but its events are not). No repoint UPDATE was added
+--   because:
+--     (a) Phase 03.1 has never shipped to prod — there is no
+--         pre-existing Reddit data anywhere this migration could find
+--         to collide on. The collision branch is effectively dead code
+--         on every existing deployment.
+--     (b) Going forward, lowercase canonicalization runs at the write
+--         boundary (src/lib/sources/reddit/server/url.ts +
+--         services/data-sources.ts), so no NEW duplicate-case pair can
+--         be created. The collision logic exists only to scrub
+--         hypothetical-bad historical state.
+--   If the limitation ever bites a real user, the follow-up is one
+--   additive migration that UPDATEs events.source_id from losers →
+--   winners before this 0040 has run, then soft-deletes the losers.
 
 -- ---------------------------------------------------------------------
 -- 0. ALTER FKs to ON UPDATE CASCADE / ON DELETE CASCADE before any
