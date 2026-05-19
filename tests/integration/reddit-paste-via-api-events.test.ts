@@ -408,6 +408,11 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
       .where(eq(redditPostSnapshots.postId, "t3_abc429"));
     expect(snapRows).toHaveLength(0);
 
+    // Cap-counter row IS NOT written — same reasoning as the 404 test
+    // above. handlePostSingle's tx never starts because redditFetch
+    // threw on the 429; the counter INSERT lives inside that tx, so
+    // it rolls back along with the (never-started) cache writes.
+    // Rate-limited fetches don't burn the user's cap.
     const capRows = await db
       .select()
       .from(adapterRefreshQueue)
@@ -418,8 +423,7 @@ describe("Reddit paste via POST /api/events (createEvent → fetchEventStats)", 
           eq(adapterRefreshQueue.type, "post_single"),
         ),
       );
-    expect(capRows).toHaveLength(1);
-    expect(capRows[0]!.payload).toMatchObject({ post_id: "t3_abc429", flow: "paste" });
+    expect(capRows).toHaveLength(0);
   });
 
   it("kind=reddit_post without URL is rejected at the service layer via cap pre-check skip", async () => {
