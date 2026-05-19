@@ -188,6 +188,19 @@ const RawSchema = z.object({
   // only supported live behavior.
   REDDIT_BASE_URL_OVERRIDE: z.string().url().optional(),
 
+  // Optional outbound HTTP proxy for Reddit fetches. When set, every
+  // `redditFetch` routes through this proxy via undici's ProxyAgent.
+  // Format: `http://user:pass@host:port` (Webshare static-residential
+  // shape). Empty/unset = direct fetch (self-host operators on residential
+  // IPs need nothing).
+  //
+  // Why this exists: Reddit aggressively 403's outbound traffic from
+  // datacenter IP ranges (Hetzner, DO, Linode, AWS, Cloudflare Workers).
+  // The author's prod VPS hits this fence. Routing through a residential
+  // proxy makes Reddit see a consumer-ISP IP and respond normally.
+  // See docs/deploy/MANUAL-DEPLOY.md for the operator decision tree.
+  REDDIT_PROXY_URL: z.string().url().optional(),
+
   // Deployment hint for operators. Adapter-owned workers are protected by
   // per-adapter singleton locks or DB-backed claim gates; this value is no
   // longer a global quota safety guard.
@@ -296,6 +309,7 @@ export const env = {
   ADMIN_EMAIL_ALLOWLIST: raw.ADMIN_EMAIL_ALLOWLIST,
   YOUTUBE_API_BASE_URL: raw.YOUTUBE_API_BASE_URL,
   REDDIT_BASE_URL_OVERRIDE: raw.REDDIT_BASE_URL_OVERRIDE,
+  REDDIT_PROXY_URL: raw.REDDIT_PROXY_URL,
   WORKER_REPLICA_COUNT: raw.WORKER_REPLICA_COUNT,
 } as const;
 
