@@ -61,4 +61,37 @@ describe("Reddit credentials.ts (Phase 03.1 DV-RDT-7)", () => {
     // Different references — caller can mutate without affecting others.
     expect(a).not.toBe(b);
   });
+
+  it("assertRedditConfigured throws AppError(503, reddit_not_configured) when UA is empty", async () => {
+    vi.resetModules();
+    vi.doMock("$lib/server/config/env.js", () => ({ env: { REDDIT_USER_AGENT: "" } }));
+    const { assertRedditConfigured } = await import(
+      "$lib/sources/reddit/server/credentials.js"
+    );
+    const { AppError } = await import("$lib/server/services/errors.js");
+    let caught: unknown = null;
+    try {
+      assertRedditConfigured({ sourceId: "src_123" });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(AppError);
+    const err = caught as InstanceType<typeof AppError>;
+    expect(err.code).toBe("reddit_not_configured");
+    expect(err.status).toBe(503);
+    // Caller-supplied context flows through to metadata so the error
+    // pinpoints which call site failed (sourceId / eventId / kind / etc.).
+    expect(err.metadata).toMatchObject({ sourceId: "src_123" });
+  });
+
+  it("assertRedditConfigured is a no-op when UA is configured", async () => {
+    vi.resetModules();
+    vi.doMock("$lib/server/config/env.js", () => ({
+      env: { REDDIT_USER_AGENT: "node:test (by /u/op)" },
+    }));
+    const { assertRedditConfigured } = await import(
+      "$lib/sources/reddit/server/credentials.js"
+    );
+    expect(() => assertRedditConfigured({ anything: "ok" })).not.toThrow();
+  });
 });

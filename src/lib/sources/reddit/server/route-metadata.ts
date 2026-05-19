@@ -20,7 +20,7 @@ import { zValidator } from "@hono/zod-validator";
 import { getAuditContext } from "$lib/server/http/middleware/audit-ip.js";
 import { mapErr } from "$lib/server/http/routes/_shared.js";
 import { redditParsePostUrl } from "./url.js";
-import { isRedditConfigured } from "./credentials.js";
+import { assertRedditConfigured } from "./credentials.js";
 import { AppError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import type { HandlePostSingleResult } from "./handlers/post-single.js";
@@ -50,13 +50,7 @@ export function createRedditMetadataRoutes(deps: {
     async (c) => {
       const ctx = getAuditContext(c);
       try {
-        if (!isRedditConfigured()) {
-          throw new AppError(
-            "Reddit ingest is not available — operator has not configured REDDIT_USER_AGENT",
-            "reddit_not_configured",
-            503,
-          );
-        }
+        assertRedditConfigured();
         const url = c.req.valid("json").url;
         const parsed = redditParsePostUrl(url);
         if (parsed === null) {

@@ -13,20 +13,35 @@
 // the value through redditFetch instead of reading env directly.
 
 import { env } from "$lib/server/config/env.js";
+import { AppError } from "$lib/server/services/errors.js";
 
 /** Returns null when Reddit is not configured (REDDIT_USER_AGENT empty).
- *  Returns { userAgent } when configured. Caller adds `User-Agent: userAgent`
- *  header on every Reddit HTTP request. A fresh object is returned per
- *  call so callers may add/mutate fields without leaking state to others. */
+ *  Returns { userAgent } when configured. A fresh object per call so
+ *  callers may mutate without leaking state to others. */
 export function pickRedditCredentials(): { userAgent: string } | null {
   const ua = env.REDDIT_USER_AGENT;
   if (ua === "") return null;
   return { userAgent: ua };
 }
 
-/** Boolean form. Used by observability.auth.isOperatorConfigured and by
- *  the paste-flow + preview-flow guards to throw `reddit_not_configured`
- *  before attempting any HTTP. */
+/** Boolean form. Use for graceful-return callers (preview returns
+ *  `unreachable`, syncStats returns null). Throw-path callers prefer
+ *  `assertRedditConfigured` for the uniform 503 surface. */
 export function isRedditConfigured(): boolean {
   return env.REDDIT_USER_AGENT !== "";
+}
+
+/** Throw-path guard. Use at every server boundary that cannot meaningfully
+ *  proceed without REDDIT_USER_AGENT — backfill enqueue, refresh-now, paste
+ *  normalize, walker reset, /reddit/fetch-metadata route. All sites throw
+ *  the same AppError shape; pass call-site identity through `context` so
+ *  the error metadata still pinpoints what was attempted. */
+export function assertRedditConfigured(context: Record<string, unknown> = {}): void {
+  if (env.REDDIT_USER_AGENT !== "") return;
+  throw new AppError(
+    "Reddit is not configured on this instance (REDDIT_USER_AGENT empty)",
+    "reddit_not_configured",
+    503,
+    context,
+  );
 }
