@@ -34,6 +34,7 @@ import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
 import { logger } from "$lib/server/logger.js";
 import { classifySnapshotStatus } from "./post-single.js";
 import { getAuthorWalkState, commitAuthorWalkProgress } from "../walker-state.js";
+import { recordNotFound, resetNotFoundOnSuccess } from "../not-found-tracker.js";
 
 interface T3Data {
   id: string;
@@ -109,7 +110,19 @@ export async function handleAuthorPoll(args: {
     nextAfterCursor = typeof after === "string" && after.length > 0 ? after : null;
   } catch (err) {
     if (err instanceof AdapterError && err.category === "not-found") {
-      await flagNotFoundOnSubscribers(handle, "not-found");
+      const tracker = await recordNotFound(db, "user", handle);
+      if (tracker.shouldFlag) {
+        logger.warn(
+          { handle, count: tracker.count },
+          "reddit author_poll: consecutive-404 threshold hit; flagging subscribers needs-reconnect",
+        );
+        await flagNotFoundOnSubscribers(handle, "not-found");
+      } else {
+        logger.info(
+          { handle, count: tracker.count },
+          "reddit author_poll: 404 below threshold; subscribers not flagged",
+        );
+      }
     }
     throw err;
   }
@@ -142,6 +155,9 @@ export async function handleAuthorPoll(args: {
     totalKarma: null,
     isSuspended: false,
   });
+
+  // Successful poll → clear the consecutive-404 counter.
+  await resetNotFoundOnSuccess(db, "user", handle);
 
   // 4. UPSERT subreddit caches for every unique sub in the listing —
   //    listing surfaces a user's posts across many subs; each needs at

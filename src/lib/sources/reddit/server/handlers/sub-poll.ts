@@ -48,6 +48,7 @@ import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
 import { logger } from "$lib/server/logger.js";
 import { classifySnapshotStatus } from "./post-single.js";
 import { getSubredditWalkState, commitSubredditWalkProgress } from "../walker-state.js";
+import { recordNotFound, resetNotFoundOnSuccess } from "../not-found-tracker.js";
 
 interface T3Data {
   id: string;
@@ -130,7 +131,19 @@ export async function handleSubPoll(args: {
     nextAfterCursor = typeof after === "string" && after.length > 0 ? after : null;
   } catch (err) {
     if (err instanceof AdapterError && err.category === "not-found") {
-      await flagNotFoundOnSubscribers(sub, "not-found");
+      const tracker = await recordNotFound(db, "subreddit", sub);
+      if (tracker.shouldFlag) {
+        logger.warn(
+          { sub, count: tracker.count },
+          "reddit sub_poll: consecutive-404 threshold hit; flagging subscribers needs-reconnect",
+        );
+        await flagNotFoundOnSubscribers(sub, "not-found");
+      } else {
+        logger.info(
+          { sub, count: tracker.count },
+          "reddit sub_poll: 404 below threshold; subscribers not flagged",
+        );
+      }
     }
     throw err;
   }
@@ -148,6 +161,10 @@ export async function handleSubPoll(args: {
     description: null,
     publicDescription: null,
   });
+
+  // Successful poll → clear the consecutive-404 counter. A previously
+  // failing sub that recovers immediately drops the threshold pressure.
+  await resetNotFoundOnSuccess(db, "subreddit", sub);
 
   // 3. UPSERT authors + posts + snapshots for each t3.
   const uniqueAuthors = new Set<string>();

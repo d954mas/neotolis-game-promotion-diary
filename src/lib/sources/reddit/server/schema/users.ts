@@ -44,6 +44,12 @@ export const redditUsersCache = pgTable(
     backfillComplete: boolean("backfill_complete").notNull().default(false),
     /** Oldest `created_utc` fetched during the deep walk. */
     backfillDeepestAt: timestamp("backfill_deepest_at", { withTimezone: true }),
+    /** Consecutive 404 count from /user/X/submitted.json. Mirrors the
+     *  `reddit_subreddits_cache.not_found_count` semantics — see header
+     *  on that table for the gate logic. */
+    notFoundCount: integer("not_found_count").notNull().default(0),
+    /** Wall-clock of the most recent 404. */
+    lastNotFoundAt: timestamp("last_not_found_at", { withTimezone: true }),
   },
   (t) => ({
     // Refresh-cron scan: pick stale rows for re-fetch. Cheap btree on a

@@ -66,6 +66,16 @@ export const redditSubredditsCache = pgTable(
      *  on the operator dashboard so we can see "how far back into r/X
      *  history have we gone" without scanning reddit_posts. */
     backfillDeepestAt: timestamp("backfill_deepest_at", { withTimezone: true }),
+    /** Consecutive 404 count from /r/X/new.json. Incremented on each
+     *  not-found error; reset to 0 on any successful poll. Used by
+     *  sub-poll's flag-needs-reconnect gate so a transient Reddit 404
+     *  (banned-then-unbanned sub, brief Reddit outage) doesn't
+     *  immediately flag every subscriber. */
+    notFoundCount: integer("not_found_count").notNull().default(0),
+    /** Wall-clock of the most recent 404. Paired with `notFoundCount` to
+     *  gate flagging on `count >= THRESHOLD` AND `lastNotFoundAt`
+     *  within the recent window. */
+    lastNotFoundAt: timestamp("last_not_found_at", { withTimezone: true }),
   },
   (t) => ({
     // Daily refresh-cron picks stale rows for /r/X/about.json walk.
