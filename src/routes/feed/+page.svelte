@@ -441,30 +441,31 @@
   .feed {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
+    gap: var(--s-4);
     min-width: 0;
   }
-  /* Inline .head + .cta CSS removed — replaced by the shared
-   * <PageHeader> component (see top of file). The shared component uses
-   * the inline-on-the-left flex layout instead of
-   * justify-content: space-between. */
-  /* CSS grid (auto-fill, minmax 280px) for the timeline. Multi-column
-   * on >=640px; single column below. <FeedDateGroupHeader> sets
+  /* v2 feed grid: single column <640px; repeat(auto-fill, minmax(320px,
+   * 1fr)) ≥640px (was 280px in v1); 3-column cap at --max-w. Gap is
+   * var(--s-4) (16px). <FeedDateGroupHeader> sets
    * `grid-column: 1 / -1` so the header spans the full row, separating
    * card groups visually. */
   .feed-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: var(--space-md);
+    grid-template-columns: 1fr;
+    gap: var(--s-4);
     margin: 0;
     padding: 0;
+    min-width: 0;
   }
-  @media (max-width: 639px) {
-    /* Force single-column on mobile (auto-fill collapses naturally below
-     * ~280px + gutter, but force it across 360-639px per UAT gap "single
-     * column on <640px"). */
+  @media (min-width: 640px) {
     .feed-grid {
-      grid-template-columns: 1fr;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    }
+  }
+  @media (min-width: 1280px) {
+    .feed-grid {
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      max-width: var(--max-w);
     }
   }
   .sentinel {
@@ -475,9 +476,9 @@
   .feed-status {
     grid-column: 1 / -1;
     text-align: center;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
-    padding: var(--space-md) 0;
+    color: var(--text-3);
+    font-size: var(--t-13);
+    padding: var(--s-4) 0;
     margin: 0;
   }
 </style>

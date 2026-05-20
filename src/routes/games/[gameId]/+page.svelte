@@ -295,13 +295,13 @@
 <style>
   .breadcrumb {
     display: flex;
-    gap: var(--space-xs);
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
-    margin-bottom: var(--space-md);
+    gap: var(--s-1);
+    color: var(--text-3);
+    font-size: var(--t-13);
+    margin-bottom: var(--s-4);
   }
   .breadcrumb a {
-    color: var(--color-accent);
+    color: var(--accent);
     text-decoration: none;
   }
   /* Stores + Events both render their CTA in the section-header row
@@ -310,103 +310,116 @@
   .section-header {
     display: flex;
     align-items: center;
-    gap: var(--space-md);
-    margin-bottom: var(--space-md);
+    gap: var(--s-4);
+    margin-bottom: var(--s-4);
     flex-wrap: wrap;
   }
   .section-header h2 {
     margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
-    line-height: var(--line-height-heading);
+    font-size: var(--t-22);
+    font-weight: var(--w-sb);
+    line-height: var(--lh-tight);
+    color: var(--text);
   }
   .game-info {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
+    gap: var(--s-4);
     padding: 0;
-    margin-bottom: var(--space-lg);
+    margin-bottom: var(--s-6);
     min-width: 0;
   }
   .stores {
-    margin-bottom: var(--space-lg);
+    margin-bottom: var(--s-6);
     min-width: 0;
   }
   .events {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
-    margin-top: var(--space-lg);
+    gap: var(--s-4);
+    margin-top: var(--s-6);
     min-width: 0;
   }
   .meta {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   .badge,
   .chip {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    padding: 2px var(--space-sm);
+    font-size: var(--t-12);
+    color: var(--text-2);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    padding: 2px var(--s-2);
   }
-  /* Description paragraph in the game-info section. white-space:
-   * pre-wrap preserves newlines from the textarea round-trip. Reads
-   * as primary copy (not muted) since it's the user's own pitch —
-   * the .notes paragraph below stays muted as the lighter "internal"
-   * notes surface. */
+  /* Description paragraph in the game-info section. */
   .description {
     margin: 0;
-    color: var(--color-text);
-    line-height: var(--line-height-body);
+    color: var(--text);
+    font-size: var(--t-14);
+    line-height: var(--lh-body);
     white-space: pre-wrap;
     word-break: break-word;
   }
   .notes {
     margin: 0;
-    color: var(--color-text-muted);
-    line-height: var(--line-height-body);
+    color: var(--text-3);
+    font-size: var(--t-13);
+    line-height: var(--lh-body);
     white-space: pre-wrap;
   }
-  /* FeedCards lay out in a 3-per-row grid at >=900px, falling back to
-   * single-column at <640px. */
+  /* v2 feed grid mirrors /feed/+page.svelte: single column <640px,
+   * minmax(320px, 1fr) ≥640px, 3-column cap at --max-w. */
   .feedcard-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: var(--space-md);
+    grid-template-columns: 1fr;
+    gap: var(--s-4);
+    min-width: 0;
   }
-  @media (max-width: 639px) {
+  @media (min-width: 640px) {
     .feedcard-grid {
-      grid-template-columns: 1fr;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    }
+  }
+  @media (min-width: 1280px) {
+    .feedcard-grid {
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      max-width: var(--max-w);
     }
   }
   .cta-secondary {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-accent);
-    border: 1px solid var(--color-accent);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit);
+    padding: 0 var(--s-3);
+    background: var(--surface);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
     cursor: pointer;
     text-decoration: none;
     display: inline-flex;
     align-items: center;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
   }
   .cta-secondary:hover {
-    background: var(--color-accent);
-    color: var(--color-accent-text);
+    background: var(--accent);
+    color: var(--accent-text);
   }
   /* The Add Store CTA in the stores section-header matches the Events
    * "+ New event" CTA visually so the two section headers read as a
-   * consistent pattern. Cursor: pointer because it's a <button> not
-   * an <a>. */
+   * consistent pattern. */
   .add-store-cta {
     cursor: pointer;
     font-family: inherit;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cta-secondary {
+      transition: none;
+    }
   }
 </style>

@@ -53,22 +53,29 @@
    * date header passes UNDER PageHeader and the next group's header
    * replaces it. That's the Instagram / Google Sheets behaviour.
    *
-   * background: --color-bg matches the page-grid background so scrolled
+   * background: var(--bg) matches the page-grid background so scrolled
    * FeedCards passing under the sticky header don't bleed through. */
   .date-header {
     margin: 0;
-    padding: var(--space-sm) 0 var(--space-xs);
-    font-size: var(--font-size-label);
-    font-weight: var(--font-weight-semibold);
-    color: var(--color-text-muted);
+    padding: var(--s-2) 0 var(--s-1);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
+    color: var(--text-3);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     position: sticky;
+    /* LB-2 / LB-3 — DO NOT change this calc() formula. --chrome-height
+     * comes from +layout.svelte's ResizeObserver on .sticky-chrome;
+     * --page-header-height comes from PageHeader.svelte's ResizeObserver;
+     * --sticky-overlap (1px) absorbs DPR rounding. */
     top: calc(
       var(--chrome-height, 116px) + var(--page-header-height, 56px) - var(--sticky-overlap, 1px)
     );
-    background: var(--color-bg);
+    background: var(--bg);
+    border-top: 1px solid var(--border-hairline);
     z-index: 1;
+    min-width: 0;
     /* Span all grid columns so the header separates card groups visually. */
     grid-column: 1 / -1;
   }

@@ -18,12 +18,12 @@
   //      OUTSIDE the wrapping <a> so its onclick handlers don't trigger
   //      card navigation). INBOX-only flow.
   //
-  // Mine treatment (user choice "C and A combined"):
-  //   - C: `<span class='overlay-mine'>` pill in the top overlay alongside
-  //        kind label and Inbox indicator.
-  //   - A: `border-left: 4px solid var(--color-accent)` on the entire card
-  //        when `event.authorIsMe === true`. The class:mine={authorIsMe}
-  //        toggle on the root <article> drives the CSS rule.
+  // Mine treatment (v2 — UI-SPEC § "Card Contract" → "Mine marker"):
+  //   - `.author-avatar.mine` accent-tinted circle in the meta row
+  //     (--accent-soft background + --accent text, 24px). Replaces v1's
+  //     4px left-border accent which collides with the v2 kind stripe.
+  //   - `<span class='overlay-mine'>` pill in the top overlay stays on
+  //     media-shape cards as a secondary signal alongside the kind label.
   //
   // Image-source rules per kind (auto-derived images only;
   // manual upload UI is OUT OF SCOPE, see TODO):
@@ -299,39 +299,69 @@
   class:mine={event.authorIsMe}
   class:standalone={isStandalone}
   data-kind={event.kind}
+  data-shape={event.kind === "youtube_video" ? "media" : "text"}
+  data-testid="feed-card"
+  style="--kind-color: var(--k-{event.kind});"
 >
   <a class="card-body" href={`/events/${event.id}`}>
-    <div class="media">
-      {#if thumbnailUrl}
-        <img
-          class="thumbnail"
-          src={thumbnailUrl}
-          alt={m.feed_card_thumbnail_alt({ title: event.title })}
-          referrerpolicy="no-referrer"
-          crossorigin="anonymous"
-          loading="lazy"
-        />
-      {:else}
-        <div class="icon-anchor" aria-hidden="true">
-          <KindIcon kind={event.kind} size={48} />
+    {#if event.kind === "youtube_video"}
+      <!-- Media shape: 16:9 thumbnail block at top, kind stripe = 2px left
+           border in var(--kind-color). The .media wrapper falls back to a
+           centered KindIcon when thumbnailUrl is null (missing-thumb
+           fallback per UI-SPEC § "Iconography Contract" — 36px). -->
+      <div class="media">
+        {#if thumbnailUrl}
+          <img
+            class="thumbnail"
+            src={thumbnailUrl}
+            alt={m.feed_card_thumbnail_alt({ title: event.title })}
+            referrerpolicy="no-referrer"
+            crossorigin="anonymous"
+            loading="lazy"
+          />
+        {:else}
+          <div class="icon-anchor thumb-fallback" aria-hidden="true">
+            <KindIcon kind={event.kind} size={36} />
+          </div>
+        {/if}
+        <!-- Top overlay: kind label + Inbox + Mine pills. LB-10
+             data-testid preserved. pointer-events: none so the overlay
+             never intercepts clicks on the wrapping <a>. -->
+        <div class="overlay" data-testid="feed-card-overlay">
+          <span class="overlay-kind">
+            <KindIcon kind={event.kind} size={14} />
+            {kindLabel}
+          </span>
+          {#if isInboxRow}
+            <span class="overlay-inbox">{m.inbox_badge()}</span>
+          {/if}
+          {#if event.authorIsMe}
+            <span class="overlay-mine">{m.feed_card_author_is_me_badge()}</span>
+          {/if}
         </div>
-      {/if}
-      <!-- Top overlay: kind label + Inbox + Mine pills.
-           Always rendered (kind label is unconditional); Inbox / Mine are
-           conditional. pointer-events: none so the overlay never intercepts
-           clicks on the wrapping <a>. -->
-      <div class="overlay" data-testid="feed-card-overlay">
-        <span class="overlay-kind">
-          <KindIcon kind={event.kind} size={14} />
-          {kindLabel}
-        </span>
-        {#if isInboxRow}
-          <span class="overlay-inbox">{m.inbox_badge()}</span>
-        {/if}
-        {#if event.authorIsMe}
-          <span class="overlay-mine">{m.feed_card_author_is_me_badge()}</span>
-        {/if}
       </div>
+    {/if}
+
+    <!-- Meta row — author avatar + kind icon + kind label + (inbox badge)
+         + date. Mine signal lives in .author-avatar.mine (replaces v1's
+         4px left border, which collides with the v2 kind stripe). On
+         text-shape cards the kind label is the primary kind signal; on
+         media-shape it duplicates the overlay-kind pill but reads when
+         the thumbnail is scrolled off-screen on tall lists. -->
+    <div class="meta-row">
+      <span
+        class="author-avatar"
+        class:mine={event.authorIsMe}
+        title={event.authorIsMe ? m.feed_card_author_is_me_badge() : ""}
+        aria-hidden="true"
+      >
+        {event.authorIsMe ? "↻" : "?"}
+      </span>
+      <KindIcon kind={event.kind} size={18} />
+      <span class="kind-label">{kindLabel}</span>
+      {#if event.kind !== "youtube_video" && isInboxRow}
+        <span class="overlay-inbox">{m.inbox_badge()}</span>
+      {/if}
     </div>
 
     <div class="title-line">
@@ -474,45 +504,59 @@
 </article>
 
 <style>
-  /* Card body remains a vertical flex column. The Mine treatment combines
-   * a left-border accent (CSS) and a top-overlay Mine pill (DOM).
-   * Grid cell sizing (`repeat(auto-fill, minmax(280px, 1fr))`) lives on
-   * /feed's grid; this card sizes to its content within the cell. */
+  /* v2 FeedCard — two-shape rule (UI-SPEC § "Card Contract").
+   *
+   * `data-shape="media"` (kind=youtube_video) renders 16:9 thumbnail block
+   *   + 2px LEFT border in var(--kind-color); kind stripe runs full-height
+   *   down the left edge.
+   *
+   * `data-shape="text"` (every other kind) drops the thumbnail block + uses
+   *   a 1px TOP hairline in var(--kind-color); kind stripe runs across the
+   *   top of the card.
+   *
+   * The kind color is injected per-card via inline
+   *   `style="--kind-color: var(--k-{kind})"` on the root .feed-card so the
+   * stylesheet stays kind-agnostic.
+   *
+   * Mine signal moved from v1's 4px left border (which collides with the
+   * 2px kind stripe) into `.author-avatar.mine` in the meta row — see
+   * UI-SPEC § "Card Contract" → "Mine marker". The v1 overlay-mine pill
+   * stays as a secondary signal over the thumbnail when present. */
   .feed-card {
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
-    padding: var(--space-md);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
+    background: var(--surface);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-card);
+    border: 1px solid var(--border);
     min-width: 0;
     max-width: 100%;
+    overflow: hidden;
     cursor: pointer;
-    transition: background 120ms ease;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .feed-card:hover {
-    background: var(--color-bg);
+    background: var(--surface-2);
   }
-  /* Mine treatment (A): left-border accent on the whole card. Combined with
-   * the overlay Mine pill (C) per user choice "C and A combined".
-   * Uses var(--color-mine) so FeedCard.mine + SourceRow.mine resolve to the
-   * single shared Mine token (defaults to accent today; can diverge). */
-  .feed-card.mine {
-    border-left: 4px solid var(--color-mine);
+  .feed-card[data-shape="media"] {
+    border-left: 2px solid var(--kind-color, var(--border));
   }
-  /* Standalone events render dimmed in /feed so they don't distract from
-   * game-tied events. User quote: "такие не связанные с игрой, нужно как-то
-   * затемнять, чтобы они не мешали". The reduced opacity is purely visual —
-   * the card remains clickable + the wrapping <a> still navigates to
-   * /events/[id]. */
+  .feed-card[data-shape="text"] {
+    border-top: 1px solid var(--kind-color, var(--border));
+  }
+  /* Off-topic / standalone fade — bumped 0.55 (v1) → 0.65 (v2). Reads as
+   * "deprioritized but still legible" rather than "ghostly". */
   .feed-card.standalone {
-    opacity: 0.55;
+    opacity: 0.65;
   }
   .card-body {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: var(--s-3);
+    padding: var(--s-4);
     min-width: 0;
     text-decoration: none;
     color: inherit;
@@ -524,14 +568,16 @@
     flex: 0 0 auto;
     width: 100%;
     aspect-ratio: 16 / 9;
-    background: var(--color-bg);
-    border-radius: 4px;
+    background: var(--surface-2);
     overflow: hidden;
     display: flex;
     align-items: center;
     justify-content: center;
     /* Anchors the absolutely-positioned .overlay child. */
     position: relative;
+    /* Margin pulls the media block out of card-body padding so the
+     * thumbnail edge meets the card border cleanly. */
+    margin: calc(var(--s-4) * -1) calc(var(--s-4) * -1) 0;
   }
   .thumbnail {
     width: 100%;
@@ -545,17 +591,19 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--color-text-muted);
+    color: var(--kind-color, var(--text-3));
   }
-  /* Top overlay — flex row of dark pills over the image. */
+  /* Top overlay — flex row of dark pills over the image. v2 uses
+   * var(--overlay-dark) token for the pill background (replaces v1's
+   * inline rgba dark literal). */
   .overlay {
     position: absolute;
-    top: var(--space-xs);
-    left: var(--space-xs);
-    right: var(--space-xs);
+    top: var(--s-2);
+    left: var(--s-2);
+    right: var(--s-2);
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-xs);
+    gap: var(--s-1);
     /* Don't intercept clicks on the wrapping <a> — the overlay is purely
      * visual; the entire card surface remains the click target. */
     pointer-events: none;
@@ -563,46 +611,85 @@
   .overlay-kind,
   .overlay-inbox,
   .overlay-mine {
-    background: rgb(0 0 0 / 70%);
-    color: white;
-    border-radius: 999px;
-    padding: 2px var(--space-sm);
-    font-size: var(--font-size-label);
+    background: var(--overlay-dark);
+    color: #fff;
+    border-radius: var(--r-pill);
+    padding: 2px var(--s-2);
+    font-size: var(--t-12);
     line-height: 1;
     display: inline-flex;
     align-items: center;
-    gap: var(--space-xs);
+    gap: var(--s-1);
     white-space: nowrap;
   }
-  /* The kind icon inside .overlay-kind inherits white via currentColor since
-   * the parent sets `color: white`. */
+  /* LB-11: KindIcon color bridge inside overlay-kind. The kind icon
+   * inherits white via currentColor since the parent sets `color: #fff`. */
   .overlay-kind :global(svg.kind) {
-    color: white;
+    color: #fff;
+  }
+  /* Meta row — author avatar + kind icon + source handle + date. New in
+   * v2; lives at the top of the card body for both media and text shapes
+   * (UI-SPEC § "Card Contract" → "Meta row"). */
+  .meta-row {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    min-width: 0;
+  }
+  .author-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: var(--r-pill);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-2);
+    color: var(--text-3);
+    font-size: var(--t-12);
+    font-weight: var(--w-sb);
+    flex: 0 0 auto;
+  }
+  /* Mine marker — accent-tinted avatar in the meta row. Replaces v1's
+   * 4px left border (which collides with the v2 kind stripe). */
+  .author-avatar.mine {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .kind-label {
+    font-size: var(--t-13);
+    color: var(--kind-color, var(--text-3));
+    font-weight: var(--w-md);
+    white-space: nowrap;
+    flex: 0 0 auto;
+  }
+  .date-label {
+    font-size: var(--t-13);
+    color: var(--text-3);
+    margin-left: auto;
+    flex: 0 0 auto;
   }
   .title-line {
     display: flex;
     align-items: flex-start;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     min-width: 0;
   }
   .title {
     flex: 1 1 auto;
     margin: 0;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
-    line-height: var(--line-height-body);
+    font-size: var(--t-15);
+    font-weight: var(--w-sb);
+    color: var(--text);
+    line-height: var(--lh-tight);
     word-break: break-word;
     min-width: 0;
   }
-  /* Notes paragraph clipped to 3 lines with ellipsis. The underlying CSS
-   * uses the prefixed `-webkit-line-clamp` block trick which is the de facto
-   * cross-browser standard for line clamping (Firefox 68+ supports the
-   * prefixed form). */
+  /* Notes paragraph clipped to 3 lines with ellipsis. */
   .notes {
     margin: 0;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
-    line-height: var(--line-height-body);
+    color: var(--text-2);
+    font-size: var(--t-13);
+    line-height: var(--lh-body);
     display: -webkit-box;
     -webkit-line-clamp: 3;
     line-clamp: 3;
@@ -610,22 +697,16 @@
     overflow: hidden;
     word-break: break-word;
   }
-  .meta-line {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-sm);
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-  }
-  /* Latest snapshot stats line for youtube_video cards. */
+  /* Latest snapshot stats line — tabular-nums + mono numerics + `·`
+   * separators. */
   .stats-line {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-xs);
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    gap: var(--s-1);
+    font-family: var(--f-mono);
+    font-size: var(--t-12);
+    color: var(--text-3);
     font-variant-numeric: tabular-nums;
   }
   .stats-line .stat {
@@ -637,7 +718,7 @@
   .chips-line {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-sm);
+    gap: var(--s-1);
     align-items: center;
     min-width: 0;
   }
@@ -648,19 +729,19 @@
     margin-top: auto;
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-sm);
+    gap: var(--s-1);
     align-items: center;
     min-width: 0;
   }
   .chip {
     display: inline-flex;
     align-items: center;
-    background: var(--color-bg);
-    color: var(--color-text-muted);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    padding: 2px var(--space-sm);
-    font-size: var(--font-size-label);
+    background: var(--surface-2);
+    color: var(--text-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    padding: 2px var(--s-2);
+    font-size: var(--t-12);
     line-height: 1;
     white-space: nowrap;
   }
@@ -671,69 +752,71 @@
     font-size: 0.85em;
     opacity: 0.7;
   }
-  /* Reddit chip emoji prefix (Phase 03.1 plan 08, D-RDT-SOURCE-DISPLAY).
-   * /u/author chip paints 🧑 + handle; /r/sub chip paints 🏛 + sub name.
-   * Decorative — aria-hidden on the emoji span keeps screen readers
-   * announcing only the chip text. */
+  /* Reddit chip emoji prefix (Phase 03.1 plan 08, D-RDT-SOURCE-DISPLAY). */
   .chip-prefix {
     font-size: 0.9em;
     line-height: 1;
     margin-right: 4px;
   }
-  /* Underperforming-median badge (D-RDT-BASELINES-DISPLAY).
-   * Renders only when score < median_score_24h AND sample_size >= 5;
-   * sits below the chips line so it doesn't clobber the stat-bearing
-   * row. Warning-coloured to communicate the comparison. */
+  /* Underperforming-median badge (D-RDT-BASELINES-DISPLAY). */
   .reddit-baseline-badge {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-xs);
+    gap: var(--s-1);
     align-items: center;
   }
   .badge {
     display: inline-flex;
     align-items: center;
-    padding: 2px var(--space-sm);
-    border-radius: 4px;
-    font-size: var(--font-size-label);
+    padding: 2px var(--s-2);
+    border-radius: var(--r-sm);
+    font-size: var(--t-12);
     line-height: 1.2;
   }
   .badge-warning {
-    background: var(--color-warning-bg, rgba(217, 153, 0, 0.15));
-    color: var(--color-warning, #d90);
-    border: 1px solid var(--color-warning, #d90);
+    background: color-mix(in oklab, var(--warn) 18%, transparent);
+    color: var(--warn);
+    border: 1px solid var(--warn);
   }
   /* Game chip stands out a bit more than the source chip (slightly stronger
    * border) since it represents the primary association. */
   .chip-game {
-    color: var(--color-text);
-    border-color: var(--color-text-muted);
+    color: var(--text);
+    border-color: var(--text-3);
   }
   .picker-line {
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     flex-wrap: wrap;
     min-width: 0;
+    padding: 0 var(--s-4) var(--s-3);
   }
-  /* Inline "Mark standalone" triage button. Visual style mirrors the
-   * AttachToGamePicker trigger (subtle ghost button) so the two affordances
-   * read as a triage pair on inbox cards. */
+  /* Inline "Mark standalone" triage button. */
   .standalone-button {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-label);
+    min-height: var(--hit);
+    padding: 0 var(--s-3);
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-size: var(--t-13);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .standalone-button:hover:not(:disabled) {
-    background: var(--color-bg);
+    background: var(--surface-2);
   }
   .standalone-button:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .feed-card,
+    .standalone-button {
+      transition: none;
+    }
   }
 </style>

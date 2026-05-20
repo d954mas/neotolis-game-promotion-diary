@@ -143,6 +143,7 @@
   <a
     class="tab"
     class:active={isActive("all")}
+    data-active={isActive("all") ? "1" : undefined}
     data-tab="all"
     href={buildHref("all")}
     onclick={(e) => handleClick("all", e)}>{m.feed_quick_nav_all()}</a
@@ -151,6 +152,7 @@
   <a
     class="tab"
     class:active={isActive("inbox")}
+    data-active={isActive("inbox") ? "1" : undefined}
     data-tab="inbox"
     href={buildHref("inbox")}
     onclick={(e) => handleClick("inbox", e)}>{m.feed_quick_nav_inbox()}</a
@@ -159,6 +161,7 @@
   <a
     class="tab"
     class:active={isActive("standalone")}
+    data-active={isActive("standalone") ? "1" : undefined}
     data-tab="standalone"
     href={buildHref("standalone")}
     onclick={(e) => handleClick("standalone", e)}>{m.feed_quick_nav_standalone()}</a
@@ -168,6 +171,7 @@
     <a
       class="tab"
       class:active={isActive({ game: g.id })}
+      data-active={isActive({ game: g.id }) ? "1" : undefined}
       data-tab="game"
       data-game-id={g.id}
       href={buildHref({ game: g.id })}
@@ -183,6 +187,7 @@
           <a
             class="tab dropdown-item"
             class:active={isActive({ game: g.id })}
+            data-active={isActive({ game: g.id }) ? "1" : undefined}
             data-tab="game"
             data-game-id={g.id}
             href={buildHref({ game: g.id })}
@@ -210,14 +215,19 @@
      * не залипали, это лишнее." */
 
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-1);
     flex-wrap: nowrap;
     overflow-x: auto;
     /* scroll-snap-type ensures touch scrolling on iOS lands cleanly on the
      * next tab boundary — critical for thumb-only navigation at 360px when
      * the strip overflows (6+ games). */
     scroll-snap-type: x mandatory;
-    padding: var(--space-xs) 0;
+    padding: var(--s-2) var(--s-4);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border-hairline);
+    max-width: var(--max-w);
+    margin: 0 auto;
+    min-width: 0;
     -webkit-overflow-scrolling: touch;
     /* Hide scrollbar visually on platforms that show it by default; the
      * touch / wheel scroll affordance still works. */
@@ -231,17 +241,23 @@
     scroll-snap-align: start;
     display: inline-flex;
     align-items: center;
-    min-height: 36px;
-    padding: 0 var(--space-md);
+    gap: var(--s-1);
+    min-height: var(--hit);
+    padding: 0 var(--s-3);
     background: transparent;
-    color: var(--color-text-muted);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    font-size: var(--font-size-label);
-    font-weight: var(--font-weight-semibold);
+    color: var(--text-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
     text-decoration: none;
     cursor: pointer;
     white-space: nowrap;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
     /* Reset <summary> default disclosure marker so the "More games" tab
      * looks identical to the sibling chips. The tab still toggles open
      * via native <details> behavior. */
@@ -251,12 +267,14 @@
     display: none;
   }
   .tab:hover {
-    background: var(--color-bg);
+    background: var(--accent-soft);
+    color: var(--text);
   }
-  .tab.active {
-    background: var(--color-accent);
-    color: var(--color-on-accent, #fff);
-    border-color: var(--color-accent);
+  .tab.active,
+  .tab[data-active="1"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent-strong);
   }
   .more {
     flex: 0 0 auto;
@@ -271,15 +289,16 @@
   }
   .dropdown {
     position: absolute;
-    top: calc(100% + var(--space-xs));
+    top: calc(100% + var(--s-1));
     left: 0;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    padding: var(--space-xs);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-elev);
+    padding: var(--s-1);
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
     min-width: 180px;
     z-index: 5;
   }
@@ -287,7 +306,17 @@
     width: 100%;
     /* Inside the dropdown, chips read like a vertical menu — pull the
      * border-radius back to a normal rect so adjacent items align. */
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     justify-content: flex-start;
+  }
+  @media (min-width: 768px) {
+    .quick-nav {
+      padding: var(--s-2) var(--s-6);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tab {
+      transition: none;
+    }
   }
 </style>

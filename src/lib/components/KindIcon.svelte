@@ -6,16 +6,18 @@
   //   youtube_video, reddit_post, twitter_post, telegram_post, discord_drop,
   //   conference, talk, press, other, post.
   //
-  // Icon style contract: 24px viewBox, stroke="currentColor",
-  // stroke-width 2, round caps/joins, fill="none", colored via
-  // --color-text-muted. Geometric forms only — NO brand marks (a YouTube
-  // "play" rectangle is the closest visual; we render it as a generic
-  // play-button triangle inside a rounded rect, indistinguishable from a
-  // generic media icon).
+  // Icon style contract (UI-SPEC § "Iconography Contract"): 24px viewBox,
+  // stroke="currentColor", stroke-width 1.75, round caps/joins, fill="none",
+  // colored via --text-3 by default. Geometric forms only — NO brand marks
+  // (the Reddit Snoo silhouette is geometric primitives, not a brand logo).
   //
   // Accessibility: aria-hidden="true" (decorative); the kind name is
   // conveyed in adjacent text via the m.event_kind_label_*() Paraglide
   // labels.
+  //
+  // LB-11 contract: class="kind" on <svg> is consumed by FeedCard's
+  // `.overlay-kind :global(svg.kind)` selector to bridge color from the
+  // dark pill overlay into the icon (currentColor → white). Do not rename.
 
   type EventKind =
     | "youtube_video"
@@ -39,7 +41,7 @@
   viewBox="0 0 24 24"
   fill="none"
   stroke="currentColor"
-  stroke-width="2"
+  stroke-width="1.75"
   stroke-linecap="round"
   stroke-linejoin="round"
   aria-hidden="true"
@@ -49,9 +51,24 @@
     <rect x="2" y="5" width="20" height="14" rx="3" />
     <path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none" />
   {:else if kind === "reddit_post"}
-    <!-- speech bubble + upvote arrow (generic forum form, not brand) -->
-    <path d="M21 13a8 8 0 01-8 8 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7A8 8 0 1121 13z" />
-    <path d="M9 13l3-3 3 3" />
+    <!-- Snoo-style silhouette per docs/design/v2/ui-kit/app-data.jsx case "reddit_post":
+         round head with two pointy ears + antenna + small eyes + smile.
+         Geometric primitives only; reads as Reddit at small sizes. -->
+    <!-- antenna -->
+    <circle cx="18.5" cy="5" r="1.4" fill="currentColor" stroke="none" />
+    <path d="M14.7 11.2 17.5 6.5" />
+    <!-- head -->
+    <circle cx="12" cy="13.5" r="6.5" fill="currentColor" stroke="none" />
+    <!-- ears (sit on top of head silhouette) -->
+    <circle cx="7" cy="9.5" r="1.6" fill="currentColor" stroke="none" />
+    <circle cx="17" cy="9.5" r="1.6" fill="currentColor" stroke="none" />
+    <!-- eyes — cut-out by drawing in bg color over the head -->
+    <circle cx="9.5" cy="13" r="1.1" fill="var(--surface)" stroke="none" />
+    <circle cx="14.5" cy="13" r="1.1" fill="var(--surface)" stroke="none" />
+    <circle cx="9.5" cy="13" r=".45" fill="currentColor" stroke="none" />
+    <circle cx="14.5" cy="13" r=".45" fill="currentColor" stroke="none" />
+    <!-- smile -->
+    <path d="M9.5 16c1.5 1.2 3.5 1.2 5 0" stroke="var(--surface)" stroke-width="1.2" fill="none" />
   {:else if kind === "conference"}
     <!-- people / podium -->
     <circle cx="12" cy="7" r="3" />
@@ -95,7 +112,7 @@
 
 <style>
   .kind {
-    color: var(--color-text-muted);
+    color: var(--text-3);
     flex-shrink: 0;
   }
 </style>
