@@ -190,15 +190,17 @@
 </div>
 
 <style>
+  /* v2 RefreshContentButton — D-01 redraw via button-on-source-row
+   * pattern. Preserves Phase 03.0.1 plan 10 POST /api/sources/:id
+   * /refresh-content trigger. */
   .refresh-content {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   .refresh-content__button--compact {
     /* Fixed width so cooldown numbers (e.g. "287") don't stretch the
-       button — pre-fix `min-width: 2rem` allowed up to 3 char numbers
-       to grow it inconsistently between adjacent rows. */
+       button. */
     width: 3rem;
     height: 2rem;
     padding: 0;
@@ -230,31 +232,47 @@
       transform: rotate(360deg);
     }
   }
+  @media (prefers-reduced-motion: reduce) {
+    .refresh-content__icon--spinning {
+      animation: none;
+    }
+  }
   .refresh-content__button {
-    padding: var(--space-sm) var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-on-accent, white);
-    border: 1px solid transparent;
-    border-radius: var(--radius-md);
+    padding: var(--s-2) var(--s-4);
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: var(--font-size-body);
-    font-weight: 500;
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .refresh-content__button:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   .refresh-content__button:disabled {
     cursor: not-allowed;
-    opacity: 0.6;
-  }
-  .refresh-content__button:hover:not(:disabled) {
-    filter: brightness(1.05);
+    opacity: 0.55;
   }
   .refresh-content__toast {
     margin: 0;
-    font-size: var(--font-size-label);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
   }
   .refresh-content__toast--ok {
-    color: var(--color-text-muted);
+    color: var(--text-3);
   }
   .refresh-content__toast--err {
-    color: var(--color-destructive);
+    color: var(--danger);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .refresh-content__button {
+      transition: none;
+    }
   }
 </style>
