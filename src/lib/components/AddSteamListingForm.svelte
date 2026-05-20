@@ -178,61 +178,85 @@
 {/if}
 
 <style>
+  /* v2 add-form recipe — --surface-2 well + --r-md container; --surface-3
+   * input bg + --border. Submit is --accent at --hit-lg height. Pattern
+   * reused by ReplaceKeyForm + Reddit/YoutubeOpsPanel. */
   .add-listing {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
-    padding: var(--space-md);
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    gap: var(--s-3);
+    padding: var(--s-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
   }
   .field {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   .field-label {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    color: var(--text-2);
   }
   .input {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
+    min-height: var(--hit);
+    padding: var(--s-2) var(--s-3);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    transition: border-color var(--m-fast) var(--m-ease);
+  }
+  .input:hover:not(:disabled) {
+    border-color: var(--accent-strong);
   }
   .submit {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border: none;
-    border-radius: 4px;
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit-lg);
+    padding: var(--s-2) var(--s-4);
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
     cursor: pointer;
     align-self: flex-start;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .submit:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   .submit:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: not-allowed;
   }
-  /* Duplicate-toast inline error block. Mirrors InlineError's destructive
-   * surface but keeps the deep link rendered as a child <a>. */
+  /* Duplicate-toast inline error block — danger border on --surface-3. */
   .duplicate-error {
-    margin: var(--space-sm) 0 0 0;
-    padding: var(--space-sm) var(--space-md);
-    background: var(--color-bg);
-    border: 1px solid var(--color-destructive);
-    border-radius: 4px;
-    color: var(--color-text);
-    font-size: var(--font-size-label);
+    margin: var(--s-2) 0 0 0;
+    padding: var(--s-2) var(--s-3);
+    background: var(--surface-3);
+    border: 1px solid var(--danger);
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
   }
   .duplicate-error a {
-    color: var(--color-accent);
-    font-weight: var(--font-weight-semibold);
+    color: var(--accent);
+    font-weight: var(--w-sb);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .input,
+    .submit {
+      transition: none;
+    }
   }
 </style>

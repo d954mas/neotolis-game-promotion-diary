@@ -107,58 +107,81 @@
 {/if}
 
 <style>
+  /* v2 DeletedEventsPanel — --surface-2 banner with restore actions. */
   .deleted-panel {
-    margin-top: var(--space-lg);
-    padding-top: var(--space-md);
-    border-top: 1px solid var(--color-border);
+    margin-top: var(--s-6);
+    padding-top: var(--s-3);
+    border-top: 1px solid var(--border-hairline);
   }
   .toggle {
     background: transparent;
-    color: var(--color-text-muted);
+    color: var(--text-3);
     border: none;
     cursor: pointer;
-    font-size: var(--font-size-label);
-    padding: var(--space-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    padding: var(--s-2);
     text-decoration: underline;
+    transition: color var(--m-fast) var(--m-ease);
   }
   .toggle:hover {
-    color: var(--color-text);
+    color: var(--text);
   }
   .rows {
     list-style: none;
-    margin: var(--space-md) 0 0 0;
+    margin: var(--s-3) 0 0 0;
     padding: 0;
+    background: var(--surface-2);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-md);
+    overflow: hidden;
   }
   .row {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-md);
-    border-bottom: 1px solid var(--color-border);
+    gap: var(--s-2);
+    padding: var(--s-3) var(--s-4);
+    border-bottom: 1px solid var(--border-hairline);
+  }
+  .row:last-child {
+    border-bottom: none;
   }
   .title {
     flex: 1 1 auto;
     min-width: 0;
-    color: var(--color-text-muted);
+    color: var(--text-3);
+    font-size: var(--t-14);
     text-decoration: line-through;
     word-break: break-word;
   }
   .restore {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-accent);
-    border-radius: 4px;
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: var(--font-size-label);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
-  .restore:hover {
-    filter: brightness(1.05);
+  .restore:hover:not(:disabled) {
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
   .restore:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: not-allowed;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .toggle,
+    .restore {
+      transition: none;
+    }
   }
 </style>

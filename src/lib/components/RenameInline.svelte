@@ -108,71 +108,103 @@
 {/if}
 
 <style>
+  /* v2 RenameInline — D-01 redraw via inline-edit pattern. Click-to-edit
+   * read button with --surface-2 hover; editing mode has --surface-3 input
+   * + --accent save + --border cancel. */
   .read {
     background: transparent;
     border: 1px solid transparent;
-    padding: var(--space-xs) var(--space-sm);
-    border-radius: 4px;
+    padding: var(--s-1) var(--s-2);
+    border-radius: var(--r-sm);
     cursor: text;
     text-align: left;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .read:hover,
   .read:focus-visible {
-    background: var(--color-surface);
-    border-color: var(--color-border);
+    background: var(--surface-2);
+    border-color: var(--border);
   }
   .title {
     margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
-    line-height: var(--line-height-heading);
-    color: var(--color-text);
+    font-family: var(--f-sans);
+    font-size: var(--t-22);
+    font-weight: var(--w-sb);
+    line-height: var(--lh-tight);
+    color: var(--text);
   }
   .edit {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     min-width: 0;
   }
   .input {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-17);
+    font-weight: var(--w-sb);
     width: 100%;
     box-sizing: border-box;
+    transition: border-color var(--m-fast) var(--m-ease);
+  }
+  .input:hover {
+    border-color: var(--accent-strong);
   }
   .actions {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     flex-wrap: wrap;
   }
   .save,
   .discard {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .save {
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border: 1px solid var(--color-accent);
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+  }
+  .save:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   .save:disabled,
   .discard:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: not-allowed;
   }
   .discard {
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
+    background: transparent;
+    color: var(--text-2);
+    border: 1px solid var(--border);
+  }
+  .discard:hover:not(:disabled) {
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .read,
+    .input,
+    .save,
+    .discard {
+      transition: none;
+    }
   }
 </style>
