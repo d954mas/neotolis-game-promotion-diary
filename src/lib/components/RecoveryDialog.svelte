@@ -152,14 +152,14 @@
     flex-direction: column;
   }
   .dialog {
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
     padding: 0;
-    width: min(560px, calc(100vw - 2 * var(--space-md)));
-    max-height: min(80vh, calc(100vh - 2 * var(--space-lg)));
-    box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+    width: min(560px, calc(100vw - 2 * var(--s-4)));
+    max-height: min(80vh, calc(100vh - 2 * var(--s-6)));
+    box-shadow: var(--shadow-elev);
     /* The dialog body needs to scroll independently when the recovery
      * list overflows. Native <dialog> applies overflow:auto by default
      * via UA stylesheet on Chromium but Firefox does not — declare it
@@ -167,40 +167,44 @@
     overflow: hidden;
   }
   .dialog::backdrop {
-    background: rgb(0 0 0 / 50%);
+    background: var(--overlay-dark);
   }
   .header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--space-md);
-    padding: var(--space-md) var(--space-lg);
-    border-bottom: 1px solid var(--color-border);
+    gap: var(--s-4);
+    padding: var(--s-4) var(--s-6);
+    border-bottom: 1px solid var(--border);
   }
   .heading {
     margin: 0;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    font-size: var(--t-17);
+    font-weight: var(--w-sb);
+    color: var(--text);
   }
   .close {
     background: transparent;
-    color: var(--color-text-muted);
+    color: var(--text-3);
     border: none;
     font-size: 1.5rem;
     line-height: 1;
     cursor: pointer;
-    padding: var(--space-xs) var(--space-sm);
-    border-radius: 4px;
+    padding: var(--s-1) var(--s-2);
+    border-radius: var(--r-sm);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
   }
   .close:hover {
-    color: var(--color-text);
-    background: var(--color-bg);
+    color: var(--text);
+    background: var(--accent-soft);
   }
   .empty {
     margin: 0;
-    padding: var(--space-lg);
-    color: var(--color-text-muted);
-    font-size: var(--font-size-body);
+    padding: var(--s-6);
+    color: var(--text-3);
+    font-size: var(--t-14);
     text-align: center;
   }
   .rows {
@@ -217,9 +221,9 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-md) var(--space-lg);
-    border-bottom: 1px solid var(--color-border);
+    gap: var(--s-2);
+    padding: var(--s-3) var(--s-6);
+    border-bottom: 1px solid var(--border-hairline);
   }
   .row:last-child {
     border-bottom: none;
@@ -227,24 +231,37 @@
   .name {
     flex: 1 1 auto;
     min-width: 0;
-    color: var(--color-text);
+    color: var(--text);
+    font-size: var(--t-14);
     word-break: break-word;
   }
   .restore {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-accent);
-    border-radius: 4px;
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-4);
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: var(--font-size-label);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
-  .restore:hover {
-    filter: brightness(1.05);
+  .restore:hover:not(:disabled) {
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
   .restore:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: not-allowed;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .close,
+    .restore {
+      transition: none;
+    }
   }
 </style>

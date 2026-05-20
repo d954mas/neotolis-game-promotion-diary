@@ -185,51 +185,55 @@
     flex-direction: column;
   }
   .dialog {
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
     padding: 0;
-    width: min(640px, calc(100vw - 2 * var(--space-md)));
-    max-height: min(90vh, calc(100vh - 2 * var(--space-lg)));
-    box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+    width: min(640px, calc(100vw - 2 * var(--s-4)));
+    max-height: min(90vh, calc(100vh - 2 * var(--s-6)));
+    box-shadow: var(--shadow-elev);
     overflow: hidden;
   }
   .dialog::backdrop {
-    background: rgb(0 0 0 / 50%);
+    background: var(--overlay-dark);
   }
   .header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--space-md);
-    padding: var(--space-md) var(--space-lg);
-    border-bottom: 1px solid var(--color-border);
+    gap: var(--s-4);
+    padding: var(--s-4) var(--s-6);
+    border-bottom: 1px solid var(--border);
   }
   .heading {
     margin: 0;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    font-size: var(--t-17);
+    font-weight: var(--w-sb);
+    color: var(--text);
   }
   .close {
     background: transparent;
-    color: var(--color-text-muted);
+    color: var(--text-3);
     border: none;
     font-size: 1.5rem;
     line-height: 1;
     cursor: pointer;
-    padding: var(--space-xs) var(--space-sm);
-    border-radius: 4px;
+    padding: var(--s-1) var(--s-2);
+    border-radius: var(--r-sm);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
   }
   .close:hover:not(:disabled) {
-    color: var(--color-text);
-    background: var(--color-bg);
+    color: var(--text);
+    background: var(--accent-soft);
   }
   .body {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
-    padding: var(--space-lg);
+    gap: var(--s-4);
+    padding: var(--s-6);
     overflow-y: auto;
     flex: 1 1 auto;
     min-height: 0;
@@ -237,82 +241,105 @@
   .field {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
     min-width: 0;
   }
   .field-label {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    font-weight: var(--font-weight-semibold);
+    font-size: var(--t-13);
+    color: var(--text-2);
+    font-weight: var(--w-md);
   }
   .input {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-bg);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit);
+    padding: var(--s-2) var(--s-3);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
     width: 100%;
     box-sizing: border-box;
+    transition: border-color var(--m-fast) var(--m-ease);
+  }
+  .input:hover:not(:disabled) {
+    border-color: var(--accent-strong);
   }
   .textarea {
-    padding: var(--space-sm) var(--space-md);
-    background: var(--color-bg);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    line-height: var(--line-height-body);
+    padding: var(--s-2) var(--s-3);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    line-height: var(--lh-body);
     width: 100%;
     box-sizing: border-box;
     resize: vertical;
     min-height: 120px;
-    font-family: inherit;
+    transition: border-color var(--m-fast) var(--m-ease);
+  }
+  .textarea:hover:not(:disabled) {
+    border-color: var(--accent-strong);
   }
   .char-count {
     align-self: flex-end;
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-size: var(--t-12);
+    color: var(--text-3);
   }
   .actions {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     justify-content: flex-end;
-    border-top: 1px solid var(--color-border);
-    padding-top: var(--space-md);
-    margin-top: var(--space-sm);
+    border-top: 1px solid var(--border-hairline);
+    padding-top: var(--s-4);
+    margin-top: var(--s-2);
   }
   .cancel,
   .save {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit);
+    padding: var(--s-2) var(--s-4);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .cancel {
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
   }
   .cancel:hover:not(:disabled) {
-    background: var(--color-bg);
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
   .save {
-    background: var(--color-accent);
-    color: var(--color-accent-text, #fff);
-    border: 1px solid var(--color-accent);
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
   }
   .save:hover:not(:disabled) {
-    filter: brightness(1.05);
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   .save:disabled,
   .cancel:disabled,
   .close:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: not-allowed;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .close,
+    .input,
+    .textarea,
+    .cancel,
+    .save {
+      transition: none;
+    }
   }
 </style>
