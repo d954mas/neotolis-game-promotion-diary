@@ -218,117 +218,132 @@
 </aside>
 
 <style>
+  /* v2 QuotaStatusBanner — D-01 redraw via DeletedEventsPanel analogy.
+   * --surface-2 + --border-2 banner; per-axis progress bars use semantic
+   * --accent / --warn / --danger colors. */
   .quota-banner {
     display: grid;
-    gap: var(--space-sm, 0.5rem);
-    padding: var(--space-md, 1rem);
-    border: 1px solid var(--color-border, #e0e0e0);
-    border-radius: var(--radius-md, 0.5rem);
-    background: var(--color-surface, #f7f7f7);
-    margin-bottom: var(--space-md, 1rem);
+    gap: var(--s-2);
+    padding: var(--s-4) var(--s-6);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    margin-bottom: var(--s-4);
   }
   .quota-banner__header {
     display: grid;
-    gap: var(--space-2xs, 0.125rem);
+    gap: var(--s-0);
   }
   .quota-banner__title {
     margin: 0;
-    font-size: var(--font-size-h3, 1.1rem);
-    font-weight: 600;
+    font-family: var(--f-sans);
+    font-size: var(--t-15);
+    font-weight: var(--w-sb);
+    color: var(--text);
   }
   .quota-banner__subtitle {
     margin: 0;
-    font-size: var(--font-size-label, 0.875rem);
-    color: var(--color-text-muted, #666);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    color: var(--text-2);
+    line-height: var(--lh-body);
   }
   .quota-banner__platform {
     display: grid;
-    gap: var(--space-2xs, 0.125rem);
-    padding: var(--space-xs, 0.25rem) 0;
-    border-top: 1px solid var(--color-border-subtle, #efefef);
+    gap: var(--s-1);
+    padding: var(--s-2) 0;
+    border-top: 1px solid var(--border-hairline);
   }
   .quota-banner__platform-name {
     margin: 0;
-    font-size: var(--font-size-body, 1rem);
-    font-weight: 500;
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    font-weight: var(--w-md);
+    color: var(--text);
   }
   .quota-banner__axis {
     display: flex;
     align-items: center;
-    gap: var(--space-xs, 0.5rem);
-    font-size: var(--font-size-label, 0.875rem);
+    gap: var(--s-2);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    color: var(--text-2);
   }
   .quota-banner__axis-label {
     min-width: 8em;
-    color: var(--color-text-muted, #666);
+    color: var(--text-3);
   }
   .quota-banner__axis-value {
     font-variant-numeric: tabular-nums;
   }
   .quota-banner__no-limit {
-    color: var(--color-text-muted, #888);
+    color: var(--text-3);
   }
   .quota-banner__bar {
     flex: 1;
     height: 6px;
-    background: var(--color-border-subtle, #efefef);
-    border-radius: 3px;
+    background: var(--surface-3);
+    border-radius: var(--r-pill);
     overflow: hidden;
     max-width: 200px;
   }
   .quota-banner__bar-fill {
     height: 100%;
-    transition: width 0.2s ease;
+    transition: width var(--m-base) var(--m-ease);
   }
   .quota-banner__bar--ok .quota-banner__bar-fill {
-    background: var(--color-accent, #4a7);
+    background: var(--accent);
   }
   .quota-banner__bar--warning .quota-banner__bar-fill {
-    background: var(--color-warning, #d90);
+    background: var(--warn);
   }
   .quota-banner__bar--error .quota-banner__bar-fill {
-    background: var(--color-destructive, #d33);
+    background: var(--danger);
   }
   .quota-banner__reset {
-    color: var(--color-text-muted, #666);
-    font-size: var(--font-size-label, 0.875rem);
+    color: var(--text-3);
+    font-size: var(--t-12);
   }
   .quota-banner__lifetime {
-    margin-top: var(--space-xs, 0.5rem);
-    padding-top: var(--space-xs, 0.5rem);
-    border-top: 1px solid var(--color-border-subtle, #efefef);
-    font-size: var(--font-size-label, 0.875rem);
-    color: var(--color-text-muted, #666);
+    margin-top: var(--s-2);
+    padding-top: var(--s-2);
+    border-top: 1px solid var(--border-hairline);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    color: var(--text-3);
   }
   .quota-banner__lifetime-title {
-    margin: 0 0 var(--space-2xs, 0.125rem) 0;
-    font-size: var(--font-size-label, 0.875rem);
-    font-weight: 600;
+    margin: 0 0 var(--s-0) 0;
+    font-size: var(--t-12);
+    font-weight: var(--w-sb);
     text-transform: uppercase;
     letter-spacing: 0.04em;
+    color: var(--text-2);
   }
   .quota-banner__lifetime-row {
     display: flex;
-    gap: var(--space-xs, 0.5rem);
+    gap: var(--s-2);
     font-variant-numeric: tabular-nums;
   }
-  /* Reddit-specific surfaces (Phase 03.1 plan 08).
-   * "Not configured" empty state when REDDIT_USER_AGENT is empty —
-   * muted, single line; no axis bars (D-RDT-AUTH-EMPTY).
-   * Explainer line under the 3-axis block — small + muted; surfaces
-   * the per-minute / per-5-min cap rationale without bloating the
-   * three axis lines themselves. */
+  /* Reddit-specific surfaces (Phase 03.1 plan 08). */
   .quota-banner__not-configured {
     margin: 0;
-    color: var(--color-text-muted, #888);
-    font-size: var(--font-size-label, 0.875rem);
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
     font-style: italic;
   }
   .quota-banner__reddit-explainer {
     display: block;
-    margin-top: var(--space-xs, 0.25rem);
-    color: var(--color-text-muted, #888);
-    font-size: var(--font-size-label, 0.8125rem);
-    line-height: 1.4;
+    margin-top: var(--s-1);
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    line-height: var(--lh-body);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .quota-banner__bar-fill {
+      transition: none;
+    }
   }
 </style>
