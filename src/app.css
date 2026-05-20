@@ -14,38 +14,68 @@
  */
 
 :root {
-  /* Spacing — 8-point baseline. Used as gaps and padding throughout. */
-  --space-xs: 4px;
-  --space-sm: 8px;
-  --space-md: 16px;
-  --space-lg: 24px;
-  --space-xl: 32px;
-  --space-2xl: 48px;
-  --space-3xl: 64px; /* reserved — chart breathing room */
+  /* Spacing — 4-point baseline (denser than v1's 8-point). */
+  --s-0: 2px; /* sub-grid (hairline padding) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-7: 32px;
+  --s-8: 48px;
 
-  /* Typography — three sizes + display. */
-  --font-size-body: 16px;
-  --font-size-label: 14px;
-  --font-size-heading: 24px;
-  --font-size-display: 32px;
+  /* Radii — slightly softer than v1 but still tool-feeling. */
+  --r-xs: 3px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
 
-  --font-weight-regular: 400;
-  --font-weight-semibold: 600;
+  /* Type scale — denser, more readable. */
+  --t-12: 12px; /* meta, chips, mono */
+  --t-13: 13px; /* dense body, source handles */
+  --t-14: 14px; /* default body */
+  --t-15: 15px; /* card title */
+  --t-17: 17px; /* page subtitle */
+  --t-22: 22px; /* h1 (was 24) */
+  --t-30: 30px; /* display */
 
-  --line-height-body: 1.5;
-  --line-height-heading: 1.2;
-  --line-height-mono: 1.4;
+  --w-rg: 420; /* slightly weightier 'regular' for dark mode legibility */
+  --w-md: 520;
+  --w-sb: 600;
 
-  --font-family-sans:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-family-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --lh-tight: 1.25;
+  --lh-body: 1.5;
 
-  /* Breakpoints — declared as custom properties for documentation; @media
-   * queries below reference the literal pixel values (CSS spec doesn't allow
-   * custom properties inside @media conditions). */
-  --bp-mobile: 360px; /* hard floor */
-  --bp-tablet: 768px;
-  --bp-desktop: 1024px;
+  --f-sans:
+    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Hit targets, layout. */
+  --hit: 36px; /* denser than v1's 44, but still safe on touch */
+  --hit-lg: 40px;
+  --max-w: 1280px;
+
+  /* Motion. */
+  --m-fast: 120ms;
+  --m-base: 180ms;
+  --m-ease: cubic-bezier(0.32, 0.72, 0.32, 1); /* iOS-like — subtle ease-out */
+
+  /* Kind palette — desaturated for dark, characteristic for instant recognition.
+   * Used on left-border accent + icon tint. Theme-agnostic; same values
+   * carry across light + dark (kind identity is platform, not theme). */
+  --k-youtube: #e0625c; /* warm red */
+  --k-reddit: #e08555; /* orange */
+  --k-twitter: #6fa0d1; /* muted sky */
+  --k-telegram: #5baac8; /* cyan */
+  --k-discord: #7a82d6; /* indigo */
+  --k-conference: #7fb46a; /* sage */
+  --k-talk: #d8b259; /* amber */
+  --k-press: #b488d4; /* lilac */
+  --k-post: #8a8a95; /* neutral */
+  --k-other: #8a8a95;
 
   /* Single source of truth for the sticky chrome offset. The chrome
    * wrapper (`.sticky-chrome` in src/routes/+layout.svelte) contains BOTH
@@ -106,65 +136,111 @@
    *
    * Overlap is invisible: `.sticky-chrome` (z: 10) paints over
    * `.page-header.sticky` (z: 5) paints over `.date-header` (z: 1) in the
-   * 1px overlap rows, and adjacent tiers share `--color-surface` /
-   * `--color-bg` backgrounds so even without z-stacking the column would
+   * 1px overlap rows, and adjacent tiers share `--surface` /
+   * `--bg` backgrounds so even without z-stacking the column would
    * look identical. */
   --sticky-overlap: 1px;
 }
 
-/* Color — light theme (default + explicit). */
+/* ─── Dark theme (default) — warm-neutral, Things 3 nighttime + Linear discipline ─── */
 :root,
-:root[data-theme="light"] {
-  --color-bg: #fafafa;
-  --color-surface: #ffffff;
-  --color-border: #e5e5e5;
-  --color-text: #1a1a1a;
-  --color-text-muted: #666666;
-  --color-accent: #2563eb;
-  --color-accent-text: #ffffff;
-  --color-destructive: #b91c1c;
-  --color-info: #0891b2;
-  --color-success: #15803d;
-  /* Single source of truth for the Mine accent. Defaults to --color-accent
-   * so the existing visual stays unchanged across FeedCard.mine and
-   * SourceRow.mine; can diverge later if Mine should read distinctly from
-   * the generic accent. */
-  --color-mine: var(--color-accent);
-}
-
-/* Color — dark theme (explicit). */
 :root[data-theme="dark"] {
-  --color-bg: #0d0d0d;
-  --color-surface: #171717;
-  --color-border: #262626;
-  --color-text: #f5f5f5;
-  --color-text-muted: #a3a3a3;
-  --color-accent: #60a5fa;
-  --color-accent-text: #0d0d0d;
-  --color-destructive: #f87171;
-  --color-info: #22d3ee;
-  --color-success: #4ade80;
-  /* Mine accent inherits the dark-theme accent. */
-  --color-mine: var(--color-accent);
+  /* warm-toned darks (hue ~30, very low saturation). */
+  --bg: #0e0e10;
+  --surface: #16161a;
+  --surface-2: #1c1c21; /* elevated panels, hover */
+  --surface-3: #232328; /* highest tier (overlays, focused fields) */
+  --border: #2b2b31;
+  --border-2: #393940; /* stronger separators */
+  --border-hairline: rgba(255, 255, 255, 0.06);
+
+  --text: #ececee;
+  --text-2: #b0b0b7; /* secondary */
+  --text-3: #7e7e86; /* tertiary, captions */
+  --text-4: #57575e; /* hint, disabled */
+
+  /* accent — warm amber-coral. Replaces v1's generic blue. */
+  --accent: #e89b5e;
+  --accent-strong: #f3ae73; /* hover / brighter */
+  --accent-soft: rgba(232, 155, 94, 0.14); /* fill tint */
+  --accent-text: #0e0e10;
+
+  /* semantic */
+  --success: #6fb36a;
+  --warn: #d8b259;
+  --danger: #e07377;
+  --info: #6fa0d1;
+
+  /* overlays + elevation */
+  --overlay-dark: rgba(0, 0, 0, 0.55);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.025) inset, 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-elev: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 8px 24px rgba(0, 0, 0, 0.4);
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 }
 
-/* Color — system theme honors prefers-color-scheme. The light baseline above
- * already applies via :root, so this block only flips when the OS asks for
- * dark AND the user has selected the "system" option. */
-@media (prefers-color-scheme: dark) {
+/* ─── Light theme (kept as alternate) ─── */
+:root[data-theme="light"] {
+  --bg: #fbfaf7; /* warm off-white, paper-feel */
+  --surface: #ffffff;
+  --surface-2: #f4f2ee;
+  --surface-3: #ebe9e3;
+  --border: #e3e0d9;
+  --border-2: #d2cec4;
+  --border-hairline: rgba(0, 0, 0, 0.06);
+
+  --text: #1b1b1d;
+  --text-2: #56565c;
+  --text-3: #82828a;
+  --text-4: #b0b0b7;
+
+  --accent: #c76d3c; /* slightly deeper amber for light bg contrast */
+  --accent-strong: #b05e2f;
+  --accent-soft: rgba(199, 109, 60, 0.1);
+  --accent-text: #ffffff;
+
+  --success: #4f8e4a;
+  --warn: #9c7a24;
+  --danger: #b33c40;
+  --info: #2e6ea8;
+
+  --overlay-dark: rgba(0, 0, 0, 0.55);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-elev: 0 8px 24px rgba(0, 0, 0, 0.1);
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+/* Color — system theme honors prefers-color-scheme. The dark baseline above
+ * already applies via :root, so this block only flips the system selector to
+ * light when the OS asks for light AND the user has selected "system". */
+@media (prefers-color-scheme: light) {
   :root[data-theme="system"] {
-    --color-bg: #0d0d0d;
-    --color-surface: #171717;
-    --color-border: #262626;
-    --color-text: #f5f5f5;
-    --color-text-muted: #a3a3a3;
-    --color-accent: #60a5fa;
-    --color-accent-text: #0d0d0d;
-    --color-destructive: #f87171;
-    --color-info: #22d3ee;
-    --color-success: #4ade80;
-    /* Mine accent inherits the system-dark accent. */
-    --color-mine: var(--color-accent);
+    --bg: #fbfaf7;
+    --surface: #ffffff;
+    --surface-2: #f4f2ee;
+    --surface-3: #ebe9e3;
+    --border: #e3e0d9;
+    --border-2: #d2cec4;
+    --border-hairline: rgba(0, 0, 0, 0.06);
+
+    --text: #1b1b1d;
+    --text-2: #56565c;
+    --text-3: #82828a;
+    --text-4: #b0b0b7;
+
+    --accent: #c76d3c;
+    --accent-strong: #b05e2f;
+    --accent-soft: rgba(199, 109, 60, 0.1);
+    --accent-text: #ffffff;
+
+    --success: #4f8e4a;
+    --warn: #9c7a24;
+    --danger: #b33c40;
+    --info: #2e6ea8;
+
+    --overlay-dark: rgba(0, 0, 0, 0.55);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-elev: 0 8px 24px rgba(0, 0, 0, 0.1);
+    --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
   }
 }
 
@@ -200,11 +276,6 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: var(--color-bg);
-  color: var(--color-text);
-  font-family: var(--font-family-sans);
-  font-size: var(--font-size-body);
-  line-height: var(--line-height-body);
   /* No horizontal scroll at 360px.
    *
    * Use `overflow-x: clip` instead of `overflow-x: hidden`. Per CSS spec,
@@ -220,6 +291,27 @@ body {
   overflow-x: clip;
 }
 
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--f-sans);
+  font-size: var(--t-14);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "ss01", "cv11", "cv05";
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  color: inherit;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 /* Defeat default flex/grid `min-width: auto` so children at 360px don't
  * overflow the viewport. UI-SPEC §"Layout" mandates min-width: 0 on every
  * flex container. */
@@ -233,10 +325,13 @@ div {
   min-width: 0;
 }
 
-/* Focus ring — never removed; 2px solid accent with 2px offset. */
+/* Focus ring — never removed; v2 form via box-shadow uses the focus-ring
+ * token (2px bg + 2px accent halo) and rounds with --r-xs for subtle softening
+ * on small elements. */
 :focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--r-xs);
 }
 
 /* Declarative body-scroll lock when ANY <dialog> is open. An imperative
