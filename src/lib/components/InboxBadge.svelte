@@ -18,14 +18,19 @@
 </span>
 
 <style>
+  /* v2 InboxBadge — --r-pill chip with --accent-soft + --accent for the
+   * "awaiting attachment" affordance. Promoted from muted-neutral to the
+   * accent wash so the inbox state reads as actionable. */
   .inbox-badge {
     display: inline-flex;
     align-items: center;
-    background: var(--color-border);
-    color: var(--color-text-muted);
-    padding: var(--space-xs) var(--space-sm);
-    border-radius: 4px;
-    font-size: var(--font-size-label);
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding: var(--s-0) var(--s-2);
+    border-radius: var(--r-pill);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
     line-height: 1;
     white-space: nowrap;
   }

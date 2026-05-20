@@ -61,53 +61,77 @@
 </div>
 
 <style>
+  /* v2 KeyMaskRow — --surface-2 row + --f-mono masked secret display. */
   .row {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
-    padding: var(--space-md);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    gap: var(--s-2);
+    padding: var(--s-3) var(--s-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
   }
   .primary {
     display: flex;
     align-items: center;
-    gap: var(--space-md);
+    gap: var(--s-3);
     flex-wrap: wrap;
     min-width: 0;
   }
   .label {
-    font-weight: var(--font-weight-semibold);
-    color: var(--color-text);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
+    color: var(--text);
   }
   .mask {
-    font-family: var(--font-family-mono);
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-family: var(--f-mono);
+    font-size: var(--t-13);
+    color: var(--text-2);
+    letter-spacing: 0.06em;
   }
   .meta {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    color: var(--text-3);
   }
   .actions {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-1);
     flex-wrap: wrap;
+    margin-left: auto;
   }
   .replace,
   .remove {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .replace:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
   .remove {
-    color: var(--color-destructive);
-    border-color: var(--color-destructive);
+    color: var(--danger);
+    border-color: var(--danger);
+  }
+  .remove:hover {
+    background: var(--danger);
+    color: #fff;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .replace,
+    .remove {
+      transition: none;
+    }
   }
 </style>

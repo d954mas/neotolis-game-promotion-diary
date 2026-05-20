@@ -50,28 +50,31 @@
 {/if}
 
 <style>
+  /* v2 SourceCoverageBadge — D-01 redraw via PollingBadge analogy.
+   * --r-pill + per-state color drawn from v2 semantic palette. */
   .coverage-badge {
     display: inline-block;
-    padding: 0.125rem 0.5rem;
-    border-radius: var(--radius-sm, 0.25rem);
-    font-size: var(--font-size-label, 0.8rem);
-    font-weight: 500;
+    padding: var(--s-0) var(--s-2);
+    border-radius: var(--r-pill);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
     line-height: 1.4;
   }
   .coverage-badge--never_polled {
-    background: var(--color-bg, #eee);
-    color: var(--color-text-muted, #666);
+    background: var(--surface-2);
+    color: var(--text-3);
   }
   .coverage-badge--has_more {
-    background: rgba(74, 119, 187, 0.15);
-    color: var(--color-accent, #4a77bb);
+    background: var(--accent-soft);
+    color: var(--accent);
   }
   .coverage-badge--caught_up {
-    background: rgba(74, 187, 119, 0.15);
-    color: #2a803c;
+    background: var(--surface-2);
+    color: var(--success);
   }
   .coverage-badge--quota_exhausted {
-    background: rgba(217, 144, 0, 0.15);
-    color: #b06d00;
+    background: var(--surface-2);
+    color: var(--warn);
   }
 </style>

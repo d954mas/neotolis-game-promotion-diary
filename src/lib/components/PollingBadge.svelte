@@ -248,13 +248,19 @@
 {/if}
 
 <style>
+  /* v2 PollingBadge — 5-state matrix (active / cold-yesterday / cold-days-ago
+   * / frozen / unavailable + transient pending / refreshing / manual)
+   * PRESERVED via per-variant class names. tests/browser/polling-badge.test.ts
+   * asserts labels + visual states. */
   .polling-badge {
     display: inline-flex;
-    gap: var(--space-xs);
+    gap: var(--s-1);
     align-items: center;
-    padding: 2px var(--space-sm);
-    border-radius: 4px;
-    font-size: var(--font-size-label);
+    padding: var(--s-0) var(--s-2);
+    border-radius: var(--r-pill);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-rg);
     line-height: 1.4;
     white-space: nowrap;
   }
@@ -264,74 +270,71 @@
     align-items: center;
   }
 
-  /* Hot · checked Xh ago — green icon, normal text, solid border. */
+  /* Hot / Updated Xh ago — accent wash (the fresh, just-polled state). */
   .polling-badge--active {
-    border: 1px solid var(--color-border);
-    color: var(--color-text);
+    background: var(--accent-soft);
+    color: var(--accent);
   }
   .polling-badge--active .polling-badge__icon {
-    color: var(--color-success);
+    color: var(--success);
   }
 
-  /* Cold · yesterday | Cold · Xd ago — info-cyan icon, muted text, solid border. */
+  /* Cold · yesterday | Cold · Xd ago — neutral surface, muted text. */
   .polling-badge--cold-yesterday,
   .polling-badge--cold-days-ago {
-    border: 1px solid var(--color-border);
-    color: var(--color-text-muted);
+    background: var(--surface-2);
+    color: var(--text-2);
   }
   .polling-badge--cold-yesterday .polling-badge__icon,
   .polling-badge--cold-days-ago .polling-badge__icon {
-    color: var(--color-info);
+    color: var(--info);
   }
 
-  /* Frozen · refresh to update — neutral icon, muted text, DASHED border
+  /* Frozen · refresh to update — neutral surface, deeper muted text
      (signals "polling has stopped on its own — refresh-now to rescue"). */
   .polling-badge--frozen {
-    border: 1px dashed var(--color-border);
-    color: var(--color-text-muted);
+    background: var(--surface-2);
+    color: var(--text-3);
   }
   .polling-badge--frozen .polling-badge__icon {
-    color: var(--color-text-muted);
+    color: var(--text-3);
   }
 
-  /* Unavailable · last seen Xd ago — destructive-red icon (status, NOT
-     destructive-fill), muted text, solid border. */
+  /* Unavailable · updated Xd ago — neutral surface, danger text (status,
+     not destructive fill). */
   .polling-badge--unavailable {
-    border: 1px solid var(--color-border);
-    color: var(--color-text-muted);
+    background: var(--surface-2);
+    color: var(--danger);
   }
   .polling-badge--unavailable .polling-badge__icon {
-    color: var(--color-destructive);
+    color: var(--danger);
   }
 
-  /* Manual entry — no polling — neutral icon, muted text, DASHED border
-     (signals "no polling lifecycle"). */
+  /* Manual entry — no polling — neutral surface, muted text. */
   .polling-badge--manual {
-    border: 1px dashed var(--color-border);
-    color: var(--color-text-muted);
+    background: var(--surface-2);
+    color: var(--text-3);
   }
   .polling-badge--manual .polling-badge__icon {
-    color: var(--color-text-muted);
+    color: var(--text-3);
   }
 
-  /* Pending · fetching video info — neutral icon, muted text, dotted
-     border to signal a transient "data on the way" state (distinct from
-     dashed Frozen/Manual which are stable end-states). The badge clears
-     within seconds of paste once channel-context-backfill writes the
-     youtube_videos row. */
-  .polling-badge--refreshing {
-    border: 1px dotted var(--color-info, #2563eb);
-    color: var(--color-text);
-  }
-  .polling-badge--refreshing .polling-badge__icon {
-    color: var(--color-info, #2563eb);
-  }
-
+  /* Pending · fetching video info — transient channel-context-backfill
+     window. Clears within seconds of paste. */
   .polling-badge--pending {
-    border: 1px dotted var(--color-border);
-    color: var(--color-text-muted);
+    background: var(--surface-2);
+    color: var(--text-3);
   }
   .polling-badge--pending .polling-badge__icon {
-    color: var(--color-text-muted);
+    color: var(--text-3);
+  }
+
+  /* Refreshing — Refresh queued (info wash, brief transient state). */
+  .polling-badge--refreshing {
+    background: var(--surface-2);
+    color: var(--info);
+  }
+  .polling-badge--refreshing .polling-badge__icon {
+    color: var(--info);
   }
 </style>
