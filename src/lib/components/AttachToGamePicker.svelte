@@ -219,77 +219,95 @@
 </div>
 
 <style>
+  /* v2 popover picker — --surface-2 panel + --shadow-elev + --r-md.
+   * Compact-mode trigger shrinks padding for inbox card surfaces. */
   .picker {
     position: relative;
     display: inline-flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   .trigger {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-label);
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-4);
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
     cursor: pointer;
     display: inline-flex;
     align-items: center;
-    gap: var(--space-xs);
+    gap: var(--s-1);
     white-space: nowrap;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .trigger:hover:not(:disabled) {
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
   .trigger:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: not-allowed;
   }
   /* Compact-mode trigger shrinks the visual weight of the inline picker
    * on inbox cards. User quote: "это кнопка ее сделать меньше, это по
-   * сути просто быстрый способ разбирать инбокс". Smaller font, lighter
-   * (transparent) background, tighter padding, muted color — the picker
-   * reads as a quick-action affordance instead of competing with the
-   * card's primary content. */
+   * сути просто быстрый способ разбирать инбокс". */
   .trigger.compact {
     min-height: 0;
-    padding: var(--space-xs) var(--space-sm);
+    padding: var(--s-1) var(--s-2);
     background: transparent;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-small, var(--font-size-label));
-    font-weight: var(--font-weight-regular, normal);
+    border-color: transparent;
+    color: var(--text-3);
+    font-size: var(--t-12);
+    font-weight: var(--w-rg);
+  }
+  .trigger.compact:hover:not(:disabled) {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: transparent;
   }
   .chev {
-    color: var(--color-text-muted);
+    color: var(--text-3);
   }
   .menu {
     position: absolute;
-    top: calc(100% + var(--space-xs));
+    top: calc(100% + var(--s-1));
     left: 0;
     z-index: 20;
-    min-width: 220px;
+    min-width: 240px;
     max-height: 360px;
     overflow-y: auto;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
-    padding: var(--space-xs);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-elev);
+    padding: var(--s-2);
     display: flex;
     flex-direction: column;
   }
   .opt {
-    min-height: 44px;
-    padding: 0 var(--space-md);
+    min-height: var(--hit);
+    padding: var(--s-2) var(--s-3);
     text-align: left;
     background: transparent;
-    color: var(--color-text);
+    color: var(--text);
     border: none;
-    border-radius: 2px;
-    font-size: var(--font-size-body);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
   }
   .opt:hover:not(:disabled) {
-    background: var(--color-bg);
+    background: var(--accent-soft);
+    color: var(--accent);
   }
   .opt:disabled {
     opacity: 0.4;
@@ -297,23 +315,31 @@
   }
   .divider {
     height: 1px;
-    background: var(--color-border);
-    margin: var(--space-xs) 0;
+    background: var(--border-hairline);
+    margin: var(--s-1) 0;
   }
   .empty-games {
-    padding: var(--space-sm) var(--space-md);
-    font-size: var(--font-size-label);
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--t-13);
+    color: var(--text-2);
   }
   .empty-games a {
-    color: var(--color-accent);
+    color: var(--accent);
     text-decoration: none;
   }
   .empty-games a:hover {
+    color: var(--accent-strong);
     text-decoration: underline;
   }
   .more-hint {
-    padding: var(--space-xs) var(--space-md);
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    padding: var(--s-1) var(--s-3);
+    font-size: var(--t-12);
+    color: var(--text-3);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .trigger,
+    .opt {
+      transition: none;
+    }
   }
 </style>

@@ -121,55 +121,81 @@
 </div>
 
 <style>
+  /* v2 date-range control — --surface-2 input boxes + --r-pill preset chips.
+   * Native date-picker filter invert on dark theme is the global LB-8 rule
+   * in src/app.css (input[type="date"]::-webkit-calendar-picker-indicator);
+   * not duplicated here. */
   .date-range {
     display: flex;
     flex-direction: row;
     align-items: end;
-    gap: var(--space-md);
+    gap: var(--s-4);
     flex-wrap: wrap;
   }
   .inputs {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     align-items: end;
     flex-wrap: wrap;
   }
   .input-wrap {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    gap: var(--s-1);
+    font-size: var(--t-13);
+    color: var(--text-2);
   }
   .input-label {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-size: var(--t-13);
+    color: var(--text-3);
   }
   .input-wrap input {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    background: var(--color-bg);
-    color: var(--color-text);
+    min-height: var(--hit);
+    padding: var(--s-2) var(--s-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    color: var(--text);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    transition: border-color var(--m-fast) var(--m-ease);
+  }
+  .input-wrap input:hover {
+    border-color: var(--accent-strong);
   }
   .presets {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-sm);
+    gap: var(--s-1);
   }
   .preset {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    background: transparent;
+    color: var(--text-2);
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: var(--font-size-label);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .preset:hover {
+    background: var(--accent-soft);
+    color: var(--text);
   }
   .preset[aria-pressed="true"] {
-    border-color: var(--color-accent);
-    color: var(--color-accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent-strong);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .input-wrap input,
+    .preset {
+      transition: none;
+    }
   }
 </style>

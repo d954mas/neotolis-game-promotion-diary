@@ -69,48 +69,74 @@
 </div>
 
 <style>
+  /* v2 backfill picker — preset-pill cluster matching DateRangeControl
+   * recipe. 5-preset behavioral contract (1d / 7d / 30d / 90d / 1y /
+   * everything) preserved from Phase 03.0 plan 12 — script unchanged. */
   .backfill-picker {
-    padding: var(--space-md) 0;
+    padding: var(--s-4) 0;
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: var(--s-2);
   }
   .legend {
-    font-weight: var(--font-weight-semibold);
-    font-size: var(--font-size-body);
+    font-family: var(--f-sans);
+    font-weight: var(--w-sb);
+    font-size: var(--t-14);
+    color: var(--text);
   }
+  /* Preset cluster sits in a subtle --surface-2 well so the 5-preset
+   * group reads as a single control. Matches DateRangeControl's
+   * affordance language. */
   .presets {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-sm);
+    gap: var(--s-1);
+    padding: var(--s-1);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
   }
   .preset {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    background: transparent;
+    color: var(--text-2);
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: var(--font-size-label);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .preset:hover {
+    background: var(--accent-soft);
+    color: var(--text);
   }
   .preset[aria-pressed="true"] {
-    border-color: var(--color-accent);
-    color: var(--color-accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent-strong);
   }
-  .preset:focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 1px;
-  }
+  /* :focus-visible inherits the global var(--focus-ring) box-shadow from app.css */
   .blurb {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    color: var(--text-3);
+    font-size: var(--t-13);
     margin: 0;
+    line-height: var(--lh-body);
   }
   .helper {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    color: var(--text-3);
+    font-size: var(--t-12);
     display: block;
+    line-height: var(--lh-body);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .preset {
+      transition: none;
+    }
   }
 </style>

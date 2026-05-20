@@ -480,27 +480,51 @@
 </dialog>
 
 <style>
+  /* v2 filter sheet — right-edge slide via translateX + --m-base/--m-ease.
+   * Body-scroll-lock is declarative via LB-7 (:root:has(dialog[open])) in
+   * src/app.css — not duplicated here. ::backdrop dims the page. */
   .sheet {
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
-    padding: var(--space-lg);
-    width: min(560px, calc(100vw - 2 * var(--space-md)));
-    max-height: 90vh;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: auto;
+    margin: 0;
+    padding: var(--s-6);
+    width: min(420px, 100vw);
+    max-width: none;
+    max-height: 100vh;
+    background: var(--surface-2);
+    color: var(--text);
+    border: none;
+    border-left: 1px solid var(--border);
+    border-radius: 0;
+    box-shadow: var(--shadow-elev);
     overflow-y: auto;
+    transform: translateX(100%);
+    transition: transform var(--m-base) var(--m-ease);
+  }
+  .sheet[open] {
+    transform: translateX(0);
   }
   .sheet::backdrop {
-    background: rgb(0 0 0 / 50%);
+    background: var(--overlay-dark);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sheet,
+    .sheet[open] {
+      transition: none;
+    }
   }
   .heading {
-    margin: 0 0 var(--space-md) 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
+    margin: 0 0 var(--s-4) 0;
+    font-size: var(--t-17);
+    font-weight: var(--w-sb);
+    color: var(--text);
   }
   .grid {
     display: grid;
-    gap: var(--space-md);
+    gap: var(--s-4);
     grid-template-columns: 1fr;
   }
   @media (min-width: 480px) {
@@ -511,31 +535,33 @@
   .field {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
     border: none;
     padding: 0;
     margin: 0;
     min-width: 0;
   }
   .label {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    font-weight: var(--font-weight-semibold);
+    font-size: var(--t-13);
+    color: var(--text-2);
+    font-weight: var(--w-md);
   }
   .input {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-bg);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
+    min-height: var(--hit);
+    padding: var(--s-2) var(--s-3);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    transition: border-color var(--m-fast) var(--m-ease);
+  }
+  .input:hover:not(:disabled) {
+    border-color: var(--accent-strong);
   }
   /* Native <select> styling. Reuses the .input box treatment so Show /
-   * Author dropdowns visually match the search inputs and date pickers.
-   * The native chevron is preserved (browser-default appearance) — on
-   * mobile it gives the OS picker UX, on desktop the standard inline
-   * dropdown. */
+   * Author dropdowns visually match the search inputs and date pickers. */
   .select {
     width: 100%;
     cursor: pointer;
@@ -544,50 +570,48 @@
   .input-wrap {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   .input-label {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-size: var(--t-13);
+    color: var(--text-3);
   }
   .checklist {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
     max-height: 220px;
     overflow-y: auto;
-    padding: var(--space-xs);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    background: var(--color-bg);
+    padding: var(--s-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--surface-3);
   }
   .check {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-xs);
-    font-size: var(--font-size-label);
+    gap: var(--s-1);
+    font-size: var(--t-13);
+    color: var(--text);
     min-height: 32px;
     cursor: pointer;
   }
   /* Source row layout. The kind glyph + short kind label sit before
    * the displayName so the visual hierarchy reads "▶ YouTube · Cool
-   * Channel Name". Mirrors SourceRow's existing kind-tag treatment for
-   * cross-surface consistency. Label font-size is reduced so kind
-   * metadata is subordinate to the displayName. The labels are
-   * single-word forms in messages/en.json. */
+   * Channel Name". */
   .source-kind-tag {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-xs);
-    color: var(--color-text);
+    gap: var(--s-1);
+    color: var(--text);
   }
   .source-kind-label {
-    font-size: var(--font-size-label);
-    font-weight: var(--font-weight-semibold);
-    color: var(--color-text-muted);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
+    color: var(--text-3);
   }
   .source-name {
-    color: var(--color-text);
+    color: var(--text);
     word-break: break-word;
     min-width: 0;
   }
@@ -595,30 +619,51 @@
    * .toggle radio-button row layout is gone. */
   .actions {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     justify-content: flex-end;
-    margin-top: var(--space-lg);
+    margin-top: var(--s-6);
     flex-wrap: wrap;
   }
   .cancel,
   .secondary,
   .primary {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit);
+    padding: var(--s-2) var(--s-4);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .cancel,
   .secondary {
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .cancel:hover,
+  .secondary:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
   .primary {
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border: none;
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+  }
+  .primary:hover {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .input,
+    .cancel,
+    .secondary,
+    .primary {
+      transition: none;
+    }
   }
 </style>

@@ -187,7 +187,12 @@
     <!-- Inline chip strip — visible at >= 600px via CSS media query. -->
     <div class="chips" aria-label="Active filters">
       {#each chips as chip (chip.key)}
-        <span class="chip">
+        <!-- data-active="1" drives the active-state CSS treatment (LB-10).
+             Every chip rendered in the strip is active by definition (the
+             strip only renders when activeCount > 0 and each chip
+             represents an active axis); the attribute is the
+             declarative-CSS handle for the wash. -->
+        <span class="chip" data-active="1">
           <button
             type="button"
             class="chip-label"
@@ -219,14 +224,17 @@
 </div>
 
 <style>
+  /* v2 chip strip — per-axis chips with --r-pill + data-active="1" active
+   * state. Per-axis grouping (Phase 02.1-19) preserved in the script; this
+   * stylesheet is the visual contract. */
   .filter-row {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
   }
   .chips {
     display: none;
     flex-wrap: wrap;
-    gap: var(--space-sm);
+    gap: var(--s-1);
     align-items: center;
     flex: 1 1 auto;
     min-width: 0;
@@ -234,15 +242,23 @@
   .sheet-trigger {
     display: inline-flex;
     align-items: center;
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-label);
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-4);
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .sheet-trigger:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
   /* Chips inline at >= 600px. Sheet trigger stays visible at all widths so
    * users can always open the full filter sheet (date range, etc.) — chips
@@ -255,54 +271,80 @@
   .chip {
     display: inline-flex;
     align-items: center;
-    background: var(--color-surface);
-    border: 1px solid var(--color-text);
-    border-radius: 999px;
-    padding: 0 var(--space-xs) 0 var(--space-sm);
-    font-size: var(--font-size-label);
+    gap: var(--s-1);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    padding: var(--s-0) var(--s-1) var(--s-0) var(--s-3);
+    color: var(--text-2);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
     line-height: 1;
     /* Chip text wraps inside the chip when natural width exceeds the
      * strip. No '+N more' truncation. */
     max-width: 100%;
     min-width: 0;
     word-break: break-word;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  /* LB-10 data-active="1" — every rendered chip is active by definition.
+   * Wash with --accent-soft + --accent text + --accent-strong border. */
+  .chip[data-active="1"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent-strong);
   }
   .chip-label {
     background: transparent;
-    color: var(--color-text);
+    color: inherit;
     border: none;
-    padding: var(--space-xs) var(--space-xs);
-    font-size: var(--font-size-label);
-    font-weight: var(--font-weight-semibold);
+    padding: var(--s-1) var(--s-1);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
     cursor: pointer;
     white-space: normal;
     text-align: left;
   }
   .chip-dismiss {
-    min-width: 44px;
-    min-height: 44px;
+    min-width: var(--hit);
+    min-height: var(--hit);
     background: transparent;
-    color: var(--color-text-muted);
+    color: inherit;
     border: none;
     cursor: pointer;
-    font-size: var(--font-size-body);
+    font-size: var(--t-14);
     line-height: 1;
-    border-radius: 999px;
+    border-radius: var(--r-pill);
     flex-shrink: 0;
+    transition: color var(--m-fast) var(--m-ease);
   }
   .chip-dismiss:hover {
-    color: var(--color-text);
+    color: var(--danger);
   }
   .clear-all {
     background: transparent;
-    color: var(--color-text-muted);
+    color: var(--text-3);
     border: none;
     text-decoration: underline;
-    font-size: var(--font-size-label);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
     cursor: pointer;
-    padding: var(--space-xs) var(--space-sm);
+    padding: var(--s-1) var(--s-2);
+    transition: color var(--m-fast) var(--m-ease);
   }
   .clear-all:hover {
-    color: var(--color-text);
+    color: var(--text);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sheet-trigger,
+    .chip,
+    .chip-dismiss,
+    .clear-all {
+      transition: none;
+    }
   }
 </style>
