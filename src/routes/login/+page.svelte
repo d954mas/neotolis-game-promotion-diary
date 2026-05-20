@@ -18,10 +18,10 @@
 
 <style>
   .disclaimer {
-    margin-top: var(--space-md);
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
-    line-height: var(--line-height-body);
+    margin-top: var(--s-4);
+    color: var(--text-2);
+    font-size: var(--t-13);
+    line-height: var(--lh-body);
     max-width: 60ch;
   }
 </style>

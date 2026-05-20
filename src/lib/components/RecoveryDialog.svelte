@@ -136,8 +136,8 @@
 </dialog>
 
 <style>
-  /* Mirrors ConfirmDialog's surface tokens (--color-surface / --color-border
-   * / 6px radius / 25% shadow) for visual consistency across the two
+  /* Mirrors ConfirmDialog's surface tokens (--surface-2 panel / --border /
+   * --r-md radius / --shadow-elev) for visual consistency across the two
    * dialog patterns. The recovery list is variable-length (1-N items)
    * so the dialog is wider and gets a max-height + scrollable body.
    *

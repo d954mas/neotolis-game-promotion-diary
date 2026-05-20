@@ -4,7 +4,7 @@
   // tier=Frozen.
   //
   // Interaction contract:
-  //   - Idle: refresh icon at --color-text-muted; 44×44 hit area; 16×16 glyph.
+  //   - Idle: refresh icon at --text-3; --hit hit area; 16×16 glyph.
   //   - Click → POST /api/events/{id}/refresh-poll (no body).
   //   - Pending: spinning rotation 360°/1s, aria-busy="true", aria-live="polite"
   //     announces m.polling_refresh_now_pending().

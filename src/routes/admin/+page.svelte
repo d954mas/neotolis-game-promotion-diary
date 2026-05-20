@@ -67,27 +67,27 @@
   .admin-quota {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
+    gap: var(--s-4);
     min-width: 0;
   }
   .intro {
     margin: 0;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-body);
-    line-height: var(--line-height-body);
+    color: var(--text-2);
+    font-size: var(--t-14);
+    line-height: var(--lh-body);
     max-width: 60ch;
   }
   /* Each section is a <details> spoiler. The summary doubles as the
      header; the body slides in/out via the native disclosure widget. */
   .admin-quota__section {
-    margin-top: var(--space-md);
-    border-top: 1px solid var(--color-border);
-    padding-top: var(--space-sm);
+    margin-top: var(--s-4);
+    border-top: 1px solid var(--border-hairline);
+    padding-top: var(--s-2);
   }
   .admin-quota__section > summary {
     list-style: none;
     cursor: pointer;
-    padding: var(--space-xs) 0;
+    padding: var(--s-1) 0;
     user-select: none;
   }
   .admin-quota__section > summary::-webkit-details-marker {
@@ -96,10 +96,15 @@
   .admin-quota__section > summary::before {
     content: "▸";
     display: inline-block;
-    margin-right: var(--space-xs);
-    color: var(--color-text-muted);
-    transition: transform 120ms ease;
+    margin-right: var(--s-1);
+    color: var(--text-3);
+    transition: transform var(--m-fast) var(--m-ease);
     transform: rotate(0deg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .admin-quota__section > summary::before {
+      transition: none;
+    }
   }
   .admin-quota__section[open] > summary::before {
     transform: rotate(90deg);
@@ -107,13 +112,13 @@
   .admin-quota__section > summary > h2 {
     display: inline;
     margin: 0;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
   }
   .admin-quota__section-body {
-    margin-top: var(--space-md);
+    margin-top: var(--s-4);
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
+    gap: var(--s-4);
   }
 </style>

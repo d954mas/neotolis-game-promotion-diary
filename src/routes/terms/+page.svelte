@@ -64,18 +64,18 @@
     line-height: 1.6;
   }
   .legal-page h1 {
-    margin-bottom: var(--space-xs);
+    margin-bottom: var(--s-1);
   }
   .legal-page h2 {
-    margin-top: var(--space-xl);
+    margin-top: var(--s-7);
   }
   .last-updated {
-    color: var(--color-muted, #666);
+    color: var(--text-3);
     font-size: 0.9em;
     margin-top: 0;
   }
   .back-link {
-    margin: 0 0 var(--space-md);
-    font-size: var(--font-size-label);
+    margin: 0 0 var(--s-4);
+    font-size: var(--t-13);
   }
 </style>

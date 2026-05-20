@@ -1,9 +1,9 @@
 <script lang="ts">
   // InboxBadge — small chip rendered on FeedRow when the event is in the
-  // inbox (game_id IS NULL && metadata.inbox.dismissed !== true). Per
-  // UI-SPEC §"<InboxBadge> and <PollingBadge> text" + §"Color" — uses muted
-  // tokens (background `--color-border`, text `--color-text-muted`) so it
-  // communicates "awaiting attachment" without reading as a status award.
+  // inbox (game_id IS NULL && metadata.inbox.dismissed !== true). v2 (Phase
+  // 03.3) promotes the chip from muted-neutral to an actionable accent wash
+  // (--r-pill on --accent-soft + --accent text); see § "v2 InboxBadge"
+  // comment in the style block below.
   //
   // Accessibility (UI-SPEC §"Accessibility Floor delta"): role="status" so
   // screen readers announce the badge when it appears (e.g. when a row's
