@@ -108,9 +108,20 @@
 <style>
   .page-header {
     display: flex;
-    gap: var(--space-md);
+    gap: var(--s-3);
     align-items: center;
     flex-wrap: wrap;
+    background: var(--bg);
+    min-width: 0;
+  }
+  .page-header h1 {
+    margin: 0;
+    font-family: var(--f-sans);
+    font-size: var(--t-22);
+    font-weight: var(--w-sb);
+    color: var(--text);
+    line-height: var(--lh-tight);
+    letter-spacing: -0.01em;
   }
   /* Sticky variant — anchors under the global chrome (AppHeader + Nav);
    * background fill + padding prevent scrolled content from bleeding
@@ -138,31 +149,32 @@
     position: sticky;
     top: calc(var(--chrome-height, 116px) - var(--sticky-overlap, 1px));
     z-index: 5;
-    padding: var(--space-sm) 0;
-    background: var(--color-bg);
-  }
-  h1 {
-    margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
+    padding: var(--s-2) 0;
+    background: var(--bg);
   }
   .cta {
     display: inline-flex;
     align-items: center;
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-accent-text, #fff);
-    border: none;
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    gap: var(--s-1);
+    min-height: var(--hit-lg);
+    padding: 0 var(--s-4);
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
     text-decoration: none;
     white-space: nowrap;
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .cta:hover {
-    filter: brightness(1.05);
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   /* Low-key text link surfacing the soft-delete recovery flow. Visually
    * subordinate to the primary CTA (label + small + muted) so it does
@@ -179,11 +191,26 @@
     padding: 0;
     font: inherit;
     cursor: pointer;
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-size: var(--t-13);
+    color: var(--text-3);
     text-decoration: underline;
   }
   .recovery-link:hover {
-    color: var(--color-text);
+    color: var(--accent);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cta {
+      transition: none;
+    }
+  }
+  @media (max-width: 480px) {
+    .page-header {
+      flex-direction: column;
+      align-items: stretch;
+      gap: var(--s-2);
+    }
+    .cta {
+      align-self: flex-start;
+    }
   }
 </style>

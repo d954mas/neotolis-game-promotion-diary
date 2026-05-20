@@ -200,7 +200,7 @@
   .audit {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
+    gap: var(--s-4);
     min-width: 0;
   }
   /* Inline .head + .head h1 styles were replaced by the shared
@@ -208,8 +208,8 @@
    * font-size + sticky offset; .audit only needs the column layout for
    * the rest of the page chrome. */
   .rows {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
   }
 </style>

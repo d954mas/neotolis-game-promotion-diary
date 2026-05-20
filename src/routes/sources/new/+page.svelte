@@ -377,39 +377,43 @@
   .new-source {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
+    gap: var(--s-4);
     min-width: 0;
   }
   .breadcrumb {
     display: flex;
     align-items: center;
-    gap: var(--space-xs);
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    gap: var(--s-1);
+    font-size: var(--t-13);
+    color: var(--text-3);
   }
   .breadcrumb a {
-    color: var(--color-text-muted);
+    color: var(--text-3);
     text-decoration: none;
   }
   .breadcrumb a:hover {
-    color: var(--color-text);
+    color: var(--text);
   }
   .sep {
-    color: var(--color-text-muted);
+    color: var(--text-3);
   }
   h1 {
     margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
+    font-family: var(--f-sans);
+    font-size: var(--t-22);
+    font-weight: var(--w-sb);
+    line-height: var(--lh-tight);
+    letter-spacing: -0.01em;
+    color: var(--text);
   }
   .form {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
-    padding: var(--space-md);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    gap: var(--s-4);
+    padding: var(--s-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
   }
   .kinds {
     border: none;
@@ -417,32 +421,41 @@
     margin: 0;
   }
   .kinds legend {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    margin-bottom: var(--space-xs);
+    font-size: var(--t-13);
+    color: var(--text-2);
+    margin-bottom: var(--s-1);
   }
   .kind-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   .chip {
     display: inline-flex;
     flex-direction: column;
     align-items: flex-start;
-    min-height: 44px;
-    padding: var(--space-xs) var(--space-sm);
-    background: var(--color-bg);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-2);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: var(--font-size-label);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .chip:hover:not(:disabled) {
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
   .chip.active {
-    background: var(--color-surface);
-    border-color: var(--color-text);
-    font-weight: var(--font-weight-semibold);
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent-strong);
+    font-weight: var(--w-sb);
   }
   .chip.disabled {
     opacity: 0.55;
@@ -454,89 +467,107 @@
     margin-right: 4px;
   }
   .status {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-size: var(--t-12);
+    color: var(--text-3);
   }
   /* Reddit-specific hint under the URL input — neutral by default,
    * warning-coloured when REDDIT_USER_AGENT is empty (D-RDT-AUTH-EMPTY).
    * Sits between the URL input and the owner/auto-import toggles. */
   .hint {
     margin: 0;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
-    line-height: var(--line-height-body);
+    color: var(--text-3);
+    font-size: var(--t-13);
+    line-height: var(--lh-body);
   }
   .hint.hint-warning {
-    color: var(--color-warning, #d90);
+    color: var(--warn);
   }
   .field {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   .label {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-size: var(--t-13);
+    color: var(--text-2);
   }
   .input {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-bg);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
+    min-height: var(--hit);
+    padding: 0 var(--s-4);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
   }
   .toggle {
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
-  }
-  .toggle.disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+    gap: var(--s-2);
+    color: var(--text);
+    font-size: var(--t-14);
   }
   /* Horizontal rule between the kind/owner/auto-import fields and the
      conditional BackfillPicker. Collapses with the picker — no orphan
      separator. */
   .picker-separator {
     border: 0;
-    border-top: 1px solid var(--color-border);
+    border-top: 1px solid var(--border-hairline);
     margin: 0;
   }
   .actions {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     justify-content: flex-end;
     align-items: center;
     flex-wrap: wrap;
   }
   .cancel {
-    min-height: 44px;
-    padding: 0 var(--space-md);
+    min-height: var(--hit);
+    padding: 0 var(--s-4);
     display: inline-flex;
     align-items: center;
     background: transparent;
-    color: var(--color-text-muted);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    color: var(--text-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
     text-decoration: none;
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    transition: background var(--m-fast) var(--m-ease);
+  }
+  .cancel:hover {
+    background: var(--accent-soft);
   }
   .submit {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border: none;
-    border-radius: 4px;
-    font-weight: var(--font-weight-semibold);
-    font-size: var(--font-size-body);
+    min-height: var(--hit-lg);
+    padding: 0 var(--s-4);
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-weight: var(--w-sb);
+    font-size: var(--t-14);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .submit:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   .submit:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .chip,
+    .cancel,
+    .submit {
+      transition: none;
+    }
   }
 </style>

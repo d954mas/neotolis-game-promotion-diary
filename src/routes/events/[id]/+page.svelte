@@ -287,214 +287,251 @@
 <style>
   .breadcrumb {
     display: flex;
-    gap: var(--space-xs);
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
-    margin-bottom: var(--space-md);
+    gap: var(--s-1);
+    color: var(--text-3);
+    font-size: var(--t-13);
+    margin-bottom: var(--s-4);
   }
   .breadcrumb a {
-    color: var(--color-accent);
+    color: var(--accent);
     text-decoration: none;
+  }
+  .breadcrumb a:hover {
+    color: var(--accent-strong);
   }
   .detail {
     display: flex;
     flex-direction: column;
-    gap: var(--space-lg);
-    padding: var(--space-md);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    gap: var(--s-6);
+    padding: var(--s-4);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-card);
     /* Anchors the absolutely-positioned .edit-pencil at the top-right
      * corner, mirroring FeedCard's overlay anchoring. */
     position: relative;
+    min-width: 0;
   }
-  /* Edit pencil at the top-right of the card. Sized to a 44x44 touch target
+  /* Edit pencil at the top-right of the card. Sized to var(--hit-lg) touch target
    * so a 360px-viewport tap reaches it without the user fumbling for the
    * small icon. z-index: 1 lifts it above the chart placeholder section if
    * the layout overlaps. */
   .edit-pencil {
     position: absolute;
-    top: var(--space-md);
-    right: var(--space-md);
+    top: var(--s-4);
+    right: var(--s-4);
     z-index: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 44px;
-    height: 44px;
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    width: var(--hit-lg);
+    height: var(--hit-lg);
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
     text-decoration: none;
-    font-size: var(--font-size-body);
+    font-size: var(--t-14);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .edit-pencil:hover {
-    background: var(--color-bg);
-    border-color: var(--color-text);
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
   .head {
     display: flex;
-    gap: var(--space-md);
+    gap: var(--s-4);
     align-items: flex-start;
     min-width: 0;
   }
   .meta {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
     min-width: 0;
     flex: 1 1 auto;
   }
   .kind-tag {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    font-weight: var(--font-weight-semibold);
+    font-size: var(--t-12);
+    color: var(--text-3);
+    font-weight: var(--w-sb);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
   .title {
     margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
-    line-height: var(--line-height-body);
+    font-family: var(--f-sans);
+    font-size: var(--t-22);
+    font-weight: var(--w-sb);
+    line-height: var(--lh-tight);
+    letter-spacing: -0.01em;
+    color: var(--text);
     word-break: break-word;
   }
   .meta-row {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     align-items: center;
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-size: var(--t-13);
+    color: var(--text-3);
   }
   .when {
-    color: var(--color-text-muted);
+    color: var(--text-3);
+    font-family: var(--f-mono);
+    font-variant-numeric: tabular-nums;
   }
   .chip {
     display: inline-flex;
     align-items: center;
-    background: var(--color-bg);
-    color: var(--color-text-muted);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    padding: 2px var(--space-sm);
-    font-size: var(--font-size-label);
+    background: var(--surface-2);
+    color: var(--text-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    padding: 2px var(--s-2);
+    font-size: var(--t-12);
     line-height: 1;
     white-space: nowrap;
   }
   .chip-author {
-    color: var(--color-text);
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
   .chip-deleted {
-    color: var(--color-destructive);
-    border-color: var(--color-destructive);
+    color: var(--danger);
+    border-color: var(--danger);
   }
   .notes {
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    padding: var(--space-md);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: var(--s-4);
   }
   .notes p {
     margin: 0;
     white-space: pre-wrap;
-    line-height: var(--line-height-body);
+    line-height: var(--lh-body);
+    color: var(--text);
   }
   .reddit-preview {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    padding: var(--space-md);
+    gap: var(--s-2);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: var(--s-4);
   }
   .reddit-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-xs);
+    gap: var(--s-1);
     align-items: center;
   }
   .reddit-stats {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-family: var(--f-mono);
+    font-size: var(--t-12);
+    color: var(--text-3);
     font-variant-numeric: tabular-nums;
   }
   .reddit-image {
     max-width: 100%;
     max-height: 480px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     display: block;
   }
   .reddit-body {
     margin: 0;
     white-space: pre-wrap;
-    line-height: var(--line-height-body);
-    color: var(--color-text);
+    line-height: var(--lh-body);
+    color: var(--text);
   }
   .reddit-link {
-    color: var(--color-link);
+    color: var(--accent);
     word-break: break-all;
+    text-decoration: none;
+  }
+  .reddit-link:hover {
+    color: var(--accent-strong);
+    text-decoration: underline;
   }
   .reddit-pending {
     margin: 0;
-    color: var(--color-text-muted);
+    color: var(--text-3);
     font-style: italic;
   }
   .actions {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     align-items: center;
   }
   .action {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    min-height: var(--hit);
+    padding: 0 var(--s-4);
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: var(--font-size-body);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
     text-decoration: none;
     display: inline-flex;
     align-items: center;
-    gap: var(--space-xs);
+    gap: var(--s-1);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .action:hover {
-    background: var(--color-bg);
+    background: var(--accent-soft);
   }
   .action.primary {
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border-color: var(--color-accent);
+    background: var(--accent);
+    color: var(--accent-text);
+    border-color: var(--accent);
+    font-weight: var(--w-sb);
   }
   .action.primary:hover {
-    opacity: 0.9;
-    background: var(--color-accent);
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   .action.danger {
-    color: var(--color-destructive);
+    color: var(--danger);
   }
   .action.danger:hover {
-    border-color: var(--color-destructive);
+    border-color: var(--danger);
   }
   .action:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
   .chart-placeholder {
-    margin-top: var(--space-md);
+    margin-top: var(--s-4);
   }
   .back {
     display: inline-block;
-    margin-top: var(--space-md);
-    color: var(--color-accent);
+    margin-top: var(--s-4);
+    color: var(--accent);
     text-decoration: none;
-    padding: var(--space-sm);
+    padding: var(--s-2);
+    font-size: var(--t-14);
   }
   .back:hover {
+    color: var(--accent-strong);
     text-decoration: underline;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .action,
+    .edit-pencil {
+      transition: none;
+    }
   }
   @media (max-width: 480px) {
     .actions {

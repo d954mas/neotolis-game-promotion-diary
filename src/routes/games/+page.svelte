@@ -219,7 +219,7 @@
   .games {
     display: flex;
     flex-direction: column;
-    gap: var(--space-lg);
+    gap: var(--s-6);
     min-width: 0;
   }
   /* Inline .head + .cta CSS were replaced by the shared <PageHeader>
@@ -232,7 +232,7 @@
     margin: 0;
     display: grid;
     grid-template-columns: 1fr;
-    gap: var(--space-md);
+    gap: var(--s-4);
   }
   @media (min-width: 768px) {
     .grid {
@@ -247,55 +247,69 @@
   .newgame {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
-    padding: var(--space-md);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    gap: var(--s-2);
+    padding: var(--s-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
   }
   .field {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   .label {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-size: var(--t-13);
+    color: var(--text-2);
   }
   .input {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-bg);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
+    min-height: var(--hit);
+    padding: 0 var(--s-4);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-size: var(--t-14);
+    font-family: var(--f-sans);
   }
   .actions {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     justify-content: flex-end;
   }
   .cancel {
     background: transparent;
-    color: var(--color-text-muted);
+    color: var(--text-2);
     border: none;
     text-decoration: underline;
     cursor: pointer;
   }
   .submit {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border: none;
-    border-radius: 4px;
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit-lg);
+    padding: 0 var(--s-4);
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
+    font-weight: var(--w-sb);
+    font-size: var(--t-14);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .submit:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   .submit:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .submit {
+      transition: none;
+    }
   }
   /* The recovery flow uses RecoveryDialog (same component on /feed and
    * /sources). */

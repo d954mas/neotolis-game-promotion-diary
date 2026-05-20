@@ -201,7 +201,7 @@
   .sources {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
+    gap: var(--s-4);
     min-width: 0;
   }
   /* Inline .head + .cta CSS removed — replaced by the shared
@@ -214,25 +214,25 @@
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: var(--s-2);
   }
   /* .deleted-sources, .deleted-row, and .restore CSS removed alongside the
    * bottom-of-page <details> recovery block. RecoveryDialog owns the
    * surface (same component on /feed and /games). */
   .quota-disclosure {
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
   }
   .quota-disclosure > summary {
-    padding: var(--space-sm) var(--space-md);
+    padding: var(--s-2) var(--s-4);
     cursor: pointer;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
-    font-weight: var(--font-weight-semibold);
+    color: var(--text-2);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
     user-select: none;
   }
   .quota-disclosure > summary:hover {
-    color: var(--color-text);
+    color: var(--text);
   }
 </style>

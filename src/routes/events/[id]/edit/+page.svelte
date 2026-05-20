@@ -404,45 +404,52 @@
 <style>
   .breadcrumb {
     display: flex;
-    gap: var(--space-xs);
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
-    margin-bottom: var(--space-md);
+    gap: var(--s-1);
+    color: var(--text-3);
+    font-size: var(--t-13);
+    margin-bottom: var(--s-4);
     flex-wrap: wrap;
   }
   .breadcrumb a {
-    color: var(--color-accent);
+    color: var(--accent);
     text-decoration: none;
+  }
+  .breadcrumb a:hover {
+    color: var(--accent-strong);
   }
   .editevent {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
+    gap: var(--s-4);
     min-width: 0;
   }
   h1 {
     margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
+    font-family: var(--f-sans);
+    font-size: var(--t-22);
+    font-weight: var(--w-sb);
+    line-height: var(--lh-tight);
+    letter-spacing: -0.01em;
+    color: var(--text);
   }
   .form {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
-    padding: var(--space-md);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    gap: var(--s-4);
+    padding: var(--s-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
   }
   .field {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   .field.checkbox {
     flex-direction: row;
     align-items: center;
-    gap: var(--space-sm);
+    gap: var(--s-2);
   }
   .field.checkbox input {
     width: 18px;
@@ -450,45 +457,59 @@
     min-height: 0;
   }
   .field-label {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-size: var(--t-13);
+    color: var(--text-2);
   }
   .input {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-bg);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
+    min-height: var(--hit);
+    padding: 0 var(--s-4);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
   }
   .textarea {
-    padding: var(--space-sm) var(--space-md);
+    padding: var(--s-2) var(--s-4);
     min-height: 88px;
-    line-height: var(--line-height-body);
+    line-height: var(--lh-body);
     font-family: inherit;
     resize: vertical;
   }
   .actions {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     justify-content: flex-end;
     align-items: center;
   }
   .cancel {
-    color: var(--color-text-muted);
+    color: var(--text-3);
     text-decoration: underline;
-    padding: var(--space-sm);
+    padding: var(--s-2);
+    font-size: var(--t-14);
+  }
+  .cancel:hover {
+    color: var(--text);
   }
   .submit {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border: none;
-    border-radius: 4px;
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit-lg);
+    padding: 0 var(--s-4);
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .submit:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   .submit:disabled {
     opacity: 0.5;
@@ -504,7 +525,7 @@
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   /* Multi-select Game picker. Mirrors the SourceRow / FiltersSheet
    * checkbox-row visual pattern; the list scrolls vertically inside the
@@ -521,23 +542,24 @@
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
     max-height: 320px;
     overflow-y: auto;
   }
   .game-list .checkbox-row {
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
-    min-height: 44px;
-    padding: var(--space-xs) var(--space-sm);
+    gap: var(--s-2);
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-2);
     cursor: pointer;
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    background: var(--color-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--surface-3);
+    transition: border-color var(--m-fast) var(--m-ease);
   }
   .game-list .checkbox-row:hover {
-    border-color: var(--color-text);
+    border-color: var(--accent-strong);
   }
   .game-list .checkbox-row input[type="checkbox"] {
     width: 18px;
@@ -546,42 +568,47 @@
   }
   .hint {
     margin: 0;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    color: var(--text-3);
+    font-size: var(--t-13);
   }
   .help {
     margin: 0;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    color: var(--text-3);
+    font-size: var(--t-13);
   }
   .conflict-error {
     margin: 0;
-    color: var(--color-destructive);
-    font-size: var(--font-size-label);
+    color: var(--danger);
+    font-size: var(--t-13);
   }
   /* Form footer Delete button. Visually separated by a divider so it
    * reads as a destructive action distinct from the Save / Cancel pair. */
   .section-divider {
     border: none;
-    border-top: 1px solid var(--color-border);
-    margin: var(--space-md) 0 0 0;
+    border-top: 1px solid var(--border-hairline);
+    margin: var(--s-4) 0 0 0;
   }
   .footer-actions {
     display: flex;
     justify-content: flex-end;
   }
   .delete-button {
-    min-height: 44px;
-    padding: 0 var(--space-md);
+    min-height: var(--hit);
+    padding: 0 var(--s-4);
     background: transparent;
-    color: var(--color-destructive);
-    border: 1px solid var(--color-destructive);
-    border-radius: 4px;
-    font-weight: var(--font-weight-semibold);
+    color: var(--danger);
+    border: 1px solid var(--danger);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
   }
   .delete-button:hover:not(:disabled) {
-    background: var(--color-destructive);
+    background: var(--danger);
     color: #fff;
   }
   .delete-button:disabled {
@@ -590,24 +617,38 @@
   }
   .quick-set {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     flex-wrap: wrap;
   }
   .chip {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    font-size: var(--font-size-label);
+    min-height: var(--hit);
+    padding: 0 var(--s-4);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .chip:hover {
-    border-color: var(--color-text);
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent-strong);
   }
   .chip:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .submit,
+    .chip,
+    .delete-button,
+    .game-list .checkbox-row {
+      transition: none;
+    }
   }
 </style>
