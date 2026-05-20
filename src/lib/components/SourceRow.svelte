@@ -326,135 +326,131 @@
 />
 
 <style>
+  /* v2 SourceRow — --surface-2 list-row + --r-md radius. Mine marker is a
+   * 2px --accent left border (replaces 4px legacy color-mine token). Edit
+   * pencil hidden in editing mode (Phase 02.1-33 contract); footer Save /
+   * Cancel / Remove sit at the BOTTOM of the form below a section divider. */
   .row {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
-    padding: var(--space-md);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    gap: var(--s-2);
+    padding: var(--s-3) var(--s-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
     min-width: 0;
   }
-  /* Mirror FeedCard's Mine treatment. The 4px mine-token left-border +
-     the upgraded overlay-style "Mine" pill combine for the same C+A
-     treatment users get on FeedCard. var(--color-mine) is the shared
-     token (defaults to accent; can diverge). */
+  /* Mine treatment — 2px --accent left border. */
   .row.mine {
-    border-left: 4px solid var(--color-mine);
+    border-left: 2px solid var(--accent);
   }
   .primary {
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     flex-wrap: wrap;
     min-width: 0;
   }
-  /* Kind icon+text bundle. Visually pairs with the SourceKindIcon
-     (currentColor inherits from this span). */
+  /* Kind icon + text bundle. SourceKindIcon inherits currentColor from
+   * this span. */
   .kind-tag {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-xs);
-    color: var(--color-text);
-    font-weight: var(--font-weight-semibold);
+    gap: var(--s-1);
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-weight: var(--w-md);
   }
-  /* Label font-size reduced so the kind tag reads as subordinate
-     metadata next to the .display name (which keeps the body 16px
-     size). The labels are also single-word forms in messages/en.json.
-     FiltersSheet.source-kind-label carries the same font-size reduction
-     for visual consistency. */
   .kind-tag-label {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-size: var(--t-12);
+    color: var(--text-3);
   }
   .display {
-    color: var(--color-text);
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    color: var(--text);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    font-weight: var(--w-md);
     word-break: break-word;
     min-width: 0;
     text-decoration: none;
+    transition: color var(--m-fast) var(--m-ease);
   }
   .display:hover {
+    color: var(--accent);
     text-decoration: underline;
   }
-  /* Real YouTube channel title shown alongside the user's own
-   * displayName, in the muted secondary tone. Same visual idea as
-   * FeedCard's channel chip — surfaces the cache row from
-   * youtube_channels so /sources is honest about what each tracking
-   * record points at. */
   .channel-title {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
-    padding: 2px var(--space-sm);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
+    color: var(--text-3);
+    font-size: var(--t-12);
+    padding: var(--s-0) var(--s-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
     white-space: nowrap;
   }
-  /* Edit-form is its own row in the .row column flex with a fields
-     stack on top and a footer action row at the bottom. */
   .edit-form {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: var(--s-3);
     width: 100%;
     min-width: 0;
   }
   .input {
-    min-height: 36px;
-    padding: 0 var(--space-sm);
-    background: var(--color-bg);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
     width: 100%;
     min-width: 0;
+    transition: border-color var(--m-fast) var(--m-ease);
+  }
+  .input:hover {
+    border-color: var(--accent-strong);
   }
   .checkbox-row {
     display: flex;
     align-items: center;
-    gap: var(--space-xs);
-    color: var(--color-text);
-    font-size: var(--font-size-body);
+    gap: var(--s-1);
+    color: var(--text);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
     cursor: pointer;
   }
   .ownership-badge {
     display: inline-flex;
     align-items: center;
-    padding: 2px var(--space-sm);
-    background: var(--color-bg);
-    color: var(--color-text-muted);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    font-size: var(--font-size-label);
+    padding: var(--s-0) var(--s-2);
+    background: var(--surface-3);
+    color: var(--text-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
   }
-  /* Mine pill uses the overlay-mine visual style. Accent background +
-     white text reads as a strong, consistent "this is yours" signal
-     across feed and sources. Pill background + border resolve via
-     var(--color-mine) — same shared token as the .row.mine
-     border-left. The accent-text foreground stays on
-     --color-accent-text because it is a paired text-on-accent token
-     (Mine pill is white-on-accent by visual contract). */
+  /* Mine pill — --accent wash matches the row's Mine border-left. */
   .ownership-badge.mine {
-    background: var(--color-mine);
-    color: var(--color-accent-text, #fff);
-    border-color: var(--color-mine);
+    background: var(--accent);
+    color: var(--accent-text);
+    border-color: var(--accent);
   }
   .meta {
     min-width: 0;
   }
   .handle {
-    font-family: var(--font-family-mono);
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-family: var(--f-mono);
+    font-size: var(--t-12);
+    color: var(--text-3);
     word-break: break-all;
   }
   .description {
     margin: 0;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    color: var(--text-2);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    line-height: var(--lh-body);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     line-clamp: 2;
@@ -464,103 +460,122 @@
   .status {
     display: flex;
     align-items: center;
-    gap: var(--space-md);
+    gap: var(--s-3);
     flex-wrap: wrap;
   }
   .polling-status {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    color: var(--text-3);
+    font-size: var(--t-12);
   }
   .last-polled,
   .event-range {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
   }
-  /* Non-interactive auto-import pill in row-display mode. Visually
-     similar to .ownership-badge but borrowed into the row-status
-     surface. */
+  /* Auto-import chip — accent-soft wash signals the auto-import is on. */
   .auto-pill {
     display: inline-flex;
     align-items: center;
-    padding: 2px var(--space-sm);
-    background: var(--color-bg);
-    color: var(--color-text-muted);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    font-size: var(--font-size-label);
+    padding: var(--s-0) var(--s-2);
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--accent-strong);
+    border-radius: var(--r-pill);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
   }
   .actions {
     display: flex;
-    gap: var(--space-xs);
+    gap: var(--s-1);
     flex-wrap: wrap;
   }
+  /* Phase 02.1-33: edit pencil hidden in edit mode. The icon-btn class
+   * is the read-mode pencil affordance; editing toggles the row away
+   * from the read surface so this rule is for the legacy icon-btn
+   * (kept for future pencil reintroduction if the editing UX changes). */
   .icon-btn {
-    min-height: 44px;
-    min-width: 44px;
-    padding: 0 var(--space-sm);
+    min-height: var(--hit);
+    min-width: var(--hit);
+    padding: var(--s-1) var(--s-2);
     background: transparent;
-    color: var(--color-text-muted);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    color: var(--text-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: var(--font-size-label);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
   }
   .icon-btn:hover {
-    color: var(--color-text);
+    background: var(--accent-soft);
+    color: var(--accent);
   }
-  /* Section divider visually separates form fields from the action row
-     that follows. Border-top on a zero-height <hr> keeps the stacking
-     simple while honoring the "fields above, actions below" read
-     order. */
+  /* Section divider above the form footer — Phase 02.1-33 contract. */
   .section-divider {
     width: 100%;
-    margin: 0;
+    margin: var(--s-2) 0 0 0;
     border: 0;
-    border-top: 1px solid var(--color-border);
+    border-top: 1px solid var(--border-hairline);
   }
-  /* Edit-form footer. Save / Cancel / Remove sit at the BOTTOM of the
-     form block, full-width and reachable at 360px without horizontal
-     scroll. Save is the primary action (--color-accent fill), Cancel is
-     the ghost variant (transparent + border), Remove is the danger
-     variant (--color-destructive border and label color). */
+  /* Edit-form footer — Phase 02.1-33: Save (primary) / Cancel (ghost) /
+   * Remove (danger) at the BOTTOM of the form block. */
   .form-footer {
     display: flex;
-    gap: var(--space-xs);
+    gap: var(--s-2);
     flex-wrap: wrap;
     margin-top: 0;
   }
   .footer-btn {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    border-radius: 4px;
-    border: 1px solid var(--color-border);
-    background: var(--color-surface);
-    color: var(--color-text);
+    min-height: var(--hit);
+    padding: var(--s-2) var(--s-4);
+    border-radius: var(--r-sm);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
     cursor: pointer;
-    font-size: var(--font-size-label);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
     flex: 1 1 auto;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .footer-btn:hover:not(:disabled) {
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
   .footer-btn:disabled {
-    opacity: 0.6;
+    opacity: 0.55;
     cursor: not-allowed;
   }
   .footer-btn-primary {
-    background: var(--color-accent);
-    color: var(--color-accent-text, #fff);
-    border-color: var(--color-accent);
+    background: var(--accent);
+    color: var(--accent-text);
+    border-color: var(--accent);
+  }
+  .footer-btn-primary:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   .footer-btn-ghost {
     background: transparent;
-    color: var(--color-text);
-    border-color: var(--color-border);
+    color: var(--text);
+    border-color: var(--border);
   }
   .footer-btn-danger {
     background: transparent;
-    color: var(--color-destructive);
-    border-color: var(--color-border);
+    color: var(--danger);
+    border-color: var(--border);
   }
   .footer-btn-danger:hover {
-    border-color: var(--color-destructive);
+    background: var(--danger);
+    color: #fff;
+    border-color: var(--danger);
   }
   @media (min-width: 768px) {
     .row {
@@ -576,10 +591,16 @@
       order: 99;
     }
     .edit-form {
-      /* Edit form takes a full row when active so the field stack +
-         section divider + footer all line up correctly. */
       flex-basis: 100%;
       order: 50;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .display,
+    .input,
+    .icon-btn,
+    .footer-btn {
+      transition: none;
     }
   }
 </style>

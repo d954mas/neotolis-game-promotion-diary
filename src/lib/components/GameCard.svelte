@@ -67,15 +67,20 @@
 </article>
 
 <style>
+  /* v2 GameCard — --surface card + --r-md radius + --shadow-card elevation;
+   * 96px/128px cover thumb with --surface-2 placeholder. LB-9
+   * `referrerpolicy="no-referrer"` preserved on cover <img>. */
   .card {
     display: grid;
     grid-template-columns: 96px 1fr auto;
-    gap: var(--space-md);
-    padding: var(--space-md);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    gap: var(--s-3);
+    padding: var(--s-3) var(--s-4);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-card);
     align-items: center;
+    min-width: 0;
   }
   .deleted {
     opacity: 0.6;
@@ -84,70 +89,87 @@
     width: 96px;
     height: 96px;
     object-fit: cover;
-    border-radius: 4px;
-    background: var(--color-bg);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
   }
   .cover.placeholder {
-    background: var(--color-bg);
-    border: 1px dashed var(--color-border);
+    background: var(--surface-2);
+    border: 1px dashed var(--border);
   }
   .body {
     min-width: 0;
   }
   .title {
-    margin: 0 0 var(--space-sm) 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
-    line-height: var(--line-height-heading);
+    margin: 0 0 var(--s-2) 0;
+    font-family: var(--f-sans);
+    font-size: var(--t-15);
+    font-weight: var(--w-sb);
+    line-height: var(--lh-tight);
   }
   .title a {
-    color: var(--color-text);
+    color: var(--text);
     text-decoration: none;
   }
   .title a:hover {
+    color: var(--accent);
     text-decoration: underline;
   }
   .meta {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   .badge,
   .chip {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    padding: 2px var(--space-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    color: var(--text-3);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    padding: var(--s-0) var(--s-2);
   }
   .actions {
     display: flex;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   .delete {
-    min-width: 44px;
-    min-height: 44px;
+    min-width: var(--hit);
+    min-height: var(--hit);
     background: transparent;
-    color: var(--color-text-muted);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    color: var(--text-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: var(--font-size-heading);
+    font-size: var(--t-17);
     line-height: 1;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .delete:hover {
-    color: var(--color-destructive);
-    border-color: var(--color-destructive);
+    background: var(--danger);
+    color: #fff;
+    border-color: var(--danger);
   }
   .restore {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .restore:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
   @media (min-width: 768px) {
     .card {
@@ -156,6 +178,12 @@
     .cover {
       width: 128px;
       height: 128px;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .delete,
+    .restore {
+      transition: none;
     }
   }
 </style>

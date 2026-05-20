@@ -50,48 +50,54 @@
 </div>
 
 <style>
+  /* v2 AuditRow — list-row on --surface-2 with --border-hairline separators
+   * and --f-mono timestamp. */
   .row {
     display: grid;
     grid-template-columns: 1fr;
-    gap: var(--space-xs);
-    padding: var(--space-md);
-    border-bottom: 1px solid var(--color-border);
+    gap: var(--s-1);
+    padding: var(--s-2) var(--s-4);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border-hairline);
   }
   .when {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-family: var(--f-mono);
+    font-size: var(--t-12);
+    color: var(--text-3);
   }
   .chip {
-    font-size: var(--font-size-label);
-    font-weight: var(--font-weight-semibold);
-    color: var(--color-text-muted);
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    padding: 2px var(--space-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
+    color: var(--text-2);
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    padding: var(--s-0) var(--s-2);
     align-self: flex-start;
     width: fit-content;
   }
   .last4 {
-    font-family: var(--font-family-mono);
-    font-size: var(--font-size-label);
-    color: var(--color-text);
+    font-family: var(--f-mono);
+    font-size: var(--t-12);
+    color: var(--text);
   }
   .ip {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    font-family: var(--font-family-mono);
+    font-family: var(--f-mono);
+    font-size: var(--t-12);
+    color: var(--text-3);
   }
   .ua {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    color: var(--text-3);
     word-break: break-word;
   }
   @media (min-width: 768px) {
     .row {
       grid-template-columns: 200px auto auto 1fr 1fr;
       align-items: center;
-      gap: var(--space-md);
+      gap: var(--s-3);
     }
   }
 </style>

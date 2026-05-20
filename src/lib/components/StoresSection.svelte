@@ -43,14 +43,15 @@
 </div>
 
 <style>
+  /* v2 StoresSection — simple wrapper. Grid layout for the listings.
+   * Padding around --surface-2 cards is owned by SteamListingRow. */
   .stores-body {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
+    gap: var(--s-3);
     min-width: 0;
   }
-  /* Grid layout. 3 cards per row at >=900px (3 * 260 + 2 * 16 = 812px
-   * content; fits at 900px including page padding); 2-per-row in the
+  /* Grid layout. 3 cards per row at >=900px; 2-per-row in the
    * 600-900 band; single column at 360px (auto-fill collapses naturally
    * below 260px + gutter). */
   .stores-grid {
@@ -59,11 +60,12 @@
     margin: 0;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: var(--space-md);
+    gap: var(--s-3);
   }
   .muted {
     margin: 0;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
   }
 </style>

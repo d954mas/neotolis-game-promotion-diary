@@ -107,10 +107,13 @@
 {/if}
 
 <style>
+  /* v2 SessionsList — D-01 redraw via AuditRow analogy. --surface-2
+   * list-rows with --border-hairline separators. */
   .muted {
     margin: 0;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
   }
   .sessions {
     list-style: none;
@@ -118,65 +121,78 @@
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: var(--s-2);
   }
   .session {
     display: flex;
     align-items: center;
-    gap: var(--space-md);
-    padding: var(--space-sm) var(--space-md);
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    gap: var(--s-3);
+    padding: var(--s-3) var(--s-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
     flex-wrap: wrap;
   }
   .meta {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
     flex: 1 1 auto;
     min-width: 0;
   }
   .when {
-    font-size: var(--font-size-label);
-    color: var(--color-text);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    color: var(--text);
   }
   .ip,
   .ua {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    font-family: var(--font-family-mono);
+    font-family: var(--f-mono);
+    font-size: var(--t-12);
+    color: var(--text-3);
     word-break: break-all;
   }
   .actions {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     align-items: center;
   }
   .current {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    padding: 2px var(--space-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    color: var(--text-3);
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    padding: var(--s-0) var(--s-2);
   }
   .signout {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .signout:hover:not(:disabled) {
-    color: var(--color-destructive);
-    border-color: var(--color-destructive);
+    background: var(--danger);
+    color: #fff;
+    border-color: var(--danger);
   }
   .signout:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: progress;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .signout {
+      transition: none;
+    }
   }
 </style>

@@ -257,262 +257,248 @@
 />
 
 <style>
-  /* Card layout — border + radius + padding + flex column so each Steam
-   * listing reads as its own card inside the StoresSection grid. The
-   * cover image is the FIRST child so the flow is image → header →
-   * app id → meta → CTA. */
+  /* v2 SteamListingRow — D-01 redraw via SourceRow analogy. --surface-2
+   * card + --r-md radius + --shadow-card elevation. data-kind="steam"
+   * (LB-10) preserved. */
   .store-card {
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
-    padding: var(--space-md);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
+    gap: var(--s-2);
+    padding: var(--s-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-card);
     min-width: 0;
     overflow: hidden;
   }
   /* Cover image at the top of the card. Aspect ratio matches Steam's
-   * standard header image (460×215, ~2.14:1) so the visual proportions
-   * stay stable even when Steam returns a differently-sized asset. The
-   * image is bleed-to-edge on the top (negative margins) so the card
-   * border frames it cleanly. */
+   * standard header image (460×215). Bleed-to-edge so the card border
+   * frames it cleanly. */
   .store-cover {
     display: block;
-    width: calc(100% + 2 * var(--space-md));
-    margin-top: calc(var(--space-md) * -1);
-    margin-left: calc(var(--space-md) * -1);
-    margin-right: calc(var(--space-md) * -1);
+    width: calc(100% + 2 * var(--s-4));
+    margin-top: calc(var(--s-4) * -1);
+    margin-left: calc(var(--s-4) * -1);
+    margin-right: calc(var(--s-4) * -1);
     aspect-ratio: 460 / 215;
     object-fit: cover;
-    background: var(--color-bg);
+    background: var(--surface-3);
   }
   .store-card-header {
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     min-width: 0;
     flex-wrap: wrap;
   }
-  /* STEAM badge — small accent pill identifying the store kind. Future
-   * kinds (Itch, Epic) extend the data-kind attribute with their own
-   * color tokens; today only "steam" is wired (matching the schema). */
+  /* STEAM badge — accent pill identifying the store kind. */
   .kind-badge {
     display: inline-flex;
     align-items: center;
-    padding: 2px var(--space-sm);
-    background: var(--color-accent);
-    color: var(--color-accent-text, #fff);
-    border-radius: 3px;
+    padding: var(--s-0) var(--s-2);
+    background: var(--accent);
+    color: var(--accent-text);
+    border-radius: var(--r-xs);
+    font-family: var(--f-sans);
     font-size: 0.6875rem;
-    font-weight: var(--font-weight-semibold);
+    font-weight: var(--w-sb);
     letter-spacing: 0.05em;
     flex-shrink: 0;
   }
   .store-name {
     margin: 0;
-    color: var(--color-text);
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    color: var(--text);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
     word-break: break-word;
     min-width: 0;
   }
-  /* App id surfaces in muted monospace so it reads as a technical
-   * identifier (not body copy). Kept literal without translation. */
   .app-id {
     margin: 0;
-    color: var(--color-text-muted);
-    font-family: var(--font-family-mono, monospace);
-    font-size: var(--font-size-label);
+    color: var(--text-3);
+    font-family: var(--f-mono);
+    font-size: var(--t-12);
   }
   .user-label,
   .release-date {
     margin: 0;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    color: var(--text-2);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
   }
-  /* "Label:" prefix in front of the free-text user label so the field
-   * is self-documenting. The prefix uses the same muted token as the
-   * value but uppercases / weights for visual hierarchy ("Label: Demo"
-   * reads as a key-value pair). */
   .label-prefix {
-    font-weight: var(--font-weight-semibold);
+    font-weight: var(--w-sb);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin-right: 4px;
+    color: var(--text-3);
   }
   .key-linked-note {
     margin: 0;
   }
   .chip {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    padding: 2px var(--space-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    color: var(--text-3);
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    padding: var(--s-0) var(--s-2);
   }
   .cta-secondary.store-link {
     align-self: flex-start;
     display: inline-flex;
     align-items: center;
-    min-height: 36px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-accent);
-    border: 1px solid var(--color-accent);
-    border-radius: 4px;
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
     text-decoration: none;
-    font-size: var(--font-size-label);
-    font-weight: var(--font-weight-semibold);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
     white-space: nowrap;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
   }
   .cta-secondary.store-link:hover {
-    background: var(--color-accent);
-    color: var(--color-accent-text, #fff);
+    background: var(--accent);
+    color: var(--accent-text);
   }
-  /* Per-card Edit button. Sits at the top-right corner of the card;
-   * small + secondary so it does not compete with the card's reading
-   * flow.
-   *
-   * Position: absolute relative to the card. When the cover image is
-   * rendered, the button sits OVER the image's top-right corner — the
-   * white-text + dark-translucent background keeps it legible on any
-   * cover. When no cover, it sits over the surface — same visual
-   * treatment for visual consistency. */
-  .edit-btn {
-    position: absolute;
-    top: var(--space-xs);
-    right: var(--space-xs);
-    min-height: 32px;
-    padding: 0 var(--space-sm);
-    background: rgb(0 0 0 / 60%);
-    color: #fff;
-    border: 1px solid rgb(255 255 255 / 30%);
-    border-radius: 4px;
-    font-size: var(--font-size-label);
-    font-weight: var(--font-weight-semibold);
-    cursor: pointer;
-    z-index: 1;
-  }
-  .edit-btn:hover {
-    background: rgb(0 0 0 / 80%);
-  }
-  /* Inline label edit form (label input + Save / Cancel + × Remove).
-   * The form sits inline in the card body — no modal — so the user
-   * can compare the new label against the cover/name/appId without
-   * context-switching.
-   *
-   * The Cancel-edit × button at the top-right takes the Edit-button
-   * position (same coords) so the user can dismiss without scrolling
-   * to find a Cancel. The form's own Save/Cancel buttons are the
-   * primary affordance for the field edit; the top-right × is the
-   * "discard + close" parallel of GameEditDialog's close button. */
+  /* Per-card Edit / Cancel buttons. Top-right; dark translucent over
+   * the cover image to stay legible. */
+  .edit-btn,
   .cancel-edit-btn {
     position: absolute;
-    top: var(--space-xs);
-    right: var(--space-xs);
-    min-width: 32px;
+    top: var(--s-1);
+    right: var(--s-1);
     min-height: 32px;
-    padding: 0 var(--space-sm);
+    min-width: 32px;
+    padding: var(--s-1) var(--s-2);
     background: rgb(0 0 0 / 60%);
     color: #fff;
     border: 1px solid rgb(255 255 255 / 30%);
-    border-radius: 4px;
-    font-size: var(--font-size-label);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-sb);
     cursor: pointer;
     z-index: 1;
+    transition: background var(--m-fast) var(--m-ease);
   }
+  .edit-btn:hover,
   .cancel-edit-btn:hover:not(:disabled) {
     background: rgb(0 0 0 / 80%);
   }
   .cancel-edit-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: not-allowed;
   }
   .edit-form {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
-    padding: var(--space-sm);
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    gap: var(--s-2);
+    padding: var(--s-3);
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
   }
   .edit-field {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   .edit-field-label {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    font-weight: var(--font-weight-semibold);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    color: var(--text-2);
+    font-weight: var(--w-md);
   }
   .edit-input {
-    min-height: 36px;
-    padding: 0 var(--space-sm);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
     width: 100%;
     box-sizing: border-box;
   }
   .edit-actions {
     display: flex;
-    gap: var(--space-xs);
+    gap: var(--s-1);
     flex-wrap: wrap;
   }
-  .edit-save {
-    min-height: 36px;
-    padding: 0 var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-accent-text, #fff);
-    border: 1px solid var(--color-accent);
-    border-radius: 4px;
-    font-size: var(--font-size-label);
-    font-weight: var(--font-weight-semibold);
+  .edit-save,
+  .edit-cancel,
+  .remove-btn-inline {
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .edit-save {
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+  }
+  .edit-save:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   .edit-save:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: not-allowed;
   }
   .edit-cancel {
-    min-height: 36px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-label);
-    cursor: pointer;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .edit-cancel:hover:not(:disabled) {
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
   .edit-cancel:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: not-allowed;
   }
   .remove-btn-inline {
     margin-left: auto;
-    min-height: 36px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-destructive);
-    border: 1px solid var(--color-destructive);
-    border-radius: 4px;
-    font-size: var(--font-size-label);
-    font-weight: var(--font-weight-semibold);
-    cursor: pointer;
+    background: transparent;
+    color: var(--danger);
+    border: 1px solid var(--danger);
   }
   .remove-btn-inline:hover:not(:disabled) {
-    background: var(--color-destructive);
+    background: var(--danger);
     color: #fff;
   }
   .remove-btn-inline:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: not-allowed;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cta-secondary.store-link,
+    .edit-btn,
+    .cancel-edit-btn,
+    .edit-save,
+    .edit-cancel,
+    .remove-btn-inline {
+      transition: none;
+    }
   }
 </style>

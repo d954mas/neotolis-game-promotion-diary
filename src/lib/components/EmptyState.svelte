@@ -68,48 +68,66 @@
 </div>
 
 <style>
+  /* v2 EmptyState — denser type with --t-30 display heading + --t-14 body
+   * + --hit-lg accent CTA. */
   .empty {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: var(--space-md);
-    padding: var(--space-xl) var(--space-md);
-    color: var(--color-text);
+    gap: var(--s-4);
+    padding: var(--s-8) var(--s-4);
+    color: var(--text);
   }
   .heading {
     margin: 0;
-    font-size: var(--font-size-display);
-    font-weight: var(--font-weight-semibold);
-    line-height: var(--line-height-heading);
+    font-family: var(--f-sans);
+    font-size: var(--t-30);
+    font-weight: var(--w-sb);
+    line-height: var(--lh-tight);
+    color: var(--text);
   }
   .body {
     margin: 0;
-    font-size: var(--font-size-body);
-    line-height: var(--line-height-body);
-    color: var(--color-text-muted);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    line-height: var(--lh-body);
+    color: var(--text-2);
     max-width: 60ch;
   }
   .example {
-    font-family: var(--font-family-mono);
-    font-size: var(--font-size-label);
-    line-height: var(--line-height-mono);
-    color: var(--color-text);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    padding: 1px var(--space-xs);
-    border-radius: 2px;
+    font-family: var(--f-mono);
+    font-size: var(--t-13);
+    line-height: var(--lh-body);
+    color: var(--text);
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    padding: var(--s-0) var(--s-1);
+    border-radius: var(--r-xs);
     cursor: text;
     word-break: break-all;
   }
   .cta {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border: none;
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit-lg);
+    padding: var(--s-2) var(--s-4);
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .cta:hover {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cta {
+      transition: none;
+    }
   }
 </style>

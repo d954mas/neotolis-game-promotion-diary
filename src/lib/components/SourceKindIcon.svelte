@@ -7,11 +7,12 @@
   //
   // Style contract:
   //   - 24px viewBox
+  //   - 16px render size (source-context — Phase 03.3 UI-SPEC)
   //   - stroke="currentColor"
-  //   - stroke-width="2"
+  //   - stroke-width="1.75"
   //   - stroke-linecap / linejoin "round"
   //   - fill="none"
-  //   - color via var(--color-text-muted)
+  //   - color via var(--text-3)
   //
   // Decorative — `aria-hidden="true"`. Adjacent text (the source-kind label
   // chip + display_name) carries the accessible name.
@@ -31,11 +32,11 @@
   <svg
     class="icon"
     viewBox="0 0 24 24"
-    width="20"
-    height="20"
+    width="16"
+    height="16"
     fill="none"
     stroke="currentColor"
-    stroke-width="2"
+    stroke-width="1.75"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"
@@ -47,11 +48,11 @@
   <svg
     class="icon"
     viewBox="0 0 24 24"
-    width="20"
-    height="20"
+    width="16"
+    height="16"
     fill="none"
     stroke="currentColor"
-    stroke-width="2"
+    stroke-width="1.75"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"
@@ -63,11 +64,11 @@
   <svg
     class="icon"
     viewBox="0 0 24 24"
-    width="20"
-    height="20"
+    width="16"
+    height="16"
     fill="none"
     stroke="currentColor"
-    stroke-width="2"
+    stroke-width="1.75"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"
@@ -80,11 +81,11 @@
   <svg
     class="icon"
     viewBox="0 0 24 24"
-    width="20"
-    height="20"
+    width="16"
+    height="16"
     fill="none"
     stroke="currentColor"
-    stroke-width="2"
+    stroke-width="1.75"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"
@@ -96,11 +97,11 @@
   <svg
     class="icon"
     viewBox="0 0 24 24"
-    width="20"
-    height="20"
+    width="16"
+    height="16"
     fill="none"
     stroke="currentColor"
-    stroke-width="2"
+    stroke-width="1.75"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"
@@ -114,8 +115,10 @@
 {/if}
 
 <style>
+  /* v2 SourceKindIcon — D-01 redraw via KindIcon analogy at source-context
+   * size. 16px / stroke 1.75 / currentColor (inherits from parent). */
   .icon {
-    color: var(--color-text-muted);
+    color: var(--text-3);
     flex-shrink: 0;
   }
 </style>
