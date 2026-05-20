@@ -167,27 +167,33 @@
     min-height: 100vh;
   }
   /* The sticky chrome wrapper. SINGLE sticky element for the AppHeader
-     + Nav pair. Background fill prevents scrolled content from showing
-     through; matches AppHeader's own `--color-surface` so the wrapper
-     is visually invisible. z-index 10 keeps the chrome above per-page
-     sticky elements (PageHeader z:5). */
+     + Nav pair. The v2 treatment is a translucent backdrop-blurred bar
+     that lets scrolled content tint through while staying legible —
+     `color-mix(in oklab, var(--bg) 80%, transparent)` over `--bg` gives
+     a soft scrim, `backdrop-filter` plus the `-webkit-` vendor prefix
+     blurs whatever scrolls underneath, and a single `--border-hairline`
+     bottom separator anchors the bar to the page below. z-index 10
+     keeps the chrome above per-page sticky elements (PageHeader z:5). */
   .sticky-chrome {
     position: sticky;
     top: 0;
     z-index: 10;
-    background: var(--color-surface);
+    background: color-mix(in oklab, var(--bg) 80%, transparent);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border-bottom: 1px solid var(--border-hairline);
   }
   main {
     flex: 1;
-    max-width: 1024px;
+    max-width: var(--max-w, 1280px);
     width: 100%;
     margin: 0 auto;
-    padding: var(--space-md);
+    padding: var(--s-4);
     min-width: 0;
   }
   @media (min-width: 768px) {
     main {
-      padding: var(--space-2xl);
+      padding: var(--s-6);
     }
   }
 </style>
