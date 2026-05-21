@@ -227,7 +227,12 @@
     gameStates: Record<string, "on" | "off" | "mixed">;
     offTopicState: "on" | "off" | "mixed";
   }): Promise<void> {
-    const ids = [...selectedIds];
+    // Use gamesPickerTargetIds — these are set correctly for both the
+    // bulk (BulkActionBar → selectedIds copy) and single (FeedCard ⋮
+    // menu → [event.id]) paths. selectedIds is the store value which
+    // is empty in single-event mode (user didn't enter mass-select),
+    // so reading from it would early-return here.
+    const ids = [...gamesPickerTargetIds];
     if (ids.length === 0) return;
     const res = await fetch("/api/events/bulk", {
       method: "PATCH",
@@ -240,7 +245,7 @@
         kind: "success",
         text: m.toast_bulk_edit_success({ count: String(body.affected_count) }),
       };
-      clearSelection();
+      if (gamesPickerMode === "bulk") clearSelection();
       gamesPickerOpen = false;
       await invalidateAll();
     } else {
