@@ -1,24 +1,31 @@
 <script lang="ts">
   // ActiveFiltersStrip — Wave 2a (Plan 03.4-07 Task 3).
   //
-  // Port of docs/design/v2/ui-kit/app.jsx lines 200-256. Renders the
-  // chip strip showing which filters are currently active when the
-  // <PageHead>'s Filters panel is COLLAPSED (LB-10 toggle). Each chip
-  // dismisses one specific filter via its onRemove callback; "Clear all"
-  // dismisses everything in one click.
+  // Port of docs/design/v2/ui-kit/app.jsx lines 200-256 + index.html
+  // `.active-filters` / `.chip.active-chip` CSS rules (lines 276-323).
+  //
+  // Renders the chip strip showing which filters are currently active
+  // when the <PageHead>'s Filters panel is COLLAPSED (LB-10 toggle).
+  // Each chip dismisses one specific filter via its onRemove callback;
+  // "Clear all" dismisses everything in one click.
+  //
+  // Visual contract vs. the prototype:
+  //   - Strip: hairline bottom border + small vertical padding. Renders
+  //     a row of pill chips with a × close icon at the right edge.
+  //   - Base chip: 30px height, surface-2 fill, hairline border, text
+  //     color. The × is a 20×20 circular subtle button that brightens
+  //     to text-color on hover.
+  //   - Variant `data-variant="show"`: accent-soft fill (matches the
+  //     Inbox active treatment in the filter row).
+  //   - Variant `data-variant="game"`: inset 3px left stripe in the
+  //     game color (echoes the card's color-coded edge).
+  //   - Variant `data-variant="kind"`: same inset stripe in the kind
+  //     hue + the kind icon.
+  //   - "Clear all" is a text-link CTA at the right edge.
   //
   // Placement decision (RESEARCH Open Question 4): this strip lives
-  // BELOW PageHead, not inside the sticky chrome. PageHead measures its
-  // own height (LB-3 ResizeObserver) and publishes
-  // --page-header-height; if the strip were inside PageHead it would
-  // grow that height every time a filter chip was added, knocking the
-  // sticky FeedDateGroupHeader's `top:` math out of sync. By rendering
-  // OUTSIDE the sticky wrapper we preserve the stable-height contract.
-  //
-  // Component is presentational — the caller assembles the AxisChip[]
-  // array from FilterState and provides onRemove / onClearAll wiring
-  // (which themselves walk through `serializeFilterState` to update the
-  // URL).
+  // BELOW PageHead, not inside the sticky chrome — keeps the
+  // FeedDateGroupHeader sticky math stable (LB-3).
 
   import { m } from "$lib/paraglide/messages.js";
 
@@ -46,9 +53,8 @@
     {#each axes as chip (chip.axis + ":" + chip.label)}
       <button
         type="button"
-        class="chip"
-        data-axis={chip.axis}
-        data-active="1"
+        class="chip active-chip"
+        data-variant={chip.axis}
         onclick={chip.onRemove}
         aria-label={m.feed_active_filters_remove_aria({ label: chip.label })}
       >
@@ -56,71 +62,124 @@
         <span class="x" aria-hidden="true">×</span>
       </button>
     {/each}
-    <button type="button" class="clear-all" onclick={onClearAll}>
+    <button type="button" class="btn-link" onclick={onClearAll}>
       {m.feed_active_filters_clear_all()}
     </button>
   </div>
 {/if}
 
 <style>
+  /* index.html .active-filters lines 278-283 — small vertical padding,
+   * hairline bottom border. */
   .active-filters {
     display: flex;
-    flex-wrap: wrap;
     gap: var(--s-2);
-    padding: var(--s-2) var(--s-4);
-    background: transparent;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: var(--s-3) 0;
+    border-bottom: 1px solid var(--border-hairline);
+    margin-bottom: var(--s-2);
     min-width: 0;
   }
 
-  .chip {
+  /* index.html .chip.active-chip lines 284-323. Base treatment is a
+   * neutral surface-2 pill with a hairline border; the × sits inside
+   * a 20px circular hover target. */
+  .chip.active-chip {
     display: inline-flex;
     align-items: center;
-    gap: var(--s-1);
-    background: var(--accent-soft);
-    color: var(--accent);
-    border: 1px solid var(--accent-strong);
+    gap: 6px;
+    height: 30px;
+    padding: 0 6px 0 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
     border-radius: var(--r-pill);
-    padding: var(--s-1) var(--s-3);
     font-family: var(--f-sans);
-    font-size: var(--t-12);
-    font-weight: var(--w-sb);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+    white-space: nowrap;
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
+  }
+
+  .chip.active-chip .x {
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    color: var(--text-3);
+    font-size: 14px;
+    line-height: 1;
     transition:
       background var(--m-fast) var(--m-ease),
       color var(--m-fast) var(--m-ease);
   }
-  .chip:hover {
-    background: var(--accent);
-    color: var(--accent-text);
-  }
-  .chip .x {
-    color: inherit;
-    font-size: 14px;
-    line-height: 1;
-    margin-left: 2px;
+  .chip.active-chip:hover .x {
+    background: rgba(0, 0, 0, 0.18);
+    color: var(--text);
   }
 
-  .clear-all {
-    background: transparent;
-    border: 1px solid transparent;
-    color: var(--text-3);
-    border-radius: var(--r-pill);
-    padding: var(--s-1) var(--s-3);
-    font-family: var(--f-sans);
-    font-size: var(--t-12);
-    cursor: pointer;
-    transition:
-      color var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
+  /* Show / author chip — accent treatment (Inbox = workflow-critical). */
+  .chip.active-chip[data-variant="show"],
+  .chip.active-chip[data-variant="author"] {
+    background: var(--accent-soft);
+    border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+    color: var(--accent-strong);
   }
-  .clear-all:hover {
-    color: var(--danger);
-    border-color: var(--danger);
+
+  /* Game chip — accent-stripe (echoes card-footer game-chip + active
+   * GAME filter chip). The stripe color is parameterized via
+   * --card-accent so per-game colors can layer in later. */
+  .chip.active-chip[data-variant="game"] {
+    box-shadow: inset 3px 0 0 var(--card-accent, var(--accent));
+    padding-left: 14px;
+    border-color: color-mix(
+      in oklab,
+      var(--card-accent, var(--accent)) 35%,
+      var(--border)
+    );
+  }
+
+  /* Kind chip — tinted in the kind's hue. */
+  .chip.active-chip[data-variant="kind"] {
+    box-shadow: inset 3px 0 0 var(--card-accent, var(--accent));
+    padding-left: 14px;
+    border-color: color-mix(
+      in oklab,
+      var(--card-accent, var(--accent)) 35%,
+      var(--border)
+    );
+  }
+
+  /* Source chip — neutral surface (no special accent in prototype). */
+
+  /* "Clear all" — subtle text-link CTA (index.html lines 459-463). */
+  .btn-link {
+    background: transparent;
+    border: 0;
+    padding: 0 var(--s-2);
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+    transition: color var(--m-fast) var(--m-ease);
+  }
+  .btn-link:hover {
+    color: var(--text);
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .chip,
-    .clear-all {
+    .chip.active-chip,
+    .chip.active-chip .x,
+    .btn-link {
       transition: none;
     }
   }
