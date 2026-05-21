@@ -796,9 +796,9 @@
       <!-- KIND axis — sentinel "All" + per-kind multi-select chips with
         leading kind-colored icon. Order mirrors prototype app.jsx lines
         1640-1657: YouTube / Press / Reddit / Twitter / Telegram / Discord
-        / Post / Conference / Talk / Other. We render the FULL list (not
-        just `visibleKinds`) so the user can predict what each chip would
-        narrow to — empty chips dim their count via data-empty. -->
+        / Post / Conference / Talk / Other. We render ONLY kinds that have
+        events in the current dataset (predictedCount > 0) OR are currently
+        selected — empty kinds clutter the axis without informing decisions. -->
       <AxisRow
         label={m.axis_row_kind_label()}
         axisKey="kind"
@@ -813,7 +813,7 @@
             label: KIND_AXIS_LABEL[k](),
             predictedCount: countWithKind(filterableEvents, k, urlState, today),
             iconKind: k,
-          })),
+          })).filter((opt) => opt.predictedCount > 0 || urlState.kind.includes(opt.value as EventKind)),
         ]}
         selectedValues={urlState.kind.length === 0 ? ["all"] : urlState.kind}
         onToggle={(v) => {
