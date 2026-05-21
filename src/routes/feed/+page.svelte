@@ -609,7 +609,7 @@
     {filtersOpen}
     activeFilterCount={activeAxes.length}
     totalCount={allRows.length}
-    filteredCount={groupedRows.reduce((n, g) => n + g.rows.length, 0)}
+    filteredCount={filterableEvents.filter((e) => passes(e, urlState, today)).length}
     sticky
   >
     <DateRangeRow
