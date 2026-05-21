@@ -785,7 +785,7 @@ describe("admin/quota cross-allowlist", () => {
   });
 });
 
-// Phase 3.4 design-v2-ux — bulk events cross-tenant placeholders.
+// Phase 3.4 design-v2-ux — bulk events cross-tenant.
 //
 // D-13 contract: bulk PATCH/DELETE silently DROP ids the caller doesn't
 // own — they NEVER 404 the whole request, they NEVER 403 the whole
@@ -795,28 +795,140 @@ describe("admin/quota cross-allowlist", () => {
 // existence-check op (Pitfall 9 — cross-tenant ids must not leak via
 // per-id 422 errors).
 //
-// Wave 1 Plan 06 mounts /api/events/bulk (service + route). At that
-// point: flip it.skip → it() and assert affected_count semantics.
-describe("bulk events cross-tenant (D-13) — Wave 1 Plan 06 deferred", () => {
-  it.skip("PATCH /api/events/bulk silently filters cross-tenant ids (D-13) — Wave 1 Plan 06 + Plan 05 flip this from skip to it()", () => {
-    // Setup: create event ev_A owned by user A; create event ev_B owned
-    // by user B. With user A's session, PATCH /api/events/bulk with
-    // ids: [ev_A, ev_B]. Expect: 200 OK; affected_count === 1; ev_B
-    // untouched. NEVER 403 (per D-13 + AGENTS.md tenant-scope contract).
+// Body MUST NOT contain "forbidden" or "permission". The mapErr envelope
+// would never produce those strings because there's no error here at all
+// — the response is 200 with a numeric counter. These assertions are
+// belt-and-suspenders against a future refactor that breaks the contract
+// (e.g. throwing NotFoundError on the first cross-tenant id, which would
+// turn the 200 into a 404).
+describe("bulk events cross-tenant (D-13)", () => {
+  it("PATCH /api/events/bulk silently filters cross-tenant ids (D-13) — 200 + affected_count for owned subset", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { createEvent } = await import("../../src/lib/server/services/events.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({
+      email: `bulk-xt-A-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const userB = await seedUserDirectly({
+      email: `bulk-xt-B-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const evA = await createEvent(
+      userA.id,
+      { gameIds: [], kind: "twitter_post", occurredAt: new Date(), title: "A" },
+      "127.0.0.1",
+    );
+    const evB = await createEvent(
+      userB.id,
+      { gameIds: [], kind: "twitter_post", occurredAt: new Date(), title: "B" },
+      "127.0.0.1",
+    );
+
+    const res = await app.request("/api/events/bulk", {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        cookie: `neotolis.session_token=${userA.signedSessionCookieValue}`,
+      },
+      body: JSON.stringify({
+        ids: [evA.id, evB.id],
+        gameStates: {},
+        offTopicState: "on",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text.toLowerCase()).not.toContain("forbidden");
+    expect(text.toLowerCase()).not.toContain("permission");
+    const body = JSON.parse(text) as { affected_count: number };
+    expect(body.affected_count).toBe(1);
   });
 
-  it.skip("DELETE /api/events/bulk silently filters cross-tenant ids (D-13) — Wave 1 Plan 06 + Plan 05 flip this from skip to it()", () => {
-    // Setup: same as above. With user A's session, DELETE /api/events/bulk
-    // with ids: [ev_A, ev_B]. Expect: 200 OK; affected_count === 1;
-    // ev_B still live in user B's feed.
+  it("DELETE /api/events/bulk silently filters cross-tenant ids (D-13) — 200 + affected_count for owned subset", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { createEvent } = await import("../../src/lib/server/services/events.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({
+      email: `bulk-del-xt-A-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const userB = await seedUserDirectly({
+      email: `bulk-del-xt-B-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const evA = await createEvent(
+      userA.id,
+      { gameIds: [], kind: "twitter_post", occurredAt: new Date(), title: "A" },
+      "127.0.0.1",
+    );
+    const evB = await createEvent(
+      userB.id,
+      { gameIds: [], kind: "twitter_post", occurredAt: new Date(), title: "B" },
+      "127.0.0.1",
+    );
+
+    const res = await app.request("/api/events/bulk", {
+      method: "DELETE",
+      headers: {
+        "content-type": "application/json",
+        cookie: `neotolis.session_token=${userA.signedSessionCookieValue}`,
+      },
+      body: JSON.stringify({ ids: [evA.id, evB.id] }),
+    });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text.toLowerCase()).not.toContain("forbidden");
+    expect(text.toLowerCase()).not.toContain("permission");
+    const body = JSON.parse(text) as { affected_count: number };
+    expect(body.affected_count).toBe(1);
   });
 
-  it.skip("DELETE /api/events/bulk?force=true silently filters cross-tenant + still-live ids (D-13 + D-21) — Wave 1 Plan 06 + Plan 05 flip this from skip to it()", () => {
-    // Setup: create soft-deleted ev_A_trash + live ev_A_live owned by
-    // user A; create soft-deleted ev_B_trash owned by user B. With user
-    // A's session, DELETE /api/events/bulk?force=true with ids:
-    // [ev_A_trash, ev_A_live, ev_B_trash]. Expect: 200 OK;
-    // affected_count === 1 (only ev_A_trash hard-deleted). ev_A_live
-    // still soft-live; ev_B_trash still in user B's trash.
+  it("DELETE /api/events/bulk?force=true silently filters cross-tenant + still-live ids (D-13 + D-21)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { createEvent } = await import("../../src/lib/server/services/events.js");
+    const { db } = await import("../../src/lib/server/db/client.js");
+    const { events } = await import("../../src/lib/server/db/schema/events.js");
+    const { and, eq } = await import("drizzle-orm");
+    const app = createApp();
+    const userA = await seedUserDirectly({
+      email: `bulk-force-xt-A-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const userB = await seedUserDirectly({
+      email: `bulk-force-xt-B-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const evALive = await createEvent(
+      userA.id,
+      { gameIds: [], kind: "twitter_post", occurredAt: new Date(), title: "A-live" },
+      "127.0.0.1",
+    );
+    const evATrash = await createEvent(
+      userA.id,
+      { gameIds: [], kind: "twitter_post", occurredAt: new Date(), title: "A-trash" },
+      "127.0.0.1",
+    );
+    const evBTrash = await createEvent(
+      userB.id,
+      { gameIds: [], kind: "twitter_post", occurredAt: new Date(), title: "B-trash" },
+      "127.0.0.1",
+    );
+    // Pre-soft-delete the two "trash" events.
+    await db
+      .update(events)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(events.userId, userA.id), eq(events.id, evATrash.id)));
+    await db
+      .update(events)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(events.userId, userB.id), eq(events.id, evBTrash.id)));
+
+    const res = await app.request("/api/events/bulk?force=true", {
+      method: "DELETE",
+      headers: {
+        "content-type": "application/json",
+        cookie: `neotolis.session_token=${userA.signedSessionCookieValue}`,
+      },
+      body: JSON.stringify({ ids: [evALive.id, evATrash.id, evBTrash.id] }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { affected_count: number };
+    // Only evATrash hard-deleted. evALive (live) silently filtered; evBTrash (cross-tenant) silently filtered.
+    expect(body.affected_count).toBe(1);
   });
 });

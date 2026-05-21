@@ -1778,10 +1778,26 @@ export async function bulkEdit(
 
       if (offTopicState !== "mixed") {
         const next = offTopicState === "on";
+        // Nested jsonb_set so the outer call creates the `triage` parent if
+        // absent (default events.metadata is `{}` from createEvent — without
+        // the outer wrap, jsonb_set('{triage,offTopic}', ...) silently
+        // no-ops when `triage` doesn't exist). Mirrors the same pattern
+        // dismissFromInbox + markStandalone use for `{inbox,...}` and
+        // `{triage,standalone}` respectively.
         await tx
           .update(events)
           .set({
-            metadata: sql`jsonb_set(COALESCE(${events.metadata}, '{}'::jsonb), '{triage,offTopic}', to_jsonb(${next}::boolean), true)`,
+            metadata: sql`jsonb_set(
+              jsonb_set(
+                COALESCE(${events.metadata}, '{}'::jsonb),
+                '{triage}',
+                COALESCE(${events.metadata}->'triage', '{}'::jsonb),
+                true
+              ),
+              '{triage,offTopic}',
+              to_jsonb(${next}::boolean),
+              true
+            )`,
             updatedAt: new Date(),
           })
           .where(and(eq(events.userId, userId), eq(events.id, event.id)));

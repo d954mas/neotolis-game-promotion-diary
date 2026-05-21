@@ -94,18 +94,13 @@ describe("anonymous-401 sweep", () => {
     // tenantScope middleware fires before redditFetch ever reaches
     // the Reddit servers, so anonymous probes never burn a unit.
     "/api/reddit/fetch-metadata",
+    // Phase 3.4 design-v2-ux — bulk endpoints (PATCH + DELETE on the
+    // same /api/events/bulk path). Wave 2 Plan 06 mounted the Hono
+    // route; the path participates in the load-bearing toContain guard
+    // below and in the per-method explicit anonymous-401 assertions at
+    // the bottom of this file.
+    "/api/events/bulk",
   ];
-
-  // Phase 3.4 design-v2-ux — bulk endpoints (PATCH + DELETE on the same
-  // /api/events/bulk path). Wave 1 Plan 06 mounts the Hono route; until
-  // then, listing in MUST_BE_PROTECTED would trip the toContain guard
-  // below. The entry lives here so the sweep still asserts the path is
-  // ON the registered routes list once Wave 1 lands — the per-route
-  // it.skip() assertions further down also flip from skip to it() at the
-  // same time. Pattern matches Phase 2.1 P02 + Phase 01 Plan 07
-  // "deferred-Wave-N MUST_BE_PROTECTED" precedent.
-  const MUST_BE_PROTECTED_PHASE_3_4_PENDING = ["/api/events/bulk"] as const;
-  void MUST_BE_PROTECTED_PHASE_3_4_PENDING;
 
   it("every /api/* route except /api/auth/* refuses anonymous with 401", async () => {
     // Hono exposes app.routes (array of {path, method, handler}).
@@ -318,13 +313,13 @@ describe("anonymous-401 sweep", () => {
 
   // Phase 3.4 design-v2-ux — bulk endpoints anonymous-401.
   //
-  // Wave 1 Plan 06 mounts /api/events/bulk (PATCH + DELETE +
-  // DELETE?force=true). Until then the route doesn't exist → it returns
-  // 404 not 401, so these explicit per-route assertions stay skipped.
-  // The day the route mounts: flip it.skip → it and confirm 401. The
-  // MUST_BE_PROTECTED_PHASE_3_4_PENDING entry above also moves into
-  // MUST_BE_PROTECTED at the same time.
-  it.skip("anonymous PATCH /api/events/bulk returns 401 unauthorized — Wave 1 Plan 06 flips this from skip to it()", async () => {
+  // Wave 2 Plan 06 mounted /api/events/bulk (PATCH + DELETE +
+  // DELETE?force=true). The auth gate (tenantScope on /api/*) fires before
+  // the route handler ever sees the body, so anonymous probes return 401
+  // before any validator or service code runs. The
+  // MUST_BE_PROTECTED entry above carries the load-bearing toContain
+  // guard; these explicit per-method checks are the second layer.
+  it("anonymous PATCH /api/events/bulk returns 401 unauthorized", async () => {
     const res = await app.request("/api/events/bulk", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -335,7 +330,7 @@ describe("anonymous-401 sweep", () => {
     expect(body).toEqual({ error: "unauthorized" });
   });
 
-  it.skip("anonymous DELETE /api/events/bulk returns 401 unauthorized — Wave 1 Plan 06 flips this from skip to it()", async () => {
+  it("anonymous DELETE /api/events/bulk returns 401 unauthorized", async () => {
     const res = await app.request("/api/events/bulk", {
       method: "DELETE",
       headers: { "content-type": "application/json" },
@@ -346,7 +341,7 @@ describe("anonymous-401 sweep", () => {
     expect(body).toEqual({ error: "unauthorized" });
   });
 
-  it.skip("anonymous DELETE /api/events/bulk?force=true returns 401 unauthorized — Wave 1 Plan 06 flips this from skip to it()", async () => {
+  it("anonymous DELETE /api/events/bulk?force=true returns 401 unauthorized", async () => {
     const res = await app.request("/api/events/bulk?force=true", {
       method: "DELETE",
       headers: { "content-type": "application/json" },
