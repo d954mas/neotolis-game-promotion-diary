@@ -34,6 +34,19 @@
   // in one step (the caller computes the next-state at toggle time).
 
   import { m } from "$lib/paraglide/messages.js";
+  import KindIcon from "$lib/components/KindIcon.svelte";
+
+  type AxisKindIcon =
+    | "youtube_video"
+    | "reddit_post"
+    | "twitter_post"
+    | "telegram_post"
+    | "discord_drop"
+    | "conference"
+    | "talk"
+    | "press"
+    | "other"
+    | "post";
 
   let {
     label,
@@ -45,13 +58,46 @@
   }: {
     label: string;
     axisKey: "show" | "game" | "kind" | "source" | "author";
-    options: Array<{ value: string; label: string; predictedCount: number }>;
+    options: Array<{
+      value: string;
+      label: string;
+      predictedCount: number;
+      // KIND axis: leading kind-colored icon. Mapped through KindIcon.svelte.
+      // Setting --card-accent on the chip is the caller's job (see /feed
+      // axis-row consumer), so the chip border + icon tint pick the kind hue.
+      iconKind?: AxisKindIcon;
+    }>;
     selectedValues: string[];
     onToggle: (value: string) => void;
     onClearAxis: () => void;
   } = $props();
 
-  let hasSelection = $derived(selectedValues.length > 0);
+  // The clear-axis × button renders when a NON-sentinel value is active.
+  // Sentinel values ("all" / "anyone") represent "no filter on this axis",
+  // so showing × for them would be confusing — clicking it does nothing
+  // visible. Mirrors the prototype (docs/design/v2/ui-kit/app.jsx lines
+  // 260-305) which never renders a per-row clear button at all.
+  const SENTINEL_VALUES = new Set(["all", "anyone"]);
+  let hasSelection = $derived(
+    selectedValues.some((v) => !SENTINEL_VALUES.has(v)),
+  );
+
+  // Kind → app.css CSS-var token (--k-*). Mirrors KIND_INFO[k].color in
+  // docs/design/v2/ui-kit/app-data.jsx lines 74-86. The value is assigned
+  // to --card-accent on the chip so the prototype's CSS contract
+  // (.chip[data-active="1"] border + kind-icon currentColor) lights up.
+  const KIND_ACCENT_VAR: Record<AxisKindIcon, string> = {
+    youtube_video: "var(--k-youtube)",
+    reddit_post: "var(--k-reddit)",
+    twitter_post: "var(--k-twitter)",
+    telegram_post: "var(--k-telegram)",
+    discord_drop: "var(--k-discord)",
+    conference: "var(--k-conference)",
+    talk: "var(--k-talk)",
+    press: "var(--k-press)",
+    post: "var(--k-post)",
+    other: "var(--k-other)",
+  };
 </script>
 
 <div class="axis-row" data-axis={axisKey}>
@@ -61,13 +107,17 @@
       {@const active = selectedValues.includes(opt.value)}
       <button
         type="button"
-        class="chip axis-chip"
+        class={"chip axis-chip" + (opt.iconKind ? " kind-chip" : "")}
         data-active={active ? "1" : "0"}
         data-axis={axisKey}
         data-key={opt.value}
         data-empty={opt.predictedCount === 0 ? "1" : "0"}
+        style={opt.iconKind ? `--card-accent: ${KIND_ACCENT_VAR[opt.iconKind]};` : null}
         onclick={() => onToggle(opt.value)}
       >
+        {#if opt.iconKind}
+          <span class="kind-icon"><KindIcon kind={opt.iconKind} size={14} /></span>
+        {/if}
         <span>{opt.label}</span>
         <span class="axis-chip-count">{opt.predictedCount}</span>
       </button>
@@ -196,6 +246,34 @@
   }
   .chip[data-empty="1"] .axis-chip-count {
     opacity: 0.5;
+  }
+
+  /* KIND axis chips — inset left stripe in the kind hue + the kind icon
+   * inherits the same hue via currentColor. Mirrors prototype
+   * docs/design/v2/ui-kit/index.html lines 725-740. */
+  .chip.axis-chip.kind-chip {
+    box-shadow: inset 3px 0 0 var(--card-accent, transparent);
+    padding-left: 14px;
+  }
+  .chip.axis-chip.kind-chip .kind-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--card-accent, var(--text-3));
+  }
+  /* KindIcon.svelte sets `color: var(--text-3)` on its inner <svg.kind>;
+   * override that here so currentColor flows from --card-accent down into
+   * the icon strokes. */
+  .chip.axis-chip.kind-chip .kind-icon :global(svg.kind) {
+    color: inherit;
+  }
+  .chip.axis-chip.kind-chip[data-active="1"] {
+    background: color-mix(in oklab, var(--card-accent) 14%, var(--surface));
+    border-color: color-mix(in oklab, var(--card-accent) 40%, var(--border));
+    color: var(--text);
+  }
+  .chip.axis-chip.kind-chip[data-active="1"] .kind-icon {
+    color: var(--card-accent);
   }
 
   .clear-axis {

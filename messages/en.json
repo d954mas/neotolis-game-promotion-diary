@@ -683,5 +683,24 @@
   "axis_row_author_label": "Author",
   "axis_row_kind_label": "Kind",
   "axis_row_clear_axis_aria": "Clear {axis} filter",
-  "axis_row_count_chip": "{count}"
+  "axis_row_count_chip": "{count}",
+
+  "feed_axis_show_all": "All",
+  "feed_axis_show_inbox": "Inbox",
+  "feed_axis_game_all": "All games",
+  "feed_axis_game_off_topic": "Off topic",
+  "feed_axis_author_anyone": "Anyone",
+  "feed_axis_author_mine": "Mine",
+  "feed_axis_author_others": "Others",
+  "feed_axis_kind_all": "All",
+  "feed_axis_kind_youtube_video": "YouTube",
+  "feed_axis_kind_press": "Press",
+  "feed_axis_kind_reddit_post": "Reddit",
+  "feed_axis_kind_twitter_post": "Twitter",
+  "feed_axis_kind_telegram_post": "Telegram",
+  "feed_axis_kind_discord_drop": "Discord",
+  "feed_axis_kind_post": "Post",
+  "feed_axis_kind_conference": "Conference",
+  "feed_axis_kind_talk": "Talk",
+  "feed_axis_kind_other": "Other"
 }

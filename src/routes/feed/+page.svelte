@@ -433,6 +433,39 @@
     gamesPickerOpen = false;
   }
 
+  // KIND axis order + labels. Hard-coded to mirror prototype
+  // docs/design/v2/ui-kit/app.jsx lines 1645-1657 — YouTube first (the
+  // marquee promotion channel), Press second (highest-leverage low-volume
+  // surface), then Reddit/Twitter/Telegram/Discord (social), then Post (the
+  // catch-all manual entry), then Conference/Talk (offline), then Other
+  // (escape hatch). Hoisted above activeAxes so the strip's kind-label
+  // lookup sees it. Empty kinds still render so the user can predict
+  // counts; data-empty="1" dims their count badge.
+  const KIND_AXIS_ORDER: readonly EventKind[] = [
+    "youtube_video",
+    "press",
+    "reddit_post",
+    "twitter_post",
+    "telegram_post",
+    "discord_drop",
+    "post",
+    "conference",
+    "talk",
+    "other",
+  ] as const;
+  const KIND_AXIS_LABEL: Record<EventKind, () => string> = {
+    youtube_video: m.feed_axis_kind_youtube_video,
+    press: m.feed_axis_kind_press,
+    reddit_post: m.feed_axis_kind_reddit_post,
+    twitter_post: m.feed_axis_kind_twitter_post,
+    telegram_post: m.feed_axis_kind_telegram_post,
+    discord_drop: m.feed_axis_kind_discord_drop,
+    post: m.feed_axis_kind_post,
+    conference: m.feed_axis_kind_conference,
+    talk: m.feed_axis_kind_talk,
+    other: m.feed_axis_kind_other,
+  };
+
   // 17. Active filter chips for ActiveFiltersStrip. One chip per active
   // axis dimension; clicking the × clears that axis. Game / Author / Show
   // are single-cardinality, source / kind are multi (one chip per value).
@@ -441,13 +474,17 @@
     if (urlState.show.kind === "inbox") {
       chips.push({
         axis: "show",
-        label: m.feed_filter_show_inbox(),
+        // Short form for the strip — mirrors prototype ActiveFiltersStrip
+        // (docs/design/v2/ui-kit/app.jsx line 204).
+        label: m.feed_axis_show_inbox(),
         onRemove: () => setShow({ kind: "any" }),
       });
     } else if (urlState.show.kind === "standalone") {
       chips.push({
-        axis: "show",
-        label: m.feed_filter_show_standalone(),
+        axis: "game",
+        // Off-topic flag is a GAME-axis option in the prototype strip
+        // (app.jsx line 210). Keep the same data-variant for visual parity.
+        label: m.feed_axis_game_off_topic(),
         onRemove: () => setShow({ kind: "any" }),
       });
     } else if (urlState.show.kind === "specific") {
@@ -469,7 +506,10 @@
     for (const k of urlState.kind) {
       chips.push({
         axis: "kind",
-        label: k,
+        // Short kind label mirrors prototype app.jsx line 232
+        // (KIND_INFO[k].label → axis-axis label). Falls back to the raw
+        // kind id if the map is somehow missing the entry.
+        label: KIND_AXIS_LABEL[k]?.() ?? k,
         onRemove: () => setKind(urlState.kind.filter((x) => x !== k)),
       });
     }
@@ -484,13 +524,14 @@
     if (urlState.authorIsMe === true) {
       chips.push({
         axis: "author",
-        label: m.feed_filter_author_me(),
+        // Short form mirrors prototype app.jsx line 225 ("Mine" / "Others").
+        label: m.feed_axis_author_mine(),
         onRemove: () => setAuthorIsMe(undefined),
       });
     } else if (urlState.authorIsMe === false) {
       chips.push({
         axis: "author",
-        label: m.feed_filter_author_others(),
+        label: m.feed_axis_author_others(),
         onRemove: () => setAuthorIsMe(undefined),
       });
     }
@@ -514,13 +555,17 @@
     })),
   );
 
-  // 19. Visible kinds — derived from the data rows themselves (no
-  // hard-coded list). Sorted alphabetically for stable order.
-  const visibleKinds = $derived.by((): EventKind[] => {
-    const set = new Set<EventKind>();
-    for (const e of data.rows) set.add(e.kind);
-    return [...set].sort() as EventKind[];
-  });
+  // Count for the KIND "All" sentinel — events matching the rest of the
+  // state with no kind restriction. Reuses filter-math.passes by dropping
+  // the kind axis from the state.
+  function countWithKindAll(
+    events: typeof filterableEvents,
+    state: typeof urlState,
+    todayArg: Date,
+  ): number {
+    const next = { ...state, kind: [] as EventKind[] };
+    return events.filter((e) => passes(e, next, todayArg)).length;
+  }
 
   // 20. Maps for O(1) source / game lookup on each card.
   const sourceById = $derived(new Map(data.sources.map((s) => [s.id, s])));
@@ -632,98 +677,106 @@
 
   {#if filtersOpen}
     <div class="filters-panel">
+      <!-- SHOW axis — sentinel "All" first, then "Inbox". Sentinel maps to
+        show.kind === "any" (URL param dropped); "Inbox" → show.kind === "inbox".
+        Mirrors prototype docs/design/v2/ui-kit/app.jsx lines 1603-1611. -->
       <AxisRow
         label={m.axis_row_show_label()}
         axisKey="show"
         options={[
           {
-            value: "inbox",
-            label: m.feed_filter_show_inbox(),
-            predictedCount: countWithShow(filterableEvents, "inbox", urlState, today),
+            value: "all",
+            label: m.feed_axis_show_all(),
+            predictedCount: countWithShow(filterableEvents, "any", urlState, today),
           },
           {
-            value: "standalone",
-            label: m.feed_filter_show_standalone(),
-            predictedCount: countWithShow(filterableEvents, "standalone", urlState, today),
+            value: "inbox",
+            label: m.feed_axis_show_inbox(),
+            predictedCount: countWithShow(filterableEvents, "inbox", urlState, today),
           },
         ]}
         selectedValues={urlState.show.kind === "inbox"
           ? ["inbox"]
-          : urlState.show.kind === "standalone"
-            ? ["standalone"]
+          : urlState.show.kind === "any"
+            ? ["all"]
             : []}
         onToggle={(v) => {
-          // Single-select radio behavior — clicking the already-active
-          // chip clears, clicking a different chip replaces.
-          if (
-            (v === "inbox" && urlState.show.kind === "inbox") ||
-            (v === "standalone" && urlState.show.kind === "standalone")
-          ) {
-            setShow({ kind: "any" });
-          } else if (v === "inbox") {
-            setShow({ kind: "inbox" });
-          } else if (v === "standalone") {
-            setShow({ kind: "standalone" });
-          }
+          if (v === "all") setShow({ kind: "any" });
+          else if (v === "inbox") setShow({ kind: "inbox" });
         }}
         onClearAxis={() => setShow({ kind: "any" })}
       />
 
-      {#if data.games.length > 0}
-        <AxisRow
-          label={m.axis_row_game_label()}
-          axisKey="game"
-          options={data.games.map((g) => ({
+      <!-- GAME axis — sentinel "All games" first, then "Off topic" (maps to
+        show.kind === "standalone"), then per-game chips. Mirrors prototype
+        app.jsx lines 1613-1627. In our schema show is single-cardinality
+        ({any | inbox | standalone | specific}); the GAME axis chips
+        therefore behave as radios (clicking a game = specific; "Off topic"
+        = standalone; "All games" = any). -->
+      <AxisRow
+        label={m.axis_row_game_label()}
+        axisKey="game"
+        options={[
+          {
+            value: "all",
+            label: m.feed_axis_game_all(),
+            predictedCount: countWithShow(filterableEvents, "any", urlState, today),
+          },
+          {
+            value: "off_topic",
+            label: m.feed_axis_game_off_topic(),
+            predictedCount: countWithShow(filterableEvents, "standalone", urlState, today),
+          },
+          ...data.games.map((g) => ({
             value: g.id,
             label: g.title,
             predictedCount: countWithGame(filterableEvents, g.id, urlState, today),
-          }))}
-          selectedValues={urlState.show.kind === "specific" ? urlState.show.gameIds : []}
-          onToggle={(v) => {
-            const current = urlState.show.kind === "specific" ? urlState.show.gameIds : [];
-            const next = current.includes(v)
-              ? current.filter((g) => g !== v)
-              : [...current, v];
-            if (next.length === 0) setShow({ kind: "any" });
-            else setShow({ kind: "specific", gameIds: next });
-          }}
-          onClearAxis={() => setShow({ kind: "any" })}
-        />
-      {/if}
+          })),
+        ]}
+        selectedValues={urlState.show.kind === "specific"
+          ? urlState.show.gameIds
+          : urlState.show.kind === "standalone"
+            ? ["off_topic"]
+            : urlState.show.kind === "any"
+              ? ["all"]
+              : []}
+        onToggle={(v) => {
+          if (v === "all") {
+            setShow({ kind: "any" });
+            return;
+          }
+          if (v === "off_topic") {
+            setShow(urlState.show.kind === "standalone" ? { kind: "any" } : { kind: "standalone" });
+            return;
+          }
+          // Per-game chip — multi-select within `specific`.
+          const current = urlState.show.kind === "specific" ? urlState.show.gameIds : [];
+          const next = current.includes(v) ? current.filter((g) => g !== v) : [...current, v];
+          if (next.length === 0) setShow({ kind: "any" });
+          else setShow({ kind: "specific", gameIds: next });
+        }}
+        onClearAxis={() => setShow({ kind: "any" })}
+      />
 
-      {#if visibleKinds.length > 0}
-        <AxisRow
-          label={m.axis_row_kind_label()}
-          axisKey="kind"
-          options={visibleKinds.map((k) => ({
-            value: k,
-            label: k,
-            predictedCount: countWithKind(filterableEvents, k, urlState, today),
-          }))}
-          selectedValues={urlState.kind}
-          onToggle={(v) => {
-            const k = v as EventKind;
-            const next = urlState.kind.includes(k)
-              ? urlState.kind.filter((x) => x !== k)
-              : [...urlState.kind, k];
-            setKind(next);
-          }}
-          onClearAxis={() => setKind([])}
-        />
-      {/if}
-
+      <!-- AUTHOR axis — sentinel "Anyone" + "Mine" + "Others". Mirrors
+        prototype app.jsx lines 1629-1638. -->
       <AxisRow
         label={m.axis_row_author_label()}
         axisKey="author"
         options={[
           {
+            value: "anyone",
+            label: m.feed_axis_author_anyone(),
+            predictedCount: countWithAuthor(filterableEvents, "anyone", urlState, today),
+          },
+          {
             value: "mine",
-            label: m.feed_filter_author_me(),
+            label: m.feed_axis_author_mine(),
             predictedCount: countWithAuthor(filterableEvents, "mine", urlState, today),
           },
           {
             value: "others",
-            label: m.feed_filter_author_others(),
+            label: m.feed_axis_author_others(),
             predictedCount: countWithAuthor(filterableEvents, "others", urlState, today),
           },
         ]}
@@ -731,15 +784,50 @@
           ? ["mine"]
           : urlState.authorIsMe === false
             ? ["others"]
-            : []}
+            : ["anyone"]}
         onToggle={(v) => {
-          if (v === "mine") {
-            setAuthorIsMe(urlState.authorIsMe === true ? undefined : true);
-          } else if (v === "others") {
-            setAuthorIsMe(urlState.authorIsMe === false ? undefined : false);
-          }
+          if (v === "anyone") setAuthorIsMe(undefined);
+          else if (v === "mine") setAuthorIsMe(true);
+          else if (v === "others") setAuthorIsMe(false);
         }}
         onClearAxis={() => setAuthorIsMe(undefined)}
+      />
+
+      <!-- KIND axis — sentinel "All" + per-kind multi-select chips with
+        leading kind-colored icon. Order mirrors prototype app.jsx lines
+        1640-1657: YouTube / Press / Reddit / Twitter / Telegram / Discord
+        / Post / Conference / Talk / Other. We render the FULL list (not
+        just `visibleKinds`) so the user can predict what each chip would
+        narrow to — empty chips dim their count via data-empty. -->
+      <AxisRow
+        label={m.axis_row_kind_label()}
+        axisKey="kind"
+        options={[
+          {
+            value: "all",
+            label: m.feed_axis_kind_all(),
+            predictedCount: countWithKindAll(filterableEvents, urlState, today),
+          },
+          ...KIND_AXIS_ORDER.map((k) => ({
+            value: k,
+            label: KIND_AXIS_LABEL[k](),
+            predictedCount: countWithKind(filterableEvents, k, urlState, today),
+            iconKind: k,
+          })),
+        ]}
+        selectedValues={urlState.kind.length === 0 ? ["all"] : urlState.kind}
+        onToggle={(v) => {
+          if (v === "all") {
+            setKind([]);
+            return;
+          }
+          const k = v as EventKind;
+          const next = urlState.kind.includes(k)
+            ? urlState.kind.filter((x) => x !== k)
+            : [...urlState.kind, k];
+          setKind(next);
+        }}
+        onClearAxis={() => setKind([])}
       />
 
       <FindRow
