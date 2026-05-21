@@ -15,8 +15,13 @@
 //
 // `serializeFilterState` omits every axis at its default value so the URL
 // stays short and shareable. Defaults: show.kind === "any", sortDir ===
-// "desc", view === "feed", dateRange.preset === "all", query === "",
+// "desc", view === "feed", dateRange.preset === "month", query === "",
 // openEventId === null, authorIsMe === undefined, cursor === undefined.
+//
+// `dateRange.preset === "month"` is the default (matches the prototype
+// where the "Month" preset chip is active out of the box). The empty URL
+// therefore implies a 30-day rolling window — `?date=month` is omitted
+// from the URL when active, while `?date=all` is the explicit opt-out.
 //
 // `authorIsMe` is a tri-state boolean: `true` (mine) / `false` (others) /
 // `undefined` (anyone). Encoded as `?authorIsMe=true|false`; undefined =
@@ -73,18 +78,26 @@ export interface FilterState {
   cursor?: string;
 }
 
-// Internal helper: ?date=today|week|month|year OR ?from=YYYY-MM-DD&to=YYYY-MM-DD
-// OR neither (→ preset: "all"). The custom branch wins over the preset
-// branch when both are present (the dragged range picker writes from/to).
+// Internal helper: ?date=today|week|month|year|all OR ?from=YYYY-MM-DD&to=YYYY-MM-DD
+// OR neither (→ preset: "month", the default). The custom branch wins
+// over the preset branch when both are present (the dragged range
+// picker writes from/to). ?date=all is the explicit opt-out for the
+// default 30-day window — without it the empty URL means "month".
 function parseDateRange(sp: URLSearchParams): DateRangeFilter {
   const from = sp.get("from");
   const to = sp.get("to");
   if (from && to) return { preset: "custom", from, to };
   const date = sp.get("date");
-  if (date === "today" || date === "week" || date === "month" || date === "year") {
+  if (
+    date === "today" ||
+    date === "week" ||
+    date === "month" ||
+    date === "year" ||
+    date === "all"
+  ) {
     return { preset: date };
   }
-  return { preset: "all" };
+  return { preset: "month" };
 }
 
 function parseShow(sp: URLSearchParams): ShowFilter {
@@ -142,11 +155,13 @@ export function serializeFilterState(state: FilterState): URLSearchParams {
   if (state.authorIsMe === true) sp.set("authorIsMe", "true");
   else if (state.authorIsMe === false) sp.set("authorIsMe", "false");
 
-  // dateRange — custom (?from + ?to) OR preset (?date=...) OR omitted (?all).
+  // dateRange — custom (?from + ?to) OR preset (?date=...) OR omitted
+  // (?month, the default). `?date=all` IS emitted because "all" is no
+  // longer the default — the empty URL means "month".
   if (state.dateRange.preset === "custom") {
     sp.set("from", state.dateRange.from);
     sp.set("to", state.dateRange.to);
-  } else if (state.dateRange.preset !== "all") {
+  } else if (state.dateRange.preset !== "month") {
     sp.set("date", state.dateRange.preset);
   }
 

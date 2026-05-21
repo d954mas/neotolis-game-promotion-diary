@@ -18,9 +18,10 @@ import {
  *
  * `serializeFilterState(state)` produces `URLSearchParams` and omits any axis
  * at its default value — so a fresh "/feed" view never carries `?show=any`,
- * `?sort=desc`, `?view=feed`, `?date=all`, `?q=`, `?event=null`, or
+ * `?sort=desc`, `?view=feed`, `?date=month`, `?q=`, `?event=null`, or
  * `?authorIsMe=undefined`. Round-trip identity: parse(serialize(s)) === s for
- * all reachable states.
+ * all reachable states. `?date=month` is the default (matches the prototype's
+ * 30-day-rolling default window); `?date=all` is the explicit opt-out.
  *
  * authorIsMe is a tri-state: `true` (mine) / `false` (others) / `undefined`
  * (anyone). undefined => key omitted from the URL.
@@ -32,12 +33,20 @@ describe("parseSearchParams", () => {
     expect(s.source).toEqual([]);
     expect(s.kind).toEqual([]);
     expect(s.authorIsMe).toBeUndefined();
-    expect(s.dateRange).toEqual({ preset: "all" });
+    // Default preset is "month" (30-day rolling), matching the prototype
+    // where the Month chip is the active default on first load.
+    expect(s.dateRange).toEqual({ preset: "month" });
     expect(s.sortDir).toBe("desc");
     expect(s.query).toBe("");
     expect(s.view).toBe("feed");
     expect(s.openEventId).toBeNull();
     expect(s.cursor).toBeUndefined();
+  });
+
+  it("returns dateRange.preset === 'all' when ?date=all (the explicit opt-out of default month window)", () => {
+    expect(parseSearchParams(new URL("https://x?date=all")).dateRange).toEqual({
+      preset: "all",
+    });
   });
 
   it("returns show.kind === 'inbox' when ?show=inbox", () => {
@@ -123,7 +132,8 @@ describe("serializeFilterState", () => {
       source: [],
       kind: [],
       authorIsMe: undefined,
-      dateRange: { preset: "all" },
+      // Default preset is "month" (matches parseSearchParams default).
+      dateRange: { preset: "month" },
       sortDir: "desc",
       query: "",
       view: "feed",
@@ -131,9 +141,17 @@ describe("serializeFilterState", () => {
     };
   }
 
-  it("omits keys with default values (no ?show=any, no ?sort=desc, no ?view=feed)", () => {
+  it("omits keys with default values (no ?show=any, no ?sort=desc, no ?view=feed, no ?date=month)", () => {
     const sp = serializeFilterState(defaultState());
     expect(sp.toString()).toBe("");
+  });
+
+  it("encodes ?date=all when preset is 'all' (the explicit opt-out — 'all' is no longer the default)", () => {
+    const sp = serializeFilterState({
+      ...defaultState(),
+      dateRange: { preset: "all" },
+    });
+    expect(sp.get("date")).toBe("all");
   });
 
   it("encodes authorIsMe boolean as ?authorIsMe=true / ?authorIsMe=false; undefined omitted", () => {
