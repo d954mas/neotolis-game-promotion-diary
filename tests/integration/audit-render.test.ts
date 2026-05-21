@@ -2015,19 +2015,23 @@ describe("/events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker
     expect(out.body).not.toMatch(/<button[^>]*class="[^"]*\bcompact\b[^"]*"/);
   });
 
-  it("/events/[id]/+page.svelte renders an edit-pencil link top-right; NO Delete button", async () => {
+  it("/events/[id]/+page.svelte is a thin wrapper around EventDetailContent (Plan 10 Wave 3 dual-render)", async () => {
+    // Phase 03.4 Wave 3 (Plan 10 Task 3): /events/[id] became a thin
+    // route shell around the shared <EventDetailContent>. The same
+    // content component mounts via <EventDetailModal> from /feed?event=.
+    // Inline-edit drafts + edit affordances live inside the shared
+    // body now; this route file is a callback-wiring shell only.
     const fs = await import("node:fs");
     const src = fs.readFileSync("src/routes/events/[id]/+page.svelte", "utf8");
-    // Edit pencil link is present.
-    expect(src).toMatch(/class="edit-pencil"/);
-    // CSS rule for absolute positioning is present.
-    expect(src).toMatch(/position:\s*absolute/);
-    // Delete button has been REMOVED — no <button> with the Delete label
-    // and no DELETE method fired from this read-only page.
-    expect(src).not.toMatch(/m\.events_detail_delete\(\)/);
-    expect(src).not.toMatch(/method:\s*"DELETE"/);
-    // ConfirmDialog import was removed (Delete moved to edit page).
-    expect(src).not.toMatch(/import\s+ConfirmDialog\s+from/);
+    expect(src, "imports EventDetailContent").toMatch(
+      /import EventDetailContent from "\$lib\/components\/event-detail\/EventDetailContent\.svelte"/,
+    );
+    expect(src, "mounts <EventDetailContent").toMatch(/<EventDetailContent\s/);
+    // Close-on-route navigates to /feed (route mount close behavior).
+    expect(src).toMatch(/goto\(["']\/feed["']\)/);
+    // The Delete-action remains wired (it's now via onDelete callback
+    // that fires DELETE /api/events/:id and navigates to /feed).
+    expect(src).toMatch(/method:\s*["']DELETE["']/);
   });
 
   it("/events/[id]/edit/+page.svelte ships standalone toggle + Delete button at footer", async () => {
