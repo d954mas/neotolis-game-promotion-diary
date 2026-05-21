@@ -784,3 +784,39 @@ describe("admin/quota cross-allowlist", () => {
     expect(bodyStr).not.toMatch(/forbidden|permission/i);
   });
 });
+
+// Phase 3.4 design-v2-ux — bulk events cross-tenant placeholders.
+//
+// D-13 contract: bulk PATCH/DELETE silently DROP ids the caller doesn't
+// own — they NEVER 404 the whole request, they NEVER 403 the whole
+// request, they return 200 with affected_count = (subset that committed).
+// This is intentionally different from per-id endpoints (which DO 404
+// cross-tenant) — bulk is an upsert-style atomic batch, not an
+// existence-check op (Pitfall 9 — cross-tenant ids must not leak via
+// per-id 422 errors).
+//
+// Wave 1 Plan 06 mounts /api/events/bulk (service + route). At that
+// point: flip it.skip → it() and assert affected_count semantics.
+describe("bulk events cross-tenant (D-13) — Wave 1 Plan 06 deferred", () => {
+  it.skip("PATCH /api/events/bulk silently filters cross-tenant ids (D-13) — Wave 1 Plan 06 + Plan 05 flip this from skip to it()", () => {
+    // Setup: create event ev_A owned by user A; create event ev_B owned
+    // by user B. With user A's session, PATCH /api/events/bulk with
+    // ids: [ev_A, ev_B]. Expect: 200 OK; affected_count === 1; ev_B
+    // untouched. NEVER 403 (per D-13 + AGENTS.md tenant-scope contract).
+  });
+
+  it.skip("DELETE /api/events/bulk silently filters cross-tenant ids (D-13) — Wave 1 Plan 06 + Plan 05 flip this from skip to it()", () => {
+    // Setup: same as above. With user A's session, DELETE /api/events/bulk
+    // with ids: [ev_A, ev_B]. Expect: 200 OK; affected_count === 1;
+    // ev_B still live in user B's feed.
+  });
+
+  it.skip("DELETE /api/events/bulk?force=true silently filters cross-tenant + still-live ids (D-13 + D-21) — Wave 1 Plan 06 + Plan 05 flip this from skip to it()", () => {
+    // Setup: create soft-deleted ev_A_trash + live ev_A_live owned by
+    // user A; create soft-deleted ev_B_trash owned by user B. With user
+    // A's session, DELETE /api/events/bulk?force=true with ids:
+    // [ev_A_trash, ev_A_live, ev_B_trash]. Expect: 200 OK;
+    // affected_count === 1 (only ev_A_trash hard-deleted). ev_A_live
+    // still soft-live; ev_B_trash still in user B's trash.
+  });
+});

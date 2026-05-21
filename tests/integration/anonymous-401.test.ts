@@ -96,6 +96,17 @@ describe("anonymous-401 sweep", () => {
     "/api/reddit/fetch-metadata",
   ];
 
+  // Phase 3.4 design-v2-ux — bulk endpoints (PATCH + DELETE on the same
+  // /api/events/bulk path). Wave 1 Plan 06 mounts the Hono route; until
+  // then, listing in MUST_BE_PROTECTED would trip the toContain guard
+  // below. The entry lives here so the sweep still asserts the path is
+  // ON the registered routes list once Wave 1 lands — the per-route
+  // it.skip() assertions further down also flip from skip to it() at the
+  // same time. Pattern matches Phase 2.1 P02 + Phase 01 Plan 07
+  // "deferred-Wave-N MUST_BE_PROTECTED" precedent.
+  const MUST_BE_PROTECTED_PHASE_3_4_PENDING = ["/api/events/bulk"] as const;
+  void MUST_BE_PROTECTED_PHASE_3_4_PENDING;
+
   it("every /api/* route except /api/auth/* refuses anonymous with 401", async () => {
     // Hono exposes app.routes (array of {path, method, handler}).
     const routes = (app as unknown as { routes: Array<{ path: string; method: string }> }).routes;
@@ -303,6 +314,47 @@ describe("anonymous-401 sweep", () => {
     const res = await app.request("/api/admin/quota");
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  // Phase 3.4 design-v2-ux — bulk endpoints anonymous-401.
+  //
+  // Wave 1 Plan 06 mounts /api/events/bulk (PATCH + DELETE +
+  // DELETE?force=true). Until then the route doesn't exist → it returns
+  // 404 not 401, so these explicit per-route assertions stay skipped.
+  // The day the route mounts: flip it.skip → it and confirm 401. The
+  // MUST_BE_PROTECTED_PHASE_3_4_PENDING entry above also moves into
+  // MUST_BE_PROTECTED at the same time.
+  it.skip("anonymous PATCH /api/events/bulk returns 401 unauthorized — Wave 1 Plan 06 flips this from skip to it()", async () => {
+    const res = await app.request("/api/events/bulk", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: ["ev_anon"], gameStates: {}, offTopicState: "mixed" }),
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body).toEqual({ error: "unauthorized" });
+  });
+
+  it.skip("anonymous DELETE /api/events/bulk returns 401 unauthorized — Wave 1 Plan 06 flips this from skip to it()", async () => {
+    const res = await app.request("/api/events/bulk", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: ["ev_anon"] }),
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body).toEqual({ error: "unauthorized" });
+  });
+
+  it.skip("anonymous DELETE /api/events/bulk?force=true returns 401 unauthorized — Wave 1 Plan 06 flips this from skip to it()", async () => {
+    const res = await app.request("/api/events/bulk?force=true", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: ["ev_anon"] }),
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body).toEqual({ error: "unauthorized" });
   });
 
   // /api/youtube/fetch-metadata gate.
