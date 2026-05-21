@@ -223,10 +223,7 @@ describe("diffGameStates — bulk-edit tri-state apply contract", () => {
   });
 
   it("handles mixed bag: { g1:on, g2:off, g3:mixed, g4:on } with existing [g2, g3]", () => {
-    const diff = diffGameStates(
-      { g1: "on", g2: "off", g3: "mixed", g4: "on" },
-      ["g2", "g3"],
-    );
+    const diff = diffGameStates({ g1: "on", g2: "off", g3: "mixed", g4: "on" }, ["g2", "g3"]);
     expect(diff.toAdd.sort()).toEqual(["g1", "g4"]);
     expect(diff.toRemove).toEqual(["g2"]);
   });

@@ -61,12 +61,7 @@
 
 <div class="toast" data-kind={kind} role="status" aria-live="polite">
   <span class="toast-text">{text}</span>
-  <button
-    type="button"
-    class="toast-close"
-    aria-label={m.toast_close_aria()}
-    onclick={close}
-  >
+  <button type="button" class="toast-close" aria-label={m.toast_close_aria()} onclick={close}>
     ×
   </button>
 </div>

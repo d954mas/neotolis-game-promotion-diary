@@ -92,16 +92,11 @@ describe("parseSearchParams", () => {
   });
 
   it("handles multi-value ?source=A&source=B via sp.getAll", () => {
-    expect(parseSearchParams(new URL("https://x?source=A&source=B")).source).toEqual([
-      "A",
-      "B",
-    ]);
+    expect(parseSearchParams(new URL("https://x?source=A&source=B")).source).toEqual(["A", "B"]);
   });
 
   it("handles multi-value ?kind=youtube_video&kind=reddit_post and filters unknown kinds", () => {
-    const s = parseSearchParams(
-      new URL("https://x?kind=youtube_video&kind=foo&kind=reddit_post"),
-    );
+    const s = parseSearchParams(new URL("https://x?kind=youtube_video&kind=foo&kind=reddit_post"));
     // 'foo' is dropped by filterValidKinds; the two valid kinds survive.
     expect(s.kind).toEqual(["youtube_video", "reddit_post"]);
   });
@@ -148,9 +143,9 @@ describe("serializeFilterState", () => {
     expect(serializeFilterState({ ...defaultState(), authorIsMe: false }).get("authorIsMe")).toBe(
       "false",
     );
-    expect(serializeFilterState({ ...defaultState(), authorIsMe: undefined }).has("authorIsMe")).toBe(
-      false,
-    );
+    expect(
+      serializeFilterState({ ...defaultState(), authorIsMe: undefined }).has("authorIsMe"),
+    ).toBe(false);
   });
 
   it("preserves cursor and openEventId pass-through", () => {
@@ -193,9 +188,7 @@ describe("serializeFilterState", () => {
 
   it("round-trips a minimal state (no extras)", () => {
     const minimal = defaultState();
-    const rt = parseSearchParams(
-      new URL("https://x?" + serializeFilterState(minimal).toString()),
-    );
+    const rt = parseSearchParams(new URL("https://x?" + serializeFilterState(minimal).toString()));
     expect(rt).toEqual(minimal);
   });
 

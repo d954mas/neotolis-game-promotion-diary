@@ -54,13 +54,7 @@
   }
 </script>
 
-<div
-  class="author-pick-pop"
-  role="menu"
-  aria-orientation="vertical"
-  tabindex="-1"
-  onkeydown={onkeydown}
->
+<div class="author-pick-pop" role="menu" aria-orientation="vertical" tabindex="-1" {onkeydown}>
   <button
     type="button"
     role="menuitemradio"

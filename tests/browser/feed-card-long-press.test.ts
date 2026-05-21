@@ -31,32 +31,11 @@ import { describe, it } from "vitest";
 // import FeedCard from "../../src/lib/components/FeedCard.svelte";
 
 describe("FeedCard touch long-press (Wave 2 Plan 08)", () => {
-  it.skip(
-    "Wave 2 Plan 08: ontouchstart starts 480ms timer; timer fire calls onToggleSelect(id, true) (D-27)",
-    async () => {},
-  );
-  it.skip(
-    "Wave 2 Plan 08: ontouchmove cancels timer — scroll-cancel (D-28, RESEARCH Pitfall 6)",
-    async () => {},
-  );
-  it.skip(
-    "Wave 2 Plan 08: ontouchend cancels timer if released before 480ms (D-28)",
-    async () => {},
-  );
-  it.skip(
-    "Wave 2 Plan 08: ontouchcancel cancels timer (D-28)",
-    async () => {},
-  );
-  it.skip(
-    "Wave 2 Plan 08: after timer fires, card data-long-pressed='1' attribute set (D-28)",
-    async () => {},
-  );
-  it.skip(
-    "Wave 2 Plan 08: onclick fired after long-press fire is suppressed — no double-toggle when finger lifts (D-28)",
-    async () => {},
-  );
-  it.skip(
-    "Wave 2 Plan 08: oncontextmenu calls preventDefault — suppresses Android long-press OS menu (D-27)",
-    async () => {},
-  );
+  it.skip("Wave 2 Plan 08: ontouchstart starts 480ms timer; timer fire calls onToggleSelect(id, true) (D-27)", async () => {});
+  it.skip("Wave 2 Plan 08: ontouchmove cancels timer — scroll-cancel (D-28, RESEARCH Pitfall 6)", async () => {});
+  it.skip("Wave 2 Plan 08: ontouchend cancels timer if released before 480ms (D-28)", async () => {});
+  it.skip("Wave 2 Plan 08: ontouchcancel cancels timer (D-28)", async () => {});
+  it.skip("Wave 2 Plan 08: after timer fires, card data-long-pressed='1' attribute set (D-28)", async () => {});
+  it.skip("Wave 2 Plan 08: onclick fired after long-press fire is suppressed — no double-toggle when finger lifts (D-28)", async () => {});
+  it.skip("Wave 2 Plan 08: oncontextmenu calls preventDefault — suppresses Android long-press OS menu (D-27)", async () => {});
 });

@@ -28,36 +28,12 @@ import { describe, it } from "vitest";
 // import EventDetailModal from "../../src/lib/components/event-detail/EventDetailModal.svelte";
 
 describe("EventDetailContent dual-render parity (Wave 2 Plan 09 + Wave 3 Plan 10)", () => {
-  it.skip(
-    "Wave 2 Plan 09: renders title field identically in modal mount and bare mount (D-05, D-06)",
-    async () => {},
-  );
-  it.skip(
-    "Wave 2 Plan 09: renders notes field identically in modal and bare",
-    async () => {},
-  );
-  it.skip(
-    "Wave 2 Plan 09: renders games chip row identically",
-    async () => {},
-  );
-  it.skip(
-    "Wave 2 Plan 09: renders kind tag + KindIcon identically",
-    async () => {},
-  );
-  it.skip(
-    "Wave 2 Plan 09: renders stats (views/likes/comments) identically for kind=youtube_video",
-    async () => {},
-  );
-  it.skip(
-    "Wave 2 Plan 09: inline-edit title pencil click sets draft to current value in both mounts",
-    async () => {},
-  );
-  it.skip(
-    "Wave 2 Plan 09: EventDetailModal.showModal() called on $effect mount; close() called on unmount (D-05)",
-    async () => {},
-  );
-  it.skip(
-    "Wave 3 Plan 10: EventDetailModal oncancel fires onClose callback with URL state cleared — back-button removes ?event= param (D-05)",
-    async () => {},
-  );
+  it.skip("Wave 2 Plan 09: renders title field identically in modal mount and bare mount (D-05, D-06)", async () => {});
+  it.skip("Wave 2 Plan 09: renders notes field identically in modal and bare", async () => {});
+  it.skip("Wave 2 Plan 09: renders games chip row identically", async () => {});
+  it.skip("Wave 2 Plan 09: renders kind tag + KindIcon identically", async () => {});
+  it.skip("Wave 2 Plan 09: renders stats (views/likes/comments) identically for kind=youtube_video", async () => {});
+  it.skip("Wave 2 Plan 09: inline-edit title pencil click sets draft to current value in both mounts", async () => {});
+  it.skip("Wave 2 Plan 09: EventDetailModal.showModal() called on $effect mount; close() called on unmount (D-05)", async () => {});
+  it.skip("Wave 3 Plan 10: EventDetailModal oncancel fires onClose callback with URL state cleared — back-button removes ?event= param (D-05)", async () => {});
 });

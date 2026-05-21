@@ -1737,9 +1737,7 @@ export async function bulkEdit(
   const rows = await db
     .select()
     .from(events)
-    .where(
-      and(eq(events.userId, userId), isNull(events.deletedAt), inArray(events.id, ids)),
-    );
+    .where(and(eq(events.userId, userId), isNull(events.deletedAt), inArray(events.id, ids)));
 
   if (rows.length === 0) return [];
 
@@ -1840,9 +1838,7 @@ export async function bulkDelete(
   const result = await db
     .update(events)
     .set({ deletedAt: new Date() })
-    .where(
-      and(eq(events.userId, userId), isNull(events.deletedAt), inArray(events.id, ids)),
-    )
+    .where(and(eq(events.userId, userId), isNull(events.deletedAt), inArray(events.id, ids)))
     .returning({ id: events.id });
 
   if (result.length === 0) return { affected_count: 0 };
@@ -1880,9 +1876,7 @@ export async function bulkDeleteForever(
 ): Promise<{ affected_count: number }> {
   const result = await db
     .delete(events)
-    .where(
-      and(eq(events.userId, userId), isNotNull(events.deletedAt), inArray(events.id, ids)),
-    )
+    .where(and(eq(events.userId, userId), isNotNull(events.deletedAt), inArray(events.id, ids)))
     .returning({ id: events.id });
 
   if (result.length === 0) return { affected_count: 0 };

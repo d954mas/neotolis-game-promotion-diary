@@ -86,7 +86,9 @@ export function dateInRange(
   // calendar day — sliced before parseEventDate so '2026-05-15T14:30:00Z'
   // resolves to the local May-15 calendar day.
   const ev =
-    typeof occurredAt === "string" ? parseEventDate(occurredAt.slice(0, 10)) : startOfDay(occurredAt);
+    typeof occurredAt === "string"
+      ? parseEventDate(occurredAt.slice(0, 10))
+      : startOfDay(occurredAt);
   if (!ev) return false;
 
   if (filter.preset === "custom") {

@@ -22,32 +22,11 @@ import { describe, it } from "vitest";
 // import { purgeStaleDeletedEvents } from "../../src/lib/server/services/purge-account.js";
 
 describe("purgeStaleDeletedEvents (Wave 1 Plan 05/06)", () => {
-  it.skip(
-    "Wave 1 Plan 05: hard-deletes events with deletedAt < now() - 30d (D-20)",
-    async () => {},
-  );
-  it.skip(
-    "Wave 1 Plan 05: preserves events with deletedAt within 30d (still recoverable)",
-    async () => {},
-  );
-  it.skip(
-    "Wave 1 Plan 05: preserves events with deletedAt IS NULL (live events untouched)",
-    async () => {},
-  );
-  it.skip(
-    "Wave 1 Plan 05: writes ONE audit row events.purge_stale per affected user_id (per-tenant cursor invariant — D-14)",
-    async () => {},
-  );
-  it.skip(
-    "Wave 1 Plan 05: audit metadata includes affected_count and purged_at; affected_ids included only when N<=100",
-    async () => {},
-  );
-  it.skip(
-    "Wave 1 Plan 05: returns { affected_count: N } total across all tenants",
-    async () => {},
-  );
-  it.skip(
-    "Wave 1 Plan 05: idempotent — re-running on empty trash returns affected_count: 0; no audit row",
-    async () => {},
-  );
+  it.skip("Wave 1 Plan 05: hard-deletes events with deletedAt < now() - 30d (D-20)", async () => {});
+  it.skip("Wave 1 Plan 05: preserves events with deletedAt within 30d (still recoverable)", async () => {});
+  it.skip("Wave 1 Plan 05: preserves events with deletedAt IS NULL (live events untouched)", async () => {});
+  it.skip("Wave 1 Plan 05: writes ONE audit row events.purge_stale per affected user_id (per-tenant cursor invariant — D-14)", async () => {});
+  it.skip("Wave 1 Plan 05: audit metadata includes affected_count and purged_at; affected_ids included only when N<=100", async () => {});
+  it.skip("Wave 1 Plan 05: returns { affected_count: N } total across all tenants", async () => {});
+  it.skip("Wave 1 Plan 05: idempotent — re-running on empty trash returns affected_count: 0; no audit row", async () => {});
 });
