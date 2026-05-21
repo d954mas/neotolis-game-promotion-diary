@@ -66,6 +66,7 @@ import { encodeCursor, decodeCursor } from "./audit-read.js";
 import { eventKindToSourceKind } from "$lib/sources/event-to-source-kind.js";
 import { getAdapter } from "$lib/sources/registry.js";
 import { logger } from "../logger.js";
+import { mapEventsToDtos, type EventDto } from "../dto.js";
 
 export type EventRow = typeof events.$inferSelect;
 export type DataSourceRow = typeof dataSources.$inferSelect;
@@ -1108,6 +1109,7 @@ export async function listFeedPage(
   userId: string,
   filters: FeedFilters,
   cursor: string | null,
+  opts?: { scope?: "live" | "trash" },
 ): Promise<FeedPage> {
   let parsedCursor: { at: Date; id: string } | null = null;
   if (cursor) parsedCursor = decodeCursor(cursor);
@@ -1120,7 +1122,22 @@ export async function listFeedPage(
   // .where(...) call so the structural ESLint rule recognizes it. Other
   // filter axes are accumulated into a separate array and combined via
   // `and()` — the userId clause stays load-bearing and visible.
-  const filterParts: SQL[] = [isNull(events.deletedAt) as SQL];
+  //
+  // Phase 3.4 D-19: opts.scope="trash" flips the soft-delete predicate so
+  // /feed?view=trash renders the user's trash with the same filter axes
+  // (kind/source/show/authorIsMe/from/to) applied. The trash view
+  // additionally enforces the 30-day retention cutoff so past-retention
+  // rows (pending purge by purgeStaleDeletedEvents) never surface in the
+  // UI. Default "live" preserves the legacy isNull(deletedAt) shape.
+  const scope = opts?.scope ?? "live";
+  const filterParts: SQL[] = [];
+  if (scope === "live") {
+    filterParts.push(isNull(events.deletedAt) as SQL);
+  } else {
+    const cutoff = new Date(Date.now() - env.RETENTION_DAYS * 86_400_000);
+    filterParts.push(isNotNull(events.deletedAt) as SQL);
+    filterParts.push(gte(events.deletedAt, cutoff) as SQL);
+  }
   // source / kind are multi-valued. pushAxis turns each axis into eq() or
   // inArray() depending on shape.
   pushAxis(filterParts, events.sourceId, filters.source);
@@ -1624,4 +1641,262 @@ export async function unmarkStandalone(
   });
 
   return row;
+}
+
+// ============================================================
+// Phase 3.4 design-v2-ux — bulk operations (D-12..D-15, D-21).
+// ============================================================
+//
+// PATCH /api/events/bulk + DELETE /api/events/bulk (route landed in Plan 06)
+// reach into this file for tri-state edit + soft-delete + hard-delete-from-
+// trash. The shapes here are the source of truth — the Hono handlers are
+// mechanical adapters that destructure the validated request body and call
+// these functions.
+//
+// Cross-tenant ids are silently filtered via the userId WHERE clause (D-13)
+// rather than throwing NotFoundError — bulk endpoints take a list of ids
+// from a multi-select; a single forged or stale id should not cancel the
+// whole batch. That diverges from single-id endpoints (which DO throw
+// NotFoundError on cross-tenant) but the bulk shape's invariant is
+// "process every owned id; ignore every other id". Reconciles with
+// AGENTS.md "404 not 403 for cross-tenant" — for bulk, the 404 surface is
+// the per-id silent drop visible in affected_count vs requested_count.
+//
+// ONE audit row per bulk action (D-14, GDPR Art. 17 "one row per
+// user-intent"). The audit row sits OUTSIDE the transaction so audit
+// failure cannot deadlock the pool nor block the business path (AGENTS.md
+// item 4 — same pattern as createEvent / attachEventToGames).
+
+/**
+ * checkGameOwnership — boolean variant of assertGameOwnedByUser.
+ *
+ * Returns true iff a live (not soft-deleted) game with that id exists AND
+ * is owned by userId. Does NOT throw on miss / cross-tenant — bulkEdit
+ * uses this to silently filter cross-tenant gameStates keys per D-13
+ * instead of leaking 404s. Single-id paths continue to use the throwing
+ * assertGameOwnedByUser.
+ */
+export async function checkGameOwnership(userId: string, gameId: string): Promise<boolean> {
+  const rows = await db
+    .select({ id: games.id })
+    .from(games)
+    .where(and(eq(games.userId, userId), eq(games.id, gameId), isNull(games.deletedAt)))
+    .limit(1);
+  return rows.length === 1;
+}
+
+/**
+ * bulkEdit — PATCH /api/events/bulk handler tx body (D-12 + D-14).
+ *
+ * Tri-state semantics per game:
+ *   on    → INSERT junction row if not present
+ *   off   → DELETE junction row if present
+ *   mixed → leave alone (no-op)
+ *
+ * offTopicState mirrors the same tri-state and writes
+ * events.metadata.triage.offTopic via jsonb_set when not "mixed".
+ *
+ * Cross-tenant ids silently dropped via the WHERE clause (D-13). Cross-tenant
+ * gameStates keys silently dropped via checkGameOwnership BEFORE the tx so
+ * the per-event diff loop only sees owned game ids.
+ *
+ * ONE audit row per call (D-14) carrying { affected_ids, game_diffs,
+ * off_topic_state, requested_count, affected_count }. Empty-diff calls
+ * (all states "mixed" OR no owned ids matched OR every per-event diff was
+ * a no-op) return [] AND write NO audit row — the operation is a true
+ * no-op and shouldn't pollute the audit stream.
+ *
+ * Returns affected events projected through mapEventsToDtos so DTO
+ * discipline holds (gameIds + videoData populated; ciphertext fields
+ * stripped — none exist on events today but the projection is the runtime
+ * barrier per AGENTS.md).
+ */
+export async function bulkEdit(
+  userId: string,
+  ids: string[],
+  gameStates: Record<string, "on" | "off" | "mixed">,
+  offTopicState: "on" | "off" | "mixed",
+  ipAddress: string,
+  userAgent?: string,
+): Promise<EventDto[]> {
+  // 1. Silently filter cross-tenant gameIds (D-13). checkGameOwnership
+  //    returns false for missing / cross-tenant / soft-deleted games; the
+  //    key is dropped rather than throwing NotFoundError.
+  const validGameIds = new Set<string>();
+  for (const gid of Object.keys(gameStates)) {
+    if (await checkGameOwnership(userId, gid)) validGameIds.add(gid);
+  }
+  const filteredGameStates: Record<string, "on" | "off" | "mixed"> = {};
+  for (const [k, v] of Object.entries(gameStates)) {
+    if (validGameIds.has(k)) filteredGameStates[k] = v;
+  }
+
+  // 2. Load owned + live events from the id list. Cross-tenant + soft-deleted
+  //    ids fall out of the rows array via the userId / deletedAt WHERE
+  //    clauses (D-13 silent filter at the read site).
+  const rows = await db
+    .select()
+    .from(events)
+    .where(
+      and(eq(events.userId, userId), isNull(events.deletedAt), inArray(events.id, ids)),
+    );
+
+  if (rows.length === 0) return [];
+
+  const affectedIds: string[] = [];
+
+  // 3. Single tx — per-event diff INSERT/DELETE on event_games + off-topic
+  //    update. The per-event existing-set read happens INSIDE the tx so a
+  //    concurrent attach/detach from another request rolls back cleanly.
+  await db.transaction(async (tx) => {
+    for (const event of rows) {
+      const existing = await tx
+        .select({ gameId: eventGames.gameId })
+        .from(eventGames)
+        .where(and(eq(eventGames.userId, userId), eq(eventGames.eventId, event.id)));
+      const existingSet = new Set(existing.map((r) => r.gameId));
+
+      const toAdd: string[] = [];
+      const toRemove: string[] = [];
+      for (const [gid, state] of Object.entries(filteredGameStates)) {
+        if (state === "on" && !existingSet.has(gid)) toAdd.push(gid);
+        if (state === "off" && existingSet.has(gid)) toRemove.push(gid);
+      }
+
+      for (const gid of toAdd) {
+        await tx.insert(eventGames).values({ userId, eventId: event.id, gameId: gid });
+      }
+      for (const gid of toRemove) {
+        await tx
+          .delete(eventGames)
+          .where(
+            and(
+              eq(eventGames.userId, userId),
+              eq(eventGames.eventId, event.id),
+              eq(eventGames.gameId, gid),
+            ),
+          );
+      }
+
+      if (offTopicState !== "mixed") {
+        const next = offTopicState === "on";
+        await tx
+          .update(events)
+          .set({
+            metadata: sql`jsonb_set(COALESCE(${events.metadata}, '{}'::jsonb), '{triage,offTopic}', to_jsonb(${next}::boolean), true)`,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(events.userId, userId), eq(events.id, event.id)));
+      }
+
+      if (toAdd.length > 0 || toRemove.length > 0 || offTopicState !== "mixed") {
+        affectedIds.push(event.id);
+      }
+    }
+  });
+
+  if (affectedIds.length === 0) return [];
+
+  // 4. ONE audit row (D-14), OUTSIDE the tx (pool-deadlock-safe).
+  await writeAudit({
+    userId,
+    action: "events.bulk_edit",
+    ipAddress,
+    userAgent,
+    metadata: {
+      affected_ids: affectedIds,
+      game_diffs: filteredGameStates,
+      off_topic_state: offTopicState,
+      requested_count: ids.length,
+      affected_count: affectedIds.length,
+    },
+  });
+
+  // 5. Re-read affected rows so DTO projection sees jsonb_set result.
+  const updated = await db
+    .select()
+    .from(events)
+    .where(and(eq(events.userId, userId), inArray(events.id, affectedIds)));
+  return mapEventsToDtos(userId, updated);
+}
+
+/**
+ * bulkDelete — DELETE /api/events/bulk soft-delete path (D-13 + D-14).
+ *
+ * Soft-deletes only owned + live events from the id list. Cross-tenant ids
+ * and already-soft-deleted ids silently filtered via the WHERE clause.
+ * Returns affected_count only (no event bodies — the UI doesn't need to
+ * re-render rows that just disappeared from the feed).
+ *
+ * Zero affected → returns {affected_count: 0} AND writes NO audit row
+ * (empty bulk operation is a true no-op).
+ */
+export async function bulkDelete(
+  userId: string,
+  ids: string[],
+  ipAddress: string,
+  userAgent?: string,
+): Promise<{ affected_count: number }> {
+  const result = await db
+    .update(events)
+    .set({ deletedAt: new Date() })
+    .where(
+      and(eq(events.userId, userId), isNull(events.deletedAt), inArray(events.id, ids)),
+    )
+    .returning({ id: events.id });
+
+  if (result.length === 0) return { affected_count: 0 };
+
+  await writeAudit({
+    userId,
+    action: "events.bulk_delete",
+    ipAddress,
+    userAgent,
+    metadata: {
+      affected_ids: result.map((r) => r.id),
+      requested_count: ids.length,
+      affected_count: result.length,
+    },
+  });
+  return { affected_count: result.length };
+}
+
+/**
+ * bulkDeleteForever — DELETE /api/events/bulk?force=true (D-21).
+ *
+ * Hard-deletes ONLY already-soft-deleted owned events from the id list.
+ * Live events and cross-tenant ids silently filtered via the WHERE clause
+ * (isNotNull(deletedAt) requires the row to already be in the trash;
+ * eq(userId, userId) enforces tenant scope). This is the "Delete forever"
+ * action available only from the trash view.
+ *
+ * Zero affected → returns {affected_count: 0} AND writes NO audit row.
+ */
+export async function bulkDeleteForever(
+  userId: string,
+  ids: string[],
+  ipAddress: string,
+  userAgent?: string,
+): Promise<{ affected_count: number }> {
+  const result = await db
+    .delete(events)
+    .where(
+      and(eq(events.userId, userId), isNotNull(events.deletedAt), inArray(events.id, ids)),
+    )
+    .returning({ id: events.id });
+
+  if (result.length === 0) return { affected_count: 0 };
+
+  await writeAudit({
+    userId,
+    action: "events.delete_forever",
+    ipAddress,
+    userAgent,
+    metadata: {
+      affected_ids: result.map((r) => r.id),
+      requested_count: ids.length,
+      affected_count: result.length,
+    },
+  });
+  return { affected_count: result.length };
 }
