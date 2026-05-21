@@ -5,8 +5,10 @@ import { formatFeedDate } from "../../src/lib/util/format-feed-date.js";
  * Compact / relative date format for the /feed surface. Four buckets:
  *   - same calendar day → "Today, HH:MM" (24h locale)
  *   - one calendar day back → "Yesterday"
- *   - same calendar year, older than yesterday → "MMM D" (Apr 25)
- *   - earlier years → "MMM D, YYYY" (Apr 25, 2025)
+ *   - same calendar year, older than yesterday → "Ddd, MMM D" (Mon, Apr 25)
+ *   - earlier years → "Ddd, MMM D, YYYY" (Mon, Apr 25, 2025)
+ *
+ * Weekday prefix matches the prototype's FeedDateGroupHeader.
  *
  * Time is frozen via vi.setSystemTime so the bucket boundaries are
  * deterministic across CI machines. Locale-rendered strings keep the regex
@@ -36,15 +38,17 @@ describe("formatFeedDate", () => {
     expect(out).toBe("Yesterday");
   });
 
-  it("returns 'MMM D' for same-year older input", () => {
+  it("returns 'Ddd, MMM D' for same-year older input (weekday prefix)", () => {
     const out = formatFeedDate(new Date("2026-04-15T12:00:00.000Z"));
     // Tolerant of TZ rendering — the runner may surface "Apr 14" or "Apr 15".
-    expect(out).toMatch(/^Apr 1[45]$/);
+    // Weekday matches the local-calendar weekday, so accept any three-letter
+    // weekday short name.
+    expect(out).toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), Apr 1[45]$/);
   });
 
-  it("returns 'MMM D, YYYY' for prior-year input", () => {
+  it("returns 'Ddd, MMM D, YYYY' for prior-year input (weekday prefix)", () => {
     const out = formatFeedDate(new Date("2025-12-25T12:00:00.000Z"));
-    expect(out).toMatch(/^Dec (24|25), 2025$/);
+    expect(out).toMatch(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), Dec (24|25), 2025$/);
   });
 
   it("accepts ISO string input", () => {
