@@ -214,34 +214,43 @@
   .preset-chips {
     display: flex;
     align-items: center;
-    gap: var(--s-1);
+    gap: var(--s-2);
     flex-wrap: wrap;
   }
+  /* Base chip — mirrors docs/design/v2/ui-kit/index.html lines 483-499.
+   * Pill shape, surface bg, hairline border, text-2 color, 28px tall.
+   * Hover deepens to surface-2 + border-2. Active gets the accent-soft
+   * tint + accent-strong text (matches the prototype's preset chips
+   * sitting alongside the date-chip). */
   .chip {
     display: inline-flex;
     align-items: center;
-    gap: var(--s-1);
-    padding: var(--s-1) var(--s-3);
-    background: var(--surface-2);
-    color: var(--text);
+    gap: var(--s-2);
+    height: 28px;
+    padding: 0 var(--s-3);
+    background: var(--surface);
+    color: var(--text-2);
     border: 1px solid var(--border);
     border-radius: var(--r-pill);
     font-family: var(--f-sans);
     font-size: var(--t-12);
+    font-weight: var(--w-md);
     cursor: pointer;
     white-space: nowrap;
     transition:
       background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
+      border-color var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
   }
   .chip:hover {
-    border-color: var(--accent);
+    background: var(--surface-2);
+    color: var(--text);
+    border-color: var(--border-2);
   }
   .chip[data-active="1"] {
     background: var(--accent-soft);
-    color: var(--accent);
-    border-color: var(--accent-strong);
-    font-weight: var(--w-sb);
+    color: var(--accent-strong);
+    border-color: color-mix(in oklab, var(--accent) 50%, transparent);
   }
 
   /* Sort toggle sits INLINE with preset chips per prototype
