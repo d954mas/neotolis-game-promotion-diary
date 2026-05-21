@@ -161,13 +161,70 @@
     game,
     games,
     onChanged,
+    // Phase 3.4 Plan 08 — mass-select architecture (D-12 + RESEARCH Question 6).
+    //
+    // All new callback props are OPTIONAL so existing call sites
+    // (/feed and /games/[id] until Plan 10 wires the page-level store)
+    // continue to work without immediate rewiring. The contract is:
+    //   - `selected` / `anySelected` default to false → no checkbox shown
+    //     as checked, no Gmail sweep on click.
+    //   - When no `onOpenDetail` is provided, the wrapping <a> falls back
+    //     to default href navigation. When provided (Plan 10), the article
+    //     click handler intercepts and calls the callback (modal open).
+    //   - The `.card-select` checkbox always renders; without
+    //     `onToggleSelect` wired, clicks are no-ops.
+    selected = false,
+    anySelected = false,
+    view = "feed",
+    onToggleSelect,
+    onOpenDetail,
+    onOpenGamesPickerForCard,
+    onDelete,
   }: {
     event: EventDtoLite;
     source: SourceLite | null;
     game: GameLite | null;
     games: GameLite[];
     onChanged?: () => void;
+    selected?: boolean;
+    anySelected?: boolean;
+    view?: "feed" | "trash";
+    onToggleSelect?: (id: string, force?: boolean) => void;
+    onOpenDetail?: (id: string) => void;
+    onOpenGamesPickerForCard?: (id: string) => void;
+    onDelete?: (id: string) => Promise<void> | void;
   } = $props();
+
+  // Touch long-press → enters selection mode after 480ms. cancelPress wires
+  // touchmove/touchend/touchcancel — scroll-cancel is LOAD-BEARING per
+  // D-28 (without it, scrolling triggers selection 480ms later, ruining
+  // the feed UX). No mouse-down handler per D-27 — mouse users click the
+  // visible `.card-select` checkbox. Haptic vibration from the prototype
+  // is intentionally NOT ported per D-27 (annoying on some browsers).
+  let pressTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function startPress(e: TouchEvent): void {
+    cancelPress();
+    const target = e.currentTarget as HTMLElement;
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      target.dataset.longPressed = "1";
+      onToggleSelect?.(event.id, true);
+    }, 480);
+  }
+
+  function cancelPress(): void {
+    if (pressTimer !== null) {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+  }
+
+  // ⋯ overflow menu open state — a single-instance dropdown anchored to
+  // the .card-actions button. Closed by clicking any menu item OR by the
+  // article-level click handler when the menu items themselves call out
+  // (each menuitem onclick sets menuOpen=false before the action).
+  let menuOpen = $state(false);
 
   // Type-safe metadata.media.url extraction (image-source rules).
   // metadata is `unknown` from toEventDto — we narrow before reading.
@@ -300,9 +357,138 @@
   class:standalone={isStandalone}
   data-kind={event.kind}
   data-shape={event.kind === "youtube_video" ? "media" : "text"}
+  data-selected={selected ? "1" : "0"}
+  data-view={view}
+  data-mine={event.authorIsMe ? "1" : "0"}
   data-testid="feed-card"
   style="--kind-color: var(--k-{event.kind});"
+  ontouchstart={startPress}
+  ontouchend={cancelPress}
+  ontouchmove={cancelPress}
+  ontouchcancel={cancelPress}
+  oncontextmenu={(e) => e.preventDefault()}
+  onclick={(e) => {
+    const target = e.target as Element;
+    // .card-select / .card-actions / .card-menu live OUTSIDE the wrapping
+    // <a> in the DOM, but a click inside ANY of them must NEVER bubble
+    // into the card-surface action (open detail / toggle select). The
+    // ⋯ menu items also stop their own bubbling, but this early-return
+    // is the load-bearing guard per RESEARCH §"Gmail-style Mass-Select".
+    if (target.closest(".card-select, .card-actions, .card-menu")) {
+      e.preventDefault();
+      return;
+    }
+    const article = e.currentTarget as HTMLElement;
+    // After a successful long-press, browsers fire a "phantom" click as
+    // the finger lifts. Without this skip, the click would either toggle
+    // selection back off OR open detail — both wrong (D-28).
+    if (article.dataset.longPressed === "1") {
+      delete article.dataset.longPressed;
+      e.preventDefault();
+      return;
+    }
+    // Gmail sweep: once any card is checked, the WHOLE card surface
+    // becomes a select-toggle. Otherwise it opens the detail (modal in
+    // Plan 10; legacy /events/[id] anchor fallback when no callback wired).
+    if (anySelected) {
+      e.preventDefault();
+      onToggleSelect?.(event.id, !selected);
+      return;
+    }
+    // When the page (Plan 10 orchestrator) wires onOpenDetail, intercept
+    // the anchor navigation so the modal opens with URL ?event= state.
+    // Otherwise let the <a href> navigate normally — current /feed and
+    // /games/[id] surfaces rely on this until they migrate to the modal.
+    if (onOpenDetail) {
+      e.preventDefault();
+      onOpenDetail(event.id);
+    }
+  }}
 >
+  <!-- .card-select — always-visible selection checkbox at top-left.
+       Sits OUTSIDE the <a class="card-body"> so its click doesn't trigger
+       navigation. The label wraps the input so clicking the visual
+       affordance area fires the checkbox. The article-level onclick uses
+       closest('.card-select') as an early-return guard. -->
+  <label
+    class="card-select"
+    onclick={(e) => e.stopPropagation()}
+    aria-label={selected ? m.feed_card_deselect_aria() : m.feed_card_select_aria()}
+  >
+    <input
+      type="checkbox"
+      checked={selected}
+      onchange={() => onToggleSelect?.(event.id, !selected)}
+    />
+  </label>
+
+  <!-- .card-actions — ⋯ overflow menu trigger at top-right. Hosts the
+       per-card menu (Edit games / Select / Delete). Lives OUTSIDE the
+       <a> so its click doesn't navigate. -->
+  <button
+    type="button"
+    class="card-actions"
+    aria-label={m.feed_card_actions_aria()}
+    aria-haspopup="menu"
+    aria-expanded={menuOpen ? "true" : "false"}
+    onclick={(e) => {
+      e.stopPropagation();
+      menuOpen = !menuOpen;
+    }}
+  >
+    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="5" r="1.8" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+      <circle cx="12" cy="19" r="1.8" fill="currentColor" />
+    </svg>
+  </button>
+  {#if menuOpen}
+    <div
+      class="card-menu"
+      role="menu"
+      tabindex="-1"
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          menuOpen = false;
+        }
+      }}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        onclick={() => {
+          menuOpen = false;
+          onOpenGamesPickerForCard?.(event.id);
+        }}
+      >
+        {m.feed_card_menu_edit_games()}
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onclick={() => {
+          menuOpen = false;
+          onToggleSelect?.(event.id, true);
+        }}
+      >
+        {m.feed_card_menu_select()}
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="danger"
+        onclick={() => {
+          menuOpen = false;
+          void onDelete?.(event.id);
+        }}
+      >
+        {m.feed_card_menu_delete()}
+      </button>
+    </div>
+  {/if}
+
   <a class="card-body" href={`/events/${event.id}`}>
     {#if event.kind === "youtube_video"}
       <!-- Media shape: 16:9 thumbnail block at top, kind stripe = 2px left
@@ -349,11 +535,19 @@
          media-shape it duplicates the overlay-kind pill but reads when
          the thumbnail is scrolled off-screen on tall lists. -->
     <div class="meta-row">
+      <!-- Author avatar — mine variant (accent circle with ↻) or unknown
+           variant (neutral circle with ?). v2 Plan 08 splits the mine vs
+           unknown styles onto the `.unknown` class for selector parity
+           with the prototype while keeping the existing `.mine` selector
+           that integration tests grep for. -->
       <span
         class="author-avatar"
         class:mine={event.authorIsMe}
+        class:unknown={!event.authorIsMe}
         title={event.authorIsMe ? m.feed_card_author_is_me_badge() : ""}
-        aria-hidden="true"
+        aria-label={event.authorIsMe
+          ? m.author_avatar_mine_aria({ name: "you" })
+          : m.author_avatar_unknown_aria()}
       >
         {event.authorIsMe ? "↻" : "?"}
       </span>
@@ -368,17 +562,76 @@
       <h3 class="title">{event.title}</h3>
     </div>
 
+    <!-- .card-byline — separate author row for reddit_post (subreddit
+         metadata.author surfaces as a per-card byline below the title).
+         Hidden when the event has no byline-worthy author handle. Other
+         source kinds can opt in later by populating event.metadata.author
+         on their adapter shape. -->
+    {#if event.kind === "reddit_post"}
+      {@const rbylineMd = (event.metadata ?? {}) as { author?: string }}
+      {#if rbylineMd.author}
+        <div class="card-byline">/u/{rbylineMd.author}</div>
+      {/if}
+    {/if}
+
     {#if event.notes}
-      <p class="notes">{event.notes}</p>
+      <p class="notes card-notes">{event.notes}</p>
     {/if}
 
     {#if event.kind === "youtube_video" && event.stats}
-      <div class="stats-line">
-        <span class="stat">{formatStat(event.stats.viewCount)} views</span>
+      <div class="stats-line card-stats">
+        <span class="stat"
+          ><svg
+            class="stat-icon"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            ><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg
+          ><span class="num">{formatStat(event.stats.viewCount)}</span>
+          <span class="stat-label">{m.event_detail_stat_views()}</span></span
+        >
         <span class="sep">·</span>
-        <span class="stat">{formatStat(event.stats.likeCount)} likes</span>
+        <span class="stat"
+          ><svg
+            class="stat-icon"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            ><path
+              d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+            /></svg
+          ><span class="num">{formatStat(event.stats.likeCount)}</span>
+          <span class="stat-label">{m.event_detail_stat_likes()}</span></span
+        >
         <span class="sep">·</span>
-        <span class="stat">{formatStat(event.stats.commentCount)} comments</span>
+        <span class="stat"
+          ><svg
+            class="stat-icon"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            ><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg
+          ><span class="num">{formatStat(event.stats.commentCount)}</span>
+          <span class="stat-label">{m.event_detail_stat_comments()}</span></span
+        >
       </div>
     {/if}
 
@@ -813,9 +1066,129 @@
     opacity: 0.6;
     cursor: not-allowed;
   }
+  /* Phase 3.4 Plan 08 additions — mass-select architecture (D-12) +
+   * Gmail sweep + per-card overflow menu + tri-state-ready selection
+   * visuals. All new selectors live in v2 tokens; no token bridge needed. */
+  .feed-card[data-selected="1"] {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  /* .card-select — always-visible checkbox, top-left.  Stays subtle
+   * until the card is hovered, the row is checked, or the page-level
+   * `<svelte:body data-selection="1">` flag (Plan 10) lights it up. */
+  .card-select {
+    position: absolute;
+    top: var(--s-2);
+    left: var(--s-2);
+    z-index: 2;
+    display: inline-flex;
+    padding: var(--s-1);
+    cursor: pointer;
+    opacity: 0.5;
+    transition: opacity var(--m-fast) var(--m-ease);
+  }
+  .feed-card:hover .card-select,
+  .feed-card[data-selected="1"] .card-select,
+  :global(body[data-selection="1"]) .card-select {
+    opacity: 1;
+  }
+  .card-select input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  /* .card-actions — ⋯ overflow menu trigger, top-right. */
+  .card-actions {
+    position: absolute;
+    top: var(--s-2);
+    right: var(--s-2);
+    z-index: 2;
+    width: var(--hit);
+    height: var(--hit);
+    background: transparent;
+    border: none;
+    color: var(--text-3);
+    cursor: pointer;
+    border-radius: var(--r-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
+  }
+  .card-actions:hover {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .card-menu {
+    position: absolute;
+    top: calc(var(--s-2) + var(--hit));
+    right: var(--s-2);
+    z-index: 3;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-elev);
+    padding: var(--s-1);
+    display: flex;
+    flex-direction: column;
+    min-width: 160px;
+  }
+  .card-menu [role="menuitem"] {
+    background: transparent;
+    border: none;
+    text-align: left;
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--t-13);
+    color: var(--text);
+    cursor: pointer;
+    border-radius: var(--r-sm);
+  }
+  .card-menu [role="menuitem"]:hover {
+    background: var(--accent-soft);
+  }
+  .card-menu .danger:hover {
+    color: var(--danger);
+  }
+  /* .author-avatar.unknown — neutral circle with "?" for non-mine
+   * authors. Sits alongside the existing `.author-avatar.mine` accent
+   * variant (which integration tests cover). The base class .author-avatar
+   * already provides the circle treatment; .unknown is a no-op selector
+   * for parity with the prototype, but explicit for grep discoverability. */
+  .author-avatar.unknown {
+    background: var(--surface-2);
+    color: var(--text-3);
+  }
+  /* .card-byline — per-source author row (e.g. reddit /u/handle). */
+  .card-byline {
+    font-size: var(--t-12);
+    color: var(--text-3);
+    margin-top: calc(-1 * var(--s-1));
+  }
+  /* .card-notes + .card-stats — alias classes alongside .notes / .stats-line
+   * so the prototype's selectors apply without breaking integration tests
+   * that grep for the legacy names. Visual contract stays identical. The
+   * empty class definitions are intentional documentation; CSS rules
+   * stacked on .notes / .stats-line continue to apply via the dual class. */
+  .card-stats .stat-icon {
+    flex: 0 0 auto;
+  }
+  .card-stats .stat-label {
+    margin-left: var(--s-1);
+  }
+  .card-stats .stat {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-1);
+  }
   @media (prefers-reduced-motion: reduce) {
     .feed-card,
-    .standalone-button {
+    .standalone-button,
+    .card-select,
+    .card-actions,
+    .author-avatar {
       transition: none;
     }
   }
