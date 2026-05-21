@@ -673,7 +673,13 @@
     </div>
   {/if}
 
-  <ActiveFiltersStrip axes={activeAxes} onClearAll={clearAllFilters} />
+  <!-- ActiveFiltersStrip renders ONLY when filters panel is closed. When the
+       panel is open, the per-axis chips themselves carry the selected state
+       (data-active) so a separate summary strip would duplicate signal.
+       Matches prototype docs/design/v2/ui-kit/app.jsx line 1588: `{!filtersOpen ? <ActiveFiltersStrip /> : ...}`. -->
+  {#if !filtersOpen}
+    <ActiveFiltersStrip axes={activeAxes} onClearAll={clearAllFilters} />
+  {/if}
 
   {#if filtersOpen}
     <div class="filters-panel">

@@ -180,25 +180,31 @@
     min-width: 0;
   }
 
+  /* Date-chip uses --r-sm (rectangular) per prototype `.btn.date-chip`
+   * inheriting from base `.btn` (docs/design/v2/ui-kit/index.html
+   * line 439: border-radius: var(--r-sm)). NOT pill — pill is for
+   * the smaller preset chips only. */
   .date-chip {
     display: inline-flex;
     align-items: center;
-    gap: var(--s-1);
+    gap: var(--s-2);
     height: 32px;
     min-height: 32px;
     padding: 0 var(--s-3);
     background: var(--surface-2);
     border: 1px solid var(--border);
     color: var(--text);
-    border-radius: var(--r-pill);
+    border-radius: var(--r-sm);
     font-family: var(--f-sans);
     font-size: var(--t-13);
+    font-weight: var(--w-md);
     white-space: nowrap;
     flex-shrink: 0;
     cursor: pointer;
     transition:
       background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
+      border-color var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
   }
   .date-chip:hover {
     background: var(--surface-2);
@@ -206,9 +212,12 @@
   }
   .date-chip[data-custom="1"] {
     background: var(--accent-soft);
-    border-color: var(--accent-strong);
-    color: var(--accent);
+    border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+    color: var(--accent-strong);
     font-weight: var(--w-sb);
+  }
+  .date-chip[data-custom="1"] svg {
+    color: var(--accent-strong);
   }
 
   .preset-chips {
