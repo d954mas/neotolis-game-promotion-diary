@@ -179,26 +179,28 @@
     color: var(--accent-strong);
   }
 
-  /* Game chip — accent-stripe (echoes card-footer game-chip + active
-   * GAME filter chip). The stripe color is parameterized via
-   * --card-accent so per-game colors can layer in later. */
+  /* Game chip — tinted bg + border + inset stripe, all in --card-accent.
+   * Mirrors prototype docs/design/v2/ui-kit/index.html lines 310-315. */
   .chip.active-chip[data-variant="game"] {
-    box-shadow: inset 3px 0 0 var(--card-accent, var(--accent));
-    padding-left: 14px;
+    background: color-mix(in oklab, var(--card-accent, var(--text-3)) 18%, var(--surface));
     border-color: color-mix(
       in oklab,
-      var(--card-accent, var(--accent)) 35%,
+      var(--card-accent, var(--text-3)) 45%,
       var(--border)
     );
+    box-shadow: inset 3px 0 0 var(--card-accent, transparent);
+    padding-left: 14px;
   }
 
-  /* Kind chip — tinted in the kind's hue. */
+  /* Kind chip — tinted bg + border + inset stripe + colored icon. Mirrors
+   * prototype lines 317-323. */
   .chip.active-chip[data-variant="kind"] {
-    box-shadow: inset 3px 0 0 var(--card-accent, var(--accent));
+    background: color-mix(in oklab, var(--card-accent) 14%, var(--surface));
+    box-shadow: inset 3px 0 0 var(--card-accent, transparent);
     padding-left: 14px;
     border-color: color-mix(
       in oklab,
-      var(--card-accent, var(--accent)) 35%,
+      var(--card-accent, var(--accent)) 40%,
       var(--border)
     );
   }
