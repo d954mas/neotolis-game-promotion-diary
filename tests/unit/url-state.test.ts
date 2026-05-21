@@ -199,6 +199,28 @@ describe("serializeFilterState", () => {
     expect(rt).toEqual(minimal);
   });
 
+  it("URL kind axis accepts every EventKind the schema defines", () => {
+    // Parity guard for the local URL_VALID_KINDS set in src/lib/feed/url-state.ts.
+    // If the schema enum grows (e.g. Phase 4 adds 'mastodon_post'), this test
+    // must be updated AND the local kind-list updated in the same commit.
+    // Documented as Plan 03.4-02 Rule 3 deviation; follow-up: extract a
+    // shared client-safe VALID_EVENT_KINDS module.
+    const ALL_SCHEMA_KINDS = [
+      "youtube_video",
+      "reddit_post",
+      "twitter_post",
+      "telegram_post",
+      "discord_drop",
+      "conference",
+      "talk",
+      "press",
+      "other",
+      "post",
+    ];
+    const url = new URL("https://x?" + ALL_SCHEMA_KINDS.map((k) => `kind=${k}`).join("&"));
+    expect(parseSearchParams(url).kind).toEqual(ALL_SCHEMA_KINDS);
+  });
+
   it("encodes dateRange preset as ?date=week and dateRange custom as ?from=&to=", () => {
     const presetSp = serializeFilterState({
       ...defaultState(),
