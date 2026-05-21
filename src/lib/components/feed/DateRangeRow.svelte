@@ -63,14 +63,24 @@
     return `${fmtMonthDay(win.from)} – ${fmtMonthDay(win.to)}`;
   }
 
-  // Current value passed into the picker — null for non-custom, the
-  // parsed Date pair for custom ranges.
+  // Current value passed into the picker. For custom ranges, parse the
+  // ISO strings. For preset ranges (month/week/year/today), resolve the
+  // preset window so the picker opens with the current view's range
+  // visually highlighted — matches prototype behavior where the user
+  // sees what's currently selected before adjusting. "All time" / null
+  // leaves the picker empty.
   let pickerValue = $derived.by((): { from: Date | null; to: Date | null } | null => {
-    if (dateRange.preset !== "custom") return null;
-    const from = parseEventDate(dateRange.from);
-    const to = parseEventDate(dateRange.to);
-    if (!from || !to) return null;
-    return { from, to };
+    if (dateRange.preset === "custom") {
+      const from = parseEventDate(dateRange.from);
+      const to = parseEventDate(dateRange.to);
+      if (!from || !to) return null;
+      return { from, to };
+    }
+    if (dateRange.preset === "all") return null;
+    if (dateRange.preset === "today") return { from: today, to: today };
+    const win = dateRangeWindow(dateRange.preset, today);
+    if (!win) return null;
+    return { from: win.from, to: win.to };
   });
 
   function toIsoLocal(d: Date): string {
@@ -172,12 +182,15 @@
   anchorLeft={anchorLeft}
   {today}
   onApply={(range) => {
+    // Don't auto-close on range completion — prototype keeps the picker
+    // open so the user can keep adjusting until they explicitly dismiss
+    // via Close button / click-outside / Esc. The range commits to URL
+    // state immediately so the feed updates while the picker stays open.
     onDateRangeChange({
       preset: "custom",
       from: toIsoLocal(range.from),
       to: toIsoLocal(range.to),
     });
-    pickerOpen = false;
   }}
   onClose={() => (pickerOpen = false)}
 />

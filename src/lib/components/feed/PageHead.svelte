@@ -34,6 +34,8 @@
     title,
     view,
     onAddEvent,
+    onOpenTrash,
+    deletedCount = 0,
     query,
     onQueryChange,
     onToggleFilters,
@@ -47,6 +49,8 @@
     title: string;
     view: "feed" | "trash";
     onAddEvent: () => void;
+    onOpenTrash?: () => void;
+    deletedCount?: number;
     query: string;
     onQueryChange: (q: string) => void;
     onToggleFilters: () => void;
@@ -107,6 +111,11 @@
         <span class="cta-plus" aria-hidden="true">+</span>
         <span>{m.add_event_modal_title()}</span>
       </button>
+      {#if deletedCount > 0 && onOpenTrash}
+        <button type="button" class="recovery-link" onclick={onOpenTrash}>
+          Recently deleted ({deletedCount})
+        </button>
+      {/if}
     {/if}
   </div>
 
@@ -276,6 +285,25 @@
   }
   .cta-primary:hover .cta-plus {
     color: var(--accent-strong);
+  }
+  /* Recovery link — text-link CTA appearing next to Add event when the
+   * user has trashed items. Matches prototype .btn-link.recovery-link
+   * (docs/design/v2/ui-kit/app.jsx lines 137-143). */
+  .recovery-link {
+    background: transparent;
+    border: 0;
+    padding: 0 var(--s-2);
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+    align-self: center;
+    transition: color var(--m-fast) var(--m-ease);
+  }
+  .recovery-link:hover {
+    color: var(--text);
   }
 
   /* Utility row — search input + Filters toggle */

@@ -658,6 +658,8 @@
     activeFilterCount={activeAxes.length}
     totalCount={allRows.length}
     filteredCount={filterableEvents.filter((e) => passes(e, urlState, today)).length}
+    deletedCount={data.deletedEvents.length}
+    onOpenTrash={() => goto("/feed?view=trash", { keepFocus: true, noScroll: true })}
   >
     <DateRangeRow
       dateRange={urlState.dateRange}
