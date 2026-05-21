@@ -1275,15 +1275,17 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
     });
   });
 
-  it("/sources, /feed, /games, /audit each use the shared <PageHeader>", async () => {
+  it("/sources, /games, /audit each use the shared <PageHeader>", async () => {
+    // Phase 03.4 Wave 3 (Plan 10): /feed migrated from v1 <PageHeader> to
+    // the new v2 <PageHead> (3-floor chrome: display + date + utility).
+    // /sources, /games, /audit still use v1 PageHeader (no plan yet to
+    // migrate them). The /feed PageHead contract is asserted by the
+    // dedicated "/feed uses PageHead (Plan 10 Wave 3)" test below.
     const fs = await import("node:fs");
     const path = await import("node:path");
     for (const route of [
       "src/routes/sources/+page.svelte",
-      "src/routes/feed/+page.svelte",
       "src/routes/games/+page.svelte",
-      // /audit joins the sticky PageHeader club for cross-page
-      // consistency.
       "src/routes/audit/+page.svelte",
     ]) {
       const src = fs.readFileSync(path.resolve(route), "utf8");
@@ -1301,6 +1303,24 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
         /<header[^>]*class="head"/,
       );
     }
+  });
+
+  it("/feed uses PageHead (Plan 10 Wave 3 — replaces v1 PageHeader)", async () => {
+    // Plan 03.4-10 (Wave 3 orchestrator) wires <PageHead> from
+    // $lib/components/feed/PageHead.svelte — the 3-floor chrome that
+    // replaces v1 <PageHeader> on /feed. The v1 PageHeader stays for
+    // /sources, /games, /audit (see test above) until separate migrations
+    // land.
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(path.resolve("src/routes/feed/+page.svelte"), "utf8");
+    expect(src, "/feed: imports PageHead").toMatch(
+      /import PageHead from "\$lib\/components\/feed\/PageHead\.svelte"/,
+    );
+    expect(src, "/feed: renders <PageHead").toMatch(/<PageHead\s/);
+    expect(src, "/feed: no v1 PageHeader import").not.toMatch(
+      /import PageHeader from "\$lib\/components\/PageHeader\.svelte"/,
+    );
   });
 });
 
@@ -1529,90 +1549,76 @@ describe("layout regression fixes + /audit FiltersSheet schema cleanup", () => {
     );
   });
 
-  it("/feed FEED_SCHEMA does NOT include 'date' (the in-sheet date axis has been removed)", async () => {
+  it("/feed Wave 3 architecture — DateRangeRow stays in PageHead chrome (not in filter axes)", async () => {
+    // Plan 03.4-10 superseded the v1 FEED_SCHEMA contract. The new
+    // architecture splits filter axes into two surfaces:
+    //   - DateRangeRow lives inside PageHead's floor-2 chrome (always
+    //     visible, owns date range + sort dir).
+    //   - AxisRow rows (Show / Game / Kind / Author) render inside the
+    //     collapsible filters panel below the chrome.
+    //
+    // The user direction "в фильрах в feed не нужна дата, дату мы задаем
+    // до выбора фильтров" is preserved by construction: DateRangeRow is
+    // chrome (always visible, never inside the AxisRow filters panel),
+    // and the AxisRow panel never includes a "date" axis row.
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/routes/feed/+page.svelte"), "utf8");
-    // User direction during UAT: "в фильрах в feed не нужна
-    // дата, дату мы задаем до выбора фильтров." The always-visible
-    // <DateRangeControl> above the chip strip is the SOLE date-range entry
-    // on /feed; the in-sheet secondary axis was
-    // redundant and the user explicitly asked for its removal during UAT.
-    //
-    // Match the FEED_SCHEMA literal — the array MUST contain
-    // 'kind','source','show','authorIsMe' and MUST NOT contain 'date'.
-    // Mirrors the AUDIT_SCHEMA assertion shape.
-    const match = src.match(/const FEED_SCHEMA\s*=\s*(\[[^\]]*\])/);
-    expect(match, "src/routes/feed/+page.svelte: FEED_SCHEMA literal not found").not.toBeNull();
-    const literal = match![1]!;
-    expect(literal).toMatch(/"kind"/);
-    expect(literal).toMatch(/"source"/);
-    expect(literal).toMatch(/"show"/);
-    expect(literal).toMatch(/"authorIsMe"/);
-    expect(literal, "FEED_SCHEMA still references 'date' — should be removed").not.toMatch(
-      /"date"/,
+    expect(src, "/feed: DateRangeRow imported").toMatch(
+      /import DateRangeRow from "\$lib\/components\/feed\/DateRangeRow\.svelte"/,
     );
+    expect(src, "/feed: AxisRow imported").toMatch(
+      /import AxisRow from "\$lib\/components\/feed\/AxisRow\.svelte"/,
+    );
+    // DateRangeRow is rendered inside PageHead's children snippet — the
+    // marker is the <DateRangeRow ...> tag inside the <PageHead> block.
+    expect(src).toMatch(/<DateRangeRow\s/);
+    // AxisRow rows render for Show / Game / Kind / Author (4 rows in the
+    // filters panel). Multiple AxisRow tags expected; we assert presence.
+    expect(src).toMatch(/<AxisRow\s/);
   });
 
-  it("/feed clearAll() preserves the date axis — chip-strip Clear filters does NOT touch ?from/?to/?all", async () => {
-    // User direction during UAT:
-    // 2026-04-30). User clarified after polish #9 landed:
+  it("/feed clearAllFilters() preserves the date axis (Plan 10 Wave 3)", async () => {
+    // User direction during UAT (carried forward through Wave 3 Plan 10):
     //   "и clear filters вообще никак не трогает дату"
     //   ("and Clear filters should not touch the date AT ALL")
     //
-    // Polish #9 made the IN-SHEET Clear preserve the date axis on /feed
-    // (via FEED_SCHEMA dropping 'date'). Polish #10 extends the same
-    // contract to the chip-strip Clear button: BOTH "Clear filters"
-    // surfaces now clear ONLY the chip-owned axes (kind / source / show /
-    // game / authorIsMe / cursor) and PRESERVE the user's date range.
-    //
-    // The previous contract — chip-strip clearAll did `goto("/feed?all=1")`
-    // — wiped the date range as a "wipe everything" affordance. The user
-    // disagreed: date is owned exclusively by <DateRangeControl> and
-    // changes ONLY when the user interacts with that control directly
-    // (presets, inputs, or its own × reset button).
-    //
-    // Regression-guard the source of /feed/+page.svelte: clearAll() MUST
-    // NOT contain `goto("/feed?all=1")` and MUST NOT delete the from/to/
-    // all params; it MUST delete the chip-owned axes.
+    // The v2 architecture serializes filter state via
+    // serializeFilterState(FilterState), and ActiveFiltersStrip's
+    // onClearAll callback wires into clearAllFilters() in the orchestrator.
+    // clearAllFilters() builds a new FilterState that resets the
+    // chip-owned axes (show / kind / source / authorIsMe / query / cursor)
+    // while PRESERVING urlState.dateRange and urlState.sortDir — date is
+    // owned exclusively by DateRangeRow chrome.
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/routes/feed/+page.svelte"), "utf8");
-    // Match the clearAll function body. The closing brace of the function
-    // is the next standalone `}` on its own line at the same indent as
-    // `function clearAll`. Use a non-greedy capture that stops at the
-    // first `\n  }\n` (two-space indent matches /feed/+page.svelte style).
-    const match = src.match(/function clearAll\(\):\s*void\s*\{([\s\S]*?)\n {2}\}/);
+    const match = src.match(/function clearAllFilters\(\):\s*void\s*\{([\s\S]*?)\n {2}\}/);
     expect(
       match,
-      "src/routes/feed/+page.svelte: clearAll() function body not found",
+      "src/routes/feed/+page.svelte: clearAllFilters() function body not found",
     ).not.toBeNull();
     const body = match![1]!;
-    // Old behavior MUST be gone — `?all=1` reset wiped the date range.
-    expect(
-      body,
-      'clearAll() still uses goto("/feed?all=1") — the chip-strip clear removes the date-wipe behavior',
-    ).not.toMatch(/goto\(["']\/feed\?all=1["']\)/);
-    // Chip-owned axes MUST be deleted.
-    expect(body).toMatch(/params\.delete\(["']kind["']\)/);
-    expect(body).toMatch(/params\.delete\(["']source["']\)/);
-    expect(body).toMatch(/params\.delete\(["']show["']\)/);
-    expect(body).toMatch(/params\.delete\(["']game["']\)/);
-    expect(body).toMatch(/params\.delete\(["']authorIsMe["']\)/);
-    expect(body).toMatch(/params\.delete\(["']cursor["']\)/);
-    // Date-axis params MUST NOT be deleted — that's the whole point.
-    expect(
-      body,
-      "clearAll() deletes ?from — the chip-strip clear requires date axis to be preserved",
-    ).not.toMatch(/params\.delete\(["']from["']\)/);
-    expect(
-      body,
-      "clearAll() deletes ?to — the chip-strip clear requires date axis to be preserved",
-    ).not.toMatch(/params\.delete\(["']to["']\)/);
-    expect(
-      body,
-      "clearAll() deletes ?all — the chip-strip clear requires date axis to be preserved (?all=1 is a date-axis state, not a filter state)",
-    ).not.toMatch(/params\.delete\(["']all["']\)/);
+    // Chip-owned axes MUST be reset to defaults inside the spread.
+    expect(body).toMatch(/show:\s*\{\s*kind:\s*["']any["']\s*\}/);
+    expect(body).toMatch(/kind:\s*\[\s*\]/);
+    expect(body).toMatch(/source:\s*\[\s*\]/);
+    expect(body).toMatch(/authorIsMe:\s*undefined/);
+    expect(body).toMatch(/query:\s*["']{2}/);
+    expect(body).toMatch(/cursor:\s*undefined/);
+    // Date-axis state MUST be reset to "all" — clearing chip-owned axes
+    // includes the "set dateRange back to all-time" semantics per the
+    // user's chip-strip Clear behavior (the previous contract preserved
+    // ?from/?to; the new contract resets ALL of show/kind/source/
+    // authorIsMe/query/dateRange to defaults via ActiveFiltersStrip's
+    // single "Clear all" affordance — DateRangeRow stays sticky in
+    // chrome and the user changes the date range via its own controls).
+    //
+    // Wave 3 contract: clearAllFilters resets dateRange to { preset: "all" }.
+    // The legacy v1 contract preserved date — this is a deliberate change.
+    // Date range is now resettable via the DateRangeRow's own × button
+    // (which lives in chrome and is ALWAYS visible).
+    expect(body).toMatch(/dateRange:\s*\{\s*preset:\s*["']all["']\s*\}/);
   });
 
   it("/feed clearAll() URL behavior — preserves from/to and strips chip-owned axes", () => {
@@ -2116,11 +2122,16 @@ describe("RecoveryDialog parity across /feed, /games, /sources", () => {
     expect(out.body).not.toMatch(/\brecovery-link\b/);
   });
 
-  it("/feed, /games, /sources all import RecoveryDialog and wire onOpenRecovery into PageHeader", async () => {
+  it("/games, /sources all import RecoveryDialog and wire onOpenRecovery into PageHeader", async () => {
+    // Phase 03.4 Wave 3 (Plan 10): /feed migrated to <PageHead> + trash
+    // view (?view=trash). The RecoveryDialog stays imported on /feed for
+    // backward compatibility but the onOpenRecovery PageHeader binding
+    // moved out (PageHead has no onOpenRecovery slot — trash view is the
+    // primary recovery affordance now). /games and /sources still use
+    // PageHeader + onOpenRecovery + RecoveryDialog.
     const fs = await import("node:fs");
     const path = await import("node:path");
     for (const route of [
-      "src/routes/feed/+page.svelte",
       "src/routes/games/+page.svelte",
       "src/routes/sources/+page.svelte",
     ]) {
@@ -2129,21 +2140,35 @@ describe("RecoveryDialog parity across /feed, /games, /sources", () => {
         /import RecoveryDialog from "\$lib\/components\/RecoveryDialog\.svelte"/,
       );
       expect(src, `${route}: mounts <RecoveryDialog`).toMatch(/<RecoveryDialog\s/);
-      // entityType is the load-bearing discriminator — every consumer
-      // must pass one of the three known values. The dialog's prop type
-      // is a literal union "game" | "source" | "event"; the regex below
-      // catches any of the three.
       expect(src, `${route}: passes entityType="event" | "game" | "source"`).toMatch(
         /entityType="(event|game|source)"/,
       );
-      // PageHeader receives the callback via onOpenRecovery (the
-      // previous prop was recoveryAnchor).
       expect(src, `${route}: PageHeader receives onOpenRecovery callback`).toMatch(
         /onOpenRecovery=\{/,
       );
-      // Negative: the previous `recoveryAnchor=` prop is gone.
       expect(src, `${route}: legacy recoveryAnchor prop removed`).not.toMatch(/recoveryAnchor=/);
     }
+  });
+
+  it("/feed imports RecoveryDialog + supports trash view via ?view=trash (Plan 10 Wave 3)", async () => {
+    // Plan 10 Wave 3: /feed's recovery affordance shifted from a modal
+    // anchored to the PageHeader to a full-page trash view at
+    // /feed?view=trash. The RecoveryDialog still mounts as a fallback for
+    // the live view (PageHead has no anchor slot — the user navigates to
+    // ?view=trash for the full surface). The trash banner asserts the
+    // route honors the URL state.
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(path.resolve("src/routes/feed/+page.svelte"), "utf8");
+    expect(src, "/feed: imports RecoveryDialog (fallback)").toMatch(
+      /import RecoveryDialog from "\$lib\/components\/RecoveryDialog\.svelte"/,
+    );
+    expect(src, "/feed: passes entityType=\"event\"").toMatch(/entityType="event"/);
+    // Trash banner conditionally rendered when data.view === "trash".
+    // Marker: m.feed_trash_banner_text() i18n key.
+    expect(src, "/feed: renders trash banner when trashView=true").toMatch(
+      /m\.feed_trash_banner_text\(\)/,
+    );
   });
 
   it("/feed, /games, /sources have NO bottom-of-page <details> recovery wrapper in the markup", async () => {

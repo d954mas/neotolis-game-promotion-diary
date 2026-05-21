@@ -1,69 +1,143 @@
 <script lang="ts">
-  // /feed — primary daily workspace for authenticated users.
+  // /feed — primary daily workspace orchestrator (Phase 03.4 Wave 3 Plan 10).
   //
-  // Composition:
-  //   - <h1>Feed</h1> at heading-24.
-  //   - <DateRangeControl> with always-visible from/to inputs + 4
-  //     presets + × clear.
-  //   - <FilterChips> emits one chip per active axis (kind / source /
-  //     show / authorIsMe), comma-joined values; click opens
-  //     FiltersSheet on that axis; × clears entire axis.
-  //   - <FeedDateGroupHeader> + <FeedCard> tiles in a CSS grid
-  //     (auto-fill, minmax 280px) — Google Photos / Apple Photos timeline.
-  //   - Sentinel <div> drives IntersectionObserver-based infinite scroll.
-  //   - <RecoveryDialog> modal opened from PageHeader's "Recently
-  //     deleted (N)" button (a dialog rather than an anchor so infinite
-  //     scroll does not throw the user to a moving target).
-  //   - <EmptyState> for first-time empty + filtered-no-match cases.
+  // Composition map:
+  //   - <PageHead>      (Plan 07) title + Add Event CTA + search + Filters toggle
+  //     ↳ children slot: <DateRangeRow> (Plan 07)
+  //   - <ActiveFiltersStrip> (Plan 07) chips for active filters
+  //   - {#if filtersOpen} <AxisRow ×4> + <FindRow> (Plan 07)
+  //   - <FeedDateGroupHeader> + <FeedCard> grid (Plan 08 — long-press + sweep)
+  //   - <EventDetailModal> (Plan 09) mounted on data.openEventId
+  //   - <AddEventModal> (Plan 09) mounted on local addEventModalOpen state
+  //   - <GamesPicker> (Plan 08) single instance — bulk via BulkActionBar AND
+  //     single via FeedCard ⋯ menu
+  //   - <BulkActionBar> (Plan 08) sticky bottom — Restore/Delete-forever variant
+  //     when view=trash
+  //   - <Toast> success surfaces for bulk + add event
+  //   - <RecoveryDialog> legacy modal — kept on live view; trash view replaces
+  //     it with the rows themselves
   //
-  // a11y note: infinite scroll has no JavaScript-disabled fallback.
-  // Screen-reader users can still scroll the rendered first page;
-  // subsequent pages require IntersectionObserver. A "Load more" button
-  // fallback is a future polish if user feedback surfaces it. The
-  // role="status" on the loading + end banners ensures assistive tech
-  // announces state changes.
+  // URL state contract: every filter mutation rebuilds the URL via
+  // serializeFilterState + goto(url, { keepFocus, noScroll, invalidateAll:
+  // false }). SvelteKit's loader re-runs on URL change; we never call
+  // invalidateAll() for filter changes (the URL change IS the invalidation
+  // signal). Bulk operations DO call invalidateAll() after the fetch
+  // resolves because they mutate the server state without changing the URL
+  // (RESEARCH Pitfall 2).
+  //
+  // Selection state lives in $feedUiStore (ephemeral per-session). Gmail
+  // sweep behavior is owned by <FeedCard> — once anySelected is true, ANY
+  // card-surface click toggles selection instead of opening detail. The
+  // store is the single source of truth; the orchestrator just reads
+  // $feedUiStore.selectedIds.
+  //
+  // Trash banner: when data.view === "trash", a banner persists at the top
+  // of the page + BulkActionBar swaps to Restore/Delete-forever per D-19.
+  // The trash view reuses the same filter axes (kind/source/show/from/to)
+  // because listFeedPage(scope=trash) accepts them.
+  //
+  // Modal vs route dual-render (D-05): /events/[id] renders
+  // <EventDetailContent> as a thin route (Plan 10 Task 3). The /feed
+  // orchestrator mounts the same content via <EventDetailModal> when
+  // ?event= is set. Both surfaces close to /feed (with the modal also
+  // dropping ?event= from the URL).
+  //
+  // LB invariants preserved through composition:
+  //   - LB-1 (single sticky chrome wrapper) — handled by +layout.svelte
+  //   - LB-2 (PageHeader resize publish) — PageHead reimplements
+  //   - LB-3 (FeedDateGroupHeader sticky math) — uses PageHead's published
+  //     --page-header-height
+  //   - LB-7 (body scroll lock on <dialog>) — app.css :has() rule
+  //   - LB-9 (groupEventsByDate util reuse) — preserved
+  //   - LB-10 (Filters toggle expanded/collapsed) — PageHead.activeFilterCount
+  //   - LB-12 (data-testid="feed-card" attribute) — preserved by FeedCard
 
   import { goto, invalidateAll } from "$app/navigation";
   import { page } from "$app/state";
   import { m } from "$lib/paraglide/messages.js";
+
+  import {
+    parseSearchParams,
+    serializeFilterState,
+    type FilterState,
+    type DateRangeFilter,
+  } from "$lib/feed/url-state.js";
+  import {
+    passes,
+    countWithGame,
+    countWithKind,
+    countWithShow,
+    countWithAuthor,
+  } from "$lib/feed/filter-math.js";
+  import { parseEventDate } from "$lib/feed/date-range.js";
+  import {
+    feedUiStore,
+    toggleSelect,
+    clearSelection,
+    setFiltersOpen,
+  } from "$lib/stores/feed-ui.js";
+
+  import PageHead from "$lib/components/feed/PageHead.svelte";
+  import DateRangeRow from "$lib/components/feed/DateRangeRow.svelte";
+  import ActiveFiltersStrip, {
+    type AxisChip,
+  } from "$lib/components/feed/ActiveFiltersStrip.svelte";
+  import AxisRow from "$lib/components/feed/AxisRow.svelte";
+  import FindRow from "$lib/components/feed/FindRow.svelte";
   import FeedCard from "$lib/components/FeedCard.svelte";
-  // Escape hatch — adapter-specific card override. YouTube uses the
-  // universal FeedCard. Other source kinds may register `cardComponent`
-  // on their sources/<kind>/ui/index.ts to opt into a custom layout.
-  import { getCardComponent } from "$lib/sources/registry-ui-client.js";
+  import BulkActionBar from "$lib/components/feed/BulkActionBar.svelte";
+  import GamesPicker from "$lib/components/feed/GamesPicker.svelte";
+  import EventDetailModal from "$lib/components/event-detail/EventDetailModal.svelte";
+  import AddEventModal from "$lib/components/add-event/AddEventModal.svelte";
+  import Toast from "$lib/components/shared/Toast.svelte";
   import FeedDateGroupHeader from "$lib/components/FeedDateGroupHeader.svelte";
-  import FeedQuickNav from "$lib/components/FeedQuickNav.svelte";
-  // Shared PageHeader replaces the inline <header class="head"> + .cta
-  // block — title + CTA inline on the left instead of
-  // justify-content: space-between.
-  import PageHeader from "$lib/components/PageHeader.svelte";
-  import DateRangeControl from "$lib/components/DateRangeControl.svelte";
-  import FilterChips from "$lib/components/FilterChips.svelte";
-  import FiltersSheet from "$lib/components/FiltersSheet.svelte";
-  import EmptyState from "$lib/components/EmptyState.svelte";
-  // <RecoveryDialog> modal opens from PageHeader's "Recently deleted (N)"
-  // button. A bottom-of-page panel broke on infinite-scroll surfaces by
-  // construction (anchor link → scroll to bottom → sentinel fires →
-  // bottom moves → user lost). The dialog decouples the recovery UI from
-  // scroll position. The soft-deleted events flow comes from the same
-  // loader (data.deletedEvents) and renders inside the modal.
   import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
+  import { getCardComponent } from "$lib/sources/registry-ui-client.js";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
+
+  import type { ShowFilter } from "$lib/server/services/events.js";
+  import type { EventKind } from "$lib/sources/adapter.js";
+  import type { AddEventPayload } from "$lib/components/add-event/AddEventForm.svelte";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
 
-  let sheetOpen = $state(false);
-  // RecoveryDialog open state. Opened by PageHeader's "Recently deleted (N)"
-  // button; closed by Escape, backdrop click, or the dialog's own close
-  // button. Auto-closes when the last recoverable item is restored
-  // (items reactively shrink to length 0).
-  let recoveryOpen = $state(false);
+  // 1. URL state. $derived re-runs whenever page.url changes (SvelteKit
+  // updates the URL on goto). parseSearchParams is the single source of
+  // truth — the loader uses the same function.
+  let urlState = $derived(parseSearchParams(page.url));
 
-  // Map deletedEvents (toEventDto-projected, no ciphertext) into the
-  // RecoveryDialog's generic { id, name, deletedAt } shape. The DTO
-  // contract guarantees `title` exists; `deletedAt` is the soft-delete
-  // timestamp — same field RetentionBadge consumes inside the dialog.
+  // 2. Server-provided TODAY (D-24). The loader picks one instant per
+  // request; the client threads it through every date helper so SSR + CSR
+  // agree.
+  let today = $derived(parseEventDate(data.today) ?? new Date());
+
+  // 3. Selection + filtersOpen + eventDetail subscribed from the store.
+  let storeState = $derived($feedUiStore);
+  let selectedIds = $derived(storeState.selectedIds);
+  let anySelected = $derived(selectedIds.size > 0);
+  let filtersOpen = $derived(storeState.filtersOpen);
+
+  // Body data-selection attribute drives the always-visible card-select
+  // checkbox opacity in FeedCard's CSS (`:global(body[data-selection="1"])
+  // .card-select { opacity: 1 }`). The attribute publish via $effect runs
+  // only in the browser (typeof window guard); SSR renders without it,
+  // hydration assigns when JS boots.
+  $effect(() => {
+    if (typeof document === "undefined") return;
+    document.body.dataset.selection = anySelected ? "1" : "0";
+  });
+
+  // 4. Local modal state (NOT in URL — modals are session-only).
+  let openEventId = $derived(urlState.openEventId); // URL-bound for deep linking
+  let addEventModalOpen = $state(false);
+  let gamesPickerOpen = $state(false);
+  let gamesPickerMode = $state<"single" | "bulk">("bulk");
+  let gamesPickerTargetIds = $state<string[]>([]);
+  let toast = $state<{ kind: "success" | "info" | "danger"; text: string } | null>(null);
+
+  // 5. RecoveryDialog state (legacy on live view; trash view doesn't use it).
+  let recoveryOpen = $state(false);
   const recoveryItems = $derived(
     data.deletedEvents.map((ev) => ({
       id: ev.id,
@@ -72,193 +146,391 @@
     })),
   );
 
-  async function restoreEvent(id: string): Promise<void> {
+  // 6. Trash view conditional.
+  let trashView = $derived(data.view === "trash");
+
+  // 7. URL mutation helper. invalidateAll: false because the URL change
+  // itself triggers SvelteKit to re-run the loader.
+  function pushUrl(nextState: FilterState, replace = false): void {
+    const sp = serializeFilterState(nextState);
+    const qs = sp.toString();
+    const url = "/feed" + (qs ? "?" + qs : "");
+    void goto(url, {
+      keepFocus: true,
+      noScroll: true,
+      replaceState: replace,
+      invalidateAll: false,
+    });
+  }
+
+  // 8. Per-axis URL mutation handlers — each builds a new FilterState
+  // (preserving every other axis) and pushes through pushUrl. Cursor is
+  // cleared on every filter change so the fresh first page renders.
+  function setShow(next: ShowFilter): void {
+    pushUrl({ ...urlState, show: next, cursor: undefined });
+  }
+  function setKind(next: EventKind[]): void {
+    pushUrl({ ...urlState, kind: next, cursor: undefined });
+  }
+  function setSource(next: string[]): void {
+    pushUrl({ ...urlState, source: next, cursor: undefined });
+  }
+  function setAuthorIsMe(next: boolean | undefined): void {
+    pushUrl({ ...urlState, authorIsMe: next, cursor: undefined });
+  }
+  function setDateRange(next: DateRangeFilter): void {
+    pushUrl({ ...urlState, dateRange: next, cursor: undefined });
+  }
+  function setSortDir(next: "asc" | "desc"): void {
+    pushUrl({ ...urlState, sortDir: next, cursor: undefined });
+  }
+  function setQuery(next: string): void {
+    // Search uses replaceState so the back button doesn't have one history
+    // entry per keystroke (RESEARCH Pitfall 3 — debounce is a follow-up
+    // polish; replaceState alone is sufficient for the back-button UX).
+    pushUrl({ ...urlState, query: next, cursor: undefined }, true);
+  }
+  function clearAllFilters(): void {
+    pushUrl({
+      ...urlState,
+      show: { kind: "any" },
+      kind: [],
+      source: [],
+      authorIsMe: undefined,
+      dateRange: { preset: "all" },
+      query: "",
+      cursor: undefined,
+    });
+  }
+
+  // 9. EventDetailModal URL handlers.
+  function openDetail(id: string): void {
+    pushUrl({ ...urlState, openEventId: id });
+  }
+  function closeDetail(): void {
+    pushUrl({ ...urlState, openEventId: null });
+  }
+
+  // 10. Selection store mutations — toggleSelect / clearSelection are
+  // imported from the store module so the store is the single source of
+  // truth (the component just emits the mutation).
+  function onToggleSelect(id: string, force?: boolean): void {
+    toggleSelect(id, force);
+  }
+
+  // 11. Bulk operations. Each fetches against /api/events/bulk then runs
+  // invalidateAll() so the loader refetches the feed (RESEARCH Pitfall 2 —
+  // without the explicit invalidateAll, the URL hasn't changed and the
+  // loader sits with stale rows). Toast surfaces success; clearSelection
+  // resets the chip state.
+  async function doBulkPatch(payload: {
+    gameStates: Record<string, "on" | "off" | "mixed">;
+    offTopicState: "on" | "off" | "mixed";
+  }): Promise<void> {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    const res = await fetch("/api/events/bulk", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids, ...payload }),
+    });
+    if (res.ok) {
+      const body = (await res.json()) as { affected_count: number };
+      toast = {
+        kind: "success",
+        text: m.toast_bulk_edit_success({ count: String(body.affected_count) }),
+      };
+      clearSelection();
+      gamesPickerOpen = false;
+      await invalidateAll();
+    } else {
+      toast = { kind: "danger", text: m.error_server_generic() };
+    }
+  }
+
+  async function doBulkDelete(): Promise<void> {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    const res = await fetch("/api/events/bulk", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    if (res.ok) {
+      const body = (await res.json()) as { affected_count: number };
+      toast = {
+        kind: "success",
+        text: m.toast_bulk_delete_success({ count: String(body.affected_count) }),
+      };
+      clearSelection();
+      await invalidateAll();
+    } else {
+      toast = { kind: "danger", text: m.error_server_generic() };
+    }
+  }
+
+  async function doBulkDeleteForever(): Promise<void> {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    const res = await fetch("/api/events/bulk?force=true", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    if (res.ok) {
+      const body = (await res.json()) as { affected_count: number };
+      toast = {
+        kind: "success",
+        text: m.toast_bulk_delete_forever_success({ count: String(body.affected_count) }),
+      };
+      clearSelection();
+      await invalidateAll();
+    } else {
+      toast = { kind: "danger", text: m.error_server_generic() };
+    }
+  }
+
+  async function doBulkRestore(): Promise<void> {
+    // No bulk-restore endpoint in scope yet — loop over per-event restore.
+    // RESEARCH Pitfall 2 still applies: invalidateAll fires after the loop.
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    for (const id of ids) {
+      await fetch(`/api/events/${id}/restore`, { method: "PATCH" });
+    }
+    toast = {
+      kind: "success",
+      text: m.toast_bulk_restore_success({ count: String(ids.length) }),
+    };
+    clearSelection();
+    await invalidateAll();
+  }
+
+  // 12. GamesPicker open helpers — bulk via BulkActionBar, single via the
+  // FeedCard ⋯ menu. The mode + targetIds drive the picker's initial-state
+  // computation below.
+  function openGamesPickerForBulk(): void {
+    gamesPickerMode = "bulk";
+    gamesPickerTargetIds = [...selectedIds];
+    gamesPickerOpen = true;
+  }
+  function openGamesPickerForCard(id: string): void {
+    gamesPickerMode = "single";
+    gamesPickerTargetIds = [id];
+    gamesPickerOpen = true;
+  }
+
+  // 13. GamesPicker initial state derivation (RESEARCH Question 8). For
+  // each game, count how many of the target events have it attached:
+  //   - 0      → "off"
+  //   - all    → "on"
+  //   - mixed  → "mixed"
+  // Same for the off-topic triage flag.
+  let gamesPickerInitial = $derived.by((): {
+    gameStates: Record<string, "on" | "off" | "mixed">;
+    offTopicState: "on" | "off" | "mixed";
+  } => {
+    const targets = data.rows.filter((e) => gamesPickerTargetIds.includes(e.id));
+    if (targets.length === 0) {
+      return { gameStates: {}, offTopicState: "off" };
+    }
+    const gameStates: Record<string, "on" | "off" | "mixed"> = {};
+    for (const g of data.games) {
+      const c = targets.reduce((n, e) => n + (e.gameIds.includes(g.id) ? 1 : 0), 0);
+      gameStates[g.id] = c === 0 ? "off" : c === targets.length ? "on" : "mixed";
+    }
+    const oc = targets.reduce((n, e) => {
+      const md = e.metadata as { triage?: { offTopic?: boolean } } | null | undefined;
+      return n + (md?.triage?.offTopic === true ? 1 : 0);
+    }, 0);
+    const offTopicState: "on" | "off" | "mixed" =
+      oc === 0 ? "off" : oc === targets.length ? "on" : "mixed";
+    return { gameStates, offTopicState };
+  });
+
+  // 14. AddEvent save (D-18) — POST then toast + invalidateAll + close.
+  async function onSaveAddEvent(payload: AddEventPayload): Promise<void> {
+    const res = await fetch("/api/events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        gameId: payload.gameIds[0] ?? null,
+        kind: payload.kind,
+        occurredAt: payload.occurredAt,
+        title: payload.title,
+        url: payload.url,
+        notes: payload.notes,
+        authorIsMe: payload.authorIsMe,
+      }),
+    });
+    if (res.ok) {
+      toast = { kind: "success", text: m.toast_event_added() };
+      addEventModalOpen = false;
+      await invalidateAll();
+    } else {
+      toast = { kind: "danger", text: m.error_server_generic() };
+    }
+  }
+
+  // 15. Per-event handlers wired through to EventDetailModal + FeedCard.
+  async function onCardDelete(id: string): Promise<void> {
+    await fetch(`/api/events/${id}`, { method: "DELETE" });
+    await invalidateAll();
+  }
+
+  async function onModalUpdate(
+    id: string,
+    patch: Partial<{ title: string; notes: string | null; url: string | null; authorIsMe: boolean }>,
+  ): Promise<void> {
+    await fetch(`/api/events/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    await invalidateAll();
+  }
+
+  async function onModalDelete(id: string): Promise<void> {
+    await fetch(`/api/events/${id}`, { method: "DELETE" });
+    closeDetail();
+    await invalidateAll();
+  }
+
+  async function onModalRestore(id: string): Promise<void> {
+    await fetch(`/api/events/${id}/restore`, { method: "PATCH" });
+    closeDetail();
+    await invalidateAll();
+  }
+
+  async function onModalDeleteForever(id: string): Promise<void> {
+    await fetch(`/api/events/${id}?force=true`, { method: "DELETE" });
+    closeDetail();
+    await invalidateAll();
+  }
+
+  async function restoreFromRecoveryDialog(id: string): Promise<void> {
     const res = await fetch(`/api/events/${id}/restore`, { method: "PATCH" });
     if (res.ok) {
       await invalidateAll();
-      // If that was the last recoverable item, close the dialog so the
-      // user is not stuck staring at "Nothing to recover" — the parent
-      // also stops rendering the PageHeader CTA at the same time
-      // (deletedCount falls to 0).
       if (data.deletedEvents.length <= 1) recoveryOpen = false;
     }
   }
-  // FilterChips/FiltersSheet's axis union includes 'action' for /audit
-  // reuse; /feed never receives that axis (filters.action is left
-  // undefined here) but the local type must match the component contract.
-  // 'date' stays in the union so the type still flows through
-  // FiltersSheet/FilterChips on other surfaces (e.g. /audit), even
-  // though /feed itself owns the date range via <DateRangeControl>.
-  let sheetFocusAxis = $state<
-    "kind" | "source" | "show" | "authorIsMe" | "date" | "action" | undefined
-  >(undefined);
 
-  // FEED_SCHEMA is the explicit list of axes /feed owns. The
-  // always-visible <DateRangeControl> above the chip strip is the SOLE
-  // date-range entry on /feed; 'date' is intentionally excluded from
-  // this schema so FiltersSheet skips the date fieldset AND its clearAll
-  // skips the date axis.
-  //
-  // Both "Clear filters" surfaces (chip-strip clearAll() below + in-
-  // sheet) preserve the date range. Date is owned exclusively by
-  // <DateRangeControl>; both "Clear filters" buttons clear ONLY the
-  // chip-owned axes (kind / source / show / game / authorIsMe / cursor).
-  const FEED_SCHEMA = ["kind", "source", "show", "authorIsMe"] as const;
+  // 16. Inline GamesPicker apply handler — single vs bulk.
+  async function onGamesPickerApply(payload: {
+    gameStates: Record<string, "on" | "off" | "mixed">;
+    offTopicState: "on" | "off" | "mixed";
+  }): Promise<void> {
+    if (gamesPickerMode === "single") {
+      // Single-event apply path. The bulk endpoint accepts a single-id
+      // array; we route through it so the diff math (on/off/mixed) is
+      // consistent across both paths and the audit log carries the same
+      // event.attached_to_game / event.detached_from_game verbs as bulk.
+      await doBulkPatch(payload);
+    } else {
+      await doBulkPatch(payload);
+    }
+    gamesPickerOpen = false;
+  }
 
+  // 17. Active filter chips for ActiveFiltersStrip. One chip per active
+  // axis dimension; clicking the × clears that axis. Game / Author / Show
+  // are single-cardinality, source / kind are multi (one chip per value).
+  const activeAxes = $derived.by((): AxisChip[] => {
+    const chips: AxisChip[] = [];
+    if (urlState.show.kind === "inbox") {
+      chips.push({
+        axis: "show",
+        label: m.feed_filter_show_inbox(),
+        onRemove: () => setShow({ kind: "any" }),
+      });
+    } else if (urlState.show.kind === "standalone") {
+      chips.push({
+        axis: "show",
+        label: m.feed_filter_show_standalone(),
+        onRemove: () => setShow({ kind: "any" }),
+      });
+    } else if (urlState.show.kind === "specific") {
+      for (const gid of urlState.show.gameIds) {
+        const game = data.games.find((g) => g.id === gid);
+        chips.push({
+          axis: "game",
+          label: game?.title ?? gid,
+          onRemove: () => {
+            const next = urlState.show.kind === "specific"
+              ? urlState.show.gameIds.filter((g) => g !== gid)
+              : [];
+            if (next.length === 0) setShow({ kind: "any" });
+            else setShow({ kind: "specific", gameIds: next });
+          },
+        });
+      }
+    }
+    for (const k of urlState.kind) {
+      chips.push({
+        axis: "kind",
+        label: k,
+        onRemove: () => setKind(urlState.kind.filter((x) => x !== k)),
+      });
+    }
+    for (const sid of urlState.source) {
+      const src = data.sources.find((s) => s.id === sid);
+      chips.push({
+        axis: "source",
+        label: src?.displayName ?? src?.handleUrl ?? sid,
+        onRemove: () => setSource(urlState.source.filter((x) => x !== sid)),
+      });
+    }
+    if (urlState.authorIsMe === true) {
+      chips.push({
+        axis: "author",
+        label: m.feed_filter_author_me(),
+        onRemove: () => setAuthorIsMe(undefined),
+      });
+    } else if (urlState.authorIsMe === false) {
+      chips.push({
+        axis: "author",
+        label: m.feed_filter_author_others(),
+        onRemove: () => setAuthorIsMe(undefined),
+      });
+    }
+    return chips;
+  });
+
+  // 18. Predicted-count helpers feed into AxisRow's per-chip count tail.
+  // Convert EventDto to the FilterableEvent shape filter-math expects
+  // (occurred_at + author_is_me snake_case). Defensive copy so the math
+  // doesn't mutate the loader's data.
+  let filterableEvents = $derived(
+    data.rows.map((e) => ({
+      id: e.id,
+      kind: e.kind,
+      occurred_at: e.occurredAt,
+      title: e.title,
+      notes: e.notes,
+      author_is_me: e.authorIsMe,
+      gameIds: e.gameIds,
+      metadata: e.metadata as { triage?: { standalone?: boolean; offTopic?: boolean } } | null,
+    })),
+  );
+
+  // 19. Visible kinds — derived from the data rows themselves (no
+  // hard-coded list). Sorted alphabetically for stable order.
+  const visibleKinds = $derived.by((): EventKind[] => {
+    const set = new Set<EventKind>();
+    for (const e of data.rows) set.add(e.kind);
+    return [...set].sort() as EventKind[];
+  });
+
+  // 20. Maps for O(1) source / game lookup on each card.
   const sourceById = $derived(new Map(data.sources.map((s) => [s.id, s])));
   const gameById = $derived(new Map(data.games.map((g) => [g.id, g])));
 
-  function hasNoActiveFilters(f: typeof data.activeFilters): boolean {
-    // source / kind are arrays + show is a discriminated union. "No
-    // filter" = all arrays empty, show.kind === 'any', authorIsMe
-    // undefined, no date constraint.
-    return (
-      f.source.length === 0 &&
-      f.kind.length === 0 &&
-      f.show.kind === "any" &&
-      f.authorIsMe === undefined &&
-      !f.defaultDateRange &&
-      f.from === undefined &&
-      f.to === undefined &&
-      !f.all
-    );
-  }
-
-  function applyDateRange(next: { from?: string; to?: string; all?: boolean }): void {
-    const params = new URLSearchParams(page.url.searchParams);
-    params.delete("from");
-    params.delete("to");
-    params.delete("all");
-    params.delete("cursor");
-    if (next.all) {
-      params.set("all", "1");
-    } else {
-      if (next.from) params.set("from", next.from);
-      if (next.to) params.set("to", next.to);
-    }
-    const qs = params.toString();
-    void goto(qs ? `/feed?${qs}` : "/feed");
-  }
-
-  // Per-axis dismiss — × on a chip clears the entire axis (drops all
-  // values for that axis, NOT a single value). 'action' is part of the
-  // FilterChips axis union for /audit reuse but is unreachable here
-  // (/feed never sets filters.action).
-  type ChipAxis = "kind" | "source" | "show" | "authorIsMe" | "action";
-  function dismissAxis(axis: ChipAxis): void {
-    const params = new URLSearchParams(page.url.searchParams);
-    params.delete("cursor");
-    if (axis === "show") {
-      // Clear the show axis → land on default (any) by removing both ?show
-      // and ?game params. Default 30-day window is preserved.
-      params.delete("show");
-      params.delete("game");
-    } else if (axis === "authorIsMe") {
-      params.delete("authorIsMe");
-    } else if (axis === "kind") {
-      params.delete("kind");
-    } else if (axis === "source") {
-      params.delete("source");
-    } else if (axis === "action") {
-      // /feed never carries an 'action' chip — defensive no-op.
-      return;
-    }
-    const qs = params.toString();
-    void goto(qs ? `/feed?${qs}` : "/feed");
-  }
-
-  type ShowFilter =
-    | { kind: "any" }
-    | { kind: "inbox" }
-    | { kind: "standalone" }
-    | { kind: "specific"; gameIds: string[] };
-
-  function applyFiltersFromSheet(next: {
-    source?: string[];
-    kind?: string[];
-    // FiltersSheet's onApply widens show to optional so /audit can omit
-    // it. /feed always supplies it; default to { kind: 'any' } when the
-    // sheet returns undefined (defensive).
-    show?: ShowFilter;
-    authorIsMe?: boolean;
-    // FiltersSheet's onApply contract is shared with /audit, which DOES
-    // use 'date' via its own schema. With FEED_SCHEMA missing 'date',
-    // the sheet never emits these on /feed — the
-    // `"from" in next || "to" in next` gate below is what makes the
-    // omission a no-op for the date params.
-    from?: string;
-    to?: string;
-    action?: string[]; // unused on /feed
-  }): void {
-    const params = new URLSearchParams(page.url.searchParams);
-    // Sheet owns source/kind/show/authorIsMe on /feed. The
-    // <DateRangeControl> above the chip strip is the sole date entry.
-    params.delete("source");
-    params.delete("kind");
-    params.delete("game");
-    params.delete("show");
-    params.delete("authorIsMe");
-    params.delete("cursor");
-    // Only rewrite from/to if the sheet emitted them (i.e. schema
-    // includes 'date'). This branch is a no-op on /feed — the user's
-    // date range survives the sheet's apply/clearAll round-trip
-    // (DateRangeControl owns the axis). The gate is preserved so the
-    // same handler shape stays compatible if a future surface
-    // re-introduces 'date' in its schema.
-    if ("from" in next || "to" in next) {
-      params.delete("from");
-      params.delete("to");
-      params.delete("all");
-      if (next.from) params.set("from", next.from);
-      if (next.to) params.set("to", next.to);
-      // If the sheet sent neither value, preserve the no-default state.
-      if (!next.from && !next.to) params.set("all", "1");
-    }
-    for (const v of next.source ?? []) params.append("source", v);
-    for (const v of next.kind ?? []) params.append("kind", v);
-    const show: ShowFilter = next.show ?? { kind: "any" };
-    if (show.kind === "inbox") {
-      params.set("show", "inbox");
-    } else if (show.kind === "standalone") {
-      // Standalone (not attached to any game) filter axis.
-      params.set("show", "standalone");
-    } else if (show.kind === "specific") {
-      params.set("show", "specific");
-      for (const v of show.gameIds) params.append("game", v);
-    }
-    // show.kind === "any": no params (default).
-    if (next.authorIsMe === true) params.set("authorIsMe", "true");
-    if (next.authorIsMe === false) params.set("authorIsMe", "false");
-    const qs = params.toString();
-    void goto(qs ? `/feed?${qs}` : "/feed");
-  }
-
-  function clearAll(): void {
-    // Wired to <FilterChips onClearAll>. Both "Clear filters" surfaces
-    // (in-sheet + chip-strip) clear chip-owned axes
-    // (kind / source / show / game / authorIsMe / cursor) and PRESERVE
-    // the user's selected date range (?from / ?to / ?all).
-    //
-    // Date is owned exclusively by <DateRangeControl>; the only way to
-    // change the date range is to interact with that control directly
-    // (presets, from/to inputs, or its own × reset button). The mental
-    // model: the date range is established BEFORE picking filters and
-    // survives every filter operation.
-    const params = new URLSearchParams(page.url.search);
-    // Drop chip-owned axes only.
-    params.delete("kind");
-    params.delete("source");
-    params.delete("show");
-    params.delete("game");
-    params.delete("authorIsMe");
-    params.delete("cursor");
-    // ?from, ?to, ?all are preserved by virtue of NOT deleting them.
-    const qs = params.toString();
-    void goto(qs ? `/feed?${qs}` : "/feed");
-  }
-
-  // Cumulative rows for infinite scroll. data.rows is the first page
-  // from the loader; loadMore() appends next pages via fetch.
+  // 21. groupEventsByDate preserved — LB-9. Cumulative state for infinite
+  // scroll is owned per-load (data.rows is the SSR first page; we don't
+  // append client-loaded pages into the store, the loader rerun delivers a
+  // fresh first page). Infinite scroll via IntersectionObserver fetches the
+  // /api/events cursor page and appends to allRows.
   let allRows = $state(data.rows);
   let nextCursor = $state<string | null>(data.nextCursor);
   let loading = $state(false);
@@ -266,10 +538,8 @@
   let sentinelEl = $state<HTMLDivElement | null>(null);
   let observer: IntersectionObserver | null = null;
 
-  // Reset cumulative state when data changes (filter change → fresh load
-  // → new first page). The $effect re-runs whenever any reactive read
-  // inside it changes, so reading data.rows + data.nextCursor here is the
-  // load-bearing tripwire for "the loader re-ran".
+  // Reset cumulative state when data changes (filter change → loader
+  // rerun → fresh first page).
   $effect(() => {
     allRows = data.rows;
     nextCursor = data.nextCursor;
@@ -287,7 +557,6 @@
       params.set("cursor", nextCursor);
       const res = await fetch(`/api/events?${params.toString()}`);
       if (!res.ok) {
-        // On error, stop trying — user can refresh manually.
         endReached = true;
         return;
       }
@@ -319,121 +588,255 @@
     observer.observe(sentinelEl);
     return () => observer?.disconnect();
   });
+
+  // 22. EventDetailModal lookup — find the opened event in allRows (which
+  // is data.rows initially + any cursor-paginated additions). The loader's
+  // ?event= load-bearing fetch guarantees data.rows includes the opened id
+  // even when cursor is past it.
+  const openedEvent = $derived(
+    openEventId ? allRows.find((r) => r.id === openEventId) ?? null : null,
+  );
 </script>
 
 <section class="feed">
-  <PageHeader
-    title="Feed"
-    cta={{ href: "/events/new", label: m.feed_cta_add_event() }}
+  <PageHead
+    title={trashView ? m.feed_page_head_title_trash() : m.feed_page_head_title_feed()}
+    view={trashView ? "trash" : "feed"}
+    onAddEvent={() => (addEventModalOpen = true)}
+    query={urlState.query}
+    onQueryChange={setQuery}
+    onToggleFilters={() => setFiltersOpen(!filtersOpen)}
+    {filtersOpen}
+    activeFilterCount={activeAxes.length}
     sticky
-    deletedCount={data.deletedEvents.length}
-    onOpenRecovery={() => (recoveryOpen = true)}
-  />
-
-  <!-- FeedQuickNav: chip strip / segmented control for the most-common
-       Show axis values (All / Inbox / Standalone / per-game). The user
-       wants a single-click switch instead of opening FiltersSheet. The
-       full FiltersSheet stays for long-tail filters (kind, source, date,
-       authorIsMe). -->
-  <FeedQuickNav
-    games={data.games}
-    activeShow={data.activeFilters.show}
-    currentUrlSearch={page.url.search}
-    onNavigate={(href) => {
-      void goto(href).then(() => invalidateAll());
-    }}
-  />
-
-  <DateRangeControl activeFilters={data.activeFilters} onApply={applyDateRange} />
-
-  {#if data.rows.length === 0 && hasNoActiveFilters(data.activeFilters)}
-    <EmptyState heading={m.empty_feed_heading()} body={m.empty_feed_body()} />
-  {:else if data.rows.length === 0}
-    <FilterChips
-      filters={data.activeFilters}
-      sources={data.sources}
-      games={data.games}
-      schema={FEED_SCHEMA}
-      onDismiss={dismissAxis}
-      onOpenSheet={(axis) => {
-        sheetFocusAxis = axis;
-        sheetOpen = true;
-      }}
-      onClearAll={clearAll}
+  >
+    <DateRangeRow
+      dateRange={urlState.dateRange}
+      onDateRangeChange={setDateRange}
+      sortDir={urlState.sortDir}
+      onSortDirChange={setSortDir}
+      {today}
     />
-    <EmptyState heading={m.empty_feed_filtered_heading()} body={m.empty_feed_filtered_body()} />
-  {:else}
-    <FilterChips
-      filters={data.activeFilters}
-      sources={data.sources}
-      games={data.games}
-      schema={FEED_SCHEMA}
-      onDismiss={dismissAxis}
-      onOpenSheet={(axis) => {
-        sheetFocusAxis = axis;
-        sheetOpen = true;
-      }}
-      onClearAll={clearAll}
-    />
-    <div class="feed-grid">
-      {#each groupedRows as group (group.date)}
-        <FeedDateGroupHeader occurredAt={group.occurredAt} />
-        {#each group.rows as row (row.id)}
-          {@const Card = getCardComponent(row.kind) ?? FeedCard}
-          <Card
-            event={row}
-            source={row.sourceId ? (sourceById.get(row.sourceId) ?? null) : null}
-            game={row.gameIds.length > 0 ? (gameById.get(row.gameIds[0]!) ?? null) : null}
-            games={data.games}
-            onChanged={() => invalidateAll()}
-          />
-        {/each}
-      {/each}
-      {#if !endReached}
-        <div class="sentinel" bind:this={sentinelEl} aria-hidden="true"></div>
-        {#if loading}
-          <p class="feed-status" role="status">{m.feed_loading_more()}</p>
-        {/if}
-      {:else if allRows.length > 0}
-        <p class="feed-status feed-end" role="status">{m.feed_no_more_events()}</p>
-      {/if}
+  </PageHead>
+
+  {#if trashView}
+    <div class="trash-banner" role="status">
+      <span>{m.feed_trash_banner_text()}</span>
+      <a class="trash-back" href="/feed">{m.feed_trash_back_to_feed()}</a>
     </div>
   {/if}
 
-  <!-- The recovery flow lives in <RecoveryDialog> — a modal opened from
-       PageHeader's "Recently deleted (N)" button. The dialog decouples
-       the recovery UI from scroll position so infinite-scroll does not
-       throw the user to a moving target. The dialog only mounts when
-       data.deletedEvents.length > 0; the dialog itself still defends
-       against the empty case (renders the localized empty message). -->
-  {#if data.deletedEvents.length > 0}
+  <ActiveFiltersStrip axes={activeAxes} onClearAll={clearAllFilters} />
+
+  {#if filtersOpen}
+    <div class="filters-panel">
+      <AxisRow
+        label={m.axis_row_show_label()}
+        axisKey="show"
+        options={[
+          {
+            value: "inbox",
+            label: m.feed_filter_show_inbox(),
+            predictedCount: countWithShow(filterableEvents, "inbox", urlState, today),
+          },
+          {
+            value: "standalone",
+            label: m.feed_filter_show_standalone(),
+            predictedCount: countWithShow(filterableEvents, "standalone", urlState, today),
+          },
+        ]}
+        selectedValues={urlState.show.kind === "inbox"
+          ? ["inbox"]
+          : urlState.show.kind === "standalone"
+            ? ["standalone"]
+            : []}
+        onToggle={(v) => {
+          // Single-select radio behavior — clicking the already-active
+          // chip clears, clicking a different chip replaces.
+          if (
+            (v === "inbox" && urlState.show.kind === "inbox") ||
+            (v === "standalone" && urlState.show.kind === "standalone")
+          ) {
+            setShow({ kind: "any" });
+          } else if (v === "inbox") {
+            setShow({ kind: "inbox" });
+          } else if (v === "standalone") {
+            setShow({ kind: "standalone" });
+          }
+        }}
+        onClearAxis={() => setShow({ kind: "any" })}
+      />
+
+      {#if data.games.length > 0}
+        <AxisRow
+          label={m.axis_row_game_label()}
+          axisKey="game"
+          options={data.games.map((g) => ({
+            value: g.id,
+            label: g.title,
+            predictedCount: countWithGame(filterableEvents, g.id, urlState, today),
+          }))}
+          selectedValues={urlState.show.kind === "specific" ? urlState.show.gameIds : []}
+          onToggle={(v) => {
+            const current = urlState.show.kind === "specific" ? urlState.show.gameIds : [];
+            const next = current.includes(v)
+              ? current.filter((g) => g !== v)
+              : [...current, v];
+            if (next.length === 0) setShow({ kind: "any" });
+            else setShow({ kind: "specific", gameIds: next });
+          }}
+          onClearAxis={() => setShow({ kind: "any" })}
+        />
+      {/if}
+
+      {#if visibleKinds.length > 0}
+        <AxisRow
+          label={m.axis_row_kind_label()}
+          axisKey="kind"
+          options={visibleKinds.map((k) => ({
+            value: k,
+            label: k,
+            predictedCount: countWithKind(filterableEvents, k, urlState, today),
+          }))}
+          selectedValues={urlState.kind}
+          onToggle={(v) => {
+            const k = v as EventKind;
+            const next = urlState.kind.includes(k)
+              ? urlState.kind.filter((x) => x !== k)
+              : [...urlState.kind, k];
+            setKind(next);
+          }}
+          onClearAxis={() => setKind([])}
+        />
+      {/if}
+
+      <AxisRow
+        label={m.axis_row_author_label()}
+        axisKey="author"
+        options={[
+          {
+            value: "mine",
+            label: m.feed_filter_author_me(),
+            predictedCount: countWithAuthor(filterableEvents, "mine", urlState, today),
+          },
+          {
+            value: "others",
+            label: m.feed_filter_author_others(),
+            predictedCount: countWithAuthor(filterableEvents, "others", urlState, today),
+          },
+        ]}
+        selectedValues={urlState.authorIsMe === true
+          ? ["mine"]
+          : urlState.authorIsMe === false
+            ? ["others"]
+            : []}
+        onToggle={(v) => {
+          if (v === "mine") {
+            setAuthorIsMe(urlState.authorIsMe === true ? undefined : true);
+          } else if (v === "others") {
+            setAuthorIsMe(urlState.authorIsMe === false ? undefined : false);
+          }
+        }}
+        onClearAxis={() => setAuthorIsMe(undefined)}
+      />
+
+      <FindRow
+        query={urlState.query}
+        onQueryChange={setQuery}
+        resultCount={filterableEvents.filter((e) => passes(e, urlState, today)).length}
+        hasOtherFilters={activeAxes.length > 0}
+      />
+    </div>
+  {/if}
+
+  <div class="feed-grid">
+    {#each groupedRows as group (group.date)}
+      <FeedDateGroupHeader occurredAt={group.occurredAt} />
+      {#each group.rows as row (row.id)}
+        {@const Card = getCardComponent(row.kind) ?? FeedCard}
+        <Card
+          event={row}
+          source={row.sourceId ? (sourceById.get(row.sourceId) ?? null) : null}
+          game={row.gameIds.length > 0 ? (gameById.get(row.gameIds[0]!) ?? null) : null}
+          games={data.games}
+          selected={selectedIds.has(row.id)}
+          {anySelected}
+          view={trashView ? "trash" : "feed"}
+          onToggleSelect={onToggleSelect}
+          onOpenDetail={openDetail}
+          onOpenGamesPickerForCard={openGamesPickerForCard}
+          onDelete={onCardDelete}
+          onChanged={() => invalidateAll()}
+        />
+      {/each}
+    {/each}
+    {#if !endReached}
+      <div class="sentinel" bind:this={sentinelEl} aria-hidden="true"></div>
+      {#if loading}
+        <p class="feed-status" role="status">{m.feed_loading_more()}</p>
+      {/if}
+    {:else if allRows.length > 0}
+      <p class="feed-status feed-end" role="status">{m.feed_no_more_events()}</p>
+    {/if}
+  </div>
+
+  {#if !trashView && data.deletedEvents.length > 0}
     <RecoveryDialog
       open={recoveryOpen}
       items={recoveryItems}
       entityType="event"
       retentionDays={data.retentionDays}
       onClose={() => (recoveryOpen = false)}
-      onRestore={restoreEvent}
+      onRestore={restoreFromRecoveryDialog}
     />
   {/if}
 
-  {#if sheetOpen}
-    <FiltersSheet
-      filters={data.activeFilters}
-      sources={data.sources}
+  {#if openedEvent}
+    <EventDetailModal
+      event={openedEvent}
       games={data.games}
-      schema={FEED_SCHEMA}
-      focusAxis={sheetFocusAxis}
-      onApply={(next) => {
-        sheetOpen = false;
-        sheetFocusAxis = undefined;
-        applyFiltersFromSheet(next);
-      }}
-      onClose={() => {
-        sheetOpen = false;
-        sheetFocusAxis = undefined;
-      }}
+      sources={data.sources}
+      view={trashView ? "trash" : "feed"}
+      hasPrev={false}
+      hasNext={false}
+      onClose={closeDetail}
+      onDelete={onModalDelete}
+      onRestore={trashView ? onModalRestore : undefined}
+      onDeleteForever={trashView ? onModalDeleteForever : undefined}
+      onUpdate={onModalUpdate}
     />
+  {/if}
+
+  <AddEventModal
+    open={addEventModalOpen}
+    games={data.games}
+    onSave={onSaveAddEvent}
+    onClose={() => (addEventModalOpen = false)}
+  />
+
+  <GamesPicker
+    open={gamesPickerOpen}
+    games={data.games.map((g) => ({ id: g.id, title: g.title }))}
+    initialGameStates={gamesPickerInitial.gameStates}
+    initialOffTopicState={gamesPickerInitial.offTopicState}
+    mode={gamesPickerMode}
+    selectedCount={gamesPickerTargetIds.length}
+    onApply={onGamesPickerApply}
+    onClose={() => (gamesPickerOpen = false)}
+  />
+
+  <BulkActionBar
+    selectedCount={selectedIds.size}
+    view={trashView ? "trash" : "feed"}
+    onOpenGamesPicker={openGamesPickerForBulk}
+    onDelete={doBulkDelete}
+    onRestore={doBulkRestore}
+    onDeleteForever={doBulkDeleteForever}
+    onClearSelection={clearSelection}
+  />
+
+  {#if toast}
+    <Toast kind={toast.kind} text={toast.text} onclose={() => (toast = null)} />
   {/if}
 </section>
 
@@ -444,11 +847,46 @@
     gap: var(--s-4);
     min-width: 0;
   }
-  /* v2 feed grid: single column <640px; repeat(auto-fill, minmax(320px,
-   * 1fr)) ≥640px (was 280px in v1); 3-column cap at --max-w. Gap is
-   * var(--s-4) (16px). <FeedDateGroupHeader> sets
-   * `grid-column: 1 / -1` so the header spans the full row, separating
-   * card groups visually. */
+
+  /* Trash banner — persistent status row above the chip strip when
+   * data.view === "trash". Amber accent treatment matches the design v2
+   * "warning / attention" surface token. */
+  .trash-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-2);
+    padding: var(--s-2) var(--s-4);
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--accent-strong);
+    border-radius: var(--r-sm);
+    font-size: var(--t-13);
+  }
+  .trash-back {
+    color: var(--accent);
+    text-decoration: underline;
+    font-weight: var(--w-sb);
+  }
+  .trash-back:hover {
+    color: var(--accent-strong);
+  }
+
+  /* Filters panel — gates AxisRow + FindRow under the LB-10 toggle so the
+   * chrome stays compact when the user doesn't need them. */
+  .filters-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-1);
+    padding: var(--s-2) 0;
+    border-top: 1px solid var(--border-hairline);
+    border-bottom: 1px solid var(--border-hairline);
+  }
+
+  /* v2 feed grid: single column < 640px; repeat(auto-fill, minmax(320px, 1fr))
+   * ≥ 640px; 3-column cap at --max-w. <FeedDateGroupHeader> spans the full
+   * row via `grid-column: 1 / -1` (sticky LB-3 math intact). */
   .feed-grid {
     display: grid;
     grid-template-columns: 1fr;
