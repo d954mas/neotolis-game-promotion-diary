@@ -589,7 +589,7 @@
       {/if}
     {/if}
 
-    <div class="card-footer" class:no-rule={!event.notes && !showThumb}>
+    <div class="card-footer">
       <div class="card-footer-chips">
         {#if isInboxRow}
           <span class="inbox-chip">{m.inbox_badge()}</span>
@@ -723,9 +723,8 @@
     letter-spacing: 0.02em;
     box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--accent) 35%, transparent);
   }
-  .author-avatar.unknown {
-    /* base styles already cover unknown; selector kept for grep parity */
-  }
+  /* .author-avatar.unknown — base styles already cover the unknown state;
+   * selector kept on the element for grep parity. */
 
   .kind-icon {
     display: inline-flex;
@@ -1045,10 +1044,6 @@
     margin-top: auto;
     border-top: 1px solid var(--border-hairline);
     flex-wrap: wrap;
-  }
-  .card-footer.no-rule {
-    border-top: 0;
-    padding-top: 0;
   }
   .card-footer-chips {
     display: flex;
