@@ -30,20 +30,16 @@
 </div>
 
 <style>
-  /* Mirrors prototype docs/design/v2/ui-kit/index.html .date-head rules.
-   * Sticky positioning anchors at the bottom of chrome + PageHead stack:
-   *   top: calc(--chrome-height + --page-header-height - --sticky-overlap)
-   * (--chrome-height from +layout.svelte ResizeObserver; --page-header-height
-   * from PageHead.svelte ResizeObserver.) */
+  /* Mirrors prototype docs/design/v2/ui-kit/index.html .date-head rules
+   * lines 813-821: sticky directly below the chrome (PageHead is NOT
+   * sticky in the prototype — it scrolls with the page content). */
   .date-head {
     display: flex;
     align-items: baseline;
     gap: var(--s-3);
     padding: var(--s-6) 0 var(--s-3);
     position: sticky;
-    top: calc(
-      var(--chrome-height, 116px) + var(--page-header-height, 56px) - var(--sticky-overlap, 1px)
-    );
+    top: calc(var(--chrome-height, 56px) - var(--sticky-overlap, 1px));
     background: var(--bg);
     z-index: 5;
   }

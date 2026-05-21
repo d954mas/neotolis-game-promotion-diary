@@ -183,9 +183,7 @@
     position: sticky;
     top: 0;
     z-index: 10;
-    background: color-mix(in oklab, var(--bg) 80%, transparent);
-    backdrop-filter: blur(14px) saturate(140%);
-    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    background: var(--bg);
     border-bottom: 1px solid var(--border-hairline);
   }
   main {
