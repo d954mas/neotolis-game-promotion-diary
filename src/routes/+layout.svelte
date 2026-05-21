@@ -130,17 +130,22 @@
 -->
 <div class="layout-root">
   {#if data.user}
-    <!-- Single sticky chrome wrapper. AppHeader and Nav are NON-sticky
-         in normal flow inside this wrapper; the wrapper alone is
-         `position: sticky; top: 0`. -->
+    <!-- Single sticky chrome wrapper (LB-1 preserved). AppHeader hosts
+         Nav inside its grid layout (Phase 3.4 — RESEARCH §"Chrome Layout
+         — Nav into Topbar"). At ≥768px Nav sits centered between brand
+         and userchip; at <768px Nav drops to a second row inside the
+         topbar's grid (preserves Phase 3.3 mobile architecture). The
+         outer `.sticky-chrome` element is the ONLY sticky boundary;
+         AppHeader + Nav move as one DOM unit. -->
     <div class="sticky-chrome">
       <AppHeader
         user={{ name: data.user.name, email: data.user.email, image: data.user.image }}
         theme={data.theme}
         onSignOut={handleSignOut}
         onSignOutAllDevices={handleSignOutAllDevices}
-      />
-      <Nav active={navActive} />
+      >
+        <Nav active={navActive} />
+      </AppHeader>
     </div>
     {#if data.user.deletedAt}
       <!-- If a soft-deleted user is signed back in (e.g. via Google
