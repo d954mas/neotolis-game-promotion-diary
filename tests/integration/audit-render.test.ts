@@ -364,7 +364,7 @@ describe("FeedCard restructured layout", () => {
     lastPollStatus: null as string | null,
   };
 
-  it("renders class:mine on the root <article> when event.authorIsMe=true (border-left accent gate)", async () => {
+  it("renders data-mine=\"1\" on the root <article> when event.authorIsMe=true (Phase 3.4 contract)", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -374,11 +374,15 @@ describe("FeedCard restructured layout", () => {
         games: [],
       },
     });
-    // Svelte 5 SSR may add a scoped class suffix — match `mine` as a class token.
-    expect(out.body).toMatch(/<article[^>]*class="[^"]*\bmine\b[^"]*"[^>]*>/);
+    // Phase 3.4 FeedCard rewrite (Plan 03.4-08) replaced `class:mine` on the
+    // root with `data-mine` attribute — CSS hooks via data-attr selectors
+    // are the new contract (see LB-10 in PLAN.md). Author avatar carries the
+    // visual mine treatment via .author-avatar.mine.
+    expect(out.body).toMatch(/<article[^>]*data-mine="1"[^>]*>/);
+    expect(out.body).toMatch(/<span[^>]*class="[^"]*\bauthor-avatar\b[^"]*\bmine\b/);
   });
 
-  it("does NOT render class:mine when event.authorIsMe=false", async () => {
+  it("renders data-mine=\"0\" on the root <article> when event.authorIsMe=false (Phase 3.4 contract)", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -388,10 +392,12 @@ describe("FeedCard restructured layout", () => {
         games: [],
       },
     });
-    expect(out.body).not.toMatch(/<article[^>]*class="[^"]*\bmine\b[^"]*"[^>]*>/);
+    expect(out.body).toMatch(/<article[^>]*data-mine="0"[^>]*>/);
+    // .author-avatar.unknown (not .mine) for non-author rows.
+    expect(out.body).not.toMatch(/<span[^>]*class="[^"]*\bauthor-avatar\b[^"]*\bmine\b/);
   });
 
-  it("renders the top overlay with kind label AND Mine badge text when author_is_me=true", async () => {
+  it("renders kind label in .card-meta AND Mine thumb-badge when author_is_me=true (Phase 3.4 contract)", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -401,27 +407,20 @@ describe("FeedCard restructured layout", () => {
         games: [],
       },
     });
-    const overlayMatch = out.body.match(
-      /<div[^>]*data-testid="feed-card-overlay"[^>]*>([\s\S]*?)<\/div>(?=\s*<\/div>\s*<div class="title-line)/,
+    // Phase 3.4 FeedCard rewrite (Plan 03.4-08) removed the legacy
+    // `data-testid="feed-card-overlay"` block. Labels are split:
+    //   - Kind label lives in .card-meta .kind-icon (aria-label/title).
+    //   - "Mine" sticker lives on the thumb as .thumb-badge--mine for
+    //     media-shape kinds (youtube_video here).
+    // Author avatar (.author-avatar.mine) also renders mine treatment.
+    expect(out.body).toMatch(/<span[^>]*class="[^"]*\bkind-icon\b[^"]*"[^>]*aria-label="YouTube video"/);
+    expect(out.body).toMatch(
+      /<span[^>]*class="[^"]*\bthumb-badge--mine\b[^"]*"[^>]*>Mine<\/span>/,
     );
-    // If the regex above is too greedy across nested divs (overlay contains
-    // child spans which contain divs from KindIcon's <svg>), fall back to a
-    // looser substring assertion: the overlay block must appear before the
-    // title-line block, and must contain the Mine badge text.
-    if (!overlayMatch) {
-      // Looser fallback: overlay element exists, body contains both labels.
-      expect(out.body).toMatch(/data-testid="feed-card-overlay"/);
-      expect(out.body).toContain("Mine");
-      // YouTube kind label should appear too.
-      expect(out.body).toContain("YouTube video");
-    } else {
-      const overlayHtml = overlayMatch[1]!;
-      expect(overlayHtml).toContain("Mine");
-      expect(overlayHtml).toContain("YouTube video");
-    }
+    expect(out.body).toMatch(/<span[^>]*class="[^"]*\bauthor-avatar\b[^"]*\bmine\b/);
   });
 
-  it("renders the Inbox label inside the top overlay (NOT in the meta-line) when row is in inbox", async () => {
+  it("renders the Inbox label inside .thumb-badge--inbox + .inbox-chip when row is in inbox (Phase 3.4 contract)", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -435,19 +434,17 @@ describe("FeedCard restructured layout", () => {
         games: [],
       },
     });
-    // Overlay must contain "Inbox" text. The original meta-line carried
-    // <InboxBadge/>; after restructure the overlay carries "Inbox" inline.
-    expect(out.body).toMatch(/data-testid="feed-card-overlay"/);
-    // "Inbox" text appears in the overlay region of the body. Check the
-    // overlay element substring contains it. We use a permissive forward
-    // slice from the overlay marker to the next major block.
-    const overlayIdx = out.body.indexOf('data-testid="feed-card-overlay"');
-    expect(overlayIdx).toBeGreaterThan(-1);
-    const overlaySlice = out.body.slice(overlayIdx, overlayIdx + 1000);
-    expect(overlaySlice).toContain("Inbox");
+    // Phase 3.4 FeedCard rewrite removed the legacy overlay; the inbox
+    // marker is now split across two surfaces:
+    //   - .thumb-badge--inbox (top-left of the thumb) for media-shape kinds.
+    //   - .inbox-chip in .card-footer-chips (always visible).
+    expect(out.body).toMatch(
+      /<span[^>]*class="[^"]*\bthumb-badge--inbox\b[^"]*"[^>]*>Inbox<\/span>/,
+    );
+    expect(out.body).toMatch(/<span[^>]*class="[^"]*\binbox-chip\b[^"]*"[^>]*>Inbox<\/span>/);
   });
 
-  it("renders <div class='games-block'> AFTER the chips-line element when game is attached", async () => {
+  it("renders <span class='game-chip'> inside .card-footer-chips when game is attached (Phase 3.4 contract)", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -457,20 +454,23 @@ describe("FeedCard restructured layout", () => {
         games: [{ id: "g-1", title: "Stellar Frontier" }],
       },
     });
-    // Both elements present.
-    expect(out.body).toMatch(/class="chips-line(?:\s[^"]*)?"/);
-    expect(out.body).toMatch(/class="games-block(?:\s[^"]*)?"/);
-    // games-block appears AFTER chips-line in source order.
-    const chipsIdx = out.body.search(/class="chips-line(?:\s[^"]*)?"/);
-    const gamesBlockIdx = out.body.search(/class="games-block(?:\s[^"]*)?"/);
+    // Phase 3.4 FeedCard rewrite (Plan 03.4-08): legacy `chips-line` +
+    // `games-block` markup collapsed into a single `.card-footer-chips`
+    // strip inside `.card-footer`. The game chip is a `<span class="game-chip">`
+    // sibling to `.inbox-chip` / `.off-topic-chip` — no separate block.
+    expect(out.body).toMatch(/class="card-footer(?:\s[^"]*)?"/);
+    expect(out.body).toMatch(/class="card-footer-chips(?:\s[^"]*)?"/);
+    expect(out.body).toMatch(
+      /<span[^>]*class="[^"]*\bgame-chip\b[^"]*"[^>]*>Stellar Frontier<\/span>/,
+    );
+    // The chip lives INSIDE .card-footer-chips (source order).
+    const chipsIdx = out.body.search(/class="card-footer-chips(?:\s[^"]*)?"/);
+    const gameChipIdx = out.body.search(/class="[^"]*\bgame-chip\b/);
     expect(chipsIdx).toBeGreaterThan(-1);
-    expect(gamesBlockIdx).toBeGreaterThan(-1);
-    expect(gamesBlockIdx).toBeGreaterThan(chipsIdx);
-    // Game title chip rendered inside games-block.
-    expect(out.body).toContain("Stellar Frontier");
+    expect(gameChipIdx).toBeGreaterThan(chipsIdx);
   });
 
-  it("does NOT render games-block when game is null", async () => {
+  it("does NOT render .game-chip when game is null (Phase 3.4 contract)", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -480,10 +480,10 @@ describe("FeedCard restructured layout", () => {
         games: [],
       },
     });
-    expect(out.body).not.toMatch(/class="games-block(?:\s[^"]*)?"/);
+    expect(out.body).not.toMatch(/class="[^"]*\bgame-chip\b/);
   });
 
-  it("renders <p class='notes'> when event.notes is non-empty (clamp class applied via CSS)", async () => {
+  it("renders <p class='card-notes'> when event.notes is non-empty (Phase 3.4 contract)", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const longNote = "This is a long-form note about the marketing campaign. ".repeat(10);
     const out = render(FeedCard, {
@@ -494,12 +494,14 @@ describe("FeedCard restructured layout", () => {
         games: [],
       },
     });
-    expect(out.body).toMatch(/<p[^>]*class="notes(?:\s[^"]*)?"[^>]*>/);
-    // Notes content rendered (truncated visually via CSS at 3 lines).
+    // Phase 3.4 FeedCard rewrite (Plan 03.4-08): notes paragraph class renamed
+    // from `notes` to `card-notes` (matches docs/design/v2/ui-kit prototype).
+    // Visual clamp at 2 lines (was 3) via CSS .card-notes { -webkit-line-clamp: 2 }.
+    expect(out.body).toMatch(/<p[^>]*class="card-notes(?:\s[^"]*)?"[^>]*>/);
     expect(out.body).toContain("marketing campaign");
   });
 
-  it("does NOT render <p class='notes'> when event.notes is null", async () => {
+  it("does NOT render <p class='card-notes'> when event.notes is null (Phase 3.4 contract)", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -509,7 +511,7 @@ describe("FeedCard restructured layout", () => {
         games: [],
       },
     });
-    expect(out.body).not.toMatch(/<p[^>]*class="notes(?:\s[^"]*)?"[^>]*>/);
+    expect(out.body).not.toMatch(/<p[^>]*class="card-notes(?:\s[^"]*)?"[^>]*>/);
   });
 
   it("renders youtube thumbnail when kind=youtube_video AND externalId present", async () => {
@@ -543,7 +545,7 @@ describe("FeedCard restructured layout", () => {
     expect(out.body).toContain("https://i.redd.it/abc.jpg");
   });
 
-  it("falls back to KindIcon (no <img>) for kind=conference (text fallback per UAT-NOTES rules)", async () => {
+  it("text-shape kinds (e.g. conference) render KindIcon in .card-meta and skip the .card-thumb (Phase 3.4 contract)", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -558,10 +560,18 @@ describe("FeedCard restructured layout", () => {
         games: [],
       },
     });
-    // No <img> tag for the .thumbnail class.
-    expect(out.body).not.toMatch(/<img[^>]*class="thumbnail/);
-    // The icon-anchor block IS rendered (KindIcon centered).
-    expect(out.body).toMatch(/class="icon-anchor(?:\s[^"]*)?"/);
+    // Phase 3.4 FeedCard rewrite (Plan 03.4-08) replaced the legacy
+    // `.icon-anchor`/`.thumbnail` markup with a `.card-thumb` block that ONLY
+    // renders for media-shape kinds (currently youtube_video) OR when a
+    // thumbnail URL exists. For text-shape kinds (conference here) with no
+    // image URL the thumb block is omitted entirely, and the kind glyph
+    // lives in `.card-meta .kind-icon`.
+    expect(out.body).toMatch(/data-shape="text"/);
+    expect(out.body).toMatch(/data-kind="conference"/);
+    expect(out.body).not.toMatch(/class="[^"]*\bcard-thumb\b/);
+    expect(out.body).not.toMatch(/<img\b/);
+    // The KindIcon glyph still renders inside .card-meta (kind-icon span).
+    expect(out.body).toMatch(/<span[^>]*class="[^"]*\bkind-icon\b[^"]*"[^>]*aria-label="Conference"/);
   });
 
   it("read-only contract preserved — no inline Edit / Delete / Open buttons", async () => {
@@ -582,7 +592,7 @@ describe("FeedCard restructured layout", () => {
     expect(out.body).not.toMatch(/<button[^>]*>[^<]*Open[^<]*<\/button>/);
   });
 
-  it("date-removal contract preserved — no inline date string on the card", async () => {
+  it("renders the occurred-at date inline in .card-meta .date (Phase 3.4 contract)", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -595,9 +605,12 @@ describe("FeedCard restructured layout", () => {
         games: [],
       },
     });
-    // formatFeedDate output (e.g. "Jan 15") MUST NOT appear inline on the card.
-    // The FeedDateGroupHeader above the card group carries the date label.
-    expect(out.body).not.toContain("Jan 15");
+    // Phase 3.4 FeedCard rewrite (Plan 03.4-08) reintroduced the per-card
+    // date label as the last slot in .card-meta — see app.jsx prototype
+    // fmtMonthDay output. The FeedDateGroupHeader above the card group
+    // still renders the group's date heading, but each card also carries
+    // its own occurred-at stamp in monospace next to the source handle.
+    expect(out.body).toMatch(/<span[^>]*class="[^"]*\bdate\b[^"]*"[^>]*>Jan 15<\/span>/);
   });
 });
 
@@ -1079,17 +1092,20 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
     expect(out.body).toContain("Open in Steam");
   });
 
-  it("SourceRow.svelte source carries the Mine treatment CSS rule + kind label", async () => {
+  it("SourceRow.svelte source carries the Mine treatment CSS rule + kind label (Phase 3.4 contract)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
     // class:mine on root .row div + .row.mine border-left rule.
     expect(src).toMatch(/class:mine=\{source\.isOwnedByMe\}/);
-    // --color-accent swapped for --color-mine so SourceRow.mine +
-    // FeedCard.mine resolve to the same shared token (defaults to accent
-    // today; can diverge later).
-    expect(src).toMatch(/\.row\.mine\s*\{[\s\S]*?border-left:\s*4px solid var\(--color-mine\)/);
-    expect(src).toMatch(/\.ownership-badge\.mine[\s\S]*?background:\s*var\(--color-mine\)/);
+    // Phase 3.4 Wave 2 (Plan 03.4-09 D-08 inline-affordances rewrite): the
+    // legacy --color-mine token + 4px border-left was swapped for the
+    // v2 design-system --accent token + 2px border-left. The ownership
+    // badge also adopts --accent (same shared resolution as before; the
+    // distinct --color-mine token was retired since /sources and /feed
+    // both want the same primary-accent treatment).
+    expect(src).toMatch(/\.row\.mine\s*\{[\s\S]*?border-left:\s*2px solid var\(--accent\)/);
+    expect(src).toMatch(/\.ownership-badge\.mine[\s\S]*?background:\s*var\(--accent\)/);
     // Kind label rendered next to the icon via kindLabel(SourceKind).
     // The per-kind paraglide keys are extracted into
     // src/lib/util/source-kind-label.ts (sourceKindLabel helper); the
@@ -1135,9 +1151,13 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
     expect(src).toMatch(/initialTitle=\{game\.title\}/);
     expect(src).toMatch(/initialDescription=\{game\.description\}/);
     // FeedCards wrapped in a feedcard-grid.
+    // Phase 3.4 Wave 2 (Plan 03.4-08 FeedCard rewrite) bumped the grid's
+    // minmax floor from 280px → 320px to fit the new card-meta line +
+    // 16:9 thumb without horizontal crowding. /feed and /games/[gameId]
+    // mirror each other on this value (see PLAN 03.4-08 LB-10).
     expect(src).toMatch(/class="feedcard-grid"/);
     expect(src).toMatch(
-      /\.feedcard-grid[\s\S]*?grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(280px/,
+      /\.feedcard-grid[\s\S]*?grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(320px/,
     );
     // The `gameInfoEditing` toggle is GONE (replaced by `editGameOpen`
     // modal-open state). RenameInline import and usage are removed
