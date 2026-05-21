@@ -1092,29 +1092,26 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
     expect(out.body).toContain("Open in Steam");
   });
 
-  it("SourceRow.svelte source carries the Mine treatment CSS rule + kind label (Phase 3.4 contract)", async () => {
+  it("SourceRow.svelte source carries the Mine treatment via data-mine attribute (Phase 3.4 contract)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
-    // class:mine on root .row div + .row.mine border-left rule.
-    expect(src).toMatch(/class:mine=\{source\.isOwnedByMe\}/);
-    // Phase 3.4 Wave 2 (Plan 03.4-09 D-08 inline-affordances rewrite): the
-    // legacy --color-mine token + 4px border-left was swapped for the
-    // v2 design-system --accent token + 2px border-left. The ownership
-    // badge also adopts --accent (same shared resolution as before; the
-    // distinct --color-mine token was retired since /sources and /feed
-    // both want the same primary-accent treatment).
-    expect(src).toMatch(/\.row\.mine\s*\{[\s\S]*?border-left:\s*2px solid var\(--accent\)/);
-    expect(src).toMatch(/\.ownership-badge\.mine[\s\S]*?background:\s*var\(--accent\)/);
-    // Kind label rendered next to the icon via kindLabel(SourceKind).
-    // The per-kind paraglide keys are extracted into
-    // src/lib/util/source-kind-label.ts (sourceKindLabel helper); the
-    // SourceRow component imports + calls the helper rather than
-    // referencing m.source_kind_label_* directly, so the literal-string
-    // assertions live in the helper's own test now (covered indirectly
-    // by paraglide.test.ts EXPECTED_KEYS snapshot).
-    expect(src).toMatch(/kindLabel/);
-    expect(src).toMatch(/from\s+["']\$lib\/util\/source-kind-label\.js["']/);
+    // Phase 3.4 Wave 2 (Plan 03.4-09 D-08/D-09/D-11 inline-affordances rewrite):
+    // - Root element is now <article class="source-row"> (was <div class="row">).
+    // - Mine signal is carried via data-mine="0|1" attribute on the article
+    //   (was class:mine). CSS hooks via attribute selectors (source-row[data-mine]).
+    // - .ownership-badge pill removed entirely — the author avatar's
+    //   data-mine attribute already surfaces the same visual signal.
+    // - SourceKindIcon renders without the kindLabel() text — the icon alone
+    //   identifies the kind; the source-kind-label helper is no longer
+    //   imported by SourceRow.
+    expect(src).toMatch(/<article[\s\S]*?class="source-row"[\s\S]*?data-mine=\{source\.isOwnedByMe \? "1" : "0"\}/);
+    // Author avatar inside the title row also carries data-mine — drives
+    // CSS .author-avatar[data-mine="1"] accent fill.
+    expect(src).toMatch(/class="author-avatar source-author-trigger"[\s\S]*?data-mine=\{source\.isOwnedByMe/);
+    // SourceKindIcon component imported and rendered (kind glyph in title).
+    expect(src).toMatch(/import SourceKindIcon/);
+    expect(src).toMatch(/<SourceKindIcon\s/);
   });
 
   it("/games/[id]/+page.svelte renders the three-section layout", async () => {
@@ -1295,16 +1292,16 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
     });
   });
 
-  it("/sources, /games, /audit each use the shared <PageHeader>", async () => {
+  it("/games and /audit use the shared <PageHeader>; /sources owns its own page-head (Phase 3.4 Plan 09)", async () => {
     // Phase 03.4 Wave 3 (Plan 10): /feed migrated from v1 <PageHeader> to
-    // the new v2 <PageHead> (3-floor chrome: display + date + utility).
-    // /sources, /games, /audit still use v1 PageHeader (no plan yet to
-    // migrate them). The /feed PageHead contract is asserted by the
-    // dedicated "/feed uses PageHead (Plan 10 Wave 3)" test below.
+    // <PageHead>. Phase 03.4 Wave 2 (Plan 09) gave /sources its own inline
+    // <header class="page-head"> block matching docs/design/v2/ui-kit/
+    // sources-page.jsx (title + counts summary + add CTA + recovery link
+    // all in one row — incompatible with the shared PageHeader's 1-cta
+    // contract). /games and /audit still use PageHeader.
     const fs = await import("node:fs");
     const path = await import("node:path");
     for (const route of [
-      "src/routes/sources/+page.svelte",
       "src/routes/games/+page.svelte",
       "src/routes/audit/+page.svelte",
     ]) {
@@ -1313,16 +1310,20 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
         /import PageHeader from "\$lib\/components\/PageHeader\.svelte"/,
       );
       expect(src, `${route}: renders <PageHeader`).toMatch(/<PageHeader\s/);
-      // The inline <header class="head"> block is gone from the markup
-      // section. Strip the <script>...</script> block first so a comment
-      // mentioning "<header class=\"head\">" in code doesn't match. The
-      // markup region is whatever sits after the closing </script> tag
-      // and before <style>.
       const markupOnly = src.replace(/<script[\s\S]*?<\/script>/g, "");
       expect(markupOnly, `${route}: no inline <header class="head"> in markup`).not.toMatch(
         /<header[^>]*class="head"/,
       );
     }
+    // /sources opts OUT of the shared PageHeader — its own page-head block
+    // hosts the title + summary + add CTA + recovery link inline.
+    const sourcesSrc = fs.readFileSync(path.resolve("src/routes/sources/+page.svelte"), "utf8");
+    expect(sourcesSrc, "/sources: does NOT import PageHeader (Plan 09 inline page-head)").not.toMatch(
+      /import PageHeader from "\$lib\/components\/PageHeader\.svelte"/,
+    );
+    expect(sourcesSrc, "/sources: renders inline <header class=\"page-head\">").toMatch(
+      /<header[^>]*class="page-head"/,
+    );
   });
 
   it("/feed uses PageHead (Plan 10 Wave 3 — replaces v1 PageHeader)", async () => {
@@ -1779,139 +1780,119 @@ describe("layout regression fixes + /audit FiltersSheet schema cleanup", () => {
 });
 
 /**
- * SourceRow edit-mode polish.
+ * SourceRow inline-affordances rewrite (Phase 03.4 Wave 2 — Plan 03.4-09).
  *
- * Four findings on the same component:
- *   - Remove visible only inside edit mode.
- *   - Edit pencil hidden inside edit mode.
- *   - auto_import is rendered as EXACTLY one checkbox (regression
- *     guard against re-introduction of a parallel text-input
- *     control bound to editAutoImport).
- *   - Save / Cancel / Remove sit at the BOTTOM of the edit-form
- *     block with a section divider above the action row.
+ * The original Phase 02.1-33 edit-form (rename + auto-import checkbox +
+ * Remove in form footer) was replaced by four dedicated inline
+ * affordances on the row itself:
+ *   - Click handle text → inline rename → PATCH /api/sources/:id { displayName }.
+ *   - Click avatar → AuthorPopover → PATCH /api/sources/:id { isOwnedByMe }.
+ *   - Click toggle (.source-toggle) → flips autoImport → PATCH /api/sources/:id { autoImport }.
+ *   - ⋯ overflow menu (.card-actions / .card-menu) → Remove → opens ConfirmDialog.
  *
- * The vitest-browser end-to-end (interactive open / cancel / save) is
- * stub-skipped pending the auth harness. SSR-level regression guards
- * live here — grep + structural assertions on SourceRow.svelte source.
+ * The edit-form, section-divider, footer-btn-* variants, edit pencil, and
+ * checkbox-bound editAutoImport state are all GONE (no replacement —
+ * inline affordances replace them functionally).
+ *
+ * SSR-level regression guards live here — grep + structural assertions on
+ * SourceRow.svelte source.
  */
-describe("SourceRow edit-mode polish (visibility gates + footer)", () => {
-  it("SourceRow read-mode .actions has refresh button, NO edit-icon, NO remove-icon", async () => {
-    // Edit pencil is REMOVED from row. User clicks the display-name link
-    // to /sources/[id] where edit (rename, auto-import toggle, delete)
-    // lives. Row is read-only except for the inline refresh button.
+describe("SourceRow inline-affordances (Phase 03.4 Wave 2 — Plan 03.4-09)", () => {
+  it("SourceRow row structure — <article class=\"source-row\"> + .card-actions overflow + .source-title + .source-actions + .source-foot", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
-    expect(src, "{#if !editing} block exists").toMatch(/\{#if !editing\}/);
-    expect(src, "{:else} branch exists for edit mode").toMatch(/\{:else\}/);
-    const ifNotEditingMatch = src.match(
-      /\{#if !editing\}\s*<!--[\s\S]*?-->\s*<div class="actions">[\s\S]*?<\/div>\s*\{:else\}/,
-    );
-    expect(
-      ifNotEditingMatch,
-      "read-mode .actions block matches the {#if !editing} ... {:else} structure",
-    ).not.toBeNull();
-    if (ifNotEditingMatch) {
-      const readModeBlock = ifNotEditingMatch[0];
-      expect(readModeBlock).toMatch(/RefreshContentButton/);
-      // Edit pencil moved to /sources/[id] detail page — row is read-only.
-      expect(readModeBlock).not.toMatch(/edit-icon/);
-      // Read-mode block must NOT contain the destructive remove-icon class.
-      expect(readModeBlock).not.toMatch(/remove-icon/);
-    }
+    // Root <article class="source-row"> (replaces legacy <div class="row">).
+    expect(src).toMatch(/<article[\s\S]*?class="source-row"/);
+    // ⋯ overflow trigger — same affordance as feed-card; lives in .card-actions.
+    expect(src).toMatch(/class="card-actions"/);
+    expect(src).toMatch(/class="card-action-btn overflow"/);
+    // Title row carries kind icon + author avatar + handle text.
+    expect(src).toMatch(/class="source-title"/);
+    // Right cluster — Sync (RefreshContentButton) + Live/Paused toggle.
+    expect(src).toMatch(/class="source-actions"/);
+    expect(src).toMatch(/class="source-toggle"/);
+    expect(src).toMatch(/<RefreshContentButton\s/);
+    // Footer mono line — events / date range / synced X ago.
+    expect(src).toMatch(/class="source-foot"/);
   });
 
-  it("SourceRow renders the destructive Remove button ONLY in edit-form footer", async () => {
+  it("SourceRow click-handle inline rename — .source-title-text button toggles renameMode → <input class=\"source-title-input\">", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
-    // The edit branch holds the form-footer with three buttons. The Remove
-    // (footer-btn-danger / remove-icon) lives ONLY here.
-    expect(src).toMatch(/form-footer/);
-    expect(src).toMatch(/footer-btn-danger/);
-    // The Remove button is wired to confirmingRemove = true, opening the
-    // existing ConfirmDialog flow — preserves the soft-delete contract.
-    expect(src).toMatch(/confirmingRemove\s*=\s*true/);
-    // remove-icon class lives on the footer button, not on a top-level
-    // read-mode .actions button.
-    const removeIconMatches = src.match(/remove-icon/g) ?? [];
-    expect(
-      removeIconMatches.length,
-      "remove-icon class appears exactly once (footer-btn-danger remove-icon)",
-    ).toBe(1);
-  });
-
-  it("SourceRow form-footer hosts Save (primary) / Cancel (ghost) / Remove (danger) AT THE BOTTOM", async () => {
-    const fs = await import("node:fs");
-    const path = await import("node:path");
-    const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
-    // Section divider above the footer row visually separates fields from
-    // actions. Both must exist; the divider must precede the footer in
-    // source order.
-    expect(src).toMatch(/section-divider/);
-    expect(src).toMatch(/form-footer/);
-    const dividerIdx = src.indexOf("section-divider");
-    const footerIdx = src.indexOf("form-footer");
-    expect(dividerIdx, "section-divider exists in SourceRow.svelte").toBeGreaterThan(-1);
-    expect(footerIdx, "form-footer exists in SourceRow.svelte").toBeGreaterThan(-1);
-    expect(
-      dividerIdx < footerIdx,
-      "section-divider precedes form-footer in source order (fields → divider → action row)",
-    ).toBe(true);
-    // Footer button variants — primary (Save), ghost (Cancel), danger (Remove).
-    expect(src).toMatch(/footer-btn-primary/);
-    expect(src).toMatch(/footer-btn-ghost/);
-    expect(src).toMatch(/footer-btn-danger/);
-    // Save uses common_save; Cancel uses common_cancel; Remove uses
-    // common_remove.
-    expect(src).toMatch(/m\.common_save\(\)/);
-    expect(src).toMatch(/m\.common_cancel\(\)/);
-    expect(src).toMatch(/m\.common_remove\(\)/);
-  });
-
-  it("SourceRow auto_import is rendered as EXACTLY ONE checkbox (regression guard)", async () => {
-    const fs = await import("node:fs");
-    const path = await import("node:path");
-    const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
-    // Positive: exactly ONE input bound to editAutoImport (the checkbox).
-    const checkedBindings = src.match(/bind:checked=\{editAutoImport\}/g) ?? [];
-    expect(checkedBindings.length, "exactly one input[type=checkbox] bound to editAutoImport").toBe(
-      1,
-    );
-    // Negative: no <input type="text"> attribute references editAutoImport
-    // anywhere in the component (catch-all against future regressions to
-    // a parallel string control).
-    expect(src).not.toMatch(/type="text"[^>]*editAutoImport/);
-    // Negative: no value-binding to editAutoImport (which would imply a
-    // non-checkbox control such as <input type="text" bind:value=...>).
-    expect(src).not.toMatch(/bind:value=\{editAutoImport\}/);
-    // Catch-all: no <input type="text"> whose attribute name mentions
-    // auto-import in any casing/separator (autoImport / auto-import /
-    // auto_import). Current variable name is editAutoImport (camelCase);
-    // this catch-all guards against renames.
-    expect(src).not.toMatch(/type="text"[^>]*[Aa]uto[_-]?[Ii]mport/);
-  });
-
-  it("SourceRow PATCH /api/sources/:id payload still ships { displayName, autoImport }", async () => {
-    const fs = await import("node:fs");
-    const path = await import("node:path");
-    const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
-    // saveSourceEdit body still serializes displayName + autoImport —
-    // pure component refactor, no schema or service change.
+    // Inline-rename state machine: renameMode + renameDraft signals; click
+    // .source-title-text flips renameMode=true and renders .source-title-input.
+    expect(src).toMatch(/let renameMode = \$state\(false\)/);
+    expect(src).toMatch(/let renameDraft = \$state/);
+    expect(src).toMatch(/class="source-title-text"/);
+    expect(src).toMatch(/class="source-title-input"/);
+    expect(src).toMatch(/async function commitRename/);
+    // PATCH payload — pure rename, NO autoImport (separate affordance now).
     expect(src).toMatch(/method:\s*"PATCH"/);
-    expect(src).toMatch(/displayName:\s*editName\.trim\(\)\s*\|\|\s*null/);
-    expect(src).toMatch(/autoImport:\s*editAutoImport/);
+    expect(src).toMatch(/displayName:\s*next/);
   });
 
-  it("SourceRow ConfirmDialog wired to existing soft-delete flow", async () => {
+  it("SourceRow author popover — .source-author-trigger button opens AuthorPopover; changeAuthor PATCHes { isOwnedByMe }", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
-    // The Remove button (now in the edit-form footer) opens the same
-    // ConfirmDialog; on confirm, DELETE /api/sources/:id is fired.
+    // Avatar button is the trigger; data-mine flips with source.isOwnedByMe.
+    expect(src).toMatch(/class="author-avatar source-author-trigger"/);
+    expect(src).toMatch(/let authorPopoverOpen = \$state\(false\)/);
+    expect(src).toMatch(/<AuthorPopover\s/);
+    // changeAuthor — separate PATCH endpoint that ONLY ships isOwnedByMe.
+    expect(src).toMatch(/async function changeAuthor/);
+    expect(src).toMatch(/isOwnedByMe:\s*isMe/);
+  });
+
+  it("SourceRow autoImport toggle — .source-toggle button flips autoImport via toggleActive() PATCH { autoImport }", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
+    // Single dedicated button — NOT a checkbox. data-on attribute carries
+    // the visual state; aria-pressed mirrors it.
+    expect(src).toMatch(/class="source-toggle"/);
+    expect(src).toMatch(/data-on=\{source\.autoImport \? "1" : "0"\}/);
+    expect(src).toMatch(/aria-pressed=\{source\.autoImport\}/);
+    expect(src).toMatch(/async function toggleActive/);
+    // PATCH ships ONLY autoImport — split from rename (own button).
+    expect(src).toMatch(/autoImport:\s*!source\.autoImport/);
+    // No checkbox bound to autoImport remains (regression guard).
+    expect(src).not.toMatch(/bind:checked=\{editAutoImport\}/);
+    expect(src).not.toMatch(/let editAutoImport/);
+  });
+
+  it("SourceRow ⋯ overflow menu hosts the destructive Remove → ConfirmDialog → DELETE flow", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
+    // Menu open state + card-menu markup (mirrors feed-card overflow menu).
+    expect(src).toMatch(/let menuOpen = \$state\(false\)/);
+    expect(src).toMatch(/class="card-menu"/);
+    expect(src).toMatch(/role="menu"/);
+    // Remove menuitem opens ConfirmDialog (confirmingRemove = true).
+    expect(src).toMatch(/confirmingRemove\s*=\s*true/);
     expect(src).toMatch(/<ConfirmDialog\s/);
-    expect(src).toMatch(/method:\s*"DELETE"/);
     expect(src).toMatch(/m\.confirm_source_remove/);
+    // confirmRemove fires DELETE /api/sources/:id.
+    expect(src).toMatch(/async function confirmRemove/);
+    expect(src).toMatch(/method:\s*"DELETE"/);
+  });
+
+  it("SourceRow has NO legacy edit-form footer (Phase 02.1-33 contract retired by Plan 03.4-09)", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
+    // The four legacy markers that used to gate the edit-form section
+    // are all absent — replaced by inline affordances (covered above).
+    expect(src).not.toMatch(/form-footer/);
+    expect(src).not.toMatch(/footer-btn-(primary|ghost|danger)/);
+    expect(src).not.toMatch(/section-divider/);
+    expect(src).not.toMatch(/let editing\s*=\s*\$state/);
+    expect(src).not.toMatch(/let editAutoImport/);
+    // No `.ownership-badge` pill anymore — avatar's data-mine carries the signal.
+    expect(src).not.toMatch(/class="ownership-badge/);
   });
 });
 
@@ -2146,32 +2127,45 @@ describe("RecoveryDialog parity across /feed, /games, /sources", () => {
     expect(out.body).not.toMatch(/\brecovery-link\b/);
   });
 
-  it("/games, /sources all import RecoveryDialog and wire onOpenRecovery into PageHeader", async () => {
+  it("/games and /sources import RecoveryDialog; /games wires onOpenRecovery via PageHeader, /sources via inline page-head button (Phase 3.4 Plan 09)", async () => {
     // Phase 03.4 Wave 3 (Plan 10): /feed migrated to <PageHead> + trash
     // view (?view=trash). The RecoveryDialog stays imported on /feed for
-    // backward compatibility but the onOpenRecovery PageHeader binding
+    // backward compatibility but the PageHeader onOpenRecovery binding
     // moved out (PageHead has no onOpenRecovery slot — trash view is the
-    // primary recovery affordance now). /games and /sources still use
-    // PageHeader + onOpenRecovery + RecoveryDialog.
+    // primary recovery affordance now).
+    //
+    // Phase 03.4 Wave 2 (Plan 09): /sources adopted an inline page-head
+    // block (1:1 with docs/design/v2/ui-kit/sources-page.jsx) — its
+    // "Recently deleted (N)" affordance is a plain <button
+    // class="recovery-link"> inside the page-head row, NOT a PageHeader
+    // callback. /games still uses PageHeader + onOpenRecovery callback.
     const fs = await import("node:fs");
     const path = await import("node:path");
-    for (const route of [
-      "src/routes/games/+page.svelte",
-      "src/routes/sources/+page.svelte",
-    ]) {
-      const src = fs.readFileSync(path.resolve(route), "utf8");
-      expect(src, `${route}: imports RecoveryDialog`).toMatch(
-        /import RecoveryDialog from "\$lib\/components\/RecoveryDialog\.svelte"/,
-      );
-      expect(src, `${route}: mounts <RecoveryDialog`).toMatch(/<RecoveryDialog\s/);
-      expect(src, `${route}: passes entityType="event" | "game" | "source"`).toMatch(
-        /entityType="(event|game|source)"/,
-      );
-      expect(src, `${route}: PageHeader receives onOpenRecovery callback`).toMatch(
-        /onOpenRecovery=\{/,
-      );
-      expect(src, `${route}: legacy recoveryAnchor prop removed`).not.toMatch(/recoveryAnchor=/);
-    }
+    // /games — PageHeader path.
+    const gamesSrc = fs.readFileSync(path.resolve("src/routes/games/+page.svelte"), "utf8");
+    expect(gamesSrc, "/games: imports RecoveryDialog").toMatch(
+      /import RecoveryDialog from "\$lib\/components\/RecoveryDialog\.svelte"/,
+    );
+    expect(gamesSrc, "/games: mounts <RecoveryDialog").toMatch(/<RecoveryDialog\s/);
+    expect(gamesSrc, "/games: passes entityType=\"game\"").toMatch(/entityType="game"/);
+    expect(gamesSrc, "/games: PageHeader receives onOpenRecovery callback").toMatch(
+      /onOpenRecovery=\{/,
+    );
+    // /sources — inline page-head path (Plan 09 rewrite).
+    const sourcesSrc = fs.readFileSync(path.resolve("src/routes/sources/+page.svelte"), "utf8");
+    expect(sourcesSrc, "/sources: imports RecoveryDialog").toMatch(
+      /import RecoveryDialog from "\$lib\/components\/RecoveryDialog\.svelte"/,
+    );
+    expect(sourcesSrc, "/sources: mounts <RecoveryDialog").toMatch(/<RecoveryDialog\s/);
+    expect(sourcesSrc, "/sources: passes entityType=\"source\"").toMatch(/entityType="source"/);
+    // The "Recently deleted (N)" affordance is a plain <button class="recovery-link">
+    // inside the inline page-head row.
+    expect(sourcesSrc, "/sources: inline recovery-link button opens RecoveryDialog").toMatch(
+      /class="recovery-link"[\s\S]*?onclick=\{[^}]*recoveryOpen\s*=\s*true/,
+    );
+    // No legacy recoveryAnchor prop survives on either route.
+    expect(gamesSrc, "/games: legacy recoveryAnchor prop removed").not.toMatch(/recoveryAnchor=/);
+    expect(sourcesSrc, "/sources: legacy recoveryAnchor prop removed").not.toMatch(/recoveryAnchor=/);
   });
 
   it("/feed imports RecoveryDialog + supports trash view via ?view=trash (Plan 10 Wave 3)", async () => {
