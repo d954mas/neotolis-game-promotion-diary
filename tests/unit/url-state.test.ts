@@ -1,0 +1,218 @@
+import { describe, it, expect } from "vitest";
+import {
+  parseSearchParams,
+  serializeFilterState,
+  type FilterState,
+} from "../../src/lib/feed/url-state.js";
+
+/**
+ * URL state contract for the v2 /feed surface (Plan 03.4-02, D-02).
+ *
+ * `parseSearchParams(url)` consumes `URL.searchParams.getAll(...)` so multi-
+ * value axes (`?source=A&source=B`) and single-value axes (`?show=inbox`)
+ * normalize to a single `FilterState` discriminated union. The kind axis runs
+ * through `filterValidKinds` so a malformed `?kind=foo` URL never reaches the
+ * SSR loader's Drizzle `inArray` clause — silent drop matches existing
+ * `/feed?show=foo` malformed-param fallback behavior (see
+ * src/routes/feed/+page.server.ts).
+ *
+ * `serializeFilterState(state)` produces `URLSearchParams` and omits any axis
+ * at its default value — so a fresh "/feed" view never carries `?show=any`,
+ * `?sort=desc`, `?view=feed`, `?date=all`, `?q=`, `?event=null`, or
+ * `?authorIsMe=undefined`. Round-trip identity: parse(serialize(s)) === s for
+ * all reachable states.
+ *
+ * authorIsMe is a tri-state: `true` (mine) / `false` (others) / `undefined`
+ * (anyone). undefined => key omitted from the URL.
+ */
+describe("parseSearchParams", () => {
+  it("returns show.kind === 'any' when no params are present", () => {
+    const s = parseSearchParams(new URL("https://x/feed"));
+    expect(s.show).toEqual({ kind: "any" });
+    expect(s.source).toEqual([]);
+    expect(s.kind).toEqual([]);
+    expect(s.authorIsMe).toBeUndefined();
+    expect(s.dateRange).toEqual({ preset: "all" });
+    expect(s.sortDir).toBe("desc");
+    expect(s.query).toBe("");
+    expect(s.view).toBe("feed");
+    expect(s.openEventId).toBeNull();
+    expect(s.cursor).toBeUndefined();
+  });
+
+  it("returns show.kind === 'inbox' when ?show=inbox", () => {
+    expect(parseSearchParams(new URL("https://x?show=inbox")).show).toEqual({
+      kind: "inbox",
+    });
+  });
+
+  it("returns show.kind === 'standalone' when ?show=standalone", () => {
+    expect(parseSearchParams(new URL("https://x?show=standalone")).show).toEqual({
+      kind: "standalone",
+    });
+  });
+
+  it("returns show.kind === 'specific' with gameIds when ?show=specific&game=g1&game=g2", () => {
+    const s = parseSearchParams(new URL("https://x?show=specific&game=g1&game=g2"));
+    expect(s.show).toEqual({ kind: "specific", gameIds: ["g1", "g2"] });
+  });
+
+  it("falls back to show.kind === 'any' on malformed ?show=foo (matches +page.server.ts fallback)", () => {
+    expect(parseSearchParams(new URL("https://x?show=foo")).show).toEqual({ kind: "any" });
+  });
+
+  it("returns dateRange.preset === 'custom' with from + to when ?from=2026-04-01&to=2026-05-01", () => {
+    const s = parseSearchParams(new URL("https://x?from=2026-04-01&to=2026-05-01"));
+    expect(s.dateRange).toEqual({
+      preset: "custom",
+      from: "2026-04-01",
+      to: "2026-05-01",
+    });
+  });
+
+  it("returns dateRange.preset === 'month' when ?date=month", () => {
+    expect(parseSearchParams(new URL("https://x?date=month")).dateRange).toEqual({
+      preset: "month",
+    });
+  });
+
+  it("returns sortDir === 'asc' when ?sort=asc; defaults to 'desc'", () => {
+    expect(parseSearchParams(new URL("https://x?sort=asc")).sortDir).toBe("asc");
+    expect(parseSearchParams(new URL("https://x")).sortDir).toBe("desc");
+  });
+
+  it("returns view === 'trash' when ?view=trash; defaults to 'feed'", () => {
+    expect(parseSearchParams(new URL("https://x?view=trash")).view).toBe("trash");
+    expect(parseSearchParams(new URL("https://x")).view).toBe("feed");
+  });
+
+  it("returns openEventId === 'ev_123' when ?event=ev_123; defaults to null", () => {
+    expect(parseSearchParams(new URL("https://x?event=ev_123")).openEventId).toBe("ev_123");
+    expect(parseSearchParams(new URL("https://x")).openEventId).toBeNull();
+  });
+
+  it("handles multi-value ?source=A&source=B via sp.getAll", () => {
+    expect(parseSearchParams(new URL("https://x?source=A&source=B")).source).toEqual([
+      "A",
+      "B",
+    ]);
+  });
+
+  it("handles multi-value ?kind=youtube_video&kind=reddit_post and filters unknown kinds", () => {
+    const s = parseSearchParams(
+      new URL("https://x?kind=youtube_video&kind=foo&kind=reddit_post"),
+    );
+    // 'foo' is dropped by filterValidKinds; the two valid kinds survive.
+    expect(s.kind).toEqual(["youtube_video", "reddit_post"]);
+  });
+
+  it("parses authorIsMe=true / authorIsMe=false / omitted", () => {
+    expect(parseSearchParams(new URL("https://x?authorIsMe=true")).authorIsMe).toBe(true);
+    expect(parseSearchParams(new URL("https://x?authorIsMe=false")).authorIsMe).toBe(false);
+    expect(parseSearchParams(new URL("https://x")).authorIsMe).toBeUndefined();
+  });
+
+  it("preserves cursor when ?cursor=abc", () => {
+    expect(parseSearchParams(new URL("https://x?cursor=abc123")).cursor).toBe("abc123");
+  });
+
+  it("preserves query when ?q=hello world", () => {
+    expect(parseSearchParams(new URL("https://x?q=hello%20world")).query).toBe("hello world");
+  });
+});
+
+describe("serializeFilterState", () => {
+  function defaultState(): FilterState {
+    return {
+      show: { kind: "any" },
+      source: [],
+      kind: [],
+      authorIsMe: undefined,
+      dateRange: { preset: "all" },
+      sortDir: "desc",
+      query: "",
+      view: "feed",
+      openEventId: null,
+    };
+  }
+
+  it("omits keys with default values (no ?show=any, no ?sort=desc, no ?view=feed)", () => {
+    const sp = serializeFilterState(defaultState());
+    expect(sp.toString()).toBe("");
+  });
+
+  it("encodes authorIsMe boolean as ?authorIsMe=true / ?authorIsMe=false; undefined omitted", () => {
+    expect(serializeFilterState({ ...defaultState(), authorIsMe: true }).get("authorIsMe")).toBe(
+      "true",
+    );
+    expect(serializeFilterState({ ...defaultState(), authorIsMe: false }).get("authorIsMe")).toBe(
+      "false",
+    );
+    expect(serializeFilterState({ ...defaultState(), authorIsMe: undefined }).has("authorIsMe")).toBe(
+      false,
+    );
+  });
+
+  it("preserves cursor and openEventId pass-through", () => {
+    const sp = serializeFilterState({
+      ...defaultState(),
+      cursor: "c-xyz",
+      openEventId: "ev_99",
+    });
+    expect(sp.get("cursor")).toBe("c-xyz");
+    expect(sp.get("event")).toBe("ev_99");
+  });
+
+  it("encodes show=specific with each gameId as ?game=...", () => {
+    const sp = serializeFilterState({
+      ...defaultState(),
+      show: { kind: "specific", gameIds: ["g1", "g2"] },
+    });
+    expect(sp.get("show")).toBe("specific");
+    expect(sp.getAll("game")).toEqual(["g1", "g2"]);
+  });
+
+  it("round-trips identity: parseSearchParams(new URL('https://x?' + serializeFilterState(s).toString())) === s", () => {
+    const original: FilterState = {
+      show: { kind: "specific", gameIds: ["g1", "g2"] },
+      source: ["src_a", "src_b"],
+      kind: ["youtube_video", "reddit_post"],
+      authorIsMe: true,
+      dateRange: { preset: "custom", from: "2026-04-01", to: "2026-05-01" },
+      sortDir: "asc",
+      query: "hello world",
+      view: "trash",
+      openEventId: "ev_42",
+      cursor: "cur_xyz",
+    };
+    const roundTripped = parseSearchParams(
+      new URL("https://x?" + serializeFilterState(original).toString()),
+    );
+    expect(roundTripped).toEqual(original);
+  });
+
+  it("round-trips a minimal state (no extras)", () => {
+    const minimal = defaultState();
+    const rt = parseSearchParams(
+      new URL("https://x?" + serializeFilterState(minimal).toString()),
+    );
+    expect(rt).toEqual(minimal);
+  });
+
+  it("encodes dateRange preset as ?date=week and dateRange custom as ?from=&to=", () => {
+    const presetSp = serializeFilterState({
+      ...defaultState(),
+      dateRange: { preset: "week" },
+    });
+    expect(presetSp.get("date")).toBe("week");
+    expect(presetSp.has("from")).toBe(false);
+
+    const customSp = serializeFilterState({
+      ...defaultState(),
+      dateRange: { preset: "custom", from: "2026-04-01", to: "2026-05-01" },
+    });
+    expect(customSp.has("date")).toBe(false);
+    expect(customSp.get("from")).toBe("2026-04-01");
+    expect(customSp.get("to")).toBe("2026-05-01");
+  });
+});
