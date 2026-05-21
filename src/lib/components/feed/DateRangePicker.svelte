@@ -208,6 +208,12 @@
       else draft = { ...draft, to: s };
       month = new Date(s.getFullYear(), s.getMonth(), 1);
     }
+    // Propagate to parent if the range is now complete — matches the
+    // pickDay() behavior so text-input edits update the filter the same
+    // way clicking day cells does.
+    if (draft.from && draft.to) {
+      onApply({ from: draft.from, to: draft.to });
+    }
     return true;
   }
   function handleBlur(which: "from" | "to", text: string): void {
