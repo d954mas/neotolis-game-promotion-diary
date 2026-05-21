@@ -659,6 +659,13 @@
   "author_avatar_mine_aria": "Author: {name}",
   "author_avatar_unknown_aria": "Author: unknown",
 
+  "feed_card_select_aria": "Select event",
+  "feed_card_deselect_aria": "Deselect event",
+  "feed_card_actions_aria": "More actions",
+  "feed_card_menu_edit_games": "Edit games",
+  "feed_card_menu_select": "Select",
+  "feed_card_menu_delete": "Delete",
+
   "toast_event_added": "Event added",
   "toast_bulk_edit_success": "{count} events updated",
   "toast_bulk_delete_success": "{count} events moved to trash",
