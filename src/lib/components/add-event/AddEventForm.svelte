@@ -3,17 +3,23 @@
   // (D-16 modal primary + D-17 fetch via /api/events/preview-url +
   // D-18 save toast wired by the caller).
   //
-  // This file is the SHARED form that renders identically whether the
-  // caller mounts it inside <AddEventModal> (overlay over /feed) OR
-  // directly inside /events/new route (Plan 10 wires both). The wrapper
-  // owns the <dialog> chrome + dirty-confirm prompt; this form owns the
-  // fields + per-kind URL host validation + the Fetch button that hits
-  // POST /api/events/preview-url (Phase 02.1-17 endpoint, NOT a mock OG
-  // parser per D-17).
+  // Visual contract: 1:1 with docs/design/v2/ui-kit/add-event-modal.jsx
+  // + its CSS rules (.field, .kind-grid, .add-kind-chip, .add-game-chip,
+  // .field-url, .field-url-fetch, .modal-foot-hint, .modal-date-edit) in
+  // index.html.
+  //
+  // The form owns:
+  //   - All field state (title, kind, url, notes, games, off-topic, author,
+  //     occurredAt).
+  //   - URL Fetch button → POST /api/events/preview-url (NOT mock OG).
+  //   - Per-kind URL host validation (instant feedback; server enforces).
+  //   - Dirty tracking → onDirtyChange (consumed by AddEventModal for the
+  //     scrim-click / Esc confirm gate).
 
+  import KindIcon from "$lib/components/KindIcon.svelte";
+  import AuthorPopover from "$lib/components/shared/AuthorPopover.svelte";
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "$lib/components/InlineError.svelte";
-  import { sortByLabel } from "$lib/util/sort-kinds.js";
   import type { GameDto } from "$lib/server/dto.js";
 
   type EventKind =
@@ -43,6 +49,7 @@
     games,
     initialKind = "post",
     initialAttachedGameIds = [],
+    currentUserName = "",
     onSave,
     onCancel,
     onDirtyChange,
@@ -50,11 +57,9 @@
     games: GameDto[];
     initialKind?: EventKind;
     initialAttachedGameIds?: string[];
+    currentUserName?: string;
     onSave: (payload: AddEventPayload) => Promise<void>;
     onCancel: () => void;
-    /** Invoked whenever the dirty state changes — the AddEventModal
-     *  wrapper subscribes so it can gate scrim-click / Esc through a
-     *  window.confirm prompt (D-16). */
     onDirtyChange?: (dirty: boolean) => void;
   } = $props();
 
@@ -67,60 +72,62 @@
   let offTopic = $state(false);
   let attachedGameIds = $state<string[]>([...initialAttachedGameIds]);
   let occurredAt = $state(new Date().toISOString().slice(0, 10));
+  let authorPopoverOpen = $state(false);
 
   // Network state.
   let fetching = $state(false);
   let saving = $state(false);
+  let fetched = $state(false);
+  let fetchedKind = $state<EventKind | null>(null);
+  let fetchedSrc = $state<string>("");
   let urlError = $state<string | null>(null);
   let errorText = $state<string | null>(null);
 
-  // Functional-only kind allowlist — mirrors /events/new's existing gate
-  // (Phase 02.1-20). Backend continues to accept all enum values; UI
-  // restricts the picker. Hidden kinds reappear when their adapter ships.
-  const FUNCTIONAL_KINDS: ReadonlyArray<EventKind> = [
+  // Kind picker order matches prototype: manual-friendly kinds first,
+  // then platforms. Internal kind list mirrors the EventKind enum union
+  // so the backend keeps its existing validation.
+  const KIND_TOP: EventKind[] = ["post", "press", "talk", "conference"];
+  const KIND_REST: EventKind[] = [
     "youtube_video",
     "reddit_post",
-    "post",
-    "conference",
-    "talk",
-    "press",
+    "twitter_post",
+    "telegram_post",
+    "discord_drop",
     "other",
   ];
+  const KIND_FLOW: EventKind[] = [...KIND_TOP, ...KIND_REST];
 
-  function eventKindLabel(k: EventKind): string {
+  function kindShort(k: EventKind): string {
     switch (k) {
-      case "youtube_video":
-        return m.event_kind_label_youtube_video();
-      case "reddit_post":
-        return m.event_kind_label_reddit_post();
-      case "post":
-        return m.event_kind_label_post();
-      case "conference":
-        return m.event_kind_label_conference();
-      case "talk":
-        return m.event_kind_label_talk();
-      case "press":
-        return m.event_kind_label_press();
-      case "other":
-        return m.event_kind_label_other();
-      case "twitter_post":
-        return m.event_kind_label_twitter_post();
-      case "telegram_post":
-        return m.event_kind_label_telegram_post();
-      case "discord_drop":
-        return m.event_kind_label_discord_drop();
+      case "youtube_video": return "YouTube";
+      case "reddit_post":   return "Reddit";
+      case "twitter_post":  return "Twitter";
+      case "telegram_post": return "Telegram";
+      case "discord_drop":  return "Discord";
+      case "press":         return "Press";
+      case "talk":          return "Talk";
+      case "conference":    return "Conference";
+      case "post":          return "Post";
+      case "other":         return "Other";
     }
   }
 
-  const kindOptions = $derived(
-    sortByLabel(
-      FUNCTIONAL_KINDS.map((value) => ({ value, label: eventKindLabel(value) })),
-      (item) => item.label,
-    ),
-  );
+  function eventKindLabel(k: EventKind): string {
+    switch (k) {
+      case "youtube_video": return m.event_kind_label_youtube_video();
+      case "reddit_post":   return m.event_kind_label_reddit_post();
+      case "post":          return m.event_kind_label_post();
+      case "conference":    return m.event_kind_label_conference();
+      case "talk":          return m.event_kind_label_talk();
+      case "press":         return m.event_kind_label_press();
+      case "other":         return m.event_kind_label_other();
+      case "twitter_post":  return m.event_kind_label_twitter_post();
+      case "telegram_post": return m.event_kind_label_telegram_post();
+      case "discord_drop":  return m.event_kind_label_discord_drop();
+    }
+  }
 
   // Dirty tracking — any user-visible change away from initial values.
-  // Re-fires onDirtyChange whenever derived state flips.
   const isDirty = $derived(
     title.trim().length > 0 ||
       url.trim().length > 0 ||
@@ -144,10 +151,9 @@
   }
 
   // Per-kind URL host validation (D-17). Client-side gives instant
-  // feedback; server-side enforcement via Zod + adapter parseUrl is the
-  // load-bearing second layer.
+  // feedback; Zod + adapter parseUrl is the load-bearing second layer.
   function urlMatchesKind(u: string, k: EventKind): boolean {
-    if (!u.trim()) return true; // empty URL is fine for non-pollable kinds
+    if (!u.trim()) return true;
     try {
       const parsed = new URL(u);
       const host = parsed.host.toLowerCase();
@@ -173,15 +179,13 @@
     }
   }
 
-  // URL Fetch — calls POST /api/events/preview-url (D-17, NOT mock OG).
-  // The endpoint returns { kind, externalId, title, thumbnailUrl,
-  // occurredAt } via the adapter registry — same path the /events/new
-  // page hits today.
+  // URL Fetch — POST /api/events/preview-url (NOT mock OG).
   async function fetchUrlMetadata(): Promise<void> {
     if (fetching) return;
     const u = url.trim();
     if (!u) return;
     fetching = true;
+    fetched = false;
     urlError = null;
     errorText = null;
     try {
@@ -198,6 +202,7 @@
         kind?: string | null;
         title?: string | null;
         occurredAt?: string | null;
+        sourceLabel?: string | null;
       };
       if (data.title && title.trim().length === 0) {
         title = data.title;
@@ -205,11 +210,25 @@
       if (data.occurredAt) {
         occurredAt = data.occurredAt.slice(0, 10);
       }
-      // If the adapter detected a concrete kind, adopt it (the URL host
-      // is unambiguous when the adapter accepted it).
-      if (data.kind && (FUNCTIONAL_KINDS as readonly string[]).includes(data.kind)) {
+      const allowed: EventKind[] = [
+        "youtube_video", "reddit_post", "twitter_post",
+        "telegram_post", "discord_drop",
+        "press", "talk", "conference", "post", "other",
+      ];
+      if (data.kind && (allowed as readonly string[]).includes(data.kind)) {
         kind = data.kind as EventKind;
+        fetchedKind = kind;
       }
+      // Surface a small "Detected …" chip below the URL row. Use the
+      // host as the fallback source label when the endpoint didn't
+      // return one (the prototype shows e.g. "@neonicle_dev" for tw).
+      try {
+        const parsedHost = new URL(u.match(/^https?:\/\//) ? u : "https://" + u).hostname.replace(/^www\./, "");
+        fetchedSrc = data.sourceLabel ?? parsedHost;
+      } catch {
+        fetchedSrc = data.sourceLabel ?? "";
+      }
+      fetched = true;
     } catch {
       errorText = m.error_network();
     } finally {
@@ -250,47 +269,115 @@
       saving = false;
     }
   }
+
+  // "Mon, May 14" label format mirrors prototype foot-hint.
+  const occurredHuman = $derived.by(() => {
+    const [y, mo, d] = occurredAt.split("-").map((x) => parseInt(x, 10));
+    if (!y || !mo || !d) return occurredAt;
+    const t = new Date(y, mo - 1, d);
+    const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][t.getDay()];
+    const mon = [
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ][t.getMonth()];
+    return `${day}, ${mon} ${t.getDate()}`;
+  });
+  const todayISO = new Date().toISOString().slice(0, 10);
+
+  // Kind color from app.css --k-* tokens. Wired via inline --card-accent
+  // on each chip — matches FeedCard pattern.
+  function kindAccent(k: EventKind): string {
+    // CSS var indirection — kind tokens live in src/app.css.
+    switch (k) {
+      case "youtube_video": return "var(--k-youtube)";
+      case "reddit_post":   return "var(--k-reddit)";
+      case "twitter_post":  return "var(--k-twitter)";
+      case "telegram_post": return "var(--k-telegram)";
+      case "discord_drop":  return "var(--k-discord)";
+      case "conference":    return "var(--k-conference)";
+      case "talk":          return "var(--k-talk)";
+      case "press":         return "var(--k-press)";
+      case "post":          return "var(--k-post)";
+      case "other":         return "var(--k-other)";
+    }
+  }
 </script>
 
-<form class="add-event-form" onsubmit={submit}>
-  <label class="field">
-    <span class="field-label">{m.add_event_modal_title_label()}</span>
+<form class="add-event-form modal-body" onsubmit={submit}>
+  <!-- Title — required. Author picker chip sits to the right of the
+       label, matching the prototype label-row layout. -->
+  <div class="field">
+    <div class="field-label-row">
+      <label class="field-label" for="addevt-title">{m.add_event_modal_title_label()}</label>
+      <div class="author-pick">
+        <button
+          type="button"
+          class="author-pick-trigger"
+          onclick={() => (authorPopoverOpen = !authorPopoverOpen)}
+          aria-haspopup="listbox"
+          aria-expanded={authorPopoverOpen}
+          disabled={saving}
+        >
+          <span class="author-avatar" data-mine={authorIsMe ? "1" : "0"}>
+            {authorIsMe ? (currentUserName[0] ?? "Y").toUpperCase() : "?"}
+          </span>
+          <span class="author-pick-name">
+            {authorIsMe ? (currentUserName || "You") : m.author_popover_someone_else()}
+          </span>
+          <span class="author-pick-chev" aria-hidden="true">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </span>
+        </button>
+        {#if authorPopoverOpen}
+          <AuthorPopover
+            authorIsMe={authorIsMe}
+            mineName={currentUserName || "You"}
+            onchange={(next) => {
+              authorIsMe = next;
+              authorPopoverOpen = false;
+            }}
+            onclose={() => (authorPopoverOpen = false)}
+          />
+        {/if}
+      </div>
+    </div>
     <input
-      class="input"
+      id="addevt-title"
+      class="field-input"
       type="text"
-      bind:value={title}
       placeholder={m.add_event_modal_title_placeholder()}
-      required
+      bind:value={title}
       maxlength="500"
       disabled={saving}
+      required
     />
-  </label>
+  </div>
 
-  <label class="field">
-    <span class="field-label">{m.add_event_modal_kind_label()}</span>
-    <select class="input" bind:value={kind} disabled={saving}>
-      {#each kindOptions as opt (opt.value)}
-        <option value={opt.value}>{opt.label}</option>
-      {/each}
-    </select>
-  </label>
-
+  <!-- Link + Fetch button. After fetch, a small preview chip shows the
+       parsed metadata so the user can verify before saving. -->
   <div class="field">
-    <span class="field-label">
+    <label class="field-label" for="addevt-url">
       {m.add_event_modal_link_label()}
-      <span class="optional">{m.add_event_modal_link_optional()}</span>
-    </span>
-    <div class="url-row">
+      <span class="field-label-opt">{m.add_event_modal_link_optional()}</span>
+    </label>
+    <div class="field-url">
       <input
-        class="input"
+        id="addevt-url"
+        class="field-input"
         type="url"
-        bind:value={url}
         placeholder={m.add_event_modal_link_placeholder()}
+        bind:value={url}
+        oninput={() => { fetched = false; urlError = null; }}
+        onkeydown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); void fetchUrlMetadata(); }
+        }}
+        spellcheck="false"
+        autocomplete="off"
         disabled={saving}
       />
       <button
         type="button"
-        class="fetch-btn"
+        class="btn ghost field-url-fetch"
         onclick={fetchUrlMetadata}
         disabled={fetching || saving || url.trim().length === 0}
       >
@@ -298,73 +385,115 @@
       </button>
     </div>
     {#if urlError}
-      <small class="field-error">{urlError}</small>
+      <div class="field-error">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <span>{urlError}</span>
+      </div>
+    {:else if fetched && fetchedSrc}
+      <div class="field-fetch-result">
+        <span class="field-fetch-ico" style="color: {kindAccent(kind)}">
+          <KindIcon kind={kind} size={14} />
+        </span>
+        <span class="field-fetch-text">
+          Detected <b>{eventKindLabel(kind)}</b>{fetchedSrc ? ` · ` : ""}<span style="font-family: var(--f-mono); font-size: 11.5px">{fetchedSrc}</span>
+        </span>
+      </div>
     {/if}
   </div>
 
-  <label class="field">
-    <span class="field-label">Date</span>
-    <input
-      class="input"
-      type="date"
-      bind:value={occurredAt}
-      max={new Date().toISOString().slice(0, 10)}
-      required
-      disabled={saving}
-    />
-  </label>
-
-  <label class="field checkbox">
-    <input type="checkbox" bind:checked={authorIsMe} disabled={saving} />
-    <span class="field-label">Author is me</span>
-  </label>
-
+  <!-- Kind picker — single wrap row of chips, kind-color cued. -->
   <div class="field">
-    <span class="field-label">{m.add_event_modal_games_label()}</span>
-    <div class="games-row">
-      {#each games as g (g.id)}
+    <span class="field-label">{m.add_event_modal_kind_label()}</span>
+    <div class="kind-grid">
+      {#each KIND_FLOW as k (k)}
         <button
           type="button"
-          class="game-chip"
-          data-active={attachedGameIds.includes(g.id) ? "1" : "0"}
-          onclick={() => toggleGame(g.id)}
+          class="chip kind-chip add-kind-chip"
+          data-active={kind === k ? "1" : "0"}
+          style="--card-accent: {kindAccent(k)}"
+          onclick={() => (kind = k)}
           disabled={saving}
         >
-          {g.title}
+          <span class="kind-icon"><KindIcon kind={k} size={16} /></span>
+          <span>{kindShort(k)}</span>
         </button>
       {/each}
-      <label class="off-topic-toggle">
-        <input type="checkbox" bind:checked={offTopic} disabled={saving} />
-        <span>{m.add_event_modal_off_topic()}</span>
-      </label>
     </div>
   </div>
 
-  <label class="field">
-    <span class="field-label">
+  <!-- Notes — optional, full free-text. -->
+  <div class="field">
+    <label class="field-label" for="addevt-notes">
       {m.add_event_modal_notes_label()}
-      <span class="optional">{m.add_event_modal_notes_optional()}</span>
-    </span>
+      <span class="field-label-opt">{m.add_event_modal_notes_optional()}</span>
+    </label>
     <textarea
-      class="input textarea"
+      id="addevt-notes"
+      class="field-input field-textarea"
+      placeholder="Anything worth remembering — context, numbers, links…"
       bind:value={notes}
       rows="3"
       maxlength="50000"
       disabled={saving}
     ></textarea>
-  </label>
+  </div>
 
-  <div class="footer">
-    <button type="button" class="footer-btn footer-btn-ghost" onclick={onCancel} disabled={saving}>
-      {m.add_event_modal_cancel()}
-    </button>
-    <button
-      type="submit"
-      class="footer-btn footer-btn-primary"
-      disabled={saving || title.trim().length === 0}
-    >
-      {m.add_event_modal_save()}
-    </button>
+  <!-- Games — chip grid with the same visual vocabulary as the kind
+       picker (game-color cued). Off-topic appears as a dashed chip. -->
+  <div class="field">
+    <span class="field-label">
+      {m.add_event_modal_games_label()}
+      <span class="field-label-opt">{m.add_event_modal_link_optional()}</span>
+    </span>
+    <div class="kind-grid">
+      {#each games as g (g.id)}
+        {@const active = attachedGameIds.includes(g.id)}
+        <button
+          type="button"
+          class="chip kind-chip game-chip add-game-chip"
+          data-active={active ? "1" : "0"}
+          style="--card-accent: var(--k-post)"
+          onclick={() => toggleGame(g.id)}
+          disabled={saving}
+        >
+          <span>{g.title}</span>
+        </button>
+      {/each}
+      <button
+        type="button"
+        class="chip kind-chip add-game-chip off-topic-add"
+        data-active={offTopic ? "1" : "0"}
+        onclick={() => (offTopic = !offTopic)}
+        disabled={saving}
+      >
+        <span>{m.add_event_modal_off_topic()}</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Quiet footer note — explains where this lands. Date is editable
+       inline via a native date picker overlaid on the label text. -->
+  <div class="modal-foot-hint">
+    Will be saved as <b>{authorIsMe ? "your event" : "someone else's event"}</b> ·
+    <span class="modal-date-edit">
+      <span style="font-variant-numeric: tabular-nums">{occurredHuman}</span>
+      <span class="modal-date-pencil" aria-hidden="true">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6"/>
+          <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+      </span>
+      <input
+        type="date"
+        class="modal-date-native"
+        bind:value={occurredAt}
+        max={todayISO}
+        aria-label="Change date"
+        disabled={saving}
+      />
+    </span>
   </div>
 
   {#if errorText}
@@ -372,197 +501,370 @@
   {/if}
 </form>
 
+<!-- Footer button row — outside .modal-body so the prototype's pinned
+     foot pattern works (head + body + foot, body scrolls between).
+     Caller (AddEventModal) wraps the form in its <dialog>; the foot
+     therefore sits inside the same <dialog> as a sibling of <form>.
+     For the standalone route mount, .modal-foot still styles into a
+     sensible right-aligned button row. -->
+<div class="modal-foot">
+  <button
+    type="button"
+    class="btn ghost"
+    onclick={onCancel}
+    disabled={saving}
+  >{m.add_event_modal_cancel()}</button>
+  <button
+    type="submit"
+    class="btn primary"
+    onclick={submit}
+    disabled={saving || title.trim().length === 0}
+  >{m.add_event_modal_save()}</button>
+</div>
+
 <style>
+  /* Prototype 1:1 — class names mirror docs/design/v2/ui-kit/index.html
+   * .field, .field-url, .kind-grid, .add-kind-chip, .add-game-chip,
+   * .off-topic-add, .modal-foot-hint, .modal-date-edit. */
+
   .add-event-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-3);
-    padding: var(--s-4);
-    min-width: 0;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text);
+    padding: 16px 18px 4px;
+    display: flex; flex-direction: column;
+    gap: 18px;
+    min-width: 0;
+    flex: 1;
+    overflow-y: auto;
   }
+
+  /* ── Field block ──────────────────────────────────────────────────── */
   .field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-1);
+    display: flex; flex-direction: column; gap: 8px;
     min-width: 0;
   }
-  .field.checkbox {
-    flex-direction: row;
-    align-items: center;
-    gap: var(--s-2);
+  .field-label-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: var(--s-3);
+    min-width: 0;
   }
   .field-label {
-    font-size: var(--t-13);
-    color: var(--text-2);
-    font-weight: var(--w-md);
-  }
-  .optional {
+    font-size: 10.5px;
+    font-weight: var(--w-sb);
     color: var(--text-3);
-    font-weight: var(--w-rg);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
   }
-  .input {
-    min-height: var(--hit);
-    padding: 0 var(--s-3);
-    background: var(--surface-3);
-    color: var(--text);
+  .field-label-opt {
+    color: var(--text-4);
+    font-weight: var(--w-rg);
+    letter-spacing: 0.04em;
+    text-transform: none;
+  }
+  .field-input {
+    width: 100%;
+    min-height: 40px;
+    padding: 0 12px;
+    background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: var(--r-sm);
-    font-family: var(--f-sans);
+    color: var(--text);
+    font: inherit;
     font-size: var(--t-14);
-    width: 100%;
-    min-width: 0;
-  }
-  .input:focus {
-    outline: none;
-    border-color: var(--accent-strong);
-  }
-  .textarea {
-    padding: var(--s-2) var(--s-3);
-    min-height: 88px;
-    line-height: var(--lh-body);
-    font-family: inherit;
-    resize: vertical;
-  }
-  .url-row {
-    display: flex;
-    gap: var(--s-2);
-    align-items: stretch;
-    min-width: 0;
-  }
-  .url-row .input {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  .fetch-btn {
-    min-height: var(--hit);
-    padding: 0 var(--s-3);
-    background: var(--accent);
-    color: var(--accent-text);
-    border: 1px solid var(--accent);
-    border-radius: var(--r-sm);
     font-family: var(--f-sans);
+    outline: none;
+    transition: border-color var(--m-fast) var(--m-ease),
+                background var(--m-fast) var(--m-ease);
+  }
+  .field-input::placeholder { color: var(--text-4); }
+  .field-input:hover { border-color: var(--border-2); }
+  .field-input:focus {
+    border-color: var(--accent);
+    background: var(--surface);
+  }
+  .field-textarea {
+    min-height: 84px;
+    padding: 10px 12px;
+    resize: vertical;
+    line-height: var(--lh-body);
+    font-family: var(--f-sans);
+  }
+
+  /* ── URL row + Fetch button ───────────────────────────────────────── */
+  .field-url {
+    display: flex; gap: 8px;
+    min-width: 0;
+  }
+  .field-url .field-input { flex: 1; min-width: 0; }
+  .btn.field-url-fetch {
+    height: 40px; min-height: 40px;
+    padding: 0 14px;
     font-size: var(--t-13);
-    font-weight: var(--w-sb);
-    cursor: pointer;
-    flex: 0 0 auto;
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
+    font-weight: var(--w-md);
+    flex-shrink: 0;
   }
-  .fetch-btn:hover:not(:disabled) {
-    background: var(--accent-strong);
-    border-color: var(--accent-strong);
-  }
-  .fetch-btn:disabled {
+  .btn.field-url-fetch:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
   .field-error {
+    display: inline-flex; align-items: center; gap: 6px;
     color: var(--danger);
     font-size: var(--t-12);
+    line-height: 1.3;
   }
-  .games-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--s-1);
-    align-items: center;
-  }
-  .game-chip {
-    display: inline-flex;
-    align-items: center;
-    padding: var(--s-1) var(--s-2);
-    background: var(--surface-3);
-    color: var(--text-2);
-    border: 1px solid var(--border);
-    border-radius: var(--r-pill);
-    font-family: var(--f-sans);
-    font-size: var(--t-12);
-    cursor: pointer;
-    transition:
-      background var(--m-fast) var(--m-ease),
-      color var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
-  }
-  .game-chip[data-active="1"] {
-    background: var(--accent-soft);
-    color: var(--accent);
-    border-color: var(--accent-strong);
-  }
-  .game-chip:hover:not(:disabled) {
-    border-color: var(--accent-strong);
-  }
-  .game-chip:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  .off-topic-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--s-1);
-    padding: var(--s-1) var(--s-2);
-    border: 1px solid var(--border);
-    border-radius: var(--r-pill);
-    background: var(--surface-3);
-    color: var(--text-2);
-    font-size: var(--t-12);
-    cursor: pointer;
-  }
-  .off-topic-toggle input {
-    width: 14px;
-    height: 14px;
-    min-height: 0;
-  }
-  .footer {
-    display: flex;
-    gap: var(--s-2);
-    justify-content: flex-end;
-    align-items: center;
-    padding-top: var(--s-2);
-    border-top: 1px solid var(--border-hairline);
-    margin-top: var(--s-2);
-  }
-  .footer-btn {
-    min-height: var(--hit);
-    padding: var(--s-2) var(--s-4);
+  .field-error svg { width: 12px; height: 12px; flex-shrink: 0; }
+  .field-fetch-result {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-hairline);
     border-radius: var(--r-sm);
+    color: var(--text-2);
+    font-size: var(--t-12);
+    flex-wrap: wrap;
+  }
+  .field-fetch-result b { color: var(--text); font-weight: var(--w-md); }
+  .field-fetch-ico {
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+
+  /* ── Author picker pill (in title label row) ──────────────────────── */
+  .author-pick { position: relative; }
+  .author-pick-trigger {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 8px 3px 3px;
+    background: var(--surface-2);
     border: 1px solid var(--border);
-    background: transparent;
-    color: var(--text);
+    border-radius: var(--r-pill);
+    color: var(--text-2);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
     cursor: pointer;
-    font-family: var(--f-sans);
-    font-size: var(--t-13);
-    font-weight: var(--w-sb);
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
+    transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
   }
-  .footer-btn:hover:not(:disabled) {
-    background: var(--accent-soft);
-    border-color: var(--accent-strong);
+  .author-pick-trigger:hover {
+    background: var(--surface-3);
+    border-color: var(--border-2);
+    color: var(--text);
   }
-  .footer-btn:disabled {
-    opacity: 0.5;
+  .author-pick-trigger:disabled {
+    opacity: 0.6;
     cursor: not-allowed;
   }
-  .footer-btn-ghost {
-    background: transparent;
+  .author-pick-trigger .author-avatar {
+    width: 20px; height: 20px;
+    font-size: 11px;
   }
-  .footer-btn-primary {
+  .author-pick-name {
+    color: var(--text);
+    letter-spacing: -0.005em;
+  }
+  .author-pick-chev {
+    display: inline-flex; color: var(--text-3);
+    margin-right: 2px;
+  }
+  .author-avatar {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--surface-3);
+    color: var(--text-3);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    font-weight: var(--w-sb);
+    padding: 0;
+  }
+  .author-avatar[data-mine="1"] {
     background: var(--accent);
     color: var(--accent-text);
     border-color: var(--accent);
   }
-  .footer-btn-primary:hover:not(:disabled) {
-    background: var(--accent-strong);
-    border-color: var(--accent-strong);
+
+  /* ── Chip-grid (kind + games picker) ──────────────────────────────── */
+  .kind-grid {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    align-items: center;
   }
+  .chip {
+    display: inline-flex; align-items: center; gap: var(--s-2);
+    padding: 0 var(--s-3);
+    height: 28px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    border-radius: var(--r-pill);
+    font-size: var(--t-12); font-weight: var(--w-md);
+    transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+    white-space: nowrap;
+  }
+  .chip.kind-chip {
+    height: 34px;
+    padding: 0 12px 0 14px;
+    gap: 8px;
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+  }
+  .chip.add-kind-chip,
+  .chip.add-game-chip {
+    background: var(--surface-2);
+    color: var(--text-3);
+    border-color: var(--border);
+    box-shadow: inset 3px 0 0 color-mix(in oklab, var(--card-accent) 55%, transparent);
+    cursor: pointer;
+    transition: background var(--m-fast) var(--m-ease),
+                color var(--m-fast) var(--m-ease),
+                border-color var(--m-fast) var(--m-ease),
+                transform var(--m-fast) var(--m-ease);
+  }
+  .chip.add-kind-chip .kind-icon {
+    color: var(--card-accent, var(--text-3));
+    opacity: 0.6;
+    transition: opacity var(--m-fast) var(--m-ease);
+  }
+  .chip.add-kind-chip:hover:not(:disabled),
+  .chip.add-game-chip:hover:not(:disabled) {
+    background: var(--surface-3);
+    color: var(--text-2);
+    border-color: var(--border-2);
+  }
+  .chip.add-kind-chip:hover .kind-icon { opacity: 0.9; }
+  .chip.add-kind-chip[data-active="1"],
+  .chip.add-game-chip[data-active="1"] {
+    background: color-mix(in oklab, var(--card-accent) 32%, var(--surface));
+    border-color: var(--card-accent);
+    color: var(--text);
+    box-shadow: inset 3px 0 0 var(--card-accent),
+                0 1px 0 rgba(255,255,255,.04) inset,
+                0 2px 6px rgba(0,0,0,.25);
+    transform: scale(1.06);
+    font-weight: var(--w-sb);
+    height: 36px;
+  }
+  .chip.add-kind-chip[data-active="1"] .kind-icon {
+    color: var(--card-accent);
+    opacity: 1;
+  }
+  .chip.off-topic-add {
+    box-shadow: none;
+    border-style: dashed;
+    padding-left: 12px;
+  }
+  .chip.off-topic-add[data-active="1"] {
+    background: var(--surface-3);
+    border-color: var(--text-2);
+    border-style: dashed;
+    color: var(--text);
+    box-shadow: 0 1px 0 rgba(255,255,255,.04) inset,
+                0 2px 6px rgba(0,0,0,.25);
+    transform: scale(1.06);
+    font-weight: var(--w-sb);
+    height: 36px;
+  }
+  .chip:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* ── Foot hint + inline date picker ───────────────────────────────── */
+  .modal-foot-hint {
+    color: var(--text-3);
+    font-size: var(--t-12);
+    padding-top: 4px;
+    padding-bottom: 8px;
+  }
+  .modal-foot-hint b {
+    color: var(--text-2); font-weight: var(--w-md);
+  }
+  .modal-date-edit {
+    position: relative;
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 6px;
+    margin: -2px 0 -2px -4px;
+    border-radius: var(--r-xs);
+    cursor: pointer;
+    transition: background var(--m-fast) var(--m-ease);
+    color: var(--text-2);
+    font-weight: var(--w-md);
+  }
+  .modal-date-pencil {
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--text-4);
+    opacity: 0.7;
+    transition: color var(--m-fast), opacity var(--m-fast);
+  }
+  @media (hover: hover) {
+    .modal-date-edit:hover {
+      background: var(--surface-2);
+      box-shadow: inset 0 0 0 1px var(--border-hairline);
+    }
+    .modal-date-edit:hover .modal-date-pencil {
+      color: var(--text-2);
+      opacity: 1;
+    }
+  }
+  .modal-date-native {
+    position: absolute; inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color-scheme: dark;
+    font: inherit;
+  }
+  :global([data-theme="light"]) .modal-date-native { color-scheme: light; }
+
+  /* ── Footer (Cancel / Save) ───────────────────────────────────────── */
+  .modal-foot {
+    display: flex; gap: 8px; align-items: center; justify-content: flex-end;
+    padding: 12px 18px;
+    border-top: 1px solid var(--border-hairline);
+    background: var(--surface);
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: var(--s-2);
+    padding: 0 var(--s-3);
+    min-height: var(--hit);
+    border-radius: var(--r-sm);
+    font-size: var(--t-13); font-weight: var(--w-md);
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-family: var(--f-sans);
+    transition: background var(--m-fast) var(--m-ease),
+                border-color var(--m-fast),
+                color var(--m-fast);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn.primary {
+    background: var(--accent); color: var(--accent-text);
+    font-weight: var(--w-sb);
+    box-shadow: 0 1px 0 rgba(255,255,255,.18) inset, 0 1px 2px rgba(0,0,0,.25);
+  }
+  .btn.primary:hover:not(:disabled) {
+    background: var(--accent-strong);
+  }
+  .btn.ghost {
+    background: var(--surface-2); color: var(--text); border-color: var(--border);
+  }
+  .btn.ghost:hover:not(:disabled) {
+    background: var(--surface-3); border-color: var(--border-2);
+  }
+
+  /* Mobile ↓ */
+  @media (max-width: 540px) {
+    .add-event-form { padding: 12px 14px 0; gap: 14px; }
+    .modal-foot { padding: 10px 14px; }
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .game-chip,
-    .fetch-btn,
-    .footer-btn,
-    .input {
+    .chip,
+    .btn,
+    .field-input,
+    .author-pick-trigger,
+    .modal-date-edit {
       transition: none;
     }
   }

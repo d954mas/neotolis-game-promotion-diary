@@ -1,12 +1,16 @@
 <script lang="ts">
   // AddEventModal — D-16 dialog wrapper around AddEventForm.
   //
+  // Visual contract: 1:1 with docs/design/v2/ui-kit/add-event-modal.jsx
+  // + .modal / .modal-head / .modal-body / .modal-foot CSS rules in
+  // docs/design/v2/ui-kit/index.html.
+  //
   // Owns:
-  //   - <dialog> element + .showModal() / .close() coordination
-  //   - tryClose dirty-confirm gate (D-16): scrim click / Esc / X button
+  //   - <dialog> element + .showModal() / .close() coordination.
+  //   - tryClose dirty-confirm gate (D-16): scrim click / Esc / × button
   //     all funnel through tryClose so an in-progress form doesn't get
-  //     thrown away by an accidental click
-  //   - 560px overlay sizing per design v2
+  //     thrown away by an accidental click.
+  //   - 560px overlay sizing per design v2.
   //
   // Does NOT own: field state, URL fetch, save mutation. Those live
   // inside AddEventForm so the route mount (which has no <dialog>) gets
@@ -33,6 +37,7 @@
     games,
     initialKind = "post",
     initialAttachedGameIds = [],
+    currentUserName = "",
     onSave,
     onClose,
   }: {
@@ -40,6 +45,7 @@
     games: GameDto[];
     initialKind?: EventKind;
     initialAttachedGameIds?: string[];
+    currentUserName?: string;
     onSave: (payload: AddEventPayload) => Promise<void>;
     onClose: () => void;
   } = $props();
@@ -48,6 +54,7 @@
   let dirty = $state(false);
 
   // Open / close the native <dialog> in response to the `open` prop.
+  // SSR-safe note: $effect only runs in the browser, never during SSR.
   $effect(() => {
     if (!dialogEl) return;
     if (open && !dialogEl.open) {
@@ -67,7 +74,7 @@
 
 <dialog
   bind:this={dialogEl}
-  class="add-event-modal"
+  class="add-event-modal modal"
   oncancel={(e) => {
     e.preventDefault();
     tryClose();
@@ -76,26 +83,22 @@
     if (e.target === dialogEl) tryClose();
   }}
 >
-  <header class="header">
-    <h2 class="header-title">{m.add_event_modal_title()}</h2>
+  <header class="modal-head">
+    <h2 class="modal-title">{m.add_event_modal_title()}</h2>
     <button
       type="button"
-      class="close-btn"
+      class="modal-close"
       aria-label={m.add_event_modal_close_aria()}
       onclick={tryClose}
-    >
-      ×
-    </button>
+    >×</button>
   </header>
   <AddEventForm
     {games}
     {initialKind}
     {initialAttachedGameIds}
+    {currentUserName}
     onSave={async (payload) => {
       await onSave(payload);
-      // Caller resets dirty by closing the modal (open=false → $effect
-      // runs dialogEl.close()); we DO NOT call onClose here directly to
-      // give the caller room to show the success toast first.
     }}
     onCancel={tryClose}
     onDirtyChange={(d) => (dirty = d)}
@@ -103,55 +106,65 @@
 </dialog>
 
 <style>
+  /* Prototype 1:1 — mirrors .modal / .modal-head / .modal-title /
+   * .modal-close from docs/design/v2/ui-kit/index.html.
+   *
+   * Native <dialog> opened via showModal() lives in the browser top-layer
+   * which auto-centers; explicit margin: auto reinforces the centering
+   * when the page CSS sets a different default. The flex column layout
+   * scopes to [open] so when the dialog is closed it stays display:none
+   * (default) and doesn't render in flow before showModal hoists it. */
+  .add-event-modal[open] {
+    display: flex; flex-direction: column;
+  }
   .add-event-modal {
-    width: min(560px, 100vw - 32px);
-    max-height: calc(100vh - 64px);
+    width: min(560px, calc(100vw - 32px));
+    max-height: min(86vh, 760px);
     padding: 0;
-    border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    background: var(--surface-2);
-    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-lg);
     box-shadow: var(--shadow-elev);
+    color: var(--text);
     margin: auto;
     overflow: hidden;
   }
   .add-event-modal::backdrop {
     background: var(--overlay-dark);
+    backdrop-filter: blur(2px) saturate(120%);
+    -webkit-backdrop-filter: blur(2px) saturate(120%);
   }
-  .header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--s-3) var(--s-4);
+  .modal-head {
+    display: flex; align-items: center;
+    padding: 14px 18px 12px;
     border-bottom: 1px solid var(--border-hairline);
+    flex-shrink: 0;
   }
-  .header-title {
+  .modal-title {
+    margin: 0; flex: 1;
     font-size: var(--t-15);
     font-weight: var(--w-sb);
-    margin: 0;
+    letter-spacing: -0.005em;
     color: var(--text);
   }
-  .close-btn {
-    min-width: var(--hit);
-    min-height: var(--hit);
-    background: transparent;
-    border: 1px solid transparent;
-    color: var(--text-3);
-    cursor: pointer;
-    font-size: var(--t-17);
-    line-height: 1;
-    border-radius: var(--r-sm);
-    transition:
-      background var(--m-fast) var(--m-ease),
-      color var(--m-fast) var(--m-ease);
+  .modal-close {
+    background: transparent; border: 0; color: var(--text-3);
+    width: 28px; height: 28px; border-radius: var(--r-sm);
+    font-size: 18px; line-height: 1; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background var(--m-fast) var(--m-ease),
+                color var(--m-fast) var(--m-ease);
   }
-  .close-btn:hover {
-    background: var(--accent-soft);
-    color: var(--accent);
+  .modal-close:hover { background: var(--surface-2); color: var(--text); }
+
+  @media (max-width: 540px) {
+    .add-event-modal {
+      width: calc(100vw - 16px);
+      max-height: calc(100vh - 16px);
+    }
+    .modal-head { padding: 12px 14px; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .close-btn {
-      transition: none;
-    }
+    .modal-close { transition: none; }
   }
 </style>
