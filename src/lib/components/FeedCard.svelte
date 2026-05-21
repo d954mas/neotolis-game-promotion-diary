@@ -1068,15 +1068,25 @@
     font-weight: var(--w-md);
     white-space: nowrap;
   }
-  /* Game chip — slightly stronger contrast since it represents the primary
-   * association. The prototype tints with --game-color; we approximate
-   * with the accent until games carry colors. */
+  /* Game chip — neutral surface-2 (matches prototype `.game-chip` once
+   * the per-game `--game-color` var is unset, which is our current
+   * state: games don't carry a color yet). UAT cat C3: the accent tint
+   * read as a global "active filter" signal and visually competed with
+   * the active filter-axis game chip in the floor-2 chrome. Neutral
+   * grey makes the card-footer chip purely decorative — the active
+   * filter-axis game chip retains the accent treatment via DateRangeRow
+   * / FilterChips.
+   *
+   * The 3px inset stripe is retained as a faint border-2 hairline so
+   * the chip still echoes the prototype's "left-stripe in game color"
+   * pattern (visually muted) — when per-game colors land, swap
+   * var(--border-2) for var(--game-color, var(--border-2)). */
   .game-chip {
-    background: color-mix(in oklab, var(--accent) 14%, var(--surface));
-    border-color: color-mix(in oklab, var(--accent) 35%, var(--border));
-    box-shadow: inset 3px 0 0 var(--accent);
+    background: var(--surface-2);
+    border-color: var(--border);
+    box-shadow: inset 3px 0 0 var(--border-2);
     padding-left: 14px;
-    color: var(--text);
+    color: var(--text-2);
   }
   .inbox-chip {
     background: color-mix(in oklab, var(--warn) 14%, var(--surface));
