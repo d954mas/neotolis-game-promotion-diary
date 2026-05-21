@@ -124,7 +124,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   // (listFeedPage with scope=trash), so the deletedEvents list would be
   // redundant; we still return it (empty) for shape stability.
   const [page, gameRows, sourceRows, deletedRows] = await Promise.all([
-    listFeedPage(userId, filters, cursor, { scope }),
+    listFeedPage(userId, filters, cursor, { scope, sortDir: state.sortDir }),
     listGames(userId),
     // Include soft-deleted sources so the feed card can still resolve
     // channelTitle / displayName for events whose parent source the user

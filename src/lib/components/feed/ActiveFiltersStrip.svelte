@@ -28,6 +28,24 @@
   // FeedDateGroupHeader sticky math stable (LB-3).
 
   import { m } from "$lib/paraglide/messages.js";
+  import KindIcon from "$lib/components/KindIcon.svelte";
+  import type { EventKind } from "$lib/sources/adapter.js";
+
+  // Kind → CSS-var bridge so KIND chips carry their per-kind accent
+  // through --card-accent (consumed by .chip.active-chip[data-variant=kind]
+  // below + KindIcon.svelte color inheritance).
+  const KIND_ACCENT_VAR: Record<EventKind, string> = {
+    youtube_video: "var(--k-youtube)",
+    reddit_post: "var(--k-reddit)",
+    twitter_post: "var(--k-twitter)",
+    telegram_post: "var(--k-telegram)",
+    discord_drop: "var(--k-discord)",
+    conference: "var(--k-conference)",
+    talk: "var(--k-talk)",
+    press: "var(--k-press)",
+    post: "var(--k-post)",
+    other: "var(--k-other)",
+  };
 
   export type AxisChip = {
     // Discriminates the chip's color treatment (kind / game / author /
@@ -35,6 +53,10 @@
     axis: "show" | "game" | "kind" | "source" | "author";
     label: string;
     onRemove: () => void;
+    // Optional kind for KIND chips — drives the leading icon + accent.
+    kind?: EventKind;
+    // Optional CSS color string for GAME chips — drives --card-accent.
+    color?: string;
   };
 
   let {
@@ -55,9 +77,19 @@
         type="button"
         class="chip active-chip"
         data-variant={chip.axis}
+        style={chip.kind
+          ? `--card-accent: ${KIND_ACCENT_VAR[chip.kind]};`
+          : chip.color
+            ? `--card-accent: ${chip.color};`
+            : null}
         onclick={chip.onRemove}
         aria-label={m.feed_active_filters_remove_aria({ label: chip.label })}
       >
+        {#if chip.kind}
+          <span class="kind-icon" aria-hidden="true">
+            <KindIcon kind={chip.kind} size={14} />
+          </span>
+        {/if}
         <span>{chip.label}</span>
         <span class="x" aria-hidden="true">×</span>
       </button>
@@ -104,6 +136,20 @@
       background var(--m-fast) var(--m-ease),
       border-color var(--m-fast) var(--m-ease),
       color var(--m-fast) var(--m-ease);
+  }
+
+  .chip.active-chip .kind-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--card-accent, var(--accent));
+    flex-shrink: 0;
+    margin-right: 2px;
+  }
+  .chip.active-chip .kind-icon :global(svg) {
+    color: inherit;
+    width: 14px;
+    height: 14px;
   }
 
   .chip.active-chip .x {

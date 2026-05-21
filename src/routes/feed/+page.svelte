@@ -512,6 +512,7 @@
         // (KIND_INFO[k].label → axis-axis label). Falls back to the raw
         // kind id if the map is somehow missing the entry.
         label: KIND_AXIS_LABEL[k]?.() ?? k,
+        kind: k,
         onRemove: () => setKind(urlState.kind.filter((x) => x !== k)),
       });
     }

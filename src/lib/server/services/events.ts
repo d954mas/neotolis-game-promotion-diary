@@ -1109,13 +1109,18 @@ export async function listFeedPage(
   userId: string,
   filters: FeedFilters,
   cursor: string | null,
-  opts?: { scope?: "live" | "trash" },
+  opts?: { scope?: "live" | "trash"; sortDir?: "asc" | "desc" },
 ): Promise<FeedPage> {
   let parsedCursor: { at: Date; id: string } | null = null;
   if (cursor) parsedCursor = decodeCursor(cursor);
 
+  // sortDir flips both the ORDER BY direction AND the cursor comparison
+  // operator. With DESC sort the cursor needs <, with ASC sort it needs >.
+  const sortAsc = opts?.sortDir === "asc";
   const cursorClause = parsedCursor
-    ? sql`(${events.occurredAt}, ${events.id}) < (${parsedCursor.at}, ${parsedCursor.id})`
+    ? sortAsc
+      ? sql`(${events.occurredAt}, ${events.id}) > (${parsedCursor.at}, ${parsedCursor.id})`
+      : sql`(${events.occurredAt}, ${events.id}) < (${parsedCursor.at}, ${parsedCursor.id})`
     : sql`true`;
 
   // P1: userId filter is the FIRST clause and is literally present in the
@@ -1213,7 +1218,11 @@ export async function listFeedPage(
     .select()
     .from(events)
     .where(and(eq(events.userId, userId), ...filterParts, cursorClause))
-    .orderBy(sql`${events.occurredAt} DESC, ${events.id} DESC`)
+    .orderBy(
+      sortAsc
+        ? sql`${events.occurredAt} ASC, ${events.id} ASC`
+        : sql`${events.occurredAt} DESC, ${events.id} DESC`,
+    )
     .limit(FEED_PAGE_SIZE + 1);
 
   const hasMore = rows.length > FEED_PAGE_SIZE;
