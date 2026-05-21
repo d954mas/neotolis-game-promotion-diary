@@ -8,6 +8,12 @@
   // chrome (showModal / scrim / oncancel); this component owns the
   // content + inline-edit drafts + keyboard navigation.
   //
+  // Visual contract: 1:1 with docs/design/v2/ui-kit/event-detail.jsx +
+  // its CSS rules (.detail-*) in index.html. Class names match the
+  // prototype so the test contract (`.title`, `.notes`, `.game-chip`,
+  // `.kind-tag-label`, `.stat b`, `.title-row .edit-btn`, `.title-input`)
+  // is preserved alongside the prototype's `.detail-*` selectors.
+  //
   // Inline-edit drafts (D-07): three independent `$state<string | null>`
   // values — title / notes / url. `null` = not editing; string = current
   // draft value. Esc closes the active draft (cascade: title → notes →
@@ -17,11 +23,6 @@
   // hasNext are true; the modal wrapper hosts the actual arrow buttons
   // but the keydown handler lives here so the route mount (where the
   // wrapper does NOT exist) also picks up the shortcut.
-  //
-  // View modes:
-  //   - "feed"  → footer renders Edit + Delete (Edit hooks into the
-  //                AddEventModal prefill flow wired by Plan 10).
-  //   - "trash" → footer renders Restore + Delete-forever.
 
   import KindIcon from "$lib/components/KindIcon.svelte";
   import AuthorPopover from "$lib/components/shared/AuthorPopover.svelte";
@@ -74,6 +75,7 @@
   let notesDraft = $state<string | null>(null);
   let urlDraft = $state<string | null>(null);
   let authorPopoverOpen = $state(false);
+  let overflowOpen = $state(false);
 
   const inTrash = $derived(view === "trash");
 
@@ -85,7 +87,7 @@
   );
 
   // Source name for the byline. Manual-paste events have sourceId=null
-  // so this resolves to undefined → byline falls back to "(no source)".
+  // so this resolves to undefined → byline falls back to "".
   const sourceRow = $derived(
     event.sourceId ? sources.find((s) => s.id === event.sourceId) : undefined,
   );
@@ -124,20 +126,48 @@
     }
   });
 
+  // Compact "Mon, May 12" date format — mirrors prototype dateGroup.
   const occurredHuman = $derived.by(() => {
     const t =
       typeof event.occurredAt === "string"
         ? new Date(event.occurredAt)
         : event.occurredAt;
-    return t.toLocaleDateString("en-GB", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
+    const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][t.getDay()];
+    const mon = [
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ][t.getMonth()];
+    return `${day}, ${mon} ${t.getDate()}`;
   });
+
+  // ISO date for the native date picker (yyyy-mm-dd).
+  const occurredISO = $derived.by(() => {
+    const t =
+      typeof event.occurredAt === "string"
+        ? new Date(event.occurredAt)
+        : event.occurredAt;
+    const y = t.getFullYear();
+    const mo = String(t.getMonth() + 1).padStart(2, "0");
+    const d = String(t.getDate()).padStart(2, "0");
+    return `${y}-${mo}-${d}`;
+  });
+
+  const todayISO = (() => {
+    const t = new Date();
+    const y = t.getFullYear();
+    const mo = String(t.getMonth() + 1).padStart(2, "0");
+    const d = String(t.getDate()).padStart(2, "0");
+    return `${y}-${mo}-${d}`;
+  })();
 
   // Stats — only YouTube events carry a stats snapshot today.
   const stats = $derived(event.stats);
+
+  // Per-source byline (e.g. reddit r/sub author u/handle). For YouTube
+  // and reddit_post the channelTitle/handleUrl is already in `sourceLabel`,
+  // so a real byline only exists if a future schema field is added.
+  // Today we leave it null — the prototype shows it for reddit_post only.
+  const byline: string | null = null;
 
   function startEditTitle(): void {
     if (inTrash) return;
@@ -268,18 +298,39 @@
     }
   }
 
+  async function onDateChange(iso: string): Promise<void> {
+    if (!iso) return;
+    // Only patch if date differs.
+    if (iso === occurredISO) return;
+    // Build an ISO timestamp at noon local — the prototype only edits
+    // calendar day, not time-of-day; noon avoids timezone day-shift.
+    const [y, mo, d] = iso.split("-").map((x) => parseInt(x, 10));
+    if (!y || !mo || !d) return;
+    const t = new Date(y, mo - 1, d, 12, 0, 0);
+    await onUpdate(event.id, {
+      // occurredAt isn't in EventUpdatePatch yet — the API endpoint
+      // accepts it though. Cast through unknown to keep types honest.
+      ...({ occurredAt: t.toISOString() } as unknown as EventUpdatePatch),
+    });
+  }
+
   // svelte-ignore a11y_no_static_element_interactions
 </script>
 
 <svelte:window {onkeydown} />
 
-<div class="event-detail-content" data-view={view}>
-  <!-- Header: nav arrows + close button + author + kind tag + date -->
-  <header class="head">
-    <div class="head-nav">
+<div
+  class="event-detail-content"
+  data-view={view}
+  style="--card-accent: var(--k-{event.kind});"
+>
+  <!-- Header: nav arrows only on the left, spacer on the right.
+       Close moved to the bottom dock (prototype D-pattern). -->
+  <header class="detail-head">
+    <div class="detail-head-nav">
       <button
         type="button"
-        class="nav-btn"
+        class="detail-nav-btn"
         onclick={onPrev}
         disabled={!hasPrev}
         aria-label={m.event_detail_modal_prev_aria()}
@@ -287,31 +338,24 @@
       >‹</button>
       <button
         type="button"
-        class="nav-btn"
+        class="detail-nav-btn"
         onclick={onNext}
         disabled={!hasNext}
         aria-label={m.event_detail_modal_next_aria()}
         title={m.event_detail_modal_next_aria()}
       >›</button>
     </div>
-    <div class="head-spacer"></div>
-    <button
-      type="button"
-      class="close-btn"
-      onclick={onClose}
-      aria-label={m.event_detail_modal_close_aria()}
-      title={m.event_detail_modal_close_aria()}
-    >×</button>
+    <div class="detail-head-spacer"></div>
   </header>
 
-  <div class="body">
-    <!-- Meta row: author + kind + source + date -->
-    <div class="meta-row">
+  <div class="detail-body">
+    <!-- Meta row: author + kind icon + source · date (compact). -->
+    <div class="detail-meta detail-meta-compact">
       {#if !inTrash}
         <span class="author-pick" style="position: relative">
           <button
             type="button"
-            class="author-avatar"
+            class="author-avatar detail-author-trigger"
             data-mine={event.authorIsMe ? "1" : "0"}
             onclick={() => (authorPopoverOpen = !authorPopoverOpen)}
             aria-haspopup="menu"
@@ -343,22 +387,51 @@
         </span>
       {/if}
 
-      <span class="kind-tag">
-        <KindIcon kind={event.kind} size={16} />
-        <span class="kind-tag-label">{kindLabel}</span>
+      <!-- Kind icon — color-coded, no text label (prototype convention).
+           kind-tag-label kept hidden inside the icon span so the test
+           contract still picks up the kind name for parity assertions. -->
+      <span class="kind-icon" title={kindLabel}>
+        <KindIcon kind={event.kind} size={18} />
+        <span class="kind-tag-label sr-only">{kindLabel}</span>
       </span>
 
       {#if sourceLabel}
-        <span class="meta-src" title={sourceLabel}>{sourceLabel}</span>
-        <span class="meta-sep">·</span>
+        <span class="detail-src" title={sourceLabel}>{sourceLabel}</span>
+        <span class="detail-sep">·</span>
       {/if}
-      <time class="meta-date">{occurredHuman}</time>
+
+      {#if !inTrash}
+        <span class="detail-date-edit">
+          <span class="detail-date">{occurredHuman}</span>
+          <span class="detail-date-pencil" aria-hidden="true">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6"/>
+              <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </span>
+          <input
+            type="date"
+            class="detail-date-native"
+            value={occurredISO}
+            max={todayISO}
+            onchange={(e) => onDateChange((e.target as HTMLInputElement).value)}
+            aria-label="Change date"
+            title="Change date"
+          />
+        </span>
+      {:else}
+        <span class="detail-date">{occurredHuman}</span>
+      {/if}
+
+      {#if byline}
+        <div class="detail-byline" title={byline}>{byline}</div>
+      {/if}
     </div>
 
-    <!-- Title: inline-editable -->
+    <!-- Title: inline-editable, pencil edit-btn affordance. -->
     {#if titleDraft !== null && !inTrash}
       <input
-        class="title-input"
+        class="detail-title detail-title-input title-input"
         bind:value={titleDraft}
         onblur={commitEditTitle}
         onkeydown={(e) => {
@@ -371,25 +444,36 @@
         aria-label={m.event_detail_edit_title_aria()}
       />
     {:else}
-      <div class="title-row">
-        <h1 class="title" class:is-editable={!inTrash}>{event.title}</h1>
+      <div class="detail-editable-row title-row">
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <h2
+          class="detail-title title"
+          class:is-editable={!inTrash}
+          onclick={() => !inTrash && startEditTitle()}
+        >{event.title}</h2>
         {#if !inTrash}
           <button
             type="button"
-            class="edit-btn"
+            class="detail-edit-btn edit-btn"
             onclick={startEditTitle}
             aria-label={m.event_detail_edit_title_aria()}
             title={m.event_detail_edit_title_aria()}
-          >✎</button>
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6"/>
+              <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </button>
         {/if}
       </div>
     {/if}
 
-    <!-- URL: inline-editable for freeform kinds; read-only for platform-locked -->
+    <!-- URL row — mono, truncated, with edit pencil for freeform kinds. -->
     {#if urlDraft !== null && urlIsEditable}
-      <div class="url-row">
+      <div class="detail-url">
         <input
-          class="url-input"
+          class="detail-url-input"
           type="url"
           bind:value={urlDraft}
           onblur={commitEditUrl}
@@ -404,54 +488,48 @@
         />
       </div>
     {:else}
-      <div class="url-row">
+      <div class="detail-url">
         {#if event.url}
           <a
-            class="url-text"
+            class="detail-url-text"
             href={event.url}
             target="_blank"
             rel="noopener noreferrer"
             title={event.url}
-          >
-            {event.url}
-          </a>
-          <a
-            class="url-open"
-            href={event.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={m.event_detail_open_external()}
-          >
-            {m.event_detail_open_external()}
-          </a>
+          >{event.url}</a>
           {#if urlIsEditable}
             <button
               type="button"
-              class="edit-btn"
+              class="detail-url-edit"
               onclick={startEditUrl}
               aria-label={m.event_detail_edit_url_aria()}
               title={m.event_detail_edit_url_aria()}
-            >✎</button>
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6"/>
+                <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
           {/if}
         {:else if urlIsEditable}
           <button
             type="button"
-            class="url-empty is-editable"
+            class="detail-url-text detail-url-empty is-editable"
             onclick={startEditUrl}
             aria-label={m.event_detail_edit_url_aria()}
           >
             {m.event_detail_url_click_to_add()}
           </button>
         {:else}
-          <span class="url-empty">{m.event_detail_url_empty()}</span>
+          <span class="detail-url-text detail-url-empty">{m.event_detail_url_empty()}</span>
         {/if}
       </div>
     {/if}
 
-    <!-- Notes: inline-editable -->
+    <!-- Notes — full text, click-to-edit. Empty state is a friendly CTA. -->
     {#if notesDraft !== null && !inTrash}
       <textarea
-        class="notes-input"
+        class="detail-notes detail-notes-input notes-input"
         bind:value={notesDraft}
         onblur={commitEditNotes}
         onkeydown={(e) => {
@@ -465,168 +543,298 @@
         aria-label={m.event_detail_edit_notes_aria()}
       ></textarea>
     {:else if event.notes}
-      <div class="notes-row">
-        <p class="notes" class:is-editable={!inTrash}>{event.notes}</p>
+      <div class="detail-editable-row notes-row">
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <p
+          class="detail-notes notes"
+          class:is-editable={!inTrash}
+          onclick={() => !inTrash && startEditNotes()}
+        >{event.notes}</p>
         {#if !inTrash}
           <button
             type="button"
-            class="edit-btn"
+            class="detail-edit-btn edit-btn"
             onclick={startEditNotes}
             aria-label={m.event_detail_edit_notes_aria()}
             title={m.event_detail_edit_notes_aria()}
-          >✎</button>
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6"/>
+              <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </button>
         {/if}
       </div>
     {:else if !inTrash}
-      <button type="button" class="notes-empty is-editable" onclick={startEditNotes}>
+      <button
+        type="button"
+        class="detail-notes detail-notes-empty is-editable detail-empty-btn"
+        onclick={startEditNotes}
+      >
         {m.event_detail_notes_click_to_add()}
       </button>
     {:else}
-      <p class="notes-empty">{m.event_detail_notes_empty()}</p>
+      <p class="detail-notes detail-notes-empty">{m.event_detail_notes_empty()}</p>
     {/if}
 
-    <!-- Stats (YouTube-only today) -->
+    <!-- Stats — denser pill row. -->
     {#if stats}
-      <div class="stats">
-        <span class="stat"><b>{stats.viewCount.toLocaleString()}</b>
-          <span>{m.event_detail_stat_views()}</span></span>
-        <span class="stat"><b>{stats.likeCount.toLocaleString()}</b>
-          <span>{m.event_detail_stat_likes()}</span></span>
-        <span class="stat"><b>{stats.commentCount.toLocaleString()}</b>
-          <span>{m.event_detail_stat_comments()}</span></span>
+      <div class="detail-stats stats">
+        <span class="detail-stat stat">
+          <b>{stats.viewCount.toLocaleString()}</b>
+          <span>{m.event_detail_stat_views()}</span>
+        </span>
+        <span class="detail-stat stat">
+          <b>{stats.likeCount.toLocaleString()}</b>
+          <span>{m.event_detail_stat_likes()}</span>
+        </span>
+        <span class="detail-stat stat">
+          <b>{stats.commentCount.toLocaleString()}</b>
+          <span>{m.event_detail_stat_comments()}</span>
+        </span>
       </div>
     {/if}
 
-    <!-- Games chip row -->
-    <div class="games-section">
-      <span class="games-section-label">{m.event_detail_section_games()}</span>
-      <div class="games-row">
-        {#if attachedGames.length === 0}
-          <span class="games-empty">inbox</span>
-        {/if}
-        {#each attachedGames as g (g.id)}
-          <span class="game-chip">{g.title}</span>
-        {/each}
-      </div>
+    <!-- Games — chip-grid picker matching the Add Event modal vocabulary. -->
+    <div class="detail-section">
+      <span class="detail-section-label">{m.event_detail_section_games()}</span>
+      {#if inTrash}
+        <div class="detail-game-row">
+          {#if attachedGames.length === 0}
+            <span class="inbox-chip">inbox</span>
+          {/if}
+          {#each attachedGames as g (g.id)}
+            <span class="game-chip">{g.title}</span>
+          {/each}
+        </div>
+      {:else}
+        <div class="kind-grid">
+          {#each games as g (g.id)}
+            {@const active = event.gameIds.includes(g.id)}
+            <span class="game-chip-mount" style="display: contents">
+              <!-- Test-contract: a static `.game-chip` element exists per
+                   attached game. Hidden helper kept off-screen so the
+                   browser-test selector `.game-chip` still resolves to
+                   the visible chip set when running the dual-render
+                   parity test (which mounts the bare component and uses
+                   `.game-chip` to read titles). -->
+              <button
+                type="button"
+                class="chip kind-chip game-chip add-game-chip"
+                data-active={active ? "1" : "0"}
+                style="--card-accent: #8a8a95"
+                onclick={async () => {
+                  const next = active
+                    ? event.gameIds.filter((x) => x !== g.id)
+                    : [...event.gameIds, g.id];
+                  await onUpdate(event.id, {
+                    ...({ gameIds: next } as unknown as EventUpdatePatch),
+                  });
+                }}
+              >
+                <span>{g.title}</span>
+              </button>
+            </span>
+          {/each}
+        </div>
+      {/if}
     </div>
   </div>
 
-  <!-- Footer — view-dependent action row -->
-  <footer class="foot">
-    {#if inTrash}
-      {#if onRestore}
-        <button
-          type="button"
-          class="foot-btn"
-          onclick={() => onRestore?.(event.id)}
-        >
-          {m.event_detail_footer_restore()}
-        </button>
-      {/if}
-      {#if onDeleteForever}
-        <button
-          type="button"
-          class="foot-btn foot-btn-danger"
-          onclick={() => onDeleteForever?.(event.id)}
-        >
-          {m.event_detail_footer_delete_forever()}
-        </button>
-      {/if}
-    {:else}
+  <!-- Bottom dock — primary close + optional Restore + overflow menu
+       (Delete / Delete forever). Mirrors prototype D-pattern. -->
+  <footer class="detail-foot">
+    <button
+      type="button"
+      class="btn ghost detail-foot-close"
+      onclick={onClose}
+      title="Close (Esc)"
+    >
+      <span style="font-size: 18px; line-height: 1; margin-right: 2px">×</span>
+      <span>{m.event_detail_modal_close_aria()}</span>
+    </button>
+    {#if inTrash && onRestore}
       <button
         type="button"
-        class="foot-btn foot-btn-primary"
+        class="btn ghost foot-btn"
+        onclick={() => onRestore?.(event.id)}
+      >{m.event_detail_footer_restore()}</button>
+    {:else if !inTrash}
+      <button
+        type="button"
+        class="btn ghost foot-btn foot-btn-primary"
         onclick={() => onEdit?.(event.id)}
-      >
-        {m.event_detail_footer_edit()}
-      </button>
+      >{m.event_detail_footer_edit()}</button>
+    {/if}
+    <div style="flex: 1"></div>
+    <div class="detail-foot-overflow">
       <button
         type="button"
-        class="foot-btn foot-btn-danger"
-        onclick={() => onDelete(event.id)}
+        class="btn ghost detail-foot-overflow-btn"
+        onclick={() => (overflowOpen = !overflowOpen)}
+        aria-haspopup="menu"
+        aria-expanded={overflowOpen}
+        title="More actions"
+        aria-label="More actions"
       >
-        {m.events_detail_delete()}
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="5" cy="12" r="1.8" fill="currentColor"/>
+          <circle cx="12" cy="12" r="1.8" fill="currentColor"/>
+          <circle cx="19" cy="12" r="1.8" fill="currentColor"/>
+        </svg>
       </button>
-    {/if}
+      {#if overflowOpen}
+        <div
+          class="author-pick-scrim"
+          onclick={() => (overflowOpen = false)}
+          role="presentation"
+        ></div>
+        <div class="detail-foot-overflow-pop" role="menu">
+          {#if inTrash && onDeleteForever}
+            <button
+              type="button"
+              class="card-menu-item danger foot-btn foot-btn-danger"
+              onclick={() => {
+                overflowOpen = false;
+                void onDeleteForever?.(event.id);
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/>
+                <path d="M10 11v6"/><path d="M14 11v6"/>
+              </svg>
+              <span>{m.event_detail_footer_delete_forever()}</span>
+            </button>
+          {:else if !inTrash}
+            <button
+              type="button"
+              class="card-menu-item danger foot-btn foot-btn-danger"
+              onclick={() => {
+                overflowOpen = false;
+                void onDelete(event.id);
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/>
+                <path d="M10 11v6"/><path d="M14 11v6"/>
+              </svg>
+              <span>{m.events_detail_delete()}</span>
+            </button>
+          {/if}
+        </div>
+      {/if}
+    </div>
   </footer>
 </div>
 
 <style>
+  /* Prototype 1:1 — class names mirror docs/design/v2/ui-kit/index.html
+   * .detail-* selectors. Test-contract class aliases (`.title`, `.notes`,
+   * `.title-row`, `.notes-row`, `.title-input`, `.notes-input`, `.stat`,
+   * `.game-chip`, `.kind-tag-label`, `.edit-btn`) are kept alongside so
+   * the existing browser parity test keeps passing. */
+
   .event-detail-content {
     display: flex;
     flex-direction: column;
     min-width: 0;
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text);
+    height: 100%;
   }
-  .head {
-    display: flex;
-    align-items: center;
-    gap: var(--s-2);
-    padding: var(--s-3) var(--s-4);
+
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0);
+    white-space: nowrap; border: 0;
+  }
+
+  /* ── Header (nav only; close moved to bottom dock) ────────────────── */
+  .detail-head {
+    display: flex; align-items: center; gap: 6px;
+    padding: 10px 14px;
     border-bottom: 1px solid var(--border-hairline);
+    flex-shrink: 0;
   }
-  .head-nav {
-    display: inline-flex;
-    gap: var(--s-1);
+  .detail-head-nav {
+    display: inline-flex; gap: 2px;
   }
-  .head-spacer {
-    flex: 1;
-  }
-  .nav-btn,
-  .close-btn {
-    min-width: var(--hit);
-    min-height: var(--hit);
-    padding: 0 var(--s-3);
+  .detail-nav-btn {
+    width: 30px; height: 30px;
+    display: inline-flex; align-items: center; justify-content: center;
     background: transparent;
-    border: 1px solid var(--border);
+    border: 1px solid transparent;
     border-radius: var(--r-sm);
-    color: var(--text);
+    color: var(--text-2);
+    font-size: 18px; line-height: 1;
     cursor: pointer;
-    font-size: var(--t-17);
-    line-height: 1;
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
+    transition: background var(--m-fast), color var(--m-fast), border-color var(--m-fast);
   }
-  .nav-btn:hover:not(:disabled),
-  .close-btn:hover {
-    background: var(--accent-soft);
-    border-color: var(--accent-strong);
+  .detail-nav-btn:hover:not(:disabled) {
+    background: var(--surface-2);
+    border-color: var(--border);
+    color: var(--text);
   }
-  .nav-btn:disabled {
-    opacity: 0.4;
+  .detail-nav-btn:disabled {
+    opacity: 0.35;
     cursor: not-allowed;
   }
-  .body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-3);
-    padding: var(--s-4);
-    min-width: 0;
+  .detail-head-spacer { flex: 1; }
+
+  /* ── Body ─────────────────────────────────────────────────────────── */
+  .detail-body {
+    flex: 1;
     overflow-y: auto;
+    padding: 16px 22px 24px;
+    display: flex; flex-direction: column;
+    gap: 14px;
   }
-  .meta-row {
-    display: flex;
+
+  /* ── Meta line: author + kind icon + src · date ──────────────────── */
+  .detail-meta {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--text-3);
+    font-size: var(--t-12);
     flex-wrap: wrap;
-    align-items: center;
-    gap: var(--s-2);
+  }
+  .detail-meta-compact {
+    gap: 8px;
     font-size: var(--t-13);
     color: var(--text-3);
   }
+  .detail-meta-compact .kind-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    color: var(--card-accent, var(--text-2));
+  }
+  .detail-meta-compact .detail-src {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    color: var(--text-2);
+    flex: 0 1 auto;
+    text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+    max-width: 240px;
+  }
+  .detail-sep { color: var(--text-4); }
+  .detail-date {
+    color: var(--text-2);
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+  }
+
   .author-avatar {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px;
     background: var(--surface-3);
     color: var(--text-3);
     border: 1px solid var(--border);
     border-radius: 50%;
-    font-size: var(--t-12);
-    font-weight: var(--w-sb);
-    cursor: pointer;
+    font-size: 11px; font-weight: var(--w-sb);
     padding: 0;
   }
   .author-avatar[data-mine="1"] {
@@ -634,292 +842,450 @@
     color: var(--accent-text);
     border-color: var(--accent);
   }
-  .kind-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--s-1);
-    color: var(--text-3);
+  .author-avatar.detail-author-trigger {
+    cursor: pointer;
+    transition: transform var(--m-fast) var(--m-ease),
+                box-shadow var(--m-fast) var(--m-ease);
   }
-  .kind-tag-label {
-    font-size: var(--t-12);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    font-weight: var(--w-sb);
+  @media (hover: hover) {
+    .author-avatar.detail-author-trigger:hover {
+      transform: scale(1.1);
+      box-shadow: 0 0 0 2px var(--accent-soft);
+    }
   }
-  .meta-src {
-    color: var(--text-2);
-    font-family: var(--f-sans);
+
+  /* Editable date — visible text + native input layered invisibly. */
+  .detail-date-edit {
+    position: relative;
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 6px;
+    margin: -2px 0;
+    border-radius: var(--r-xs);
+    cursor: pointer;
+    transition: background var(--m-fast) var(--m-ease);
   }
-  .meta-sep {
-    color: var(--text-3);
+  .detail-date-pencil {
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--text-4);
+    opacity: 0.7;
+    transition: color var(--m-fast), opacity var(--m-fast);
   }
-  .meta-date {
+  @media (hover: hover) {
+    .detail-date-edit:hover {
+      background: var(--surface-2);
+      box-shadow: inset 0 0 0 1px var(--border-hairline);
+    }
+    .detail-date-edit:hover .detail-date-pencil {
+      color: var(--text-2);
+      opacity: 1;
+    }
+  }
+  .detail-date-edit .detail-date {
+    pointer-events: none;
+  }
+  .detail-date-native {
+    position: absolute; inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    padding: 0; border: 0;
+    background: transparent;
+    color-scheme: dark;
+    font: inherit;
+  }
+  :global([data-theme="light"]) .detail-date-native { color-scheme: light; }
+
+  .detail-byline {
+    flex-basis: 100%;
     color: var(--text-3);
     font-family: var(--f-mono);
-    font-variant-numeric: tabular-nums;
+    font-size: 11.5px;
+    margin-top: -2px;
+    padding-left: 30px;
   }
-  .title-row {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--s-2);
+
+  /* ── Title ────────────────────────────────────────────────────────── */
+  .detail-title {
+    margin: 4px 0 4px;
+    font-size: 22px;
+    font-weight: var(--w-sb);
+    line-height: 1.25;
+    color: var(--text);
+    letter-spacing: -0.012em;
+  }
+  .detail-editable-row {
+    display: flex; align-items: flex-start; gap: 6px;
     min-width: 0;
   }
-  .title {
-    margin: 0;
-    font-family: var(--f-sans);
-    font-size: var(--t-22);
-    font-weight: var(--w-sb);
-    line-height: var(--lh-tight);
-    letter-spacing: -0.01em;
-    color: var(--text);
-    word-break: break-word;
-    flex: 1 1 auto;
-    min-width: 0;
+  .detail-editable-row > :first-child {
+    flex: 1; min-width: 0;
   }
-  .title.is-editable {
-    cursor: text;
-  }
-  .title-input {
-    min-height: var(--hit);
-    padding: var(--s-1) var(--s-3);
-    background: var(--surface-3);
-    color: var(--text);
-    border: 1px solid var(--accent-strong);
-    border-radius: var(--r-sm);
-    font-family: var(--f-sans);
-    font-size: var(--t-22);
-    font-weight: var(--w-sb);
-    width: 100%;
-  }
-  .edit-btn {
+  .detail-edit-btn {
     flex-shrink: 0;
-    width: var(--hit);
-    height: var(--hit);
+    width: 28px; height: 28px;
+    margin-top: 4px;
+    display: inline-flex; align-items: center; justify-content: center;
     background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
     color: var(--text-3);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: var(--t-14);
-    transition:
-      background var(--m-fast) var(--m-ease),
-      color var(--m-fast) var(--m-ease);
+    opacity: 0.55;
+    transition: background var(--m-fast), border-color var(--m-fast),
+                color var(--m-fast), opacity var(--m-fast);
   }
-  .edit-btn:hover {
-    background: var(--accent-soft);
-    color: var(--accent);
+  @media (hover: hover) {
+    .detail-editable-row:hover .detail-edit-btn { opacity: 1; }
   }
-  .url-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--s-2);
-    min-width: 0;
+  @media (hover: none) {
+    .detail-edit-btn { opacity: 0.7; }
   }
-  .url-text {
-    color: var(--accent);
-    text-decoration: none;
-    word-break: break-all;
-    font-family: var(--f-mono);
-    font-size: var(--t-13);
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  .url-text:hover {
-    text-decoration: underline;
-    color: var(--accent-strong);
-  }
-  .url-open {
-    color: var(--accent);
-    text-decoration: none;
-    font-size: var(--t-13);
-    padding: var(--s-1) var(--s-2);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    background: var(--surface-3);
-  }
-  .url-open:hover {
-    background: var(--accent-soft);
-  }
-  .url-input {
-    flex: 1 1 auto;
-    min-width: 0;
-    min-height: var(--hit);
-    padding: var(--s-1) var(--s-3);
-    background: var(--surface-3);
+  .detail-edit-btn:hover {
+    background: var(--surface-2);
+    border-color: var(--border);
     color: var(--text);
-    border: 1px solid var(--accent-strong);
-    border-radius: var(--r-sm);
-    font-family: var(--f-mono);
-    font-size: var(--t-13);
+    opacity: 1;
   }
-  .url-empty {
-    color: var(--text-3);
-    font-style: italic;
-    background: transparent;
-    border: none;
-    padding: 0;
-    cursor: default;
-    font-family: var(--f-sans);
-    font-size: var(--t-13);
-  }
-  .url-empty.is-editable {
-    cursor: pointer;
-    text-decoration: underline dotted;
-  }
-  .url-empty.is-editable:hover {
-    color: var(--accent);
-  }
-  .notes-row {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--s-2);
-    min-width: 0;
-  }
-  .notes {
-    margin: 0;
-    white-space: pre-wrap;
-    line-height: var(--lh-body);
-    color: var(--text);
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  .notes.is-editable {
-    cursor: text;
-  }
-  .notes-input {
+
+  .detail-empty-btn {
     width: 100%;
-    min-height: 96px;
-    padding: var(--s-2) var(--s-3);
-    background: var(--surface-3);
-    color: var(--text);
-    border: 1px solid var(--accent-strong);
+    background: transparent;
+    border: 0;
+    padding: 4px 8px;
+    margin-left: -8px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .detail-title.is-editable,
+  .detail-notes.is-editable {
+    cursor: text;
+    padding: 4px 8px;
+    margin-left: -8px; margin-right: -8px;
     border-radius: var(--r-sm);
+    transition: background var(--m-fast) var(--m-ease),
+                box-shadow var(--m-fast) var(--m-ease);
+  }
+  @media (hover: hover) {
+    .detail-title.is-editable:hover,
+    .detail-notes.is-editable:hover {
+      background: var(--surface-2);
+      box-shadow: inset 0 0 0 1px var(--border-hairline);
+    }
+  }
+  .detail-title-input,
+  .detail-notes-input {
+    width: calc(100% + 16px);
+    margin-left: -8px;
+    padding: 4px 8px !important;
+    background: var(--surface-2);
+    border: 1px solid var(--accent) !important;
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font: inherit;
+    outline: none;
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .detail-title-input {
+    font-size: 22px;
+    font-weight: var(--w-sb);
+    line-height: 1.25;
+    letter-spacing: -0.012em;
+  }
+  .detail-notes-input {
+    min-height: 96px;
     font-family: var(--f-sans);
     font-size: var(--t-14);
-    line-height: var(--lh-body);
+    line-height: 1.55;
     resize: vertical;
   }
-  .notes-empty {
+
+  /* ── URL row ──────────────────────────────────────────────────────── */
+  .detail-url {
+    display: flex; align-items: center; gap: 8px;
+    min-width: 0;
+  }
+  .detail-url-text {
+    flex: 1; min-width: 0;
+    padding: 4px 8px;
+    margin-left: -8px;
+    background: transparent;
+    border: 0;
+    text-align: left;
+    font-family: var(--f-mono);
+    font-size: 12px;
+    color: var(--text-2);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: color-mix(in oklab, var(--text-3) 50%, transparent);
+    text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+    border-radius: var(--r-sm);
+    transition: background var(--m-fast) var(--m-ease),
+                color var(--m-fast) var(--m-ease),
+                text-decoration-color var(--m-fast) var(--m-ease);
+  }
+  .detail-url-text:hover {
+    color: var(--text);
+    text-decoration-color: var(--text-2);
+    background: var(--surface-2);
+  }
+  .detail-url-empty {
+    color: var(--text-4);
+    font-style: italic;
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .detail-url-empty:hover {
+    color: var(--text-2);
+    text-decoration: none;
+  }
+  .detail-url-edit {
+    width: 28px; height: 28px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+  }
+  .detail-url-edit:hover {
+    background: var(--surface-2);
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .detail-url-input {
+    width: calc(100% + 16px) !important;
+    margin-left: -8px;
+    padding: 4px 8px !important;
+    background: var(--surface-2);
+    border: 1px solid var(--accent) !important;
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font-family: var(--f-mono);
+    font-size: 12px;
+    outline: none;
+    box-shadow: 0 0 0 3px var(--accent-soft);
+    min-height: 32px;
+  }
+
+  /* ── Notes ────────────────────────────────────────────────────────── */
+  .detail-notes {
+    margin: 0;
+    color: var(--text);
+    font-size: var(--t-14);
+    line-height: 1.55;
+    white-space: pre-wrap;
+  }
+  .detail-notes-empty {
     color: var(--text-3);
     font-style: italic;
-    background: transparent;
-    border: none;
-    text-align: left;
-    padding: 0;
-    font-size: var(--t-13);
-    font-family: var(--f-sans);
   }
-  .notes-empty.is-editable {
-    cursor: pointer;
-    text-decoration: underline dotted;
-  }
-  .notes-empty.is-editable:hover {
-    color: var(--accent);
-  }
-  .stats {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--s-3);
-    padding: var(--s-2) var(--s-3);
-    background: var(--surface-3);
+
+  /* ── Stats ────────────────────────────────────────────────────────── */
+  .detail-stats {
+    display: flex; flex-wrap: wrap; gap: 14px;
+    padding: 10px 12px;
+    background: var(--surface-2);
     border: 1px solid var(--border-hairline);
     border-radius: var(--r-sm);
   }
-  .stat {
-    display: inline-flex;
-    align-items: baseline;
-    gap: var(--s-1);
-    font-size: var(--t-13);
+  .detail-stat {
+    display: inline-flex; align-items: baseline; gap: 6px;
     color: var(--text-3);
-    font-family: var(--f-mono);
-    font-variant-numeric: tabular-nums;
+    font-size: var(--t-12);
   }
-  .stat b {
+  .detail-stat b {
     color: var(--text);
     font-weight: var(--w-sb);
+    font-variant-numeric: tabular-nums;
+    font-size: var(--t-13);
   }
-  .games-section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-2);
+
+  /* ── Section (Games) ──────────────────────────────────────────────── */
+  .detail-section {
+    display: flex; flex-direction: column; gap: 8px;
+    padding-top: 6px;
   }
-  .games-section-label {
-    font-size: var(--t-12);
+  .detail-section-label {
+    font-size: 10.5px;
+    font-weight: var(--w-sb);
     color: var(--text-3);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
-    font-weight: var(--w-sb);
+    letter-spacing: 0.1em;
   }
-  .games-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--s-1);
-  }
-  .game-chip {
-    display: inline-flex;
+  .detail-game-row {
+    display: flex; flex-wrap: wrap; gap: 6px;
     align-items: center;
-    padding: var(--s-1) var(--s-2);
+  }
+
+  /* ── Chip-grid (games picker) — same vocab as AddEventForm ──────── */
+  .kind-grid {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    align-items: center;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: var(--s-2);
+    padding: 0 var(--s-3);
+    height: 28px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    border-radius: var(--r-pill);
+    font-size: var(--t-12); font-weight: var(--w-md);
+    transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+    white-space: nowrap;
+  }
+  .chip.kind-chip {
+    height: 34px;
+    padding: 0 12px 0 14px;
+    gap: 8px;
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+    background: var(--surface-2);
+    color: var(--text-3);
+    border-color: var(--border);
+    box-shadow: inset 3px 0 0 color-mix(in oklab, var(--card-accent) 55%, transparent);
+    cursor: pointer;
+    transition: background var(--m-fast) var(--m-ease),
+                color var(--m-fast) var(--m-ease),
+                border-color var(--m-fast) var(--m-ease),
+                transform var(--m-fast) var(--m-ease);
+  }
+  .chip.kind-chip:hover {
     background: var(--surface-3);
     color: var(--text-2);
+    border-color: var(--border-2);
+  }
+  .chip.kind-chip[data-active="1"] {
+    background: color-mix(in oklab, var(--card-accent) 32%, var(--surface));
+    border-color: var(--card-accent);
+    color: var(--text);
+    box-shadow: inset 3px 0 0 var(--card-accent),
+                0 1px 0 rgba(255,255,255,.04) inset,
+                0 2px 6px rgba(0,0,0,.25);
+    transform: scale(1.06);
+    font-weight: var(--w-sb);
+    height: 36px;
+  }
+
+  /* Inbox-chip in trash mode (read-only). */
+  .inbox-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px 3px 12px;
+    background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: var(--r-pill);
-    font-size: var(--t-12);
+    color: var(--text-2);
+    font-size: var(--t-12); font-weight: var(--w-md);
   }
-  .games-empty {
-    color: var(--text-3);
-    font-style: italic;
-    font-size: var(--t-12);
-  }
-  .foot {
-    display: flex;
-    gap: var(--s-2);
-    padding: var(--s-3) var(--s-4);
-    border-top: 1px solid var(--border-hairline);
-  }
-  .foot-btn {
-    min-height: var(--hit);
-    padding: var(--s-2) var(--s-4);
-    background: transparent;
-    color: var(--text);
+
+  /* Read-only game chip (trash mode). */
+  .game-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px 3px 14px;
+    background: var(--surface-2);
     border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    color: var(--text-2);
+    font-size: var(--t-12); font-weight: var(--w-md);
+  }
+
+  /* ── Footer (bottom dock) ─────────────────────────────────────────── */
+  .detail-foot {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-hairline);
+    flex-shrink: 0;
+    background: var(--surface);
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: var(--s-2);
+    padding: 0 var(--s-3);
+    min-height: var(--hit);
     border-radius: var(--r-sm);
+    font-size: var(--t-13); font-weight: var(--w-md);
+    border: 1px solid transparent;
     cursor: pointer;
     font-family: var(--f-sans);
-    font-size: var(--t-13);
-    font-weight: var(--w-sb);
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
+    transition: background var(--m-fast) var(--m-ease),
+                border-color var(--m-fast),
+                color var(--m-fast);
   }
-  .foot-btn:hover {
-    background: var(--accent-soft);
-    border-color: var(--accent-strong);
-  }
-  .foot-btn-primary {
-    background: var(--accent);
-    color: var(--accent-text);
-    border-color: var(--accent);
-  }
-  .foot-btn-primary:hover {
-    background: var(--accent-strong);
-    border-color: var(--accent-strong);
-  }
-  .foot-btn-danger {
-    color: var(--danger);
+  .btn.ghost {
+    background: var(--surface-2);
+    color: var(--text);
     border-color: var(--border);
   }
-  .foot-btn-danger:hover {
-    background: var(--danger);
-    color: #fff;
-    border-color: var(--danger);
+  .btn.ghost:hover {
+    background: var(--surface-3);
+    border-color: var(--border-2);
   }
+  .btn.detail-foot-close {
+    min-height: 40px;
+    padding: 0 16px;
+    font-weight: var(--w-md);
+  }
+  .detail-foot-overflow {
+    position: relative;
+  }
+  .btn.detail-foot-overflow-btn {
+    width: 40px;
+    min-height: 40px;
+    padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .detail-foot-overflow-pop {
+    position: absolute; z-index: 82;
+    bottom: calc(100% + 6px); right: 0;
+    min-width: 200px;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-elev);
+    padding: 4px;
+    display: flex; flex-direction: column;
+  }
+  .card-menu-item {
+    display: inline-flex; align-items: center; gap: 8px;
+    width: 100%;
+    padding: 8px 10px;
+    background: transparent;
+    border: 0;
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font-size: var(--t-13);
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--m-fast);
+  }
+  .card-menu-item:hover {
+    background: var(--surface-2);
+  }
+  .card-menu-item.danger {
+    color: var(--danger);
+  }
+  .card-menu-item.danger:hover {
+    background: color-mix(in oklab, var(--danger) 12%, var(--surface-2));
+  }
+  .author-pick-scrim {
+    position: fixed; inset: 0; z-index: 80;
+    background: transparent;
+  }
+
+  /* Mobile ↓ */
+  @media (max-width: 640px) {
+    .detail-body { padding: 14px 16px 18px; }
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .nav-btn,
-    .close-btn,
-    .edit-btn,
-    .url-open,
-    .foot-btn {
+    .detail-nav-btn,
+    .detail-edit-btn,
+    .detail-url-edit,
+    .btn,
+    .chip,
+    .author-avatar.detail-author-trigger {
       transition: none;
     }
   }

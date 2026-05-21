@@ -99,24 +99,33 @@
 </dialog>
 
 <style>
-  /* D-05: centered modal 760px overlay; max-height window-h minus 64px so
-   * the dialog never hugs the viewport edge. v2 tokens throughout. */
+  /* D-05 + prototype .detail-modal — centered dialog up to 760px wide,
+   * max-height = min(86vh, 820px) so the dialog never hugs the viewport
+   * edge. Mirrors docs/design/v2/ui-kit/index.html .detail-modal. */
+  .event-detail-modal[open] {
+    display: flex; flex-direction: column;
+  }
   .event-detail-modal {
-    width: min(760px, 100vw - 32px);
-    max-height: calc(100vh - 64px);
+    width: min(760px, calc(100vw - 32px));
+    max-height: min(86vh, 820px);
     padding: 0;
-    border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    background: var(--surface-2);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-lg);
+    background: var(--surface);
     box-shadow: var(--shadow-elev);
     color: var(--text);
-    /* The native modal uses the browser top-layer, which itself centers
-     * the dialog; explicit margin: auto reinforces the centering when the
-     * page CSS sets a different default. */
     margin: auto;
     overflow: hidden;
   }
   .event-detail-modal::backdrop {
     background: var(--overlay-dark);
+    backdrop-filter: blur(2px) saturate(120%);
+    -webkit-backdrop-filter: blur(2px) saturate(120%);
+  }
+  @media (max-width: 640px) {
+    .event-detail-modal {
+      width: calc(100vw - 12px);
+      max-height: calc(100vh - 12px);
+    }
   }
 </style>
