@@ -441,13 +441,15 @@
   // (escape hatch). Hoisted above activeAxes so the strip's kind-label
   // lookup sees it. Empty kinds still render so the user can predict
   // counts; data-empty="1" dims their count badge.
+  // Only kinds with a real adapter or manual-entry path are surfaced in
+  // the KIND axis. Twitter / Telegram / Discord are declared in the
+  // schema enum but have no adapter or paste flow — PROJECT.md flags
+  // them as out-of-scope for v1. They stay in the DB enum (forward
+  // compatibility) but never appear in the filter UI.
   const KIND_AXIS_ORDER: readonly EventKind[] = [
     "youtube_video",
-    "press",
     "reddit_post",
-    "twitter_post",
-    "telegram_post",
-    "discord_drop",
+    "press",
     "post",
     "conference",
     "talk",
