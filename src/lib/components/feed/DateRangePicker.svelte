@@ -45,6 +45,8 @@
   let {
     value,
     open,
+    anchorTop = 0,
+    anchorLeft = 0,
     today,
     onApply,
     onClear,
@@ -52,11 +54,40 @@
   }: {
     value: { from: Date | null; to: Date | null } | null;
     open: boolean;
+    anchorTop?: number;
+    anchorLeft?: number;
     today: Date;
     onApply: (range: { from: Date; to: Date }) => void;
     onClear: () => void;
     onClose: () => void;
   } = $props();
+
+  // Non-modal popover: handle click-outside + Esc manually since
+  // dialog.show() doesn't render a scrim.
+  $effect(() => {
+    if (typeof window === "undefined") return;
+    if (!open) return;
+    const handler = (e: MouseEvent): void => {
+      const el = dialogEl;
+      if (!el) return;
+      if (e.target instanceof Node && !el.contains(e.target)) {
+        onClose();
+      }
+    };
+    const keyHandler = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") onClose();
+    };
+    // Defer one tick so the click that OPENED the picker doesn't immediately close it.
+    const t = setTimeout(() => {
+      document.addEventListener("click", handler, true);
+      document.addEventListener("keydown", keyHandler);
+    }, 0);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("click", handler, true);
+      document.removeEventListener("keydown", keyHandler);
+    };
+  });
 
   // ─── Date helpers (port-local, not exported) ─────────────────────────
   const WEEK_DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] as const;
@@ -125,7 +156,10 @@
   $effect(() => {
     const el = dialogEl;
     if (!el) return;
-    if (open && !el.open) el.showModal();
+    // Non-modal `.show()` so the picker behaves as a popover anchored to
+    // the date-chip, not a centered modal. Matches prototype which uses
+    // `position: fixed` with computed top/left from anchorRect.
+    if (open && !el.open) el.show();
     if (!open && el.open) el.close();
   });
 
@@ -244,15 +278,11 @@
 <dialog
   bind:this={dialogEl}
   class="date-range-picker"
+  style="top: {anchorTop}px; left: {anchorLeft}px;"
   aria-label={m.feed_date_range_picker_close_aria()}
   oncancel={(e) => {
     e.preventDefault();
     onClose();
-  }}
-  onclick={(e) => {
-    // Click on the backdrop (the <dialog> element itself, not its
-    // children) closes — children stop propagation via .panel wrapper.
-    if (e.target === dialogEl) onClose();
   }}
 >
   <div
@@ -489,19 +519,19 @@
 </dialog>
 
 <style>
-  /* ─── Dialog reset — native <dialog> baseline is browser-default
-   * (centered, scrim via ::backdrop). The body-scroll-lock rule at
-   * src/app.css (LB-7, html:has(dialog[open])) automatically catches
-   * this element since it's a native <dialog>. */
+  /* ─── Anchored popover — non-modal <dialog> positioned via inline
+   * top/left from the date-chip's getBoundingClientRect (set by caller
+   * DateRangeRow). Mirrors prototype `.date-picker`
+   * (docs/design/v2/ui-kit/index.html lines 1145-1151). */
   .date-range-picker {
+    position: fixed;
+    z-index: 61;
     background: transparent;
     border: 0;
     padding: 0;
+    margin: 0;
     max-width: calc(100vw - 32px);
     color: var(--text);
-  }
-  .date-range-picker::backdrop {
-    background: rgba(0, 0, 0, 0.4);
   }
 
   .panel {

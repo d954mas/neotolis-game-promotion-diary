@@ -32,6 +32,18 @@
   } = $props();
 
   let pickerOpen = $state<boolean>(false);
+  let chipEl: HTMLButtonElement | undefined = $state();
+  let anchorTop = $state<number>(0);
+  let anchorLeft = $state<number>(0);
+
+  function openPicker(): void {
+    if (chipEl) {
+      const rect = chipEl.getBoundingClientRect();
+      anchorTop = rect.bottom + 4;
+      anchorLeft = rect.left;
+    }
+    pickerOpen = true;
+  }
 
   // Chip label mirrors prototype docs/design/v2/ui-kit/app.jsx lines 774-778:
   // shows the RESOLVED date range for preset values (e.g., "Apr 13 — May 14"
@@ -71,10 +83,11 @@
 
 <div class="date-range-row">
   <button
+    bind:this={chipEl}
     type="button"
     class="date-chip"
     data-custom={dateRange.preset === "custom" ? "1" : "0"}
-    onclick={() => (pickerOpen = true)}
+    onclick={openPicker}
     title="Pick a custom range"
   >
     <svg
@@ -155,6 +168,8 @@
 <DateRangePicker
   value={pickerValue}
   open={pickerOpen}
+  anchorTop={anchorTop}
+  anchorLeft={anchorLeft}
   {today}
   onApply={(range) => {
     onDateRangeChange({
