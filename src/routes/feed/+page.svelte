@@ -53,7 +53,7 @@
   //   - LB-12 (data-testid="feed-card" attribute) — preserved by FeedCard
 
   import { goto, invalidateAll } from "$app/navigation";
-  import { page } from "$app/state";
+  import { page, navigating } from "$app/state";
   import { m } from "$lib/paraglide/messages.js";
 
   import {
@@ -643,7 +643,7 @@
   );
 </script>
 
-<section class="feed">
+<section class="feed" data-navigating={navigating.to ? "1" : "0"}>
   <PageHead
     title={trashView ? m.feed_page_head_title_trash() : m.feed_page_head_title_feed()}
     view={trashView ? "trash" : "feed"}
@@ -941,6 +941,45 @@
     flex-direction: column;
     gap: var(--s-4);
     min-width: 0;
+  }
+
+  /* Optimistic loading state — visual feedback while SvelteKit's loader
+   * round-trip is in flight. `navigating.to` from $app/state is reactive
+   * (non-null when a navigation is pending). The .feed-grid dims and
+   * blocks input so the click feels registered immediately. */
+  .feed[data-navigating="1"] .feed-grid {
+    opacity: 0.55;
+    pointer-events: none;
+    cursor: progress;
+    transition: opacity var(--m-fast, 120ms) var(--m-ease, ease-out);
+  }
+  .feed[data-navigating="1"]::after {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--accent),
+      transparent
+    );
+    animation: feed-nav-progress 1s linear infinite;
+    z-index: 100;
+    pointer-events: none;
+  }
+  @keyframes feed-nav-progress {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .feed[data-navigating="1"]::after {
+      animation: none;
+      background: var(--accent);
+      opacity: 0.6;
+    }
   }
 
   /* Trash banner — persistent status row above the chip strip when
