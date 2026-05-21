@@ -34,6 +34,7 @@
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import InlineError from "./InlineError.svelte";
   import RefreshContentButton from "./RefreshContentButton.svelte";
+  import AuthorPopover from "./shared/AuthorPopover.svelte";
   // kindLabel is a shared helper so SourceRow and FiltersSheet's kind
   // glyph + label render resolve to the same wording.
   import { sourceKindLabel as kindLabel, type SourceKind } from "$lib/util/source-kind-label.js";
@@ -64,7 +65,16 @@
     source,
     cooldownSec = 0,
     pulling = false,
-  }: { source: DataSourceDto; cooldownSec?: number; pulling?: boolean } = $props();
+    currentUserName = "",
+  }: {
+    source: DataSourceDto;
+    cooldownSec?: number;
+    pulling?: boolean;
+    /** Display name for the AuthorPopover "(you)" line. Optional — when
+     *  omitted (no parent passes it) the popover falls back to the
+     *  generic "You" label. */
+    currentUserName?: string;
+  } = $props();
 
   const descriptionText = $derived(
     typeof source.metadata?.description === "string" && source.metadata.description.trim()
@@ -95,6 +105,111 @@
   function formatDateShort(when: Date | string): string {
     const t = typeof when === "string" ? new Date(when) : when;
     return t.toLocaleDateString("en-GB", { year: "numeric", month: "short", day: "numeric" });
+  }
+
+  // ── Inline-affordance state (Wave 2 Plan 09 — coexists with editing
+  //    edit-mode footer per D-08 mutual exclusion). The three new
+  //    inline patterns ride ON TOP of the existing Phase 02.1-33
+  //    edit-form footer; the gates below ensure renameMode and
+  //    editing are NEVER both true.
+  //
+  //    1. handle click → renameMode → contenteditable rename →
+  //       Enter/blur commits via PATCH /api/sources/:id (displayName)
+  //    2. avatar click → authorPopoverOpen → AuthorPopover →
+  //       PATCH /api/sources/:id (isOwnedByMe)
+  //    3. status pill (Live/Paused) click → toggle "active" → PATCH
+  //       /api/sources/:id. The backend schema accepts `autoImport`
+  //       (NOT a top-level `active` column on data_sources — autoImport
+  //       is the field that gates whether the polling worker pulls
+  //       new content for this source, which is exactly what the
+  //       Live/Paused pill represents). The prototype-side `source.active`
+  //       maps to our `source.autoImport`. See SUMMARY.md "Deviations"
+  //       for the rationale.
+  let renameMode = $state(false);
+  // Re-seeded from the current source row each time renameMode flips on
+  // (matches the existing editName seeding pattern below); a bare
+  // `$state(source.displayName ?? "")` initializer only captures the
+  // initial prop value and would render stale text on next open.
+  let renameDraft = $state("");
+  let authorPopoverOpen = $state(false);
+  let liveToggling = $state(false);
+
+  async function commitRename(): Promise<void> {
+    const next = renameDraft.trim();
+    if (next === "" || next === (source.displayName ?? "")) {
+      renameMode = false;
+      return;
+    }
+    try {
+      const res = await fetch(`/api/sources/${source.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ displayName: next }),
+      });
+      if (!res.ok) {
+        rowError = m.error_server_generic();
+      } else {
+        await invalidateAll();
+      }
+    } catch {
+      rowError = m.error_network();
+    } finally {
+      renameMode = false;
+    }
+  }
+
+  function cancelRename(): void {
+    renameMode = false;
+    renameDraft = "";
+  }
+
+  // Toggle the "active" status (Live ↔ Paused). The status pill is the
+  // user-facing label; the backend field is `autoImport` — same
+  // semantic (is this source pulling new content?).
+  async function toggleActive(): Promise<void> {
+    if (liveToggling) return;
+    liveToggling = true;
+    rowError = null;
+    const nextActive = !source.autoImport;
+    try {
+      const res = await fetch(`/api/sources/${source.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        // Prototype literal `active` mirrored as the semantically
+        // equivalent `autoImport` field. Backend Zod schema accepts
+        // autoImport on PATCH /api/sources/:id (Phase 02.1).
+        body: JSON.stringify({ autoImport: nextActive }),
+      });
+      if (!res.ok) {
+        rowError = m.error_server_generic();
+      } else {
+        await invalidateAll();
+      }
+    } catch {
+      rowError = m.error_network();
+    } finally {
+      liveToggling = false;
+    }
+  }
+
+  async function changeAuthor(isMe: boolean): Promise<void> {
+    rowError = null;
+    try {
+      const res = await fetch(`/api/sources/${source.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ isOwnedByMe: isMe }),
+      });
+      if (!res.ok) {
+        rowError = m.error_server_generic();
+      } else {
+        await invalidateAll();
+      }
+    } catch {
+      rowError = m.error_network();
+    } finally {
+      authorPopoverOpen = false;
+    }
   }
 
   let editing = $state(false);
@@ -200,14 +315,96 @@
       <SourceKindIcon kind={source.kind} />
       <span class="kind-tag-label">{kindLabel(source.kind)}</span>
     </span>
+
     {#if !editing}
-      <!-- displayName is not surfaced — the canonical channel title is
-           the identifier. Existing rows keep their displayName column
-           data for legacy compat but nothing renders it. -->
-      <a class="display" href="/sources/{source.id}">
-        {source.channelTitle ?? source.handleUrl}
-      </a>
+      <!-- Avatar — click opens AuthorPopover (D-11 — REUSE the same
+           shared popover the FeedCard + EventDetailModal use, no
+           re-implementation). Disabled while the edit-mode footer
+           is open (D-08 mutual exclusion). -->
+      <span class="author-pick">
+        <button
+          type="button"
+          class="author-avatar"
+          data-mine={source.isOwnedByMe ? "1" : "0"}
+          onclick={() => (authorPopoverOpen = !authorPopoverOpen)}
+          aria-haspopup="menu"
+          aria-expanded={authorPopoverOpen}
+          aria-label={source.isOwnedByMe
+            ? m.author_avatar_mine_aria({ name: currentUserName || "you" })
+            : m.author_avatar_unknown_aria()}
+        >
+          {source.isOwnedByMe ? (currentUserName[0] ?? "Y").toUpperCase() : "?"}
+        </button>
+        {#if authorPopoverOpen}
+          <AuthorPopover
+            authorIsMe={source.isOwnedByMe}
+            mineName={currentUserName || "You"}
+            onchange={changeAuthor}
+            onclose={() => (authorPopoverOpen = false)}
+          />
+        {/if}
+      </span>
     {/if}
+
+    <!-- Handle text — click to rename (D-08: inline-edit ONLY when
+         the existing Phase 02.1-33 edit-mode footer is NOT open).
+         editing=true → renameMode is BLOCKED. renameMode=true → the
+         pencil-to-edit-footer trigger is HIDDEN below. The canonical
+         channel title remains the identifier; rename targets the
+         user's displayName label, which the existing edit-form also
+         binds to (same field, two affordances). -->
+    {#if renameMode && !editing}
+      <input
+        class="handle-input"
+        bind:value={renameDraft}
+        onblur={commitRename}
+        onkeydown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void commitRename();
+          }
+          if (e.key === "Escape") cancelRename();
+        }}
+        maxlength="120"
+        aria-label="Rename source"
+      />
+    {:else if !editing}
+      <button
+        type="button"
+        class="handle-text"
+        onclick={() => {
+          renameMode = true;
+          renameDraft = source.displayName ?? source.channelTitle ?? source.handleUrl;
+        }}
+        title="Click to rename"
+      >
+        {source.channelTitle ?? source.handleUrl}
+      </button>
+    {:else}
+      <!-- editing=true: footer rename is in flight; show the static
+           name and keep inline rename mode disabled (D-08). -->
+      <span class="handle-text handle-text-disabled">
+        {source.channelTitle ?? source.handleUrl}
+      </span>
+    {/if}
+
+    {#if !editing}
+      <!-- Live/Paused status pill — click toggles "active" (backend
+           field: autoImport). Standalone signal; sits beside the
+           existing PollingBadge (preserved below) per D-09. -->
+      <button
+        type="button"
+        class="status-pill"
+        data-active={source.autoImport ? "1" : "0"}
+        onclick={toggleActive}
+        disabled={liveToggling}
+        aria-pressed={source.autoImport}
+        title={source.autoImport ? "Click to pause polling" : "Click to resume polling"}
+      >
+        {source.autoImport ? "Live" : "Paused"}
+      </button>
+    {/if}
+
     <span class="ownership-badge" class:mine={source.isOwnedByMe}>
       {source.isOwnedByMe ? m.sources_owned_by_me() : m.sources_owned_by_other()}
     </span>
@@ -378,6 +575,111 @@
   .display:hover {
     color: var(--accent);
     text-decoration: underline;
+  }
+  /* Inline-rename affordance — Wave 2 Plan 09. Click handle-text → button
+   * morphs into an input; Enter/blur commits. D-08 mutual exclusion
+   * keeps this hidden when the edit-mode footer is open. */
+  .handle-text {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--text);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    font-weight: var(--w-md);
+    cursor: pointer;
+    word-break: break-word;
+    min-width: 0;
+    text-align: left;
+    transition: color var(--m-fast) var(--m-ease);
+  }
+  .handle-text:hover {
+    color: var(--accent);
+    text-decoration: underline dotted;
+  }
+  .handle-text-disabled {
+    cursor: default;
+    color: var(--text-3);
+  }
+  .handle-input {
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-2);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--accent-strong);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    font-weight: var(--w-md);
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  /* AuthorPopover trigger — small 24×24 avatar; matches the
+   * EventDetailContent + FeedCard treatment so the Mine/Other vocabulary
+   * is consistent across surfaces. */
+  .author-pick {
+    position: relative;
+    display: inline-flex;
+  }
+  .author-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    background: var(--surface-3);
+    color: var(--text-3);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-sb);
+    cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .author-avatar[data-mine="1"] {
+    background: var(--accent);
+    color: var(--accent-text);
+    border-color: var(--accent);
+  }
+  .author-avatar:hover {
+    border-color: var(--accent-strong);
+  }
+  /* Live/Paused status pill — small clickable chip. Live = accent wash
+   * (same vocabulary as the existing .auto-pill); Paused = surface-3
+   * with text-3. Sits on the same line as kind + handle so the user
+   * can flip the source on/off without entering the edit-mode footer. */
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--s-0) var(--s-2);
+    background: var(--surface-3);
+    color: var(--text-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
+    cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .status-pill[data-active="1"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent-strong);
+  }
+  .status-pill:hover:not(:disabled) {
+    border-color: var(--accent-strong);
+  }
+  .status-pill:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
   .channel-title {
     color: var(--text-3);
