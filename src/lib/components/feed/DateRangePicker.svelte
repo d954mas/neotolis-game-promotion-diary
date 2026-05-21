@@ -42,6 +42,12 @@
   import { parseEventDate, startOfDay, fmtMonthDay } from "$lib/feed/date-range.js";
   import { m } from "$lib/paraglide/messages.js";
 
+  // `onClear` was removed from the picker UI in UAT cat C4c (the
+  // bottom-row dual-button Clear+Apply collapsed to a single Close
+  // button — auto-apply on the 2nd day click is the only commit path).
+  // Callers used to wire onClear to reset state to ?date=all; that
+  // affordance now lives in DateRangeRow's preset chip strip ("All time"
+  // chip) which is the canonical place to drop a custom range.
   let {
     value,
     open,
@@ -49,7 +55,6 @@
     anchorLeft = 0,
     today,
     onApply,
-    onClear,
     onClose,
   }: {
     value: { from: Date | null; to: Date | null } | null;
@@ -58,7 +63,6 @@
     anchorLeft?: number;
     today: Date;
     onApply: (range: { from: Date; to: Date }) => void;
-    onClear: () => void;
     onClose: () => void;
   } = $props();
 
@@ -316,6 +320,27 @@
               }
             }}
           />
+          <!-- Trailing calendar SVG icon (UAT cat C4d) — same shape as
+               DateRangeRow's date-chip glyph. Sits absolutely on the
+               right edge of .cal-input-row. The native date input below
+               overlays the icon area so a click on the icon = open the
+               browser's native date picker (the input gets the click,
+               not the SVG which is pointer-events:none). -->
+          <svg
+            class="cal-input-icon"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="3" y="5" width="18" height="16" rx="2" />
+            <path d="M16 3v4M8 3v4M3 11h18" />
+          </svg>
           <input
             type="date"
             class="cal-input-native"
@@ -354,6 +379,21 @@
               }
             }}
           />
+          <svg
+            class="cal-input-icon"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="3" y="5" width="18" height="16" rx="2" />
+            <path d="M16 3v4M8 3v4M3 11h18" />
+          </svg>
           <input
             type="date"
             class="cal-input-native"
@@ -367,20 +407,24 @@
       </label>
     </div>
 
-    <div class="cal-selection">
+    <!-- Range display header — prominent mono-font readout of the
+         currently-selected range. UAT cat C4a: lives above the calendar
+         grid, replaces the old subtle .cal-selection hint. Renders an
+         empty placeholder ("Pick a date range") when no anchor is set
+         so the layout never shifts between empty and partial states. -->
+    <div class="cal-range-display" data-empty={draft.from ? "0" : "1"}>
       {#if draft.from && draft.to}
-        <span>
-          <b>{fmtMonthDay(draft.from)}, {draft.from.getFullYear()}</b>
-          <i>→</i>
-          <b>{fmtMonthDay(draft.to)}, {draft.to.getFullYear()}</b>
-        </span>
+        <span class="cal-range-from">{fmtMonthDay(draft.from)}, {draft.from.getFullYear()}</span>
+        <span class="cal-range-sep" aria-hidden="true">—</span>
+        <span class="cal-range-to">{fmtMonthDay(draft.to)}, {draft.to.getFullYear()}</span>
       {:else if draft.from}
-        <span>
-          <b>{fmtMonthDay(draft.from)}, {draft.from.getFullYear()}</b>
-          <i>→ pick end date</i>
-        </span>
+        <span class="cal-range-from">{fmtMonthDay(draft.from)}, {draft.from.getFullYear()}</span>
+        <span class="cal-range-sep" aria-hidden="true">—</span>
+        <span class="cal-range-to cal-range-to-empty">…</span>
       {:else}
-        <span><i>Click a day to start</i></span>
+        <span class="cal-range-placeholder"
+          >{m.feed_date_range_picker_pick_range_placeholder()}</span
+        >
       {/if}
     </div>
 
@@ -499,20 +543,14 @@
       </div>
     {/if}
 
+    <!-- UAT cat C4c: single Close button replaces the Apply+Clear pair.
+         The picker AUTO-APPLIES on the second day click (see pickDay) and
+         on any input commit (commitDateInput) — Close just dismisses the
+         popover without changing state. -->
     <div class="cal-actions">
-      <button type="button" class="ghost" onclick={onClear}>
-        {m.feed_date_range_picker_clear()}
-      </button>
       <div style="flex: 1"></div>
-      <button
-        type="button"
-        class="primary"
-        disabled={!draft.from || !draft.to}
-        onclick={() => {
-          if (draft.from && draft.to) onApply({ from: draft.from, to: draft.to });
-        }}
-      >
-        {m.feed_date_range_picker_apply()}
+      <button type="button" class="primary" onclick={onClose}>
+        {m.feed_date_range_picker_close()}
       </button>
     </div>
   </div>
@@ -602,15 +640,24 @@
     width: 100%;
     min-width: 0;
   }
-  .cal-input-row::after {
-    content: "📅";
+  /* Trailing calendar SVG icon (UAT cat C4d) — replaces the 📅 emoji.
+   * pointer-events:none so the native date input layered on top
+   * (.cal-input-native) actually receives the click and opens the
+   * browser's date picker. The icon visually echoes DateRangeRow's
+   * date-chip glyph. */
+  .cal-input-row .cal-input-icon {
     position: absolute;
     right: 0;
     top: 50%;
     transform: translateY(-50%);
     pointer-events: none;
-    font-size: 13px;
-    opacity: 0.7;
+    color: var(--text-3);
+    opacity: 0.85;
+    flex-shrink: 0;
+  }
+  .cal-input:focus-within .cal-input-icon {
+    color: var(--accent);
+    opacity: 1;
   }
   .cal-input-native {
     position: absolute;
@@ -633,22 +680,45 @@
     padding-bottom: 10px;
   }
 
-  /* ─── Selection summary ─────────────────────────────────────────── */
-  .cal-selection {
+  /* ─── Range display header ──────────────────────────────────────────
+   * Prominent mono-font readout of the currently-selected range
+   * (UAT cat C4a). Sits above the calendar grid so the user always
+   * has the picked range in view while scrubbing through months /
+   * year-level navigation. min-height locks layout so toggling
+   * between empty / partial / full states never shifts the grid. */
+  .cal-range-display {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--s-2);
+    padding: 6px 4px 8px;
+    min-height: 30px;
+    font-family: var(--f-mono, ui-monospace);
     font-size: var(--t-13);
-    color: var(--text-2);
-    padding: 0 4px 4px;
-    min-height: 18px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.005em;
+    border-bottom: 1px solid var(--border-hairline);
   }
-  .cal-selection b {
+  .cal-range-display .cal-range-from,
+  .cal-range-display .cal-range-to {
     color: var(--text);
     font-weight: var(--w-sb);
-    font-variant-numeric: tabular-nums;
   }
-  .cal-selection i {
+  .cal-range-display .cal-range-to-empty {
+    color: var(--text-3);
+    font-weight: var(--w-md);
+  }
+  .cal-range-display .cal-range-sep {
+    color: var(--text-3);
+    font-weight: var(--w-md);
+  }
+  .cal-range-display[data-empty="1"] {
+    border-bottom-color: transparent;
+  }
+  .cal-range-display .cal-range-placeholder {
     color: var(--text-3);
     font-style: normal;
-    margin: 0 4px;
+    font-weight: var(--w-md);
   }
 
   /* ─── Header / nav ───────────────────────────────────────────────── */
@@ -855,22 +925,6 @@
     padding: 8px 4px 0;
     border-top: 1px solid var(--border-hairline);
   }
-  .cal-actions .ghost {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-2);
-    padding: 6px 12px;
-    border-radius: var(--r-sm);
-    font-size: var(--t-13);
-    cursor: pointer;
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
-  }
-  .cal-actions .ghost:hover {
-    background: var(--surface-2);
-    color: var(--text);
-  }
   .cal-actions .primary {
     background: var(--accent);
     color: var(--accent-text);
@@ -888,12 +942,6 @@
     background: var(--accent-strong);
     border-color: var(--accent-strong);
   }
-  .cal-actions .primary:disabled {
-    background: var(--surface-2);
-    color: var(--text-3);
-    border-color: var(--border);
-    cursor: not-allowed;
-  }
 
   @media (prefers-reduced-motion: reduce) {
     .cal-input,
@@ -901,7 +949,6 @@
     .cal-head-tab,
     .cal-day,
     .cal-coarse-cell,
-    .cal-actions .ghost,
     .cal-actions .primary {
       transition: none;
     }

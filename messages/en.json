@@ -598,7 +598,9 @@
   "feed_date_range_picker_to": "To",
   "feed_date_range_picker_apply": "Apply",
   "feed_date_range_picker_clear": "Clear",
+  "feed_date_range_picker_close": "Close",
   "feed_date_range_picker_close_aria": "Close date picker",
+  "feed_date_range_picker_pick_range_placeholder": "Pick a date range",
 
   "find_row_placeholder": "Search in current view…",
   "find_row_result_count": "{count} matches",

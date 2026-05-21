@@ -179,10 +179,6 @@
     });
     pickerOpen = false;
   }}
-  onClear={() => {
-    onDateRangeChange({ preset: "all" });
-    pickerOpen = false;
-  }}
   onClose={() => (pickerOpen = false)}
 />
 
