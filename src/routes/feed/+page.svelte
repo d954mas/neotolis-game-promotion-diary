@@ -866,6 +866,8 @@
           onOpenDetail={openDetail}
           onOpenGamesPickerForCard={openGamesPickerForCard}
           onDelete={onCardDelete}
+          onRestore={onModalRestore}
+          onDeleteForever={onModalDeleteForever}
           onChanged={() => invalidateAll()}
         />
       {/each}

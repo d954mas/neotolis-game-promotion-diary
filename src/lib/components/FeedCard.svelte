@@ -122,6 +122,8 @@
     onOpenDetail,
     onOpenGamesPickerForCard,
     onDelete,
+    onRestore,
+    onDeleteForever,
   }: {
     event: EventDtoLite;
     source: SourceLite | null;
@@ -135,6 +137,8 @@
     onOpenDetail?: (id: string) => void;
     onOpenGamesPickerForCard?: (id: string) => void;
     onDelete?: (id: string) => Promise<void> | void;
+    onRestore?: (id: string) => Promise<void> | void;
+    onDeleteForever?: (id: string) => Promise<void> | void;
   } = $props();
 
   // Touch long-press → enters selection mode after 480ms. cancelPress wires
@@ -374,37 +378,63 @@
         }
       }}
     >
-      <button
-        type="button"
-        role="menuitem"
-        onclick={() => {
-          menuOpen = false;
-          onOpenGamesPickerForCard?.(event.id);
-        }}
-      >
-        {m.feed_card_menu_edit_games()}
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        onclick={() => {
-          menuOpen = false;
-          onToggleSelect?.(event.id, true);
-        }}
-      >
-        {m.feed_card_menu_select()}
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        class="danger"
-        onclick={() => {
-          menuOpen = false;
-          void onDelete?.(event.id);
-        }}
-      >
-        {m.feed_card_menu_delete()}
-      </button>
+      {#if view === "trash"}
+        <!-- Trash view: Restore + Delete forever. The soft-delete + edit-games
+             actions don't make sense on an already-deleted row. -->
+        <button
+          type="button"
+          role="menuitem"
+          onclick={() => {
+            menuOpen = false;
+            void onRestore?.(event.id);
+          }}
+        >
+          Restore
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="danger"
+          onclick={() => {
+            menuOpen = false;
+            void onDeleteForever?.(event.id);
+          }}
+        >
+          Delete forever
+        </button>
+      {:else}
+        <button
+          type="button"
+          role="menuitem"
+          onclick={() => {
+            menuOpen = false;
+            onOpenGamesPickerForCard?.(event.id);
+          }}
+        >
+          {m.feed_card_menu_edit_games()}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          onclick={() => {
+            menuOpen = false;
+            onToggleSelect?.(event.id, true);
+          }}
+        >
+          {m.feed_card_menu_select()}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="danger"
+          onclick={() => {
+            menuOpen = false;
+            void onDelete?.(event.id);
+          }}
+        >
+          {m.feed_card_menu_delete()}
+        </button>
+      {/if}
     </div>
   {/if}
 
