@@ -455,7 +455,10 @@ describe("event_games + steam listing unique swap (0005 + 0006 split)", () => {
       // source.refresh_content_requested.
       // Plan 03.1-02 added 4 Reddit verbs (queue_drained, deletion_propagated,
       // cap_exhausted, adapter_degraded).
-      // Total: 23 + 4 (0008) + 5 (0010) + 1 (0023) + 4 (0030) = 37.
+      // Phase 03.4 Plan 06 (migration 0042) added 4 bulk-action verbs
+      // (events.bulk_edit, events.bulk_delete, events.delete_forever,
+      // events.purge_stale).
+      // Total: 23 + 4 (0008) + 5 (0010) + 1 (0023) + 4 (0030) + 4 (0042) = 41.
       expect(values).toContain("account.deleted");
       expect(values).toContain("account.restored");
       expect(values).toContain("account.exported");
@@ -470,7 +473,12 @@ describe("event_games + steam listing unique swap (0005 + 0006 split)", () => {
       expect(values).toContain("reddit.deletion_propagated");
       expect(values).toContain("reddit.cap_exhausted");
       expect(values).toContain("reddit.adapter_degraded");
-      expect(values).toHaveLength(37);
+      // Phase 03.4 Plan 06 audit verbs (migration 0042).
+      expect(values).toContain("events.bulk_edit");
+      expect(values).toContain("events.bulk_delete");
+      expect(values).toContain("events.delete_forever");
+      expect(values).toContain("events.purge_stale");
+      expect(values).toHaveLength(41);
     } finally {
       await pool.end();
     }
@@ -704,10 +712,16 @@ describe("migration 0010 baseline", () => {
       // Sanity: prior verbs still present.
       expect(values).toContain("quota.limit_hit");
       expect(values).toContain("event.detached_from_game");
-      // 27 + 5 (migration 0010) + 1 (migration 0023) + 4 (migration 0030 Reddit) = 37.
+      // 27 + 5 (migration 0010) + 1 (migration 0023) + 4 (migration 0030 Reddit)
+      // + 4 (migration 0042 Phase 03.4 bulk verbs) = 41.
       expect(values).toContain("source.refresh_content_requested");
       expect(values).toContain("reddit.queue_drained");
-      expect(values).toHaveLength(37);
+      // Phase 03.4 Plan 06 audit verbs (migration 0042).
+      expect(values).toContain("events.bulk_edit");
+      expect(values).toContain("events.bulk_delete");
+      expect(values).toContain("events.delete_forever");
+      expect(values).toContain("events.purge_stale");
+      expect(values).toHaveLength(41);
     } finally {
       await pool.end();
     }
