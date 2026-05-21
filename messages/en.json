@@ -561,5 +561,9 @@
   "about_section_self_host_body": "Indie-budget friendly: every infra component runs on free tiers or a small VPS. Production-ready Docker compose, deploy scripts, and a step-by-step operator runbook ship with the repository.",
   "about_section_self_host_runbook_link": "Read the deploy runbook",
   "about_footer_links_label": "Legal & contact",
-  "legal_back_to_about": "← Back to About"
+  "legal_back_to_about": "← Back to About",
+
+  "toast_close_aria": "Dismiss notification",
+  "author_popover_mine_label": "Mine ({name})",
+  "author_popover_someone_else": "Someone else"
 }
