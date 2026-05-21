@@ -39,6 +39,8 @@
     onToggleFilters,
     filtersOpen,
     activeFilterCount,
+    totalCount,
+    filteredCount,
     sticky = false,
     children,
   }: {
@@ -50,9 +52,15 @@
     onToggleFilters: () => void;
     filtersOpen: boolean;
     activeFilterCount: number;
+    totalCount?: number;
+    filteredCount?: number;
     sticky?: boolean;
     children?: import("svelte").Snippet;
   } = $props();
+
+  const isFiltered = $derived(
+    totalCount != null && filteredCount != null && filteredCount !== totalCount,
+  );
 
   let el: HTMLElement | undefined = $state();
 
@@ -77,9 +85,23 @@
 </script>
 
 <section class="page-head" class:sticky bind:this={el}>
-  <!-- Floor 1: display row (title + primary CTA) -->
-  <div class="floor display">
-    <h1>{title}</h1>
+  <!-- Floor 1: display row — titlegroup + primary CTA. Count summary sits
+       ABSOLUTELY under the H1 so its length doesn't affect layout. -->
+  <div class="floor display top">
+    <div class="titlegroup">
+      <h1>{title}</h1>
+      {#if totalCount != null}
+        <span class="summary" aria-label="Event count">
+          {#if isFiltered}
+            <b>{filteredCount}</b> of <b>{totalCount}</b>
+            {view === "trash" ? "items" : "events"}
+          {:else}
+            <b>{totalCount}</b> {view === "trash" ? "items" : "events"}
+          {/if}
+          {#if view === "trash"}<span class="sep">·</span>auto-removed in 30 days{/if}
+        </span>
+      {/if}
+    </div>
     {#if view === "feed"}
       <button type="button" class="cta-primary" onclick={onAddEvent}>
         + {m.add_event_modal_title()}
@@ -142,14 +164,46 @@
     flex-wrap: wrap;
     min-width: 0;
   }
-  .floor.display h1 {
+  .floor.top {
+    gap: var(--s-4);
+    align-items: flex-start;
+  }
+  .titlegroup {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding-bottom: 26px;
+  }
+  .titlegroup h1 {
     margin: 0;
     font-family: var(--f-sans);
     font-size: var(--t-22);
     font-weight: var(--w-sb);
     color: var(--text);
-    line-height: var(--lh-tight);
+    line-height: 1;
     letter-spacing: -0.01em;
+  }
+  .summary {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    white-space: nowrap;
+    color: var(--text-3);
+    font-size: var(--t-12);
+    font-family: var(--f-mono);
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+    pointer-events: none;
+  }
+  .summary b {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    font-weight: var(--w-md);
+  }
+  .summary .sep {
+    color: var(--text-3);
+    margin: 0 6px;
   }
   .cta-primary {
     display: inline-flex;
@@ -179,8 +233,12 @@
   .floor.utility {
     align-items: center;
   }
+  /* Search width-bounded per prototype `.page-head-search`
+   * (docs/design/v2/ui-kit/index.html line 176-181): grows to 420px max,
+   * basis 280px. Filters button sits next to it, not at far right. */
   .search {
-    flex: 1;
+    flex: 1 1 280px;
+    max-width: 420px;
     min-width: 0;
     background: var(--surface-2);
     border: 1px solid var(--border);

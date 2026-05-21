@@ -294,6 +294,13 @@
       padding: 0 var(--s-6);
     }
   }
+  /* Progressive hiding — matches prototype docs/design/v2/ui-kit/index.html
+   * lines 90-94 (tab labels drop at 480px; icons stay). */
+  @media (max-width: 480px) {
+    .tab-label {
+      display: none;
+    }
+  }
   @media (prefers-reduced-motion: reduce) {
     .nav-tab {
       transition: none;

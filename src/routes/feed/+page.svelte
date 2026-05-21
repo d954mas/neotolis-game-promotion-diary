@@ -608,6 +608,8 @@
     onToggleFilters={() => setFiltersOpen(!filtersOpen)}
     {filtersOpen}
     activeFilterCount={activeAxes.length}
+    totalCount={allRows.length}
+    filteredCount={groupedRows.reduce((n, g) => n + g.rows.length, 0)}
     sticky
   >
     <DateRangeRow
@@ -749,9 +751,9 @@
     </div>
   {/if}
 
-  <div class="feed-grid">
-    {#each groupedRows as group (group.date)}
-      <FeedDateGroupHeader occurredAt={group.occurredAt} />
+  {#each groupedRows as group (group.date)}
+    <FeedDateGroupHeader occurredAt={group.occurredAt} count={group.rows.length} />
+    <div class="feed-grid">
       {#each group.rows as row (row.id)}
         {@const Card = getCardComponent(row.kind) ?? FeedCard}
         <Card
@@ -769,16 +771,16 @@
           onChanged={() => invalidateAll()}
         />
       {/each}
-    {/each}
-    {#if !endReached}
-      <div class="sentinel" bind:this={sentinelEl} aria-hidden="true"></div>
-      {#if loading}
-        <p class="feed-status" role="status">{m.feed_loading_more()}</p>
-      {/if}
-    {:else if allRows.length > 0}
-      <p class="feed-status feed-end" role="status">{m.feed_no_more_events()}</p>
+    </div>
+  {/each}
+  {#if !endReached}
+    <div class="sentinel" bind:this={sentinelEl} aria-hidden="true"></div>
+    {#if loading}
+      <p class="feed-status" role="status">{m.feed_loading_more()}</p>
     {/if}
-  </div>
+  {:else if allRows.length > 0}
+    <p class="feed-status feed-end" role="status">{m.feed_no_more_events()}</p>
+  {/if}
 
   {#if !trashView && data.deletedEvents.length > 0}
     <RecoveryDialog
@@ -884,26 +886,26 @@
     border-bottom: 1px solid var(--border-hairline);
   }
 
-  /* v2 feed grid: single column < 640px; repeat(auto-fill, minmax(320px, 1fr))
-   * ≥ 640px; 3-column cap at --max-w. <FeedDateGroupHeader> spans the full
-   * row via `grid-column: 1 / -1` (sticky LB-3 math intact). */
+  /* v2 feed grid — mirrors prototype docs/design/v2/ui-kit/index.html
+   * .feed-grid (lines 836-842): 3 cols wide / 2 cols tablet / 1 col mobile.
+   * One feed-grid per date group; FeedDateGroupHeader sits BETWEEN grids
+   * (sticky LB-3 math intact via its own component CSS). */
   .feed-grid {
     display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--s-4);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--s-3);
     margin: 0;
     padding: 0;
     min-width: 0;
   }
-  @media (min-width: 640px) {
+  @media (max-width: 1024px) {
     .feed-grid {
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
-  @media (min-width: 1280px) {
+  @media (max-width: 640px) {
     .feed-grid {
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-      max-width: var(--max-w);
+      grid-template-columns: 1fr;
     }
   }
   .sentinel {

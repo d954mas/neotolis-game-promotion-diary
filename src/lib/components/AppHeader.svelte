@@ -79,11 +79,14 @@
 </header>
 
 <style>
-  /* v2 topbar — CSS Grid 3-column layout at ≥768px (brand | nav | userchip).
-   * Drops to 2-row stack at <768px (brand+userchip on row 1; nav spans
-   * row 2). The legacy `.app-header` class is preserved on the same
-   * <header> so existing CSS hooks / a11y tooling that grep for it
-   * continue to work; the new `.topbar` selector is the v2 grid driver. */
+  /* v2 topbar — CSS Grid 3-column layout (brand | nav | userchip) at all
+   * widths. Progressive hiding (per prototype docs/design/v2/ui-kit/index.html):
+   *   ≤1024px → wordmark "Promotion diary" hides (logo stays)
+   *   ≤820px  → UserChip email hides (avatar stays — see UserChip.svelte)
+   *   ≤480px  → Nav tab labels hide (icons stay — see Nav.svelte)
+   * The legacy `.app-header` class is preserved on the same <header> so
+   * existing CSS hooks / a11y tooling that grep for it continue to work;
+   * the new `.topbar` selector is the v2 grid driver. */
   .topbar {
     display: grid;
     grid-template-columns: auto 1fr auto;
@@ -138,30 +141,12 @@
       padding: var(--s-2) var(--s-6);
     }
   }
-  /* Below 768px the topbar can't fit brand + nav + userchip on one row
-   * without truncating. Fall back to two rows: brand+userchip on row 1
-   * (nav-tabs span the full width on row 2). The Phase 3.3 mobile Nav
-   * horizontal-scroll contract continues to apply because <Nav> itself
-   * uses overflow-x:auto + scrollbar-width:none. */
-  @media (max-width: 767px) {
-    .topbar {
-      grid-template-columns: auto auto;
-      grid-template-rows: auto auto;
-      padding: var(--s-2) var(--s-4);
-    }
-    .brand {
-      grid-column: 1;
-      grid-row: 1;
-    }
-    .userchip-slot {
-      grid-column: 2;
-      grid-row: 1;
-      justify-self: end;
-    }
-    .nav-tabs-slot {
-      grid-column: 1 / -1;
-      grid-row: 2;
-      justify-self: stretch;
+  /* Progressive hiding for narrow viewports — matches prototype
+   * docs/design/v2/ui-kit/index.html lines 84-89. The wordmark drops
+   * first so the topbar always reads cleanly without truncation. */
+  @media (max-width: 1024px) {
+    .wordmark {
+      display: none;
     }
   }
 </style>

@@ -186,8 +186,9 @@
     color: var(--text-3);
     flex-shrink: 0;
   }
-  /* 560px hard-coded breakpoint per UI-SPEC (no token covers this). */
-  @media (max-width: 560px) {
+  /* Progressive hiding — matches prototype docs/design/v2/ui-kit/index.html
+   * line 87-89 (email drops at 820px; avatar always visible). */
+  @media (max-width: 820px) {
     .email {
       display: none;
     }

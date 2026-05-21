@@ -277,7 +277,7 @@
   {:else}
     <div class="feedcard-grid">
       {#each groupedEvents as group (group.date)}
-        <FeedDateGroupHeader occurredAt={group.occurredAt} />
+        <FeedDateGroupHeader occurredAt={group.occurredAt} count={group.rows.length} />
         {#each group.rows as ev (ev.id)}
           <FeedCard
             event={ev}
