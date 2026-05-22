@@ -148,6 +148,26 @@
   // 6. Trash view conditional.
   let trashView = $derived(data.view === "trash");
 
+  // Navigating-overlay safeguard: navigating.to comes from $app/state and
+  // normally clears when the navigation completes or errors. If the dev
+  // server's vite-client websocket dies (long-idle tab returning to
+  // foreground) the navigation can hang indefinitely — leaving the
+  // .feed[data-navigating="1"] dim + progress bar stuck forever. We
+  // gate the visual on BOTH `navigating.to` AND a self-clearing timeout
+  // so the overlay can't outlive a real network round-trip by more than
+  // a generous bound (10s — well past p99 loader latency).
+  let navOverlayActive = $state(false);
+  $effect(() => {
+    if (navigating.to) {
+      navOverlayActive = true;
+      const t = setTimeout(() => {
+        navOverlayActive = false;
+      }, 10_000);
+      return () => clearTimeout(t);
+    }
+    navOverlayActive = false;
+  });
+
   // 7. URL mutation helper. invalidateAll: false because the URL change
   // itself triggers SvelteKit to re-run the loader.
   function pushUrl(nextState: FilterState, replace = false): void {
@@ -665,7 +685,7 @@
   );
 </script>
 
-<section class="feed" data-navigating={navigating.to ? "1" : "0"}>
+<section class="feed" data-navigating={navOverlayActive ? "1" : "0"}>
   <PageHead
     title={trashView ? m.feed_page_head_title_trash() : m.feed_page_head_title_feed()}
     view={trashView ? "trash" : "feed"}
