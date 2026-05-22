@@ -253,25 +253,33 @@
         kind = data.kind as EventKind;
         fetchedKind = kind;
       }
-      // Stash kind-specific metadata for the save payload. FeedCard's
-      // sourceLabel branch reads different keys per platform — keep
-      // each platform's canonical key so the card renders without
-      // backend translation.
+      // Stash adapter-derived metadata that is INTRINSIC to the URL
+      // itself, not a denormalization of a separately-renameable entity.
+      //
+      //   - subreddit: encoded in the Reddit URL path, never renames
+      //     (Reddit forbids renaming subreddits). Safe to store on the
+      //     event.
+      //   - author handle (reddit u/…): extracted by adapter from the
+      //     post payload. Reddit handles CAN be renamed but the change
+      //     also breaks the URL itself, so a stale author here matches
+      //     a stale URL — consistent.
+      //
+      // We deliberately do NOT store YouTube channelTitle here. That's
+      // a separately-renameable display name owned by the data_sources
+      // table (or a future youtube_channel_cache). Caching it on every
+      // event would mean "Rick Astley" rows survive a rename. FeedCard's
+      // sourceLabel reads channelTitle from data_sources via sourceId —
+      // when the user registers the channel as a source, the name flows
+      // through; until then events from unregistered channels render
+      // with no channel attribution, which is the honest state.
       fetchedMetadata = {};
-      if (kind === "youtube_video" && data.authorName) {
-        fetchedMetadata.channelTitle = data.authorName;
-      } else if (kind === "reddit_post") {
-        // Reddit URL embeds subreddit + post id; author needs Reddit's
-        // post-single fetch (not part of oEmbed). When the server lacks
-        // an author here (paste flow doesn't fully populate it), we
-        // store what we have — the polling worker will fill the rest.
+      if (kind === "reddit_post") {
         try {
           const subMatch = u.match(/\/r\/([^/]+)\//i);
           if (subMatch) fetchedMetadata.subreddit = subMatch[1];
         } catch {
           /* leave empty */
         }
-        if (data.authorName) fetchedMetadata.author = data.authorName;
       }
       // Surface a small "Detected …" chip below the URL row. Use the
       // host as the fallback source label when the endpoint didn't

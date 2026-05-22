@@ -303,18 +303,24 @@
       subreddit?: string;
       handle?: string;
       channel?: string;
-      channelTitle?: string;
     };
+    // YouTube channel name comes from data_sources (the registered
+    // channel record), NOT from event metadata. Caching channelTitle
+    // per event would break on channel rename; the source row is the
+    // single source of truth. Events from unregistered channels show
+    // no channel attribution — the honest state. Polling for known
+    // sources keeps source.channelTitle current.
     if (event.kind === "youtube_video") {
       return (
         event.channelTitle ??
-        md.channelTitle ??
         source?.channelTitle ??
         source?.displayName ??
         source?.handleUrl ??
         ""
       );
     }
+    // Reddit subreddit is part of the URL itself (Reddit forbids
+    // subreddit rename), so it's safe to denormalize on the event.
     if (event.kind === "reddit_post" && md.subreddit) return `r/${md.subreddit}`;
     if (event.kind === "twitter_post" && md.handle) return `@${md.handle}`;
     if (event.kind === "telegram_post" && md.channel) return md.channel;
