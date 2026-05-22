@@ -701,7 +701,14 @@
    * dropdown (position:absolute) when the menu's height exceeds the
    * card's height. The .card-thumb has its own overflow:hidden +
    * border-radius for image rounding, so removing it here doesn't
-   * leak the thumb image past the card's rounded corners. */
+   * leak the thumb image past the card's rounded corners.
+   *
+   * Z-index escalation when menu is open: when the dropdown extends
+   * past the card's bottom edge into the grid gap, the NEXT card in
+   * source order would otherwise paint over it (HTML painting order +
+   * default z-index: auto). `:has(.card-menu)` promotes the active
+   * card above sibling cards so the menu — including its bottom
+   * border-radius — renders unclipped. */
   .feed-card {
     position: relative;
     background: var(--surface);
@@ -716,6 +723,12 @@
       transform var(--m-fast) var(--m-ease);
     min-width: 0;
     max-width: 100%;
+  }
+  /* Promote z-index when the dropdown menu is open so the menu (which
+   * extends past the card's bottom edge) renders ABOVE neighbouring
+   * cards in source order. */
+  .feed-card:has(.card-menu) {
+    z-index: 5;
   }
   @media (hover: hover) {
     .feed-card:hover {

@@ -114,10 +114,13 @@
 </section>
 
 <style>
+  /* Bounded reading width matching /settings (960px tier — credentials
+   * surface is the same conceptual category as account settings). */
   .keys {
     display: flex;
     flex-direction: column;
     gap: var(--s-4);
+    max-width: 960px;
     min-width: 0;
   }
   .head h1 {
