@@ -373,7 +373,6 @@ describe("paraglide i18n", () => {
       "feed_card_attach_compact_label",
       "feed_card_author_is_me_badge",
       "feed_card_deselect_aria",
-      "feed_card_mark_standalone_button",
       "feed_card_menu_delete",
       "feed_card_menu_edit_games",
       "feed_card_menu_select",

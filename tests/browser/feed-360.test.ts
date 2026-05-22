@@ -310,7 +310,6 @@ describe("FeedQuickNav at top of /feed", () => {
  *
  * Pure i18n value rename. The Paraglide KEYS stay (URL contract / state
  * shape preserved); only the VALUES change:
- *   - feed_card_mark_standalone_button: → "Mark as not game-related"
  *   - feed_filter_show_standalone:      → "Not game-related"
  *   - feed_quick_nav_standalone:        → "Not game-related"
  *   - audit_action_event_marked_standalone:   STAYS (technical audit log)
@@ -448,7 +447,7 @@ describe("/events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker
     "/events/[id]/edit form footer renders the Delete button (manual UAT — auth harness deferred)",
   );
   it.skip(
-    "/events/[id]/edit standalone checkbox toggles metadata.triage.offTopic via PATCH /api/events/:id/mark-standalone (manual UAT — auth harness deferred)",
+    "/events/[id]/edit standalone checkbox toggles metadata.triage.offTopic via PATCH /api/events/bulk (single-id payload + offTopicState) (manual UAT — auth harness deferred)",
   );
   it.skip(
     "FeedCard with gameIds.length > 0 does NOT render AttachToGamePicker on /feed (manual UAT — auth harness deferred)",

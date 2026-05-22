@@ -1726,12 +1726,12 @@ describe("M:N gameIds", () => {
  *
  * Asserts the round-trip behavior the form relies on:
  *   1. PATCH /api/events/:id (main fields) followed by PATCH
- *      /api/events/:id/mark-standalone reaches the desired state
- *      (metadata.triage.offTopic === true) AND writes both audit verbs
- *      in order (event.edited, event.marked_standalone).
- *   2. PATCH /api/events/:id/mark-standalone on an event with attached
- *      games returns 422 standalone_conflicts_with_game (defense-in-depth
- *      mirror of the events-attach.test.ts coverage).
+ *      /api/events/bulk (single-id payload with offTopicState=on) reaches
+ *      the desired state (metadata.triage.offTopic === true) AND writes
+ *      both audit verbs in order (event.edited, events.bulk_edit).
+ *   2. PATCH /api/events/bulk with offTopicState=on on an event with
+ *      attached games SUCCEEDS — off-topic and games are independent axes
+ *      since Plan 03.4-10's GAME-axis multi-select refactor.
  *   3. DELETE /api/events/:id soft-deletes the event; subsequent GET
  *      returns 404 (default loader excludes soft-deleted rows). The
  *      Delete button lives at the /events/[id]/edit form footer.
@@ -1740,7 +1740,7 @@ describe("/events/[id]/edit standalone toggle round-trip", () => {
   // Parallel-executor email-uniqueness coordination:
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("PATCH /api/events/:id then PATCH /api/events/:id/mark-standalone reaches metadata.triage.offTopic=true + audit chain", async () => {
+  it("PATCH /api/events/:id then PATCH /api/events/bulk (single-id, offTopicState=on) reaches metadata.triage.offTopic=true + audit chain", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev32-roundtrip-${uniq()}@test.local` });
@@ -1774,29 +1774,41 @@ describe("/events/[id]/edit standalone toggle round-trip", () => {
     });
     expect(patchRes.status).toBe(200);
 
-    // Step 2: PATCH /mark-standalone (the dedicated route the edit-form's
-    // submit handler calls when the standalone toggle differs from loaded).
-    const standaloneRes = await app.request(`/api/events/${ev.id}/mark-standalone`, {
+    // Step 2: PATCH /api/events/bulk (the canonical off-topic write path
+    // the edit-form's submit handler calls when the standalone toggle
+    // differs from loaded).
+    const standaloneRes = await app.request(`/api/events/bulk`, {
       method: "PATCH",
       headers: {
         cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
       },
+      body: JSON.stringify({
+        ids: [ev.id],
+        offTopicState: "on",
+      }),
     });
     expect(standaloneRes.status).toBe(200);
-    const standaloneBody = (await standaloneRes.json()) as {
-      id: string;
-      metadata: { triage?: { offTopic?: boolean } } | null;
-    };
-    expect(standaloneBody.metadata?.triage?.offTopic).toBe(true);
 
-    // Audit chain: event.edited (from the PATCH) then event.marked_standalone.
+    // Verify the post-state directly: the bulk endpoint returns the
+    // affected DTOs but the audit-chain assertion below is the load-bearing
+    // contract for the edit-form's round-trip.
+    const after = await db
+      .select({ id: events.id, metadata: events.metadata })
+      .from(events)
+      .where(eq(events.id, ev.id));
+    const md = (after[0]?.metadata as { triage?: { offTopic?: boolean } } | null) ?? null;
+    expect(md?.triage?.offTopic).toBe(true);
+
+    // Audit chain: event.edited (from the PATCH) then events.bulk_edit
+    // (from the bulk off-topic write).
     const audits = await db.select().from(auditLog).where(eq(auditLog.userId, u.id));
     const actions = audits.map((r) => r.action);
     expect(actions).toContain("event.edited");
-    expect(actions).toContain("event.marked_standalone");
+    expect(actions).toContain("events.bulk_edit");
   });
 
-  it("PATCH /api/events/:id/mark-standalone on event with attached games SUCCEEDS — off-topic and games coexist (independent axes after GAME multi-select refactor)", async () => {
+  it("PATCH /api/events/bulk (single-id, offTopicState=on) on event with attached games SUCCEEDS — off-topic and games coexist (independent axes after GAME multi-select refactor)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev32-conflict-${uniq()}@test.local` });
@@ -1814,9 +1826,16 @@ describe("/events/[id]/edit standalone toggle round-trip", () => {
       "127.0.0.1",
     );
 
-    const res = await app.request(`/api/events/${ev.id}/mark-standalone`, {
+    const res = await app.request(`/api/events/bulk`, {
       method: "PATCH",
-      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+      headers: {
+        cookie: `neotolis.session_token=${u.signedSessionCookieValue}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        ids: [ev.id],
+        offTopicState: "on",
+      }),
     });
     expect(res.status).toBe(200);
     // Verify the event now carries BOTH the off-topic flag AND the game.

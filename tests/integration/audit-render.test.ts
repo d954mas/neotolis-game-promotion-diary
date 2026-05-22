@@ -1367,9 +1367,9 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
  *     (was a radio group, now a <select>
  *     dropdown — same Paraglide key, same value="standalone" attribute on
  *     the option element, same load-bearing assertion on the rendered text)
- *   - FeedCard inline button via m.feed_card_mark_standalone_button()
  * Plus a positive guard that the audit-action verb names STAY as the
- * technical strings (m.audit_action_event_marked_standalone() unchanged).
+ * technical strings (m.audit_action_event_marked_standalone() unchanged)
+ * so historical audit rows continue to render with the same labels.
  */
 describe("Standalone label rename to 'Not game-related'", () => {
   it("FeedQuickNav standalone segment renders 'Not game-related' (NOT 'Standalone')", async () => {
@@ -1467,43 +1467,6 @@ describe("Standalone label rename to 'Not game-related'", () => {
     }
   });
 
-  it("FeedCard inline 'Mark standalone' button reads 'Mark as not game-related' on inbox cards", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
-    // Inbox card (gameIds=[]) with no triage.offTopic marker → renders
-    // the inline mark-standalone button. The button text is the renamed
-    // copy.
-    const out = render(FeedCard, {
-      props: {
-        event: {
-          id: "evt-1",
-          gameIds: [],
-          sourceId: null,
-          kind: "post" as const,
-          authorIsMe: false,
-          occurredAt: new Date("2026-04-29T12:00:00Z"),
-          title: "Test event",
-          url: null,
-          externalId: null,
-          notes: null,
-          metadata: null,
-          lastPolledAt: null,
-          // lastPollStatus is part of EventDtoLite.
-          lastPollStatus: null,
-        },
-        source: null,
-        game: null,
-        games: [],
-      },
-    });
-    // The button rendering — class="standalone-button" carries the renamed
-    // text via m.feed_card_mark_standalone_button().
-    const buttonMatch = out.body.match(
-      /<button[^>]*class="[^"]*standalone-button[^"]*"[^>]*>([\s\S]*?)<\/button>/,
-    );
-    expect(buttonMatch, "standalone-button not found in inbox FeedCard SSR output").not.toBeNull();
-    expect(buttonMatch![1]!.trim()).toBe("Mark as not game-related");
-  });
-
   it("audit-action verb names STAY unchanged (technical context — by design)", async () => {
     // INVARIANT: the audit log is a technical surface and
     // the audit verbs match existing entries like "Event attached to a
@@ -1517,13 +1480,12 @@ describe("Standalone label rename to 'Not game-related'", () => {
     expect(raw.audit_action_event_unmarked_standalone).toBe("Event unmarked standalone");
   });
 
-  it("messages/en.json has the renamed user-facing values for the 3 standalone keys", async () => {
+  it("messages/en.json has the renamed user-facing values for the standalone keys", async () => {
     // Lock in the value contract at JSON-source level too — a future PR
     // that flips the value back to "Standalone" trips this assertion.
     const fs = await import("node:fs");
     const path = await import("node:path");
     const raw = JSON.parse(fs.readFileSync(path.resolve("messages/en.json"), "utf8"));
-    expect(raw.feed_card_mark_standalone_button).toBe("Mark as not game-related");
     expect(raw.feed_filter_show_standalone).toBe("Not game-related");
     expect(raw.feed_quick_nav_standalone).toBe("Not game-related");
   });
@@ -2047,9 +2009,11 @@ describe("/events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker
     expect(src).toMatch(/m\.events_edit_standalone_help\(\)/);
     expect(src).toMatch(/m\.events_edit_standalone_conflict\(\)/);
     expect(src).toMatch(/m\.events_edit_delete_button\(\)/);
-    // Mark-standalone OR unmark-standalone PATCH is fired conditionally.
-    expect(src).toMatch(/mark-standalone/);
-    expect(src).toMatch(/unmark-standalone/);
+    // Off-topic toggle writes via PATCH /api/events/bulk (single-id
+    // payload + offTopicState tri-state) — the canonical write path since
+    // Plan 03.4-10 unified the metadata.triage.offTopic JSONB write.
+    expect(src).toMatch(/\/api\/events\/bulk/);
+    expect(src).toMatch(/offTopicState/);
     // Delete button at footer + ConfirmDialog flow present.
     expect(src).toMatch(/<ConfirmDialog\s/);
     expect(src).toMatch(/class="delete-button"/);

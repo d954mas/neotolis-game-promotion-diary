@@ -1,15 +1,39 @@
 import { describe, it, expect } from "vitest";
+import { and, eq, sql } from "drizzle-orm";
 import {
   createEvent,
   listFeedFacets,
-  markStandalone,
   OFF_TOPIC_TAG,
   type FeedFilters,
 } from "../../src/lib/server/services/events.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { games } from "../../src/lib/server/db/schema/games.js";
+import { events } from "../../src/lib/server/db/schema/events.js";
 import { uuidv7 } from "../../src/lib/server/ids.js";
 import { seedUserDirectly } from "./helpers.js";
+
+// Helper: flip metadata.triage.offTopic on an owned event row directly,
+// bypassing the (now-deleted) markStandalone service. The off-topic write
+// path proper goes through bulkEdit; here we only need the post-state to
+// seed listFeedFacets fixtures.
+async function setOffTopicDirectly(userId: string, eventId: string): Promise<void> {
+  await db
+    .update(events)
+    .set({
+      metadata: sql`jsonb_set(
+        jsonb_set(
+          COALESCE(${events.metadata}, '{}'::jsonb),
+          '{triage}',
+          COALESCE(${events.metadata}->'triage', '{}'::jsonb),
+          true
+        ),
+        '{triage,offTopic}',
+        'true'::jsonb,
+        true
+      )`,
+    })
+    .where(and(eq(events.userId, userId), eq(events.id, eventId)));
+}
 
 /**
  * listFeedFacets — server-side facet counts (Plan 03.4-10 follow-up Option B).
@@ -103,7 +127,7 @@ async function seedUserWithFixtures(prefix: string): Promise<{
   );
   // Mark press2 off-topic so it leaves the inbox AND surfaces under the
   // off_topic facet bucket.
-  await markStandalone(u.id, press2.id, "127.0.0.1");
+  await setOffTopicDirectly(u.id, press2.id);
 
   return {
     userId: u.id,
