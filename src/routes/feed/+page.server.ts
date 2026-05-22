@@ -2,6 +2,7 @@ import type { PageServerLoad } from "./$types.js";
 import { redirect } from "@sveltejs/kit";
 import {
   listFeedPage,
+  listFeedFacets,
   listDeletedEvents,
   getEventById,
   type FeedFilters,
@@ -137,8 +138,14 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   // /feed?view=trash renders the trash rows directly via data.rows
   // (listFeedPage with scope=trash), so the deletedEvents list would be
   // redundant; we still return it (empty) for shape stability.
-  const [page, gameRows, sourceRows, deletedRows] = await Promise.all([
+  const [page, facets, gameRows, sourceRows, deletedRows] = await Promise.all([
     listFeedPage(userId, filters, cursor, { scope, sortDir: state.sortDir }),
+    // listFeedFacets — server-side facet counts (Plan 03.4-10 follow-up
+    // Option B). Replaces the orchestrator's client-side countWith* helpers
+    // which counted on the cursor-paginated first page only; the facets
+    // count against the full event pool with the rest of the axes applied,
+    // so chip counts are stable across same-axis toggles.
+    listFeedFacets(userId, filters, { scope }),
     listGames(userId),
     // Include soft-deleted sources so the feed card can still resolve
     // channelTitle / displayName for events whose parent source the user
@@ -210,8 +217,12 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     //   openEventId  → string | null (drives the EventDetailModal mount in
     //                   the orchestrator; SSR-resolved so the modal renders
     //                   on first paint, not on hydration)
+    //   facets       → server-side facet counts for axis chip rows
+    //                   (Plan 03.4-10 follow-up Option B). Replaces
+    //                   client-side countWith* helpers in the orchestrator.
     today: todayIso,
     view: scope,
     openEventId: state.openEventId,
+    facets,
   };
 };

@@ -223,10 +223,23 @@ export interface FeedFacets {
    */
   gameTags: Record<string, number>;
   /**
+   * "All games" sentinel count — events matching every axis EXCEPT the
+   * GAME axis (i.e. what the user would see if they cleared gameTags).
+   * Stable across same-axis (GAME) toggles, mirrors the per-game chip
+   * stability invariant.
+   */
+  gameTagsAll: number;
+  /**
    * KIND axis facet. Maps each EventKind → events with that kind after the
    * rest of the axes are applied. Empty kinds omitted.
    */
   kinds: Record<string, number>;
+  /**
+   * "All kinds" sentinel count — events matching every axis EXCEPT the
+   * KIND axis (i.e. what the user would see if they cleared the kind
+   * filter). Stable across same-axis (KIND) toggles.
+   */
+  kindsAll: number;
   /**
    * SHOW axis facet. `all` = total matching every other axis (the "All"
    * sentinel chip count + the visible-rows count at the page bottom).
@@ -1540,6 +1553,15 @@ export async function listFeedFacets(
       ),
     );
 
+  // "All games" sentinel count — total events matching the GAME-axis-
+  // excluded base (= count of every event the user would see if they
+  // cleared gameTags). DISTINCT because a single event attached to two
+  // games would double-count via the junction GROUP BY.
+  const gameTagsAllQuery = db
+    .select({ count: sql<string>`count(*)` })
+    .from(events)
+    .where(and(eq(events.userId, userId), ...gameBaseParts));
+
   // KIND facet — exclude the kind axis from the base filter, then GROUP BY
   // events.kind.
   const kindBaseParts = buildFeedBaseFilterParts(userId, filters, scope, new Set(["kind"]));
@@ -1548,6 +1570,10 @@ export async function listFeedFacets(
     .from(events)
     .where(and(eq(events.userId, userId), ...kindBaseParts))
     .groupBy(events.kind);
+  const kindsAllQuery = db
+    .select({ count: sql<string>`count(*)` })
+    .from(events)
+    .where(and(eq(events.userId, userId), ...kindBaseParts));
 
   // SHOW facet — `all` reuses the full-axes base count; `inbox` adds the
   // inbox-eligibility clause on top of a base that excludes the SHOW axis.
@@ -1596,7 +1622,9 @@ export async function listFeedFacets(
   const [
     gameRows,
     offTopicRows,
+    gameTagsAllRows,
     kindRows,
+    kindsAllRows,
     showAllRows,
     showInboxRows,
     authorAnyoneRows,
@@ -1606,7 +1634,9 @@ export async function listFeedFacets(
   ] = await Promise.all([
     gameGroupQuery,
     offTopicQuery,
+    gameTagsAllQuery,
     kindGroupQuery,
+    kindsAllQuery,
     showAllQuery,
     showInboxQuery,
     authorAnyoneQuery,
@@ -1625,7 +1655,9 @@ export async function listFeedFacets(
 
   return {
     gameTags,
+    gameTagsAll: Number(gameTagsAllRows[0]?.count ?? 0),
     kinds,
+    kindsAll: Number(kindsAllRows[0]?.count ?? 0),
     show: {
       all: Number(showAllRows[0]?.count ?? 0),
       inbox: Number(showInboxRows[0]?.count ?? 0),

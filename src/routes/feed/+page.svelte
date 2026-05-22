@@ -64,13 +64,7 @@
     type DateRangeFilter,
     type ShowFilter,
   } from "$lib/feed/url-state.js";
-  import {
-    passes,
-    countWithGame,
-    countWithKind,
-    countWithShow,
-    countWithAuthor,
-  } from "$lib/feed/filter-math.js";
+  import { passes } from "$lib/feed/filter-math.js";
   import { parseEventDate } from "$lib/feed/date-range.js";
   import {
     feedUiStore,
@@ -590,18 +584,6 @@
     })),
   );
 
-  // Count for the KIND "All" sentinel — events matching the rest of the
-  // state with no kind restriction. Reuses filter-math.passes by dropping
-  // the kind axis from the state.
-  function countWithKindAll(
-    events: typeof filterableEvents,
-    state: typeof urlState,
-    todayArg: Date,
-  ): number {
-    const next = { ...state, kind: [] as EventKind[] };
-    return events.filter((e) => passes(e, next, todayArg)).length;
-  }
-
   // 20. Maps for O(1) source / game lookup on each card.
   const sourceById = $derived(new Map(data.sources.map((s) => [s.id, s])));
   const gameById = $derived(new Map(data.games.map((g) => [g.id, g])));
@@ -729,12 +711,15 @@
           {
             value: "all",
             label: m.feed_axis_show_all(),
-            predictedCount: countWithShow(filterableEvents, "any", urlState, today),
+            // Server-side facet (Plan 03.4-10 Option B). show.all = total
+            // events matching every other axis. Stable across same-axis
+            // toggles (toggling Inbox doesn't change All's count).
+            predictedCount: data.facets.show.all,
           },
           {
             value: "inbox",
             label: m.feed_axis_show_inbox(),
-            predictedCount: countWithShow(filterableEvents, "inbox", urlState, today),
+            predictedCount: data.facets.show.inbox,
           },
         ]}
         selectedValues={urlState.show.kind === "inbox"
@@ -762,22 +747,20 @@
           {
             value: "all",
             label: m.feed_axis_game_all(),
-            // "All" sentinel represents the empty-axis state — count is
-            // the result of the rest of the filter pipeline with gameTags
-            // cleared.
-            predictedCount: filterableEvents.filter((e) =>
-              passes(e, { ...urlState, gameTags: [] }, today),
-            ).length,
+            // "All games" sentinel = events matching every other axis with
+            // the GAME axis cleared. Stable across same-axis (GAME) chip
+            // toggles — toggling Last Light doesn't change the All count.
+            predictedCount: data.facets.gameTagsAll,
           },
           {
             value: OFF_TOPIC_TAG,
             label: m.feed_axis_game_off_topic(),
-            predictedCount: countWithGame(filterableEvents, OFF_TOPIC_TAG, urlState, today),
+            predictedCount: data.facets.gameTags[OFF_TOPIC_TAG] ?? 0,
           },
           ...data.games.map((g) => ({
             value: g.id,
             label: g.title,
-            predictedCount: countWithGame(filterableEvents, g.id, urlState, today),
+            predictedCount: data.facets.gameTags[g.id] ?? 0,
           })),
         ]}
         selectedValues={urlState.gameTags.length === 0 ? ["all"] : urlState.gameTags}
@@ -806,17 +789,20 @@
           {
             value: "anyone",
             label: m.feed_axis_author_anyone(),
-            predictedCount: countWithAuthor(filterableEvents, "anyone", urlState, today),
+            // Server-side facet (Plan 03.4-10 Option B). author.anyone =
+            // total events matching every other axis with the AUTHOR
+            // axis cleared. Stable across same-axis (AUTHOR) toggles.
+            predictedCount: data.facets.author.anyone,
           },
           {
             value: "mine",
             label: m.feed_axis_author_mine(),
-            predictedCount: countWithAuthor(filterableEvents, "mine", urlState, today),
+            predictedCount: data.facets.author.mine,
           },
           {
             value: "others",
             label: m.feed_axis_author_others(),
-            predictedCount: countWithAuthor(filterableEvents, "others", urlState, today),
+            predictedCount: data.facets.author.others,
           },
         ]}
         selectedValues={urlState.authorIsMe === true
@@ -845,12 +831,15 @@
           {
             value: "all",
             label: m.feed_axis_kind_all(),
-            predictedCount: countWithKindAll(filterableEvents, urlState, today),
+            // Server-side facet (Plan 03.4-10 Option B). kindsAll = total
+            // events matching every other axis with the KIND axis cleared.
+            // Stable across same-axis (KIND) toggles.
+            predictedCount: data.facets.kindsAll,
           },
           ...KIND_AXIS_ORDER.map((k) => ({
             value: k,
             label: KIND_AXIS_LABEL[k](),
-            predictedCount: countWithKind(filterableEvents, k, urlState, today),
+            predictedCount: data.facets.kinds[k] ?? 0,
             iconKind: k,
           })),
         ]}
