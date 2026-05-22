@@ -92,17 +92,25 @@
       onclick={tryClose}
     >×</button>
   </header>
-  <AddEventForm
-    {games}
-    {initialKind}
-    {initialAttachedGameIds}
-    {currentUserName}
-    onSave={async (payload) => {
-      await onSave(payload);
-    }}
-    onCancel={tryClose}
-    onDirtyChange={(d) => (dirty = d)}
-  />
+  {#key open}
+    <!-- Remount the form per open-cycle so previously-entered values
+         (title / url / notes / kind / fetched-state) don't leak into a
+         fresh "Add event" attempt. User UAT: «после создания события
+         когда я хочу добавить новое на этом окне старые введённые
+         данные». The dialog itself stays mounted (it has its own state +
+         body-scroll-lock contract); only the form's local state resets. -->
+    <AddEventForm
+      {games}
+      {initialKind}
+      {initialAttachedGameIds}
+      {currentUserName}
+      onSave={async (payload) => {
+        await onSave(payload);
+      }}
+      onCancel={tryClose}
+      onDirtyChange={(d) => (dirty = d)}
+    />
+  {/key}
 </dialog>
 
 <style>
