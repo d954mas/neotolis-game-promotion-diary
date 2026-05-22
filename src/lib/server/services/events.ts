@@ -872,9 +872,22 @@ export async function enrichFromUrl(
     ipAddress,
   });
   if (preview.kind === "unreachable") {
-    throw new AppError("youtube oembed unreachable", "youtube_oembed_unreachable", 502, {
-      cause: preview.cause,
-    });
+    // Graceful fallback: oEmbed network failure (firewall/DNS/RKN
+    // blocking from the server) shouldn't break paste flow entirely.
+    // Return the URL-parsed kind + videoId so the form locks the kind
+    // picker; user fills in title manually. Title field has the
+    // required-asterisk so they can't save with an empty one.
+    return {
+      kind: "youtube_video",
+      externalId: parsed.videoId,
+      title: "",
+      occurredAt: null,
+      thumbnailUrl: null,
+      authorName: null,
+      authorUrl: null,
+      canonicalUrl: parsed.canonicalUrl,
+      sourceMatch: null,
+    };
   }
   if (preview.kind === "private") {
     throw new AppError("video is private", "youtube_unavailable", 422, {
