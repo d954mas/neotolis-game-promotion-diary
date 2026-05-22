@@ -68,22 +68,31 @@
 </div>
 
 <style>
-  /* v2 EmptyState — denser type with --t-30 display heading + --t-14 body
-   * + --hit-lg accent CTA. */
+  /* v2 EmptyState — matches prototype `.feed-empty` block
+   * (docs/design/v2/ui-kit/index.html lines 326-345). 22px heading +
+   * 14px body, max-width 560px, centered horizontally so the empty-state
+   * does not stretch across a 1280px viewport.
+   *
+   * The CTA is `--accent` filled per the prototype's `.btn.primary` since
+   * it is the single primary action on a page that has nothing else to
+   * compete with for attention. */
   .empty {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: var(--s-4);
+    gap: var(--s-3);
     padding: var(--s-8) var(--s-4);
+    max-width: 560px;
+    margin: 0 auto;
     color: var(--text);
   }
   .heading {
     margin: 0;
     font-family: var(--f-sans);
-    font-size: var(--t-30);
+    font-size: var(--t-22);
     font-weight: var(--w-sb);
     line-height: var(--lh-tight);
+    letter-spacing: -0.01em;
     color: var(--text);
   }
   .body {
