@@ -60,8 +60,6 @@ import {
   dismissFromInbox,
   listDeletedEvents,
   restoreEvent,
-  markStandalone,
-  unmarkStandalone,
   bulkEdit,
   bulkDelete,
   bulkDeleteForever,
@@ -611,42 +609,6 @@ eventsRoutes.patch("/events/:id/restore", async (c) => {
     return c.json(toEventDto(ev, gameIds));
   } catch (err) {
     return mapErr(c, err, "PATCH /api/events/:id/restore");
-  }
-});
-
-// markStandalone + unmarkStandalone triage routes. Inline "Mark standalone"
-// affordance on inbox cards. Cross-tenant returns 404 by construction (the
-// service's UPDATE WHERE clause requires the userId match); mapErr
-// translates NotFoundError to {error: "not_found"} status 404.
-eventsRoutes.patch("/events/:id/mark-standalone", async (c) => {
-  const ctx = getAuditContext(c);
-  try {
-    const ev = await markStandalone(
-      ctx.userId,
-      c.req.param("id"),
-      ctx.ipAddress,
-      ctx.userAgent ?? undefined,
-    );
-    const gameIds = await loadGameIdsForEvent(ctx.userId, ev.id);
-    return c.json(toEventDto(ev, gameIds));
-  } catch (err) {
-    return mapErr(c, err, "PATCH /api/events/:id/mark-standalone");
-  }
-});
-
-eventsRoutes.patch("/events/:id/unmark-standalone", async (c) => {
-  const ctx = getAuditContext(c);
-  try {
-    const ev = await unmarkStandalone(
-      ctx.userId,
-      c.req.param("id"),
-      ctx.ipAddress,
-      ctx.userAgent ?? undefined,
-    );
-    const gameIds = await loadGameIdsForEvent(ctx.userId, ev.id);
-    return c.json(toEventDto(ev, gameIds));
-  } catch (err) {
-    return mapErr(c, err, "PATCH /api/events/:id/unmark-standalone");
   }
 });
 
