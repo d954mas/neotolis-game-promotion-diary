@@ -8,7 +8,7 @@ import {
   diffGameStates,
   type FilterableEvent,
 } from "../../src/lib/feed/filter-math.js";
-import type { FilterState } from "../../src/lib/feed/url-state.js";
+import { OFF_TOPIC_TAG, type FilterState } from "../../src/lib/feed/url-state.js";
 
 /**
  * Pure filter predicates + predicted-count helpers (Plan 03.4-02 Task 3).
@@ -26,6 +26,7 @@ function baseState(): FilterState {
     show: { kind: "any" },
     source: [],
     kind: [],
+    gameTags: [],
     authorIsMe: undefined,
     dateRange: { preset: "all" },
     sortDir: "desc",
@@ -60,18 +61,48 @@ describe("passes — show axis", () => {
     expect(passes(ev({ gameIds: [] }), state, TODAY)).toBe(true);
   });
 
-  it("returns false when show.kind === 'standalone' AND event metadata.triage.offTopic !== true", () => {
-    const state = { ...baseState(), show: { kind: "standalone" as const } };
+  it("returns false when show.kind === 'inbox' AND event marked off-topic (off-topic = triaged, not inbox)", () => {
+    // Post-03.4-10: inbox is "no triage decision yet" — off-topic events
+    // have BEEN triaged so they don't belong in the inbox. Mirrors the
+    // server SQL clause (COALESCE(metadata->triage->>offTopic,'false')='false').
+    const state = { ...baseState(), show: { kind: "inbox" as const } };
+    expect(passes(ev({ gameIds: [], metadata: { triage: { offTopic: true } } }), state, TODAY)).toBe(
+      false,
+    );
+    expect(passes(ev({ gameIds: [], metadata: null }), state, TODAY)).toBe(true);
+  });
+});
+
+describe("passes — game axis (gameTags multi-select, Plan 03.4-10)", () => {
+  it("returns false when gameTags contains 'off_topic' (only) AND event.metadata.triage.offTopic !== true", () => {
+    const state = { ...baseState(), gameTags: [OFF_TOPIC_TAG] };
     expect(passes(ev({ metadata: null }), state, TODAY)).toBe(false);
     expect(passes(ev({ metadata: { triage: { offTopic: false } } }), state, TODAY)).toBe(false);
     expect(passes(ev({ metadata: { triage: { offTopic: true } } }), state, TODAY)).toBe(true);
   });
 
-  it("returns false when show.kind === 'specific' AND event has none of show.gameIds", () => {
-    const state = { ...baseState(), show: { kind: "specific" as const, gameIds: ["g1", "g2"] } };
+  it("returns false when gameTags contains only game IDs AND event has none of those gameIds", () => {
+    const state = { ...baseState(), gameTags: ["g1", "g2"] };
     expect(passes(ev({ gameIds: ["g3"] }), state, TODAY)).toBe(false);
     expect(passes(ev({ gameIds: ["g1"] }), state, TODAY)).toBe(true);
     expect(passes(ev({ gameIds: ["g1", "g3"] }), state, TODAY)).toBe(true);
+  });
+
+  it("OR semantics — gameTags = ['g1', 'off_topic'] matches events attached to g1 OR marked off-topic", () => {
+    // The bug user reported: "в фильтрах не могу выбрать офтопик вместе с
+    // играми". With OR semantics, picking Off topic + Neotolis returns
+    // BOTH groups in one feed (not the empty intersection of the two).
+    const state = { ...baseState(), gameTags: ["g1", OFF_TOPIC_TAG] };
+    expect(passes(ev({ gameIds: ["g1"] }), state, TODAY)).toBe(true); // matches game
+    expect(
+      passes(ev({ gameIds: [], metadata: { triage: { offTopic: true } } }), state, TODAY),
+    ).toBe(true); // matches off-topic
+    expect(passes(ev({ gameIds: ["g9"] }), state, TODAY)).toBe(false); // neither
+  });
+
+  it("empty gameTags is treated as 'no GAME-axis filter'", () => {
+    expect(passes(ev({ gameIds: [] }), { ...baseState(), gameTags: [] }, TODAY)).toBe(true);
+    expect(passes(ev({ gameIds: ["g1"] }), { ...baseState(), gameTags: [] }, TODAY)).toBe(true);
   });
 });
 
@@ -139,21 +170,31 @@ describe("countWithGame — predicted facet counter", () => {
     ev({ id: "e2", gameIds: ["g2"] }),
     ev({ id: "e3", gameIds: ["g1", "g2"] }),
     ev({ id: "e4", gameIds: [] }), // inbox
+    ev({ id: "e5", gameIds: [], metadata: { triage: { offTopic: true } } }),
   ];
 
-  it("returns count of events that would pass after toggling show=specific[g1]", () => {
+  it("returns count of events that would pass after toggling gameTags += [g1]", () => {
     // e1 has g1, e3 has g1 → 2 matching events
     expect(countWithGame(events, "g1", baseState(), TODAY)).toBe(2);
   });
 
-  it("merges into an existing show.specific list (union)", () => {
-    const state: FilterState = {
-      ...baseState(),
-      show: { kind: "specific", gameIds: ["g2"] },
-    };
-    // After adding g1: show.specific gameIds = [g2, g1] (union)
+  it("merges into an existing gameTags list (union)", () => {
+    const state: FilterState = { ...baseState(), gameTags: ["g2"] };
+    // After adding g1: gameTags = [g2, g1] (union)
     // Events matching at least one: e1 (g1), e2 (g2), e3 (g1+g2) → 3
     expect(countWithGame(events, "g1", state, TODAY)).toBe(3);
+  });
+
+  it("off_topic sentinel — counts events where metadata.triage.offTopic === true", () => {
+    // Only e5 is off-topic.
+    expect(countWithGame(events, OFF_TOPIC_TAG, baseState(), TODAY)).toBe(1);
+  });
+
+  it("off_topic + game id — OR union (game-attached OR off-topic events)", () => {
+    const state: FilterState = { ...baseState(), gameTags: ["g1"] };
+    // After adding off_topic: gameTags = [g1, off_topic]. Events matching:
+    //   e1 (g1) + e3 (g1) + e5 (off_topic) = 3
+    expect(countWithGame(events, OFF_TOPIC_TAG, state, TODAY)).toBe(3);
   });
 });
 
@@ -176,10 +217,10 @@ describe("countWithShow — predicted facet counter", () => {
     ev({ id: "e3", gameIds: [], metadata: { triage: { offTopic: true } } }),
   ];
 
-  it("returns count for each show variant", () => {
+  it("returns count for each show variant (any | inbox after Plan 03.4-10)", () => {
     expect(countWithShow(events, "any", baseState(), TODAY)).toBe(3);
-    expect(countWithShow(events, "inbox", baseState(), TODAY)).toBe(2); // e2, e3 both inbox
-    expect(countWithShow(events, "standalone", baseState(), TODAY)).toBe(1); // only e3
+    // Inbox excludes off-topic events (triaged) — only e2 qualifies.
+    expect(countWithShow(events, "inbox", baseState(), TODAY)).toBe(1);
   });
 });
 

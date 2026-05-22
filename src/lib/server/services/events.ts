@@ -152,10 +152,33 @@ export type ShowFilter =
   | { kind: "standalone" }
   | { kind: "specific"; gameIds: string[] };
 
+/**
+ * Sentinel value carried in `FeedFilters.gameTags` to flag the off-topic
+ * branch of the GAME axis multi-select. Must stay in lock-step with
+ * OFF_TOPIC_TAG in src/lib/feed/url-state.ts — they're the SAME wire value
+ * but the two modules don't import each other (client-vs-server isolation).
+ */
+export const OFF_TOPIC_TAG = "off_topic";
+
 export interface FeedFilters {
   source?: string | string[];
   kind?: EventKind | EventKind[];
   show?: ShowFilter;
+  /**
+   * GAME axis multi-select (Plan 03.4-10). Each entry is either a game id
+   * OR the sentinel `OFF_TOPIC_TAG`. When non-empty, the listFeedPage SQL
+   * adds a clause that matches events attached to ANY game in the list OR
+   * (when `OFF_TOPIC_TAG` is present) marked off-topic via
+   * metadata.triage.offTopic. Empty / undefined = no GAME-axis filter.
+   *
+   * Replaces the legacy `show: { kind: "specific" | "standalone" }`
+   * branches as the canonical input for the GAME axis; those legacy
+   * variants are kept on `show` for back-compat with the /api/events HTTP
+   * route + FeedQuickNav per-game tab URL contract, but the /feed UI
+   * routes through `gameTags` exclusively so off-topic + games can be
+   * selected simultaneously.
+   */
+  gameTags?: string[];
   authorIsMe?: boolean;
   from?: Date;
   to?: Date;
@@ -1210,6 +1233,54 @@ export async function listFeedPage(
     // (the UI prevents this state but the service stays defensive).
   }
   // show.kind === "any" or undefined: no clause appended (default).
+
+  // GAME axis multi-select (Plan 03.4-10). `filters.gameTags` is a flat
+  // array where each entry is EITHER a game id OR the OFF_TOPIC_TAG
+  // sentinel. The clause is `(event_games.gameId IN (gameIds_filter)) OR
+  // (metadata.triage.offTopic = true)` — OR semantics so the user can pick
+  // "Off topic" + "Neotolis: Last Light" at once and see both groups in
+  // the same feed.
+  //
+  // The userId clause is duplicated INSIDE the EXISTS subquery so the
+  // event_games junction is tenant-scoped at the read site (mirrors the
+  // show.kind === "specific" branch above). Drizzle's `inArray` would
+  // require the column ref; we use raw `IN (...)` with `sql.join` so each
+  // value gets its own bind slot (no string interpolation of caller-
+  // supplied ids).
+  if (filters.gameTags !== undefined && filters.gameTags.length > 0) {
+    const wantsOffTopic = filters.gameTags.includes(OFF_TOPIC_TAG);
+    const gameIdsFilter = filters.gameTags.filter((t) => t !== OFF_TOPIC_TAG);
+    const orParts: SQL[] = [];
+    if (gameIdsFilter.length === 1) {
+      const gid = gameIdsFilter[0]!;
+      orParts.push(
+        sql`EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId} AND ${eventGames.gameId} = ${gid})` as SQL,
+      );
+    } else if (gameIdsFilter.length > 1) {
+      orParts.push(
+        sql`EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId} AND ${eventGames.gameId} IN (${sql.join(
+          gameIdsFilter.map((id) => sql`${id}`),
+          sql.raw(", "),
+        )}))` as SQL,
+      );
+    }
+    if (wantsOffTopic) {
+      orParts.push(
+        sql`COALESCE(${events.metadata}->'triage'->>'offTopic', 'false') = 'true'` as SQL,
+      );
+    }
+    if (orParts.length === 1) {
+      filterParts.push(orParts[0]!);
+    } else if (orParts.length > 1) {
+      // Combine via SQL OR. Drizzle's `or(...)` would work but emits
+      // parens around each operand; raw OR-join keeps the SQL compact and
+      // mirrors the manual subquery pattern used elsewhere in this file.
+      filterParts.push(
+        sql`(${sql.join(orParts, sql.raw(" OR "))})` as SQL,
+      );
+    }
+  }
+
   if (filters.authorIsMe !== undefined) {
     filterParts.push(eq(events.authorIsMe, filters.authorIsMe));
   }

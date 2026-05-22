@@ -59,8 +59,10 @@
   import {
     parseSearchParams,
     serializeFilterState,
+    OFF_TOPIC_TAG,
     type FilterState,
     type DateRangeFilter,
+    type ShowFilter,
   } from "$lib/feed/url-state.js";
   import {
     passes,
@@ -95,7 +97,6 @@
   import { getCardComponent } from "$lib/sources/registry-ui-client.js";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
 
-  import type { ShowFilter } from "$lib/server/services/events.js";
   import type { EventKind } from "$lib/sources/adapter.js";
   import type { AddEventPayload } from "$lib/components/add-event/AddEventForm.svelte";
   import type { PageData } from "./$types";
@@ -169,6 +170,19 @@
   function setShow(next: ShowFilter): void {
     pushUrl({ ...urlState, show: next, cursor: undefined });
   }
+  /**
+   * setGameTags — GAME-axis multi-select writer (Plan 03.4-10). `next` is
+   * a flat list of game IDs + optional OFF_TOPIC_TAG. Empty list clears
+   * the axis. Switching to a non-empty gameTags while the user is in
+   * `?show=inbox` would yield zero rows by construction (inbox = no games
+   * attached); we collapse `show` back to "any" so the user sees the
+   * expected GAME-axis result set instead of an empty feed.
+   */
+  function setGameTags(next: string[]): void {
+    const nextShow: ShowFilter =
+      next.length > 0 && urlState.show.kind === "inbox" ? { kind: "any" } : urlState.show;
+    pushUrl({ ...urlState, gameTags: next, show: nextShow, cursor: undefined });
+  }
   function setKind(next: EventKind[]): void {
     pushUrl({ ...urlState, kind: next, cursor: undefined });
   }
@@ -194,6 +208,7 @@
     pushUrl({
       ...urlState,
       show: { kind: "any" },
+      gameTags: [],
       kind: [],
       source: [],
       authorIsMe: undefined,
@@ -485,8 +500,10 @@
   };
 
   // 17. Active filter chips for ActiveFiltersStrip. One chip per active
-  // axis dimension; clicking the × clears that axis. Game / Author / Show
-  // are single-cardinality, source / kind are multi (one chip per value).
+  // axis dimension; clicking the × clears that axis. After Plan 03.4-10
+  // the GAME axis is multi-select (gameTags is a flat list of game IDs +
+  // optional OFF_TOPIC_TAG sentinel) so we emit one chip per entry. SHOW
+  // axis is narrowed to any | inbox.
   const activeAxes = $derived.by((): AxisChip[] => {
     const chips: AxisChip[] = [];
     if (urlState.show.kind === "inbox") {
@@ -497,28 +514,26 @@
         label: m.feed_axis_show_inbox(),
         onRemove: () => setShow({ kind: "any" }),
       });
-    } else if (urlState.show.kind === "standalone") {
-      chips.push({
-        axis: "game",
-        // Off-topic flag is a GAME-axis option in the prototype strip
-        // (app.jsx line 210). Keep the same data-variant for visual parity.
-        label: m.feed_axis_game_off_topic(),
-        onRemove: () => setShow({ kind: "any" }),
-      });
-    } else if (urlState.show.kind === "specific") {
-      for (const gid of urlState.show.gameIds) {
-        const game = data.games.find((g) => g.id === gid);
+    }
+    // GAME axis chips — one per active gameTags entry. Off-topic sentinel
+    // uses the off-topic label + accent; per-game entries use the game's
+    // title + deterministic gameColor.
+    for (const tag of urlState.gameTags) {
+      if (tag === OFF_TOPIC_TAG) {
         chips.push({
           axis: "game",
-          label: game?.title ?? gid,
-          color: gameColor(gid),
-          onRemove: () => {
-            const next = urlState.show.kind === "specific"
-              ? urlState.show.gameIds.filter((g) => g !== gid)
-              : [];
-            if (next.length === 0) setShow({ kind: "any" });
-            else setShow({ kind: "specific", gameIds: next });
-          },
+          // Off-topic flag is a GAME-axis option in the prototype strip
+          // (app.jsx line 210). Keep the same data-variant for visual parity.
+          label: m.feed_axis_game_off_topic(),
+          onRemove: () => setGameTags(urlState.gameTags.filter((t) => t !== OFF_TOPIC_TAG)),
+        });
+      } else {
+        const game = data.games.find((g) => g.id === tag);
+        chips.push({
+          axis: "game",
+          label: game?.title ?? tag,
+          color: gameColor(tag),
+          onRemove: () => setGameTags(urlState.gameTags.filter((t) => t !== tag)),
         });
       }
     }
@@ -704,9 +719,9 @@
 
   {#if filtersOpen}
     <div class="filters-panel">
-      <!-- SHOW axis — sentinel "All" first, then "Inbox". Sentinel maps to
-        show.kind === "any" (URL param dropped); "Inbox" → show.kind === "inbox".
-        Mirrors prototype docs/design/v2/ui-kit/app.jsx lines 1603-1611. -->
+      <!-- SHOW axis — sentinel "All" + "Inbox". After Plan 03.4-10 the
+        SHOW axis is narrowed to any | inbox; off-topic + per-game selection
+        moved to the orthogonal GAME axis multi-select below. -->
       <AxisRow
         label={m.axis_row_show_label()}
         axisKey="show"
@@ -734,12 +749,12 @@
         onClearAxis={() => setShow({ kind: "any" })}
       />
 
-      <!-- GAME axis — sentinel "All games" first, then "Off topic" (maps to
-        show.kind === "standalone"), then per-game chips. Mirrors prototype
-        app.jsx lines 1613-1627. In our schema show is single-cardinality
-        ({any | inbox | standalone | specific}); the GAME axis chips
-        therefore behave as radios (clicking a game = specific; "Off topic"
-        = standalone; "All games" = any). -->
+      <!-- GAME axis (Plan 03.4-10) — flat multi-select. Sentinel "All games"
+        first (clears the axis), "Off topic" (toggles OFF_TOPIC_TAG in
+        gameTags), then per-game chips (each toggles its game id in
+        gameTags). Off-topic + games co-exist in the same list with OR
+        semantics in the server SQL. Mirrors prototype app.jsx
+        lines 1613-1627 which already used a flat `game: string[]` array. -->
       <AxisRow
         label={m.axis_row_game_label()}
         axisKey="game"
@@ -747,12 +762,17 @@
           {
             value: "all",
             label: m.feed_axis_game_all(),
-            predictedCount: countWithShow(filterableEvents, "any", urlState, today),
+            // "All" sentinel represents the empty-axis state — count is
+            // the result of the rest of the filter pipeline with gameTags
+            // cleared.
+            predictedCount: filterableEvents.filter((e) =>
+              passes(e, { ...urlState, gameTags: [] }, today),
+            ).length,
           },
           {
-            value: "off_topic",
+            value: OFF_TOPIC_TAG,
             label: m.feed_axis_game_off_topic(),
-            predictedCount: countWithShow(filterableEvents, "standalone", urlState, today),
+            predictedCount: countWithGame(filterableEvents, OFF_TOPIC_TAG, urlState, today),
           },
           ...data.games.map((g) => ({
             value: g.id,
@@ -760,29 +780,21 @@
             predictedCount: countWithGame(filterableEvents, g.id, urlState, today),
           })),
         ]}
-        selectedValues={urlState.show.kind === "specific"
-          ? urlState.show.gameIds
-          : urlState.show.kind === "standalone"
-            ? ["off_topic"]
-            : urlState.show.kind === "any"
-              ? ["all"]
-              : []}
+        selectedValues={urlState.gameTags.length === 0 ? ["all"] : urlState.gameTags}
         onToggle={(v) => {
           if (v === "all") {
-            setShow({ kind: "any" });
+            setGameTags([]);
             return;
           }
-          if (v === "off_topic") {
-            setShow(urlState.show.kind === "standalone" ? { kind: "any" } : { kind: "standalone" });
-            return;
-          }
-          // Per-game chip — multi-select within `specific`.
-          const current = urlState.show.kind === "specific" ? urlState.show.gameIds : [];
-          const next = current.includes(v) ? current.filter((g) => g !== v) : [...current, v];
-          if (next.length === 0) setShow({ kind: "any" });
-          else setShow({ kind: "specific", gameIds: next });
+          // Multi-select toggle — adds when absent, removes when present.
+          // Off-topic + game IDs share the same array; the server SQL
+          // ORs them together.
+          const next = urlState.gameTags.includes(v)
+            ? urlState.gameTags.filter((t) => t !== v)
+            : [...urlState.gameTags, v];
+          setGameTags(next);
         }}
-        onClearAxis={() => setShow({ kind: "any" })}
+        onClearAxis={() => setGameTags([])}
       />
 
       <!-- AUTHOR axis — sentinel "Anyone" + "Mine" + "Others". Mirrors

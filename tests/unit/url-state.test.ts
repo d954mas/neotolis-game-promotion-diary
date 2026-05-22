@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseSearchParams,
   serializeFilterState,
+  OFF_TOPIC_TAG,
   type FilterState,
 } from "../../src/lib/feed/url-state.js";
 
@@ -32,6 +33,7 @@ describe("parseSearchParams", () => {
     expect(s.show).toEqual({ kind: "any" });
     expect(s.source).toEqual([]);
     expect(s.kind).toEqual([]);
+    expect(s.gameTags).toEqual([]);
     expect(s.authorIsMe).toBeUndefined();
     // Default preset is "month" (30-day rolling), matching the prototype
     // where the Month chip is the active default on first load.
@@ -55,15 +57,35 @@ describe("parseSearchParams", () => {
     });
   });
 
-  it("returns show.kind === 'standalone' when ?show=standalone", () => {
-    expect(parseSearchParams(new URL("https://x?show=standalone")).show).toEqual({
-      kind: "standalone",
-    });
+  it("migrates legacy ?show=standalone to gameTags: ['off_topic'] (Plan 03.4-10 back-compat)", () => {
+    // The /feed URL contract narrowed `show` to `any | inbox` and moved
+    // off-topic into the flat GAME-axis multi-select. Legacy bookmarks
+    // self-clean on the next URL write via serializeFilterState.
+    const s = parseSearchParams(new URL("https://x?show=standalone"));
+    expect(s.show).toEqual({ kind: "any" });
+    expect(s.gameTags).toEqual([OFF_TOPIC_TAG]);
   });
 
-  it("returns show.kind === 'specific' with gameIds when ?show=specific&game=g1&game=g2", () => {
+  it("migrates legacy ?show=specific&game=g1&game=g2 to gameTags: ['g1','g2'] (Plan 03.4-10 back-compat)", () => {
     const s = parseSearchParams(new URL("https://x?show=specific&game=g1&game=g2"));
-    expect(s.show).toEqual({ kind: "specific", gameIds: ["g1", "g2"] });
+    expect(s.show).toEqual({ kind: "any" });
+    expect(s.gameTags).toEqual(["g1", "g2"]);
+  });
+
+  it("parses ?game=g1&game=g2 into gameTags (new flat multi-select)", () => {
+    const s = parseSearchParams(new URL("https://x?game=g1&game=g2"));
+    expect(s.show).toEqual({ kind: "any" });
+    expect(s.gameTags).toEqual(["g1", "g2"]);
+  });
+
+  it("parses ?game=off_topic,g1 into gameTags: ['off_topic','g1'] (comma-split shorthand)", () => {
+    const s = parseSearchParams(new URL("https://x?game=off_topic,g1"));
+    expect(s.gameTags).toEqual([OFF_TOPIC_TAG, "g1"]);
+  });
+
+  it("dedupes repeated ?game= entries", () => {
+    const s = parseSearchParams(new URL("https://x?game=g1&game=g1&game=g2"));
+    expect(s.gameTags).toEqual(["g1", "g2"]);
   });
 
   it("falls back to show.kind === 'any' on malformed ?show=foo (matches +page.server.ts fallback)", () => {
@@ -131,6 +153,7 @@ describe("serializeFilterState", () => {
       show: { kind: "any" },
       source: [],
       kind: [],
+      gameTags: [],
       authorIsMe: undefined,
       // Default preset is "month" (matches parseSearchParams default).
       dateRange: { preset: "month" },
@@ -176,20 +199,29 @@ describe("serializeFilterState", () => {
     expect(sp.get("event")).toBe("ev_99");
   });
 
-  it("encodes show=specific with each gameId as ?game=...", () => {
+  it("encodes gameTags as repeated ?game= params (no ?show=specific after Plan 03.4-10)", () => {
     const sp = serializeFilterState({
       ...defaultState(),
-      show: { kind: "specific", gameIds: ["g1", "g2"] },
+      gameTags: ["g1", "g2"],
     });
-    expect(sp.get("show")).toBe("specific");
+    expect(sp.has("show")).toBe(false);
     expect(sp.getAll("game")).toEqual(["g1", "g2"]);
+  });
+
+  it("encodes off_topic sentinel alongside game IDs as ?game=g1&game=off_topic", () => {
+    const sp = serializeFilterState({
+      ...defaultState(),
+      gameTags: ["g1", OFF_TOPIC_TAG],
+    });
+    expect(sp.getAll("game")).toEqual(["g1", OFF_TOPIC_TAG]);
   });
 
   it("round-trips identity: parseSearchParams(new URL('https://x?' + serializeFilterState(s).toString())) === s", () => {
     const original: FilterState = {
-      show: { kind: "specific", gameIds: ["g1", "g2"] },
+      show: { kind: "any" },
       source: ["src_a", "src_b"],
       kind: ["youtube_video", "reddit_post"],
+      gameTags: ["g1", "g2", OFF_TOPIC_TAG],
       authorIsMe: true,
       dateRange: { preset: "custom", from: "2026-04-01", to: "2026-05-01" },
       sortDir: "asc",

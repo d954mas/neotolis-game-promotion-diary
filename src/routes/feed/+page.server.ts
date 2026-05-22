@@ -106,10 +106,24 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     to = window.to;
   }
 
+  // GAME axis multi-select (Plan 03.4-10). `state.gameTags` is the flat
+  // multi-select array (game IDs + optional OFF_TOPIC_TAG sentinel). When
+  // show.kind === "inbox", the user is in the "no triage decision yet" view
+  // and gameTags is behaviorally empty — pairing inbox with gameTags would
+  // always return zero rows by construction (inbox = no games attached), so
+  // we drop the gameTags filter rather than emit an empty result.
+  const gameTags =
+    state.show.kind === "inbox"
+      ? undefined
+      : state.gameTags.length > 0
+        ? state.gameTags
+        : undefined;
+
   const filters: FeedFilters = {
     show: state.show,
     source: state.source.length > 0 ? state.source : undefined,
     kind: state.kind.length > 0 ? state.kind : undefined,
+    gameTags,
     authorIsMe: state.authorIsMe,
     from,
     to,
