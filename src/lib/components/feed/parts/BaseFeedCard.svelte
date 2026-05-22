@@ -445,14 +445,21 @@
       cursor: pointer;
     }
   }
+  /* Kind-color stripe. Inset 1px so it sits INSIDE the card border;
+   * border-radius rounds its corners to match the card. Previously
+   * left:0/top:0/bottom:0 made the stripe extend square-edged past
+   * the card's rounded corners (visible after .feed-card overflow:
+   * hidden was removed for the dropdown menu). */
   .feed-card[data-kind-color="1"]::before {
     content: "";
     position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
+    left: 1px;
+    top: 1px;
+    bottom: 1px;
     width: 2px;
     background: var(--card-accent, var(--border-2));
+    border-top-left-radius: calc(var(--r-md) - 1px);
+    border-bottom-left-radius: calc(var(--r-md) - 1px);
     z-index: 1;
   }
 
