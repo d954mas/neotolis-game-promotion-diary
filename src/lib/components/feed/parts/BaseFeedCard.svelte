@@ -24,7 +24,6 @@
 
   import { m } from "$lib/paraglide/messages.js";
   import KindIcon from "../../KindIcon.svelte";
-  import AttachToGamePicker from "../../AttachToGamePicker.svelte";
   import AuthorAvatar from "./AuthorAvatar.svelte";
   import type { CardEventKind, CardEventLite } from "./derive-card-data.js";
   import {
@@ -189,19 +188,6 @@
     };
   });
 
-  let markingStandalone = $state(false);
-  async function markStandaloneClick(): Promise<void> {
-    if (markingStandalone) return;
-    markingStandalone = true;
-    try {
-      const res = await fetch(`/api/events/${event.id}/mark-standalone`, {
-        method: "PATCH",
-      });
-      if (res.ok) onChanged?.();
-    } finally {
-      markingStandalone = false;
-    }
-  }
 </script>
 
 <article
@@ -224,7 +210,7 @@
   oncontextmenu={(e) => e.preventDefault()}
   onclick={(e) => {
     const target = e.target as Element;
-    if (target.closest(".card-select, .card-actions, .card-menu, .picker-line")) {
+    if (target.closest(".card-select, .card-actions, .card-menu")) {
       e.preventDefault();
       return;
     }
@@ -421,19 +407,12 @@
       </div>
     </div>
 
-    {#if inboxRow}
-      <div class="picker-line" onclick={(e) => e.stopPropagation()} role="presentation">
-        <AttachToGamePicker {event} {games} onChanged={() => onChanged?.()} compact={true} />
-        <button
-          type="button"
-          class="standalone-button"
-          onclick={markStandaloneClick}
-          disabled={markingStandalone}
-        >
-          {m.feed_card_mark_standalone_button()}
-        </button>
-      </div>
-    {/if}
+    <!-- Inline inbox affordances removed to match prototype
+         docs/design/v2/ui-kit/app.jsx:1180-1193 — the design surfaces
+         only the `inbox` chip in card-footer-chips for un-attached
+         events. User attaches games via ⋮ → Edit games (GamesPicker)
+         or via bulk select. The mark-standalone path moved into
+         GamesPicker's off-topic tri-state row. -->
   </div>
 </article>
 
@@ -849,38 +828,8 @@
     padding-left: 12px;
   }
 
-  .picker-line {
-    display: flex;
-    align-items: center;
-    gap: var(--s-2);
-    flex-wrap: wrap;
-    min-width: 0;
-    padding-top: var(--s-2);
-  }
-  .standalone-button {
-    min-height: var(--hit);
-    padding: 0 var(--s-3);
-    background: var(--surface);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    font-size: var(--t-13);
-    cursor: pointer;
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
-  }
-  .standalone-button:hover:not(:disabled) {
-    background: var(--surface-2);
-  }
-  .standalone-button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
   @media (prefers-reduced-motion: reduce) {
     .feed-card,
-    .standalone-button,
     .card-select,
     .card-action-btn.overflow {
       transition: none;
