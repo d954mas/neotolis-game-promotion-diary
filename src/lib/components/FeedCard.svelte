@@ -732,10 +732,11 @@
     background: var(--card-accent, var(--border-2));
     z-index: 1;
   }
-  /* Off-topic / standalone fade. */
-  .feed-card.standalone {
-    opacity: 0.65;
-  }
+  /* Off-topic events are NOT faded — matches prototype
+   * docs/design/v2/ui-kit/index.html which has no .card.standalone
+   * opacity rule. Off-topic state is communicated via the .off-topic-chip
+   * in card-footer, not by dimming the entire card (user confused the
+   * fade with "deleted" styling after restoring from trash). */
 
   /* ── Card body ── */
   .card-body {
