@@ -371,12 +371,23 @@
     white-space: pre-wrap;
   }
   /* v2 feed grid mirrors /feed/+page.svelte: single column <640px,
-   * minmax(320px, 1fr) ≥640px, 3-column cap at --max-w. */
+   * minmax(320px, 1fr) ≥640px, 3-column cap at --max-w.
+   *
+   * FeedDateGroupHeader must span all columns (`grid-column: 1 / -1`) so
+   * the date heading reads as a row separator above the card row instead
+   * of landing in the first grid track and pushing the card to the right.
+   * Mirrors the /feed orchestrator behavior: there each date group lives
+   * in its own .feed-grid block, so date headers are siblings to the
+   * grid — here both are inside the same grid because the page does not
+   * partition by date. */
   .feedcard-grid {
     display: grid;
     grid-template-columns: 1fr;
     gap: var(--s-4);
     min-width: 0;
+  }
+  .feedcard-grid :global(.date-head) {
+    grid-column: 1 / -1;
   }
   @media (min-width: 640px) {
     .feedcard-grid {
