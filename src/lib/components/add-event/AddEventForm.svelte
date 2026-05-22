@@ -500,6 +500,7 @@
         <AuthorPopover
           authorIsMe={authorIsMe}
           mineName={currentUserName || "You"}
+          placement="up"
           onchange={(next) => {
             authorIsMe = next;
             authorPopoverOpen = false;
@@ -750,8 +751,14 @@
   }
   .chip.add-kind-chip .kind-icon {
     color: var(--card-accent, var(--text-3));
-    opacity: 0.6;
+    opacity: 0.85;
     transition: opacity var(--m-fast) var(--m-ease);
+  }
+  /* KindIcon.svelte sets `color: var(--text-3)` on its inner <svg.kind>;
+   * override so currentColor flows from --card-accent down into the
+   * SVG strokes. Same pattern as AxisRow.svelte kind chips. */
+  .chip.add-kind-chip .kind-icon :global(svg.kind) {
+    color: inherit;
   }
   .chip.add-kind-chip:hover:not(:disabled),
   .chip.add-game-chip:hover:not(:disabled) {

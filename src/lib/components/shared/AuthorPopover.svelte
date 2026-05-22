@@ -39,11 +39,17 @@
     mineName,
     onchange,
     onclose,
+    placement = "down",
   }: {
     authorIsMe: boolean | undefined;
     mineName: string;
     onchange: (next: boolean) => void;
     onclose?: () => void;
+    // "down" opens below trigger (default — used in card-meta avatars
+    // where there's room below). "up" opens ABOVE trigger — used in
+    // AddEventForm footer-hint where the trigger sits at the bottom of
+    // the modal and a down-open would overflow the dialog.
+    placement?: "up" | "down";
   } = $props();
 
   function pickMine(): void {
@@ -63,7 +69,7 @@
   const mineInitial = $derived((mineName?.[0] ?? "Y").toUpperCase());
 </script>
 
-<div class="author-pick-pop" role="menu" aria-orientation="vertical" tabindex="-1" {onkeydown}>
+<div class="author-pick-pop" data-placement={placement} role="menu" aria-orientation="vertical" tabindex="-1" {onkeydown}>
   <button
     type="button"
     role="menuitemradio"
@@ -116,7 +122,6 @@
   .author-pick-pop {
     position: absolute;
     z-index: 81;
-    top: calc(100% + 6px);
     right: 0;
     min-width: 240px;
     background: var(--surface);
@@ -126,6 +131,14 @@
     padding: 4px;
     display: flex;
     flex-direction: column;
+  }
+  .author-pick-pop[data-placement="down"] {
+    top: calc(100% + 6px);
+  }
+  .author-pick-pop[data-placement="up"] {
+    bottom: calc(100% + 6px);
+    left: 0;
+    right: auto;
   }
   .author-pick-opt {
     display: flex;
