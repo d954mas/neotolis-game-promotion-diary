@@ -185,6 +185,46 @@
 
   let menuOpen = $state(false);
 
+  // Auto-close the dropdown on document click (outside this card's menu)
+  // and on a custom "feedcard:menu-opened" event broadcast by sibling
+  // cards so that opening another card's menu also closes ours. Listener
+  // attach deferred one tick so the click that OPENS this menu doesn't
+  // immediately close it (capture phase races with the toggle handler).
+  $effect(() => {
+    if (typeof window === "undefined") return;
+    if (!menuOpen) return;
+    // Broadcast so any other open menu (on another card) closes.
+    window.dispatchEvent(new CustomEvent("feedcard:menu-opened", { detail: { id: event.id } }));
+
+    const outsideClick = (e: MouseEvent): void => {
+      if (e.target instanceof Node) {
+        const root = document.querySelector(
+          `[data-testid="feed-card"][data-event-id="${event.id}"]`,
+        );
+        if (root && root.contains(e.target)) return;
+      }
+      menuOpen = false;
+    };
+    const onOtherMenuOpen = (e: Event): void => {
+      const ev = e as CustomEvent<{ id: string }>;
+      if (ev.detail?.id !== event.id) menuOpen = false;
+    };
+    const onEsc = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") menuOpen = false;
+    };
+    const t = setTimeout(() => {
+      document.addEventListener("click", outsideClick, true);
+      window.addEventListener("feedcard:menu-opened", onOtherMenuOpen);
+      document.addEventListener("keydown", onEsc);
+    }, 0);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("click", outsideClick, true);
+      window.removeEventListener("feedcard:menu-opened", onOtherMenuOpen);
+      document.removeEventListener("keydown", onEsc);
+    };
+  });
+
   function readMediaUrlFromMetadata(md: unknown): string | null {
     if (md === null || typeof md !== "object") return null;
     const mediaContainer = (md as { media?: unknown }).media;
@@ -353,6 +393,7 @@
   data-view={view}
   data-mine={event.authorIsMe ? "1" : "0"}
   data-testid="feed-card"
+  data-event-id={event.id}
   style="--card-accent: var(--k-{event.kind}); --kind-color: var(--k-{event.kind});"
   ontouchstart={startPress}
   ontouchend={cancelPress}
