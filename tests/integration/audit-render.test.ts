@@ -1859,125 +1859,18 @@ describe("SourceRow inline-affordances (Phase 03.4 Wave 2 — Plan 03.4-09)", ()
 });
 
 /**
- * /events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker
- * compact + FeedCard visibility gate.
+ * /events/[id] Edit pencil top-right + Delete moved + FeedCard inbox.
  *
- * Four findings ride together because they all reshape the read-only
- * detail page + inbox card surface in one user-visible UX delta:
- *   - /events/[id] Delete REMOVED (now at /events/[id]/edit footer).
- *   - /events/[id] Edit pencil moves to top-right corner.
- *   - AttachToGamePicker hidden when gameIds.length > 0 OR standalone.
- *   - AttachToGamePicker visual shrink (compact mode label + style).
+ * AttachToGamePicker assertions removed — Plan 03.4-08 deleted the
+ * inline picker from the inbox card per prototype
+ * docs/design/v2/ui-kit/app.jsx:1180-1193 (which surfaces only the
+ * `inbox` chip; users attach games via ⋮ → Edit games or bulk select).
+ * The picker component itself was dead-code-removed in the follow-up.
  *
- * SSR-render-time guards live here. Browser-mode 360px assertions live
- * in tests/browser/feed-360.test.ts (auth harness deferred).
+ * SSR-render-time guards for the remaining surfaces live here.
+ * Browser-mode 360px assertions live in tests/browser/feed-360.test.ts.
  */
-describe("/events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker compact + FeedCard visibility gate", () => {
-  const baseEvent = {
-    id: "ev-1",
-    gameIds: [] as string[],
-    sourceId: null,
-    kind: "youtube_video" as const,
-    authorIsMe: false,
-    occurredAt: new Date("2026-04-25T12:00:00Z"),
-    title: "How I marketed my indie game",
-    url: "https://youtube.com/watch?v=abc",
-    externalId: "abc",
-    notes: null as string | null,
-    metadata: null as unknown,
-    lastPolledAt: null as Date | null,
-    // PollingBadge live-state extends EventDtoLite with lastPollStatus
-    // (the unavailable override). Test fixtures get null since these
-    // tests don't exercise the polling tier.
-    lastPollStatus: null as string | null,
-  };
-
-  it("FeedCard with gameIds.length > 0 does NOT render AttachToGamePicker", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
-    const out = render(FeedCard, {
-      props: {
-        event: { ...baseEvent, gameIds: ["g-1"] },
-        source: null,
-        game: { id: "g-1", title: "Attached Game" },
-        games: [{ id: "g-1", title: "Attached Game" }],
-      },
-    });
-    // The picker-line wrapper is gated on isInboxRow — no game means
-    // gameIds.length > 0 → not rendered.
-    expect(out.body).not.toMatch(/class="picker-line(?:\s[^"]*)?"/);
-    // Defense-in-depth: the AttachToGamePicker root <div class="picker">
-    // must also be absent (it would only exist if rendered).
-    expect(out.body).not.toMatch(/<div class="picker(?:\s[^"]*)?"/);
-  });
-
-  it("FeedCard with metadata.triage.offTopic === true does NOT render AttachToGamePicker", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
-    const out = render(FeedCard, {
-      props: {
-        event: {
-          ...baseEvent,
-          gameIds: [],
-          metadata: { triage: { offTopic: true } },
-        },
-        source: null,
-        game: null,
-        games: [],
-      },
-    });
-    expect(out.body).not.toMatch(/class="picker-line(?:\s[^"]*)?"/);
-  });
-
-  it("FeedCard inbox row (gameIds=[], no triage flags) renders AttachToGamePicker WITH compact class", async () => {
-    const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
-    const out = render(FeedCard, {
-      props: {
-        event: {
-          ...baseEvent,
-          gameIds: [],
-          metadata: null,
-        },
-        source: null,
-        game: null,
-        games: [{ id: "g-1", title: "Some Game" }],
-      },
-    });
-    // The picker-line is rendered (inbox row).
-    expect(out.body).toMatch(/class="picker-line(?:\s[^"]*)?"/);
-    // The trigger button carries the compact class.
-    expect(out.body).toMatch(/<button[^>]*class="trigger(?:\s[^"]*)?\s+compact(?:\s[^"]*)?"/);
-    // The compact-mode label is rendered (see messages/en.json).
-    expect(out.body).toContain("Attach");
-  });
-
-  it("AttachToGamePicker compact={true} swaps the trigger label to feed_card_attach_compact_label", async () => {
-    const AttachToGamePicker = (await import("../../src/lib/components/AttachToGamePicker.svelte"))
-      .default;
-    const out = render(AttachToGamePicker, {
-      props: {
-        event: { id: "ev-1", gameIds: [] as string[] },
-        games: [{ id: "g-1", title: "Stellar Frontier" }],
-        compact: true,
-      },
-    });
-    expect(out.body).toMatch(/<button[^>]*class="[^"]*\bcompact\b[^"]*"/);
-    expect(out.body).toContain("Attach");
-  });
-
-  it("AttachToGamePicker compact={false} (default) keeps the original 'Attach to game' label", async () => {
-    const AttachToGamePicker = (await import("../../src/lib/components/AttachToGamePicker.svelte"))
-      .default;
-    const out = render(AttachToGamePicker, {
-      props: {
-        event: { id: "ev-1", gameIds: [] as string[] },
-        games: [{ id: "g-1", title: "Stellar Frontier" }],
-      },
-    });
-    // Default trigger: "Attach to game" (full label).
-    expect(out.body).toContain("Attach to game");
-    // Trigger button does NOT carry the compact class.
-    expect(out.body).not.toMatch(/<button[^>]*class="[^"]*\bcompact\b[^"]*"/);
-  });
-
+describe("/events/[id] dual-render shell", () => {
   it("/events/[id]/+page.svelte is a thin wrapper around EventDetailContent (Plan 10 Wave 3 dual-render)", async () => {
     // Phase 03.4 Wave 3 (Plan 10 Task 3): /events/[id] became a thin
     // route shell around the shared <EventDetailContent>. The same

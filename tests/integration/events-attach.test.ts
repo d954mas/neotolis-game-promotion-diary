@@ -288,9 +288,13 @@ describe("attachEventToGames (M:N junction service)", () => {
     const beforeTs = ev.updatedAt;
 
     // Wait long enough for the Postgres NOW() clock to advance past
-    // beforeTs even under CI scheduling jitter — 5ms occasionally
-    // missed the bar when the kernel delayed our timer.
-    await new Promise((r) => setTimeout(r, 50));
+    // beforeTs across container clock skew. createEvent's updatedAt
+    // comes from JS new Date(); attachEventToGames bumps via Postgres
+    // NOW(). On Windows + Docker the two clocks can drift ±30ms even
+    // with NTP, so a 50ms sleep occasionally produced after < before.
+    // 500ms is generous enough to outrun any plausible skew while
+    // still keeping the test fast.
+    await new Promise((r) => setTimeout(r, 500));
     const after = await attachEventToGames(u.id, ev.id, [gA], "127.0.0.1");
     expect(after.updatedAt.getTime()).toBeGreaterThanOrEqual(beforeTs.getTime());
   });

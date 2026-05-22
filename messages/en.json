@@ -31,7 +31,6 @@
   "game_add_steam_listing_cta": "+ Add Steam listing",
   "feed_filters_apply": "Apply filters",
   "feed_filters_clear_all": "Clear all filters",
-  "feed_attach_to_game": "Attach to game",
   "feed_move_to_inbox": "Move to inbox",
   "feed_dismiss_from_inbox": "Mark not game-related",
   "settings_sessions_signout_one": "Sign out this session",
@@ -416,7 +415,6 @@
   "feed_row_edit_aria": "Edit event",
   "feed_row_delete_aria": "Delete event",
 
-  "feed_card_attach_compact_label": "Attach",
   "feed_card_author_is_me_badge": "Mine",
   "feed_card_thumbnail_alt": "Thumbnail for: {title}",
   "feed_card_open_external": "Open external link",

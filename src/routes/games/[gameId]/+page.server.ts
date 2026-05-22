@@ -30,7 +30,7 @@ import { enrichDataSourceDtosWithYoutubeChannelTitles } from "$lib/server/servic
  *   - game        : GameDto (userId stripped)
  *   - listings    : GameSteamListingDto[]
  *   - events      : EventDto[] (per-game curated, sorted DESC by occurredAt)
- *   - games       : GameDto[] (for AttachToGamePicker on FeedRow)
+ *   - games       : GameDto[] (used by FeedCard to render attached game chips)
  *   - sources     : DataSourceDto[] (for source-chip resolution on FeedRow)
  *
  * Cross-tenant gameId surfaces as 404 (never 403). Child fetches are
