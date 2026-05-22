@@ -374,10 +374,16 @@
 </section>
 
 <style>
+  /* Bound the form to a comfortable reading width so the kind chip row +
+   * URL input do not sprawl across a 1280px viewport. Matches the
+   * /sources/[id] detail page (`.source-detail` is also 720px) and the
+   * AddEventModal panel chrome — keeps form pages consistent across the
+   * app. */
   .new-source {
     display: flex;
     flex-direction: column;
     gap: var(--s-4);
+    max-width: 720px;
     min-width: 0;
   }
   .breadcrumb {
@@ -491,15 +497,33 @@
     font-size: var(--t-13);
     color: var(--text-2);
   }
+  /* Input mirrors prototype `.field-input` (40px height, surface-2 bg,
+   * border with focus ring) — keeps form inputs consistent with the
+   * AddEventModal / EventDetailModal modal patterns. */
   .input {
-    min-height: var(--hit);
-    padding: 0 var(--s-4);
-    background: var(--surface-3);
+    min-height: var(--hit-lg);
+    padding: 0 var(--s-3);
+    background: var(--surface-2);
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: var(--r-sm);
     font-family: var(--f-sans);
     font-size: var(--t-14);
+    transition: border-color var(--m-fast) var(--m-ease);
+  }
+  .input::placeholder {
+    color: var(--text-3);
+  }
+  .input:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: var(--focus-ring);
+  }
+  textarea.input {
+    min-height: 80px;
+    padding: var(--s-2) var(--s-3);
+    line-height: var(--lh-body);
+    resize: vertical;
   }
   .toggle {
     display: flex;
@@ -507,6 +531,17 @@
     gap: var(--s-2);
     color: var(--text);
     font-size: var(--t-14);
+    cursor: pointer;
+  }
+  /* Accent the native checkbox so it reads as the design-system color
+   * instead of the browser default blue. Same `accent-color` is applied
+   * globally via app.css for app-wide consistency, but the per-page rule
+   * is the resilient fallback for browsers without the inherited rule. */
+  .toggle input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
   }
   /* Horizontal rule between the kind/owner/auto-import fields and the
      conditional BackfillPicker. Collapses with the picker — no orphan
