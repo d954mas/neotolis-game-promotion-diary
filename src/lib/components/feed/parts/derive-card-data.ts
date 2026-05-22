@@ -74,6 +74,11 @@ export interface CardEventLite {
     } | null;
     linkUrl?: string | null;
     bodyExcerpt?: string | null;
+    /** Subreddit slug from reddit_posts.subreddit (source-of-truth). */
+    subreddit?: string | null;
+    /** Author handle from reddit_posts.author (source-of-truth, NULL on
+     *  Reddit-side account deletion). */
+    author?: string | null;
   };
 }
 

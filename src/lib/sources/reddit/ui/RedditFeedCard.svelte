@@ -80,24 +80,25 @@
     currentUserName?: string;
   } = $props();
 
-  // r/<subreddit>. Strict no-denorm: read ONLY from source-of-truth row.
-  // For sub-polled events source_id → data_sources(reddit_subreddit) →
-  // displayName carries the subreddit slug. For author-polled events
-  // source is the reddit_account row. Paste-flow events from
-  // unregistered subs/accounts show no attribution until either:
-  //  - the user registers the source in /sources, OR
-  //  - a future paste-flow enrichment creates a service-level cache row.
-  // Honest state for unregistered sources, mirroring YoutubeFeedCard.
-  const sourceLabel = $derived.by(
-    (): string => source?.displayName ?? source?.handleUrl ?? "",
-  );
+  // r/<subreddit>. Read from reddit_posts.subreddit via redditEnrichment
+  // (set by feed-enrichment JOIN). reddit_posts is the source-of-truth
+  // cache row populated by handlePostSingle on every paste / poll;
+  // events.metadata.subreddit is a denormalization that we deliberately
+  // stop reading. Fallback to data_sources for sub-polled events whose
+  // source.displayName carries the slug.
+  const sourceLabel = $derived.by((): string => {
+    const sub = event.redditEnrichment?.subreddit ?? null;
+    if (sub) return `r/${sub}`;
+    return source?.displayName ?? source?.handleUrl ?? "";
+  });
 
-  // /u/<author> — same source-of-truth principle. We currently have no
-  // reddit_posts cache table that owns per-post author identity; the
-  // metadata.author snapshot is a denormalization we deliberately stop
-  // reading. Until a per-post or per-author source row exists for the
-  // event, byline stays empty (honest state).
-  const bylineLabel = $derived.by((): string | null => null);
+  // /u/<author>. Same source-of-truth principle — read from
+  // reddit_posts.author through enrichment. NULL when the Reddit user
+  // has deleted their account (Reddit redacts the field).
+  const bylineLabel = $derived.by((): string | null => {
+    const a = event.redditEnrichment?.author ?? null;
+    return a ? `/u/${a}` : null;
+  });
 
   const thumbnailUrl = $derived.by(() => deriveThumbnailUrl(event));
 
