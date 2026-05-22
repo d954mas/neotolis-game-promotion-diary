@@ -271,10 +271,15 @@
 />
 
 <style>
+  /* Bounded reading width so the .block cards do not sprawl across a
+   * 1280px viewport — settings is single-column content, no reason to
+   * fill the full layout column. Matches /sources/[id] + /sources/new
+   * detail surfaces (720-960px tier). */
   .settings {
     display: flex;
     flex-direction: column;
-    gap: var(--s-7);
+    gap: var(--s-6);
+    max-width: 960px;
     min-width: 0;
   }
   h1 {
