@@ -211,7 +211,15 @@
         body: JSON.stringify({ url: u }),
       });
       if (!res.ok) {
-        urlError = m.add_event_modal_url_error_invalid();
+        // Surface the server's error code instead of the generic
+        // "Not a valid URL" so the user sees WHY it failed
+        // (rate-limited / reddit_not_configured / network / …).
+        try {
+          const body = (await res.json()) as { error?: string; message?: string };
+          urlError = body.error ?? body.message ?? m.add_event_modal_url_error_invalid();
+        } catch {
+          urlError = `${res.status} ${res.statusText}` || m.add_event_modal_url_error_invalid();
+        }
         return;
       }
       const data = (await res.json()) as {
