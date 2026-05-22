@@ -53,8 +53,37 @@
   }
 </script>
 
-<AddEventForm
-  games={data.games}
-  {onSave}
-  onCancel={() => goto("/feed")}
-/>
+<!--
+  Route-mode wrapper — visually mirrors AddEventModal's 720px panel chrome
+  so /events/new reads as the same surface a user opens from the feed
+  "+ Add event" CTA (D-05 dual-render contract). Without this wrapper the
+  AddEventForm's <form> + <div class="modal-foot"> siblings stretch to the
+  full viewport because the route is a regular block flow.
+-->
+<section class="addevent-route-host">
+  <AddEventForm
+    games={data.games}
+    {onSave}
+    onCancel={() => goto("/feed")}
+  />
+</section>
+
+<style>
+  /* Mirrors AddEventModal's panel sizing — 720px feels right for a form
+   * with a 4-col kind grid + URL + notes; the EventDetailContent panel is
+   * 760px because it carries a wider footer dock. Surface + border + radius
+   * + shadow mirror EventDetailModal's modal box for cross-surface parity. */
+  .addevent-route-host {
+    width: min(720px, calc(100vw - 32px));
+    margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-elev);
+    color: var(--text);
+    overflow: hidden;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+</style>
