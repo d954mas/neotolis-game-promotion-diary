@@ -277,6 +277,27 @@ export interface FeedFacets {
   total: number;
 }
 
+/**
+ * escapeLikePattern — escape user-supplied substrings before splicing into
+ * an ILIKE pattern (Plan 03.4-10 hybrid-search follow-up).
+ *
+ * Hybrid search uses `title ILIKE '%' || $q || '%'` to match substrings the
+ * FTS lexer can't reach (e.g. `?q=holl` matching "Hollow Knight"). Raw user
+ * input MUST be escaped first so `%` / `_` in the query are treated as
+ * literal characters, not ILIKE wildcards — otherwise `?q=100%25` would
+ * collapse to `'%100%%'` and match every event with `100` anywhere in the
+ * title (wildcard injection).
+ *
+ * The backslash escape is itself escaped first so a user-supplied `\` is
+ * treated as a literal backslash (the default ESCAPE clause in Postgres
+ * ILIKE is `\`). Order matters — backslash MUST go first, otherwise the
+ * subsequent `%` / `_` escapes would each insert a new `\` that gets
+ * double-escaped on the next pass.
+ */
+function escapeLikePattern(input: string): string {
+  return input.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
 function assertValidKind(kind: string): asserts kind is EventKind {
   if (!(VALID_EVENT_KINDS as readonly string[]).includes(kind)) {
     throw new AppError(
@@ -1379,32 +1400,73 @@ export async function listFeedPage(
     filterParts.push(lte(events.occurredAt, filters.to));
   }
 
-  // Full-text search predicate (Plan 03.4-10 follow-up). `plainto_tsquery`
-  // accepts freeform user input — it auto-ANDs the supplied words and
-  // escapes operators that would otherwise raise a `syntax error in
-  // tsquery` (e.g. `to_tsquery('foo!bar')` throws). The `search_vec`
-  // column is GENERATED ALWAYS AS to_tsvector('english', title || notes)
-  // and backed by GIN index `idx_events_search_vec`; the planner picks
-  // the GIN index for `@@` predicates automatically.
+  // Hybrid search predicate (Plan 03.4-10 follow-up — pg_trgm rollout).
+  //
+  // Two complementary halves run as an OR union:
+  //   1. FTS — `search_vec @@ plainto_tsquery('english', $q)`. Word-level
+  //      English stemming (`promote` matches `promotion`, `viking` matches
+  //      `vikings`), backed by GIN(search_vec). `plainto_tsquery` (not
+  //      `to_tsquery`) accepts freeform input — auto-ANDs words and
+  //      escapes operators that would otherwise raise `syntax error in
+  //      tsquery` (e.g. `?q=foo!bar`).
+  //   2. Trigram — `title ILIKE '%q%' OR notes ILIKE '%q%'`. Substring
+  //      search (`?q=holl` matches "Hollow Knight"), backed by
+  //      GIN(title gin_trgm_ops) + GIN(notes gin_trgm_ops) from migration
+  //      0045. Trigrams turn what would be O(n) seq scans into O(log n)
+  //      index-backed lookups; the planner picks the trigram GIN
+  //      automatically for `column ILIKE '%pattern%'` shape (NOT the
+  //      anchored `'pattern%'` shape — that uses btree).
+  //
+  // User input is splice-escaped via escapeLikePattern so `%` / `_` from
+  // the user are treated as literals (wildcard injection guard); the SQL
+  // bind itself is parameterized so the value never lands inline.
+  //
+  // Ranking ORDER BY (when query is set): FTS matches sort first (rank 0),
+  // partial-only matches sort second (rank 1); within each tier sort by
+  // ts_rank DESC for FTS relevance, then by occurred_at DESC. Without
+  // ranking, an FTS-perfect match buried under partial matches would
+  // surface AFTER less-relevant trigram hits sharing the same date.
   //
   // Whitespace-only queries are dropped (treated as "no filter") so the
   // user typing then deleting characters doesn't briefly return an empty
   // result set. The trim happens here at the service boundary rather
   // than in the loader so every caller benefits.
   const trimmedQuery = filters.query?.trim() ?? "";
-  if (trimmedQuery !== "") {
-    filterParts.push(sql`${events.searchVec} @@ plainto_tsquery('english', ${trimmedQuery})` as SQL);
+  const hasQuery = trimmedQuery !== "";
+  if (hasQuery) {
+    const likePattern = `%${escapeLikePattern(trimmedQuery)}%`;
+    filterParts.push(sql`(
+      ${events.searchVec} @@ plainto_tsquery('english', ${trimmedQuery})
+      OR ${events.title} ILIKE ${likePattern}
+      OR COALESCE(${events.notes}, '') ILIKE ${likePattern}
+    )` as SQL);
   }
+
+  // ORDER BY: when the query is active, tier FTS matches above trigram-only
+  // matches, then within each tier order by ts_rank (relevance) and
+  // finally occurred_at. When no query, fall back to the legacy cursor
+  // ordering (occurred_at + id, asc or desc per opts.sortDir).
+  const orderBy = hasQuery
+    ? sortAsc
+      ? sql`
+          CASE WHEN ${events.searchVec} @@ plainto_tsquery('english', ${trimmedQuery}) THEN 0 ELSE 1 END,
+          ts_rank(${events.searchVec}, plainto_tsquery('english', ${trimmedQuery})) DESC,
+          ${events.occurredAt} ASC, ${events.id} ASC
+        `
+      : sql`
+          CASE WHEN ${events.searchVec} @@ plainto_tsquery('english', ${trimmedQuery}) THEN 0 ELSE 1 END,
+          ts_rank(${events.searchVec}, plainto_tsquery('english', ${trimmedQuery})) DESC,
+          ${events.occurredAt} DESC, ${events.id} DESC
+        `
+    : sortAsc
+      ? sql`${events.occurredAt} ASC, ${events.id} ASC`
+      : sql`${events.occurredAt} DESC, ${events.id} DESC`;
 
   const rows = await db
     .select()
     .from(events)
     .where(and(eq(events.userId, userId), ...filterParts, cursorClause))
-    .orderBy(
-      sortAsc
-        ? sql`${events.occurredAt} ASC, ${events.id} ASC`
-        : sql`${events.occurredAt} DESC, ${events.id} DESC`,
-    )
+    .orderBy(orderBy)
     .limit(FEED_PAGE_SIZE + 1);
 
   const hasMore = rows.length > FEED_PAGE_SIZE;
@@ -1514,17 +1576,24 @@ function buildFeedBaseFilterParts(
     if (filters.to !== undefined) filterParts.push(lte(events.occurredAt, filters.to));
   }
 
-  // Full-text search predicate carries through to facet counts so chip
-  // counts respect the current `?q=...` scope. The query axis is NEVER a
-  // facet (there are no chips to render), but it IS a filter that should
-  // narrow every other facet's count — exclude.has("query") is therefore
-  // effectively always false in current callers.
+  // Hybrid search predicate carries through to facet counts so chip
+  // counts respect the current `?q=...` scope. Mirrors listFeedPage's
+  // FTS-OR-trigram clause exactly — without it, partial-match queries
+  // (`?q=holl`) would show inflated facet counts compared to the page
+  // results. The query axis is NEVER a facet (there are no chips to
+  // render), but it IS a filter that should narrow every other facet's
+  // count — exclude.has("query") is therefore effectively always false
+  // in current callers. See listFeedPage for the full hybrid-search
+  // rationale + ranking notes.
   if (!exclude.has("query")) {
     const trimmedQuery = filters.query?.trim() ?? "";
     if (trimmedQuery !== "") {
-      filterParts.push(
-        sql`${events.searchVec} @@ plainto_tsquery('english', ${trimmedQuery})` as SQL,
-      );
+      const likePattern = `%${escapeLikePattern(trimmedQuery)}%`;
+      filterParts.push(sql`(
+        ${events.searchVec} @@ plainto_tsquery('english', ${trimmedQuery})
+        OR ${events.title} ILIKE ${likePattern}
+        OR COALESCE(${events.notes}, '') ILIKE ${likePattern}
+      )` as SQL);
     }
   }
 

@@ -139,6 +139,21 @@ export const events = pgTable(
     // counts respect the search). Without GIN, every page load with a
     // query would seq-scan the events table.
     searchVecIdx: index("idx_events_search_vec").using("gin", t.searchVec),
+    // pg_trgm support (migration 0045_events_trigram). Trigram GIN indexes
+    // on `title` and `notes` turn the substring-search half of the hybrid
+    // search predicate (`title ILIKE '%q%' OR notes ILIKE '%q%'`) from
+    // O(n) seq scans into O(log n) index-backed lookups. The FTS index
+    // above handles word-level matches (English stemming via
+    // `plainto_tsquery`); these handle substring matches (e.g. `?q=holl`
+    // matching "Hollow Knight") — together they form the canonical
+    // Postgres hybrid-search recipe (FTS + pg_trgm).
+    //
+    // The `gin_trgm_ops` operator class is what makes a GIN index
+    // ILIKE-aware; drizzle-kit emits the trailing space + opclass via a raw
+    // sql expression on the column ref. Both indexes carry the matching
+    // expression in the snapshot so `pnpm db:check` does not detect drift.
+    titleTrgmIdx: index("idx_events_title_trgm").using("gin", sql`${t.title} gin_trgm_ops`),
+    notesTrgmIdx: index("idx_events_notes_trgm").using("gin", sql`${t.notes} gin_trgm_ops`),
     // Polling-state queries go through youtube_videos (one row per video,
     // JOINed on external_id from events). The previous partial index on
     // events.last_polled_at and the column itself were dropped in an

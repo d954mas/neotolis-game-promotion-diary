@@ -10,21 +10,33 @@ import { uuidv7 } from "../../src/lib/server/ids.js";
 import { seedUserDirectly } from "./helpers.js";
 
 /**
- * Postgres FTS on `events.search_vec` (Plan 03.4-10 follow-up).
+ * Hybrid search on events (Plan 03.4-10 follow-up: FTS + pg_trgm).
  *
- * search_vec is GENERATED ALWAYS AS to_tsvector('english', title || notes),
- * backed by GIN index `idx_events_search_vec`. listFeedPage +
- * listFeedFacets apply `search_vec @@ plainto_tsquery('english', $q)`
- * when filters.query is non-empty.
+ * Two complementary predicates run as an OR union in listFeedPage +
+ * listFeedFacets when filters.query is non-empty:
  *
- * `plainto_tsquery` (not `to_tsquery`) handles freeform user input — it
- * auto-ANDs supplied words and escapes operators (so `?q=promotion!`
- * doesn't trip a syntax error). Stemming is English-default: "promote",
- * "promoting", "promoted", "promotion" all share the same lexeme so a
- * query for any matches events containing any of the inflections.
+ *   1. FTS — `search_vec @@ plainto_tsquery('english', $q)`.
+ *      Word-level English stemming, backed by GIN(search_vec). `promote`
+ *      matches `promotion`; `viking` matches `vikings`; `wishlist`
+ *      matches `wishlists`. `plainto_tsquery` (not `to_tsquery`) handles
+ *      freeform input — auto-ANDs words and escapes operators (so
+ *      `?q=foo!bar` doesn't trip a syntax error).
+ *
+ *   2. Trigram — `title ILIKE '%q%' OR notes ILIKE '%q%'`.
+ *      Substring search (e.g. `?q=holl` matches "Hollow Knight"), backed
+ *      by GIN(title gin_trgm_ops) + GIN(notes gin_trgm_ops). Fills the
+ *      substring gap FTS can't cover.
+ *
+ * Ranking (when query is active): FTS matches sort first (rank 0),
+ * trigram-only matches sort second (rank 1); within each tier by
+ * ts_rank DESC then by occurred_at DESC. Industry-standard FTS +
+ * pg_trgm hybrid recipe (Linear, Cal.com, Supabase docs).
+ *
+ * User input is escaped via escapeLikePattern before splicing into the
+ * ILIKE pattern so `%` / `_` from the user behave as literals.
  *
  * Tenant scope MUST be preserved — every test seeds at least two
- * tenants and asserts cross-tenant rows never leak through the FTS
+ * tenants and asserts cross-tenant rows never leak through the search
  * predicate.
  */
 
@@ -282,6 +294,217 @@ describe("FEED-SEARCH: server-side FTS on events.title + events.notes", () => {
     );
 
     const facets = await listFeedFacets(userId, { query: "promotion" });
+    expect(facets.total).toBe(2);
+    expect(facets.kinds.press).toBe(1);
+    expect(facets.kinds.youtube_video).toBe(1);
+    expect(facets.show.all).toBe(2);
+  });
+
+  // ------------------------------------------------------------------
+  // pg_trgm hybrid-search cases (Plan 03.4-10 trigram rollout)
+  // ------------------------------------------------------------------
+
+  it("trigram: short prefix matches via substring (?q=holl finds Hollow Knight)", async () => {
+    // FTS alone would NOT match `?q=holl` — `holl` is not a stemmed
+    // lexeme, so `search_vec @@ plainto_tsquery('english', 'holl')`
+    // returns no rows. With the trigram ILIKE branch added, the title
+    // substring match fires and "Hollow Knight" surfaces.
+    const { userId, gameId } = await seedTenant("trgm-prefix@test.local");
+    const match = await createEvent(
+      userId,
+      {
+        gameIds: [gameId],
+        kind: "press",
+        occurredAt: new Date("2026-04-01T12:00:00Z"),
+        title: "Hollow Knight launch wishlist push",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      userId,
+      {
+        gameIds: [gameId],
+        kind: "press",
+        occurredAt: new Date("2026-04-02T12:00:00Z"),
+        title: "Some other release",
+      },
+      "127.0.0.1",
+    );
+
+    const page = await listFeedPage(userId, { query: "holl" }, null);
+    expect(page.rows.map((r) => r.id)).toEqual([match.id]);
+  });
+
+  it("trigram: short prefix matches in notes too (?q=holl finds notes hit)", async () => {
+    const { userId, gameId } = await seedTenant("trgm-notes-prefix@test.local");
+    const match = await createEvent(
+      userId,
+      {
+        gameIds: [gameId],
+        kind: "press",
+        occurredAt: new Date("2026-04-01T12:00:00Z"),
+        title: "Unrelated title",
+        notes: "Coverage of the Hollywood event was unexpected.",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      userId,
+      {
+        gameIds: [gameId],
+        kind: "press",
+        occurredAt: new Date("2026-04-02T12:00:00Z"),
+        title: "Another title",
+        notes: "Nothing related here.",
+      },
+      "127.0.0.1",
+    );
+
+    const page = await listFeedPage(userId, { query: "holl" }, null);
+    expect(page.rows.map((r) => r.id)).toEqual([match.id]);
+  });
+
+  it("FTS still preferred: ?q=viking matches vikings (stem) without trigram", async () => {
+    // Stemming wins on its own — this test ensures the OR didn't break
+    // the stem branch. `viking` → lexeme `viking`; "vikings" → also
+    // `viking`. The trigram branch ALSO matches (substring), but the
+    // FTS branch should fire and tier the result rank 0.
+    const { userId, gameId } = await seedTenant("trgm-vikings@test.local");
+    const stem = await createEvent(
+      userId,
+      {
+        gameIds: [gameId],
+        kind: "press",
+        occurredAt: new Date("2026-04-01T12:00:00Z"),
+        title: "Reviewing vikings combat in detail",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      userId,
+      {
+        gameIds: [gameId],
+        kind: "press",
+        occurredAt: new Date("2026-04-02T12:00:00Z"),
+        title: "Unrelated title",
+      },
+      "127.0.0.1",
+    );
+
+    const page = await listFeedPage(userId, { query: "viking" }, null);
+    expect(page.rows.map((r) => r.id)).toEqual([stem.id]);
+  });
+
+  it("ranking: FTS-matched event sorts before trigram-only match", async () => {
+    // Event A: word "hello" — FTS lexeme match (rank 0).
+    // Event B: word "helloworld" — trigram-only substring (rank 1) —
+    //   English stemmer treats `helloworld` as a single lexeme distinct
+    //   from `hello`, so FTS does NOT consider B a `hello` match. The
+    //   trigram ILIKE branch picks it up via the substring 'hello'.
+    //
+    // Even though B occurred LATER (would normally surface first by
+    // date-desc), the rank tier flips: A (FTS, rank 0) MUST come before
+    // B (trigram-only, rank 1).
+    const { userId, gameId } = await seedTenant("trgm-rank@test.local");
+    const fts = await createEvent(
+      userId,
+      {
+        gameIds: [gameId],
+        kind: "press",
+        occurredAt: new Date("2026-04-01T12:00:00Z"),
+        title: "hello there",
+      },
+      "127.0.0.1",
+    );
+    const trigramOnly = await createEvent(
+      userId,
+      {
+        gameIds: [gameId],
+        kind: "press",
+        // Occurs LATER — would normally sort first by date-desc, but
+        // FTS tier-0 should beat trigram tier-1 regardless of date.
+        occurredAt: new Date("2026-04-05T12:00:00Z"),
+        title: "Big helloworld push",
+      },
+      "127.0.0.1",
+    );
+
+    const page = await listFeedPage(userId, { query: "hello" }, null);
+    // Both events are matched. Tier order: FTS first, trigram-only second.
+    expect(page.rows.map((r) => r.id)).toEqual([fts.id, trigramOnly.id]);
+  });
+
+  it("ILIKE wildcard injection guard: literal % in query doesn't widen match", async () => {
+    // Without escapeLikePattern, `?q=%` would build pattern `%%%` →
+    // matches everything. With escaping, `%` becomes `\%` (literal) so
+    // only rows whose title/notes contain a literal `%` character match.
+    const { userId, gameId } = await seedTenant("trgm-escape@test.local");
+    await createEvent(
+      userId,
+      {
+        gameIds: [gameId],
+        kind: "press",
+        occurredAt: new Date("2026-04-01T12:00:00Z"),
+        title: "Normal title",
+      },
+      "127.0.0.1",
+    );
+    const literalPercent = await createEvent(
+      userId,
+      {
+        gameIds: [gameId],
+        kind: "press",
+        occurredAt: new Date("2026-04-02T12:00:00Z"),
+        title: "Bumped 100% conversion on Friday",
+      },
+      "127.0.0.1",
+    );
+
+    // Query literally for "100%" — should only match the row containing
+    // the literal "100%", not every row. The `%` from input must NOT
+    // act as a wildcard.
+    const page = await listFeedPage(userId, { query: "100%" }, null);
+    expect(page.rows.map((r) => r.id)).toEqual([literalPercent.id]);
+  });
+
+  it("trigram facets: chip counts respect partial-match queries", async () => {
+    // Three events: two with "Hollow" in title (one press, one youtube),
+    // one with unrelated title. ?q=holl should narrow facets to the
+    // matching two via the trigram branch.
+    const { userId, gameId } = await seedTenant("trgm-facets@test.local");
+    await createEvent(
+      userId,
+      {
+        gameIds: [gameId],
+        kind: "press",
+        occurredAt: new Date("2026-04-01T12:00:00Z"),
+        title: "Hollow Knight press",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      userId,
+      {
+        gameIds: [gameId],
+        kind: "youtube_video",
+        occurredAt: new Date("2026-04-02T12:00:00Z"),
+        title: "Hollow Knight video",
+        externalId: "yt-trgm-1",
+      },
+      "127.0.0.1",
+    );
+    await createEvent(
+      userId,
+      {
+        gameIds: [gameId],
+        kind: "press",
+        occurredAt: new Date("2026-04-03T12:00:00Z"),
+        title: "Unrelated press",
+      },
+      "127.0.0.1",
+    );
+
+    const facets = await listFeedFacets(userId, { query: "holl" });
     expect(facets.total).toBe(2);
     expect(facets.kinds.press).toBe(1);
     expect(facets.kinds.youtube_video).toBe(1);

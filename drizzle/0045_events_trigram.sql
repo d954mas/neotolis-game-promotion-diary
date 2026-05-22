@@ -1,0 +1,40 @@
+-- Hybrid search: pg_trgm trigram support on top of FTS (Plan 03.4-10 follow-up).
+--
+-- Background: 0044_events_fts added a tsvector column `search_vec` +
+-- GIN(search_vec) index for word-level English-stemmed search. FTS is great
+-- for matched-words queries (`promote` -> `promotion`, `viking` -> `vikings`)
+-- but cannot match arbitrary substrings — `?q=holl` returns ZERO matches
+-- even when the events contain "Hollow Knight" in the title, because `holl`
+-- is not a stemmed lexeme.
+--
+-- This migration adds the missing substring-search half:
+--   - pg_trgm extension (PostgreSQL contrib, ships with every distribution)
+--   - GIN(title gin_trgm_ops) + GIN(notes gin_trgm_ops)
+--
+-- listFeedPage's WHERE predicate becomes:
+--   search_vec @@ plainto_tsquery('english', $q)   -- word-level (FTS)
+--     OR title ILIKE '%' || $q || '%'              -- substring (trigram)
+--     OR notes ILIKE '%' || $q || '%'              -- substring (trigram)
+--
+-- The trigram GIN indexes turn the ILIKE patterns from O(n) seq scans into
+-- O(log n) index-backed lookups. Industry standard pattern (Linear, Cal.com,
+-- Supabase docs) — FTS + pg_trgm is the canonical Postgres hybrid search
+-- recipe for "search-as-you-type" UX.
+--
+-- Storage cost: each trigram index is ~2-3x the underlying column size.
+-- title is short (≤500 chars) and notes is typically a paragraph; on a
+-- 100k-event tenant this is single-digit MB total — cheap.
+--
+-- Refs:
+--   https://www.postgresql.org/docs/current/pgtrgm.html
+--   https://supabase.com/docs/guides/database/extensions/pg_trgm
+--
+-- Forward-only. Idempotent: `CREATE EXTENSION IF NOT EXISTS` is the canonical
+-- shape; `CREATE INDEX IF NOT EXISTS` keeps re-runs safe (drizzle-migrator
+-- does not re-run, but the operator-friendly shape protects accidental
+-- manual replays).
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS idx_events_title_trgm ON events USING GIN(title gin_trgm_ops);
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS idx_events_notes_trgm ON events USING GIN(notes gin_trgm_ops);
