@@ -767,9 +767,12 @@
   }
   /* Promote z-index when the dropdown menu is open so the menu (which
    * extends past the card's bottom edge) renders ABOVE neighbouring
-   * cards in source order. */
+   * cards AND the next sticky FeedDateGroupHeader (z-index: 5). We use
+   * 20 so it's safely above date headers but below the global chrome
+   * (.sticky-chrome at z-index: 10 sets the upper bound for in-feed
+   * UI — dialogs / modals live in a higher tier). */
   .feed-card:has(.card-menu) {
-    z-index: 5;
+    z-index: 20;
   }
   @media (hover: hover) {
     .feed-card:hover {
