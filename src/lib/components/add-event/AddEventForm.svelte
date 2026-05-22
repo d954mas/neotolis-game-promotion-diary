@@ -81,6 +81,17 @@
   let fetched = $state(false);
   let fetchedKind = $state<EventKind | null>(null);
   let fetchedSrc = $state<string>("");
+
+  // After a successful fetch, the URL + kind are AUTHORITATIVE — the
+  // adapter parsed them from the live URL. Lock both inputs so the user
+  // can't drift them out of sync with the source. A "Reset" button on
+  // the fetch-result chip clears these and re-enables editing.
+  function resetFetch(): void {
+    fetched = false;
+    fetchedKind = null;
+    fetchedSrc = "";
+    urlError = null;
+  }
   let urlError = $state<string | null>(null);
   let errorText = $state<string | null>(null);
 
@@ -374,15 +385,22 @@
         }}
         spellcheck="false"
         autocomplete="off"
-        disabled={saving}
+        disabled={saving || fetched}
+        readonly={fetched}
       />
       <button
         type="button"
         class="btn ghost field-url-fetch"
-        onclick={fetchUrlMetadata}
-        disabled={fetching || saving || url.trim().length === 0}
+        onclick={fetched ? resetFetch : fetchUrlMetadata}
+        disabled={fetching || saving || (!fetched && url.trim().length === 0)}
       >
-        {fetching ? m.add_event_modal_fetch_button_loading() : m.add_event_modal_fetch_button()}
+        {#if fetched}
+          Reset
+        {:else if fetching}
+          {m.add_event_modal_fetch_button_loading()}
+        {:else}
+          {m.add_event_modal_fetch_button()}
+        {/if}
       </button>
     </div>
     {#if urlError}
@@ -404,10 +422,14 @@
     {/if}
   </div>
 
-  <!-- Kind picker — single wrap row of chips, kind-color cued. -->
+  <!-- Kind picker — single wrap row of chips, kind-color cued. After
+       fetch, the kind was determined by the URL adapter and is locked
+       (the picker as a whole becomes non-interactive; only the active
+       chip remains visible at full opacity so the user can still see
+       the detected kind). Reset on the URL field re-enables. -->
   <div class="field">
     <span class="field-label">{m.add_event_modal_kind_label()}</span>
-    <div class="kind-grid">
+    <div class="kind-grid" data-locked={fetched ? "1" : "0"}>
       {#each KIND_FLOW as k (k)}
         <button
           type="button"
@@ -415,7 +437,7 @@
           data-active={kind === k ? "1" : "0"}
           style="--card-accent: {kindAccent(k)}"
           onclick={() => (kind = k)}
-          disabled={saving}
+          disabled={saving || fetched}
         >
           <span class="kind-icon"><KindIcon kind={k} size={16} /></span>
           <span>{kindShort(k)}</span>
@@ -776,31 +798,39 @@
   .modal-foot-hint b {
     color: var(--text-2); font-weight: var(--w-md);
   }
+  /* Date-edit affordance — more obvious now per user UAT: dotted
+   * underline + persistent pencil so it reads as clickable without
+   * needing hover. */
   .modal-date-edit {
     position: relative;
-    display: inline-flex; align-items: center; gap: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     padding: 2px 6px;
     margin: -2px 0 -2px -4px;
     border-radius: var(--r-xs);
     cursor: pointer;
-    transition: background var(--m-fast) var(--m-ease);
-    color: var(--text-2);
-    font-weight: var(--w-md);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
+    color: var(--text);
+    font-weight: var(--w-sb);
+    border-bottom: 1px dashed var(--border-2);
   }
   .modal-date-pencil {
-    display: inline-flex; align-items: center; justify-content: center;
-    color: var(--text-4);
-    opacity: 0.7;
-    transition: color var(--m-fast), opacity var(--m-fast);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
+    transition: color var(--m-fast);
   }
   @media (hover: hover) {
     .modal-date-edit:hover {
-      background: var(--surface-2);
-      box-shadow: inset 0 0 0 1px var(--border-hairline);
+      background: var(--accent-soft);
+      color: var(--accent-strong);
     }
     .modal-date-edit:hover .modal-date-pencil {
-      color: var(--text-2);
-      opacity: 1;
+      color: var(--accent-strong);
     }
   }
   .modal-date-native {
