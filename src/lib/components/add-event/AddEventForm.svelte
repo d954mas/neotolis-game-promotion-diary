@@ -44,6 +44,10 @@
     offTopic: boolean;
     authorIsMe: boolean;
     occurredAt: string;
+    // Optional metadata captured from URL fetch (YouTube oEmbed
+    // author_name, Reddit subreddit/author, etc). Persisted to
+    // events.metadata so FeedCard.sourceLabel can read it back.
+    metadata?: Record<string, unknown>;
   };
 
   let {
@@ -81,6 +85,10 @@
   let fetched = $state(false);
   let fetchedKind = $state<EventKind | null>(null);
   let fetchedSrc = $state<string>("");
+  // Adapter-parsed metadata held until save → events.metadata. Surfaces
+  // in FeedCard sourceLabel (e.g. "Rick Astley (YouTube channel)") via
+  // metadata.channelTitle / metadata.subreddit / metadata.author.
+  let fetchedMetadata = $state<Record<string, unknown>>({});
 
   // After a successful fetch, the URL + kind are AUTHORITATIVE — the
   // adapter parsed them from the live URL. Lock both inputs so the user
@@ -227,6 +235,8 @@
         title?: string | null;
         occurredAt?: string | null;
         sourceLabel?: string | null;
+        authorName?: string | null;
+        authorUrl?: string | null;
       };
       if (data.title && title.trim().length === 0) {
         title = data.title;
@@ -242,6 +252,26 @@
       if (data.kind && (allowed as readonly string[]).includes(data.kind)) {
         kind = data.kind as EventKind;
         fetchedKind = kind;
+      }
+      // Stash kind-specific metadata for the save payload. FeedCard's
+      // sourceLabel branch reads different keys per platform — keep
+      // each platform's canonical key so the card renders without
+      // backend translation.
+      fetchedMetadata = {};
+      if (kind === "youtube_video" && data.authorName) {
+        fetchedMetadata.channelTitle = data.authorName;
+      } else if (kind === "reddit_post") {
+        // Reddit URL embeds subreddit + post id; author needs Reddit's
+        // post-single fetch (not part of oEmbed). When the server lacks
+        // an author here (paste flow doesn't fully populate it), we
+        // store what we have — the polling worker will fill the rest.
+        try {
+          const subMatch = u.match(/\/r\/([^/]+)\//i);
+          if (subMatch) fetchedMetadata.subreddit = subMatch[1];
+        } catch {
+          /* leave empty */
+        }
+        if (data.authorName) fetchedMetadata.author = data.authorName;
       }
       // Surface a small "Detected …" chip below the URL row. Use the
       // host as the fallback source label when the endpoint didn't
@@ -286,6 +316,7 @@
         offTopic,
         authorIsMe,
         occurredAt: new Date(occurredAt).toISOString(),
+        metadata: Object.keys(fetchedMetadata).length > 0 ? fetchedMetadata : undefined,
       });
     } catch {
       errorText = m.error_server_generic();

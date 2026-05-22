@@ -299,10 +299,22 @@
   // displayName on the source row, then the raw handleUrl. Reddit / Twitter
   // / Telegram pull subreddit / @handle from event.metadata.
   const sourceLabel = $derived.by((): string => {
+    const md = (event.metadata ?? {}) as {
+      subreddit?: string;
+      handle?: string;
+      channel?: string;
+      channelTitle?: string;
+    };
     if (event.kind === "youtube_video") {
-      return event.channelTitle ?? source?.channelTitle ?? source?.displayName ?? source?.handleUrl ?? "";
+      return (
+        event.channelTitle ??
+        md.channelTitle ??
+        source?.channelTitle ??
+        source?.displayName ??
+        source?.handleUrl ??
+        ""
+      );
     }
-    const md = (event.metadata ?? {}) as { subreddit?: string; handle?: string; channel?: string };
     if (event.kind === "reddit_post" && md.subreddit) return `r/${md.subreddit}`;
     if (event.kind === "twitter_post" && md.handle) return `@${md.handle}`;
     if (event.kind === "telegram_post" && md.channel) return md.channel;

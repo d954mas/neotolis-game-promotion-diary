@@ -379,6 +379,7 @@
         url: payload.url,
         notes: payload.notes,
         authorIsMe: payload.authorIsMe,
+        metadata: payload.metadata,
       }),
     });
     if (res.ok) {
