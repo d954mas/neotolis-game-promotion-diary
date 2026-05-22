@@ -244,6 +244,8 @@
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
+  /* Inline "+ New game" form. Bound to 720px so it does not sprawl the
+   * full grid width. Matches /sources/new + /sources/[id] form widths. */
   .newgame {
     display: flex;
     flex-direction: column;
@@ -252,6 +254,7 @@
     background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: var(--r-md);
+    max-width: 720px;
   }
   .field {
     display: flex;
@@ -262,15 +265,26 @@
     font-size: var(--t-13);
     color: var(--text-2);
   }
+  /* Prototype-aligned input: 40px height, surface-2 bg, focus ring on
+   * accent border. Matches .field-input across modal + route forms. */
   .input {
-    min-height: var(--hit);
-    padding: 0 var(--s-4);
-    background: var(--surface-3);
+    min-height: var(--hit-lg);
+    padding: 0 var(--s-3);
+    background: var(--surface-2);
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: var(--r-sm);
     font-size: var(--t-14);
     font-family: var(--f-sans);
+    transition: border-color var(--m-fast) var(--m-ease);
+  }
+  .input::placeholder {
+    color: var(--text-3);
+  }
+  .input:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: var(--focus-ring);
   }
   .actions {
     display: flex;
