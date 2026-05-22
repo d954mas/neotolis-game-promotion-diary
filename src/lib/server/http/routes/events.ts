@@ -314,11 +314,11 @@ eventsRoutes.get(
         }
       }
     }
-    // Discriminated show axis (any | inbox | standalone | specific). A bare
-    // ?game= without ?show=specific is ignored — the UI never produces that
-    // combo. 'standalone' = game_id IS NULL AND metadata.triage.offTopic='true'
-    // (Plan 03.4-10 unified the JSONB key with bulkEdit; URL filter mode name
-    // stays "standalone").
+    // Discriminated show axis. Post-Plan-03.4-10 the /feed orchestrator
+    // narrows ?show= to "any" | "inbox" and emits the new flat
+    // ?game=g1,g2,off_topic multi-select for the GAME axis. Legacy
+    // ?show=standalone / ?show=specific URLs from old bookmarks /
+    // FeedQuickNav stay supported as a back-compat hook.
     const showParam = q.show ?? "any";
     const showFilter: ShowFilter =
       showParam === "inbox"
@@ -328,6 +328,17 @@ eventsRoutes.get(
           : showParam === "specific"
             ? { kind: "specific", gameIds: gameList }
             : { kind: "any" };
+    // GAME axis multi-select (Plan 03.4-10). When ?show is absent OR
+    // explicitly "any" AND ?game= is present, the params encode the new
+    // flat multi-select (game IDs + optional "off_topic" sentinel). The
+    // legacy ?show=specific&game=... path keeps its own gameIds plumbing
+    // (above); the new path routes through filters.gameTags. Comma-split
+    // is honored so ?game=g1,off_topic and ?game=g1&game=off_topic both
+    // parse the same way (mirrors parseGameTags in url-state.ts).
+    const gameTagsFromUrl =
+      showParam === "any" && gameList.length > 0
+        ? Array.from(new Set(gameList.flatMap((v) => v.split(",")).filter((v) => v !== "")))
+        : undefined;
     try {
       const page = await listFeedPage(
         c.var.userId,
@@ -335,6 +346,7 @@ eventsRoutes.get(
           source: sourceList && sourceList.length > 0 ? sourceList : undefined,
           kind: kindList && kindList.length > 0 ? kindList : undefined,
           show: showFilter,
+          gameTags: gameTagsFromUrl,
           authorIsMe: q.authorIsMe === "true" ? true : q.authorIsMe === "false" ? false : undefined,
           // Date-only (YYYY-MM-DD) is inclusive on both ends — see /feed/+page.server.ts.
           from: q.from ? new Date(`${q.from}T00:00:00.000Z`) : undefined,

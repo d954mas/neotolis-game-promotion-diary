@@ -980,7 +980,12 @@ describe("?show=any|inbox|specific URL contract over /api/events", () => {
     expect((await res.json()).error).toBe("validation_failed");
   });
 
-  it("GET /api/events?game=X with no ?show treats as 'any' (bare ?game without ?show=specific is ignored)", async () => {
+  it("GET /api/events?game=X (no ?show) filters to events attached to X (Plan 03.4-10 flat multi-select)", async () => {
+    // Post-Plan-03.4-10: ?game=<id> without ?show= is the canonical
+    // /feed URL contract for GAME-axis filtering (replaces the legacy
+    // ?show=specific&game=<id>). Bare ?game= now applies the GAME-axis
+    // filter via filters.gameTags so the cursor-paginated /api/events
+    // endpoint stays in sync with the SSR /feed loader's first page.
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "ev19-f@test.local" });
@@ -1007,8 +1012,6 @@ describe("?show=any|inbox|specific URL contract over /api/events", () => {
       "127.0.0.1",
     );
 
-    // Bare ?game=X without ?show=specific is ignored — server treats this
-    // as ?show=any. The UI never produces this combo.
     const res = await app.request(`/api/events?game=${gameId}`, {
       headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
     });
@@ -1016,7 +1019,58 @@ describe("?show=any|inbox|specific URL contract over /api/events", () => {
     const body = (await res.json()) as { rows: Array<{ id: string }> };
     const ids = body.rows.map((r) => r.id);
     expect(ids).toContain(attached.id);
-    expect(ids).toContain(inbox.id);
+    expect(ids).not.toContain(inbox.id);
+  });
+
+  it("GET /api/events?game=off_topic,<id> (Plan 03.4-10) returns events off-topic OR attached to id (OR semantics)", async () => {
+    // The bug user reported: «в фильтрах не могу выбрать офтопик вместе с
+    // играми». Validates the new OR-semantics SQL clause end-to-end.
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "ev19-off-topic@test.local" });
+    const gameId = uuidv7();
+    await db.insert(games).values({ id: gameId, userId: u.id, title: "G" });
+    const attached = await createEvent(
+      u.id,
+      {
+        gameIds: [gameId],
+        kind: "press",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "Attached to G",
+      },
+      "127.0.0.1",
+    );
+    const offTopic = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "press",
+        occurredAt: new Date("2026-06-02T10:00:00Z"),
+        title: "Off-topic",
+        metadata: { triage: { offTopic: true } },
+      },
+      "127.0.0.1",
+    );
+    const inboxPlain = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "press",
+        occurredAt: new Date("2026-06-03T10:00:00Z"),
+        title: "Plain inbox",
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(`/api/events?game=off_topic,${gameId}`, {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rows: Array<{ id: string }> };
+    const ids = body.rows.map((r) => r.id);
+    expect(ids).toContain(attached.id);
+    expect(ids).toContain(offTopic.id);
+    expect(ids).not.toContain(inboxPlain.id);
   });
 });
 
