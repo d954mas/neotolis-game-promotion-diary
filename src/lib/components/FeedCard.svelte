@@ -280,6 +280,26 @@
     return md?.triage?.offTopic === true;
   });
 
+  // All attached games (multi-attach events render one chip per game).
+  // Looks up each gameId from the games catalog passed by the orchestrator.
+  const attachedGames = $derived.by((): { id: string; title: string }[] => {
+    if (event.gameIds.length === 0) return [];
+    const map = new Map(games.map((g) => [g.id, g] as const));
+    return event.gameIds
+      .map((gid) => map.get(gid))
+      .filter((g): g is GameLite => g !== undefined);
+  });
+
+  // Deterministic per-game color from id hash → CSS hsl. GameDto has no
+  // color field, so derive client-side. Same id → same hue across the
+  // app. Light/dark theme adapts via fixed saturation + lightness curve.
+  function gameColor(id: string): string {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+    const hue = ((h % 360) + 360) % 360;
+    return `hsl(${hue} 62% 52%)`;
+  }
+
   let markingStandalone = $state(false);
   async function markStandaloneClick(): Promise<void> {
     if (markingStandalone) return;
@@ -624,9 +644,9 @@
         {#if isInboxRow}
           <span class="inbox-chip">{m.inbox_badge()}</span>
         {/if}
-        {#if game}
-          <span class="game-chip">{game.title}</span>
-        {/if}
+        {#each attachedGames as ag (ag.id)}
+          <span class="game-chip" style="--card-accent: {gameColor(ag.id)};">{ag.title}</span>
+        {/each}
         {#if isStandalone}
           <span class="off-topic-chip">Off topic</span>
         {/if}
@@ -1111,12 +1131,19 @@
    * the chip still echoes the prototype's "left-stripe in game color"
    * pattern (visually muted) — when per-game colors land, swap
    * var(--border-2) for var(--game-color, var(--border-2)). */
+  /* Game chip — tinted bg + colored border + inset stripe, all driven by
+   * --card-accent (set inline from gameColor(id) hash). Matches prototype
+   * card-footer game-chip pattern. */
   .game-chip {
-    background: var(--surface-2);
-    border-color: var(--border);
-    box-shadow: inset 3px 0 0 var(--border-2);
+    background: color-mix(in oklab, var(--card-accent, var(--border-2)) 14%, var(--surface));
+    border-color: color-mix(
+      in oklab,
+      var(--card-accent, var(--border-2)) 45%,
+      var(--border)
+    );
+    box-shadow: inset 3px 0 0 var(--card-accent, var(--border-2));
     padding-left: 14px;
-    color: var(--text-2);
+    color: var(--text);
   }
   .inbox-chip {
     background: color-mix(in oklab, var(--warn) 14%, var(--surface));

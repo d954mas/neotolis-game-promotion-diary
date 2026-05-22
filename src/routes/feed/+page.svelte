@@ -451,6 +451,17 @@
   // schema enum but have no adapter or paste flow — PROJECT.md flags
   // them as out-of-scope for v1. They stay in the DB enum (forward
   // compatibility) but never appear in the filter UI.
+  // Deterministic per-game color from id hash → HSL. GameDto has no
+  // color field, so derive client-side. Same id always produces the same
+  // hue so the color flows consistently across FeedCard footer chips,
+  // ActiveFiltersStrip, and the AxisRow game chips.
+  function gameColor(id: string): string {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+    const hue = ((h % 360) + 360) % 360;
+    return `hsl(${hue} 62% 52%)`;
+  }
+
   const KIND_AXIS_ORDER: readonly EventKind[] = [
     "youtube_video",
     "reddit_post",
@@ -500,6 +511,7 @@
         chips.push({
           axis: "game",
           label: game?.title ?? gid,
+          color: gameColor(gid),
           onRemove: () => {
             const next = urlState.show.kind === "specific"
               ? urlState.show.gameIds.filter((g) => g !== gid)
