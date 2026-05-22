@@ -419,10 +419,15 @@
   .breadcrumb a:hover {
     color: var(--accent-strong);
   }
+  /* Bounded reading width matching /sources/new + /sources/[id] + the
+   * /events/new wrapper. Without a max-width the form sprawled across a
+   * 1280px viewport with the URL/title inputs as 1200px wide single
+   * lines — divergent from every other form surface in the app. */
   .editevent {
     display: flex;
     flex-direction: column;
     gap: var(--s-4);
+    max-width: 720px;
     min-width: 0;
   }
   h1 {
@@ -462,18 +467,29 @@
     font-size: var(--t-13);
     color: var(--text-2);
   }
+  /* Prototype-aligned input: 40px height, surface-2 bg, focus-ring on
+   * accent border. Matches .field-input across modal + route forms. */
   .input {
-    min-height: var(--hit);
-    padding: 0 var(--s-4);
-    background: var(--surface-3);
+    min-height: var(--hit-lg);
+    padding: 0 var(--s-3);
+    background: var(--surface-2);
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: var(--r-sm);
     font-family: var(--f-sans);
     font-size: var(--t-14);
+    transition: border-color var(--m-fast) var(--m-ease);
+  }
+  .input::placeholder {
+    color: var(--text-3);
+  }
+  .input:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: var(--focus-ring);
   }
   .textarea {
-    padding: var(--s-2) var(--s-4);
+    padding: var(--s-2) var(--s-3);
     min-height: 88px;
     line-height: var(--lh-body);
     font-family: inherit;
