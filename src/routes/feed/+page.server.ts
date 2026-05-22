@@ -120,6 +120,14 @@ export const load: PageServerLoad = async ({ locals, url }) => {
         ? state.gameTags
         : undefined;
 
+  // Free-text search (Plan 03.4-10 follow-up). The `?q=...` URL param is
+  // serialized by `serializeFilterState` to drive PageHead's search input;
+  // pass it through to FeedFilters so listFeedPage + listFeedFacets apply
+  // the `search_vec @@ plainto_tsquery('english', $q)` predicate. Trim
+  // whitespace at the service boundary, not here — keeps every caller of
+  // listFeedPage honest about query semantics.
+  const query = state.query !== "" ? state.query : undefined;
+
   const filters: FeedFilters = {
     show: state.show,
     source: state.source.length > 0 ? state.source : undefined,
@@ -128,6 +136,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     authorIsMe: state.authorIsMe,
     from,
     to,
+    query,
   };
 
   const scope: "live" | "trash" = state.view === "trash" ? "trash" : "live";

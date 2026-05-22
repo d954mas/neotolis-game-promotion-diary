@@ -182,6 +182,24 @@ export interface FeedFilters {
   authorIsMe?: boolean;
   from?: Date;
   to?: Date;
+  /**
+   * Free-text search over `events.title` + `events.notes` (Plan 03.4-10
+   * follow-up). When non-empty, listFeedPage + listFeedFacets add a
+   * `search_vec @@ plainto_tsquery('english', $query)` predicate so the
+   * `?q=...` URL param drives a real server-side FTS filter (not the
+   * client-side `filter-math` heuristic).
+   *
+   * `plainto_tsquery` (not `to_tsquery`) handles freeform user input —
+   * it auto-ANDs the supplied words and escapes operators that would
+   * otherwise raise a syntax error. Empty / undefined / whitespace-only
+   * value → no clause appended.
+   *
+   * The `search_vec` column is a Postgres-side GENERATED ALWAYS AS
+   * tsvector backed by GIN index `idx_events_search_vec` (migration
+   * drizzle/0044_events_fts.sql). The app never reads or writes the
+   * column directly.
+   */
+  query?: string;
 }
 
 export interface FeedPage {
@@ -1361,6 +1379,23 @@ export async function listFeedPage(
     filterParts.push(lte(events.occurredAt, filters.to));
   }
 
+  // Full-text search predicate (Plan 03.4-10 follow-up). `plainto_tsquery`
+  // accepts freeform user input — it auto-ANDs the supplied words and
+  // escapes operators that would otherwise raise a `syntax error in
+  // tsquery` (e.g. `to_tsquery('foo!bar')` throws). The `search_vec`
+  // column is GENERATED ALWAYS AS to_tsvector('english', title || notes)
+  // and backed by GIN index `idx_events_search_vec`; the planner picks
+  // the GIN index for `@@` predicates automatically.
+  //
+  // Whitespace-only queries are dropped (treated as "no filter") so the
+  // user typing then deleting characters doesn't briefly return an empty
+  // result set. The trim happens here at the service boundary rather
+  // than in the loader so every caller benefits.
+  const trimmedQuery = filters.query?.trim() ?? "";
+  if (trimmedQuery !== "") {
+    filterParts.push(sql`${events.searchVec} @@ plainto_tsquery('english', ${trimmedQuery})` as SQL);
+  }
+
   const rows = await db
     .select()
     .from(events)
@@ -1394,7 +1429,7 @@ export async function listFeedPage(
  * through this helper — callers add it directly to their .where(...) so
  * the ESLint tenant-scope rule sees it lexically.
  */
-type FeedAxis = "kind" | "source" | "show" | "gameTags" | "author" | "date";
+type FeedAxis = "kind" | "source" | "show" | "gameTags" | "author" | "date" | "query";
 function buildFeedBaseFilterParts(
   userId: string,
   filters: FeedFilters,
@@ -1477,6 +1512,20 @@ function buildFeedBaseFilterParts(
   if (!exclude.has("date")) {
     if (filters.from !== undefined) filterParts.push(gte(events.occurredAt, filters.from));
     if (filters.to !== undefined) filterParts.push(lte(events.occurredAt, filters.to));
+  }
+
+  // Full-text search predicate carries through to facet counts so chip
+  // counts respect the current `?q=...` scope. The query axis is NEVER a
+  // facet (there are no chips to render), but it IS a filter that should
+  // narrow every other facet's count — exclude.has("query") is therefore
+  // effectively always false in current callers.
+  if (!exclude.has("query")) {
+    const trimmedQuery = filters.query?.trim() ?? "";
+    if (trimmedQuery !== "") {
+      filterParts.push(
+        sql`${events.searchVec} @@ plainto_tsquery('english', ${trimmedQuery})` as SQL,
+      );
+    }
   }
 
   return filterParts;
