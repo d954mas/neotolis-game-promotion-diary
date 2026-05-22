@@ -602,11 +602,6 @@
   "feed_date_range_picker_close_aria": "Close date picker",
   "feed_date_range_picker_pick_range_placeholder": "Pick a date range",
 
-  "find_row_placeholder": "Search in current view…",
-  "find_row_result_count": "{count} matches",
-  "find_row_result_count_singular": "1 match",
-  "find_row_result_in_filters": "in current filters",
-
   "event_detail_modal_close_aria": "Close",
   "event_detail_modal_prev_aria": "Previous event",
   "event_detail_modal_next_aria": "Next event",

@@ -5,7 +5,12 @@
   //   - <PageHead>      (Plan 07) title + Add Event CTA + search + Filters toggle
   //     ↳ children slot: <DateRangeRow> (Plan 07)
   //   - <ActiveFiltersStrip> (Plan 07) chips for active filters
-  //   - {#if filtersOpen} <AxisRow ×4> + <FindRow> (Plan 07)
+  //   - {#if filtersOpen} <AxisRow ×4>
+  //     (FindRow removed Plan 03.4-10 follow-up — the in-result search
+  //     input was a duplicate of PageHead's `?q=...` field; the prototype
+  //     never rendered it. The single source of truth for the search
+  //     query is now PageHead → serializeFilterState → ?q= → loader →
+  //     listFeedPage's Postgres FTS predicate.)
   //   - <FeedDateGroupHeader> + <FeedCard> grid (Plan 08 — long-press + sweep)
   //   - <EventDetailModal> (Plan 09) mounted on data.openEventId
   //   - <AddEventModal> (Plan 09) mounted on local addEventModalOpen state
@@ -79,7 +84,6 @@
     type AxisChip,
   } from "$lib/components/feed/ActiveFiltersStrip.svelte";
   import AxisRow from "$lib/components/feed/AxisRow.svelte";
-  import FindRow from "$lib/components/feed/FindRow.svelte";
   import FeedCard from "$lib/components/FeedCard.svelte";
   import BulkActionBar from "$lib/components/feed/BulkActionBar.svelte";
   import GamesPicker from "$lib/components/feed/GamesPicker.svelte";
@@ -858,12 +862,6 @@
         onClearAxis={() => setKind([])}
       />
 
-      <FindRow
-        query={urlState.query}
-        onQueryChange={setQuery}
-        resultCount={filterableEvents.filter((e) => passes(e, urlState, today)).length}
-        hasOtherFilters={activeAxes.length > 0}
-      />
     </div>
   {/if}
 
@@ -1032,8 +1030,9 @@
     color: var(--accent-strong);
   }
 
-  /* Filters panel — gates AxisRow + FindRow under the LB-10 toggle so the
-   * chrome stays compact when the user doesn't need them. */
+  /* Filters panel — gates AxisRow rows under the LB-10 toggle so the
+   * chrome stays compact when the user doesn't need them. (FindRow was
+   * removed Plan 03.4-10 follow-up — duplicate of PageHead's search.) */
   .filters-panel {
     display: flex;
     flex-direction: column;
