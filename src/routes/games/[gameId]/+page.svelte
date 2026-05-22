@@ -389,26 +389,42 @@
       max-width: var(--max-w);
     }
   }
+  /* Section-header "+ Add" / "+ New event" CTA — ghost-styled to match
+   * prototype `.btn.add-event` and the shared <PageHeader> CTA so the
+   * Stores + Events section affordances read as the same vocabulary as
+   * the page-level title CTA. The accent ring + accent text variant was
+   * heavier than the prototype intends. */
   .cta-secondary {
     min-height: var(--hit);
     padding: 0 var(--s-3);
-    background: var(--surface);
-    color: var(--accent);
-    border: 1px solid var(--accent);
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
     border-radius: var(--r-sm);
     font-size: var(--t-13);
-    font-weight: var(--w-sb);
+    font-weight: var(--w-md);
     cursor: pointer;
     text-decoration: none;
     display: inline-flex;
     align-items: center;
+    gap: 4px;
     transition:
       background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease),
       color var(--m-fast) var(--m-ease);
   }
+  .cta-secondary::first-letter {
+    color: var(--accent);
+    font-size: 1.1em;
+    font-weight: var(--w-sb);
+  }
   .cta-secondary:hover {
-    background: var(--accent);
-    color: var(--accent-text);
+    background: var(--surface-3, var(--surface-2));
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .cta-secondary:hover::first-letter {
+    color: var(--accent-strong);
   }
   /* The Add Store CTA in the stores section-header matches the Events
    * "+ New event" CTA visually so the two section headers read as a
