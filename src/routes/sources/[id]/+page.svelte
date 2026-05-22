@@ -217,6 +217,18 @@
 </svelte:head>
 
 <section class="source-detail">
+  <!--
+    Breadcrumb mirrors /sources/new + /games/[gameId] — a one-step back
+    affordance plus the canonical "Sources" link so the user can pop out
+    of the detail context without needing the browser back button. Matches
+    the prototype's sources-page.jsx "Sources" header recognition.
+  -->
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    <a href="/sources">Sources</a>
+    <span aria-hidden="true" class="sep">/</span>
+    <span aria-current="page">{heading}</span>
+  </nav>
+
   <header class="hdr">
     <h1 class="hdr__title">{heading}</h1>
     <a class="hdr__handle" href={source.handleUrl} target="_blank" rel="noopener noreferrer">
@@ -450,6 +462,30 @@
     padding: var(--s-4);
     max-width: 720px;
     min-width: 0;
+  }
+  /* Breadcrumb — matches /sources/new + /games/[gameId] breadcrumb pattern
+   * so the back-to-list affordance reads consistently across the app. */
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: var(--s-1);
+    font-size: var(--t-13);
+    color: var(--text-3);
+    margin-bottom: 0;
+  }
+  .breadcrumb a {
+    color: var(--text-3);
+    text-decoration: none;
+  }
+  .breadcrumb a:hover {
+    color: var(--text);
+  }
+  .breadcrumb .sep {
+    color: var(--text-4);
+  }
+  .breadcrumb [aria-current="page"] {
+    color: var(--text-2);
+    word-break: break-word;
   }
 
   .hdr {
