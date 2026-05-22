@@ -27,6 +27,7 @@
   import KindIcon from "$lib/components/KindIcon.svelte";
   import AuthorPopover from "$lib/components/shared/AuthorPopover.svelte";
   import { m } from "$lib/paraglide/messages.js";
+  import { gameColor } from "$lib/util/game-color.js";
   import type { EventDto, GameDto, DataSourceDto } from "$lib/server/dto.js";
 
   type EventUpdatePatch = Partial<{
@@ -623,7 +624,7 @@
                 type="button"
                 class="chip kind-chip game-chip add-game-chip"
                 data-active={active ? "1" : "0"}
-                style="--card-accent: #8a8a95"
+                style="--card-accent: {gameColor(g.id)};"
                 onclick={async () => {
                   const next = active
                     ? event.gameIds.filter((x) => x !== g.id)
