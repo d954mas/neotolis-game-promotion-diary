@@ -76,6 +76,16 @@
   --k-press: #b488d4; /* lilac */
   --k-post: #8a8a95; /* neutral */
   --k-other: #8a8a95;
+  /* Aliases — components consume `var(--k-{event.kind})` where kind is
+   * the full enum value (youtube_video / reddit_post / twitter_post /
+   * telegram_post / discord_drop). Token names above used short forms;
+   * keep both naming schemes resolvable so existing call sites
+   * (`var(--k-youtube)`) and event-kind interpolations both work. */
+  --k-youtube_video: var(--k-youtube);
+  --k-reddit_post: var(--k-reddit);
+  --k-twitter_post: var(--k-twitter);
+  --k-telegram_post: var(--k-telegram);
+  --k-discord_drop: var(--k-discord);
 
   /* Single source of truth for the sticky chrome offset. The chrome
    * wrapper (`.sticky-chrome` in src/routes/+layout.svelte) contains BOTH

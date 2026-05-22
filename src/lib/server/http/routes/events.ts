@@ -399,6 +399,8 @@ eventsRoutes.post(
         externalId: enriched.externalId,
         title: enriched.title,
         thumbnailUrl: enriched.thumbnailUrl,
+        authorName: enriched.authorName,
+        authorUrl: enriched.authorUrl,
         // ISO string when set; null when oEmbed has no published_at.
         occurredAt: enriched.occurredAt ? enriched.occurredAt.toISOString() : null,
       });
