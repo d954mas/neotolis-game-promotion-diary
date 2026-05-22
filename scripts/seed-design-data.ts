@@ -323,6 +323,7 @@ async function main(): Promise<void> {
       occurred: daysAgo(12),
       games: [gameNeotolis],
       notes: "240 апвоутов, 38 комментариев, +850 wishlist за 48 часов.",
+      metadata: { subreddit: "indiedev", author: "neotolis_dev" },
     },
     {
       kind: "reddit_post",
@@ -334,6 +335,7 @@ async function main(): Promise<void> {
       occurred: daysAgo(3),
       games: [gameDungeon],
       notes: null,
+      metadata: { subreddit: "IndieGaming", author: "neotolis_dev" },
     },
     {
       kind: "twitter_post",
@@ -447,6 +449,7 @@ async function main(): Promise<void> {
       url: e.url ?? null,
       notes: e.notes ?? null,
       externalId: e.externalId ?? null,
+      metadata: (e as { metadata?: Record<string, unknown> }).metadata ?? {},
     });
     for (const gameId of e.games) {
       await db.insert(eventGames).values({ eventId: id, gameId, userId });

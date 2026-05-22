@@ -95,19 +95,23 @@
   let urlError = $state<string | null>(null);
   let errorText = $state<string | null>(null);
 
-  // Kind picker order matches prototype: manual-friendly kinds first,
-  // then platforms. Internal kind list mirrors the EventKind enum union
-  // so the backend keeps its existing validation.
-  const KIND_TOP: EventKind[] = ["post", "press", "talk", "conference"];
-  const KIND_REST: EventKind[] = [
+  // Kind picker — kinds that have either an adapter (YouTube / Reddit)
+  // OR a manual-paste flow (press / post / talk / conference / other).
+  // Twitter / Telegram / Discord are declared in the DB enum (forward-
+  // compat) but have no adapter or manual entry today — PROJECT.md flags
+  // them as out-of-scope for v1, and the /feed KIND axis filters them
+  // out for the same reason. Keeping the AddEvent picker aligned with
+  // the filter axis avoids the awkward state where a user can create
+  // events that don't show up in their own filter list.
+  const KIND_FLOW: EventKind[] = [
     "youtube_video",
     "reddit_post",
-    "twitter_post",
-    "telegram_post",
-    "discord_drop",
+    "press",
+    "post",
+    "conference",
+    "talk",
     "other",
   ];
-  const KIND_FLOW: EventKind[] = [...KIND_TOP, ...KIND_REST];
 
   function kindShort(k: EventKind): string {
     switch (k) {
@@ -319,40 +323,7 @@
   <!-- Title — required. Author picker chip sits to the right of the
        label, matching the prototype label-row layout. -->
   <div class="field">
-    <div class="field-label-row">
-      <label class="field-label" for="addevt-title">{m.add_event_modal_title_label()}</label>
-      <div class="author-pick">
-        <button
-          type="button"
-          class="author-pick-trigger"
-          onclick={() => (authorPopoverOpen = !authorPopoverOpen)}
-          aria-haspopup="listbox"
-          aria-expanded={authorPopoverOpen}
-          disabled={saving}
-        >
-          <span class="author-avatar" data-mine={authorIsMe ? "1" : "0"}>
-            {authorIsMe ? (currentUserName[0] ?? "Y").toUpperCase() : "?"}
-          </span>
-          <span class="author-pick-name">
-            {authorIsMe ? (currentUserName || "You") : m.author_popover_someone_else()}
-          </span>
-          <span class="author-pick-chev" aria-hidden="true">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-          </span>
-        </button>
-        {#if authorPopoverOpen}
-          <AuthorPopover
-            authorIsMe={authorIsMe}
-            mineName={currentUserName || "You"}
-            onchange={(next) => {
-              authorIsMe = next;
-              authorPopoverOpen = false;
-            }}
-            onclose={() => (authorPopoverOpen = false)}
-          />
-        {/if}
-      </div>
-    </div>
+    <label class="field-label" for="addevt-title">{m.add_event_modal_title_label()}</label>
     <input
       id="addevt-title"
       class="field-input"
@@ -496,10 +467,40 @@
     </div>
   </div>
 
-  <!-- Quiet footer note — explains where this lands. Date is editable
-       inline via a native date picker overlaid on the label text. -->
+  <!-- Footer hint — author picker + inline date picker, side by side. -->
   <div class="modal-foot-hint">
-    Will be saved as <b>{authorIsMe ? "your event" : "someone else's event"}</b> ·
+    <span class="author-pick">
+      <button
+        type="button"
+        class="author-pick-trigger"
+        onclick={() => (authorPopoverOpen = !authorPopoverOpen)}
+        aria-haspopup="listbox"
+        aria-expanded={authorPopoverOpen}
+        disabled={saving}
+      >
+        <span class="author-avatar" data-mine={authorIsMe ? "1" : "0"}>
+          {authorIsMe ? (currentUserName[0] ?? "Y").toUpperCase() : "?"}
+        </span>
+        <span class="author-pick-name">
+          {authorIsMe ? (currentUserName || "You") : m.author_popover_someone_else()}
+        </span>
+        <span class="author-pick-chev" aria-hidden="true">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </span>
+      </button>
+      {#if authorPopoverOpen}
+        <AuthorPopover
+          authorIsMe={authorIsMe}
+          mineName={currentUserName || "You"}
+          onchange={(next) => {
+            authorIsMe = next;
+            authorPopoverOpen = false;
+          }}
+          onclose={() => (authorPopoverOpen = false)}
+        />
+      {/if}
+    </span>
+    <span class="modal-hint-sep" aria-hidden="true">·</span>
     <span class="modal-date-edit">
       <span style="font-variant-numeric: tabular-nums">{occurredHuman}</span>
       <span class="modal-date-pencil" aria-hidden="true">
@@ -788,15 +789,26 @@
     cursor: not-allowed;
   }
 
-  /* ── Foot hint + inline date picker ───────────────────────────────── */
+  /* ── Foot hint: author picker + inline date picker ───────────────── */
   .modal-foot-hint {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    flex-wrap: wrap;
     color: var(--text-3);
     font-size: var(--t-12);
-    padding-top: 4px;
-    padding-bottom: 8px;
+    padding-top: var(--s-2);
+    padding-bottom: var(--s-2);
   }
   .modal-foot-hint b {
-    color: var(--text-2); font-weight: var(--w-md);
+    color: var(--text-2);
+    font-weight: var(--w-md);
+  }
+  .modal-foot-hint .author-pick {
+    position: relative;
+  }
+  .modal-hint-sep {
+    color: var(--text-4);
   }
   /* Date-edit affordance — more obvious now per user UAT: dotted
    * underline + persistent pencil so it reads as clickable without
