@@ -124,6 +124,7 @@
     onDelete,
     onRestore,
     onDeleteForever,
+    currentUserName,
   }: {
     event: EventDtoLite;
     source: SourceLite | null;
@@ -139,7 +140,27 @@
     onDelete?: (id: string) => Promise<void> | void;
     onRestore?: (id: string) => Promise<void> | void;
     onDeleteForever?: (id: string) => Promise<void> | void;
+    currentUserName?: string;
   } = $props();
+
+  // Author avatar tooltip + glyph derived from currentUserName.
+  // Mirrors prototype docs/design/v2/ui-kit/app.jsx lines 1124-1131:
+  //   - mine:    title = "{name} (you)",   glyph = first char of name
+  //   - unknown: title = "Unknown author", glyph = "?"
+  const authorTooltip = $derived.by((): string => {
+    if (event.authorIsMe) {
+      const name = (currentUserName ?? "").trim();
+      return name ? `${name} (you)` : "You";
+    }
+    return "Unknown author";
+  });
+  const authorGlyph = $derived.by((): string => {
+    if (event.authorIsMe) {
+      const name = (currentUserName ?? "").trim();
+      return name ? name.charAt(0).toUpperCase() : "Y";
+    }
+    return "?";
+  });
 
   // Touch long-press → enters selection mode after 480ms. cancelPress wires
   // touchmove/touchend/touchcancel — scroll-cancel is LOAD-BEARING per D-28.
@@ -494,12 +515,12 @@
         class:mine={event.authorIsMe}
         class:unknown={!event.authorIsMe}
         data-mine={event.authorIsMe ? "1" : "0"}
-        title={event.authorIsMe ? m.feed_card_author_is_me_badge() : ""}
+        title={authorTooltip}
         aria-label={event.authorIsMe
-          ? m.author_avatar_mine_aria({ name: "you" })
+          ? m.author_avatar_mine_aria({ name: currentUserName ?? "you" })
           : m.author_avatar_unknown_aria()}
       >
-        {event.authorIsMe ? "↻" : "?"}
+        {authorGlyph}
       </span>
 
       <span class="kind-icon" aria-label={kindLabel} title={kindLabel}>
