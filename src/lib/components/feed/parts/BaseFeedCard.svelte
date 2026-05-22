@@ -654,7 +654,12 @@
   }
 
   .card-byline {
-    padding-left: 80px;
+    /* Left-align with the .card-meta .src text so subreddit (row 1) and
+     * author handle (row 2) start at the same column. .card-meta flex
+     * sequence is [select=0 default][avatar 20][gap 8][kind-icon ~16]
+     * [gap 8][src], so src begins at 52px from the card-body padding.
+     * Match here. */
+    padding-left: 52px;
     padding-right: 34px;
     margin-top: -2px;
     color: var(--text-3);
