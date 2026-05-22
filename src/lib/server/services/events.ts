@@ -37,11 +37,11 @@
 // one per remove (event.detached_from_game). Cross-tenant gameIds throw
 // NotFoundError → 404 by construction (assertGameOwnedByUser pre-check).
 //
-// Standalone↔game mutual exclusion: markStandalone REJECTS when the event
-// has ≥ 1 event_games rows; attachEventToGames REJECTS when the event is
-// already metadata.triage.offTopic === true AND non-empty gameIds are
-// passed. AppError 'standalone_conflicts_with_game' (422). Defense-in-depth
-// — the UI hides the conflicting affordances.
+// Off-topic and games are INDEPENDENT axes (Plan 03.4-10): an event can
+// carry metadata.triage.offTopic=true AND ≥ 1 event_games rows freely.
+// The off-topic write path goes through bulkEdit (single-id payload from
+// the edit form, multi-id from the feed selection); attachEventToGames
+// does not gate on the off-topic flag.
 //
 // dismissFromInbox: writes metadata.inbox.dismissed=true via jsonb_set;
 // only valid on inbox events (zero junction rows); otherwise throws
@@ -1362,9 +1362,10 @@ export async function listFeedPage(
     // Standalone view = events the user explicitly marked "not related to
     // any game" (a.k.a. off-topic — the JSONB key is `offTopic` since
     // Plan 03.4-10 unified the field name with bulkEdit's write path).
-    // The junction-empty constraint is structural (markStandalone refuses
-    // if any junction rows exist); the metadata.triage.offTopic clause is
-    // what distinguishes standalone from plain inbox.
+    // The junction-empty clause + metadata.triage.offTopic clause are
+    // independent — historically this view excluded attached events
+    // because off-topic+attached was forbidden; under the decoupled axes
+    // both must hold so the view stays focused on inbox-shaped events.
     filterParts.push(
       sql`NOT EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId})` as SQL,
     );
@@ -1864,11 +1865,10 @@ export async function listFeedFacets(
  * (cross-tenant eventId returns zero rows → NotFoundError 404 by
  * construction).
  *
- * Standalone↔game mutual exclusion: if `gameIds.length > 0` AND the event
- * has metadata.triage.offTopic === true, throws
- * AppError(422, 'standalone_conflicts_with_game'). The user must
- * un-standalone first (or the UI hides the conflicting affordances).
- * Defense-in-depth at the service layer regardless of the UI's enforcement.
+ * Off-topic and games are independent axes (Plan 03.4-10): a non-empty
+ * gameIds on an event with metadata.triage.offTopic === true succeeds.
+ * The prior mutual-exclusion 422 guard was removed when the GAME axis
+ * became multi-select with off-topic as a sentinel under OR semantics.
  *
  * Set-input dedup: the input array is normalized via `Set` so the same
  * gameId passed twice doesn't trip the composite-PK 23505 (which would
@@ -2106,145 +2106,6 @@ export async function dismissFromInbox(
   return row;
 }
 
-/**
- * markStandalone — set metadata.triage.offTopic=true on an event with NO
- * attached games. The user has explicitly said this event is not related
- * to any game; the /feed view dims standalone events (FeedCard opacity
- * 0.55) so they don't distract from game-tied events. Function name +
- * audit verb stay `markStandalone` / `event.marked_standalone`; only the
- * JSONB key migrated to `offTopic` in Plan 03.4-10 (so bulkEdit's
- * off-topic write path and the single-event path target the same key).
- *
- * Standalone↔game mutual exclusion: REJECTS when the event has ≥ 1
- * event_games rows. AppError 'standalone_conflicts_with_game' (422). The
- * legacy "detach gameId at the same time" behavior is REMOVED — the
- * column is gone, and silent detachment was the wrong UX anyway (the user
- * might not realize a game is attached). The route layer surfaces the
- * 422; the UI hides the conflicting affordance, so this code path is
- * defense-in-depth.
- *
- * Tenant scope: userId-first; the UPDATE WHERE clause
- * `eq(events.userId, userId) AND eq(events.id, eventId)` ensures
- * cross-tenant attempts return zero rows and surface as NotFoundError →
- * 404 at the HTTP boundary (404, never 403).
- *
- * Idempotency: jsonb_set with create_missing=true is idempotent. Calling
- * markStandalone twice in a row is safe — both calls succeed; both write
- * fresh audit rows (mirroring the dismissFromInbox precedent).
- *
- * Audit: writes `event.marked_standalone` AFTER the UPDATE succeeds.
- * NotFoundError fires BEFORE writeAudit so a cross-tenant attempt does not
- * generate a misleading audit trail (mirrors restoreEvent for
- * non-destructive triage).
- */
-export async function markStandalone(
-  userId: string,
-  eventId: string,
-  ipAddress: string,
-  userAgent?: string,
-): Promise<EventRow> {
-  // Conflict guard: if the event has any junction rows, reject with a 422
-  // rather than silently detaching. The user must
-  // detach explicitly (via attachEventToGames(..., [])) before marking
-  // Off-topic + games are INDEPENDENT axes. Load the event ID first
-  // (cross-tenant 404). The prior guard against marking standalone on an
-  // event with attached games was removed when GAME axis became multi-
-  // select with off_topic as a sentinel (OR semantics, not mutex).
-  const [eventRow] = await db
-    .select({ id: events.id })
-    .from(events)
-    .where(and(eq(events.userId, userId), eq(events.id, eventId), isNull(events.deletedAt)))
-    .limit(1);
-  if (!eventRow) throw new NotFoundError();
-
-  // Two nested jsonb_set calls: outer creates `triage` parent; inner sets
-  // `triage.offTopic=true`. Mirrors dismissFromInbox's nested-jsonb_set
-  // pattern so a future metadata.triage.* sibling key (e.g., a flagged-as-
-  // duplicate marker) won't collide.
-  // The legacy `gameId: null` field is GONE (column dropped); the
-  // conflict guard above ensures the junction is already empty when we
-  // reach the UPDATE.
-  // Field name is `offTopic` (Plan 03.4-10 unification) — bulkEdit's
-  // off-topic tri-state writes the same key, so this single-event path and
-  // the bulk path now agree on the JSONB shape. Function name + audit verb
-  // stay `markStandalone` / `event.marked_standalone` (URL semantic and DB
-  // enum, respectively, do not migrate).
-  const [row] = await db
-    .update(events)
-    .set({
-      metadata: sql`jsonb_set(
-        jsonb_set(
-          COALESCE(${events.metadata}, '{}'::jsonb),
-          '{triage}',
-          COALESCE(${events.metadata}->'triage', '{}'::jsonb),
-          true
-        ),
-        '{triage,offTopic}',
-        'true'::jsonb,
-        true
-      )`,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(events.userId, userId), eq(events.id, eventId), isNull(events.deletedAt)))
-    .returning();
-  if (!row) throw new NotFoundError();
-
-  await writeAudit({
-    userId,
-    action: "event.marked_standalone",
-    ipAddress,
-    userAgent,
-    metadata: { event_id: row.id, kind: row.kind },
-  });
-
-  return row;
-}
-
-/**
- * unmarkStandalone — clear metadata.triage.offTopic (set to false). Plan
- * 02.1-24. Restores the event to plain inbox state (game_id remains null;
- * the user can re-attach via /events/[id]/edit if they change their mind).
- *
- * Tenant scope + audit ordering match markStandalone exactly. Audit verb is
- * `event.unmarked_standalone`.
- */
-export async function unmarkStandalone(
-  userId: string,
-  eventId: string,
-  ipAddress: string,
-  userAgent?: string,
-): Promise<EventRow> {
-  const [row] = await db
-    .update(events)
-    .set({
-      metadata: sql`jsonb_set(
-        jsonb_set(
-          COALESCE(${events.metadata}, '{}'::jsonb),
-          '{triage}',
-          COALESCE(${events.metadata}->'triage', '{}'::jsonb),
-          true
-        ),
-        '{triage,offTopic}',
-        'false'::jsonb,
-        true
-      )`,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(events.userId, userId), eq(events.id, eventId), isNull(events.deletedAt)))
-    .returning();
-  if (!row) throw new NotFoundError();
-
-  await writeAudit({
-    userId,
-    action: "event.unmarked_standalone",
-    ipAddress,
-    userAgent,
-    metadata: { event_id: row.id, kind: row.kind },
-  });
-
-  return row;
-}
-
 // ============================================================
 // Phase 3.4 design-v2-ux — bulk operations (D-12..D-15, D-21).
 // ============================================================
@@ -2384,9 +2245,8 @@ export async function bulkEdit(
         // absent (default events.metadata is `{}` from createEvent — without
         // the outer wrap, jsonb_set('{triage,offTopic}', ...) silently
         // no-ops when `triage` doesn't exist). Mirrors the same pattern
-        // dismissFromInbox + markStandalone use for `{inbox,...}` and
-        // `{triage,offTopic}` respectively. (Plan 03.4-10 unified the
-        // field name so the two write paths agree.)
+        // dismissFromInbox uses for `{inbox,...}` — bulkEdit owns the
+        // canonical {triage,offTopic} write path since Plan 03.4-10.
         await tx
           .update(events)
           .set({

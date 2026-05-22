@@ -411,8 +411,8 @@
          docs/design/v2/ui-kit/app.jsx:1180-1193 — the design surfaces
          only the `inbox` chip in card-footer-chips for un-attached
          events. User attaches games via ⋮ → Edit games (GamesPicker)
-         or via bulk select. The mark-standalone path moved into
-         GamesPicker's off-topic tri-state row. -->
+         or via bulk select. The off-topic toggle lives in GamesPicker's
+         tri-state row + the bulk edit sheet. -->
   </div>
 </article>
 

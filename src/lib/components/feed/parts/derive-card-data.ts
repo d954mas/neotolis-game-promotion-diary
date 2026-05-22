@@ -213,7 +213,7 @@ export function isInboxRow(event: Pick<CardEventLite, "gameIds" | "metadata">): 
   return true;
 }
 
-/** Off-topic predicate — triage.offTopic flag set via markStandalone. */
+/** Off-topic predicate — triage.offTopic flag set via bulkEdit. */
 export function isStandalone(event: Pick<CardEventLite, "metadata">): boolean {
   const md = event.metadata as { triage?: { offTopic?: boolean } } | null | undefined;
   return md?.triage?.offTopic === true;
