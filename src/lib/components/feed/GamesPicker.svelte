@@ -30,6 +30,7 @@
 
   import { m } from "$lib/paraglide/messages.js";
   import TriStateCheckbox from "./TriStateCheckbox.svelte";
+  import { gameColor } from "$lib/util/game-color.js";
 
   type GameOption = { id: string; title: string };
 
@@ -125,21 +126,27 @@
 
   <div class="body">
     {#each games as g (g.id)}
-      <div class="row">
+      <div class="row" data-state={gameStates[g.id] ?? "off"}>
         <TriStateCheckbox
           state={gameStates[g.id] ?? "off"}
           onchange={(next) => setGameState(g.id, next)}
-          label={g.title}
         />
+        <span
+          class="picker-game-dot"
+          aria-hidden="true"
+          style="background: {gameColor(g.id)};"
+        ></span>
+        <span class="picker-label">{g.title}</span>
       </div>
     {/each}
-    <div class="row separator">
+    <div class="row separator" data-state={offTopicState}>
       <TriStateCheckbox
         state={offTopicState}
         onchange={setOffTopicState}
-        label={m.games_picker_off_topic_label()}
       />
-      <span class="hint">{m.games_picker_off_topic_hint()}</span>
+      <span class="picker-game-dot dashed" aria-hidden="true"></span>
+      <span class="picker-label">{m.games_picker_off_topic_label()}</span>
+      <span class="picker-hint">{m.games_picker_off_topic_hint()}</span>
     </div>
   </div>
 
@@ -154,100 +161,154 @@
 </dialog>
 
 <style>
-  /* Reset the browser-default dialog box treatment so v2 tokens drive
-   * appearance. The native dialog element handles focus trap + Esc; we
-   * only restyle the box and the ::backdrop. */
+  /* Prototype 1:1 — mirrors .picker / .picker-head / .picker-options /
+   * .picker-opt / .picker-game-dot / .picker-actions from
+   * docs/design/v2/ui-kit/index.html (lines 1505-1594). The native
+   * <dialog> mechanics (showModal / ::backdrop / focus trap / Esc) are
+   * kept for the LB-7 body-scroll-lock rule (html:has(dialog[open]))
+   * — the prototype's "anchored popover above the BulkActionBar"
+   * pattern is the same dialog spatially, just without the rule. */
   .games-picker {
-    width: min(420px, 100vw - 32px);
+    width: min(320px, 100vw - 32px);
     max-height: calc(100vh - 64px);
-    padding: 0;
-    border: 1px solid var(--border);
+    padding: var(--s-3) var(--s-2);
+    border: 1px solid var(--border-2);
     border-radius: var(--r-md);
-    background: var(--surface-2);
+    background: var(--surface);
     color: var(--text);
     box-shadow: var(--shadow-elev);
   }
   .games-picker::backdrop {
-    background: var(--overlay-dark);
+    background: rgba(0, 0, 0, 0.4);
   }
+  /* Header — denser than the previous treatment (~--t-13 instead of
+   * --t-15) so the picker reads as a quick popover, not a heavy modal. */
   .header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--s-3) var(--s-4);
-    border-bottom: 1px solid var(--border-hairline);
+    padding: 0 8px 6px;
   }
   .header h2 {
-    font-size: var(--t-15);
+    font-size: var(--t-13);
     font-weight: var(--w-sb);
+    color: var(--text);
     margin: 0;
   }
   .close {
     background: transparent;
-    border: none;
+    border: 0;
     color: var(--text-3);
-    cursor: pointer;
-    font-size: var(--t-17);
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    font-size: 15px;
     line-height: 1;
+    cursor: pointer;
   }
   .close:hover {
+    background: var(--surface-2);
     color: var(--text);
   }
   .body {
-    padding: var(--s-3) var(--s-4);
     display: flex;
     flex-direction: column;
-    gap: var(--s-2);
+    gap: 2px;
     max-height: 60vh;
     overflow-y: auto;
   }
+  /* Each picker row — same vocabulary as .picker-opt in the prototype:
+   * a horizontal flex of [check][game-dot][label] (+ hint on off-topic).
+   * Hover adds a soft surface fill; on/mixed states tint via accent-soft. */
   .row {
     display: flex;
     align-items: center;
-    gap: var(--s-2);
-    padding: var(--s-1) 0;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font-size: var(--t-13);
+    text-align: left;
+  }
+  .row:hover {
+    background: var(--surface-2);
+  }
+  .row[data-state="on"] {
+    background: var(--accent-soft);
+  }
+  .row[data-state="on"]:hover {
+    background: color-mix(in oklab, var(--accent-soft) 70%, var(--surface-2));
   }
   .row.separator {
     border-top: 1px solid var(--border-hairline);
-    padding-top: var(--s-3);
-    margin-top: var(--s-2);
+    margin-top: 4px;
+    padding-top: 12px;
   }
-  .hint {
-    font-size: var(--t-12);
+  /* Game-color dot — 12×12 solid square for real games, dashed outline
+   * for the off-topic flag (prototype docs/design/v2/ui-kit/index.html
+   * lines 1568-1576). */
+  .picker-game-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    background: var(--text-3);
+    flex-shrink: 0;
+  }
+  .picker-game-dot.dashed {
+    background: transparent;
+    border: 1.5px dashed var(--text-3);
+  }
+  .picker-label {
+    flex: 1;
+    color: var(--text);
+  }
+  .picker-hint {
+    font-size: 11px;
     color: var(--text-3);
   }
   .footer {
     display: flex;
     justify-content: flex-end;
     gap: var(--s-2);
-    padding: var(--s-3) var(--s-4);
+    padding: var(--s-2) 4px 0;
     border-top: 1px solid var(--border-hairline);
+    margin-top: 4px;
   }
   .ghost {
-    background: transparent;
-    border: 1px solid var(--border);
+    background: var(--surface-2);
     color: var(--text);
+    border: 1px solid var(--border);
     border-radius: var(--r-sm);
-    padding: var(--s-2) var(--s-3);
-    cursor: pointer;
+    padding: 0 var(--s-3);
     min-height: var(--hit);
-    transition: background var(--m-fast) var(--m-ease);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+    cursor: pointer;
+    transition: background var(--m-fast) var(--m-ease),
+                border-color var(--m-fast) var(--m-ease);
   }
   .ghost:hover {
-    background: var(--surface);
+    background: var(--surface-3);
+    border-color: var(--border-2);
   }
   .primary {
     background: var(--accent);
     color: var(--accent-text);
     border: 1px solid var(--accent);
     border-radius: var(--r-sm);
-    padding: var(--s-2) var(--s-3);
-    cursor: pointer;
+    padding: 0 var(--s-3);
     min-height: var(--hit);
-    transition: background var(--m-fast) var(--m-ease);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
+    cursor: pointer;
+    transition: background var(--m-fast) var(--m-ease),
+                border-color var(--m-fast) var(--m-ease);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 1px 2px rgba(0, 0, 0, 0.25);
   }
   .primary:hover {
     background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   @media (prefers-reduced-motion: reduce) {
     .ghost,
