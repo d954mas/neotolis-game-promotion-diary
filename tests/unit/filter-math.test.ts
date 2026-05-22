@@ -178,11 +178,12 @@ describe("countWithGame — predicted facet counter", () => {
     expect(countWithGame(events, "g1", baseState(), TODAY)).toBe(2);
   });
 
-  it("merges into an existing gameTags list (union)", () => {
+  it("REPLACES gameTags with [tag] (single-tag semantics)", () => {
+    // Per chip-count contract: chip count = "if THIS chip were the only
+    // selection, how many would I see". g2 in current state is IGNORED;
+    // count is for g1 alone. e1 (g1) + e3 (g1) = 2.
     const state: FilterState = { ...baseState(), gameTags: ["g2"] };
-    // After adding g1: gameTags = [g2, g1] (union)
-    // Events matching at least one: e1 (g1), e2 (g2), e3 (g1+g2) → 3
-    expect(countWithGame(events, "g1", state, TODAY)).toBe(3);
+    expect(countWithGame(events, "g1", state, TODAY)).toBe(2);
   });
 
   it("off_topic sentinel — counts events where metadata.triage.offTopic === true", () => {
@@ -190,11 +191,12 @@ describe("countWithGame — predicted facet counter", () => {
     expect(countWithGame(events, OFF_TOPIC_TAG, baseState(), TODAY)).toBe(1);
   });
 
-  it("off_topic + game id — OR union (game-attached OR off-topic events)", () => {
+  it("off_topic counted alone even when gameTags has games (replace semantics)", () => {
+    // Per chip-count contract: each chip shows its standalone count.
+    // gameTags=["g1"] in current state is IGNORED; off_topic alone counts
+    // events where triage.offTopic === true. Only e5 → 1.
     const state: FilterState = { ...baseState(), gameTags: ["g1"] };
-    // After adding off_topic: gameTags = [g1, off_topic]. Events matching:
-    //   e1 (g1) + e3 (g1) + e5 (off_topic) = 3
-    expect(countWithGame(events, OFF_TOPIC_TAG, state, TODAY)).toBe(3);
+    expect(countWithGame(events, OFF_TOPIC_TAG, state, TODAY)).toBe(1);
   });
 });
 

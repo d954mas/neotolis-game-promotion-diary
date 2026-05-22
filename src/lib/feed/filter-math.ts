@@ -92,12 +92,13 @@ export function passes(e: FilterableEvent, state: FilterState, today: Date): boo
 }
 
 /**
- * countWithGame — predicted count if the user toggles `tag` ON in the GAME
- * axis. `tag` is either a game id OR the OFF_TOPIC_TAG sentinel; the
- * function unions the new tag into `state.gameTags` (dedup via Set) and
- * runs the filter pipeline. Mirrors the prototype's per-chip count tail
- * (app.jsx lines 1352-1409) where each game / off-topic chip predicts the
- * size of its result set.
+ * countWithGame — predicted count if `tag` were the SOLE selection in the
+ * GAME axis (other axes preserved). `tag` is either a game id OR the
+ * OFF_TOPIC_TAG sentinel. Mirrors prototype app.jsx line 1403:
+ *   `passes(e, { ...currentState, game: [v] })`
+ * The chip count answers "if I had ONLY this chip active, how many?" —
+ * NOT "if I added this to the current selection". Union semantics would
+ * make every chip show the same OR-total once any chip is active.
  */
 export function countWithGame(
   events: FilterableEvent[],
@@ -107,11 +108,16 @@ export function countWithGame(
 ): number {
   const next: FilterState = {
     ...state,
-    gameTags: Array.from(new Set([...state.gameTags, tag])),
+    gameTags: [tag],
   };
   return events.filter((e) => passes(e, next, today)).length;
 }
 
+/**
+ * countWithKind — predicted count if `kind` were the SOLE selection in
+ * the KIND axis (other axes preserved). Same single-tag semantics as
+ * countWithGame.
+ */
 export function countWithKind(
   events: FilterableEvent[],
   kind: string,
@@ -120,7 +126,7 @@ export function countWithKind(
 ): number {
   const next: FilterState = {
     ...state,
-    kind: Array.from(new Set([...state.kind, kind as (typeof state.kind)[number]])),
+    kind: [kind as (typeof state.kind)[number]],
   };
   return events.filter((e) => passes(e, next, today)).length;
 }
