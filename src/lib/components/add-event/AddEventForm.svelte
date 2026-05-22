@@ -331,7 +331,10 @@
   <!-- Title — required. Author picker chip sits to the right of the
        label, matching the prototype label-row layout. -->
   <div class="field">
-    <label class="field-label" for="addevt-title">{m.add_event_modal_title_label()}</label>
+    <label class="field-label" for="addevt-title">
+      {m.add_event_modal_title_label()}
+      <span class="field-label-req" aria-hidden="true">*</span>
+    </label>
     <input
       id="addevt-title"
       class="field-input"
@@ -593,6 +596,14 @@
     font-weight: var(--w-rg);
     letter-spacing: 0.04em;
     text-transform: none;
+  }
+  /* Required-field marker — small accent asterisk after the label text.
+   * aria-hidden because <input required> carries the a11y contract; this
+   * is purely a visual cue. */
+  .field-label-req {
+    color: var(--accent);
+    font-weight: var(--w-sb);
+    margin-left: 2px;
   }
   .field-input {
     width: 100%;
