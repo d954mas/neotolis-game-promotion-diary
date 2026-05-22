@@ -45,9 +45,11 @@
     title: string;
     url: string | null;
     notes: string | null;
-    // metadata.triage.standalone surfaces the "Not game-related" toggle on
+    // metadata.triage.offTopic surfaces the "Not game-related" toggle on
     // the edit form. toEventDto already projects metadata so the value
-    // reaches the page load function unchanged.
+    // reaches the page load function unchanged. (Plan 03.4-10 unified the
+    // JSONB key — URL filter mode "standalone" + function names like
+    // markStandalone stay; only the JSONB field name migrated.)
     metadata: unknown;
   };
 
@@ -85,7 +87,7 @@
     }
   }
 
-  // Standalone toggle hydrated from metadata.triage.standalone. The submit
+  // Standalone toggle hydrated from metadata.triage.offTopic. The submit
   // handler fires PATCH /api/events/:id/mark-standalone (or
   // /unmark-standalone) ONLY when the toggle's value differs from the
   // loaded value — reuses the existing service surface so no new audit
@@ -94,7 +96,7 @@
     if (md === null || typeof md !== "object") return false;
     const triage = (md as { triage?: unknown }).triage;
     if (triage === null || triage === undefined || typeof triage !== "object") return false;
-    return (triage as { standalone?: unknown }).standalone === true;
+    return (triage as { offTopic?: unknown }).offTopic === true;
   }
   const initialStandalone = readStandaloneFromMetadata(event.metadata);
   let editStandalone = $state(initialStandalone);

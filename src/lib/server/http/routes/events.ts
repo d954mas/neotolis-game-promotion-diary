@@ -316,7 +316,9 @@ eventsRoutes.get(
     }
     // Discriminated show axis (any | inbox | standalone | specific). A bare
     // ?game= without ?show=specific is ignored — the UI never produces that
-    // combo. 'standalone' = game_id IS NULL AND metadata.triage.standalone='true'.
+    // combo. 'standalone' = game_id IS NULL AND metadata.triage.offTopic='true'
+    // (Plan 03.4-10 unified the JSONB key with bulkEdit; URL filter mode name
+    // stays "standalone").
     const showParam = q.show ?? "any";
     const showFilter: ShowFilter =
       showParam === "inbox"

@@ -1673,7 +1673,7 @@ describe("M:N gameIds", () => {
  * Asserts the round-trip behavior the form relies on:
  *   1. PATCH /api/events/:id (main fields) followed by PATCH
  *      /api/events/:id/mark-standalone reaches the desired state
- *      (metadata.triage.standalone === true) AND writes both audit verbs
+ *      (metadata.triage.offTopic === true) AND writes both audit verbs
  *      in order (event.edited, event.marked_standalone).
  *   2. PATCH /api/events/:id/mark-standalone on an event with attached
  *      games returns 422 standalone_conflicts_with_game (defense-in-depth
@@ -1686,7 +1686,7 @@ describe("/events/[id]/edit standalone toggle round-trip", () => {
   // Parallel-executor email-uniqueness coordination:
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("PATCH /api/events/:id then PATCH /api/events/:id/mark-standalone reaches metadata.triage.standalone=true + audit chain", async () => {
+  it("PATCH /api/events/:id then PATCH /api/events/:id/mark-standalone reaches metadata.triage.offTopic=true + audit chain", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev32-roundtrip-${uniq()}@test.local` });
@@ -1731,9 +1731,9 @@ describe("/events/[id]/edit standalone toggle round-trip", () => {
     expect(standaloneRes.status).toBe(200);
     const standaloneBody = (await standaloneRes.json()) as {
       id: string;
-      metadata: { triage?: { standalone?: boolean } } | null;
+      metadata: { triage?: { offTopic?: boolean } } | null;
     };
-    expect(standaloneBody.metadata?.triage?.standalone).toBe(true);
+    expect(standaloneBody.metadata?.triage?.offTopic).toBe(true);
 
     // Audit chain: event.edited (from the PATCH) then event.marked_standalone.
     const audits = await db.select().from(auditLog).where(eq(auditLog.userId, u.id));

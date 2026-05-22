@@ -60,11 +60,11 @@ describe("passes — show axis", () => {
     expect(passes(ev({ gameIds: [] }), state, TODAY)).toBe(true);
   });
 
-  it("returns false when show.kind === 'standalone' AND event metadata.triage.standalone !== true", () => {
+  it("returns false when show.kind === 'standalone' AND event metadata.triage.offTopic !== true", () => {
     const state = { ...baseState(), show: { kind: "standalone" as const } };
     expect(passes(ev({ metadata: null }), state, TODAY)).toBe(false);
-    expect(passes(ev({ metadata: { triage: { standalone: false } } }), state, TODAY)).toBe(false);
-    expect(passes(ev({ metadata: { triage: { standalone: true } } }), state, TODAY)).toBe(true);
+    expect(passes(ev({ metadata: { triage: { offTopic: false } } }), state, TODAY)).toBe(false);
+    expect(passes(ev({ metadata: { triage: { offTopic: true } } }), state, TODAY)).toBe(true);
   });
 
   it("returns false when show.kind === 'specific' AND event has none of show.gameIds", () => {
@@ -173,7 +173,7 @@ describe("countWithShow — predicted facet counter", () => {
   const events: FilterableEvent[] = [
     ev({ id: "e1", gameIds: ["g1"] }),
     ev({ id: "e2", gameIds: [] }), // inbox
-    ev({ id: "e3", gameIds: [], metadata: { triage: { standalone: true } } }),
+    ev({ id: "e3", gameIds: [], metadata: { triage: { offTopic: true } } }),
   ];
 
   it("returns count for each show variant", () => {

@@ -1130,13 +1130,14 @@ describe("multi-select feed filters (OR-within-axis, AND-across-axes)", () => {
 });
 
 // listFeedPage's ShowFilter branch `{ kind: 'standalone' }` returns
-// only events where game_id IS NULL AND metadata.triage.standalone =
-// 'true'. Inbox view excludes dismissed events AND standalone events
+// only events where game_id IS NULL AND metadata.triage.offTopic =
+// 'true' (Plan 03.4-10 unified the JSONB key; URL filter mode "standalone"
+// stays). Inbox view excludes dismissed events AND standalone events
 // (they are a separate triage state, not "still in inbox").
 // Cross-tenant probe with show.kind=standalone returns ZERO of the
 // other tenant's standalone rows.
 describe("show.kind=standalone filter", () => {
-  it("listFeedPage with show.kind=standalone returns ONLY events where game_id IS NULL AND metadata.triage.standalone=true", async () => {
+  it("listFeedPage with show.kind=standalone returns ONLY events where game_id IS NULL AND metadata.triage.offTopic=true", async () => {
     const u = await seedUserDirectly({ email: "p24-feed-1@test.local" });
 
     // Inbox event (game_id=null, no standalone flag) — must NOT appear in standalone view.

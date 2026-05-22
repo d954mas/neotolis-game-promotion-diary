@@ -1469,7 +1469,7 @@ describe("Standalone label rename to 'Not game-related'", () => {
 
   it("FeedCard inline 'Mark standalone' button reads 'Mark as not game-related' on inbox cards", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
-    // Inbox card (gameIds=[]) with no triage.standalone marker → renders
+    // Inbox card (gameIds=[]) with no triage.offTopic marker → renders
     // the inline mark-standalone button. The button text is the renamed
     // copy.
     const out = render(FeedCard, {
@@ -1948,14 +1948,14 @@ describe("/events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker
     expect(out.body).not.toMatch(/<div class="picker(?:\s[^"]*)?"/);
   });
 
-  it("FeedCard with metadata.triage.standalone === true does NOT render AttachToGamePicker", async () => {
+  it("FeedCard with metadata.triage.offTopic === true does NOT render AttachToGamePicker", async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
         event: {
           ...baseEvent,
           gameIds: [],
-          metadata: { triage: { standalone: true } },
+          metadata: { triage: { offTopic: true } },
         },
         source: null,
         game: null,
@@ -2041,7 +2041,7 @@ describe("/events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker
     // Standalone toggle state + conflict guard derivation present.
     expect(src).toMatch(/editStandalone/);
     expect(src).toMatch(/standaloneConflict/);
-    expect(src).toMatch(/metadata\.triage\.standalone|triage.*standalone/);
+    expect(src).toMatch(/metadata\.triage\.offTopic|triage.*offTopic/);
     // Standalone Paraglide labels referenced.
     expect(src).toMatch(/m\.events_edit_standalone_label\(\)/);
     expect(src).toMatch(/m\.events_edit_standalone_help\(\)/);

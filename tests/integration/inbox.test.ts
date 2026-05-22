@@ -254,7 +254,7 @@ describe("PATCH /api/events/:id/dismiss-inbox HTTP boundary", () => {
 // triage actions write audit AFTER the UPDATE succeeds, so cross-tenant
 // NotFoundError does not generate misleading audit rows.
 describe("markStandalone + unmarkStandalone", () => {
-  it("markStandalone sets metadata.triage.standalone=true + game_id=null + writes event.marked_standalone audit", async () => {
+  it("markStandalone sets metadata.triage.offTopic=true + game_id=null + writes event.marked_standalone audit", async () => {
     const u = await seedUserDirectly({ email: "standalone1@test.local" });
     // Seed an inbox event (game_id=null, kind=conference — author_is_me
     // implicit false, no source).
@@ -273,8 +273,8 @@ describe("markStandalone + unmarkStandalone", () => {
     expect(updated.id).toBe(ev.id);
     // The gameId column is gone; standalone events are guaranteed
     // junction-empty by the conflict guard (verified separately below).
-    const meta = updated.metadata as { triage?: { standalone?: unknown } };
-    expect(meta.triage?.standalone).toBe(true);
+    const meta = updated.metadata as { triage?: { offTopic?: unknown } };
+    expect(meta.triage?.offTopic).toBe(true);
 
     // Audit row written with the correct action + metadata + ip + ua.
     const audits = await db
@@ -329,14 +329,14 @@ describe("markStandalone + unmarkStandalone", () => {
     expect(junction).toHaveLength(1);
     expect(junction[0]!.gameId).toBe(gameId);
 
-    // Metadata.triage.standalone is NOT set.
+    // Metadata.triage.offTopic is NOT set.
     const [row] = await db
       .select()
       .from(events28)
       .where(and(eq(events28.userId, u.id), eq(events28.id, ev.id)))
       .limit(1);
-    const md = row?.metadata as { triage?: { standalone?: unknown } } | null;
-    expect(md?.triage?.standalone).toBeUndefined();
+    const md = row?.metadata as { triage?: { offTopic?: unknown } } | null;
+    expect(md?.triage?.offTopic).toBeUndefined();
   });
 
   it("cross-tenant markStandalone throws NotFoundError (404, never 403); no audit row written", async () => {
@@ -375,11 +375,11 @@ describe("markStandalone + unmarkStandalone", () => {
     expect(auditsB.length).toBe(0);
 
     // userA's event is untouched (UPDATE matched 0 rows under userB's userId).
-    const aMeta = evA.metadata as { triage?: { standalone?: unknown } } | null;
-    expect(aMeta?.triage?.standalone).toBeUndefined();
+    const aMeta = evA.metadata as { triage?: { offTopic?: unknown } } | null;
+    expect(aMeta?.triage?.offTopic).toBeUndefined();
   });
 
-  it("unmarkStandalone clears metadata.triage.standalone=false + writes event.unmarked_standalone audit", async () => {
+  it("unmarkStandalone clears metadata.triage.offTopic=false + writes event.unmarked_standalone audit", async () => {
     const u = await seedUserDirectly({ email: "standalone4@test.local" });
     const ev = await createEvent(
       u.id,
@@ -394,8 +394,8 @@ describe("markStandalone + unmarkStandalone", () => {
     await markStandalone(u.id, ev.id, "127.0.0.1");
 
     const reverted = await unmarkStandalone(u.id, ev.id, "127.0.0.1");
-    const meta = reverted.metadata as { triage?: { standalone?: unknown } };
-    expect(meta.triage?.standalone).toBe(false);
+    const meta = reverted.metadata as { triage?: { offTopic?: unknown } };
+    expect(meta.triage?.offTopic).toBe(false);
 
     const audits = await db
       .select()
@@ -433,7 +433,7 @@ describe("markStandalone + unmarkStandalone", () => {
 // PATCH /api/events/:id/mark-standalone + /unmark-standalone HTTP
 // boundary. Mirrors the dismiss-inbox / restore HTTP tests.
 describe("PATCH /api/events/:id/mark-standalone + unmark-standalone HTTP boundary", () => {
-  it("PATCH /api/events/:id/mark-standalone returns 200 with metadata.triage.standalone=true", async () => {
+  it("PATCH /api/events/:id/mark-standalone returns 200 with metadata.triage.offTopic=true", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-standalone-1@test.local" });
@@ -455,13 +455,13 @@ describe("PATCH /api/events/:id/mark-standalone + unmark-standalone HTTP boundar
     const body = (await res.json()) as {
       id: string;
       gameIds: string[];
-      metadata: { triage?: { standalone?: boolean } };
+      metadata: { triage?: { offTopic?: boolean } };
     };
     expect(body.id).toBe(ev.id);
     // The gameId column is gone; standalone events have ZERO junction
     // rows (the conflict guard refuses to standalone an attached event).
     expect(body.gameIds).toEqual([]);
-    expect(body.metadata.triage?.standalone).toBe(true);
+    expect(body.metadata.triage?.offTopic).toBe(true);
   });
 
   it("PATCH /api/events/:id/mark-standalone cross-tenant returns 404 not_found (no forbidden/permission leak)", async () => {
@@ -489,7 +489,7 @@ describe("PATCH /api/events/:id/mark-standalone + unmark-standalone HTTP boundar
     expect(JSON.stringify(body)).not.toMatch(/forbidden|permission/i);
   });
 
-  it("PATCH /api/events/:id/unmark-standalone returns 200 with metadata.triage.standalone=false", async () => {
+  it("PATCH /api/events/:id/unmark-standalone returns 200 with metadata.triage.offTopic=false", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: "http-standalone-3@test.local" });
@@ -511,9 +511,9 @@ describe("PATCH /api/events/:id/mark-standalone + unmark-standalone HTTP boundar
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      metadata: { triage?: { standalone?: boolean } };
+      metadata: { triage?: { offTopic?: boolean } };
     };
-    expect(body.metadata.triage?.standalone).toBe(false);
+    expect(body.metadata.triage?.offTopic).toBe(false);
   });
 });
 
@@ -562,14 +562,14 @@ describe("standalone conflict guard (mutual exclusion)", () => {
       .where(and(eq(eg.userId, u.id), eq(eg.eventId, ev.id)));
     expect(junction).toHaveLength(1);
 
-    // metadata.triage.standalone NOT set.
+    // metadata.triage.offTopic NOT set.
     const [row] = await db
       .select()
       .from(events28)
       .where(and(eq(events28.userId, u.id), eq(events28.id, ev.id)))
       .limit(1);
-    const md = row?.metadata as { triage?: { standalone?: unknown } } | null;
-    expect(md?.triage?.standalone).toBeUndefined();
+    const md = row?.metadata as { triage?: { offTopic?: unknown } } | null;
+    expect(md?.triage?.offTopic).toBeUndefined();
 
     // No event.marked_standalone audit row was written.
     const audits = await db

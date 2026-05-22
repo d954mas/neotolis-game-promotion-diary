@@ -8,7 +8,10 @@
 // M:N: events relate to ZERO-or-MORE games via the `event_games` junction
 // table. Inbox criterion is "no event_games rows for this event"; standalone
 // criterion is the same junction-empty check PLUS
-// metadata.triage.standalone === true.
+// metadata.triage.offTopic === true. (Plan 03.4-10 unified the JSONB field
+// name with bulkEdit's write path. Function names + URL filter mode
+// "standalone" + audit verbs `event.*_standalone` STAY — only the JSONB key
+// migrated.)
 //
 // Tenant scope: EVERY function takes `userId: string` first; EVERY Drizzle
 // query .where()-clauses on `eq(events.userId, userId)` AND, when querying
@@ -36,7 +39,7 @@
 //
 // Standalone↔game mutual exclusion: markStandalone REJECTS when the event
 // has ≥ 1 event_games rows; attachEventToGames REJECTS when the event is
-// already metadata.triage.standalone === true AND non-empty gameIds are
+// already metadata.triage.offTopic === true AND non-empty gameIds are
 // passed. AppError 'standalone_conflicts_with_game' (422). Defense-in-depth
 // — the UI hides the conflicting affordances.
 //
@@ -138,7 +141,8 @@ export interface UpdateEventInput {
  *
  * The `standalone` branch is the "not related to any game" triage state.
  * Standalone events have game_id IS NULL AND
- * metadata.triage.standalone='true'. The Show
+ * metadata.triage.offTopic='true' (URL filter mode name `standalone` stays
+ * even though the JSONB key was renamed in Plan 03.4-10). The Show
  * fieldset's 4-option radio (Any / Inbox / Standalone / Specific) cannot
  * represent invalid combinations by construction.
  */
@@ -1170,16 +1174,18 @@ export async function listFeedPage(
     // separate triage state — the user has explicitly said the event is
     // not related to any game, so it does NOT belong in the inbox awaiting
     // triage.
-    filterParts.push(sql`COALESCE(${events.metadata}->'triage'->>'standalone', 'false') = 'false'`);
+    filterParts.push(sql`COALESCE(${events.metadata}->'triage'->>'offTopic', 'false') = 'false'`);
   } else if (filters.show?.kind === "standalone") {
     // Standalone view = events the user explicitly marked "not related to
-    // any game". The junction-empty constraint is structural (markStandalone
-    // refuses if any junction rows exist); the metadata.triage.standalone
-    // clause is what distinguishes standalone from plain inbox.
+    // any game" (a.k.a. off-topic — the JSONB key is `offTopic` since
+    // Plan 03.4-10 unified the field name with bulkEdit's write path).
+    // The junction-empty constraint is structural (markStandalone refuses
+    // if any junction rows exist); the metadata.triage.offTopic clause is
+    // what distinguishes standalone from plain inbox.
     filterParts.push(
       sql`NOT EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId})` as SQL,
     );
-    filterParts.push(sql`COALESCE(${events.metadata}->'triage'->>'standalone', 'false') = 'true'`);
+    filterParts.push(sql`COALESCE(${events.metadata}->'triage'->>'offTopic', 'false') = 'true'`);
   } else if (filters.show?.kind === "specific") {
     if (filters.show.gameIds.length === 1) {
       // Single-game EXISTS subquery — equivalent query plan to the legacy
@@ -1259,7 +1265,7 @@ export async function listFeedPage(
  * construction).
  *
  * Standalone↔game mutual exclusion: if `gameIds.length > 0` AND the event
- * has metadata.triage.standalone === true, throws
+ * has metadata.triage.offTopic === true, throws
  * AppError(422, 'standalone_conflicts_with_game'). The user must
  * un-standalone first (or the UI hides the conflicting affordances).
  * Defense-in-depth at the service layer regardless of the UI's enforcement.
@@ -1295,8 +1301,8 @@ export async function attachEventToGames(
   //    junction so the 422 surfaces atomically — a partial add/remove
   //    sequence followed by a 422 would be a confusing UX.
   if (gameIds.length > 0) {
-    const md = event.metadata as { triage?: { standalone?: boolean } } | null;
-    if (md?.triage?.standalone === true) {
+    const md = event.metadata as { triage?: { offTopic?: boolean } } | null;
+    if (md?.triage?.offTopic === true) {
       throw new AppError(
         "event marked standalone cannot be attached to a game",
         "standalone_conflicts_with_game",
@@ -1508,10 +1514,13 @@ export async function dismissFromInbox(
 }
 
 /**
- * markStandalone — set metadata.triage.standalone=true on an event with NO
+ * markStandalone — set metadata.triage.offTopic=true on an event with NO
  * attached games. The user has explicitly said this event is not related
  * to any game; the /feed view dims standalone events (FeedCard opacity
- * 0.55) so they don't distract from game-tied events.
+ * 0.55) so they don't distract from game-tied events. Function name +
+ * audit verb stay `markStandalone` / `event.marked_standalone`; only the
+ * JSONB key migrated to `offTopic` in Plan 03.4-10 (so bulkEdit's
+ * off-topic write path and the single-event path target the same key).
  *
  * Standalone↔game mutual exclusion: REJECTS when the event has ≥ 1
  * event_games rows. AppError 'standalone_conflicts_with_game' (422). The
@@ -1570,12 +1579,17 @@ export async function markStandalone(
   }
 
   // Two nested jsonb_set calls: outer creates `triage` parent; inner sets
-  // `triage.standalone=true`. Mirrors dismissFromInbox's nested-jsonb_set
+  // `triage.offTopic=true`. Mirrors dismissFromInbox's nested-jsonb_set
   // pattern so a future metadata.triage.* sibling key (e.g., a flagged-as-
   // duplicate marker) won't collide.
   // The legacy `gameId: null` field is GONE (column dropped); the
   // conflict guard above ensures the junction is already empty when we
   // reach the UPDATE.
+  // Field name is `offTopic` (Plan 03.4-10 unification) — bulkEdit's
+  // off-topic tri-state writes the same key, so this single-event path and
+  // the bulk path now agree on the JSONB shape. Function name + audit verb
+  // stay `markStandalone` / `event.marked_standalone` (URL semantic and DB
+  // enum, respectively, do not migrate).
   const [row] = await db
     .update(events)
     .set({
@@ -1586,7 +1600,7 @@ export async function markStandalone(
           COALESCE(${events.metadata}->'triage', '{}'::jsonb),
           true
         ),
-        '{triage,standalone}',
+        '{triage,offTopic}',
         'true'::jsonb,
         true
       )`,
@@ -1608,7 +1622,7 @@ export async function markStandalone(
 }
 
 /**
- * unmarkStandalone — clear metadata.triage.standalone (set to false). Plan
+ * unmarkStandalone — clear metadata.triage.offTopic (set to false). Plan
  * 02.1-24. Restores the event to plain inbox state (game_id remains null;
  * the user can re-attach via /events/[id]/edit if they change their mind).
  *
@@ -1631,7 +1645,7 @@ export async function unmarkStandalone(
           COALESCE(${events.metadata}->'triage', '{}'::jsonb),
           true
         ),
-        '{triage,standalone}',
+        '{triage,offTopic}',
         'false'::jsonb,
         true
       )`,
@@ -1792,7 +1806,8 @@ export async function bulkEdit(
         // the outer wrap, jsonb_set('{triage,offTopic}', ...) silently
         // no-ops when `triage` doesn't exist). Mirrors the same pattern
         // dismissFromInbox + markStandalone use for `{inbox,...}` and
-        // `{triage,standalone}` respectively.
+        // `{triage,offTopic}` respectively. (Plan 03.4-10 unified the
+        // field name so the two write paths agree.)
         await tx
           .update(events)
           .set({

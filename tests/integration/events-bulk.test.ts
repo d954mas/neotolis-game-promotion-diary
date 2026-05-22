@@ -133,6 +133,40 @@ describe("PATCH /api/events/bulk (Wave 2 Plan 06)", () => {
     }
   });
 
+  // Plan 03.4-10 — regression test for the JSONB field-name unification.
+  // Before the fix, bulkEdit wrote `triage.offTopic` while the feed filter
+  // read `triage.standalone`, so off-topic events toggled via GamesPicker
+  // were invisible to the show=standalone filter. Asserts the end-to-end
+  // bug-fix: bulkEdit({offTopicState:'on'}) → listFeedPage({show:{kind:
+  // 'standalone'}}) returns the event.
+  it("Plan 03.4-10 — bulkEdit offTopicState='on' surfaces event in listFeedPage show.kind='standalone'", async () => {
+    const { listFeedPage } = await import("../../src/lib/server/services/events.js");
+    const fx = await seedUserWithGames("bulk-edit-offtopic-feed");
+    const ev1 = await seedEvent(fx.userId);
+
+    // Sanity: before the bulkEdit, ev1 has no triage marker → standalone
+    // filter must NOT include it.
+    const beforePage = await listFeedPage(fx.userId, { show: { kind: "standalone" } }, null);
+    expect(beforePage.rows.map((r) => r.id)).not.toContain(ev1);
+
+    const res = await app.request("/api/events/bulk", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: fx.cookie },
+      body: JSON.stringify({
+        ids: [ev1],
+        gameStates: {},
+        offTopicState: "on",
+      }),
+    });
+    expect(res.status).toBe(200);
+
+    // After: the standalone filter MUST include ev1. Pre-fix this was the
+    // failing assertion — bulkEdit wrote `triage.offTopic` but the filter
+    // read `triage.standalone`, so the result was empty.
+    const afterPage = await listFeedPage(fx.userId, { show: { kind: "standalone" } }, null);
+    expect(afterPage.rows.map((r) => r.id)).toContain(ev1);
+  });
+
   it("D-13 — cross-tenant ids silently filtered; affected_count reflects owned subset only", async () => {
     const fxA = await seedUserWithGames("bulk-edit-xtA");
     const fxB = await seedUserWithGames("bulk-edit-xtB");

@@ -448,13 +448,13 @@ describe("/events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker
     "/events/[id]/edit form footer renders the Delete button (manual UAT — auth harness deferred)",
   );
   it.skip(
-    "/events/[id]/edit standalone checkbox toggles metadata.triage.standalone via PATCH /api/events/:id/mark-standalone (manual UAT — auth harness deferred)",
+    "/events/[id]/edit standalone checkbox toggles metadata.triage.offTopic via PATCH /api/events/:id/mark-standalone (manual UAT — auth harness deferred)",
   );
   it.skip(
     "FeedCard with gameIds.length > 0 does NOT render AttachToGamePicker on /feed (manual UAT — auth harness deferred)",
   );
   it.skip(
-    "FeedCard with metadata.triage.standalone=true does NOT render AttachToGamePicker on /feed (manual UAT — auth harness deferred)",
+    "FeedCard with metadata.triage.offTopic=true does NOT render AttachToGamePicker on /feed (manual UAT — auth harness deferred)",
   );
   it.skip(
     "FeedCard inbox row renders AttachToGamePicker with class='compact' and label='Attach' (manual UAT — auth harness deferred)",

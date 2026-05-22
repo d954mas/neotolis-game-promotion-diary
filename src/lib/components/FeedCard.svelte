@@ -267,17 +267,17 @@
   const isInboxRow = $derived.by((): boolean => {
     if (event.gameIds.length > 0) return false;
     const md = event.metadata as
-      | { inbox?: { dismissed?: boolean }; triage?: { standalone?: boolean } }
+      | { inbox?: { dismissed?: boolean }; triage?: { offTopic?: boolean } }
       | null
       | undefined;
     if (md?.inbox?.dismissed === true) return false;
-    if (md?.triage?.standalone === true) return false;
+    if (md?.triage?.offTopic === true) return false;
     return true;
   });
 
   const isStandalone = $derived.by((): boolean => {
-    const md = event.metadata as { triage?: { standalone?: boolean } } | null | undefined;
-    return md?.triage?.standalone === true;
+    const md = event.metadata as { triage?: { offTopic?: boolean } } | null | undefined;
+    return md?.triage?.offTopic === true;
   });
 
   let markingStandalone = $state(false);

@@ -29,13 +29,13 @@ export interface FilterableEvent {
   notes?: string | null;
   author_is_me?: boolean;
   gameIds: string[];
-  metadata?: { triage?: { standalone?: boolean; offTopic?: boolean } } | null;
+  metadata?: { triage?: { offTopic?: boolean } } | null;
 }
 
 export function passes(e: FilterableEvent, state: FilterState, today: Date): boolean {
   // 1. show axis — inbox (no games), standalone (triage flag), specific (any-of)
   if (state.show.kind === "inbox" && (e.gameIds?.length ?? 0) > 0) return false;
-  if (state.show.kind === "standalone" && e.metadata?.triage?.standalone !== true) return false;
+  if (state.show.kind === "standalone" && e.metadata?.triage?.offTopic !== true) return false;
   if (state.show.kind === "specific") {
     if (!state.show.gameIds.some((gid) => e.gameIds.includes(gid))) return false;
   }

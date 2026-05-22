@@ -559,7 +559,7 @@
       notes: e.notes,
       author_is_me: e.authorIsMe,
       gameIds: e.gameIds,
-      metadata: e.metadata as { triage?: { standalone?: boolean; offTopic?: boolean } } | null,
+      metadata: e.metadata as { triage?: { offTopic?: boolean } } | null,
     })),
   );
 
