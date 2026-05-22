@@ -289,12 +289,12 @@ describe("markStandalone + unmarkStandalone", () => {
     expect(audits[0]!.userAgent).toBe("ua-test");
   });
 
-  it("markStandalone on event with attached games throws AppError 422 'standalone_conflicts_with_game'", async () => {
-    // The contract is "reject 422 — user must detach first" (replacing
-    // an earlier "silently detach + mark standalone" approach).
-    // Rationale: silent detach was the wrong UX because the user could
-    // miss that a game was attached; the 422 + UI-hidden affordance is
-    // defense-in-depth + user-honest.
+  it("markStandalone on event with attached games SUCCEEDS — off-topic and games are independent axes", async () => {
+    // After the GAME-axis multi-select refactor (Plan 03.4-10), off-topic
+    // is just another tag on the GAME axis (alongside game IDs). An event
+    // can carry BOTH a game attachment AND the off-topic flag — the filter
+    // expresses "attached to game OR marked off-topic" as an OR union, so
+    // they're no longer mutually exclusive triage decisions.
     const uniqId = Math.random().toString(36).slice(2, 10);
     const u = await seedUserDirectly({ email: `standalone2-${uniqId}@test.local` });
     const gameId = uuidv7();
@@ -305,22 +305,14 @@ describe("markStandalone + unmarkStandalone", () => {
         gameIds: [gameId],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
-        title: "Press piece I attached by mistake",
+        title: "Off-topic press piece linked to a game",
       },
       "127.0.0.1",
     );
 
-    let threw: unknown;
-    try {
-      await markStandalone(u.id, ev.id, "127.0.0.1");
-    } catch (e) {
-      threw = e;
-    }
-    expect(threw).toBeInstanceOf(AppError);
-    expect((threw as AppError).code).toBe("standalone_conflicts_with_game");
-    expect((threw as AppError).status).toBe(422);
+    await markStandalone(u.id, ev.id, "127.0.0.1");
 
-    // Junction unchanged — the event is still attached to the game.
+    // Junction unchanged — event is still attached to the game.
     const { eventGames: eg28 } = await import("../../src/lib/server/db/schema/event-games.js");
     const junction = await db
       .select()
@@ -329,14 +321,14 @@ describe("markStandalone + unmarkStandalone", () => {
     expect(junction).toHaveLength(1);
     expect(junction[0]!.gameId).toBe(gameId);
 
-    // Metadata.triage.offTopic is NOT set.
+    // Metadata.triage.offTopic now set — both states coexist.
     const [row] = await db
       .select()
       .from(events28)
       .where(and(eq(events28.userId, u.id), eq(events28.id, ev.id)))
       .limit(1);
-    const md = row?.metadata as { triage?: { offTopic?: unknown } } | null;
-    expect(md?.triage?.offTopic).toBeUndefined();
+    const md = row?.metadata as { triage?: { offTopic?: boolean } } | null;
+    expect(md?.triage?.offTopic).toBe(true);
   });
 
   it("cross-tenant markStandalone throws NotFoundError (404, never 403); no audit row written", async () => {
@@ -520,16 +512,14 @@ describe("PATCH /api/events/:id/mark-standalone + unmark-standalone HTTP boundar
 /**
  * Standalone conflict guard at the service layer.
  *
- * markStandalone REJECTS attached events; attachEventToGames(non-empty)
- * REJECTS standalone events. AppError 'standalone_conflicts_with_game'
- * (422). The UI hides the conflicting affordances; this service-layer
- * guard is defense-in-depth.
+ * After Plan 03.4-10 GAME-axis multi-select refactor: off-topic and games
+ * are INDEPENDENT axes. An event can freely carry both — the prior mutual-
+ * exclusion 422 guard is gone. These tests assert the new contract.
  */
-describe("standalone conflict guard (mutual exclusion)", () => {
-  // Parallel-executor email-uniqueness coordination:
+describe("off-topic + games coexist freely (independent axes)", () => {
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("markStandalone on event with attached games throws AppError 422 'standalone_conflicts_with_game'; metadata + junction unchanged", async () => {
+  it("markStandalone on event with attached games SUCCEEDS — both states coexist + audit row written", async () => {
     const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
     const u = await seedUserDirectly({ email: `inbox28-1-${uniq()}@test.local` });
     const gA = uuidv7();
@@ -540,46 +530,38 @@ describe("standalone conflict guard (mutual exclusion)", () => {
         gameIds: [gA],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
-        title: "Attached + cannot standalone",
+        title: "Attached and off-topic at the same time",
       },
       "127.0.0.1",
     );
 
-    let threw: unknown;
-    try {
-      await markStandalone(u.id, ev.id, "127.0.0.1");
-    } catch (e) {
-      threw = e;
-    }
-    expect(threw).toBeInstanceOf(AppError);
-    expect((threw as AppError).code).toBe("standalone_conflicts_with_game");
-    expect((threw as AppError).status).toBe(422);
+    await markStandalone(u.id, ev.id, "127.0.0.1");
 
-    // Junction unchanged.
+    // Junction preserved — event still attached to the game.
     const junction = await db
       .select()
       .from(eg)
       .where(and(eq(eg.userId, u.id), eq(eg.eventId, ev.id)));
     expect(junction).toHaveLength(1);
 
-    // metadata.triage.offTopic NOT set.
+    // metadata.triage.offTopic now set.
     const [row] = await db
       .select()
       .from(events28)
       .where(and(eq(events28.userId, u.id), eq(events28.id, ev.id)))
       .limit(1);
-    const md = row?.metadata as { triage?: { offTopic?: unknown } } | null;
-    expect(md?.triage?.offTopic).toBeUndefined();
+    const md = row?.metadata as { triage?: { offTopic?: boolean } } | null;
+    expect(md?.triage?.offTopic).toBe(true);
 
-    // No event.marked_standalone audit row was written.
+    // Audit row written for the off-topic transition.
     const audits = await db
       .select()
       .from(auditLog)
       .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "event.marked_standalone")));
-    expect(audits).toHaveLength(0);
+    expect(audits).toHaveLength(1);
   });
 
-  it("attachEventToGames(non-empty) on standalone event throws AppError 422 'standalone_conflicts_with_game'; junction unchanged", async () => {
+  it("attachEventToGames(non-empty) on off-topic event SUCCEEDS — both states coexist", async () => {
     const { attachEventToGames: attach28 } =
       await import("../../src/lib/server/services/events.js");
     const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
@@ -592,28 +574,30 @@ describe("standalone conflict guard (mutual exclusion)", () => {
         gameIds: [],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
-        title: "Standalone first",
+        title: "Off-topic then attach a game",
       },
       "127.0.0.1",
     );
     await markStandalone(u.id, ev.id, "127.0.0.1");
 
-    let threw: unknown;
-    try {
-      await attach28(u.id, ev.id, [gA], "127.0.0.1");
-    } catch (e) {
-      threw = e;
-    }
-    expect(threw).toBeInstanceOf(AppError);
-    expect((threw as AppError).code).toBe("standalone_conflicts_with_game");
-    expect((threw as AppError).status).toBe(422);
+    await attach28(u.id, ev.id, [gA], "127.0.0.1");
 
-    // Junction unchanged (still empty — the standalone state is preserved).
+    // Junction populated — game attached.
     const junction = await db
       .select()
       .from(eg)
       .where(and(eq(eg.userId, u.id), eq(eg.eventId, ev.id)));
-    expect(junction).toHaveLength(0);
+    expect(junction).toHaveLength(1);
+    expect(junction[0]!.gameId).toBe(gA);
+
+    // Off-topic flag preserved.
+    const [row] = await db
+      .select()
+      .from(events28)
+      .where(and(eq(events28.userId, u.id), eq(events28.id, ev.id)))
+      .limit(1);
+    const md = row?.metadata as { triage?: { offTopic?: boolean } } | null;
+    expect(md?.triage?.offTopic).toBe(true);
   });
 
   it("attachEventToGames([]) on standalone event SUCCEEDS — empty target set is the no-op detach path", async () => {

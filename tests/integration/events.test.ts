@@ -1796,7 +1796,7 @@ describe("/events/[id]/edit standalone toggle round-trip", () => {
     expect(actions).toContain("event.marked_standalone");
   });
 
-  it("PATCH /api/events/:id/mark-standalone on event with attached games returns 422 standalone_conflicts_with_game (defense-in-depth)", async () => {
+  it("PATCH /api/events/:id/mark-standalone on event with attached games SUCCEEDS — off-topic and games coexist (independent axes after GAME multi-select refactor)", async () => {
     const { createApp } = await import("../../src/lib/server/http/app.js");
     const app = createApp();
     const u = await seedUserDirectly({ email: `ev32-conflict-${uniq()}@test.local` });
@@ -1809,7 +1809,7 @@ describe("/events/[id]/edit standalone toggle round-trip", () => {
         gameIds: [gA],
         kind: "press",
         occurredAt: new Date("2026-06-01T10:00:00Z"),
-        title: "Cannot go standalone",
+        title: "Off-topic plus a game",
       },
       "127.0.0.1",
     );
@@ -1818,9 +1818,20 @@ describe("/events/[id]/edit standalone toggle round-trip", () => {
       method: "PATCH",
       headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
     });
-    expect(res.status).toBe(422);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("standalone_conflicts_with_game");
+    expect(res.status).toBe(200);
+    // Verify the event now carries BOTH the off-topic flag AND the game.
+    const { eventGames: eg } = await import("../../src/lib/server/db/schema/event-games.js");
+    const after = await db
+      .select({ id: events.id, metadata: events.metadata })
+      .from(events)
+      .where(eq(events.id, ev.id));
+    const md = (after[0]?.metadata as { triage?: { offTopic?: boolean } } | null) ?? null;
+    expect(md?.triage?.offTopic).toBe(true);
+    const junction = await db
+      .select({ gameId: eg.gameId })
+      .from(eg)
+      .where(eq(eg.eventId, ev.id));
+    expect(junction.map((r) => r.gameId)).toEqual([gA]);
   });
 
   it("DELETE /api/events/:id soft-deletes; subsequent GET /api/events/:id returns 404", async () => {

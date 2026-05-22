@@ -1728,20 +1728,13 @@ export async function attachEventToGames(
     .limit(1);
   if (!event) throw new NotFoundError();
 
-  // 2. Standalone↔game mutual exclusion guard. Fires BEFORE we touch the
-  //    junction so the 422 surfaces atomically — a partial add/remove
-  //    sequence followed by a 422 would be a confusing UX.
-  if (gameIds.length > 0) {
-    const md = event.metadata as { triage?: { offTopic?: boolean } } | null;
-    if (md?.triage?.offTopic === true) {
-      throw new AppError(
-        "event marked standalone cannot be attached to a game",
-        "standalone_conflicts_with_game",
-        422,
-        { event_id: eventId },
-      );
-    }
-  }
+  // 2. Off-topic + games are INDEPENDENT axes (matches prototype semantics:
+  //    off_topic is a flag on the event; gameIds is the M:N junction; an
+  //    event can carry both freely). The prior 422 guard against attaching
+  //    games to an off-topic event was removed in the GAME-axis multi-select
+  //    refactor — the filter UI now expresses "attached to game OR marked
+  //    off-topic" as an OR union, so the two states no longer represent
+  //    mutually exclusive triage decisions.
 
   // 3. Validate every gameId in the target set belongs to userId.
   //    Cross-tenant gameId throws NotFoundError → 404. De-dup via Set so
@@ -1984,30 +1977,16 @@ export async function markStandalone(
   // Conflict guard: if the event has any junction rows, reject with a 422
   // rather than silently detaching. The user must
   // detach explicitly (via attachEventToGames(..., [])) before marking
-  // standalone. We need to load the event ID first (cross-tenant 404)
-  // before the junction lookup so a forged eventId from a different
-  // tenant returns 404 not "standalone_conflicts_with_game".
+  // Off-topic + games are INDEPENDENT axes. Load the event ID first
+  // (cross-tenant 404). The prior guard against marking standalone on an
+  // event with attached games was removed when GAME axis became multi-
+  // select with off_topic as a sentinel (OR semantics, not mutex).
   const [eventRow] = await db
     .select({ id: events.id })
     .from(events)
     .where(and(eq(events.userId, userId), eq(events.id, eventId), isNull(events.deletedAt)))
     .limit(1);
   if (!eventRow) throw new NotFoundError();
-  const attached = await db
-    .select({ gameId: eventGames.gameId })
-    .from(eventGames)
-    .where(and(eq(eventGames.userId, userId), eq(eventGames.eventId, eventId)));
-  if (attached.length > 0) {
-    throw new AppError(
-      "event has attached games; detach before marking standalone",
-      "standalone_conflicts_with_game",
-      422,
-      {
-        event_id: eventId,
-        game_count: attached.length,
-      },
-    );
-  }
 
   // Two nested jsonb_set calls: outer creates `triage` parent; inner sets
   // `triage.offTopic=true`. Mirrors dismissFromInbox's nested-jsonb_set

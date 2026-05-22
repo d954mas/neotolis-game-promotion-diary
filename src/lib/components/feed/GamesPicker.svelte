@@ -78,25 +78,15 @@
     onApply({ gameStates, offTopicState });
   }
 
-  // Mutex with off-topic: a row attached to ≥1 game CANNOT also be
-  // marked off-topic (server enforces `standalone_conflicts_with_game`).
-  // Reflect that in the UI:
-  //   - Turning a game ON force-clears off-topic (off-topic → off)
-  //   - Turning off-topic ON force-clears all games (all → off)
+  // Off-topic + games are INDEPENDENT axes (matches prototype semantics
+  // and the GAME-axis multi-select OR-union refactor). Toggling one no
+  // longer forces the other; events freely carry both states.
   function setGameState(gid: string, next: "on" | "off"): void {
     gameStates = { ...gameStates, [gid]: next };
-    if (next === "on" && offTopicState !== "off") {
-      offTopicState = "off";
-    }
   }
 
   function setOffTopicState(next: "on" | "off"): void {
     offTopicState = next;
-    if (next === "on") {
-      const cleared: Record<string, "on" | "off" | "mixed"> = {};
-      for (const k of Object.keys(gameStates)) cleared[k] = "off";
-      gameStates = cleared;
-    }
   }
 </script>
 
