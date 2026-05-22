@@ -1,28 +1,24 @@
 <script lang="ts">
   // TriStateCheckbox — Wave 0 Plan 03 primitive (Foundation C).
   //
-  // Renders a native <input type="checkbox"> that visually + semantically
-  // expresses three states: on / off / mixed. Used by GamesPicker per-game
-  // row (Plan 08) to express bulk-edit aggregation:
+  // Three states: on / off / mixed. Used by GamesPicker per-game row to
+  // express bulk-edit aggregation:
   //   - on:    all selected events have this game attached
   //   - off:   none do
-  //   - mixed: some do, some don't (initial state when bulk-editing a
-  //           heterogeneous selection)
+  //   - mixed: some do, some don't (initial state for heterogeneous selection)
   //
   // Cycle on click (CONTEXT D-12 + prototype line 904):
-  //   mixed → onchange("on")
-  //   off   → onchange("on")
-  //   on    → onchange("off")
+  //   mixed / off → onchange("on")
+  //   on          → onchange("off")
   //
-  // The "mixed" state is OUTPUT-ONLY — once the user clicks, the checkbox
-  // commits to on/off and can't return to mixed without external state
-  // (e.g., Cancel restoring the original view in GamesPicker).
-  //
-  // CRITICAL: HTML `indeterminate` is a JS property, NOT a reflected
-  // attribute. Svelte's `bind:` doesn't cover it. The component uses
-  // `bind:this={el}` + `$effect` to imperatively sync `el.indeterminate`
-  // every time `state` changes. Without this sync the dash glyph would
-  // never clear when state transitions from "mixed" to "on" or "off".
+  // Why a <button role="checkbox"> and not <input type="checkbox">:
+  // wrapping a native checkbox inside a <label> caused a race between
+  // browser's default toggle and our preventDefault — clicking the label
+  // sometimes left input.checked out of sync with the parent's state,
+  // making the chip appear non-responsive. Using a button with the
+  // role="checkbox" + aria-checked contract gives us full visual control
+  // and removes the label-forwarding race entirely. Keyboard semantics
+  // preserved: Enter / Space trigger click on a focused <button>.
 
   let {
     state,
@@ -36,46 +32,74 @@
     ariaLabelledby?: string;
   } = $props();
 
-  let el: HTMLInputElement;
-
-  $effect(() => {
-    if (!el) return;
-    el.checked = state === "on";
-    el.indeterminate = state === "mixed";
-  });
-
   function cycle(): void {
     if (state === "mixed" || state === "off") onchange("on");
     else onchange("off");
   }
 </script>
 
-<label class="tri-state">
-  <input
-    bind:this={el}
-    type="checkbox"
-    aria-checked={state === "mixed" ? "mixed" : state === "on" ? "true" : "false"}
-    aria-labelledby={ariaLabelledby}
-    onclick={(e) => {
-      e.preventDefault();
-      cycle();
-    }}
-  />
+<button
+  type="button"
+  class="tri-state"
+  role="checkbox"
+  aria-checked={state === "mixed" ? "mixed" : state === "on" ? "true" : "false"}
+  aria-labelledby={ariaLabelledby}
+  onclick={cycle}
+>
+  <span class="box" data-state={state} aria-hidden="true">
+    {#if state === "on"}
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 6.5 L5 9.5 L10 3.5" />
+      </svg>
+    {:else if state === "mixed"}
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M2.5 6 L9.5 6" />
+      </svg>
+    {/if}
+  </span>
   {#if label}<span class="tri-state-label">{label}</span>{/if}
-</label>
+</button>
 
 <style>
   .tri-state {
     display: inline-flex;
     align-items: center;
     gap: var(--s-2);
+    background: transparent;
+    border: 0;
+    padding: 0;
     cursor: pointer;
+    font: inherit;
+    color: var(--text);
   }
-  .tri-state input[type="checkbox"] {
+  .tri-state .box {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 18px;
     height: 18px;
-    accent-color: var(--accent);
-    cursor: pointer;
+    border: 1.5px solid var(--border-2, var(--border));
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--accent-text, #fff);
+    flex-shrink: 0;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .tri-state:hover .box {
+    border-color: var(--accent);
+  }
+  .tri-state .box[data-state="on"],
+  .tri-state .box[data-state="mixed"] {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .tri-state:focus-visible {
+    outline: none;
+  }
+  .tri-state:focus-visible .box {
+    box-shadow: var(--focus-ring);
   }
   .tri-state-label {
     font-size: var(--t-13);
