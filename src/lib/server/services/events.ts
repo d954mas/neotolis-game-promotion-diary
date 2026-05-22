@@ -189,6 +189,63 @@ export interface FeedPage {
   nextCursor: string | null;
 }
 
+/**
+ * FeedFacets — server-side facet counts for /feed chip rows (Plan 03.4-10
+ * follow-up Option B). Each facet count answers the prototype contract
+ * (docs/design/v2/ui-kit/app.jsx lines 1394-1409): "how many events would
+ * match the rest of the filter state if THIS chip were the only selection
+ * on its axis".
+ *
+ * Stability invariant — toggling a chip on the SAME axis must NOT change
+ * other chips' counts on that axis. The server achieves this by stripping
+ * the faceted axis from the filter set before counting, then GROUP BY-ing
+ * over that axis (or running per-variant COUNT(*) queries for axes without
+ * a natural GROUP BY column).
+ *
+ * Responsiveness invariant — changing DATE / KIND / AUTHOR / SHOW / SOURCE
+ * DOES recompute all facets. Other axes are still applied as WHERE
+ * predicates inside each facet query, so the facet only excludes its own
+ * axis from the filter pipeline.
+ *
+ * Replaces the legacy client-side `countWithGame/Kind/Show/Author` helpers
+ * for the /feed orchestrator (those helpers stay exported for standalone
+ * callers + the unit tests they backstop). The legacy helpers counted on
+ * `data.rows` — the server-paginated first page (50 rows max) — so chip
+ * counts mutated when the user toggled chips. Facets count against the
+ * full event pool so the numbers are stable per scope.
+ */
+export interface FeedFacets {
+  /**
+   * GAME axis facet. Maps each game id → events attached to that game
+   * after the rest of the axes are applied. Adds the OFF_TOPIC_TAG
+   * sentinel → count of events where metadata.triage.offTopic === true.
+   * Games with zero matching events are OMITTED (callers use `?? 0`).
+   */
+  gameTags: Record<string, number>;
+  /**
+   * KIND axis facet. Maps each EventKind → events with that kind after the
+   * rest of the axes are applied. Empty kinds omitted.
+   */
+  kinds: Record<string, number>;
+  /**
+   * SHOW axis facet. `all` = total matching every other axis (the "All"
+   * sentinel chip count + the visible-rows count at the page bottom).
+   * `inbox` = same with the inbox-eligibility clause applied (zero
+   * attached games AND not dismissed AND not off-topic).
+   */
+  show: { all: number; inbox: number };
+  /**
+   * AUTHOR axis facet. `anyone` is the same as show.all; `mine` filters
+   * authorIsMe=true; `others` filters authorIsMe=false.
+   */
+  author: { anyone: number; mine: number; others: number };
+  /**
+   * Convenience copy of `show.all` — total events matching ALL axes. Use
+   * for "current visible count" displays where the SHOW axis isn't relevant.
+   */
+  total: number;
+}
+
 function assertValidKind(kind: string): asserts kind is EventKind {
   if (!(VALID_EVENT_KINDS as readonly string[]).includes(kind)) {
     throw new AppError(
@@ -1308,6 +1365,277 @@ export async function listFeedPage(
   return {
     rows: page,
     nextCursor: hasMore && last ? encodeCursor(last.occurredAt, last.id) : null,
+  };
+}
+
+/**
+ * buildFeedBaseFilterParts — shared WHERE-clause builder for listFeedPage +
+ * listFeedFacets. Returns the same SQL[] array that listFeedPage assembles
+ * for its `and(eq(events.userId, userId), ...filterParts)` clause MINUS the
+ * cursor and the axes the caller asked to exclude.
+ *
+ * `exclude` is a set of axis names — when an axis is excluded, its WHERE
+ * clause is NOT appended. Used by listFeedFacets so each facet query
+ * excludes its own axis (the faceted axis becomes the GROUP BY / variant
+ * dimension instead of a filter). The userId clause is NEVER routed
+ * through this helper — callers add it directly to their .where(...) so
+ * the ESLint tenant-scope rule sees it lexically.
+ */
+type FeedAxis = "kind" | "source" | "show" | "gameTags" | "author" | "date";
+function buildFeedBaseFilterParts(
+  userId: string,
+  filters: FeedFilters,
+  scope: "live" | "trash",
+  exclude: ReadonlySet<FeedAxis>,
+): SQL[] {
+  const filterParts: SQL[] = [];
+
+  // Soft-delete predicate — always applied, regardless of `exclude`.
+  if (scope === "live") {
+    filterParts.push(isNull(events.deletedAt) as SQL);
+  } else {
+    const cutoff = new Date(Date.now() - env.RETENTION_DAYS * 86_400_000);
+    filterParts.push(isNotNull(events.deletedAt) as SQL);
+    filterParts.push(gte(events.deletedAt, cutoff) as SQL);
+  }
+
+  if (!exclude.has("source")) pushAxis(filterParts, events.sourceId, filters.source);
+  if (!exclude.has("kind")) pushAxis(filterParts, events.kind, filters.kind);
+
+  if (!exclude.has("show")) {
+    if (filters.show?.kind === "inbox") {
+      filterParts.push(
+        sql`NOT EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId})` as SQL,
+      );
+      filterParts.push(sql`COALESCE(${events.metadata}->'inbox'->>'dismissed', 'false') = 'false'`);
+      filterParts.push(sql`COALESCE(${events.metadata}->'triage'->>'offTopic', 'false') = 'false'`);
+    } else if (filters.show?.kind === "standalone") {
+      filterParts.push(
+        sql`NOT EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId})` as SQL,
+      );
+      filterParts.push(sql`COALESCE(${events.metadata}->'triage'->>'offTopic', 'false') = 'true'`);
+    } else if (filters.show?.kind === "specific") {
+      if (filters.show.gameIds.length === 1) {
+        const gid = filters.show.gameIds[0]!;
+        filterParts.push(
+          sql`EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId} AND ${eventGames.gameId} = ${gid})` as SQL,
+        );
+      } else if (filters.show.gameIds.length > 1) {
+        filterParts.push(
+          sql`EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId} AND ${eventGames.gameId} IN (${sql.join(
+            filters.show.gameIds.map((id) => sql`${id}`),
+            sql.raw(", "),
+          )}))` as SQL,
+        );
+      }
+    }
+  }
+
+  if (!exclude.has("gameTags") && filters.gameTags !== undefined && filters.gameTags.length > 0) {
+    const wantsOffTopic = filters.gameTags.includes(OFF_TOPIC_TAG);
+    const gameIdsFilter = filters.gameTags.filter((t) => t !== OFF_TOPIC_TAG);
+    const orParts: SQL[] = [];
+    if (gameIdsFilter.length === 1) {
+      const gid = gameIdsFilter[0]!;
+      orParts.push(
+        sql`EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId} AND ${eventGames.gameId} = ${gid})` as SQL,
+      );
+    } else if (gameIdsFilter.length > 1) {
+      orParts.push(
+        sql`EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId} AND ${eventGames.gameId} IN (${sql.join(
+          gameIdsFilter.map((id) => sql`${id}`),
+          sql.raw(", "),
+        )}))` as SQL,
+      );
+    }
+    if (wantsOffTopic) {
+      orParts.push(
+        sql`COALESCE(${events.metadata}->'triage'->>'offTopic', 'false') = 'true'` as SQL,
+      );
+    }
+    if (orParts.length === 1) filterParts.push(orParts[0]!);
+    else if (orParts.length > 1)
+      filterParts.push(sql`(${sql.join(orParts, sql.raw(" OR "))})` as SQL);
+  }
+
+  if (!exclude.has("author") && filters.authorIsMe !== undefined) {
+    filterParts.push(eq(events.authorIsMe, filters.authorIsMe));
+  }
+  if (!exclude.has("date")) {
+    if (filters.from !== undefined) filterParts.push(gte(events.occurredAt, filters.from));
+    if (filters.to !== undefined) filterParts.push(lte(events.occurredAt, filters.to));
+  }
+
+  return filterParts;
+}
+
+/**
+ * listFeedFacets — server-side facet counts for the /feed chip rows
+ * (Plan 03.4-10 follow-up Option B).
+ *
+ * Returns one count per chip on each filter axis, computed against the
+ * FULL event pool (not the cursor-paginated first page). Each facet
+ * query applies all axes EXCEPT the one being faceted, so chip counts
+ * are stable when chips on the SAME axis are toggled but recompute when
+ * other axes change.
+ *
+ * Four facet queries run in parallel via Promise.all:
+ *   1. GAME — GROUP BY game_id via event_games junction (+ off-topic sentinel).
+ *   2. KIND — GROUP BY events.kind.
+ *   3. SHOW — two COUNT queries (all + inbox-eligible).
+ *   4. AUTHOR — three COUNT queries (anyone + mine + others).
+ *
+ * Tenant scope: every query carries `eq(events.userId, userId)` as a
+ * first-class WHERE clause + every junction reference duplicates the
+ * userId filter inside the EXISTS/JOIN subquery (mirrors listFeedPage).
+ *
+ * Total latency: each facet is one query and they all run concurrently,
+ * so the wall-clock cost is `max(query_time)` not `sum(query_time)`.
+ * Combined with the loader's existing parallel listFeedPage / listGames /
+ * listSources fetch, the facets piggyback on the same Promise.all batch
+ * with no incremental round-trip cost.
+ */
+export async function listFeedFacets(
+  userId: string,
+  filters: FeedFilters,
+  opts?: { scope?: "live" | "trash" },
+): Promise<FeedFacets> {
+  const scope = opts?.scope ?? "live";
+
+  // GAME facet — exclude the gameTags axis from the base filter, then
+  // GROUP BY game_id via the junction. Off-topic sentinel is counted via a
+  // separate query (it's a metadata flag, not a game id, so it can't share
+  // the GROUP BY).
+  const gameBaseParts = buildFeedBaseFilterParts(
+    userId,
+    filters,
+    scope,
+    new Set(["gameTags"]),
+  );
+
+  const gameGroupQuery = db
+    .select({
+      gameId: eventGames.gameId,
+      // count(*) emits bigint; Postgres returns it as a JS string from the
+      // driver, so we cast to text + parse on the client. Drizzle's
+      // sql<number> generic forces the typed shape.
+      count: sql<string>`count(*)`,
+    })
+    .from(events)
+    .innerJoin(
+      eventGames,
+      and(eq(eventGames.eventId, events.id), eq(eventGames.userId, userId)),
+    )
+    .where(and(eq(events.userId, userId), ...gameBaseParts))
+    .groupBy(eventGames.gameId);
+
+  const offTopicQuery = db
+    .select({ count: sql<string>`count(*)` })
+    .from(events)
+    .where(
+      and(
+        eq(events.userId, userId),
+        ...gameBaseParts,
+        sql`COALESCE(${events.metadata}->'triage'->>'offTopic', 'false') = 'true'`,
+      ),
+    );
+
+  // KIND facet — exclude the kind axis from the base filter, then GROUP BY
+  // events.kind.
+  const kindBaseParts = buildFeedBaseFilterParts(userId, filters, scope, new Set(["kind"]));
+  const kindGroupQuery = db
+    .select({ kind: events.kind, count: sql<string>`count(*)` })
+    .from(events)
+    .where(and(eq(events.userId, userId), ...kindBaseParts))
+    .groupBy(events.kind);
+
+  // SHOW facet — `all` reuses the full-axes base count; `inbox` adds the
+  // inbox-eligibility clause on top of a base that excludes the SHOW axis.
+  const showBaseParts = buildFeedBaseFilterParts(userId, filters, scope, new Set(["show"]));
+  const showAllQuery = db
+    .select({ count: sql<string>`count(*)` })
+    .from(events)
+    .where(and(eq(events.userId, userId), ...showBaseParts));
+  const showInboxQuery = db
+    .select({ count: sql<string>`count(*)` })
+    .from(events)
+    .where(
+      and(
+        eq(events.userId, userId),
+        ...showBaseParts,
+        sql`NOT EXISTS (SELECT 1 FROM ${eventGames} WHERE ${eventGames.eventId} = ${events.id} AND ${eventGames.userId} = ${userId})` as SQL,
+        sql`COALESCE(${events.metadata}->'inbox'->>'dismissed', 'false') = 'false'`,
+        sql`COALESCE(${events.metadata}->'triage'->>'offTopic', 'false') = 'false'`,
+      ),
+    );
+
+  // AUTHOR facet — `anyone` reuses the full-axes base count; `mine` /
+  // `others` apply the authorIsMe predicate on the author-excluded base.
+  const authorBaseParts = buildFeedBaseFilterParts(userId, filters, scope, new Set(["author"]));
+  const authorAnyoneQuery = db
+    .select({ count: sql<string>`count(*)` })
+    .from(events)
+    .where(and(eq(events.userId, userId), ...authorBaseParts));
+  const authorMineQuery = db
+    .select({ count: sql<string>`count(*)` })
+    .from(events)
+    .where(and(eq(events.userId, userId), ...authorBaseParts, eq(events.authorIsMe, true)));
+  const authorOthersQuery = db
+    .select({ count: sql<string>`count(*)` })
+    .from(events)
+    .where(and(eq(events.userId, userId), ...authorBaseParts, eq(events.authorIsMe, false)));
+
+  // TOTAL — full-axes count (no exclusions). Drives data.facets.total +
+  // the "All games" / "All kinds" sentinel chip predictions.
+  const totalParts = buildFeedBaseFilterParts(userId, filters, scope, new Set());
+  const totalQuery = db
+    .select({ count: sql<string>`count(*)` })
+    .from(events)
+    .where(and(eq(events.userId, userId), ...totalParts));
+
+  const [
+    gameRows,
+    offTopicRows,
+    kindRows,
+    showAllRows,
+    showInboxRows,
+    authorAnyoneRows,
+    authorMineRows,
+    authorOthersRows,
+    totalRows,
+  ] = await Promise.all([
+    gameGroupQuery,
+    offTopicQuery,
+    kindGroupQuery,
+    showAllQuery,
+    showInboxQuery,
+    authorAnyoneQuery,
+    authorMineQuery,
+    authorOthersQuery,
+    totalQuery,
+  ]);
+
+  const gameTags: Record<string, number> = {};
+  for (const r of gameRows) gameTags[r.gameId] = Number(r.count);
+  const offTopicCount = Number(offTopicRows[0]?.count ?? 0);
+  if (offTopicCount > 0) gameTags[OFF_TOPIC_TAG] = offTopicCount;
+
+  const kinds: Record<string, number> = {};
+  for (const r of kindRows) kinds[r.kind] = Number(r.count);
+
+  return {
+    gameTags,
+    kinds,
+    show: {
+      all: Number(showAllRows[0]?.count ?? 0),
+      inbox: Number(showInboxRows[0]?.count ?? 0),
+    },
+    author: {
+      anyone: Number(authorAnyoneRows[0]?.count ?? 0),
+      mine: Number(authorMineRows[0]?.count ?? 0),
+      others: Number(authorOthersRows[0]?.count ?? 0),
+    },
+    total: Number(totalRows[0]?.count ?? 0),
   };
 }
 
