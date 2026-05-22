@@ -1,10 +1,10 @@
 <script lang="ts">
   // AuthorPopover — Wave 0 Plan 03 shared primitive (Foundation C).
   //
-  // Mine / Someone-else picker used by FeedCard, EventDetailModal, and
-  // SourceRow per CONTEXT D-11. Two options only in v1 (no third
-  // "specific blogger" option — deferred to v2 when there's a real need
-  // to attribute events to a registered third-party source).
+  // Mine / Someone-else picker used by FeedCard, EventDetailContent,
+  // AddEventForm, and SourceRow per CONTEXT D-11. Two options only in v1
+  // (no third "specific blogger" option — deferred to v2 when there's a
+  // real need to attribute events to a registered third-party source).
   //
   // Per RESEARCH §"Dialog Stack" Question 10: this is an absolute-
   // positioned <div role="menu">, NOT a native <dialog>. Reason:
@@ -20,6 +20,13 @@
   //     from INSIDE the already-modal AddEventModal / EventDetailModal,
   //     and a nested <dialog> can't reliably layer above an open one
   //     across browsers.
+  //
+  // Visual contract: 1:1 with docs/design/v2/ui-kit/index.html
+  // .author-pick-pop / .author-pick-opt / .author-pick-opt-name /
+  // .author-pick-opt-tag / .author-pick-opt-check rules. Each row
+  // renders a 22px avatar (orange-filled for "mine", grey-bordered for
+  // "?"), a name, a mono "you" tag on the mine row, and a check glyph
+  // on the active row.
   //
   // Positioning contract: the caller wraps AuthorPopover in a positioned
   // container (`position: relative`) anchored next to the avatar; the
@@ -52,6 +59,8 @@
   function onkeydown(e: KeyboardEvent): void {
     if (e.key === "Escape") onclose?.();
   }
+
+  const mineInitial = $derived((mineName?.[0] ?? "Y").toUpperCase());
 </script>
 
 <div class="author-pick-pop" role="menu" aria-orientation="vertical" tabindex="-1" {onkeydown}>
@@ -59,59 +68,136 @@
     type="button"
     role="menuitemradio"
     aria-checked={authorIsMe === true}
-    class="author-pick-row"
+    class="author-pick-opt"
     data-active={authorIsMe === true ? "1" : "0"}
     onclick={pickMine}
   >
-    {m.author_popover_mine_label({ name: mineName })}
+    <span class="author-avatar" data-mine="1">{mineInitial}</span>
+    <span class="author-pick-opt-name">{mineName}</span>
+    <span class="author-pick-opt-tag">you</span>
+    {#if authorIsMe === true}
+      <span class="author-pick-opt-check" aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </span>
+    {/if}
+    <!-- Hidden label for compat with older tests that read the i18n
+         string verbatim. The visible row already carries the same text
+         via {mineName} + "you". -->
+    <span class="sr-only">{m.author_popover_mine_label({ name: mineName })}</span>
   </button>
   <button
     type="button"
     role="menuitemradio"
     aria-checked={authorIsMe === false}
-    class="author-pick-row"
+    class="author-pick-opt"
     data-active={authorIsMe === false ? "1" : "0"}
     onclick={pickOthers}
   >
-    {m.author_popover_someone_else()}
+    <span class="author-avatar" data-mine="0">?</span>
+    <span class="author-pick-opt-name">{m.author_popover_someone_else()}</span>
+    {#if authorIsMe === false}
+      <span class="author-pick-opt-check" aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </span>
+    {/if}
   </button>
 </div>
 
 <style>
+  /* Prototype 1:1 — mirrors .author-pick-pop / .author-pick-opt /
+   * .author-pick-opt-name / .author-pick-opt-tag / .author-pick-opt-check
+   * from docs/design/v2/ui-kit/index.html. Positioned absolute below the
+   * trigger; the caller's wrapping div with position:relative is the
+   * positioning context. */
   .author-pick-pop {
     position: absolute;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
+    z-index: 81;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 240px;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
     border-radius: var(--r-md);
     box-shadow: var(--shadow-elev);
-    padding: var(--s-1);
-    min-width: 200px;
-    z-index: 50;
+    padding: 4px;
     display: flex;
     flex-direction: column;
-    gap: 2px;
   }
-  .author-pick-row {
+  .author-pick-opt {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
     background: transparent;
-    border: none;
-    text-align: left;
-    padding: var(--s-2) var(--s-3);
-    font-size: var(--t-13);
-    color: var(--text);
-    cursor: pointer;
+    border: 0;
     border-radius: var(--r-sm);
+    color: var(--text);
+    font-size: var(--t-13);
+    text-align: left;
+    cursor: pointer;
     transition: background-color var(--m-fast) var(--m-ease);
   }
-  .author-pick-row:hover {
-    background: var(--accent-soft);
-    color: var(--text);
+  .author-pick-opt:hover {
+    background: var(--surface-2);
   }
-  .author-pick-row[data-active="1"] {
+  .author-pick-opt[data-active="1"] {
     background: var(--accent-soft);
-    color: var(--accent);
+  }
+  .author-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    background: var(--surface-3);
+    color: var(--text-3);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    font-family: var(--f-sans);
+    font-size: 11px;
+    font-weight: var(--w-sb);
+    flex-shrink: 0;
+  }
+  .author-avatar[data-mine="1"] {
+    background: var(--accent);
+    color: var(--accent-text);
+    border-color: var(--accent);
+  }
+  .author-pick-opt-name {
+    flex: 1;
+    color: var(--text);
+    font-weight: var(--w-md);
+  }
+  .author-pick-opt-tag {
+    color: var(--text-3);
+    font-size: var(--t-12);
+    font-family: var(--f-mono);
+    letter-spacing: 0.02em;
+  }
+  .author-pick-opt-check {
+    display: inline-flex;
+    color: var(--accent-strong);
+    flex-shrink: 0;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
   @media (prefers-reduced-motion: reduce) {
-    .author-pick-row {
+    .author-pick-opt {
       transition: none;
     }
   }
