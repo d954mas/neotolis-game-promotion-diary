@@ -866,38 +866,58 @@
     </div>
   {/if}
 
-  {#each groupedRows as group (group.date)}
-    <FeedDateGroupHeader occurredAt={group.occurredAt} count={group.rows.length} />
-    <div class="feed-grid">
-      {#each group.rows as row (row.id)}
-        {@const Card = getCardComponent(row.kind) ?? FeedCard}
-        <Card
-          event={row}
-          source={row.sourceId ? (sourceById.get(row.sourceId) ?? null) : null}
-          game={row.gameIds.length > 0 ? (gameById.get(row.gameIds[0]!) ?? null) : null}
-          games={data.games}
-          selected={selectedIds.has(row.id)}
-          {anySelected}
-          view={trashView ? "trash" : "feed"}
-          onToggleSelect={onToggleSelect}
-          onOpenDetail={openDetail}
-          onOpenGamesPickerForCard={openGamesPickerForCard}
-          onDelete={onCardDelete}
-          onRestore={onModalRestore}
-          onDeleteForever={onModalDeleteForever}
-          currentUserName={page.data.user?.name ?? undefined}
-          onChanged={() => invalidateAll()}
-        />
-      {/each}
+  {#if allRows.length === 0}
+    <!--
+      Empty state — matches the prototype's `.feed-empty` block
+      (docs/design/v2/ui-kit/index.html .feed-empty lines 326-345).
+      Three variants: trash-empty, feed-empty-no-filters, feed-empty-with-filters.
+    -->
+    <div class="feed-empty" role="status">
+      {#if trashView}
+        <h2 class="feed-empty-heading">{m.feed_trash_empty_heading()}</h2>
+        <p class="feed-empty-body">{m.feed_trash_empty_body()}</p>
+      {:else if activeAxes.length > 0 || urlState.query.length > 0}
+        <h2 class="feed-empty-heading">{m.empty_feed_filtered_heading()}</h2>
+        <p class="feed-empty-body">{m.empty_feed_filtered_body()}</p>
+      {:else}
+        <h2 class="feed-empty-heading">{m.empty_feed_heading()}</h2>
+        <p class="feed-empty-body">{m.empty_feed_body()}</p>
+      {/if}
     </div>
-  {/each}
-  {#if !endReached}
-    <div class="sentinel" bind:this={sentinelEl} aria-hidden="true"></div>
-    {#if loading}
-      <p class="feed-status" role="status">{m.feed_loading_more()}</p>
+  {:else}
+    {#each groupedRows as group (group.date)}
+      <FeedDateGroupHeader occurredAt={group.occurredAt} count={group.rows.length} />
+      <div class="feed-grid">
+        {#each group.rows as row (row.id)}
+          {@const Card = getCardComponent(row.kind) ?? FeedCard}
+          <Card
+            event={row}
+            source={row.sourceId ? (sourceById.get(row.sourceId) ?? null) : null}
+            game={row.gameIds.length > 0 ? (gameById.get(row.gameIds[0]!) ?? null) : null}
+            games={data.games}
+            selected={selectedIds.has(row.id)}
+            {anySelected}
+            view={trashView ? "trash" : "feed"}
+            onToggleSelect={onToggleSelect}
+            onOpenDetail={openDetail}
+            onOpenGamesPickerForCard={openGamesPickerForCard}
+            onDelete={onCardDelete}
+            onRestore={onModalRestore}
+            onDeleteForever={onModalDeleteForever}
+            currentUserName={page.data.user?.name ?? undefined}
+            onChanged={() => invalidateAll()}
+          />
+        {/each}
+      </div>
+    {/each}
+    {#if !endReached}
+      <div class="sentinel" bind:this={sentinelEl} aria-hidden="true"></div>
+      {#if loading}
+        <p class="feed-status" role="status">{m.feed_loading_more()}</p>
+      {/if}
+    {:else if allRows.length > 0}
+      <p class="feed-status feed-end" role="status">{m.feed_no_more_events()}</p>
     {/if}
-  {:else if allRows.length > 0}
-    <p class="feed-status feed-end" role="status">{m.feed_no_more_events()}</p>
   {/if}
 
   {#if !trashView && data.deletedEvents.length > 0}
@@ -1078,5 +1098,35 @@
     font-size: var(--t-13);
     padding: var(--s-4) 0;
     margin: 0;
+  }
+  /* Empty state — matches prototype `.feed-empty` block
+   * (docs/design/v2/ui-kit/index.html lines 326-345). Three variants
+   * rendered conditionally from the orchestrator above: trash-empty,
+   * feed-empty-no-filters (no events at all), feed-empty-with-filters
+   * (filtered set is empty). 22px heading + 14px body, max-width 560px,
+   * centered horizontally in the layout column. */
+  .feed-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--s-3);
+    padding: var(--s-8) var(--s-4);
+    max-width: 560px;
+    margin: 0 auto;
+  }
+  .feed-empty-heading {
+    margin: 0;
+    font-family: var(--f-sans);
+    font-size: var(--t-22);
+    font-weight: var(--w-sb);
+    color: var(--text);
+    letter-spacing: -0.01em;
+    line-height: var(--lh-tight);
+  }
+  .feed-empty-body {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--t-14);
+    line-height: var(--lh-body);
   }
 </style>
