@@ -73,17 +73,44 @@
   }
 </script>
 
-<EventDetailContent
-  event={data.event}
-  games={data.games}
-  sources={data.sources}
-  {view}
-  hasPrev={false}
-  hasNext={false}
-  onClose={() => goto("/feed")}
-  {onDelete}
-  onRestore={view === "trash" ? onRestore : undefined}
-  onDeleteForever={view === "trash" ? onDeleteForever : undefined}
-  {onUpdate}
-  {onEdit}
-/>
+<!--
+  Route-mode wrapper — visually mirrors EventDetailModal's 760px panel
+  chrome so /events/[id] reads as the same surface a user opens from the
+  feed (D-05 dual-render contract). Without this wrapper EventDetailContent
+  stretches to the full viewport width because the route is a regular block
+  flow with no max-width / border / radius.
+-->
+<section class="detail-route-host">
+  <EventDetailContent
+    event={data.event}
+    games={data.games}
+    sources={data.sources}
+    {view}
+    hasPrev={false}
+    hasNext={false}
+    onClose={() => goto("/feed")}
+    {onDelete}
+    onRestore={view === "trash" ? onRestore : undefined}
+    onDeleteForever={view === "trash" ? onDeleteForever : undefined}
+    {onUpdate}
+    {onEdit}
+  />
+</section>
+
+<style>
+  /* Mirrors `.event-detail-modal` from EventDetailModal.svelte (lines
+   * 108-119): 760px wide, surface fill, border + radius + soft elevation.
+   * No `max-height` here — the route flows naturally inside the document,
+   * unlike the modal which is constrained to the viewport. */
+  .detail-route-host {
+    width: min(760px, calc(100vw - 32px));
+    margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-elev);
+    color: var(--text);
+    overflow: hidden;
+    min-width: 0;
+  }
+</style>
