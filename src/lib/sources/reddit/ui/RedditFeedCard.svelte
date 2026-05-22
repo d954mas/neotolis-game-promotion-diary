@@ -3,16 +3,23 @@
   //
   // Composed from $lib/components/feed/parts/BaseFeedCard.svelte so the
   // markup shell + click handling + menu + footer is identical to the
-  // default FeedCard. This file enforces the Reddit-specific read paths:
+  // default FeedCard. This file enforces the Reddit-specific read paths
+  // per AGENTS.md no-denormalization rule — reads ONLY from owning rows
+  // (data_sources via the FK on event.sourceId), NEVER from event
+  // metadata snapshots:
   //
-  //   - sourceLabel: `r/{event.metadata.subreddit}`. SAFE to read from
-  //     event metadata per AGENTS.md — subreddit slug is intrinsic to
-  //     the Reddit URL and Reddit forbids subreddit rename. The value
-  //     cannot drift from the post.
-  //   - bylineLabel: `/u/{event.metadata.author}`. Author handle is the
-  //     user's identifier at post-time; the post URL doesn't carry it
-  //     but the metadata snapshot is intrinsic to who posted (Reddit
-  //     usernames are permanent).
+  //   - sourceLabel: source.displayName ?? source.handleUrl ?? "".
+  //     For sub-polled posts the source row is the registered subreddit
+  //     (source_kind=reddit_subreddit, handle_url=r/<slug>). For
+  //     author-polled posts the source row is the tracked Reddit account
+  //     (source_kind=reddit_account). Either way, the canonical display
+  //     name is owned by data_sources — one UPDATE there reflects across
+  //     every event. Pasted events from unregistered subs/users show no
+  //     attribution (honest state — we can't claim a name we don't own).
+  //   - bylineLabel: derived from source.handleUrl when source_kind is
+  //     reddit_account. (Sub-polled events don't have author attribution
+  //     until the post-single fetch creates a per-account source row;
+  //     in the meantime byline is empty — same honest state.)
   //   - stats: event.redditEnrichment.stats (score / numComments /
   //     upvoteRatio). Populated by ./server/feed-enrichment.ts via JOIN
   //     with reddit_post_snapshots — the post's own polling data,
@@ -33,8 +40,6 @@
   import BaseFeedCard from "$lib/components/feed/parts/BaseFeedCard.svelte";
   import {
     deriveThumbnailUrl,
-    redditAuthorByline,
-    redditSubredditLabel,
     type CardEventLite,
     type CardSourceLite,
   } from "$lib/components/feed/parts/derive-card-data.js";
@@ -58,9 +63,7 @@
     currentUserName,
   }: {
     event: CardEventLite;
-    /** Source prop accepted for prop-shape parity with the default
-     *  FeedCard / YoutubeFeedCard. Reddit sourceLabel is derived from
-     *  event metadata (intrinsic-to-URL), so `source` is unused here. */
+    /** Source-of-truth row for sourceLabel (subreddit / account). */
     source?: CardSourceLite | null;
     game?: GameLite | null;
     games: GameLite[];
@@ -77,19 +80,24 @@
     currentUserName?: string;
   } = $props();
 
-  // r/<subreddit>. Reddit's subreddit slug is part of the canonical
-  // URL and forbidden to rename — safe to read from event metadata.
-  const sourceLabel = $derived.by((): string => {
-    const fromMetadata = redditSubredditLabel(event.metadata);
-    if (fromMetadata.length > 0) return fromMetadata;
-    // Fallback: data_sources.displayName when subreddit absent
-    // (community-tracking source registered without a specific post).
-    return source?.displayName ?? source?.handleUrl ?? "";
-  });
+  // r/<subreddit>. Strict no-denorm: read ONLY from source-of-truth row.
+  // For sub-polled events source_id → data_sources(reddit_subreddit) →
+  // displayName carries the subreddit slug. For author-polled events
+  // source is the reddit_account row. Paste-flow events from
+  // unregistered subs/accounts show no attribution until either:
+  //  - the user registers the source in /sources, OR
+  //  - a future paste-flow enrichment creates a service-level cache row.
+  // Honest state for unregistered sources, mirroring YoutubeFeedCard.
+  const sourceLabel = $derived.by(
+    (): string => source?.displayName ?? source?.handleUrl ?? "",
+  );
 
-  // /u/<author>. Reddit usernames are permanent; the metadata snapshot
-  // captures who posted at post-time.
-  const bylineLabel = $derived.by(() => redditAuthorByline(event.metadata));
+  // /u/<author> — same source-of-truth principle. We currently have no
+  // reddit_posts cache table that owns per-post author identity; the
+  // metadata.author snapshot is a denormalization we deliberately stop
+  // reading. Until a per-post or per-author source row exists for the
+  // event, byline stays empty (honest state).
+  const bylineLabel = $derived.by((): string | null => null);
 
   const thumbnailUrl = $derived.by(() => deriveThumbnailUrl(event));
 
