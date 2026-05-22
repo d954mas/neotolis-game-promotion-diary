@@ -20,6 +20,7 @@
   import AuthorPopover from "$lib/components/shared/AuthorPopover.svelte";
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "$lib/components/InlineError.svelte";
+  import { gameColor } from "$lib/util/game-color.js";
   import type { GameDto } from "$lib/server/dto.js";
 
   type EventKind =
@@ -454,7 +455,7 @@
           type="button"
           class="chip kind-chip game-chip add-game-chip"
           data-active={active ? "1" : "0"}
-          style="--card-accent: var(--k-post)"
+          style="--card-accent: {gameColor(g.id)};"
           onclick={() => toggleGame(g.id)}
           disabled={saving}
         >
