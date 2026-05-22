@@ -1,0 +1,167 @@
+<script lang="ts">
+  // YoutubeFeedCard — per-platform variant for kind=youtube_video.
+  //
+  // Composed from $lib/components/feed/parts/BaseFeedCard.svelte so the
+  // markup shell + click handling + menu + footer is identical to the
+  // default FeedCard. This file enforces the YouTube-specific read
+  // paths:
+  //
+  //   - sourceLabel: data_sources.channelTitle via the `source` prop
+  //     (FK lookup at /feed loader time). NEVER from event.metadata —
+  //     the channel name can be renamed by the YouTube account owner
+  //     after the event was logged; reading from the owning row is the
+  //     only way to stay fresh. event.channelTitle (populated by
+  //     youtube_videos.channel_title) is the legacy denormalized read
+  //     path; we keep it as a fallback ONLY for events whose source
+  //     was deleted (sourceId=null) so the card still shows a label,
+  //     but the source row is the canonical truth when present.
+  //   - thumbnail: img.youtube.com/vi/{externalId}/mqdefault.jpg —
+  //     externalId IS the video id, intrinsic to the YouTube URL.
+  //   - stats: event.stats.{viewCount,likeCount,commentCount} — these
+  //     are owned by youtube_video_snapshots (the video's own polling
+  //     data), not duplicated from another table.
+  //
+  // Registered via ./index.ts as `cardComponent` so /feed/+page.svelte's
+  // `getCardComponent("youtube_video")` returns this component instead
+  // of the default FeedCard.
+
+  import BaseFeedCard from "$lib/components/feed/parts/BaseFeedCard.svelte";
+  import {
+    deriveThumbnailUrl,
+    formatStat,
+    youtubeChannelLabel,
+    type CardEventLite,
+    type CardSourceLite,
+  } from "$lib/components/feed/parts/derive-card-data.js";
+
+  type GameLite = { id: string; title: string };
+
+  let {
+    event,
+    source,
+    games,
+    onChanged,
+    selected = false,
+    anySelected = false,
+    view = "feed",
+    onToggleSelect,
+    onOpenDetail,
+    onOpenGamesPickerForCard,
+    onDelete,
+    onRestore,
+    onDeleteForever,
+    currentUserName,
+  }: {
+    event: CardEventLite;
+    source: CardSourceLite | null;
+    /** Legacy single-game prop kept for prop-shape parity with the
+     *  default FeedCard call sites. Unused inside the component —
+     *  BaseFeedCard reads `games` for chip rendering. */
+    game?: GameLite | null;
+    games: GameLite[];
+    onChanged?: () => void;
+    selected?: boolean;
+    anySelected?: boolean;
+    view?: "feed" | "trash";
+    onToggleSelect?: (id: string, force?: boolean) => void;
+    onOpenDetail?: (id: string) => void;
+    onOpenGamesPickerForCard?: (id: string) => void;
+    onDelete?: (id: string) => Promise<void> | void;
+    onRestore?: (id: string) => Promise<void> | void;
+    onDeleteForever?: (id: string) => Promise<void> | void;
+    currentUserName?: string;
+  } = $props();
+
+  // YouTube channel name — read via FK from data_sources.channelTitle.
+  // When source is null (deleted source / manual paste before backfill)
+  // fall back to event.channelTitle (the legacy denormalized snapshot
+  // from youtube_videos.channel_title — a P1 schema fix tracked in
+  // .planning/phases/03.4-design-v2-ux/denormalization-audit.md).
+  const sourceLabel = $derived.by((): string => {
+    const fromSource = youtubeChannelLabel(source);
+    if (fromSource.length > 0) return fromSource;
+    return event.channelTitle ?? "";
+  });
+
+  const thumbnailUrl = $derived.by(() => deriveThumbnailUrl(event));
+</script>
+
+<BaseFeedCard
+  {event}
+  {sourceLabel}
+  {thumbnailUrl}
+  {games}
+  {onChanged}
+  {selected}
+  {anySelected}
+  {view}
+  {onToggleSelect}
+  {onOpenDetail}
+  {onOpenGamesPickerForCard}
+  {onDelete}
+  {onRestore}
+  {onDeleteForever}
+  {currentUserName}
+  statsSlot={statsSnippet}
+/>
+
+{#snippet statsSnippet()}
+  {#if event.stats}
+    <div class="card-stats stats-line">
+      <span class="stat">
+        <svg
+          class="stat-icon"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+        <span class="num">{formatStat(event.stats.viewCount)}</span>
+      </span>
+      <span class="stat">
+        <svg
+          class="stat-icon"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path
+            d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+          />
+        </svg>
+        <span class="num">{formatStat(event.stats.likeCount)}</span>
+      </span>
+      <span class="stat">
+        <svg
+          class="stat-icon"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+        <span class="num">{formatStat(event.stats.commentCount)}</span>
+      </span>
+    </div>
+  {/if}
+{/snippet}
