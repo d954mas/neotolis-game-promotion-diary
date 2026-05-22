@@ -61,6 +61,16 @@ export const youtubeVideos = pgTable(
     title: text("title").notNull(),
     description: text("description"),
     channelId: text("channel_id"),
+    // DENORMALIZATION DEBT — owned by youtube_channels.channel_title but
+    // snapshotted here at video-discover time. AGENTS.md (no-denorm
+    // rule) flags this: when a channel renames, every video row carries
+    // the stale name until the next refresh. feed-enrichment.ts reads
+    // this column to populate EventDto.channelTitle.
+    //
+    // Remediation deferred — drop this column + JOIN
+    // youtube_videos.channel_id → youtube_channels.channel_title at
+    // read time. Tracked in
+    // .planning/phases/03.4-design-v2-ux/denormalization-audit.md V-1.
     channelTitle: text("channel_title"),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),

@@ -87,6 +87,16 @@ export async function youtubeEnrichFeedDtos(
     }
 
     // 2. ChannelTitle lookup from youtube_videos cache.
+    //
+    // DENORMALIZATION DEBT — youtube_videos.channel_title snapshots a
+    // value owned by youtube_channels. AGENTS.md no-denorm rule flags
+    // it; remediation is to JOIN youtube_channels at read time instead
+    // (see .planning/phases/03.4-design-v2-ux/denormalization-audit.md
+    // V-1). YoutubeFeedCard already prefers the data_sources.channelTitle
+    // read path (via the source prop) which IS routed through the
+    // owning row when the channel is registered as a source — this
+    // column is only the fallback for events whose channel the user
+    // hasn't registered yet.
     const videoChannels = await db
       .select({
         videoId: youtubeVideos.videoId,
