@@ -827,13 +827,24 @@
     flex-shrink: 0;
   }
 
-  /* ── Selection checkbox — leftmost slot in the meta row ── */
+  /* ── Selection checkbox — leftmost slot in the meta row ──
+   *
+   * Hidden by default (display:none → no layout reservation, no visual
+   * distraction). Reveals when:
+   *   - mass-select mode is active (`body[data-selection="1"]` —
+   *     orchestrator sets this when anySelected from feedUiStore)
+   *   - this specific card is selected (`data-selected="1"` on .feed-card)
+   *
+   * User can enter mass-select via ⋮ → Select OR touch long-press.
+   * Once in mass-select mode, every card's checkbox appears so the user
+   * can shift-click / sweep additional rows.
+   */
   .card-select {
+    display: none;
     width: 18px;
     height: 18px;
     padding: 0;
     margin: 0;
-    display: inline-flex;
     align-items: center;
     justify-content: center;
     background: transparent;
@@ -844,10 +855,13 @@
     flex-shrink: 0;
     transition:
       background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease),
-      opacity var(--m-fast) var(--m-ease);
-    opacity: 0.55;
+      border-color var(--m-fast) var(--m-ease);
     position: relative;
+  }
+  /* Reveal when mass-select mode is on OR this card is itself selected. */
+  :global(body[data-selection="1"]) .card-select,
+  .feed-card[data-selected="1"] .card-select {
+    display: inline-flex;
   }
   /* Hide the native checkbox visual; it's still focusable + clickable
    * because we forward clicks via the wrapping label and the test
@@ -861,17 +875,11 @@
     opacity: 0;
     cursor: pointer;
   }
-  @media (hover: hover) {
-    .feed-card:hover .card-select {
-      opacity: 1;
-    }
-  }
   .card-select:hover {
     border-color: var(--accent);
     background: var(--surface-2);
   }
   .card-select[data-checked="1"] {
-    opacity: 1;
     background: var(--accent);
     border-color: var(--accent);
   }
