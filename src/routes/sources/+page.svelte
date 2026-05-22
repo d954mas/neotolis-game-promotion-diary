@@ -330,31 +330,47 @@
     opacity: 0.6;
   }
 
-  /* "+ Add source" — primary CTA inline with the title. Matches the
-   * prototype's .btn.add-event treatment used across feed / sources. */
+  /* "+ Add source" — ghost-styled primary CTA inline with the title. The
+   * solid-accent fill was visually heavier than the prototype intends.
+   * Matches prototype `.btn.add-event`
+   * (docs/design/v2/ui-kit/index.html lines 365-389) used across feed /
+   * sources for the additive primary action. The leading "+" carries the
+   * accent through `::first-letter` so the affordance reads as additive
+   * without a competing solid block of color. */
   .btn.add-source {
     display: inline-flex;
     align-items: center;
-    gap: var(--s-1);
+    gap: 8px;
     min-height: var(--hit-lg);
     padding: 0 var(--s-4);
-    background: var(--accent);
-    color: var(--accent-text);
-    border: 1px solid var(--accent);
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
     border-radius: var(--r-sm);
     font-family: var(--f-sans);
     font-size: var(--t-14);
-    font-weight: var(--w-sb);
+    font-weight: var(--w-md);
     text-decoration: none;
     white-space: nowrap;
     cursor: pointer;
     transition:
       background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
+      border-color var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
+  }
+  .btn.add-source::first-letter {
+    color: var(--accent);
+    font-size: 1.25em;
+    font-weight: var(--w-sb);
+    margin-right: 4px;
+    vertical-align: -1px;
   }
   .btn.add-source:hover {
-    background: var(--accent-strong);
-    border-color: var(--accent-strong);
+    background: var(--surface-3, var(--surface-2));
+    border-color: var(--accent);
+  }
+  .btn.add-source:hover::first-letter {
+    color: var(--accent-strong);
   }
   .recovery-link {
     background: transparent;

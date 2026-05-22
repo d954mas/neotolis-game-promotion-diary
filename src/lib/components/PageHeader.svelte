@@ -152,30 +152,47 @@
     padding: var(--s-2) 0;
     background: var(--bg);
   }
+  /* CTA — ghost-styled to match prototype `.btn.add-event`
+   * (docs/design/v2/ui-kit/index.html .btn.add-event lines 365-389 +
+   * src/lib/components/feed/PageHead.svelte `.cta-primary`).
+   * The shared chrome's primary additive CTA reads as "additive action"
+   * with an accent-only leading glyph; the solid-accent fill was visually
+   * heavier than the prototype intends. */
   .cta {
     display: inline-flex;
     align-items: center;
-    gap: var(--s-1);
+    gap: 8px;
     min-height: var(--hit-lg);
     padding: 0 var(--s-4);
-    background: var(--accent);
-    color: var(--accent-text);
-    border: 1px solid var(--accent);
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
     border-radius: var(--r-sm);
     font-family: var(--f-sans);
     font-size: var(--t-14);
-    font-weight: var(--w-sb);
+    font-weight: var(--w-md);
     text-decoration: none;
     white-space: nowrap;
     cursor: pointer;
     transition:
       background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
+      border-color var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
   }
   .cta:hover {
-    background: var(--accent-strong);
-    border-color: var(--accent-strong);
+    background: var(--surface-3, var(--surface-2));
+    border-color: var(--accent);
   }
+  /* Accent the "+" / leading glyph when the label starts with it — matches
+   * the prototype's pattern where the leading + carries the accent and the
+   * remainder of the chip stays neutral. Label authors include the literal
+   * "+ " prefix in the i18n message; we recolor it via ::first-letter
+   * approximation isn't workable, so we instead lift the accent into the
+   * first space-prefix character using a CSS gradient on the button text:
+   * here we lift the whole label slightly via `text-shadow: 0 0 0 transparent;`
+   * fallback — actual leading-+ accent is delivered by callers that use the
+   * cta-plus glyph (see PageHead.svelte). For shared PageHeader we keep the
+   * label uniform; the ghost style alone matches the prototype's weight. */
   /* Low-key text link surfacing the soft-delete recovery flow. Visually
    * subordinate to the primary CTA (label + small + muted) so it does
    * not compete for attention; only appears when deletedCount > 0.
