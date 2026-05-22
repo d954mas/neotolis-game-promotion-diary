@@ -765,6 +765,7 @@
             value: g.id,
             label: g.title,
             predictedCount: data.facets.gameTags[g.id] ?? 0,
+            accentColor: gameColor(g.id),
           })),
         ]}
         selectedValues={urlState.gameTags.length === 0 ? ["all"] : urlState.gameTags}

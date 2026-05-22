@@ -66,6 +66,10 @@
       // Setting --card-accent on the chip is the caller's job (see /feed
       // axis-row consumer), so the chip border + icon tint pick the kind hue.
       iconKind?: AxisKindIcon;
+      // GAME axis: per-game CSS color (e.g. hsl()) driving --card-accent so
+      // the same chip-tint contract used by KIND chips also paints game
+      // chips with their per-game derived color. Ignored by other axes.
+      accentColor?: string;
     }>;
     selectedValues: string[];
     onToggle: (value: string) => void;
@@ -107,12 +111,18 @@
       {@const active = selectedValues.includes(opt.value)}
       <button
         type="button"
-        class={"chip axis-chip" + (opt.iconKind ? " kind-chip" : "")}
+        class={"chip axis-chip" +
+          (opt.iconKind ? " kind-chip" : "") +
+          (opt.accentColor ? " game-chip" : "")}
         data-active={active ? "1" : "0"}
         data-axis={axisKey}
         data-key={opt.value}
         data-empty={opt.predictedCount === 0 ? "1" : "0"}
-        style={opt.iconKind ? `--card-accent: ${KIND_ACCENT_VAR[opt.iconKind]};` : null}
+        style={opt.iconKind
+          ? `--card-accent: ${KIND_ACCENT_VAR[opt.iconKind]};`
+          : opt.accentColor
+            ? `--card-accent: ${opt.accentColor};`
+            : null}
         onclick={() => onToggle(opt.value)}
       >
         {#if opt.iconKind}
@@ -274,6 +284,18 @@
   }
   .chip.axis-chip.kind-chip[data-active="1"] .kind-icon {
     color: var(--card-accent);
+  }
+
+  /* GAME axis chips — same color contract as KIND: 3px inset stripe in the
+   * per-game derived color (HSL from id hash), with bg tint on active. */
+  .chip.axis-chip.game-chip {
+    box-shadow: inset 3px 0 0 var(--card-accent, transparent);
+    padding-left: 14px;
+  }
+  .chip.axis-chip.game-chip[data-active="1"] {
+    background: color-mix(in oklab, var(--card-accent) 14%, var(--surface));
+    border-color: color-mix(in oklab, var(--card-accent) 40%, var(--border));
+    color: var(--text);
   }
 
   .clear-axis {
