@@ -47,9 +47,9 @@
     notes: string | null;
     // metadata.triage.offTopic surfaces the "Not game-related" toggle on
     // the edit form. toEventDto already projects metadata so the value
-    // reaches the page load function unchanged. (Plan 03.4-10 unified the
-    // JSONB key — URL filter mode "standalone" + function names like
-    // markStandalone stay; only the JSONB field name migrated.)
+    // reaches the page load function unchanged. The toggle writes through
+    // PATCH /api/events/bulk (single-id payload) — the canonical write
+    // path since Plan 03.4-10 unified the off-topic axis under bulkEdit.
     metadata: unknown;
   };
 
@@ -88,10 +88,11 @@
   }
 
   // Standalone toggle hydrated from metadata.triage.offTopic. The submit
-  // handler fires PATCH /api/events/:id/mark-standalone (or
-  // /unmark-standalone) ONLY when the toggle's value differs from the
-  // loaded value — reuses the existing service surface so no new audit
-  // verb is added.
+  // handler fires PATCH /api/events/bulk with a single-id payload + the
+  // tri-state offTopicState ("on" / "off") ONLY when the toggle's value
+  // differs from the loaded value. The bulk endpoint is the canonical
+  // write path for off-topic since Plan 03.4-10 (one audit verb,
+  // event.bulk_edited, carrying the off-topic state change).
   function readStandaloneFromMetadata(md: unknown): boolean {
     if (md === null || typeof md !== "object") return false;
     const triage = (md as { triage?: unknown }).triage;
@@ -231,16 +232,20 @@
       }
 
       // 3) If the standalone toggle differs from the loaded value, fire
-      //    the dedicated route. Two PATCHes (instead of folding the toggle
-      //    into the main updateEvent) because (a) markStandalone has its
-      //    own audit verb (forensics intact — event.marked_standalone /
-      //    event.unmarked_standalone), (b) the conflict-guard 422 fires
-      //    correctly only on the dedicated route, (c) reuses existing
-      //    service surface.
+      //    PATCH /api/events/bulk with a single-id payload + the
+      //    offTopicState tri-state. This is the canonical off-topic write
+      //    path since Plan 03.4-10 — bulkEdit owns the metadata.triage.offTopic
+      //    JSONB write and writes one event.bulk_edited audit row carrying
+      //    the off-topic transition (forensics intact under the unified
+      //    verb).
       if (editStandalone !== initialStandalone) {
-        const path = editStandalone ? "mark-standalone" : "unmark-standalone";
-        const standaloneRes = await fetch(`/api/events/${event.id}/${path}`, {
+        const standaloneRes = await fetch(`/api/events/bulk`, {
           method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            ids: [event.id],
+            offTopicState: editStandalone ? "on" : "off",
+          }),
         });
         if (!standaloneRes.ok) {
           errorText = m.error_server_generic();
@@ -354,11 +359,11 @@
       <textarea class="input textarea" bind:value={notes} rows="3" disabled={pending}></textarea>
     </label>
 
-    <!-- Standalone toggle. Submit fires
-         PATCH /api/events/:id/mark-standalone (or /unmark-standalone)
-         when the toggle differs from the loaded value. The conflict
-         warning surfaces when standalone=true AND a game is attached;
-         the Save button stays disabled while the conflict is active. -->
+    <!-- Standalone toggle. Submit fires PATCH /api/events/bulk with a
+         single-id payload + offTopicState tri-state when the toggle
+         differs from the loaded value. The conflict warning surfaces
+         when standalone=true AND a game is attached; the Save button
+         stays disabled while the conflict is active. -->
     <fieldset class="field standalone-fieldset">
       <label class="field checkbox">
         <input type="checkbox" bind:checked={editStandalone} disabled={pending} />
