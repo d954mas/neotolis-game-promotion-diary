@@ -397,6 +397,21 @@
       <div class="card-footer-chips">
         {#if inboxRow}
           <span class="inbox-chip">{m.inbox_badge()}</span>
+          <!-- UX-on-top-of-prototype: a quick-attach chip-button so the
+               user can open GamesPicker without going through ⋮. Mirrors
+               the chip silhouette but reads as actionable (accent color +
+               solid dashed border + cursor pointer). Stops propagation
+               so the surrounding article's click→openDetail doesn't fire. -->
+          <button
+            type="button"
+            class="attach-chip"
+            onclick={(e) => {
+              e.stopPropagation();
+              onOpenGamesPickerForCard?.(event.id);
+            }}
+          >
+            + {m.feed_card_menu_edit_games()}
+          </button>
         {/if}
         {#each attachedGames as ag (ag.id)}
           <span class="game-chip" style="--card-accent: {gameColor(ag.id)};">{ag.title}</span>
@@ -827,6 +842,39 @@
     background: color-mix(in oklab, var(--warn) 14%, var(--surface));
     border-color: color-mix(in oklab, var(--warn) 45%, var(--border));
     color: var(--text-2);
+  }
+  /* Quick-attach chip-button — sits next to .inbox-chip in card-footer-
+   * chips. Visually mirrors the chip silhouette but reads as actionable
+   * (accent border + accent text + hover fill). UX-on-top-of-prototype:
+   * the prototype doesn't have this affordance, but the user asked for
+   * a one-click attach path without going through ⋮. */
+  .attach-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    background: transparent;
+    border: 1px dashed color-mix(in oklab, var(--accent) 60%, var(--border));
+    border-radius: var(--r-pill);
+    color: var(--accent);
+    font-size: var(--t-12);
+    font-weight: var(--w-sb);
+    font-family: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
+  }
+  .attach-chip:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-strong);
+  }
+  .attach-chip:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
   .off-topic-chip {
     background: transparent;
