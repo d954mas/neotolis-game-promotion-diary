@@ -905,6 +905,44 @@ export async function enrichFromUrl(
   const matchedSource =
     preview.authorUrl !== "" ? await findActiveSourceByHandleUrl(userId, preview.authorUrl) : null;
 
+  // Synchronously populate the youtube_videos public-data cache
+  // BEFORE the caller (paste flow) INSERTs the events row. Without
+  // this UPSERT:
+  //   (a) feed-enrichment's JOIN against youtube_videos finds no
+  //       row → /feed renders the new event with channel_title=null.
+  //   (b) selectEligibleVideoIds filters on
+  //       `youtube_videos.published_at IS NOT NULL` → paste-only
+  //       events never appear in the active/cold tier window and
+  //       stats never refresh automatically.
+  //
+  // Mirrors the Reddit paste flow (handlePostSingle UPSERTs
+  // reddit_posts + caches + snapshot + cap-counter BEFORE the
+  // events INSERT — see fetchEventPreviewMetadata in
+  // src/lib/sources/reddit/server/index.ts and
+  // src/lib/sources/reddit/server/handlers/post-single.ts).
+  //
+  // Failure is non-fatal: handleVideoSingle catches Data API
+  // errors internally and falls back to oEmbed-only UPSERT.
+  // A truly unhandled error here is logged + swallowed so the
+  // preview endpoint stays responsive — the events INSERT can
+  // still succeed and cron tick will populate cache later.
+  try {
+    const { handleVideoSingle } = await import(
+      "$lib/sources/youtube/server/handlers/video-single.js"
+    );
+    await handleVideoSingle({
+      videoId: parsed.videoId,
+      userId,
+      paste: true,
+      ipAddress,
+    });
+  } catch (err) {
+    logger.warn(
+      { videoId: parsed.videoId, err: String((err as Error)?.message ?? err) },
+      "enrichFromUrl: handleVideoSingle failed; cache row not populated synchronously",
+    );
+  }
+
   return {
     kind: "youtube_video",
     externalId: parsed.videoId,
