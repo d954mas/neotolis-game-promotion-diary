@@ -697,12 +697,16 @@
 
 <style>
   /* ── Card root (mirrors docs/design/v2/ui-kit/index.html .card rules) ── */
+  /* No overflow:hidden on .feed-card — it would clip the .card-menu
+   * dropdown (position:absolute) when the menu's height exceeds the
+   * card's height. The .card-thumb has its own overflow:hidden +
+   * border-radius for image rounding, so removing it here doesn't
+   * leak the thumb image past the card's rounded corners. */
   .feed-card {
     position: relative;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--r-md);
-    overflow: hidden;
     display: flex;
     flex-direction: column;
     box-shadow: var(--shadow-card);
