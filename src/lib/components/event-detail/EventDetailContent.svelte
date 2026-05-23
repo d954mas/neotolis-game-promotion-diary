@@ -585,39 +585,11 @@
       {/if}
     {/if}
 
-    <!-- Notes — full text, click-to-edit. Empty state is a friendly CTA. -->
-    {#if notesDraft !== null && !inTrash}
-      <div class="detail-notes-editor">
-        <textarea
-          class="detail-notes detail-notes-input notes-input"
-          bind:value={notesDraft}
-          onkeydown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              void commitEditNotes();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              cancelEditNotes();
-            }
-          }}
-          rows="10"
-          maxlength="4000"
-          aria-label={m.event_detail_edit_notes_aria()}
-        ></textarea>
-        <div class="detail-notes-actions">
-          <button
-            type="button"
-            class="btn ghost"
-            onclick={cancelEditNotes}
-          >Cancel</button>
-          <button
-            type="button"
-            class="btn primary"
-            onclick={() => void commitEditNotes()}
-          >Save</button>
-        </div>
-      </div>
-    {:else if event.notes}
+    <!-- Notes — read-only display. Editing opens a separate big dialog
+         (see <dialog class="notes-editor-modal"> at the end of this
+         file) so the user gets full-page real estate for long notes
+         without the parent modal's body-scroll constraints. -->
+    {#if event.notes}
       <div class="detail-editable-row notes-row">
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -796,6 +768,56 @@
     </div>
   </footer>
 </div>
+
+<!-- Notes editor — separate big modal. User UAT: «может большое
+     отдельное модальное вью, заметки это важно и там может быть много
+     текста». Larger surface, bigger textarea, dedicated header/footer.
+     Mounts as a SIBLING dialog so it sits on top of the parent
+     event-detail-modal in the browser top-layer. -->
+{#if notesDraft !== null && !inTrash}
+  <dialog
+    class="notes-editor-modal"
+    open
+    oncancel={(e) => {
+      e.preventDefault();
+      cancelEditNotes();
+    }}
+    onclick={(e) => {
+      if (e.target === e.currentTarget) cancelEditNotes();
+    }}
+  >
+    <header class="notes-editor-head">
+      <h2 class="notes-editor-title">{m.event_detail_edit_notes_aria()}</h2>
+      <button
+        type="button"
+        class="detail-close-btn"
+        onclick={cancelEditNotes}
+        aria-label={m.event_detail_modal_close_aria()}
+        title={m.event_detail_modal_close_aria()}
+      >×</button>
+    </header>
+    <div class="notes-editor-body">
+      <!-- svelte-ignore a11y_autofocus -->
+      <textarea
+        class="notes-editor-textarea"
+        bind:value={notesDraft}
+        onkeydown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
+            void commitEditNotes();
+          }
+        }}
+        maxlength="4000"
+        autofocus
+        aria-label={m.event_detail_edit_notes_aria()}
+      ></textarea>
+    </div>
+    <footer class="notes-editor-foot">
+      <button type="button" class="btn ghost" onclick={cancelEditNotes}>Cancel</button>
+      <button type="button" class="btn primary" onclick={() => void commitEditNotes()}>Save</button>
+    </footer>
+  </dialog>
+{/if}
 
 <style>
   /* Prototype 1:1 — class names mirror docs/design/v2/ui-kit/index.html
@@ -1194,6 +1216,76 @@
     font-size: var(--t-14);
     line-height: 1.55;
     resize: vertical;
+  }
+
+  /* Notes editor — a separate big dialog opened from the detail modal.
+   * Sits on top via the browser top-layer (sibling <dialog open>).
+   * Wider + taller than the parent modal so long notes get room. */
+  .notes-editor-modal {
+    width: min(900px, calc(100vw - 32px));
+    max-height: min(86vh, 820px);
+    padding: 0;
+    margin: auto;
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-elev);
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+  }
+  .notes-editor-modal::backdrop {
+    background: var(--overlay-dark);
+    backdrop-filter: blur(2px);
+  }
+  .notes-editor-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-hairline);
+  }
+  .notes-editor-title {
+    flex: 1;
+    margin: 0;
+    font-size: var(--t-15);
+    font-weight: var(--w-sb);
+  }
+  .notes-editor-body {
+    flex: 1;
+    min-height: 0;
+    padding: 16px;
+    display: flex;
+  }
+  .notes-editor-textarea {
+    flex: 1;
+    min-height: 60vh;
+    width: 100%;
+    padding: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font: inherit;
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    line-height: 1.55;
+    resize: none;
+    outline: none;
+  }
+  .notes-editor-textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .notes-editor-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-hairline);
   }
   /* Save / Cancel row for notes editing. Replaces blur-to-save because
    * users couldn't tell when blur fires (closing the modal mid-edit
