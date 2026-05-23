@@ -26,7 +26,7 @@
 
   import KindIcon from "$lib/components/KindIcon.svelte";
   import AuthorPopover from "$lib/components/shared/AuthorPopover.svelte";
-  import RefreshNowButton from "$lib/components/RefreshNowButton.svelte";
+  import PollingBadge from "$lib/components/PollingBadge.svelte";
   import { m } from "$lib/paraglide/messages.js";
   import { gameColor } from "$lib/util/game-color.js";
   import {
@@ -431,11 +431,15 @@
     <span class="detail-head-spacer"></span>
 
     {#if !inTrash && event.kind === "youtube_video"}
-      <RefreshNowButton
+      <PollingBadge
         event={{
           id: event.id,
-          metadata: (event.metadata ?? null) as Record<string, unknown> | null,
+          kind: event.kind,
+          occurredAt: event.occurredAt,
+          publishedAt: event.publishedAt ?? null,
           lastPolledAt: event.lastPolledAt ?? null,
+          lastPollStatus: event.lastPollStatus ?? null,
+          metadata: (event.metadata ?? null) as Record<string, unknown> | null,
         }}
       />
     {/if}
