@@ -354,13 +354,81 @@
   data-view={view}
   style="--card-accent: var(--k-{event.kind});"
 >
-  <!-- Header: generic 'Event details' label + × close. User UAT:
-       «два заголовка странно — наверху просто написать Event Details».
-       Event title stays in the body where it always was; the header
-       strip carries only the modal-type label so users don't see the
-       same title twice. -->
+  <!-- Header: rich strip with author + kind icon + kind label + source +
+       date + ×. Replaces the bare 'Event details' label and the in-body
+       meta row — saves a row of vertical body real estate (more space
+       for thumbnail / notes) AND lets the user see + edit primary
+       metadata without scrolling. User UAT: «может автора и тип и дату
+       прям в заголовок вместо event details». -->
   <header class="detail-head">
-    <h2 class="detail-head-title">{m.event_detail_modal_header_title()}</h2>
+    {#if !inTrash}
+      <!-- Direct toggle — clicking the avatar flips authorIsMe immediately.
+           A floating AuthorPopover was clipped by the modal's overflow:
+           hidden parent in this header context. Two-option choice doesn't
+           need a popover; the title tooltip explains the action. -->
+      <button
+        type="button"
+        class="author-avatar detail-author-trigger"
+        data-mine={event.authorIsMe ? "1" : "0"}
+        onclick={() => void changeAuthor(!event.authorIsMe)}
+        title={event.authorIsMe
+          ? `${currentUserName || "You"} (you) — click to mark as someone else`
+          : "Someone else — click to mark as yours"}
+        aria-label={event.authorIsMe
+          ? m.author_avatar_mine_aria({ name: currentUserName || "you" })
+          : m.author_avatar_unknown_aria()}
+      >
+        {event.authorIsMe ? (currentUserName[0] ?? "Y").toUpperCase() : "?"}
+      </button>
+    {:else}
+      <span
+        class="author-avatar"
+        data-mine={event.authorIsMe ? "1" : "0"}
+        aria-label={event.authorIsMe
+          ? m.author_avatar_mine_aria({ name: currentUserName || "you" })
+          : m.author_avatar_unknown_aria()}
+      >
+        {event.authorIsMe ? (currentUserName[0] ?? "Y").toUpperCase() : "?"}
+      </span>
+    {/if}
+
+    <span class="kind-icon" title={kindLabel}>
+      <KindIcon kind={event.kind} size={18} />
+    </span>
+    <span class="detail-kind-label">{kindLabel}</span>
+
+    {#if sourceLabel}
+      <span class="detail-sep" aria-hidden="true">·</span>
+      <span class="detail-src" title={sourceLabel}>{sourceLabel}</span>
+    {/if}
+
+    <span class="detail-sep" aria-hidden="true">·</span>
+
+    {#if !inTrash}
+      <span class="detail-date-edit">
+        <span class="detail-date">{occurredHuman}</span>
+        <span class="detail-date-pencil" aria-hidden="true">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6"/>
+            <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+        </span>
+        <input
+          type="date"
+          class="detail-date-native"
+          value={occurredISO}
+          max={todayISO}
+          onchange={(e) => onDateChange((e.target as HTMLInputElement).value)}
+          aria-label="Change date"
+          title="Change date"
+        />
+      </span>
+    {:else}
+      <span class="detail-date">{occurredHuman}</span>
+    {/if}
+
+    <span class="detail-head-spacer"></span>
+
     <button
       type="button"
       class="detail-close-btn"
@@ -371,85 +439,6 @@
   </header>
 
   <div class="detail-body">
-    <!-- Meta row: author + kind icon + source · date (compact). -->
-    <div class="detail-meta detail-meta-compact">
-      {#if !inTrash}
-        <span class="author-pick" style="position: relative">
-          <button
-            type="button"
-            class="author-avatar detail-author-trigger"
-            data-mine={event.authorIsMe ? "1" : "0"}
-            onclick={() => (authorPopoverOpen = !authorPopoverOpen)}
-            aria-haspopup="menu"
-            aria-expanded={authorPopoverOpen}
-            aria-label={event.authorIsMe
-              ? m.author_avatar_mine_aria({ name: currentUserName || "you" })
-              : m.author_avatar_unknown_aria()}
-          >
-            {event.authorIsMe ? (currentUserName[0] ?? "Y").toUpperCase() : "?"}
-          </button>
-          {#if authorPopoverOpen}
-            <AuthorPopover
-              authorIsMe={event.authorIsMe}
-              mineName={currentUserName || "You"}
-              onchange={changeAuthor}
-              onclose={() => (authorPopoverOpen = false)}
-            />
-          {/if}
-        </span>
-      {:else}
-        <span
-          class="author-avatar"
-          data-mine={event.authorIsMe ? "1" : "0"}
-          aria-label={event.authorIsMe
-            ? m.author_avatar_mine_aria({ name: currentUserName || "you" })
-            : m.author_avatar_unknown_aria()}
-        >
-          {event.authorIsMe ? (currentUserName[0] ?? "Y").toUpperCase() : "?"}
-        </span>
-      {/if}
-
-      <!-- Kind icon + visible label. Prototype shows just the icon, but
-           user UAT: «в детальном вью вообще нет типа» — surfacing the
-           kind name explicitly so the detail view doesn't read as a
-           different surface from the card the user clicked. -->
-      <span class="kind-icon" title={kindLabel}>
-        <KindIcon kind={event.kind} size={18} />
-      </span>
-      <span class="detail-kind-label">{kindLabel}</span>
-
-      {#if sourceLabel}
-        <span class="detail-src" title={sourceLabel}>{sourceLabel}</span>
-        <span class="detail-sep">·</span>
-      {/if}
-
-      {#if !inTrash}
-        <span class="detail-date-edit">
-          <span class="detail-date">{occurredHuman}</span>
-          <span class="detail-date-pencil" aria-hidden="true">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6"/>
-              <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-            </svg>
-          </span>
-          <input
-            type="date"
-            class="detail-date-native"
-            value={occurredISO}
-            max={todayISO}
-            onchange={(e) => onDateChange((e.target as HTMLInputElement).value)}
-            aria-label="Change date"
-            title="Change date"
-          />
-        </span>
-      {:else}
-        <span class="detail-date">{occurredHuman}</span>
-      {/if}
-
-      {#if byline}
-        <div class="detail-byline" title={byline}>{byline}</div>
-      {/if}
-    </div>
 
     <!-- Title: inline-editable, pencil edit-btn affordance. -->
     {#if titleDraft !== null && !inTrash}
@@ -611,7 +600,7 @@
               cancelEditNotes();
             }
           }}
-          rows="4"
+          rows="10"
           maxlength="4000"
           aria-label={m.event_detail_edit_notes_aria()}
         ></textarea>
@@ -664,20 +653,30 @@
       <p class="detail-notes detail-notes-empty">{m.event_detail_notes_empty()}</p>
     {/if}
 
-    <!-- Stats — denser pill row. -->
+    <!-- Stats — inline icon row, same vocabulary as FeedCard but a
+         touch larger. User UAT: «1578 views 91 likes 8 comments много
+         места занимает. На превью меньше и читаемо. Можно в таком
+         стиле только чуть больше». -->
     {#if stats}
       <div class="detail-stats stats">
-        <span class="detail-stat stat">
-          <b>{stats.viewCount.toLocaleString()}</b>
-          <span>{m.event_detail_stat_views()}</span>
+        <span class="detail-stat stat" title={m.event_detail_stat_views()}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          <span class="detail-stat-num">{stats.viewCount.toLocaleString()}</span>
         </span>
-        <span class="detail-stat stat">
-          <b>{stats.likeCount.toLocaleString()}</b>
-          <span>{m.event_detail_stat_likes()}</span>
+        <span class="detail-stat stat" title={m.event_detail_stat_likes()}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+          </svg>
+          <span class="detail-stat-num">{stats.likeCount.toLocaleString()}</span>
         </span>
-        <span class="detail-stat stat">
-          <b>{stats.commentCount.toLocaleString()}</b>
-          <span>{m.event_detail_stat_comments()}</span>
+        <span class="detail-stat stat" title={m.event_detail_stat_comments()}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+          <span class="detail-stat-num">{stats.commentCount.toLocaleString()}</span>
         </span>
       </div>
     {/if}
@@ -836,18 +835,48 @@
     border-bottom: 1px solid var(--border-hairline);
     flex-shrink: 0;
   }
-  /* Generic 'Event details' label in the header strip — flex:1 pushes
-   * the × to the right. text-2 + medium weight so it reads as a chrome
-   * label, not a duplicate of the event title in the body. */
-  .detail-head-title {
+  /* Rich header strip — [author][kind-icon][kind-label][src][date][×].
+   * flex-wrap so narrow viewports stack into 2 lines instead of clipping. */
+  .detail-head {
+    flex-wrap: wrap;
+  }
+  .detail-head-spacer {
     flex: 1;
-    min-width: 0;
-    margin: 0;
+  }
+  .detail-head .author-avatar {
+    width: 26px;
+    height: 26px;
+    font-size: 11px;
+  }
+  .detail-head .kind-icon {
+    color: var(--card-accent, var(--text-2));
+    display: inline-flex;
+    align-items: center;
+  }
+  .detail-head .kind-icon :global(svg.kind) {
+    color: inherit;
+  }
+  .detail-head .detail-kind-label {
+    color: var(--text);
+    font-weight: var(--w-sb);
     font-size: var(--t-13);
-    font-weight: var(--w-md);
+  }
+  .detail-head .detail-src {
+    font-family: var(--f-mono);
+    font-size: 12px;
     color: var(--text-2);
-    text-transform: none;
-    letter-spacing: 0;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .detail-head .detail-sep {
+    color: var(--text-4);
+  }
+  .detail-head .detail-date {
+    color: var(--text-2);
+    font-family: var(--f-mono);
+    font-size: 12px;
   }
   /* × close button — mirrors AddEventModal / GamesPicker close affordance.
    * Sits at the top-right of the detail header. */
@@ -883,9 +912,9 @@
   .detail-body {
     flex: 1;
     overflow-y: auto;
-    padding: 16px 22px 24px;
+    padding: 10px 22px 24px;
     display: flex; flex-direction: column;
-    gap: 14px;
+    gap: 8px;
   }
 
   /* ── Meta line: author + kind icon + src · date ──────────────────── */
@@ -931,11 +960,17 @@
     font-size: 11.5px;
   }
 
-  /* ── Thumbnail (16:9 media slot) ──────────────────────────────────── */
+  /* ── Thumbnail (16:9 media slot) ──────────────────────────────────── *
+   * flex-shrink:0 is LOAD-BEARING — the parent .detail-body is a flex
+   * column with overflow:auto. Without flex-shrink:0, flex layout
+   * happily collapses the aspect-ratio-sized thumb when content is
+   * taller than the viewport, producing a 60-80px sliver instead of
+   * the 16:9 panel the user expects. */
   .detail-thumb {
     position: relative;
     aspect-ratio: 16 / 9;
     width: 100%;
+    flex-shrink: 0;
     background: var(--surface-2);
     border: 1px solid var(--border-hairline);
     border-radius: var(--r-md);
@@ -1154,7 +1189,7 @@
     letter-spacing: -0.012em;
   }
   .detail-notes-input {
-    min-height: 96px;
+    min-height: 240px;
     font-family: var(--f-sans);
     font-size: var(--t-14);
     line-height: 1.55;
@@ -1210,17 +1245,17 @@
   }
   .detail-url-text {
     flex: 1; min-width: 0;
-    padding: 4px 8px;
-    margin-left: -8px;
+    padding: 2px 6px;
+    margin-left: -6px;
     background: transparent;
     border: 0;
     text-align: left;
     font-family: var(--f-mono);
-    font-size: 12px;
-    color: var(--text-2);
+    font-size: 11px;
+    color: var(--text-3);
     text-decoration: underline;
     text-underline-offset: 2px;
-    text-decoration-color: color-mix(in oklab, var(--text-3) 50%, transparent);
+    text-decoration-color: color-mix(in oklab, var(--text-3) 40%, transparent);
     text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
     border-radius: var(--r-sm);
     transition: background var(--m-fast) var(--m-ease),
@@ -1290,22 +1325,22 @@
 
   /* ── Stats ────────────────────────────────────────────────────────── */
   .detail-stats {
-    display: flex; flex-wrap: wrap; gap: 14px;
-    padding: 10px 12px;
-    background: var(--surface-2);
-    border: 1px solid var(--border-hairline);
-    border-radius: var(--r-sm);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    padding: 4px 0;
+    color: var(--text-3);
   }
   .detail-stat {
-    display: inline-flex; align-items: baseline; gap: 6px;
-    color: var(--text-3);
-    font-size: var(--t-12);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--t-13);
   }
-  .detail-stat b {
+  .detail-stat-num {
     color: var(--text);
     font-weight: var(--w-sb);
     font-variant-numeric: tabular-nums;
-    font-size: var(--t-13);
   }
 
   /* ── Section (Games) ──────────────────────────────────────────────── */
