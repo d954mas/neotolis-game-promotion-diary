@@ -600,6 +600,7 @@
   "feed_date_range_picker_pick_range_placeholder": "Pick a date range",
 
   "event_detail_modal_close_aria": "Close",
+  "event_detail_modal_header_title": "Event details",
   "event_detail_modal_prev_aria": "Previous event",
   "event_detail_modal_next_aria": "Next event",
   "event_detail_url_click_to_add": "Click to add URL…",

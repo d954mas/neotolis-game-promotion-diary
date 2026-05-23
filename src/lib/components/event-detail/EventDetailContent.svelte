@@ -336,13 +336,13 @@
   data-view={view}
   style="--card-accent: var(--k-{event.kind});"
 >
-  <!-- Header: event title on the left (truncated), × close on the
-       right. User UAT: «странно выглядит без заголовка» — the bare
-       × on an empty strip made the header read as a modal stub. The
-       event title in the strip mirrors common modal headers and gives
-       the user a stable label while scrolling the body. -->
+  <!-- Header: generic 'Event details' label + × close. User UAT:
+       «два заголовка странно — наверху просто написать Event Details».
+       Event title stays in the body where it always was; the header
+       strip carries only the modal-type label so users don't see the
+       same title twice. -->
   <header class="detail-head">
-    <h2 class="detail-head-title" title={event.title}>{event.title}</h2>
+    <h2 class="detail-head-title">{m.event_detail_modal_header_title()}</h2>
     <button
       type="button"
       class="detail-close-btn"
@@ -801,19 +801,18 @@
     border-bottom: 1px solid var(--border-hairline);
     flex-shrink: 0;
   }
-  /* Event title in the header strip — flex:1 so it pushes the × to
-   * the right; single-line ellipsis so a very long title doesn't push
-   * the close button off-canvas. */
+  /* Generic 'Event details' label in the header strip — flex:1 pushes
+   * the × to the right. text-2 + medium weight so it reads as a chrome
+   * label, not a duplicate of the event title in the body. */
   .detail-head-title {
     flex: 1;
     min-width: 0;
     margin: 0;
-    font-size: var(--t-15);
-    font-weight: var(--w-sb);
-    color: var(--text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+    color: var(--text-2);
+    text-transform: none;
+    letter-spacing: 0;
   }
   /* × close button — mirrors AddEventModal / GamesPicker close affordance.
    * Sits at the top-right of the detail header. */
