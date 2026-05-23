@@ -94,11 +94,13 @@
     return md.triage?.offTopic === true;
   });
 
-  // Games attached to this event (resolve gameIds → GameDto[]).
+  // Iterate the canonical `games` list (server-ordered desc createdAt)
+  // instead of event.gameIds — junction-row order is non-deterministic.
+  // Filtering the ordered list keeps the chip sequence identical to
+  // BaseFeedCard + filter-axis chip ordering.
+  const attachedGameSet = $derived(new Set(event.gameIds));
   const attachedGames = $derived(
-    event.gameIds
-      .map((id) => games.find((g) => g.id === id))
-      .filter((g): g is GameDto => g !== undefined),
+    games.filter((g) => attachedGameSet.has(g.id)),
   );
 
   // Source name for the byline. Manual-paste events have sourceId=null

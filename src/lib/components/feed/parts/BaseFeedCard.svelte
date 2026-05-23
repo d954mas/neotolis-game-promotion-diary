@@ -122,13 +122,15 @@
   const inboxRow = $derived.by(() => deriveIsInboxRow(event));
   const standalone = $derived.by(() => deriveIsStandalone(event));
 
-  const attachedGames = $derived.by((): GameLite[] => {
-    if (event.gameIds.length === 0) return [];
-    const map = new Map(games.map((g) => [g.id, g] as const));
-    return event.gameIds
-      .map((gid) => map.get(gid))
-      .filter((g): g is GameLite => g !== undefined);
-  });
+  // Iterate the canonical `games` list (server-ordered desc createdAt)
+  // instead of event.gameIds — loadGameIdsForEvents returns junction
+  // rows in arbitrary order. Filtering the ordered games list keeps the
+  // chip sequence identical across FeedCard / EventDetailContent /
+  // filter axes (everywhere reads from this same array).
+  const attachedSet = $derived(new Set(event.gameIds));
+  const attachedGames = $derived.by(
+    (): GameLite[] => games.filter((g) => attachedSet.has(g.id)),
+  );
 
   // Touch long-press → enters selection mode after 480ms. Scroll-cancel
   // via touchmove is LOAD-BEARING per D-28.
