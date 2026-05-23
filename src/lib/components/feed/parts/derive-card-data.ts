@@ -79,6 +79,9 @@ export interface CardEventLite {
     /** Author handle from reddit_posts.author (source-of-truth, NULL on
      *  Reddit-side account deletion). */
     author?: string | null;
+    /** ISO timestamp when the worker detected the post is gone from
+     *  Reddit. Cards use this for the "Deleted on Reddit" banner. */
+    deletionDetectedAt?: string | null;
   };
 }
 

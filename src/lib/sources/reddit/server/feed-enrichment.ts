@@ -83,6 +83,10 @@ export interface RedditEnrichment {
    *  RedditFeedCard renders as `/u/<handle>` when present. Sourced from
    *  the cache row rather than event.metadata for the same reason. */
   author: string | null;
+  /** ISO timestamp when the polling worker detected the post is gone
+   *  from Reddit (404 / private / mod-removed). NULL while the post is
+   *  still reachable. UI uses this for the 'Deleted on Reddit' banner. */
+  deletionDetectedAt: string | null;
 }
 
 /** Discriminator key for the in-place decoration. The card-props mapper
@@ -234,7 +238,13 @@ export async function enrichRedditFeedDtos(
     //    which form events.externalId stores.
     const postLinkMap = new Map<
       string,
-      { linkUrl: string | null; bodyExcerpt: string | null; subreddit: string | null; author: string | null }
+      {
+        linkUrl: string | null;
+        bodyExcerpt: string | null;
+        subreddit: string | null;
+        author: string | null;
+        deletionDetectedAt: string | null;
+      }
     >();
     const postRows = await db
       .select({
@@ -242,6 +252,7 @@ export async function enrichRedditFeedDtos(
         metadata: redditPosts.metadata,
         subreddit: redditPosts.subreddit,
         author: redditPosts.author,
+        deletionDetectedAt: redditPosts.deletionDetectedAt,
       })
       .from(redditPosts)
       .where(inArray(redditPosts.postId, lookupArr));
@@ -249,7 +260,13 @@ export async function enrichRedditFeedDtos(
       const meta = (r.metadata ?? {}) as { link_url?: unknown; body_excerpt?: unknown };
       const linkUrl = typeof meta.link_url === "string" ? meta.link_url : null;
       const bodyExcerpt = typeof meta.body_excerpt === "string" ? meta.body_excerpt : null;
-      const value = { linkUrl, bodyExcerpt, subreddit: r.subreddit, author: r.author };
+      const value = {
+        linkUrl,
+        bodyExcerpt,
+        subreddit: r.subreddit,
+        author: r.author,
+        deletionDetectedAt: r.deletionDetectedAt ? r.deletionDetectedAt.toISOString() : null,
+      };
       postLinkMap.set(r.postId, value);
       if (r.postId.startsWith("t3_")) postLinkMap.set(r.postId.slice(3), value);
     }
@@ -277,6 +294,7 @@ export async function enrichRedditFeedDtos(
         bodyExcerpt: post?.bodyExcerpt ?? null,
         subreddit: post?.subreddit ?? null,
         author: post?.author ?? null,
+        deletionDetectedAt: post?.deletionDetectedAt ?? null,
       };
     }
   } catch (err) {

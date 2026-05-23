@@ -89,6 +89,14 @@
 
   const inTrash = $derived(view === "trash");
 
+  // Deleted-on-Reddit flag — populated by feed-enrichment from
+  // reddit_posts.deletion_detected_at via redditEnrichment.
+  const redditDeletedAt = $derived.by((): string | null => {
+    const re = (event as { redditEnrichment?: { deletionDetectedAt?: string | null } })
+      .redditEnrichment;
+    return re?.deletionDetectedAt ?? null;
+  });
+
   // Off-topic flag — written by GamesPicker into metadata.triage.offTopic.
   const isOffTopic = $derived.by((): boolean => {
     const md = (event.metadata ?? {}) as { triage?: { offTopic?: boolean } };
@@ -510,6 +518,17 @@
       title={m.event_detail_modal_close_aria()}
     >×</button>
   </header>
+
+  {#if redditDeletedAt}
+    <div class="detail-deleted-banner" role="status">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="3 6 5 6 21 6" />
+        <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+        <path d="M10 11v6" /><path d="M14 11v6" />
+      </svg>
+      <span><strong>Deleted on Reddit.</strong> The post is no longer reachable.</span>
+    </div>
+  {/if}
 
   <div class="detail-body">
 
@@ -1332,6 +1351,22 @@
     justify-content: flex-end;
     gap: 8px;
   }
+  /* Deleted-on-Reddit banner — full-width danger-tinted strip between
+   * the header and the body so the user can't miss the deletion when
+   * opening the detail card. */
+  .detail-deleted-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 22px;
+    background: color-mix(in oklab, var(--danger) 12%, var(--surface));
+    border-top: 1px solid color-mix(in oklab, var(--danger) 30%, var(--border));
+    border-bottom: 1px solid color-mix(in oklab, var(--danger) 30%, var(--border));
+    color: var(--danger);
+    font-size: var(--t-13);
+    flex-shrink: 0;
+  }
+
   /* Primary action button (Save in notes-editor-modal, etc). The
    * default .btn rule sets border:1px solid transparent — that left
    * the Save button reading as white-on-white inside the notes editor

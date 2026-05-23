@@ -160,6 +160,16 @@
 {/snippet}
 
 {#snippet extraSnippet()}
+  {#if event.redditEnrichment?.deletionDetectedAt}
+    <div class="reddit-deleted-banner" role="status">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="3 6 5 6 21 6" />
+        <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+        <path d="M10 11v6" /><path d="M14 11v6" />
+      </svg>
+      <span>Deleted on Reddit</span>
+    </div>
+  {/if}
   {#if baselineState.underperforming && baselineState.baselinePct !== null}
     <div class="reddit-baseline-badge">
       <span class="badge badge-warning"
@@ -170,3 +180,21 @@
     </div>
   {/if}
 {/snippet}
+
+<style>
+  /* Deleted-on-Reddit banner — dashed danger border + danger-tinted
+   * fill. Sits between thumbnail and stats via the BaseFeedCard
+   * extraSlot. */
+  :global(.reddit-deleted-banner) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: color-mix(in oklab, var(--danger) 14%, var(--surface));
+    border: 1px dashed color-mix(in oklab, var(--danger) 60%, var(--border));
+    border-radius: var(--r-pill);
+    color: var(--danger);
+    font-size: var(--t-12);
+    font-weight: var(--w-sb);
+  }
+</style>
