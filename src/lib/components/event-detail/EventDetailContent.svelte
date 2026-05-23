@@ -336,13 +336,13 @@
   data-view={view}
   style="--card-accent: var(--k-{event.kind});"
 >
-  <!-- Header: × close button on the right, like other modals.
-       Previously had ‹/› nav arrows on the left (D-05 keyboard nav
-       still works via ←/→ keys; the arrow BUTTONS are gone per user
-       UAT: «убери стрелки наверху. Добавь крест наверх как у
-       модальных окон»). -->
+  <!-- Header: event title on the left (truncated), × close on the
+       right. User UAT: «странно выглядит без заголовка» — the bare
+       × on an empty strip made the header read as a modal stub. The
+       event title in the strip mirrors common modal headers and gives
+       the user a stable label while scrolling the body. -->
   <header class="detail-head">
-    <div class="detail-head-spacer"></div>
+    <h2 class="detail-head-title" title={event.title}>{event.title}</h2>
     <button
       type="button"
       class="detail-close-btn"
@@ -771,12 +771,19 @@
    * the existing browser parity test keeps passing. */
 
   .event-detail-content {
+    /* Fills the dialog's column-flex container as the sole child.
+     * `flex: 1` makes it claim the remaining height; `min-height: 0`
+     * is REQUIRED so the inner .detail-body's `overflow-y: auto`
+     * actually scrolls — without min-height:0 the flex item refuses
+     * to shrink below content size, the scroll context is lost, and
+     * notes blow past the dialog bottom (and past .detail-foot). */
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-height: 0;
     min-width: 0;
     background: var(--surface);
     color: var(--text);
-    height: 100%;
   }
 
   .sr-only {
@@ -794,7 +801,20 @@
     border-bottom: 1px solid var(--border-hairline);
     flex-shrink: 0;
   }
-  .detail-head-spacer { flex: 1; }
+  /* Event title in the header strip — flex:1 so it pushes the × to
+   * the right; single-line ellipsis so a very long title doesn't push
+   * the close button off-canvas. */
+  .detail-head-title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: var(--t-15);
+    font-weight: var(--w-sb);
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   /* × close button — mirrors AddEventModal / GamesPicker close affordance.
    * Sits at the top-right of the detail header. */
   .detail-close-btn {
