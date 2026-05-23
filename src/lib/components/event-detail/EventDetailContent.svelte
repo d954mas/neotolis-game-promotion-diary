@@ -248,6 +248,13 @@
   const mediaShape = $derived(deriveIsMediaShape(event.kind as CardEventLite["kind"]));
   const thumbnailUrl = $derived(deriveThumbnailUrl(event as unknown as CardEventLite));
   const showDetailThumb = $derived(mediaShape || thumbnailUrl !== null);
+  // YouTube click-to-play facade — flips to embedded iframe on user
+  // click. Reset whenever the event changes (modal pagination).
+  let iframeLoaded = $state(false);
+  $effect(() => {
+    void event.id;
+    iframeLoaded = false;
+  });
 
   async function changeAuthor(isMe: boolean): Promise<void> {
     await onUpdate(event.id, { authorIsMe: isMe });
@@ -531,18 +538,51 @@
       </div>
     {/if}
 
-    <!-- Thumbnail — 16:9 media slot. Renders for kinds with media-shape
-         (YouTube always; Reddit only when redditEnrichment.linkUrl is
-         image-like). Empty YouTube reserves the slot with a KindIcon
-         placeholder so the layout doesn't reflow on slow oEmbed. -->
+    <!-- Thumbnail / playable preview — 16:9 media slot. For YouTube we
+         use a click-to-play facade: thumb + ▶ overlay → click → swap
+         to an embedded iframe (no autoload to keep dialog open cheap;
+         iframe pulls ~500KB of YT player JS only when the user opts in).
+         For Reddit image posts we just show the static image. -->
     {#if showDetailThumb}
-      <div class="detail-thumb" class:empty={thumbnailUrl === null}>
-        {#if thumbnailUrl}
-          <img src={thumbnailUrl} alt="" referrerpolicy="no-referrer" />
-        {:else}
-          <KindIcon kind={event.kind} size={48} />
-        {/if}
-      </div>
+      {#if event.kind === "youtube_video" && !iframeLoaded}
+        <button
+          type="button"
+          class="detail-thumb detail-thumb-yt-facade"
+          class:empty={thumbnailUrl === null}
+          onclick={() => (iframeLoaded = true)}
+          aria-label="Play video preview"
+        >
+          {#if thumbnailUrl}
+            <img src={thumbnailUrl} alt="" referrerpolicy="no-referrer" />
+          {:else}
+            <KindIcon kind={event.kind} size={48} />
+          {/if}
+          <span class="detail-thumb-play" aria-hidden="true">
+            <svg width="56" height="56" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </span>
+        </button>
+      {:else if event.kind === "youtube_video" && iframeLoaded && event.externalId}
+        <div class="detail-thumb detail-thumb-iframe">
+          <iframe
+            src="https://www.youtube.com/embed/{event.externalId}?autoplay=1"
+            title="YouTube video player"
+            frameborder="0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            referrerpolicy="strict-origin-when-cross-origin"
+            allowfullscreen
+          ></iframe>
+        </div>
+      {:else}
+        <div class="detail-thumb" class:empty={thumbnailUrl === null}>
+          {#if thumbnailUrl}
+            <img src={thumbnailUrl} alt="" referrerpolicy="no-referrer" />
+          {:else}
+            <KindIcon kind={event.kind} size={48} />
+          {/if}
+        </div>
+      {/if}
     {/if}
 
     <!-- Notes — full text, click-to-edit. Empty state is a friendly CTA. -->
@@ -919,6 +959,40 @@
   .detail-thumb.empty :global(svg.kind) {
     color: var(--card-accent, var(--text-4));
     opacity: 0.55;
+  }
+  /* YouTube click-to-play facade — thumb + centered play overlay.
+   * Whole thing is a <button> so keyboard + screen readers get a real
+   * activation target. */
+  .detail-thumb-yt-facade {
+    cursor: pointer;
+    padding: 0;
+    border: 1px solid var(--border-hairline);
+  }
+  .detail-thumb-yt-facade:hover .detail-thumb-play {
+    background: rgba(255, 0, 0, 0.95);
+    transform: translate(-50%, -50%) scale(1.05);
+  }
+  .detail-thumb-play {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    transition: background var(--m-fast), transform var(--m-fast);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  }
+  .detail-thumb-iframe iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
   }
 
   .author-avatar {
