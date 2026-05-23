@@ -547,20 +547,36 @@
 
     <!-- Notes — full text, click-to-edit. Empty state is a friendly CTA. -->
     {#if notesDraft !== null && !inTrash}
-      <textarea
-        class="detail-notes detail-notes-input notes-input"
-        bind:value={notesDraft}
-        onblur={commitEditNotes}
-        onkeydown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-            e.preventDefault();
-            (e.target as HTMLTextAreaElement).blur();
-          }
-        }}
-        rows="4"
-        maxlength="4000"
-        aria-label={m.event_detail_edit_notes_aria()}
-      ></textarea>
+      <div class="detail-notes-editor">
+        <textarea
+          class="detail-notes detail-notes-input notes-input"
+          bind:value={notesDraft}
+          onkeydown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              void commitEditNotes();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancelEditNotes();
+            }
+          }}
+          rows="4"
+          maxlength="4000"
+          aria-label={m.event_detail_edit_notes_aria()}
+        ></textarea>
+        <div class="detail-notes-actions">
+          <button
+            type="button"
+            class="btn ghost"
+            onclick={cancelEditNotes}
+          >Cancel</button>
+          <button
+            type="button"
+            class="btn primary"
+            onclick={() => void commitEditNotes()}
+          >Save</button>
+        </div>
+      </div>
     {:else if event.notes}
       <div class="detail-editable-row notes-row">
         <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -679,13 +695,11 @@
         class="btn ghost foot-btn"
         onclick={() => onRestore?.(event.id)}
       >{m.event_detail_footer_restore()}</button>
-    {:else if !inTrash}
-      <button
-        type="button"
-        class="btn ghost foot-btn foot-btn-primary"
-        onclick={() => onEdit?.(event.id)}
-      >{m.event_detail_footer_edit()}</button>
     {/if}
+    <!-- Edit button removed: every editable field is click-to-edit
+         inline (title / notes / date / author / games), URL + kind are
+         locked. There was nothing for a separate Edit button to do. -->
+
     <div style="flex: 1"></div>
     <div class="detail-foot-overflow">
       <button
@@ -1058,6 +1072,48 @@
     line-height: 1.55;
     resize: vertical;
   }
+  /* Save / Cancel row for notes editing. Replaces blur-to-save because
+   * users couldn't tell when blur fires (closing the modal mid-edit
+   * lost the draft). Explicit buttons + Cmd/Ctrl+Enter shortcut + Esc
+   * to cancel — same vocab as Add Event modal footer. */
+  .detail-notes-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .detail-notes-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .detail-notes-actions .btn {
+    min-height: var(--hit);
+    padding: 0 var(--s-3);
+    border-radius: var(--r-sm);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+    cursor: pointer;
+    transition: background var(--m-fast), border-color var(--m-fast);
+  }
+  .detail-notes-actions .btn.ghost {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .detail-notes-actions .btn.ghost:hover {
+    background: var(--surface-3);
+    border-color: var(--border-2);
+  }
+  .detail-notes-actions .btn.primary {
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: var(--accent-text);
+    font-weight: var(--w-sb);
+  }
+  .detail-notes-actions .btn.primary:hover {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+  }
 
   /* ── URL row ──────────────────────────────────────────────────────── */
   .detail-url {
@@ -1255,11 +1311,15 @@
 
   /* ── Footer (bottom dock) ─────────────────────────────────────────── */
   .detail-foot {
-    display: flex; align-items: center; gap: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding: 12px 16px;
     border-top: 1px solid var(--border-hairline);
     flex-shrink: 0;
     background: var(--surface);
+    /* flex-wrap so narrow viewports stack actions instead of clipping. */
+    flex-wrap: wrap;
   }
   .btn {
     display: inline-flex; align-items: center; gap: var(--s-2);
