@@ -226,17 +226,12 @@
     urlDraft = null;
   }
 
-  // URL is read-only for platform-locked kinds — the URL is the binding
-  // between event and its source. Editable only for freeform kinds.
-  const URL_LOCKED_KINDS = new Set([
-    "youtube_video",
-    "reddit_post",
-    "twitter_post",
-    "telegram_post",
-    "discord_drop",
-  ]);
-  const urlIsLocked = $derived(URL_LOCKED_KINDS.has(event.kind));
-  const urlIsEditable = $derived(!inTrash && !urlIsLocked);
+  // URL is read-only for ALL event kinds. Per user UAT: «url и тип
+  // менять нехочется, тк это трекинг и тд, и в этом нет смысла».
+  // URL is set at creation only (paste-flow fetches it; manual-flow
+  // collects it in AddEventForm); after that it's a permanent link.
+  // Delete + recreate if the user needs a different URL.
+  const urlIsEditable = $derived(false as boolean);
 
   async function changeAuthor(isMe: boolean): Promise<void> {
     await onUpdate(event.id, { authorIsMe: isMe });
