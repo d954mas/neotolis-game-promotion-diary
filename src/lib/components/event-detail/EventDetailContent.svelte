@@ -28,6 +28,11 @@
   import AuthorPopover from "$lib/components/shared/AuthorPopover.svelte";
   import { m } from "$lib/paraglide/messages.js";
   import { gameColor } from "$lib/util/game-color.js";
+  import {
+    deriveThumbnailUrl,
+    isMediaShape as deriveIsMediaShape,
+    type CardEventLite,
+  } from "$lib/components/feed/parts/derive-card-data.js";
   import type { EventDto, GameDto, DataSourceDto } from "$lib/server/dto.js";
 
   type EventUpdatePatch = Partial<{
@@ -233,6 +238,17 @@
   // Delete + recreate if the user needs a different URL.
   const urlIsEditable = $derived(false as boolean);
 
+  // Thumbnail: same derivation FeedCard uses so the detail view reads
+  // as a zoomed-in version of the card the user just clicked.
+  // - youtube_video: always reserves a 16:9 slot (KindIcon fills the
+  //   empty state)
+  // - reddit_post / twitter_post / telegram_post: only when image-like
+  //   URL is derivable
+  // - other kinds: no thumb (showThumb=false)
+  const mediaShape = $derived(deriveIsMediaShape(event.kind as CardEventLite["kind"]));
+  const thumbnailUrl = $derived(deriveThumbnailUrl(event as unknown as CardEventLite));
+  const showDetailThumb = $derived(mediaShape || thumbnailUrl !== null);
+
   async function changeAuthor(isMe: boolean): Promise<void> {
     await onUpdate(event.id, { authorIsMe: isMe });
     authorPopoverOpen = false;
@@ -375,13 +391,14 @@
         </span>
       {/if}
 
-      <!-- Kind icon — color-coded, no text label (prototype convention).
-           kind-tag-label kept hidden inside the icon span so the test
-           contract still picks up the kind name for parity assertions. -->
+      <!-- Kind icon + visible label. Prototype shows just the icon, but
+           user UAT: «в детальном вью вообще нет типа» — surfacing the
+           kind name explicitly so the detail view doesn't read as a
+           different surface from the card the user clicked. -->
       <span class="kind-icon" title={kindLabel}>
         <KindIcon kind={event.kind} size={18} />
-        <span class="kind-tag-label sr-only">{kindLabel}</span>
       </span>
+      <span class="detail-kind-label">{kindLabel}</span>
 
       {#if sourceLabel}
         <span class="detail-src" title={sourceLabel}>{sourceLabel}</span>
@@ -510,6 +527,20 @@
           </button>
         {:else}
           <span class="detail-url-text detail-url-empty">{m.event_detail_url_empty()}</span>
+        {/if}
+      </div>
+    {/if}
+
+    <!-- Thumbnail — 16:9 media slot. Renders for kinds with media-shape
+         (YouTube always; Reddit only when redditEnrichment.linkUrl is
+         image-like). Empty YouTube reserves the slot with a KindIcon
+         placeholder so the layout doesn't reflow on slow oEmbed. -->
+    {#if showDetailThumb}
+      <div class="detail-thumb" class:empty={thumbnailUrl === null}>
+        {#if thumbnailUrl}
+          <img src={thumbnailUrl} alt="" referrerpolicy="no-referrer" />
+        {:else}
+          <KindIcon kind={event.kind} size={48} />
         {/if}
       </div>
     {/if}
@@ -806,6 +837,17 @@
     flex-shrink: 0;
     color: var(--card-accent, var(--text-2));
   }
+  /* KindIcon's inner <svg.kind> forces text-3 — override so currentColor
+   * flows from --card-accent. Same trick BaseFeedCard uses. */
+  .detail-meta-compact .kind-icon :global(svg.kind) {
+    color: inherit;
+  }
+  .detail-meta-compact .detail-kind-label {
+    color: var(--text-2);
+    font-weight: var(--w-md);
+    font-size: var(--t-13);
+    flex-shrink: 0;
+  }
   .detail-meta-compact .detail-src {
     font-family: var(--f-mono);
     font-size: 12px;
@@ -819,6 +861,31 @@
     color: var(--text-2);
     font-family: var(--f-mono);
     font-size: 11.5px;
+  }
+
+  /* ── Thumbnail (16:9 media slot) ──────────────────────────────────── */
+  .detail-thumb {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    width: 100%;
+    background: var(--surface-2);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-4);
+  }
+  .detail-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .detail-thumb.empty :global(svg.kind) {
+    color: var(--card-accent, var(--text-4));
+    opacity: 0.55;
   }
 
   .author-avatar {
