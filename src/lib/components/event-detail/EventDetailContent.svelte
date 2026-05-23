@@ -57,7 +57,7 @@
     onRestore,
     onDeleteForever,
     onUpdate,
-    onEdit,
+    onOpenGamesPickerForCard,
   }: {
     event: EventDto;
     games: GameDto[];
@@ -73,7 +73,10 @@
     onRestore?: (id: string) => Promise<void>;
     onDeleteForever?: (id: string) => Promise<void>;
     onUpdate: (id: string, patch: EventUpdatePatch) => Promise<void>;
-    onEdit?: (id: string) => void;
+    /** Opens the shared GamesPicker (tri-state games + off-topic) for
+     *  this event. Same callback FeedCard's ⋮ → Edit games uses, so the
+     *  detail surface shares one game-edit path. */
+    onOpenGamesPickerForCard?: (id: string) => void;
   } = $props();
 
   // Inline-edit drafts. null = not editing; string = current draft.
@@ -84,6 +87,12 @@
   let overflowOpen = $state(false);
 
   const inTrash = $derived(view === "trash");
+
+  // Off-topic flag — written by GamesPicker into metadata.triage.offTopic.
+  const isOffTopic = $derived.by((): boolean => {
+    const md = (event.metadata ?? {}) as { triage?: { offTopic?: boolean } };
+    return md.triage?.offTopic === true;
+  });
 
   // Games attached to this event (resolve gameIds → GameDto[]).
   const attachedGames = $derived(
@@ -671,49 +680,33 @@
       </div>
     {/if}
 
-    <!-- Games — chip-grid picker matching the Add Event modal vocabulary. -->
+    <!-- Games + off-topic — show ONLY attached. Editing happens through
+         the shared GamesPicker (tri-state games + off-topic row) via the
+         "Edit games" button — same path FeedCard's ⋮ → Edit games uses,
+         so the detail surface doesn't duplicate the picker chip-grid
+         inline. -->
     <div class="detail-section">
-      <span class="detail-section-label">{m.event_detail_section_games()}</span>
-      {#if inTrash}
-        <div class="detail-game-row">
-          {#if attachedGames.length === 0}
-            <span class="inbox-chip">inbox</span>
-          {/if}
-          {#each attachedGames as g (g.id)}
-            <span class="game-chip">{g.title}</span>
-          {/each}
-        </div>
-      {:else}
-        <div class="kind-grid">
-          {#each games as g (g.id)}
-            {@const active = event.gameIds.includes(g.id)}
-            <span class="game-chip-mount" style="display: contents">
-              <!-- Test-contract: a static `.game-chip` element exists per
-                   attached game. Hidden helper kept off-screen so the
-                   browser-test selector `.game-chip` still resolves to
-                   the visible chip set when running the dual-render
-                   parity test (which mounts the bare component and uses
-                   `.game-chip` to read titles). -->
-              <button
-                type="button"
-                class="chip kind-chip game-chip add-game-chip"
-                data-active={active ? "1" : "0"}
-                style="--card-accent: {gameColor(g.id)};"
-                onclick={async () => {
-                  const next = active
-                    ? event.gameIds.filter((x) => x !== g.id)
-                    : [...event.gameIds, g.id];
-                  await onUpdate(event.id, {
-                    ...({ gameIds: next } as unknown as EventUpdatePatch),
-                  });
-                }}
-              >
-                <span>{g.title}</span>
-              </button>
-            </span>
-          {/each}
-        </div>
-      {/if}
+      <div class="detail-section-head">
+        <span class="detail-section-label">{m.event_detail_section_games()}</span>
+        {#if !inTrash && onOpenGamesPickerForCard}
+          <button
+            type="button"
+            class="detail-section-edit"
+            onclick={() => onOpenGamesPickerForCard?.(event.id)}
+          >+ {m.feed_card_menu_edit_games()}</button>
+        {/if}
+      </div>
+      <div class="detail-game-row">
+        {#if attachedGames.length === 0 && !isOffTopic}
+          <span class="inbox-chip">{m.inbox_badge()}</span>
+        {/if}
+        {#each attachedGames as g (g.id)}
+          <span class="game-chip" style="--card-accent: {gameColor(g.id)};">{g.title}</span>
+        {/each}
+        {#if isOffTopic}
+          <span class="off-topic-chip">Off topic</span>
+        {/if}
+      </div>
     </div>
   </div>
 
@@ -1318,12 +1311,39 @@
     display: flex; flex-direction: column; gap: 8px;
     padding-top: 6px;
   }
+  .detail-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
   .detail-section-label {
     font-size: 10.5px;
     font-weight: var(--w-sb);
     color: var(--text-3);
     text-transform: uppercase;
     letter-spacing: 0.1em;
+  }
+  /* Edit-games chip-button — same dashed accent silhouette as the
+   * attach-chip on FeedCard. Opens the shared GamesPicker. */
+  .detail-section-edit {
+    padding: 3px 10px;
+    background: transparent;
+    border: 1px dashed color-mix(in oklab, var(--accent) 60%, var(--border));
+    border-radius: var(--r-pill);
+    color: var(--accent);
+    font-size: var(--t-12);
+    font-weight: var(--w-sb);
+    cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
+  }
+  .detail-section-edit:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-strong);
   }
   .detail-game-row {
     display: flex; flex-wrap: wrap; gap: 6px;

@@ -64,13 +64,6 @@
     await goto("/feed?view=trash");
   }
 
-  function onEdit(id: string): void {
-    // Free-form Edit page (/events/[id]/edit) remains the canonical
-    // out-of-place edit destination — Plan 09 EventDetailContent inline
-    // drafts cover title / notes / url / authorIsMe; structural edits
-    // (kind, occurredAt) still use the legacy form.
-    void goto(`/events/${id}/edit`);
-  }
 </script>
 
 <!--
@@ -93,7 +86,6 @@
     onRestore={view === "trash" ? onRestore : undefined}
     onDeleteForever={view === "trash" ? onDeleteForever : undefined}
     {onUpdate}
-    {onEdit}
   />
 </section>
 

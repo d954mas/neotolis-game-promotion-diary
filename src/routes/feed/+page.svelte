@@ -965,6 +965,7 @@
       onRestore={trashView ? onModalRestore : undefined}
       onDeleteForever={trashView ? onModalDeleteForever : undefined}
       onUpdate={onModalUpdate}
+      onOpenGamesPickerForCard={openGamesPickerForCard}
     />
   {/if}
 

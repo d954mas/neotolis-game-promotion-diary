@@ -38,7 +38,7 @@
     onRestore,
     onDeleteForever,
     onUpdate,
-    onEdit,
+    onOpenGamesPickerForCard,
   }: {
     event: EventDto;
     games: GameDto[];
@@ -52,9 +52,9 @@
     onClose: () => void;
     onDelete: (id: string) => Promise<void>;
     onRestore?: (id: string) => Promise<void>;
+    onOpenGamesPickerForCard?: (id: string) => void;
     onDeleteForever?: (id: string) => Promise<void>;
     onUpdate: (id: string, patch: EventUpdatePatch) => Promise<void>;
-    onEdit?: (id: string) => void;
   } = $props();
 
   let dialogEl: HTMLDialogElement | undefined = $state();
@@ -94,7 +94,7 @@
     {onRestore}
     {onDeleteForever}
     {onUpdate}
-    {onEdit}
+    {onOpenGamesPickerForCard}
   />
 </dialog>
 
