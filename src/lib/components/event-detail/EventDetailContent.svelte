@@ -325,28 +325,20 @@
   data-view={view}
   style="--card-accent: var(--k-{event.kind});"
 >
-  <!-- Header: nav arrows only on the left, spacer on the right.
-       Close moved to the bottom dock (prototype D-pattern). -->
+  <!-- Header: × close button on the right, like other modals.
+       Previously had ‹/› nav arrows on the left (D-05 keyboard nav
+       still works via ←/→ keys; the arrow BUTTONS are gone per user
+       UAT: «убери стрелки наверху. Добавь крест наверх как у
+       модальных окон»). -->
   <header class="detail-head">
-    <div class="detail-head-nav">
-      <button
-        type="button"
-        class="detail-nav-btn"
-        onclick={onPrev}
-        disabled={!hasPrev}
-        aria-label={m.event_detail_modal_prev_aria()}
-        title={m.event_detail_modal_prev_aria()}
-      >‹</button>
-      <button
-        type="button"
-        class="detail-nav-btn"
-        onclick={onNext}
-        disabled={!hasNext}
-        aria-label={m.event_detail_modal_next_aria()}
-        title={m.event_detail_modal_next_aria()}
-      >›</button>
-    </div>
     <div class="detail-head-spacer"></div>
+    <button
+      type="button"
+      class="detail-close-btn"
+      onclick={onClose}
+      aria-label={m.event_detail_modal_close_aria()}
+      title={m.event_detail_modal_close_aria()}
+    >×</button>
   </header>
 
   <div class="detail-body">
@@ -762,30 +754,36 @@
     border-bottom: 1px solid var(--border-hairline);
     flex-shrink: 0;
   }
-  .detail-head-nav {
-    display: inline-flex; gap: 2px;
-  }
-  .detail-nav-btn {
-    width: 30px; height: 30px;
-    display: inline-flex; align-items: center; justify-content: center;
+  .detail-head-spacer { flex: 1; }
+  /* × close button — mirrors AddEventModal / GamesPicker close affordance.
+   * Sits at the top-right of the detail header. */
+  .detail-close-btn {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--r-sm);
-    color: var(--text-2);
-    font-size: 18px; line-height: 1;
+    color: var(--text-3);
+    font-size: 22px;
+    line-height: 1;
     cursor: pointer;
-    transition: background var(--m-fast), color var(--m-fast), border-color var(--m-fast);
+    transition:
+      background var(--m-fast),
+      color var(--m-fast),
+      border-color var(--m-fast);
   }
-  .detail-nav-btn:hover:not(:disabled) {
+  .detail-close-btn:hover {
     background: var(--surface-2);
     border-color: var(--border);
     color: var(--text);
   }
-  .detail-nav-btn:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
+  .detail-close-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
-  .detail-head-spacer { flex: 1; }
 
   /* ── Body ─────────────────────────────────────────────────────────── */
   .detail-body {
@@ -1281,7 +1279,7 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .detail-nav-btn,
+    .detail-close-btn,
     .detail-edit-btn,
     .detail-url-edit,
     .btn,
