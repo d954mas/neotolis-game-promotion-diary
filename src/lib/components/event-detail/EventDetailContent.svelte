@@ -1311,11 +1311,13 @@
     display: flex; flex-direction: column; gap: 8px;
     padding-top: 6px;
   }
+  /* Row that pairs the section label with its inline edit affordance.
+   * gap:10 so the chip-button sits right beside the GAMES label rather
+   * than pushed to the right edge of the section. */
   .detail-section-head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    gap: 10px;
   }
   .detail-section-label {
     font-size: 10.5px;
@@ -1411,15 +1413,50 @@
     font-size: var(--t-12); font-weight: var(--w-md);
   }
 
-  /* Read-only game chip (trash mode). */
-  .game-chip {
-    display: inline-flex; align-items: center; gap: 6px;
+  /* Game chip — same per-game accent styling as FeedCard (kind-color
+   * stripe on the left + tinted fill). --card-accent is set inline
+   * via gameColor(g.id) so each game keeps its deterministic hue. */
+  .detail-game-row .game-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     padding: 3px 10px 3px 14px;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
+    background: color-mix(in oklab, var(--card-accent, var(--border-2)) 14%, var(--surface));
+    border: 1px solid color-mix(
+      in oklab,
+      var(--card-accent, var(--border-2)) 45%,
+      var(--border)
+    );
+    box-shadow: inset 3px 0 0 var(--card-accent, var(--border-2));
+    border-radius: var(--r-pill);
+    color: var(--text);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
+    white-space: nowrap;
+  }
+  /* Off-topic chip — transparent + dashed border, matches FeedCard. */
+  .detail-game-row .off-topic-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    background: transparent;
+    border: 1px dashed var(--border-2);
     border-radius: var(--r-pill);
     color: var(--text-2);
-    font-size: var(--t-12); font-weight: var(--w-md);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
+  }
+  /* Inbox chip — dashed, warn-tinted, mirrors FeedCard. */
+  .detail-game-row .inbox-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    background: color-mix(in oklab, var(--warn) 14%, var(--surface));
+    border: 1px solid color-mix(in oklab, var(--warn) 45%, var(--border));
+    border-radius: var(--r-pill);
+    color: var(--text-2);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
   }
 
   /* ── Footer (bottom dock) ─────────────────────────────────────────── */
