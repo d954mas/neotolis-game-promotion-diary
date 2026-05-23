@@ -26,6 +26,7 @@
 
   import KindIcon from "$lib/components/KindIcon.svelte";
   import AuthorPopover from "$lib/components/shared/AuthorPopover.svelte";
+  import RefreshNowButton from "$lib/components/RefreshNowButton.svelte";
   import { m } from "$lib/paraglide/messages.js";
   import { gameColor } from "$lib/util/game-color.js";
   import {
@@ -429,6 +430,74 @@
 
     <span class="detail-head-spacer"></span>
 
+    {#if !inTrash && event.kind === "youtube_video"}
+      <RefreshNowButton
+        event={{
+          id: event.id,
+          metadata: (event.metadata ?? null) as Record<string, unknown> | null,
+          lastPolledAt: event.lastPolledAt ?? null,
+        }}
+      />
+    {/if}
+
+    {#if !inTrash || onRestore || onDeleteForever}
+      <div class="detail-head-overflow">
+        <button
+          type="button"
+          class="detail-close-btn"
+          onclick={() => (overflowOpen = !overflowOpen)}
+          aria-haspopup="menu"
+          aria-expanded={overflowOpen}
+          aria-label="More actions"
+          title="More actions"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="5" cy="12" r="1.8" fill="currentColor" />
+            <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+            <circle cx="19" cy="12" r="1.8" fill="currentColor" />
+          </svg>
+        </button>
+        {#if overflowOpen}
+          <div
+            class="author-pick-scrim"
+            onclick={() => (overflowOpen = false)}
+            role="presentation"
+          ></div>
+          <div class="detail-head-overflow-pop" role="menu">
+            {#if inTrash && onRestore}
+              <button
+                type="button"
+                class="card-menu-item"
+                onclick={() => {
+                  overflowOpen = false;
+                  void onRestore?.(event.id);
+                }}
+              >{m.event_detail_footer_restore()}</button>
+            {/if}
+            {#if inTrash && onDeleteForever}
+              <button
+                type="button"
+                class="card-menu-item danger"
+                onclick={() => {
+                  overflowOpen = false;
+                  void onDeleteForever?.(event.id);
+                }}
+              >{m.event_detail_footer_delete_forever()}</button>
+            {:else if !inTrash}
+              <button
+                type="button"
+                class="card-menu-item danger"
+                onclick={() => {
+                  overflowOpen = false;
+                  void onDelete(event.id);
+                }}
+              >{m.events_detail_delete()}</button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
     <button
       type="button"
       class="detail-close-btn"
@@ -683,90 +752,10 @@
     </div>
   </div>
 
-  <!-- Bottom dock — primary close + optional Restore + overflow menu
-       (Delete / Delete forever). Mirrors prototype D-pattern. -->
-  <footer class="detail-foot">
-    <button
-      type="button"
-      class="btn ghost detail-foot-close"
-      onclick={onClose}
-      title="Close (Esc)"
-    >
-      <span style="font-size: 18px; line-height: 1; margin-right: 2px">×</span>
-      <span>{m.event_detail_modal_close_aria()}</span>
-    </button>
-    {#if inTrash && onRestore}
-      <button
-        type="button"
-        class="btn ghost foot-btn"
-        onclick={() => onRestore?.(event.id)}
-      >{m.event_detail_footer_restore()}</button>
-    {/if}
-    <!-- Edit button removed: every editable field is click-to-edit
-         inline (title / notes / date / author / games), URL + kind are
-         locked. There was nothing for a separate Edit button to do. -->
-
-    <div style="flex: 1"></div>
-    <div class="detail-foot-overflow">
-      <button
-        type="button"
-        class="btn ghost detail-foot-overflow-btn"
-        onclick={() => (overflowOpen = !overflowOpen)}
-        aria-haspopup="menu"
-        aria-expanded={overflowOpen}
-        title="More actions"
-        aria-label="More actions"
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="5" cy="12" r="1.8" fill="currentColor"/>
-          <circle cx="12" cy="12" r="1.8" fill="currentColor"/>
-          <circle cx="19" cy="12" r="1.8" fill="currentColor"/>
-        </svg>
-      </button>
-      {#if overflowOpen}
-        <div
-          class="author-pick-scrim"
-          onclick={() => (overflowOpen = false)}
-          role="presentation"
-        ></div>
-        <div class="detail-foot-overflow-pop" role="menu">
-          {#if inTrash && onDeleteForever}
-            <button
-              type="button"
-              class="card-menu-item danger foot-btn foot-btn-danger"
-              onclick={() => {
-                overflowOpen = false;
-                void onDeleteForever?.(event.id);
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <polyline points="3 6 5 6 21 6"/>
-                <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/>
-                <path d="M10 11v6"/><path d="M14 11v6"/>
-              </svg>
-              <span>{m.event_detail_footer_delete_forever()}</span>
-            </button>
-          {:else if !inTrash}
-            <button
-              type="button"
-              class="card-menu-item danger foot-btn foot-btn-danger"
-              onclick={() => {
-                overflowOpen = false;
-                void onDelete(event.id);
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <polyline points="3 6 5 6 21 6"/>
-                <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/>
-                <path d="M10 11v6"/><path d="M14 11v6"/>
-              </svg>
-              <span>{m.events_detail_delete()}</span>
-            </button>
-          {/if}
-        </div>
-      {/if}
-    </div>
-  </footer>
+  <!-- Footer dock removed — every action moved into the header strip:
+       × close + ⋮ overflow (Delete / Restore / Delete forever) +
+       RefreshNowButton for YouTube. Mirrors modal pattern in
+       AddEventModal / GamesPicker (no bottom action dock). -->
 </div>
 
 <!-- Notes editor — separate big modal. User UAT: «может большое
@@ -899,6 +888,44 @@
     color: var(--text-2);
     font-family: var(--f-mono);
     font-size: 12px;
+  }
+  /* ⋮ overflow in header — sibling of × close. Popover anchored via
+   * position:relative on .detail-head-overflow. */
+  .detail-head-overflow {
+    position: relative;
+  }
+  .detail-head-overflow-pop {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 180px;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-elev);
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    z-index: 50;
+  }
+  .detail-head-overflow-pop .card-menu-item {
+    background: transparent;
+    border: none;
+    text-align: left;
+    padding: 8px 12px;
+    font-size: var(--t-13);
+    color: var(--text);
+    cursor: pointer;
+    border-radius: var(--r-sm);
+  }
+  .detail-head-overflow-pop .card-menu-item:hover {
+    background: var(--accent-soft);
+  }
+  .detail-head-overflow-pop .card-menu-item.danger {
+    color: var(--danger);
+  }
+  .detail-head-overflow-pop .card-menu-item.danger:hover {
+    background: color-mix(in oklab, var(--danger) 12%, var(--surface));
   }
   /* × close button — mirrors AddEventModal / GamesPicker close affordance.
    * Sits at the top-right of the detail header. */
@@ -1301,31 +1328,18 @@
     justify-content: flex-end;
     gap: 8px;
   }
-  .detail-notes-actions .btn {
-    min-height: var(--hit);
-    padding: 0 var(--s-3);
-    border-radius: var(--r-sm);
-    font-size: var(--t-13);
-    font-weight: var(--w-md);
-    cursor: pointer;
-    transition: background var(--m-fast), border-color var(--m-fast);
-  }
-  .detail-notes-actions .btn.ghost {
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    color: var(--text);
-  }
-  .detail-notes-actions .btn.ghost:hover {
-    background: var(--surface-3);
-    border-color: var(--border-2);
-  }
-  .detail-notes-actions .btn.primary {
+  /* Primary action button (Save in notes-editor-modal, etc). The
+   * default .btn rule sets border:1px solid transparent — that left
+   * the Save button reading as white-on-white inside the notes editor
+   * because no class besides .btn applied. Explicit accent fill +
+   * accent-text label makes it readable. */
+  .btn.primary {
     background: var(--accent);
-    border: 1px solid var(--accent);
     color: var(--accent-text);
+    border: 1px solid var(--accent);
     font-weight: var(--w-sb);
   }
-  .detail-notes-actions .btn.primary:hover {
+  .btn.primary:hover {
     background: var(--accent-strong);
     border-color: var(--accent-strong);
   }
