@@ -73,6 +73,20 @@
   let kind = $state<EventKind>(initialKind);
   let url = $state("");
   let notes = $state("");
+  // Big notes-editor modal — opens on click, saves into `notes` $state.
+  let notesEditorOpen = $state(false);
+  let notesEditorDraft = $state("");
+  function openNotesEditor(): void {
+    notesEditorDraft = notes;
+    notesEditorOpen = true;
+  }
+  function commitNotesEditor(): void {
+    notes = notesEditorDraft;
+    notesEditorOpen = false;
+  }
+  function cancelNotesEditor(): void {
+    notesEditorOpen = false;
+  }
   let authorIsMe = $state(true);
   let offTopic = $state(false);
   let attachedGameIds = $state<string[]>([...initialAttachedGameIds]);
@@ -467,21 +481,28 @@
     </div>
   </div>
 
-  <!-- Notes — optional, full free-text. -->
+  <!-- Notes — click to open big editor. No inline textarea (resize
+       handle was distracting + the 3-row preview cramped longer notes).
+       User UAT: «при создании эвента хочется такое же редактирование
+       заметок. И там не нужно давать возможность расширять эту зону». -->
   <div class="field">
-    <label class="field-label" for="addevt-notes">
+    <span class="field-label">
       {m.add_event_modal_notes_label()}
       <span class="field-label-opt">{m.add_event_modal_notes_optional()}</span>
-    </label>
-    <textarea
-      id="addevt-notes"
-      class="field-input field-textarea"
-      placeholder="Anything worth remembering — context, numbers, links…"
-      bind:value={notes}
-      rows="3"
-      maxlength="50000"
+    </span>
+    <button
+      type="button"
+      class="field-input addevt-notes-trigger"
+      class:has-content={notes.trim().length > 0}
+      onclick={openNotesEditor}
       disabled={saving}
-    ></textarea>
+    >
+      {#if notes.trim().length > 0}
+        <span class="addevt-notes-preview">{notes}</span>
+      {:else}
+        <span class="addevt-notes-placeholder">Anything worth remembering — context, numbers, links…</span>
+      {/if}
+    </button>
   </div>
 
   <!-- Games — chip grid with the same visual vocabulary as the kind
@@ -597,6 +618,53 @@
   >{m.add_event_modal_save()}</button>
 </div>
 
+<!-- Big notes-editor — same pattern as EventDetailContent. Sibling
+     dialog on top of the AddEvent modal via browser top-layer. -->
+{#if notesEditorOpen}
+  <dialog
+    class="notes-editor-modal"
+    open
+    oncancel={(e) => {
+      e.preventDefault();
+      cancelNotesEditor();
+    }}
+    onclick={(e) => {
+      if (e.target === e.currentTarget) cancelNotesEditor();
+    }}
+  >
+    <header class="notes-editor-head">
+      <h2 class="notes-editor-title">{m.add_event_modal_notes_label()}</h2>
+      <button
+        type="button"
+        class="notes-editor-close"
+        onclick={cancelNotesEditor}
+        aria-label="Close"
+        title="Close"
+      >×</button>
+    </header>
+    <div class="notes-editor-body">
+      <!-- svelte-ignore a11y_autofocus -->
+      <textarea
+        class="notes-editor-textarea"
+        bind:value={notesEditorDraft}
+        onkeydown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
+            commitNotesEditor();
+          }
+        }}
+        maxlength="50000"
+        autofocus
+        placeholder="Anything worth remembering — context, numbers, links…"
+      ></textarea>
+    </div>
+    <footer class="notes-editor-foot">
+      <button type="button" class="btn ghost" onclick={cancelNotesEditor}>Cancel</button>
+      <button type="button" class="btn primary" onclick={commitNotesEditor}>Save</button>
+    </footer>
+  </dialog>
+{/if}
+
 <style>
   /* Prototype 1:1 — class names mirror docs/design/v2/ui-kit/index.html
    * .field, .field-url, .kind-grid, .add-kind-chip, .add-game-chip,
@@ -671,6 +739,117 @@
     resize: vertical;
     line-height: var(--lh-body);
     font-family: var(--f-sans);
+  }
+  /* Notes preview button — looks like .field-input but is a button that
+   * opens the big notes-editor modal. Long content scrolls vertically
+   * with a soft max-height; placeholder reads grey-italic. */
+  .addevt-notes-trigger {
+    text-align: left;
+    cursor: pointer;
+    min-height: 84px;
+    max-height: 200px;
+    overflow-y: auto;
+    line-height: var(--lh-body);
+    font-family: var(--f-sans);
+  }
+  .addevt-notes-trigger.has-content {
+    color: var(--text);
+  }
+  .addevt-notes-preview {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .addevt-notes-placeholder {
+    color: var(--text-4);
+    font-style: italic;
+  }
+
+  /* Big notes-editor modal — sibling <dialog> opened from the form.
+   * Sits on top of the AddEvent modal via browser top-layer stacking. */
+  .notes-editor-modal {
+    width: min(900px, calc(100vw - 32px));
+    max-height: min(86vh, 820px);
+    padding: 0;
+    margin: auto;
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-elev);
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+  }
+  .notes-editor-modal::backdrop {
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+  }
+  .notes-editor-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-hairline);
+  }
+  .notes-editor-title {
+    flex: 1;
+    margin: 0;
+    font-size: var(--t-15);
+    font-weight: var(--w-sb);
+  }
+  .notes-editor-close {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .notes-editor-close:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .notes-editor-body {
+    flex: 1;
+    min-height: 0;
+    padding: 16px;
+    display: flex;
+  }
+  .notes-editor-textarea {
+    flex: 1;
+    min-height: 60vh;
+    width: 100%;
+    padding: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    line-height: 1.55;
+    /* Fixed area per user UAT: «не нужно давать возможность расширять
+     * эту зону». */
+    resize: none;
+    outline: none;
+  }
+  .notes-editor-textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .notes-editor-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-hairline);
   }
 
   /* ── URL row + Fetch button ───────────────────────────────────────── */

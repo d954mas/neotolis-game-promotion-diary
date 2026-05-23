@@ -430,7 +430,7 @@
 
     <span class="detail-head-spacer"></span>
 
-    {#if !inTrash && event.kind === "youtube_video"}
+    {#if !inTrash && (event.kind === "youtube_video" || event.kind === "reddit_post")}
       <PollingBadge
         event={{
           id: event.id,
