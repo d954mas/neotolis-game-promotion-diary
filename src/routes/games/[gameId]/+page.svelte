@@ -200,7 +200,10 @@
   }
 
   // Soft-delete game — moved from /games list to here per UAT.
+  // Pulled into ⋮ overflow next to PageHeader so it stays reachable
+  // without scrolling past N events.
   let deleteConfirmOpen = $state(false);
+  let gameMenuOpen = $state(false);
   async function deleteGame(): Promise<void> {
     const res = await fetch(`/api/games/${game.id}`, { method: "DELETE" });
     deleteConfirmOpen = false;
@@ -228,6 +231,55 @@
   deletedCount={deletedListings.length}
   onOpenRecovery={() => (recoveryOpen = true)}
 />
+
+<!-- ⋮ overflow next to PageHeader CTA. Carries the Delete game action
+     (moved here from the bottom danger zone — long event lists meant
+     the user couldn't scroll to it). Sits just under the page-header
+     so it's reachable on every viewport. -->
+<div class="game-overflow-row">
+  <div class="game-overflow-wrap">
+    <button
+      type="button"
+      class="game-overflow-btn"
+      onclick={() => (gameMenuOpen = !gameMenuOpen)}
+      aria-haspopup="menu"
+      aria-expanded={gameMenuOpen}
+      aria-label="More actions"
+      title="More actions"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="5" cy="12" r="1.8" fill="currentColor" />
+        <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+        <circle cx="19" cy="12" r="1.8" fill="currentColor" />
+      </svg>
+    </button>
+    {#if gameMenuOpen}
+      <button
+        type="button"
+        class="game-overflow-scrim"
+        onclick={() => (gameMenuOpen = false)}
+        aria-label="Close menu"
+      ></button>
+      <div class="game-overflow-pop" role="menu">
+        <button
+          type="button"
+          class="card-menu-item danger"
+          role="menuitem"
+          onclick={() => {
+            gameMenuOpen = false;
+            deleteConfirmOpen = true;
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+          </svg>
+          <span>Delete game</span>
+        </button>
+      </div>
+    {/if}
+  </div>
+</div>
 
 <!--
   GameEditDialog modal — title input + description textarea +
@@ -366,22 +418,8 @@
   {/if}
 </section>
 
-<!-- Danger zone — soft-delete this game. Moved from /games list per
-     UAT («удаление игры спрятать в детальное вью»). -->
-<section class="danger-zone">
-  <button
-    type="button"
-    class="delete-game-btn"
-    onclick={() => (deleteConfirmOpen = true)}
-  >
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <polyline points="3 6 5 6 21 6" />
-      <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
-      <path d="M10 11v6" /><path d="M14 11v6" />
-    </svg>
-    <span>Delete game</span>
-  </button>
-</section>
+<!-- Bottom danger-zone removed — Delete game lives in the ⋮ overflow
+     next to PageHeader, reachable without scrolling past N events. -->
 
 <ConfirmDialog
   open={deleteConfirmOpen}
@@ -575,31 +613,80 @@
     color: var(--accent-strong);
   }
 
-  /* Danger zone — Delete game CTA pinned at the bottom of the page. */
-  .danger-zone {
-    margin-top: var(--s-6);
-    padding-top: var(--s-4);
-    border-top: 1px solid var(--border-hairline);
+  /* ⋮ overflow row under PageHeader — Delete game lives here. */
+  .game-overflow-row {
     display: flex;
     justify-content: flex-end;
+    margin-top: calc(-1 * var(--s-3));
+    margin-bottom: var(--s-3);
   }
-  .delete-game-btn {
+  .game-overflow-wrap {
+    position: relative;
+  }
+  .game-overflow-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    background: transparent;
-    border: 1px solid color-mix(in oklab, var(--danger) 45%, var(--border));
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
     border-radius: var(--r-sm);
-    color: var(--danger);
-    font-size: var(--t-13);
-    font-weight: var(--w-md);
+    color: var(--text-2);
     cursor: pointer;
     transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
   }
-  .delete-game-btn:hover {
+  .game-overflow-btn:hover,
+  .game-overflow-btn[aria-expanded="true"] {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-strong);
+  }
+  .game-overflow-scrim {
+    position: fixed;
+    inset: 0;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: default;
+    z-index: 40;
+  }
+  .game-overflow-pop {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 180px;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-elev);
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    z-index: 50;
+  }
+  .game-overflow-pop .card-menu-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: transparent;
+    border: 0;
+    text-align: left;
+    font-size: var(--t-13);
+    color: var(--text);
+    cursor: pointer;
+    border-radius: var(--r-sm);
+    font-family: inherit;
+  }
+  .game-overflow-pop .card-menu-item:hover {
+    background: var(--accent-soft);
+  }
+  .game-overflow-pop .card-menu-item.danger {
+    color: var(--danger);
+  }
+  .game-overflow-pop .card-menu-item.danger:hover {
     background: color-mix(in oklab, var(--danger) 12%, var(--surface));
-    border-color: var(--danger);
   }
 
   /* Notes editor modal — same vocab as event notes-editor-modal. */
