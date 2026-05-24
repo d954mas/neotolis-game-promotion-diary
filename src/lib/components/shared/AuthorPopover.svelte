@@ -65,15 +65,19 @@
     if (!anchor || !popEl) return;
     const rect = anchor.getBoundingClientRect();
     const popRect = popEl.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const PAD = 8;
     if (placement === "up") {
       fixedTop = rect.top - popRect.height - 6;
-      fixedLeft = rect.left;
     } else {
       fixedTop = rect.bottom + 6;
-      // align right edges; if it would go off-screen, fall back to left-align
-      const desiredLeft = rect.right - popRect.width;
-      fixedLeft = desiredLeft >= 8 ? desiredLeft : rect.left;
     }
+    // Horizontal placement: prefer right-aligning popover edge to anchor
+    // edge. Clamp to viewport [PAD, vw - popRect.width - PAD] so the
+    // popover never spills past either viewport edge.
+    const desiredLeft = rect.right - popRect.width;
+    const maxLeft = vw - popRect.width - PAD;
+    fixedLeft = Math.max(PAD, Math.min(desiredLeft, maxLeft));
   });
 
   function pickMine(): void {

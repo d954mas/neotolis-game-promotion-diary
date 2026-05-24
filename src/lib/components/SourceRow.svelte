@@ -33,7 +33,10 @@
   import InlineError from "./InlineError.svelte";
   import RefreshContentButton from "./RefreshContentButton.svelte";
   import AuthorPopover from "./shared/AuthorPopover.svelte";
+  import BackfillPicker from "./BackfillPicker.svelte";
   import { type SourceKind } from "$lib/util/source-kind-label.js";
+
+  type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
 
   type DataSourceDto = {
     id: string;
@@ -108,7 +111,54 @@
   let renameMode = $state(false);
   let renameDraft = $state("");
   let authorPopoverOpen = $state(false);
+  let authorAvatarEl = $state<HTMLButtonElement | null>(null);
   let menuOpen = $state(false);
+  let backfillDialogOpen = $state(false);
+  let backfillWindow = $state<BackfillWindow>("30d");
+  let backfillSaving = $state(false);
+  let backfillError = $state<string | null>(null);
+
+  // Map preset to absolute date (ms-since-epoch, midnight UTC).
+  function backfillPresetToDate(preset: BackfillWindow): Date {
+    const now = new Date();
+    if (preset === "everything") return new Date("1970-01-01T00:00:00.000Z");
+    const days = { "1d": 1, "7d": 7, "30d": 30, "90d": 90, "1y": 365 }[preset];
+    const t = new Date(now);
+    t.setUTCDate(t.getUTCDate() - days);
+    t.setUTCHours(0, 0, 0, 0);
+    return t;
+  }
+
+  async function commitBackfill(): Promise<void> {
+    if (backfillSaving) return;
+    backfillSaving = true;
+    backfillError = null;
+    try {
+      const target = backfillPresetToDate(backfillWindow);
+      const res = await fetch(`/api/sources/${source.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ backfillTargetSince: target.toISOString() }),
+      });
+      if (!res.ok) {
+        let code = "error_server_generic";
+        try {
+          const body = (await res.json()) as { error?: string };
+          if (body.error) code = body.error;
+        } catch {
+          /* ignore */
+        }
+        backfillError = code;
+        return;
+      }
+      backfillDialogOpen = false;
+      await invalidateAll();
+    } catch {
+      backfillError = "error_network";
+    } finally {
+      backfillSaving = false;
+    }
+  }
   let liveToggling = $state(false);
   let confirmingRemove = $state(false);
   let mutating = $state(false);
@@ -293,6 +343,23 @@
       <div class="card-menu" role="menu">
         <button
           type="button"
+          class="card-menu-item"
+          role="menuitem"
+          onclick={() => {
+            menuOpen = false;
+            backfillDialogOpen = true;
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+          <span>Backfill window…</span>
+        </button>
+        <button
+          type="button"
           class="card-menu-item danger"
           role="menuitem"
           onclick={() => {
@@ -319,6 +386,7 @@
 
     <span class="author-pick">
       <button
+        bind:this={authorAvatarEl}
         type="button"
         class="author-avatar source-author-trigger"
         data-mine={source.isOwnedByMe ? "1" : "0"}
@@ -338,6 +406,7 @@
         <AuthorPopover
           authorIsMe={source.isOwnedByMe}
           mineName={currentUserName || "You"}
+          anchor={authorAvatarEl}
           onchange={changeAuthor}
           onclose={() => (authorPopoverOpen = false)}
         />
@@ -430,6 +499,51 @@
   onConfirm={confirmRemove}
   onCancel={() => (confirmingRemove = false)}
 />
+
+<!-- Backfill window dialog — opened from ⋮ menu. Reuses BackfillPicker
+     (the same preset selector /sources/new ships). Saving issues a
+     PATCH with backfillTargetSince derived from the preset. Server-side
+     guard (services/data-sources.ts:698) rejects forward moves; the
+     dialog surfaces the resulting 422 via backfillError. -->
+{#if backfillDialogOpen}
+  <dialog
+    class="backfill-dialog"
+    open
+    oncancel={(e) => {
+      e.preventDefault();
+      backfillDialogOpen = false;
+    }}
+    onclick={(e) => {
+      if (e.target === e.currentTarget) backfillDialogOpen = false;
+    }}
+  >
+    <header class="backfill-dialog-head">
+      <h2 class="backfill-dialog-title">Backfill window</h2>
+      <button
+        type="button"
+        class="backfill-dialog-close"
+        onclick={() => (backfillDialogOpen = false)}
+        aria-label="Close"
+      >×</button>
+    </header>
+    <div class="backfill-dialog-body">
+      <p class="backfill-dialog-hint">
+        Extend how far back the worker pulls events for this source.
+        Window can only move <b>earlier</b> in time (you can't drop already-imported events).
+      </p>
+      <BackfillPicker bind:value={backfillWindow} />
+      {#if backfillError}
+        <InlineError message={backfillError} />
+      {/if}
+    </div>
+    <footer class="backfill-dialog-foot">
+      <button type="button" class="btn ghost" onclick={() => (backfillDialogOpen = false)}>Cancel</button>
+      <button type="button" class="btn primary" onclick={() => void commitBackfill()} disabled={backfillSaving}>
+        {backfillSaving ? "Saving…" : "Save"}
+      </button>
+    </footer>
+  </dialog>
+{/if}
 
 <style>
   /* SourceRow — 1:1 parity with docs/design/v2/ui-kit/sources-page.jsx.
@@ -797,6 +911,117 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .status-dot { animation: none; }
+  }
+
+  /* Backfill window dialog — sibling <dialog open> rendered fixed on
+   * top of the page chrome (browser top-layer). Reuses the same
+   * vocabulary as notes-editor-modal / GamesPicker. */
+  .backfill-dialog {
+    width: min(480px, calc(100vw - 32px));
+    padding: 0;
+    margin: auto;
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-elev);
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+  }
+  .backfill-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+  }
+  .backfill-dialog-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-hairline);
+  }
+  .backfill-dialog-title {
+    flex: 1;
+    margin: 0;
+    font-size: var(--t-15);
+    font-weight: var(--w-sb);
+  }
+  .backfill-dialog-close {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .backfill-dialog-close:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .backfill-dialog-body {
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .backfill-dialog-hint {
+    margin: 0;
+    font-size: var(--t-13);
+    color: var(--text-3);
+    line-height: 1.5;
+  }
+  .backfill-dialog-hint b {
+    color: var(--text);
+    font-weight: var(--w-sb);
+  }
+  .backfill-dialog-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-hairline);
+  }
+  .backfill-dialog-foot .btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--hit);
+    padding: 0 var(--s-3);
+    border-radius: var(--r-sm);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+    cursor: pointer;
+    transition: background var(--m-fast), border-color var(--m-fast);
+  }
+  .backfill-dialog-foot .btn.ghost {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .backfill-dialog-foot .btn.ghost:hover {
+    background: var(--surface-3);
+    border-color: var(--border-2);
+  }
+  .backfill-dialog-foot .btn.primary {
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: var(--accent-text);
+    font-weight: var(--w-sb);
+  }
+  .backfill-dialog-foot .btn.primary:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+  }
+  .backfill-dialog-foot .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* Mobile — actions wrap below title on narrow screens. */
