@@ -39,6 +39,7 @@
     kind: SourceKind;
     handleUrl: string;
     displayName: string | null;
+    note: string | null;
     isOwnedByMe: boolean;
     autoImport: boolean;
     deletedAt: Date | string | null;

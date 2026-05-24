@@ -2,20 +2,27 @@
   // SourceRow — one row in the /sources list, restructured for 1:1
   // parity with docs/design/v2/ui-kit/sources-page.jsx.
   //
-  // Layout (CSS grid: 1fr auto / "title acts" / "foot foot"):
+  // Layout (CSS grid: 1fr auto / "title acts" / "note note" / "foot foot"):
   //   - Title row: <kind-icon> <author-avatar> <handle-text>
   //   - Right cluster: [Sync button] [on/off toggle]
+  //   - Optional note row: <source-note> with edit pencil OR "+ Add note" ghost
   //   - Footer: N events · date range · synced X ago
   //   - Absolute top-right: ⋯ overflow menu (Remove source)
   //
   // Behaviors preserved from Wave 2 Plan 09:
-  //   - Click handle → inline rename → PATCH /api/sources/:id { displayName }
   //   - Click avatar → AuthorPopover → PATCH /api/sources/:id { isOwnedByMe }
   //   - Click toggle → flips autoImport → PATCH /api/sources/:id { autoImport }
   //     (prototype calls it Live/Paused / "active"; backend field is
   //     autoImport — same semantic: does the polling worker pull this source?)
   //
-  // Behaviors removed (superseded by prototype affordances):
+  // Behaviors removed by Plan 03.4-08:
+  //   - Click-handle inline rename → PATCH { displayName }. Source titles
+  //     arrive canonical from the platform (YouTube channelTitle, Reddit
+  //     r/<sub> / u/<handle> from handleUrl); a user-typed override
+  //     duplicated information and stale-ified on upstream rename. The
+  //     new private `note` field replaces it as the disambiguation knob.
+  //
+  // Behaviors removed (superseded by prototype affordances earlier):
   //   - Phase 02.1-33 edit-mode form (rename + auto-import checkbox + Remove
   //     in form footer): all four moves now have a dedicated inline
   //     affordance. Removing the form eliminates the D-08 mutual exclusion
@@ -43,6 +50,7 @@
     kind: SourceKind;
     handleUrl: string;
     displayName: string | null;
+    note: string | null;
     isOwnedByMe: boolean;
     autoImport: boolean;
     deletedAt: Date | string | null;
@@ -107,10 +115,13 @@
     return t.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   }
 
-  // Inline-rename state. Click handle text → input replaces it; Enter or
-  // blur commits via PATCH /api/sources/:id { displayName }.
-  let renameMode = $state(false);
-  let renameDraft = $state("");
+  // Note-edit state. Click the note text (or "+ Add note" ghost) → opens
+  // .note-dialog with a textarea; Save commits via PATCH /api/sources/:id
+  // { note }. Empty-string save is normalized to null at the route layer.
+  let noteDialogOpen = $state(false);
+  let noteDraft = $state("");
+  let noteSaving = $state(false);
+  let noteError = $state<string | null>(null);
   let authorPopoverOpen = $state(false);
   let authorAvatarEl = $state<HTMLButtonElement | null>(null);
   let menuOpen = $state(false);
@@ -180,34 +191,43 @@
   let mutating = $state(false);
   let rowError = $state<string | null>(null);
 
-  async function commitRename(): Promise<void> {
-    const next = renameDraft.trim();
-    const current = source.displayName ?? "";
-    if (next === "" || next === current) {
-      renameMode = false;
+  function openNoteDialog(): void {
+    noteDraft = source.note ?? "";
+    noteError = null;
+    noteDialogOpen = true;
+  }
+
+  // Commit the note. Empty-string trims to null at the boundary (route
+  // normalizes; we send the literal string so server-side trim is the
+  // single source of truth). The current-value short-circuit matches the
+  // legacy rename: no PATCH when nothing changed.
+  async function commitNote(): Promise<void> {
+    if (noteSaving) return;
+    const next = noteDraft;
+    const current = source.note ?? "";
+    if (next === current) {
+      noteDialogOpen = false;
       return;
     }
+    noteSaving = true;
+    noteError = null;
     try {
       const res = await fetch(`/api/sources/${source.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ displayName: next }),
+        body: JSON.stringify({ note: next }),
       });
       if (!res.ok) {
-        rowError = m.error_server_generic();
-      } else {
-        await invalidateAll();
+        noteError = m.error_server_generic();
+        return;
       }
+      noteDialogOpen = false;
+      await invalidateAll();
     } catch {
-      rowError = m.error_network();
+      noteError = m.error_network();
     } finally {
-      renameMode = false;
+      noteSaving = false;
     }
-  }
-
-  function cancelRename(): void {
-    renameMode = false;
-    renameDraft = "";
   }
 
   // Toggle autoImport (the prototype's "active"). The polling worker
@@ -273,11 +293,41 @@
     }
   }
 
-  // Computed: handle label. Prefer the user-chosen displayName, then the
-  // YouTube channel title from the cache, finally the raw URL/handle.
-  const handleLabel = $derived(
-    source.displayName ?? source.channelTitle ?? source.handleUrl,
-  );
+  // Derive a Reddit-flavored handle ("r/<sub>" or "u/<handle>") from the
+  // canonical handleUrl. Reddit URLs follow a fixed shape — see
+  // src/lib/sources/reddit/server/adapter.ts parseSourceUrl. When the URL
+  // doesn't match (corrupt data, future kinds), fall through to the URL
+  // itself.
+  function deriveRedditHandle(kind: SourceKind, url: string): string | null {
+    if (kind === "reddit_subreddit") {
+      const m = url.match(/reddit\.com\/r\/([^/?#]+)/i);
+      return m ? `r/${m[1]}` : null;
+    }
+    if (kind === "reddit_account") {
+      const m = url.match(/reddit\.com\/(?:user|u)\/([^/?#]+)/i);
+      return m ? `u/${m[1]}` : null;
+    }
+    return null;
+  }
+
+  // Computed: handle label. The title is READ-ONLY canonical per Plan
+  // 03.4-08 — pick what the platform owns, then fall back to the user's
+  // legacy displayName (Phase 02 sources still have it set), then the
+  // derived Reddit form, then the raw URL as last resort.
+  //
+  // The legacy precedence (displayName first) flipped intentionally:
+  // channelTitle/canonical platform identity beats a user-typed override
+  // because rename should round-trip with the upstream rename, not lock
+  // to a typo from 2026. Stale displayName values are visible noise but
+  // not editable here anymore — they're fading out as users re-add
+  // sources, and the `note` field is the new disambiguation surface.
+  const handleLabel = $derived.by((): string => {
+    if (source.channelTitle) return source.channelTitle;
+    if (source.displayName) return source.displayName;
+    const derived = deriveRedditHandle(source.kind, source.handleUrl);
+    if (derived) return derived;
+    return source.handleUrl;
+  });
 
   // Footer string parts. The prototype puts events · date range · synced
   // on one mono line.
@@ -429,34 +479,9 @@
       {/if}
     </span>
 
-    {#if renameMode}
-      <input
-        class="source-title-input"
-        bind:value={renameDraft}
-        onblur={commitRename}
-        onkeydown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            void commitRename();
-          }
-          if (e.key === "Escape") cancelRename();
-        }}
-        maxlength="120"
-        aria-label="Rename source"
-      />
-    {:else}
-      <button
-        type="button"
-        class="source-title-text"
-        title={handleLabel}
-        onclick={() => {
-          renameMode = true;
-          renameDraft = source.displayName ?? source.channelTitle ?? source.handleUrl;
-        }}
-      >
-        {handleLabel}
-      </button>
-    {/if}
+    <span class="source-title-text" title={handleLabel}>
+      {handleLabel}
+    </span>
   </h3>
 
   <!-- Right cluster — [status pill] [Sync] [Live/Paused toggle]. Status
@@ -491,6 +516,38 @@
     </button>
   </div>
 
+  <!-- Note row — private per-user remark. When set: text + small pencil
+       edit button. When empty (and not soft-deleted): ghost "+ Add note"
+       button. Phase 03.4-08 — the rename affordance was retired in
+       favour of this annotation-only surface. -->
+  {#if source.deletedAt === null}
+    <div class="source-note">
+      {#if source.note}
+        <span class="source-note-text">{source.note}</span>
+        <button
+          type="button"
+          class="source-note-edit"
+          onclick={openNoteDialog}
+          aria-label={m.source_note_edit_aria()}
+          title={m.source_note_edit_aria()}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+          </svg>
+        </button>
+      {:else}
+        <button
+          type="button"
+          class="source-note-add"
+          onclick={openNoteDialog}
+        >
+          {m.source_note_add()}
+        </button>
+      {/if}
+    </div>
+  {/if}
+
   <!-- Footer — events · date range · synced X ago. Status pill moved
        up to .source-actions (next to Sync button). -->
   <div class="source-foot">
@@ -515,6 +572,59 @@
   onConfirm={confirmRemove}
   onCancel={() => (confirmingRemove = false)}
 />
+
+<!-- Note editor — same dialog vocabulary as .backfill-dialog so the user
+     recognises the surface from /sources interactions. Esc + backdrop +
+     × all close non-destructively (Save is the only commit path). -->
+{#if noteDialogOpen}
+  <dialog
+    class="note-dialog"
+    open
+    oncancel={(e) => {
+      e.preventDefault();
+      noteDialogOpen = false;
+    }}
+    onclick={(e) => {
+      if (e.target === e.currentTarget) noteDialogOpen = false;
+    }}
+  >
+    <header class="note-dialog-head">
+      <h2 class="note-dialog-title">{m.source_note_dialog_title()}</h2>
+      <button
+        type="button"
+        class="note-dialog-close"
+        onclick={() => (noteDialogOpen = false)}
+        aria-label={m.common_close()}
+      >×</button>
+    </header>
+    <div class="note-dialog-body">
+      <p class="note-dialog-hint">{m.source_note_dialog_hint()}</p>
+      <textarea
+        class="note-dialog-textarea"
+        bind:value={noteDraft}
+        rows="4"
+        maxlength="500"
+        placeholder={m.source_note_placeholder()}
+      ></textarea>
+      {#if noteError}
+        <InlineError message={noteError} />
+      {/if}
+    </div>
+    <footer class="note-dialog-foot">
+      <button type="button" class="btn ghost" onclick={() => (noteDialogOpen = false)}>
+        {m.common_cancel()}
+      </button>
+      <button
+        type="button"
+        class="btn primary"
+        onclick={() => void commitNote()}
+        disabled={noteSaving}
+      >
+        {noteSaving ? "Saving…" : m.common_save()}
+      </button>
+    </footer>
+  </dialog>
+{/if}
 
 <!-- Backfill window dialog — opened from ⋮ menu. Reuses BackfillPicker
      (the same preset selector /sources/new ships). Saving issues a
@@ -588,6 +698,7 @@
     grid-template-columns: 1fr auto;
     grid-template-areas:
       "title acts"
+      "note  note"
       "foot  foot";
     align-items: center;
     gap: 6px 12px;
@@ -736,39 +847,88 @@
     color: var(--card-accent, var(--text-3));
     flex-shrink: 0;
   }
+  /* Title is read-only canonical (Plan 03.4-08). No click affordance,
+   * no hover treatment — it's text, not a button. The user-facing
+   * disambiguation moves to the .source-note row below. */
   .source-title-text {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    background: transparent;
-    border: none;
-    padding: 0;
-    margin: 0;
     color: inherit;
     font: inherit;
     letter-spacing: inherit;
-    cursor: pointer;
-    text-align: left;
-    transition: color var(--m-fast) var(--m-ease);
   }
-  .source-title-text:hover {
-    color: var(--accent);
-    text-decoration: underline dotted;
-  }
-  .source-title-input {
-    flex: 1 1 auto;
+
+  /* Note row — appears below the title row. Single-line preview when
+   * populated (truncated with ellipsis on overflow; full note visible in
+   * the editor dialog); ghost "+ Add note" button when empty. Mono font
+   * matches the prototype's note styling on /sources. */
+  .source-note {
+    grid-area: note;
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     min-width: 0;
-    min-height: 26px;
-    padding: 2px 6px;
-    background: var(--surface-2);
-    color: var(--text);
-    border: 1px solid var(--accent-strong);
-    border-radius: var(--r-sm);
+    margin-top: 2px;
     font-family: var(--f-mono);
-    font-size: var(--t-15);
-    font-weight: var(--w-sb);
-    letter-spacing: -0.005em;
+    font-size: 12px;
+    color: var(--text-3);
+    line-height: 1.4;
+  }
+  .source-note-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-2);
+    font-style: italic;
+  }
+  .source-note-edit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
+    flex-shrink: 0;
+  }
+  .source-note-edit:hover {
+    background: var(--surface-2);
+    border-color: var(--border);
+    color: var(--accent);
+  }
+  .source-note-add {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    background: transparent;
+    border: 1px dashed var(--border-2);
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
+  }
+  .source-note-add:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    border-style: solid;
+    color: var(--accent-strong);
   }
 
   /* Clickable author avatar in the title row — matches feed-card
@@ -1075,6 +1235,7 @@
       grid-template-areas:
         "title"
         "acts"
+        "note"
         "foot";
       gap: 8px;
     }
@@ -1089,9 +1250,140 @@
     .source-toggle,
     .source-toggle-thumb,
     .author-avatar.source-author-trigger,
-    .source-title-text,
+    .source-note-edit,
+    .source-note-add,
     .card-action-btn.overflow {
       transition: none;
     }
+  }
+
+  /* Note dialog — same vocabulary as .backfill-dialog. The user already
+   * meets this surface from the ⋮ menu's "Backfill window…" item; reusing
+   * the same chrome keeps the row's two modal affordances visually
+   * coherent. */
+  .note-dialog {
+    width: min(480px, calc(100vw - 32px));
+    padding: 0;
+    margin: auto;
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-elev);
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+  }
+  .note-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+  }
+  .note-dialog-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-hairline);
+  }
+  .note-dialog-title {
+    flex: 1;
+    margin: 0;
+    font-size: var(--t-15);
+    font-weight: var(--w-sb);
+  }
+  .note-dialog-close {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .note-dialog-close:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .note-dialog-body {
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .note-dialog-hint {
+    margin: 0;
+    font-size: var(--t-13);
+    color: var(--text-3);
+    line-height: 1.5;
+  }
+  .note-dialog-textarea {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    line-height: var(--lh-body);
+    resize: vertical;
+    min-height: 80px;
+    transition: border-color var(--m-fast) var(--m-ease);
+  }
+  .note-dialog-textarea::placeholder {
+    color: var(--text-3);
+  }
+  .note-dialog-textarea:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: var(--focus-ring);
+  }
+  .note-dialog-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-hairline);
+  }
+  .note-dialog-foot .btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--hit);
+    padding: 0 var(--s-3);
+    border-radius: var(--r-sm);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+    cursor: pointer;
+    transition: background var(--m-fast), border-color var(--m-fast);
+  }
+  .note-dialog-foot .btn.ghost {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .note-dialog-foot .btn.ghost:hover {
+    background: var(--surface-3);
+    border-color: var(--border-2);
+  }
+  .note-dialog-foot .btn.primary {
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: var(--accent-text);
+    font-weight: var(--w-sb);
+  }
+  .note-dialog-foot .btn.primary:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+  }
+  .note-dialog-foot .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 </style>

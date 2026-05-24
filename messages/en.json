@@ -452,6 +452,15 @@
   "common_save": "Save",
   "common_close": "Close",
 
+  "source_note_add": "+ Add note",
+  "source_note_edit_aria": "Edit note",
+  "source_note_dialog_title": "Source note",
+  "source_note_dialog_hint": "Private remark to disambiguate this source from similar handles. Only you see it.",
+  "source_note_placeholder": "e.g. press contact for indie horror; asked for review codes",
+
+  "add_source_modal_title": "Add data source",
+  "add_source_modal_close_aria": "Close add source dialog",
+
   "privacy_title": "Privacy Policy",
   "privacy_last_updated": "Last updated: {date}",
   "privacy_section_who_we_are_title": "Who we are",
