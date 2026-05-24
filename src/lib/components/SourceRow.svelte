@@ -430,30 +430,6 @@
     return { variant: "idle", label: "Up to date" };
   });
 
-  // Manual "Retry now" — replicates RefreshContentButton's POST. The
-  // button itself is already on the row but lives behind the Sync icon;
-  // when in error state the user benefits from a labelled, in-context
-  // affordance under the ⋮ menu next to the matching "Reconnect" item.
-  let retryingNow = $state(false);
-  async function retryNow(): Promise<void> {
-    if (retryingNow) return;
-    retryingNow = true;
-    rowError = null;
-    try {
-      const res = await fetch(`/api/sources/${source.id}/refresh-content`, {
-        method: "POST",
-      });
-      if (!res.ok && res.status !== 200 && res.status !== 202) {
-        rowError = m.error_server_generic();
-      } else {
-        await invalidateAll();
-      }
-    } catch {
-      rowError = m.error_network();
-    } finally {
-      retryingNow = false;
-    }
-  }
 </script>
 
 <article
@@ -528,44 +504,13 @@
           </svg>
           <span>Backfill window…</span>
         </button>
-        {#if status.variant === "error"}
-          <!-- Recovery affordances surface only when the source IS in
-               error state. Retry now mirrors the Sync button (one more
-               polling attempt — if the upstream is healthy again this
-               clears needsReconnect on the next successful run). Reconnect
-               navigates to /sources/[id] where the user can edit the
-               handle URL — recommended for permanent / not-found / setup
-               errors that won't self-heal. -->
-          <button
-            type="button"
-            class="card-menu-item"
-            role="menuitem"
-            disabled={retryingNow}
-            onclick={() => {
-              menuOpen = false;
-              void retryNow();
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polyline points="23 4 23 10 17 10" />
-              <polyline points="1 20 1 14 7 14" />
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-            </svg>
-            <span>{m.source_action_retry_now()}</span>
-          </button>
-          <a
-            class="card-menu-item"
-            role="menuitem"
-            href="/sources/{source.id}"
-            onclick={() => (menuOpen = false)}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-            </svg>
-            <span>{m.source_action_reconnect()}</span>
-          </a>
-        {/if}
+        <!-- Error-state-specific recovery items removed. 'Retry now'
+             was identical to the visible Sync button on the row (same
+             POST /api/sources/:id/refresh-content endpoint) — two
+             buttons for one action. 'Reconnect' navigated to a legacy
+             edit page with no useful re-setup. For a broken source the
+             cleaner workflow is Remove + add fresh via AddSourceModal. -->
+
         <button
           type="button"
           class="card-menu-item danger"
