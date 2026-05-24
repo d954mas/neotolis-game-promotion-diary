@@ -264,8 +264,22 @@ async function handleChannelContextBackfillImpl(job: {
     if (!parsed) {
       logger.warn(
         { jobId: job.id, handleUrl },
-        "channel-context-backfill: handleUrl does not parse to a youtube channel; skipping",
+        "channel-context-backfill: handleUrl does not parse to a youtube channel; skipping + marking needs_reconnect",
       );
+      // Operator-issue: the user's pasted handleUrl is malformed and no
+      // amount of retry will fix it. Surface 'Error: Setup' in
+      // /sources so the user knows to Reconnect → edit handle URL.
+      // Best-effort write; cron continues for other sources on failure.
+      if (sourceId) {
+        try {
+          await markSourceNeedsReconnect(userId, sourceId, "operator-issue");
+        } catch (err) {
+          logger.warn(
+            { jobId: job.id, sourceId, err: String((err as Error)?.message ?? err) },
+            "channel-context-backfill: markSourceNeedsReconnect failed; continuing",
+          );
+        }
+      }
       return;
     }
     if (parsed.kind === "channelId") {
@@ -317,8 +331,22 @@ async function handleChannelContextBackfillImpl(job: {
       if (!item) {
         logger.warn(
           { jobId: job.id, handle: parsed.value },
-          "channel-context-backfill: forHandle lookup returned no channel; skipping",
+          "channel-context-backfill: forHandle lookup returned no channel; skipping + marking needs_reconnect",
         );
+        // Upstream YouTube returned no channel for this handle — either
+        // the handle is wrong (operator-issue) or the channel was
+        // deleted (not-found). 'not-found' maps to a more accurate UI
+        // label ('Error: Not found') than 'Error: Setup'.
+        if (sourceId) {
+          try {
+            await markSourceNeedsReconnect(userId, sourceId, "not-found");
+          } catch (err) {
+            logger.warn(
+              { jobId: job.id, sourceId, err: String((err as Error)?.message ?? err) },
+              "channel-context-backfill: markSourceNeedsReconnect failed; continuing",
+            );
+          }
+        }
         return;
       }
       channelId = item.id;

@@ -24,6 +24,7 @@ import { db } from "$lib/server/db/client.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 import { logger } from "$lib/server/logger.js";
+import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
 
 interface RedditSourceMetadata {
   username?: string;
@@ -40,6 +41,7 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
   const sources = await db
     .select({
       id: dataSources.id,
+      userId: dataSources.userId,
       kind: dataSources.kind,
       metadata: dataSources.metadata,
       channelId: dataSources.channelId,
@@ -59,8 +61,14 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
   }
 
   // Build one queue row per source. Drop rows whose metadata is missing
-  // the expected handle field — those are seed-data bugs, not runtime
-  // failures, and surface as a WARN log + skipped row.
+  // the expected handle field — those are seed-data bugs (local dev
+  // seeder, broken import) that the user must intervene on. They never
+  // resolve themselves: every cron tick re-skips the same row forever.
+  // Mark needs_reconnect on the source so /sources surfaces an
+  // 'Error: Setup' pill — same UI affordance as a remote 404. The user
+  // can either fix the metadata (Reconnect → edit handle URL) or delete
+  // the source. Wrapped in try/catch because a single source's UPDATE
+  // failure must not abort the cron tick for every other source.
   const values: Array<typeof adapterRefreshQueue.$inferInsert> = [];
   for (const s of sources) {
     const meta = (s.metadata ?? {}) as RedditSourceMetadata;
@@ -69,8 +77,16 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
       if (handle === null) {
         logger.warn(
           { sourceId: s.id, kind: s.kind },
-          "reddit.enqueue_service_sources_cron: reddit_account missing username; skipping",
+          "reddit.enqueue_service_sources_cron: reddit_account missing username; skipping + marking needs_reconnect",
         );
+        try {
+          await markSourceNeedsReconnect(s.userId, s.id, "operator-issue");
+        } catch (err) {
+          logger.warn(
+            { sourceId: s.id, err: String((err as Error)?.message ?? err) },
+            "reddit.enqueue_service_sources_cron: markSourceNeedsReconnect failed for reddit_account; continuing",
+          );
+        }
         continue;
       }
       values.push({
@@ -86,8 +102,16 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
       if (sub === null) {
         logger.warn(
           { sourceId: s.id, kind: s.kind },
-          "reddit.enqueue_service_sources_cron: reddit_subreddit missing subreddit; skipping",
+          "reddit.enqueue_service_sources_cron: reddit_subreddit missing subreddit; skipping + marking needs_reconnect",
         );
+        try {
+          await markSourceNeedsReconnect(s.userId, s.id, "operator-issue");
+        } catch (err) {
+          logger.warn(
+            { sourceId: s.id, err: String((err as Error)?.message ?? err) },
+            "reddit.enqueue_service_sources_cron: markSourceNeedsReconnect failed for reddit_subreddit; continuing",
+          );
+        }
         continue;
       }
       values.push({
