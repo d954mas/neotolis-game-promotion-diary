@@ -84,6 +84,11 @@ const createSourceSchema = z.object({
   autoImport: z.boolean().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   backfillWindow: backfillWindowEnum.optional(),
+  // Optional absolute cutoff. When set, takes precedence over
+  // backfillWindow — the UI uses this for the custom-date picker
+  // alongside the preset row. Must be in the past (z.coerce.date will
+  // accept either Date or ISO-8601 string).
+  backfillTargetSince: z.coerce.date().optional(),
 });
 
 const updateSourceSchema = z

@@ -96,6 +96,7 @@
   // clean if the user toggles back on.
   type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
   let backfillWindow = $state<BackfillWindow>("30d");
+  let backfillCustomDate = $state<string | null>(null);
   const selectedKindEnabled = $derived(
     kindMatrix.find((k) => k.value === selectedKind)?.disabled !== true,
   );
@@ -194,9 +195,14 @@
           isOwnedByMe,
           autoImport,
           // Only include the field when the picker would have been visible —
-          // otherwise the server applies its default ('30d'). The chosen
-          // value is included when kind=youtube_channel AND auto_import=true.
-          ...(showPicker ? { backfillWindow } : {}),
+          // otherwise the server applies its default ('30d'). Custom date
+          // overrides the preset; both consumers pass it through as an
+          // absolute ISO timestamp via backfillTargetSince.
+          ...(showPicker
+            ? backfillCustomDate
+              ? { backfillTargetSince: new Date(`${backfillCustomDate}T00:00:00.000Z`).toISOString() }
+              : { backfillWindow }
+            : {}),
         }),
       });
       if (res.status === 201 || res.status === 200) {
@@ -357,7 +363,7 @@
 
     {#if showPicker}
       <hr class="picker-separator" />
-      <BackfillPicker bind:value={backfillWindow} />
+      <BackfillPicker bind:value={backfillWindow} bind:customDate={backfillCustomDate} />
     {/if}
 
     {#if formError}

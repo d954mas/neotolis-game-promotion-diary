@@ -21,7 +21,16 @@
 
   type Preset = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
 
-  let { value = $bindable<Preset>("30d") }: { value?: Preset } = $props();
+  let {
+    value = $bindable<Preset>("30d"),
+    customDate = $bindable<string | null>(null),
+  }: {
+    value?: Preset;
+    /** Optional custom date (YYYY-MM-DD). When non-null, overrides the
+     *  preset — consumer should derive the absolute date from this
+     *  string instead of the preset. Empty / null means "use preset". */
+    customDate?: string | null;
+  } = $props();
 
   const presets: { id: Preset; label: () => string }[] = [
     { id: "1d", label: m.backfill_picker_preset_1d_label },
@@ -31,6 +40,13 @@
     { id: "1y", label: m.backfill_picker_preset_1y_label },
     { id: "everything", label: m.backfill_picker_preset_everything_label },
   ];
+
+  const todayISO = new Date().toISOString().slice(0, 10);
+  let customExpanded = $state(customDate !== null && customDate !== "");
+  function pickPreset(id: Preset): void {
+    value = id;
+    customDate = null;
+  }
 
   const helperText = $derived.by(() => {
     switch (value) {
@@ -57,15 +73,41 @@
       <button
         type="button"
         class="preset"
-        aria-pressed={value === preset.id}
-        onclick={() => (value = preset.id)}
+        aria-pressed={value === preset.id && !customDate}
+        onclick={() => pickPreset(preset.id)}
       >
         {preset.label()}
       </button>
     {/each}
   </div>
+  <details class="custom-date" bind:open={customExpanded}>
+    <summary>Or pick a custom date…</summary>
+    <div class="custom-date-row">
+      <input
+        type="date"
+        class="custom-date-input"
+        bind:value={customDate}
+        min="2005-01-01"
+        max={todayISO}
+      />
+      {#if customDate}
+        <button
+          type="button"
+          class="custom-date-clear"
+          onclick={() => (customDate = null)}
+          title="Clear custom date and use preset"
+        >Clear</button>
+      {/if}
+    </div>
+  </details>
   <p class="blurb">{m.backfill_picker_section_blurb()}</p>
-  <small class="helper">{helperText}</small>
+  <small class="helper">
+    {#if customDate}
+      Pulling events submitted on or after <b>{customDate}</b>.
+    {:else}
+      {helperText}
+    {/if}
+  </small>
 </div>
 
 <style>
@@ -133,6 +175,78 @@
     font-size: var(--t-12);
     display: block;
     line-height: var(--lh-body);
+  }
+  .helper b {
+    color: var(--text);
+    font-weight: var(--w-sb);
+    font-variant-numeric: tabular-nums;
+  }
+  /* Custom-date disclosure — collapsed by default; reveals a date
+   * input + Clear button when expanded. */
+  .custom-date {
+    margin-top: 2px;
+  }
+  .custom-date > summary {
+    list-style: none;
+    cursor: pointer;
+    color: var(--text-3);
+    font-size: var(--t-12);
+    padding: 4px 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .custom-date > summary::-webkit-details-marker {
+    display: none;
+  }
+  .custom-date > summary::before {
+    content: "›";
+    color: var(--accent);
+    font-size: 14px;
+    line-height: 1;
+    transition: transform var(--m-fast) var(--m-ease);
+  }
+  .custom-date[open] > summary::before {
+    transform: rotate(90deg);
+  }
+  .custom-date > summary:hover {
+    color: var(--text);
+  }
+  .custom-date-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 0 2px;
+  }
+  .custom-date-input {
+    min-height: 36px;
+    padding: 0 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--t-13);
+    font-family: var(--f-mono);
+    outline: none;
+    color-scheme: dark;
+  }
+  .custom-date-input:focus {
+    border-color: var(--accent);
+  }
+  .custom-date-clear {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-3);
+    border-radius: var(--r-sm);
+    padding: 0 10px;
+    min-height: 36px;
+    font-size: var(--t-12);
+    cursor: pointer;
+  }
+  .custom-date-clear:hover {
+    color: var(--text);
+    border-color: var(--border-2);
   }
   @media (prefers-reduced-motion: reduce) {
     .preset {

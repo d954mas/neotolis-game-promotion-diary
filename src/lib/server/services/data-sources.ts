@@ -207,6 +207,9 @@ export interface CreateSourceInput {
   // field is preserved on the row only via `metadata` if the caller chooses
   // to (this service does not stamp it).
   backfillWindow?: BackfillWindow;
+  /** Absolute custom date — UI calendar input. Takes precedence over
+   *  backfillWindow when set. Sentinel 1970-01-01 = 'all history'. */
+  backfillTargetSince?: Date;
 }
 
 export interface UpdateSourcePatch {
@@ -532,7 +535,10 @@ export async function createSource(
           // tickets only pulled newer-than-frontier - silently truncating
           // user's selected history if initial backfill hit cap
           // (MAX_PAGES=20) before the window boundary.
-          backfillTargetSince: backfillWindowToDate(input.backfillWindow ?? "30d"),
+          // Custom date wins over preset; falls back to '30d' preset.
+          backfillTargetSince:
+            input.backfillTargetSince ??
+            backfillWindowToDate(input.backfillWindow ?? "30d"),
         })
         .returning();
       if (!r) {

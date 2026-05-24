@@ -115,6 +115,7 @@
   let menuOpen = $state(false);
   let backfillDialogOpen = $state(false);
   let backfillWindow = $state<BackfillWindow>("30d");
+  let backfillCustomDate = $state<string | null>(null);
   let backfillSaving = $state(false);
   let backfillError = $state<string | null>(null);
 
@@ -134,7 +135,11 @@
     backfillSaving = true;
     backfillError = null;
     try {
-      const target = backfillPresetToDate(backfillWindow);
+      // Custom date wins over preset when both are present (BackfillPicker
+      // clears the preset selection when a custom date is set).
+      const target = backfillCustomDate
+        ? new Date(`${backfillCustomDate}T00:00:00.000Z`)
+        : backfillPresetToDate(backfillWindow);
       const res = await fetch(`/api/sources/${source.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
@@ -531,7 +536,7 @@
         Extend how far back the worker pulls events for this source.
         Window can only move <b>earlier</b> in time (you can't drop already-imported events).
       </p>
-      <BackfillPicker bind:value={backfillWindow} />
+      <BackfillPicker bind:value={backfillWindow} bind:customDate={backfillCustomDate} />
       {#if backfillError}
         <InlineError message={backfillError} />
       {/if}
