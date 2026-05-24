@@ -286,6 +286,7 @@ describe("paraglide i18n", () => {
       "event_detail_footer_edit",
       "event_detail_footer_restore",
       "event_detail_modal_close_aria",
+      "event_detail_modal_header_title",
       "event_detail_modal_next_aria",
       "event_detail_modal_prev_aria",
       "event_detail_notes_click_to_add",
