@@ -248,7 +248,7 @@
       };
     }
     if (!source.autoImport) return { variant: "paused", label: "Paused" };
-    if (source.backfillComplete === false) return { variant: "initial", label: "Initial sync" };
+    if (source.backfillComplete === false) return { variant: "initial", label: "Backfilling" };
     if (!source.lastPolledAt) return { variant: "queued", label: "Queued" };
     return { variant: "live", label: "Live" };
   });
@@ -374,8 +374,17 @@
     {/if}
   </h3>
 
-  <!-- Right cluster — Sync (compact, ghost) + Live/Paused toggle. -->
+  <!-- Right cluster — [status pill] [Sync] [Live/Paused toggle]. Status
+       pill sits next to the manual Sync button because both describe
+       the polling state of this source — user UAT: «status почему не
+       рядом с sync». -->
   <div class="source-actions">
+    <span class="status-pill" data-variant={status.variant}>
+      {#if status.variant === "pulling"}
+        <span class="status-dot" aria-hidden="true"></span>
+      {/if}
+      {status.label}
+    </span>
     <RefreshContentButton
       sourceId={source.id}
       sourceKind={source.kind}
@@ -397,15 +406,9 @@
     </button>
   </div>
 
-  <!-- Footer — [status pill] · events · date range · synced X ago. -->
+  <!-- Footer — events · date range · synced X ago. Status pill moved
+       up to .source-actions (next to Sync button). -->
   <div class="source-foot">
-    <span class="status-pill" data-variant={status.variant}>
-      {#if status.variant === "pulling"}
-        <span class="status-dot" aria-hidden="true"></span>
-      {/if}
-      {status.label}
-    </span>
-    <span class="source-foot-sep">·</span>
     <span>{eventCount} {eventCount === 1 ? "event" : "events"}</span>
     {#if hasRange}
       <span class="source-foot-sep">·</span>
