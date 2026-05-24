@@ -62,7 +62,10 @@ async function main(): Promise<void> {
       title: "Neotolis: Last Light",
       coverUrl:
         "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/367520/header.jpg",
-      releaseDate: "2026-09-15",
+      // releaseDate / releaseTba moved to the listing rows below per
+      // denormalization-audit-2.md V-2 — games row no longer carries
+      // these columns (migration drizzle/0047). Loaders derive them
+      // via JOIN on game_steam_listings.release_date.
       tags: [],
       description:
         "Атмосферный метроидвания-рогалик про последний город на разрушающейся планете. Ручная пиксельная графика, вязкий бой, хардкорная сложность.",
@@ -74,8 +77,6 @@ async function main(): Promise<void> {
       title: "Dungeon Tactics",
       coverUrl:
         "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/646570/header.jpg",
-      releaseDate: "2026-12-01",
-      releaseTba: false,
       tags: [],
       description: "Тактика на гексах в подземельях. Кооп до 4 игроков.",
       notes: "Ранний доступ. Demo Festival осенью.",
@@ -85,7 +86,6 @@ async function main(): Promise<void> {
       userId,
       title: "Starweaver",
       coverUrl: null,
-      releaseTba: true,
       tags: [],
       description: null,
       notes: "Идея в работе. Дата релиза не определена.",
@@ -120,6 +120,24 @@ async function main(): Promise<void> {
       comingSoon: "true",
       steamGenres: ["Strategy", "RPG"],
       steamCategories: ["Multi-player", "Co-op"],
+    },
+    // Starweaver: TBA listing — release_date NULL is Steam's "Coming
+    // soon, no date" sentinel. Loader derives releaseTba=true for this
+    // game because of the NULL release_date here. Replaces the old
+    // games.release_tba=true direct write per denormalization-audit-2.md
+    // V-2.
+    {
+      id: uuidv7(),
+      userId,
+      gameId: gameStarweaver,
+      appId: 999001,
+      label: "Coming Soon",
+      name: "Starweaver",
+      coverUrl: null,
+      releaseDate: null,
+      comingSoon: "true",
+      steamGenres: ["Indie"],
+      steamCategories: ["Single-player"],
     },
   ]);
 
