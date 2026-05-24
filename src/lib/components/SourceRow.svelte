@@ -227,6 +227,31 @@
       ? `synced ${formatRelativeTime(source.lastPolledAt)}`
       : "never synced",
   );
+
+  // Status pill — mirrors event PollingBadge vocabulary. One pill per
+  // row, surfacing the highest-priority signal:
+  //   pulling=true             → "Refreshing now" (animated dot)
+  //   cooldownSec>0            → "Cooldown {m}:{ss}"
+  //   !autoImport              → "Paused"          (user-controlled)
+  //   backfillComplete=false   → "Initial sync"    (first pull pending)
+  //   lastPolledAt=null        → "Queued"          (never polled, waiting)
+  //   default                  → "Live"            (autoImport on, recent poll)
+  type StatusVariant = "pulling" | "cooldown" | "paused" | "initial" | "queued" | "live";
+  const status = $derived.by((): { variant: StatusVariant; label: string } => {
+    if (pulling) return { variant: "pulling", label: "Refreshing now" };
+    if (cooldownSec > 0) {
+      const min = Math.floor(cooldownSec / 60);
+      const sec = cooldownSec % 60;
+      return {
+        variant: "cooldown",
+        label: `Cooldown ${min}:${String(sec).padStart(2, "0")}`,
+      };
+    }
+    if (!source.autoImport) return { variant: "paused", label: "Paused" };
+    if (source.backfillComplete === false) return { variant: "initial", label: "Initial sync" };
+    if (!source.lastPolledAt) return { variant: "queued", label: "Queued" };
+    return { variant: "live", label: "Live" };
+  });
 </script>
 
 <article
@@ -372,8 +397,15 @@
     </button>
   </div>
 
-  <!-- Footer — single mono line: events · date range · synced X ago. -->
+  <!-- Footer — [status pill] · events · date range · synced X ago. -->
   <div class="source-foot">
+    <span class="status-pill" data-variant={status.variant}>
+      {#if status.variant === "pulling"}
+        <span class="status-dot" aria-hidden="true"></span>
+      {/if}
+      {status.label}
+    </span>
+    <span class="source-foot-sep">·</span>
     <span>{eventCount} {eventCount === 1 ? "event" : "events"}</span>
     {#if hasRange}
       <span class="source-foot-sep">·</span>
@@ -701,6 +733,67 @@
   }
   .source-foot-range {
     color: var(--text-2);
+  }
+
+  /* Status pill — mirrors event PollingBadge vocab. One per row,
+   * variant-tinted background + label. */
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    font-family: var(--f-mono);
+    font-size: 11px;
+    font-weight: var(--w-sb);
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+    line-height: 1.4;
+  }
+  .status-pill[data-variant="pulling"] {
+    background: color-mix(in oklab, var(--accent) 18%, var(--surface));
+    border: 1px solid color-mix(in oklab, var(--accent) 55%, var(--border));
+    color: var(--accent-strong);
+  }
+  .status-pill[data-variant="cooldown"] {
+    background: color-mix(in oklab, var(--warn) 14%, var(--surface));
+    border: 1px solid color-mix(in oklab, var(--warn) 50%, var(--border));
+    color: var(--text);
+  }
+  .status-pill[data-variant="paused"] {
+    background: var(--surface-2);
+    border: 1px dashed var(--border-2);
+    color: var(--text-3);
+  }
+  .status-pill[data-variant="initial"] {
+    background: color-mix(in oklab, var(--accent) 14%, var(--surface));
+    border: 1px solid color-mix(in oklab, var(--accent) 40%, var(--border));
+    color: var(--accent-strong);
+  }
+  .status-pill[data-variant="queued"] {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-3);
+  }
+  .status-pill[data-variant="live"] {
+    background: color-mix(in oklab, var(--success, #5eb572) 14%, var(--surface));
+    border: 1px solid color-mix(in oklab, var(--success, #5eb572) 45%, var(--border));
+    color: color-mix(in oklab, var(--success, #5eb572) 70%, var(--text));
+  }
+  /* Animated dot for the "Refreshing now" state. */
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: status-pulse 1s ease-in-out infinite;
+  }
+  @keyframes status-pulse {
+    0%, 100% { opacity: 0.35; transform: scale(0.7); }
+    50%      { opacity: 1;    transform: scale(1.1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .status-dot { animation: none; }
   }
 
   /* Mobile — actions wrap below title on narrow screens. */
