@@ -390,10 +390,15 @@ export async function restoreGame(
  *     mix).
  *
  * Listing.release_date is a free-form string from Steam's appdetails
- * ("Q4 2026" / "14 Mar, 2026"). String comparison gives a stable but
- * not necessarily chronologically-correct ordering across mixed
- * formats. For the indie-scale 1-3 listings/game typical case this is
- * fine; a future enhancement could parse and sort by parsed date.
+ * ("Q4 2026" / "14 Mar, 2026"). The min-across-listings comparison
+ * now uses Date.parse with an Infinity sentinel for unparseable
+ * strings (B-7): concrete dates parse to a millis number and compare
+ * chronologically; quarters / "Coming Soon" / other unparseable
+ * shapes are treated as Infinity and sort last, so they never beat
+ * a real date for the "earliest non-null" pick. This keeps a game
+ * whose listings span ["Q4 2026", "14 Mar, 2026"] picking the March
+ * 2026 row (the earlier date) instead of letting lexical "1" < "Q"
+ * surface the quarter string.
  *
  * Tenant scope: the listing query filters by `eq(gameSteamListings.userId, userId)`
  * AND by `inArray(gameSteamListings.gameId, gameIds)`. Empty input
@@ -424,11 +429,23 @@ export async function deriveReleaseInfoForGames(
     const existing = map.get(r.gameId) ?? { releaseDate: null, releaseTba: false };
     if (r.releaseDate === null) {
       existing.releaseTba = true;
-    } else if (existing.releaseDate === null || r.releaseDate < existing.releaseDate) {
+    } else if (existing.releaseDate === null) {
+      existing.releaseDate = r.releaseDate;
+    } else if (releaseDateMillis(r.releaseDate) < releaseDateMillis(existing.releaseDate)) {
       existing.releaseDate = r.releaseDate;
     }
     map.set(r.gameId, existing);
   }
 
   return map;
+}
+
+/** Parse a free-form Steam release-date string to a comparable number.
+ *  Returns Date.parse result for parseable shapes ("14 Mar, 2026" /
+ *  "2026-03-14"), Infinity for unparseable shapes ("Q4 2026" / "Coming
+ *  Soon"). Infinity sorts last so unparseable strings never beat a
+ *  concrete date when picking the earliest. */
+function releaseDateMillis(s: string): number {
+  const ms = Date.parse(s);
+  return Number.isNaN(ms) ? Infinity : ms;
 }
