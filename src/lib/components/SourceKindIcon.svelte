@@ -45,6 +45,9 @@
     <path d="M10 9.5l5 2.5-5 2.5z" />
   </svg>
 {:else if kind === "reddit_account" || kind === "reddit_subreddit"}
+  <!-- Reddit — geometric stroke icon to match the YouTube rect-and-glyph
+       visual weight. Round head + two ears + antenna dot. Same stroke
+       width / linejoin as the YouTube icon above. -->
   <svg
     class="icon"
     viewBox="0 0 24 24"
@@ -57,8 +60,11 @@
     stroke-linejoin="round"
     aria-hidden="true"
   >
-    <path d="M4 11a3 3 0 016 0v6H7l-3 3v-9z" />
-    <path d="M9 8l3-4 3 4" />
+    <circle cx="12" cy="13" r="7" />
+    <circle cx="6" cy="9.5" r="1.4" />
+    <circle cx="18" cy="9.5" r="1.4" />
+    <circle cx="18.5" cy="5" r="1" fill="currentColor" stroke="none" />
+    <path d="M14.5 10.5 17.5 6" />
   </svg>
 {:else if kind === "twitter_account"}
   <svg

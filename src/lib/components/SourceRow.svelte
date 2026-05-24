@@ -294,17 +294,19 @@
       : "never synced",
   );
 
-  // Status pill — mirrors event PollingBadge vocabulary. One pill per
-  // row, surfacing the highest-priority signal:
-  //   pulling=true             → "Refreshing now" (animated dot)
-  //   cooldownSec>0            → "Cooldown {m}:{ss}"
-  //   !autoImport              → "Paused"          (user-controlled)
-  //   backfillComplete=false   → "Initial sync"    (first pull pending)
-  //   lastPolledAt=null        → "Queued"          (never polled, waiting)
-  //   default                  → "Live"            (autoImport on, recent poll)
-  type StatusVariant = "pulling" | "cooldown" | "paused" | "initial" | "queued" | "live";
+  // Status pill — user mental model: «есть ли в очереди, и обновляется
+  // ли прямо сейчас». Collapsed to 4 variants:
+  //   pulling || !backfillComplete  → "Updating now"  (worker is fetching)
+  //   !autoImport                   → "Paused"         (user toggled off)
+  //   cooldownSec>0                 → "Cooldown {m:ss}" (manual refresh blocked)
+  //   !lastPolledAt                 → "Queued"         (never polled yet)
+  //   default                       → "Up to date"
+  type StatusVariant = "updating" | "paused" | "cooldown" | "queued" | "idle";
   const status = $derived.by((): { variant: StatusVariant; label: string } => {
-    if (pulling) return { variant: "pulling", label: "Refreshing now" };
+    if (pulling || source.backfillComplete === false) {
+      return { variant: "updating", label: "Updating now" };
+    }
+    if (!source.autoImport) return { variant: "paused", label: "Paused" };
     if (cooldownSec > 0) {
       const min = Math.floor(cooldownSec / 60);
       const sec = cooldownSec % 60;
@@ -313,10 +315,8 @@
         label: `Cooldown ${min}:${String(sec).padStart(2, "0")}`,
       };
     }
-    if (!source.autoImport) return { variant: "paused", label: "Paused" };
-    if (source.backfillComplete === false) return { variant: "initial", label: "Backfilling" };
     if (!source.lastPolledAt) return { variant: "queued", label: "Queued" };
-    return { variant: "live", label: "Live" };
+    return { variant: "idle", label: "Up to date" };
   });
 </script>
 
@@ -465,7 +465,7 @@
        рядом с sync». -->
   <div class="source-actions">
     <span class="status-pill" data-variant={status.variant}>
-      {#if status.variant === "pulling"}
+      {#if status.variant === "updating"}
         <span class="status-dot" aria-hidden="true"></span>
       {/if}
       {status.label}
@@ -634,24 +634,31 @@
     right: 10px;
     z-index: 2;
   }
+  /* ⋮ button — make it discoverable. Subtle border + filled surface so
+   * the user sees it as an actionable affordance instead of disappearing
+   * into the background. */
   .card-action-btn.overflow {
-    background: transparent;
-    border: 0;
-    color: var(--text-4);
-    width: 24px;
-    height: 24px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    width: 28px;
+    height: 28px;
     padding: 0;
     border-radius: var(--r-sm);
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: background var(--m-fast), color var(--m-fast);
+    transition:
+      background var(--m-fast),
+      border-color var(--m-fast),
+      color var(--m-fast);
   }
   .card-action-btn.overflow:hover,
   .card-action-btn.overflow[aria-expanded="true"] {
-    background: var(--surface-2);
-    color: var(--text-2);
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-strong);
   }
 
   /* Card menu — small popover anchored under the ⋯ trigger. */
@@ -895,7 +902,7 @@
     text-transform: uppercase;
     line-height: 1.4;
   }
-  .status-pill[data-variant="pulling"] {
+  .status-pill[data-variant="updating"] {
     background: color-mix(in oklab, var(--accent) 18%, var(--surface));
     border: 1px solid color-mix(in oklab, var(--accent) 55%, var(--border));
     color: var(--accent-strong);
@@ -910,17 +917,12 @@
     border: 1px dashed var(--border-2);
     color: var(--text-3);
   }
-  .status-pill[data-variant="initial"] {
-    background: color-mix(in oklab, var(--accent) 14%, var(--surface));
-    border: 1px solid color-mix(in oklab, var(--accent) 40%, var(--border));
-    color: var(--accent-strong);
-  }
   .status-pill[data-variant="queued"] {
     background: var(--surface-2);
     border: 1px solid var(--border);
     color: var(--text-3);
   }
-  .status-pill[data-variant="live"] {
+  .status-pill[data-variant="idle"] {
     background: color-mix(in oklab, var(--success, #5eb572) 14%, var(--surface));
     border: 1px solid color-mix(in oklab, var(--success, #5eb572) 45%, var(--border));
     color: color-mix(in oklab, var(--success, #5eb572) 70%, var(--text));
