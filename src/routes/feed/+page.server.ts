@@ -7,7 +7,7 @@ import {
   getEventById,
   type FeedFilters,
 } from "$lib/server/services/events.js";
-import { listGames } from "$lib/server/services/games.js";
+import { listGames, deriveReleaseInfoForGames } from "$lib/server/services/games.js";
 import { listSources } from "$lib/server/services/data-sources.js";
 import { mapEventsToDtos, toGameDto, toDataSourceDto } from "$lib/server/dto.js";
 import { allAdapters } from "$lib/sources/registry.js";
@@ -213,10 +213,21 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const sourceDtos = sourceRows.map(toDataSourceDto);
   await enrichDataSourceDtosWithYoutubeChannelTitles(sourceDtos);
 
+  // GameDto.releaseDate / .releaseTba derived via JOIN with
+  // game_steam_listings — the games row no longer carries the columns
+  // (denormalization-audit-2.md V-2). FeedCard's game chip reads
+  // `game.releaseDate` for the game it's attached to.
+  const releaseByGameId = await deriveReleaseInfoForGames(
+    userId,
+    gameRows.map((g) => g.id),
+  );
+
   return {
     rows: rowDtos,
     nextCursor: page.nextCursor,
-    games: gameRows.map(toGameDto),
+    games: gameRows.map((g) =>
+      toGameDto(g, releaseByGameId.get(g.id) ?? { releaseDate: null, releaseTba: false }),
+    ),
     sources: sourceDtos,
     deletedEvents: deletedDtos,
     // Phase 03.4 Wave 3 additions:

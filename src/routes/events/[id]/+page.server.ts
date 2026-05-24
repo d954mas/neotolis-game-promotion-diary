@@ -1,7 +1,7 @@
 import type { PageServerLoad } from "./$types";
 import { error, redirect } from "@sveltejs/kit";
 import { getEventById } from "$lib/server/services/events.js";
-import { listGames } from "$lib/server/services/games.js";
+import { listGames, deriveReleaseInfoForGames } from "$lib/server/services/games.js";
 import { listSources } from "$lib/server/services/data-sources.js";
 import {
   toEventDto,
@@ -89,10 +89,25 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
     const sourceDtos = allSources.map(toDataSourceDto);
     await enrichDataSourceDtosWithYoutubeChannelTitles(sourceDtos);
 
+    // GameDto.releaseDate / .releaseTba derived via JOIN with
+    // game_steam_listings — the games row no longer carries the
+    // columns (denormalization-audit-2.md V-2).
+    const releaseByGameId = await deriveReleaseInfoForGames(
+      locals.user.id,
+      games.map((g) => g.id),
+    );
+
     return {
       event: dto,
-      games: games.map(toGameDto),
-      game: primaryGame ? toGameDto(primaryGame) : null,
+      games: games.map((g) =>
+        toGameDto(g, releaseByGameId.get(g.id) ?? { releaseDate: null, releaseTba: false }),
+      ),
+      game: primaryGame
+        ? toGameDto(
+            primaryGame,
+            releaseByGameId.get(primaryGame.id) ?? { releaseDate: null, releaseTba: false },
+          )
+        : null,
       sources: sourceDtos,
       redditPost,
     };

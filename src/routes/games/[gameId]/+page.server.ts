@@ -1,6 +1,10 @@
 import { error } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
-import { getGameById, listGames } from "$lib/server/services/games.js";
+import {
+  getGameById,
+  listGames,
+  deriveReleaseInfoForGames,
+} from "$lib/server/services/games.js";
 import { listListings, listSoftDeletedListings } from "$lib/server/services/game-steam-listings.js";
 import { listEventsForGame } from "$lib/server/services/events.js";
 import { listSources } from "$lib/server/services/data-sources.js";
@@ -9,6 +13,7 @@ import {
   toGameSteamListingDto,
   mapEventsToDtos,
   toDataSourceDto,
+  type DerivedReleaseInfo,
 } from "$lib/server/dto.js";
 import { allAdapters } from "$lib/sources/registry.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
@@ -86,12 +91,39 @@ export const load: PageServerLoad = async ({ locals, params }) => {
   const sourceDtos = sources.map(toDataSourceDto);
   await enrichDataSourceDtosWithYoutubeChannelTitles(sourceDtos);
 
+  // Derive THIS game's releaseDate / releaseTba directly from the
+  // listings we already loaded — no extra query needed. Mirrors the
+  // semantics of deriveReleaseInfoForGames (earliest non-null +
+  // any-null-means-TBA). The listings array is already filtered to
+  // non-deleted rows by listListings.
+  const thisGameDerived: DerivedReleaseInfo = { releaseDate: null, releaseTba: false };
+  for (const l of listings) {
+    if (l.releaseDate === null) {
+      thisGameDerived.releaseTba = true;
+    } else if (
+      thisGameDerived.releaseDate === null ||
+      l.releaseDate < thisGameDerived.releaseDate
+    ) {
+      thisGameDerived.releaseDate = l.releaseDate;
+    }
+  }
+
+  // Derived release info for the `games` array (FeedCard chip uses
+  // game.releaseDate / .releaseTba via the GameLite type). Uses the
+  // batch service so we get one JOIN query for all of the user's
+  // games. Excluding the current gameId is not worth the branch — it's
+  // a single map lookup and a single row in the WHERE IN clause.
+  const allGameIds = gamesAll.map((g) => g.id);
+  const allGameRelease = await deriveReleaseInfoForGames(userId, allGameIds);
+
   return {
-    game: toGameDto(game),
+    game: toGameDto(game, thisGameDerived),
     listings: listings.map(toGameSteamListingDto),
     deletedListings: deletedListings.map(toGameSteamListingDto),
     events: eventDtos,
-    games: gamesAll.map(toGameDto),
+    games: gamesAll.map((r) =>
+      toGameDto(r, allGameRelease.get(r.id) ?? { releaseDate: null, releaseTba: false }),
+    ),
     sources: sourceDtos,
   };
 };

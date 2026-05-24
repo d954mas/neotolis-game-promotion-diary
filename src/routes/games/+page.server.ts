@@ -1,5 +1,9 @@
 import type { PageServerLoad } from "./$types";
-import { listGames, listSoftDeletedGames } from "$lib/server/services/games.js";
+import {
+  listGames,
+  listSoftDeletedGames,
+  deriveReleaseInfoForGames,
+} from "$lib/server/services/games.js";
 import { toGameDto } from "$lib/server/dto.js";
 import { db } from "$lib/server/db/client.js";
 import { eventGames, events } from "$lib/server/db/schema/index.js";
@@ -56,13 +60,32 @@ export const load: PageServerLoad = async ({ locals }) => {
     for (const r of rows) eventCountByGameId.set(r.gameId, Number(r.count));
   }
 
+  // Derive releaseDate / releaseTba from game_steam_listings — the
+  // games row no longer carries these columns. See
+  // services/games.ts deriveReleaseInfoForGames header and
+  // denormalization-audit-2.md V-2 for rationale.
+  const releaseByGameId = await deriveReleaseInfoForGames(locals.user.id, activeIds);
+
   const games = activeRows.map((r) => ({
-    ...toGameDto(r),
+    ...toGameDto(r, releaseByGameId.get(r.id) ?? { releaseDate: null, releaseTba: false }),
     eventCount: eventCountByGameId.get(r.id) ?? 0,
   }));
 
+  // Soft-deleted games get the same JOIN-derived release info so the
+  // recovery dialog and any future trash-list rendering see consistent
+  // values. The deriveReleaseInfoForGames query filters by
+  // `isNull(deletedAt)` on listings only — soft-deleted listings are
+  // intentionally excluded from the derivation regardless of the
+  // parent's state. A soft-deleted game whose listings were cascaded
+  // gets `{ releaseDate: null, releaseTba: false }`, which matches the
+  // dialog's read-only summary surface.
+  const softDeletedIds = softDeletedRows.map((r) => r.id);
+  const softDeletedRelease = await deriveReleaseInfoForGames(locals.user.id, softDeletedIds);
+
   return {
     games,
-    softDeleted: softDeletedRows.map(toGameDto),
+    softDeleted: softDeletedRows.map((r) =>
+      toGameDto(r, softDeletedRelease.get(r.id) ?? { releaseDate: null, releaseTba: false }),
+    ),
   };
 };

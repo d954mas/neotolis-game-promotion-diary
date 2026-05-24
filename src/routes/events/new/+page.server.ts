@@ -1,6 +1,6 @@
 import type { PageServerLoad } from "./$types";
 import { redirect } from "@sveltejs/kit";
-import { listGames } from "$lib/server/services/games.js";
+import { listGames, deriveReleaseInfoForGames } from "$lib/server/services/games.js";
 import { toGameDto } from "$lib/server/dto.js";
 
 /**
@@ -24,7 +24,16 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   }
   const userId = locals.user.id;
   const gameRows = await listGames(userId);
+  // Derive releaseDate / releaseTba from game_steam_listings — the
+  // games row no longer carries the columns
+  // (denormalization-audit-2.md V-2).
+  const releaseByGameId = await deriveReleaseInfoForGames(
+    userId,
+    gameRows.map((g) => g.id),
+  );
   return {
-    games: gameRows.map(toGameDto),
+    games: gameRows.map((g) =>
+      toGameDto(g, releaseByGameId.get(g.id) ?? { releaseDate: null, releaseTba: false }),
+    ),
   };
 };
