@@ -24,6 +24,10 @@
   // RetentionBadge + per-row Restore live INSIDE the dialog (the dialog
   // mirrors the visual treatment SourceRow used for soft-deleted rows).
   import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
+  // Phase 03.4-08: "+ Add data source" is now a modal mounted on /sources
+  // instead of a hard navigate to /sources/new. The /sources/new route
+  // still exists as a fallback (non-JS / direct-link entry).
+  import AddSourceModal from "$lib/components/sources/AddSourceModal.svelte";
   import type { PageData } from "./$types";
 
   type SourceKind =
@@ -134,6 +138,12 @@
   let recoveryOpen = $state(false);
   let restoreError = $state<string | null>(null);
 
+  // AddSourceModal open state. Opened by the "+ Add data source" CTA and
+  // the EmptyState CTA; closed by Esc / backdrop / × / Cancel / a
+  // successful submit. /sources/new still exists as a fallback for
+  // non-JS / direct-link entry.
+  let addOpen = $state(false);
+
   // Collapsable group state — per-group set of platform labels currently
   // collapsed. Persisted across page reloads via localStorage so user
   // preference survives navigation. Empty set = all expanded (default).
@@ -221,9 +231,13 @@
           <span class="metric"><b>{totalEventCount}</b> events</span>
         </span>
       </div>
-      <a class="btn add-source" href="/sources/new">
+      <button
+        type="button"
+        class="btn add-source"
+        onclick={() => (addOpen = true)}
+      >
         {m.sources_cta_new_source()}
-      </a>
+      </button>
       {#if deleted.length > 0}
         <button
           type="button"
@@ -253,9 +267,7 @@
       body={m.empty_sources_body()}
       exampleUrl="@RickAstleyYT"
       ctaLabel={m.sources_cta_new_source()}
-      onCta={() => {
-        window.location.href = "/sources/new";
-      }}
+      onCta={() => (addOpen = true)}
     />
   {:else}
     <div class="sources-list">
@@ -313,6 +325,19 @@
       onRestore={restoreSource}
     />
   {/if}
+
+  <!-- Add-source modal. /sources/new survives as a non-JS fallback; this
+       is the primary affordance from /sources. The modal owns its own
+       form state + submit; on success it calls invalidateAll() and our
+       onSuccess closure no-ops (the loader already re-runs). -->
+  <AddSourceModal
+    open={addOpen}
+    kindMatrix={data.kindMatrix}
+    redditOperatorConfigured={data.redditOperatorConfigured}
+    defaultIsOwnedByMe={data.defaultIsOwnedByMe}
+    defaultAutoImport={data.defaultAutoImport}
+    onClose={() => (addOpen = false)}
+  />
 </section>
 
 <style>
