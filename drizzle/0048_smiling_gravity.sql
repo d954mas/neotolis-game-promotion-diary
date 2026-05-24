@@ -1,0 +1,1 @@
+ALTER TABLE "youtube_videos" DROP COLUMN "channel_title";

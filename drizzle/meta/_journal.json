@@ -337,6 +337,13 @@
       "when": 1779619406528,
       "tag": "0047_bright_shocker",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1780300000000,
+      "tag": "0048_smiling_gravity",
+      "breakpoints": true
     }
   ]
 }
