@@ -95,14 +95,10 @@
         min="2005-01-01"
         max={maxDate ?? todayISO}
       />
-      {#if customDate}
-        <button
-          type="button"
-          class="custom-date-clear"
-          onclick={() => (customDate = null)}
-          title="Clear custom date and use preset"
-        >Clear</button>
-      {/if}
+      <!-- No Clear button — clicking any preset chip above already
+           clears customDate via pickPreset(). Two paths for the same
+           action read as redundant UX. -->
+
     </div>
   </details>
   <p class="blurb">{m.backfill_picker_section_blurb()}</p>
@@ -238,20 +234,6 @@
   }
   .custom-date-input:focus {
     border-color: var(--accent);
-  }
-  .custom-date-clear {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-3);
-    border-radius: var(--r-sm);
-    padding: 0 10px;
-    min-height: 36px;
-    font-size: var(--t-12);
-    cursor: pointer;
-  }
-  .custom-date-clear:hover {
-    color: var(--text);
-    border-color: var(--border-2);
   }
   @media (prefers-reduced-motion: reduce) {
     .preset {
