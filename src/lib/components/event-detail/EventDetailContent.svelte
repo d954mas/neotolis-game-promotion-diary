@@ -557,13 +557,11 @@
       />
     {:else}
       <div class="detail-editable-row title-row">
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <h2
-          class="detail-title title"
-          class:is-editable={!inTrash}
-          onclick={() => !inTrash && startEditTitle()}
-        >{event.title}</h2>
+        <!-- Title is read-only text — pencil button is the only edit
+             affordance. On mobile, tap-to-scroll vs tap-to-edit are
+             indistinguishable, so the text doesn't carry a click handler.
+             Same convention applies to notes below. -->
+        <h2 class="detail-title title">{event.title}</h2>
         {#if !inTrash}
           <button
             type="button"
@@ -692,12 +690,10 @@
     {#if event.notes}
       <div class="detail-editable-row notes-row">
         <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <p
-          class="detail-notes notes"
-          class:is-editable={!inTrash}
-          onclick={() => !inTrash && startEditNotes()}
-        >{event.notes}</p>
+        <!-- Notes are read-only here — pencil button below opens the
+             big notes-editor modal. No click-on-text edit handler
+             because mobile tap-to-scroll would accidentally fire it. -->
+        <p class="detail-notes notes">{event.notes}</p>
         {#if !inTrash}
           <button
             type="button"
