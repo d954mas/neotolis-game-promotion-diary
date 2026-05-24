@@ -2182,95 +2182,171 @@ export async function bulkEdit(
   ipAddress: string,
   userAgent?: string,
 ): Promise<EventDto[]> {
-  // 1. Silently filter cross-tenant gameIds (D-13). checkGameOwnership
-  //    returns false for missing / cross-tenant / soft-deleted games; the
-  //    key is dropped rather than throwing NotFoundError.
-  const validGameIds = new Set<string>();
-  for (const gid of Object.keys(gameStates)) {
-    if (await checkGameOwnership(userId, gid)) validGameIds.add(gid);
+  // 1. Silently filter cross-tenant gameIds (D-13). Single owned-set query
+  //    over the full gameStates key set replaces the per-id round trip from
+  //    the prior implementation (B-4).
+  const requestedGameIds = Object.keys(gameStates);
+  let validGameIds = new Set<string>();
+  if (requestedGameIds.length > 0) {
+    const ownedRows = await db
+      .select({ id: games.id })
+      .from(games)
+      .where(
+        and(
+          eq(games.userId, userId),
+          isNull(games.deletedAt),
+          inArray(games.id, requestedGameIds),
+        ),
+      );
+    validGameIds = new Set(ownedRows.map((r) => r.id));
   }
   const filteredGameStates: Record<string, "on" | "off" | "mixed"> = {};
   for (const [k, v] of Object.entries(gameStates)) {
     if (validGameIds.has(k)) filteredGameStates[k] = v;
   }
 
-  // 2. Load owned + live events from the id list. Cross-tenant + soft-deleted
-  //    ids fall out of the rows array via the userId / deletedAt WHERE
-  //    clauses (D-13 silent filter at the read site).
   const rows = await db
     .select()
     .from(events)
     .where(and(eq(events.userId, userId), isNull(events.deletedAt), inArray(events.id, ids)));
 
   if (rows.length === 0) return [];
+  const eventIds = rows.map((r) => r.id);
 
-  const affectedIds: string[] = [];
+  // Batched diff (B-5): rather than per-event INSERT/DELETE loops inside
+  // the tx, compute the (eventId, gameId) pairs to add/remove across ALL
+  // events up-front and emit two batched statements. Off-topic updates
+  // group by target value and emit at most two UPDATEs.
 
-  // 3. Single tx — per-event diff INSERT/DELETE on event_games + off-topic
-  //    update. The per-event existing-set read happens INSIDE the tx so a
-  //    concurrent attach/detach from another request rolls back cleanly.
+  // 2. ONE SELECT of existing junctions across all target events.
+  const onGameIds: string[] = [];
+  const offGameIds: string[] = [];
+  for (const [gid, state] of Object.entries(filteredGameStates)) {
+    if (state === "on") onGameIds.push(gid);
+    else if (state === "off") offGameIds.push(gid);
+  }
+
+  const affectedSet = new Set<string>();
+  const pairsToAdd: Array<{ eventId: string; gameId: string }> = [];
+  const pairsToRemove: Array<{ eventId: string; gameId: string }> = [];
+
   await db.transaction(async (tx) => {
-    for (const event of rows) {
-      const existing = await tx
-        .select({ gameId: eventGames.gameId })
-        .from(eventGames)
-        .where(and(eq(eventGames.userId, userId), eq(eventGames.eventId, event.id)));
-      const existingSet = new Set(existing.map((r) => r.gameId));
-
-      const toAdd: string[] = [];
-      const toRemove: string[] = [];
-      for (const [gid, state] of Object.entries(filteredGameStates)) {
-        if (state === "on" && !existingSet.has(gid)) toAdd.push(gid);
-        if (state === "off" && existingSet.has(gid)) toRemove.push(gid);
-      }
-
-      for (const gid of toAdd) {
-        await tx.insert(eventGames).values({ userId, eventId: event.id, gameId: gid });
-      }
-      for (const gid of toRemove) {
-        await tx
-          .delete(eventGames)
-          .where(
-            and(
-              eq(eventGames.userId, userId),
-              eq(eventGames.eventId, event.id),
-              eq(eventGames.gameId, gid),
-            ),
-          );
-      }
-
-      if (offTopicState !== "mixed") {
-        const next = offTopicState === "on";
-        // Nested jsonb_set so the outer call creates the `triage` parent if
-        // absent (default events.metadata is `{}` from createEvent — without
-        // the outer wrap, jsonb_set('{triage,offTopic}', ...) silently
-        // no-ops when `triage` doesn't exist). Mirrors the same pattern
-        // dismissFromInbox uses for `{inbox,...}` — bulkEdit owns the
-        // canonical {triage,offTopic} write path since Plan 03.4-10.
-        await tx
-          .update(events)
-          .set({
-            metadata: sql`jsonb_set(
-              jsonb_set(
-                COALESCE(${events.metadata}, '{}'::jsonb),
-                '{triage}',
-                COALESCE(${events.metadata}->'triage', '{}'::jsonb),
-                true
+    // Existing-junction snapshot for both axes inside the tx so a
+    // concurrent attach/detach rolls back cleanly with this work.
+    const existingForAdds =
+      onGameIds.length > 0
+        ? await tx
+            .select({ eventId: eventGames.eventId, gameId: eventGames.gameId })
+            .from(eventGames)
+            .where(
+              and(
+                eq(eventGames.userId, userId),
+                inArray(eventGames.eventId, eventIds),
+                inArray(eventGames.gameId, onGameIds),
               ),
-              '{triage,offTopic}',
-              to_jsonb(${next}::boolean),
-              true
-            )`,
-            updatedAt: new Date(),
-          })
-          .where(and(eq(events.userId, userId), eq(events.id, event.id)));
-      }
+            )
+        : [];
+    const existingAddKeys = new Set(existingForAdds.map((r) => `${r.eventId}|${r.gameId}`));
 
-      if (toAdd.length > 0 || toRemove.length > 0 || offTopicState !== "mixed") {
-        affectedIds.push(event.id);
+    const existingForRemoves =
+      offGameIds.length > 0
+        ? await tx
+            .select({ eventId: eventGames.eventId, gameId: eventGames.gameId })
+            .from(eventGames)
+            .where(
+              and(
+                eq(eventGames.userId, userId),
+                inArray(eventGames.eventId, eventIds),
+                inArray(eventGames.gameId, offGameIds),
+              ),
+            )
+        : [];
+    const existingRemoveKeys = new Set(
+      existingForRemoves.map((r) => `${r.eventId}|${r.gameId}`),
+    );
+
+    for (const event of rows) {
+      for (const gid of onGameIds) {
+        if (!existingAddKeys.has(`${event.id}|${gid}`)) {
+          pairsToAdd.push({ eventId: event.id, gameId: gid });
+        }
+      }
+      for (const gid of offGameIds) {
+        if (existingRemoveKeys.has(`${event.id}|${gid}`)) {
+          pairsToRemove.push({ eventId: event.id, gameId: gid });
+        }
       }
     }
+
+    // INSERT batch — one statement for every (event, game) pair to attach.
+    // ON CONFLICT DO NOTHING covers the race window between the snapshot
+    // SELECT above and this INSERT (concurrent attach from another req);
+    // the (user_id, event_id, game_id) PK absorbs duplicates.
+    if (pairsToAdd.length > 0) {
+      await tx
+        .insert(eventGames)
+        .values(pairsToAdd.map((p) => ({ userId, eventId: p.eventId, gameId: p.gameId })))
+        .onConflictDoNothing();
+      for (const p of pairsToAdd) affectedSet.add(p.eventId);
+    }
+
+    // DELETE batch — one statement for every (event, game) pair to detach.
+    // event_id / game_id / user_id are text columns (NOT uuid — see
+    // event-games.ts header); the explicit ::text casts make the VALUES-
+    // join unambiguous to Postgres so the parameter inferences land on
+    // text and the equality joins type-match the column.
+    if (pairsToRemove.length > 0) {
+      const rowsSql = pairsToRemove.map(
+        (p) => sql`(${p.eventId}::text, ${p.gameId}::text)`,
+      );
+      await tx.execute(sql`
+        DELETE FROM event_games AS eg
+        USING (VALUES ${sql.join(rowsSql, sql`, `)}) AS pairs(eid, gid)
+        WHERE eg.user_id = ${userId}
+          AND eg.event_id = pairs.eid
+          AND eg.game_id = pairs.gid
+      `);
+      for (const p of pairsToRemove) affectedSet.add(p.eventId);
+    }
+
+    // Off-topic UPDATEs — grouped by target value. Per-row jsonb_set
+    // semantics preserved (nested set so triage parent auto-creates). At
+    // most one statement when offTopicState is "on" or "off"; zero when
+    // "mixed". The WHERE filters events whose current value differs from
+    // the target so unchanged rows don't contribute to affectedSet.
+    if (offTopicState !== "mixed") {
+      const next = offTopicState === "on";
+      const result = await tx
+        .update(events)
+        .set({
+          metadata: sql`jsonb_set(
+            jsonb_set(
+              COALESCE(${events.metadata}, '{}'::jsonb),
+              '{triage}',
+              COALESCE(${events.metadata}->'triage', '{}'::jsonb),
+              true
+            ),
+            '{triage,offTopic}',
+            to_jsonb(${next}::boolean),
+            true
+          )`,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(events.userId, userId),
+            inArray(events.id, eventIds),
+            // Skip rows already at the target — keeps affected_count
+            // honest (no churn-only updates pollute the audit row).
+            sql`COALESCE((${events.metadata}->'triage'->>'offTopic')::boolean, false) IS DISTINCT FROM ${next}`,
+          ),
+        )
+        .returning({ id: events.id });
+      for (const r of result) affectedSet.add(r.id);
+    }
   });
+
+  const affectedIds = rows.map((r) => r.id).filter((id) => affectedSet.has(id));
 
   if (affectedIds.length === 0) return [];
 
