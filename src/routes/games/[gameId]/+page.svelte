@@ -24,7 +24,9 @@
   //     tenant-scoped updateGame service — cross-tenant 404 invariant
   //     exercised in tests/integration/games.test.ts.
 
-  import { invalidateAll } from "$app/navigation";
+  import { invalidateAll, goto } from "$app/navigation";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import InlineError from "$lib/components/InlineError.svelte";
   import { m } from "$lib/paraglide/messages.js";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import FeedCard from "$lib/components/FeedCard.svelte";
@@ -162,6 +164,48 @@
     await invalidateAll();
     editGameOpen = false;
   }
+
+  // Notes editor modal — same vocab as event notes-editor-modal. Click
+  // pencil opens; Save PATCHes /api/games/:id { notes }; Cancel discards.
+  let notesEditorOpen = $state(false);
+  let notesDraft = $state("");
+  let notesSaving = $state(false);
+  let notesError = $state<string | null>(null);
+  function openNotesEditor(): void {
+    notesDraft = game.notes ?? "";
+    notesError = null;
+    notesEditorOpen = true;
+  }
+  async function commitNotes(): Promise<void> {
+    if (notesSaving) return;
+    notesSaving = true;
+    notesError = null;
+    try {
+      const res = await fetch(`/api/games/${game.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ notes: notesDraft }),
+      });
+      if (!res.ok) {
+        notesError = "error_server_generic";
+        return;
+      }
+      notesEditorOpen = false;
+      await invalidateAll();
+    } catch {
+      notesError = "error_network";
+    } finally {
+      notesSaving = false;
+    }
+  }
+
+  // Soft-delete game — moved from /games list to here per UAT.
+  let deleteConfirmOpen = $state(false);
+  async function deleteGame(): Promise<void> {
+    const res = await fetch(`/api/games/${game.id}`, { method: "DELETE" });
+    deleteConfirmOpen = false;
+    if (res.ok || res.status === 204) await goto("/games");
+  }
 </script>
 
 <nav class="breadcrumb" aria-label="Breadcrumb">
@@ -250,6 +294,34 @@
   {#if game.description}
     <p class="description">{game.description}</p>
   {/if}
+
+  <!-- Notes section — free-form private remarks, edited via a modal
+       (same vocabulary as event notes-editor-modal). Click the section
+       (text or empty-state button) → opens big editor. -->
+  <div class="notes-section">
+    <div class="notes-head">
+      <span class="notes-label">Notes</span>
+      <button
+        type="button"
+        class="notes-edit-btn"
+        onclick={openNotesEditor}
+        aria-label="Edit notes"
+        title="Edit notes"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6" />
+          <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+        </svg>
+      </button>
+    </div>
+    {#if game.notes}
+      <p class="notes">{game.notes}</p>
+    {:else}
+      <button type="button" class="notes-empty" onclick={openNotesEditor}>
+        + Add notes
+      </button>
+    {/if}
+  </div>
 </section>
 
 <!--
@@ -293,6 +365,79 @@
     </div>
   {/if}
 </section>
+
+<!-- Danger zone — soft-delete this game. Moved from /games list per
+     UAT («удаление игры спрятать в детальное вью»). -->
+<section class="danger-zone">
+  <button
+    type="button"
+    class="delete-game-btn"
+    onclick={() => (deleteConfirmOpen = true)}
+  >
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6" /><path d="M14 11v6" />
+    </svg>
+    <span>Delete game</span>
+  </button>
+</section>
+
+<ConfirmDialog
+  open={deleteConfirmOpen}
+  message={m.confirm_game_delete({ title: game.title })}
+  confirmLabel={m.common_delete()}
+  onConfirm={deleteGame}
+  onCancel={() => (deleteConfirmOpen = false)}
+/>
+
+<!-- Notes editor modal — same pattern as event notes-editor-modal. -->
+{#if notesEditorOpen}
+  <dialog
+    class="notes-editor-modal"
+    open
+    oncancel={(e) => {
+      e.preventDefault();
+      notesEditorOpen = false;
+    }}
+    onclick={(e) => {
+      if (e.target === e.currentTarget) notesEditorOpen = false;
+    }}
+  >
+    <header class="notes-editor-head">
+      <h2 class="notes-editor-title">Notes</h2>
+      <button
+        type="button"
+        class="notes-editor-close"
+        onclick={() => (notesEditorOpen = false)}
+        aria-label="Close"
+      >×</button>
+    </header>
+    <div class="notes-editor-body">
+      <!-- svelte-ignore a11y_autofocus -->
+      <textarea
+        class="notes-editor-textarea"
+        bind:value={notesDraft}
+        onkeydown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
+            void commitNotes();
+          }
+        }}
+        maxlength="50000"
+        autofocus
+        placeholder="Anything worth remembering about this game…"
+      ></textarea>
+      {#if notesError}<InlineError message={notesError} />{/if}
+    </div>
+    <footer class="notes-editor-foot">
+      <button type="button" class="btn ghost" onclick={() => (notesEditorOpen = false)}>Cancel</button>
+      <button type="button" class="btn primary" onclick={() => void commitNotes()} disabled={notesSaving}>
+        {notesSaving ? "Saving…" : "Save"}
+      </button>
+    </footer>
+  </dialog>
+{/if}
 
 <style>
   .breadcrumb {
@@ -367,10 +512,212 @@
   }
   .notes {
     margin: 0;
-    color: var(--text-3);
-    font-size: var(--t-13);
+    color: var(--text-2);
+    font-size: var(--t-14);
     line-height: var(--lh-body);
     white-space: pre-wrap;
+    word-break: break-word;
+  }
+  /* Notes section header row + editable affordance. */
+  .notes-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: var(--s-3);
+    padding-top: var(--s-3);
+    border-top: 1px solid var(--border-hairline);
+  }
+  .notes-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .notes-label {
+    font-size: 10.5px;
+    font-weight: var(--w-sb);
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .notes-edit-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    cursor: pointer;
+    transition: background var(--m-fast), color var(--m-fast), border-color var(--m-fast);
+  }
+  .notes-edit-btn:hover {
+    background: var(--surface-2);
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .notes-empty {
+    align-self: flex-start;
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px dashed color-mix(in oklab, var(--accent) 50%, var(--border));
+    border-radius: var(--r-pill);
+    color: var(--accent);
+    font-size: var(--t-12);
+    font-weight: var(--w-sb);
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .notes-empty:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-strong);
+  }
+
+  /* Danger zone — Delete game CTA pinned at the bottom of the page. */
+  .danger-zone {
+    margin-top: var(--s-6);
+    padding-top: var(--s-4);
+    border-top: 1px solid var(--border-hairline);
+    display: flex;
+    justify-content: flex-end;
+  }
+  .delete-game-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: transparent;
+    border: 1px solid color-mix(in oklab, var(--danger) 45%, var(--border));
+    border-radius: var(--r-sm);
+    color: var(--danger);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+    cursor: pointer;
+    transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+  }
+  .delete-game-btn:hover {
+    background: color-mix(in oklab, var(--danger) 12%, var(--surface));
+    border-color: var(--danger);
+  }
+
+  /* Notes editor modal — same vocab as event notes-editor-modal. */
+  .notes-editor-modal {
+    width: min(900px, calc(100vw - 32px));
+    max-height: min(86vh, 820px);
+    padding: 0;
+    margin: auto;
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-elev);
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+  }
+  .notes-editor-modal::backdrop {
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+  }
+  .notes-editor-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-hairline);
+  }
+  .notes-editor-title {
+    flex: 1;
+    margin: 0;
+    font-size: var(--t-15);
+    font-weight: var(--w-sb);
+  }
+  .notes-editor-close {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .notes-editor-close:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .notes-editor-body {
+    flex: 1;
+    min-height: 0;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .notes-editor-textarea {
+    flex: 1;
+    min-height: 60vh;
+    width: 100%;
+    padding: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    line-height: 1.55;
+    resize: none;
+    outline: none;
+  }
+  .notes-editor-textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .notes-editor-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-hairline);
+  }
+  .notes-editor-foot .btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--hit);
+    padding: 0 var(--s-3);
+    border-radius: var(--r-sm);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+    cursor: pointer;
+  }
+  .notes-editor-foot .btn.ghost {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .notes-editor-foot .btn.ghost:hover {
+    background: var(--surface-3);
+  }
+  .notes-editor-foot .btn.primary {
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: var(--accent-text);
+    font-weight: var(--w-sb);
+  }
+  .notes-editor-foot .btn.primary:hover:not(:disabled) {
+    background: var(--accent-strong);
+  }
+  .notes-editor-foot .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
   /* v2 feed grid mirrors /feed/+page.svelte: single column <640px,
    * minmax(320px, 1fr) ≥640px, 3-column cap at --max-w.

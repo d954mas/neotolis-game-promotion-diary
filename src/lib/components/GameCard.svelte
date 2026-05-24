@@ -90,7 +90,7 @@
     border: 1px solid var(--border);
     border-radius: var(--r-md);
     box-shadow: var(--shadow-card);
-    align-items: center;
+    align-items: start;
     min-width: 0;
     transition: border-color var(--m-fast) var(--m-ease);
   }
