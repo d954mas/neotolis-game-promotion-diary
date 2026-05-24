@@ -186,9 +186,8 @@
       <div class="page-head-titlegroup">
         <h1 class="page-title">Sources</h1>
         <span class="page-head-summary">
-          <b>{active.length}</b> connected
-          <span class="sep">·</span>
-          <b>{totalEventCount}</b> {totalEventCount === 1 ? "event" : "events"} imported
+          <span class="metric"><b>{active.length}</b> sources</span>
+          <span class="metric"><b>{totalEventCount}</b> events</span>
         </span>
       </div>
       <a class="btn add-source" href="/sources/new">
@@ -313,21 +312,26 @@
     line-height: var(--lh-tight);
     letter-spacing: -0.01em;
   }
+  /* Compact metric chips — replaced the verbose "N connected · N events
+   * imported" string. Each metric is a small pill that reads at a
+   * glance. */
   .page-head-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     color: var(--text-3);
     font-family: var(--f-mono);
-    font-size: 11.5px;
-    letter-spacing: 0.01em;
+    font-size: var(--t-12);
     font-variant-numeric: tabular-nums;
   }
-  .page-head-summary b {
-    color: var(--text-2);
-    font-weight: var(--w-sb);
+  .page-head-summary .metric {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 3px;
   }
-  .page-head-summary .sep {
-    margin: 0 4px;
-    color: var(--text-4);
-    opacity: 0.6;
+  .page-head-summary b {
+    color: var(--text);
+    font-weight: var(--w-sb);
   }
 
   /* "+ Add source" — ghost-styled primary CTA inline with the title. The
@@ -448,21 +452,57 @@
   .sources-group:nth-of-type(4) .sources-group-head .kind-icon { color: var(--k-telegram); }
   .sources-group:nth-of-type(5) .sources-group-head .kind-icon { color: var(--k-discord); }
 
+  /* Quota disclosure — visually consistent with .source-row chrome:
+   * surface fill, hairline border, --r-md corners. Summary row has a
+   * tiny accent chevron that rotates on open and a mono label. */
   .quota-disclosure {
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-hairline);
     border-radius: var(--r-md);
-    background: var(--surface-2);
+    background: var(--surface);
+    overflow: hidden;
+    transition: border-color var(--m-fast) var(--m-ease);
+  }
+  .quota-disclosure[open] {
+    border-color: var(--border);
   }
   .quota-disclosure > summary {
     padding: var(--s-2) var(--s-4);
     cursor: pointer;
-    color: var(--text-2);
-    font-size: var(--t-13);
+    color: var(--text-3);
+    font-size: var(--t-12);
+    font-family: var(--f-mono);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
     font-weight: var(--w-sb);
     user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: color var(--m-fast) var(--m-ease);
+  }
+  .quota-disclosure > summary::-webkit-details-marker {
+    display: none;
+  }
+  .quota-disclosure > summary::before {
+    content: "›";
+    display: inline-flex;
+    color: var(--accent);
+    font-family: var(--f-sans);
+    font-size: 14px;
+    line-height: 1;
+    transition: transform var(--m-fast) var(--m-ease);
+    transform: rotate(0deg);
+  }
+  .quota-disclosure[open] > summary::before {
+    transform: rotate(90deg);
   }
   .quota-disclosure > summary:hover {
     color: var(--text);
+  }
+  .quota-disclosure[open] > :not(summary) {
+    padding: var(--s-3) var(--s-4) var(--s-4);
+    border-top: 1px solid var(--border-hairline);
   }
 
   @media (max-width: 480px) {

@@ -127,9 +127,10 @@ async function main(): Promise<void> {
   const srcYtMine = uuidv7();
   const srcYtBlogger = uuidv7();
   const srcReddit = uuidv7();
-  const srcTwitter = uuidv7();
-  const srcTelegram = uuidv7();
-  const srcDiscord = uuidv7();
+  // Twitter / Telegram / Discord seed sources removed — those source
+  // kinds are not in FUNCTIONAL_KINDS (services/data-sources.ts:59), no
+  // adapter ships yet. Showing them on /sources would mislead the user
+  // into expecting polling that can't run.
   await db.insert(dataSources).values([
     {
       id: srcYtMine,
@@ -162,36 +163,6 @@ async function main(): Promise<void> {
       isOwnedByMe: true,
       autoImport: false,
       metadata: { subreddit: "indiedev" },
-    },
-    {
-      id: srcTwitter,
-      userId,
-      kind: "twitter_account",
-      handleUrl: "https://twitter.com/neotolisgames",
-      displayName: "@neotolisgames",
-      isOwnedByMe: true,
-      autoImport: false,
-      metadata: {},
-    },
-    {
-      id: srcTelegram,
-      userId,
-      kind: "telegram_channel",
-      handleUrl: "https://t.me/neotolis_devblog",
-      displayName: "Neotolis Devblog",
-      isOwnedByMe: true,
-      autoImport: false,
-      metadata: {},
-    },
-    {
-      id: srcDiscord,
-      userId,
-      kind: "discord_server",
-      handleUrl: "https://discord.gg/neotolis",
-      displayName: "Neotolis Community",
-      isOwnedByMe: true,
-      autoImport: false,
-      metadata: {},
     },
   ]);
 
@@ -337,45 +308,9 @@ async function main(): Promise<void> {
       notes: null,
       metadata: { subreddit: "IndieGaming", author: "neotolis_dev" },
     },
-    {
-      kind: "twitter_post",
-      sourceId: srcTwitter,
-      authorIsMe: true,
-      title: "Pixel art breakdown: how we paint our dungeons",
-      url: "https://twitter.com/neotolisgames/status/1812345678",
-      occurred: daysAgo(8),
-      games: [gameNeotolis],
-      notes: "Тред из 6 твитов. 1.2k лайков, 240 ретвитов.",
-    },
-    {
-      kind: "twitter_post",
-      sourceId: srcTwitter,
-      authorIsMe: true,
-      title: "Coming Soon на Steam — Neotolis: Last Light",
-      url: "https://twitter.com/neotolisgames/status/1820000000",
-      occurred: daysAgo(40),
-      games: [gameNeotolis],
-      notes: null,
-    },
-    {
-      kind: "telegram_post",
-      sourceId: srcTelegram,
-      authorIsMe: true,
-      title: "Devblog #14 — что мы делаем с боссами",
-      url: "https://t.me/neotolis_devblog/142",
-      occurred: daysAgo(5),
-      games: [gameNeotolis],
-      notes: "На канале сейчас 1.4k подписчиков. Reach ~2200.",
-    },
-    {
-      kind: "discord_drop",
-      sourceId: srcDiscord,
-      authorIsMe: true,
-      title: "Drop #07 — playable build for testers",
-      occurred: daysAgo(10),
-      games: [gameDungeon],
-      notes: "Раздали 200 ключей в Discord, обратная связь в #playtest-feedback.",
-    },
+    // Twitter / Telegram / Discord event seeds removed — those event
+    // kinds are not in FUNCTIONAL_KINDS, no source rows exist to attach
+    // them to, and the /sources page doesn't show their group.
     {
       kind: "conference",
       sourceId: null,
@@ -487,7 +422,7 @@ async function main(): Promise<void> {
     },
     { action: "event.created", days: 12, meta: { kind: "reddit_post" } },
     { action: "event.dismissed_from_inbox", days: 8, meta: {} },
-    { action: "event.edited", days: 5, meta: { kind: "telegram_post" } },
+    { action: "event.edited", days: 5, meta: { kind: "press" } },
     { action: "session.signin", days: 0, meta: { ip: "127.0.0.1" } },
   ];
   for (const a of auditEntries) {
