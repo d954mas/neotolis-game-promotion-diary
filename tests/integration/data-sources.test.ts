@@ -8,6 +8,7 @@ import {
   softDeleteSource,
   restoreSource,
   assertNoChannelConflict,
+  markSourceNeedsReconnect,
 } from "../../src/lib/server/services/data-sources.js";
 import { loadSourceDetailPage } from "../../src/lib/server/services/sources-page-read.js";
 import { toDataSourceDto } from "../../src/lib/server/dto.js";
@@ -698,6 +699,58 @@ describe("soft-delete + retention + auto_import toggle + audit", () => {
     );
     expect(second.id).not.toBe(first.id);
     expect(second.deletedAt).toBeNull();
+  });
+});
+
+// markSourceNeedsReconnect — AdapterError surface columns.
+// Plan 03.4-08 surfaces these to /sources as a danger-tinted 'Error: <kind>'
+// pill on SourceRow. The UI render path keys off DTO fields, so the
+// load-bearing invariant is: after the helper writes, the DTO carries the
+// expected values back through getSourceById → toDataSourceDto.
+describe("markSourceNeedsReconnect — surfaces AdapterError state on DTO", () => {
+  it("flips needsReconnect=true + writes lastErrorKind + lastErrorAt on the source row", async () => {
+    const userA = await seedUserDirectly({ email: "ds-needs-reconnect@test.local" });
+    const src = await createSource(
+      userA.id,
+      { kind: "youtube_channel", handleUrl: "https://www.youtube.com/@needs-reconnect" },
+      "127.0.0.1",
+    );
+    // Sanity — fresh source is clean.
+    const beforeDto = toDataSourceDto(await getSourceById(userA.id, src.id));
+    expect(beforeDto.needsReconnect).toBe(false);
+    expect(beforeDto.lastErrorKind).toBeNull();
+    expect(beforeDto.lastErrorAt).toBeNull();
+
+    const tStart = Date.now();
+    await markSourceNeedsReconnect(userA.id, src.id, "not-found");
+
+    const afterDto = toDataSourceDto(await getSourceById(userA.id, src.id));
+    expect(afterDto.needsReconnect).toBe(true);
+    expect(afterDto.lastErrorKind).toBe("not-found");
+    expect(afterDto.lastErrorAt).toBeInstanceOf(Date);
+    // lastErrorAt is "now-ish" — within the last 60s. Loose bound so the
+    // assertion survives slow CI runners without becoming a flake.
+    expect(afterDto.lastErrorAt!.getTime()).toBeGreaterThanOrEqual(tStart - 1000);
+    expect(afterDto.lastErrorAt!.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+  });
+
+  it("operator-issue category surfaces as lastErrorKind='operator-issue' — drives 'Error: Setup' UI label", async () => {
+    // Reddit cron + YouTube channel-context-backfill both write
+    // 'operator-issue' for malformed source metadata. The SourceRow
+    // pill maps that kind to "Error: Setup"; the integration contract
+    // is just "the kind round-trips intact through the DTO".
+    const userA = await seedUserDirectly({ email: "ds-needs-reconnect-op@test.local" });
+    const src = await createSource(
+      userA.id,
+      { kind: "reddit_account", handleUrl: "https://reddit.com/user/operator-issue-test" },
+      "127.0.0.1",
+    );
+
+    await markSourceNeedsReconnect(userA.id, src.id, "operator-issue");
+
+    const dto = toDataSourceDto(await getSourceById(userA.id, src.id));
+    expect(dto.needsReconnect).toBe(true);
+    expect(dto.lastErrorKind).toBe("operator-issue");
   });
 });
 
