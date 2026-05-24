@@ -45,7 +45,10 @@ import { events } from "$lib/server/db/schema/events.js";
 import { youtubeVideos as youtubeVideosTable } from "../schema/index.js";
 import { logger } from "$lib/server/logger.js";
 import { writeAuditStrict } from "$lib/server/audit.js";
-import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
+import {
+  markSourceNeedsReconnect,
+  clearNeedsReconnect,
+} from "$lib/server/services/data-sources.js";
 import {
   getChannelState,
   markChannelLastPolledAt,
@@ -345,6 +348,20 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
       }
     }
     await markChannelLastPolledAt(kind, channelKey);
+    // B-2: clear needsReconnect on all subscribers — successful empty-result
+    // poll still proves upstream is healthy. Idempotent on already-clean rows.
+    if (pollResult.unitsUsed > 0) {
+      for (const sub of subscribers) {
+        try {
+          await clearNeedsReconnect(sub.userId, sub.id);
+        } catch (err) {
+          logger.warn(
+            { userId: sub.userId, sourceId: sub.id, err: String((err as Error)?.message ?? err) },
+            "youtube.backfill.channel: clearNeedsReconnect failed",
+          );
+        }
+      }
+    }
     if (triggerUserId) {
       await writeBackfillAudit({
         job,
@@ -639,6 +656,21 @@ export async function handleBackfillChannel(job: BackfillChannelJob): Promise<vo
     await markChannelBackfillComplete(kind, channelKey);
   }
   await markChannelLastPolledAt(kind, channelKey);
+
+  // B-2: clear needsReconnect on all subscribers — successful end-to-end
+  // walk proves upstream is healthy again. Counterpart to the
+  // markSourceNeedsReconnect calls in the AdapterError handler above.
+  // Idempotent (skips UPDATE when already clean).
+  for (const sub of subscribers) {
+    try {
+      await clearNeedsReconnect(sub.userId, sub.id);
+    } catch (err) {
+      logger.warn(
+        { userId: sub.userId, sourceId: sub.id, err: String((err as Error)?.message ?? err) },
+        "youtube.backfill.channel: clearNeedsReconnect failed",
+      );
+    }
+  }
 
   // 10. Audit — only for trigger user. Cron flows are traced via
   //     youtube_service_quota_usage operator pool table; no per-user row.

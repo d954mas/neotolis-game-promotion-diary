@@ -44,7 +44,10 @@ import { buildPostMetadata } from "../post-metadata.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { events } from "$lib/server/db/schema/events.js";
 import { AdapterError } from "$lib/sources/errors.js";
-import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
+import {
+  markSourceNeedsReconnect,
+  clearNeedsReconnect,
+} from "$lib/server/services/data-sources.js";
 import { logger } from "$lib/server/logger.js";
 import { classifySnapshotStatus } from "./post-single.js";
 import { getSubredditWalkState, commitSubredditWalkProgress } from "../walker-state.js";
@@ -249,6 +252,12 @@ export async function handleSubPoll(args: {
   // threshold gate still reflects "this sub keeps failing".
   await resetNotFoundOnSuccess(db, "subreddit", sub);
 
+  // B-2: clear needsReconnect on every subscriber of this sub. Counterpart
+  // to flagNotFoundOnSubscribers — if we got here without throwing, the
+  // upstream is healthy again. Idempotent (clearNeedsReconnect filters
+  // WHERE needsReconnect=true, so no-op on already-clean rows).
+  await clearNeedsReconnectOnSubscribers(sub);
+
   logger.info(
     {
       sub,
@@ -419,6 +428,33 @@ async function fanOutToSubscribers(sub: string, t3s: T3Data[]): Promise<number> 
     .onConflictDoNothing()
     .returning({ id: events.id });
   return ins.length;
+}
+
+/** Counterpart to flagNotFoundOnSubscribers — on successful end-to-end
+ *  poll, drop the needs-reconnect bit for every subscriber. WHERE spans
+ *  tenants by design — an external sub doesn't have an owning user. */
+async function clearNeedsReconnectOnSubscribers(sub: string): Promise<void> {
+  // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- channel-scoped fan-out: external sub has no owning user
+  const subscribers = await db
+    .select({ userId: dataSources.userId, id: dataSources.id })
+    .from(dataSources)
+    .where(
+      and(
+        eq(dataSources.kind, "reddit_subreddit"),
+        sql`${dataSources.metadata}->>'subreddit' = ${sub}`,
+        isNull(dataSources.deletedAt),
+      ),
+    );
+  for (const s of subscribers) {
+    try {
+      await clearNeedsReconnect(s.userId, s.id);
+    } catch (err) {
+      logger.warn(
+        { userId: s.userId, sourceId: s.id, err: String((err as Error)?.message ?? err) },
+        "reddit sub_poll: clearNeedsReconnect failed",
+      );
+    }
+  }
 }
 
 /** When a sub returns 404 / private, flag every auto_import subscriber's

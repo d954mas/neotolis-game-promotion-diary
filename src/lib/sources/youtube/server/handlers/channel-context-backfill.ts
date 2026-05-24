@@ -44,7 +44,10 @@ import { env } from "$lib/server/config/env.js";
 import { parseYoutubeUrl } from "../url.js";
 import { logger } from "$lib/server/logger.js";
 import { AdapterError } from "$lib/sources/errors.js";
-import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
+import {
+  markSourceNeedsReconnect,
+  clearNeedsReconnect,
+} from "$lib/server/services/data-sources.js";
 import {
   markChannelLastPolledAt,
   markChannelBackfillFrontier,
@@ -791,6 +794,21 @@ async function handleChannelContextBackfillImpl(job: {
       // clear token because we did NOT exhaust pagination, we just
       // stopped at the window boundary.
       await setChannelBackfillPageToken("youtube_channel", channelId, null);
+    }
+  }
+
+  // B-2: clear needsReconnect — handler completed end-to-end without
+  // throwing, so the source is healthy again. Idempotent (skips UPDATE
+  // when already clean). Only relevant when sourceId is present
+  // (createSource flow); ingest-paste backfill has no parent source row.
+  if (sourceId) {
+    try {
+      await clearNeedsReconnect(userId, sourceId);
+    } catch (err) {
+      logger.warn(
+        { jobId: job.id, sourceId, err: String((err as Error)?.message ?? err) },
+        "channel-context-backfill: clearNeedsReconnect failed; continuing",
+      );
     }
   }
 
