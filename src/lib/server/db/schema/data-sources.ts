@@ -69,6 +69,14 @@ export const dataSources = pgTable(
     handleUrl: text("handle_url").notNull(),
     channelId: text("channel_id"),
     displayName: text("display_name"),
+    // Free-form per-user note attached to this source. The source title is
+    // read-only canonical (channelTitle / r/<sub> / u/<handle>) — the user
+    // cannot rename what arrives from the upstream platform, but can
+    // annotate it with a private remark to disambiguate similar handles
+    // ("press contact", "asked for review codes", etc.). NULL when unset;
+    // empty-string saves are normalized back to NULL by the route layer.
+    // 500-char ceiling enforced at the API boundary (z.string().max(500)).
+    note: text("note"),
     isOwnedByMe: boolean("is_owned_by_me").notNull().default(true),
     autoImport: boolean("auto_import").notNull().default(true),
     metadata: jsonb("metadata")
