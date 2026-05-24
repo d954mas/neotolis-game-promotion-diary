@@ -45,9 +45,9 @@
     <path d="M10 9.5l5 2.5-5 2.5z" />
   </svg>
 {:else if kind === "reddit_account" || kind === "reddit_subreddit"}
-  <!-- Reddit — geometric stroke icon to match the YouTube rect-and-glyph
-       visual weight. Round head + two ears + antenna dot. Same stroke
-       width / linejoin as the YouTube icon above. -->
+  <!-- Reddit — same Snoo silhouette as KindIcon (used on feed cards) so
+       a user scanning /sources + /feed reads the platform consistently.
+       Geometry mirrors src/lib/components/KindIcon.svelte:54-71. -->
   <svg
     class="icon"
     viewBox="0 0 24 24"
@@ -60,11 +60,16 @@
     stroke-linejoin="round"
     aria-hidden="true"
   >
-    <circle cx="12" cy="13" r="7" />
-    <circle cx="6" cy="9.5" r="1.4" />
-    <circle cx="18" cy="9.5" r="1.4" />
-    <circle cx="18.5" cy="5" r="1" fill="currentColor" stroke="none" />
-    <path d="M14.5 10.5 17.5 6" />
+    <circle cx="18.5" cy="5" r="1.4" fill="currentColor" stroke="none" />
+    <path d="M14.7 11.2 17.5 6.5" />
+    <circle cx="12" cy="13.5" r="6.5" fill="currentColor" stroke="none" />
+    <circle cx="7" cy="9.5" r="1.6" fill="currentColor" stroke="none" />
+    <circle cx="17" cy="9.5" r="1.6" fill="currentColor" stroke="none" />
+    <circle cx="9.5" cy="13" r="1.1" fill="var(--surface)" stroke="none" />
+    <circle cx="14.5" cy="13" r="1.1" fill="var(--surface)" stroke="none" />
+    <circle cx="9.5" cy="13" r=".45" fill="currentColor" stroke="none" />
+    <circle cx="14.5" cy="13" r=".45" fill="currentColor" stroke="none" />
+    <path d="M9.5 16c1.5 1.2 3.5 1.2 5 0" stroke="var(--surface)" stroke-width="1.2" fill="none" />
   </svg>
 {:else if kind === "twitter_account"}
   <svg
