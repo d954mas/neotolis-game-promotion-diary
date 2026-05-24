@@ -10,11 +10,12 @@
   //     (FK lookup at /feed loader time). NEVER from event.metadata —
   //     the channel name can be renamed by the YouTube account owner
   //     after the event was logged; reading from the owning row is the
-  //     only way to stay fresh. event.channelTitle (populated by
-  //     youtube_videos.channel_title) is the legacy denormalized read
-  //     path; we keep it as a fallback ONLY for events whose source
-  //     was deleted (sourceId=null) so the card still shows a label,
-  //     but the source row is the canonical truth when present.
+  //     only way to stay fresh. event.channelTitle (now populated by
+  //     feed-enrichment JOIN on youtube_channels — no-denorm fix V-1,
+  //     see docs/denormalization-policy.md) is the fallback for events
+  //     whose source row was deleted (sourceId=null) so the card still
+  //     shows a label; data_sources.channelTitle remains the canonical
+  //     truth when present.
   //   - thumbnail: img.youtube.com/vi/{externalId}/mqdefault.jpg —
   //     externalId IS the video id, intrinsic to the YouTube URL.
   //   - stats: event.stats.{viewCount,likeCount,commentCount} — these
@@ -74,9 +75,9 @@
 
   // YouTube channel name — read via FK from data_sources.channelTitle.
   // When source is null (deleted source / manual paste before backfill)
-  // fall back to event.channelTitle (the legacy denormalized snapshot
-  // from youtube_videos.channel_title — a P1 schema fix tracked in
-  // .planning/phases/03.4-design-v2-ux/denormalization-audit.md).
+  // fall back to event.channelTitle, which the /feed loader populates
+  // by JOINing youtube_videos → youtube_channels (source of truth post
+  // no-denorm fix V-1, see docs/denormalization-policy.md).
   const sourceLabel = $derived.by((): string => {
     const fromSource = youtubeChannelLabel(source);
     if (fromSource.length > 0) return fromSource;

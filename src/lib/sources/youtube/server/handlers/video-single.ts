@@ -65,7 +65,7 @@
 import { sql, eq, and, gte, desc } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "$lib/server/db/client.js";
-import { youtubeVideos, youtubeVideoSnapshots } from "../schema/index.js";
+import { youtubeVideos, youtubeVideoSnapshots, youtubeChannels } from "../schema/index.js";
 import { fetchYoutubeOembed } from "$lib/server/integrations/youtube-oembed.js";
 import { hasYoutubeApiKeys, youtubeQuotaUser } from "../quota.js";
 import { chargedFetch } from "../http.js";
@@ -114,10 +114,12 @@ export interface HandleVideoSingleResult {
   /** Title from oEmbed (always present on success) — Data API may
    *  override with a fresher value if it was called. */
   title: string;
-  /** From oEmbed `author_name` — populates youtube_videos.channel_title.
-   *  Always non-null on success because oEmbed succeeded before we get
-   *  here (the caller maps oEmbed failures into the unreachable
-   *  fallback BEFORE invoking this handler). */
+  /** From oEmbed `author_name`. Returned to callers for in-memory use
+   *  (e.g. immediate /events/new preview rendering). NOT persisted to
+   *  youtube_videos — that column was dropped in no-denorm fix V-1
+   *  (docs/denormalization-policy.md); youtube_channels carries the
+   *  channel display name now. Always non-null on success because
+   *  oEmbed succeeded before we get here. */
   channelTitle: string;
   /** Resolved when Data API responded; null when API key absent or
    *  request failed. With null, the row is UPSERTed without
@@ -241,9 +243,11 @@ export async function handleVideoSingle(
   // youtube_video_snapshots are all PUBLIC-DATA (no user_id column);
   // the ESLint tenant-scope allowlist already covers them.
   await db.transaction(async (tx) => {
-    // 1. UPSERT youtube_videos. Use COALESCE on channel_id /
-    //    published_at / description so a later oEmbed-only path
-    //    can't null out values written by an earlier Data API hit.
+    // 1. UPSERT youtube_videos. No channel_title column — that lives
+    //    on youtube_channels and is read at JOIN time
+    //    (docs/denormalization-policy.md V-1). Use COALESCE on
+    //    channel_id / published_at so a later oEmbed-only path can't
+    //    null out values written by an earlier Data API hit.
     const now = new Date();
     await tx
       .insert(youtubeVideos)
@@ -252,7 +256,6 @@ export async function handleVideoSingle(
         title: oembedTitle,
         description: null,
         channelId: dataApiResult?.channelId ?? null,
-        channelTitle: oembedChannelTitle,
         publishedAt: dataApiResult?.publishedAt ?? null,
         fetchedAt: now,
       })
@@ -264,7 +267,6 @@ export async function handleVideoSingle(
           // agree, oEmbed wins here for consistency with the no-key
           // path).
           title: sql`EXCLUDED.title`,
-          channelTitle: sql`EXCLUDED.channel_title`,
           // COALESCE so a no-API-key re-paste doesn't clobber a
           // previously-resolved channel_id.
           channelId: sql`COALESCE(EXCLUDED.channel_id, ${youtubeVideos.channelId})`,
@@ -288,12 +290,12 @@ export async function handleVideoSingle(
     //    - the worker's playlistItems walk discovering new uploads
     //  Both have the channels.list response and write the row
     //  correctly. Paste-only events don't need the channel row
-    //  immediately — `youtube_videos.channel_title` is what
-    //  feed-enrichment reads for the chip name today (denorm-debt
-    //  V-1 tracked in .planning/phases/03.4-design-v2-ux/
-    //  denormalization-audit.md). When the user later registers
-    //  this channel as a source, the row will be UPSERTed
-    //  properly.)
+    //  immediately — feed-enrichment LEFT JOINs youtube_channels
+    //  and falls back to null when the channel hasn't been
+    //  backfilled yet (no-denorm fix V-1, see
+    //  docs/denormalization-policy.md). When the user later
+    //  registers this channel as a source, the row gets UPSERTed
+    //  properly and the channel chip surfaces on the next render.)
 
     // 2. Optional snapshot row when Data API gave us stats.
     //    Mirrors handlePostSingle's reddit_post_snapshots write +
@@ -382,16 +384,21 @@ export async function handleVideoSingle(
  */
 async function readCachedVideo(videoId: string): Promise<HandleVideoSingleResult | null> {
   const since = new Date(Date.now() - VIDEO_SINGLE_DEDUP_WINDOW_MS);
+  // channelTitle JOINs youtube_channels (source of truth post-V-1
+  // no-denorm fix). LEFT JOIN because a paste-only video pre-backfill
+  // has a resolved channel_id but no youtube_channels row until
+  // channel-context-backfill runs — caller's "" fallback covers it.
   const rows = await db
     .select({
       videoId: youtubeVideos.videoId,
       title: youtubeVideos.title,
       channelId: youtubeVideos.channelId,
-      channelTitle: youtubeVideos.channelTitle,
+      channelTitle: youtubeChannels.channelTitle,
       publishedAt: youtubeVideos.publishedAt,
       fetchedAt: youtubeVideos.fetchedAt,
     })
     .from(youtubeVideos)
+    .leftJoin(youtubeChannels, eq(youtubeVideos.channelId, youtubeChannels.channelId))
     .where(and(eq(youtubeVideos.videoId, videoId), gte(youtubeVideos.fetchedAt, since)))
     .limit(1);
   const row = rows[0];

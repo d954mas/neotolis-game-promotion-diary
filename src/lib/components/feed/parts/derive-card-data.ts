@@ -16,13 +16,13 @@
 //
 // What's intentionally NOT here:
 //   - event.metadata.channelTitle reads. The /feed loader populates
-//     event.channelTitle via JOIN with youtube_videos, which is itself
-//     a (currently denormalized) snapshot of the channel name —
-//     tracked in the denormalization-audit doc as a P1 schema fix.
-//     For the v0.1 ship, YoutubeFeedCard intentionally prefers the
-//     `source` prop (data_sources.channelTitle resolved at read time)
-//     over event.channelTitle so a channel rename + source-row update
-//     reflects everywhere immediately.
+//     event.channelTitle by JOINing youtube_videos → youtube_channels
+//     (source of truth post no-denorm fix V-1, see
+//     docs/denormalization-policy.md). YoutubeFeedCard still prefers
+//     the `source` prop (data_sources.channelTitle resolved at read
+//     time) over event.channelTitle so a registered channel's rename
+//     reflects everywhere immediately; event.channelTitle is the
+//     fallback for unregistered channels.
 
 export type CardEventKind =
   | "youtube_video"

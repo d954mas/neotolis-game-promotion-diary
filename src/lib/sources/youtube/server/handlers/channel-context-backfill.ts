@@ -552,9 +552,13 @@ async function handleChannelContextBackfillImpl(job: {
   }
 
   // 5a. UPSERT youtube_videos. One row per video, no time-series  -
-  //     title / description / channel only. The snippet half of
-  //     videos.list lands here so the /events/new "Get from YouTube"
-  //     button can read it for free on a re-paste of the same video.
+  //     title / description / channel_id only (no channel_title; see
+  //     docs/denormalization-policy.md V-1). The youtube_channels
+  //     UPSERT below is the canonical writer for the channel display
+  //     name; feed-enrichment + metadata.ts cache reads JOIN it back
+  //     in at read time. The snippet half of videos.list lands here
+  //     so the /events/new "Get from YouTube" button can read it for
+  //     free on a re-paste of the same video.
   for (const item of allItems) {
     const sn = item.snippet;
     if (!sn) continue;
@@ -566,7 +570,6 @@ async function handleChannelContextBackfillImpl(job: {
         title: sn.title,
         description: sn.description ?? null,
         channelId: sn.channelId ?? null,
-        channelTitle: sn.channelTitle ?? null,
         publishedAt,
         fetchedAt: now,
       })
@@ -576,7 +579,6 @@ async function handleChannelContextBackfillImpl(job: {
           title: sn.title,
           description: sn.description ?? null,
           channelId: sn.channelId ?? null,
-          channelTitle: sn.channelTitle ?? null,
           publishedAt,
           fetchedAt: now,
           updatedAt: now,
