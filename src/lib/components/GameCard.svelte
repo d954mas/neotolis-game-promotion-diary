@@ -51,18 +51,18 @@
     </h3>
     <div class="meta">
       {#if game.releaseTba || game.releaseDate}
-        <span class="badge release" title="Release date">
+        <span class="release-date" title="Release date">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="3" y="4" width="18" height="18" rx="2" />
             <line x1="16" y1="2" x2="16" y2="6" />
             <line x1="8" y1="2" x2="8" y2="6" />
             <line x1="3" y1="10" x2="21" y2="10" />
           </svg>
-          {game.releaseTba ? m.badge_release_tba() : game.releaseDate}
+          <span>{game.releaseTba ? m.badge_release_tba() : game.releaseDate}</span>
         </span>
       {/if}
       {#if game.eventCount !== undefined && game.eventCount > 0}
-        <span class="badge event-count">{game.eventCount} {game.eventCount === 1 ? "event" : "events"}</span>
+        <span class="event-count">{game.eventCount} {game.eventCount === 1 ? "event" : "events"}</span>
       {/if}
     </div>
     {#if game.description}
@@ -147,28 +147,21 @@
     flex-wrap: wrap;
     gap: var(--s-1);
   }
-  .badge,
-  .chip {
-    font-family: var(--f-sans);
-    font-size: var(--t-12);
-    color: var(--text-3);
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: var(--r-pill);
-    padding: var(--s-0) var(--s-2);
-  }
-  .badge {
+  /* Inline meta items — plain text, no pill border so they read as
+   * metadata (date, count) instead of taggable chips. User UAT: «дата
+   * показывается как чип, что выглядело как какой-то тег». */
+  .release-date,
+  .event-count {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    font-family: var(--f-mono);
+    font-size: var(--t-12);
+    color: var(--text-3);
   }
-  .badge.release {
-    color: var(--text-2);
-  }
-  .badge.event-count {
-    color: var(--text);
-    background: color-mix(in oklab, var(--card-accent) 14%, var(--surface));
-    border-color: color-mix(in oklab, var(--card-accent) 40%, var(--border));
+  .event-count {
+    color: color-mix(in oklab, var(--card-accent) 60%, var(--text-2));
+    font-weight: var(--w-sb);
   }
   /* 2-line description excerpt — same line-clamp pattern as FeedCard. */
   .description {
