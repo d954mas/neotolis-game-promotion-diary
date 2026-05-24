@@ -174,9 +174,15 @@ describe("YouTube paste flow — public-data cache population", () => {
     expect(result.externalId).toBe(videoId);
     expect(result.authorName).toBe("Test Channel Name");
 
-    // 1. youtube_videos row exists with both oEmbed-derived
-    //    (channel_title) AND Data-API-derived (channel_id,
-    //    published_at) columns populated.
+    // 1. youtube_videos row exists with Data-API-derived
+    //    (channel_id, published_at) columns populated. channel_title
+    //    NOT on this row post no-denorm fix V-1 — it lives on
+    //    youtube_channels and is read via JOIN (see
+    //    docs/denormalization-policy.md). handleVideoSingle
+    //    intentionally does NOT UPSERT youtube_channels (videos.list
+    //    snippet lacks uploads_playlist_id which is NOT NULL on that
+    //    table); the channel-context-backfill worker is the canonical
+    //    writer for youtube_channels.
     const rows = await db
       .select()
       .from(youtubeVideos)
@@ -184,12 +190,15 @@ describe("YouTube paste flow — public-data cache population", () => {
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
     expect(row.title).toBe("Test Video Title");
-    expect(row.channelTitle).toBe("Test Channel Name");
     expect(row.channelId).toBe(channelId);
     expect(row.publishedAt).toBeInstanceOf(Date);
     expect(row.publishedAt?.toISOString()).toBe("2026-03-15T12:00:00.000Z");
     expect(row.lastPollStatus).toBe("ok");
     expect(row.lastPolledAt).toBeInstanceOf(Date);
+    // result.authorName == "Test Channel Name" already asserted above
+    // (line 175) — that's the in-memory return value derived from
+    // oEmbed, which is the source for live preview rendering. It is
+    // NOT persisted to youtube_videos by design.
 
     // 2. youtube_video_snapshots row written from videos.list stats.
     const snaps = await db
@@ -226,9 +235,11 @@ describe("YouTube paste flow — public-data cache population", () => {
     expect(result.kind).toBe("youtube_video");
     expect(result.externalId).toBe(videoId);
 
-    // 1. youtube_videos row exists with title + channel_title
-    //    from oEmbed; channel_id + published_at stay null because
-    //    Data API was unavailable.
+    // 1. youtube_videos row exists with title from oEmbed; channel_id
+    //    + published_at stay null because Data API was unavailable.
+    //    channel_title NOT on this row (no-denorm fix V-1, see
+    //    docs/denormalization-policy.md). result.authorName below
+    //    asserts the in-memory oEmbed value surfaces for the caller.
     const rows = await db
       .select()
       .from(youtubeVideos)
@@ -236,11 +247,13 @@ describe("YouTube paste flow — public-data cache population", () => {
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
     expect(row.title).toBe("Test Video Title");
-    expect(row.channelTitle).toBe("Test Channel Name");
     expect(row.channelId).toBeNull();
     expect(row.publishedAt).toBeNull();
     // last_polled_at NOT set because no Data API call happened.
     expect(row.lastPolledAt).toBeNull();
+    // In-memory result surfaces channelTitle from oEmbed even with
+    // no Data API key.
+    expect(result.authorName).toBe("Test Channel Name");
 
     // 2. NO snapshot row — we never had stats.
     const snaps = await db
