@@ -5,11 +5,18 @@
 //   - filtersOpen: whether the per-axis filter strip is expanded
 //   - eventDetailOpen: whether the EventDetailModal is mounted
 //
-// Per CONTEXT D-03 / D-04: this store is INTENTIONALLY ephemeral — F5
-// resets selection, an unmount of /feed resets filtersOpen, and there is
+// Per CONTEXT D-03 / D-04: this store is INTENTIONALLY ephemeral across
+// reloads — F5 resets everything because the module re-evaluates. There is
 // NO localStorage persistence. The prototype's `v2-filters-open` and
 // `v2-sort-dir` keys were dropped — URL params are the single source of
 // truth for filter axes that need to survive a reload.
+//
+// NOTE: the writable singleton survives client-side navigation away from
+// /feed and back (the module stays loaded). Selection and filtersOpen are
+// preserved on cross-route navigation by design — return-to-feed keeps the
+// user's working context. Hard reload (F5) is the only reset path. If a
+// future requirement needs unmount-reset, add `onDestroy(clearAll)` in
+// `/feed/+page.svelte` — not here, because the store has no lifecycle hook.
 //
 // The Set<string> in selectedIds is REPLACED on every helper invocation
 // (`new Set(s.selectedIds)`); Svelte's `writable` only fires subscribers on
