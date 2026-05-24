@@ -458,6 +458,9 @@
   "source_note_dialog_hint": "Private remark to disambiguate this source from similar handles. Only you see it.",
   "source_note_placeholder": "e.g. press contact for indie horror; asked for review codes",
 
+  "source_action_retry_now": "Retry now",
+  "source_action_reconnect": "Reconnect…",
+
   "add_source_modal_title": "Add data source",
   "add_source_modal_close_aria": "Close add source dialog",
 

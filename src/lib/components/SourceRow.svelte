@@ -62,6 +62,15 @@
     eventCount?: number;
     metadata?: Record<string, unknown> | null;
     backfillTargetSince?: Date | string | null;
+    // AdapterError surface — populated by markSourceNeedsReconnect() when
+    // an adapter throws operator-issue / permanent / not-found / rate-
+    // limited against this source. The DTO has carried these since Phase
+    // 03 (see src/lib/server/dto.ts:250) but this component's local Dto
+    // shape only listed the fields the row needed for layout; once the
+    // status pill surfaces them, the local type must list them too.
+    needsReconnect?: boolean;
+    lastErrorAt?: Date | string | null;
+    lastErrorKind?: string | null;
   };
 
   let {
@@ -361,6 +370,25 @@
       : "never synced",
   );
 
+  // Map stored AdapterError category → human-friendly UI label. Unknown
+  // kinds fall through to a passthrough so we never hide an emergent
+  // signal behind "Error" alone — the operator still sees WHICH kind.
+  function errorLabel(kind: string): string {
+    switch (kind) {
+      case "not-found":
+        return "Error: Not found";
+      case "rate-limited":
+        return "Error: Rate limited";
+      case "permanent":
+        return "Error: Banned";
+      case "operator-issue":
+      case "invalid_metadata":
+        return "Error: Setup";
+      default:
+        return `Error: ${kind}`;
+    }
+  }
+
   // Status pill — user mental model: «есть ли в очереди, и обновляется
   // ли прямо сейчас». Driven SOLELY by signals that reflect actual
   // worker / queue state — never by stored defaults that may not have
@@ -370,13 +398,24 @@
   // for the channelId — sources without one stayed "Updating now"
   // forever even with no job in flight).
   //
+  //   needsReconnect|lastErrorKind → "Error: <kind>" (top priority — a
+  //                                  broken source must not masquerade
+  //                                  as "Queued" forever)
   //   pulling=true            → "Updating now"  (pg-boss job active/created)
   //   !autoImport             → "Paused"         (user toggled off)
   //   cooldownSec>0           → "Cooldown M:SS"  (manual refresh blocked)
   //   !lastPolledAt           → "Queued"         (never polled yet)
   //   default                 → "Up to date"
-  type StatusVariant = "updating" | "paused" | "cooldown" | "queued" | "idle";
+  type StatusVariant = "error" | "updating" | "paused" | "cooldown" | "queued" | "idle";
   const status = $derived.by((): { variant: StatusVariant; label: string } => {
+    if (source.needsReconnect || source.lastErrorKind) {
+      // lastErrorKind is the most specific signal; fall back to a
+      // generic 'setup' label when only needsReconnect is set (defensive
+      // — the markSourceNeedsReconnect helper always writes both, but
+      // an external/manual UPDATE could leave kind null).
+      const kind = source.lastErrorKind ?? "operator-issue";
+      return { variant: "error", label: errorLabel(kind) };
+    }
     if (pulling) return { variant: "updating", label: "Updating now" };
     if (!source.autoImport) return { variant: "paused", label: "Paused" };
     if (cooldownSec > 0) {
@@ -390,6 +429,31 @@
     if (!source.lastPolledAt) return { variant: "queued", label: "Queued" };
     return { variant: "idle", label: "Up to date" };
   });
+
+  // Manual "Retry now" — replicates RefreshContentButton's POST. The
+  // button itself is already on the row but lives behind the Sync icon;
+  // when in error state the user benefits from a labelled, in-context
+  // affordance under the ⋮ menu next to the matching "Reconnect" item.
+  let retryingNow = $state(false);
+  async function retryNow(): Promise<void> {
+    if (retryingNow) return;
+    retryingNow = true;
+    rowError = null;
+    try {
+      const res = await fetch(`/api/sources/${source.id}/refresh-content`, {
+        method: "POST",
+      });
+      if (!res.ok && res.status !== 200 && res.status !== 202) {
+        rowError = m.error_server_generic();
+      } else {
+        await invalidateAll();
+      }
+    } catch {
+      rowError = m.error_network();
+    } finally {
+      retryingNow = false;
+    }
+  }
 </script>
 
 <article
@@ -464,6 +528,44 @@
           </svg>
           <span>Backfill window…</span>
         </button>
+        {#if status.variant === "error"}
+          <!-- Recovery affordances surface only when the source IS in
+               error state. Retry now mirrors the Sync button (one more
+               polling attempt — if the upstream is healthy again this
+               clears needsReconnect on the next successful run). Reconnect
+               navigates to /sources/[id] where the user can edit the
+               handle URL — recommended for permanent / not-found / setup
+               errors that won't self-heal. -->
+          <button
+            type="button"
+            class="card-menu-item"
+            role="menuitem"
+            disabled={retryingNow}
+            onclick={() => {
+              menuOpen = false;
+              void retryNow();
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="23 4 23 10 17 10" />
+              <polyline points="1 20 1 14 7 14" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+            <span>{m.source_action_retry_now()}</span>
+          </button>
+          <a
+            class="card-menu-item"
+            role="menuitem"
+            href="/sources/{source.id}"
+            onclick={() => (menuOpen = false)}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+            <span>{m.source_action_reconnect()}</span>
+          </a>
+        {/if}
         <button
           type="button"
           class="card-menu-item danger"
@@ -852,9 +954,14 @@
     cursor: pointer;
     border-radius: var(--r-sm);
     transition: background var(--m-fast) var(--m-ease);
+    text-decoration: none;
   }
   .card-menu-item:hover {
     background: var(--surface-3);
+  }
+  .card-menu-item:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
   }
   .card-menu-item.danger {
     color: var(--danger);
@@ -1126,6 +1233,14 @@
     background: color-mix(in oklab, var(--success, #5eb572) 14%, var(--surface));
     border: 1px solid color-mix(in oklab, var(--success, #5eb572) 45%, var(--border));
     color: color-mix(in oklab, var(--success, #5eb572) 70%, var(--text));
+  }
+  /* Error variant — danger-tinted pill that displaces every other
+   * status. The user MUST see that the source is broken, so the
+   * priority chain in `status` puts this branch first. */
+  .status-pill[data-variant="error"] {
+    background: color-mix(in oklab, var(--danger) 14%, var(--surface));
+    border: 1px solid color-mix(in oklab, var(--danger) 55%, var(--border));
+    color: var(--danger);
   }
   /* Animated dot for the "Refreshing now" state. */
   .status-dot {
