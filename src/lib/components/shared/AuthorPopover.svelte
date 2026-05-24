@@ -63,21 +63,40 @@
   let fixedLeft = $state(0);
   $effect(() => {
     if (!anchor || !popEl) return;
-    const rect = anchor.getBoundingClientRect();
-    const popRect = popEl.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const PAD = 8;
-    if (placement === "up") {
-      fixedTop = rect.top - popRect.height - 6;
-    } else {
-      fixedTop = rect.bottom + 6;
-    }
-    // Horizontal placement: prefer right-aligning popover edge to anchor
-    // edge. Clamp to viewport [PAD, vw - popRect.width - PAD] so the
-    // popover never spills past either viewport edge.
-    const desiredLeft = rect.right - popRect.width;
-    const maxLeft = vw - popRect.width - PAD;
-    fixedLeft = Math.max(PAD, Math.min(desiredLeft, maxLeft));
+    const a = anchor;
+    const p = popEl;
+
+    const reposition = (): void => {
+      const rect = a.getBoundingClientRect();
+      const popRect = p.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const PAD = 8;
+      if (placement === "up") {
+        fixedTop = rect.top - popRect.height - 6;
+      } else {
+        fixedTop = rect.bottom + 6;
+      }
+      // Horizontal placement: prefer right-aligning popover edge to anchor
+      // edge. Clamp to viewport [PAD, vw - popRect.width - PAD] so the
+      // popover never spills past either viewport edge.
+      const desiredLeft = rect.right - popRect.width;
+      const maxLeft = vw - popRect.width - PAD;
+      fixedLeft = Math.max(PAD, Math.min(desiredLeft, maxLeft));
+    };
+    reposition();
+
+    // B-9: reposition on scroll + resize so the popover stays glued to
+    // the anchor when the page scrolls underneath an open menu (e.g. on
+    // EventDetailModal where the modal body scrolls). `capture: true`
+    // on scroll catches scrolls from nested scroll containers too — a
+    // non-capturing listener on window only fires for window-level
+    // scrolls.
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("resize", reposition);
+    return () => {
+      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("resize", reposition);
+    };
   });
 
   function pickMine(): void {
