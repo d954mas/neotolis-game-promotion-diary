@@ -568,6 +568,59 @@ describe("soft-delete + retention + auto_import toggle + audit", () => {
     expect(audits).toHaveLength(0);
   });
 
+  // Phase 03.4-08: source titles became read-only canonical, with a separate
+  // free-form `note` field replacing the inline-rename of `displayName`. The
+  // service-layer contract: `note` round-trips through updateSource, the
+  // column accepts null (clear), and cross-tenant updates still 404.
+  it("updateSource persists note (set, clear, round-trip via getSourceById)", async () => {
+    const userA = await seedUserDirectly({ email: "ds-note-a@test.local" });
+    const src = await createSource(
+      userA.id,
+      { kind: "youtube_channel", handleUrl: "https://youtube.com/@withnote" },
+      "127.0.0.1",
+    );
+
+    // Fresh row: note starts NULL (column nullable, default null).
+    expect(src.note).toBeNull();
+
+    // Set a non-empty note.
+    const setRow = await updateSource(
+      userA.id,
+      src.id,
+      { note: "press contact — asked for review codes" },
+      "127.0.0.1",
+    );
+    expect(setRow.note).toBe("press contact — asked for review codes");
+
+    // Re-read confirms persistence (not a return-value-only artifact).
+    const reread = await getSourceById(userA.id, src.id);
+    expect(reread.note).toBe("press contact — asked for review codes");
+
+    // Clearing via null sets the column back to NULL.
+    const clearedRow = await updateSource(userA.id, src.id, { note: null }, "127.0.0.1");
+    expect(clearedRow.note).toBeNull();
+  });
+
+  it("cross-tenant updateSource with note still throws NotFoundError (404, never 403)", async () => {
+    const userA = await seedUserDirectly({ email: "ds-note-b@test.local" });
+    const userB = await seedUserDirectly({ email: "ds-note-c@test.local" });
+    const aSrc = await createSource(
+      userA.id,
+      { kind: "youtube_channel", handleUrl: "https://youtube.com/@victim" },
+      "127.0.0.1",
+    );
+    // userB attempts to set a note on userA's source — tenant-scope WHERE on
+    // the SELECT inside updateSource (getSourceById) yields no row, and the
+    // 404 sentinel fires. Note-aware patch path inherits the same gate; no
+    // separate test surface needed for the column itself.
+    await expect(
+      updateSource(userB.id, aSrc.id, { note: "I should not see this" }, "127.0.0.1"),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    // Bonus: the row stays untouched.
+    const persisted = await getSourceById(userA.id, aSrc.id);
+    expect(persisted.note).toBeNull();
+  });
+
   it("softDeleteSource writes audit BEFORE the soft-delete update (forensics order)", async () => {
     const userA = await seedUserDirectly({ email: "ds14@test.local" });
     const src = await createSource(

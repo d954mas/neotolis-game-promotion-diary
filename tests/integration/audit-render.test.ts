@@ -1742,24 +1742,30 @@ describe("layout regression fixes + /audit FiltersSheet schema cleanup", () => {
 });
 
 /**
- * SourceRow inline-affordances rewrite (Phase 03.4 Wave 2 — Plan 03.4-09).
+ * SourceRow inline-affordances rewrite (Phase 03.4 Wave 2 — Plan 03.4-09)
+ * with the Phase 03.4-08 follow-up that retired inline title-rename in
+ * favour of a read-only canonical title + separate `note` affordance.
  *
- * The original Phase 02.1-33 edit-form (rename + auto-import checkbox +
- * Remove in form footer) was replaced by four dedicated inline
- * affordances on the row itself:
- *   - Click handle text → inline rename → PATCH /api/sources/:id { displayName }.
+ * The original Phase 02.1-33 edit-form was replaced by inline affordances
+ * on the row itself, and Phase 03.4-08 then dropped one of those (title
+ * rename) when user feedback established that source titles are canonical
+ * (channelTitle / r/sub / u/handle) and a private `note` is the right
+ * escape hatch for disambiguation:
+ *   - Title is a plain text span — NO click-to-edit, NO pencil.
+ *   - Note block under the title → opens .note-dialog → PATCH /api/sources/:id { note }.
  *   - Click avatar → AuthorPopover → PATCH /api/sources/:id { isOwnedByMe }.
  *   - Click toggle (.source-toggle) → flips autoImport → PATCH /api/sources/:id { autoImport }.
  *   - ⋯ overflow menu (.card-actions / .card-menu) → Remove → opens ConfirmDialog.
  *
- * The edit-form, section-divider, footer-btn-* variants, edit pencil, and
- * checkbox-bound editAutoImport state are all GONE (no replacement —
- * inline affordances replace them functionally).
+ * The edit-form, section-divider, footer-btn-* variants, edit pencil,
+ * checkbox-bound editAutoImport state, AND the inline rename machinery
+ * (renameMode / renameDraft / .source-title-text button / .source-title-input
+ * / commitRename) are all GONE.
  *
  * SSR-level regression guards live here — grep + structural assertions on
  * SourceRow.svelte source.
  */
-describe("SourceRow inline-affordances (Phase 03.4 Wave 2 — Plan 03.4-09)", () => {
+describe("SourceRow inline-affordances (Phase 03.4 Wave 2 — Plan 03.4-09 + Plan 03.4-08 note)", () => {
   it("SourceRow row structure — <article class=\"source-row\"> + .card-actions overflow + .source-title + .source-actions + .source-foot", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
@@ -1769,7 +1775,7 @@ describe("SourceRow inline-affordances (Phase 03.4 Wave 2 — Plan 03.4-09)", ()
     // ⋯ overflow trigger — same affordance as feed-card; lives in .card-actions.
     expect(src).toMatch(/class="card-actions"/);
     expect(src).toMatch(/class="card-action-btn overflow"/);
-    // Title row carries kind icon + author avatar + handle text.
+    // Title row carries kind icon + author avatar + canonical handle text.
     expect(src).toMatch(/class="source-title"/);
     // Right cluster — Sync (RefreshContentButton) + Live/Paused toggle.
     expect(src).toMatch(/class="source-actions"/);
@@ -1779,20 +1785,43 @@ describe("SourceRow inline-affordances (Phase 03.4 Wave 2 — Plan 03.4-09)", ()
     expect(src).toMatch(/class="source-foot"/);
   });
 
-  it("SourceRow click-handle inline rename — .source-title-text button toggles renameMode → <input class=\"source-title-input\">", async () => {
+  it("SourceRow title is read-only canonical — NO inline rename machinery (Phase 03.4-08)", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
-    // Inline-rename state machine: renameMode + renameDraft signals; click
-    // .source-title-text flips renameMode=true and renders .source-title-input.
-    expect(src).toMatch(/let renameMode = \$state\(false\)/);
-    expect(src).toMatch(/let renameDraft = \$state/);
-    expect(src).toMatch(/class="source-title-text"/);
-    expect(src).toMatch(/class="source-title-input"/);
-    expect(src).toMatch(/async function commitRename/);
-    // PATCH payload — pure rename, NO autoImport (separate affordance now).
+    // The title is a plain text span — NOT a click-to-edit button. The
+    // four legacy markers from the inline-rename state machine are all
+    // removed by Plan 03.4-08.
+    expect(src).not.toMatch(/let renameMode = \$state/);
+    expect(src).not.toMatch(/let renameDraft = \$state/);
+    expect(src).not.toMatch(/class="source-title-input"/);
+    expect(src).not.toMatch(/async function commitRename/);
+    // The title element itself is now a span (the .source-title-text
+    // class may stay as a styling hook, but it is not a <button>).
+    // Grep for the legacy <button class="source-title-text" — its absence
+    // is the regression guard.
+    expect(src).not.toMatch(/<button[^>]*class="source-title-text"/);
+    // PATCH payload for the title field is no longer emitted — the UI
+    // never sends `displayName` from this component anymore.
+    expect(src).not.toMatch(/displayName:\s*next/);
+  });
+
+  it("SourceRow note affordance — .source-note block + .note-dialog + PATCH /api/sources/:id { note } (Phase 03.4-08)", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
+    // Note state machine — dialog open + draft.
+    expect(src).toMatch(/let noteDialogOpen = \$state/);
+    expect(src).toMatch(/let noteDraft = \$state/);
+    // Note block class anchored to the new CSS rules below the title.
+    expect(src).toMatch(/class="source-note/);
+    // Dialog vocab mirrors .backfill-dialog (header / body / foot).
+    expect(src).toMatch(/class="note-dialog"/);
+    // commitNote PATCHes { note } — empty string becomes null at the
+    // boundary (route normalizes); the client passes `noteDraft` directly.
+    expect(src).toMatch(/async function commitNote/);
     expect(src).toMatch(/method:\s*"PATCH"/);
-    expect(src).toMatch(/displayName:\s*next/);
+    expect(src).toMatch(/\bnote:\s*/);
   });
 
   it("SourceRow author popover — .source-author-trigger button opens AuthorPopover; changeAuthor PATCHes { isOwnedByMe }", async () => {
