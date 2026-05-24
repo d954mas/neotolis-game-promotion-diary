@@ -69,6 +69,7 @@ const baseSources = [
     handleUrl: "https://youtube.com/@test",
     channelId: "UCxxx",
     displayName: "My Test Channel",
+    note: null,
     isOwnedByMe: true,
     autoImport: true,
     metadata: {},

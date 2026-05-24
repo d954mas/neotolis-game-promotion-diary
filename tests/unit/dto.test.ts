@@ -183,6 +183,7 @@ describe("toDataSourceDto strips userId", () => {
       handleUrl: "https://reddit.com/user/me",
       channelId: null,
       displayName: null,
+      note: null,
       isOwnedByMe: false,
       autoImport: false,
       metadata: {},
@@ -224,12 +225,17 @@ describe("toDataSourceDto strips userId", () => {
       "lastPolledAt",
       "metadata",
       "needsReconnect",
+      // Free-form per-user remark. Phase 03.4-08 — replaces the inline-
+      // rename of `displayName` (source titles are now read-only canonical;
+      // the user annotates via this field instead).
+      "note",
       "updatedAt",
     ]);
     expect(dto.deletedAt).toEqual(deletedAt);
     expect(dto.kind).toBe("reddit_account");
     expect(dto.channelId).toBeNull();
     expect(dto.displayName).toBeNull();
+    expect(dto.note).toBeNull();
     expect(dto.isOwnedByMe).toBe(false);
     expect(dto.autoImport).toBe(false);
     expect(dto.needsReconnect).toBe(false);
@@ -239,6 +245,30 @@ describe("toDataSourceDto strips userId", () => {
     expect(dto.backfillOldestAt).toBeNull();
     expect(dto.backfillComplete).toBe(false);
     expect(dto.backfillTargetSince).toBeNull();
+  });
+
+  it("note field round-trips truthy values", () => {
+    // The note column is read-write per the Phase 03.4-08 spec (replaces
+    // inline-rename). The projection MUST pass non-null notes through
+    // unchanged; the column ceiling (500 chars) is enforced at the route
+    // boundary, not the DTO layer.
+    const fakeRow = {
+      id: "src-note",
+      userId: "u1",
+      kind: "youtube_channel" as const,
+      handleUrl: "https://youtube.com/@x",
+      channelId: null,
+      displayName: null,
+      note: "press contact — asked for review codes",
+      isOwnedByMe: true,
+      autoImport: true,
+      metadata: {},
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: null,
+    };
+    const dto = toDataSourceDto(fakeRow as Parameters<typeof toDataSourceDto>[0]);
+    expect(dto.note).toBe("press contact — asked for review codes");
   });
 
   it("coerces null/undefined metadata to empty object", () => {

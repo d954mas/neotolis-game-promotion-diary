@@ -97,6 +97,13 @@ const updateSourceSchema = z
     autoImport: z.boolean().optional(),
     isOwnedByMe: z.boolean().optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
+    // Free-form per-user remark. 500-char ceiling — long enough for a
+    // sentence-fragment annotation ("press contact for indie horror"),
+    // short enough that the column doesn't become a free-text dumping
+    // ground. Nullable to let the UI clear an existing note; the route
+    // layer normalizes empty-string saves to null below so the field has
+    // exactly two states: present (truthy non-empty) or unset.
+    note: z.string().max(500).nullable().optional(),
     // Earliest-event boundary user wants pulled. Accept ISO date string
     // from UI (date picker / preset button). Coerced to Date and validated
     // server-side in updateSource:
@@ -222,10 +229,19 @@ sourcesRoutes.patch(
   async (c) => {
     const ctx = getAuditContext(c);
     try {
+      const body = c.req.valid("json");
+      // Normalize empty-string note to null at the boundary. A truly
+      // empty note has no UI representation distinct from "no note set",
+      // so the column has exactly two states: NULL (no note) or non-empty
+      // text. The UI's "Clear" path sends "" or null indifferently.
+      const patch =
+        body.note !== undefined && typeof body.note === "string" && body.note.trim().length === 0
+          ? { ...body, note: null }
+          : body;
       const row = await updateSource(
         ctx.userId,
         c.req.param("id"),
-        c.req.valid("json"),
+        patch,
         ctx.ipAddress,
         ctx.userAgent ?? undefined,
       );

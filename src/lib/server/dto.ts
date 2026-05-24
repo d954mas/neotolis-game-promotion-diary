@@ -223,6 +223,10 @@ export interface DataSourceDto {
   handleUrl: string;
   channelId: string | null;
   displayName: string | null;
+  // Free-form per-user remark. NULL = unset. UI renders it under the
+  // (read-only canonical) title row when truthy, or shows a "+ Add note"
+  // ghost button when null.
+  note: string | null;
   isOwnedByMe: boolean;
   autoImport: boolean;
   metadata: Record<string, unknown>;
@@ -271,6 +275,7 @@ export function toDataSourceDto(r: DataSourceRow): DataSourceDto {
     handleUrl: r.handleUrl,
     channelId: r.channelId,
     displayName: r.displayName,
+    note: r.note,
     isOwnedByMe: r.isOwnedByMe,
     autoImport: r.autoImport,
     metadata: (r.metadata ?? {}) as Record<string, unknown>,

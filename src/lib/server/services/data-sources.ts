@@ -217,6 +217,12 @@ export interface UpdateSourcePatch {
   autoImport?: boolean;
   isOwnedByMe?: boolean;
   metadata?: Record<string, unknown>;
+  /** Free-form per-user note. Null clears the field; empty-string is
+   *  normalized to null at the route layer (an empty string saved would
+   *  read back as a truthy `.length === 0` value and confuse the
+   *  "render Note vs +Add note" branch). 500-char ceiling enforced at the
+   *  route boundary (z.string().max(500)). */
+  note?: string | null;
   /** Change earliest-event boundary user wants pulled. Worker uses this
    *  as `since` for historical catch-up; the UI date picker + preset
    *  radios send absolute Date here. Sentinel 1970-01-01 = "all history".
@@ -672,6 +678,7 @@ export async function updateSource(
   if (patch.autoImport !== undefined) update.autoImport = patch.autoImport;
   if (patch.isOwnedByMe !== undefined) update.isOwnedByMe = patch.isOwnedByMe;
   if (patch.metadata !== undefined) update.metadata = patch.metadata;
+  if (patch.note !== undefined) update.note = patch.note;
 
   // backfill_target_since change. Validate: must be in past. Recompute
   // backfill_complete based on new target:
