@@ -744,11 +744,18 @@
    * opens the big notes-editor modal. Long content scrolls vertically
    * with a soft max-height; placeholder reads grey-italic. */
   .addevt-notes-trigger {
+    /* Top-align content. Default <button> centers text vertically;
+     * with min-height:84px that put short text in the middle and read
+     * as a strange top-margin. align-items:flex-start fixes the
+     * inline-flex layout button-elements get. */
+    display: flex;
+    align-items: flex-start;
     text-align: left;
     cursor: pointer;
     min-height: 84px;
     max-height: 200px;
     overflow-y: auto;
+    padding: 10px 12px;
     line-height: var(--lh-body);
     font-family: var(--f-sans);
   }
