@@ -967,6 +967,43 @@ export async function markSourceNeedsReconnect(
     .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
 }
 
+/**
+ * Clear the AdapterError surface columns after a successful adapter run.
+ *
+ * Counterpart to `markSourceNeedsReconnect`: if an adapter handler completes
+ * without throwing, the operator-issue / not-found / permanent state must
+ * downshift. Otherwise `needsReconnect=true` is one-way and the UI shows
+ * `Error: Setup` forever even after the upstream is fixed (B-2).
+ *
+ * Idempotent: filters on `needsReconnect=true` so a no-op call skips the
+ * UPDATE entirely. Safe to invoke from every adapter-success path without
+ * worrying about write amplification.
+ *
+ * Tenant scope: userId is the first non-optional argument and the UPDATE's
+ * WHERE clause filters on `eq(dataSources.userId, userId)`. Cross-tenant
+ * misuse is a compile-time block via the ESLint rule.
+ */
+export async function clearNeedsReconnect(
+  userId: string,
+  sourceId: string,
+): Promise<void> {
+  await db
+    .update(dataSources)
+    .set({
+      needsReconnect: false,
+      lastErrorAt: null,
+      lastErrorKind: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(dataSources.userId, userId),
+        eq(dataSources.id, sourceId),
+        eq(dataSources.needsReconnect, true),
+      ),
+    );
+}
+
 // ----- Backfill state machine helpers -----
 // All four mark* helpers accept optional dbCtx (DbOrTx) so worker chunk
 // transactions can write state alongside event INSERTs atomically. Default
