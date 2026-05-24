@@ -9,6 +9,7 @@ import svelteParser from "svelte-eslint-parser";
 import prettier from "eslint-config-prettier";
 import globals from "globals";
 import tenantScope from "./eslint-plugin-tenant-scope/index.js";
+import localRules from "./eslint-rules/index.js";
 
 const noProcessEnv = {
   "no-restricted-properties": [
@@ -132,6 +133,31 @@ export default [
     },
     rules: {
       "tenant-scope/no-unfiltered-tenant-query": "error",
+    },
+  },
+  // Project-local lint rules. no-denormalized-write fires on JSONB
+  // metadata writes that snapshot separately-renameable display names
+  // (AGENTS.md no-denorm rule, see docs/denormalization-policy.md).
+  // Severity is "warn" — false positives are possible (audit-log
+  // forensic snapshots, intrinsic-to-URL identifiers) and the team
+  // triages on PR. Real positives become follow-up PRs.
+  //
+  // Glob includes eslint-rules/__tests__/fixture-* so the demo fixture
+  // surfaces the rule's behavior on a real lint pass. The vitest
+  // RuleTester unit test in tests/unit/no-denormalized-write-eslint-
+  // rule.test.ts is the load-bearing CI gate; the fixture is
+  // documentation.
+  {
+    files: [
+      "src/**/*.ts",
+      "src/**/*.svelte",
+      "eslint-rules/__tests__/fixture-*.ts",
+    ],
+    plugins: {
+      local: localRules,
+    },
+    rules: {
+      "local/no-denormalized-write": "warn",
     },
   },
   // Carve-out: env config is the ONE place process.env is allowed.
