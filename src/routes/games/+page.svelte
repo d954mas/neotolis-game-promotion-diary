@@ -11,7 +11,6 @@
   import { m } from "$lib/paraglide/messages.js";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import GameCard from "$lib/components/GameCard.svelte";
-  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
   // Shared PageHeader uses the onClick CTA variant so the toggle behavior
   // (showForm = true) stays a button (not a link).
@@ -33,7 +32,9 @@
     releaseDate: string | null;
     releaseTba: boolean;
     tags: string[];
+    description: string | null;
     deletedAt: string | null;
+    eventCount?: number;
   };
 
   let { data }: { data: PageData & { retentionDays: number } } = $props();
@@ -46,9 +47,9 @@
   let creating = $state(false);
   let createError = $state<string | null>(null);
 
-  let confirmOpen = $state(false);
-  let pendingDeleteId = $state<string | null>(null);
-  let pendingDeleteTitle = $state("");
+  // Delete-game moved to /games/[gameId] detail page per UAT — list
+  // surface stays read-only browse mode. ConfirmDialog + askDelete +
+  // confirmDelete + related state removed.
 
   async function submitNewGame(e: Event): Promise<void> {
     e.preventDefault();
@@ -74,20 +75,6 @@
     } finally {
       creating = false;
     }
-  }
-
-  function askDelete(g: GameDto): void {
-    pendingDeleteId = g.id;
-    pendingDeleteTitle = g.title;
-    confirmOpen = true;
-  }
-
-  async function confirmDelete(): Promise<void> {
-    if (!pendingDeleteId) return;
-    const res = await fetch(`/api/games/${pendingDeleteId}`, { method: "DELETE" });
-    confirmOpen = false;
-    pendingDeleteId = null;
-    if (res.ok || res.status === 204) await invalidateAll();
   }
 
   // RecoveryDialog open state. Opened by PageHeader's "Recently deleted
@@ -178,9 +165,10 @@
               releaseDate: g.releaseDate,
               releaseTba: g.releaseTba,
               tags: g.tags,
+              description: g.description,
               deletedAt: g.deletedAt,
+              eventCount: g.eventCount ?? 0,
             }}
-            onSoftDelete={() => askDelete(g)}
           />
         </li>
       {/each}
@@ -203,16 +191,8 @@
     />
   {/if}
 
-  <ConfirmDialog
-    open={confirmOpen}
-    message={m.confirm_game_delete({ title: pendingDeleteTitle })}
-    confirmLabel={m.common_delete()}
-    onConfirm={confirmDelete}
-    onCancel={() => {
-      confirmOpen = false;
-      pendingDeleteId = null;
-    }}
-  />
+  <!-- Delete confirm dialog moved to /games/[gameId] detail page. -->
+
 </section>
 
 <style>
