@@ -330,6 +330,13 @@
       "when": 1780200000000,
       "tag": "0046_phase34_data_sources_note",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1779619406528,
+      "tag": "0047_bright_shocker",
+      "breakpoints": true
     }
   ]
 }
