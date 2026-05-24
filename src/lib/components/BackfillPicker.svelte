@@ -24,12 +24,17 @@
   let {
     value = $bindable<Preset>("30d"),
     customDate = $bindable<string | null>(null),
+    maxDate,
   }: {
     value?: Preset;
     /** Optional custom date (YYYY-MM-DD). When non-null, overrides the
      *  preset — consumer should derive the absolute date from this
      *  string instead of the preset. Empty / null means "use preset". */
     customDate?: string | null;
+    /** YYYY-MM-DD upper bound for the custom-date input. Edit flow
+     *  passes the source's current backfillTargetSince so the user
+     *  can only move the window earlier (server enforces too). */
+    maxDate?: string;
   } = $props();
 
   const presets: { id: Preset; label: () => string }[] = [
@@ -88,7 +93,7 @@
         class="custom-date-input"
         bind:value={customDate}
         min="2005-01-01"
-        max={todayISO}
+        max={maxDate ?? todayISO}
       />
       {#if customDate}
         <button

@@ -118,7 +118,9 @@
   /* v2 SourceKindIcon — D-01 redraw via KindIcon analogy at source-context
    * size. 16px / stroke 1.75 / currentColor (inherits from parent). */
   .icon {
-    color: var(--text-3);
+    /* Inherit parent color so kind-color flows from --card-accent on
+     * source-row (or whatever ancestor sets currentColor). */
+    color: inherit;
     flex-shrink: 0;
   }
 </style>

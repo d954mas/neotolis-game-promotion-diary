@@ -53,6 +53,7 @@
     lastEventAt?: Date | string | null;
     eventCount?: number;
     metadata?: Record<string, unknown> | null;
+    backfillTargetSince?: Date | string | null;
   };
 
   let {
@@ -118,6 +119,16 @@
   let backfillCustomDate = $state<string | null>(null);
   let backfillSaving = $state(false);
   let backfillError = $state<string | null>(null);
+
+  // Sentinel 1970-01-01 = "all history". Anything earlier than 1971 is
+  // the sentinel; show 'all history' instead of a meaningless 1970 date.
+  const currentTargetLabel = $derived.by((): string => {
+    const ts = source.backfillTargetSince;
+    if (!ts) return "—";
+    const d = typeof ts === "string" ? new Date(ts) : ts;
+    if (d.getTime() < new Date("1971-01-01").getTime()) return "all history";
+    return d.toISOString().slice(0, 10);
+  });
 
   // Map preset to absolute date (ms-since-epoch, midnight UTC).
   function backfillPresetToDate(preset: BackfillWindow): Date {
@@ -532,11 +543,23 @@
       >×</button>
     </header>
     <div class="backfill-dialog-body">
+      {#if source.backfillTargetSince}
+        <p class="backfill-dialog-current">
+          Currently pulling from <b>{currentTargetLabel}</b>
+        </p>
+      {/if}
       <p class="backfill-dialog-hint">
-        Extend how far back the worker pulls events for this source.
         Window can only move <b>earlier</b> in time (you can't drop already-imported events).
       </p>
-      <BackfillPicker bind:value={backfillWindow} bind:customDate={backfillCustomDate} />
+      <BackfillPicker
+        bind:value={backfillWindow}
+        bind:customDate={backfillCustomDate}
+        maxDate={source.backfillTargetSince
+          ? new Date(typeof source.backfillTargetSince === "string"
+              ? source.backfillTargetSince
+              : source.backfillTargetSince.toISOString()).toISOString().slice(0, 10)
+          : undefined}
+      />
       {#if backfillError}
         <InlineError message={backfillError} />
       {/if}
@@ -976,6 +999,20 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+  }
+  .backfill-dialog-current {
+    margin: 0;
+    padding: 8px 12px;
+    background: color-mix(in oklab, var(--accent) 14%, var(--surface));
+    border: 1px solid color-mix(in oklab, var(--accent) 40%, var(--border));
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font-size: var(--t-13);
+  }
+  .backfill-dialog-current b {
+    color: var(--accent-strong);
+    font-weight: var(--w-sb);
+    font-family: var(--f-mono);
   }
   .backfill-dialog-hint {
     margin: 0;

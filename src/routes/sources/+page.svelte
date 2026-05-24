@@ -133,6 +133,36 @@
   let recoveryOpen = $state(false);
   let restoreError = $state<string | null>(null);
 
+  // Collapsable group state — per-group set of platform labels currently
+  // collapsed. Persisted across page reloads via localStorage so user
+  // preference survives navigation. Empty set = all expanded (default).
+  let collapsedGroups = $state<Set<string>>(new Set());
+  $effect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem("sources.collapsedGroups");
+      if (raw) collapsedGroups = new Set(JSON.parse(raw) as string[]);
+    } catch {
+      /* corrupt localStorage entry — ignore */
+    }
+  });
+  function toggleGroup(label: string): void {
+    const next = new Set(collapsedGroups);
+    if (next.has(label)) {
+      next.delete(label);
+    } else {
+      next.add(label);
+    }
+    collapsedGroups = next;
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("sources.collapsedGroups", JSON.stringify([...next]));
+      } catch {
+        /* quota / privacy mode — ignore */
+      }
+    }
+  }
+
   // Map deleted (toDataSourceDto-projected, no ciphertext) into the
   // RecoveryDialog's generic { id, name, deletedAt } shape. `displayName`
   // is nullable on data_sources (the user may not have set one); fall
@@ -229,24 +259,33 @@
   {:else}
     <div class="sources-list">
       {#each groups as group (group.label)}
-        <section class="sources-group">
-          <header class="sources-group-head">
+        {@const expanded = !collapsedGroups.has(group.label)}
+        <section class="sources-group" data-expanded={expanded ? "1" : "0"}>
+          <button
+            type="button"
+            class="sources-group-head"
+            onclick={() => toggleGroup(group.label)}
+            aria-expanded={expanded}
+          >
+            <span class="sources-group-chev" aria-hidden="true">›</span>
             <span class="kind-icon" aria-hidden="true">
               <SourceKindIcon kind={group.kind} />
             </span>
             <h2 class="sources-group-title">{group.label}</h2>
             <span class="sources-group-count">{group.items.length}</span>
             <div class="sources-group-rule"></div>
-          </header>
-          <div class="sources-rows">
-            {#each group.items as source (source.id)}
-              <SourceRow
-                {source}
-                cooldownSec={data.cooldownBySource?.[source.id] ?? 0}
-                pulling={data.pullingBySource?.[source.id] ?? false}
-              />
-            {/each}
-          </div>
+          </button>
+          {#if expanded}
+            <div class="sources-rows">
+              {#each group.items as source (source.id)}
+                <SourceRow
+                  {source}
+                  cooldownSec={data.cooldownBySource?.[source.id] ?? 0}
+                  pulling={data.pullingBySource?.[source.id] ?? false}
+                />
+              {/each}
+            </div>
+          {/if}
         </section>
       {/each}
     </div>
@@ -402,11 +441,36 @@
     display: flex;
     flex-direction: column;
   }
+  /* Group head is a button — click to collapse/expand its rows. */
   .sources-group-head {
+    width: 100%;
     display: flex;
     align-items: center;
     gap: var(--s-2);
     padding: var(--s-3) 0;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+  }
+  .sources-group-head:hover .sources-group-title {
+    color: var(--text);
+  }
+  .sources-group-chev {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    color: var(--accent);
+    font-size: 16px;
+    line-height: 1;
+    transition: transform var(--m-fast) var(--m-ease);
+    flex-shrink: 0;
+  }
+  .sources-group[data-expanded="1"] .sources-group-chev {
+    transform: rotate(90deg);
   }
   .sources-group-head .kind-icon {
     display: inline-flex;
