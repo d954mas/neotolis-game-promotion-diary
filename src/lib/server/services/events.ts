@@ -2264,7 +2264,6 @@ export async function bulkEdit(
   // events up-front and emit two batched statements. Off-topic updates
   // group by target value and emit at most two UPDATEs.
 
-  // 2. ONE SELECT of existing junctions across all target events.
   const onGameIds: string[] = [];
   const offGameIds: string[] = [];
   for (const [gid, state] of Object.entries(filteredGameStates)) {
