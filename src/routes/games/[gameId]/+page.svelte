@@ -232,21 +232,23 @@
   textarea.
 -->
 <section class="game-info" id="section-game">
-  <div class="meta">
-    {#if game.releaseTba}
-      <span class="badge">{m.badge_release_tba()}</span>
-    {:else if game.releaseDate}
-      <span class="badge">{game.releaseDate}</span>
-    {/if}
-    {#each game.tags as tag}
-      <span class="chip">{tag}</span>
-    {/each}
-  </div>
+  <!-- Meta row carries only release date now. Per-game tags (Steam
+       genres/categories) + notes (legacy free-form field) removed —
+       neither was user-editable via GameEditDialog, and tags duplicated
+       per-store badges that live inside each SteamListingRow. User UAT:
+       «теги убираем и второе описание которое я не делал и которое я
+       не могу редактировать тоже убираем». -->
+  {#if game.releaseTba || game.releaseDate}
+    <div class="meta">
+      {#if game.releaseTba}
+        <span class="badge">{m.badge_release_tba()}</span>
+      {:else if game.releaseDate}
+        <span class="badge">{game.releaseDate}</span>
+      {/if}
+    </div>
+  {/if}
   {#if game.description}
     <p class="description">{game.description}</p>
-  {/if}
-  {#if game.notes}
-    <p class="notes">{game.notes}</p>
   {/if}
 </section>
 

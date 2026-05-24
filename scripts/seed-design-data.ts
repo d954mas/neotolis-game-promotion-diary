@@ -63,7 +63,7 @@ async function main(): Promise<void> {
       coverUrl:
         "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/367520/header.jpg",
       releaseDate: "2026-09-15",
-      tags: ["roguelike", "atmospheric", "indie", "metroidvania"],
+      tags: [],
       description:
         "Атмосферный метроидвания-рогалик про последний город на разрушающейся планете. Ручная пиксельная графика, вязкий бой, хардкорная сложность.",
       notes: "Главный фокус кампании. Wishlist target к релизу: 50k.",
@@ -76,7 +76,7 @@ async function main(): Promise<void> {
         "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/646570/header.jpg",
       releaseDate: "2026-12-01",
       releaseTba: false,
-      tags: ["tactics", "strategy", "turn-based", "fantasy"],
+      tags: [],
       description: "Тактика на гексах в подземельях. Кооп до 4 игроков.",
       notes: "Ранний доступ. Demo Festival осенью.",
     },
@@ -86,7 +86,7 @@ async function main(): Promise<void> {
       title: "Starweaver",
       coverUrl: null,
       releaseTba: true,
-      tags: ["narrative", "sci-fi"],
+      tags: [],
       description: null,
       notes: "Идея в работе. Дата релиза не определена.",
     },
