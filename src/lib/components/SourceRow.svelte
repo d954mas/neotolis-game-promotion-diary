@@ -345,17 +345,22 @@
   );
 
   // Status pill — user mental model: «есть ли в очереди, и обновляется
-  // ли прямо сейчас». Collapsed to 4 variants:
-  //   pulling || !backfillComplete  → "Updating now"  (worker is fetching)
-  //   !autoImport                   → "Paused"         (user toggled off)
-  //   cooldownSec>0                 → "Cooldown {m:ss}" (manual refresh blocked)
-  //   !lastPolledAt                 → "Queued"         (never polled yet)
-  //   default                       → "Up to date"
+  // ли прямо сейчас». Driven SOLELY by signals that reflect actual
+  // worker / queue state — never by stored defaults that may not have
+  // been overwritten (the old branch `!backfillComplete → Updating` was
+  // wrong: that field defaults to false from toDataSourceDto and
+  // enrichWithChannelState only overwrites it when a state row exists
+  // for the channelId — sources without one stayed "Updating now"
+  // forever even with no job in flight).
+  //
+  //   pulling=true            → "Updating now"  (pg-boss job active/created)
+  //   !autoImport             → "Paused"         (user toggled off)
+  //   cooldownSec>0           → "Cooldown M:SS"  (manual refresh blocked)
+  //   !lastPolledAt           → "Queued"         (never polled yet)
+  //   default                 → "Up to date"
   type StatusVariant = "updating" | "paused" | "cooldown" | "queued" | "idle";
   const status = $derived.by((): { variant: StatusVariant; label: string } => {
-    if (pulling || source.backfillComplete === false) {
-      return { variant: "updating", label: "Updating now" };
-    }
+    if (pulling) return { variant: "updating", label: "Updating now" };
     if (!source.autoImport) return { variant: "paused", label: "Paused" };
     if (cooldownSec > 0) {
       const min = Math.floor(cooldownSec / 60);
