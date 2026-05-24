@@ -25,6 +25,11 @@
 // app.html (the opening <html> tag) and any sane HTML response will carry that
 // chunk first. The replace is a no-op on every later chunk.
 
+// Side-effect import: sets DNS IPv4-first resolution at module load.
+// Mirrors src/server.ts so the SvelteKit `vite preview` / `vite dev` /
+// production `node` entrypoints all hit the same single-shot call.
+// Node's module cache dedupes — second import is a no-op.
+import "./lib/server/integrations/dns-bootstrap.js";
 import { sequence } from "@sveltejs/kit/hooks";
 import type { Handle } from "@sveltejs/kit";
 import { auth } from "./lib/auth.js";

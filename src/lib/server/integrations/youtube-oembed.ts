@@ -47,20 +47,13 @@ export type YoutubeOembedResult =
  * key here — that would route through Data API quota for no benefit.
  */
 export async function fetchYoutubeOembed(canonicalUrl: string): Promise<YoutubeOembedResult> {
+  // DNS IPv4-first resolution is now set once per process at boot —
+  // see src/lib/server/integrations/dns-bootstrap.ts (B-8). The prior
+  // implementation re-set the default order on every paste, which was
+  // wasted work on the hot ingest path.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 5000);
   try {
-    // Force IPv4-first DNS resolution at fetch time. Node 18+ defaults
-    // to whatever the OS returns (often IPv6 on dual-stack Windows hosts
-    // without working v6 connectivity), which hangs until timeout. The
-    // browser routes via Chrome's own networking stack which doesn't
-    // hit this issue. This single call is global per process but cheap.
-    try {
-      const dns = await import("node:dns");
-      dns.setDefaultResultOrder("ipv4first");
-    } catch {
-      /* SSR-only call; ignore in browser bundles */
-    }
     const res = await fetch(
       `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`,
       {
