@@ -974,6 +974,52 @@ export async function enrichFromUrl(
  * caller id, so a forged cross-tenant gameId returns zero rows by
  * construction.
  */
+/**
+ * countEventsByGameIds — per-game live-event count for the /games list.
+ *
+ * Returns a Map keyed by gameId with the count of non-soft-deleted
+ * events attached via the event_games junction. One GROUP BY query for
+ * the whole input set (no N+1).
+ *
+ * Tenant scope: both `eventGames.userId` and `events.userId` are
+ * filtered by the caller's userId. The denormalized userId on the
+ * junction is what lets the ESLint tenant-scope rule see the predicate
+ * directly without spanning a JOIN.
+ *
+ * Empty input → empty Map (no query issued). Game ids not present in
+ * the result are simply absent — the caller defaults to 0 with
+ * `.get(id) ?? 0`. Cross-tenant ids fall out via the userId filters.
+ *
+ * Extracted from `/games/+page.server.ts` per the routes-call-services
+ * audit finding: route handlers MUST go through a service, not raw
+ * Drizzle queries.
+ */
+export async function countEventsByGameIds(
+  userId: string,
+  gameIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (gameIds.length === 0) return out;
+  const rows = await db
+    .select({
+      gameId: eventGames.gameId,
+      count: sql<string>`count(*)`,
+    })
+    .from(eventGames)
+    .innerJoin(events, eq(events.id, eventGames.eventId))
+    .where(
+      and(
+        eq(eventGames.userId, userId),
+        eq(events.userId, userId),
+        isNull(events.deletedAt),
+        inArray(eventGames.gameId, gameIds),
+      ),
+    )
+    .groupBy(eventGames.gameId);
+  for (const r of rows) out.set(r.gameId, Number(r.count));
+  return out;
+}
+
 export async function listEventsForGame(userId: string, gameId: string): Promise<EventRow[]> {
   await assertGameOwnedByUser(userId, gameId);
   // Drizzle's join + select-fields shape: pull the events row out of the

@@ -4,10 +4,8 @@ import {
   listSoftDeletedGames,
   deriveReleaseInfoForGames,
 } from "$lib/server/services/games.js";
+import { countEventsByGameIds } from "$lib/server/services/events.js";
 import { toGameDto } from "$lib/server/dto.js";
-import { db } from "$lib/server/db/client.js";
-import { eventGames, events } from "$lib/server/db/schema/index.js";
-import { and, eq, isNull, sql, inArray } from "drizzle-orm";
 
 /**
  * /games loader — list the caller's games.
@@ -34,31 +32,12 @@ export const load: PageServerLoad = async ({ locals }) => {
     listSoftDeletedGames(locals.user.id),
   ]);
 
-  // Per-game event count for the list view. Counts non-deleted events
-  // attached via the event_games junction. Single GROUP BY query — N
-  // games + 1 query (not N+1).
-  const eventCountByGameId = new Map<string, number>();
+  // Per-game event count for the list view via the events service.
+  // Routes call services per AGENTS.md — the prior inline JOIN +
+  // ESLint disable was a routes-call-services violation flagged in
+  // the self-review audit.
   const activeIds = activeRows.map((r) => r.id);
-  if (activeIds.length > 0) {
-    // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- userId filter on both joined tables; ESLint can't span the AND chain
-    const rows = await db
-      .select({
-        gameId: eventGames.gameId,
-        count: sql<string>`count(*)`,
-      })
-      .from(eventGames)
-      .innerJoin(events, eq(events.id, eventGames.eventId))
-      .where(
-        and(
-          eq(eventGames.userId, locals.user.id),
-          eq(events.userId, locals.user.id),
-          isNull(events.deletedAt),
-          inArray(eventGames.gameId, activeIds),
-        ),
-      )
-      .groupBy(eventGames.gameId);
-    for (const r of rows) eventCountByGameId.set(r.gameId, Number(r.count));
-  }
+  const eventCountByGameId = await countEventsByGameIds(locals.user.id, activeIds);
 
   // Derive releaseDate / releaseTba from game_steam_listings — the
   // games row no longer carries these columns. See
