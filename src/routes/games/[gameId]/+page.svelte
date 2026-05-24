@@ -27,6 +27,7 @@
   import { invalidateAll, goto } from "$app/navigation";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
+  import NotesEditorModal from "$lib/components/shared/NotesEditorModal.svelte";
   import { m } from "$lib/paraglide/messages.js";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import FeedCard from "$lib/components/FeedCard.svelte";
@@ -165,26 +166,23 @@
     editGameOpen = false;
   }
 
-  // Notes editor modal — same vocab as event notes-editor-modal. Click
-  // pencil opens; Save PATCHes /api/games/:id { notes }; Cancel discards.
+  // Notes editor modal — extracted to NotesEditorModal component which
+  // owns the dialog markup, draft state, Save/Cancel buttons and
+  // Cmd/Ctrl+Enter shortcut (audit DRY-extract finding). This page owns
+  // the open flag + the PATCH call.
   let notesEditorOpen = $state(false);
-  let notesDraft = $state("");
-  let notesSaving = $state(false);
   let notesError = $state<string | null>(null);
   function openNotesEditor(): void {
-    notesDraft = game.notes ?? "";
     notesError = null;
     notesEditorOpen = true;
   }
-  async function commitNotes(): Promise<void> {
-    if (notesSaving) return;
-    notesSaving = true;
+  async function commitNotes(value: string): Promise<void> {
     notesError = null;
     try {
       const res = await fetch(`/api/games/${game.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ notes: notesDraft }),
+        body: JSON.stringify({ notes: value }),
       });
       if (!res.ok) {
         notesError = "error_server_generic";
@@ -194,8 +192,6 @@
       await invalidateAll();
     } catch {
       notesError = "error_network";
-    } finally {
-      notesSaving = false;
     }
   }
 
@@ -429,52 +425,20 @@
   onCancel={() => (deleteConfirmOpen = false)}
 />
 
-<!-- Notes editor modal — same pattern as event notes-editor-modal. -->
-{#if notesEditorOpen}
-  <dialog
-    class="notes-editor-modal"
-    open
-    oncancel={(e) => {
-      e.preventDefault();
-      notesEditorOpen = false;
-    }}
-    onclick={(e) => {
-      if (e.target === e.currentTarget) notesEditorOpen = false;
-    }}
-  >
-    <header class="notes-editor-head">
-      <h2 class="notes-editor-title">Notes</h2>
-      <button
-        type="button"
-        class="notes-editor-close"
-        onclick={() => (notesEditorOpen = false)}
-        aria-label="Close"
-      >×</button>
-    </header>
-    <div class="notes-editor-body">
-      <!-- svelte-ignore a11y_autofocus -->
-      <textarea
-        class="notes-editor-textarea"
-        bind:value={notesDraft}
-        onkeydown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-            e.preventDefault();
-            void commitNotes();
-          }
-        }}
-        maxlength="50000"
-        autofocus
-        placeholder="Anything worth remembering about this game…"
-      ></textarea>
-      {#if notesError}<InlineError message={notesError} />{/if}
-    </div>
-    <footer class="notes-editor-foot">
-      <button type="button" class="btn ghost" onclick={() => (notesEditorOpen = false)}>Cancel</button>
-      <button type="button" class="btn primary" onclick={() => void commitNotes()} disabled={notesSaving}>
-        {notesSaving ? "Saving…" : "Save"}
-      </button>
-    </footer>
-  </dialog>
+<!-- Notes editor modal — shared NotesEditorModal owns dialog markup,
+     draft state, Save/Cancel buttons, Cmd/Ctrl+Enter, Esc / backdrop
+     cancel and the disabled-while-saving state. The page owns only the
+     open flag, initial value pluck from `game.notes`, and the PATCH. -->
+<NotesEditorModal
+  open={notesEditorOpen}
+  initialValue={game.notes ?? ""}
+  title="Notes"
+  placeholder="Anything worth remembering about this game…"
+  onSave={(value) => commitNotes(value)}
+  onCancel={() => (notesEditorOpen = false)}
+/>
+{#if notesError}
+  <InlineError message={notesError} />
 {/if}
 
 <style>
@@ -689,123 +653,9 @@
     background: color-mix(in oklab, var(--danger) 12%, var(--surface));
   }
 
-  /* Notes editor modal — same vocab as event notes-editor-modal. */
-  .notes-editor-modal {
-    width: min(900px, calc(100vw - 32px));
-    max-height: min(86vh, 820px);
-    padding: 0;
-    margin: auto;
-    border: 1px solid var(--border-2);
-    border-radius: var(--r-lg);
-    background: var(--surface);
-    color: var(--text);
-    box-shadow: var(--shadow-elev);
-    display: flex;
-    flex-direction: column;
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-  }
-  .notes-editor-modal::backdrop {
-    background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(2px);
-  }
-  .notes-editor-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border-hairline);
-  }
-  .notes-editor-title {
-    flex: 1;
-    margin: 0;
-    font-size: var(--t-15);
-    font-weight: var(--w-sb);
-  }
-  .notes-editor-close {
-    width: 30px;
-    height: 30px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--r-sm);
-    color: var(--text-3);
-    font-size: 22px;
-    line-height: 1;
-    cursor: pointer;
-  }
-  .notes-editor-close:hover {
-    background: var(--surface-2);
-    color: var(--text);
-  }
-  .notes-editor-body {
-    flex: 1;
-    min-height: 0;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .notes-editor-textarea {
-    flex: 1;
-    min-height: 60vh;
-    width: 100%;
-    padding: 12px;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    color: var(--text);
-    font-family: var(--f-sans);
-    font-size: var(--t-14);
-    line-height: 1.55;
-    resize: none;
-    outline: none;
-  }
-  .notes-editor-textarea:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
-  }
-  .notes-editor-foot {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    padding: 12px 16px;
-    border-top: 1px solid var(--border-hairline);
-  }
-  .notes-editor-foot .btn {
-    display: inline-flex;
-    align-items: center;
-    min-height: var(--hit);
-    padding: 0 var(--s-3);
-    border-radius: var(--r-sm);
-    font-size: var(--t-13);
-    font-weight: var(--w-md);
-    cursor: pointer;
-  }
-  .notes-editor-foot .btn.ghost {
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    color: var(--text);
-  }
-  .notes-editor-foot .btn.ghost:hover {
-    background: var(--surface-3);
-  }
-  .notes-editor-foot .btn.primary {
-    background: var(--accent);
-    border: 1px solid var(--accent);
-    color: var(--accent-text);
-    font-weight: var(--w-sb);
-  }
-  .notes-editor-foot .btn.primary:hover:not(:disabled) {
-    background: var(--accent-strong);
-  }
-  .notes-editor-foot .btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
+  /* Notes editor modal markup + styles live in NotesEditorModal.svelte
+   * (DRY-extract per audit). The component carries its own .notes-editor-*
+   * style block; this file no longer needs the duplicated CSS. */
   /* v2 feed grid mirrors /feed/+page.svelte: single column <640px,
    * minmax(320px, 1fr) ≥640px, 3-column cap at --max-w.
    *

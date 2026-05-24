@@ -18,6 +18,7 @@
 
   import KindIcon from "$lib/components/KindIcon.svelte";
   import AuthorPopover from "$lib/components/shared/AuthorPopover.svelte";
+  import NotesEditorModal from "$lib/components/shared/NotesEditorModal.svelte";
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "$lib/components/InlineError.svelte";
   import { gameColor } from "$lib/util/game-color.js";
@@ -73,15 +74,15 @@
   let kind = $state<EventKind>(initialKind);
   let url = $state("");
   let notes = $state("");
-  // Big notes-editor modal — opens on click, saves into `notes` $state.
+  // Big notes-editor modal — extracted to NotesEditorModal (DRY per
+  // audit). This form owns the open flag + the committed `notes`
+  // value; the modal owns dialog markup + Save/Cancel/Esc/Cmd+Enter.
   let notesEditorOpen = $state(false);
-  let notesEditorDraft = $state("");
   function openNotesEditor(): void {
-    notesEditorDraft = notes;
     notesEditorOpen = true;
   }
-  function commitNotesEditor(): void {
-    notes = notesEditorDraft;
+  function commitNotesEditor(value: string): void {
+    notes = value;
     notesEditorOpen = false;
   }
   function cancelNotesEditor(): void {
@@ -618,52 +619,18 @@
   >{m.add_event_modal_save()}</button>
 </div>
 
-<!-- Big notes-editor — same pattern as EventDetailContent. Sibling
-     dialog on top of the AddEvent modal via browser top-layer. -->
-{#if notesEditorOpen}
-  <dialog
-    class="notes-editor-modal"
-    open
-    oncancel={(e) => {
-      e.preventDefault();
-      cancelNotesEditor();
-    }}
-    onclick={(e) => {
-      if (e.target === e.currentTarget) cancelNotesEditor();
-    }}
-  >
-    <header class="notes-editor-head">
-      <h2 class="notes-editor-title">{m.add_event_modal_notes_label()}</h2>
-      <button
-        type="button"
-        class="notes-editor-close"
-        onclick={cancelNotesEditor}
-        aria-label="Close"
-        title="Close"
-      >×</button>
-    </header>
-    <div class="notes-editor-body">
-      <!-- svelte-ignore a11y_autofocus -->
-      <textarea
-        class="notes-editor-textarea"
-        bind:value={notesEditorDraft}
-        onkeydown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-            e.preventDefault();
-            commitNotesEditor();
-          }
-        }}
-        maxlength="50000"
-        autofocus
-        placeholder="Anything worth remembering — context, numbers, links…"
-      ></textarea>
-    </div>
-    <footer class="notes-editor-foot">
-      <button type="button" class="btn ghost" onclick={cancelNotesEditor}>Cancel</button>
-      <button type="button" class="btn primary" onclick={commitNotesEditor}>Save</button>
-    </footer>
-  </dialog>
-{/if}
+<!-- Big notes-editor — shared NotesEditorModal owns dialog markup +
+     Save/Cancel/Esc/Cmd+Enter (audit DRY-extract). This form passes the
+     current committed `notes` as initialValue; commit copies the
+     returned draft back into form state on Save. -->
+<NotesEditorModal
+  open={notesEditorOpen}
+  initialValue={notes}
+  title={m.add_event_modal_notes_label()}
+  placeholder="Anything worth remembering — context, numbers, links…"
+  onSave={(value) => commitNotesEditor(value)}
+  onCancel={cancelNotesEditor}
+/>
 
 <style>
   /* Prototype 1:1 — class names mirror docs/design/v2/ui-kit/index.html
@@ -771,93 +738,10 @@
     font-style: italic;
   }
 
-  /* Big notes-editor modal — sibling <dialog> opened from the form.
-   * Sits on top of the AddEvent modal via browser top-layer stacking. */
-  .notes-editor-modal {
-    width: min(900px, calc(100vw - 32px));
-    max-height: min(86vh, 820px);
-    padding: 0;
-    margin: auto;
-    border: 1px solid var(--border-2);
-    border-radius: var(--r-lg);
-    background: var(--surface);
-    color: var(--text);
-    box-shadow: var(--shadow-elev);
-    display: flex;
-    flex-direction: column;
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-  }
-  .notes-editor-modal::backdrop {
-    background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(2px);
-  }
-  .notes-editor-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border-hairline);
-  }
-  .notes-editor-title {
-    flex: 1;
-    margin: 0;
-    font-size: var(--t-15);
-    font-weight: var(--w-sb);
-  }
-  .notes-editor-close {
-    width: 30px;
-    height: 30px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--r-sm);
-    color: var(--text-3);
-    font-size: 22px;
-    line-height: 1;
-    cursor: pointer;
-  }
-  .notes-editor-close:hover {
-    background: var(--surface-2);
-    color: var(--text);
-  }
-  .notes-editor-body {
-    flex: 1;
-    min-height: 0;
-    padding: 16px;
-    display: flex;
-  }
-  .notes-editor-textarea {
-    flex: 1;
-    min-height: 60vh;
-    width: 100%;
-    padding: 12px;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    color: var(--text);
-    font-family: var(--f-sans);
-    font-size: var(--t-14);
-    line-height: 1.55;
-    /* Fixed area per user UAT: «не нужно давать возможность расширять
-     * эту зону». */
-    resize: none;
-    outline: none;
-  }
-  .notes-editor-textarea:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
-  }
-  .notes-editor-foot {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    padding: 12px 16px;
-    border-top: 1px solid var(--border-hairline);
-  }
+  /* .notes-editor-* styles moved to NotesEditorModal.svelte (DRY per
+   * audit). The form's only reference is the <NotesEditorModal> tag
+   * above — its draft state + Save/Cancel/Esc/Cmd+Enter contract are
+   * preserved verbatim. */
 
   /* ── URL row + Fetch button ───────────────────────────────────────── */
   .field-url {
