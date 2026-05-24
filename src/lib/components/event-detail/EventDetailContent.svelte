@@ -85,6 +85,7 @@
   let notesDraft = $state<string | null>(null);
   let urlDraft = $state<string | null>(null);
   let authorPopoverOpen = $state(false);
+  let authorAvatarEl = $state<HTMLButtonElement | null>(null);
   let overflowOpen = $state(false);
 
   const inTrash = $derived(view === "trash");
@@ -371,24 +372,31 @@
        прям в заголовок вместо event details». -->
   <header class="detail-head">
     {#if !inTrash}
-      <!-- Direct toggle — clicking the avatar flips authorIsMe immediately.
-           A floating AuthorPopover was clipped by the modal's overflow:
-           hidden parent in this header context. Two-option choice doesn't
-           need a popover; the title tooltip explains the action. -->
+      <!-- AuthorPopover renders fixed-position via `anchor` prop so it
+           escapes the modal's overflow:hidden clip. -->
       <button
         type="button"
+        bind:this={authorAvatarEl}
         class="author-avatar detail-author-trigger"
         data-mine={event.authorIsMe ? "1" : "0"}
-        onclick={() => void changeAuthor(!event.authorIsMe)}
-        title={event.authorIsMe
-          ? `${currentUserName || "You"} (you) — click to mark as someone else`
-          : "Someone else — click to mark as yours"}
+        onclick={() => (authorPopoverOpen = !authorPopoverOpen)}
+        aria-haspopup="menu"
+        aria-expanded={authorPopoverOpen}
         aria-label={event.authorIsMe
           ? m.author_avatar_mine_aria({ name: currentUserName || "you" })
           : m.author_avatar_unknown_aria()}
       >
         {event.authorIsMe ? (currentUserName[0] ?? "Y").toUpperCase() : "?"}
       </button>
+      {#if authorPopoverOpen}
+        <AuthorPopover
+          authorIsMe={event.authorIsMe}
+          mineName={currentUserName || "You"}
+          anchor={authorAvatarEl}
+          onchange={changeAuthor}
+          onclose={() => (authorPopoverOpen = false)}
+        />
+      {/if}
     {:else}
       <span
         class="author-avatar"

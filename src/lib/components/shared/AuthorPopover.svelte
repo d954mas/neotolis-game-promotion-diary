@@ -40,6 +40,7 @@
     onchange,
     onclose,
     placement = "down",
+    anchor = null,
   }: {
     authorIsMe: boolean | undefined;
     mineName: string;
@@ -50,7 +51,30 @@
     // AddEventForm footer-hint where the trigger sits at the bottom of
     // the modal and a down-open would overflow the dialog.
     placement?: "up" | "down";
+    // Optional anchor element. When provided, the popover renders with
+    // position:fixed + computed top/left from anchor.getBoundingClientRect()
+    // so it escapes any ancestor overflow:hidden (e.g. event-detail-modal).
+    anchor?: HTMLElement | null;
   } = $props();
+
+  // Fixed-position coordinates derived from anchor (when set).
+  let popEl: HTMLDivElement | null = $state(null);
+  let fixedTop = $state(0);
+  let fixedLeft = $state(0);
+  $effect(() => {
+    if (!anchor || !popEl) return;
+    const rect = anchor.getBoundingClientRect();
+    const popRect = popEl.getBoundingClientRect();
+    if (placement === "up") {
+      fixedTop = rect.top - popRect.height - 6;
+      fixedLeft = rect.left;
+    } else {
+      fixedTop = rect.bottom + 6;
+      // align right edges; if it would go off-screen, fall back to left-align
+      const desiredLeft = rect.right - popRect.width;
+      fixedLeft = desiredLeft >= 8 ? desiredLeft : rect.left;
+    }
+  });
 
   function pickMine(): void {
     onchange(true);
@@ -69,7 +93,17 @@
   const mineInitial = $derived((mineName?.[0] ?? "Y").toUpperCase());
 </script>
 
-<div class="author-pick-pop" data-placement={placement} role="menu" aria-orientation="vertical" tabindex="-1" {onkeydown}>
+<div
+  bind:this={popEl}
+  class="author-pick-pop"
+  data-placement={placement}
+  data-fixed={anchor ? "1" : "0"}
+  style={anchor ? `top: ${fixedTop}px; left: ${fixedLeft}px;` : null}
+  role="menu"
+  aria-orientation="vertical"
+  tabindex="-1"
+  {onkeydown}
+>
   <button
     type="button"
     role="menuitemradio"
@@ -139,6 +173,16 @@
     bottom: calc(100% + 6px);
     left: 0;
     right: auto;
+  }
+  /* Fixed positioning — escapes any ancestor overflow:hidden (modals).
+   * top/left set inline from anchor.getBoundingClientRect(). */
+  .author-pick-pop[data-fixed="1"] {
+    position: fixed;
+    top: auto;
+    bottom: auto;
+    left: auto;
+    right: auto;
+    z-index: 1100;
   }
   .author-pick-opt {
     display: flex;
