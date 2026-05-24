@@ -152,6 +152,23 @@
     return t;
   }
 
+  // Reverse map: returns the preset whose computed date matches `ts`
+  // within a 1-day tolerance. Returns null if `ts` doesn't fit any
+  // preset — the dialog uses the custom-date input in that case.
+  function matchPresetForTarget(ts: Date | string | null | undefined): BackfillWindow | null {
+    if (!ts) return null;
+    const target = typeof ts === "string" ? new Date(ts) : ts;
+    // Sentinel 1970-01-01 = 'everything'
+    if (target.getTime() < new Date("1971-01-01").getTime()) return "everything";
+    const presets: BackfillWindow[] = ["1d", "7d", "30d", "90d", "1y"];
+    const ONE_DAY_MS = 86_400_000;
+    for (const p of presets) {
+      const presetDate = backfillPresetToDate(p);
+      if (Math.abs(target.getTime() - presetDate.getTime()) < ONE_DAY_MS) return p;
+    }
+    return null;
+  }
+
   async function commitBackfill(): Promise<void> {
     if (backfillSaving) return;
     backfillSaving = true;
@@ -418,6 +435,24 @@
           role="menuitem"
           onclick={() => {
             menuOpen = false;
+            // Seed dialog state from the source's current
+            // backfillTargetSince so the picker shows what's actually
+            // active — never a stale 30d default. If the current target
+            // matches a preset (within 1-day tolerance), select that
+            // preset; otherwise populate the custom-date field.
+            const ts = source.backfillTargetSince;
+            const matched = matchPresetForTarget(ts);
+            if (matched) {
+              backfillWindow = matched;
+              backfillCustomDate = null;
+            } else if (ts) {
+              const d = typeof ts === "string" ? new Date(ts) : ts;
+              backfillCustomDate = d.toISOString().slice(0, 10);
+            } else {
+              backfillWindow = "30d";
+              backfillCustomDate = null;
+            }
+            backfillError = null;
             backfillDialogOpen = true;
           }}
         >
