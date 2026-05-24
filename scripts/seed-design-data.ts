@@ -161,8 +161,12 @@ async function main(): Promise<void> {
       handleUrl: "https://reddit.com/user/neotolis_dev",
       displayName: "u/neotolis_dev",
       isOwnedByMe: true,
-      autoImport: false,
-      metadata: { subreddit: "indiedev" },
+      autoImport: true,
+      // reddit_account needs metadata.username — author-poll cron reads
+      // this to know whose posts to fetch. Previous seed had {subreddit}
+      // which is reddit_subreddit-shaped → cron skipped this row with
+      // a 'missing username' warn and the source stuck in 'Queued' forever.
+      metadata: { username: "neotolis_dev" },
     },
   ]);
 
