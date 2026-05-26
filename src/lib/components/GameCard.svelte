@@ -42,9 +42,13 @@
 
   const isDeleted = $derived(game.deletedAt !== null);
   const isTrash = $derived(view === "trash");
+  let menuOpen = $state(false);
 </script>
 
-<article class="card" class:deleted={isDeleted} class:card-trash={isTrash} style="--card-accent: {gameColor(game.id)};">
+<!-- No opacity dimming for trash cards — matches /feed pattern where
+     deleted events render at full readability. The trash-view banner +
+     ⋮ menu actions (Restore / Delete forever) signal the deleted state. -->
+<article class="card" style="--card-accent: {gameColor(game.id)};">
   {#if game.coverUrl}
     <img class="cover" src={game.coverUrl} alt="" referrerpolicy="no-referrer" loading="lazy" />
   {:else}
@@ -81,16 +85,42 @@
       <p class="description">{game.description}</p>
     {/if}
   </div>
-  <div class="actions">
-    {#if isTrash}
-      {#if onRestore}
-        <button type="button" class="restore" onclick={onRestore}>{m.common_restore()}</button>
-      {/if}
-      {#if onDeleteForever}
-        <button type="button" class="delete-forever" onclick={onDeleteForever}>{m.games_trash_delete_forever()}</button>
-      {/if}
-    {:else if isDeleted && onRestore}
-      <button type="button" class="restore" onclick={onRestore}>{m.common_restore()}</button>
+  <!-- ⋮ overflow — Restore + Delete forever in trash, same as feed cards.
+       No inline buttons cluttering the card surface. -->
+  <div class="card-actions">
+    <button
+      type="button"
+      class="card-action-btn overflow"
+      onclick={(e) => { e.stopPropagation(); menuOpen = !menuOpen; }}
+      aria-haspopup="menu"
+      aria-expanded={menuOpen}
+      aria-label="More actions"
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="5" r="1.8" fill="currentColor" />
+        <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+        <circle cx="12" cy="19" r="1.8" fill="currentColor" />
+      </svg>
+    </button>
+    {#if menuOpen}
+      <button
+        type="button"
+        class="menu-scrim"
+        onclick={() => (menuOpen = false)}
+        aria-label="Close menu"
+      ></button>
+      <div class="card-menu" role="menu">
+        {#if isTrash && onRestore}
+          <button type="button" role="menuitem" onclick={() => { menuOpen = false; onRestore?.(); }}>
+            {m.common_restore()}
+          </button>
+        {/if}
+        {#if isTrash && onDeleteForever}
+          <button type="button" role="menuitem" class="danger" onclick={() => { menuOpen = false; onDeleteForever?.(); }}>
+            {m.games_trash_delete_forever()}
+          </button>
+        {/if}
+      </div>
     {/if}
   </div>
 </article>
@@ -128,10 +158,6 @@
     background: var(--card-accent, var(--border-2));
     border-top-left-radius: calc(var(--r-md) - 1px);
     border-bottom-left-radius: calc(var(--r-md) - 1px);
-  }
-  /* Softer fade for trash cards — 0.6 was too dim to read (user UAT). */
-  .deleted {
-    opacity: 0.85;
   }
   .cover {
     width: 96px;
@@ -195,52 +221,71 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
-  /* Actions column aligns to card top (grid align-items:start on .card).
-   * flex-wrap so Restore + Delete forever stack vertically when the card
-   * is narrow instead of overflowing into the cover area. */
-  .actions {
+  /* ⋮ overflow — same pattern as FeedCard / SourceRow. Absolute
+   * top-right so it doesn't interfere with the grid layout. */
+  .card-actions {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 2;
+  }
+  .card-action-btn.overflow {
+    width: 28px;
+    height: 28px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+  }
+  .card-action-btn.overflow:hover,
+  .card-action-btn.overflow[aria-expanded="true"] {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-strong);
+  }
+  .menu-scrim {
+    position: fixed;
+    inset: 0;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: default;
+    z-index: 3;
+  }
+  .card-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 160px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-elev);
+    padding: var(--s-1);
     display: flex;
     flex-direction: column;
-    gap: var(--s-1);
-    align-items: flex-end;
+    z-index: 4;
   }
-  .restore {
-    min-height: var(--hit);
-    padding: var(--s-1) var(--s-3);
+  .card-menu [role="menuitem"] {
     background: transparent;
-    color: var(--accent);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    font-family: var(--f-sans);
+    border: none;
+    text-align: left;
+    padding: var(--s-2) var(--s-3);
     font-size: var(--t-13);
+    color: var(--text);
     cursor: pointer;
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
+    border-radius: var(--r-sm);
   }
-  .restore:hover {
+  .card-menu [role="menuitem"]:hover {
     background: var(--accent-soft);
-    border-color: var(--accent-strong);
   }
-  /* Trash view — warn-tinted border + reduced opacity. */
-  .card-trash {
-    border-color: var(--accent-strong);
-  }
-  .delete-forever {
-    min-height: var(--hit);
-    padding: var(--s-1) var(--s-3);
-    background: transparent;
-    color: var(--danger);
-    border: 1px solid color-mix(in oklab, var(--danger) 35%, var(--border));
-    border-radius: var(--r-sm);
-    font-family: var(--f-sans);
-    font-size: var(--t-13);
-    cursor: pointer;
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
-  }
-  .delete-forever:hover {
+  .card-menu .danger:hover {
     background: color-mix(in oklab, var(--danger) 14%, var(--surface-2));
     border-color: var(--danger);
   }

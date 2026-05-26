@@ -446,14 +446,52 @@
 
 <article
   class="source-row"
-  class:source-row-trash={isTrash}
   data-active={isTrash ? "0" : source.autoImport ? "1" : "0"}
   data-mine={source.isOwnedByMe ? "1" : "0"}
   data-kind={source.kind}
   style="--card-accent: var({KIND_VAR[source.kind]});"
 >
   {#if isTrash}
-    <!-- Trash view — simplified row: title + retention badge + Restore / Delete forever. -->
+    <!-- Trash view — same full card layout as live mode, no opacity dim.
+         ⋮ menu carries Restore + Delete forever (same pattern as /feed
+         trash cards). RetentionBadge in footer shows days remaining. -->
+    <div class="card-actions">
+      <button
+        type="button"
+        class="card-action-btn overflow"
+        onclick={(e) => { e.stopPropagation(); menuOpen = !menuOpen; }}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        aria-label="More actions"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="5" r="1.8" fill="currentColor" />
+          <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+          <circle cx="12" cy="19" r="1.8" fill="currentColor" />
+        </svg>
+      </button>
+      {#if menuOpen}
+        <button
+          type="button"
+          class="picker-scrim"
+          onclick={() => (menuOpen = false)}
+          aria-label="Close menu"
+        ></button>
+        <div class="card-menu" role="menu">
+          {#if onRestore}
+            <button type="button" class="card-menu-item" role="menuitem" onclick={() => { menuOpen = false; onRestore?.(); }}>
+              {m.common_restore()}
+            </button>
+          {/if}
+          {#if onDeleteForever}
+            <button type="button" class="card-menu-item danger" role="menuitem" onclick={() => { menuOpen = false; onDeleteForever?.(); }}>
+              {m.sources_trash_delete_forever()}
+            </button>
+          {/if}
+        </div>
+      {/if}
+    </div>
+
     <h3 class="source-title">
       <span class="kind-icon" aria-hidden="true">
         <SourceKindIcon kind={source.kind} />
@@ -463,19 +501,9 @@
       </span>
     </h3>
 
-    <div class="source-actions trash-actions">
+    <div class="source-actions">
       {#if source.deletedAt}
         <RetentionBadge deletedAt={source.deletedAt} />
-      {/if}
-      {#if onRestore}
-        <button type="button" class="trash-restore-btn" onclick={onRestore}>
-          {m.common_restore()}
-        </button>
-      {/if}
-      {#if onDeleteForever}
-        <button type="button" class="trash-delete-forever-btn" onclick={onDeleteForever}>
-          {m.sources_trash_delete_forever()}
-        </button>
       {/if}
     </div>
 
@@ -1389,58 +1417,10 @@
     }
   }
 
-  /* Trash view — reduced opacity + warn-tinted border matching /feed trash cards. */
-  .source-row-trash {
-    opacity: 0.75;
-    border-color: var(--accent-strong);
-  }
-  .source-row-trash:hover {
-    opacity: 0.9;
-  }
-  /* Trash-view action cluster — Restore + Delete forever buttons. */
-  .trash-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--s-2);
-    flex-wrap: wrap;
-  }
-  .trash-restore-btn {
-    min-height: var(--hit);
-    padding: var(--s-1) var(--s-3);
-    background: transparent;
-    color: var(--accent);
-    border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--border));
-    border-radius: var(--r-sm);
-    font-family: var(--f-sans);
-    font-size: var(--t-13);
-    font-weight: var(--w-sb);
-    cursor: pointer;
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
-  }
-  .trash-restore-btn:hover {
-    background: var(--accent-soft);
-    border-color: var(--accent);
-  }
-  .trash-delete-forever-btn {
-    min-height: var(--hit);
-    padding: var(--s-1) var(--s-3);
-    background: transparent;
-    color: var(--danger);
-    border: 1px solid color-mix(in oklab, var(--danger) 35%, var(--border));
-    border-radius: var(--r-sm);
-    font-family: var(--f-sans);
-    font-size: var(--t-13);
-    cursor: pointer;
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
-  }
-  .trash-delete-forever-btn:hover {
-    background: color-mix(in oklab, var(--danger) 14%, var(--surface-2));
-    border-color: var(--danger);
-  }
+  /* Trash-view inline button styles removed — Restore + Delete forever
+   * now live in the ⋮ menu (same pattern as /feed trash cards). No
+   * opacity dim on trash rows — matches /feed where deleted events
+   * render at full readability. */
 
   /* Note dialog — same vocabulary as .backfill-dialog. The user already
    * meets this surface from the ⋮ menu's "Backfill window…" item; reusing
