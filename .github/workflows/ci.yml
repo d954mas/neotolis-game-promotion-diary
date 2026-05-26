@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.1.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -64,7 +64,7 @@ jobs:
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.1.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -108,7 +108,7 @@ jobs:
       BROWSER_TEST_BASE_URL: http://localhost:5173
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.1.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -223,7 +223,7 @@ jobs:
       CI: 'true'
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4.1.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
