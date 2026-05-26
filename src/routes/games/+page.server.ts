@@ -24,8 +24,9 @@ import { toGameDto } from "$lib/server/dto.js";
  * service functions enforce `userId` scoping; every row goes through
  * `toGameDto` which strips `userId` (P3 discipline).
  */
-export const load: PageServerLoad = async ({ locals }) => {
-  if (!locals.user) return { games: [], softDeleted: [] };
+export const load: PageServerLoad = async ({ locals, url }) => {
+  const view = url.searchParams.get("view") === "trash" ? "trash" : "feed" as const;
+  if (!locals.user) return { view, games: [], softDeleted: [] };
 
   const [activeRows, softDeletedRows] = await Promise.all([
     listGames(locals.user.id),
@@ -62,6 +63,7 @@ export const load: PageServerLoad = async ({ locals }) => {
   const softDeletedRelease = await deriveReleaseInfoForGames(locals.user.id, softDeletedIds);
 
   return {
+    view,
     games,
     softDeleted: softDeletedRows.map((r) =>
       toGameDto(r, softDeletedRelease.get(r.id) ?? { releaseDate: null, releaseTba: false }),

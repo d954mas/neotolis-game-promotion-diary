@@ -13,6 +13,7 @@
 
   import { m } from "$lib/paraglide/messages.js";
   import { gameColor } from "$lib/util/game-color.js";
+  import RetentionBadge from "./RetentionBadge.svelte";
 
   type Game = {
     id: string;
@@ -28,18 +29,22 @@
 
   let {
     game,
+    view = "feed",
     onRestore,
+    onDeleteForever,
   }: {
     game: Game;
-    /** Delete affordance moved to /games/[gameId]. Prop intentionally
-     *  removed; restore stays for the deleted-list rendering. */
+    /** "feed" (default) or "trash" — drives which affordances render. */
+    view?: "feed" | "trash";
     onRestore?: () => void;
+    onDeleteForever?: () => void;
   } = $props();
 
   const isDeleted = $derived(game.deletedAt !== null);
+  const isTrash = $derived(view === "trash");
 </script>
 
-<article class="card" class:deleted={isDeleted} style="--card-accent: {gameColor(game.id)};">
+<article class="card" class:deleted={isDeleted} class:card-trash={isTrash} style="--card-accent: {gameColor(game.id)};">
   {#if game.coverUrl}
     <img class="cover" src={game.coverUrl} alt="" referrerpolicy="no-referrer" loading="lazy" />
   {:else}
@@ -47,9 +52,16 @@
   {/if}
   <div class="body">
     <h3 class="title">
-      <a href={`/games/${game.id}`}>{game.title}</a>
+      {#if isTrash}
+        <span>{game.title}</span>
+      {:else}
+        <a href={`/games/${game.id}`}>{game.title}</a>
+      {/if}
     </h3>
     <div class="meta">
+      {#if isTrash && game.deletedAt}
+        <RetentionBadge deletedAt={game.deletedAt} />
+      {/if}
       {#if game.releaseTba || game.releaseDate}
         <span class="release-date" title="Release date">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -70,7 +82,14 @@
     {/if}
   </div>
   <div class="actions">
-    {#if isDeleted && onRestore}
+    {#if isTrash}
+      {#if onRestore}
+        <button type="button" class="restore" onclick={onRestore}>{m.common_restore()}</button>
+      {/if}
+      {#if onDeleteForever}
+        <button type="button" class="delete-forever" onclick={onDeleteForever}>{m.games_trash_delete_forever()}</button>
+      {/if}
+    {:else if isDeleted && onRestore}
       <button type="button" class="restore" onclick={onRestore}>{m.common_restore()}</button>
     {/if}
   </div>
@@ -196,6 +215,28 @@
   .restore:hover {
     background: var(--accent-soft);
     border-color: var(--accent-strong);
+  }
+  /* Trash view — warn-tinted border + reduced opacity. */
+  .card-trash {
+    border-color: var(--accent-strong);
+  }
+  .delete-forever {
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    background: transparent;
+    color: var(--danger);
+    border: 1px solid color-mix(in oklab, var(--danger) 35%, var(--border));
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .delete-forever:hover {
+    background: color-mix(in oklab, var(--danger) 14%, var(--surface-2));
+    border-color: var(--danger);
   }
   @media (min-width: 768px) {
     .card {
