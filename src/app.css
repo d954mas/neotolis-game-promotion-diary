@@ -166,7 +166,7 @@
 
   --text: #ececee;
   --text-2: #b0b0b7; /* secondary */
-  --text-3: #7e7e86; /* tertiary, captions */
+  --text-3: #8a8a92; /* tertiary, captions — bumped from #7e7e86 for WCAG AA (≥4.5:1 on --bg #0e0e10) */
   --text-4: #57575e; /* hint, disabled */
 
   /* accent — warm amber-coral. Replaces v1's generic blue. */
