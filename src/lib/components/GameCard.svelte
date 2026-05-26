@@ -129,8 +129,9 @@
     border-top-left-radius: calc(var(--r-md) - 1px);
     border-bottom-left-radius: calc(var(--r-md) - 1px);
   }
+  /* Softer fade for trash cards — 0.6 was too dim to read (user UAT). */
   .deleted {
-    opacity: 0.6;
+    opacity: 0.85;
   }
   .cover {
     width: 96px;
@@ -194,9 +195,14 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+  /* Actions column aligns to card top (grid align-items:start on .card).
+   * flex-wrap so Restore + Delete forever stack vertically when the card
+   * is narrow instead of overflowing into the cover area. */
   .actions {
     display: flex;
+    flex-direction: column;
     gap: var(--s-1);
+    align-items: flex-end;
   }
   .restore {
     min-height: var(--hit);
