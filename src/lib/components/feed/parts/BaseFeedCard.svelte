@@ -42,7 +42,6 @@
     bylineLabel = null,
     thumbnailUrl,
     games,
-    onChanged,
     selected = false,
     anySelected = false,
     view = "feed",
@@ -67,7 +66,6 @@
     /** Already-derived thumbnail URL or null. */
     thumbnailUrl: string | null;
     games: GameLite[];
-    onChanged?: () => void;
     selected?: boolean;
     anySelected?: boolean;
     view?: "feed" | "trash";
@@ -128,9 +126,7 @@
   // chip sequence identical across FeedCard / EventDetailContent /
   // filter axes (everywhere reads from this same array).
   const attachedSet = $derived(new Set(event.gameIds));
-  const attachedGames = $derived.by(
-    (): GameLite[] => games.filter((g) => attachedSet.has(g.id)),
-  );
+  const attachedGames = $derived.by((): GameLite[] => games.filter((g) => attachedSet.has(g.id)));
 
   // Touch long-press → enters selection mode after 480ms. Scroll-cancel
   // via touchmove is LOAD-BEARING per D-28.
@@ -189,7 +185,6 @@
       document.removeEventListener("keydown", onEsc);
     };
   });
-
 </script>
 
 <article
@@ -724,8 +719,7 @@
     display: block;
   }
   .card-thumb.empty {
-    background:
-      radial-gradient(circle at 50% 50%, var(--surface-2) 0%, var(--surface) 70%);
+    background: radial-gradient(circle at 50% 50%, var(--surface-2) 0%, var(--surface) 70%);
   }
   .card-thumb.empty :global(svg) {
     color: var(--card-accent, var(--text-4));
@@ -844,11 +838,7 @@
   }
   .game-chip {
     background: color-mix(in oklab, var(--card-accent, var(--border-2)) 14%, var(--surface));
-    border-color: color-mix(
-      in oklab,
-      var(--card-accent, var(--border-2)) 45%,
-      var(--border)
-    );
+    border-color: color-mix(in oklab, var(--card-accent, var(--border-2)) 45%, var(--border));
     box-shadow: inset 3px 0 0 var(--card-accent, var(--border-2));
     padding-left: 14px;
     color: var(--text);

@@ -5,8 +5,6 @@
 
 import { chromium } from "playwright";
 import { mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
 const COOKIE_VALUE = process.argv[2];
 if (!COOKIE_VALUE) {

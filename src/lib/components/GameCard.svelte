@@ -40,7 +40,6 @@
     onDeleteForever?: () => void;
   } = $props();
 
-  const isDeleted = $derived(game.deletedAt !== null);
   const isTrash = $derived(view === "trash");
   let menuOpen = $state(false);
 </script>
@@ -68,7 +67,17 @@
       {/if}
       {#if game.releaseTba || game.releaseDate}
         <span class="release-date" title="Release date">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
             <rect x="3" y="4" width="18" height="18" rx="2" />
             <line x1="16" y1="2" x2="16" y2="6" />
             <line x1="8" y1="2" x2="8" y2="6" />
@@ -78,7 +87,9 @@
         </span>
       {/if}
       {#if game.eventCount !== undefined && game.eventCount > 0}
-        <span class="event-count">{game.eventCount} {game.eventCount === 1 ? "event" : "events"}</span>
+        <span class="event-count"
+          >{game.eventCount} {game.eventCount === 1 ? "event" : "events"}</span
+        >
       {/if}
     </div>
     {#if game.description}
@@ -91,7 +102,10 @@
     <button
       type="button"
       class="card-action-btn overflow"
-      onclick={(e) => { e.stopPropagation(); menuOpen = !menuOpen; }}
+      onclick={(e) => {
+        e.stopPropagation();
+        menuOpen = !menuOpen;
+      }}
       aria-haspopup="menu"
       aria-expanded={menuOpen}
       aria-label="More actions"
@@ -111,12 +125,27 @@
       ></button>
       <div class="card-menu" role="menu">
         {#if isTrash && onRestore}
-          <button type="button" role="menuitem" onclick={() => { menuOpen = false; onRestore?.(); }}>
+          <button
+            type="button"
+            role="menuitem"
+            onclick={() => {
+              menuOpen = false;
+              onRestore?.();
+            }}
+          >
             {m.common_restore()}
           </button>
         {/if}
         {#if isTrash && onDeleteForever}
-          <button type="button" role="menuitem" class="danger" onclick={() => { menuOpen = false; onDeleteForever?.(); }}>
+          <button
+            type="button"
+            role="menuitem"
+            class="danger"
+            onclick={() => {
+              menuOpen = false;
+              onDeleteForever?.();
+            }}
+          >
             {m.games_trash_delete_forever()}
           </button>
         {/if}
@@ -241,7 +270,10 @@
     align-items: center;
     justify-content: center;
     padding: 0;
-    transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+    transition:
+      background var(--m-fast),
+      border-color var(--m-fast),
+      color var(--m-fast);
   }
   .card-action-btn.overflow:hover,
   .card-action-btn.overflow[aria-expanded="true"] {

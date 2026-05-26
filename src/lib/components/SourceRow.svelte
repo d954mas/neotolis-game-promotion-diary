@@ -226,7 +226,6 @@
   }
   let liveToggling = $state(false);
   let confirmingRemove = $state(false);
-  let mutating = $state(false);
   let rowError = $state<string | null>(null);
 
   function openNoteDialog(): void {
@@ -315,7 +314,6 @@
 
   async function confirmRemove(): Promise<void> {
     confirmingRemove = false;
-    mutating = true;
     rowError = null;
     try {
       const res = await fetch(`/api/sources/${source.id}`, { method: "DELETE" });
@@ -326,8 +324,6 @@
       await invalidateAll();
     } catch {
       rowError = m.error_network();
-    } finally {
-      mutating = false;
     }
   }
 
@@ -377,9 +373,7 @@
       : "",
   );
   const lastSyncedLabel = $derived(
-    source.lastPolledAt
-      ? `synced ${formatRelativeTime(source.lastPolledAt)}`
-      : "never synced",
+    source.lastPolledAt ? `synced ${formatRelativeTime(source.lastPolledAt)}` : "never synced",
   );
 
   // Map stored AdapterError category → human-friendly UI label. Unknown
@@ -441,7 +435,6 @@
     if (!source.lastPolledAt) return { variant: "queued", label: "Queued" };
     return { variant: "idle", label: "Up to date" };
   });
-
 </script>
 
 <article
@@ -459,7 +452,10 @@
       <button
         type="button"
         class="card-action-btn overflow"
-        onclick={(e) => { e.stopPropagation(); menuOpen = !menuOpen; }}
+        onclick={(e) => {
+          e.stopPropagation();
+          menuOpen = !menuOpen;
+        }}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         aria-label="More actions"
@@ -479,12 +475,28 @@
         ></button>
         <div class="card-menu" role="menu">
           {#if onRestore}
-            <button type="button" class="card-menu-item" role="menuitem" onclick={() => { menuOpen = false; onRestore?.(); }}>
+            <button
+              type="button"
+              class="card-menu-item"
+              role="menuitem"
+              onclick={() => {
+                menuOpen = false;
+                onRestore?.();
+              }}
+            >
               {m.common_restore()}
             </button>
           {/if}
           {#if onDeleteForever}
-            <button type="button" class="card-menu-item danger" role="menuitem" onclick={() => { menuOpen = false; onDeleteForever?.(); }}>
+            <button
+              type="button"
+              class="card-menu-item danger"
+              role="menuitem"
+              onclick={() => {
+                menuOpen = false;
+                onDeleteForever?.();
+              }}
+            >
               {m.sources_trash_delete_forever()}
             </button>
           {/if}
@@ -572,7 +584,17 @@
               backfillDialogOpen = true;
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
               <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
               <line x1="16" y1="2" x2="16" y2="6" />
               <line x1="8" y1="2" x2="8" y2="6" />
@@ -590,7 +612,17 @@
               confirmingRemove = true;
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
               <path d="M3 6h18" />
               <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
               <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
@@ -679,17 +711,23 @@
             aria-label={m.source_note_edit_aria()}
             title={m.source_note_edit_aria()}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
           </button>
         {:else}
-          <button
-            type="button"
-            class="source-note-add"
-            onclick={openNoteDialog}
-          >
+          <button type="button" class="source-note-add" onclick={openNoteDialog}>
             {m.source_note_add()}
           </button>
         {/if}
@@ -741,8 +779,8 @@
         type="button"
         class="note-dialog-close"
         onclick={() => (noteDialogOpen = false)}
-        aria-label={m.common_close()}
-      >×</button>
+        aria-label={m.common_close()}>×</button
+      >
     </header>
     <div class="note-dialog-body">
       <p class="note-dialog-hint">{m.source_note_dialog_hint()}</p>
@@ -796,8 +834,8 @@
         type="button"
         class="backfill-dialog-close"
         onclick={() => (backfillDialogOpen = false)}
-        aria-label="Close"
-      >×</button>
+        aria-label="Close">×</button
+      >
     </header>
     <div class="backfill-dialog-body">
       {#if source.backfillTargetSince}
@@ -812,9 +850,13 @@
         bind:value={backfillWindow}
         bind:customDate={backfillCustomDate}
         maxDate={source.backfillTargetSince
-          ? new Date(typeof source.backfillTargetSince === "string"
-              ? source.backfillTargetSince
-              : source.backfillTargetSince.toISOString()).toISOString().slice(0, 10)
+          ? new Date(
+              typeof source.backfillTargetSince === "string"
+                ? source.backfillTargetSince
+                : source.backfillTargetSince.toISOString(),
+            )
+              .toISOString()
+              .slice(0, 10)
           : undefined}
       />
       {#if backfillError}
@@ -822,8 +864,15 @@
       {/if}
     </div>
     <footer class="backfill-dialog-foot">
-      <button type="button" class="btn ghost" onclick={() => (backfillDialogOpen = false)}>Cancel</button>
-      <button type="button" class="btn primary" onclick={() => void commitBackfill()} disabled={backfillSaving}>
+      <button type="button" class="btn ghost" onclick={() => (backfillDialogOpen = false)}
+        >Cancel</button
+      >
+      <button
+        type="button"
+        class="btn primary"
+        onclick={() => void commitBackfill()}
+        disabled={backfillSaving}
+      >
         {backfillSaving ? "Saving…" : "Save"}
       </button>
     </footer>
@@ -1256,11 +1305,20 @@
     animation: status-pulse 1s ease-in-out infinite;
   }
   @keyframes status-pulse {
-    0%, 100% { opacity: 0.35; transform: scale(0.7); }
-    50%      { opacity: 1;    transform: scale(1.1); }
+    0%,
+    100% {
+      opacity: 0.35;
+      transform: scale(0.7);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.1);
+    }
   }
   @media (prefers-reduced-motion: reduce) {
-    .status-dot { animation: none; }
+    .status-dot {
+      animation: none;
+    }
   }
 
   /* Backfill window dialog — sibling <dialog open> rendered fixed on
@@ -1362,7 +1420,9 @@
     font-size: var(--t-13);
     font-weight: var(--w-md);
     cursor: pointer;
-    transition: background var(--m-fast), border-color var(--m-fast);
+    transition:
+      background var(--m-fast),
+      border-color var(--m-fast);
   }
   .backfill-dialog-foot .btn.ghost {
     background: var(--surface-2);
@@ -1526,7 +1586,9 @@
     font-size: var(--t-13);
     font-weight: var(--w-md);
     cursor: pointer;
-    transition: background var(--m-fast), border-color var(--m-fast);
+    transition:
+      background var(--m-fast),
+      border-color var(--m-fast);
   }
   .note-dialog-foot .btn.ghost {
     background: var(--surface-2);

@@ -49,11 +49,7 @@
     games,
     sources,
     view = "feed",
-    hasPrev = false,
-    hasNext = false,
     currentUserName = "",
-    onPrev,
-    onNext,
     onClose,
     onDelete,
     onRestore,
@@ -65,11 +61,7 @@
     games: GameDto[];
     sources: DataSourceDto[];
     view?: "feed" | "trash";
-    hasPrev?: boolean;
-    hasNext?: boolean;
     currentUserName?: string;
-    onPrev?: () => void;
-    onNext?: () => void;
     onClose: () => void;
     onDelete: (id: string) => Promise<void>;
     onRestore?: (id: string) => Promise<void>;
@@ -113,9 +105,7 @@
   // Filtering the ordered list keeps the chip sequence identical to
   // BaseFeedCard + filter-axis chip ordering.
   const attachedGameSet = $derived(new Set(event.gameIds));
-  const attachedGames = $derived(
-    games.filter((g) => attachedGameSet.has(g.id)),
-  );
+  const attachedGames = $derived(games.filter((g) => attachedGameSet.has(g.id)));
 
   // Source name for the byline. Manual-paste events have sourceId=null
   // so this resolves to undefined → byline falls back to "".
@@ -124,10 +114,7 @@
   );
 
   const sourceLabel = $derived(
-    sourceRow?.channelTitle ??
-      sourceRow?.displayName ??
-      sourceRow?.handleUrl ??
-      "",
+    sourceRow?.channelTitle ?? sourceRow?.displayName ?? sourceRow?.handleUrl ?? "",
   );
 
   // Pretty kind label (matches FeedCard / EventDetailModal labels).
@@ -159,24 +146,28 @@
 
   // Compact "Mon, May 12" date format — mirrors prototype dateGroup.
   const occurredHuman = $derived.by(() => {
-    const t =
-      typeof event.occurredAt === "string"
-        ? new Date(event.occurredAt)
-        : event.occurredAt;
+    const t = typeof event.occurredAt === "string" ? new Date(event.occurredAt) : event.occurredAt;
     const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][t.getDay()];
     const mon = [
-      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
     ][t.getMonth()];
     return `${day}, ${mon} ${t.getDate()}`;
   });
 
   // ISO date for the native date picker (yyyy-mm-dd).
   const occurredISO = $derived.by(() => {
-    const t =
-      typeof event.occurredAt === "string"
-        ? new Date(event.occurredAt)
-        : event.occurredAt;
+    const t = typeof event.occurredAt === "string" ? new Date(event.occurredAt) : event.occurredAt;
     const y = t.getFullYear();
     const mo = String(t.getMonth() + 1).padStart(2, "0");
     const d = String(t.getDate()).padStart(2, "0");
@@ -193,12 +184,6 @@
 
   // Stats — only YouTube events carry a stats snapshot today.
   const stats = $derived(event.stats);
-
-  // Per-source byline (e.g. reddit r/sub author u/handle). For YouTube
-  // and reddit_post the channelTitle/handleUrl is already in `sourceLabel`,
-  // so a real byline only exists if a future schema field is added.
-  // Today we leave it null — the prototype shows it for reddit_post only.
-  const byline: string | null = null;
 
   function startEditTitle(): void {
     if (inTrash) return;
@@ -293,9 +278,7 @@
     const target = e.target as HTMLElement | null;
     if (
       target &&
-      (target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable)
+      (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
     ) {
       if (e.key === "Escape") {
         if (titleDraft !== null) {
@@ -356,11 +339,7 @@
 
 <svelte:window {onkeydown} />
 
-<div
-  class="event-detail-content"
-  data-view={view}
-  style="--card-accent: var(--k-{event.kind});"
->
+<div class="event-detail-content" data-view={view} style="--card-accent: var(--k-{event.kind});">
   <!-- Header: rich strip with author + kind icon + kind label + source +
        date + ×. Replaces the bare 'Event details' label and the in-body
        meta row — saves a row of vertical body real estate (more space
@@ -422,9 +401,18 @@
       <span class="detail-date-edit">
         <span class="detail-date">{occurredHuman}</span>
         <span class="detail-date-pencil" aria-hidden="true">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6"/>
-            <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6" />
+            <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
           </svg>
         </span>
         <input
@@ -488,8 +476,8 @@
                 onclick={() => {
                   overflowOpen = false;
                   void onRestore?.(event.id);
-                }}
-              >{m.event_detail_footer_restore()}</button>
+                }}>{m.event_detail_footer_restore()}</button
+              >
             {/if}
             {#if inTrash && onDeleteForever}
               <button
@@ -498,8 +486,8 @@
                 onclick={() => {
                   overflowOpen = false;
                   void onDeleteForever?.(event.id);
-                }}
-              >{m.event_detail_footer_delete_forever()}</button>
+                }}>{m.event_detail_footer_delete_forever()}</button
+              >
             {:else if !inTrash}
               <button
                 type="button"
@@ -507,8 +495,8 @@
                 onclick={() => {
                   overflowOpen = false;
                   void onDelete(event.id);
-                }}
-              >{m.events_detail_delete()}</button>
+                }}>{m.events_detail_delete()}</button
+              >
             {/if}
           </div>
         {/if}
@@ -520,13 +508,23 @@
       class="detail-close-btn"
       onclick={onClose}
       aria-label={m.event_detail_modal_close_aria()}
-      title={m.event_detail_modal_close_aria()}
-    >×</button>
+      title={m.event_detail_modal_close_aria()}>×</button
+    >
   </header>
 
   {#if redditDeletedAt}
     <div class="detail-deleted-banner" role="status">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.75"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
         <polyline points="3 6 5 6 21 6" />
         <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
         <path d="M10 11v6" /><path d="M14 11v6" />
@@ -536,7 +534,6 @@
   {/if}
 
   <div class="detail-body">
-
     <!-- Title: inline-editable, pencil edit-btn affordance. -->
     {#if titleDraft !== null && !inTrash}
       <input
@@ -567,9 +564,19 @@
             aria-label={m.event_detail_edit_title_aria()}
             title={m.event_detail_edit_title_aria()}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6"/>
-              <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.75"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6" />
+              <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
           </button>
         {/if}
@@ -602,8 +609,8 @@
             href={event.url}
             target="_blank"
             rel="noopener noreferrer"
-            title={event.url}
-          >{event.url}</a>
+            title={event.url}>{event.url}</a
+          >
           {#if urlIsEditable}
             <button
               type="button"
@@ -612,9 +619,19 @@
               aria-label={m.event_detail_edit_url_aria()}
               title={m.event_detail_edit_url_aria()}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6"/>
-                <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6" />
+                <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
               </svg>
             </button>
           {/if}
@@ -699,9 +716,19 @@
             aria-label={m.event_detail_edit_notes_aria()}
             title={m.event_detail_edit_notes_aria()}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6"/>
-              <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.75"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6" />
+              <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
           </button>
         {/if}
@@ -725,20 +752,52 @@
     {#if stats}
       <div class="detail-stats stats">
         <span class="detail-stat stat" title={m.event_detail_stat_views()}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
             <circle cx="12" cy="12" r="3" />
           </svg>
           <span class="detail-stat-num">{stats.viewCount.toLocaleString()}</span>
         </span>
         <span class="detail-stat stat" title={m.event_detail_stat_likes()}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path
+              d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+            />
           </svg>
           <span class="detail-stat-num">{stats.likeCount.toLocaleString()}</span>
         </span>
         <span class="detail-stat stat" title={m.event_detail_stat_comments()}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
           <span class="detail-stat-num">{stats.commentCount.toLocaleString()}</span>
@@ -759,7 +818,8 @@
             type="button"
             class="detail-section-edit"
             onclick={() => onOpenGamesPickerForCard?.(event.id)}
-          >+ {m.feed_card_menu_edit_games()}</button>
+            >+ {m.feed_card_menu_edit_games()}</button
+          >
         {/if}
       </div>
       <div class="detail-game-row">
@@ -823,15 +883,21 @@
 
   .sr-only {
     position: absolute;
-    width: 1px; height: 1px;
-    padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0, 0, 0, 0);
-    white-space: nowrap; border: 0;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   /* ── Header (nav only; close moved to bottom dock) ────────────────── */
   .detail-head {
-    display: flex; align-items: center; gap: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     padding: 10px 14px;
     border-bottom: 1px solid var(--border-hairline);
     flex-shrink: 0;
@@ -952,13 +1018,16 @@
     flex: 1;
     overflow-y: auto;
     padding: 10px 22px 24px;
-    display: flex; flex-direction: column;
+    display: flex;
+    flex-direction: column;
     gap: 8px;
   }
 
   /* ── Meta line: author + kind icon + src · date ──────────────────── */
   .detail-meta {
-    display: flex; align-items: center; gap: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     color: var(--text-3);
     font-size: var(--t-12);
     flex-wrap: wrap;
@@ -969,7 +1038,9 @@
     color: var(--text-3);
   }
   .detail-meta-compact .kind-icon {
-    display: inline-flex; align-items: center; justify-content: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
     color: var(--card-accent, var(--text-2));
   }
@@ -989,10 +1060,14 @@
     font-size: 12px;
     color: var(--text-2);
     flex: 0 1 auto;
-    text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
     max-width: 240px;
   }
-  .detail-sep { color: var(--text-4); }
+  .detail-sep {
+    color: var(--text-4);
+  }
   .detail-date {
     color: var(--text-2);
     font-family: var(--f-mono);
@@ -1055,7 +1130,9 @@
     align-items: center;
     justify-content: center;
     pointer-events: none;
-    transition: background var(--m-fast), transform var(--m-fast);
+    transition:
+      background var(--m-fast),
+      transform var(--m-fast);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   }
   .detail-thumb-iframe iframe {
@@ -1065,13 +1142,17 @@
   }
 
   .author-avatar {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
     background: var(--surface-3);
     color: var(--text-3);
     border: 1px solid var(--border);
     border-radius: 50%;
-    font-size: 11px; font-weight: var(--w-sb);
+    font-size: 11px;
+    font-weight: var(--w-sb);
     padding: 0;
   }
   .author-avatar[data-mine="1"] {
@@ -1081,8 +1162,9 @@
   }
   .author-avatar.detail-author-trigger {
     cursor: pointer;
-    transition: transform var(--m-fast) var(--m-ease),
-                box-shadow var(--m-fast) var(--m-ease);
+    transition:
+      transform var(--m-fast) var(--m-ease),
+      box-shadow var(--m-fast) var(--m-ease);
   }
   @media (hover: hover) {
     .author-avatar.detail-author-trigger:hover {
@@ -1094,7 +1176,9 @@
   /* Editable date — visible text + native input layered invisibly. */
   .detail-date-edit {
     position: relative;
-    display: inline-flex; align-items: center; gap: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     padding: 2px 6px;
     margin: -2px 0;
     border-radius: var(--r-xs);
@@ -1102,10 +1186,14 @@
     transition: background var(--m-fast) var(--m-ease);
   }
   .detail-date-pencil {
-    display: inline-flex; align-items: center; justify-content: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     color: var(--text-4);
     opacity: 0.7;
-    transition: color var(--m-fast), opacity var(--m-fast);
+    transition:
+      color var(--m-fast),
+      opacity var(--m-fast);
   }
   @media (hover: hover) {
     .detail-date-edit:hover {
@@ -1121,15 +1209,19 @@
     pointer-events: none;
   }
   .detail-date-native {
-    position: absolute; inset: 0;
+    position: absolute;
+    inset: 0;
     opacity: 0;
     cursor: pointer;
-    padding: 0; border: 0;
+    padding: 0;
+    border: 0;
     background: transparent;
     color-scheme: dark;
     font: inherit;
   }
-  :global([data-theme="light"]) .detail-date-native { color-scheme: light; }
+  :global([data-theme="light"]) .detail-date-native {
+    color-scheme: light;
+  }
 
   .detail-byline {
     flex-basis: 100%;
@@ -1150,31 +1242,44 @@
     letter-spacing: -0.012em;
   }
   .detail-editable-row {
-    display: flex; align-items: flex-start; gap: 6px;
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
     min-width: 0;
   }
   .detail-editable-row > :first-child {
-    flex: 1; min-width: 0;
+    flex: 1;
+    min-width: 0;
   }
   .detail-edit-btn {
     flex-shrink: 0;
-    width: 28px; height: 28px;
+    width: 28px;
+    height: 28px;
     margin-top: 4px;
-    display: inline-flex; align-items: center; justify-content: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--r-sm);
     color: var(--text-3);
     cursor: pointer;
     opacity: 0.55;
-    transition: background var(--m-fast), border-color var(--m-fast),
-                color var(--m-fast), opacity var(--m-fast);
+    transition:
+      background var(--m-fast),
+      border-color var(--m-fast),
+      color var(--m-fast),
+      opacity var(--m-fast);
   }
   @media (hover: hover) {
-    .detail-editable-row:hover .detail-edit-btn { opacity: 1; }
+    .detail-editable-row:hover .detail-edit-btn {
+      opacity: 1;
+    }
   }
   @media (hover: none) {
-    .detail-edit-btn { opacity: 0.7; }
+    .detail-edit-btn {
+      opacity: 0.7;
+    }
   }
   .detail-edit-btn:hover {
     background: var(--surface-2);
@@ -1196,10 +1301,12 @@
   .detail-notes.is-editable {
     cursor: text;
     padding: 4px 8px;
-    margin-left: -8px; margin-right: -8px;
+    margin-left: -8px;
+    margin-right: -8px;
     border-radius: var(--r-sm);
-    transition: background var(--m-fast) var(--m-ease),
-                box-shadow var(--m-fast) var(--m-ease);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      box-shadow var(--m-fast) var(--m-ease);
   }
   @media (hover: hover) {
     .detail-title.is-editable:hover,
@@ -1287,11 +1394,14 @@
 
   /* ── URL row ──────────────────────────────────────────────────────── */
   .detail-url {
-    display: flex; align-items: center; gap: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     min-width: 0;
   }
   .detail-url-text {
-    flex: 1; min-width: 0;
+    flex: 1;
+    min-width: 0;
     padding: 2px 6px;
     margin-left: -6px;
     background: transparent;
@@ -1303,11 +1413,14 @@
     text-decoration: underline;
     text-underline-offset: 2px;
     text-decoration-color: color-mix(in oklab, var(--text-3) 40%, transparent);
-    text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
     border-radius: var(--r-sm);
-    transition: background var(--m-fast) var(--m-ease),
-                color var(--m-fast) var(--m-ease),
-                text-decoration-color var(--m-fast) var(--m-ease);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease),
+      text-decoration-color var(--m-fast) var(--m-ease);
   }
   .detail-url-text:hover {
     color: var(--text);
@@ -1327,15 +1440,21 @@
     text-decoration: none;
   }
   .detail-url-edit {
-    width: 28px; height: 28px;
-    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--r-sm);
     color: var(--text-3);
     cursor: pointer;
     flex-shrink: 0;
-    transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+    transition:
+      background var(--m-fast),
+      border-color var(--m-fast),
+      color var(--m-fast);
   }
   .detail-url-edit:hover {
     background: var(--surface-2);
@@ -1392,7 +1511,9 @@
 
   /* ── Section (Games) ──────────────────────────────────────────────── */
   .detail-section {
-    display: flex; flex-direction: column; gap: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
     padding-top: 6px;
   }
   /* Row that pairs the section label with its inline edit affordance.
@@ -1432,25 +1553,35 @@
     color: var(--accent-strong);
   }
   .detail-game-row {
-    display: flex; flex-wrap: wrap; gap: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
     align-items: center;
   }
 
   /* ── Chip-grid (games picker) — same vocab as AddEventForm ──────── */
   .kind-grid {
-    display: flex; flex-wrap: wrap; gap: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
     align-items: center;
   }
   .chip {
-    display: inline-flex; align-items: center; gap: var(--s-2);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-2);
     padding: 0 var(--s-3);
     height: 28px;
     background: var(--surface);
     border: 1px solid var(--border);
     color: var(--text-2);
     border-radius: var(--r-pill);
-    font-size: var(--t-12); font-weight: var(--w-md);
-    transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
+    transition:
+      background var(--m-fast),
+      border-color var(--m-fast),
+      color var(--m-fast);
     white-space: nowrap;
   }
   .chip.kind-chip {
@@ -1464,10 +1595,11 @@
     border-color: var(--border);
     box-shadow: inset 3px 0 0 color-mix(in oklab, var(--card-accent) 55%, transparent);
     cursor: pointer;
-    transition: background var(--m-fast) var(--m-ease),
-                color var(--m-fast) var(--m-ease),
-                border-color var(--m-fast) var(--m-ease),
-                transform var(--m-fast) var(--m-ease);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease),
+      transform var(--m-fast) var(--m-ease);
   }
   .chip.kind-chip:hover {
     background: var(--surface-3);
@@ -1478,9 +1610,10 @@
     background: color-mix(in oklab, var(--card-accent) 32%, var(--surface));
     border-color: var(--card-accent);
     color: var(--text);
-    box-shadow: inset 3px 0 0 var(--card-accent),
-                0 1px 0 rgba(255,255,255,.04) inset,
-                0 2px 6px rgba(0,0,0,.25);
+    box-shadow:
+      inset 3px 0 0 var(--card-accent),
+      0 1px 0 rgba(255, 255, 255, 0.04) inset,
+      0 2px 6px rgba(0, 0, 0, 0.25);
     transform: scale(1.06);
     font-weight: var(--w-sb);
     height: 36px;
@@ -1488,13 +1621,16 @@
 
   /* Inbox-chip in trash mode (read-only). */
   .inbox-chip {
-    display: inline-flex; align-items: center; gap: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     padding: 3px 10px 3px 12px;
     background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: var(--r-pill);
     color: var(--text-2);
-    font-size: var(--t-12); font-weight: var(--w-md);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
   }
 
   /* Game chip — same per-game accent styling as FeedCard (kind-color
@@ -1506,11 +1642,7 @@
     gap: 6px;
     padding: 3px 10px 3px 14px;
     background: color-mix(in oklab, var(--card-accent, var(--border-2)) 14%, var(--surface));
-    border: 1px solid color-mix(
-      in oklab,
-      var(--card-accent, var(--border-2)) 45%,
-      var(--border)
-    );
+    border: 1px solid color-mix(in oklab, var(--card-accent, var(--border-2)) 45%, var(--border));
     box-shadow: inset 3px 0 0 var(--card-accent, var(--border-2));
     border-radius: var(--r-pill);
     color: var(--text);
@@ -1556,17 +1688,21 @@
     flex-wrap: wrap;
   }
   .btn {
-    display: inline-flex; align-items: center; gap: var(--s-2);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-2);
     padding: 0 var(--s-3);
     min-height: var(--hit);
     border-radius: var(--r-sm);
-    font-size: var(--t-13); font-weight: var(--w-md);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
     border: 1px solid transparent;
     cursor: pointer;
     font-family: var(--f-sans);
-    transition: background var(--m-fast) var(--m-ease),
-                border-color var(--m-fast),
-                color var(--m-fast);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast),
+      color var(--m-fast);
   }
   .btn.ghost {
     background: var(--surface-2);
@@ -1589,21 +1725,28 @@
     width: 40px;
     min-height: 40px;
     padding: 0;
-    display: inline-flex; align-items: center; justify-content: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
   .detail-foot-overflow-pop {
-    position: absolute; z-index: 82;
-    bottom: calc(100% + 6px); right: 0;
+    position: absolute;
+    z-index: 82;
+    bottom: calc(100% + 6px);
+    right: 0;
     min-width: 200px;
     background: var(--surface);
     border: 1px solid var(--border-2);
     border-radius: var(--r-md);
     box-shadow: var(--shadow-elev);
     padding: 4px;
-    display: flex; flex-direction: column;
+    display: flex;
+    flex-direction: column;
   }
   .card-menu-item {
-    display: inline-flex; align-items: center; gap: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     width: 100%;
     padding: 8px 10px;
     background: transparent;
@@ -1625,13 +1768,17 @@
     background: color-mix(in oklab, var(--danger) 12%, var(--surface-2));
   }
   .author-pick-scrim {
-    position: fixed; inset: 0; z-index: 80;
+    position: fixed;
+    inset: 0;
+    z-index: 80;
     background: transparent;
   }
 
   /* Mobile ↓ */
   @media (max-width: 640px) {
-    .detail-body { padding: 14px 16px 18px; }
+    .detail-body {
+      padding: 14px 16px 18px;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {

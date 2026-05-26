@@ -98,7 +98,6 @@
   let fetching = $state(false);
   let saving = $state(false);
   let fetched = $state(false);
-  let fetchedKind = $state<EventKind | null>(null);
   let fetchedSrc = $state<string>("");
   // Adapter-parsed metadata held until save → events.metadata. Surfaces
   // in FeedCard sourceLabel (e.g. "Rick Astley (YouTube channel)") via
@@ -111,7 +110,6 @@
   // the fetch-result chip clears these and re-enables editing.
   function resetFetch(): void {
     fetched = false;
-    fetchedKind = null;
     fetchedSrc = "";
     urlError = null;
   }
@@ -138,31 +136,51 @@
 
   function kindShort(k: EventKind): string {
     switch (k) {
-      case "youtube_video": return "YouTube";
-      case "reddit_post":   return "Reddit";
-      case "twitter_post":  return "Twitter";
-      case "telegram_post": return "Telegram";
-      case "discord_drop":  return "Discord";
-      case "press":         return "Press";
-      case "talk":          return "Talk";
-      case "conference":    return "Conference";
-      case "post":          return "Post";
-      case "other":         return "Other";
+      case "youtube_video":
+        return "YouTube";
+      case "reddit_post":
+        return "Reddit";
+      case "twitter_post":
+        return "Twitter";
+      case "telegram_post":
+        return "Telegram";
+      case "discord_drop":
+        return "Discord";
+      case "press":
+        return "Press";
+      case "talk":
+        return "Talk";
+      case "conference":
+        return "Conference";
+      case "post":
+        return "Post";
+      case "other":
+        return "Other";
     }
   }
 
   function eventKindLabel(k: EventKind): string {
     switch (k) {
-      case "youtube_video": return m.event_kind_label_youtube_video();
-      case "reddit_post":   return m.event_kind_label_reddit_post();
-      case "post":          return m.event_kind_label_post();
-      case "conference":    return m.event_kind_label_conference();
-      case "talk":          return m.event_kind_label_talk();
-      case "press":         return m.event_kind_label_press();
-      case "other":         return m.event_kind_label_other();
-      case "twitter_post":  return m.event_kind_label_twitter_post();
-      case "telegram_post": return m.event_kind_label_telegram_post();
-      case "discord_drop":  return m.event_kind_label_discord_drop();
+      case "youtube_video":
+        return m.event_kind_label_youtube_video();
+      case "reddit_post":
+        return m.event_kind_label_reddit_post();
+      case "post":
+        return m.event_kind_label_post();
+      case "conference":
+        return m.event_kind_label_conference();
+      case "talk":
+        return m.event_kind_label_talk();
+      case "press":
+        return m.event_kind_label_press();
+      case "other":
+        return m.event_kind_label_other();
+      case "twitter_post":
+        return m.event_kind_label_twitter_post();
+      case "telegram_post":
+        return m.event_kind_label_telegram_post();
+      case "discord_drop":
+        return m.event_kind_label_discord_drop();
     }
   }
 
@@ -241,7 +259,7 @@
           const body = (await res.json()) as { error?: string; message?: string };
           urlError = body.error ?? body.message ?? m.add_event_modal_url_error_invalid();
         } catch {
-          urlError = `${res.status} ${res.statusText}` || m.add_event_modal_url_error_invalid();
+          urlError = `${res.status} ${res.statusText}`;
         }
         return;
       }
@@ -260,13 +278,19 @@
         occurredAt = data.occurredAt.slice(0, 10);
       }
       const allowed: EventKind[] = [
-        "youtube_video", "reddit_post", "twitter_post",
-        "telegram_post", "discord_drop",
-        "press", "talk", "conference", "post", "other",
+        "youtube_video",
+        "reddit_post",
+        "twitter_post",
+        "telegram_post",
+        "discord_drop",
+        "press",
+        "talk",
+        "conference",
+        "post",
+        "other",
       ];
       if (data.kind && (allowed as readonly string[]).includes(data.kind)) {
         kind = data.kind as EventKind;
-        fetchedKind = kind;
       }
       // Stash adapter-derived metadata that is INTRINSIC to the URL
       // itself, not a denormalization of a separately-renameable entity.
@@ -300,7 +324,10 @@
       // host as the fallback source label when the endpoint didn't
       // return one (the prototype shows e.g. "@neonicle_dev" for tw).
       try {
-        const parsedHost = new URL(u.match(/^https?:\/\//) ? u : "https://" + u).hostname.replace(/^www\./, "");
+        const parsedHost = new URL(u.match(/^https?:\/\//) ? u : "https://" + u).hostname.replace(
+          /^www\./,
+          "",
+        );
         fetchedSrc = data.sourceLabel ?? parsedHost;
       } catch {
         fetchedSrc = data.sourceLabel ?? "";
@@ -355,8 +382,18 @@
     const t = new Date(y, mo - 1, d);
     const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][t.getDay()];
     const mon = [
-      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
     ][t.getMonth()];
     return `${day}, ${mon} ${t.getDate()}`;
   });
@@ -367,16 +404,26 @@
   function kindAccent(k: EventKind): string {
     // CSS var indirection — kind tokens live in src/app.css.
     switch (k) {
-      case "youtube_video": return "var(--k-youtube)";
-      case "reddit_post":   return "var(--k-reddit)";
-      case "twitter_post":  return "var(--k-twitter)";
-      case "telegram_post": return "var(--k-telegram)";
-      case "discord_drop":  return "var(--k-discord)";
-      case "conference":    return "var(--k-conference)";
-      case "talk":          return "var(--k-talk)";
-      case "press":         return "var(--k-press)";
-      case "post":          return "var(--k-post)";
-      case "other":         return "var(--k-other)";
+      case "youtube_video":
+        return "var(--k-youtube)";
+      case "reddit_post":
+        return "var(--k-reddit)";
+      case "twitter_post":
+        return "var(--k-twitter)";
+      case "telegram_post":
+        return "var(--k-telegram)";
+      case "discord_drop":
+        return "var(--k-discord)";
+      case "conference":
+        return "var(--k-conference)";
+      case "talk":
+        return "var(--k-talk)";
+      case "press":
+        return "var(--k-press)";
+      case "post":
+        return "var(--k-post)";
+      case "other":
+        return "var(--k-other)";
     }
   }
 </script>
@@ -415,9 +462,15 @@
         type="url"
         placeholder={m.add_event_modal_link_placeholder()}
         bind:value={url}
-        oninput={() => { fetched = false; urlError = null; }}
+        oninput={() => {
+          fetched = false;
+          urlError = null;
+        }}
         onkeydown={(e) => {
-          if (e.key === "Enter") { e.preventDefault(); void fetchUrlMetadata(); }
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void fetchUrlMetadata();
+          }
         }}
         spellcheck="false"
         autocomplete="off"
@@ -441,18 +494,35 @@
     </div>
     {#if urlError}
       <div class="field-error">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line
+            x1="12"
+            y1="16"
+            x2="12.01"
+            y2="16"
+          />
         </svg>
         <span>{urlError}</span>
       </div>
     {:else if fetched && fetchedSrc}
       <div class="field-fetch-result">
         <span class="field-fetch-ico" style="color: {kindAccent(kind)}">
-          <KindIcon kind={kind} size={14} />
+          <KindIcon {kind} size={14} />
         </span>
         <span class="field-fetch-text">
-          Detected <b>{eventKindLabel(kind)}</b>{fetchedSrc ? ` · ` : ""}<span style="font-family: var(--f-mono); font-size: 11.5px">{fetchedSrc}</span>
+          Detected <b>{eventKindLabel(kind)}</b>{fetchedSrc ? ` · ` : ""}<span
+            style="font-family: var(--f-mono); font-size: 11.5px">{fetchedSrc}</span
+          >
         </span>
       </div>
     {/if}
@@ -501,7 +571,9 @@
       {#if notes.trim().length > 0}
         <span class="addevt-notes-preview">{notes}</span>
       {:else}
-        <span class="addevt-notes-placeholder">Anything worth remembering — context, numbers, links…</span>
+        <span class="addevt-notes-placeholder"
+          >Anything worth remembering — context, numbers, links…</span
+        >
       {/if}
     </button>
   </div>
@@ -554,15 +626,24 @@
           {authorIsMe ? (currentUserName[0] ?? "Y").toUpperCase() : "?"}
         </span>
         <span class="author-pick-name">
-          {authorIsMe ? (currentUserName || "You") : m.author_popover_someone_else()}
+          {authorIsMe ? currentUserName || "You" : m.author_popover_someone_else()}
         </span>
         <span class="author-pick-chev" aria-hidden="true">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"><polyline points="6 9 12 15 18 9" /></svg
+          >
         </span>
       </button>
       {#if authorPopoverOpen}
         <AuthorPopover
-          authorIsMe={authorIsMe}
+          {authorIsMe}
           mineName={currentUserName || "You"}
           placement="up"
           onchange={(next) => {
@@ -577,9 +658,18 @@
     <span class="modal-date-edit">
       <span style="font-variant-numeric: tabular-nums">{occurredHuman}</span>
       <span class="modal-date-pencil" aria-hidden="true">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6"/>
-          <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        <svg
+          width="11"
+          height="11"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6" />
+          <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
         </svg>
       </span>
       <input
@@ -605,18 +695,15 @@
      For the standalone route mount, .modal-foot still styles into a
      sensible right-aligned button row. -->
 <div class="modal-foot">
-  <button
-    type="button"
-    class="btn ghost"
-    onclick={onCancel}
-    disabled={saving}
-  >{m.add_event_modal_cancel()}</button>
+  <button type="button" class="btn ghost" onclick={onCancel} disabled={saving}
+    >{m.add_event_modal_cancel()}</button
+  >
   <button
     type="submit"
     class="btn primary"
     onclick={submit}
-    disabled={saving || title.trim().length === 0}
-  >{m.add_event_modal_save()}</button>
+    disabled={saving || title.trim().length === 0}>{m.add_event_modal_save()}</button
+  >
 </div>
 
 <!-- Big notes-editor — shared NotesEditorModal owns dialog markup +
@@ -641,7 +728,8 @@
     background: var(--surface);
     color: var(--text);
     padding: 16px 18px 4px;
-    display: flex; flex-direction: column;
+    display: flex;
+    flex-direction: column;
     gap: 18px;
     min-width: 0;
     flex: 1;
@@ -650,11 +738,15 @@
 
   /* ── Field block ──────────────────────────────────────────────────── */
   .field {
-    display: flex; flex-direction: column; gap: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
     min-width: 0;
   }
   .field-label-row {
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: var(--s-3);
     min-width: 0;
   }
@@ -691,11 +783,16 @@
     font-size: var(--t-14);
     font-family: var(--f-sans);
     outline: none;
-    transition: border-color var(--m-fast) var(--m-ease),
-                background var(--m-fast) var(--m-ease);
+    transition:
+      border-color var(--m-fast) var(--m-ease),
+      background var(--m-fast) var(--m-ease);
   }
-  .field-input::placeholder { color: var(--text-4); }
-  .field-input:hover { border-color: var(--border-2); }
+  .field-input::placeholder {
+    color: var(--text-4);
+  }
+  .field-input:hover {
+    border-color: var(--border-2);
+  }
   .field-input:focus {
     border-color: var(--accent);
     background: var(--surface);
@@ -745,12 +842,17 @@
 
   /* ── URL row + Fetch button ───────────────────────────────────────── */
   .field-url {
-    display: flex; gap: 8px;
+    display: flex;
+    gap: 8px;
     min-width: 0;
   }
-  .field-url .field-input { flex: 1; min-width: 0; }
+  .field-url .field-input {
+    flex: 1;
+    min-width: 0;
+  }
   .btn.field-url-fetch {
-    height: 40px; min-height: 40px;
+    height: 40px;
+    min-height: 40px;
     padding: 0 14px;
     font-size: var(--t-13);
     font-weight: var(--w-md);
@@ -761,14 +863,22 @@
     cursor: not-allowed;
   }
   .field-error {
-    display: inline-flex; align-items: center; gap: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     color: var(--danger);
     font-size: var(--t-12);
     line-height: 1.3;
   }
-  .field-error svg { width: 12px; height: 12px; flex-shrink: 0; }
+  .field-error svg {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+  }
   .field-fetch-result {
-    display: inline-flex; align-items: center; gap: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     padding: 6px 10px;
     background: var(--surface-2);
     border: 1px solid var(--border-hairline);
@@ -777,16 +887,25 @@
     font-size: var(--t-12);
     flex-wrap: wrap;
   }
-  .field-fetch-result b { color: var(--text); font-weight: var(--w-md); }
+  .field-fetch-result b {
+    color: var(--text);
+    font-weight: var(--w-md);
+  }
   .field-fetch-ico {
-    display: inline-flex; align-items: center; justify-content: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
   }
 
   /* ── Author picker pill (in title label row) ──────────────────────── */
-  .author-pick { position: relative; }
+  .author-pick {
+    position: relative;
+  }
   .author-pick-trigger {
-    display: inline-flex; align-items: center; gap: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     padding: 3px 8px 3px 3px;
     background: var(--surface-2);
     border: 1px solid var(--border);
@@ -795,7 +914,10 @@
     font-size: var(--t-12);
     font-weight: var(--w-md);
     cursor: pointer;
-    transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+    transition:
+      background var(--m-fast),
+      border-color var(--m-fast),
+      color var(--m-fast);
   }
   .author-pick-trigger:hover {
     background: var(--surface-3);
@@ -807,7 +929,8 @@
     cursor: not-allowed;
   }
   .author-pick-trigger .author-avatar {
-    width: 20px; height: 20px;
+    width: 20px;
+    height: 20px;
     font-size: 11px;
   }
   .author-pick-name {
@@ -815,11 +938,14 @@
     letter-spacing: -0.005em;
   }
   .author-pick-chev {
-    display: inline-flex; color: var(--text-3);
+    display: inline-flex;
+    color: var(--text-3);
     margin-right: 2px;
   }
   .author-avatar {
-    display: inline-flex; align-items: center; justify-content: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background: var(--surface-3);
     color: var(--text-3);
     border: 1px solid var(--border);
@@ -835,19 +961,27 @@
 
   /* ── Chip-grid (kind + games picker) ──────────────────────────────── */
   .kind-grid {
-    display: flex; flex-wrap: wrap; gap: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
     align-items: center;
   }
   .chip {
-    display: inline-flex; align-items: center; gap: var(--s-2);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-2);
     padding: 0 var(--s-3);
     height: 28px;
     background: var(--surface);
     border: 1px solid var(--border);
     color: var(--text-2);
     border-radius: var(--r-pill);
-    font-size: var(--t-12); font-weight: var(--w-md);
-    transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
+    transition:
+      background var(--m-fast),
+      border-color var(--m-fast),
+      color var(--m-fast);
     white-space: nowrap;
   }
   .chip.kind-chip {
@@ -864,10 +998,11 @@
     border-color: var(--border);
     box-shadow: inset 3px 0 0 color-mix(in oklab, var(--card-accent) 55%, transparent);
     cursor: pointer;
-    transition: background var(--m-fast) var(--m-ease),
-                color var(--m-fast) var(--m-ease),
-                border-color var(--m-fast) var(--m-ease),
-                transform var(--m-fast) var(--m-ease);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease),
+      transform var(--m-fast) var(--m-ease);
   }
   .chip.add-kind-chip .kind-icon {
     color: var(--card-accent, var(--text-3));
@@ -886,15 +1021,18 @@
     color: var(--text-2);
     border-color: var(--border-2);
   }
-  .chip.add-kind-chip:hover .kind-icon { opacity: 0.9; }
+  .chip.add-kind-chip:hover .kind-icon {
+    opacity: 0.9;
+  }
   .chip.add-kind-chip[data-active="1"],
   .chip.add-game-chip[data-active="1"] {
     background: color-mix(in oklab, var(--card-accent) 32%, var(--surface));
     border-color: var(--card-accent);
     color: var(--text);
-    box-shadow: inset 3px 0 0 var(--card-accent),
-                0 1px 0 rgba(255,255,255,.04) inset,
-                0 2px 6px rgba(0,0,0,.25);
+    box-shadow:
+      inset 3px 0 0 var(--card-accent),
+      0 1px 0 rgba(255, 255, 255, 0.04) inset,
+      0 2px 6px rgba(0, 0, 0, 0.25);
     transform: scale(1.06);
     font-weight: var(--w-sb);
     height: 36px;
@@ -913,8 +1051,9 @@
     border-color: var(--text-2);
     border-style: dashed;
     color: var(--text);
-    box-shadow: 0 1px 0 rgba(255,255,255,.04) inset,
-                0 2px 6px rgba(0,0,0,.25);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.04) inset,
+      0 2px 6px rgba(0, 0, 0, 0.25);
     transform: scale(1.06);
     font-weight: var(--w-sb);
     height: 36px;
@@ -981,7 +1120,8 @@
     }
   }
   .modal-date-native {
-    position: absolute; inset: 0;
+    position: absolute;
+    inset: 0;
     opacity: 0;
     cursor: pointer;
     padding: 0;
@@ -990,51 +1130,71 @@
     color-scheme: dark;
     font: inherit;
   }
-  :global([data-theme="light"]) .modal-date-native { color-scheme: light; }
+  :global([data-theme="light"]) .modal-date-native {
+    color-scheme: light;
+  }
 
   /* ── Footer (Cancel / Save) ───────────────────────────────────────── */
   .modal-foot {
-    display: flex; gap: 8px; align-items: center; justify-content: flex-end;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
     padding: 12px 18px;
     border-top: 1px solid var(--border-hairline);
     background: var(--surface);
   }
   .btn {
-    display: inline-flex; align-items: center; gap: var(--s-2);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-2);
     padding: 0 var(--s-3);
     min-height: var(--hit);
     border-radius: var(--r-sm);
-    font-size: var(--t-13); font-weight: var(--w-md);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
     border: 1px solid transparent;
     cursor: pointer;
     font-family: var(--f-sans);
-    transition: background var(--m-fast) var(--m-ease),
-                border-color var(--m-fast),
-                color var(--m-fast);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast),
+      color var(--m-fast);
   }
   .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
   .btn.primary {
-    background: var(--accent); color: var(--accent-text);
+    background: var(--accent);
+    color: var(--accent-text);
     font-weight: var(--w-sb);
-    box-shadow: 0 1px 0 rgba(255,255,255,.18) inset, 0 1px 2px rgba(0,0,0,.25);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.18) inset,
+      0 1px 2px rgba(0, 0, 0, 0.25);
   }
   .btn.primary:hover:not(:disabled) {
     background: var(--accent-strong);
   }
   .btn.ghost {
-    background: var(--surface-2); color: var(--text); border-color: var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    border-color: var(--border);
   }
   .btn.ghost:hover:not(:disabled) {
-    background: var(--surface-3); border-color: var(--border-2);
+    background: var(--surface-3);
+    border-color: var(--border-2);
   }
 
   /* Mobile ↓ */
   @media (max-width: 540px) {
-    .add-event-form { padding: 12px 14px 0; gap: 14px; }
-    .modal-foot { padding: 10px 14px; }
+    .add-event-form {
+      padding: 12px 14px 0;
+      gap: 14px;
+    }
+    .modal-foot {
+      padding: 10px 14px;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {

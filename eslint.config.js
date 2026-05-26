@@ -50,6 +50,7 @@ export default [
       // plan runs; ESLint should not police them. The active
       // source-of-truth is the top-level src/ + tests/ trees.
       ".claude/",
+      ".planning/",
       // Developer-personal dev helpers
       // (.dev-worker.ts, .dev-oauth-mock.mjs, .dev-probe-youtube.ts,
       // .dev-trigger-poll.ts, etc). These are intentionally outside
@@ -148,11 +149,7 @@ export default [
   // rule.test.ts is the load-bearing CI gate; the fixture is
   // documentation.
   {
-    files: [
-      "src/**/*.ts",
-      "src/**/*.svelte",
-      "eslint-rules/__tests__/fixture-*.ts",
-    ],
+    files: ["src/**/*.ts", "src/**/*.svelte", "eslint-rules/__tests__/fixture-*.ts"],
     plugins: {
       local: localRules,
     },

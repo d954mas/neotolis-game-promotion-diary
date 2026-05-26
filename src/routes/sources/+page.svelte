@@ -7,14 +7,13 @@
   // SourceRow cards with Restore + Delete forever actions (same pattern
   // as /feed?view=trash).
 
-  import { invalidateAll, goto } from "$app/navigation";
+  import { invalidateAll } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import SourceRow from "$lib/components/SourceRow.svelte";
   import SourceKindIcon from "$lib/components/SourceKindIcon.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
   import QuotaStatusBanner from "$lib/components/QuotaStatusBanner.svelte";
-  import RetentionBadge from "$lib/components/RetentionBadge.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import Toast from "$lib/components/shared/Toast.svelte";
   // Phase 03.4-08: "+ Add data source" is now a modal mounted on /sources
@@ -98,9 +97,7 @@
 
   // Total event count across every connected source — drives the "<N>
   // events imported" half of the page-head summary.
-  const totalEventCount = $derived(
-    active.reduce((sum, s) => sum + (s.eventCount ?? 0), 0),
-  );
+  const totalEventCount = $derived(active.reduce((sum, s) => sum + (s.eventCount ?? 0), 0));
 
   // Group active sources by platform for the prototype-style
   // sources-group-head dividers. The reddit_account and reddit_subreddit
@@ -236,7 +233,9 @@
 
     <div class="trash-banner" role="status">
       <a class="trash-back" href="/sources">← {m.sources_trash_back()}</a>
-      <span class="trash-banner-text">{m.sources_trash_banner_text({ days: data.retentionDays })}</span>
+      <span class="trash-banner-text"
+        >{m.sources_trash_banner_text({ days: data.retentionDays })}</span
+      >
     </div>
 
     {#if deleted.length === 0}
@@ -254,7 +253,8 @@
             pulling={false}
             view="trash"
             onRestore={() => restoreSource(source.id)}
-            onDeleteForever={() => askDeleteForever(source.id, source.displayName ?? source.handleUrl)}
+            onDeleteForever={() =>
+              askDeleteForever(source.id, source.displayName ?? source.handleUrl)}
           />
         {/each}
       </div>
@@ -274,18 +274,11 @@
             <span class="metric"><b>{totalEventCount}</b> events</span>
           </span>
         </div>
-        <button
-          type="button"
-          class="btn add-source"
-          onclick={() => (addOpen = true)}
-        >
+        <button type="button" class="btn add-source" onclick={() => (addOpen = true)}>
           {m.sources_cta_new_source()}
         </button>
         {#if deleted.length > 0}
-          <a
-            class="recovery-link"
-            href="/sources?view=trash"
-          >
+          <a class="recovery-link" href="/sources?view=trash">
             {m.page_header_recently_deleted({ count: deleted.length })}
           </a>
         {/if}
@@ -616,11 +609,21 @@
     gap: var(--s-2);
   }
 
-  .sources-group:nth-of-type(1) .sources-group-head .kind-icon { color: var(--k-youtube); }
-  .sources-group:nth-of-type(2) .sources-group-head .kind-icon { color: var(--k-reddit); }
-  .sources-group:nth-of-type(3) .sources-group-head .kind-icon { color: var(--k-twitter); }
-  .sources-group:nth-of-type(4) .sources-group-head .kind-icon { color: var(--k-telegram); }
-  .sources-group:nth-of-type(5) .sources-group-head .kind-icon { color: var(--k-discord); }
+  .sources-group:nth-of-type(1) .sources-group-head .kind-icon {
+    color: var(--k-youtube);
+  }
+  .sources-group:nth-of-type(2) .sources-group-head .kind-icon {
+    color: var(--k-reddit);
+  }
+  .sources-group:nth-of-type(3) .sources-group-head .kind-icon {
+    color: var(--k-twitter);
+  }
+  .sources-group:nth-of-type(4) .sources-group-head .kind-icon {
+    color: var(--k-telegram);
+  }
+  .sources-group:nth-of-type(5) .sources-group-head .kind-icon {
+    color: var(--k-discord);
+  }
 
   .quota-disclosure {
     border: 1px solid var(--border-hairline);
