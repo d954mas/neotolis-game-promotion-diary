@@ -94,15 +94,11 @@ function mountBare(propsOverrides: Record<string, unknown> = {}): {
     onClose: ReturnType<typeof vi.fn>;
     onDelete: ReturnType<typeof vi.fn>;
     onUpdate: ReturnType<typeof vi.fn>;
-    onPrev: ReturnType<typeof vi.fn>;
-    onNext: ReturnType<typeof vi.fn>;
   };
 } {
   const onClose = vi.fn();
   const onDelete = vi.fn(async () => {});
   const onUpdate = vi.fn(async () => {});
-  const onPrev = vi.fn();
-  const onNext = vi.fn();
   const component = mount(EventDetailContent, {
     target: host,
     props: {
@@ -110,21 +106,17 @@ function mountBare(propsOverrides: Record<string, unknown> = {}): {
       games: baseGames,
       sources: baseSources,
       view: "feed",
-      hasPrev: true,
-      hasNext: true,
       currentUserName: "Alice",
       onClose,
       onDelete,
       onUpdate,
-      onPrev,
-      onNext,
       ...propsOverrides,
     },
   });
   flushSync();
   const root = host.querySelector(".event-detail-content") as HTMLElement | null;
   if (!root) throw new Error("EventDetailContent root not found");
-  return { root, component, spies: { onClose, onDelete, onUpdate, onPrev, onNext } };
+  return { root, component, spies: { onClose, onDelete, onUpdate } };
 }
 
 function mountInModal(propsOverrides: Record<string, unknown> = {}): {
@@ -135,15 +127,11 @@ function mountInModal(propsOverrides: Record<string, unknown> = {}): {
     onClose: ReturnType<typeof vi.fn>;
     onDelete: ReturnType<typeof vi.fn>;
     onUpdate: ReturnType<typeof vi.fn>;
-    onPrev: ReturnType<typeof vi.fn>;
-    onNext: ReturnType<typeof vi.fn>;
   };
 } {
   const onClose = vi.fn();
   const onDelete = vi.fn(async () => {});
   const onUpdate = vi.fn(async () => {});
-  const onPrev = vi.fn();
-  const onNext = vi.fn();
   const component = mount(EventDetailModal, {
     target: host,
     props: {
@@ -151,14 +139,10 @@ function mountInModal(propsOverrides: Record<string, unknown> = {}): {
       games: baseGames,
       sources: baseSources,
       view: "feed",
-      hasPrev: true,
-      hasNext: true,
       currentUserName: "Alice",
       onClose,
       onDelete,
       onUpdate,
-      onPrev,
-      onNext,
       ...propsOverrides,
     },
   });
@@ -167,7 +151,7 @@ function mountInModal(propsOverrides: Record<string, unknown> = {}): {
   if (!dialog) throw new Error("EventDetailModal <dialog> not found");
   const root = dialog.querySelector(".event-detail-content") as HTMLElement | null;
   if (!root) throw new Error("EventDetailContent inside modal not found");
-  return { root, dialog, component, spies: { onClose, onDelete, onUpdate, onPrev, onNext } };
+  return { root, dialog, component, spies: { onClose, onDelete, onUpdate } };
 }
 
 beforeEach(() => {

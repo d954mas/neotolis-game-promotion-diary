@@ -28,11 +28,7 @@
     games,
     sources,
     view = "feed",
-    hasPrev = false,
-    hasNext = false,
     currentUserName = "",
-    onPrev,
-    onNext,
     onClose,
     onDelete,
     onRestore,
@@ -44,11 +40,7 @@
     games: GameDto[];
     sources: DataSourceDto[];
     view?: "feed" | "trash";
-    hasPrev?: boolean;
-    hasNext?: boolean;
     currentUserName?: string;
-    onPrev?: () => void;
-    onNext?: () => void;
     onClose: () => void;
     onDelete: (id: string) => Promise<void>;
     onRestore?: (id: string) => Promise<void>;
@@ -85,11 +77,7 @@
     {games}
     {sources}
     {view}
-    {hasPrev}
-    {hasNext}
     {currentUserName}
-    {onPrev}
-    {onNext}
     {onClose}
     {onDelete}
     {onRestore}

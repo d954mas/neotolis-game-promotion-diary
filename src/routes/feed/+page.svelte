@@ -958,8 +958,6 @@
       games={data.games}
       sources={data.sources}
       view={trashView ? "trash" : "feed"}
-      hasPrev={false}
-      hasNext={false}
       onClose={closeDetail}
       onDelete={onModalDelete}
       onRestore={trashView ? onModalRestore : undefined}

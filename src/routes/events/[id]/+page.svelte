@@ -79,8 +79,6 @@
     games={data.games}
     sources={data.sources}
     {view}
-    hasPrev={false}
-    hasNext={false}
     onClose={() => goto("/feed")}
     {onDelete}
     onRestore={view === "trash" ? onRestore : undefined}
