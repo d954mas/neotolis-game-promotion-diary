@@ -331,14 +331,8 @@
       return;
     }
 
-    if (e.key === "ArrowLeft" && hasPrev) {
-      onPrev?.();
-      e.preventDefault();
-    }
-    if (e.key === "ArrowRight" && hasNext) {
-      onNext?.();
-      e.preventDefault();
-    }
+    // ←/→ keyboard nav removed (D-05 buttons were removed per UAT;
+    // detail is now a single-event modal, not a paginated list).
   }
 
   async function onDateChange(iso: string): Promise<void> {

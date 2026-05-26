@@ -395,7 +395,7 @@
   </header>
 
   {#if events.length === 0}
-    <EmptyState heading={m.games_detail_events_empty()} body={m.empty_feed_filtered_body()} />
+    <EmptyState heading={m.games_detail_events_empty()} body={m.games_detail_events_empty_body()} />
   {:else}
     <div class="feedcard-grid">
       {#each groupedEvents as group (group.date)}

@@ -222,4 +222,45 @@
     padding: 12px 16px;
     border-top: 1px solid var(--border-hairline);
   }
+  /* Button styles were scoped to the host components before extraction.
+   * The shared modal needs its own definitions so the buttons render
+   * correctly regardless of which parent mounts it. */
+  .notes-editor-foot .btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--hit);
+    padding: 0 var(--s-3);
+    border-radius: var(--r-sm);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+    font-family: var(--f-sans);
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .notes-editor-foot .btn.ghost {
+    background: var(--surface-2);
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .notes-editor-foot .btn.ghost:hover {
+    background: var(--surface-3);
+    border-color: var(--border-2);
+  }
+  .notes-editor-foot .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+    font-weight: var(--w-sb);
+  }
+  .notes-editor-foot .btn.primary:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+  }
+  .notes-editor-foot .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 </style>

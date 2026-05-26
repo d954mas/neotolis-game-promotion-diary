@@ -187,6 +187,7 @@
   "stores_empty": "No stores linked yet.",
   "games_detail_events_heading": "Events",
   "games_detail_events_empty": "No events for this game yet.",
+  "games_detail_events_empty_body": "Events appear here once you attach them to this game — use the \"Edit games\" button on any event in the feed.",
   "games_detail_section_events": "Events",
   "games_detail_section_game": "Game",
   "games_detail_section_stores": "Stores",
