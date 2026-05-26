@@ -75,7 +75,7 @@
     createFeedToast,
     createFeedNavOverlay,
     createGamesPickerState,
-  } from "$lib/feed/feed-state.js";
+  } from "$lib/feed/feed-state.svelte.js";
   import {
     feedUiStore,
     toggleSelect,
