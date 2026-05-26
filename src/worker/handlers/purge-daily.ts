@@ -22,6 +22,7 @@ import {
   purgeAccount,
   purgeStaleDeletedEvents,
 } from "../../lib/server/services/purge-account.js";
+import { env } from "../../lib/server/config/env.js";
 import { logger } from "../../lib/server/logger.js";
 import { deleteForwardedOutboxRows } from "./outbox-forwarder.js";
 
@@ -52,19 +53,25 @@ export async function handlePurgeDaily(job: { id: string; data: object }): Promi
     }
   }
 
-  // Phase 3.4 design-v2-ux — hard-delete event-level trash older than 30
-  // days (D-20). The events sweep is independent of the per-user account
-  // sweep above: a live user can accumulate stale soft-deleted events that
-  // need purging even when their account is in good standing. Try/catch
-  // isolates this step from downstream outbox cleanup — a transient error
-  // here must NOT abort the larger cron tick.
+  // Phase 3.4 design-v2-ux — hard-delete event-level trash older than
+  // RETENTION_DAYS (D-20). The events sweep is independent of the per-user
+  // account sweep above: a live user can accumulate stale soft-deleted
+  // events that need purging even when their account is in good standing.
+  // Try/catch isolates this step from downstream outbox cleanup — a
+  // transient error here must NOT abort the larger cron tick.
+  //
+  // env.RETENTION_DAYS is read HERE (the sole env-read site for this value
+  // in the cron path) and passed as a parameter so the service stays
+  // env-read-free per AGENTS.md. The same value is used by
+  // listDeletedEvents, restoreEvent, and listFeedPage(scope="trash") so
+  // the UI and the purge cron agree on what's restorable.
   //
   // AGENTS.md "no try/catch around db.insert that cleans up a half-write"
   // doesn't apply: this is per-step isolation in a multi-step pipeline,
   // not half-write rollback. Mirrors the existing try/catch around the
   // outbox cleanup below.
   try {
-    const result = await purgeStaleDeletedEvents();
+    const result = await purgeStaleDeletedEvents(env.RETENTION_DAYS);
     logger.info(
       { jobId: job.id, affected_count: result.affected_count },
       "purge-daily: stale event trash purged",

@@ -243,15 +243,15 @@ export async function listPurgeEligibleUsers(now: Date = new Date()): Promise<st
 
 /**
  * purgeStaleDeletedEvents — hard-deletes events whose deletedAt is older
- * than 30 days. Called from the existing Phase 03.0 purge.daily cron
- * handler (D-20). NO new cron / queue / handler — one extra step in the
- * existing daily 04:00 PT tick lands in Plan 06.
+ * than the configured retention window. Called from the existing Phase 03.0
+ * purge.daily cron handler (D-20). NO new cron / queue / handler — one
+ * extra step in the existing daily 04:00 PT tick lands in Plan 06.
  *
- * 30 days is the EVENTS-specific cutoff. RETENTION_DAYS (typically 60)
- * remains for user-account purges (PRIV-04). The two retentions are
- * intentionally distinct: a deleted event is forensically uninteresting
- * after 30 days; a deleted account stays restorable for 60 days because
- * the user might change their mind about the whole account.
+ * The `retentionDays` parameter MUST match the value used by
+ * `listDeletedEvents`, `restoreEvent`, and `listFeedPage(scope="trash")`
+ * (all read from `env.RETENTION_DAYS`). The cron caller reads env and
+ * passes the value here so the service stays env-read-free (per AGENTS.md
+ * — env reads only in config/env.ts, callers pass as parameter).
  *
  * Audit: ONE row per affected user_id (matches purge.completed's
  * "scoped to the purged user_id" pattern, preserving the per-tenant
@@ -266,10 +266,10 @@ export async function listPurgeEligibleUsers(now: Date = new Date()): Promise<st
  * semantics).
  */
 export async function purgeStaleDeletedEvents(
+  retentionDays: number,
   now: Date = new Date(),
 ): Promise<{ affected_count: number }> {
-  const EVENT_TRASH_RETENTION_DAYS = 30;
-  const cutoff = new Date(now.getTime() - EVENT_TRASH_RETENTION_DAYS * 86_400_000);
+  const cutoff = new Date(now.getTime() - retentionDays * 86_400_000);
 
   // System-wide cross-tenant sweep — purges every tenant's stale events in
   // one tx. Per-tenant scoping happens at the audit-write layer (one row

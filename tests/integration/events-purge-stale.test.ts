@@ -26,6 +26,7 @@ import { events } from "../../src/lib/server/db/schema/events.js";
 import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
 import { uuidv7 } from "../../src/lib/server/ids.js";
 import { purgeStaleDeletedEvents } from "../../src/lib/server/services/purge-account.js";
+import { env } from "../../src/lib/server/config/env.js";
 import { handlePurgeDaily } from "../../src/worker/handlers/purge-daily.js";
 import { seedUserDirectly } from "./helpers.js";
 
@@ -46,26 +47,26 @@ async function seedEventWithDeletedAt(userId: string, deletedAt: Date | null): P
 }
 
 describe("purgeStaleDeletedEvents service (Wave 1 Plan 05)", () => {
-  it("D-20 — hard-deletes events with deletedAt < now() - 30d", async () => {
+  it("D-20 — hard-deletes events with deletedAt < now() - RETENTION_DAYS", async () => {
     const u = await seedUserDirectly({ email: `purge-stale-${uniq()}@test.local` });
     const now = new Date("2026-06-01T10:00:00Z");
-    const old = new Date("2026-04-01T10:00:00Z"); // 61 days before now → past retention
+    const old = new Date("2026-04-01T10:00:00Z"); // 61 days before now → past retention (default 60)
     const ev = await seedEventWithDeletedAt(u.id, old);
 
-    const result = await purgeStaleDeletedEvents(now);
+    const result = await purgeStaleDeletedEvents(env.RETENTION_DAYS, now);
     expect(result.affected_count).toBeGreaterThanOrEqual(1);
 
     const rows = await db.select().from(events).where(eq(events.id, ev));
     expect(rows.length).toBe(0);
   });
 
-  it("preserves events with deletedAt within 30d (still recoverable)", async () => {
+  it("preserves events with deletedAt within RETENTION_DAYS (still recoverable)", async () => {
     const u = await seedUserDirectly({ email: `purge-recent-${uniq()}@test.local` });
     const now = new Date("2026-06-01T10:00:00Z");
     const recent = new Date("2026-05-20T10:00:00Z"); // 12 days before now → within retention
     const ev = await seedEventWithDeletedAt(u.id, recent);
 
-    await purgeStaleDeletedEvents(now);
+    await purgeStaleDeletedEvents(env.RETENTION_DAYS, now);
     const rows = await db.select().from(events).where(eq(events.id, ev));
     expect(rows.length).toBe(1);
   });
@@ -75,7 +76,7 @@ describe("purgeStaleDeletedEvents service (Wave 1 Plan 05)", () => {
     const now = new Date("2026-06-01T10:00:00Z");
     const ev = await seedEventWithDeletedAt(u.id, null);
 
-    await purgeStaleDeletedEvents(now);
+    await purgeStaleDeletedEvents(env.RETENTION_DAYS, now);
     const rows = await db
       .select({ deletedAt: events.deletedAt })
       .from(events)
@@ -93,7 +94,7 @@ describe("purgeStaleDeletedEvents service (Wave 1 Plan 05)", () => {
     await seedEventWithDeletedAt(u1.id, old);
     await seedEventWithDeletedAt(u2.id, old);
 
-    await purgeStaleDeletedEvents(now);
+    await purgeStaleDeletedEvents(env.RETENTION_DAYS, now);
 
     const auditsU1 = await db
       .select()
@@ -118,7 +119,7 @@ describe("purgeStaleDeletedEvents service (Wave 1 Plan 05)", () => {
     const ev1 = await seedEventWithDeletedAt(u.id, old);
     const ev2 = await seedEventWithDeletedAt(u.id, old);
 
-    await purgeStaleDeletedEvents(now);
+    await purgeStaleDeletedEvents(env.RETENTION_DAYS, now);
 
     const audits = await db
       .select()
@@ -139,7 +140,7 @@ describe("purgeStaleDeletedEvents service (Wave 1 Plan 05)", () => {
     const u = await seedUserDirectly({ email: `purge-empty-${uniq()}@test.local` });
     const now = new Date("2026-06-01T10:00:00Z");
 
-    const result = await purgeStaleDeletedEvents(now);
+    const result = await purgeStaleDeletedEvents(env.RETENTION_DAYS, now);
     expect(result.affected_count).toBe(0);
 
     const audits = await db
@@ -148,14 +149,33 @@ describe("purgeStaleDeletedEvents service (Wave 1 Plan 05)", () => {
       .where(and(eq(auditLog.userId, u.id), eq(auditLog.action, "events.purge_stale")));
     expect(audits.length).toBe(0);
   });
+
+  it("retention consistency: purge uses same cutoff as listDeletedEvents/restoreEvent/listFeedPage(trash)", async () => {
+    // The bug: purge used hardcoded 30d while the UI read paths used
+    // env.RETENTION_DAYS (default 60d). Events in the 31-60 day window
+    // would show as restorable in the UI but already be purged by cron.
+    // After the fix, all paths use env.RETENTION_DAYS so the 45-day-old
+    // event below is BOTH shown in UI AND preserved by purge.
+    const u = await seedUserDirectly({ email: `retention-consistency-${uniq()}@test.local` });
+    const now = new Date("2026-06-01T10:00:00Z");
+    // 45 days old — within 60d retention, would have been purged under old 30d hardcode.
+    const midRange = new Date("2026-04-17T10:00:00Z");
+    const ev = await seedEventWithDeletedAt(u.id, midRange);
+
+    await purgeStaleDeletedEvents(env.RETENTION_DAYS, now);
+
+    // Event must survive — it's within the retention window.
+    const rows = await db.select().from(events).where(eq(events.id, ev));
+    expect(rows.length).toBe(1);
+  });
 });
 
 describe("handlePurgeDaily worker step (Wave 2 Plan 06)", () => {
   it("daily cron runs purgeStaleDeletedEvents — stale events hard-deleted + audit row written", async () => {
     const u = await seedUserDirectly({ email: `purge-daily-step-${uniq()}@test.local` });
 
-    // Seed a stale event (deletedAt = 60d ago, well past the 30d retention).
-    const stale = new Date(Date.now() - 60 * 86_400_000);
+    // Seed a stale event (deletedAt = 90d ago, well past RETENTION_DAYS).
+    const stale = new Date(Date.now() - 90 * 86_400_000);
     const evStale = await seedEventWithDeletedAt(u.id, stale);
 
     // The handler must not throw — listPurgeEligibleUsers may return zero
@@ -179,7 +199,7 @@ describe("handlePurgeDaily worker step (Wave 2 Plan 06)", () => {
   it("daily cron leaves within-retention soft-deleted events alone", async () => {
     const u = await seedUserDirectly({ email: `purge-daily-keep-${uniq()}@test.local` });
 
-    // Seed an event soft-deleted 10d ago (within the 30d retention).
+    // Seed an event soft-deleted 10d ago (within RETENTION_DAYS).
     const recent = new Date(Date.now() - 10 * 86_400_000);
     const evRecent = await seedEventWithDeletedAt(u.id, recent);
 
