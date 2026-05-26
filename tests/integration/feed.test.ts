@@ -1,11 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { eq } from "drizzle-orm";
-import {
-  createEvent,
-  listFeedPage,
-  markStandalone,
-  FEED_PAGE_SIZE,
-} from "../../src/lib/server/services/events.js";
+import { and, eq, sql } from "drizzle-orm";
+import { createEvent, listFeedPage, FEED_PAGE_SIZE } from "../../src/lib/server/services/events.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { dataSources } from "../../src/lib/server/db/schema/data-sources.js";
 import { games } from "../../src/lib/server/db/schema/games.js";
@@ -13,6 +8,29 @@ import { events } from "../../src/lib/server/db/schema/events.js";
 import { encodeCursor } from "../../src/lib/server/services/audit-read.js";
 import { uuidv7 } from "../../src/lib/server/ids.js";
 import { seedUserDirectly } from "./helpers.js";
+
+// Helper: flip metadata.triage.offTopic on an owned event row directly,
+// bypassing the (now-deleted) markStandalone service. The off-topic write
+// path proper goes through bulkEdit — tested in its own suite. Here we
+// only need the post-state for setup of listFeedPage filter assertions.
+async function setOffTopicDirectly(userId: string, eventId: string): Promise<void> {
+  await db
+    .update(events)
+    .set({
+      metadata: sql`jsonb_set(
+        jsonb_set(
+          COALESCE(${events.metadata}, '{}'::jsonb),
+          '{triage}',
+          COALESCE(${events.metadata}->'triage', '{}'::jsonb),
+          true
+        ),
+        '{triage,offTopic}',
+        'true'::jsonb,
+        true
+      )`,
+    })
+    .where(and(eq(events.userId, userId), eq(events.id, eventId)));
+}
 
 /**
  * listFeedPage service-level tests.
@@ -1130,13 +1148,14 @@ describe("multi-select feed filters (OR-within-axis, AND-across-axes)", () => {
 });
 
 // listFeedPage's ShowFilter branch `{ kind: 'standalone' }` returns
-// only events where game_id IS NULL AND metadata.triage.standalone =
-// 'true'. Inbox view excludes dismissed events AND standalone events
+// only events where game_id IS NULL AND metadata.triage.offTopic =
+// 'true' (Plan 03.4-10 unified the JSONB key; URL filter mode "standalone"
+// stays). Inbox view excludes dismissed events AND standalone events
 // (they are a separate triage state, not "still in inbox").
 // Cross-tenant probe with show.kind=standalone returns ZERO of the
 // other tenant's standalone rows.
 describe("show.kind=standalone filter", () => {
-  it("listFeedPage with show.kind=standalone returns ONLY events where game_id IS NULL AND metadata.triage.standalone=true", async () => {
+  it("listFeedPage with show.kind=standalone returns ONLY events where game_id IS NULL AND metadata.triage.offTopic=true", async () => {
     const u = await seedUserDirectly({ email: "p24-feed-1@test.local" });
 
     // Inbox event (game_id=null, no standalone flag) — must NOT appear in standalone view.
@@ -1162,7 +1181,7 @@ describe("show.kind=standalone filter", () => {
       },
       "127.0.0.1",
     );
-    await markStandalone(u.id, standaloneEv.id, "127.0.0.1");
+    await setOffTopicDirectly(u.id, standaloneEv.id);
 
     // Attached event (game_id != null) — must NOT appear in standalone view.
     const gameId = uuidv7();
@@ -1208,7 +1227,7 @@ describe("show.kind=standalone filter", () => {
       },
       "127.0.0.1",
     );
-    await markStandalone(u.id, standaloneEv.id, "127.0.0.1");
+    await setOffTopicDirectly(u.id, standaloneEv.id);
 
     const inboxPage = await listFeedPage(u.id, { show: { kind: "inbox" } }, null);
     const ids = inboxPage.rows.map((r) => r.id);
@@ -1231,7 +1250,7 @@ describe("show.kind=standalone filter", () => {
       },
       "127.0.0.1",
     );
-    await markStandalone(userA.id, evA.id, "127.0.0.1");
+    await setOffTopicDirectly(userA.id, evA.id);
 
     const pageB = await listFeedPage(userB.id, { show: { kind: "standalone" } }, null);
     expect(pageB.rows.map((r) => r.id)).not.toContain(evA.id);

@@ -62,30 +62,38 @@
 {/if}
 
 <style>
+  /* v2 GameCover — Steam capsule aspect ratio + --r-sm radius. LB-9
+   * `referrerpolicy="no-referrer"` + `crossorigin="anonymous"` preserved on
+   * the <img>. */
   .cover {
     /* Steam capsule aspect ratio (460x215). Matches the source image when
      * available so the gradient placeholder doesn't visually shift the
      * page when a user later adds a Steam listing. */
     aspect-ratio: 460 / 215;
     width: 100%;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     overflow: hidden;
+    background: var(--surface-2);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   }
   .image {
     object-fit: cover;
-    background: var(--color-bg);
+    background: var(--surface-2);
     display: block;
+    width: 100%;
+    height: 100%;
   }
   .placeholder {
-    background: linear-gradient(135deg, var(--color-accent), #6366f1);
+    background: linear-gradient(135deg, var(--accent), var(--accent-strong));
     display: flex;
     align-items: center;
     justify-content: center;
   }
   .initials {
-    color: var(--color-accent-text, #fff);
+    color: var(--accent-text);
+    font-family: var(--f-sans);
     font-size: clamp(2rem, 6vw, 3rem);
-    font-weight: var(--font-weight-semibold);
+    font-weight: var(--w-sb);
     letter-spacing: 0.1em;
   }
 </style>

@@ -61,7 +61,12 @@ export const youtubeVideos = pgTable(
     title: text("title").notNull(),
     description: text("description"),
     channelId: text("channel_id"),
-    channelTitle: text("channel_title"),
+    // No `channel_title` column here — AGENTS.md no-denorm rule.
+    // The channel display name lives on youtube_channels.channel_title
+    // (FK via `channel_id`). feed-enrichment.ts JOINs at read time so a
+    // channel rename in youtube_channels reflects everywhere immediately.
+    // History: this column existed and was dropped in 0048; see
+    // docs/denormalization-policy.md.
     publishedAt: timestamp("published_at", { withTimezone: true }),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
     // Polling state lives here (not on `events`). NULL on rows freshly

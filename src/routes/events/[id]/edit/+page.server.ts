@@ -1,7 +1,7 @@
 import type { PageServerLoad } from "./$types";
 import { error, redirect } from "@sveltejs/kit";
 import { getEventById } from "$lib/server/services/events.js";
-import { listGames } from "$lib/server/services/games.js";
+import { listGames, deriveReleaseInfoForGames } from "$lib/server/services/games.js";
 import { toEventDto, toGameDto, loadGameIdsForEvent } from "$lib/server/dto.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
 
@@ -30,9 +30,17 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
     const games = await listGames(locals.user.id);
     // Load gameIds for the edit form (multi-select).
     const gameIds = await loadGameIdsForEvent(locals.user.id, row.id);
+    // GameDto.releaseDate / .releaseTba derived via JOIN with
+    // game_steam_listings (denormalization-audit-2.md V-2).
+    const releaseByGameId = await deriveReleaseInfoForGames(
+      locals.user.id,
+      games.map((g) => g.id),
+    );
     return {
       event: toEventDto(row, gameIds),
-      games: games.map(toGameDto),
+      games: games.map((g) =>
+        toGameDto(g, releaseByGameId.get(g.id) ?? { releaseDate: null, releaseTba: false }),
+      ),
     };
   } catch (err) {
     if (err instanceof NotFoundError) throw error(404, "Event not found");

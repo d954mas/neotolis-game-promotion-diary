@@ -1,18 +1,20 @@
 <script lang="ts">
   // UserChip — avatar + email + sign-out menu for AppHeader.
   //
-  // Layout:
-  //   - 28px circular avatar (Google profile picture from user.image)
-  //   - email label hidden below 480px viewport (hard-coded media query;
-  //     a token would be premature)
-  //   - <button> trigger with aria-label `Account menu — {email}`
-  //   - menu items: read-only email + Sign out + Sign out from all devices
-  //   - Esc closes the menu; click outside closes the menu
-  //
-  // Google profile picture rendered with referrerpolicy="no-referrer" +
-  // crossorigin="anonymous" + alt="" so a network failure renders the
-  // fallback (initial-letter placeholder generated client-side) without
-  // leaking referrer.
+  // v2 shape:
+  //   - 24px circular avatar; Google profile picture when user.image is
+  //     set (renders with referrerpolicy="no-referrer" +
+  //     crossorigin="anonymous" so a network failure flips to the
+  //     initial-letter fallback without leaking referrer — LB-9).
+  //     Fallback uses --accent-soft background + --accent text initial.
+  //   - email at --text-2 (hidden below 560px viewport).
+  //   - chevron in --text-3 to signal "menu".
+  //   - <button> trigger with aria-label
+  //     `Account menu — {email}` (Paraglide key preserved).
+  //   - menu panel uses --surface-2 + --shadow-elev + --r-md; item
+  //     hover gets --accent-soft + --accent text.
+  //   - Esc closes the menu; click outside closes the menu (existing
+  //     script logic preserved).
 
   import { m } from "$lib/paraglide/messages.js";
 
@@ -77,7 +79,7 @@
   >
     {#if user.image && !imageBroke}
       <img
-        class="avatar"
+        class="avatar-img"
         src={user.image}
         alt=""
         referrerpolicy="no-referrer"
@@ -85,9 +87,23 @@
         onerror={() => (imageBroke = true)}
       />
     {:else}
-      <span class="avatar avatar-fallback" aria-hidden="true">{initial}</span>
+      <span class="avatar-initial" aria-hidden="true">{initial}</span>
     {/if}
     <span class="email">{user.email}</span>
+    <svg
+      class="chevron"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.75"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
   </button>
   {#if menuOpen}
     <div class="menu" role="menu">
@@ -125,88 +141,110 @@
   .user-chip {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-sm);
-    min-height: 44px;
-    padding: 4px var(--space-sm);
+    gap: var(--s-2);
+    padding: var(--s-1) var(--s-2) var(--s-1) var(--s-1);
+    min-height: var(--hit);
     background: transparent;
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    color: var(--text);
     cursor: pointer;
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .user-chip:hover,
   .user-chip:focus-visible {
-    background: var(--color-surface);
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
-  .avatar {
+  .avatar-img,
+  .avatar-initial {
+    width: 24px;
+    height: 24px;
+    border-radius: var(--r-pill);
+    background: var(--accent-soft);
+    color: var(--accent);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
+    font-weight: var(--w-sb);
+    font-size: var(--t-12);
     object-fit: cover;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
     flex-shrink: 0;
   }
-  .avatar-fallback {
-    font-size: var(--font-size-label);
-    font-weight: var(--font-weight-semibold);
-    color: var(--color-text);
-  }
   .email {
-    font-size: var(--font-size-label);
-    font-weight: var(--font-weight-semibold);
-    color: var(--color-text);
-    max-width: 18ch;
+    max-width: 220px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: var(--text-2);
   }
-  /* 480px hard-coded breakpoint (the token set has none). */
-  @media (max-width: 479px) {
+  .chevron {
+    color: var(--text-3);
+    flex-shrink: 0;
+  }
+  /* Progressive hiding — matches prototype docs/design/v2/ui-kit/index.html
+   * line 87-89 (email drops at 820px; avatar always visible). */
+  @media (max-width: 820px) {
     .email {
       display: none;
     }
   }
   .menu {
     position: absolute;
-    top: calc(100% + var(--space-xs));
+    top: calc(100% + var(--s-1));
     right: 0;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    box-shadow: 0 4px 12px rgb(0 0 0 / 12%);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-elev);
     min-width: 240px;
-    z-index: 10;
+    padding: var(--s-1);
+    z-index: 20;
     display: flex;
     flex-direction: column;
-    padding: var(--space-xs) 0;
+    gap: var(--s-0);
   }
   .menu-email {
-    padding: var(--space-sm) var(--space-md);
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    border-bottom: 1px solid var(--color-border);
+    padding: var(--s-2) var(--s-3);
+    font-size: var(--t-12);
+    color: var(--text-3);
+    border-bottom: 1px solid var(--border-hairline);
+    margin-bottom: var(--s-1);
   }
   .menu-item {
     display: block;
     width: 100%;
     text-align: left;
     background: transparent;
-    color: var(--color-text);
-    border: none;
-    padding: var(--space-sm) var(--space-md);
-    font-size: var(--font-size-body);
+    color: var(--text);
+    border: 0;
+    padding: var(--s-2) var(--s-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    border-radius: var(--r-sm);
     cursor: pointer;
-    min-height: 44px;
+    min-height: var(--hit);
   }
   .menu-item:hover,
   .menu-item:focus-visible {
-    background: var(--color-bg);
+    background: var(--accent-soft);
+    color: var(--accent);
   }
   .menu-item-danger {
-    color: var(--color-destructive);
+    color: var(--danger);
+  }
+  .menu-item-danger:hover,
+  .menu-item-danger:focus-visible {
+    background: var(--accent-soft);
+    color: var(--danger);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .user-chip {
+      transition: none;
+    }
   }
 </style>

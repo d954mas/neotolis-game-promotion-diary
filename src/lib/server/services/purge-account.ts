@@ -240,3 +240,79 @@ export async function listPurgeEligibleUsers(now: Date = new Date()): Promise<st
     .where(and(isNotNull(user.deletedAt), lt(user.deletedAt, cutoff)));
   return rows.map((r) => r.id);
 }
+
+/**
+ * purgeStaleDeletedEvents — hard-deletes events whose deletedAt is older
+ * than the configured retention window. Called from the existing Phase 03.0
+ * purge.daily cron handler (D-20). NO new cron / queue / handler — one
+ * extra step in the existing daily 04:00 PT tick lands in Plan 06.
+ *
+ * The `retentionDays` parameter MUST match the value used by
+ * `listDeletedEvents`, `restoreEvent`, and `listFeedPage(scope="trash")`
+ * (all read from `env.RETENTION_DAYS`). The cron caller reads env and
+ * passes the value here so the service stays env-read-free (per AGENTS.md
+ * — env reads only in config/env.ts, callers pass as parameter).
+ *
+ * Audit: ONE row per affected user_id (matches purge.completed's
+ * "scoped to the purged user_id" pattern, preserving the per-tenant
+ * cursor invariant — audit_log readers query by user_id; a cross-tenant
+ * audit row would never surface to any user's /audit page and would
+ * break per-user cursor pagination). When >100 events purged for a
+ * single user the `affected_ids` list is omitted to keep the audit row
+ * small — `affected_count` still records the total.
+ *
+ * Idempotent: re-running with no stale rows returns {affected_count: 0}
+ * AND writes NO audit rows (mirrors createEvent / bulkEdit empty-diff
+ * semantics).
+ */
+export async function purgeStaleDeletedEvents(
+  retentionDays: number,
+  now: Date = new Date(),
+): Promise<{ affected_count: number }> {
+  const cutoff = new Date(now.getTime() - retentionDays * 86_400_000);
+
+  // System-wide cross-tenant sweep — purges every tenant's stale events in
+  // one tx. Per-tenant scoping happens at the audit-write layer (one row
+  // per user_id below). This is the only legitimate cross-tenant query in
+  // the events service surface; the inline disable is justified per
+  // AGENTS.md Pitfall 7. The cron handler calls this from purge.daily;
+  // no user-facing route ever reaches this code path.
+  /* eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query --
+     System-wide cron sweep that purges all tenants' stale events in one
+     tx. Per-tenant scoping happens at the audit-write level (one row per
+     user_id grouped below). Cron-only call site — no user-facing route
+     reaches this code path. */
+  const result = await db
+    .delete(events)
+    .where(and(isNotNull(events.deletedAt), lt(events.deletedAt, cutoff)))
+    .returning({ id: events.id, userId: events.userId });
+
+  if (result.length === 0) return { affected_count: 0 };
+
+  // Group affected ids by user_id so each audit row stays per-tenant
+  // (preserves per-tenant cursor invariant — see header comment above).
+  const byUser = new Map<string, string[]>();
+  for (const row of result) {
+    const list = byUser.get(row.userId) ?? [];
+    list.push(row.id);
+    byUser.set(row.userId, list);
+  }
+
+  for (const [userId, eventIds] of byUser) {
+    await writeAudit({
+      userId,
+      action: "events.purge_stale",
+      ipAddress: "system",
+      metadata: {
+        affected_count: eventIds.length,
+        purged_at: now.toISOString(),
+        // Omit affected_ids when >100 to keep the audit row small. The
+        // affected_count above still records the total; forensics can
+        // reconstruct from logs if needed.
+        ...(eventIds.length <= 100 ? { affected_ids: eventIds } : {}),
+      },
+    });
+  }
+
+  return { affected_count: result.length };
+}

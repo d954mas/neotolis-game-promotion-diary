@@ -34,6 +34,7 @@
   const currentSessionId = $derived(data.currentSessionId as string);
 
   let confirmSignOutAllOpen = $state(false);
+  let signOutAllError = $state<string | null>(null);
 
   // Account-management state (merged from former /settings/account route).
   let exportInProgress = $state(false);
@@ -77,8 +78,17 @@
 
   async function handleSignOutAllConfirm(): Promise<void> {
     confirmSignOutAllOpen = false;
-    await fetch("/api/me/sessions/all", { method: "POST" });
-    await goto("/", { invalidateAll: true });
+    signOutAllError = null;
+    try {
+      const res = await fetch("/api/me/sessions/all", { method: "POST" });
+      if (!res.ok) {
+        signOutAllError = m.sign_out_all_failed();
+        return;
+      }
+      await goto("/", { invalidateAll: true });
+    } catch {
+      signOutAllError = m.sign_out_all_failed();
+    }
   }
 
   async function handleExport(): Promise<void> {
@@ -151,6 +161,9 @@
         {m.sign_out_all_devices()}
       </button>
     </div>
+    {#if signOutAllError}
+      <InlineError message={signOutAllError} />
+    {/if}
 
     <div class="sub-section">
       <h3>{m.settings_account_section_export_title()}</h3>
@@ -271,114 +284,149 @@
 />
 
 <style>
+  /* Bounded reading width so the .block cards do not sprawl across a
+   * 1280px viewport — settings is single-column content, no reason to
+   * fill the full layout column. Matches /sources/[id] + /sources/new
+   * detail surfaces (720-960px tier). */
   .settings {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xl);
+    gap: var(--s-6);
+    max-width: 960px;
     min-width: 0;
   }
   h1 {
     margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
+    font-family: var(--f-sans);
+    font-size: var(--t-22);
+    font-weight: var(--w-sb);
+    line-height: var(--lh-tight);
+    letter-spacing: -0.01em;
+    color: var(--text);
   }
   .block {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
-    padding: var(--space-md);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    gap: var(--s-2);
+    padding: var(--s-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
   }
   .block h2 {
     margin: 0;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    font-family: var(--f-sans);
+    font-size: var(--t-15);
+    font-weight: var(--w-sb);
+    color: var(--text);
   }
   .muted {
     margin: 0;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
-    line-height: var(--line-height-body);
+    color: var(--text-3);
+    font-size: var(--t-13);
+    line-height: var(--lh-body);
   }
   .theme-row {
     display: flex;
     align-items: center;
-    gap: var(--space-md);
+    gap: var(--s-4);
     flex-wrap: wrap;
   }
   .account {
     display: grid;
     grid-template-columns: max-content 1fr;
-    gap: var(--space-xs) var(--space-md);
+    gap: var(--s-1) var(--s-4);
     margin: 0;
-    font-size: var(--font-size-body);
+    font-size: var(--t-14);
   }
   .account dt {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    color: var(--text-3);
+    font-size: var(--t-13);
   }
   .account dd {
     margin: 0;
-    color: var(--color-text);
+    color: var(--text);
   }
   .actions {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     flex-wrap: wrap;
-    margin-top: var(--space-sm);
+    margin-top: var(--s-2);
   }
   .signout,
   .signout-all {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
+    min-height: var(--hit);
+    padding: 0 var(--s-4);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
-  .signout-all {
-    color: var(--color-destructive);
-    border-color: var(--color-destructive);
+  .signout:hover {
+    background: var(--accent-soft);
+  }
+  /* "Sign out from all devices" — same neutral ghost as regular
+   * sign-out (P2-8: danger styling drew too much visual weight for a
+   * rarely-used action). ConfirmDialog still gates the destructive
+   * action; the button itself doesn't need to scream. */
+  .signout-all:hover {
+    background: var(--accent-soft);
   }
   .sub-section {
-    margin-top: var(--space-md);
-    padding-top: var(--space-md);
-    border-top: 1px solid var(--color-border);
+    margin-top: var(--s-4);
+    padding-top: var(--s-4);
+    border-top: 1px solid var(--border-hairline);
   }
   .sub-section h3 {
-    margin: 0 0 var(--space-xs);
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    margin: 0 0 var(--s-1);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
+    color: var(--text);
   }
   .sub-section.danger-zone h3 {
-    color: var(--color-destructive);
+    color: var(--danger);
   }
   .export,
   .delete {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit);
+    padding: 0 var(--s-4);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .export {
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .export:hover:not(:disabled) {
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
   .export:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
   .delete {
-    background: var(--color-surface);
-    color: var(--color-destructive);
-    border: 1px solid var(--color-destructive);
+    background: transparent;
+    color: var(--danger);
+    border: 1px solid var(--danger);
+  }
+  .delete:hover:not(:disabled) {
+    background: var(--danger);
+    color: #fff;
   }
   .delete:disabled {
     opacity: 0.5;
@@ -388,19 +436,28 @@
   .badge {
     display: inline-block;
     width: fit-content;
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    padding: 2px var(--space-sm);
+    font-size: var(--t-12);
+    color: var(--text-3);
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    padding: 2px var(--s-2);
   }
   .audit-link {
-    color: var(--color-accent);
+    color: var(--accent);
     text-decoration: none;
-    font-size: var(--font-size-body);
+    font-size: var(--t-14);
   }
   .audit-link:hover {
+    color: var(--accent-strong);
     text-decoration: underline;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .signout,
+    .signout-all,
+    .export,
+    .delete {
+      transition: none;
+    }
   }
 </style>

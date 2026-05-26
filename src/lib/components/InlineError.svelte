@@ -12,20 +12,20 @@
 </div>
 
 <style>
+  /* v2 InlineError — --danger text + --t-13 inline alert. */
   .error {
     display: flex;
     align-items: flex-start;
-    gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border-left: 3px solid var(--color-destructive);
-    font-size: var(--font-size-body);
-    line-height: var(--line-height-body);
+    gap: var(--s-1);
+    padding: var(--s-1) 0;
+    color: var(--danger);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    line-height: var(--lh-body);
   }
   .icon {
-    color: var(--color-destructive);
-    font-weight: var(--font-weight-semibold);
+    color: var(--danger);
+    font-weight: var(--w-sb);
     line-height: 1;
     flex-shrink: 0;
     width: 1.25em;

@@ -5,6 +5,8 @@
 //   POST   /api/events/preview-url             — enrichFromUrl (no DB write)
 //   GET    /api/events                         — listFeedPage (chronological pool)
 //   GET    /api/events/deleted                 — listDeletedEvents
+//   PATCH  /api/events/bulk                    — bulkEdit (tri-state, D-12)
+//   DELETE /api/events/bulk                    — bulkDelete / bulkDeleteForever (?force=true, D-13/D-21)
 //   GET    /api/events/:id                     — getEventById
 //   PATCH  /api/events/:id                     — updateEvent
 //   DELETE /api/events/:id                     — softDeleteEvent
@@ -25,6 +27,10 @@
 // GET /events/:id because Hono matches the first declaration at a given depth.
 // Without this ordering, the parametric `:id` route would consume the literal
 // `deleted` segment and the deleted-events list endpoint would never fire.
+// The same precedence rule applies to PATCH/DELETE /events/bulk — both /bulk
+// handlers MUST register BEFORE the parametric /:id PATCH/DELETE pair, or
+// `:id` would match `"bulk"` as the id param and the bulk endpoints would
+// never fire (D-12/D-21 Phase 3.4).
 //
 // `kind` mirrors the unified-events pgEnum (eventKindEnum from
 // src/lib/server/db/schema/events.ts). Service-layer `assertValidKind` is
@@ -54,8 +60,9 @@ import {
   dismissFromInbox,
   listDeletedEvents,
   restoreEvent,
-  markStandalone,
-  unmarkStandalone,
+  bulkEdit,
+  bulkDelete,
+  bulkDeleteForever,
   VALID_EVENT_KINDS,
   type ShowFilter,
 } from "../../services/events.js";
@@ -130,7 +137,7 @@ const createEventSchema = z
     // gameId is the DEPRECATED back-compat alias; gameIds is canonical.
     // The transform below normalizes singular → plural.
     gameId: z.string().min(1).nullable().optional(),
-    gameIds: z.array(z.string().min(1)).optional(),
+    gameIds: z.array(z.string().min(1)).max(500).optional(),
     kind: eventKindEnum,
     occurredAt: z.string().datetime(),
     title: z.string().min(1).max(500),
@@ -180,7 +187,7 @@ const updateEventSchema = z
     // gameIds patch on the edit path. Optional — omitting leaves the
     // junction unchanged; supplying replaces (set semantics via
     // attachEventToGames).
-    gameIds: z.array(z.string().min(1)).optional(),
+    gameIds: z.array(z.string().min(1)).max(500).optional(),
   })
   .refine((obj) => Object.keys(obj).length > 0, {
     message: "at least one field must be supplied",
@@ -205,6 +212,11 @@ const feedQuerySchema = z.object({
   from: z.string().optional(),
   to: z.string().optional(),
   all: z.enum(["1", "0"]).optional(),
+  q: z.string().optional(),
+  // Infinite-scroll continuation must carry the same scope + sort the SSR
+  // loader used, otherwise subsequent pages silently default to live/desc.
+  view: z.enum(["feed", "trash"]).optional(),
+  sort: z.enum(["asc", "desc"]).optional(),
 });
 
 // PATCH /api/events/:id/attach accepts BOTH the canonical
@@ -212,7 +224,7 @@ const feedQuerySchema = z.object({
 // alias. The union + transform pattern below normalizes either shape into
 // a `{gameIds: string[]}` payload before the handler reads it.
 const attachSchema = z.union([
-  z.object({ gameIds: z.array(z.string().min(1)) }),
+  z.object({ gameIds: z.array(z.string().min(1)).max(500) }),
   z
     .object({ gameId: z.string().min(1).nullable() })
     .transform((o) => ({ gameIds: o.gameId === null ? [] : [o.gameId] })),
@@ -224,6 +236,26 @@ const attachSchema = z.union([
 // committing the row.
 const previewUrlSchema = z.object({
   url: z.string().url(),
+});
+
+// PATCH /api/events/bulk schema (D-12). Tri-state semantics per game id
+// ("on" = attach, "off" = detach, "mixed" = leave alone); offTopicState
+// mirrors the same vocab and writes events.metadata.triage.offTopic. The
+// ids cap (.max(500)) is the rate-limit-friendly upper bound — mass-select
+// in the UI tops out at the feed-page size; 500 is comfortable headroom
+// without becoming a quota laundering vector.
+const bulkEditSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(500),
+  gameStates: z.record(z.string(), z.enum(["on", "off", "mixed"])).default({}),
+  offTopicState: z.enum(["on", "off", "mixed"]).default("mixed"),
+});
+
+// DELETE /api/events/bulk schema (D-13 / D-21). `?force=true` query param
+// switches the handler from bulkDelete (soft-delete owned + live events)
+// to bulkDeleteForever (hard-delete owned + already-soft-deleted events).
+// Both paths reuse the same body shape; the query string is the disambiguator.
+const bulkDeleteSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(500),
 });
 
 export const eventsRoutes = new Hono<RouteVars>();
@@ -285,9 +317,11 @@ eventsRoutes.get(
         }
       }
     }
-    // Discriminated show axis (any | inbox | standalone | specific). A bare
-    // ?game= without ?show=specific is ignored — the UI never produces that
-    // combo. 'standalone' = game_id IS NULL AND metadata.triage.standalone='true'.
+    // Discriminated show axis. Post-Plan-03.4-10 the /feed orchestrator
+    // narrows ?show= to "any" | "inbox" and emits the new flat
+    // ?game=g1,g2,off_topic multi-select for the GAME axis. Legacy
+    // ?show=standalone / ?show=specific URLs from old bookmarks /
+    // FeedQuickNav stay supported as a back-compat hook.
     const showParam = q.show ?? "any";
     const showFilter: ShowFilter =
       showParam === "inbox"
@@ -297,19 +331,35 @@ eventsRoutes.get(
           : showParam === "specific"
             ? { kind: "specific", gameIds: gameList }
             : { kind: "any" };
+    // GAME axis multi-select (Plan 03.4-10). When ?show is absent OR
+    // explicitly "any" AND ?game= is present, the params encode the new
+    // flat multi-select (game IDs + optional "off_topic" sentinel). The
+    // legacy ?show=specific&game=... path keeps its own gameIds plumbing
+    // (above); the new path routes through filters.gameTags. Comma-split
+    // is honored so ?game=g1,off_topic and ?game=g1&game=off_topic both
+    // parse the same way (mirrors parseGameTags in url-state.ts).
+    const gameTagsFromUrl =
+      showParam === "any" && gameList.length > 0
+        ? Array.from(new Set(gameList.flatMap((v) => v.split(",")).filter((v) => v !== "")))
+        : undefined;
     try {
+      const scope: "live" | "trash" = q.view === "trash" ? "trash" : "live";
+      const sortDir: "asc" | "desc" = q.sort === "asc" ? "asc" : "desc";
       const page = await listFeedPage(
         c.var.userId,
         {
           source: sourceList && sourceList.length > 0 ? sourceList : undefined,
           kind: kindList && kindList.length > 0 ? kindList : undefined,
           show: showFilter,
+          gameTags: gameTagsFromUrl,
           authorIsMe: q.authorIsMe === "true" ? true : q.authorIsMe === "false" ? false : undefined,
           // Date-only (YYYY-MM-DD) is inclusive on both ends — see /feed/+page.server.ts.
           from: q.from ? new Date(`${q.from}T00:00:00.000Z`) : undefined,
           to: q.to ? new Date(`${q.to}T23:59:59.999Z`) : undefined,
+          query: q.q ?? undefined,
         },
         q.cursor ?? null,
+        { scope, sortDir },
       );
       // Batch-load junction rows for every event in the page so each
       // EventDto carries its gameIds[] without an N+1 lookup. Two queries
@@ -356,6 +406,8 @@ eventsRoutes.post(
         externalId: enriched.externalId,
         title: enriched.title,
         thumbnailUrl: enriched.thumbnailUrl,
+        authorName: enriched.authorName,
+        authorUrl: enriched.authorUrl,
         // ISO string when set; null when oEmbed has no published_at.
         occurredAt: enriched.occurredAt ? enriched.occurredAt.toISOString() : null,
       });
@@ -388,6 +440,71 @@ eventsRoutes.get("/events/deleted", async (c) => {
     return mapErr(c, err, "GET /api/events/deleted");
   }
 });
+
+// Phase 3.4 design-v2-ux — bulk operations (D-12 + D-13 + D-14 + D-21).
+//
+// Hono path-precedence: /bulk MUST register BEFORE /:id, otherwise the
+// parametric `:id` matches `"bulk"` as the id param and these handlers
+// never fire. Mirrors the /events/deleted precedence pattern documented
+// at the top of this file.
+//
+// Cross-tenant ids are silently filtered at the service layer (D-13) — the
+// bulk endpoints NEVER return 404 for "id you don't own"; they return 200
+// with affected_count reflecting the owned-subset that committed. That
+// diverges from the per-id endpoints (which DO 404 cross-tenant) and is
+// the documented bulk contract — see services/events.ts header for the
+// rationale.
+eventsRoutes.patch(
+  "/events/bulk",
+  zValidator("json", bulkEditSchema, (r, c) => {
+    if (!r.success) {
+      return c.json({ error: "validation_failed", details: r.error.issues }, 422);
+    }
+  }),
+  async (c) => {
+    const ctx = getAuditContext(c);
+    const body = c.req.valid("json");
+    try {
+      const dtos = await bulkEdit(
+        ctx.userId,
+        body.ids,
+        body.gameStates,
+        body.offTopicState,
+        ctx.ipAddress,
+        ctx.userAgent ?? undefined,
+      );
+      return c.json({ events: dtos, affected_count: dtos.length });
+    } catch (err) {
+      return mapErr(c, err, "PATCH /api/events/bulk");
+    }
+  },
+);
+
+// DELETE /api/events/bulk — soft-delete or hard-delete-from-trash depending
+// on `?force=true`. The query string is the disambiguator; both paths share
+// the same body schema (D-21 — "Delete forever" surfaces only in the trash
+// view, but the same Hono route handles both via the force flag).
+eventsRoutes.delete(
+  "/events/bulk",
+  zValidator("json", bulkDeleteSchema, (r, c) => {
+    if (!r.success) {
+      return c.json({ error: "validation_failed", details: r.error.issues }, 422);
+    }
+  }),
+  async (c) => {
+    const ctx = getAuditContext(c);
+    const body = c.req.valid("json");
+    const force = c.req.query("force") === "true";
+    try {
+      const result = force
+        ? await bulkDeleteForever(ctx.userId, body.ids, ctx.ipAddress, ctx.userAgent ?? undefined)
+        : await bulkDelete(ctx.userId, body.ids, ctx.ipAddress, ctx.userAgent ?? undefined);
+      return c.json(result);
+    } catch (err) {
+      return mapErr(c, err, "DELETE /api/events/bulk");
+    }
+  },
+);
 
 eventsRoutes.get("/events/:id", async (c) => {
   try {
@@ -501,42 +618,6 @@ eventsRoutes.patch("/events/:id/restore", async (c) => {
     return c.json(toEventDto(ev, gameIds));
   } catch (err) {
     return mapErr(c, err, "PATCH /api/events/:id/restore");
-  }
-});
-
-// markStandalone + unmarkStandalone triage routes. Inline "Mark standalone"
-// affordance on inbox cards. Cross-tenant returns 404 by construction (the
-// service's UPDATE WHERE clause requires the userId match); mapErr
-// translates NotFoundError to {error: "not_found"} status 404.
-eventsRoutes.patch("/events/:id/mark-standalone", async (c) => {
-  const ctx = getAuditContext(c);
-  try {
-    const ev = await markStandalone(
-      ctx.userId,
-      c.req.param("id"),
-      ctx.ipAddress,
-      ctx.userAgent ?? undefined,
-    );
-    const gameIds = await loadGameIdsForEvent(ctx.userId, ev.id);
-    return c.json(toEventDto(ev, gameIds));
-  } catch (err) {
-    return mapErr(c, err, "PATCH /api/events/:id/mark-standalone");
-  }
-});
-
-eventsRoutes.patch("/events/:id/unmark-standalone", async (c) => {
-  const ctx = getAuditContext(c);
-  try {
-    const ev = await unmarkStandalone(
-      ctx.userId,
-      c.req.param("id"),
-      ctx.ipAddress,
-      ctx.userAgent ?? undefined,
-    );
-    const gameIds = await loadGameIdsForEvent(ctx.userId, ev.id);
-    return c.json(toEventDto(ev, gameIds));
-  } catch (err) {
-    return mapErr(c, err, "PATCH /api/events/:id/unmark-standalone");
   }
 });
 

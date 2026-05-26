@@ -70,6 +70,16 @@ const LABELS: Record<AuditAction, () => string> = {
   "reddit.deletion_propagated": () => m.audit_action_reddit_deletion_propagated(),
   "reddit.cap_exhausted": () => m.audit_action_reddit_cap_exhausted(),
   "reddit.adapter_degraded": () => m.audit_action_reddit_adapter_degraded(),
+  // Phase 03.4 design-v2-ux — bulk + trash + purge verbs. PG enum
+  // extension in drizzle/0042_phase34_audit_verbs.sql; en.json keys land
+  // in lock-step (audit_action_events_*).
+  "events.bulk_edit": () => m.audit_action_events_bulk_edit(),
+  "events.bulk_delete": () => m.audit_action_events_bulk_delete(),
+  "events.delete_forever": () => m.audit_action_events_delete_forever(),
+  "events.purge_stale": () => m.audit_action_events_purge_stale(),
+  // Phase 3.4 — ?view=trash hard-delete for sources + games.
+  "source.delete_forever": () => m.audit_action_source_delete_forever(),
+  "game.delete_forever": () => m.audit_action_game_delete_forever(),
 };
 
 /**

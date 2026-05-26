@@ -50,47 +50,77 @@
 </article>
 
 <style>
+  /* v2 list-row treatment — sibling to FeedCard for non-grid contexts. */
   .event-card {
-    display: grid;
-    gap: 0.5rem;
-    padding: 1rem;
-    border: 1px solid var(--color-border, #ccc);
-    border-radius: 0.5rem;
-    background: var(--color-surface, #fff);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-2);
+    padding: var(--s-3) var(--s-4);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border-hairline);
+    border-radius: var(--r-md);
+    min-width: 0;
+    transition: background var(--m-fast) var(--m-ease);
+  }
+  .event-card:hover {
+    background: var(--surface-3);
   }
   .thumbnail {
     width: 100%;
     height: auto;
-    border-radius: 0.25rem;
+    border-radius: var(--r-sm);
   }
   .title {
     margin: 0;
-    font-size: 1rem;
-    font-weight: 600;
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
   .subtitle {
     margin: 0;
-    color: var(--color-text-muted, #666);
+    font-size: var(--t-13);
+    color: var(--text-3);
   }
   .badge {
     display: inline-block;
-    padding: 0.125rem 0.5rem;
-    background: var(--color-bg, #eee);
-    border-radius: 0.25rem;
-    font-size: 0.75rem;
+    padding: 2px var(--s-2);
+    background: var(--surface);
+    border-radius: var(--r-sm);
+    font-size: var(--t-12);
+    color: var(--text-2);
   }
   .metrics {
     list-style: none;
     padding: 0;
     margin: 0;
     display: flex;
-    gap: 1rem;
+    gap: var(--s-3);
     flex-wrap: wrap;
+    font-family: var(--f-mono);
+    font-size: var(--t-12);
+    font-variant-numeric: tabular-nums;
   }
   .metrics .label {
-    color: var(--color-text-muted, #666);
+    color: var(--text-3);
+  }
+  .metrics .value {
+    color: var(--text);
   }
   .open {
-    font-size: 0.875rem;
+    font-size: var(--t-13);
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .open:hover {
+    color: var(--accent-strong);
+    text-decoration: underline;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .event-card {
+      transition: none;
+    }
   }
 </style>

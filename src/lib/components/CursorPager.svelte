@@ -26,24 +26,41 @@
 </nav>
 
 <style>
+  /* v2 CursorPager — "← Newer" / "Older →" button pair on --text-2 base
+   * with --accent-soft hover. */
   .pager {
     display: flex;
     justify-content: space-between;
-    gap: var(--space-md);
-    padding: var(--space-md);
+    gap: var(--s-2);
+    padding: var(--s-4);
+    color: var(--text-2);
+    font-size: var(--t-13);
   }
   .btn {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
   }
   .btn:disabled {
-    opacity: 0.4;
+    opacity: 0.55;
     cursor: not-allowed;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .btn {
+      transition: none;
+    }
   }
 </style>

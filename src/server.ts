@@ -10,6 +10,11 @@
 // containers also fail fast on schema drift, and so /readyz semantics hold
 // for the app role.
 
+// Side-effect import: sets DNS IPv4-first resolution at process boot.
+// Must run before any outbound fetch happens; placing it ahead of the
+// env / logger imports keeps the resolver order set even if a downstream
+// module fires an outbound fetch at module-load time.
+import "./lib/server/integrations/dns-bootstrap.js";
 import { env } from "./lib/server/config/env.js";
 import { logger } from "./lib/server/logger.js";
 import { runMigrations } from "./lib/server/db/migrate.js";

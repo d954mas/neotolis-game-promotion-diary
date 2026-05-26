@@ -2,8 +2,13 @@
 // This helper buckets dates into 4 surfaces:
 //   - same calendar day → "Today, HH:MM" (24h locale)
 //   - one calendar day back → "Yesterday"
-//   - same calendar year, older than yesterday → "MMM D" (Apr 25)
-//   - earlier years → "MMM D, YYYY" (Apr 25, 2025)
+//   - same calendar year, older than yesterday → "Ddd, MMM D" (Mon, Apr 25)
+//   - earlier years → "Ddd, MMM D, YYYY" (Mon, Apr 25, 2025)
+//
+// Weekday prefix on the older-than-yesterday buckets matches the
+// prototype's FeedDateGroupHeader which leads with the weekday name
+// (e.g. "Mon, May 12") — it's a strong scanning anchor when the user
+// scrolls past several days of activity.
 //
 // Locale: fixed `"en"`. Date format conventions (Apr 15, Dec 25, 2025) are
 // a brand choice, NOT a translation target — Paraglide handles all
@@ -47,9 +52,14 @@ export function formatFeedDate(input: Date | string | null | undefined): string 
 
   const sameYear = d.getFullYear() === now.getFullYear();
   if (sameYear) {
-    return d.toLocaleDateString("en", { month: "short", day: "numeric" });
+    return d.toLocaleDateString("en", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
   }
   return d.toLocaleDateString("en", {
+    weekday: "short",
     month: "short",
     day: "numeric",
     year: "numeric",

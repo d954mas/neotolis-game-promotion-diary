@@ -119,65 +119,92 @@
 {/if}
 
 <style>
+  /* v2 ReplaceKeyForm — D-01 redraw via AddSteamListingForm analogy. */
   .form {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
-    padding: var(--space-md);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    gap: var(--s-4);
+    padding: var(--s-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
   }
   .field {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   .label {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    color: var(--text-2);
   }
   .input {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-bg);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
+    min-height: var(--hit);
+    padding: var(--s-2) var(--s-3);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    transition: border-color var(--m-fast) var(--m-ease);
+  }
+  .input:hover {
+    border-color: var(--accent-strong);
   }
   .mono {
-    font-family: var(--font-family-mono);
+    font-family: var(--f-mono);
   }
   .actions {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     justify-content: flex-end;
   }
   .cancel {
     background: transparent;
-    color: var(--color-text-muted);
+    color: var(--text-3);
     border: none;
     text-decoration: underline;
-    font-size: var(--font-size-body);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
     cursor: pointer;
+    transition: color var(--m-fast) var(--m-ease);
+  }
+  .cancel:hover {
+    color: var(--text);
   }
   .submit {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border: none;
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit-lg);
+    padding: var(--s-2) var(--s-4);
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .submit:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   .submit:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: not-allowed;
   }
   .msg {
-    margin-top: var(--space-sm);
+    margin-top: var(--s-2);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .input,
+    .cancel,
+    .submit {
+      transition: none;
+    }
   }
 </style>

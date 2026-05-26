@@ -77,59 +77,68 @@
 {/if}
 
 <style>
+  /* v2 QuotaKeyTable — 4-col table with --surface-2 thead and
+   * --border-hairline row separators; tabular-nums for the numeric cells.
+   * Status pills as --r-pill chips with v2 semantic colors. Phase 03.0
+   * plan 13 contract — < 600px stacking — preserved. */
   .quota-key-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: var(--font-size-label);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    min-width: 0;
   }
   .quota-key-table th,
   .quota-key-table td {
     text-align: left;
-    padding: var(--space-md) var(--space-sm);
-    border-bottom: 1px solid var(--color-border);
+    padding: var(--s-3);
+    border-bottom: 1px solid var(--border-hairline);
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
   }
   .quota-key-table tr:last-child td {
     border-bottom: none;
   }
   .quota-key-table th {
-    font-weight: var(--font-weight-regular);
-    color: var(--color-text-muted);
+    font-weight: var(--w-md);
+    color: var(--text-3);
+    background: var(--surface-2);
   }
   .quota-key-table code {
-    font-family: var(--font-family-mono);
-    font-size: var(--font-size-label);
-    color: var(--color-text);
+    font-family: var(--f-mono);
+    font-size: var(--t-12);
+    color: var(--text);
   }
 
-  /* QuotaKeyTable status pill color rules: 12% alpha wash via color-mix
-   * (the RetentionBadge idiom). */
+  /* QuotaKeyTable status pill — --r-pill chip with semantic color wash. */
   .status-pill {
     display: inline-block;
-    padding: 2px var(--space-sm);
-    border-radius: 4px;
-    font-size: var(--font-size-label);
-    font-weight: var(--font-weight-semibold);
+    padding: var(--s-0) var(--s-2);
+    border-radius: var(--r-pill);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
     white-space: nowrap;
   }
   .status-pill--ok {
-    background: color-mix(in srgb, var(--color-success) 12%, transparent);
-    color: var(--color-success);
+    background: var(--accent-soft);
+    color: var(--success);
   }
   .status-pill--80_throttle {
-    background: color-mix(in srgb, var(--color-info) 12%, transparent);
-    color: var(--color-info);
+    background: var(--surface-2);
+    color: var(--warn);
+    border: 1px solid var(--warn);
   }
   .status-pill--95_throttle {
-    background: color-mix(in srgb, var(--color-destructive) 12%, transparent);
-    color: var(--color-destructive);
+    background: var(--danger);
+    color: #fff;
   }
 
-  /* Stacked layout < 600px viewport: columns collapse so each row becomes
-   * a vertical block (key id on first line, units used + % + status pill
-   * below). Status pill stays right-aligned. */
+  /* Stacked layout < 600px viewport — Phase 03.0 plan 13 contract preserved. */
   @media (max-width: 600px) {
     .quota-key-table thead {
       display: none;
@@ -142,10 +151,10 @@
     .quota-key-table tr {
       display: grid;
       grid-template-columns: 1fr auto;
-      column-gap: var(--space-sm);
-      row-gap: var(--space-xs);
-      padding: var(--space-md);
-      border-bottom: 1px solid var(--color-border);
+      column-gap: var(--s-2);
+      row-gap: var(--s-1);
+      padding: var(--s-3);
+      border-bottom: 1px solid var(--border);
     }
     .quota-key-table td {
       border-bottom: none;
@@ -153,7 +162,7 @@
     }
     .quota-key-table td:first-child {
       grid-column: 1 / 3;
-      font-weight: var(--font-weight-semibold);
+      font-weight: var(--w-sb);
     }
     .status-pill {
       justify-self: end;

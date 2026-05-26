@@ -24,6 +24,10 @@ import { db } from "$lib/server/db/client.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { adapterRefreshQueue } from "$lib/server/db/schema/index.js";
 import { logger } from "$lib/server/logger.js";
+import {
+  markSourceNeedsReconnect,
+  clearNeedsReconnect,
+} from "$lib/server/services/data-sources.js";
 
 interface RedditSourceMetadata {
   username?: string;
@@ -40,9 +44,12 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
   const sources = await db
     .select({
       id: dataSources.id,
+      userId: dataSources.userId,
       kind: dataSources.kind,
       metadata: dataSources.metadata,
       channelId: dataSources.channelId,
+      needsReconnect: dataSources.needsReconnect,
+      lastErrorKind: dataSources.lastErrorKind,
     })
     .from(dataSources)
     .where(
@@ -59,18 +66,47 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
   }
 
   // Build one queue row per source. Drop rows whose metadata is missing
-  // the expected handle field — those are seed-data bugs, not runtime
-  // failures, and surface as a WARN log + skipped row.
+  // the expected handle field — those are seed-data bugs (local dev
+  // seeder, broken import) that the user must intervene on. They never
+  // resolve themselves: every cron tick re-skips the same row forever.
+  // Mark needs_reconnect on the source so /sources surfaces an
+  // 'Error: Setup' pill — same UI affordance as a remote 404. The user
+  // can either fix the metadata (Reconnect → edit handle URL) or delete
+  // the source. Wrapped in try/catch because a single source's UPDATE
+  // failure must not abort the cron tick for every other source.
   const values: Array<typeof adapterRefreshQueue.$inferInsert> = [];
+  // B-2: track sources whose metadata is valid AND were currently flagged
+  // with needs_reconnect=true / operator-issue (the only error category
+  // this cron itself sets). Producing a valid queue row IS the recovery
+  // signal — the operator-issue was "missing handle/sub metadata" and
+  // that's now resolved. Cleared once after the bulk INSERT succeeds, so
+  // a thrown enqueue doesn't prematurely declare recovery.
+  const recoveredSourceIds: Array<{ userId: string; id: string }> = [];
   for (const s of sources) {
     const meta = (s.metadata ?? {}) as RedditSourceMetadata;
     if (s.kind === "reddit_account") {
       const handle = meta.username ?? s.channelId ?? null;
       if (handle === null) {
+        // B-3: short-circuit — if this source is already flagged with the
+        // same operator-issue kind, the UPDATE is a no-op write that
+        // bumps updated_at on every tick (4×/day forever). Skip when the
+        // current state already matches what we'd write.
+        const alreadyFlagged = s.needsReconnect === true && s.lastErrorKind === "operator-issue";
+        if (alreadyFlagged) {
+          continue;
+        }
         logger.warn(
           { sourceId: s.id, kind: s.kind },
-          "reddit.enqueue_service_sources_cron: reddit_account missing username; skipping",
+          "reddit.enqueue_service_sources_cron: reddit_account missing username; skipping + marking needs_reconnect",
         );
+        try {
+          await markSourceNeedsReconnect(s.userId, s.id, "operator-issue");
+        } catch (err) {
+          logger.warn(
+            { sourceId: s.id, err: String((err as Error)?.message ?? err) },
+            "reddit.enqueue_service_sources_cron: markSourceNeedsReconnect failed for reddit_account; continuing",
+          );
+        }
         continue;
       }
       values.push({
@@ -81,13 +117,29 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
         userId: null,
         priority: 0,
       });
+      if (s.needsReconnect === true && s.lastErrorKind === "operator-issue") {
+        recoveredSourceIds.push({ userId: s.userId, id: s.id });
+      }
     } else if (s.kind === "reddit_subreddit") {
       const sub = meta.subreddit ?? s.channelId ?? null;
       if (sub === null) {
+        // B-3: short-circuit — see reddit_account branch above.
+        const alreadyFlagged = s.needsReconnect === true && s.lastErrorKind === "operator-issue";
+        if (alreadyFlagged) {
+          continue;
+        }
         logger.warn(
           { sourceId: s.id, kind: s.kind },
-          "reddit.enqueue_service_sources_cron: reddit_subreddit missing subreddit; skipping",
+          "reddit.enqueue_service_sources_cron: reddit_subreddit missing subreddit; skipping + marking needs_reconnect",
         );
+        try {
+          await markSourceNeedsReconnect(s.userId, s.id, "operator-issue");
+        } catch (err) {
+          logger.warn(
+            { sourceId: s.id, err: String((err as Error)?.message ?? err) },
+            "reddit.enqueue_service_sources_cron: markSourceNeedsReconnect failed for reddit_subreddit; continuing",
+          );
+        }
         continue;
       }
       values.push({
@@ -98,6 +150,9 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
         userId: null,
         priority: 0,
       });
+      if (s.needsReconnect === true && s.lastErrorKind === "operator-issue") {
+        recoveredSourceIds.push({ userId: s.userId, id: s.id });
+      }
     }
   }
 
@@ -119,9 +174,26 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
   // about cron parallelism.
   const insertedRows = await atomicallyInsertNonDuplicates(values);
   const skipped = values.length - insertedRows;
+
+  // B-2: clear needs_reconnect on sources whose metadata is now valid AND
+  // were previously flagged operator-issue by this cron. Idempotent
+  // (clearNeedsReconnect filters WHERE needs_reconnect=true). Runs even
+  // when insertedRows=0 — dedup means the queue row may already be pending
+  // from a prior tick; the recovery state is the source row, not the queue.
+  for (const r of recoveredSourceIds) {
+    try {
+      await clearNeedsReconnect(r.userId, r.id);
+    } catch (err) {
+      logger.warn(
+        { sourceId: r.id, userId: r.userId, err: String((err as Error)?.message ?? err) },
+        "reddit.enqueue_service_sources_cron: clearNeedsReconnect failed; continuing",
+      );
+    }
+  }
+
   if (insertedRows === 0) {
     logger.info(
-      { skipped },
+      { skipped, recovered: recoveredSourceIds.length },
       "reddit.enqueue_service_sources_cron: all candidates already pending; tick is a no-op",
     );
     return { enqueued: 0 };
@@ -131,6 +203,7 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
       enqueued: insertedRows,
       skipped,
       sourcesScanned: sources.length,
+      recovered: recoveredSourceIds.length,
     },
     "reddit.enqueue_service_sources_cron: tick complete",
   );

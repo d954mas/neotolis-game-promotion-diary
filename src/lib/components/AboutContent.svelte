@@ -120,60 +120,85 @@
 </main>
 
 <style>
+  /* v2 AboutContent — D-01 redraw via long-form copy with typography
+   * hierarchy. h1 --t-22 (display sized up in the hero) / h2 --t-17 /
+   * h3 --t-15 / body --t-14. */
   .about-page {
-    max-width: 760px;
+    max-width: 720px;
     margin: 0 auto;
-    padding: var(--space-xl) var(--space-md);
-    line-height: var(--line-height-body);
+    padding: var(--s-6) var(--s-4);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    line-height: var(--lh-body);
+    color: var(--text-2);
   }
   .hero {
-    margin-bottom: calc(var(--space-xl) * 2);
+    margin-bottom: var(--s-8);
     text-align: center;
   }
   .hero h1 {
-    margin: 0 0 var(--space-sm);
-    font-size: 2.4rem;
-    font-weight: var(--font-weight-semibold);
+    margin: 0 0 var(--s-2);
+    font-family: var(--f-sans);
+    font-size: var(--t-30);
+    font-weight: var(--w-sb);
+    color: var(--text);
+    line-height: var(--lh-tight);
   }
   .hero .tagline {
-    margin: 0 0 var(--space-lg);
-    color: var(--color-text-muted);
-    font-size: 1.15rem;
-    line-height: 1.5;
+    margin: 0 0 var(--s-6);
+    color: var(--text-2);
+    font-size: var(--t-17);
+    line-height: var(--lh-body);
   }
   .hero-cta {
     margin: 0;
   }
   .cta-button {
     display: inline-block;
-    padding: var(--space-sm) var(--space-lg);
-    background: var(--color-accent);
-    color: #fff;
-    border: none;
-    border-radius: 4px;
+    padding: var(--s-2) var(--s-6);
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
     text-decoration: none;
-    font-weight: var(--font-weight-semibold);
-    font-size: 1rem;
-    min-height: 44px;
+    font-family: var(--f-sans);
+    font-weight: var(--w-sb);
+    font-size: var(--t-14);
+    min-height: var(--hit-lg);
     line-height: 28px;
     cursor: pointer;
-    font-family: inherit;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .cta-button:hover {
-    opacity: 0.9;
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   section {
-    margin-bottom: calc(var(--space-xl) * 1.5);
+    margin-bottom: var(--s-8);
   }
   section h2 {
-    margin: 0 0 var(--space-md);
-    font-size: 1.5rem;
-    font-weight: var(--font-weight-semibold);
-    border-bottom: 1px solid var(--color-border);
-    padding-bottom: var(--space-xs);
+    margin: var(--s-6) 0 var(--s-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-17);
+    font-weight: var(--w-md);
+    color: var(--text);
+    line-height: var(--lh-tight);
+    border-bottom: 1px solid var(--border-hairline);
+    padding-bottom: var(--s-1);
   }
   section p {
-    margin: 0 0 var(--space-md);
+    margin: 0 0 var(--s-3);
+    color: var(--text-2);
+  }
+  section a {
+    color: var(--accent);
+    text-decoration: underline;
+    transition: color var(--m-fast) var(--m-ease);
+  }
+  section a:hover {
+    color: var(--accent-strong);
   }
   .steps {
     counter-reset: step;
@@ -182,8 +207,8 @@
     margin: 0;
   }
   .steps li {
-    margin-bottom: var(--space-lg);
-    padding-left: calc(var(--space-xl) + var(--space-sm));
+    margin-bottom: var(--s-6);
+    padding-left: calc(var(--s-8) + var(--s-2));
     position: relative;
     counter-increment: step;
   }
@@ -195,43 +220,47 @@
     width: 2rem;
     height: 2rem;
     border-radius: 50%;
-    background: var(--color-accent);
-    color: #fff;
+    background: var(--accent);
+    color: var(--accent-text);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-weight: var(--font-weight-semibold);
+    font-family: var(--f-sans);
+    font-weight: var(--w-sb);
   }
   .steps h3 {
-    margin: 0 0 var(--space-xs);
-    font-size: 1.1rem;
-    font-weight: var(--font-weight-semibold);
+    margin: var(--s-4) 0 var(--s-2);
+    font-family: var(--f-sans);
+    font-size: var(--t-15);
+    font-weight: var(--w-sb);
+    color: var(--text);
   }
   .steps p {
     margin: 0;
   }
   .cta-link {
     display: inline-block;
-    margin-top: var(--space-xs);
+    margin-top: var(--s-1);
   }
   .legal-footer {
-    margin-top: calc(var(--space-xl) * 2);
-    padding-top: var(--space-lg);
-    border-top: 1px solid var(--color-border);
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    margin-top: var(--s-8);
+    padding-top: var(--s-6);
+    border-top: 1px solid var(--border-hairline);
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
   }
   .legal-footer strong {
     display: block;
-    margin-bottom: var(--space-sm);
-    color: var(--color-text);
+    margin-bottom: var(--s-2);
+    color: var(--text);
   }
   .legal-footer ul {
     list-style: none;
     padding: 0;
-    margin: 0 0 var(--space-md);
+    margin: 0 0 var(--s-3);
     display: flex;
-    gap: var(--space-md);
+    gap: var(--s-3);
     flex-wrap: wrap;
   }
   .legal-footer ul li {
@@ -239,5 +268,16 @@
   }
   .legal-footer .contact {
     margin: 0;
+  }
+  @media (min-width: 768px) {
+    .about-page {
+      padding: var(--s-8) var(--s-6);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cta-button,
+    section a {
+      transition: none;
+    }
   }
 </style>

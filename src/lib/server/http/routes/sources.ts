@@ -12,6 +12,7 @@
 //   GET    /api/sources/:id            - getSourceById
 //   PATCH  /api/sources/:id            - updateSource
 //   DELETE /api/sources/:id            - softDeleteSource (returns soft-deleted row)
+//   DELETE /api/sources/:id?force=true - hardDeleteSource (permanent remove of already-soft-deleted)
 //   POST   /api/sources/:id/restore    - restoreSource (422 retention_expired beyond RETENTION_DAYS)
 //
 // Every handler runs after the `/api/*` tenantScope middleware (anonymous -> 401)
@@ -27,6 +28,7 @@ import {
   getSourceById,
   updateSource,
   softDeleteSource,
+  hardDeleteSource,
   restoreSource,
   enforceRefreshContentCooldown,
   enforceRefreshContentIntentRateLimit,
@@ -84,6 +86,16 @@ const createSourceSchema = z.object({
   autoImport: z.boolean().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   backfillWindow: backfillWindowEnum.optional(),
+  // Optional absolute cutoff. When set, takes precedence over
+  // backfillWindow — the UI uses this for the custom-date picker
+  // alongside the preset row. Must be in the past — `.refine()` evaluates
+  // at request time (unlike `.max(new Date())` which freezes at module load).
+  backfillTargetSince: z.coerce
+    .date()
+    .optional()
+    .refine((d) => d === undefined || d <= new Date(), {
+      message: "backfillTargetSince must be in the past",
+    }),
 });
 
 const updateSourceSchema = z
@@ -92,6 +104,13 @@ const updateSourceSchema = z
     autoImport: z.boolean().optional(),
     isOwnedByMe: z.boolean().optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
+    // Free-form per-user remark. 500-char ceiling — long enough for a
+    // sentence-fragment annotation ("press contact for indie horror"),
+    // short enough that the column doesn't become a free-text dumping
+    // ground. Nullable to let the UI clear an existing note; the route
+    // layer normalizes empty-string saves to null below so the field has
+    // exactly two states: present (truthy non-empty) or unset.
+    note: z.string().max(500).nullable().optional(),
     // Earliest-event boundary user wants pulled. Accept ISO date string
     // from UI (date picker / preset button). Coerced to Date and validated
     // server-side in updateSource:
@@ -217,10 +236,19 @@ sourcesRoutes.patch(
   async (c) => {
     const ctx = getAuditContext(c);
     try {
+      const body = c.req.valid("json");
+      // Normalize empty-string note to null at the boundary. A truly
+      // empty note has no UI representation distinct from "no note set",
+      // so the column has exactly two states: NULL (no note) or non-empty
+      // text. The UI's "Clear" path sends "" or null indifferently.
+      const patch =
+        body.note !== undefined && typeof body.note === "string" && body.note.trim().length === 0
+          ? { ...body, note: null }
+          : body;
       const row = await updateSource(
         ctx.userId,
         c.req.param("id"),
-        c.req.valid("json"),
+        patch,
         ctx.ipAddress,
         ctx.userAgent ?? undefined,
       );
@@ -233,7 +261,17 @@ sourcesRoutes.patch(
 
 sourcesRoutes.delete("/sources/:id", async (c) => {
   const ctx = getAuditContext(c);
+  const force = c.req.query("force") === "true";
   try {
+    if (force) {
+      await hardDeleteSource(
+        ctx.userId,
+        c.req.param("id"),
+        ctx.ipAddress,
+        ctx.userAgent ?? undefined,
+      );
+      return c.body(null, 204);
+    }
     const row = await softDeleteSource(
       ctx.userId,
       c.req.param("id"),

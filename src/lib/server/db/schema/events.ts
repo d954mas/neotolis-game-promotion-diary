@@ -30,11 +30,25 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  customType,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.js";
 import { dataSources } from "./data-sources.js";
 import { uuidv7 } from "../../ids.js";
+
+// tsvector is not a first-class drizzle pg-core type. We declare it as a
+// customType so the schema can carry the generated `search_vec` column
+// for snapshot drift checks. The application code NEVER reads or writes
+// this column — it exists purely to back the GIN index that powers the
+// `?q=...` full-text search predicate in listFeedPage / listFeedFacets.
+// `dataType: () => "tsvector"` is enough for drizzle-kit's snapshot diff;
+// the actual GENERATED ALWAYS AS expression lives in migration
+// drizzle/0044_events_fts.sql (forward-only, generated columns are
+// emitted via raw SQL rather than the drizzle generator).
+const tsvector = customType<{ data: string; default: false; notNull: false }>({
+  dataType: () => "tsvector",
+});
 
 // EXPORTED — drizzle-kit silently drops non-exported pgEnums (#5174).
 //
@@ -81,6 +95,16 @@ export const events = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    // Full-text search vector — Postgres-side GENERATED ALWAYS AS column
+    // derived from title + notes via to_tsvector('english', ...). Backed
+    // by GIN index `idx_events_search_vec`. Drives `?q=...` server-side
+    // filtering in listFeedPage / listFeedFacets via
+    // `search_vec @@ plainto_tsquery('english', $q)`. App code NEVER
+    // reads or writes this column; the GENERATED clause keeps it in sync
+    // with title/notes automatically. See drizzle/0044_events_fts.sql.
+    searchVec: tsvector("search_vec").generatedAlwaysAs(
+      sql`to_tsvector('english', coalesce(title, '') || ' ' || coalesce(notes, ''))`,
+    ),
   },
   (t) => ({
     userIdx: index("events_user_id_idx").on(t.userId),
@@ -109,6 +133,27 @@ export const events = pgTable(
     userKindSourceExtUnq: uniqueIndex("events_user_kind_source_ext_unq")
       .on(t.userId, t.kind, t.sourceId, t.externalId)
       .where(sql`${t.sourceId} IS NOT NULL AND ${t.externalId} IS NOT NULL`),
+    // GIN index backing the `?q=...` full-text search predicate. Used as
+    // `search_vec @@ plainto_tsquery('english', $q)` in listFeedPage and
+    // listFeedFacets (the facet path includes the query predicate so chip
+    // counts respect the search). Without GIN, every page load with a
+    // query would seq-scan the events table.
+    searchVecIdx: index("idx_events_search_vec").using("gin", t.searchVec),
+    // pg_trgm support (migration 0045_events_trigram). Trigram GIN indexes
+    // on `title` and `notes` turn the substring-search half of the hybrid
+    // search predicate (`title ILIKE '%q%' OR notes ILIKE '%q%'`) from
+    // O(n) seq scans into O(log n) index-backed lookups. The FTS index
+    // above handles word-level matches (English stemming via
+    // `plainto_tsquery`); these handle substring matches (e.g. `?q=holl`
+    // matching "Hollow Knight") — together they form the canonical
+    // Postgres hybrid-search recipe (FTS + pg_trgm).
+    //
+    // The `gin_trgm_ops` operator class is what makes a GIN index
+    // ILIKE-aware; drizzle-kit emits the trailing space + opclass via a raw
+    // sql expression on the column ref. Both indexes carry the matching
+    // expression in the snapshot so `pnpm db:check` does not detect drift.
+    titleTrgmIdx: index("idx_events_title_trgm").using("gin", sql`${t.title} gin_trgm_ops`),
+    notesTrgmIdx: index("idx_events_notes_trgm").using("gin", sql`${t.notes} gin_trgm_ops`),
     // Polling-state queries go through youtube_videos (one row per video,
     // JOINed on external_id from events). The previous partial index on
     // events.last_polled_at and the column itself were dropped in an

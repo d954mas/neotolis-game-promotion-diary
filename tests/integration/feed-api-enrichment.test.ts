@@ -29,7 +29,7 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { youtubeVideos, youtubeVideoSnapshots } =
+const { youtubeVideos, youtubeVideoSnapshots, youtubeChannels } =
   await import("../../src/lib/server/db/schema/index.js");
 const { createApp } = await import("../../src/lib/server/http/app.js");
 const { createSource } = await import("../../src/lib/server/services/data-sources.js");
@@ -55,11 +55,17 @@ describe("feed-api-enrichment (issue #29 Part 2)", () => {
 
     const videoId = `vid_${uniq()}_${uniq().slice(0, 8)}`;
     const polledAt = new Date();
+    // channel display name lives on youtube_channels — feed-enrichment
+    // JOINs via youtube_videos.channel_id (no-denorm fix V-1).
+    await db.insert(youtubeChannels).values({
+      channelId: channelKey,
+      uploadsPlaylistId: `UU${channelKey.slice(2)}`,
+      channelTitle: "Test Channel",
+    });
     await db.insert(youtubeVideos).values({
       videoId,
       title: "Test video",
       channelId: channelKey,
-      channelTitle: "Test Channel",
       publishedAt: new Date(),
     });
     await db.insert(youtubeVideoSnapshots).values({
@@ -113,11 +119,17 @@ describe("feed-api-enrichment (issue #29 Part 2)", () => {
     );
 
     const videoId = `vid_${uniq()}_${uniq().slice(0, 8)}`;
+    // channel display name lives on youtube_channels — feed-enrichment
+    // JOINs via youtube_videos.channel_id (no-denorm fix V-1).
+    await db.insert(youtubeChannels).values({
+      channelId: channelKey,
+      uploadsPlaylistId: `UU${channelKey.slice(2)}`,
+      channelTitle: "Test Channel",
+    });
     await db.insert(youtubeVideos).values({
       videoId,
       title: "Test video",
       channelId: channelKey,
-      channelTitle: "Test Channel",
       publishedAt: new Date(),
     });
     await db.insert(youtubeVideoSnapshots).values({

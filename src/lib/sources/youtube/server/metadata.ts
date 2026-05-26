@@ -18,7 +18,11 @@ import { eq } from "drizzle-orm";
 import { hasYoutubeApiKeys, youtubeQuotaUser } from "./quota.js";
 import { chargedFetch } from "./http.js";
 import { db } from "$lib/server/db/client.js";
-import { youtubeVideos, youtubeMetadataFetchLog } from "$lib/server/db/schema/index.js";
+import {
+  youtubeVideos,
+  youtubeChannels,
+  youtubeMetadataFetchLog,
+} from "$lib/server/db/schema/index.js";
 import { env } from "$lib/server/config/env.js";
 import { AppError } from "$lib/server/services/errors.js";
 import { AdapterError } from "$lib/sources/errors.js";
@@ -123,9 +127,24 @@ export async function fetchVideoMetadataByUrl(
   // user pastes the same URL twice. Cache hits are free - they don't
   // ping Google, don't burn the operator's envelope, and don't count
   // against the user's youtube_metadata_fetches_per_day cap.
+  //
+  // channelTitle is sourced via LEFT JOIN youtube_channels (no-denorm
+  // fix V-1, see docs/denormalization-policy.md). When the channel
+  // cache is still empty (paste-only video that hasn't been backfilled
+  // yet), channelTitle is null — the caller (route returning JSON to
+  // the form) ships it through unchanged and the form just doesn't
+  // pre-fill the channel name.
   const cached = await db
-    .select()
+    .select({
+      videoId: youtubeVideos.videoId,
+      title: youtubeVideos.title,
+      description: youtubeVideos.description,
+      channelId: youtubeVideos.channelId,
+      channelTitle: youtubeChannels.channelTitle,
+      publishedAt: youtubeVideos.publishedAt,
+    })
     .from(youtubeVideos)
+    .leftJoin(youtubeChannels, eq(youtubeVideos.channelId, youtubeChannels.channelId))
     .where(eq(youtubeVideos.videoId, videoId))
     .limit(1);
   if (cached[0]) {
@@ -220,6 +239,11 @@ export async function fetchVideoMetadataByUrl(
   // Step C - write-through to cache so the next paste of this URL (by
   // anyone) is a hit. UPSERT on video_id PK; no tenant scope on the
   // cache row (public-data table).
+  //
+  // channel_title is NOT written here (no-denorm fix V-1) — it lives
+  // on youtube_channels and is read at JOIN time. channel-context-
+  // backfill is the canonical writer for the channel row; this cache
+  // hit returns null channelTitle until that backfill runs.
   const publishedAtDate = item.snippet.publishedAt ? new Date(item.snippet.publishedAt) : null;
   const now = new Date();
   await db
@@ -229,7 +253,6 @@ export async function fetchVideoMetadataByUrl(
       title: item.snippet.title,
       description: item.snippet.description ?? null,
       channelId: item.snippet.channelId ?? null,
-      channelTitle: item.snippet.channelTitle ?? null,
       publishedAt: publishedAtDate,
       fetchedAt: now,
     })
@@ -239,7 +262,6 @@ export async function fetchVideoMetadataByUrl(
         title: item.snippet.title,
         description: item.snippet.description ?? null,
         channelId: item.snippet.channelId ?? null,
-        channelTitle: item.snippet.channelTitle ?? null,
         publishedAt: publishedAtDate,
         fetchedAt: now,
         updatedAt: now,

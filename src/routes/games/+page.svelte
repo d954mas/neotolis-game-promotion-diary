@@ -1,29 +1,18 @@
 <script lang="ts">
-  // /games — list view.
+  // /games — list view with ?view=trash support.
   //
-  // Empty state with Steam URL example. Populated state stacks
-  // <GameCard> rows; CSS grid breaks to 2-col at 768px (RetentionBadge
-  // appears in the soft-deleted section). The "+ New game" CTA opens an
-  // inline form that POSTs /api/games and navigates to the new game's
-  // detail page on success.
+  // Normal view: GameCard grid + inline new-game form.
+  // Trash view (?view=trash): deleted games as full GameCard cards with
+  // Restore + Delete forever actions, same pattern as /feed?view=trash.
 
   import { invalidateAll, goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import GameCard from "$lib/components/GameCard.svelte";
-  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
-  // Shared PageHeader uses the onClick CTA variant so the toggle behavior
-  // (showForm = true) stays a button (not a link).
   import PageHeader from "$lib/components/PageHeader.svelte";
-  // RecoveryDialog modal — same single recovery surface across the app
-  // (/feed, /games, /sources). The user surfaced this during UAT (verbatim, ru):
-  //   "и так сделать для всеху удаленных обьектов на других страницах"
-  //   ("and do the same for all deleted objects on other pages")
-  // The dialog opens from PageHeader's "Recently deleted (N)" button.
-  // entityType="game" lets RecoveryDialog forward-style per-type even though
-  // the visual treatment is identical today.
-  import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import Toast from "$lib/components/shared/Toast.svelte";
   import type { PageData } from "./$types";
 
   type GameDto = {
@@ -33,10 +22,15 @@
     releaseDate: string | null;
     releaseTba: boolean;
     tags: string[];
+    description: string | null;
     deletedAt: string | null;
+    eventCount?: number;
   };
 
   let { data }: { data: PageData & { retentionDays: number } } = $props();
+
+  // Trash view conditional.
+  let trashView = $derived(data.view === "trash");
 
   const games = $derived(data.games as GameDto[]);
   const softDeleted = $derived(data.softDeleted as GameDto[]);
@@ -45,10 +39,6 @@
   let newTitle = $state("");
   let creating = $state(false);
   let createError = $state<string | null>(null);
-
-  let confirmOpen = $state(false);
-  let pendingDeleteId = $state<string | null>(null);
-  let pendingDeleteTitle = $state("");
 
   async function submitNewGame(e: Event): Promise<void> {
     e.preventDefault();
@@ -76,163 +66,186 @@
     }
   }
 
-  function askDelete(g: GameDto): void {
-    pendingDeleteId = g.id;
-    pendingDeleteTitle = g.title;
-    confirmOpen = true;
-  }
+  // Toast state.
+  let toast = $state<{ kind: "success" | "info" | "danger"; text: string } | null>(null);
 
-  async function confirmDelete(): Promise<void> {
-    if (!pendingDeleteId) return;
-    const res = await fetch(`/api/games/${pendingDeleteId}`, { method: "DELETE" });
-    confirmOpen = false;
-    pendingDeleteId = null;
-    if (res.ok || res.status === 204) await invalidateAll();
-  }
-
-  // RecoveryDialog open state. Opened by PageHeader's "Recently deleted
-  // (N)" button; closed by Escape, backdrop click, the dialog's × button,
-  // or auto-closes when the last recoverable item is restored (same
-  // contract as /feed).
-  let recoveryOpen = $state(false);
-
-  // Map softDeleted (toGameDto-projected, no ciphertext) into the
-  // RecoveryDialog's generic { id, name, deletedAt } shape. `name` falls
-  // back from `title` — every game has a non-empty title by schema, so
-  // this is a straight projection, but the dialog's prop contract is
-  // entity-agnostic.
-  const recoveryItems = $derived(
-    softDeleted.map((g) => ({
-      id: g.id,
-      name: g.title,
-      deletedAt: g.deletedAt,
-    })),
-  );
-
+  // Trash view: per-card Restore handler.
   async function restoreGame(id: string): Promise<void> {
     const res = await fetch(`/api/games/${id}/restore`, { method: "POST" });
     if (res.ok || res.status === 204) {
+      toast = { kind: "success", text: m.toast_game_restored() };
       await invalidateAll();
-      // If that was the last recoverable item, close the dialog so the
-      // user is not stuck staring at "Nothing to recover" — the parent
-      // also stops rendering the PageHeader CTA at the same time
-      // (deletedCount falls to 0). Same pattern as /feed.
-      if (softDeleted.length <= 1) recoveryOpen = false;
+    } else {
+      toast = { kind: "danger", text: m.error_server_generic() };
+    }
+  }
+
+  // Trash view: Delete-forever state + confirm dialog.
+  let deleteForeverId = $state<string | null>(null);
+  let deleteForeverTitle = $state<string>("");
+  let confirmDeleteForeverOpen = $state(false);
+
+  function askDeleteForever(id: string, title: string): void {
+    deleteForeverId = id;
+    deleteForeverTitle = title;
+    confirmDeleteForeverOpen = true;
+  }
+
+  async function confirmDeleteForever(): Promise<void> {
+    if (!deleteForeverId) return;
+    confirmDeleteForeverOpen = false;
+    try {
+      const res = await fetch(`/api/games/${deleteForeverId}?force=true`, { method: "DELETE" });
+      if (!res.ok) {
+        toast = { kind: "danger", text: m.error_server_generic() };
+        return;
+      }
+      toast = { kind: "success", text: m.toast_game_deleted_forever() };
+      deleteForeverId = null;
+      await invalidateAll();
+    } catch {
+      toast = { kind: "danger", text: m.error_network() };
     }
   }
 </script>
 
 <section class="games">
-  <PageHeader
-    title="Games"
-    cta={{
-      onClick: () => {
-        showForm = !showForm;
-      },
-      label: m.games_cta_new_game(),
-    }}
-    sticky
-    deletedCount={softDeleted.length}
-    onOpenRecovery={() => (recoveryOpen = true)}
-  />
+  {#if trashView}
+    <!-- Trash view — renders deleted games as full GameCard cards. -->
+    <PageHeader title={m.games_page_title_trash()} sticky />
 
-  {#if showForm}
-    <form class="newgame" onsubmit={submitNewGame}>
-      <label class="field">
-        <span class="label">Title *</span>
-        <input class="input" type="text" bind:value={newTitle} required maxlength="200" />
-      </label>
-      <div class="actions">
-        <button type="button" class="cancel" onclick={() => (showForm = false)}>
-          {m.common_cancel()}
-        </button>
-        <button type="submit" class="submit" disabled={creating || newTitle.trim().length === 0}>
-          {m.games_cta_new_game()}
-        </button>
+    <div class="trash-banner" role="status">
+      <a class="trash-back" href="/games">← {m.games_trash_back()}</a>
+      <span class="trash-banner-text"
+        >{m.games_trash_banner_text({ days: data.retentionDays })}</span
+      >
+    </div>
+
+    {#if softDeleted.length === 0}
+      <div class="trash-empty" role="status">
+        <h2 class="trash-empty-heading">{m.games_trash_empty_heading()}</h2>
+        <p class="trash-empty-body">{m.games_trash_empty_body({ days: data.retentionDays })}</p>
+        <a href="/games" class="trash-back-link">{m.games_trash_back()}</a>
       </div>
-      {#if createError}
-        <InlineError message={createError} />
-      {/if}
-    </form>
-  {/if}
-
-  {#if games.length === 0}
-    <EmptyState
-      heading={m.empty_games_heading()}
-      body={m.empty_games_body({
-        url: "https://store.steampowered.com/app/1145360/HADES/",
-      })}
-      exampleUrl="https://store.steampowered.com/app/1145360/HADES/"
-      ctaLabel={m.games_cta_new_game()}
-      onCta={() => (showForm = true)}
-    />
+    {:else}
+      <ul class="grid">
+        {#each softDeleted as g (g.id)}
+          <li>
+            <GameCard
+              game={{
+                id: g.id,
+                title: g.title,
+                coverUrl: g.coverUrl,
+                releaseDate: g.releaseDate,
+                releaseTba: g.releaseTba,
+                tags: g.tags,
+                description: g.description,
+                deletedAt: g.deletedAt,
+                eventCount: g.eventCount ?? 0,
+              }}
+              view="trash"
+              onRestore={() => restoreGame(g.id)}
+              onDeleteForever={() => askDeleteForever(g.id, g.title)}
+            />
+          </li>
+        {/each}
+      </ul>
+    {/if}
   {:else}
-    <ul class="grid">
-      {#each games as g (g.id)}
-        <li>
-          <GameCard
-            game={{
-              id: g.id,
-              title: g.title,
-              coverUrl: g.coverUrl,
-              releaseDate: g.releaseDate,
-              releaseTba: g.releaseTba,
-              tags: g.tags,
-              deletedAt: g.deletedAt,
-            }}
-            onSoftDelete={() => askDelete(g)}
-          />
-        </li>
-      {/each}
-    </ul>
-  {/if}
-
-  <!-- The recovery flow lives in <RecoveryDialog> — a modal opened from
-       PageHeader's "Recently deleted (N)" button. The dialog mounts only
-       when softDeleted.length > 0; the dialog itself still defends against
-       the empty case (renders the localized empty message). RetentionBadge
-       is rendered INSIDE the dialog per item. -->
-  {#if softDeleted.length > 0}
-    <RecoveryDialog
-      open={recoveryOpen}
-      items={recoveryItems}
-      entityType="game"
-      retentionDays={data.retentionDays}
-      onClose={() => (recoveryOpen = false)}
-      onRestore={restoreGame}
+    <!-- Normal view. -->
+    <PageHeader
+      title="Games"
+      cta={{
+        onClick: () => {
+          showForm = !showForm;
+        },
+        label: m.games_cta_new_game(),
+      }}
+      sticky
+      deletedCount={softDeleted.length}
+      onOpenRecovery={() => goto("/games?view=trash")}
     />
+
+    {#if showForm}
+      <form class="newgame" onsubmit={submitNewGame}>
+        <label class="field">
+          <span class="label">Title *</span>
+          <input class="input" type="text" bind:value={newTitle} required maxlength="200" />
+        </label>
+        <div class="actions">
+          <button type="button" class="cancel" onclick={() => (showForm = false)}>
+            {m.common_cancel()}
+          </button>
+          <button type="submit" class="submit" disabled={creating || newTitle.trim().length === 0}>
+            {m.games_cta_new_game()}
+          </button>
+        </div>
+        {#if createError}
+          <InlineError message={createError} />
+        {/if}
+      </form>
+    {/if}
+
+    {#if games.length === 0}
+      <EmptyState
+        heading={m.empty_games_heading()}
+        body={m.empty_games_body({
+          url: "https://store.steampowered.com/app/1145360/HADES/",
+        })}
+        exampleUrl="https://store.steampowered.com/app/1145360/HADES/"
+        ctaLabel={m.games_cta_new_game()}
+        onCta={() => (showForm = true)}
+      />
+    {:else}
+      <ul class="grid">
+        {#each games as g (g.id)}
+          <li>
+            <GameCard
+              game={{
+                id: g.id,
+                title: g.title,
+                coverUrl: g.coverUrl,
+                releaseDate: g.releaseDate,
+                releaseTba: g.releaseTba,
+                tags: g.tags,
+                description: g.description,
+                deletedAt: g.deletedAt,
+                eventCount: g.eventCount ?? 0,
+              }}
+            />
+          </li>
+        {/each}
+      </ul>
+    {/if}
   {/if}
 
   <ConfirmDialog
-    open={confirmOpen}
-    message={m.confirm_game_delete({ title: pendingDeleteTitle })}
-    confirmLabel={m.common_delete()}
-    onConfirm={confirmDelete}
-    onCancel={() => {
-      confirmOpen = false;
-      pendingDeleteId = null;
-    }}
+    open={confirmDeleteForeverOpen}
+    message={m.games_trash_confirm_delete_forever({ title: deleteForeverTitle })}
+    confirmLabel={m.games_trash_delete_forever()}
+    onConfirm={confirmDeleteForever}
+    onCancel={() => (confirmDeleteForeverOpen = false)}
   />
+
+  {#if toast}
+    <Toast kind={toast.kind} text={toast.text} onclose={() => (toast = null)} />
+  {/if}
 </section>
 
 <style>
   .games {
     display: flex;
     flex-direction: column;
-    gap: var(--space-lg);
+    gap: var(--s-6);
     min-width: 0;
   }
-  /* Inline .head + .cta CSS were replaced by the shared <PageHeader>
-   * component (see top of file). PageHeader uses the inline-on-the-left
-   * flex layout. The onClick CTA variant preserves the inline-form-toggle
-   * behavior (showForm = !showForm). */
   .grid {
     list-style: none;
     padding: 0;
     margin: 0;
     display: grid;
     grid-template-columns: 1fr;
-    gap: var(--space-md);
+    gap: var(--s-4);
   }
   @media (min-width: 768px) {
     .grid {
@@ -244,59 +257,144 @@
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
+
+  /* Trash banner — ← back link left, then text. */
+  .trash-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s-3);
+    padding: var(--s-2) var(--s-4);
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--accent-strong);
+    border-radius: var(--r-sm);
+    font-size: var(--t-13);
+  }
+  .trash-back {
+    color: var(--accent-strong);
+    text-decoration: none;
+    font-weight: var(--w-sb);
+    white-space: nowrap;
+  }
+  .trash-back:hover {
+    text-decoration: underline;
+  }
+  .trash-banner-text {
+    color: var(--accent);
+  }
+
+  /* Trash empty state. */
+  .trash-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--s-3);
+    padding: var(--s-8) var(--s-4);
+    max-width: 560px;
+    margin: 0 auto;
+  }
+  .trash-empty-heading {
+    margin: 0;
+    font-family: var(--f-sans);
+    font-size: var(--t-22);
+    font-weight: var(--w-sb);
+    color: var(--text);
+    letter-spacing: -0.01em;
+    line-height: var(--lh-tight);
+  }
+  .trash-empty-body {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--t-14);
+    line-height: var(--lh-body);
+  }
+  .trash-back-link {
+    color: var(--accent);
+    text-decoration: underline;
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
+  }
+  .trash-back-link:hover {
+    color: var(--accent-strong);
+  }
+
+  /* Inline "+ New game" form. */
   .newgame {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
-    padding: var(--space-md);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    gap: var(--s-2);
+    padding: var(--s-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    max-width: 720px;
   }
   .field {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   .label {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    font-size: var(--t-13);
+    color: var(--text-2);
   }
   .input {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-bg);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
+    min-height: var(--hit-lg);
+    padding: 0 var(--s-3);
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-size: var(--t-14);
+    font-family: var(--f-sans);
+    transition: border-color var(--m-fast) var(--m-ease);
+  }
+  .input::placeholder {
+    color: var(--text-3);
+  }
+  .input:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: var(--focus-ring);
   }
   .actions {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     justify-content: flex-end;
   }
   .cancel {
     background: transparent;
-    color: var(--color-text-muted);
+    color: var(--text-2);
     border: none;
     text-decoration: underline;
     cursor: pointer;
   }
   .submit {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-accent-text);
-    border: none;
-    border-radius: 4px;
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit-lg);
+    padding: 0 var(--s-4);
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
+    font-weight: var(--w-sb);
+    font-size: var(--t-14);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .submit:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   .submit:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
-  /* The recovery flow uses RecoveryDialog (same component on /feed and
-   * /sources). */
+  @media (prefers-reduced-motion: reduce) {
+    .submit {
+      transition: none;
+    }
+  }
 </style>

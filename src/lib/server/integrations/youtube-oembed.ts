@@ -47,6 +47,10 @@ export type YoutubeOembedResult =
  * key here — that would route through Data API quota for no benefit.
  */
 export async function fetchYoutubeOembed(canonicalUrl: string): Promise<YoutubeOembedResult> {
+  // DNS IPv4-first resolution is now set once per process at boot —
+  // see src/lib/server/integrations/dns-bootstrap.ts (B-8). The prior
+  // implementation re-set the default order on every paste, which was
+  // wasted work on the hot ingest path.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 5000);
   try {

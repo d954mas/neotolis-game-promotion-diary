@@ -65,9 +65,6 @@ describe("anonymous-401 sweep", () => {
     "/api/events/:id/attach",
     "/api/events/:id/dismiss-inbox",
     "/api/events/:id/restore",
-    // markStandalone + unmarkStandalone triage routes.
-    "/api/events/:id/mark-standalone",
-    "/api/events/:id/unmark-standalone",
     "/api/games/:gameId/events",
     // audit
     "/api/audit",
@@ -94,6 +91,12 @@ describe("anonymous-401 sweep", () => {
     // tenantScope middleware fires before redditFetch ever reaches
     // the Reddit servers, so anonymous probes never burn a unit.
     "/api/reddit/fetch-metadata",
+    // Phase 3.4 design-v2-ux — bulk endpoints (PATCH + DELETE on the
+    // same /api/events/bulk path). Wave 2 Plan 06 mounted the Hono
+    // route; the path participates in the load-bearing toContain guard
+    // below and in the per-method explicit anonymous-401 assertions at
+    // the bottom of this file.
+    "/api/events/bulk",
   ];
 
   it("every /api/* route except /api/auth/* refuses anonymous with 401", async () => {
@@ -238,22 +241,6 @@ describe("anonymous-401 sweep", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
-  it("anonymous PATCH /api/events/:id/mark-standalone returns 401 unauthorized", async () => {
-    const res = await app.request("/api/events/fixture-id/mark-standalone", {
-      method: "PATCH",
-    });
-    expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: "unauthorized" });
-  });
-
-  it("anonymous PATCH /api/events/:id/unmark-standalone returns 401 unauthorized", async () => {
-    const res = await app.request("/api/events/fixture-id/unmark-standalone", {
-      method: "PATCH",
-    });
-    expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: "unauthorized" });
-  });
-
   // Explicit per-route anonymous-401 assertions for the /api/me/*
   // account-export-delete-restore surface (AGENTS.md §3 — vacuous-pass
   // sweep + explicit per-route assertions, both layers required).
@@ -303,6 +290,47 @@ describe("anonymous-401 sweep", () => {
     const res = await app.request("/api/admin/quota");
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  // Phase 3.4 design-v2-ux — bulk endpoints anonymous-401.
+  //
+  // Wave 2 Plan 06 mounted /api/events/bulk (PATCH + DELETE +
+  // DELETE?force=true). The auth gate (tenantScope on /api/*) fires before
+  // the route handler ever sees the body, so anonymous probes return 401
+  // before any validator or service code runs. The
+  // MUST_BE_PROTECTED entry above carries the load-bearing toContain
+  // guard; these explicit per-method checks are the second layer.
+  it("anonymous PATCH /api/events/bulk returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events/bulk", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: ["ev_anon"], gameStates: {}, offTopicState: "mixed" }),
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body).toEqual({ error: "unauthorized" });
+  });
+
+  it("anonymous DELETE /api/events/bulk returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events/bulk", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: ["ev_anon"] }),
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body).toEqual({ error: "unauthorized" });
+  });
+
+  it("anonymous DELETE /api/events/bulk?force=true returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events/bulk?force=true", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: ["ev_anon"] }),
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body).toEqual({ error: "unauthorized" });
   });
 
   // /api/youtube/fetch-metadata gate.

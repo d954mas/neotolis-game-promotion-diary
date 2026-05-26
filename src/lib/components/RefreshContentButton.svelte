@@ -152,19 +152,34 @@
     onclick={onClick}
   >
     {#if compact}
-      <!-- Refresh icon (Unicode ↻). Spinning ONLY while worker is actively
-           pulling (pgboss job state in active/created/retry) OR while
-           the client-side fetch is pending. Cooldown without active pull
-           = static icon + countdown (worker finished, just rate-limit
-           gate ticking down). -->
-      <span
-        class="refresh-content__icon"
-        class:refresh-content__icon--spinning={pending || pulling}
+      <!-- Compact mode = the "Sync" button on /sources row: ghost-style,
+           icon + "Sync" label (matches docs/design/v2/ui-kit/sources-page
+           .jsx .btn.ghost.source-sync-btn). Spinning ONLY while worker is
+           actively pulling (pgboss job state in active/created/retry) OR
+           while the client-side fetch is pending. Cooldown without active
+           pull = static icon + countdown. -->
+      <svg
+        class="refresh-content__svg"
+        class:refresh-content__svg--spinning={pending || pulling}
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
       >
-        ↻
-      </span>
+        <path d="M3 12a9 9 0 0 1 15-6.7L21 7" />
+        <path d="M21 3v4h-4" />
+        <path d="M21 12a9 9 0 0 1-15 6.7L3 17" />
+        <path d="M3 21v-4h4" />
+      </svg>
       {#if cooldownSec > 0 && !pending}
         <span class="refresh-content__compact-count">{cooldownSec}</span>
+      {:else}
+        <span class="refresh-content__compact-label">Sync</span>
       {/if}
     {:else if pending}
       {m.sources_detail_pull_new_content_pending()}
@@ -190,37 +205,68 @@
 </div>
 
 <style>
+  /* v2 RefreshContentButton — D-01 redraw via button-on-source-row
+   * pattern. Preserves Phase 03.0.1 plan 10 POST /api/sources/:id
+   * /refresh-content trigger. */
   .refresh-content {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
-  .refresh-content__button--compact {
-    /* Fixed width so cooldown numbers (e.g. "287") don't stretch the
-       button — pre-fix `min-width: 2rem` allowed up to 3 char numbers
-       to grow it inconsistently between adjacent rows. */
-    width: 3rem;
-    height: 2rem;
-    padding: 0;
-    font-size: 0.85rem;
-    line-height: 1;
+  /* Compact mode — used in SourceRow as the "Sync" button. Ghost style
+   * (transparent + border) matching the prototype's
+   * `.btn.ghost.source-sync-btn`: 32px tall, icon + "Sync" label.
+   *
+   * Selector chains both classes so this wins the cascade over the base
+   * `.refresh-content__button` block below (which is filled-accent for
+   * the /sources/[id] detail page). */
+  .refresh-content__button.refresh-content__button--compact {
+    height: 32px;
+    min-height: 32px;
+    padding: 0 12px;
+    gap: 6px;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
     box-sizing: border-box;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 2px;
-  }
-  .refresh-content__icon {
-    display: inline-block;
-    font-size: 1.05rem;
     line-height: 1;
+    border-radius: var(--r-sm);
   }
-  .refresh-content__icon--spinning {
+  .refresh-content__button.refresh-content__button--compact:hover:not(:disabled) {
+    background: var(--surface-2);
+    border-color: var(--border-2);
+    color: var(--text);
+  }
+  .refresh-content__button.refresh-content__button--compact:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .refresh-content__svg {
+    transition: transform var(--m-base) var(--m-ease);
+  }
+  .refresh-content__button.refresh-content__button--compact:hover:not(:disabled)
+    .refresh-content__svg {
+    transform: rotate(-90deg);
+  }
+  .refresh-content__svg--spinning {
     animation: refresh-spin 1.4s linear infinite;
   }
   .refresh-content__compact-count {
-    font-size: 0.7rem;
-    opacity: 0.85;
+    font-family: var(--f-mono);
+    font-size: var(--t-12);
+    color: var(--text-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .refresh-content__compact-label {
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
   }
   @keyframes refresh-spin {
     from {
@@ -230,31 +276,61 @@
       transform: rotate(360deg);
     }
   }
+  @media (prefers-reduced-motion: reduce) {
+    .refresh-content__svg--spinning {
+      animation: none;
+    }
+    .refresh-content__button.refresh-content__button--compact:hover:not(:disabled)
+      .refresh-content__svg {
+      transform: none;
+    }
+  }
+  @media (max-width: 480px) {
+    .refresh-content__button.refresh-content__button--compact {
+      padding: 0;
+      width: 32px;
+      justify-content: center;
+    }
+    .refresh-content__compact-label {
+      display: none;
+    }
+  }
   .refresh-content__button {
-    padding: var(--space-sm) var(--space-md);
-    background: var(--color-accent);
-    color: var(--color-on-accent, white);
-    border: 1px solid transparent;
-    border-radius: var(--radius-md);
+    padding: var(--s-2) var(--s-4);
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: var(--font-size-body);
-    font-weight: 500;
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .refresh-content__button:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   .refresh-content__button:disabled {
     cursor: not-allowed;
-    opacity: 0.6;
-  }
-  .refresh-content__button:hover:not(:disabled) {
-    filter: brightness(1.05);
+    opacity: 0.55;
   }
   .refresh-content__toast {
     margin: 0;
-    font-size: var(--font-size-label);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
   }
   .refresh-content__toast--ok {
-    color: var(--color-text-muted);
+    color: var(--text-3);
   }
   .refresh-content__toast--err {
-    color: var(--color-destructive);
+    color: var(--danger);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .refresh-content__button {
+      transition: none;
+    }
   }
 </style>

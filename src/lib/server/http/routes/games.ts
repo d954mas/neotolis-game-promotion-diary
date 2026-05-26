@@ -20,7 +20,9 @@ import {
   getGameById,
   updateGame,
   softDeleteGame,
+  hardDeleteGame,
   restoreGame,
+  deriveReleaseInfoForGames,
 } from "../../services/games.js";
 import { listEventsForGame } from "../../services/events.js";
 import { toGameDto, mapEventsToDtos } from "../../dto.js";
@@ -36,18 +38,17 @@ const updateGameSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   notes: z.string().max(5000).optional(),
   tags: z.array(z.string().max(50)).max(50).optional(),
-  releaseTba: z.boolean().optional(),
-  releaseDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .nullable()
-    .optional(),
   coverUrl: z.string().url().nullable().optional(),
   // Long-form per-game description. Nullable + optional; service layer
   // normalizes empty string → null and enforces the 2000-char cap (DB
   // column is unconstrained). Zod also rejects oversized payloads at
   // the boundary so a malformed client cannot reach the service.
   description: z.string().max(2000).nullable().optional(),
+  // releaseTba / releaseDate INTENTIONALLY OMITTED from the PATCH
+  // schema. Owned by game_steam_listings.release_date per
+  // denormalization-audit-2.md V-2 (AGENTS.md no-denorm rule).
+  // GameDto still carries the fields for UI rendering — the loader
+  // derives them via JOIN before serializing.
 });
 
 export const gamesRoutes = new Hono<RouteVars>();
@@ -74,7 +75,19 @@ gamesRoutes.get("/games", async (c) => {
   const includeSoftDeleted = c.req.query("includeSoftDeleted") === "true";
   try {
     const list = await listGames(c.var.userId, { includeSoftDeleted });
-    return c.json(list.map(toGameDto));
+    // Derive releaseDate / releaseTba from listings JOIN — the games
+    // row no longer carries these columns (denormalization-audit-2.md
+    // V-2). One extra query per list response; null-safe for empty
+    // input arrays.
+    const releaseByGameId = await deriveReleaseInfoForGames(
+      c.var.userId,
+      list.map((g) => g.id),
+    );
+    return c.json(
+      list.map((g) =>
+        toGameDto(g, releaseByGameId.get(g.id) ?? { releaseDate: null, releaseTba: false }),
+      ),
+    );
   } catch (err) {
     return mapErr(c, err, "GET /api/games");
   }
@@ -83,7 +96,10 @@ gamesRoutes.get("/games", async (c) => {
 gamesRoutes.get("/games/:id", async (c) => {
   try {
     const g = await getGameById(c.var.userId, c.req.param("id"));
-    return c.json(toGameDto(g));
+    const releaseByGameId = await deriveReleaseInfoForGames(c.var.userId, [g.id]);
+    return c.json(
+      toGameDto(g, releaseByGameId.get(g.id) ?? { releaseDate: null, releaseTba: false }),
+    );
   } catch (err) {
     return mapErr(c, err, "GET /api/games/:id");
   }
@@ -99,7 +115,10 @@ gamesRoutes.patch(
   async (c) => {
     try {
       const g = await updateGame(c.var.userId, c.req.param("id"), c.req.valid("json"));
-      return c.json(toGameDto(g));
+      const releaseByGameId = await deriveReleaseInfoForGames(c.var.userId, [g.id]);
+      return c.json(
+        toGameDto(g, releaseByGameId.get(g.id) ?? { releaseDate: null, releaseTba: false }),
+      );
     } catch (err) {
       return mapErr(c, err, "PATCH /api/games/:id");
     }
@@ -108,8 +127,13 @@ gamesRoutes.patch(
 
 gamesRoutes.delete("/games/:id", async (c) => {
   const ctx = getAuditContext(c);
+  const force = c.req.query("force") === "true";
   try {
-    await softDeleteGame(ctx.userId, c.req.param("id"), ctx.ipAddress);
+    if (force) {
+      await hardDeleteGame(ctx.userId, c.req.param("id"), ctx.ipAddress);
+    } else {
+      await softDeleteGame(ctx.userId, c.req.param("id"), ctx.ipAddress);
+    }
     return c.body(null, 204);
   } catch (err) {
     return mapErr(c, err, "DELETE /api/games/:id");

@@ -116,8 +116,73 @@
   {:else}
     <ul class="rows">
       {#each items as item (item.id)}
-        <li class="row">
-          <span class="name">{item.name}</span>
+        <li class="row" data-entity-type={entityType}>
+          <span class="icon" aria-hidden="true">
+            {#if entityType === "event"}
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+              </svg>
+            {:else if entityType === "game"}
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="2" y="6" width="20" height="12" rx="4" />
+                <line x1="6" y1="12" x2="10" y2="12" />
+                <line x1="8" y1="10" x2="8" y2="14" />
+                <circle cx="16" cy="11" r="1" />
+                <circle cx="18" cy="13" r="1" />
+              </svg>
+            {:else if entityType === "source"}
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M4 11a5 9 0 0 1 16 0v4a5 9 0 0 1-16 0z" />
+                <path d="M12 2v4M9 6h6" />
+              </svg>
+            {:else if entityType === "store"}
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M3 7l1-3h16l1 3" />
+                <path d="M4 7v13h16V7" />
+                <path d="M9 12h6" />
+              </svg>
+            {/if}
+          </span>
+          <span class="name" title={item.name}>{item.name}</span>
           {#if item.deletedAt !== null}
             <RetentionBadge deletedAt={item.deletedAt} {retentionDays} />
           {/if}
@@ -126,8 +191,23 @@
             class="restore"
             disabled={pendingId === item.id}
             onclick={() => restore(item.id)}
+            aria-label={`Restore ${item.name}`}
           >
-            {m.common_restore()}
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 12a9 9 0 0 1 15-6.7L21 7" />
+              <path d="M21 3v4h-4" />
+            </svg>
+            <span>{m.common_restore()}</span>
           </button>
         </li>
       {/each}
@@ -136,8 +216,8 @@
 </dialog>
 
 <style>
-  /* Mirrors ConfirmDialog's surface tokens (--color-surface / --color-border
-   * / 6px radius / 25% shadow) for visual consistency across the two
+  /* Mirrors ConfirmDialog's surface tokens (--surface-2 panel / --border /
+   * --r-md radius / --shadow-elev) for visual consistency across the two
    * dialog patterns. The recovery list is variable-length (1-N items)
    * so the dialog is wider and gets a max-height + scrollable body.
    *
@@ -152,55 +232,56 @@
     flex-direction: column;
   }
   .dialog {
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-lg);
     padding: 0;
-    width: min(560px, calc(100vw - 2 * var(--space-md)));
-    max-height: min(80vh, calc(100vh - 2 * var(--space-lg)));
-    box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
-    /* The dialog body needs to scroll independently when the recovery
-     * list overflows. Native <dialog> applies overflow:auto by default
-     * via UA stylesheet on Chromium but Firefox does not — declare it
-     * explicitly. */
+    width: min(560px, calc(100vw - 32px));
+    max-height: min(80vh, calc(100vh - 64px));
+    box-shadow: var(--shadow-elev);
     overflow: hidden;
   }
   .dialog::backdrop {
-    background: rgb(0 0 0 / 50%);
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
   }
   .header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--space-md);
-    padding: var(--space-md) var(--space-lg);
-    border-bottom: 1px solid var(--color-border);
+    gap: var(--s-4);
+    padding: var(--s-4) var(--s-6);
+    border-bottom: 1px solid var(--border);
   }
   .heading {
     margin: 0;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    font-size: var(--t-17);
+    font-weight: var(--w-sb);
+    color: var(--text);
   }
   .close {
     background: transparent;
-    color: var(--color-text-muted);
+    color: var(--text-3);
     border: none;
     font-size: 1.5rem;
     line-height: 1;
     cursor: pointer;
-    padding: var(--space-xs) var(--space-sm);
-    border-radius: 4px;
+    padding: var(--s-1) var(--s-2);
+    border-radius: var(--r-sm);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
   }
   .close:hover {
-    color: var(--color-text);
-    background: var(--color-bg);
+    color: var(--text);
+    background: var(--accent-soft);
   }
   .empty {
     margin: 0;
-    padding: var(--space-lg);
-    color: var(--color-text-muted);
-    font-size: var(--font-size-body);
+    padding: var(--s-6);
+    color: var(--text-3);
+    font-size: var(--t-14);
     text-align: center;
   }
   .rows {
@@ -215,36 +296,76 @@
   }
   .row {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-md) var(--space-lg);
-    border-bottom: 1px solid var(--color-border);
+    gap: 10px;
+    padding: 10px var(--s-6);
+    border-bottom: 1px solid var(--border-hairline);
+    transition: background var(--m-fast) var(--m-ease);
   }
   .row:last-child {
     border-bottom: none;
   }
+  .row:hover {
+    background: var(--surface-2);
+  }
+  .icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    color: var(--text-3);
+    flex-shrink: 0;
+  }
+  .row:hover .icon {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
   .name {
     flex: 1 1 auto;
     min-width: 0;
-    color: var(--color-text);
-    word-break: break-word;
+    color: var(--text);
+    font-size: var(--t-14);
+    font-weight: var(--w-md);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .restore {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-accent);
-    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 32px;
+    padding: 0 12px;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--border));
+    border-radius: var(--r-pill);
     cursor: pointer;
-    font-size: var(--font-size-label);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-sb);
+    flex-shrink: 0;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
   }
-  .restore:hover {
-    filter: brightness(1.05);
+  .restore:hover:not(:disabled) {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent-strong);
   }
   .restore:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: not-allowed;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .close,
+    .restore {
+      transition: none;
+    }
   }
 </style>

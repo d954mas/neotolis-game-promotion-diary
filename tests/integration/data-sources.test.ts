@@ -8,6 +8,9 @@ import {
   softDeleteSource,
   restoreSource,
   assertNoChannelConflict,
+  markSourceNeedsReconnect,
+  clearNeedsReconnect,
+  hardDeleteSource,
 } from "../../src/lib/server/services/data-sources.js";
 import { loadSourceDetailPage } from "../../src/lib/server/services/sources-page-read.js";
 import { toDataSourceDto } from "../../src/lib/server/dto.js";
@@ -568,6 +571,59 @@ describe("soft-delete + retention + auto_import toggle + audit", () => {
     expect(audits).toHaveLength(0);
   });
 
+  // Phase 03.4-08: source titles became read-only canonical, with a separate
+  // free-form `note` field replacing the inline-rename of `displayName`. The
+  // service-layer contract: `note` round-trips through updateSource, the
+  // column accepts null (clear), and cross-tenant updates still 404.
+  it("updateSource persists note (set, clear, round-trip via getSourceById)", async () => {
+    const userA = await seedUserDirectly({ email: "ds-note-a@test.local" });
+    const src = await createSource(
+      userA.id,
+      { kind: "youtube_channel", handleUrl: "https://youtube.com/@withnote" },
+      "127.0.0.1",
+    );
+
+    // Fresh row: note starts NULL (column nullable, default null).
+    expect(src.note).toBeNull();
+
+    // Set a non-empty note.
+    const setRow = await updateSource(
+      userA.id,
+      src.id,
+      { note: "press contact — asked for review codes" },
+      "127.0.0.1",
+    );
+    expect(setRow.note).toBe("press contact — asked for review codes");
+
+    // Re-read confirms persistence (not a return-value-only artifact).
+    const reread = await getSourceById(userA.id, src.id);
+    expect(reread.note).toBe("press contact — asked for review codes");
+
+    // Clearing via null sets the column back to NULL.
+    const clearedRow = await updateSource(userA.id, src.id, { note: null }, "127.0.0.1");
+    expect(clearedRow.note).toBeNull();
+  });
+
+  it("cross-tenant updateSource with note still throws NotFoundError (404, never 403)", async () => {
+    const userA = await seedUserDirectly({ email: "ds-note-b@test.local" });
+    const userB = await seedUserDirectly({ email: "ds-note-c@test.local" });
+    const aSrc = await createSource(
+      userA.id,
+      { kind: "youtube_channel", handleUrl: "https://youtube.com/@victim" },
+      "127.0.0.1",
+    );
+    // userB attempts to set a note on userA's source — tenant-scope WHERE on
+    // the SELECT inside updateSource (getSourceById) yields no row, and the
+    // 404 sentinel fires. Note-aware patch path inherits the same gate; no
+    // separate test surface needed for the column itself.
+    await expect(
+      updateSource(userB.id, aSrc.id, { note: "I should not see this" }, "127.0.0.1"),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    // Bonus: the row stays untouched.
+    const persisted = await getSourceById(userA.id, aSrc.id);
+    expect(persisted.note).toBeNull();
+  });
+
   it("softDeleteSource writes audit BEFORE the soft-delete update (forensics order)", async () => {
     const userA = await seedUserDirectly({ email: "ds14@test.local" });
     const src = await createSource(
@@ -645,6 +701,58 @@ describe("soft-delete + retention + auto_import toggle + audit", () => {
     );
     expect(second.id).not.toBe(first.id);
     expect(second.deletedAt).toBeNull();
+  });
+});
+
+// markSourceNeedsReconnect — AdapterError surface columns.
+// Plan 03.4-08 surfaces these to /sources as a danger-tinted 'Error: <kind>'
+// pill on SourceRow. The UI render path keys off DTO fields, so the
+// load-bearing invariant is: after the helper writes, the DTO carries the
+// expected values back through getSourceById → toDataSourceDto.
+describe("markSourceNeedsReconnect — surfaces AdapterError state on DTO", () => {
+  it("flips needsReconnect=true + writes lastErrorKind + lastErrorAt on the source row", async () => {
+    const userA = await seedUserDirectly({ email: "ds-needs-reconnect@test.local" });
+    const src = await createSource(
+      userA.id,
+      { kind: "youtube_channel", handleUrl: "https://www.youtube.com/@needs-reconnect" },
+      "127.0.0.1",
+    );
+    // Sanity — fresh source is clean.
+    const beforeDto = toDataSourceDto(await getSourceById(userA.id, src.id));
+    expect(beforeDto.needsReconnect).toBe(false);
+    expect(beforeDto.lastErrorKind).toBeNull();
+    expect(beforeDto.lastErrorAt).toBeNull();
+
+    const tStart = Date.now();
+    await markSourceNeedsReconnect(userA.id, src.id, "not-found");
+
+    const afterDto = toDataSourceDto(await getSourceById(userA.id, src.id));
+    expect(afterDto.needsReconnect).toBe(true);
+    expect(afterDto.lastErrorKind).toBe("not-found");
+    expect(afterDto.lastErrorAt).toBeInstanceOf(Date);
+    // lastErrorAt is "now-ish" — within the last 60s. Loose bound so the
+    // assertion survives slow CI runners without becoming a flake.
+    expect(afterDto.lastErrorAt!.getTime()).toBeGreaterThanOrEqual(tStart - 1000);
+    expect(afterDto.lastErrorAt!.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+  });
+
+  it("operator-issue category surfaces as lastErrorKind='operator-issue' — drives 'Error: Setup' UI label", async () => {
+    // Reddit cron + YouTube channel-context-backfill both write
+    // 'operator-issue' for malformed source metadata. The SourceRow
+    // pill maps that kind to "Error: Setup"; the integration contract
+    // is just "the kind round-trips intact through the DTO".
+    const userA = await seedUserDirectly({ email: "ds-needs-reconnect-op@test.local" });
+    const src = await createSource(
+      userA.id,
+      { kind: "reddit_account", handleUrl: "https://reddit.com/user/operator-issue-test" },
+      "127.0.0.1",
+    );
+
+    await markSourceNeedsReconnect(userA.id, src.id, "operator-issue");
+
+    const dto = toDataSourceDto(await getSourceById(userA.id, src.id));
+    expect(dto.needsReconnect).toBe(true);
+    expect(dto.lastErrorKind).toBe("operator-issue");
   });
 });
 
@@ -1122,5 +1230,153 @@ describe("assertNoChannelConflict — state machine (direct)", () => {
     await expect(
       withTx((tx) => assertNoChannelConflict(tx, userB.id, channelId)),
     ).resolves.toBeUndefined();
+  });
+});
+
+// hardDeleteSource — permanent removal of soft-deleted data_sources rows.
+// The service requires the row to already be soft-deleted; live rows and
+// cross-tenant rows surface as NotFoundError (404, never 403).
+describe("hardDeleteSource — permanent delete of soft-deleted sources", () => {
+  it("soft-delete then hard-delete removes the row from the DB", async () => {
+    const userA = await seedUserDirectly({ email: "hd-src-1@test.local" });
+    const src = await createSource(
+      userA.id,
+      { kind: "youtube_channel", handleUrl: "https://youtube.com/@hard-del" },
+      "127.0.0.1",
+    );
+    await softDeleteSource(userA.id, src.id, "127.0.0.1");
+
+    await hardDeleteSource(userA.id, src.id, "127.0.0.1", "vitest");
+
+    // Row is gone from the DB entirely.
+    const rows = await db.select().from(dataSources).where(eq(dataSources.id, src.id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("hard-delete via HTTP DELETE ?force=true returns 204 + row gone", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const u = await seedUserDirectly({ email: "hd-src-http@test.local" });
+    const src = await createSource(
+      u.id,
+      { kind: "youtube_channel", handleUrl: "https://youtube.com/@hard-del-http" },
+      "127.0.0.1",
+    );
+    await softDeleteSource(u.id, src.id, "127.0.0.1");
+
+    const cookie = `neotolis.session_token=${u.signedSessionCookieValue}`;
+    const res = await app.request(`/api/sources/${src.id}?force=true`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(204);
+
+    const rows = await db.select().from(dataSources).where(eq(dataSources.id, src.id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("hard-delete on a NON-soft-deleted source throws NotFoundError", async () => {
+    const userA = await seedUserDirectly({ email: "hd-src-2@test.local" });
+    const src = await createSource(
+      userA.id,
+      { kind: "youtube_channel", handleUrl: "https://youtube.com/@hard-del-live" },
+      "127.0.0.1",
+    );
+
+    // Source is still live — hard-delete must reject.
+    await expect(hardDeleteSource(userA.id, src.id, "127.0.0.1")).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+
+    // Row is still in the DB.
+    const rows = await db.select().from(dataSources).where(eq(dataSources.id, src.id));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("cross-tenant hard-delete throws NotFoundError (404, never 403)", async () => {
+    const userA = await seedUserDirectly({ email: "hd-src-3a@test.local" });
+    const userB = await seedUserDirectly({ email: "hd-src-3b@test.local" });
+    const src = await createSource(
+      userA.id,
+      { kind: "youtube_channel", handleUrl: "https://youtube.com/@hard-del-xt" },
+      "127.0.0.1",
+    );
+    await softDeleteSource(userA.id, src.id, "127.0.0.1");
+
+    // userB attempts to hard-delete userA's source.
+    const err = await hardDeleteSource(userB.id, src.id, "127.0.0.1").catch((e) => e);
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.code).toBe("not_found");
+    expect(err.status).toBe(404);
+    expect(err.message).not.toMatch(/forbidden|permission/i);
+
+    // Row is still intact for userA.
+    const rows = await db.select().from(dataSources).where(eq(dataSources.id, src.id));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("hard-delete writes audit row source.delete_forever with correct metadata", async () => {
+    const userA = await seedUserDirectly({ email: "hd-src-4@test.local" });
+    const src = await createSource(
+      userA.id,
+      { kind: "youtube_channel", handleUrl: "https://youtube.com/@hard-del-audit" },
+      "127.0.0.1",
+    );
+    await softDeleteSource(userA.id, src.id, "127.0.0.1");
+
+    await hardDeleteSource(userA.id, src.id, "127.0.0.1", "vitest");
+
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.userId, userA.id), eq(auditLog.action, "source.delete_forever")));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.metadata).toMatchObject({
+      source_id: src.id,
+      kind: "youtube_channel",
+    });
+  });
+});
+
+// clearNeedsReconnect — counterpart to markSourceNeedsReconnect.
+describe("clearNeedsReconnect — resets AdapterError surface columns", () => {
+  it("mark then clear round-trips: needsReconnect=true → false, error fields nulled", async () => {
+    const userA = await seedUserDirectly({ email: "clr-reconnect-1@test.local" });
+    const src = await createSource(
+      userA.id,
+      { kind: "youtube_channel", handleUrl: "https://www.youtube.com/@clr-reconnect" },
+      "127.0.0.1",
+    );
+
+    await markSourceNeedsReconnect(userA.id, src.id, "not-found");
+    const afterMark = toDataSourceDto(await getSourceById(userA.id, src.id));
+    expect(afterMark.needsReconnect).toBe(true);
+    expect(afterMark.lastErrorKind).toBe("not-found");
+
+    await clearNeedsReconnect(userA.id, src.id);
+    const afterClear = toDataSourceDto(await getSourceById(userA.id, src.id));
+    expect(afterClear.needsReconnect).toBe(false);
+    expect(afterClear.lastErrorAt).toBeNull();
+    expect(afterClear.lastErrorKind).toBeNull();
+  });
+
+  it("clearNeedsReconnect when already clear is a no-op (idempotent)", async () => {
+    const userA = await seedUserDirectly({ email: "clr-reconnect-2@test.local" });
+    const src = await createSource(
+      userA.id,
+      { kind: "youtube_channel", handleUrl: "https://www.youtube.com/@clr-noop" },
+      "127.0.0.1",
+    );
+
+    // Source starts clean — clearNeedsReconnect should be a silent no-op.
+    const before = toDataSourceDto(await getSourceById(userA.id, src.id));
+    expect(before.needsReconnect).toBe(false);
+
+    await clearNeedsReconnect(userA.id, src.id);
+
+    const after = toDataSourceDto(await getSourceById(userA.id, src.id));
+    expect(after.needsReconnect).toBe(false);
+    expect(after.lastErrorAt).toBeNull();
+    expect(after.lastErrorKind).toBeNull();
   });
 });

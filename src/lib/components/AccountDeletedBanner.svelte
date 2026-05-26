@@ -80,18 +80,23 @@
 </aside>
 
 <style>
+  /* v2 AccountDeletedBanner — --surface-2 panel with --danger bottom edge
+   * signaling destructive context. Permanent-delete-now CTA lives in
+   * /settings (per existing component contract); this banner stays simple
+   * with the Restore affordance only. */
   .banner {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: var(--space-md);
-    padding: var(--space-sm) var(--space-md);
-    background: var(--color-surface);
-    color: var(--color-text);
-    border-bottom: 3px solid var(--color-destructive);
-    font-size: var(--font-size-body);
-    line-height: var(--line-height-body);
+    gap: var(--s-3);
+    padding: var(--s-3) var(--s-4);
+    background: var(--surface-2);
+    color: var(--text);
+    border-bottom: 3px solid var(--danger);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    line-height: var(--lh-body);
   }
   .copy {
     display: flex;
@@ -101,39 +106,53 @@
     flex: 1 1 auto;
   }
   .title {
-    color: var(--color-destructive);
-    font-weight: var(--font-weight-semibold);
+    color: var(--danger);
+    font-weight: var(--w-sb);
+    font-size: var(--t-15);
   }
   .meta {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    color: var(--text-2);
+    font-size: var(--t-13);
   }
   .actions {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     flex-wrap: wrap;
     flex-shrink: 0;
   }
   .restore {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-accent);
-    color: #fff;
-    border: 1px solid var(--color-accent);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit);
+    padding: var(--s-2) var(--s-4);
+    background: var(--accent);
+    color: var(--accent-text);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .restore:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   .restore:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: not-allowed;
   }
   .error {
     flex: 1 1 100%;
     margin: 0;
-    padding: var(--space-xs) 0 0 0;
-    color: var(--color-destructive);
-    font-size: var(--font-size-label);
+    padding: var(--s-1) 0 0 0;
+    color: var(--danger);
+    font-size: var(--t-13);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .restore {
+      transition: none;
+    }
   }
 </style>

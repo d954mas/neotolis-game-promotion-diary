@@ -295,6 +295,62 @@
       "when": 1779173640452,
       "tag": "0041_phase03_1_reddit_404_threshold",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1779346766396,
+      "tag": "0042_phase34_audit_verbs",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1779691200000,
+      "tag": "0043_unify_offtopic_field",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1780000000000,
+      "tag": "0044_events_fts",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1780100000000,
+      "tag": "0045_events_trigram",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1780200000000,
+      "tag": "0046_phase34_data_sources_note",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1780250000000,
+      "tag": "0047_bright_shocker",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1780300000000,
+      "tag": "0048_smiling_gravity",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1780350000000,
+      "tag": "0049_flippant_zeigeist",
+      "breakpoints": true
     }
   ]
 }

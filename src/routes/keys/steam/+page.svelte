@@ -114,22 +114,25 @@
 </section>
 
 <style>
+  /* Bounded reading width matching /settings (960px tier — credentials
+   * surface is the same conceptual category as account settings). */
   .keys {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
+    gap: var(--s-4);
+    max-width: 960px;
     min-width: 0;
   }
   .head h1 {
     margin: 0;
-    font-size: var(--font-size-heading);
-    font-weight: var(--font-weight-semibold);
+    font-size: var(--t-22);
+    font-weight: var(--w-sb);
   }
   h3 {
-    margin: var(--space-md) 0 var(--space-sm) 0;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
-    color: var(--color-text);
+    margin: var(--s-4) 0 var(--s-2) 0;
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
+    color: var(--text);
   }
   .keys-list {
     list-style: none;
@@ -137,11 +140,11 @@
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
+    gap: var(--s-4);
   }
   .key-item {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: var(--s-2);
   }
 </style>

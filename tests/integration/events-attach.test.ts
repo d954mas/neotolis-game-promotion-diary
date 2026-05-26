@@ -1,10 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { and, eq } from "drizzle-orm";
-import {
-  createEvent,
-  attachEventToGames,
-  markStandalone,
-} from "../../src/lib/server/services/events.js";
+import { createEvent, attachEventToGames } from "../../src/lib/server/services/events.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { games } from "../../src/lib/server/db/schema/games.js";
 import { eventGames } from "../../src/lib/server/db/schema/event-games.js";
@@ -272,40 +268,6 @@ describe("attachEventToGames (M:N junction service)", () => {
     );
   });
 
-  it("attachEventToGames(non-empty) on a standalone event throws AppError 422 'standalone_conflicts_with_game'", async () => {
-    const u = await seedUserDirectly({ email: `attach28-9-${uniq()}@test.local` });
-    const gA = uuidv7();
-    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
-    const ev = await createEvent(
-      u.id,
-      {
-        gameIds: [],
-        kind: "press",
-        occurredAt: new Date("2026-06-01T10:00:00Z"),
-        title: "About to be standalone",
-      },
-      "127.0.0.1",
-    );
-    await markStandalone(u.id, ev.id, "127.0.0.1");
-
-    let threw: unknown;
-    try {
-      await attachEventToGames(u.id, ev.id, [gA], "127.0.0.1");
-    } catch (e) {
-      threw = e;
-    }
-    expect(threw).toBeInstanceOf(AppError);
-    expect((threw as AppError).code).toBe("standalone_conflicts_with_game");
-    expect((threw as AppError).status).toBe(422);
-
-    // Junction unchanged.
-    const junction = await db
-      .select()
-      .from(eventGames)
-      .where(and(eq(eventGames.userId, u.id), eq(eventGames.eventId, ev.id)));
-    expect(junction).toHaveLength(0);
-  });
-
   it("attachEventToGames bumps events.updatedAt", async () => {
     const u = await seedUserDirectly({ email: `attach28-10-${uniq()}@test.local` });
     const gA = uuidv7();
@@ -323,9 +285,13 @@ describe("attachEventToGames (M:N junction service)", () => {
     const beforeTs = ev.updatedAt;
 
     // Wait long enough for the Postgres NOW() clock to advance past
-    // beforeTs even under CI scheduling jitter — 5ms occasionally
-    // missed the bar when the kernel delayed our timer.
-    await new Promise((r) => setTimeout(r, 50));
+    // beforeTs across container clock skew. createEvent's updatedAt
+    // comes from JS new Date(); attachEventToGames bumps via Postgres
+    // NOW(). On Windows + Docker the two clocks can drift ±30ms even
+    // with NTP, so a 50ms sleep occasionally produced after < before.
+    // 500ms is generous enough to outrun any plausible skew while
+    // still keeping the test fast.
+    await new Promise((r) => setTimeout(r, 500));
     const after = await attachEventToGames(u.id, ev.id, [gA], "127.0.0.1");
     expect(after.updatedAt.getTime()).toBeGreaterThanOrEqual(beforeTs.getTime());
   });
@@ -488,32 +454,6 @@ describe("PATCH /api/events/:id/attach HTTP boundary (M:N + back-compat alias)",
     expect(res.status).toBe(404);
     expect(res.status).not.toBe(500);
     expect((await res.json()).error).toBe("not_found");
-  });
-
-  it("PATCH /api/events/:id/mark-standalone on event with attached games returns 422 'standalone_conflicts_with_game'", async () => {
-    const { createApp } = await import("../../src/lib/server/http/app.js");
-    const app = createApp();
-    const u = await seedUserDirectly({ email: `http-attach28-6-${uniq()}@test.local` });
-    const gA = uuidv7();
-    await db.insert(games).values({ id: gA, userId: u.id, title: "A" });
-    const ev = await createEvent(
-      u.id,
-      {
-        gameIds: [gA],
-        kind: "press",
-        occurredAt: new Date("2026-06-01T10:00:00Z"),
-        title: "Attached cannot go standalone",
-      },
-      "127.0.0.1",
-    );
-
-    const res = await app.request(`/api/events/${ev.id}/mark-standalone`, {
-      method: "PATCH",
-      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
-    });
-    expect(res.status).toBe(422);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("standalone_conflicts_with_game");
   });
 });
 

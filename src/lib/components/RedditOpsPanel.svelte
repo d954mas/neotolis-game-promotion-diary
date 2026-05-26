@@ -211,44 +211,55 @@
 {/if}
 
 <style>
+  /* v2 RedditOpsPanel — D-01 redraw via admin-panel pattern: --surface-2
+   * + --border + --r-md container with form/table sections. */
   .reddit-ops {
     display: flex;
     flex-direction: column;
-    gap: var(--space-lg);
+    gap: var(--s-6);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: var(--s-6);
   }
   .reddit-ops__block {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: var(--s-3);
   }
   .reddit-ops__block h3 {
     margin: 0;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    font-family: var(--f-sans);
+    font-size: var(--t-15);
+    font-weight: var(--w-sb);
+    color: var(--text);
   }
   .reddit-ops__intro {
     margin: 0;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-small);
-    line-height: var(--line-height-body);
+    color: var(--text-2);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    line-height: var(--lh-body);
     max-width: 60ch;
   }
   .reddit-ops__table {
     width: 100%;
     border-collapse: collapse;
-    font-size: var(--font-size-body);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
   }
   .reddit-ops__table th,
   .reddit-ops__table td {
     text-align: left;
-    padding: var(--space-xs) var(--space-sm);
-    border-bottom: 1px solid var(--color-border);
+    padding: var(--s-2) var(--s-3);
+    border-bottom: 1px solid var(--border-hairline);
     vertical-align: top;
+    color: var(--text);
   }
   .reddit-ops__table th {
-    font-weight: var(--font-weight-medium);
-    color: var(--color-text-muted);
-    font-size: var(--font-size-small);
+    font-weight: var(--w-md);
+    color: var(--text-3);
+    font-size: var(--t-12);
   }
   .reddit-ops__num {
     font-variant-numeric: tabular-nums;
@@ -256,78 +267,90 @@
     white-space: nowrap;
   }
   .reddit-ops__num--alarm {
-    color: var(--color-destructive);
-    font-weight: var(--font-weight-semibold);
+    color: var(--danger);
+    font-weight: var(--w-sb);
   }
   .reddit-ops__lane-name {
     display: block;
-    font-family: var(--font-family-mono, monospace);
-    font-size: var(--font-size-small);
-    font-weight: var(--font-weight-medium);
+    font-family: var(--f-mono);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
+    color: var(--text);
   }
   .reddit-ops__lane-desc {
     display: block;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-small);
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
     margin-top: 2px;
   }
   .reddit-ops__totals {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-md);
+    gap: var(--s-3);
   }
   .reddit-ops__total-card {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: var(--space-sm) var(--space-md);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm, 4px);
+    padding: var(--s-3) var(--s-4);
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
     min-width: 12rem;
   }
   .reddit-ops__total-num {
-    font-size: var(--font-size-h2, 1.5rem);
-    font-weight: var(--font-weight-semibold);
+    font-family: var(--f-sans);
+    font-size: var(--t-22);
+    font-weight: var(--w-sb);
+    color: var(--text);
     font-variant-numeric: tabular-nums;
   }
   .reddit-ops__total-label {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-small);
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
   }
   .reddit-ops__total-hint {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-xs, 0.75rem);
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
     opacity: 0.7;
-    margin-top: var(--space-2xs, 2px);
+    margin-top: 2px;
   }
   .reddit-ops__alarm {
-    margin: var(--space-xs) 0 0 0;
-    padding: var(--space-xs) var(--space-sm);
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--color-destructive) 12%, transparent);
-    color: var(--color-destructive);
-    font-size: var(--font-size-small);
-    font-weight: var(--font-weight-medium);
+    margin: var(--s-1) 0 0 0;
+    padding: var(--s-1) var(--s-2);
+    border-radius: var(--r-sm);
+    background: var(--surface-3);
+    color: var(--danger);
+    border: 1px solid var(--danger);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
   }
   .reddit-ops__alarms {
-    margin: var(--space-xs) 0 0 0;
+    margin: var(--s-1) 0 0 0;
     padding: 0;
     list-style: none;
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-xs);
+    gap: var(--s-1);
   }
   .reddit-ops__alarm-chip {
-    padding: 2px var(--space-sm);
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--color-info, var(--color-text-muted)) 12%, transparent);
-    color: var(--color-info, var(--color-text));
-    font-size: var(--font-size-small);
+    padding: var(--s-0) var(--s-2);
+    border-radius: var(--r-pill);
+    background: var(--surface-3);
+    color: var(--info);
+    border: 1px solid var(--info);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
   }
   .reddit-ops__alarm-chip--degraded {
-    background: color-mix(in srgb, var(--color-destructive) 12%, transparent);
-    color: var(--color-destructive);
-    font-weight: var(--font-weight-medium);
+    background: var(--surface-3);
+    color: var(--danger);
+    border-color: var(--danger);
+    font-weight: var(--w-md);
   }
 
   /* Stacked layout on narrow viewports. */
@@ -343,8 +366,8 @@
       width: 100%;
     }
     .reddit-ops__table tr {
-      padding: var(--space-sm) 0;
-      border-bottom: 1px solid var(--color-border);
+      padding: var(--s-2) 0;
+      border-bottom: 1px solid var(--border);
     }
     .reddit-ops__table td {
       padding: 2px 0;
@@ -353,9 +376,9 @@
     }
     .reddit-ops__table td[data-label]::before {
       content: attr(data-label) ": ";
-      color: var(--color-text-muted);
-      font-size: var(--font-size-small);
-      margin-right: var(--space-xs);
+      color: var(--text-3);
+      font-size: var(--t-12);
+      margin-right: var(--s-1);
     }
     .reddit-ops__num {
       text-align: left;

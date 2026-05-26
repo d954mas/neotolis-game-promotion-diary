@@ -72,6 +72,21 @@ export interface RedditEnrichment {
    *  link posts). buildPostMetadata stores this in reddit_posts.metadata
    *  so the diary stays metadata-thin (no novella-length blobs). */
   bodyExcerpt: string | null;
+  /** Canonical subreddit slug from reddit_posts.subreddit (notNull
+   *  column — the post's intrinsic location, can't change). RedditFeedCard
+   *  renders this as `r/<slug>`. Sourced from the cache row rather than
+   *  event.metadata so the read path goes through the table that owns
+   *  the value (no-denorm rule, AGENTS.md). */
+  subreddit: string | null;
+  /** Reddit author handle from reddit_posts.author (nullable — Reddit
+   *  redacts to NULL when the user deletes their account post-hoc).
+   *  RedditFeedCard renders as `/u/<handle>` when present. Sourced from
+   *  the cache row rather than event.metadata for the same reason. */
+  author: string | null;
+  /** ISO timestamp when the polling worker detected the post is gone
+   *  from Reddit (404 / private / mod-removed). NULL while the post is
+   *  still reachable. UI uses this for the 'Deleted on Reddit' banner. */
+  deletionDetectedAt: string | null;
 }
 
 /** Discriminator key for the in-place decoration. The card-props mapper
@@ -221,11 +236,23 @@ export async function enrichRedditFeedDtos(
     //    Keyed on the t3_-form post_id in reddit_posts; the JS Map keys on
     //    BOTH t3 and bare forms so the dto-side lookup hits regardless of
     //    which form events.externalId stores.
-    const postLinkMap = new Map<string, { linkUrl: string | null; bodyExcerpt: string | null }>();
+    const postLinkMap = new Map<
+      string,
+      {
+        linkUrl: string | null;
+        bodyExcerpt: string | null;
+        subreddit: string | null;
+        author: string | null;
+        deletionDetectedAt: string | null;
+      }
+    >();
     const postRows = await db
       .select({
         postId: redditPosts.postId,
         metadata: redditPosts.metadata,
+        subreddit: redditPosts.subreddit,
+        author: redditPosts.author,
+        deletionDetectedAt: redditPosts.deletionDetectedAt,
       })
       .from(redditPosts)
       .where(inArray(redditPosts.postId, lookupArr));
@@ -233,7 +260,13 @@ export async function enrichRedditFeedDtos(
       const meta = (r.metadata ?? {}) as { link_url?: unknown; body_excerpt?: unknown };
       const linkUrl = typeof meta.link_url === "string" ? meta.link_url : null;
       const bodyExcerpt = typeof meta.body_excerpt === "string" ? meta.body_excerpt : null;
-      const value = { linkUrl, bodyExcerpt };
+      const value = {
+        linkUrl,
+        bodyExcerpt,
+        subreddit: r.subreddit,
+        author: r.author,
+        deletionDetectedAt: r.deletionDetectedAt ? r.deletionDetectedAt.toISOString() : null,
+      };
       postLinkMap.set(r.postId, value);
       if (r.postId.startsWith("t3_")) postLinkMap.set(r.postId.slice(3), value);
     }
@@ -259,6 +292,9 @@ export async function enrichRedditFeedDtos(
         baseline: sub ? (baselineMap.get(sub) ?? null) : null,
         linkUrl: post?.linkUrl ?? null,
         bodyExcerpt: post?.bodyExcerpt ?? null,
+        subreddit: post?.subreddit ?? null,
+        author: post?.author ?? null,
+        deletionDetectedAt: post?.deletionDetectedAt ?? null,
       };
     }
   } catch (err) {

@@ -7,11 +7,12 @@
   //
   // Style contract:
   //   - 24px viewBox
+  //   - 16px render size (source-context — Phase 03.3 UI-SPEC)
   //   - stroke="currentColor"
-  //   - stroke-width="2"
+  //   - stroke-width="1.75"
   //   - stroke-linecap / linejoin "round"
   //   - fill="none"
-  //   - color via var(--color-text-muted)
+  //   - color via var(--text-3)
   //
   // Decorative — `aria-hidden="true"`. Adjacent text (the source-kind label
   // chip + display_name) carries the accessible name.
@@ -31,11 +32,11 @@
   <svg
     class="icon"
     viewBox="0 0 24 24"
-    width="20"
-    height="20"
+    width="16"
+    height="16"
     fill="none"
     stroke="currentColor"
-    stroke-width="2"
+    stroke-width="1.75"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"
@@ -44,30 +45,41 @@
     <path d="M10 9.5l5 2.5-5 2.5z" />
   </svg>
 {:else if kind === "reddit_account" || kind === "reddit_subreddit"}
+  <!-- Reddit — same Snoo silhouette as KindIcon (used on feed cards) so
+       a user scanning /sources + /feed reads the platform consistently.
+       Geometry mirrors src/lib/components/KindIcon.svelte:54-71. -->
   <svg
     class="icon"
     viewBox="0 0 24 24"
-    width="20"
-    height="20"
+    width="16"
+    height="16"
     fill="none"
     stroke="currentColor"
-    stroke-width="2"
+    stroke-width="1.75"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"
   >
-    <path d="M4 11a3 3 0 016 0v6H7l-3 3v-9z" />
-    <path d="M9 8l3-4 3 4" />
+    <circle cx="18.5" cy="5" r="1.4" fill="currentColor" stroke="none" />
+    <path d="M14.7 11.2 17.5 6.5" />
+    <circle cx="12" cy="13.5" r="6.5" fill="currentColor" stroke="none" />
+    <circle cx="7" cy="9.5" r="1.6" fill="currentColor" stroke="none" />
+    <circle cx="17" cy="9.5" r="1.6" fill="currentColor" stroke="none" />
+    <circle cx="9.5" cy="13" r="1.1" fill="var(--surface)" stroke="none" />
+    <circle cx="14.5" cy="13" r="1.1" fill="var(--surface)" stroke="none" />
+    <circle cx="9.5" cy="13" r=".45" fill="currentColor" stroke="none" />
+    <circle cx="14.5" cy="13" r=".45" fill="currentColor" stroke="none" />
+    <path d="M9.5 16c1.5 1.2 3.5 1.2 5 0" stroke="var(--surface)" stroke-width="1.2" fill="none" />
   </svg>
 {:else if kind === "twitter_account"}
   <svg
     class="icon"
     viewBox="0 0 24 24"
-    width="20"
-    height="20"
+    width="16"
+    height="16"
     fill="none"
     stroke="currentColor"
-    stroke-width="2"
+    stroke-width="1.75"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"
@@ -80,11 +92,11 @@
   <svg
     class="icon"
     viewBox="0 0 24 24"
-    width="20"
-    height="20"
+    width="16"
+    height="16"
     fill="none"
     stroke="currentColor"
-    stroke-width="2"
+    stroke-width="1.75"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"
@@ -96,11 +108,11 @@
   <svg
     class="icon"
     viewBox="0 0 24 24"
-    width="20"
-    height="20"
+    width="16"
+    height="16"
     fill="none"
     stroke="currentColor"
-    stroke-width="2"
+    stroke-width="1.75"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"
@@ -114,8 +126,12 @@
 {/if}
 
 <style>
+  /* v2 SourceKindIcon — D-01 redraw via KindIcon analogy at source-context
+   * size. 16px / stroke 1.75 / currentColor (inherits from parent). */
   .icon {
-    color: var(--color-text-muted);
+    /* Inherit parent color so kind-color flows from --card-accent on
+     * source-row (or whatever ancestor sets currentColor). */
+    color: inherit;
     flex-shrink: 0;
   }
 </style>

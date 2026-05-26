@@ -4,7 +4,7 @@
   // tier=Frozen.
   //
   // Interaction contract:
-  //   - Idle: refresh icon at --color-text-muted; 44×44 hit area; 16×16 glyph.
+  //   - Idle: refresh icon at --text-3; --hit hit area; 16×16 glyph.
   //   - Click → POST /api/events/{id}/refresh-poll (no body).
   //   - Pending: spinning rotation 360°/1s, aria-busy="true", aria-live="polite"
   //     announces m.polling_refresh_now_pending().
@@ -220,25 +220,34 @@
 {/if}
 
 <style>
+  /* v2 RefreshNowButton — preserves Phase 03.0 plan 11 5-min cooldown
+   * gate + prefers-reduced-motion rotation animation handling. Visual
+   * treatment migrates to v2 tokens. */
   .refresh-now {
     min-width: 3rem;
     height: 2rem;
-    padding: 0 var(--space-sm);
+    padding: var(--s-1) var(--s-2);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 4px;
     background: transparent;
-    border: 1px solid var(--color-border, #ccc);
-    border-radius: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
     cursor: pointer;
-    color: var(--color-text-muted);
-    font-size: 0.85rem;
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
     line-height: 1;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .refresh-now:hover:not(:disabled) {
-    color: var(--color-text);
-    border-color: var(--color-text);
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent-strong);
   }
   .refresh-now:disabled {
     cursor: not-allowed;
@@ -255,11 +264,16 @@
     line-height: 1;
   }
   .refresh-now__count {
-    font-size: 0.75rem;
+    font-size: var(--t-12);
     opacity: 0.85;
     font-variant-numeric: tabular-nums;
   }
 
+  /* prefers-reduced-motion gate — PRESERVED (Phase 03.0 plan 11 contract).
+   * @media (prefers-reduced-motion: no-preference) is the default-on
+   * variant: animation runs ONLY when the user hasn't requested reduced
+   * motion. Pair with the transition-disable block below for full
+   * accessibility coverage. */
   @media (prefers-reduced-motion: no-preference) {
     .refresh-now__icon--spinning {
       animation: refresh-spin 1.4s linear infinite;
@@ -271,6 +285,11 @@
       to {
         transform: rotate(360deg);
       }
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .refresh-now {
+      transition: none;
     }
   }
 
@@ -286,9 +305,10 @@
     border: 0;
   }
   .refresh-now-error {
-    color: var(--color-destructive);
+    color: var(--danger);
     display: block;
-    margin-top: var(--space-xs);
-    font-size: var(--font-size-label);
+    margin-top: var(--s-1);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
   }
 </style>

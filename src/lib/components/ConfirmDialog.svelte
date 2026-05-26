@@ -115,84 +115,106 @@
 </dialog>
 
 <style>
+  /* v2 dialog recipe — --r-md panel + --shadow-elev + --surface-2 body. Sibling
+   * dialogs (GameEditDialog, AddStoreDialog, RecoveryDialog) share the same
+   * surface tokens so the four modal patterns feel like one family. */
   .dialog {
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
-    padding: var(--space-lg);
-    max-width: min(440px, calc(100vw - 2 * var(--space-md)));
-    box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: var(--s-6);
+    max-width: min(440px, calc(100vw - 2 * var(--s-4)));
+    box-shadow: var(--shadow-elev);
   }
   .dialog::backdrop {
-    background: rgb(0 0 0 / 50%);
+    background: var(--overlay-dark);
   }
   .message {
-    margin: 0 0 var(--space-md) 0;
-    font-size: var(--font-size-body);
-    line-height: var(--line-height-body);
+    margin: 0 0 var(--s-4) 0;
+    font-size: var(--t-14);
+    line-height: var(--lh-body);
+    color: var(--text-2);
   }
   .speedbump {
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-sm);
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    margin-bottom: var(--space-md);
-    font-size: var(--font-size-label);
+    gap: var(--s-2);
+    padding: var(--s-2);
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    margin-bottom: var(--s-4);
+    font-size: var(--t-13);
+    color: var(--text-2);
   }
   .type-delete {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
-    margin-bottom: var(--space-md);
-    font-size: var(--font-size-label);
+    gap: var(--s-1);
+    margin-bottom: var(--s-4);
+    font-size: var(--t-13);
   }
   .type-delete-label {
-    color: var(--color-text-muted);
+    color: var(--text-3);
   }
   .type-delete-input {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    background: var(--color-bg);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-family: var(--font-mono, ui-monospace, monospace);
+    min-height: var(--hit);
+    padding: var(--s-2) var(--s-3);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-size: var(--t-14);
+    font-family: var(--f-mono);
   }
-  .type-delete-input:focus {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 1px;
-  }
+  /* :focus-visible inherits the global var(--focus-ring) box-shadow from app.css */
   .actions {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     justify-content: flex-end;
+    margin-top: var(--s-6);
   }
   .cancel,
   .confirm {
-    min-height: 44px;
-    padding: 0 var(--space-md);
-    border-radius: 4px;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    min-height: var(--hit);
+    padding: var(--s-2) var(--s-4);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .cancel {
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
   }
+  .cancel:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent-strong);
+  }
+  /* Destructive confirm — --danger token. ConfirmDialog is always destructive
+   * (the speedbump + type-DELETE gates exist for irreversible actions). */
   .confirm {
-    background: var(--color-destructive);
+    background: var(--danger);
     color: #fff;
-    border: 1px solid var(--color-destructive);
+    border: 1px solid var(--danger);
+  }
+  .confirm:hover:not(:disabled) {
+    filter: brightness(1.05);
   }
   .confirm:disabled {
-    opacity: 0.5;
+    opacity: 0.55;
     cursor: not-allowed;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cancel,
+    .confirm {
+      transition: none;
+    }
   }
 </style>

@@ -369,19 +369,6 @@ describe("cross-tenant matrix", () => {
           method: "PATCH",
           path: `/api/events/${deletedEvent.id}/restore`,
         },
-        // PATCH /api/events/:id/mark-standalone + /unmark-standalone on A's
-        // inbox event must 404 cross-tenant. The service's UPDATE WHERE
-        // clause requires the userId match; B's session never satisfies it
-        // (tenant-scope/no-unfiltered-tenant-query ESLint rule plus the
-        // explicit eq(events.userId, userId) clause).
-        {
-          method: "PATCH",
-          path: `/api/events/${inboxEvent.id}/mark-standalone`,
-        },
-        {
-          method: "PATCH",
-          path: `/api/events/${inboxEvent.id}/unmark-standalone`,
-        },
       ];
 
       for (const p of probes) {
@@ -782,5 +769,153 @@ describe("admin/quota cross-allowlist", () => {
     // Response body MUST NOT leak "forbidden" / "permission".
     const bodyStr = JSON.stringify(body);
     expect(bodyStr).not.toMatch(/forbidden|permission/i);
+  });
+});
+
+// Phase 3.4 design-v2-ux — bulk events cross-tenant.
+//
+// D-13 contract: bulk PATCH/DELETE silently DROP ids the caller doesn't
+// own — they NEVER 404 the whole request, they NEVER 403 the whole
+// request, they return 200 with affected_count = (subset that committed).
+// This is intentionally different from per-id endpoints (which DO 404
+// cross-tenant) — bulk is an upsert-style atomic batch, not an
+// existence-check op (Pitfall 9 — cross-tenant ids must not leak via
+// per-id 422 errors).
+//
+// Body MUST NOT contain "forbidden" or "permission". The mapErr envelope
+// would never produce those strings because there's no error here at all
+// — the response is 200 with a numeric counter. These assertions are
+// belt-and-suspenders against a future refactor that breaks the contract
+// (e.g. throwing NotFoundError on the first cross-tenant id, which would
+// turn the 200 into a 404).
+describe("bulk events cross-tenant (D-13)", () => {
+  it("PATCH /api/events/bulk silently filters cross-tenant ids (D-13) — 200 + affected_count for owned subset", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { createEvent } = await import("../../src/lib/server/services/events.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({
+      email: `bulk-xt-A-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const userB = await seedUserDirectly({
+      email: `bulk-xt-B-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const evA = await createEvent(
+      userA.id,
+      { gameIds: [], kind: "twitter_post", occurredAt: new Date(), title: "A" },
+      "127.0.0.1",
+    );
+    const evB = await createEvent(
+      userB.id,
+      { gameIds: [], kind: "twitter_post", occurredAt: new Date(), title: "B" },
+      "127.0.0.1",
+    );
+
+    const res = await app.request("/api/events/bulk", {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        cookie: `neotolis.session_token=${userA.signedSessionCookieValue}`,
+      },
+      body: JSON.stringify({
+        ids: [evA.id, evB.id],
+        gameStates: {},
+        offTopicState: "on",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text.toLowerCase()).not.toContain("forbidden");
+    expect(text.toLowerCase()).not.toContain("permission");
+    const body = JSON.parse(text) as { affected_count: number };
+    expect(body.affected_count).toBe(1);
+  });
+
+  it("DELETE /api/events/bulk silently filters cross-tenant ids (D-13) — 200 + affected_count for owned subset", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { createEvent } = await import("../../src/lib/server/services/events.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({
+      email: `bulk-del-xt-A-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const userB = await seedUserDirectly({
+      email: `bulk-del-xt-B-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const evA = await createEvent(
+      userA.id,
+      { gameIds: [], kind: "twitter_post", occurredAt: new Date(), title: "A" },
+      "127.0.0.1",
+    );
+    const evB = await createEvent(
+      userB.id,
+      { gameIds: [], kind: "twitter_post", occurredAt: new Date(), title: "B" },
+      "127.0.0.1",
+    );
+
+    const res = await app.request("/api/events/bulk", {
+      method: "DELETE",
+      headers: {
+        "content-type": "application/json",
+        cookie: `neotolis.session_token=${userA.signedSessionCookieValue}`,
+      },
+      body: JSON.stringify({ ids: [evA.id, evB.id] }),
+    });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text.toLowerCase()).not.toContain("forbidden");
+    expect(text.toLowerCase()).not.toContain("permission");
+    const body = JSON.parse(text) as { affected_count: number };
+    expect(body.affected_count).toBe(1);
+  });
+
+  it("DELETE /api/events/bulk?force=true silently filters cross-tenant + still-live ids (D-13 + D-21)", async () => {
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const { createEvent } = await import("../../src/lib/server/services/events.js");
+    const { db } = await import("../../src/lib/server/db/client.js");
+    const { events } = await import("../../src/lib/server/db/schema/events.js");
+    const { and, eq } = await import("drizzle-orm");
+    const app = createApp();
+    const userA = await seedUserDirectly({
+      email: `bulk-force-xt-A-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const userB = await seedUserDirectly({
+      email: `bulk-force-xt-B-${Math.random().toString(36).slice(2, 10)}@test.local`,
+    });
+    const evALive = await createEvent(
+      userA.id,
+      { gameIds: [], kind: "twitter_post", occurredAt: new Date(), title: "A-live" },
+      "127.0.0.1",
+    );
+    const evATrash = await createEvent(
+      userA.id,
+      { gameIds: [], kind: "twitter_post", occurredAt: new Date(), title: "A-trash" },
+      "127.0.0.1",
+    );
+    const evBTrash = await createEvent(
+      userB.id,
+      { gameIds: [], kind: "twitter_post", occurredAt: new Date(), title: "B-trash" },
+      "127.0.0.1",
+    );
+    // Pre-soft-delete the two "trash" events.
+    await db
+      .update(events)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(events.userId, userA.id), eq(events.id, evATrash.id)));
+    await db
+      .update(events)
+      .set({ deletedAt: new Date() })
+      .where(and(eq(events.userId, userB.id), eq(events.id, evBTrash.id)));
+
+    const res = await app.request("/api/events/bulk?force=true", {
+      method: "DELETE",
+      headers: {
+        "content-type": "application/json",
+        cookie: `neotolis.session_token=${userA.signedSessionCookieValue}`,
+      },
+      body: JSON.stringify({ ids: [evALive.id, evATrash.id, evBTrash.id] }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { affected_count: number };
+    // Only evATrash hard-deleted. evALive (live) silently filtered; evBTrash (cross-tenant) silently filtered.
+    expect(body.affected_count).toBe(1);
   });
 });

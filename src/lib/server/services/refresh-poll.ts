@@ -165,7 +165,7 @@ export async function requestRefreshPoll(
   //
   //    Atomic write:
   //    1) Use Postgres `||` jsonb merge so we don't clobber other metadata
-  //       fields (`inbox.dismissed`, `triage.standalone`, etc.) that a
+  //       fields (`inbox.dismissed`, `triage.offTopic`, etc.) that a
   //       parallel write may have set between our SELECT and our UPDATE.
   //       The write is idempotent for `last_user_refresh_at` and partial
   //       for everything else.

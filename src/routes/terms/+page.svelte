@@ -62,20 +62,36 @@
     max-width: 720px;
     margin: 0 auto;
     line-height: 1.6;
+    color: var(--text);
   }
   .legal-page h1 {
-    margin-bottom: var(--space-xs);
+    margin-bottom: var(--s-1);
+    color: var(--text);
   }
   .legal-page h2 {
-    margin-top: var(--space-xl);
+    margin-top: var(--s-7);
+    color: var(--text);
+  }
+  .legal-page p {
+    color: var(--text-2);
   }
   .last-updated {
-    color: var(--color-muted, #666);
+    color: var(--text-3);
     font-size: 0.9em;
     margin-top: 0;
   }
   .back-link {
-    margin: 0 0 var(--space-md);
-    font-size: var(--font-size-label);
+    margin: 0 0 var(--s-4);
+    font-size: var(--t-13);
+  }
+  /* Anchor color aligned to the accent palette so it does not render as
+   * the browser-default bright blue against the dark theme. */
+  .legal-page a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .legal-page a:hover {
+    color: var(--accent-strong);
   }
 </style>

@@ -207,6 +207,9 @@ export interface CreateSourceInput {
   // field is preserved on the row only via `metadata` if the caller chooses
   // to (this service does not stamp it).
   backfillWindow?: BackfillWindow;
+  /** Absolute custom date — UI calendar input. Takes precedence over
+   *  backfillWindow when set. Sentinel 1970-01-01 = 'all history'. */
+  backfillTargetSince?: Date;
 }
 
 export interface UpdateSourcePatch {
@@ -214,6 +217,12 @@ export interface UpdateSourcePatch {
   autoImport?: boolean;
   isOwnedByMe?: boolean;
   metadata?: Record<string, unknown>;
+  /** Free-form per-user note. Null clears the field; empty-string is
+   *  normalized to null at the route layer (an empty string saved would
+   *  read back as a truthy `.length === 0` value and confuse the
+   *  "render Note vs +Add note" branch). 500-char ceiling enforced at the
+   *  route boundary (z.string().max(500)). */
+  note?: string | null;
   /** Change earliest-event boundary user wants pulled. Worker uses this
    *  as `since` for historical catch-up; the UI date picker + preset
    *  radios send absolute Date here. Sentinel 1970-01-01 = "all history".
@@ -532,7 +541,9 @@ export async function createSource(
           // tickets only pulled newer-than-frontier - silently truncating
           // user's selected history if initial backfill hit cap
           // (MAX_PAGES=20) before the window boundary.
-          backfillTargetSince: backfillWindowToDate(input.backfillWindow ?? "30d"),
+          // Custom date wins over preset; falls back to '30d' preset.
+          backfillTargetSince:
+            input.backfillTargetSince ?? backfillWindowToDate(input.backfillWindow ?? "30d"),
         })
         .returning();
       if (!r) {
@@ -666,6 +677,7 @@ export async function updateSource(
   if (patch.autoImport !== undefined) update.autoImport = patch.autoImport;
   if (patch.isOwnedByMe !== undefined) update.isOwnedByMe = patch.isOwnedByMe;
   if (patch.metadata !== undefined) update.metadata = patch.metadata;
+  if (patch.note !== undefined) update.note = patch.note;
 
   // backfill_target_since change. Validate: must be in past. Recompute
   // backfill_complete based on new target:
@@ -918,6 +930,42 @@ export async function restoreSource(
 }
 
 /**
+ * Permanently delete a soft-deleted data_source row.
+ *
+ * Only operates on rows that already have `deletedAt IS NOT NULL` — the user
+ * must soft-delete first. Throws NotFoundError if the row is missing, cross-
+ * tenant, or not already soft-deleted (same 404 semantics as restoreSource).
+ *
+ * Audit: writes `source.delete_forever` with metadata { source_id, kind }.
+ */
+export async function hardDeleteSource(
+  userId: string,
+  sourceId: string,
+  ipAddress: string,
+  userAgent?: string,
+): Promise<void> {
+  const [existing] = await db
+    .select()
+    .from(dataSources)
+    .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)))
+    .limit(1);
+  if (!existing) throw new NotFoundError();
+  if (existing.deletedAt === null) throw new NotFoundError();
+
+  await db
+    .delete(dataSources)
+    .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
+
+  await writeAudit({
+    userId,
+    action: "source.delete_forever",
+    ipAddress,
+    userAgent,
+    metadata: { source_id: existing.id, kind: existing.kind },
+  });
+}
+
+/**
  * Flip the AdapterError surface columns when an adapter throws AdapterError
  * of category operator-issue / permanent / not-found against this source.
  *
@@ -952,6 +1000,40 @@ export async function markSourceNeedsReconnect(
       updatedAt: new Date(),
     })
     .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
+}
+
+/**
+ * Clear the AdapterError surface columns after a successful adapter run.
+ *
+ * Counterpart to `markSourceNeedsReconnect`: if an adapter handler completes
+ * without throwing, the operator-issue / not-found / permanent state must
+ * downshift. Otherwise `needsReconnect=true` is one-way and the UI shows
+ * `Error: Setup` forever even after the upstream is fixed (B-2).
+ *
+ * Idempotent: filters on `needsReconnect=true` so a no-op call skips the
+ * UPDATE entirely. Safe to invoke from every adapter-success path without
+ * worrying about write amplification.
+ *
+ * Tenant scope: userId is the first non-optional argument and the UPDATE's
+ * WHERE clause filters on `eq(dataSources.userId, userId)`. Cross-tenant
+ * misuse is a compile-time block via the ESLint rule.
+ */
+export async function clearNeedsReconnect(userId: string, sourceId: string): Promise<void> {
+  await db
+    .update(dataSources)
+    .set({
+      needsReconnect: false,
+      lastErrorAt: null,
+      lastErrorKind: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(dataSources.userId, userId),
+        eq(dataSources.id, sourceId),
+        eq(dataSources.needsReconnect, true),
+      ),
+    );
 }
 
 // ----- Backfill state machine helpers -----

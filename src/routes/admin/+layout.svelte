@@ -51,23 +51,23 @@
   .admin-breadcrumb {
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-md);
-    border-left: 3px solid var(--color-accent);
+    gap: var(--s-2);
+    padding: var(--s-2) var(--s-4);
+    border-left: 3px solid var(--accent);
     background: transparent;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
-    line-height: var(--line-height-mono);
+    color: var(--text-2);
+    font-size: var(--t-13);
+    line-height: var(--lh-body);
   }
   .admin-breadcrumb__icon {
-    color: var(--color-accent);
+    color: var(--accent);
     flex-shrink: 0;
   }
   /* < 600px: text wraps; the 3px accent left-border + small icon stay
    * anchored at the top-left of the wrapped block. */
   @media (max-width: 600px) {
     .admin-breadcrumb {
-      padding: var(--space-sm);
+      padding: var(--s-2);
     }
   }
 </style>

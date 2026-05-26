@@ -1,0 +1,3038 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Neotolis · feed</title>
+  <link rel="icon" href="../assets/favicon.svg"/>
+  <!-- Google Fonts removed — runtime uses system font stack (privacy:
+       self-host must not leak visitor IPs). Prototype renders with whatever
+       system sans/mono the browser provides. See src/app.css --f-sans/--f-mono. -->
+  <link rel="stylesheet" href="tokens.css"/>
+  <style>
+    /* App-level layout. */
+    .layout { min-height: 100vh; display: flex; flex-direction: column; }
+    .layout-inner {
+      width: 100%; max-width: var(--max-w); margin: 0 auto;
+      padding: 0 var(--s-6);
+    }
+
+    /* Chrome — header + nav stuck together as one sticky wrapper. */
+    .chrome {
+      position: sticky; top: 0; z-index: 30;
+      background: color-mix(in oklab, var(--bg) 80%, transparent);
+      backdrop-filter: blur(14px) saturate(140%);
+      -webkit-backdrop-filter: blur(14px) saturate(140%);
+      border-bottom: 1px solid var(--border-hairline);
+    }
+    .topbar {
+      display: flex; align-items: center; gap: var(--s-4);
+      padding: var(--s-3) var(--s-6);
+      max-width: var(--max-w); margin: 0 auto;
+      min-width: 0;
+    }
+    .nav-tabs {
+      display: flex; gap: 2px;
+      margin-left: var(--s-6);
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .nav-tabs::-webkit-scrollbar { display: none; }
+    .brand {
+      display: flex; align-items: center; gap: var(--s-2);
+      color: var(--text);
+      text-decoration: none;
+      font-weight: var(--w-sb);
+      font-size: var(--t-15);
+      letter-spacing: -0.005em;
+      flex-shrink: 0;
+    }
+    .brand-mark {
+      width: 24px; height: 24px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: var(--r-sm);
+      background: linear-gradient(135deg, var(--accent), color-mix(in oklab, var(--accent) 60%, var(--accent-strong)));
+      color: var(--accent-text);
+      box-shadow: 0 1px 0 rgba(255,255,255,.18) inset, 0 1px 2px rgba(0,0,0,.3);
+    }
+    .nav-tabs {
+      display: flex; gap: 2px; margin-left: var(--s-6);
+    }
+    .nav-tabs a {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 0 14px;
+      color: var(--text-2); text-decoration: none;
+      font-size: var(--t-14); font-weight: var(--w-md);
+      border-radius: var(--r-sm);
+      transition: background var(--m-fast) var(--m-ease), color var(--m-fast) var(--m-ease);
+      min-height: 40px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .nav-tabs a svg { width: 18px; height: 18px; }
+    .nav-tabs a:hover { color: var(--text); background: var(--surface-2); }
+    .nav-tabs a.active { color: var(--text); background: var(--surface-2); }
+    .nav-tabs a.active svg { color: var(--accent); }
+    .nav-tabs svg { color: var(--text-3); }
+    .topbar-spacer { flex: 1; }
+
+    /* Progressive hiding for narrow viewports — tabs stay visible always.
+     * First "Promotion diary" text drops, then the user email, so the
+     * navigation row always reads cleanly. */
+    @media (max-width: 1024px) {
+      .brand span { display: none; }
+    }
+    @media (max-width: 820px) {
+      .userchip .uname { display: none; }
+    }
+    @media (max-width: 480px) {
+      .nav-tabs { margin-left: var(--s-2); gap: 0; }
+      .nav-tabs a { padding: 0 8px; }
+      .nav-tabs a span { display: none; }
+    }
+
+    .userchip {
+      display: inline-flex; align-items: center; gap: var(--s-2);
+      padding: 3px 8px 3px 3px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: var(--r-pill);
+      transition: background var(--m-fast), border-color var(--m-fast);
+      flex-shrink: 0;
+    }
+    .userchip:hover { background: var(--surface-2); border-color: var(--border-2); }
+    .userchip .avatar {
+      width: 24px; height: 24px; border-radius: 50%;
+      background: linear-gradient(135deg, #d8a76b, #b06a3a);
+      color: #1b1310; display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: var(--w-sb);
+    }
+    .userchip .uname { color: var(--text-2); font-size: var(--t-13); }
+    .userchip .chev  { color: var(--text-3); }
+
+    /* Page header — two floors:
+     *   Floor 1 (display): left column = H1 stacked with count summary,
+     *                      right column = primary CTA + recovery link.
+     *                      Stacking the count under H1 keeps the right
+     *                      side rock-steady when the filter result count
+     *                      changes (no jumping target).
+     *   Floor 2 (utility):  Search · Filters
+     * Both rows flex-wrap; on narrow widths they restack independently. */
+    .page-head {
+      display: flex; flex-direction: column;
+      gap: var(--s-2);
+      padding: var(--s-7) 0 var(--s-4);
+    }
+    .page-head-row {
+      display: flex; align-items: center;
+      gap: var(--s-3);
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .page-head-row.top {
+      gap: var(--s-4);
+      align-items: flex-start;
+    }
+    .page-head-titlegroup {
+      position: relative;
+      display: flex; flex-direction: column;
+      min-width: 0;
+      padding-bottom: 26px;          /* room for the absolute summary below, with breathing space above it */
+    }
+    /* Date row sits inside .page-head — its axis-row default padding-top
+     * (12px) compounds with the title-group's padding-bottom and page-head
+     * gap, leaving an awkward 36px gap. Tighten when nested. */
+    .page-head > .axis-row {
+      padding-top: 0;
+      padding-bottom: var(--s-2);
+    }
+    .page-head-titlegroup .page-title {
+      line-height: 1;
+    }
+    .page-head-summary {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      white-space: nowrap;
+      color: var(--text-3);
+      font-size: var(--t-12);
+      font-family: var(--f-mono);
+      letter-spacing: 0.02em;
+      line-height: 1.2;
+      pointer-events: none;          /* it's a label, not a control */
+    }
+    .page-head-summary b {
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+      font-weight: var(--w-md);
+    }
+    .page-head-summary .sep {
+      color: var(--text-4);
+      margin: 0 6px;
+    }
+    /* Local search of the current view — primary control of utility row. */
+    .page-head-search {
+      display: flex; align-items: center; gap: 8px;
+      flex: 1 1 280px;
+      max-width: 420px;
+      padding: 0 12px;
+      height: 40px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      color: var(--text-3); font-size: var(--t-13);
+      transition: border-color var(--m-fast) var(--m-ease), background var(--m-fast) var(--m-ease);
+    }
+    .page-head-search:focus-within {
+      border-color: var(--accent);
+      background: var(--surface);
+    }
+    .page-head-search svg { width: 16px; height: 16px; color: var(--text-3); flex-shrink: 0; }
+    .page-head-search input {
+      flex: 1; background: transparent; border: 0; color: var(--text);
+      font: inherit; font-size: var(--t-13); outline: none; min-width: 0;
+    }
+    .page-head-search input::placeholder { color: var(--text-3); }
+    .page-head-search-x {
+      background: transparent; border: 0; color: var(--text-3);
+      width: 22px; height: 22px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 15px; cursor: pointer;
+    }
+    .page-head-search-x:hover { background: var(--surface-3); color: var(--text); }
+    @media (max-width: 640px) {
+      .page-head-search { flex: 1 1 100%; max-width: none; }
+    }
+
+    /* Sort direction toggle — subtle ghost button next to filters. */
+    .btn.sort-toggle {
+      height: 40px; min-height: 40px;
+      padding: 0 12px;
+      gap: 6px;
+      font-size: var(--t-13);
+      color: var(--text-2);
+    }
+    .btn.sort-toggle:hover { color: var(--text); }
+
+    /* Select toggle in page-head — wakes selection mode on touch where
+     * hover-based ⋯ → Select isn't reachable. data-active when active. */
+    .btn.select-toggle {
+      height: 40px; min-height: 40px;
+      padding: 0 12px;
+      gap: 6px;
+      font-size: var(--t-13);
+      color: var(--text-2);
+    }
+    .btn.select-toggle:hover { color: var(--text); }
+    .btn.select-toggle[data-active="1"] {
+      background: var(--accent-soft);
+      border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
+      color: var(--text);
+    }
+    .btn.select-toggle svg { width: 14px; height: 14px; color: var(--accent); }
+
+    /* Prevent iOS/Android long-press text-selection from clashing with
+     * our own long-press → selection gesture. */
+    .card {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .card .src, .card .card-title, .card .card-notes {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+
+    /* Filters toggle — visually subtle ghost button, badge when active. */
+    .btn.filters-toggle {
+      height: 40px; min-height: 40px;
+      padding: 0 14px;
+      gap: 8px;
+      font-size: var(--t-14);
+    }
+    .btn.filters-toggle[data-active="1"] {
+      border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
+      background: var(--accent-soft);
+      color: var(--text);
+    }
+    .filters-count {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 20px; height: 20px; padding: 0 6px;
+      background: var(--accent);
+      color: var(--accent-text);
+      border-radius: var(--r-pill);
+      font-size: 11px; font-weight: var(--w-sb);
+      font-variant-numeric: tabular-nums;
+    }
+    .filters-chev {
+      display: inline-flex; transition: transform var(--m-fast) var(--m-ease);
+      color: var(--text-3);
+    }
+    .filters-chev[data-open="1"] { transform: rotate(180deg); }
+
+    /* Active filters strip — chips that match their filter-row color
+     * treatment. */
+    .active-filters {
+      display: flex; gap: var(--s-2); flex-wrap: wrap; align-items: center;
+      padding: var(--s-3) 0;
+      border-bottom: 1px solid var(--border-hairline);
+      margin-bottom: var(--s-2);
+    }
+    .chip.active-chip {
+      height: 30px;
+      padding: 0 6px 0 12px;
+      gap: 6px;
+      font-size: var(--t-13);
+      font-weight: var(--w-md);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .chip.active-chip .x {
+      width: 20px; height: 20px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 50%;
+      color: var(--text-3); font-size: 14px; line-height: 1;
+    }
+    .chip.active-chip:hover .x { background: rgba(0,0,0,.18); color: var(--text); }
+
+    /* Show chip in strip — accent (matches Inbox treatment in filter row). */
+    .chip.active-chip[data-variant="show"] {
+      background: var(--accent-soft);
+      border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+      color: var(--accent-strong);
+    }
+    /* Game chip in strip — fully colored in the game's color (matches the
+     * card-footer game-chip + the active GAME filter chip). */
+    .chip.active-chip[data-variant="game"] {
+      background: color-mix(in oklab, var(--card-accent, var(--text-3)) 18%, var(--surface));
+      border-color: color-mix(in oklab, var(--card-accent, var(--text-3)) 45%, var(--border));
+      box-shadow: inset 3px 0 0 var(--card-accent, transparent);
+      padding-left: 14px;
+    }
+    /* Kind chip — tinted in the kind's hue with icon. */
+    .chip.active-chip[data-variant="kind"] {
+      background: color-mix(in oklab, var(--card-accent) 14%, var(--surface));
+      border-color: color-mix(in oklab, var(--card-accent) 40%, var(--border));
+      box-shadow: inset 3px 0 0 var(--card-accent, transparent);
+      padding-left: 14px;
+    }
+    .chip.active-chip[data-variant="kind"] .kind-icon { color: var(--card-accent); }
+
+    /* Empty state — feed has no events after filters/search applied. */
+    .feed-empty {
+      display: flex; flex-direction: column;
+      align-items: flex-start;
+      gap: var(--s-3);
+      padding: var(--s-8) var(--s-4);
+      max-width: 560px;
+      margin: 0 auto;
+    }
+    .feed-empty-heading {
+      font-size: var(--t-22);
+      font-weight: var(--w-sb);
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+    .feed-empty-body {
+      margin: 0;
+      color: var(--text-2);
+      font-size: var(--t-14);
+      line-height: var(--lh-body);
+    }
+    .page-title { margin: 0; font-size: var(--t-30); font-weight: var(--w-sb); letter-spacing: -0.015em; line-height: 1.1; }
+    .page-sub   { color: var(--text-3); font-size: var(--t-14); }
+
+    /* Result count — sits AFTER filters/date/search and BEFORE the feed
+     * grid. Reads as the live count of what's currently matching the
+     * active filter set, not as a page-level statistic. */
+    .result-count {
+      color: var(--text-3); font-size: var(--t-13);
+      padding: var(--s-3) 0 var(--s-1);
+      letter-spacing: 0.005em;
+    }
+    .result-count span {
+      color: var(--text); font-variant-numeric: tabular-nums;
+      font-weight: var(--w-md);
+    }
+
+    /* "Add event" — primary but not alarming. Neutral ghost surface with
+     * an accent "+" glyph; reads as "additive action" without competing
+     * with content for visual weight. */
+    .btn.add-event {
+      height: 40px; min-height: 40px;
+      padding: 0 var(--s-4);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-weight: var(--w-md); font-size: var(--t-14);
+      gap: 8px;
+    }
+    .btn.add-event svg {
+      color: var(--accent);
+      width: 18px; height: 18px;
+    }
+    .btn.add-event:hover {
+      background: var(--surface-3);
+      border-color: var(--accent);
+    }
+    /* When the Back-to-Feed variant of .add-event sits in trash view,
+     * tint its icon neutral instead of accent — the arrow already
+     * signals "navigation", and accent should be reserved for additive
+     * actions. */
+    .btn.add-event:has(svg path[d^="M19 12"]) svg { color: var(--text-2); }
+    .btn.add-event:has(svg path[d^="M19 12"]):hover svg { color: var(--text); }
+
+    .btn.add-event:hover svg { color: var(--accent-strong); }
+
+    /* Danger variant for text-link CTAs (Empty trash). */
+    .btn-link.danger { color: var(--danger); }
+    .btn-link.danger:hover { color: var(--danger); opacity: 0.85; }
+    .btn-link[disabled],
+    .btn[disabled] {
+      opacity: 0.4;
+      pointer-events: none;
+    }
+
+    /* Trash banner — persistent reminder of scope. Sits between the
+     * page-head and filter rows. */
+    .trash-banner {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 16px;
+      margin: 0 0 var(--s-4);
+      background: color-mix(in oklab, var(--warn) 14%, var(--surface));
+      border: 1px solid color-mix(in oklab, var(--warn) 40%, var(--border));
+      border-radius: var(--r-md);
+      color: var(--text);
+      font-size: var(--t-13);
+      line-height: 1.45;
+    }
+    .trash-banner-ico {
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--warn);
+      flex-shrink: 0;
+    }
+
+    /* Trash-scope card treatment — desaturated, slightly dimmed.
+     * Reads as "soft-archived" without becoming illegible. */
+    .card[data-view="trash"] {
+      filter: grayscale(0.35);
+      opacity: 0.88;
+    }
+    .card[data-view="trash"]:hover {
+      filter: grayscale(0.15);
+      opacity: 1;
+    }
+    .card[data-view="trash"][data-selected="1"] {
+      filter: none;
+      opacity: 1;
+    }
+
+    /* Primary CTA. */
+    .btn {
+      display: inline-flex; align-items: center; gap: var(--s-2);
+      padding: 0 var(--s-3);
+      min-height: var(--hit);
+      border-radius: var(--r-sm);
+      font-size: var(--t-13); font-weight: var(--w-md);
+      border: 1px solid transparent;
+      transition: background var(--m-fast) var(--m-ease), border-color var(--m-fast), color var(--m-fast);
+    }
+    .btn.primary {
+      background: var(--accent); color: var(--accent-text);
+      font-weight: var(--w-sb);
+      box-shadow: 0 1px 0 rgba(255,255,255,.18) inset, 0 1px 2px rgba(0,0,0,.25);
+    }
+    .btn.primary:hover { background: var(--accent-strong); }
+    .btn.ghost {
+      background: var(--surface-2); color: var(--text); border-color: var(--border);
+    }
+    .btn.ghost:hover { background: var(--surface-3); border-color: var(--border-2); }
+    .btn.subtle {
+      background: transparent; color: var(--text-2);
+    }
+    .btn.subtle:hover { background: var(--surface-2); color: var(--text); }
+
+    .btn-link {
+      background: transparent; border: 0; padding: 0; color: var(--text-3);
+      font-size: var(--t-13); text-decoration: underline; text-underline-offset: 2px;
+    }
+    .btn-link:hover { color: var(--text); }
+
+    /* Date-preset row — sits between page head and kind filters. */
+    .date-presets {
+      display: flex; gap: var(--s-2); align-items: center;
+      padding: var(--s-2) 0 var(--s-4);
+      margin-bottom: var(--s-4);
+      border-bottom: 1px solid var(--border-hairline);
+      flex-wrap: wrap;
+    }
+
+    /* Filter row. */
+    .toolbar {
+      display: flex; gap: var(--s-2); flex-wrap: wrap; align-items: center;
+      padding-bottom: var(--s-4);
+      border-bottom: 1px solid var(--border-hairline);
+      margin-bottom: var(--s-5);
+    }
+    .toolbar .grow { flex: 1; }
+
+    .chip {
+      display: inline-flex; align-items: center; gap: var(--s-2);
+      padding: 0 var(--s-3);
+      height: 28px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-2);
+      border-radius: var(--r-pill);
+      font-size: var(--t-12); font-weight: var(--w-md);
+      transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+      white-space: nowrap;
+    }
+    .chip:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-2); }
+    .chip[data-active="1"] {
+      background: var(--accent-soft); border-color: color-mix(in oklab, var(--accent) 50%, transparent);
+      color: var(--accent-strong);
+    }
+    .chip .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    /* Kind filter chips: bigger height, prominent kind icon in the kind's
+     * hue, and a colored left stripe (echoes the card's color-coded edge). */
+    .chip.kind-chip {
+      height: 38px;
+      padding: 0 14px 0 14px;
+      gap: 10px;
+      font-size: var(--t-13);
+      font-weight: var(--w-md);
+      box-shadow: inset 3px 0 0 var(--card-accent, transparent);
+    }
+    .chip.kind-chip .kind-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--card-accent, var(--text-3));
+    }
+    .chip.kind-chip .kind-icon svg { width: 22px; height: 22px; }
+    .chip.kind-chip[data-active="1"] .kind-icon {
+      color: var(--card-accent, var(--accent-strong));
+    }
+    .chip .x   {
+      margin-left: 2px; margin-right: -4px;
+      width: 16px; height: 16px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--text-3); cursor: pointer;
+    }
+    .chip .x:hover { background: var(--surface-3); color: var(--text); }
+
+    /* Rows without a label — chip area spans full width. */
+    .axis-row[data-no-label="1"] {
+      grid-template-columns: 1fr;
+    }
+    .axis-row[data-no-label="1"] .axis-label { display: none; }
+
+    /* Last axis row drops its bottom border — the feed below is the
+     * visual separator. */
+    .axis-row:last-of-type { border-bottom: 0; }
+    /* FIND row helpers — match-count next to search box. */
+    .find-result {
+      font-size: 12px;
+      color: var(--text-3);
+      font-variant-numeric: tabular-nums;
+      margin-left: var(--s-2);
+    }
+    .search-local {
+      display: flex; align-items: center; gap: 8px;
+      height: 32px; padding: 0 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      color: var(--text-3); font-size: var(--t-13);
+      min-width: 220px;
+      transition: border-color var(--m-fast) var(--m-ease), background var(--m-fast) var(--m-ease);
+    }
+    .search-local:focus-within {
+      border-color: var(--accent);
+      background: var(--surface-2);
+    }
+    .search-local svg { width: 14px; height: 14px; color: var(--text-3); flex-shrink: 0; }
+    .search-local input {
+      flex: 1; background: transparent; border: 0; color: var(--text);
+      font: inherit; font-size: var(--t-13); outline: none; min-width: 0;
+    }
+    .search-local input::placeholder { color: var(--text-3); }
+
+    /* View segments — Inbox / All / Mine. */
+    .view-seg {
+      display: inline-flex; align-items: center;
+      gap: 2px; padding: 3px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      margin: var(--s-2) 0 var(--s-4);
+    }
+    .view-seg-btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 0 14px; height: 32px;
+      background: transparent;
+      border: 0; border-radius: 7px;
+      color: var(--text-2);
+      font-size: var(--t-13);
+      font-weight: var(--w-md);
+      transition: background var(--m-fast), color var(--m-fast);
+    }
+    .view-seg-btn:hover { color: var(--text); }
+    .view-seg-btn[data-active="1"] {
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 1px 2px rgba(0,0,0,.2);
+    }
+    .view-seg-count {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 22px; height: 18px; padding: 0 6px;
+      background: var(--surface-3);
+      color: var(--text-3);
+      border-radius: var(--r-pill);
+      font-size: 11px; font-weight: var(--w-sb);
+      font-variant-numeric: tabular-nums;
+    }
+    /* Inbox count is the load-bearing signal — paint it with the accent
+     * when there's queued work. */
+    .view-seg-btn[data-view="inbox"] .view-seg-count {
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+    .view-seg-btn[data-view="inbox"][data-active="1"] .view-seg-count {
+      background: var(--accent);
+      color: var(--accent-text);
+    }
+
+    /* Long-tail filter row (Source / Game). */
+    .toolbar-more {
+      padding-top: 0;
+      margin-bottom: var(--s-5);
+    }
+    .toolbar-label {
+      font-size: 11px; font-weight: var(--w-sb);
+      color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em;
+      margin-right: 4px;
+    }
+
+    /* Recovery link — subtle text-link CTA near the title. */
+    .recovery-link {
+      color: var(--text-3);
+      font-size: var(--t-13);
+      margin-left: 4px;
+      text-decoration: underline; text-underline-offset: 3px;
+    }
+    .recovery-link:hover { color: var(--text); }
+    /* ── Unified axis row ── all filter axes look the same. */
+    .axis-row {
+      display: grid;
+      grid-template-columns: 76px 1fr;
+      align-items: start;
+      gap: var(--s-3);
+      padding: var(--s-3) 0;
+      border-bottom: 1px solid var(--border-hairline);
+    }
+    .axis-label {
+      font-size: 10.5px; font-weight: var(--w-sb);
+      color: var(--text-3); text-transform: uppercase; letter-spacing: 0.1em;
+      padding-top: 9px;       /* aligns with first chip baseline */
+    }
+    .axis-chips {
+      display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap;
+      min-height: var(--hit);
+    }
+    /* Narrow viewports — label stacks on top of chips so the connection
+     * stays obvious when chips wrap. */
+    @media (max-width: 720px) {
+      .axis-row {
+        grid-template-columns: 1fr;
+        gap: 6px;
+        padding: var(--s-3) 0 var(--s-3);
+      }
+      .axis-label { padding-top: 0; }
+    }
+    .axis-row + .axis-row { /* divider between rows handled by bottom-border */ }
+    .axis-label {
+      font-size: 10.5px; font-weight: var(--w-sb);
+      color: var(--text-3); text-transform: uppercase; letter-spacing: 0.1em;
+      align-self: center;
+      padding-top: 2px;
+    }
+    .axis-chips {
+      display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap;
+    }
+    .chip.axis-chip {
+      height: 32px;
+      padding: 0 12px;
+      gap: 8px;
+      font-size: var(--t-13);
+      font-weight: var(--w-md);
+      background: transparent;
+      color: var(--text-2);
+      border-color: transparent;
+    }
+    .chip.axis-chip:hover {
+      background: var(--surface-2);
+      color: var(--text);
+      border-color: var(--border);
+    }
+    .chip.axis-chip[data-active="1"] {
+      background: var(--surface-2);
+      color: var(--text);
+      border-color: var(--border-2);
+      box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 1px 2px rgba(0,0,0,.18);
+    }
+    /* Inbox is a workflow-critical scope — paint its chip with the
+     * accent when active so it reads as "you are in triage mode". */
+    .chip.axis-chip[data-active="1"]:where([data-key="inbox"]) {
+      background: var(--accent-soft);
+      border-color: color-mix(in oklab, var(--accent) 50%, transparent);
+      color: var(--accent-strong);
+    }
+
+    /* Count badge on axis chips — Inbox's count is the load-bearing signal. */
+    .axis-chip-count {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 20px; height: 18px; padding: 0 6px;
+      background: var(--surface-3);
+      color: var(--text-3);
+      border-radius: var(--r-pill);
+      font-size: 11px; font-weight: var(--w-sb);
+      font-variant-numeric: tabular-nums;
+    }
+    .chip.axis-chip[data-active="1"] .axis-chip-count {
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    /* Per-game chip: tinted left stripe in the game's color (echoes the
+     * card's game-dot color so user sees the relationship). */
+    .chip.axis-chip.game-chip {
+      box-shadow: inset 3px 0 0 var(--card-accent, transparent);
+      padding-left: 14px;
+    }
+    .chip.axis-chip.game-chip[data-active="1"] {
+      background: color-mix(in oklab, var(--card-accent) 14%, var(--surface));
+      border-color: color-mix(in oklab, var(--card-accent) 40%, var(--border));
+      color: var(--text);
+    }
+    .game-dot {
+      display: none; /* color stripe carries the same info */
+    }
+    /* Kind axis chips keep their colored left stripe + kind icon. */
+    .chip.axis-chip.kind-chip {
+      box-shadow: inset 3px 0 0 var(--card-accent, transparent);
+      padding-left: 14px;
+    }
+    .chip.axis-chip.kind-chip .kind-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--card-accent, var(--text-3));
+    }
+    .chip.axis-chip.kind-chip[data-active="1"] {
+      background: color-mix(in oklab, var(--card-accent) 14%, var(--surface));
+      border-color: color-mix(in oklab, var(--card-accent) 40%, var(--border));
+      color: var(--text);
+    }
+    .chip.axis-chip.kind-chip[data-active="1"] .kind-icon {
+      color: var(--card-accent);
+    }
+      height: 38px;
+      padding: 0 14px;
+      gap: 8px;
+      color: var(--text-2);
+      border-style: dashed;
+      font-weight: var(--w-md);
+      font-size: var(--t-13);
+    }
+    .chip.more-trigger:hover { color: var(--text); border-style: solid; }
+    .chip.more-trigger svg { width: 14px; height: 14px; }
+
+    .chip.more-chip {
+      height: 38px;
+      padding: 0 6px 0 12px;
+      gap: 8px;
+      background: var(--accent-soft);
+      border-color: color-mix(in oklab, var(--accent) 50%, transparent);
+      color: var(--text);
+      font-weight: var(--w-md);
+      font-size: var(--t-13);
+    }
+    .chip.more-chip .more-axis {
+      color: var(--accent-strong);
+      font-weight: var(--w-sb);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .chip.more-chip .x {
+      width: 22px; height: 22px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 50%;
+      color: var(--text-2);
+      font-size: 14px; line-height: 1;
+      margin-left: 4px;
+    }
+    .chip.more-chip:hover .x { background: rgba(0,0,0,.18); color: var(--text); }
+
+    /* Popover for non-kind filter axes. */
+    .pop-scrim {
+      position: fixed; inset: 0; z-index: 40;
+      background: rgba(0,0,0,.25);
+    }
+    .pop {
+      position: absolute; z-index: 41;
+      top: calc(100% + 6px); left: 0;
+      width: 320px;
+      background: var(--surface);
+      border: 1px solid var(--border-2);
+      border-radius: var(--r-md);
+      box-shadow: var(--shadow-elev);
+      padding: var(--s-2);
+      display: flex; flex-direction: column; gap: 2px;
+      max-height: 420px; overflow-y: auto;
+    }
+    .pop-section + .pop-section { border-top: 1px solid var(--border-hairline); margin-top: 4px; padding-top: 6px; }
+    .pop-axis {
+      font-size: 10.5px; font-weight: var(--w-sb);
+      color: var(--text-3); letter-spacing: 0.08em; text-transform: uppercase;
+      padding: 6px 10px 4px;
+    }
+    .pop-options { display: flex; flex-direction: column; }
+    .pop-opt {
+      text-align: left;
+      background: transparent; border: 0;
+      padding: 8px 10px;
+      border-radius: var(--r-xs);
+      color: var(--text);
+      font-size: var(--t-13);
+    }
+    .pop-opt:hover { background: var(--surface-2); }
+
+    /* Sticky date group header. */
+    .date-head {
+      display: flex; align-items: baseline; gap: var(--s-3);
+      padding: var(--s-6) 0 var(--s-3);
+      position: sticky;
+      top: 56px;            /* below chrome */
+      background: var(--bg);
+      z-index: 5;
+    }
+    .date-head:first-of-type { padding-top: 0; }
+    .date-head h2 {
+      margin: 0; font-size: var(--t-13); font-weight: var(--w-sb);
+      color: var(--text-2);
+      letter-spacing: 0.01em;
+    }
+    .date-head .count {
+      font-family: var(--f-mono);
+      font-size: var(--t-12); color: var(--text-3);
+    }
+    .date-head .rule {
+      flex: 1; height: 1px; background: var(--border-hairline);
+    }
+
+    /* Feed grid — denser than v1: 3 cols on wide, 2 mid, 1 narrow. */
+    .feed-grid {
+      display: grid; gap: var(--s-3);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    @media (max-width: 1024px) { .feed-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 640px)  { .feed-grid { grid-template-columns: 1fr; } }
+
+    /* ── Feed card ── */
+    .card {
+      position: relative;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      overflow: hidden;
+      display: flex; flex-direction: column;
+      box-shadow: var(--shadow-card);
+      transition: background var(--m-fast) var(--m-ease),
+                  border-color var(--m-fast) var(--m-ease),
+                  transform var(--m-fast) var(--m-ease);
+    }
+    /* Hover affordances are gated on real hover-capable devices.
+     * Without this gate, touch devices fire :hover on tap and KEEP it
+     * after lift — cards look stuck-selected after every scroll touch. */
+    @media (hover: hover) {
+      .card:hover {
+        background: var(--surface-2);
+        border-color: var(--accent);
+        cursor: pointer;
+      }
+    }
+    /* Kind color-coded left border. */
+    .card[data-kind-color="1"]::before {
+      content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+      width: 2px; background: var(--card-accent, var(--border-2));
+    }
+
+    /* Title now lives inside .card-body (no longer top-of-card). */
+    .card-title {
+      margin: 0;
+      font-size: 16px;
+      font-weight: var(--w-sb);
+      line-height: 1.35;
+      color: var(--text);
+      letter-spacing: -0.005em;
+      display: -webkit-box;
+      -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .card-thumb {
+      position: relative;
+      aspect-ratio: 16 / 9;
+      background: var(--surface-2);
+      overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-4);
+      border-radius: var(--r-sm);
+      border: 1px solid var(--border-hairline);
+    }
+    .card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .card-thumb .play {
+      position: absolute; right: 8px; bottom: 8px;
+      padding: 2px 6px;
+      background: rgba(0,0,0,.7);
+      color: #fff; font-family: var(--f-mono); font-size: 11px;
+      border-radius: var(--r-xs);
+    }
+    .card-thumb.empty {
+      background:
+        radial-gradient(circle at 50% 50%, var(--surface-2) 0%, var(--surface) 70%);
+    }
+    .card-thumb.empty svg { color: var(--card-accent, var(--text-4)); opacity: 0.45; }
+
+    .card-body {
+      padding: var(--s-3) var(--s-4) var(--s-4);
+      display: flex; flex-direction: column;
+      gap: var(--s-2);
+      flex: 1;
+    }
+    /* Meta line takes a slightly tighter gap below itself since title
+     * follows immediately. */
+    .card-meta + .card-title { margin-top: 2px; }
+    /* When the card has a thumbnail, give the title a touch more
+     * breathing room above the image. */
+    .card-title + .card-thumb { margin-top: var(--s-1); }
+
+    /* Author avatar — leftmost in meta. Only two states today:
+     *   mine    = accent fill with current user's initial
+     *   unknown = empty neutral circle (no derived initial — we don't
+     *             fake authorship from .src). Multi-author support is
+     *             a future feature; this stays a one-bit signal. */
+    .author-avatar {
+      width: 20px; height: 20px;
+      display: inline-flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      border-radius: 50%;
+      background: var(--surface-2);
+      color: var(--text-4);
+      font-family: var(--f-sans);
+      font-size: 11px;
+      font-weight: var(--w-md);
+      letter-spacing: 0;
+      border: 1px dashed var(--border-2);
+      cursor: default;
+    }
+    .author-avatar[data-mine="1"] {
+      background: var(--accent);
+      color: var(--accent-text);
+      border-color: var(--accent);
+      border-style: solid;
+      font-weight: var(--w-sb);
+      font-size: 10.5px;
+      letter-spacing: 0.02em;
+      box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--accent) 35%, transparent);
+    }
+
+    /* Card meta line — icon + source + date. No kind text label
+     * (kind is conveyed by the icon's color + shape). */
+    .card-meta {
+      display: flex; align-items: center; gap: var(--s-2);
+      color: var(--text-3); font-size: var(--t-12);
+      min-width: 0;
+    }
+    .kind-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--card-accent, var(--text-2));
+      flex-shrink: 0;
+    }
+    .card-meta .src {
+      color: var(--text-3); font-family: var(--f-mono); font-size: 11.5px;
+      text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+      min-width: 0; flex: 1;
+    }
+    .card-meta .date {
+      color: var(--text-3); font-family: var(--f-mono); font-size: 11.5px;
+      flex-shrink: 0;
+    }
+
+    /* Per-source byline — second line of meta, only when the source
+     * has a sub-identity beyond its name (today: only reddit posts,
+     * where r/ is the community and u/ is the post author).
+     *
+     * Aligns under the .src column (80px = checkbox 18 + gap 8 +
+     * avatar 20 + gap 8 + kind-icon 18 + gap 8), so it reads as a
+     * continuation of the source identity rather than a separate
+     * metadata row. Padding-right matches .card-meta so it doesn't
+     * collide with the ⋯ overflow button. */
+    .card-byline {
+      padding-left: 80px;
+      padding-right: 34px;
+      margin-top: -2px;            /* tighten against the meta row above */
+      color: var(--text-3);
+      font-family: var(--f-mono);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.4;
+    }
+
+    .card-notes {
+      margin: 0;
+      color: var(--text-2);
+      font-size: var(--t-13);
+      line-height: 1.5;
+      display: -webkit-box;
+      -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .card-stats {
+      display: flex; gap: var(--s-3);
+      color: var(--text-3); font-size: var(--t-12);
+      font-variant-numeric: tabular-nums;
+      padding-top: var(--s-1);
+    }
+    .card-stats .stat { display: inline-flex; align-items: center; gap: 4px; }
+
+    .card-footer {
+      display: flex; align-items: center; gap: var(--s-2);
+      padding-top: var(--s-2);
+      margin-top: auto;
+      border-top: 1px solid var(--border-hairline);
+      flex-wrap: wrap;
+    }
+    .card-footer.no-rule { border-top: 0; padding-top: 0; }
+
+    .game-chip, .inbox-chip, .off-topic-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 10px 3px 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r-pill);
+      color: var(--text-2);
+      font-size: var(--t-12); font-weight: var(--w-md);
+    }
+    /* Card's game-chip: filled in the game's color. */
+    .game-chip {
+      background: color-mix(in oklab, var(--game-color) 18%, var(--surface));
+      border-color: color-mix(in oklab, var(--game-color) 45%, var(--border));
+      box-shadow: inset 3px 0 0 var(--game-color, transparent);
+      padding-left: 14px;
+      color: var(--text);
+    }
+    .game-chip .game-ico {
+      width: 14px; height: 14px; border-radius: 3px;
+      background: var(--game-color, var(--text-3));
+      opacity: 0.9; flex-shrink: 0;
+    }
+    /* Off topic — dashed border, more subtle than a game chip. */
+    .off-topic-chip {
+      background: transparent;
+      border-style: dashed;
+      color: var(--text-2);
+      padding-left: 12px;
+    }
+
+    /* Card footer wraps chips so multiple games fit gracefully. */
+    .card-footer-chips {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      flex: 1; min-width: 0;
+    }
+    .card-footer {
+      align-items: flex-end;
+    }
+
+    .card { position: relative; }
+
+    /* Inline selection checkbox — leftmost slot in the meta row.
+     * Always visible; subtle until hovered or checked. */
+    .card-select {
+      width: 18px; height: 18px;
+      padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent;
+      border: 1px solid var(--border-2);
+      border-radius: 4px;
+      color: var(--accent-text);
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background var(--m-fast) var(--m-ease),
+                  border-color var(--m-fast) var(--m-ease),
+                  opacity var(--m-fast) var(--m-ease);
+      opacity: 0.55;
+    }
+    @media (hover: hover) {
+      .card:hover .card-select { opacity: 1; }
+    }
+    .card-select:hover { border-color: var(--accent); background: var(--surface-2); }
+    .card-select[data-checked="1"] {
+      opacity: 1;
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .card-select svg { width: 12px; height: 12px; }
+
+    /* Selected card — accent outline. */
+    .card[data-selected="1"] {
+      outline: 2px solid var(--accent);
+      outline-offset: -1px;
+    }
+    .card[data-selected="1"] .card-select { opacity: 1; }
+
+    /* Once anything is selected, the whole card surface becomes a
+     * select-toggle (Gmail-style sweep). Surface a copy-cursor to hint. */
+    body[data-selection="1"] .card { cursor: pointer; }
+
+    /* Single overflow `⋯` button in card top-right. Hover-only.
+     * No longer fights for slot with the checkbox (which moved inline). */
+    .card-actions {
+      position: absolute; top: 8px; right: 8px;
+      display: flex; gap: 4px;
+      z-index: 2;
+    }
+    /* Reserve space for the ⋯ button so the date stays readable.
+     * Always-on (was hover-only — broke on touch devices). */
+    .card .card-meta { padding-right: 34px; }
+    .card-action-btn.overflow {
+      width: 26px; height: 26px;
+      padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      color: var(--text-3);
+      line-height: 1;
+      transition: color var(--m-fast) var(--m-ease),
+                  border-color var(--m-fast) var(--m-ease),
+                  background var(--m-fast) var(--m-ease);
+    }
+    @media (hover: hover) {
+      .card:hover .card-action-btn.overflow {
+        background: var(--surface-3);
+        color: var(--text-2);
+        box-shadow: 0 2px 4px rgba(0,0,0,.25);
+      }
+    }
+    .card-action-btn.overflow:hover { color: var(--text); border-color: var(--accent); }
+
+    /* Date chip — accent when a custom range is active. */
+    .btn.date-chip[data-custom="1"] {
+      background: var(--accent-soft);
+      border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+      color: var(--accent-strong);
+    }
+    .btn.date-chip[data-custom="1"] svg { color: var(--accent-strong); }
+
+    /* ── Two-month date range picker ───────────────────────────── */
+    .date-picker {
+      position: fixed; z-index: 61;
+      width: 340px; max-width: calc(100vw - 32px);
+      background: var(--surface);
+      border: 1px solid var(--border-2);
+      border-radius: var(--r-md);
+      box-shadow: var(--shadow-elev);
+      padding: 12px 14px 10px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .cal-grid { padding: 4px; }
+    .cal-grid.single .cal-month { padding: 0; }
+    .cal-head {
+      display: flex; align-items: center; gap: 12px;
+      padding: 0 4px 4px;
+      border-bottom: 1px solid var(--border-hairline);
+    }
+    .cal-head-meta {
+      flex: 1; text-align: center;
+      font-size: var(--t-13); color: var(--text-2);
+    }
+    .cal-head-meta b { color: var(--text); font-weight: var(--w-sb); }
+    .cal-head-meta i { color: var(--text-3); font-style: normal; }
+    .cal-nav {
+      width: 28px; height: 28px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      color: var(--text-2);
+      font-size: 18px; line-height: 1;
+      cursor: pointer;
+    }
+    .cal-nav:hover { color: var(--text); border-color: var(--accent); }
+    .cal-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+      padding: 4px;
+    }
+    .cal-month-label {
+      text-align: center;
+      font-size: var(--t-13);
+      font-weight: var(--w-sb);
+      color: var(--text);
+      margin-bottom: 6px;
+      letter-spacing: -0.005em;
+    }
+    .cal-week-head {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 2px;
+      margin-bottom: 4px;
+    }
+    .cal-week-head span {
+      text-align: center;
+      font-family: var(--f-mono); font-size: 10.5px;
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 4px 0 6px;
+    }
+    .cal-days {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 1px;
+    }
+    .cal-day {
+      aspect-ratio: 1 / 1;
+      min-height: 30px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent;
+      border: 0;
+      border-radius: 6px;
+      color: var(--text);
+      font-size: var(--t-13);
+      font-variant-numeric: tabular-nums;
+      cursor: pointer;
+      transition: background var(--m-fast) var(--m-ease), color var(--m-fast) var(--m-ease);
+    }
+    .cal-day:hover { background: var(--surface-2); }
+    .cal-day.empty { visibility: hidden; }
+    .cal-day[data-future="1"] {
+      color: var(--text-4);
+      cursor: not-allowed;
+    }
+    .cal-day[data-future="1"]:hover { background: transparent; }
+    .cal-day[data-today="1"] {
+      color: var(--accent-strong);
+      font-weight: var(--w-sb);
+    }
+    .cal-day[data-in-range="1"] {
+      background: var(--accent-soft);
+      color: var(--text);
+      border-radius: 0;
+    }
+    .cal-day[data-from="1"], .cal-day[data-to="1"] {
+      background: var(--accent);
+      color: var(--accent-text);
+      font-weight: var(--w-sb);
+    }
+    .cal-day[data-from="1"] { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+    .cal-day[data-to="1"]   { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+    .cal-day[data-from="1"][data-to="1"] { border-radius: 6px; }
+    .cal-actions {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 4px 0;
+      border-top: 1px solid var(--border-hairline);
+    }
+
+    /* Native date inputs — label stacked above the field. Primary use
+     * is clicking the calendar icon to open the browser's native picker
+     * (typing year is awkward in native date inputs, so we de-emphasize
+     * the keyboard path and the stepped year/month picker below is the
+     * main entry method). */
+    .cal-inputs {
+      display: flex; align-items: flex-end; gap: 8px;
+      padding: 2px 4px 8px;
+      min-width: 0;
+    }
+    .cal-input {
+      flex: 1 1 0;
+      min-width: 0;
+      display: flex; flex-direction: column; gap: 4px;
+      padding: 6px 10px 7px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      transition: border-color var(--m-fast) var(--m-ease);
+      overflow: hidden;
+    }
+    .cal-input:focus-within { border-color: var(--accent); }
+    .cal-input[data-invalid="1"] {
+      border-color: var(--danger);
+      background: color-mix(in oklab, var(--danger) 8%, var(--surface-2));
+    }
+    .cal-input > span {
+      font-family: var(--f-mono);
+      font-size: 10px;
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      line-height: 1;
+    }
+    .cal-input input[type="text"] {
+      width: 100%;
+      min-width: 0;
+      background: transparent;
+      border: 0;
+      color: var(--text);
+      font: inherit;
+      font-size: var(--t-13);
+      font-variant-numeric: tabular-nums;
+      outline: none;
+      padding: 0;
+    }
+    .cal-input-row {
+      position: relative;
+      display: flex; align-items: center;
+      width: 100%;
+      min-width: 0;
+    }
+    .cal-input-row::after {
+      content: "📅";
+      position: absolute;
+      right: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      pointer-events: none;
+      font-size: 13px;
+      opacity: 0.7;
+    }
+    .cal-input input[type="text"] { padding-right: 22px; }
+    .cal-input-native {
+      position: absolute;
+      width: 22px; height: 22px;
+      right: -2px;
+      top: 50%;
+      transform: translateY(-50%);
+      opacity: 0;
+      cursor: pointer;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      z-index: 2;
+      color-scheme: dark;
+    }
+    [data-theme="light"] .cal-input-native { color-scheme: light; }
+    .cal-input-sep {
+      color: var(--text-3); font-size: 14px;
+      flex-shrink: 0;
+      padding-bottom: 10px;
+    }
+
+    /* Year ▸ Month ▸ Calendar — clickable header. Selection summary
+     * above shows the picked range. */
+    .cal-selection {
+      font-size: var(--t-13);
+      color: var(--text-2);
+      padding: 0 4px 4px;
+      min-height: 18px;
+    }
+    .cal-selection b {
+      color: var(--text);
+      font-weight: var(--w-sb);
+      font-variant-numeric: tabular-nums;
+    }
+    .cal-selection i {
+      color: var(--text-3);
+      font-style: normal;
+      margin: 0 4px;
+    }
+
+    .cal-head-tabs {
+      flex: 1;
+      display: flex; align-items: center; justify-content: center;
+      gap: 4px;
+    }
+    .cal-head-tab {
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: var(--r-sm);
+      padding: 4px 10px;
+      color: var(--text);
+      font-size: var(--t-13);
+      font-weight: var(--w-sb);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.005em;
+      cursor: pointer;
+      transition: background var(--m-fast) var(--m-ease), border-color var(--m-fast) var(--m-ease);
+    }
+    .cal-head-tab:hover { background: var(--surface-2); }
+    .cal-head-tab[data-active="1"] {
+      background: var(--accent-soft);
+      border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
+      color: var(--accent-strong);
+    }
+    .cal-head-tab[data-hidden="1"] { display: none; }
+
+    .cal-coarse {
+      padding: 4px;
+    }
+    .cal-coarse-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      width: 100%;
+    }
+    .cal-coarse-cell {
+      padding: 14px 0;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      color: var(--text);
+      font-size: var(--t-13);
+      font-variant-numeric: tabular-nums;
+      cursor: pointer;
+      transition: background var(--m-fast) var(--m-ease), border-color var(--m-fast) var(--m-ease);
+    }
+    .cal-coarse-cell:hover {
+      background: var(--surface-3);
+      border-color: var(--accent);
+    }
+    .cal-coarse-cell[data-current="1"] {
+      background: var(--accent-soft);
+      border-color: color-mix(in oklab, var(--accent) 50%, var(--border));
+      color: var(--accent-strong);
+      font-weight: var(--w-sb);
+    }
+    .cal-coarse-cell[data-future="1"] {
+      color: var(--text-4);
+      cursor: not-allowed;
+      background: transparent;
+    }
+    .cal-coarse-cell[data-future="1"]:hover { border-color: var(--border); }
+    .cal-coarse-cell[data-outside="1"] {
+      background: transparent;
+      color: var(--text-3);
+    }
+
+    /* Drill-down: month-of-year and year-of-decade grids replace the
+     * day grid when the user clicks "May 2026" → "2026" → decade. */
+    .cal-month-label.as-btn {
+      background: transparent;
+      border: 0;
+      padding: 4px 10px;
+      border-radius: var(--r-xs);
+      cursor: pointer;
+      color: var(--text);
+      transition: background var(--m-fast) var(--m-ease);
+    }
+    .cal-month-label.as-btn:hover { background: var(--surface-2); }
+    .cal-coarse {
+      padding: 4px;
+      display: flex; flex-direction: column;
+      align-items: center; gap: 12px;
+    }
+    .cal-coarse-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      width: 100%;
+    }
+    .cal-coarse-cell {
+      padding: 12px 0;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      color: var(--text);
+      font-size: var(--t-13);
+      font-variant-numeric: tabular-nums;
+      cursor: pointer;
+      transition: background var(--m-fast) var(--m-ease), border-color var(--m-fast) var(--m-ease);
+    }
+    .cal-coarse-cell:hover {
+      background: var(--surface-3);
+      border-color: var(--accent);
+    }
+    .cal-coarse-cell[data-future="1"] {
+      color: var(--text-4);
+      cursor: not-allowed;
+      background: transparent;
+    }
+    .cal-coarse-cell[data-future="1"]:hover { border-color: var(--border); }
+    .cal-coarse-cell[data-outside="1"] {
+      background: transparent;
+      color: var(--text-3);
+    }
+
+    /* Card-menu and other popovers share these tokens. */
+    .card-menu {
+      position: fixed; z-index: 61;
+      min-width: 200px;
+      background: var(--surface);
+      border: 1px solid var(--border-2);
+      border-radius: var(--r-md);
+      box-shadow: var(--shadow-elev);
+      padding: 4px;
+      display: flex; flex-direction: column;
+    }
+    .card-menu-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px;
+      background: transparent; border: 0;
+      color: var(--text);
+      font-size: var(--t-13); font-weight: var(--w-md);
+      border-radius: var(--r-sm);
+      text-align: left;
+    }
+    .card-menu-item:hover { background: var(--surface-2); }
+    .card-menu-item.danger { color: var(--danger); }
+    .card-menu-item.danger:hover { background: rgba(224,115,119,.1); }
+    .card-menu-sep { height: 1px; background: var(--border-hairline); margin: 4px 6px; }
+
+    /* Games / Off-topic picker — floating popover, also used as modal in
+     * bulk mode. */
+    .picker-scrim {
+      position: fixed; inset: 0; z-index: 60;
+      background: rgba(0,0,0,.4);
+    }
+    .picker {
+      position: fixed; z-index: 61;
+      width: 320px;
+      background: var(--surface);
+      border: 1px solid var(--border-2);
+      border-radius: var(--r-md);
+      box-shadow: var(--shadow-elev);
+      padding: var(--s-3) var(--s-2);
+      display: flex; flex-direction: column; gap: 2px;
+      /* Center fallback when anchorRect not provided (mass-select mode). */
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+    }
+    .picker[style*="top:"] { transform: none; }
+    .picker-head {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0 8px 6px;
+      font-size: var(--t-13); font-weight: var(--w-sb);
+      color: var(--text);
+    }
+    .picker-close {
+      background: transparent; border: 0; color: var(--text-3);
+      width: 22px; height: 22px; border-radius: 50%;
+      font-size: 15px; cursor: pointer;
+    }
+    .picker-close:hover { background: var(--surface-2); color: var(--text); }
+
+    .picker-options { display: flex; flex-direction: column; gap: 2px; }
+    .picker-opt {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%;
+      padding: 8px 10px;
+      background: transparent; border: 0;
+      border-radius: var(--r-sm);
+      color: var(--text);
+      font-size: var(--t-13);
+      text-align: left;
+      cursor: pointer;
+    }
+    .picker-opt:hover { background: var(--surface-2); }
+    .picker-opt[data-active="1"] { background: var(--accent-soft); }
+    .picker-check {
+      width: 16px; height: 16px; flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border-2);
+      border-radius: 4px;
+      background: var(--surface-2);
+    }
+    .picker-check[data-state="on"] {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--accent-text);
+    }
+    .picker-check[data-state="mixed"] {
+      background: var(--surface-3);
+      border-color: var(--border-2);
+    }
+    .picker-check-dash {
+      width: 8px; height: 2px; background: var(--text-2); border-radius: 1px;
+    }
+    .picker-opt[data-state="on"]    { background: var(--accent-soft); }
+    .picker-opt[data-state="mixed"] { background: transparent; }
+    .picker-opt[data-state="on"]:hover    { background: color-mix(in oklab, var(--accent-soft) 70%, var(--surface-2)); }
+    .picker-game-dot {
+      width: 12px; height: 12px; border-radius: 3px;
+      background: var(--text-3);
+      flex-shrink: 0;
+    }
+    .picker-game-dot.dashed {
+      background: transparent;
+      border: 1.5px dashed var(--text-3);
+    }
+    .picker-label { flex: 1; }
+    .picker-hint { font-size: 11px; color: var(--text-3); }
+    .picker-sep {
+      height: 1px; background: var(--border-hairline);
+      margin: 6px 4px;
+    }
+    .picker-mode {
+      display: flex; gap: 6px;
+      padding: 8px 8px 4px;
+      border-top: 1px solid var(--border-hairline);
+      margin-top: 4px;
+    }
+    .picker-actions {
+      display: flex; gap: var(--s-2); justify-content: flex-end;
+      padding: var(--s-2) 4px 0;
+      border-top: 1px solid var(--border-hairline);
+      margin-top: 4px;
+    }
+
+    /* ── Add event modal ─────────────────────────────────────────
+     * Centered dialog over a scrim. The scrim reuses .picker-scrim
+     * but with a stronger overlay so the lente disappears behind it.
+     * Body scrolls inside the modal when content overflows; head/foot
+     * stay pinned. */
+    .modal-scrim {
+      background: var(--overlay-dark);
+      backdrop-filter: blur(2px) saturate(120%);
+      -webkit-backdrop-filter: blur(2px) saturate(120%);
+      z-index: 70;
+    }
+    .modal {
+      position: fixed; z-index: 71;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: min(560px, calc(100vw - 32px));
+      max-height: min(86vh, 760px);
+      background: var(--surface);
+      border: 1px solid var(--border-2);
+      border-radius: var(--r-lg);
+      box-shadow: var(--shadow-elev);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .modal-head {
+      display: flex; align-items: center;
+      padding: 14px 18px 12px;
+      border-bottom: 1px solid var(--border-hairline);
+    }
+    .modal-title {
+      margin: 0; flex: 1;
+      font-size: var(--t-15);
+      font-weight: var(--w-sb);
+      letter-spacing: -0.005em;
+      color: var(--text);
+    }
+    .modal-close {
+      background: transparent; border: 0; color: var(--text-3);
+      width: 28px; height: 28px; border-radius: var(--r-sm);
+      font-size: 18px; line-height: 1; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .modal-close:hover { background: var(--surface-2); color: var(--text); }
+
+    .modal-body {
+      padding: 16px 18px 4px;
+      display: flex; flex-direction: column;
+      gap: 18px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .modal-foot {
+      display: flex; gap: 8px; align-items: center; justify-content: flex-end;
+      padding: 12px 18px;
+      border-top: 1px solid var(--border-hairline);
+      background: var(--surface);
+    }
+    .modal-foot-hint {
+      color: var(--text-3);
+      font-size: var(--t-12);
+      padding-top: 4px;
+      padding-bottom: 8px;
+    }
+    .modal-foot-hint b {
+      color: var(--text-2); font-weight: var(--w-md);
+    }
+    /* Inline editable date in the foot-hint — native date picker
+     * overlays invisibly on top of the label, same pattern as the
+     * Detail view date cell. Hover surfaces a soft frame. */
+    .modal-date-edit {
+      position: relative;
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 6px;
+      margin: -2px 0 -2px -4px;
+      border-radius: var(--r-xs);
+      cursor: pointer;
+      transition: background var(--m-fast) var(--m-ease);
+      color: var(--text-2);
+      font-weight: var(--w-md);
+    }
+    .modal-date-pencil {
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--text-4);
+      opacity: 0.7;
+      transition: color var(--m-fast), opacity var(--m-fast);
+    }
+    @media (hover: hover) {
+      .modal-date-edit:hover {
+        background: var(--surface-2);
+        box-shadow: inset 0 0 0 1px var(--border-hairline);
+      }
+      .modal-date-edit:hover .modal-date-pencil {
+        color: var(--text-2);
+        opacity: 1;
+      }
+    }
+    .modal-date-native {
+      position: absolute; inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color-scheme: dark;
+      font: inherit;
+    }
+    [data-theme="light"] .modal-date-native { color-scheme: light; }
+
+    /* Form fields inside the modal — labels above, dense inputs. */
+    .field {
+      display: flex; flex-direction: column; gap: 8px;
+      min-width: 0;
+    }
+    .field-label-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: var(--s-3);
+      min-width: 0;
+    }
+    .field-label {
+      font-size: 10.5px;
+      font-weight: var(--w-sb);
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    /* Author picker — single trigger chip + popover. Today: Mine /
+     * Someone else; the popover is the canonical place where a real
+     * authors list will live (avatars + names, current user marked
+     * "you"). Triggered from a button in the title-label row. */
+    .author-pick { position: relative; }
+    .author-pick-trigger {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 8px 3px 3px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r-pill);
+      color: var(--text-2);
+      font-size: var(--t-12);
+      font-weight: var(--w-md);
+      cursor: pointer;
+      transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+    }
+    .author-pick-trigger:hover {
+      background: var(--surface-3);
+      border-color: var(--border-2);
+      color: var(--text);
+    }
+    .author-pick-trigger .author-avatar {
+      width: 20px; height: 20px;
+      font-size: 11px;
+    }
+    .author-pick-name {
+      color: var(--text);
+      letter-spacing: -0.005em;
+    }
+    .author-pick-chev {
+      display: inline-flex; color: var(--text-3);
+      margin-right: 2px;
+    }
+    .author-pick-scrim {
+      position: fixed; inset: 0; z-index: 80;
+      background: transparent;
+    }
+    .author-pick-pop {
+      position: absolute; z-index: 81;
+      top: calc(100% + 6px); right: 0;
+      min-width: 240px;
+      background: var(--surface);
+      border: 1px solid var(--border-2);
+      border-radius: var(--r-md);
+      box-shadow: var(--shadow-elev);
+      padding: 4px;
+      display: flex; flex-direction: column;
+    }
+    .author-pick-opt {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%;
+      padding: 8px 10px;
+      background: transparent;
+      border: 0;
+      border-radius: var(--r-sm);
+      color: var(--text);
+      font-size: var(--t-13);
+      text-align: left;
+      cursor: pointer;
+    }
+    .author-pick-opt:hover { background: var(--surface-2); }
+    .author-pick-opt[data-active="1"] { background: var(--accent-soft); }
+    .author-pick-opt .author-avatar {
+      width: 22px; height: 22px;
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+    .author-pick-opt-name { flex: 1; color: var(--text); font-weight: var(--w-md); }
+    .author-pick-opt-tag {
+      color: var(--text-3); font-size: var(--t-12);
+      font-family: var(--f-mono); letter-spacing: 0.02em;
+    }
+    .author-pick-opt-check {
+      display: inline-flex; color: var(--accent-strong);
+    }
+    .field-label-opt {
+      color: var(--text-4);
+      font-weight: var(--w-rg);
+      letter-spacing: 0.04em;
+      text-transform: none;
+    }
+    .field-input {
+      width: 100%;
+      min-height: 40px;
+      padding: 0 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      color: var(--text);
+      font: inherit;
+      font-size: var(--t-14);
+      outline: none;
+      transition: border-color var(--m-fast) var(--m-ease),
+                  background var(--m-fast) var(--m-ease);
+    }
+    .field-input::placeholder { color: var(--text-4); }
+    .field-input:hover { border-color: var(--border-2); }
+    .field-input:focus {
+      border-color: var(--accent);
+      background: var(--surface);
+    }
+    .field-textarea {
+      min-height: 84px;
+      padding: 10px 12px;
+      resize: vertical;
+      line-height: var(--lh-body);
+      font-family: var(--f-sans);
+    }
+    .field-url {
+      display: flex; gap: 8px;
+      min-width: 0;
+    }
+    .field-url .field-input { flex: 1; min-width: 0; }
+    .btn.field-url-fetch {
+      height: 40px; min-height: 40px;
+      padding: 0 14px;
+      font-size: var(--t-13);
+      font-weight: var(--w-md);
+      flex-shrink: 0;
+    }
+    .btn.field-url-fetch:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .field-error {
+      display: inline-flex; align-items: center; gap: 6px;
+      color: var(--danger);
+      font-size: var(--t-12);
+      line-height: 1.3;
+    }
+    .field-error svg { width: 12px; height: 12px; flex-shrink: 0; }
+    .field-fetch-result {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 10px;
+      background: var(--surface-2);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--r-sm);
+      color: var(--text-2);
+      font-size: var(--t-12);
+      flex-wrap: wrap;
+    }
+    .field-fetch-result b { color: var(--text); font-weight: var(--w-md); }
+    .field-fetch-ico {
+      display: inline-flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .field-fetch-clear {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--text-3);
+    }
+
+    /* Chip pickers inside the modal — uses the same kind-chip visual
+     * vocabulary as filter-row chips, sized down a touch. Inactive
+     * chips keep their kind/game color (icon tinted, left stripe) so
+     * the row reads as a color-coded palette; the active one scales
+     * up slightly and gets a strong fill so it pops out without
+     * killing the inactive color signal. */
+    .kind-grid {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      /* room for the slight scale-up on active chips */
+      align-items: center;
+    }
+    .chip.add-kind-chip,
+    .chip.add-game-chip {
+      height: 34px;
+      padding: 0 12px 0 14px;
+      gap: 8px;
+      font-size: var(--t-13);
+      font-weight: var(--w-md);
+      background: var(--surface-2);
+      color: var(--text-3);
+      border-color: var(--border);
+      /* Inactive: the kind color is *hinted*, not *announced* — a faded
+       * 3px left stripe paints the same gesture as filter-row chips,
+       * but at ~55% intensity so the active chip's full-saturation fill
+       * still clearly dominates. */
+      box-shadow: inset 3px 0 0 color-mix(in oklab, var(--card-accent) 55%, transparent);
+      cursor: pointer;
+      transition: background var(--m-fast) var(--m-ease),
+                  color var(--m-fast) var(--m-ease),
+                  border-color var(--m-fast) var(--m-ease),
+                  transform var(--m-fast) var(--m-ease);
+    }
+    .chip.add-kind-chip .kind-icon {
+      /* Tinted but desaturated — keeps the color-coding cue without
+       * fighting the active chip for attention. */
+      color: var(--card-accent, var(--text-3));
+      opacity: 0.6;
+      transition: opacity var(--m-fast) var(--m-ease);
+    }
+    .chip.add-kind-chip:hover,
+    .chip.add-game-chip:hover {
+      background: var(--surface-3);
+      color: var(--text-2);
+      border-color: var(--border-2);
+    }
+    .chip.add-kind-chip:hover .kind-icon { opacity: 0.9; }
+    .chip.add-kind-chip[data-active="1"],
+    .chip.add-game-chip[data-active="1"] {
+      background: color-mix(in oklab, var(--card-accent) 32%, var(--surface));
+      border-color: var(--card-accent);
+      color: var(--text);
+      box-shadow: inset 3px 0 0 var(--card-accent),
+                  0 1px 0 rgba(255,255,255,.04) inset,
+                  0 2px 6px rgba(0,0,0,.25);
+      transform: scale(1.06);
+      font-weight: var(--w-sb);
+      height: 36px;
+    }
+    .chip.add-kind-chip[data-active="1"] .kind-icon {
+      color: var(--card-accent);
+      opacity: 1;
+    }
+    .chip.off-topic-add {
+      box-shadow: none;
+      border-style: dashed;
+      padding-left: 12px;
+    }
+    .chip.off-topic-add[data-active="1"] {
+      background: var(--surface-3);
+      border-color: var(--text-2);
+      border-style: dashed;
+      color: var(--text);
+      box-shadow: 0 1px 0 rgba(255,255,255,.04) inset,
+                  0 2px 6px rgba(0,0,0,.25);
+      transform: scale(1.06);
+      font-weight: var(--w-sb);
+      height: 36px;
+    }
+
+    @media (max-width: 540px) {
+      .modal {
+        width: calc(100vw - 16px);
+        max-height: calc(100vh - 16px);
+      }
+      .modal-body { padding: 12px 14px 0; gap: 14px; }
+      .modal-head { padding: 12px 14px; }
+      .modal-foot { padding: 10px 14px; }
+    }
+
+    /* ── Event detail (panel / modal) ──────────────────────────
+     * Same content, two outer chromes. The user picks via the Tweaks
+     * panel — panel mode is the default because the diary use-case is
+     * "browse and listать", which a side drawer serves better than a
+     * scrim-blocking modal. */
+    .detail-scrim {
+      position: fixed; inset: 0; z-index: 64;
+    }
+    .detail-scrim-panel {
+      /* Dim the lente lightly — it should stay visible so the user
+       * knows where they are. */
+      background: rgba(0,0,0,.35);
+      backdrop-filter: blur(1px);
+      -webkit-backdrop-filter: blur(1px);
+    }
+    .detail-scrim-modal {
+      background: var(--overlay-dark);
+      backdrop-filter: blur(2px) saturate(120%);
+      -webkit-backdrop-filter: blur(2px) saturate(120%);
+    }
+
+    .detail-panel {
+      position: fixed; z-index: 65;
+      top: 0; right: 0; bottom: 0;
+      width: min(560px, 92vw);
+      background: var(--surface);
+      border-left: 1px solid var(--border-2);
+      box-shadow: -12px 0 32px rgba(0,0,0,.35);
+      display: flex; flex-direction: column;
+      animation: detail-panel-in 200ms var(--m-ease);
+    }
+    @keyframes detail-panel-in {
+      from { transform: translateX(24px); opacity: 0; }
+      to   { transform: translateX(0);    opacity: 1; }
+    }
+
+    .detail-modal {
+      position: fixed; z-index: 65;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: min(760px, calc(100vw - 32px));
+      max-height: min(86vh, 820px);
+      background: var(--surface);
+      border: 1px solid var(--border-2);
+      border-radius: var(--r-lg);
+      box-shadow: var(--shadow-elev);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+
+    .detail-head {
+      display: flex; align-items: center; gap: 6px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border-hairline);
+      flex-shrink: 0;
+    }
+    .detail-head-nav {
+      display: inline-flex; gap: 2px;
+    }
+    .detail-nav-btn {
+      width: 30px; height: 30px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: var(--r-sm);
+      color: var(--text-2);
+      font-size: 18px; line-height: 1;
+      cursor: pointer;
+      transition: background var(--m-fast), color var(--m-fast), border-color var(--m-fast);
+    }
+    .detail-nav-btn:hover:not(:disabled) {
+      background: var(--surface-2);
+      border-color: var(--border);
+      color: var(--text);
+    }
+    .detail-nav-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+    .detail-head-spacer { flex: 1; }
+    .detail-close {
+      width: 30px; height: 30px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent;
+      border: 0;
+      border-radius: var(--r-sm);
+      color: var(--text-3);
+      font-size: 20px; line-height: 1;
+      cursor: pointer;
+    }
+    .detail-close:hover { background: var(--surface-2); color: var(--text); }
+
+    .detail-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 22px 24px;
+      display: flex; flex-direction: column;
+      gap: 14px;
+    }
+
+    .detail-foot {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--border-hairline);
+      flex-shrink: 0;
+      background: var(--surface);
+    }
+    /* Primary close button at the bottom-left — bigger target so it
+     * sits comfortably under the thumb on mobile. Uses neutral ghost
+     * (not danger) because it's just "close this view", nothing
+     * destructive. */
+    .btn.detail-foot-close {
+      min-height: 40px;
+      padding: 0 16px;
+      font-weight: var(--w-md);
+    }
+    .detail-foot-overflow {
+      position: relative;
+    }
+    .btn.detail-foot-overflow-btn {
+      width: 40px;
+      min-height: 40px;
+      padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .detail-foot-overflow-pop {
+      position: absolute; z-index: 82;
+      bottom: calc(100% + 6px); right: 0;
+      min-width: 200px;
+      background: var(--surface);
+      border: 1px solid var(--border-2);
+      border-radius: var(--r-md);
+      box-shadow: var(--shadow-elev);
+      padding: 4px;
+      display: flex; flex-direction: column;
+    }
+    .detail-foot .btn.ghost.danger {
+      color: var(--danger);
+      border-color: color-mix(in oklab, var(--danger) 35%, var(--border));
+    }
+    .detail-foot .btn.ghost.danger:hover {
+      background: color-mix(in oklab, var(--danger) 12%, var(--surface-2));
+    }
+
+    /* Meta line — author avatar + kind pill + source + date. */
+    .detail-meta {
+      display: flex; align-items: center; gap: 8px;
+      color: var(--text-3);
+      font-size: var(--t-12);
+      flex-wrap: wrap;
+    }
+    .detail-meta .author-avatar { width: 22px; height: 22px; font-size: 11px; }
+    .detail-kind {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 10px 3px 8px;
+      background: color-mix(in oklab, var(--card-accent) 14%, var(--surface-2));
+      border: 1px solid color-mix(in oklab, var(--card-accent) 35%, var(--border));
+      border-radius: var(--r-pill);
+      color: var(--text);
+      font-size: var(--t-12);
+      font-weight: var(--w-md);
+    }
+    .detail-kind .kind-icon { color: var(--card-accent); }
+    .detail-src {
+      color: var(--text-2);
+      font-family: var(--f-mono);
+      font-size: 11.5px;
+    }
+    .detail-sep { color: var(--text-4); }
+    .detail-date {
+      color: var(--text-2);
+      font-family: var(--f-mono);
+      font-size: 11.5px;
+    }
+
+    /* Compact meta row inside the detail view — matches the feed-card
+     * meta vocabulary so the user recognises the structure at a glance.
+     * [avatar 22px] [kind icon] [src] · [date]. */
+    .detail-meta-compact {
+      gap: 8px;
+      font-size: var(--t-13);
+      color: var(--text-3);
+    }
+    .detail-meta-compact .kind-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .detail-meta-compact .detail-src {
+      font-family: var(--f-mono);
+      font-size: 12px;
+      color: var(--text-2);
+      flex: 0 1 auto;
+      text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+      max-width: 240px;
+    }
+
+    /* Author trigger inside the compact meta row — just the avatar,
+     * looks identical to the read-only avatar but with hover affordance
+     * + caret cue on hover. Popover positions to the left under it. */
+    .author-avatar.detail-author-trigger {
+      width: 22px; height: 22px;
+      padding: 0;
+      font-size: 11px;
+      cursor: pointer;
+      transition: transform var(--m-fast) var(--m-ease),
+                  box-shadow var(--m-fast) var(--m-ease);
+    }
+    @media (hover: hover) {
+      .author-avatar.detail-author-trigger:hover {
+        transform: scale(1.1);
+        box-shadow: 0 0 0 2px var(--accent-soft);
+      }
+    }
+
+    /* Editable date — the visible text + an invisible native date
+     * input layered on top. Hover surfaces a subtle frame so it reads
+     * as a control without adding visual weight. The pencil glyph
+     * matches the title/notes/url edit affordance. */
+    .detail-date-edit {
+      position: relative;
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 6px;
+      margin: -2px 0;
+      border-radius: var(--r-xs);
+      cursor: pointer;
+      transition: background var(--m-fast) var(--m-ease);
+    }
+    .detail-date-pencil {
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--text-4);
+      opacity: 0.7;
+      transition: color var(--m-fast), opacity var(--m-fast);
+    }
+    @media (hover: hover) {
+      .detail-date-edit:hover {
+        background: var(--surface-2);
+        box-shadow: inset 0 0 0 1px var(--border-hairline);
+      }
+      .detail-date-edit:hover .detail-date-pencil {
+        color: var(--text-2);
+        opacity: 1;
+      }
+    }
+    .detail-date-edit .detail-date {
+      pointer-events: none;
+    }
+    .detail-date-native {
+      position: absolute; inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color-scheme: dark;
+      font: inherit;
+    }
+    [data-theme="light"] .detail-date-native { color-scheme: light; }
+
+    /* Per-source byline (e.g. reddit post author `u/jondoe`).
+     * detail-meta is a flex-wrap row, so flex-basis:100% pushes this
+     * to its own line below the source/date row. Uses the same mono
+     * vocabulary as the source name so the pair reads as one identity. */
+    .detail-byline {
+      flex-basis: 100%;
+      color: var(--text-3);
+      font-family: var(--f-mono);
+      font-size: 11.5px;
+      margin-top: -2px;
+      padding-left: 30px;        /* aligns under the source — past avatar(22)+gap(8) */
+    }
+
+    .detail-title {
+      margin: 4px 0 4px;
+      font-size: 22px;
+      font-weight: var(--w-sb);
+      line-height: 1.25;
+      color: var(--text);
+      letter-spacing: -0.012em;
+    }
+    /* Editable row — wraps a display block (title/notes/etc) with a
+     * pencil-edit affordance to its right. The pencil is the canonical
+     * "this is editable" cue across the whole detail view. Clicking
+     * the text itself also enters edit mode. */
+    .detail-editable-row {
+      display: flex; align-items: flex-start; gap: 6px;
+      min-width: 0;
+    }
+    .detail-editable-row > :first-child {
+      flex: 1; min-width: 0;
+    }
+    .detail-edit-btn {
+      flex-shrink: 0;
+      width: 28px; height: 28px;
+      margin-top: 4px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: var(--r-sm);
+      color: var(--text-3);
+      cursor: pointer;
+      opacity: 0.55;
+      transition: background var(--m-fast), border-color var(--m-fast),
+                  color var(--m-fast), opacity var(--m-fast);
+    }
+    @media (hover: hover) {
+      .detail-editable-row:hover .detail-edit-btn { opacity: 1; }
+    }
+    @media (hover: none) {
+      .detail-edit-btn { opacity: 0.7; }
+    }
+    .detail-edit-btn:hover {
+      background: var(--surface-2);
+      border-color: var(--border);
+      color: var(--text);
+      opacity: 1;
+    }
+    /* "Click to add" empty-state — styled like a faint placeholder
+     * field. Uses button semantics so it's focusable and tappable. */
+    .detail-empty-btn {
+      width: 100%;
+      background: transparent;
+      border: 0;
+      padding: 4px 8px;
+      margin-left: -8px;
+      text-align: left;
+      cursor: pointer;
+    }
+    /* Editable affordance — only on devices with hover (touch users
+     * just tap directly). A soft hover-frame hints "this is a field". */
+    .detail-title.is-editable,
+    .detail-notes.is-editable {
+      cursor: text;
+      padding: 4px 8px;
+      margin-left: -8px; margin-right: -8px;
+      border-radius: var(--r-sm);
+      transition: background var(--m-fast) var(--m-ease),
+                  box-shadow var(--m-fast) var(--m-ease);
+    }
+    @media (hover: hover) {
+      .detail-title.is-editable:hover,
+      .detail-notes.is-editable:hover {
+        background: var(--surface-2);
+        box-shadow: inset 0 0 0 1px var(--border-hairline);
+      }
+    }
+    .detail-title-input,
+    .detail-notes-input {
+      width: calc(100% + 16px);
+      margin-left: -8px;
+      padding: 4px 8px !important;
+      background: var(--surface-2);
+      border: 1px solid var(--accent) !important;
+      border-radius: var(--r-sm);
+      color: var(--text);
+      font: inherit;
+      outline: none;
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    .detail-title-input {
+      font-size: 22px;
+      font-weight: var(--w-sb);
+      line-height: 1.25;
+      letter-spacing: -0.012em;
+    }
+    .detail-notes-input {
+      min-height: 96px;
+      font-family: var(--f-sans);
+      font-size: var(--t-14);
+      line-height: 1.55;
+      resize: vertical;
+    }
+
+    /* Thumb — same aspect as card thumb, fills the body width. The
+     * explicit flex-shrink: 0 + width: 100% prevents the flex-column
+     * parent from collapsing it short, which happened in the panel. */
+    .detail-thumb {
+      position: relative;
+      aspect-ratio: 16 / 9;
+      width: 100%;
+      flex-shrink: 0;
+      background: var(--surface-2);
+      overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-4);
+      border-radius: var(--r-sm);
+      border: 1px solid var(--border-hairline);
+    }
+    .detail-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .detail-thumb .play {
+      position: absolute; right: 8px; bottom: 8px;
+      padding: 3px 8px;
+      background: rgba(0,0,0,.7);
+      color: #fff; font-family: var(--f-mono); font-size: 11.5px;
+      border-radius: var(--r-xs);
+    }
+    .detail-thumb.empty {
+      background: radial-gradient(circle at 50% 50%, var(--surface-2) 0%, var(--surface) 70%);
+    }
+
+    /* URL row — appears under the title, always visible. Mono font,
+     * truncated with ellipsis if long. Open button (↗) sits to the
+     * right. For freeform kinds (everything except platform-bound ones)
+     * clicking the URL text enters edit mode. */
+    .detail-url {
+      display: flex; align-items: center; gap: 8px;
+      min-width: 0;
+    }
+    .detail-url-text {
+      flex: 1; min-width: 0;
+      padding: 4px 8px;
+      margin-left: -8px;
+      background: transparent;
+      border: 0;
+      text-align: left;
+      font-family: var(--f-mono);
+      font-size: 12px;
+      color: var(--text-2);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      text-decoration-color: color-mix(in oklab, var(--text-3) 50%, transparent);
+      text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+      border-radius: var(--r-sm);
+      transition: background var(--m-fast) var(--m-ease),
+                  color var(--m-fast) var(--m-ease),
+                  text-decoration-color var(--m-fast) var(--m-ease);
+    }
+    .detail-url-text:hover {
+      color: var(--text);
+      text-decoration-color: var(--text-2);
+      background: var(--surface-2);
+    }
+    .detail-url-empty {
+      color: var(--text-4);
+      font-style: italic;
+      font-family: var(--f-sans);
+      font-size: var(--t-13);
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .detail-url-empty:hover {
+      color: var(--text-2);
+      text-decoration: none;
+    }
+    /* Pencil edit affordance — sits between URL text and ↗. Subtle by
+     * default, brightens on hover. Touch-friendly target size. */
+    .detail-url-edit {
+      width: 28px; height: 28px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: var(--r-sm);
+      color: var(--text-3);
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+    }
+    .detail-url-edit:hover {
+      background: var(--surface-2);
+      border-color: var(--border);
+      color: var(--text);
+    }
+    .detail-url-open {
+      width: 28px; height: 28px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      color: var(--text-2);
+      text-decoration: none;
+      font-size: 14px;
+      flex-shrink: 0;
+      transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+    }
+    .detail-url-open:hover {
+      background: var(--surface-3);
+      border-color: var(--accent);
+      color: var(--text);
+    }
+    .detail-url-input {
+      width: calc(100% + 16px) !important;
+      margin-left: -8px;
+      padding: 4px 8px !important;
+      background: var(--surface-2);
+      border: 1px solid var(--accent) !important;
+      border-radius: var(--r-sm);
+      color: var(--text);
+      font-family: var(--f-mono);
+      font-size: 12px;
+      outline: none;
+      box-shadow: 0 0 0 3px var(--accent-soft);
+      min-height: 32px;
+    }
+    .detail-notes {
+      margin: 0;
+      color: var(--text);
+      font-size: var(--t-14);
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+    .detail-notes-empty {
+      color: var(--text-3);
+      font-style: italic;
+    }
+
+    /* Stats — denser than card stats; show label + value pairs. */
+    .detail-stats {
+      display: flex; flex-wrap: wrap; gap: 14px;
+      padding: 10px 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--border-hairline);
+      border-radius: var(--r-sm);
+    }
+    .detail-stat {
+      display: inline-flex; align-items: center; gap: 6px;
+      color: var(--text-3);
+      font-size: var(--t-12);
+    }
+    .detail-stat svg { width: 13px; height: 13px; color: var(--text-3); }
+    .detail-stat b {
+      color: var(--text);
+      font-weight: var(--w-sb);
+      font-variant-numeric: tabular-nums;
+      font-size: var(--t-13);
+    }
+    .detail-stat-text {
+      font-family: var(--f-mono);
+      color: var(--text-2);
+    }
+
+    /* Section block — labelled groups (Games / Add a note). */
+    .detail-section {
+      display: flex; flex-direction: column; gap: 8px;
+      padding-top: 6px;
+    }
+    .detail-section-label {
+      font-size: 10.5px;
+      font-weight: var(--w-sb);
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .detail-game-row {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      align-items: center;
+    }
+
+    .detail-note-input {
+      min-height: 64px;
+      font-family: var(--f-sans);
+    }
+    .detail-note-actions {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .detail-note-actions .btn { flex-shrink: 0; }
+    .detail-note-hint {
+      color: var(--text-4);
+      font-size: 11.5px;
+      line-height: 1.4;
+    }
+
+    /* Mobile — panel takes full width minus a small margin; modal takes
+     * full screen. */
+    @media (max-width: 640px) {
+      .detail-panel {
+        width: 100vw;
+        border-left: 0;
+        box-shadow: none;
+      }
+      .detail-modal {
+        width: calc(100vw - 12px);
+        max-height: calc(100vh - 12px);
+      }
+      .detail-body { padding: 14px 16px 18px; }
+    }
+
+    /* ── Sources page ──────────────────────────────────────────
+     * Rows-as-cards: single-column rows that share feed-card surface
+     * vocabulary (border, radius, color-stripe). Grouped by platform
+     * so the user can quickly scan "I have 2 YouTube + 2 Reddit". */
+    .sources-list {
+      display: flex; flex-direction: column;
+      gap: var(--s-7);
+      padding-bottom: var(--s-6);
+    }
+    .sources-group { display: flex; flex-direction: column; }
+    .sources-group-head {
+      display: flex; align-items: center; gap: var(--s-2);
+      padding: var(--s-3) 0;
+    }
+    .sources-group-title {
+      margin: 0;
+      font-size: var(--t-13);
+      font-weight: var(--w-sb);
+      color: var(--text-2);
+      letter-spacing: 0.01em;
+    }
+    .sources-group-count {
+      font-family: var(--f-mono);
+      font-size: var(--t-12);
+      color: var(--text-3);
+      padding: 0 6px;
+      background: var(--surface-2);
+      border-radius: var(--r-pill);
+    }
+    .sources-group-rule { flex: 1; height: 1px; background: var(--border-hairline); }
+    .sources-rows {
+      display: flex; flex-direction: column;
+      gap: var(--s-2);
+    }
+
+    /* ⋯ overflow on source rows — quieter than feed-card's lifted
+     * button: no surface, no border, just a dim glyph that hides into
+     * the row's calm state. Hover reveals a subtle surface. */
+    .source-row .card-actions {
+      position: absolute;
+      top: 10px; right: 10px;
+    }
+    .source-row .card-action-btn.overflow {
+      background: transparent;
+      border: 0;
+      color: var(--text-4);
+      box-shadow: none;
+      width: 24px; height: 24px;
+    }
+    .source-row .card-action-btn.overflow:hover {
+      background: var(--surface-2);
+      color: var(--text-2);
+      border: 0;
+    }
+
+    .source-row {
+      position: relative;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      grid-template-areas:
+        "title acts"
+        "foot  foot";
+      align-items: center;
+      gap: 6px 12px;
+      padding: 12px 14px 10px;
+      padding-right: 44px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      box-shadow: var(--shadow-card);
+      transition: background var(--m-fast) var(--m-ease),
+                  border-color var(--m-fast) var(--m-ease),
+                  opacity var(--m-fast) var(--m-ease);
+    }
+    .source-title { grid-area: title; }
+    .source-actions { grid-area: acts; justify-content: flex-end; }
+    .source-foot { grid-area: foot; }
+
+    /* Title row — mini kind icon + handle, on a single line with the
+     * action cluster on the right. The big kind tile is gone (the
+     * section header above already carries the platform). Mini icon
+     * stays so the title has a stable left anchor and the platform is
+     * still readable if a user collapses the section. */
+    .source-title {
+      display: flex; align-items: center;
+      gap: 8px;
+      margin: 0;
+      min-width: 0;
+      font-family: var(--f-mono);
+      font-size: var(--t-15);
+      font-weight: var(--w-sb);
+      color: var(--text);
+      letter-spacing: -0.005em;
+      line-height: 1.25;
+    }
+    .source-title .kind-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 16px; height: 16px;
+      color: var(--card-accent, var(--text-3));
+      flex-shrink: 0;
+    }
+    .source-title-text {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    /* ⋯ button sits absolute-positioned in the top-right corner, same
+     * affordance pattern as feed-cards. Reserve space in main col so
+     * the author chip never collides with it. */
+    .source-row > .card-actions {
+      position: absolute; top: 8px; right: 10px;
+      z-index: 2;
+    }
+    .source-row .source-main { padding-right: 0; }
+    .source-name-row {
+      display: flex; align-items: center; gap: 8px; min-width: 0;
+    }
+    /* Clickable author avatar in the header row — matches the feed-card
+     * author-avatar in size and treatment. Hover scales gently. */
+    .author-avatar.source-author-trigger {
+      width: 22px; height: 22px;
+      padding: 0;
+      font-size: 11px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: transform var(--m-fast) var(--m-ease),
+                  box-shadow var(--m-fast) var(--m-ease);
+    }
+    @media (hover: hover) {
+      .author-avatar.source-author-trigger:hover {
+        transform: scale(1.1);
+        box-shadow: 0 0 0 2px var(--accent-soft);
+      }
+    }
+    /* Footer — single line: events · date range · author · synced.
+     * No flex-spacer, no left/right split. Reads as one factual phrase
+     * about the source's state. Wraps to 2 lines on narrow widths. */
+    .source-foot {
+      grid-column: 1 / -1;
+      display: flex; align-items: center;
+      flex-wrap: wrap;
+      gap: 2px 8px;
+      color: var(--text-3);
+      font-family: var(--f-mono);
+      font-size: 11.5px;
+      letter-spacing: 0.01em;
+      font-variant-numeric: tabular-nums;
+    }
+    .source-foot-sep { color: var(--text-4); }
+    .source-foot-range { color: var(--text-2); }
+    /* Author lives in the footer as a quiet inline mete-token —
+     * not a full pill. Clickable to change. Mini-avatar (14px) keeps
+     * the visual weight down to the rest of the meta line. */
+    .source-foot-author {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 1px 6px 1px 4px;
+      margin: -2px 0;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: var(--r-pill);
+      color: var(--text-3);
+      font-family: inherit;
+      font-size: inherit;
+      cursor: pointer;
+      transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+    }
+    .source-foot-author:hover {
+      background: var(--surface-2);
+      border-color: var(--border);
+      color: var(--text);
+    }
+    .source-foot-author .author-avatar {
+      width: 14px; height: 14px; font-size: 9px;
+      border-width: 1px;
+    }
+    .source-foot-author[data-mine="1"] { color: var(--text-2); }
+    .source-foot-sep { color: var(--text-4); opacity: 0.6; }
+    .source-foot-range { color: var(--text-3); font-variant-numeric: tabular-nums; }
+    .source-foot-spacer { flex: 1; }
+    .source-row::before {
+      content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+      width: 2px;
+      background: var(--card-accent, var(--border-2));
+      border-top-left-radius: var(--r-md);
+      border-bottom-left-radius: var(--r-md);
+    }
+    @media (hover: hover) {
+      .source-row:hover {
+        background: var(--surface-2);
+        border-color: var(--border-2);
+      }
+    }
+    .source-row[data-active="0"] {
+      opacity: 0.6;
+    }
+    .source-row[data-active="0"]:hover { opacity: 0.85; }
+
+    .source-kind {
+      position: relative;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 44px; height: 44px;
+      color: var(--card-accent, var(--text-3));
+      border-radius: var(--r-sm);
+      background: color-mix(in oklab, var(--card-accent) 14%, var(--surface-2));
+      flex-shrink: 0;
+    }
+
+    .source-main {
+      display: flex; flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+    .source-name-row {
+      display: flex; align-items: center; min-width: 0;
+    }
+    .source-name-wrap {
+      display: inline-flex; align-items: center; gap: 4px;
+      min-width: 0;
+    }
+    .source-name {
+      font-family: var(--f-mono);
+      font-size: var(--t-15);
+      font-weight: var(--w-sb);
+      color: var(--text);
+      letter-spacing: -0.005em;
+      word-break: break-word;
+    }
+    .source-name-row {
+      display: flex; align-items: center; gap: 10px;
+      min-width: 0;
+    }
+
+    /* Author chip in the source-row meta line — full author-pick
+     * trigger (avatar + name + chev). Opens the same popover used in
+     * Add Event / Detail view. */
+    .source-author-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 8px 3px 3px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--r-pill);
+      color: var(--text-2);
+      font-size: var(--t-12);
+      font-weight: var(--w-md);
+      cursor: pointer;
+      transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+    }
+    .source-author-chip:hover {
+      background: var(--surface-3);
+      border-color: var(--border-2);
+      color: var(--text);
+    }
+    .source-author-chip .author-avatar {
+      width: 20px; height: 20px;
+      font-size: 11px;
+    }
+    .source-author-chip-name {
+      color: var(--text);
+      letter-spacing: -0.005em;
+    }
+    .source-author-chip .author-pick-chev {
+      display: inline-flex; color: var(--text-3);
+      margin-right: 2px;
+    }
+
+    /* On/off toggle — classic switch. Accent fill when on. */
+    .source-toggle {
+      position: relative;
+      width: 38px; height: 22px;
+      padding: 0;
+      background: var(--surface-3);
+      border: 1px solid var(--border-2);
+      border-radius: 11px;
+      cursor: pointer;
+      transition: background var(--m-fast), border-color var(--m-fast);
+      flex-shrink: 0;
+    }
+    .source-toggle-thumb {
+      position: absolute;
+      top: 2px; left: 2px;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: var(--text-3);
+      transition: left var(--m-fast) var(--m-ease),
+                  background var(--m-fast) var(--m-ease);
+    }
+    .source-toggle[data-on="1"] {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .source-toggle[data-on="1"] .source-toggle-thumb {
+      left: 18px;
+      background: var(--accent-text);
+    }
+    .source-toggle:hover {
+      border-color: var(--text-3);
+    }
+
+    .source-meta {
+      display: flex; align-items: center; gap: 8px;
+      color: var(--text-3);
+      font-size: var(--t-12);
+      min-width: 0;
+    }
+    .source-sep { color: var(--text-4); }
+    .source-synced {
+      color: var(--text-3);
+      font-family: var(--f-mono);
+      font-size: 11.5px;
+    }
+
+    .source-stats {
+      color: var(--text-3);
+      font-size: var(--t-12);
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
+      padding-right: 6px;
+    }
+    .source-stats b {
+      color: var(--text);
+      font-weight: var(--w-sb);
+      font-size: var(--t-15);
+    }
+    .source-stats-label { color: var(--text-3); }
+
+    .source-actions {
+      display: inline-flex; align-items: center; gap: 16px;
+      flex-shrink: 0;
+    }
+    /* Big sync button — main action on the row. */
+    .btn.source-sync-btn {
+      height: 32px; min-height: 32px;
+      padding: 0 12px;
+      gap: 6px;
+      font-size: var(--t-13);
+    }
+    .btn.source-sync-btn svg {
+      transition: transform var(--m-base) var(--m-ease);
+    }
+    .btn.source-sync-btn:hover svg {
+      transform: rotate(-90deg);
+    }
+
+    .source-overflow {
+      width: 32px; height: 32px;
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-3);
+    }
+    .source-overflow:hover {
+      background: var(--surface-2);
+      border-color: var(--border);
+      color: var(--text);
+    }
+
+    /* Mobile — actions wrap below title on narrow screens. */
+    @media (max-width: 560px) {
+      .source-row {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+          "title"
+          "acts"
+          "foot";
+        gap: 8px;
+      }
+      .source-actions { justify-content: flex-start; flex-wrap: wrap; gap: 10px; }
+    }
+    @media (max-width: 480px) {
+      .btn.source-sync-btn span { display: none; }
+      .btn.source-sync-btn { padding: 0; width: 32px; justify-content: center; }
+    }
+
+    /* Bulk action bar — sticky-bottom centered tray. */
+    .bulk-bar {
+      position: fixed; bottom: 16px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 50;
+      pointer-events: none;
+      max-width: calc(100vw - 32px);
+    }
+    .bulk-bar-inner {
+      display: flex; align-items: center; gap: var(--s-2);
+      padding: 8px 8px 8px 18px;
+      background: var(--surface);
+      border: 1px solid var(--border-2);
+      border-radius: var(--r-lg);
+      box-shadow: var(--shadow-elev);
+      pointer-events: auto;
+      flex-wrap: wrap;
+    }
+    .bulk-count { font-size: var(--t-13); color: var(--text-2); }
+    .bulk-count strong {
+      color: var(--accent-strong); font-weight: var(--w-sb);
+      font-variant-numeric: tabular-nums;
+      margin-right: 2px;
+    }
+    .btn.danger { color: var(--danger); }
+    .btn.danger:hover { color: var(--danger); border-color: var(--danger); }
+    .inbox-chip {
+      background: transparent;
+      border-style: dashed;
+      color: var(--text-3);
+    }
+    /* Author tag in footer — subtle text marker, always present so the
+     * reader can scan "mine vs others" without a hunt. */
+    .author-tag {
+      color: var(--text-3); font-size: var(--t-12);
+      font-family: var(--f-mono);
+      letter-spacing: 0.02em;
+    }
+    .mine-pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 1px 6px;
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+      border-radius: var(--r-xs);
+      font-family: var(--f-mono);
+      font-size: 10.5px;
+      font-weight: var(--w-md);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .feed-footer {
+      grid-column: 1 / -1;
+      display: flex; justify-content: center; align-items: center;
+      gap: var(--s-3);
+      padding: var(--s-7) 0 var(--s-8);
+      color: var(--text-3); font-size: var(--t-13);
+    }
+    .feed-footer::before, .feed-footer::after {
+      content: ""; flex: 1; height: 1px; background: var(--border-hairline);
+      max-width: 120px;
+    }
+
+    /* "Density: compact" tweaks. */
+    [data-density="compact"] .card-body { padding: var(--s-2) var(--s-3) var(--s-3); gap: var(--s-1); }
+    [data-density="compact"] .card-title { font-size: var(--t-14); }
+    [data-density="compact"] .card-notes { display: none; }
+    [data-density="compact"] .feed-grid  { gap: var(--s-2); }
+    [data-density="compact"] .date-head  { padding: var(--s-5) 0 var(--s-2); }
+
+    /* Vibe variants — override only what's different from the base "Warm diary". */
+    [data-vibe="linear"] {
+      --bg: #0B0B0E;
+      --surface: #131318;
+      --surface-2: #1A1A20;
+      --surface-3: #21212A;
+      --border: #232329;
+      --border-2: #2F2F37;
+      --text: #ECECEF;
+      --text-2: #A4A4AC;
+      --text-3: #72727A;
+    }
+    [data-vibe="linear"] .card { border-radius: var(--r-sm); }
+    [data-vibe="linear"] .card-thumb { background: #0F0F14; }
+
+    [data-vibe="stripe"] {
+      --bg: #0C0C10;
+      --surface: #15151B;
+      --surface-2: #1B1B22;
+      --border: #25252C;
+      --border-2: #313139;
+      --text: #F3F3F5;
+      --text-2: #ABABB2;
+      --text-3: #74747C;
+    }
+    [data-vibe="stripe"] .card { border-radius: 8px; }
+    [data-vibe="stripe"] .card-thumb { aspect-ratio: 21 / 9; }
+    [data-vibe="stripe"] .card-title { font-size: var(--t-14); font-weight: var(--w-sb); }
+
+    /* Light mode overrides. */
+    [data-theme="light"] .chrome {
+      background: color-mix(in oklab, var(--bg) 80%, transparent);
+    }
+    [data-theme="light"] .card-thumb .play { background: rgba(0,0,0,.7); color:#fff; }
+
+    /* Tweaks-panel collision guard — keep cards visible behind the panel. */
+    @media (min-width: 640px) {
+      .layout-inner { padding-bottom: 100px; }
+    }
+  </style>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" src="tweaks-panel.jsx"></script>
+  <script type="text/babel" src="app-data.jsx"></script>
+  <script type="text/babel" src="add-event-modal.jsx"></script>
+  <script type="text/babel" src="event-detail.jsx"></script>
+  <script type="text/babel" src="sources-page.jsx"></script>
+  <script type="text/babel" src="app.jsx"></script>
+</body>
+</html>

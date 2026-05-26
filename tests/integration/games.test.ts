@@ -17,6 +17,8 @@ import {
   getGameById,
   getGameByIdIncludingDeleted,
   updateGame,
+  deriveReleaseInfoForGames,
+  hardDeleteGame,
 } from "../../src/lib/server/services/games.js";
 import { toGameDto } from "../../src/lib/server/dto.js";
 import { seedUserDirectly } from "./helpers.js";
@@ -237,5 +239,254 @@ describe("games CRUD", () => {
     // The original game is still readable + intact for the actual owner.
     const stillThere = await getGameByIdIncludingDeleted(userA.id, aGame.id);
     expect(stillThere.deletedAt).toBeNull();
+  });
+});
+
+// games.release_date + games.release_tba columns DROPPED in migration
+// 0047 per denormalization-audit-2.md V-2 (AGENTS.md no-denorm rule).
+// The effective release date is derived from `game_steam_listings`
+// rows via deriveReleaseInfoForGames(). These tests assert the
+// derivation contract:
+//   - releaseDate: earliest non-null release_date across non-deleted listings
+//   - releaseTba:  true when any non-deleted listing has release_date IS NULL
+// The DTO consumer (GameCard / /games/[gameId]/+page.svelte) reads
+// these fields under the same names they did before; only the SOURCE
+// moved from the games row to the listings JOIN.
+describe("games release info derived from listings (denorm fix V-2)", () => {
+  it("returns empty release info for a game with no listings", async () => {
+    const userA = await seedUserDirectly({ email: "rd-empty@test.local" });
+    const game = await createGame(userA.id, { title: "No listings" }, "127.0.0.1");
+    const map = await deriveReleaseInfoForGames(userA.id, [game.id]);
+    // No rows in the map at all → caller falls back to {null,false}.
+    expect(map.has(game.id)).toBe(false);
+
+    // DTO path: loader passes the empty fallback explicitly.
+    const dto = toGameDto(game);
+    expect(dto.releaseDate).toBeNull();
+    expect(dto.releaseTba).toBe(false);
+  });
+
+  it("releaseDate is the earliest non-null release_date across non-deleted listings", async () => {
+    const userA = await seedUserDirectly({ email: "rd-early@test.local" });
+    const game = await createGame(userA.id, { title: "Multi-release" }, "127.0.0.1");
+    await db.insert(gameSteamListings).values([
+      // Insert in NON-sorted order to verify the derivation actually picks the earliest.
+      {
+        userId: userA.id,
+        gameId: game.id,
+        appId: 1,
+        label: "DLC",
+        releaseDate: "2026-09-15",
+      },
+      {
+        userId: userA.id,
+        gameId: game.id,
+        appId: 2,
+        label: "Main",
+        releaseDate: "2024-03-14",
+      },
+      {
+        userId: userA.id,
+        gameId: game.id,
+        appId: 3,
+        label: "OST",
+        releaseDate: "2025-06-20",
+      },
+    ]);
+    const map = await deriveReleaseInfoForGames(userA.id, [game.id]);
+    expect(map.get(game.id)).toEqual({ releaseDate: "2024-03-14", releaseTba: false });
+  });
+
+  it("releaseTba=true when ANY non-deleted listing has release_date NULL", async () => {
+    const userA = await seedUserDirectly({ email: "rd-tba@test.local" });
+    const game = await createGame(userA.id, { title: "Mixed TBA" }, "127.0.0.1");
+    await db.insert(gameSteamListings).values([
+      {
+        userId: userA.id,
+        gameId: game.id,
+        appId: 10,
+        label: "Main",
+        releaseDate: "2025-06-20",
+      },
+      {
+        userId: userA.id,
+        gameId: game.id,
+        appId: 11,
+        label: "Demo",
+        releaseDate: null,
+      },
+    ]);
+    const map = await deriveReleaseInfoForGames(userA.id, [game.id]);
+    // Date from the dated listing surfaces AND TBA is true because of the null one.
+    expect(map.get(game.id)).toEqual({ releaseDate: "2025-06-20", releaseTba: true });
+  });
+
+  it("soft-deleted listings are EXCLUDED from the derivation", async () => {
+    const userA = await seedUserDirectly({ email: "rd-soft@test.local" });
+    const game = await createGame(userA.id, { title: "Soft-deleted" }, "127.0.0.1");
+    await db.insert(gameSteamListings).values([
+      {
+        userId: userA.id,
+        gameId: game.id,
+        appId: 20,
+        label: "Live",
+        releaseDate: "2026-01-01",
+      },
+      {
+        userId: userA.id,
+        gameId: game.id,
+        appId: 21,
+        label: "Old",
+        releaseDate: "2020-01-01",
+        deletedAt: new Date(), // soft-deleted earlier listing
+      },
+    ]);
+    const map = await deriveReleaseInfoForGames(userA.id, [game.id]);
+    // The old (soft-deleted) row is ignored — earliest live date is 2026-01-01.
+    expect(map.get(game.id)).toEqual({ releaseDate: "2026-01-01", releaseTba: false });
+  });
+
+  it("batched: one query returns the per-game map for many games", async () => {
+    const userA = await seedUserDirectly({ email: "rd-batch@test.local" });
+    const g1 = await createGame(userA.id, { title: "G1" }, "127.0.0.1");
+    const g2 = await createGame(userA.id, { title: "G2" }, "127.0.0.1");
+    const g3 = await createGame(userA.id, { title: "G3" }, "127.0.0.1"); // no listings
+    await db.insert(gameSteamListings).values([
+      {
+        userId: userA.id,
+        gameId: g1.id,
+        appId: 100,
+        label: "G1-Main",
+        releaseDate: "2025-05-01",
+      },
+      {
+        userId: userA.id,
+        gameId: g2.id,
+        appId: 200,
+        label: "G2-Demo",
+        releaseDate: null,
+      },
+    ]);
+    const map = await deriveReleaseInfoForGames(userA.id, [g1.id, g2.id, g3.id]);
+    expect(map.get(g1.id)).toEqual({ releaseDate: "2025-05-01", releaseTba: false });
+    expect(map.get(g2.id)).toEqual({ releaseDate: null, releaseTba: true });
+    // G3 has no listings → not in the map at all. Loader maps to {null,false}.
+    expect(map.has(g3.id)).toBe(false);
+  });
+
+  it("tenant scope: another user's listings DO NOT leak into the derivation", async () => {
+    const userA = await seedUserDirectly({ email: "rd-ct-a@test.local" });
+    const userB = await seedUserDirectly({ email: "rd-ct-b@test.local" });
+    const aGame = await createGame(userA.id, { title: "A's game" }, "127.0.0.1");
+    // Insert a listing under userA's game. Then probe as userB.
+    await db.insert(gameSteamListings).values({
+      userId: userA.id,
+      gameId: aGame.id,
+      appId: 999,
+      label: "Main",
+      releaseDate: "2026-01-01",
+    });
+    // userB asks for aGame's release info — tenant scope filters the
+    // listings query so userB sees nothing.
+    const map = await deriveReleaseInfoForGames(userB.id, [aGame.id]);
+    expect(map.has(aGame.id)).toBe(false);
+  });
+
+  it("empty input returns an empty map (no query issued)", async () => {
+    const userA = await seedUserDirectly({ email: "rd-empty-input@test.local" });
+    const map = await deriveReleaseInfoForGames(userA.id, []);
+    expect(map.size).toBe(0);
+  });
+});
+
+// hardDeleteGame — permanent removal of soft-deleted game + cascaded children.
+describe("hardDeleteGame — permanent delete of soft-deleted games", () => {
+  it("soft-delete then hard-delete removes the game row from the DB", async () => {
+    const userA = await seedUserDirectly({ email: "hd-game-1@test.local" });
+    const game = await createGame(userA.id, { title: "Hard Del Game" }, "127.0.0.1");
+    await softDeleteGame(userA.id, game.id, "127.0.0.1");
+
+    await hardDeleteGame(userA.id, game.id, "127.0.0.1");
+
+    const rows = await db.select().from(games).where(eq(games.id, game.id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("hard-delete on a NON-soft-deleted game throws NotFoundError", async () => {
+    const userA = await seedUserDirectly({ email: "hd-game-2@test.local" });
+    const game = await createGame(userA.id, { title: "Live Game" }, "127.0.0.1");
+
+    await expect(hardDeleteGame(userA.id, game.id, "127.0.0.1")).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
+
+    // Row is still in the DB.
+    const rows = await db.select().from(games).where(eq(games.id, game.id));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("cross-tenant hard-delete throws NotFoundError (404, never 403)", async () => {
+    const userA = await seedUserDirectly({ email: "hd-game-3a@test.local" });
+    const userB = await seedUserDirectly({ email: "hd-game-3b@test.local" });
+    const game = await createGame(userA.id, { title: "XT Game" }, "127.0.0.1");
+    await softDeleteGame(userA.id, game.id, "127.0.0.1");
+
+    const err = await hardDeleteGame(userB.id, game.id, "127.0.0.1").catch((e) => e);
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.code).toBe("not_found");
+    expect(err.status).toBe(404);
+    expect(err.message).not.toMatch(/forbidden|permission/i);
+
+    // Row is still intact for userA.
+    const rows = await db.select().from(games).where(eq(games.id, game.id));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("hard-delete writes audit row game.delete_forever", async () => {
+    const userA = await seedUserDirectly({ email: "hd-game-4@test.local" });
+    const game = await createGame(userA.id, { title: "Audit Del Game" }, "127.0.0.1");
+    await softDeleteGame(userA.id, game.id, "127.0.0.1");
+
+    await hardDeleteGame(userA.id, game.id, "127.0.0.1");
+
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.userId, userA.id), eq(auditLog.action, "game.delete_forever")));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.metadata).toMatchObject({ gameId: game.id });
+  });
+
+  it("hard-delete game with attached listings cascades (listings also removed)", async () => {
+    const userA = await seedUserDirectly({ email: "hd-game-5@test.local" });
+    const game = await createGame(userA.id, { title: "Cascade Game" }, "127.0.0.1");
+
+    // Attach a Steam listing to the game.
+    await db.insert(gameSteamListings).values({
+      userId: userA.id,
+      gameId: game.id,
+      appId: 9001,
+      label: "Cascade Test",
+    });
+
+    const listingsBefore = await db
+      .select()
+      .from(gameSteamListings)
+      .where(eq(gameSteamListings.gameId, game.id));
+    expect(listingsBefore).toHaveLength(1);
+
+    await softDeleteGame(userA.id, game.id, "127.0.0.1");
+    await hardDeleteGame(userA.id, game.id, "127.0.0.1");
+
+    // Game row gone.
+    const gameRows = await db.select().from(games).where(eq(games.id, game.id));
+    expect(gameRows).toHaveLength(0);
+
+    // Listing rows also gone (hard-delete cascades to children).
+    const listingsAfter = await db
+      .select()
+      .from(gameSteamListings)
+      .where(eq(gameSteamListings.gameId, game.id));
+    expect(listingsAfter).toHaveLength(0);
   });
 });

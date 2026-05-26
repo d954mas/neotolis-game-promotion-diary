@@ -36,7 +36,7 @@
 // `game.restored`; listing CRUD is intentionally NOT audited (only the
 // security-relevant verbs in the audit enum).
 
-import { and, eq, isNull, desc } from "drizzle-orm";
+import { and, eq, isNull, desc, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { games } from "../db/schema/games.js";
 import { gameSteamListings } from "../db/schema/game-steam-listings.js";
@@ -44,6 +44,7 @@ import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { withQuotaGuard } from "./quota.js";
+import type { DerivedReleaseInfo } from "../dto.js";
 
 export type GameRow = typeof games.$inferSelect;
 
@@ -56,8 +57,6 @@ export interface UpdateGameInput {
   title?: string;
   notes?: string;
   tags?: string[];
-  releaseTba?: boolean;
-  releaseDate?: string | null;
   coverUrl?: string | null;
   // Nullable long-form description. Service-layer max length 2000 chars
   // (DB column has no constraint). Pass `null` explicitly to clear an
@@ -65,6 +64,10 @@ export interface UpdateGameInput {
   // empty-string case is normalized to NULL at the service entry so
   // callers can pass an empty textarea verbatim.
   description?: string | null;
+  // releaseDate / releaseTba INTENTIONALLY OMITTED. The release date is
+  // owned by `game_steam_listings.release_date` (denormalization-audit-2.md
+  // V-2). Migration drizzle/0047 dropped the games-row columns; the
+  // loaders derive the value via JOIN before serializing the DTO.
 }
 
 const TITLE_MIN = 1;
@@ -240,10 +243,11 @@ export async function updateGame(
   if (input.title !== undefined) patch.title = input.title.trim();
   if (input.notes !== undefined) patch.notes = input.notes;
   if (input.tags !== undefined) patch.tags = input.tags;
-  if (input.releaseTba !== undefined) patch.releaseTba = input.releaseTba;
-  if (input.releaseDate !== undefined) patch.releaseDate = input.releaseDate;
   if (input.coverUrl !== undefined) patch.coverUrl = input.coverUrl;
   if (normalizedDescription !== undefined) patch.description = normalizedDescription;
+  // releaseDate / releaseTba: NOT WRITABLE on games row anymore.
+  // Owned by game_steam_listings.release_date; see UpdateGameInput
+  // header + denormalization-audit-2.md V-2.
 
   const [row] = await db
     .update(games)
@@ -356,4 +360,131 @@ export async function restoreGame(
     ipAddress,
     metadata: { gameId },
   });
+}
+
+/**
+ * Permanently delete a soft-deleted game and its cascaded children
+ * (game_steam_listings). Only operates on rows with `deletedAt IS NOT NULL`.
+ *
+ * Events are M:N to games via `event_games` — the FK CASCADE on
+ * `event_games(game_id)` automatically removes the junction rows when the
+ * parent game is hard-deleted, leaving the events themselves intact.
+ *
+ * Audit: writes `game.delete_forever` with `metadata: { gameId }`.
+ */
+export async function hardDeleteGame(
+  userId: string,
+  gameId: string,
+  ipAddress: string,
+): Promise<void> {
+  const [existing] = await db
+    .select({ deletedAt: games.deletedAt })
+    .from(games)
+    .where(and(eq(games.userId, userId), eq(games.id, gameId)))
+    .limit(1);
+  if (!existing) throw new NotFoundError();
+  if (existing.deletedAt === null) throw new NotFoundError();
+
+  await db.transaction(async (tx) => {
+    // Delete child listings first (FK constraint order).
+    await tx
+      .delete(gameSteamListings)
+      .where(and(eq(gameSteamListings.userId, userId), eq(gameSteamListings.gameId, gameId)));
+    await tx.delete(games).where(and(eq(games.userId, userId), eq(games.id, gameId)));
+  });
+
+  await writeAudit({
+    userId,
+    action: "game.delete_forever",
+    ipAddress,
+    metadata: { gameId },
+  });
+}
+
+/**
+ * Per-game derived release-date info — computed from the game's
+ * non-deleted Steam listings.
+ *
+ * Why this helper exists: AGENTS.md no-denorm rule + denormalization-
+ * audit-2.md V-2. `games.release_date` / `games.release_tba` were
+ * dropped in migration 0047 because the listing rows already own the
+ * field and were the only source kept in sync with Steam. The /games
+ * list loader and /games/[gameId] detail loader call this helper once
+ * per request, then pass each game's derived `{releaseDate, releaseTba}`
+ * pair into `toGameDto(gameRow, derived)` so the wire DTO still
+ * surfaces the two field names the UI reads.
+ *
+ * Derivation contract:
+ *   - releaseDate: earliest non-null release_date across the game's
+ *     non-deleted listings; null when no listings or every listing has
+ *     NULL.
+ *   - releaseTba: true when any non-deleted listing has release_date
+ *     IS NULL (Steam's TBA sentinel for unannounced dates — "Coming
+ *     soon" without a concrete date). A game with two listings (one
+ *     with a date + one without) renders both: the concrete date
+ *     surfaces as releaseDate AND releaseTba is true. UI today renders
+ *     "TBA" when releaseTba is true (badge_release_tba), otherwise the
+ *     date string — that's fine for the mixed case (a game with a
+ *     released main + a TBA DLC reads as TBA, accurate to the listing
+ *     mix).
+ *
+ * Listing.release_date is a free-form string from Steam's appdetails
+ * ("Q4 2026" / "14 Mar, 2026"). The min-across-listings comparison
+ * now uses Date.parse with an Infinity sentinel for unparseable
+ * strings (B-7): concrete dates parse to a millis number and compare
+ * chronologically; quarters / "Coming Soon" / other unparseable
+ * shapes are treated as Infinity and sort last, so they never beat
+ * a real date for the "earliest non-null" pick. This keeps a game
+ * whose listings span ["Q4 2026", "14 Mar, 2026"] picking the March
+ * 2026 row (the earlier date) instead of letting lexical "1" < "Q"
+ * surface the quarter string.
+ *
+ * Tenant scope: the listing query filters by `eq(gameSteamListings.userId, userId)`
+ * AND by `inArray(gameSteamListings.gameId, gameIds)`. Empty input
+ * returns an empty map (no query issued).
+ */
+export async function deriveReleaseInfoForGames(
+  userId: string,
+  gameIds: string[],
+): Promise<Map<string, DerivedReleaseInfo>> {
+  const map = new Map<string, DerivedReleaseInfo>();
+  if (gameIds.length === 0) return map;
+
+  const rows = await db
+    .select({
+      gameId: gameSteamListings.gameId,
+      releaseDate: gameSteamListings.releaseDate,
+    })
+    .from(gameSteamListings)
+    .where(
+      and(
+        eq(gameSteamListings.userId, userId),
+        inArray(gameSteamListings.gameId, gameIds),
+        isNull(gameSteamListings.deletedAt),
+      ),
+    );
+
+  for (const r of rows) {
+    const existing = map.get(r.gameId) ?? { releaseDate: null, releaseTba: false };
+    if (r.releaseDate === null) {
+      existing.releaseTba = true;
+    } else if (existing.releaseDate === null) {
+      existing.releaseDate = r.releaseDate;
+    } else if (releaseDateMillis(r.releaseDate) < releaseDateMillis(existing.releaseDate)) {
+      existing.releaseDate = r.releaseDate;
+    }
+    map.set(r.gameId, existing);
+  }
+
+  return map;
+}
+
+/** Parse a free-form Steam release-date string to a comparable number.
+ *  Returns Date.parse result for parseable shapes ("14 Mar, 2026" /
+ *  "2026-03-14"), Infinity for unparseable shapes ("Q4 2026" / "Coming
+ *  Soon"). Infinity sorts last so unparseable strings never beat a
+ *  concrete date when picking the earliest. */
+function releaseDateMillis(s: string): number {
+  const ms = Date.parse(s);
+  return Number.isNaN(ms) ? Infinity : ms;
 }

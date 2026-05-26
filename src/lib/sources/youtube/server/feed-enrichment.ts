@@ -7,9 +7,13 @@
 // Two batched queries:
 //   1. youtube_video_snapshots — DISTINCT ON videoId ORDER BY polledAt DESC.
 //      Gets latest snapshot per video for stats (view/like/comment).
-//   2. youtube_videos — SELECT channelTitle by videoId IN (...). Gets
-//      the channel chip name (populated by channel-context-backfill OR
-//      backfill-channel's youtube_videos UPSERT).
+//   2. youtube_videos LEFT JOIN youtube_channels ON channel_id —
+//      SELECT youtube_channels.channelTitle by videoId IN (...). Gets
+//      the channel chip name from the SOURCE OF TRUTH row
+//      (youtube_channels), so a YouTube-side channel rename reflects
+//      in /feed as soon as the polling worker refreshes the channel
+//      row (no per-video re-walk required). See
+//      docs/denormalization-policy.md (V-1).
 //
 // Both tables are public-data (no userId scope) — already in ESLint
 // tenant-scope allowlist. The tenant guarantee comes from the upstream
@@ -19,9 +23,9 @@
 // Failure mode: errors are caught + logged at WARN; the cards render
 // without the enrichment instead of breaking the feed.
 
-import { inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { db } from "$lib/server/db/client.js";
-import { youtubeVideos } from "$lib/server/db/schema/index.js";
+import { youtubeVideos, youtubeChannels } from "$lib/server/db/schema/index.js";
 import { logger } from "$lib/server/logger.js";
 import type { EventDto } from "$lib/server/dto.js";
 
@@ -86,13 +90,23 @@ export async function youtubeEnrichFeedDtos(
       });
     }
 
-    // 2. ChannelTitle lookup from youtube_videos cache.
+    // 2. ChannelTitle lookup via JOIN — read from youtube_channels
+    //    (source of truth) keyed by youtube_videos.channel_id.
+    //
+    // LEFT JOIN because a paste-only video whose channel hasn't been
+    // backfilled yet has channel_id non-null (resolved by Data API)
+    // but no youtube_channels row until channel-context-backfill runs.
+    // YoutubeFeedCard's data_sources.channelTitle read path (via the
+    // source prop) covers registered channels; this enrichment covers
+    // events whose channel the user hasn't registered yet, falling
+    // back gracefully to null when the channel cache is still empty.
     const videoChannels = await db
       .select({
         videoId: youtubeVideos.videoId,
-        channelTitle: youtubeVideos.channelTitle,
+        channelTitle: youtubeChannels.channelTitle,
       })
       .from(youtubeVideos)
+      .leftJoin(youtubeChannels, eq(youtubeVideos.channelId, youtubeChannels.channelId))
       .where(inArray(youtubeVideos.videoId, youtubeExternalIds));
     const titleByVideo = new Map<string, string | null>();
     for (const v of videoChannels) titleByVideo.set(v.videoId, v.channelTitle);

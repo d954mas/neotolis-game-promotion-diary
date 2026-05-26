@@ -77,50 +77,59 @@
     flex-direction: column;
   }
   .dialog {
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
     padding: 0;
-    width: min(560px, calc(100vw - 2 * var(--space-md)));
-    max-height: min(80vh, calc(100vh - 2 * var(--space-lg)));
-    box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+    width: min(560px, calc(100vw - 2 * var(--s-4)));
+    max-height: min(80vh, calc(100vh - 2 * var(--s-6)));
+    box-shadow: var(--shadow-elev);
     overflow: hidden;
   }
   .dialog::backdrop {
-    background: rgb(0 0 0 / 50%);
+    background: var(--overlay-dark);
   }
   .header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--space-md);
-    padding: var(--space-md) var(--space-lg);
-    border-bottom: 1px solid var(--color-border);
+    gap: var(--s-4);
+    padding: var(--s-4) var(--s-6);
+    border-bottom: 1px solid var(--border);
   }
   .heading {
     margin: 0;
-    font-size: var(--font-size-body);
-    font-weight: var(--font-weight-semibold);
+    font-size: var(--t-17);
+    font-weight: var(--w-sb);
+    color: var(--text);
   }
   .close {
     background: transparent;
-    color: var(--color-text-muted);
+    color: var(--text-3);
     border: none;
     font-size: 1.5rem;
     line-height: 1;
     cursor: pointer;
-    padding: var(--space-xs) var(--space-sm);
-    border-radius: 4px;
+    padding: var(--s-1) var(--s-2);
+    border-radius: var(--r-sm);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
   }
   .close:hover {
-    color: var(--color-text);
-    background: var(--color-bg);
+    color: var(--text);
+    background: var(--accent-soft);
   }
   .body {
-    padding: var(--space-lg);
+    padding: var(--s-6);
     overflow-y: auto;
     flex: 1 1 auto;
     min-height: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .close {
+      transition: none;
+    }
   }
 </style>

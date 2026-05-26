@@ -1,15 +1,22 @@
 // YouTube ui/index.ts — client-safe entry.
 //
-// Re-exports the server-safe surface AND any per-source Svelte components
-// (none yet; the escape hatch remains available for kinds with unique
-// layouts).
+// Re-exports the server-safe surface AND the per-source FeedCard
+// override (YoutubeFeedCard) so the /feed dispatch via
+// getCardComponent("youtube_video") picks it up.
+//
+// YoutubeFeedCard enforces the YouTube-specific source-of-truth read
+// path: channel name comes from data_sources.channelTitle (FK lookup
+// in the /feed loader), NOT from event metadata. See the component's
+// header comment for the full rationale.
 //
 // .svelte files MUST import from this barrel (not from ./server.js)
-// when they want both the mapper AND any future per-source component
+// when they want both the mapper AND the per-source component
 // re-exports. SvelteKit +page.server.ts loaders and other server
 // modules must import from ./server.js to avoid bundler crashes pulling
 // server-only deps into the client.
 export * from "./server.js";
+
+export { default as cardComponent } from "./YoutubeFeedCard.svelte";
 
 /** Client-side URL detection for the /events/new "Get info" paste-preview
  *  button. Returns true if `url` is a YouTube watch / shorts / embed URL

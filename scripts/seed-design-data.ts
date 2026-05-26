@@ -62,8 +62,11 @@ async function main(): Promise<void> {
       title: "Neotolis: Last Light",
       coverUrl:
         "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/367520/header.jpg",
-      releaseDate: "2026-09-15",
-      tags: ["roguelike", "atmospheric", "indie", "metroidvania"],
+      // releaseDate / releaseTba moved to the listing rows below per
+      // denormalization-audit-2.md V-2 — games row no longer carries
+      // these columns (migration drizzle/0047). Loaders derive them
+      // via JOIN on game_steam_listings.release_date.
+      tags: [],
       description:
         "Атмосферный метроидвания-рогалик про последний город на разрушающейся планете. Ручная пиксельная графика, вязкий бой, хардкорная сложность.",
       notes: "Главный фокус кампании. Wishlist target к релизу: 50k.",
@@ -74,9 +77,7 @@ async function main(): Promise<void> {
       title: "Dungeon Tactics",
       coverUrl:
         "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/646570/header.jpg",
-      releaseDate: "2026-12-01",
-      releaseTba: false,
-      tags: ["tactics", "strategy", "turn-based", "fantasy"],
+      tags: [],
       description: "Тактика на гексах в подземельях. Кооп до 4 игроков.",
       notes: "Ранний доступ. Demo Festival осенью.",
     },
@@ -85,8 +86,7 @@ async function main(): Promise<void> {
       userId,
       title: "Starweaver",
       coverUrl: null,
-      releaseTba: true,
-      tags: ["narrative", "sci-fi"],
+      tags: [],
       description: null,
       notes: "Идея в работе. Дата релиза не определена.",
     },
@@ -121,15 +121,34 @@ async function main(): Promise<void> {
       steamGenres: ["Strategy", "RPG"],
       steamCategories: ["Multi-player", "Co-op"],
     },
+    // Starweaver: TBA listing — release_date NULL is Steam's "Coming
+    // soon, no date" sentinel. Loader derives releaseTba=true for this
+    // game because of the NULL release_date here. Replaces the old
+    // games.release_tba=true direct write per denormalization-audit-2.md
+    // V-2.
+    {
+      id: uuidv7(),
+      userId,
+      gameId: gameStarweaver,
+      appId: 999001,
+      label: "Coming Soon",
+      name: "Starweaver",
+      coverUrl: null,
+      releaseDate: null,
+      comingSoon: "true",
+      steamGenres: ["Indie"],
+      steamCategories: ["Single-player"],
+    },
   ]);
 
   // ─── data_sources ────────────────────────────────────────────────────────
   const srcYtMine = uuidv7();
   const srcYtBlogger = uuidv7();
   const srcReddit = uuidv7();
-  const srcTwitter = uuidv7();
-  const srcTelegram = uuidv7();
-  const srcDiscord = uuidv7();
+  // Twitter / Telegram / Discord seed sources removed — those source
+  // kinds are not in FUNCTIONAL_KINDS (services/data-sources.ts:59), no
+  // adapter ships yet. Showing them on /sources would mislead the user
+  // into expecting polling that can't run.
   await db.insert(dataSources).values([
     {
       id: srcYtMine,
@@ -160,38 +179,12 @@ async function main(): Promise<void> {
       handleUrl: "https://reddit.com/user/neotolis_dev",
       displayName: "u/neotolis_dev",
       isOwnedByMe: true,
-      autoImport: false,
-      metadata: { subreddit: "indiedev" },
-    },
-    {
-      id: srcTwitter,
-      userId,
-      kind: "twitter_account",
-      handleUrl: "https://twitter.com/neotolisgames",
-      displayName: "@neotolisgames",
-      isOwnedByMe: true,
-      autoImport: false,
-      metadata: {},
-    },
-    {
-      id: srcTelegram,
-      userId,
-      kind: "telegram_channel",
-      handleUrl: "https://t.me/neotolis_devblog",
-      displayName: "Neotolis Devblog",
-      isOwnedByMe: true,
-      autoImport: false,
-      metadata: {},
-    },
-    {
-      id: srcDiscord,
-      userId,
-      kind: "discord_server",
-      handleUrl: "https://discord.gg/neotolis",
-      displayName: "Neotolis Community",
-      isOwnedByMe: true,
-      autoImport: false,
-      metadata: {},
+      autoImport: true,
+      // reddit_account needs metadata.username — author-poll cron reads
+      // this to know whose posts to fetch. Previous seed had {subreddit}
+      // which is reddit_subreddit-shaped → cron skipped this row with
+      // a 'missing username' warn and the source stuck in 'Queued' forever.
+      metadata: { username: "neotolis_dev" },
     },
   ]);
 
@@ -323,6 +316,7 @@ async function main(): Promise<void> {
       occurred: daysAgo(12),
       games: [gameNeotolis],
       notes: "240 апвоутов, 38 комментариев, +850 wishlist за 48 часов.",
+      metadata: { subreddit: "indiedev", author: "neotolis_dev" },
     },
     {
       kind: "reddit_post",
@@ -334,46 +328,11 @@ async function main(): Promise<void> {
       occurred: daysAgo(3),
       games: [gameDungeon],
       notes: null,
+      metadata: { subreddit: "IndieGaming", author: "neotolis_dev" },
     },
-    {
-      kind: "twitter_post",
-      sourceId: srcTwitter,
-      authorIsMe: true,
-      title: "Pixel art breakdown: how we paint our dungeons",
-      url: "https://twitter.com/neotolisgames/status/1812345678",
-      occurred: daysAgo(8),
-      games: [gameNeotolis],
-      notes: "Тред из 6 твитов. 1.2k лайков, 240 ретвитов.",
-    },
-    {
-      kind: "twitter_post",
-      sourceId: srcTwitter,
-      authorIsMe: true,
-      title: "Coming Soon на Steam — Neotolis: Last Light",
-      url: "https://twitter.com/neotolisgames/status/1820000000",
-      occurred: daysAgo(40),
-      games: [gameNeotolis],
-      notes: null,
-    },
-    {
-      kind: "telegram_post",
-      sourceId: srcTelegram,
-      authorIsMe: true,
-      title: "Devblog #14 — что мы делаем с боссами",
-      url: "https://t.me/neotolis_devblog/142",
-      occurred: daysAgo(5),
-      games: [gameNeotolis],
-      notes: "На канале сейчас 1.4k подписчиков. Reach ~2200.",
-    },
-    {
-      kind: "discord_drop",
-      sourceId: srcDiscord,
-      authorIsMe: true,
-      title: "Drop #07 — playable build for testers",
-      occurred: daysAgo(10),
-      games: [gameDungeon],
-      notes: "Раздали 200 ключей в Discord, обратная связь в #playtest-feedback.",
-    },
+    // Twitter / Telegram / Discord event seeds removed — those event
+    // kinds are not in FUNCTIONAL_KINDS, no source rows exist to attach
+    // them to, and the /sources page doesn't show their group.
     {
       kind: "conference",
       sourceId: null,
@@ -447,6 +406,7 @@ async function main(): Promise<void> {
       url: e.url ?? null,
       notes: e.notes ?? null,
       externalId: e.externalId ?? null,
+      metadata: (e as { metadata?: Record<string, unknown> }).metadata ?? {},
     });
     for (const gameId of e.games) {
       await db.insert(eventGames).values({ eventId: id, gameId, userId });
@@ -484,7 +444,7 @@ async function main(): Promise<void> {
     },
     { action: "event.created", days: 12, meta: { kind: "reddit_post" } },
     { action: "event.dismissed_from_inbox", days: 8, meta: {} },
-    { action: "event.edited", days: 5, meta: { kind: "telegram_post" } },
+    { action: "event.edited", days: 5, meta: { kind: "press" } },
     { action: "session.signin", days: 0, meta: { ip: "127.0.0.1" } },
   ];
   for (const a of auditEntries) {

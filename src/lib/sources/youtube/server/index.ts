@@ -600,6 +600,14 @@ function registerRoutes(app: Hono<AdapterAppContext>): void {
  * charged to user pool via pollStatsByVideoId), writes a
  * youtube_video_snapshots row.
  *
+ * Cache-row prerequisite: writeSnapshot's UPDATE youtube_videos
+ * needs a row to UPDATE. That row is UPSERTed by handleVideoSingle
+ * in the enrichFromUrl preview path BEFORE this function ever runs
+ * — without it, the UPDATE is a no-op and last_polled_at /
+ * channel_id / published_at never land. Paste flow always passes
+ * through enrichFromUrl first (the form's Fetch button hits the
+ * preview endpoint).
+ *
  * Returns null on rate-limited / auth-error / not-found — caller
  * (createEventFromPaste) treats as «stats unavailable now, will be
  * picked up by next active/cold cron tick».

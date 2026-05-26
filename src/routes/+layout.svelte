@@ -75,8 +75,13 @@
   }
 
   async function handleSignOutAllDevices(): Promise<void> {
-    await fetch("/api/me/sessions/all", { method: "POST" });
-    await goto("/", { invalidateAll: true });
+    try {
+      const res = await fetch("/api/me/sessions/all", { method: "POST" });
+      if (!res.ok) return;
+      await goto("/", { invalidateAll: true });
+    } catch {
+      // Network error — stay on the current page so the user can retry.
+    }
   }
 
   // The sticky chrome is a SINGLE wrapper element, not two stacked
@@ -130,17 +135,22 @@
 -->
 <div class="layout-root">
   {#if data.user}
-    <!-- Single sticky chrome wrapper. AppHeader and Nav are NON-sticky
-         in normal flow inside this wrapper; the wrapper alone is
-         `position: sticky; top: 0`. -->
+    <!-- Single sticky chrome wrapper (LB-1 preserved). AppHeader hosts
+         Nav inside its grid layout (Phase 3.4 — RESEARCH §"Chrome Layout
+         — Nav into Topbar"). At ≥768px Nav sits centered between brand
+         and userchip; at <768px Nav drops to a second row inside the
+         topbar's grid (preserves Phase 3.3 mobile architecture). The
+         outer `.sticky-chrome` element is the ONLY sticky boundary;
+         AppHeader + Nav move as one DOM unit. -->
     <div class="sticky-chrome">
       <AppHeader
         user={{ name: data.user.name, email: data.user.email, image: data.user.image }}
         theme={data.theme}
         onSignOut={handleSignOut}
         onSignOutAllDevices={handleSignOutAllDevices}
-      />
-      <Nav active={navActive} />
+      >
+        <Nav active={navActive} />
+      </AppHeader>
     </div>
     {#if data.user.deletedAt}
       <!-- If a soft-deleted user is signed back in (e.g. via Google
@@ -167,27 +177,31 @@
     min-height: 100vh;
   }
   /* The sticky chrome wrapper. SINGLE sticky element for the AppHeader
-     + Nav pair. Background fill prevents scrolled content from showing
-     through; matches AppHeader's own `--color-surface` so the wrapper
-     is visually invisible. z-index 10 keeps the chrome above per-page
-     sticky elements (PageHeader z:5). */
+     + Nav pair. The v2 treatment is a translucent backdrop-blurred bar
+     that lets scrolled content tint through while staying legible —
+     `color-mix(in oklab, var(--bg) 80%, transparent)` over `--bg` gives
+     a soft scrim, `backdrop-filter` plus the `-webkit-` vendor prefix
+     blurs whatever scrolls underneath, and a single `--border-hairline`
+     bottom separator anchors the bar to the page below. z-index 10
+     keeps the chrome above per-page sticky elements (PageHeader z:5). */
   .sticky-chrome {
     position: sticky;
     top: 0;
     z-index: 10;
-    background: var(--color-surface);
+    background: var(--bg);
+    border-bottom: 1px solid var(--border-hairline);
   }
   main {
     flex: 1;
-    max-width: 1024px;
+    max-width: var(--max-w, 1280px);
     width: 100%;
     margin: 0 auto;
-    padding: var(--space-md);
+    padding: var(--s-4);
     min-width: 0;
   }
   @media (min-width: 768px) {
     main {
-      padding: var(--space-2xl);
+      padding: var(--s-6);
     }
   }
 </style>

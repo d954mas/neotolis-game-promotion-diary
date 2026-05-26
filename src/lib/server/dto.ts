@@ -111,7 +111,19 @@ export function toSessionDto(s: Session): SessionDto {
 
 /**
  * GameDto — the per-game DTO returned by /api/games and embedded in many
- * other endpoints. Mirrors the `games` table minus `userId`.
+ * other endpoints. Mirrors the `games` table minus `userId`, PLUS two
+ * fields (`releaseDate` + `releaseTba`) derived at LOADER time from the
+ * game's non-deleted Steam listings.
+ *
+ * `releaseDate` / `releaseTba` — the games table NO LONGER carries these
+ * columns (migration drizzle/0047 dropped them per denormalization-audit-2.md
+ * V-2 / AGENTS.md no-denorm rule). The owning row is `game_steam_listings.release_date`:
+ *   - releaseDate: earliest non-null release_date across non-deleted listings,
+ *     or null when the game has no listings or every listing has NULL.
+ *   - releaseTba: true when any non-deleted listing has release_date IS NULL
+ *     (Steam's "Coming soon / TBA" sentinel for unannounced dates).
+ * Loaders call `deriveReleaseInfoForGames` to compute the per-game map,
+ * then pass each game's `{releaseDate, releaseTba}` into `toGameDto`.
  *
  * `description` (nullable text) is projected — non-secret per-game prose
  * set by the user via the GameEditDialog modal on /games/[gameId].
@@ -130,13 +142,23 @@ export interface GameDto {
   deletedAt: Date | null;
 }
 
-export function toGameDto(r: GameRow): GameDto {
+/** Derived release info — computed via JOIN with game_steam_listings.
+ *  Loaders MUST pass this in to `toGameDto`; the games row no longer
+ *  carries the underlying columns. */
+export interface DerivedReleaseInfo {
+  releaseDate: string | null;
+  releaseTba: boolean;
+}
+
+const EMPTY_RELEASE: DerivedReleaseInfo = { releaseDate: null, releaseTba: false };
+
+export function toGameDto(r: GameRow, derived: DerivedReleaseInfo = EMPTY_RELEASE): GameDto {
   return {
     id: r.id,
     title: r.title,
     coverUrl: r.coverUrl,
-    releaseDate: r.releaseDate,
-    releaseTba: r.releaseTba,
+    releaseDate: derived.releaseDate,
+    releaseTba: derived.releaseTba,
     tags: r.tags,
     notes: r.notes,
     description: r.description ?? null,
@@ -223,6 +245,10 @@ export interface DataSourceDto {
   handleUrl: string;
   channelId: string | null;
   displayName: string | null;
+  // Free-form per-user remark. NULL = unset. UI renders it under the
+  // (read-only canonical) title row when truthy, or shows a "+ Add note"
+  // ghost button when null.
+  note: string | null;
   isOwnedByMe: boolean;
   autoImport: boolean;
   metadata: Record<string, unknown>;
@@ -271,6 +297,7 @@ export function toDataSourceDto(r: DataSourceRow): DataSourceDto {
     handleUrl: r.handleUrl,
     channelId: r.channelId,
     displayName: r.displayName,
+    note: r.note,
     isOwnedByMe: r.isOwnedByMe,
     autoImport: r.autoImport,
     metadata: (r.metadata ?? {}) as Record<string, unknown>,

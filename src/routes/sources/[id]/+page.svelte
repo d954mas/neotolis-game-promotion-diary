@@ -217,6 +217,18 @@
 </svelte:head>
 
 <section class="source-detail">
+  <!--
+    Breadcrumb mirrors /sources/new + /games/[gameId] — a one-step back
+    affordance plus the canonical "Sources" link so the user can pop out
+    of the detail context without needing the browser back button. Matches
+    the prototype's sources-page.jsx "Sources" header recognition.
+  -->
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    <a href="/sources">Sources</a>
+    <span aria-hidden="true" class="sep">/</span>
+    <span aria-current="page">{heading}</span>
+  </nav>
+
   <header class="hdr">
     <h1 class="hdr__title">{heading}</h1>
     <a class="hdr__handle" href={source.handleUrl} target="_blank" rel="noopener noreferrer">
@@ -446,127 +458,162 @@
   .source-detail {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
-    padding: var(--space-md);
+    gap: var(--s-4);
+    padding: var(--s-4);
     max-width: 720px;
+    min-width: 0;
+  }
+  /* Breadcrumb — matches /sources/new + /games/[gameId] breadcrumb pattern
+   * so the back-to-list affordance reads consistently across the app. */
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: var(--s-1);
+    font-size: var(--t-13);
+    color: var(--text-3);
+    margin-bottom: 0;
+  }
+  .breadcrumb a {
+    color: var(--text-3);
+    text-decoration: none;
+  }
+  .breadcrumb a:hover {
+    color: var(--text);
+  }
+  .breadcrumb .sep {
+    color: var(--text-4);
+  }
+  .breadcrumb [aria-current="page"] {
+    color: var(--text-2);
+    word-break: break-word;
   }
 
   .hdr {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
-    padding-bottom: var(--space-sm);
-    border-bottom: 1px solid var(--color-border);
+    gap: var(--s-1);
+    padding-bottom: var(--s-2);
+    border-bottom: 1px solid var(--border-hairline);
   }
   .hdr__title {
     margin: 0;
-    font-size: var(--font-size-h1);
-    line-height: 1.2;
+    font-family: var(--f-sans);
+    font-size: var(--t-22);
+    font-weight: var(--w-sb);
+    line-height: var(--lh-tight);
+    color: var(--text);
     word-break: break-word;
   }
   .hdr__handle {
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    color: var(--text-3);
+    font-size: var(--t-13);
+    font-family: var(--f-mono);
     word-break: break-all;
   }
   .hdr__meta {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     align-items: center;
-    margin-top: var(--space-xs);
+    margin-top: var(--s-1);
   }
   .kind-tag {
     display: inline-flex;
-    padding: 2px var(--space-sm);
-    background: var(--color-bg);
-    color: var(--color-text-muted);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    font-size: var(--font-size-label);
+    padding: 2px var(--s-2);
+    background: var(--surface-2);
+    color: var(--text-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    font-size: var(--t-12);
   }
 
   .card {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
-    padding: var(--space-md);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    gap: var(--s-2);
+    padding: var(--s-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
   }
   .card__header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: var(--space-sm);
+    gap: var(--s-2);
   }
   .card__title {
     margin: 0;
-    font-size: var(--font-size-h3, 1.05rem);
-    font-weight: var(--font-weight-semibold);
+    font-family: var(--f-sans);
+    font-size: var(--t-15);
+    font-weight: var(--w-sb);
+    color: var(--text);
   }
   .card__edit {
     background: none;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    padding: 2px var(--space-sm);
-    color: var(--color-text);
-    font-size: var(--font-size-label);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    padding: 2px var(--s-2);
+    color: var(--text);
+    font-size: var(--t-13);
     cursor: pointer;
+    transition: background var(--m-fast) var(--m-ease);
   }
   .card__edit:hover {
-    background: var(--color-bg);
+    background: var(--accent-soft);
   }
   .card__value {
     margin: 0;
-    font-size: var(--font-size-body);
+    font-size: var(--t-14);
+    color: var(--text);
   }
   .card__value--text {
     white-space: pre-wrap;
   }
   .card__hint {
     margin: 0;
-    color: var(--color-text-muted);
-    font-size: var(--font-size-label);
+    color: var(--text-3);
+    font-size: var(--t-13);
   }
   .card__actions {
     display: flex;
     justify-content: flex-end;
-    gap: var(--space-sm);
-  }
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
-  }
-  .field__label {
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
+    gap: var(--s-2);
   }
   .field__input {
-    padding: var(--space-sm);
+    padding: var(--s-2);
     font-family: inherit;
-    font-size: var(--font-size-body);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    background: var(--color-bg);
-    color: var(--color-text);
+    font-size: var(--t-14);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--surface-3);
+    color: var(--text);
   }
   .field__input--textarea {
     width: 100%;
     resize: vertical;
   }
   .btn {
-    padding: var(--space-xs) var(--space-md);
-    border-radius: var(--radius-sm);
+    padding: var(--s-1) var(--s-4);
+    min-height: var(--hit);
+    border-radius: var(--r-sm);
     border: 1px solid transparent;
-    font-size: var(--font-size-body);
+    font-size: var(--t-14);
+    font-family: var(--f-sans);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .btn--primary {
-    background: var(--color-accent);
-    color: var(--color-on-accent, white);
+    background: var(--accent);
+    color: var(--accent-text);
+    border-color: var(--accent);
+    font-weight: var(--w-sb);
+  }
+  .btn--primary:hover:not(:disabled) {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
   }
   .btn--primary:disabled {
     opacity: 0.6;
@@ -574,19 +621,23 @@
   }
   .btn--ghost {
     background: transparent;
-    color: var(--color-text);
-    border-color: var(--color-border);
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .btn--ghost:hover {
+    background: var(--accent-soft);
   }
   .err {
     margin: 0;
-    color: var(--color-destructive);
-    font-size: var(--font-size-label);
+    color: var(--danger);
+    font-size: var(--t-13);
   }
   .toggle {
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
-    font-size: var(--font-size-body);
+    gap: var(--s-2);
+    font-size: var(--t-14);
+    color: var(--text);
     cursor: pointer;
   }
   .toggle input {
@@ -595,22 +646,26 @@
   .presets {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-sm);
-    margin-top: var(--space-xs);
+    gap: var(--s-2);
+    margin-top: var(--s-1);
   }
   .preset-btn {
-    padding: var(--space-xs) var(--space-md);
-    background: var(--color-bg);
-    color: var(--color-text);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    font-size: var(--font-size-label);
+    padding: var(--s-1) var(--s-4);
+    min-height: var(--hit);
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    font-size: var(--t-13);
     cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .preset-btn:hover:not(:disabled) {
-    background: var(--color-accent);
-    color: var(--color-on-accent, white);
-    border-color: var(--color-accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent-strong);
   }
   .preset-btn--disabled,
   .preset-btn:disabled {
@@ -618,18 +673,25 @@
     cursor: not-allowed;
   }
   .custom-date {
-    margin-top: var(--space-xs);
-    font-size: var(--font-size-label);
+    margin-top: var(--s-1);
+    font-size: var(--t-13);
   }
   .custom-date summary {
     cursor: pointer;
-    color: var(--color-text-muted);
-    padding: var(--space-xs) 0;
+    color: var(--text-3);
+    padding: var(--s-1) 0;
   }
   .custom-date__row {
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--s-2);
     align-items: center;
-    margin-top: var(--space-xs);
+    margin-top: var(--s-1);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .btn,
+    .preset-btn,
+    .card__edit {
+      transition: none;
+    }
   }
 </style>

@@ -44,7 +44,10 @@ import { env } from "$lib/server/config/env.js";
 import { parseYoutubeUrl } from "../url.js";
 import { logger } from "$lib/server/logger.js";
 import { AdapterError } from "$lib/sources/errors.js";
-import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
+import {
+  markSourceNeedsReconnect,
+  clearNeedsReconnect,
+} from "$lib/server/services/data-sources.js";
 import {
   markChannelLastPolledAt,
   markChannelBackfillFrontier,
@@ -264,8 +267,22 @@ async function handleChannelContextBackfillImpl(job: {
     if (!parsed) {
       logger.warn(
         { jobId: job.id, handleUrl },
-        "channel-context-backfill: handleUrl does not parse to a youtube channel; skipping",
+        "channel-context-backfill: handleUrl does not parse to a youtube channel; skipping + marking needs_reconnect",
       );
+      // Operator-issue: the user's pasted handleUrl is malformed and no
+      // amount of retry will fix it. Surface 'Error: Setup' in
+      // /sources so the user knows to Reconnect → edit handle URL.
+      // Best-effort write; cron continues for other sources on failure.
+      if (sourceId) {
+        try {
+          await markSourceNeedsReconnect(userId, sourceId, "operator-issue");
+        } catch (err) {
+          logger.warn(
+            { jobId: job.id, sourceId, err: String((err as Error)?.message ?? err) },
+            "channel-context-backfill: markSourceNeedsReconnect failed; continuing",
+          );
+        }
+      }
       return;
     }
     if (parsed.kind === "channelId") {
@@ -317,8 +334,22 @@ async function handleChannelContextBackfillImpl(job: {
       if (!item) {
         logger.warn(
           { jobId: job.id, handle: parsed.value },
-          "channel-context-backfill: forHandle lookup returned no channel; skipping",
+          "channel-context-backfill: forHandle lookup returned no channel; skipping + marking needs_reconnect",
         );
+        // Upstream YouTube returned no channel for this handle — either
+        // the handle is wrong (operator-issue) or the channel was
+        // deleted (not-found). 'not-found' maps to a more accurate UI
+        // label ('Error: Not found') than 'Error: Setup'.
+        if (sourceId) {
+          try {
+            await markSourceNeedsReconnect(userId, sourceId, "not-found");
+          } catch (err) {
+            logger.warn(
+              { jobId: job.id, sourceId, err: String((err as Error)?.message ?? err) },
+              "channel-context-backfill: markSourceNeedsReconnect failed; continuing",
+            );
+          }
+        }
         return;
       }
       channelId = item.id;
@@ -524,9 +555,13 @@ async function handleChannelContextBackfillImpl(job: {
   }
 
   // 5a. UPSERT youtube_videos. One row per video, no time-series  -
-  //     title / description / channel only. The snippet half of
-  //     videos.list lands here so the /events/new "Get from YouTube"
-  //     button can read it for free on a re-paste of the same video.
+  //     title / description / channel_id only (no channel_title; see
+  //     docs/denormalization-policy.md V-1). The youtube_channels
+  //     UPSERT below is the canonical writer for the channel display
+  //     name; feed-enrichment + metadata.ts cache reads JOIN it back
+  //     in at read time. The snippet half of videos.list lands here
+  //     so the /events/new "Get from YouTube" button can read it for
+  //     free on a re-paste of the same video.
   for (const item of allItems) {
     const sn = item.snippet;
     if (!sn) continue;
@@ -538,7 +573,6 @@ async function handleChannelContextBackfillImpl(job: {
         title: sn.title,
         description: sn.description ?? null,
         channelId: sn.channelId ?? null,
-        channelTitle: sn.channelTitle ?? null,
         publishedAt,
         fetchedAt: now,
       })
@@ -548,7 +582,6 @@ async function handleChannelContextBackfillImpl(job: {
           title: sn.title,
           description: sn.description ?? null,
           channelId: sn.channelId ?? null,
-          channelTitle: sn.channelTitle ?? null,
           publishedAt,
           fetchedAt: now,
           updatedAt: now,
@@ -761,6 +794,21 @@ async function handleChannelContextBackfillImpl(job: {
       // clear token because we did NOT exhaust pagination, we just
       // stopped at the window boundary.
       await setChannelBackfillPageToken("youtube_channel", channelId, null);
+    }
+  }
+
+  // B-2: clear needsReconnect — handler completed end-to-end without
+  // throwing, so the source is healthy again. Idempotent (skips UPDATE
+  // when already clean). Only relevant when sourceId is present
+  // (createSource flow); ingest-paste backfill has no parent source row.
+  if (sourceId) {
+    try {
+      await clearNeedsReconnect(userId, sourceId);
+    } catch (err) {
+      logger.warn(
+        { jobId: job.id, sourceId, err: String((err as Error)?.message ?? err) },
+        "channel-context-backfill: clearNeedsReconnect failed; continuing",
+      );
     }
   }
 

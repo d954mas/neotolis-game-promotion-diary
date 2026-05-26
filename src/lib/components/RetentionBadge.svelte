@@ -39,17 +39,22 @@
 </span>
 
 <style>
+  /* v2 RetentionBadge — D-01 redraw via InboxBadge analogy. Neutral pill
+   * by default, --danger pill when retention window < 7 days. */
   .badge {
     display: inline-block;
-    font-size: var(--font-size-label);
-    color: var(--color-text-muted);
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: 999px;
-    padding: 2px var(--space-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
+    color: var(--text-3);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    padding: var(--s-0) var(--s-2);
+    line-height: 1.4;
   }
   .warning {
-    color: var(--color-destructive);
-    border-color: var(--color-destructive);
+    color: var(--danger);
+    border-color: var(--danger);
   }
 </style>

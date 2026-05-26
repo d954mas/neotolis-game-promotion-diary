@@ -30,7 +30,10 @@ import { buildPostMetadata } from "../post-metadata.js";
 import { dataSources } from "$lib/server/db/schema/data-sources.js";
 import { events } from "$lib/server/db/schema/events.js";
 import { AdapterError } from "$lib/sources/errors.js";
-import { markSourceNeedsReconnect } from "$lib/server/services/data-sources.js";
+import {
+  markSourceNeedsReconnect,
+  clearNeedsReconnect,
+} from "$lib/server/services/data-sources.js";
 import { logger } from "$lib/server/logger.js";
 import { classifySnapshotStatus } from "./post-single.js";
 import { getAuthorWalkState, commitAuthorWalkProgress } from "../walker-state.js";
@@ -231,6 +234,25 @@ export async function handleAuthorPoll(args: {
   // Runs AFTER fan-out + walker commit; see sub-poll.ts for the same
   // reasoning.
   await resetNotFoundOnSuccess(db, "user", handle);
+
+  // B-2: clear needsReconnect on every subscriber of this handle.
+  // Counterpart to flagNotFoundOnSubscribers — if we got here without
+  // throwing, the upstream is healthy again. Idempotent (clearNeedsReconnect
+  // filters WHERE needsReconnect=true, so no-op on already-clean rows).
+  for (const sub_row of subscribers) {
+    try {
+      await clearNeedsReconnect(sub_row.userId, sub_row.id);
+    } catch (err) {
+      logger.warn(
+        {
+          userId: sub_row.userId,
+          sourceId: sub_row.id,
+          err: String((err as Error)?.message ?? err),
+        },
+        "reddit author_poll: clearNeedsReconnect failed",
+      );
+    }
+  }
 
   logger.info(
     {

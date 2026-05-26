@@ -74,53 +74,58 @@
 {/if}
 
 <style>
+  /* v2 QuotaAuditList — D-01 redraw via AuditRow analogy. */
   .quota-audit-list {
     list-style: none;
     padding: 0;
     margin: 0;
     display: flex;
     flex-direction: column;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    overflow: hidden;
   }
   .quota-audit-row {
     display: grid;
     grid-template-columns: auto auto 1fr;
-    gap: var(--space-md);
-    padding: var(--space-sm) var(--space-md);
-    border-bottom: 1px solid var(--color-border);
+    gap: var(--s-3);
+    padding: var(--s-2) var(--s-4);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border-hairline);
     align-items: baseline;
-    font-size: var(--font-size-label);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
     min-width: 0;
   }
   .quota-audit-row:last-child {
     border-bottom: none;
   }
   .quota-audit-row time {
-    font-family: var(--font-family-mono);
-    color: var(--color-text-muted);
+    font-family: var(--f-mono);
+    font-size: var(--t-12);
+    color: var(--text-3);
     white-space: nowrap;
   }
   .quota-audit-row .action {
-    font-family: var(--font-family-mono);
-    color: var(--color-text);
+    font-family: var(--f-mono);
+    font-size: var(--t-12);
+    color: var(--text);
   }
   .quota-audit-row .meta {
-    color: var(--color-text-muted);
+    color: var(--text-3);
+    font-size: var(--t-12);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  /* UI-SPEC §"Layout & Responsive Contract → QuotaAuditList vertical stack":
-   * each entry already stacks vertically below 600px (timestamp · action ·
-   * metadata become three rows in a single column). */
+  /* Each entry stacks vertically below 600px. */
   @media (max-width: 600px) {
     .quota-audit-row {
       grid-template-columns: 1fr;
-      gap: var(--space-xs);
-      padding: var(--space-md);
+      gap: var(--s-1);
+      padding: var(--s-3);
     }
     .quota-audit-row .meta {
       white-space: normal;

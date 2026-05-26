@@ -310,7 +310,6 @@ describe("FeedQuickNav at top of /feed", () => {
  *
  * Pure i18n value rename. The Paraglide KEYS stay (URL contract / state
  * shape preserved); only the VALUES change:
- *   - feed_card_mark_standalone_button: → "Mark as not game-related"
  *   - feed_filter_show_standalone:      → "Not game-related"
  *   - feed_quick_nav_standalone:        → "Not game-related"
  *   - audit_action_event_marked_standalone:   STAYS (technical audit log)
@@ -424,20 +423,17 @@ describe("FeedCard reuse on /games/[id] at 360px", () => {
 });
 
 /**
- * /events/[id] Edit pencil + Delete placement + AttachToGamePicker compact + visibility.
+ * /events/[id] Edit pencil + Delete placement.
  *
  * The full 360px-viewport flow (visit /events/[id] → pencil at top-right
- * + NO Delete; visit /events/[id]/edit → Delete at form footer; visit
- * /feed → inbox card has compact picker, attached card has NO picker)
+ * + NO Delete; visit /events/[id]/edit → Delete at form footer)
  * requires the cookie-injection auth harness.
  *
- * The component-level regression guard lives in
- * tests/integration/audit-render.test.ts — 7 SSR-render-time tests over
- * the picker visibility gate, compact label swap, /events/[id] edit-pencil
- * presence + Delete absence, and /events/[id]/edit standalone toggle +
- * Delete-at-footer wiring.
+ * AttachToGamePicker visibility tests removed — Plan 03.4-08 deleted the
+ * inline inbox picker per prototype, and the picker component itself
+ * was dead-code-removed in the follow-up.
  */
-describe("/events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker compact + visibility", () => {
+describe("/events/[id] Edit pencil top-right + Delete moved", () => {
   it.skip(
     "/events/[id] at 360px renders <a class='edit-pencil'> with computed position: absolute, top: small, right: small (manual UAT — auth harness deferred)",
   );
@@ -448,16 +444,7 @@ describe("/events/[id] Edit pencil top-right + Delete moved + AttachToGamePicker
     "/events/[id]/edit form footer renders the Delete button (manual UAT — auth harness deferred)",
   );
   it.skip(
-    "/events/[id]/edit standalone checkbox toggles metadata.triage.standalone via PATCH /api/events/:id/mark-standalone (manual UAT — auth harness deferred)",
-  );
-  it.skip(
-    "FeedCard with gameIds.length > 0 does NOT render AttachToGamePicker on /feed (manual UAT — auth harness deferred)",
-  );
-  it.skip(
-    "FeedCard with metadata.triage.standalone=true does NOT render AttachToGamePicker on /feed (manual UAT — auth harness deferred)",
-  );
-  it.skip(
-    "FeedCard inbox row renders AttachToGamePicker with class='compact' and label='Attach' (manual UAT — auth harness deferred)",
+    "/events/[id]/edit standalone checkbox toggles metadata.triage.offTopic via PATCH /api/events/bulk (single-id payload + offTopicState) (manual UAT — auth harness deferred)",
   );
 });
 

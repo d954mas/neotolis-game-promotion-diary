@@ -43,6 +43,7 @@ import { auditLog } from "../db/schema/audit-log.js";
 import { writeAudit } from "../audit.js";
 import { env } from "../config/env.js";
 import { NotFoundError, AppError } from "./errors.js";
+import { deriveReleaseInfoForGames } from "./games.js";
 import {
   toUserDto,
   toGameDto,
@@ -189,13 +190,26 @@ export async function exportAccountJson(
   const keysRows = await db.select().from(apiKeysSteam).where(eq(apiKeysSteam.userId, userId));
   const auditRows = await db.select().from(auditLog).where(eq(auditLog.userId, userId));
 
+  // releaseDate / releaseTba on GameDto are now derived via JOIN with
+  // game_steam_listings (denormalization-audit-2.md V-2). The export
+  // includes derived values for consistency with the wire DTO — a
+  // user re-importing the JSON elsewhere sees the same fields the UI
+  // sees, even though the underlying table no longer carries the
+  // columns.
+  const releaseByGameId = await deriveReleaseInfoForGames(
+    userId,
+    gamesRows.map((g) => g.id),
+  );
+
   // DTO discipline (AGENTS.md §5): every entity through its projection
   // function — runtime barrier that strips ciphertext / PII columns.
   // TypeScript erases at runtime; the projection IS the strip.
   const envelope: AccountExportEnvelope = {
     exported_at: new Date().toISOString(),
     user: toUserDto(userRow),
-    games: gamesRows.map(toGameDto),
+    games: gamesRows.map((g) =>
+      toGameDto(g, releaseByGameId.get(g.id) ?? { releaseDate: null, releaseTba: false }),
+    ),
     game_steam_listings: listingsRows.map(toGameSteamListingDto),
     data_sources: sourcesRows.map(toDataSourceDto),
     events: await mapEventsToDtos(userId, eventsRows),

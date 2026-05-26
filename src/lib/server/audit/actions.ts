@@ -82,6 +82,33 @@ export const AUDIT_ACTIONS = [
   "reddit.deletion_propagated",
   "reddit.cap_exhausted",
   "reddit.adapter_degraded",
+  // Phase 3.4 design-v2-ux — bulk + trash + auto-purge audit verbs.
+  //
+  //   - events.bulk_edit       — PATCH /api/events/bulk applied tri-state
+  //     {gameStates, offTopicState} diff to N events. Metadata:
+  //     { affected_ids, game_diffs, off_topic_state, requested_count,
+  //       affected_count }. ONE row per bulk operation (D-14).
+  //   - events.bulk_delete     — DELETE /api/events/bulk soft-deleted N
+  //     owned events. Metadata: { affected_ids, requested_count,
+  //     affected_count }.
+  //   - events.delete_forever  — DELETE /api/events/bulk?force=true OR
+  //     DELETE /api/events/:id?force=true hard-deleted already-soft-deleted
+  //     rows. Metadata: same shape as events.bulk_delete.
+  //   - events.purge_stale     — purgeStaleDeletedEvents() cron step
+  //     hard-deleted events soft-deleted > 30d ago. ONE row per affected
+  //     user_id (per-tenant cursor invariant). Metadata:
+  //     { affected_count, purged_at, affected_ids? (omitted if > 100) }.
+  "events.bulk_edit",
+  "events.bulk_delete",
+  "events.delete_forever",
+  "events.purge_stale",
+  // Phase 3.4 — ?view=trash hard-delete from the sources + games pages.
+  //   - source.delete_forever — DELETE /api/sources/:id?force=true
+  //     permanently removes a soft-deleted data_source row.
+  //   - game.delete_forever   — DELETE /api/games/:id?force=true
+  //     permanently removes a soft-deleted game + cascaded children.
+  "source.delete_forever",
+  "game.delete_forever",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

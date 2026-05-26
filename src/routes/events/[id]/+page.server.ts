@@ -1,15 +1,18 @@
 import type { PageServerLoad } from "./$types";
 import { error, redirect } from "@sveltejs/kit";
 import { getEventById } from "$lib/server/services/events.js";
-import { listGames } from "$lib/server/services/games.js";
+import { listGames, deriveReleaseInfoForGames } from "$lib/server/services/games.js";
+import { listSources } from "$lib/server/services/data-sources.js";
 import {
   toEventDto,
   toGameDto,
+  toDataSourceDto,
   loadGameIdsForEvent,
   loadVideoDataForEvents,
 } from "$lib/server/dto.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
 import { allAdapters } from "$lib/sources/registry.js";
+import { enrichDataSourceDtosWithYoutubeChannelTitles } from "$lib/server/services/sources-page-read.js";
 import {
   loadRedditEventDetailPreview,
   type RedditEventDetailPreview,
@@ -37,7 +40,17 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   const includeSoftDeleted = url.searchParams.get("deleted") === "1";
   try {
     const row = await getEventById(locals.user.id, params.id, { includeSoftDeleted });
-    const games = await listGames(locals.user.id);
+    // Sources joined so the dual-render <EventDetailContent> resolves
+    // sourceLabel for the event's byline (Plan 03.4-10 Task 3). The
+    // route was previously single-event-only; Wave 3 extends it so
+    // /events/[id] and /feed?event= render the same content with the
+    // same data shape. includeDeleted preserves the source chip for
+    // events whose parent source the user has removed (same rationale
+    // as /feed/+page.server.ts).
+    const [games, allSources] = await Promise.all([
+      listGames(locals.user.id),
+      listSources(locals.user.id, { includeDeleted: true }),
+    ]);
     // Load attached gameIds via the M:N junction. The page surfaces the
     // FIRST attached game as the "primary" (legacy single-game UI
     // affordance preserved).
@@ -70,10 +83,32 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
       await adapter.enrichFeedDtos(locals.user.id, [dto]);
     }
 
+    // Enrich source DTOs with YouTube channel_title from cache — same
+    // shape /feed loader returns, so <EventDetailContent>'s sourceLabel
+    // derivation works identically on both surfaces (dual-render parity).
+    const sourceDtos = allSources.map(toDataSourceDto);
+    await enrichDataSourceDtosWithYoutubeChannelTitles(sourceDtos);
+
+    // GameDto.releaseDate / .releaseTba derived via JOIN with
+    // game_steam_listings — the games row no longer carries the
+    // columns (denormalization-audit-2.md V-2).
+    const releaseByGameId = await deriveReleaseInfoForGames(
+      locals.user.id,
+      games.map((g) => g.id),
+    );
+
     return {
       event: dto,
-      games: games.map(toGameDto),
-      game: primaryGame ? toGameDto(primaryGame) : null,
+      games: games.map((g) =>
+        toGameDto(g, releaseByGameId.get(g.id) ?? { releaseDate: null, releaseTba: false }),
+      ),
+      game: primaryGame
+        ? toGameDto(
+            primaryGame,
+            releaseByGameId.get(primaryGame.id) ?? { releaseDate: null, releaseTba: false },
+          )
+        : null,
+      sources: sourceDtos,
       redditPost,
     };
   } catch (err) {
