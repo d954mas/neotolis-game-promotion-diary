@@ -2177,24 +2177,6 @@ export async function dismissFromInbox(
 // item 4 — same pattern as createEvent / attachEventToGames).
 
 /**
- * checkGameOwnership — boolean variant of assertGameOwnedByUser.
- *
- * Returns true iff a live (not soft-deleted) game with that id exists AND
- * is owned by userId. Does NOT throw on miss / cross-tenant — bulkEdit
- * uses this to silently filter cross-tenant gameStates keys per D-13
- * instead of leaking 404s. Single-id paths continue to use the throwing
- * assertGameOwnedByUser.
- */
-export async function checkGameOwnership(userId: string, gameId: string): Promise<boolean> {
-  const rows = await db
-    .select({ id: games.id })
-    .from(games)
-    .where(and(eq(games.userId, userId), eq(games.id, gameId), isNull(games.deletedAt)))
-    .limit(1);
-  return rows.length === 1;
-}
-
-/**
  * bulkEdit — PATCH /api/events/bulk handler tx body (D-12 + D-14).
  *
  * Tri-state semantics per game:
@@ -2206,8 +2188,8 @@ export async function checkGameOwnership(userId: string, gameId: string): Promis
  * events.metadata.triage.offTopic via jsonb_set when not "mixed".
  *
  * Cross-tenant ids silently dropped via the WHERE clause (D-13). Cross-tenant
- * gameStates keys silently dropped via checkGameOwnership BEFORE the tx so
- * the per-event diff loop only sees owned game ids.
+ * gameStates keys silently dropped via a batch ownership SELECT BEFORE the tx
+ * so the per-event diff loop only sees owned game ids.
  *
  * ONE audit row per call (D-14) carrying { affected_ids, game_diffs,
  * off_topic_state, requested_count, affected_count }. Empty-diff calls

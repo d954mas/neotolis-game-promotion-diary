@@ -258,8 +258,8 @@ describe("PATCH /api/events/bulk (Wave 2 Plan 06)", () => {
     const fxB = await seedUserWithGames("bulk-edit-xtgameB");
     const evA = await seedEvent(fxA.userId);
 
-    // userA sends a gameStates key for userB's game. checkGameOwnership
-    // returns false → silently dropped before the tx. The offTopicState
+    // userA sends a gameStates key for userB's game. Batch ownership
+    // SELECT filters it out → silently dropped before the tx. The offTopicState
     // still applies (causing affected_count=1).
     const res = await app.request("/api/events/bulk", {
       method: "PATCH",
