@@ -72,6 +72,11 @@
   import { passes } from "$lib/feed/filter-math.js";
   import { parseEventDate } from "$lib/feed/date-range.js";
   import {
+    createFeedToast,
+    createFeedNavOverlay,
+    createGamesPickerState,
+  } from "$lib/feed/feed-state.js";
+  import {
     feedUiStore,
     toggleSelect,
     clearSelection,
@@ -130,10 +135,8 @@
   // 4. Local modal state (NOT in URL — modals are session-only).
   let openEventId = $derived(urlState.openEventId); // URL-bound for deep linking
   let addEventModalOpen = $state(false);
-  let gamesPickerOpen = $state(false);
-  let gamesPickerMode = $state<"single" | "bulk">("bulk");
-  let gamesPickerTargetIds = $state<string[]>([]);
-  let toast = $state<{ kind: "success" | "info" | "danger"; text: string } | null>(null);
+  const gamesPicker = createGamesPickerState();
+  const toast = createFeedToast();
 
   // 5. RecoveryDialog state (legacy on live view; trash view doesn't use it).
   let recoveryOpen = $state(false);
@@ -148,24 +151,12 @@
   // 6. Trash view conditional.
   let trashView = $derived(data.view === "trash");
 
-  // Navigating-overlay safeguard: navigating.to comes from $app/state and
-  // normally clears when the navigation completes or errors. If the dev
-  // server's vite-client websocket dies (long-idle tab returning to
-  // foreground) the navigation can hang indefinitely — leaving the
-  // .feed[data-navigating="1"] dim + progress bar stuck forever. We
-  // gate the visual on BOTH `navigating.to` AND a self-clearing timeout
-  // so the overlay can't outlive a real network round-trip by more than
-  // a generous bound (10s — well past p99 loader latency).
-  let navOverlayActive = $state(false);
+  // Navigating-overlay safeguard: gates the visual on BOTH `navigating.to`
+  // AND a self-clearing 10s timeout so the overlay can't outlive a real
+  // network round-trip. See createFeedNavOverlay for full rationale.
+  const navOverlay = createFeedNavOverlay();
   $effect(() => {
-    if (navigating.to) {
-      navOverlayActive = true;
-      const t = setTimeout(() => {
-        navOverlayActive = false;
-      }, 10_000);
-      return () => clearTimeout(t);
-    }
-    navOverlayActive = false;
+    navOverlay.track(navigating.to);
   });
 
   // 7. URL mutation helper. invalidateAll: false because the URL change
@@ -260,12 +251,12 @@
     gameStates: Record<string, "on" | "off" | "mixed">;
     offTopicState: "on" | "off" | "mixed";
   }): Promise<void> {
-    // Use gamesPickerTargetIds — these are set correctly for both the
+    // Use gamesPicker.targetIds — these are set correctly for both the
     // bulk (BulkActionBar → selectedIds copy) and single (FeedCard ⋮
     // menu → [event.id]) paths. selectedIds is the store value which
     // is empty in single-event mode (user didn't enter mass-select),
     // so reading from it would early-return here.
-    const ids = [...gamesPickerTargetIds];
+    const ids = [...gamesPicker.targetIds];
     if (ids.length === 0) return;
     const res = await fetch("/api/events/bulk", {
       method: "PATCH",
@@ -274,15 +265,12 @@
     });
     if (res.ok) {
       const body = (await res.json()) as { affected_count: number };
-      toast = {
-        kind: "success",
-        text: m.toast_bulk_edit_success({ count: String(body.affected_count) }),
-      };
-      if (gamesPickerMode === "bulk") clearSelection();
-      gamesPickerOpen = false;
+      toast.show("success", m.toast_bulk_edit_success({ count: String(body.affected_count) }));
+      if (gamesPicker.mode === "bulk") clearSelection();
+      gamesPicker.close();
       await invalidateAll();
     } else {
-      toast = { kind: "danger", text: m.error_server_generic() };
+      toast.show("danger", m.error_server_generic());
     }
   }
 
@@ -296,14 +284,11 @@
     });
     if (res.ok) {
       const body = (await res.json()) as { affected_count: number };
-      toast = {
-        kind: "success",
-        text: m.toast_bulk_delete_success({ count: String(body.affected_count) }),
-      };
+      toast.show("success", m.toast_bulk_delete_success({ count: String(body.affected_count) }));
       clearSelection();
       await invalidateAll();
     } else {
-      toast = { kind: "danger", text: m.error_server_generic() };
+      toast.show("danger", m.error_server_generic());
     }
   }
 
@@ -317,14 +302,14 @@
     });
     if (res.ok) {
       const body = (await res.json()) as { affected_count: number };
-      toast = {
-        kind: "success",
-        text: m.toast_bulk_delete_forever_success({ count: String(body.affected_count) }),
-      };
+      toast.show(
+        "success",
+        m.toast_bulk_delete_forever_success({ count: String(body.affected_count) }),
+      );
       clearSelection();
       await invalidateAll();
     } else {
-      toast = { kind: "danger", text: m.error_server_generic() };
+      toast.show("danger", m.error_server_generic());
     }
   }
 
@@ -336,10 +321,7 @@
     for (const id of ids) {
       await fetch(`/api/events/${id}/restore`, { method: "PATCH" });
     }
-    toast = {
-      kind: "success",
-      text: m.toast_bulk_restore_success({ count: String(ids.length) }),
-    };
+    toast.show("success", m.toast_bulk_restore_success({ count: String(ids.length) }));
     clearSelection();
     await invalidateAll();
   }
@@ -348,14 +330,10 @@
   // FeedCard ⋯ menu. The mode + targetIds drive the picker's initial-state
   // computation below.
   function openGamesPickerForBulk(): void {
-    gamesPickerMode = "bulk";
-    gamesPickerTargetIds = [...selectedIds];
-    gamesPickerOpen = true;
+    gamesPicker.openForBulk(selectedIds);
   }
   function openGamesPickerForCard(id: string): void {
-    gamesPickerMode = "single";
-    gamesPickerTargetIds = [id];
-    gamesPickerOpen = true;
+    gamesPicker.openForCard(id);
   }
 
   // 13. GamesPicker initial state derivation (RESEARCH Question 8). For
@@ -369,7 +347,7 @@
       gameStates: Record<string, "on" | "off" | "mixed">;
       offTopicState: "on" | "off" | "mixed";
     } => {
-      const targets = data.rows.filter((e) => gamesPickerTargetIds.includes(e.id));
+      const targets = data.rows.filter((e) => gamesPicker.targetIds.includes(e.id));
       if (targets.length === 0) {
         return { gameStates: {}, offTopicState: "off" };
       }
@@ -405,11 +383,11 @@
       }),
     });
     if (res.ok) {
-      toast = { kind: "success", text: m.toast_event_added() };
+      toast.show("success", m.toast_event_added());
       addEventModalOpen = false;
       await invalidateAll();
     } else {
-      toast = { kind: "danger", text: m.error_server_generic() };
+      toast.show("danger", m.error_server_generic());
     }
   }
 
@@ -467,7 +445,7 @@
     gameStates: Record<string, "on" | "off" | "mixed">;
     offTopicState: "on" | "off" | "mixed";
   }): Promise<void> {
-    if (gamesPickerMode === "single") {
+    if (gamesPicker.mode === "single") {
       // Single-event apply path. The bulk endpoint accepts a single-id
       // array; we route through it so the diff math (on/off/mixed) is
       // consistent across both paths and the audit log carries the same
@@ -476,7 +454,7 @@
     } else {
       await doBulkPatch(payload);
     }
-    gamesPickerOpen = false;
+    gamesPicker.close();
   }
 
   // KIND axis order + labels. Hard-coded to mirror prototype
@@ -692,7 +670,7 @@
   );
 </script>
 
-<section class="feed" data-navigating={navOverlayActive ? "1" : "0"}>
+<section class="feed" data-navigating={navOverlay.active ? "1" : "0"}>
   <PageHead
     title={trashView ? m.feed_page_head_title_trash() : m.feed_page_head_title_feed()}
     view={trashView ? "trash" : "feed"}
@@ -981,14 +959,14 @@
   />
 
   <GamesPicker
-    open={gamesPickerOpen}
+    open={gamesPicker.open}
     games={data.games.map((g) => ({ id: g.id, title: g.title }))}
     initialGameStates={gamesPickerInitial.gameStates}
     initialOffTopicState={gamesPickerInitial.offTopicState}
-    mode={gamesPickerMode}
-    selectedCount={gamesPickerTargetIds.length}
+    mode={gamesPicker.mode}
+    selectedCount={gamesPicker.targetIds.length}
     onApply={onGamesPickerApply}
-    onClose={() => (gamesPickerOpen = false)}
+    onClose={gamesPicker.close}
   />
 
   <BulkActionBar
@@ -1001,8 +979,8 @@
     onClearSelection={clearSelection}
   />
 
-  {#if toast}
-    <Toast kind={toast.kind} text={toast.text} onclose={() => (toast = null)} />
+  {#if toast.current}
+    <Toast kind={toast.current.kind} text={toast.current.text} onclose={toast.dismiss} />
   {/if}
 </section>
 

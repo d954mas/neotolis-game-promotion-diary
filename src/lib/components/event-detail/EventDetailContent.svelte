@@ -547,12 +547,7 @@
       <EventDetailStats {stats} />
     {/if}
 
-    <EventDetailGames
-      {event}
-      {games}
-      {view}
-      {onOpenGamesPickerForCard}
-    />
+    <EventDetailGames {event} {games} {view} {onOpenGamesPickerForCard} />
   </div>
 
   <!-- Footer dock removed — every action moved into the header strip:
