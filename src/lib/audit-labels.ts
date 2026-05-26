@@ -77,6 +77,9 @@ const LABELS: Record<AuditAction, () => string> = {
   "events.bulk_delete": () => m.audit_action_events_bulk_delete(),
   "events.delete_forever": () => m.audit_action_events_delete_forever(),
   "events.purge_stale": () => m.audit_action_events_purge_stale(),
+  // Phase 3.4 — ?view=trash hard-delete for sources + games.
+  "source.delete_forever": () => m.audit_action_source_delete_forever(),
+  "game.delete_forever": () => m.audit_action_game_delete_forever(),
 };
 
 /**

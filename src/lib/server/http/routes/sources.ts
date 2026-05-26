@@ -12,6 +12,7 @@
 //   GET    /api/sources/:id            - getSourceById
 //   PATCH  /api/sources/:id            - updateSource
 //   DELETE /api/sources/:id            - softDeleteSource (returns soft-deleted row)
+//   DELETE /api/sources/:id?force=true - hardDeleteSource (permanent remove of already-soft-deleted)
 //   POST   /api/sources/:id/restore    - restoreSource (422 retention_expired beyond RETENTION_DAYS)
 //
 // Every handler runs after the `/api/*` tenantScope middleware (anonymous -> 401)
@@ -27,6 +28,7 @@ import {
   getSourceById,
   updateSource,
   softDeleteSource,
+  hardDeleteSource,
   restoreSource,
   enforceRefreshContentCooldown,
   enforceRefreshContentIntentRateLimit,
@@ -254,7 +256,12 @@ sourcesRoutes.patch(
 
 sourcesRoutes.delete("/sources/:id", async (c) => {
   const ctx = getAuditContext(c);
+  const force = c.req.query("force") === "true";
   try {
+    if (force) {
+      await hardDeleteSource(ctx.userId, c.req.param("id"), ctx.ipAddress, ctx.userAgent ?? undefined);
+      return c.body(null, 204);
+    }
     const row = await softDeleteSource(
       ctx.userId,
       c.req.param("id"),

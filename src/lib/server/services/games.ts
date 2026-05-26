@@ -363,6 +363,49 @@ export async function restoreGame(
 }
 
 /**
+ * Permanently delete a soft-deleted game and its cascaded children
+ * (game_steam_listings). Only operates on rows with `deletedAt IS NOT NULL`.
+ *
+ * Events are M:N to games via `event_games` — the FK CASCADE on
+ * `event_games(game_id)` automatically removes the junction rows when the
+ * parent game is hard-deleted, leaving the events themselves intact.
+ *
+ * Audit: writes `game.delete_forever` with `metadata: { gameId }`.
+ */
+export async function hardDeleteGame(
+  userId: string,
+  gameId: string,
+  ipAddress: string,
+): Promise<void> {
+  const [existing] = await db
+    .select({ deletedAt: games.deletedAt })
+    .from(games)
+    .where(and(eq(games.userId, userId), eq(games.id, gameId)))
+    .limit(1);
+  if (!existing) throw new NotFoundError();
+  if (existing.deletedAt === null) throw new NotFoundError();
+
+  await db.transaction(async (tx) => {
+    // Delete child listings first (FK constraint order).
+    await tx
+      .delete(gameSteamListings)
+      .where(
+        and(eq(gameSteamListings.userId, userId), eq(gameSteamListings.gameId, gameId)),
+      );
+    await tx
+      .delete(games)
+      .where(and(eq(games.userId, userId), eq(games.id, gameId)));
+  });
+
+  await writeAudit({
+    userId,
+    action: "game.delete_forever",
+    ipAddress,
+    metadata: { gameId },
+  });
+}
+
+/**
  * Per-game derived release-date info — computed from the game's
  * non-deleted Steam listings.
  *

@@ -683,6 +683,8 @@
   "audit_action_events_bulk_delete": "Bulk delete",
   "audit_action_events_delete_forever": "Permanent delete",
   "audit_action_events_purge_stale": "Stale events purged",
+  "audit_action_source_delete_forever": "Source permanently deleted",
+  "audit_action_game_delete_forever": "Game permanently deleted",
 
   "axis_row_show_label": "Show",
   "axis_row_game_label": "Game",
@@ -708,5 +710,25 @@
   "feed_axis_kind_post": "Post",
   "feed_axis_kind_conference": "Conference",
   "feed_axis_kind_talk": "Talk",
-  "feed_axis_kind_other": "Other"
+  "feed_axis_kind_other": "Other",
+
+  "sources_trash_banner_text": "You're viewing the trash. Items here are auto-removed after {days} days.",
+  "sources_trash_back": "Back to Sources",
+  "sources_trash_empty_heading": "Trash is empty.",
+  "sources_trash_empty_body": "Sources you remove will land here. They stay for {days} days before being permanently removed.",
+  "sources_page_title_trash": "Sources — Trash",
+  "sources_trash_delete_forever": "Delete forever",
+  "sources_trash_confirm_delete_forever": "Permanently delete \"{name}\"? This cannot be undone.",
+  "toast_source_restored": "Source restored.",
+  "toast_source_deleted_forever": "Source permanently deleted.",
+
+  "games_trash_banner_text": "You're viewing the trash. Items here are auto-removed after {days} days.",
+  "games_trash_back": "Back to Games",
+  "games_trash_empty_heading": "Trash is empty.",
+  "games_trash_empty_body": "Games you delete will land here. They stay for {days} days before being permanently removed.",
+  "games_page_title_trash": "Games — Trash",
+  "games_trash_delete_forever": "Delete forever",
+  "games_trash_confirm_delete_forever": "Permanently delete \"{title}\"? This cannot be undone.",
+  "toast_game_restored": "Game restored.",
+  "toast_game_deleted_forever": "Game permanently deleted."
 }

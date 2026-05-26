@@ -931,6 +931,42 @@ export async function restoreSource(
 }
 
 /**
+ * Permanently delete a soft-deleted data_source row.
+ *
+ * Only operates on rows that already have `deletedAt IS NOT NULL` — the user
+ * must soft-delete first. Throws NotFoundError if the row is missing, cross-
+ * tenant, or not already soft-deleted (same 404 semantics as restoreSource).
+ *
+ * Audit: writes `source.delete_forever` with metadata { source_id, kind }.
+ */
+export async function hardDeleteSource(
+  userId: string,
+  sourceId: string,
+  ipAddress: string,
+  userAgent?: string,
+): Promise<void> {
+  const [existing] = await db
+    .select()
+    .from(dataSources)
+    .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)))
+    .limit(1);
+  if (!existing) throw new NotFoundError();
+  if (existing.deletedAt === null) throw new NotFoundError();
+
+  await db
+    .delete(dataSources)
+    .where(and(eq(dataSources.userId, userId), eq(dataSources.id, sourceId)));
+
+  await writeAudit({
+    userId,
+    action: "source.delete_forever",
+    ipAddress,
+    userAgent,
+    metadata: { source_id: existing.id, kind: existing.kind },
+  });
+}
+
+/**
  * Flip the AdapterError surface columns when an adapter throws AdapterError
  * of category operator-issue / permanent / not-found against this source.
  *

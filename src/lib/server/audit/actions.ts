@@ -102,6 +102,13 @@ export const AUDIT_ACTIONS = [
   "events.bulk_delete",
   "events.delete_forever",
   "events.purge_stale",
+  // Phase 3.4 — ?view=trash hard-delete from the sources + games pages.
+  //   - source.delete_forever — DELETE /api/sources/:id?force=true
+  //     permanently removes a soft-deleted data_source row.
+  //   - game.delete_forever   — DELETE /api/games/:id?force=true
+  //     permanently removes a soft-deleted game + cascaded children.
+  "source.delete_forever",
+  "game.delete_forever",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

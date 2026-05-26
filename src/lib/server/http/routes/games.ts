@@ -20,6 +20,7 @@ import {
   getGameById,
   updateGame,
   softDeleteGame,
+  hardDeleteGame,
   restoreGame,
   deriveReleaseInfoForGames,
 } from "../../services/games.js";
@@ -126,8 +127,13 @@ gamesRoutes.patch(
 
 gamesRoutes.delete("/games/:id", async (c) => {
   const ctx = getAuditContext(c);
+  const force = c.req.query("force") === "true";
   try {
-    await softDeleteGame(ctx.userId, c.req.param("id"), ctx.ipAddress);
+    if (force) {
+      await hardDeleteGame(ctx.userId, c.req.param("id"), ctx.ipAddress);
+    } else {
+      await softDeleteGame(ctx.userId, c.req.param("id"), ctx.ipAddress);
+    }
     return c.body(null, 204);
   } catch (err) {
     return mapErr(c, err, "DELETE /api/games/:id");
