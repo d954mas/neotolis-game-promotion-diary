@@ -1,4 +1,5 @@
 name: CI
+# Re-registered: 2026-05-26 — force GitHub to re-parse workflow triggers.
 
 on:
   pull_request:
