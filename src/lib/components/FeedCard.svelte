@@ -51,7 +51,6 @@
     event,
     source,
     games,
-    onChanged,
     selected = false,
     anySelected = false,
     view = "feed",
@@ -70,7 +69,6 @@
      *  chip rendering. */
     game?: GameLite | null;
     games: GameLite[];
-    onChanged?: () => void;
     selected?: boolean;
     anySelected?: boolean;
     view?: "feed" | "trash";

@@ -926,7 +926,6 @@
             onRestore={onModalRestore}
             onDeleteForever={onModalDeleteForever}
             currentUserName={page.data.user?.name ?? undefined}
-            onChanged={() => invalidateAll()}
           />
         {/each}
       </div>

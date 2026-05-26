@@ -405,7 +405,6 @@
             source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
             game={ev.gameIds.length > 0 ? (gameById.get(ev.gameIds[0]!) ?? null) : null}
             games={allGames}
-            onChanged={() => invalidateAll()}
           />
         {/each}
       {/each}
