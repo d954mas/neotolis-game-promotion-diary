@@ -711,8 +711,8 @@
 
   {#if trashView}
     <div class="trash-banner" role="status">
-      <span>{m.feed_trash_banner_text()}</span>
-      <a class="trash-back" href="/feed">{m.feed_trash_back_to_feed()}</a>
+      <a class="trash-back" href="/feed">← {m.feed_trash_back_to_feed()}</a>
+      <span class="trash-banner-text">{m.feed_trash_banner_text()}</span>
     </div>
   {/if}
 
@@ -1056,8 +1056,7 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
-    gap: var(--s-2);
+    gap: var(--s-3);
     padding: var(--s-2) var(--s-4);
     background: var(--accent-soft);
     color: var(--accent);
@@ -1066,12 +1065,16 @@
     font-size: var(--t-13);
   }
   .trash-back {
-    color: var(--accent);
-    text-decoration: underline;
+    color: var(--accent-strong);
+    text-decoration: none;
     font-weight: var(--w-sb);
+    white-space: nowrap;
   }
   .trash-back:hover {
-    color: var(--accent-strong);
+    text-decoration: underline;
+  }
+  .trash-banner-text {
+    color: var(--accent);
   }
 
   /* Filters panel — gates AxisRow rows under the LB-10 toggle so the

@@ -115,8 +115,8 @@
     <PageHeader title={m.games_page_title_trash()} sticky />
 
     <div class="trash-banner" role="status">
-      <span>{m.games_trash_banner_text({ days: data.retentionDays })}</span>
-      <a class="trash-back" href="/games">{m.games_trash_back()}</a>
+      <a class="trash-back" href="/games">← {m.games_trash_back()}</a>
+      <span class="trash-banner-text">{m.games_trash_banner_text({ days: data.retentionDays })}</span>
     </div>
 
     {#if softDeleted.length === 0}
@@ -256,13 +256,12 @@
     }
   }
 
-  /* Trash banner — same visual language as /feed + /sources. */
+  /* Trash banner — ← back link left, then text. */
   .trash-banner {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
-    gap: var(--s-2);
+    gap: var(--s-3);
     padding: var(--s-2) var(--s-4);
     background: var(--accent-soft);
     color: var(--accent);
@@ -271,12 +270,16 @@
     font-size: var(--t-13);
   }
   .trash-back {
-    color: var(--accent);
-    text-decoration: underline;
+    color: var(--accent-strong);
+    text-decoration: none;
     font-weight: var(--w-sb);
+    white-space: nowrap;
   }
   .trash-back:hover {
-    color: var(--accent-strong);
+    text-decoration: underline;
+  }
+  .trash-banner-text {
+    color: var(--accent);
   }
 
   /* Trash empty state. */

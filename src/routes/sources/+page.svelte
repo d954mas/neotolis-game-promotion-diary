@@ -235,8 +235,8 @@
     </header>
 
     <div class="trash-banner" role="status">
-      <span>{m.sources_trash_banner_text({ days: data.retentionDays })}</span>
-      <a class="trash-back" href="/sources">{m.sources_trash_back()}</a>
+      <a class="trash-back" href="/sources">← {m.sources_trash_back()}</a>
+      <span class="trash-banner-text">{m.sources_trash_banner_text({ days: data.retentionDays })}</span>
     </div>
 
     {#if deleted.length === 0}
@@ -471,13 +471,12 @@
     color: var(--accent);
   }
 
-  /* Trash banner — same visual language as /feed's .trash-banner. */
+  /* Trash banner — ← back link left, then text. */
   .trash-banner {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
-    gap: var(--s-2);
+    gap: var(--s-3);
     padding: var(--s-2) var(--s-4);
     background: var(--accent-soft);
     color: var(--accent);
@@ -486,12 +485,16 @@
     font-size: var(--t-13);
   }
   .trash-back {
-    color: var(--accent);
-    text-decoration: underline;
+    color: var(--accent-strong);
+    text-decoration: none;
     font-weight: var(--w-sb);
+    white-space: nowrap;
   }
   .trash-back:hover {
-    color: var(--accent-strong);
+    text-decoration: underline;
+  }
+  .trash-banner-text {
+    color: var(--accent);
   }
 
   /* Trash empty state. */
