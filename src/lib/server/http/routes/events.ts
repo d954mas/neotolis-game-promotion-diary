@@ -137,7 +137,7 @@ const createEventSchema = z
     // gameId is the DEPRECATED back-compat alias; gameIds is canonical.
     // The transform below normalizes singular → plural.
     gameId: z.string().min(1).nullable().optional(),
-    gameIds: z.array(z.string().min(1)).optional(),
+    gameIds: z.array(z.string().min(1)).max(500).optional(),
     kind: eventKindEnum,
     occurredAt: z.string().datetime(),
     title: z.string().min(1).max(500),
@@ -187,7 +187,7 @@ const updateEventSchema = z
     // gameIds patch on the edit path. Optional — omitting leaves the
     // junction unchanged; supplying replaces (set semantics via
     // attachEventToGames).
-    gameIds: z.array(z.string().min(1)).optional(),
+    gameIds: z.array(z.string().min(1)).max(500).optional(),
   })
   .refine((obj) => Object.keys(obj).length > 0, {
     message: "at least one field must be supplied",
@@ -224,7 +224,7 @@ const feedQuerySchema = z.object({
 // alias. The union + transform pattern below normalizes either shape into
 // a `{gameIds: string[]}` payload before the handler reads it.
 const attachSchema = z.union([
-  z.object({ gameIds: z.array(z.string().min(1)) }),
+  z.object({ gameIds: z.array(z.string().min(1)).max(500) }),
   z
     .object({ gameId: z.string().min(1).nullable() })
     .transform((o) => ({ gameIds: o.gameId === null ? [] : [o.gameId] })),
