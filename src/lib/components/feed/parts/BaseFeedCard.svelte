@@ -200,7 +200,6 @@
   data-testid="feed-card"
   data-event-id={event.id}
   style="--card-accent: var(--k-{event.kind}); --kind-color: var(--k-{event.kind});"
-  role="button"
   tabindex="0"
   onkeydown={(e) => {
     if (e.key === "Enter" || e.key === " ") {
