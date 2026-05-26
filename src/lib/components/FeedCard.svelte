@@ -99,7 +99,6 @@
   {sourceLabel}
   {thumbnailUrl}
   {games}
-  {onChanged}
   {selected}
   {anySelected}
   {view}

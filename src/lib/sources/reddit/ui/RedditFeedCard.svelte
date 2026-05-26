@@ -130,7 +130,6 @@
   {bylineLabel}
   {thumbnailUrl}
   {games}
-  {onChanged}
   {selected}
   {anySelected}
   {view}
