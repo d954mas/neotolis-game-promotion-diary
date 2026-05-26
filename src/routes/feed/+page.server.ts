@@ -85,7 +85,13 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   // so the listFeedPage filter clauses stay shape-stable. The custom branch
   // honors the user-typed from/to directly. "all" leaves both undefined
   // (no date predicate appended). Server TODAY (D-24) lives in `today` ISO.
-  const todayIso = new Date().toISOString().slice(0, 10);
+  //
+  // Use local-date computation (not UTC) so "Today" aligns with the
+  // server's wall-clock date. .toISOString().slice(0,10) returns UTC which
+  // diverges from local time between midnight and the UTC offset window
+  // (e.g. UTC+5 shows yesterday between 00:00-04:59 local).
+  const now = new Date();
+  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const todayDate = parseEventDate(todayIso) ?? new Date();
   let from: Date | undefined;
   let to: Date | undefined;
