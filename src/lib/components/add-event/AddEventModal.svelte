@@ -75,6 +75,7 @@
 <dialog
   bind:this={dialogEl}
   class="add-event-modal modal"
+  aria-label={m.add_event_modal_title()}
   oncancel={(e) => {
     e.preventDefault();
     tryClose();
