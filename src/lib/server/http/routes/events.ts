@@ -213,6 +213,10 @@ const feedQuerySchema = z.object({
   to: z.string().optional(),
   all: z.enum(["1", "0"]).optional(),
   q: z.string().optional(),
+  // Infinite-scroll continuation must carry the same scope + sort the SSR
+  // loader used, otherwise subsequent pages silently default to live/desc.
+  view: z.enum(["feed", "trash"]).optional(),
+  sort: z.enum(["asc", "desc"]).optional(),
 });
 
 // PATCH /api/events/:id/attach accepts BOTH the canonical
@@ -339,6 +343,8 @@ eventsRoutes.get(
         ? Array.from(new Set(gameList.flatMap((v) => v.split(",")).filter((v) => v !== "")))
         : undefined;
     try {
+      const scope: "live" | "trash" = q.view === "trash" ? "trash" : "live";
+      const sortDir: "asc" | "desc" = q.sort === "asc" ? "asc" : "desc";
       const page = await listFeedPage(
         c.var.userId,
         {
@@ -353,6 +359,7 @@ eventsRoutes.get(
           query: q.q ?? undefined,
         },
         q.cursor ?? null,
+        { scope, sortDir },
       );
       // Batch-load junction rows for every event in the page so each
       // EventDto carries its gameIds[] without an N+1 lookup. Two queries
