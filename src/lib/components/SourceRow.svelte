@@ -446,7 +446,7 @@
 
 <article
   class="source-row"
-  data-active={isTrash ? "0" : source.autoImport ? "1" : "0"}
+  data-active={isTrash ? "1" : source.autoImport ? "1" : "0"}
   data-mine={source.isOwnedByMe ? "1" : "0"}
   data-kind={source.kind}
   style="--card-accent: var({KIND_VAR[source.kind]});"
