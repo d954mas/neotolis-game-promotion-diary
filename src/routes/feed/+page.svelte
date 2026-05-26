@@ -712,7 +712,7 @@
   {#if trashView}
     <div class="trash-banner" role="status">
       <a class="trash-back" href="/feed">← {m.feed_trash_back_to_feed()}</a>
-      <span class="trash-banner-text">{m.feed_trash_banner_text()}</span>
+      <span class="trash-banner-text">{m.feed_trash_banner_text({ days: data.retentionDays })}</span>
     </div>
   {/if}
 
@@ -896,7 +896,7 @@
     <div class="feed-empty" role="status">
       {#if trashView}
         <h2 class="feed-empty-heading">{m.feed_trash_empty_heading()}</h2>
-        <p class="feed-empty-body">{m.feed_trash_empty_body()}</p>
+        <p class="feed-empty-body">{m.feed_trash_empty_body({ days: data.retentionDays })}</p>
       {:else if activeAxes.length > 0 || urlState.query.length > 0}
         <h2 class="feed-empty-heading">{m.empty_feed_filtered_heading()}</h2>
         <p class="feed-empty-body">{m.empty_feed_filtered_body()}</p>

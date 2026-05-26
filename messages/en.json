@@ -580,11 +580,11 @@
   "feed_bulk_action_bar_clear_selection": "Clear selection",
   "feed_bulk_action_aria_region": "Bulk actions",
 
-  "feed_trash_banner_text": "You're viewing the trash. Items here are auto-removed after 30 days.",
+  "feed_trash_banner_text": "You're viewing the trash. Items here are auto-removed after {days} days.",
   "feed_trash_back_to_feed": "Back to Feed",
-  "feed_trash_summary_auto_removed_in": "auto-removed in 30 days",
+  "feed_trash_summary_auto_removed_in": "auto-removed in {days} days",
   "feed_trash_empty_heading": "Trash is empty.",
-  "feed_trash_empty_body": "Items you delete will land here. They stay for 30 days before being permanently removed.",
+  "feed_trash_empty_body": "Items you delete will land here. They stay for {days} days before being permanently removed.",
 
   "feed_page_head_title_feed": "Feed",
   "feed_page_head_title_trash": "Recently deleted",
