@@ -90,8 +90,8 @@
       type="button"
       class="modal-close"
       aria-label={m.add_event_modal_close_aria()}
-      onclick={tryClose}
-    >×</button>
+      onclick={tryClose}>×</button
+    >
   </header>
   {#key open}
     <!-- Remount the form per open-cycle so previously-entered values
@@ -124,7 +124,8 @@
    * scopes to [open] so when the dialog is closed it stays display:none
    * (default) and doesn't render in flow before showModal hoists it. */
   .add-event-modal[open] {
-    display: flex; flex-direction: column;
+    display: flex;
+    flex-direction: column;
   }
   .add-event-modal {
     width: min(560px, calc(100vw - 32px));
@@ -144,36 +145,54 @@
     -webkit-backdrop-filter: blur(2px) saturate(120%);
   }
   .modal-head {
-    display: flex; align-items: center;
+    display: flex;
+    align-items: center;
     padding: 14px 18px 12px;
     border-bottom: 1px solid var(--border-hairline);
     flex-shrink: 0;
   }
   .modal-title {
-    margin: 0; flex: 1;
+    margin: 0;
+    flex: 1;
     font-size: var(--t-15);
     font-weight: var(--w-sb);
     letter-spacing: -0.005em;
     color: var(--text);
   }
   .modal-close {
-    background: transparent; border: 0; color: var(--text-3);
-    width: 28px; height: 28px; border-radius: var(--r-sm);
-    font-size: 18px; line-height: 1; cursor: pointer;
-    display: inline-flex; align-items: center; justify-content: center;
-    transition: background var(--m-fast) var(--m-ease),
-                color var(--m-fast) var(--m-ease);
+    background: transparent;
+    border: 0;
+    color: var(--text-3);
+    width: 28px;
+    height: 28px;
+    border-radius: var(--r-sm);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
   }
-  .modal-close:hover { background: var(--surface-2); color: var(--text); }
+  .modal-close:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
 
   @media (max-width: 540px) {
     .add-event-modal {
       width: calc(100vw - 16px);
       max-height: calc(100vh - 16px);
     }
-    .modal-head { padding: 12px 14px; }
+    .modal-head {
+      padding: 12px 14px;
+    }
   }
   @media (prefers-reduced-motion: reduce) {
-    .modal-close { transition: none; }
+    .modal-close {
+      transition: none;
+    }
   }
 </style>

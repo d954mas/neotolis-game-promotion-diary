@@ -114,12 +114,7 @@
         ? m.games_picker_bulk_title({ count: String(selectedCount) })
         : m.games_picker_title()}
     </h2>
-    <button
-      type="button"
-      class="close"
-      aria-label={m.games_picker_close_aria()}
-      onclick={onClose}
-    >
+    <button type="button" class="close" aria-label={m.games_picker_close_aria()} onclick={onClose}>
       ×
     </button>
   </header>
@@ -131,19 +126,13 @@
           state={gameStates[g.id] ?? "off"}
           onchange={(next) => setGameState(g.id, next)}
         />
-        <span
-          class="picker-game-dot"
-          aria-hidden="true"
-          style="background: {gameColor(g.id)};"
+        <span class="picker-game-dot" aria-hidden="true" style="background: {gameColor(g.id)};"
         ></span>
         <span class="picker-label">{g.title}</span>
       </div>
     {/each}
     <div class="row separator" data-state={offTopicState}>
-      <TriStateCheckbox
-        state={offTopicState}
-        onchange={setOffTopicState}
-      />
+      <TriStateCheckbox state={offTopicState} onchange={setOffTopicState} />
       <span class="picker-game-dot dashed" aria-hidden="true"></span>
       <span class="picker-label">{m.games_picker_off_topic_label()}</span>
       <span class="picker-hint">{m.games_picker_off_topic_hint()}</span>
@@ -285,8 +274,9 @@
     font-size: var(--t-13);
     font-weight: var(--w-md);
     cursor: pointer;
-    transition: background var(--m-fast) var(--m-ease),
-                border-color var(--m-fast) var(--m-ease);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
   }
   .ghost:hover {
     background: var(--surface-3);
@@ -302,9 +292,12 @@
     font-size: var(--t-13);
     font-weight: var(--w-sb);
     cursor: pointer;
-    transition: background var(--m-fast) var(--m-ease),
-                border-color var(--m-fast) var(--m-ease);
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 1px 2px rgba(0, 0, 0, 0.25);
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.18) inset,
+      0 1px 2px rgba(0, 0, 0, 0.25);
   }
   .primary:hover {
     background: var(--accent-strong);

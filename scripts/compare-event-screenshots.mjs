@@ -75,41 +75,68 @@ await liveCtx.addCookies([
 ]);
 
 const live = await liveCtx.newPage();
-await live.goto(`http://localhost:5173/events/${EVENT_ID}`, { waitUntil: "domcontentloaded", timeout: 60000 });
+await live.goto(`http://localhost:5173/events/${EVENT_ID}`, {
+  waitUntil: "domcontentloaded",
+  timeout: 60000,
+});
 await live.waitForTimeout(3000);
 await live.screenshot({ path: resolve(OUT, "event-detail-live-route.png"), fullPage: true });
 console.log("✓ event-detail-live-route.png");
 
 // ─── 2. Live /feed?event=… (modal) ─────────────────────────────────────────
-await live.goto(`http://localhost:5173/feed?event=${EVENT_ID}`, { waitUntil: "load", timeout: 60000 });
-await live.waitForFunction(() => typeof window.__sveltekit_dev !== "undefined" && document.readyState === "complete", { timeout: 30000 });
+await live.goto(`http://localhost:5173/feed?event=${EVENT_ID}`, {
+  waitUntil: "load",
+  timeout: 60000,
+});
+await live.waitForFunction(
+  () => typeof window.__sveltekit_dev !== "undefined" && document.readyState === "complete",
+  { timeout: 30000 },
+);
 await live.waitForTimeout(5000);
-await live.waitForFunction(() => {
-  const d = document.querySelector("dialog.event-detail-modal");
-  return d && d.open;
-}, { timeout: 10000 }).catch(() => console.warn("⚠ Detail modal didn't auto-open"));
+await live
+  .waitForFunction(
+    () => {
+      const d = document.querySelector("dialog.event-detail-modal");
+      return d && d.open;
+    },
+    { timeout: 10000 },
+  )
+  .catch(() => console.warn("⚠ Detail modal didn't auto-open"));
 await live.waitForTimeout(1000);
 await live.screenshot({ path: resolve(OUT, "event-detail-live-modal.png"), fullPage: false });
 console.log("✓ event-detail-live-modal.png");
 
 // ─── 3. Live /events/new (route) ────────────────────────────────────────────
-await live.goto("http://localhost:5173/events/new", { waitUntil: "domcontentloaded", timeout: 60000 });
+await live.goto("http://localhost:5173/events/new", {
+  waitUntil: "domcontentloaded",
+  timeout: 60000,
+});
 await live.waitForTimeout(3000);
 await live.screenshot({ path: resolve(OUT, "add-event-live-route.png"), fullPage: true });
 console.log("✓ add-event-live-route.png");
 
 // ─── 4. Live /feed → click "+ Add event" → modal ───────────────────────────
 await live.goto("http://localhost:5173/feed", { waitUntil: "load", timeout: 60000 });
-await live.waitForFunction(() => typeof window.__sveltekit_dev !== "undefined" && document.readyState === "complete", { timeout: 30000 });
+await live.waitForFunction(
+  () => typeof window.__sveltekit_dev !== "undefined" && document.readyState === "complete",
+  { timeout: 30000 },
+);
 await live.waitForTimeout(5000);
-const addBtn = await live.locator('button:has-text("Add event"), a:has-text("Add event"), [data-add-event]').first();
+const addBtn = await live
+  .locator('button:has-text("Add event"), a:has-text("Add event"), [data-add-event]')
+  .first();
 const addBtnCount = await addBtn.count();
 if (addBtnCount > 0) {
   await addBtn.click();
-  await live.waitForFunction(() => {
-    const d = document.querySelector("dialog.add-event-modal");
-    return d && d.open;
-  }, { timeout: 10000 }).catch(() => console.warn("⚠ Modal didn't open in 10s"));
+  await live
+    .waitForFunction(
+      () => {
+        const d = document.querySelector("dialog.add-event-modal");
+        return d && d.open;
+      },
+      { timeout: 10000 },
+    )
+    .catch(() => console.warn("⚠ Modal didn't open in 10s"));
   await live.waitForTimeout(1000);
   await live.screenshot({ path: resolve(OUT, "add-event-live-modal.png"), fullPage: false });
   console.log("✓ add-event-live-modal.png");
@@ -124,7 +151,10 @@ const protoCtx = await browser.newContext({
   colorScheme: "dark",
 });
 const protoPage = await protoCtx.newPage();
-await protoPage.goto("http://localhost:8765/index.html", { waitUntil: "domcontentloaded", timeout: 60000 });
+await protoPage.goto("http://localhost:8765/index.html", {
+  waitUntil: "domcontentloaded",
+  timeout: 60000,
+});
 await protoPage.waitForSelector(".feed-grid, .card, .topbar", { timeout: 30000 });
 await protoPage.waitForTimeout(1500);
 
@@ -134,7 +164,10 @@ const firstCardCount = await firstCard.count();
 if (firstCardCount > 0) {
   await firstCard.click();
   await protoPage.waitForTimeout(800);
-  await protoPage.screenshot({ path: resolve(OUT, "event-detail-proto-panel.png"), fullPage: false });
+  await protoPage.screenshot({
+    path: resolve(OUT, "event-detail-proto-panel.png"),
+    fullPage: false,
+  });
   console.log("✓ event-detail-proto-panel.png");
 
   // Try to switch to modal mode via Tweaks panel if available
@@ -151,7 +184,10 @@ if (firstCardCount > 0) {
 // Simpler: directly screenshot the .detail-modal if rendered, else panel.
 
 // ─── 6. Prototype — add-event modal ─────────────────────────────────────────
-await protoPage.goto("http://localhost:8765/index.html", { waitUntil: "domcontentloaded", timeout: 60000 });
+await protoPage.goto("http://localhost:8765/index.html", {
+  waitUntil: "domcontentloaded",
+  timeout: 60000,
+});
 await protoPage.waitForSelector(".feed-grid, .card, .topbar", { timeout: 30000 });
 await protoPage.waitForTimeout(800);
 

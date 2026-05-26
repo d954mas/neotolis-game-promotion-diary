@@ -106,9 +106,7 @@ export function youtubeChannelLabel(source: CardSourceLite | null): string {
 export function redditSubredditLabel(metadata: unknown): string {
   if (metadata === null || typeof metadata !== "object") return "";
   const md = metadata as { subreddit?: unknown };
-  return typeof md.subreddit === "string" && md.subreddit.length > 0
-    ? `r/${md.subreddit}`
-    : "";
+  return typeof md.subreddit === "string" && md.subreddit.length > 0 ? `r/${md.subreddit}` : "";
 }
 
 /** Read the Reddit author handle from event metadata. SAFE — the

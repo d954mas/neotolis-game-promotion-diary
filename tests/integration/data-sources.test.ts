@@ -1249,10 +1249,7 @@ describe("hardDeleteSource — permanent delete of soft-deleted sources", () => 
     await hardDeleteSource(userA.id, src.id, "127.0.0.1", "vitest");
 
     // Row is gone from the DB entirely.
-    const rows = await db
-      .select()
-      .from(dataSources)
-      .where(eq(dataSources.id, src.id));
+    const rows = await db.select().from(dataSources).where(eq(dataSources.id, src.id));
     expect(rows).toHaveLength(0);
   });
 
@@ -1274,10 +1271,7 @@ describe("hardDeleteSource — permanent delete of soft-deleted sources", () => 
     });
     expect(res.status).toBe(204);
 
-    const rows = await db
-      .select()
-      .from(dataSources)
-      .where(eq(dataSources.id, src.id));
+    const rows = await db.select().from(dataSources).where(eq(dataSources.id, src.id));
     expect(rows).toHaveLength(0);
   });
 
@@ -1290,15 +1284,12 @@ describe("hardDeleteSource — permanent delete of soft-deleted sources", () => 
     );
 
     // Source is still live — hard-delete must reject.
-    await expect(
-      hardDeleteSource(userA.id, src.id, "127.0.0.1"),
-    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(hardDeleteSource(userA.id, src.id, "127.0.0.1")).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
 
     // Row is still in the DB.
-    const rows = await db
-      .select()
-      .from(dataSources)
-      .where(eq(dataSources.id, src.id));
+    const rows = await db.select().from(dataSources).where(eq(dataSources.id, src.id));
     expect(rows).toHaveLength(1);
   });
 
@@ -1320,10 +1311,7 @@ describe("hardDeleteSource — permanent delete of soft-deleted sources", () => 
     expect(err.message).not.toMatch(/forbidden|permission/i);
 
     // Row is still intact for userA.
-    const rows = await db
-      .select()
-      .from(dataSources)
-      .where(eq(dataSources.id, src.id));
+    const rows = await db.select().from(dataSources).where(eq(dataSources.id, src.id));
     expect(rows).toHaveLength(1);
   });
 
@@ -1341,9 +1329,7 @@ describe("hardDeleteSource — permanent delete of soft-deleted sources", () => 
     const audits = await db
       .select()
       .from(auditLog)
-      .where(
-        and(eq(auditLog.userId, userA.id), eq(auditLog.action, "source.delete_forever")),
-      );
+      .where(and(eq(auditLog.userId, userA.id), eq(auditLog.action, "source.delete_forever")));
     expect(audits).toHaveLength(1);
     expect(audits[0]!.metadata).toMatchObject({
       source_id: src.id,

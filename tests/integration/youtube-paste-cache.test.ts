@@ -80,9 +80,8 @@ vi.mock("../../src/lib/server/integrations/youtube-oembed.js", async (importOrig
 const { enrichFromUrl } = await import("../../src/lib/server/services/events.js");
 const { db } = await import("../../src/lib/server/db/client.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
-const { youtubeVideos, youtubeVideoSnapshots } = await import(
-  "../../src/lib/server/db/schema/index.js"
-);
+const { youtubeVideos, youtubeVideoSnapshots } =
+  await import("../../src/lib/server/db/schema/index.js");
 const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { seedUserDirectly } = await import("./helpers.js");
 
@@ -183,10 +182,7 @@ describe("YouTube paste flow — public-data cache population", () => {
     //    snippet lacks uploads_playlist_id which is NOT NULL on that
     //    table); the channel-context-backfill worker is the canonical
     //    writer for youtube_channels.
-    const rows = await db
-      .select()
-      .from(youtubeVideos)
-      .where(eq(youtubeVideos.videoId, videoId));
+    const rows = await db.select().from(youtubeVideos).where(eq(youtubeVideos.videoId, videoId));
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
     expect(row.title).toBe("Test Video Title");
@@ -212,10 +208,7 @@ describe("YouTube paste flow — public-data cache population", () => {
 
     // 3. event.poll_refreshed audit row written (load-bearing for
     //    the per-user requestsPerDay cap counter).
-    const audit = await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.userId, u.id));
+    const audit = await db.select().from(auditLog).where(eq(auditLog.userId, u.id));
     const refreshRows = audit.filter((a) => a.action === "event.poll_refreshed");
     expect(refreshRows).toHaveLength(1);
     const meta = refreshRows[0]!.metadata as Record<string, unknown>;
@@ -240,10 +233,7 @@ describe("YouTube paste flow — public-data cache population", () => {
     //    channel_title NOT on this row (no-denorm fix V-1, see
     //    docs/denormalization-policy.md). result.authorName below
     //    asserts the in-memory oEmbed value surfaces for the caller.
-    const rows = await db
-      .select()
-      .from(youtubeVideos)
-      .where(eq(youtubeVideos.videoId, videoId));
+    const rows = await db.select().from(youtubeVideos).where(eq(youtubeVideos.videoId, videoId));
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
     expect(row.title).toBe("Test Video Title");
@@ -264,10 +254,7 @@ describe("YouTube paste flow — public-data cache population", () => {
 
     // 3. NO audit row — audit fires only after a successful Data
     //    API hit.
-    const audit = await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.userId, u.id));
+    const audit = await db.select().from(auditLog).where(eq(auditLog.userId, u.id));
     const refreshRows = audit.filter((a) => a.action === "event.poll_refreshed");
     expect(refreshRows).toHaveLength(0);
 
@@ -311,10 +298,7 @@ describe("YouTube paste flow — public-data cache population", () => {
     expect(snaps).toHaveLength(1);
 
     // Single audit row (no second one from the dedup hit).
-    const audit = await db
-      .select()
-      .from(auditLog)
-      .where(eq(auditLog.userId, u.id));
+    const audit = await db.select().from(auditLog).where(eq(auditLog.userId, u.id));
     const refreshRows = audit.filter((a) => a.action === "event.poll_refreshed");
     expect(refreshRows).toHaveLength(1);
   });
@@ -376,9 +360,8 @@ describe("YouTube paste flow — public-data cache population", () => {
     // candidate query result set" — that proves the JOIN +
     // published_at gate passed. The specific tier classification
     // is the SUT of poll-eligibility-resolver tests, not this one.
-    const { selectEligibleVideoIds } = await import(
-      "../../src/lib/server/services/poll-eligibility.js"
-    );
+    const { selectEligibleVideoIds } =
+      await import("../../src/lib/server/services/poll-eligibility.js");
     // Active tier window: walk a year back so any recent video
     // falls inside the SQL window. The SUT here is "the JOIN +
     // published_at IS NOT NULL gate finds the row", not the tier

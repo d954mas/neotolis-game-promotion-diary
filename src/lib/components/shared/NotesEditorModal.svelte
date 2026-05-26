@@ -101,8 +101,8 @@
         class="notes-editor-close"
         onclick={cancel}
         aria-label="Close"
-        title="Close"
-      >×</button>
+        title="Close">×</button
+      >
     </header>
     <div class="notes-editor-body">
       <!-- svelte-ignore a11y_autofocus -->
@@ -122,12 +122,9 @@
     </div>
     <footer class="notes-editor-foot">
       <button type="button" class="btn ghost" onclick={cancel}>Cancel</button>
-      <button
-        type="button"
-        class="btn primary"
-        onclick={() => void commit()}
-        disabled={saving}
-      >{saving ? "Saving…" : "Save"}</button>
+      <button type="button" class="btn primary" onclick={() => void commit()} disabled={saving}
+        >{saving ? "Saving…" : "Save"}</button
+      >
     </footer>
   </dialog>
 {/if}

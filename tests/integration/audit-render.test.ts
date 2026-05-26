@@ -364,7 +364,7 @@ describe("FeedCard restructured layout", () => {
     lastPollStatus: null as string | null,
   };
 
-  it("renders data-mine=\"1\" on the root <article> when event.authorIsMe=true (Phase 3.4 contract)", async () => {
+  it('renders data-mine="1" on the root <article> when event.authorIsMe=true (Phase 3.4 contract)', async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -382,7 +382,7 @@ describe("FeedCard restructured layout", () => {
     expect(out.body).toMatch(/<span[^>]*class="[^"]*\bauthor-avatar\b[^"]*\bmine\b/);
   });
 
-  it("renders data-mine=\"0\" on the root <article> when event.authorIsMe=false (Phase 3.4 contract)", async () => {
+  it('renders data-mine="0" on the root <article> when event.authorIsMe=false (Phase 3.4 contract)', async () => {
     const FeedCard = (await import("../../src/lib/components/FeedCard.svelte")).default;
     const out = render(FeedCard, {
       props: {
@@ -413,10 +413,10 @@ describe("FeedCard restructured layout", () => {
     //   - "Mine" sticker lives on the thumb as .thumb-badge--mine for
     //     media-shape kinds (youtube_video here).
     // Author avatar (.author-avatar.mine) also renders mine treatment.
-    expect(out.body).toMatch(/<span[^>]*class="[^"]*\bkind-icon\b[^"]*"[^>]*aria-label="YouTube video"/);
     expect(out.body).toMatch(
-      /<span[^>]*class="[^"]*\bthumb-badge--mine\b[^"]*"[^>]*>Mine<\/span>/,
+      /<span[^>]*class="[^"]*\bkind-icon\b[^"]*"[^>]*aria-label="YouTube video"/,
     );
+    expect(out.body).toMatch(/<span[^>]*class="[^"]*\bthumb-badge--mine\b[^"]*"[^>]*>Mine<\/span>/);
     expect(out.body).toMatch(/<span[^>]*class="[^"]*\bauthor-avatar\b[^"]*\bmine\b/);
   });
 
@@ -571,7 +571,9 @@ describe("FeedCard restructured layout", () => {
     expect(out.body).not.toMatch(/class="[^"]*\bcard-thumb\b/);
     expect(out.body).not.toMatch(/<img\b/);
     // The KindIcon glyph still renders inside .card-meta (kind-icon span).
-    expect(out.body).toMatch(/<span[^>]*class="[^"]*\bkind-icon\b[^"]*"[^>]*aria-label="Conference"/);
+    expect(out.body).toMatch(
+      /<span[^>]*class="[^"]*\bkind-icon\b[^"]*"[^>]*aria-label="Conference"/,
+    );
   });
 
   it("read-only contract preserved — no inline Edit / Delete / Open buttons", async () => {
@@ -1105,10 +1107,14 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
     // - SourceKindIcon renders without the kindLabel() text — the icon alone
     //   identifies the kind; the source-kind-label helper is no longer
     //   imported by SourceRow.
-    expect(src).toMatch(/<article[\s\S]*?class="source-row"[\s\S]*?data-mine=\{source\.isOwnedByMe \? "1" : "0"\}/);
+    expect(src).toMatch(
+      /<article[\s\S]*?class="source-row"[\s\S]*?data-mine=\{source\.isOwnedByMe \? "1" : "0"\}/,
+    );
     // Author avatar inside the title row also carries data-mine — drives
     // CSS .author-avatar[data-mine="1"] accent fill.
-    expect(src).toMatch(/class="author-avatar source-author-trigger"[\s\S]*?data-mine=\{source\.isOwnedByMe/);
+    expect(src).toMatch(
+      /class="author-avatar source-author-trigger"[\s\S]*?data-mine=\{source\.isOwnedByMe/,
+    );
     // SourceKindIcon component imported and rendered (kind glyph in title).
     expect(src).toMatch(/import SourceKindIcon/);
     expect(src).toMatch(/<SourceKindIcon\s/);
@@ -1301,10 +1307,7 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
     // contract). /games and /audit still use PageHeader.
     const fs = await import("node:fs");
     const path = await import("node:path");
-    for (const route of [
-      "src/routes/games/+page.svelte",
-      "src/routes/audit/+page.svelte",
-    ]) {
+    for (const route of ["src/routes/games/+page.svelte", "src/routes/audit/+page.svelte"]) {
       const src = fs.readFileSync(path.resolve(route), "utf8");
       expect(src, `${route}: imports PageHeader`).toMatch(
         /import PageHeader from "\$lib\/components\/PageHeader\.svelte"/,
@@ -1318,10 +1321,11 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
     // /sources opts OUT of the shared PageHeader — its own page-head block
     // hosts the title + summary + add CTA + recovery link inline.
     const sourcesSrc = fs.readFileSync(path.resolve("src/routes/sources/+page.svelte"), "utf8");
-    expect(sourcesSrc, "/sources: does NOT import PageHeader (Plan 09 inline page-head)").not.toMatch(
-      /import PageHeader from "\$lib\/components\/PageHeader\.svelte"/,
-    );
-    expect(sourcesSrc, "/sources: renders inline <header class=\"page-head\">").toMatch(
+    expect(
+      sourcesSrc,
+      "/sources: does NOT import PageHeader (Plan 09 inline page-head)",
+    ).not.toMatch(/import PageHeader from "\$lib\/components\/PageHeader\.svelte"/);
+    expect(sourcesSrc, '/sources: renders inline <header class="page-head">').toMatch(
       /<header[^>]*class="page-head"/,
     );
   });
@@ -1766,7 +1770,7 @@ describe("layout regression fixes + /audit FiltersSheet schema cleanup", () => {
  * SourceRow.svelte source.
  */
 describe("SourceRow inline-affordances (Phase 03.4 Wave 2 — Plan 03.4-09 + Plan 03.4-08 note)", () => {
-  it("SourceRow row structure — <article class=\"source-row\"> + .card-actions overflow + .source-title + .source-actions + .source-foot", async () => {
+  it('SourceRow row structure — <article class="source-row"> + .card-actions overflow + .source-title + .source-actions + .source-foot', async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const src = fs.readFileSync(path.resolve("src/lib/components/SourceRow.svelte"), "utf8");
@@ -2033,7 +2037,7 @@ describe("RecoveryDialog parity across /feed, /games, /sources", () => {
       /import RecoveryDialog from "\$lib\/components\/RecoveryDialog\.svelte"/,
     );
     expect(gamesSrc, "/games: mounts <RecoveryDialog").toMatch(/<RecoveryDialog\s/);
-    expect(gamesSrc, "/games: passes entityType=\"game\"").toMatch(/entityType="game"/);
+    expect(gamesSrc, '/games: passes entityType="game"').toMatch(/entityType="game"/);
     expect(gamesSrc, "/games: PageHeader receives onOpenRecovery callback").toMatch(
       /onOpenRecovery=\{/,
     );
@@ -2043,7 +2047,7 @@ describe("RecoveryDialog parity across /feed, /games, /sources", () => {
       /import RecoveryDialog from "\$lib\/components\/RecoveryDialog\.svelte"/,
     );
     expect(sourcesSrc, "/sources: mounts <RecoveryDialog").toMatch(/<RecoveryDialog\s/);
-    expect(sourcesSrc, "/sources: passes entityType=\"source\"").toMatch(/entityType="source"/);
+    expect(sourcesSrc, '/sources: passes entityType="source"').toMatch(/entityType="source"/);
     // The "Recently deleted (N)" affordance is a plain <button class="recovery-link">
     // inside the inline page-head row.
     expect(sourcesSrc, "/sources: inline recovery-link button opens RecoveryDialog").toMatch(
@@ -2051,7 +2055,9 @@ describe("RecoveryDialog parity across /feed, /games, /sources", () => {
     );
     // No legacy recoveryAnchor prop survives on either route.
     expect(gamesSrc, "/games: legacy recoveryAnchor prop removed").not.toMatch(/recoveryAnchor=/);
-    expect(sourcesSrc, "/sources: legacy recoveryAnchor prop removed").not.toMatch(/recoveryAnchor=/);
+    expect(sourcesSrc, "/sources: legacy recoveryAnchor prop removed").not.toMatch(
+      /recoveryAnchor=/,
+    );
   });
 
   it("/feed imports RecoveryDialog + supports trash view via ?view=trash (Plan 10 Wave 3)", async () => {
@@ -2067,7 +2073,7 @@ describe("RecoveryDialog parity across /feed, /games, /sources", () => {
     expect(src, "/feed: imports RecoveryDialog (fallback)").toMatch(
       /import RecoveryDialog from "\$lib\/components\/RecoveryDialog\.svelte"/,
     );
-    expect(src, "/feed: passes entityType=\"event\"").toMatch(/entityType="event"/);
+    expect(src, '/feed: passes entityType="event"').toMatch(/entityType="event"/);
     // Trash banner conditionally rendered when data.view === "trash".
     // Marker: m.feed_trash_banner_text() i18n key.
     expect(src, "/feed: renders trash banner when trashView=true").toMatch(

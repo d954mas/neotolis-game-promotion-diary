@@ -73,10 +73,7 @@
     if (!el) return;
     const root = document.documentElement;
     const sync = (): void => {
-      root.style.setProperty(
-        "--page-header-height",
-        `${el!.getBoundingClientRect().height}px`,
-      );
+      root.style.setProperty("--page-header-height", `${el!.getBoundingClientRect().height}px`);
     };
     sync();
     const ro = new ResizeObserver(sync);

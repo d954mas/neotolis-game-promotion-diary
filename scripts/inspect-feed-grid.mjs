@@ -6,15 +6,17 @@ const ctx = await browser.newContext({
   viewport: { width: 1440, height: 900 },
   deviceScaleFactor: 1,
 });
-await ctx.addCookies([{
-  name: "neotolis.session_token",
-  value: COOKIE,
-  domain: "localhost",
-  path: "/",
-  httpOnly: true,
-  secure: false,
-  sameSite: "Lax",
-}]);
+await ctx.addCookies([
+  {
+    name: "neotolis.session_token",
+    value: COOKIE,
+    domain: "localhost",
+    path: "/",
+    httpOnly: true,
+    secure: false,
+    sameSite: "Lax",
+  },
+]);
 const page = await ctx.newPage();
 await page.goto("http://localhost:5173/feed", { waitUntil: "networkidle" });
 await page.waitForSelector(".feed-grid", { timeout: 10000 });

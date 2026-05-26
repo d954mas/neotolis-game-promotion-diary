@@ -1,8 +1,19 @@
 import { chromium } from "playwright";
 const browser = await chromium.launch({ headless: true });
-const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
+const ctx = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  deviceScaleFactor: 2,
+});
 await ctx.addCookies([
-  { name: "neotolis.session_token", value: process.argv[2], domain: "localhost", path: "/", httpOnly: true, secure: false, sameSite: "Lax" },
+  {
+    name: "neotolis.session_token",
+    value: process.argv[2],
+    domain: "localhost",
+    path: "/",
+    httpOnly: true,
+    secure: false,
+    sameSite: "Lax",
+  },
 ]);
 const p = await ctx.newPage();
 await p.goto("http://localhost:5173/feed?date=all", { waitUntil: "networkidle" });

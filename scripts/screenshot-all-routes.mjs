@@ -71,7 +71,11 @@ for (const { slug, url, noAuth } of ROUTES) {
   const page = await ctxAuth.newPage();
   try {
     await page.goto(`${BASE}/games`, { waitUntil: "networkidle", timeout: 30000 });
-    const gameHref = await page.locator('a[href^="/games/"]').first().getAttribute("href").catch(() => null);
+    const gameHref = await page
+      .locator('a[href^="/games/"]')
+      .first()
+      .getAttribute("href")
+      .catch(() => null);
     if (gameHref) {
       await page.goto(`${BASE}${gameHref}`, { waitUntil: "networkidle", timeout: 30000 });
       await page.waitForTimeout(500);
@@ -91,7 +95,11 @@ for (const { slug, url, noAuth } of ROUTES) {
   const page = await ctxAuth.newPage();
   try {
     await page.goto(`${BASE}/sources`, { waitUntil: "networkidle", timeout: 30000 });
-    const srcHref = await page.locator('a[href^="/sources/"]').first().getAttribute("href").catch(() => null);
+    const srcHref = await page
+      .locator('a[href^="/sources/"]')
+      .first()
+      .getAttribute("href")
+      .catch(() => null);
     if (srcHref && !srcHref.endsWith("/new")) {
       await page.goto(`${BASE}${srcHref}`, { waitUntil: "networkidle", timeout: 30000 });
       await page.waitForTimeout(500);
@@ -116,7 +124,7 @@ for (const { slug, url, noAuth } of ROUTES) {
     // first feed card and click it (the modal opens). For the route version,
     // look for a link.
     const cardId = await page.evaluate(() => {
-      const el = document.querySelector("[data-testid=\"feed-card\"]");
+      const el = document.querySelector('[data-testid="feed-card"]');
       return el ? (el.getAttribute("data-event-id") ?? el.id ?? null) : null;
     });
     if (cardId) {

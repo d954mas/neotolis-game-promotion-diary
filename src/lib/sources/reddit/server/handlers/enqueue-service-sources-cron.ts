@@ -91,8 +91,7 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
         // same operator-issue kind, the UPDATE is a no-op write that
         // bumps updated_at on every tick (4×/day forever). Skip when the
         // current state already matches what we'd write.
-        const alreadyFlagged =
-          s.needsReconnect === true && s.lastErrorKind === "operator-issue";
+        const alreadyFlagged = s.needsReconnect === true && s.lastErrorKind === "operator-issue";
         if (alreadyFlagged) {
           continue;
         }
@@ -125,8 +124,7 @@ export async function handleEnqueueServiceSourcesCron(): Promise<{ enqueued: num
       const sub = meta.subreddit ?? s.channelId ?? null;
       if (sub === null) {
         // B-3: short-circuit — see reddit_account branch above.
-        const alreadyFlagged =
-          s.needsReconnect === true && s.lastErrorKind === "operator-issue";
+        const alreadyFlagged = s.needsReconnect === true && s.lastErrorKind === "operator-issue";
         if (alreadyFlagged) {
           continue;
         }

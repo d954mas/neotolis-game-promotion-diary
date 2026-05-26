@@ -244,7 +244,11 @@ export async function handleAuthorPoll(args: {
       await clearNeedsReconnect(sub_row.userId, sub_row.id);
     } catch (err) {
       logger.warn(
-        { userId: sub_row.userId, sourceId: sub_row.id, err: String((err as Error)?.message ?? err) },
+        {
+          userId: sub_row.userId,
+          sourceId: sub_row.id,
+          err: String((err as Error)?.message ?? err),
+        },
         "reddit author_poll: clearNeedsReconnect failed",
       );
     }

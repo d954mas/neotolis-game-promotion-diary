@@ -170,7 +170,10 @@ function parseGameTags(sp: URLSearchParams): string[] {
   // Read every repeated ?game= param, then split on "," to honor both
   // shapes (?game=a,b and ?game=a&game=b). Empty strings (from a stray
   // trailing comma or `?game=`) are filtered.
-  const raw = sp.getAll("game").flatMap((v) => v.split(",")).filter((v) => v !== "");
+  const raw = sp
+    .getAll("game")
+    .flatMap((v) => v.split(","))
+    .filter((v) => v !== "");
   const collected = new Set<string>(raw);
 
   // Legacy URL migration. `?show=standalone` (pre-Plan-03.4-10) implied a

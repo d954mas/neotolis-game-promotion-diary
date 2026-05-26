@@ -183,11 +183,7 @@
    * Mirrors prototype docs/design/v2/ui-kit/index.html lines 310-315. */
   .chip.active-chip[data-variant="game"] {
     background: color-mix(in oklab, var(--card-accent, var(--text-3)) 18%, var(--surface));
-    border-color: color-mix(
-      in oklab,
-      var(--card-accent, var(--text-3)) 45%,
-      var(--border)
-    );
+    border-color: color-mix(in oklab, var(--card-accent, var(--text-3)) 45%, var(--border));
     box-shadow: inset 3px 0 0 var(--card-accent, transparent);
     padding-left: 14px;
   }
@@ -198,11 +194,7 @@
     background: color-mix(in oklab, var(--card-accent) 14%, var(--surface));
     box-shadow: inset 3px 0 0 var(--card-accent, transparent);
     padding-left: 14px;
-    border-color: color-mix(
-      in oklab,
-      var(--card-accent, var(--accent)) 40%,
-      var(--border)
-    );
+    border-color: color-mix(in oklab, var(--card-accent, var(--accent)) 40%, var(--border));
   }
 
   /* Source chip — neutral surface (no special accent in prototype). */

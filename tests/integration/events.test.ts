@@ -1846,10 +1846,7 @@ describe("/events/[id]/edit standalone toggle round-trip", () => {
       .where(eq(events.id, ev.id));
     const md = (after[0]?.metadata as { triage?: { offTopic?: boolean } } | null) ?? null;
     expect(md?.triage?.offTopic).toBe(true);
-    const junction = await db
-      .select({ gameId: eg.gameId })
-      .from(eg)
-      .where(eq(eg.eventId, ev.id));
+    const junction = await db.select({ gameId: eg.gameId }).from(eg).where(eq(eg.eventId, ev.id));
     expect(junction.map((r) => r.gameId)).toEqual([gA]);
   });
 

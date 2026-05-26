@@ -25,7 +25,7 @@ import { toGameDto } from "$lib/server/dto.js";
  * `toGameDto` which strips `userId` (P3 discipline).
  */
 export const load: PageServerLoad = async ({ locals, url }) => {
-  const view = url.searchParams.get("view") === "trash" ? "trash" : "feed" as const;
+  const view = url.searchParams.get("view") === "trash" ? "trash" : ("feed" as const);
   if (!locals.user) return { view, games: [], softDeleted: [] };
 
   const [activeRows, softDeletedRows] = await Promise.all([

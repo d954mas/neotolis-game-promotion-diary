@@ -389,12 +389,8 @@ export async function hardDeleteGame(
     // Delete child listings first (FK constraint order).
     await tx
       .delete(gameSteamListings)
-      .where(
-        and(eq(gameSteamListings.userId, userId), eq(gameSteamListings.gameId, gameId)),
-      );
-    await tx
-      .delete(games)
-      .where(and(eq(games.userId, userId), eq(games.id, gameId)));
+      .where(and(eq(gameSteamListings.userId, userId), eq(gameSteamListings.gameId, gameId)));
+    await tx.delete(games).where(and(eq(games.userId, userId), eq(games.id, gameId)));
   });
 
   await writeAudit({

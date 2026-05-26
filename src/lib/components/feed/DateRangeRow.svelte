@@ -178,8 +178,8 @@
 <DateRangePicker
   value={pickerValue}
   open={pickerOpen}
-  anchorTop={anchorTop}
-  anchorLeft={anchorLeft}
+  {anchorTop}
+  {anchorLeft}
   {today}
   onApply={(range) => {
     // Don't auto-close on range completion — prototype keeps the picker

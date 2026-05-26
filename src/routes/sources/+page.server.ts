@@ -48,7 +48,7 @@ export interface SourcesPageLoadData extends SourcesPageData {
  * layout handles the redirect; this is defense in depth).
  */
 export const load: PageServerLoad = async ({ locals, url }): Promise<SourcesPageLoadData> => {
-  const view = url.searchParams.get("view") === "trash" ? "trash" : "feed" as const;
+  const view = url.searchParams.get("view") === "trash" ? "trash" : ("feed" as const);
   const redditOperatorConfigured = hasAdapter("reddit_account")
     ? getAdapter("reddit_account").observability.auth.isOperatorConfigured
     : false;

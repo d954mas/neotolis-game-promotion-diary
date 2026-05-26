@@ -1,10 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
-import {
-  createEvent,
-  listFeedPage,
-  FEED_PAGE_SIZE,
-} from "../../src/lib/server/services/events.js";
+import { createEvent, listFeedPage, FEED_PAGE_SIZE } from "../../src/lib/server/services/events.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { dataSources } from "../../src/lib/server/db/schema/data-sources.js";
 import { games } from "../../src/lib/server/db/schema/games.js";

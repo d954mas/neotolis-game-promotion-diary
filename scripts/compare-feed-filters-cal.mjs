@@ -75,7 +75,7 @@ await live.waitForTimeout(600);
 
 // Open the filters panel (look for the PageHead Filters toggle button).
 const filtersToggle = live.locator('button:has-text("Filters"), button:has-text("Filter")').first();
-if (await filtersToggle.count() > 0) {
+if ((await filtersToggle.count()) > 0) {
   await filtersToggle.click();
   await live.waitForTimeout(400);
 }
@@ -84,7 +84,7 @@ console.log("✓ feed-live-filters-open.png");
 
 // Now open the calendar overlay — click the date-chip.
 const dateChip = live.locator(".date-chip").first();
-if (await dateChip.count() > 0) {
+if ((await dateChip.count()) > 0) {
   await dateChip.click();
   await live.waitForTimeout(500);
   await live.screenshot({ path: resolve(OUT, "feed-live-calendar.png"), fullPage: false });
@@ -100,13 +100,16 @@ const proto = await browser.newContext({
   colorScheme: "dark",
 });
 const protoPage = await proto.newPage();
-await protoPage.goto("http://localhost:8765/index.html", { waitUntil: "networkidle", timeout: 60000 });
+await protoPage.goto("http://localhost:8765/index.html", {
+  waitUntil: "networkidle",
+  timeout: 60000,
+});
 await protoPage.waitForSelector(".feed-grid, .card, .topbar", { timeout: 30000 });
 await protoPage.waitForTimeout(1200);
 
 // Click Filters toggle in prototype top-row.
 const protoFiltersToggle = protoPage.locator('button:has-text("Filters")').first();
-if (await protoFiltersToggle.count() > 0) {
+if ((await protoFiltersToggle.count()) > 0) {
   await protoFiltersToggle.click();
   await protoPage.waitForTimeout(400);
 }
@@ -115,7 +118,7 @@ console.log("✓ feed-proto-filters-open.png");
 
 // Click the date-chip in prototype to open calendar.
 const protoDateChip = protoPage.locator(".date-chip, .btn.date-chip").first();
-if (await protoDateChip.count() > 0) {
+if ((await protoDateChip.count()) > 0) {
   await protoDateChip.click();
   await protoPage.waitForTimeout(500);
   await protoPage.screenshot({ path: resolve(OUT, "feed-proto-calendar.png"), fullPage: false });

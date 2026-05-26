@@ -200,7 +200,11 @@
           // absolute ISO timestamp via backfillTargetSince.
           ...(showPicker
             ? backfillCustomDate
-              ? { backfillTargetSince: new Date(`${backfillCustomDate}T00:00:00.000Z`).toISOString() }
+              ? {
+                  backfillTargetSince: new Date(
+                    `${backfillCustomDate}T00:00:00.000Z`,
+                  ).toISOString(),
+                }
               : { backfillWindow }
             : {}),
         }),

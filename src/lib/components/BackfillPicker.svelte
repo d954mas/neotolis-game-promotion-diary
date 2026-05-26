@@ -98,7 +98,6 @@
       <!-- No Clear button — clicking any preset chip above already
            clears customDate via pickPreset(). Two paths for the same
            action read as redundant UX. -->
-
     </div>
   </details>
   <p class="blurb">{m.backfill_picker_section_blurb()}</p>

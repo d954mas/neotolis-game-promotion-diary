@@ -416,9 +416,9 @@ describe("hardDeleteGame — permanent delete of soft-deleted games", () => {
     const userA = await seedUserDirectly({ email: "hd-game-2@test.local" });
     const game = await createGame(userA.id, { title: "Live Game" }, "127.0.0.1");
 
-    await expect(
-      hardDeleteGame(userA.id, game.id, "127.0.0.1"),
-    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(hardDeleteGame(userA.id, game.id, "127.0.0.1")).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
 
     // Row is still in the DB.
     const rows = await db.select().from(games).where(eq(games.id, game.id));
@@ -452,9 +452,7 @@ describe("hardDeleteGame — permanent delete of soft-deleted games", () => {
     const audits = await db
       .select()
       .from(auditLog)
-      .where(
-        and(eq(auditLog.userId, userA.id), eq(auditLog.action, "game.delete_forever")),
-      );
+      .where(and(eq(auditLog.userId, userA.id), eq(auditLog.action, "game.delete_forever")));
     expect(audits).toHaveLength(1);
     expect(audits[0]!.metadata).toMatchObject({ gameId: game.id });
   });

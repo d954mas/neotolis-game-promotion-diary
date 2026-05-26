@@ -80,7 +80,10 @@ const proto = await browser.newContext({
   colorScheme: "dark",
 });
 const protoPage = await proto.newPage();
-await protoPage.goto("http://localhost:8765/index.html", { waitUntil: "networkidle", timeout: 60000 });
+await protoPage.goto("http://localhost:8765/index.html", {
+  waitUntil: "networkidle",
+  timeout: 60000,
+});
 // React+Babel needs runtime time after networkidle
 await protoPage.waitForSelector(".feed-grid, .card, .topbar", { timeout: 30000 });
 await protoPage.waitForTimeout(1500);

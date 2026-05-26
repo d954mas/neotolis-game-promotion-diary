@@ -66,9 +66,9 @@ describe("passes — show axis", () => {
     // have BEEN triaged so they don't belong in the inbox. Mirrors the
     // server SQL clause (COALESCE(metadata->triage->>offTopic,'false')='false').
     const state = { ...baseState(), show: { kind: "inbox" as const } };
-    expect(passes(ev({ gameIds: [], metadata: { triage: { offTopic: true } } }), state, TODAY)).toBe(
-      false,
-    );
+    expect(
+      passes(ev({ gameIds: [], metadata: { triage: { offTopic: true } } }), state, TODAY),
+    ).toBe(false);
     expect(passes(ev({ gameIds: [], metadata: null }), state, TODAY)).toBe(true);
   });
 });

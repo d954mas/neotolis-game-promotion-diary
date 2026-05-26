@@ -96,8 +96,18 @@
   // ─── Date helpers (port-local, not exported) ─────────────────────────
   const WEEK_DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] as const;
   const MONTH_NAMES = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
   ] as const;
 
   function toISO(d: Date): string {
@@ -107,10 +117,13 @@
     return `${y}-${mo}-${da}`;
   }
   function sameDay(a: Date | null, b: Date | null): boolean {
-    return !!a && !!b &&
+    return (
+      !!a &&
+      !!b &&
       a.getFullYear() === b.getFullYear() &&
       a.getMonth() === b.getMonth() &&
-      a.getDate() === b.getDate();
+      a.getDate() === b.getDate()
+    );
   }
   function monthMatrix(year: number, monthIdx: number): (Date | null)[] {
     // 6×7 grid of Date|null — Monday-first (offset = (getDay+6)%7).
@@ -280,9 +293,7 @@
   );
 
   // Decade grid (12 cells: 1 outside + 10 in-range + 1 outside)
-  let decadeYears = $derived(
-    Array.from({ length: 12 }, (_, i) => decadeStart + i - 1),
-  );
+  let decadeYears = $derived(Array.from({ length: 12 }, (_, i) => decadeStart + i - 1));
 </script>
 
 <dialog
@@ -295,10 +306,7 @@
     onClose();
   }}
 >
-  <div
-    class="panel"
-    role="document"
-  >
+  <div class="panel" role="document">
     <div class="cal-inputs">
       <label class="cal-input" data-invalid={fromInvalid ? "1" : "0"}>
         <span>{m.feed_date_range_picker_from()}</span>
@@ -435,12 +443,9 @@
     </div>
 
     <div class="cal-head">
-      <button
-        type="button"
-        class="cal-nav"
-        onclick={() => handleNav(-1)}
-        aria-label="Previous"
-      >‹</button>
+      <button type="button" class="cal-nav" onclick={() => handleNav(-1)} aria-label="Previous"
+        >‹</button
+      >
       <div class="cal-head-tabs">
         <button
           type="button"
@@ -460,12 +465,8 @@
           {MONTH_NAMES[mo]}
         </button>
       </div>
-      <button
-        type="button"
-        class="cal-nav"
-        onclick={() => handleNav(1)}
-        aria-label="Next"
-      >›</button>
+      <button type="button" class="cal-nav" onclick={() => handleNav(1)} aria-label="Next">›</button
+      >
     </div>
 
     {#if level === "year"}
@@ -748,7 +749,9 @@
     font-size: 18px;
     line-height: 1;
     cursor: pointer;
-    transition: border-color var(--m-fast) var(--m-ease), color var(--m-fast) var(--m-ease);
+    transition:
+      border-color var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
   }
   .cal-nav:hover {
     color: var(--text);

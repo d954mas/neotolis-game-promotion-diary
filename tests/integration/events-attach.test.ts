@@ -1,9 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { and, eq } from "drizzle-orm";
-import {
-  createEvent,
-  attachEventToGames,
-} from "../../src/lib/server/services/events.js";
+import { createEvent, attachEventToGames } from "../../src/lib/server/services/events.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { games } from "../../src/lib/server/db/schema/games.js";
 import { eventGames } from "../../src/lib/server/db/schema/event-games.js";
@@ -458,7 +455,6 @@ describe("PATCH /api/events/:id/attach HTTP boundary (M:N + back-compat alias)",
     expect(res.status).not.toBe(500);
     expect((await res.json()).error).toBe("not_found");
   });
-
 });
 
 /**

@@ -414,10 +414,7 @@ async function readCachedVideo(videoId: string): Promise<HandleVideoSingleResult
     })
     .from(youtubeVideoSnapshots)
     .where(
-      and(
-        eq(youtubeVideoSnapshots.videoId, videoId),
-        gte(youtubeVideoSnapshots.polledAt, since),
-      ),
+      and(eq(youtubeVideoSnapshots.videoId, videoId), gte(youtubeVideoSnapshots.polledAt, since)),
     )
     .orderBy(desc(youtubeVideoSnapshots.polledAt))
     .limit(1);

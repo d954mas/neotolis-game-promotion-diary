@@ -153,10 +153,7 @@ export default ESLintUtils.RuleCreator.withoutDocs({
         // Skip object literals where the value is a Property /
         // ObjectExpression (those are nested wrappers, not the leaf
         // write).
-        if (
-          node.value.type === "ObjectExpression" ||
-          node.value.type === "ArrayExpression"
-        ) {
+        if (node.value.type === "ObjectExpression" || node.value.type === "ArrayExpression") {
           return;
         }
         if (!findMetadataAncestor(node, sourceCode)) return;

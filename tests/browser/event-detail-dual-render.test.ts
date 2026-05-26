@@ -190,11 +190,11 @@ describe("EventDetailContent dual-render parity (Wave 2 Plan 09 + Wave 3 Plan 10
   it("Wave 2 Plan 09: renders games chip row identically", () => {
     const bare = mountBare();
     const modal = mountInModal();
-    const bareChips = Array.from(bare.root.querySelectorAll(".game-chip")).map(
-      (c) => c.textContent?.trim(),
+    const bareChips = Array.from(bare.root.querySelectorAll(".game-chip")).map((c) =>
+      c.textContent?.trim(),
     );
-    const modalChips = Array.from(modal.root.querySelectorAll(".game-chip")).map(
-      (c) => c.textContent?.trim(),
+    const modalChips = Array.from(modal.root.querySelectorAll(".game-chip")).map((c) =>
+      c.textContent?.trim(),
     );
     expect(bareChips).toEqual(["Game One"]);
     expect(modalChips).toEqual(["Game One"]);
@@ -219,11 +219,11 @@ describe("EventDetailContent dual-render parity (Wave 2 Plan 09 + Wave 3 Plan 10
   it("Wave 2 Plan 09: renders stats (views/likes/comments) identically for kind=youtube_video", () => {
     const bare = mountBare();
     const modal = mountInModal();
-    const bareStats = Array.from(bare.root.querySelectorAll(".stat b")).map(
-      (b) => b.textContent?.trim(),
+    const bareStats = Array.from(bare.root.querySelectorAll(".stat b")).map((b) =>
+      b.textContent?.trim(),
     );
-    const modalStats = Array.from(modal.root.querySelectorAll(".stat b")).map(
-      (b) => b.textContent?.trim(),
+    const modalStats = Array.from(modal.root.querySelectorAll(".stat b")).map((b) =>
+      b.textContent?.trim(),
     );
     expect(bareStats).toEqual([
       (1234).toLocaleString(),

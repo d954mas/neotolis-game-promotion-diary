@@ -189,7 +189,11 @@
           autoImport,
           ...(showPicker
             ? backfillCustomDate
-              ? { backfillTargetSince: new Date(`${backfillCustomDate}T00:00:00.000Z`).toISOString() }
+              ? {
+                  backfillTargetSince: new Date(
+                    `${backfillCustomDate}T00:00:00.000Z`,
+                  ).toISOString(),
+                }
               : { backfillWindow }
             : {}),
         }),
@@ -283,8 +287,8 @@
         class="add-source-dialog-close"
         onclick={handleClose}
         aria-label={m.add_source_modal_close_aria()}
-        disabled={submitting}
-      >×</button>
+        disabled={submitting}>×</button
+      >
     </header>
 
     <form onsubmit={submit} class="add-source-dialog-body">
@@ -374,12 +378,9 @@
       {/if}
 
       <footer class="add-source-dialog-foot">
-        <button
-          type="button"
-          class="btn ghost"
-          onclick={handleClose}
-          disabled={submitting}
-        >{m.common_cancel()}</button>
+        <button type="button" class="btn ghost" onclick={handleClose} disabled={submitting}
+          >{m.common_cancel()}</button
+        >
         <button
           type="submit"
           class="btn primary"
@@ -609,7 +610,9 @@
     font-size: var(--t-13);
     font-weight: var(--w-md);
     cursor: pointer;
-    transition: background var(--m-fast), border-color var(--m-fast);
+    transition:
+      background var(--m-fast),
+      border-color var(--m-fast);
   }
   .add-source-dialog-foot .btn.ghost {
     background: var(--surface-2);

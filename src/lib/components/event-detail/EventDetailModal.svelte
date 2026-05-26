@@ -92,7 +92,8 @@
    * max-height = min(86vh, 820px) so the dialog never hugs the viewport
    * edge. Mirrors docs/design/v2/ui-kit/index.html .detail-modal. */
   .event-detail-modal[open] {
-    display: flex; flex-direction: column;
+    display: flex;
+    flex-direction: column;
   }
   .event-detail-modal {
     width: min(760px, calc(100vw - 32px));

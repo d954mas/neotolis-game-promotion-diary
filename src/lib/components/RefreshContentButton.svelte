@@ -250,7 +250,8 @@
   .refresh-content__svg {
     transition: transform var(--m-base) var(--m-ease);
   }
-  .refresh-content__button.refresh-content__button--compact:hover:not(:disabled) .refresh-content__svg {
+  .refresh-content__button.refresh-content__button--compact:hover:not(:disabled)
+    .refresh-content__svg {
     transform: rotate(-90deg);
   }
   .refresh-content__svg--spinning {
@@ -279,7 +280,8 @@
     .refresh-content__svg--spinning {
       animation: none;
     }
-    .refresh-content__button.refresh-content__button--compact:hover:not(:disabled) .refresh-content__svg {
+    .refresh-content__button.refresh-content__button--compact:hover:not(:disabled)
+      .refresh-content__svg {
       transform: none;
     }
   }

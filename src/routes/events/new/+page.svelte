@@ -61,11 +61,7 @@
   full viewport because the route is a regular block flow.
 -->
 <section class="addevent-route-host">
-  <AddEventForm
-    games={data.games}
-    {onSave}
-    onCancel={() => goto("/feed")}
-  />
+  <AddEventForm games={data.games} {onSave} onCancel={() => goto("/feed")} />
 </section>
 
 <style>

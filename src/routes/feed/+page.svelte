@@ -364,27 +364,29 @@
   //   - all    → "on"
   //   - mixed  → "mixed"
   // Same for the off-topic triage flag.
-  let gamesPickerInitial = $derived.by((): {
-    gameStates: Record<string, "on" | "off" | "mixed">;
-    offTopicState: "on" | "off" | "mixed";
-  } => {
-    const targets = data.rows.filter((e) => gamesPickerTargetIds.includes(e.id));
-    if (targets.length === 0) {
-      return { gameStates: {}, offTopicState: "off" };
-    }
-    const gameStates: Record<string, "on" | "off" | "mixed"> = {};
-    for (const g of data.games) {
-      const c = targets.reduce((n, e) => n + (e.gameIds.includes(g.id) ? 1 : 0), 0);
-      gameStates[g.id] = c === 0 ? "off" : c === targets.length ? "on" : "mixed";
-    }
-    const oc = targets.reduce((n, e) => {
-      const md = e.metadata as { triage?: { offTopic?: boolean } } | null | undefined;
-      return n + (md?.triage?.offTopic === true ? 1 : 0);
-    }, 0);
-    const offTopicState: "on" | "off" | "mixed" =
-      oc === 0 ? "off" : oc === targets.length ? "on" : "mixed";
-    return { gameStates, offTopicState };
-  });
+  let gamesPickerInitial = $derived.by(
+    (): {
+      gameStates: Record<string, "on" | "off" | "mixed">;
+      offTopicState: "on" | "off" | "mixed";
+    } => {
+      const targets = data.rows.filter((e) => gamesPickerTargetIds.includes(e.id));
+      if (targets.length === 0) {
+        return { gameStates: {}, offTopicState: "off" };
+      }
+      const gameStates: Record<string, "on" | "off" | "mixed"> = {};
+      for (const g of data.games) {
+        const c = targets.reduce((n, e) => n + (e.gameIds.includes(g.id) ? 1 : 0), 0);
+        gameStates[g.id] = c === 0 ? "off" : c === targets.length ? "on" : "mixed";
+      }
+      const oc = targets.reduce((n, e) => {
+        const md = e.metadata as { triage?: { offTopic?: boolean } } | null | undefined;
+        return n + (md?.triage?.offTopic === true ? 1 : 0);
+      }, 0);
+      const offTopicState: "on" | "off" | "mixed" =
+        oc === 0 ? "off" : oc === targets.length ? "on" : "mixed";
+      return { gameStates, offTopicState };
+    },
+  );
 
   // 14. AddEvent save (D-18) — POST then toast + invalidateAll + close.
   async function onSaveAddEvent(payload: AddEventPayload): Promise<void> {
@@ -419,7 +421,12 @@
 
   async function onModalUpdate(
     id: string,
-    patch: Partial<{ title: string; notes: string | null; url: string | null; authorIsMe: boolean }>,
+    patch: Partial<{
+      title: string;
+      notes: string | null;
+      url: string | null;
+      authorIsMe: boolean;
+    }>,
   ): Promise<void> {
     await fetch(`/api/events/${id}`, {
       method: "PATCH",
@@ -681,7 +688,7 @@
   // ?event= load-bearing fetch guarantees data.rows includes the opened id
   // even when cursor is past it.
   const openedEvent = $derived(
-    openEventId ? allRows.find((r) => r.id === openEventId) ?? null : null,
+    openEventId ? (allRows.find((r) => r.id === openEventId) ?? null) : null,
   );
 </script>
 
@@ -712,7 +719,8 @@
   {#if trashView}
     <div class="trash-banner" role="status">
       <a class="trash-back" href="/feed">← {m.feed_trash_back_to_feed()}</a>
-      <span class="trash-banner-text">{m.feed_trash_banner_text({ days: data.retentionDays })}</span>
+      <span class="trash-banner-text">{m.feed_trash_banner_text({ days: data.retentionDays })}</span
+      >
     </div>
   {/if}
 
@@ -883,7 +891,6 @@
         }}
         onClearAxis={() => setKind([])}
       />
-
     </div>
   {/if}
 
@@ -919,7 +926,7 @@
             selected={selectedIds.has(row.id)}
             {anySelected}
             view={trashView ? "trash" : "feed"}
-            onToggleSelect={onToggleSelect}
+            {onToggleSelect}
             onOpenDetail={openDetail}
             onOpenGamesPickerForCard={openGamesPickerForCard}
             onDelete={onCardDelete}
@@ -1024,19 +1031,18 @@
     left: 0;
     right: 0;
     height: 2px;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      var(--accent),
-      transparent
-    );
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
     animation: feed-nav-progress 1s linear infinite;
     z-index: 100;
     pointer-events: none;
   }
   @keyframes feed-nav-progress {
-    0% { transform: translateX(-100%); }
-    100% { transform: translateX(100%); }
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
   }
   @media (prefers-reduced-motion: reduce) {
     .feed[data-navigating="1"]::after {

@@ -256,7 +256,17 @@
             deleteConfirmOpen = true;
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
             <polyline points="3 6 5 6 21 6" />
             <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
           </svg>
@@ -266,11 +276,7 @@
     {/if}
   </div>
   {#if deletedListings.length > 0}
-    <button
-      type="button"
-      class="recovery-link"
-      onclick={() => (recoveryOpen = true)}
-    >
+    <button type="button" class="recovery-link" onclick={() => (recoveryOpen = true)}>
       Recently deleted ({deletedListings.length})
     </button>
   {/if}
@@ -355,7 +361,17 @@
         aria-label="Edit notes"
         title="Edit notes"
       >
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
           <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6" />
           <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
         </svg>
@@ -364,9 +380,7 @@
     {#if game.notes}
       <p class="notes">{game.notes}</p>
     {:else}
-      <button type="button" class="notes-empty" onclick={openNotesEditor}>
-        + Add notes
-      </button>
+      <button type="button" class="notes-empty" onclick={openNotesEditor}> + Add notes </button>
     {/if}
   </div>
 </section>
@@ -550,7 +564,10 @@
     border-radius: var(--r-sm);
     color: var(--text-3);
     cursor: pointer;
-    transition: background var(--m-fast), color var(--m-fast), border-color var(--m-fast);
+    transition:
+      background var(--m-fast),
+      color var(--m-fast),
+      border-color var(--m-fast);
   }
   .notes-edit-btn:hover {
     background: var(--surface-2);
@@ -604,7 +621,9 @@
     font-size: var(--t-13);
     font-weight: var(--w-md);
     cursor: pointer;
-    transition: background var(--m-fast), border-color var(--m-fast);
+    transition:
+      background var(--m-fast),
+      border-color var(--m-fast);
   }
   .btn-edit:hover {
     background: var(--surface-3);
@@ -638,7 +657,10 @@
     border-radius: var(--r-sm);
     color: var(--text-2);
     cursor: pointer;
-    transition: background var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+    transition:
+      background var(--m-fast),
+      border-color var(--m-fast),
+      color var(--m-fast);
   }
   .game-overflow-btn:hover,
   .game-overflow-btn[aria-expanded="true"] {

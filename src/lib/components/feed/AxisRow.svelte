@@ -82,9 +82,7 @@
   // visible. Mirrors the prototype (docs/design/v2/ui-kit/app.jsx lines
   // 260-305) which never renders a per-row clear button at all.
   const SENTINEL_VALUES = new Set(["all", "anyone"]);
-  let hasSelection = $derived(
-    selectedValues.some((v) => !SENTINEL_VALUES.has(v)),
-  );
+  let hasSelection = $derived(selectedValues.some((v) => !SENTINEL_VALUES.has(v)));
 
   // Kind → app.css CSS-var token (--k-*). Mirrors KIND_INFO[k].color in
   // docs/design/v2/ui-kit/app-data.jsx lines 74-86. The value is assigned
@@ -137,8 +135,8 @@
         type="button"
         class="clear-axis"
         aria-label={m.axis_row_clear_axis_aria({ axis: label })}
-        onclick={onClearAxis}
-      >×</button>
+        onclick={onClearAxis}>×</button
+      >
     {/if}
   </div>
 </div>

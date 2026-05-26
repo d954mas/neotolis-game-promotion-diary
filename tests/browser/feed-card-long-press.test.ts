@@ -81,7 +81,10 @@ function mountFeedCard(propsOverrides: Record<string, unknown> = {}): {
 // Synthetic touch event — vitest browser-mode chromium exposes TouchEvent.
 // We only need a target to satisfy the handler signature; the timer fires
 // off setTimeout and does not actually read e.touches.
-function dispatchTouch(el: HTMLElement, type: "touchstart" | "touchend" | "touchmove" | "touchcancel"): void {
+function dispatchTouch(
+  el: HTMLElement,
+  type: "touchstart" | "touchend" | "touchmove" | "touchcancel",
+): void {
   const ev = new Event(type, { bubbles: true });
   el.dispatchEvent(ev);
 }

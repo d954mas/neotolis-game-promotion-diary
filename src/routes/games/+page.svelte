@@ -116,7 +116,9 @@
 
     <div class="trash-banner" role="status">
       <a class="trash-back" href="/games">← {m.games_trash_back()}</a>
-      <span class="trash-banner-text">{m.games_trash_banner_text({ days: data.retentionDays })}</span>
+      <span class="trash-banner-text"
+        >{m.games_trash_banner_text({ days: data.retentionDays })}</span
+      >
     </div>
 
     {#if softDeleted.length === 0}

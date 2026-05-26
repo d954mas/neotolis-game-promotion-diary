@@ -35,25 +35,54 @@ await new Promise((r) => protoServer.listen(8765, r));
 
 const browser = await chromium.launch();
 
-const ctxOpts = { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, colorScheme: "dark" };
+const ctxOpts = {
+  viewport: { width: 1440, height: 900 },
+  deviceScaleFactor: 1,
+  colorScheme: "dark",
+};
 
 const ctx = await browser.newContext(ctxOpts);
 await ctx.addCookies([
-  { name: "neotolis.session_token", value: COOKIE, domain: "localhost", path: "/", httpOnly: true, secure: false, sameSite: "Lax" },
-  { name: "__theme", value: "dark", domain: "localhost", path: "/", httpOnly: false, secure: false, sameSite: "Lax" },
+  {
+    name: "neotolis.session_token",
+    value: COOKIE,
+    domain: "localhost",
+    path: "/",
+    httpOnly: true,
+    secure: false,
+    sameSite: "Lax",
+  },
+  {
+    name: "__theme",
+    value: "dark",
+    domain: "localhost",
+    path: "/",
+    httpOnly: false,
+    secure: false,
+    sameSite: "Lax",
+  },
 ]);
 const live = await ctx.newPage();
 await live.goto("http://localhost:5173/feed", { waitUntil: "networkidle", timeout: 60000 });
 await live.waitForTimeout(800);
-await live.screenshot({ path: resolve(OUT, "feed-live-top.png"), clip: { x: 0, y: 0, width: 1440, height: 500 } });
+await live.screenshot({
+  path: resolve(OUT, "feed-live-top.png"),
+  clip: { x: 0, y: 0, width: 1440, height: 500 },
+});
 console.log("✓ feed-live-top.png");
 
 const proto = await browser.newContext(ctxOpts);
 const protoPage = await proto.newPage();
-await protoPage.goto("http://localhost:8765/index.html", { waitUntil: "networkidle", timeout: 60000 });
+await protoPage.goto("http://localhost:8765/index.html", {
+  waitUntil: "networkidle",
+  timeout: 60000,
+});
 await protoPage.waitForSelector(".feed-grid, .card, .topbar", { timeout: 30000 });
 await protoPage.waitForTimeout(1500);
-await protoPage.screenshot({ path: resolve(OUT, "feed-prototype-top.png"), clip: { x: 0, y: 0, width: 1440, height: 500 } });
+await protoPage.screenshot({
+  path: resolve(OUT, "feed-prototype-top.png"),
+  clip: { x: 0, y: 0, width: 1440, height: 500 },
+});
 console.log("✓ feed-prototype-top.png");
 
 await browser.close();

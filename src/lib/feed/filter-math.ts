@@ -46,10 +46,7 @@ export function passes(e: FilterableEvent, state: FilterState, today: Date): boo
   // "no triage decision yet" = zero attached games. Off-topic + per-game
   // selection moved to the orthogonal GAME axis (state.gameTags).
   if (state.show.kind === "inbox" && (e.gameIds?.length ?? 0) > 0) return false;
-  if (
-    state.show.kind === "inbox" &&
-    e.metadata?.triage?.offTopic === true
-  ) {
+  if (state.show.kind === "inbox" && e.metadata?.triage?.offTopic === true) {
     // An event explicitly marked off-topic has been triaged — the user has
     // said "this is not related to any game". It does NOT belong in the
     // inbox awaiting triage. Mirrors the server SQL clause.

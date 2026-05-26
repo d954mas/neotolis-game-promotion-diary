@@ -85,9 +85,7 @@
   // channelTitle: the default card doesn't know about YouTube. Per-
   // platform variants (YoutubeFeedCard) read channelTitle via their
   // own source-of-truth path.
-  const sourceLabel = $derived.by(
-    (): string => source?.displayName ?? source?.handleUrl ?? "",
-  );
+  const sourceLabel = $derived.by((): string => source?.displayName ?? source?.handleUrl ?? "");
 
   const thumbnailUrl = $derived.by(() => deriveThumbnailUrl(event));
 </script>

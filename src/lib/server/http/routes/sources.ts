@@ -264,7 +264,12 @@ sourcesRoutes.delete("/sources/:id", async (c) => {
   const force = c.req.query("force") === "true";
   try {
     if (force) {
-      await hardDeleteSource(ctx.userId, c.req.param("id"), ctx.ipAddress, ctx.userAgent ?? undefined);
+      await hardDeleteSource(
+        ctx.userId,
+        c.req.param("id"),
+        ctx.ipAddress,
+        ctx.userAgent ?? undefined,
+      );
       return c.body(null, 204);
     }
     const row = await softDeleteSource(

@@ -927,9 +927,8 @@ export async function enrichFromUrl(
   // preview endpoint stays responsive — the events INSERT can
   // still succeed and cron tick will populate cache later.
   try {
-    const { handleVideoSingle } = await import(
-      "$lib/sources/youtube/server/handlers/video-single.js"
-    );
+    const { handleVideoSingle } =
+      await import("$lib/sources/youtube/server/handlers/video-single.js");
     await handleVideoSingle({
       videoId: parsed.videoId,
       userId,
@@ -1371,11 +1370,12 @@ export async function listFeedPage(
     // or no cursor predicate).
   }
 
-  const cursorClause = !isSearchMode && parsedCursor
-    ? sortAsc
-      ? sql`(${events.occurredAt}, ${events.id}) > (${parsedCursor.at}, ${parsedCursor.id})`
-      : sql`(${events.occurredAt}, ${events.id}) < (${parsedCursor.at}, ${parsedCursor.id})`
-    : sql`true`;
+  const cursorClause =
+    !isSearchMode && parsedCursor
+      ? sortAsc
+        ? sql`(${events.occurredAt}, ${events.id}) > (${parsedCursor.at}, ${parsedCursor.id})`
+        : sql`(${events.occurredAt}, ${events.id}) < (${parsedCursor.at}, ${parsedCursor.id})`
+      : sql`true`;
 
   // P1: userId filter is the FIRST clause and is literally present in the
   // .where(...) call so the structural ESLint rule recognizes it. Other
@@ -1503,9 +1503,7 @@ export async function listFeedPage(
       // Combine via SQL OR. Drizzle's `or(...)` would work but emits
       // parens around each operand; raw OR-join keeps the SQL compact and
       // mirrors the manual subquery pattern used elsewhere in this file.
-      filterParts.push(
-        sql`(${sql.join(orParts, sql.raw(" OR "))})` as SQL,
-      );
+      filterParts.push(sql`(${sql.join(orParts, sql.raw(" OR "))})` as SQL);
     }
   }
 
@@ -1554,11 +1552,13 @@ export async function listFeedPage(
   const hasQuery = trimmedQuery !== "";
   if (hasQuery) {
     const likePattern = `%${escapeLikePattern(trimmedQuery)}%`;
-    filterParts.push(sql`(
+    filterParts.push(
+      sql`(
       ${events.searchVec} @@ plainto_tsquery('english', ${trimmedQuery})
       OR ${events.title} ILIKE ${likePattern}
       OR COALESCE(${events.notes}, '') ILIKE ${likePattern}
-    )` as SQL);
+    )` as SQL,
+    );
   }
 
   // ORDER BY: when the query is active, tier FTS matches above trigram-only
@@ -1588,9 +1588,7 @@ export async function listFeedPage(
     .orderBy(orderBy)
     .limit(FEED_PAGE_SIZE + 1);
 
-  const rows = isSearchMode
-    ? await baseQuery.offset(searchPage * FEED_PAGE_SIZE)
-    : await baseQuery;
+  const rows = isSearchMode ? await baseQuery.offset(searchPage * FEED_PAGE_SIZE) : await baseQuery;
 
   const hasMore = rows.length > FEED_PAGE_SIZE;
   const page = rows.slice(0, FEED_PAGE_SIZE);
@@ -1719,11 +1717,13 @@ function buildFeedBaseFilterParts(
     const trimmedQuery = filters.query?.trim() ?? "";
     if (trimmedQuery !== "") {
       const likePattern = `%${escapeLikePattern(trimmedQuery)}%`;
-      filterParts.push(sql`(
+      filterParts.push(
+        sql`(
         ${events.searchVec} @@ plainto_tsquery('english', ${trimmedQuery})
         OR ${events.title} ILIKE ${likePattern}
         OR COALESCE(${events.notes}, '') ILIKE ${likePattern}
-      )` as SQL);
+      )` as SQL,
+      );
     }
   }
 
@@ -1767,12 +1767,7 @@ export async function listFeedFacets(
   // GROUP BY game_id via the junction. Off-topic sentinel is counted via a
   // separate query (it's a metadata flag, not a game id, so it can't share
   // the GROUP BY).
-  const gameBaseParts = buildFeedBaseFilterParts(
-    userId,
-    filters,
-    scope,
-    new Set(["gameTags"]),
-  );
+  const gameBaseParts = buildFeedBaseFilterParts(userId, filters, scope, new Set(["gameTags"]));
 
   const gameGroupQuery = db
     .select({
@@ -1783,10 +1778,7 @@ export async function listFeedFacets(
       count: sql<string>`count(*)`,
     })
     .from(events)
-    .innerJoin(
-      eventGames,
-      and(eq(eventGames.eventId, events.id), eq(eventGames.userId, userId)),
-    )
+    .innerJoin(eventGames, and(eq(eventGames.eventId, events.id), eq(eventGames.userId, userId)))
     .where(and(eq(events.userId, userId), ...gameBaseParts))
     .groupBy(eventGames.gameId);
 
@@ -2252,11 +2244,7 @@ export async function bulkEdit(
       .select({ id: games.id })
       .from(games)
       .where(
-        and(
-          eq(games.userId, userId),
-          isNull(games.deletedAt),
-          inArray(games.id, requestedGameIds),
-        ),
+        and(eq(games.userId, userId), isNull(games.deletedAt), inArray(games.id, requestedGameIds)),
       );
     validGameIds = new Set(ownedRows.map((r) => r.id));
   }
@@ -2320,9 +2308,7 @@ export async function bulkEdit(
               ),
             )
         : [];
-    const existingRemoveKeys = new Set(
-      existingForRemoves.map((r) => `${r.eventId}|${r.gameId}`),
-    );
+    const existingRemoveKeys = new Set(existingForRemoves.map((r) => `${r.eventId}|${r.gameId}`));
 
     for (const event of rows) {
       for (const gid of onGameIds) {
@@ -2355,9 +2341,7 @@ export async function bulkEdit(
     // join unambiguous to Postgres so the parameter inferences land on
     // text and the equality joins type-match the column.
     if (pairsToRemove.length > 0) {
-      const rowsSql = pairsToRemove.map(
-        (p) => sql`(${p.eventId}::text, ${p.gameId}::text)`,
-      );
+      const rowsSql = pairsToRemove.map((p) => sql`(${p.eventId}::text, ${p.gameId}::text)`);
       await tx.execute(sql`
         DELETE FROM event_games AS eg
         USING (VALUES ${sql.join(rowsSql, sql`, `)}) AS pairs(eid, gid)

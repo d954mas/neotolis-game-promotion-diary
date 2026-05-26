@@ -63,7 +63,6 @@
     await fetch(`/api/events/${id}?force=true`, { method: "DELETE" });
     await goto("/feed?view=trash");
   }
-
 </script>
 
 <!--

@@ -543,8 +543,7 @@ export async function createSource(
           // (MAX_PAGES=20) before the window boundary.
           // Custom date wins over preset; falls back to '30d' preset.
           backfillTargetSince:
-            input.backfillTargetSince ??
-            backfillWindowToDate(input.backfillWindow ?? "30d"),
+            input.backfillTargetSince ?? backfillWindowToDate(input.backfillWindow ?? "30d"),
         })
         .returning();
       if (!r) {
@@ -1019,10 +1018,7 @@ export async function markSourceNeedsReconnect(
  * WHERE clause filters on `eq(dataSources.userId, userId)`. Cross-tenant
  * misuse is a compile-time block via the ESLint rule.
  */
-export async function clearNeedsReconnect(
-  userId: string,
-  sourceId: string,
-): Promise<void> {
+export async function clearNeedsReconnect(userId: string, sourceId: string): Promise<void> {
   await db
     .update(dataSources)
     .set({

@@ -210,11 +210,7 @@ describe("FEED-SEARCH: server-side FTS on events.title + events.notes", () => {
     );
 
     // kind=youtube_video AND query=promotion → only the matching YT event.
-    const page = await listFeedPage(
-      userId,
-      { kind: "youtube_video", query: "promotion" },
-      null,
-    );
+    const page = await listFeedPage(userId, { kind: "youtube_video", query: "promotion" }, null);
     expect(page.rows.map((r) => r.id)).toEqual([ytMatch.id]);
   });
 
@@ -526,7 +522,9 @@ describe("FEED-SEARCH: server-side FTS on events.title + events.notes", () => {
         {
           gameIds: [gameId],
           kind: "press",
-          occurredAt: new Date(`2026-01-${String(1 + (i % 28)).padStart(2, "0")}T${String(i % 24).padStart(2, "0")}:00:00Z`),
+          occurredAt: new Date(
+            `2026-01-${String(1 + (i % 28)).padStart(2, "0")}T${String(i % 24).padStart(2, "0")}:00:00Z`,
+          ),
           title: `Pagination test event ${i}`,
         },
         "127.0.0.1",
@@ -558,7 +556,9 @@ describe("FEED-SEARCH: server-side FTS on events.title + events.notes", () => {
         {
           gameIds: [gameId],
           kind: "press",
-          occurredAt: new Date(`2026-02-${String(1 + (i % 28)).padStart(2, "0")}T${String(i % 24).padStart(2, "0")}:00:00Z`),
+          occurredAt: new Date(
+            `2026-02-${String(1 + (i % 28)).padStart(2, "0")}T${String(i % 24).padStart(2, "0")}:00:00Z`,
+          ),
           title: `Keyset check event ${i}`,
         },
         "127.0.0.1",

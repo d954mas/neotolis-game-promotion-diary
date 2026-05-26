@@ -4,7 +4,15 @@ const COOKIE = process.argv[2];
 const browser = await chromium.launch({ headless: true });
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 await ctx.addCookies([
-  { name: "neotolis.session_token", value: COOKIE, domain: "localhost", path: "/", httpOnly: true, secure: false, sameSite: "Lax" },
+  {
+    name: "neotolis.session_token",
+    value: COOKIE,
+    domain: "localhost",
+    path: "/",
+    httpOnly: true,
+    secure: false,
+    sameSite: "Lax",
+  },
 ]);
 const page = await ctx.newPage();
 page.on("console", (m) => console.log(`[console:${m.type()}] ${m.text()}`));
@@ -45,7 +53,10 @@ const checkboxAfter = await firstRow.locator("button[role=checkbox]").evaluate((
 console.log("[after-click]", JSON.stringify(checkboxAfter));
 
 // Did the state change?
-if (checkboxBefore.ariaChecked === checkboxAfter.ariaChecked && checkboxBefore.boxState === checkboxAfter.boxState) {
+if (
+  checkboxBefore.ariaChecked === checkboxAfter.ariaChecked &&
+  checkboxBefore.boxState === checkboxAfter.boxState
+) {
   console.log("[BUG] checkbox state UNCHANGED after click");
 } else {
   console.log("[OK] checkbox toggled");
