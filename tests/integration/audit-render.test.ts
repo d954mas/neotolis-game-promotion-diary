@@ -1137,12 +1137,14 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
     expect(src).toMatch(/<section[^>]*class="game-info"[^>]*id="section-game"/);
     expect(src).toMatch(/<section[^>]*class="stores"[^>]*id="section-stores"/);
     expect(src).toMatch(/<section[^>]*class="events"[^>]*id="section-events"/);
-    // Sticky PageHeader sits at the top with the game's title.
-    expect(src).toMatch(/<PageHeader[\s\S]*?title=\{game\.title\}/);
-    // The cta opens the modal (editGameOpen = true), label is the static
+    // Inline .game-header sits at the top with the game's title (PageHeader
+    // replaced by inline header in commit 92f7cea).
+    expect(src).toMatch(/<header class="game-header">/);
+    expect(src).toMatch(/<h1 class="game-title">\{game\.title\}<\/h1>/);
+    // The btn-edit opens the modal (editGameOpen = true), label is the static
     // "Edit" key (no longer a toggle pair).
     expect(src).toMatch(/editGameOpen\s*=\s*true/);
-    expect(src).toMatch(/label:\s*m\.games_detail_edit_cta\(\)/);
+    expect(src).toMatch(/m\.games_detail_edit_cta\(\)/);
     // <GameCover> is removed from this page (user during UAT: "после
     // названия игры идет огромная картинка... она тут лишняя, она есть
     // в карточки стора"). The cover already surfaces on each
@@ -1205,9 +1207,10 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
       expect(gameInfoMatch, "game-info section must render").not.toBeNull();
       const gameInfoBody = gameInfoMatch![1]!;
       expect(gameInfoBody).not.toMatch(/<header[^>]*class="section-header"/);
-      // PageHeader.cta opens the <GameEditDialog> modal (editGameOpen
+      // Inline .btn-edit opens the <GameEditDialog> modal (editGameOpen
       // = true). The Edit label is the static games_detail_edit_cta key.
-      expect(src).toMatch(/<PageHeader[\s\S]*?cta=\{/);
+      // PageHeader replaced by inline .game-header in commit 92f7cea.
+      expect(src).toMatch(/class="btn-edit"/);
       expect(src).toMatch(/editGameOpen\s*=\s*true/);
       expect(src).toMatch(/m\.games_detail_edit_cta\(\)/);
     });
@@ -2017,41 +2020,42 @@ describe("RecoveryDialog parity across /feed, /games, /sources", () => {
     expect(out.body).not.toMatch(/\brecovery-link\b/);
   });
 
-  it("/games and /sources import RecoveryDialog; /games wires onOpenRecovery via PageHeader, /sources via inline page-head button (Phase 3.4 Plan 09)", async () => {
-    // Phase 03.4 Wave 3 (Plan 10): /feed migrated to <PageHead> + trash
-    // view (?view=trash). The RecoveryDialog stays imported on /feed for
-    // backward compatibility but the PageHeader onOpenRecovery binding
-    // moved out (PageHead has no onOpenRecovery slot — trash view is the
-    // primary recovery affordance now).
-    //
-    // Phase 03.4 Wave 2 (Plan 09): /sources adopted an inline page-head
-    // block (1:1 with docs/design/v2/ui-kit/sources-page.jsx) — its
-    // "Recently deleted (N)" affordance is a plain <button
-    // class="recovery-link"> inside the page-head row, NOT a PageHeader
-    // callback. /games still uses PageHeader + onOpenRecovery callback.
+  it("/games and /sources use ?view=trash for recovery (RecoveryDialog replaced by trash view); /games wires onOpenRecovery via PageHeader, /sources via inline recovery-link anchor", async () => {
+    // Both /games and /sources replaced <RecoveryDialog> with a full-page
+    // ?view=trash pattern (same as /feed). The user navigates to
+    // /games?view=trash or /sources?view=trash to see and restore
+    // soft-deleted items.
     const fs = await import("node:fs");
     const path = await import("node:path");
-    // /games — PageHeader path.
+    // /games — PageHeader path. No RecoveryDialog import; instead
+    // PageHeader.onOpenRecovery navigates to ?view=trash.
     const gamesSrc = fs.readFileSync(path.resolve("src/routes/games/+page.svelte"), "utf8");
-    expect(gamesSrc, "/games: imports RecoveryDialog").toMatch(
+    expect(gamesSrc, "/games: no RecoveryDialog import (replaced by trash view)").not.toMatch(
       /import RecoveryDialog from "\$lib\/components\/RecoveryDialog\.svelte"/,
     );
-    expect(gamesSrc, "/games: mounts <RecoveryDialog").toMatch(/<RecoveryDialog\s/);
-    expect(gamesSrc, '/games: passes entityType="game"').toMatch(/entityType="game"/);
     expect(gamesSrc, "/games: PageHeader receives onOpenRecovery callback").toMatch(
       /onOpenRecovery=\{/,
     );
-    // /sources — inline page-head path (Plan 09 rewrite).
+    expect(gamesSrc, "/games: onOpenRecovery navigates to ?view=trash").toMatch(
+      /goto\(["']\/games\?view=trash["']/,
+    );
+    expect(gamesSrc, "/games: passes deletedCount to PageHeader").toMatch(
+      /deletedCount=\{softDeleted\.length\}/,
+    );
+    expect(gamesSrc, "/games: supports trashView state").toMatch(
+      /let trashView = \$derived\(data\.view === "trash"\)/,
+    );
+    // /sources — inline page-head path. No RecoveryDialog import; instead
+    // a plain <a class="recovery-link"> navigates to /sources?view=trash.
     const sourcesSrc = fs.readFileSync(path.resolve("src/routes/sources/+page.svelte"), "utf8");
-    expect(sourcesSrc, "/sources: imports RecoveryDialog").toMatch(
+    expect(sourcesSrc, "/sources: no RecoveryDialog import (replaced by trash view)").not.toMatch(
       /import RecoveryDialog from "\$lib\/components\/RecoveryDialog\.svelte"/,
     );
-    expect(sourcesSrc, "/sources: mounts <RecoveryDialog").toMatch(/<RecoveryDialog\s/);
-    expect(sourcesSrc, '/sources: passes entityType="source"').toMatch(/entityType="source"/);
-    // The "Recently deleted (N)" affordance is a plain <button class="recovery-link">
-    // inside the inline page-head row.
-    expect(sourcesSrc, "/sources: inline recovery-link button opens RecoveryDialog").toMatch(
-      /class="recovery-link"[\s\S]*?onclick=\{[^}]*recoveryOpen\s*=\s*true/,
+    expect(sourcesSrc, "/sources: inline recovery-link anchors to ?view=trash").toMatch(
+      /class="recovery-link"[\s\S]*?href="\/sources\?view=trash"/,
+    );
+    expect(sourcesSrc, "/sources: supports trashView state").toMatch(
+      /let trashView = \$derived\(data\.view === "trash"\)/,
     );
     // No legacy recoveryAnchor prop survives on either route.
     expect(gamesSrc, "/games: legacy recoveryAnchor prop removed").not.toMatch(/recoveryAnchor=/);
@@ -2075,9 +2079,9 @@ describe("RecoveryDialog parity across /feed, /games, /sources", () => {
     );
     expect(src, '/feed: passes entityType="event"').toMatch(/entityType="event"/);
     // Trash banner conditionally rendered when data.view === "trash".
-    // Marker: m.feed_trash_banner_text() i18n key.
+    // Marker: m.feed_trash_banner_text({ days: ... }) i18n key.
     expect(src, "/feed: renders trash banner when trashView=true").toMatch(
-      /m\.feed_trash_banner_text\(\)/,
+      /m\.feed_trash_banner_text\(/,
     );
   });
 
