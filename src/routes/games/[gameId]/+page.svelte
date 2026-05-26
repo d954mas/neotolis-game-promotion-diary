@@ -39,7 +39,7 @@
   // it AGAIN at the top of /games/[gameId] is duplicate visual weight.
   // Component file kept in src/lib/components for future reuse on /games
   // list page or preview surfaces.
-  import PageHeader from "$lib/components/PageHeader.svelte";
+  // PageHeader replaced by inline .game-header with Edit + ⋮ side by side.
   import GameEditDialog from "$lib/components/GameEditDialog.svelte";
   import AddStoreDialog from "$lib/components/AddStoreDialog.svelte";
   // RecoveryDialog extends to per-game soft-deleted listings.
@@ -216,23 +216,13 @@
 <!--
   PageHeader.cta opens <GameEditDialog>.
 -->
-<PageHeader
-  title={game.title}
-  cta={{
-    onClick: () => {
-      editGameOpen = true;
-    },
-    label: m.games_detail_edit_cta(),
-  }}
-  deletedCount={deletedListings.length}
-  onOpenRecovery={() => (recoveryOpen = true)}
-/>
-
-<!-- ⋮ overflow next to PageHeader CTA. Carries the Delete game action
-     (moved here from the bottom danger zone — long event lists meant
-     the user couldn't scroll to it). Sits just under the page-header
-     so it's reachable on every viewport. -->
-<div class="game-overflow-row">
+<!-- Inline title row with Edit + ⋮ side by side so Delete is
+     discoverable right next to the title, not buried below. -->
+<header class="game-header">
+  <h1 class="game-title">{game.title}</h1>
+  <button type="button" class="btn-edit" onclick={() => (editGameOpen = true)}>
+    {m.games_detail_edit_cta()}
+  </button>
   <div class="game-overflow-wrap">
     <button
       type="button"
@@ -275,7 +265,16 @@
       </div>
     {/if}
   </div>
-</div>
+  {#if deletedListings.length > 0}
+    <button
+      type="button"
+      class="recovery-link"
+      onclick={() => (recoveryOpen = true)}
+    >
+      Recently deleted ({deletedListings.length})
+    </button>
+  {/if}
+</header>
 
 <!--
   GameEditDialog modal — title input + description textarea +
@@ -577,12 +576,54 @@
     color: var(--accent-strong);
   }
 
-  /* ⋮ overflow row under PageHeader — Delete game lives here. */
-  .game-overflow-row {
+  /* Inline header — title + Edit + ⋮ + recovery link, all in one row.
+   * Replaces the separate PageHeader + game-overflow-row that split
+   * them visually (user couldn't find ⋯ separated from the title). */
+  .game-header {
     display: flex;
-    justify-content: flex-end;
-    margin-top: calc(-1 * var(--s-3));
-    margin-bottom: var(--s-3);
+    align-items: center;
+    gap: var(--s-3);
+    flex-wrap: wrap;
+    margin-bottom: var(--s-4);
+  }
+  .game-title {
+    margin: 0;
+    font-size: var(--t-22);
+    font-weight: var(--w-sb);
+    color: var(--text);
+    line-height: var(--lh-tight);
+  }
+  .btn-edit {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--hit);
+    padding: 0 var(--s-3);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+    cursor: pointer;
+    transition: background var(--m-fast), border-color var(--m-fast);
+  }
+  .btn-edit:hover {
+    background: var(--surface-3);
+    border-color: var(--border-2);
+  }
+  .recovery-link {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font: inherit;
+    cursor: pointer;
+    font-size: var(--t-13);
+    color: var(--text-3);
+    text-decoration: underline;
+    margin-left: auto;
+  }
+  .recovery-link:hover {
+    color: var(--accent);
   }
   .game-overflow-wrap {
     position: relative;
