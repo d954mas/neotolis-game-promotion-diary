@@ -3,6 +3,7 @@ import {
   createEvent,
   listFeedPage,
   listFeedFacets,
+  FEED_PAGE_SIZE,
 } from "../../src/lib/server/services/events.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { games } from "../../src/lib/server/db/schema/games.js";
@@ -509,5 +510,66 @@ describe("FEED-SEARCH: server-side FTS on events.title + events.notes", () => {
     expect(facets.kinds.press).toBe(1);
     expect(facets.kinds.youtube_video).toBe(1);
     expect(facets.show.all).toBe(2);
+  });
+
+  // ------------------------------------------------------------------
+  // Search pagination (P1-1 fix: offset-based when ?q= is active)
+  // ------------------------------------------------------------------
+
+  it("search pagination: nextCursor uses offset-based 'p:' prefix, not keyset cursor", async () => {
+    // Seed FEED_PAGE_SIZE + 1 matching events so the query triggers pagination.
+    const { userId, gameId } = await seedTenant("search-page-cursor@test.local");
+    const total = FEED_PAGE_SIZE + 1;
+    for (let i = 0; i < total; i++) {
+      await createEvent(
+        userId,
+        {
+          gameIds: [gameId],
+          kind: "press",
+          occurredAt: new Date(`2026-01-${String(1 + (i % 28)).padStart(2, "0")}T${String(i % 24).padStart(2, "0")}:00:00Z`),
+          title: `Pagination test event ${i}`,
+        },
+        "127.0.0.1",
+      );
+    }
+
+    // First page with search query — should return FEED_PAGE_SIZE rows
+    // and an offset-based cursor (not a keyset cursor).
+    const page1 = await listFeedPage(userId, { query: "pagination test" }, null);
+    expect(page1.rows.length).toBe(FEED_PAGE_SIZE);
+    expect(page1.nextCursor).toBe("p:1");
+
+    // Second page using the offset cursor — should return the remaining row(s).
+    const page2 = await listFeedPage(userId, { query: "pagination test" }, page1.nextCursor);
+    expect(page2.rows.length).toBe(1);
+    expect(page2.nextCursor).toBeNull();
+
+    // No duplicates across pages.
+    const allIds = [...page1.rows.map((r) => r.id), ...page2.rows.map((r) => r.id)];
+    expect(new Set(allIds).size).toBe(total);
+  });
+
+  it("search pagination: non-search mode still uses keyset cursor (no 'p:' prefix)", async () => {
+    const { userId, gameId } = await seedTenant("search-page-keyset@test.local");
+    const total = FEED_PAGE_SIZE + 1;
+    for (let i = 0; i < total; i++) {
+      await createEvent(
+        userId,
+        {
+          gameIds: [gameId],
+          kind: "press",
+          occurredAt: new Date(`2026-02-${String(1 + (i % 28)).padStart(2, "0")}T${String(i % 24).padStart(2, "0")}:00:00Z`),
+          title: `Keyset check event ${i}`,
+        },
+        "127.0.0.1",
+      );
+    }
+
+    // Without search query, the cursor should be a standard keyset cursor
+    // (base64url JSON, NOT "p:" prefixed).
+    const page1 = await listFeedPage(userId, {}, null);
+    expect(page1.rows.length).toBe(FEED_PAGE_SIZE);
+    expect(page1.nextCursor).not.toBeNull();
+    expect(page1.nextCursor!.startsWith("p:")).toBe(false);
   });
 });

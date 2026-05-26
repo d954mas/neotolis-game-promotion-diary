@@ -212,6 +212,7 @@ const feedQuerySchema = z.object({
   from: z.string().optional(),
   to: z.string().optional(),
   all: z.enum(["1", "0"]).optional(),
+  q: z.string().optional(),
 });
 
 // PATCH /api/events/:id/attach accepts BOTH the canonical
@@ -349,6 +350,7 @@ eventsRoutes.get(
           // Date-only (YYYY-MM-DD) is inclusive on both ends — see /feed/+page.server.ts.
           from: q.from ? new Date(`${q.from}T00:00:00.000Z`) : undefined,
           to: q.to ? new Date(`${q.to}T23:59:59.999Z`) : undefined,
+          query: q.q ?? undefined,
         },
         q.cursor ?? null,
       );

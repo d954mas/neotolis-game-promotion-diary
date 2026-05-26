@@ -1344,13 +1344,34 @@ export async function listFeedPage(
   cursor: string | null,
   opts?: { scope?: "live" | "trash"; sortDir?: "asc" | "desc" },
 ): Promise<FeedPage> {
-  let parsedCursor: { at: Date; id: string } | null = null;
-  if (cursor) parsedCursor = decodeCursor(cursor);
-
   // sortDir flips both the ORDER BY direction AND the cursor comparison
   // operator. With DESC sort the cursor needs <, with ASC sort it needs >.
   const sortAsc = opts?.sortDir === "asc";
-  const cursorClause = parsedCursor
+
+  // Search-mode pagination: when `?q=` is active the ORDER BY includes
+  // FTS tier + ts_rank which the standard (occurredAt, id) cursor cannot
+  // represent. Offset-based pagination is safe here because search
+  // result sets are small (bounded by the user's own content volume) and
+  // deep-paging is rare. The page offset is encoded inside the cursor
+  // string with a "p:" prefix so callers (SSR loader, API route, client
+  // loadMore) stay unchanged.
+  const trimmedQueryEarly = filters.query?.trim() ?? "";
+  const isSearchMode = trimmedQueryEarly !== "";
+
+  let parsedCursor: { at: Date; id: string } | null = null;
+  let searchPage = 0;
+  if (cursor) {
+    if (isSearchMode && cursor.startsWith("p:")) {
+      searchPage = Math.max(0, parseInt(cursor.slice(2), 10) || 0);
+    } else if (!isSearchMode) {
+      parsedCursor = decodeCursor(cursor);
+    }
+    // When switching between search/non-search modes the old cursor
+    // format becomes meaningless — fall through with defaults (page 0
+    // or no cursor predicate).
+  }
+
+  const cursorClause = !isSearchMode && parsedCursor
     ? sortAsc
       ? sql`(${events.occurredAt}, ${events.id}) > (${parsedCursor.at}, ${parsedCursor.id})`
       : sql`(${events.occurredAt}, ${events.id}) < (${parsedCursor.at}, ${parsedCursor.id})`
@@ -1560,20 +1581,31 @@ export async function listFeedPage(
       ? sql`${events.occurredAt} ASC, ${events.id} ASC`
       : sql`${events.occurredAt} DESC, ${events.id} DESC`;
 
-  const rows = await db
+  const baseQuery = db
     .select()
     .from(events)
     .where(and(eq(events.userId, userId), ...filterParts, cursorClause))
     .orderBy(orderBy)
     .limit(FEED_PAGE_SIZE + 1);
 
+  const rows = isSearchMode
+    ? await baseQuery.offset(searchPage * FEED_PAGE_SIZE)
+    : await baseQuery;
+
   const hasMore = rows.length > FEED_PAGE_SIZE;
   const page = rows.slice(0, FEED_PAGE_SIZE);
-  const last = page[page.length - 1];
-  return {
-    rows: page,
-    nextCursor: hasMore && last ? encodeCursor(last.occurredAt, last.id) : null,
-  };
+
+  let nextCursor: string | null = null;
+  if (hasMore) {
+    if (isSearchMode) {
+      nextCursor = `p:${searchPage + 1}`;
+    } else {
+      const last = page[page.length - 1];
+      if (last) nextCursor = encodeCursor(last.occurredAt, last.id);
+    }
+  }
+
+  return { rows: page, nextCursor };
 }
 
 /**
