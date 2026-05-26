@@ -41,6 +41,7 @@
   import RefreshContentButton from "./RefreshContentButton.svelte";
   import AuthorPopover from "./shared/AuthorPopover.svelte";
   import BackfillPicker from "./BackfillPicker.svelte";
+  import RetentionBadge from "./RetentionBadge.svelte";
   import { type SourceKind } from "$lib/util/source-kind-label.js";
 
   type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
@@ -78,13 +79,24 @@
     cooldownSec = 0,
     pulling = false,
     currentUserName = "",
+    view = "feed",
+    onRestore,
+    onDeleteForever,
   }: {
     source: DataSourceDto;
     cooldownSec?: number;
     pulling?: boolean;
     /** Display name for the AuthorPopover "(you)" line. */
     currentUserName?: string;
+    /** "feed" (default) or "trash" — drives which affordances are rendered. */
+    view?: "feed" | "trash";
+    /** Restore callback — only used in trash view. */
+    onRestore?: () => void;
+    /** Delete-forever callback — only used in trash view. */
+    onDeleteForever?: () => void;
   } = $props();
+
+  const isTrash = $derived(view === "trash");
 
   // Map data_sources.kind → CSS variable so .source-row::before and the
   // .kind-icon pick up the per-platform accent. The data_sources kinds
@@ -434,221 +446,241 @@
 
 <article
   class="source-row"
-  data-active={source.autoImport ? "1" : "0"}
+  class:source-row-trash={isTrash}
+  data-active={isTrash ? "0" : source.autoImport ? "1" : "0"}
   data-mine={source.isOwnedByMe ? "1" : "0"}
   data-kind={source.kind}
   style="--card-accent: var({KIND_VAR[source.kind]});"
 >
-  <!-- ⋯ overflow — absolute top-right, mirrors feed-card affordance. -->
-  <div class="card-actions">
-    <button
-      type="button"
-      class="card-action-btn overflow"
-      onclick={(e) => {
-        e.stopPropagation();
-        menuOpen = !menuOpen;
-      }}
-      title="More actions"
-      aria-label="More actions"
-      aria-haspopup="menu"
-      aria-expanded={menuOpen}
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="12" cy="5" r="1.8" fill="currentColor" />
-        <circle cx="12" cy="12" r="1.8" fill="currentColor" />
-        <circle cx="12" cy="19" r="1.8" fill="currentColor" />
-      </svg>
-    </button>
-    {#if menuOpen}
-      <!-- Scrim closes the menu on outside click. Same dismissal pattern
-           as AuthorPopover. -->
-      <button
-        type="button"
-        class="picker-scrim"
-        onclick={() => (menuOpen = false)}
-        aria-label="Close menu"
-      ></button>
-      <div class="card-menu" role="menu">
-        <button
-          type="button"
-          class="card-menu-item"
-          role="menuitem"
-          onclick={() => {
-            menuOpen = false;
-            // Seed dialog state from the source's current
-            // backfillTargetSince so the picker shows what's actually
-            // active — never a stale 30d default. If the current target
-            // matches a preset (within 1-day tolerance), select that
-            // preset; otherwise populate the custom-date field.
-            const ts = source.backfillTargetSince;
-            const matched = matchPresetForTarget(ts);
-            if (matched) {
-              backfillWindow = matched;
-              backfillCustomDate = null;
-            } else if (ts) {
-              const d = typeof ts === "string" ? new Date(ts) : ts;
-              backfillCustomDate = d.toISOString().slice(0, 10);
-            } else {
-              backfillWindow = "30d";
-              backfillCustomDate = null;
-            }
-            backfillError = null;
-            backfillDialogOpen = true;
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-            <line x1="16" y1="2" x2="16" y2="6" />
-            <line x1="8" y1="2" x2="8" y2="6" />
-            <line x1="3" y1="10" x2="21" y2="10" />
-          </svg>
-          <span>Backfill window…</span>
-        </button>
-        <!-- Error-state-specific recovery items removed. 'Retry now'
-             was identical to the visible Sync button on the row (same
-             POST /api/sources/:id/refresh-content endpoint) — two
-             buttons for one action. 'Reconnect' navigated to a legacy
-             edit page with no useful re-setup. For a broken source the
-             cleaner workflow is Remove + add fresh via AddSourceModal. -->
+  {#if isTrash}
+    <!-- Trash view — simplified row: title + retention badge + Restore / Delete forever. -->
+    <h3 class="source-title">
+      <span class="kind-icon" aria-hidden="true">
+        <SourceKindIcon kind={source.kind} />
+      </span>
+      <span class="source-title-text" title={handleLabel}>
+        {handleLabel}
+      </span>
+    </h3>
 
-        <button
-          type="button"
-          class="card-menu-item danger"
-          role="menuitem"
-          onclick={() => {
-            menuOpen = false;
-            confirmingRemove = true;
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M3 6h18" />
-            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-          </svg>
-          <span>{m.common_remove()}</span>
-        </button>
-      </div>
-    {/if}
-  </div>
-
-  <!-- Title row — mini kind icon + clickable author avatar + handle text. -->
-  <h3 class="source-title">
-    <span class="kind-icon" aria-hidden="true">
-      <SourceKindIcon kind={source.kind} />
-    </span>
-
-    <span class="author-pick">
-      <button
-        bind:this={authorAvatarEl}
-        type="button"
-        class="author-avatar source-author-trigger"
-        data-mine={source.isOwnedByMe ? "1" : "0"}
-        onclick={(e) => {
-          e.stopPropagation();
-          authorPopoverOpen = !authorPopoverOpen;
-        }}
-        aria-haspopup="menu"
-        aria-expanded={authorPopoverOpen}
-        aria-label={source.isOwnedByMe
-          ? m.author_avatar_mine_aria({ name: currentUserName || "you" })
-          : m.author_avatar_unknown_aria()}
-      >
-        {source.isOwnedByMe ? (currentUserName[0] ?? "Y").toUpperCase() : "?"}
-      </button>
-      {#if authorPopoverOpen}
-        <AuthorPopover
-          authorIsMe={source.isOwnedByMe}
-          mineName={currentUserName || "You"}
-          anchor={authorAvatarEl}
-          onchange={changeAuthor}
-          onclose={() => (authorPopoverOpen = false)}
-        />
+    <div class="source-actions trash-actions">
+      {#if source.deletedAt}
+        <RetentionBadge deletedAt={source.deletedAt} />
       {/if}
-    </span>
-
-    <span class="source-title-text" title={handleLabel}>
-      {handleLabel}
-    </span>
-  </h3>
-
-  <!-- Right cluster — [status pill] [Sync] [Live/Paused toggle]. Status
-       pill sits next to the manual Sync button because both describe
-       the polling state of this source — user UAT: «status почему не
-       рядом с sync». -->
-  <div class="source-actions">
-    <span class="status-pill" data-variant={status.variant}>
-      {#if status.variant === "updating"}
-        <span class="status-dot" aria-hidden="true"></span>
-      {/if}
-      {status.label}
-    </span>
-    <RefreshContentButton
-      sourceId={source.id}
-      sourceKind={source.kind}
-      compact
-      initialCooldownSec={cooldownSec}
-      {pulling}
-    />
-    <button
-      type="button"
-      class="source-toggle"
-      data-on={source.autoImport ? "1" : "0"}
-      onclick={toggleActive}
-      disabled={liveToggling}
-      aria-pressed={source.autoImport}
-      aria-label={source.autoImport ? "Pause source" : "Resume source"}
-      title={source.autoImport ? "Pause" : "Resume"}
-    >
-      <span class="source-toggle-thumb"></span>
-    </button>
-  </div>
-
-  <!-- Note row — private per-user remark. When set: text + small pencil
-       edit button. When empty (and not soft-deleted): ghost "+ Add note"
-       button. Phase 03.4-08 — the rename affordance was retired in
-       favour of this annotation-only surface. -->
-  {#if source.deletedAt === null}
-    <div class="source-note">
-      {#if source.note}
-        <span class="source-note-text">{source.note}</span>
-        <button
-          type="button"
-          class="source-note-edit"
-          onclick={openNoteDialog}
-          aria-label={m.source_note_edit_aria()}
-          title={m.source_note_edit_aria()}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-          </svg>
+      {#if onRestore}
+        <button type="button" class="trash-restore-btn" onclick={onRestore}>
+          {m.common_restore()}
         </button>
-      {:else}
-        <button
-          type="button"
-          class="source-note-add"
-          onclick={openNoteDialog}
-        >
-          {m.source_note_add()}
+      {/if}
+      {#if onDeleteForever}
+        <button type="button" class="trash-delete-forever-btn" onclick={onDeleteForever}>
+          {m.sources_trash_delete_forever()}
         </button>
       {/if}
     </div>
-  {/if}
 
-  <!-- Footer — events · date range · synced X ago. Status pill moved
-       up to .source-actions (next to Sync button). -->
-  <div class="source-foot">
-    <span>{eventCount} {eventCount === 1 ? "event" : "events"}</span>
-    {#if hasRange}
-      <span class="source-foot-sep">·</span>
-      <span class="source-foot-range">{dateRangeLabel}</span>
+    {#if source.note}
+      <div class="source-note">
+        <span class="source-note-text">{source.note}</span>
+      </div>
     {/if}
-    <span class="source-foot-sep">·</span>
-    <span>{lastSyncedLabel}</span>
-  </div>
 
-  {#if rowError}
-    <InlineError message={rowError} />
+    <div class="source-foot">
+      <span>{eventCount} {eventCount === 1 ? "event" : "events"}</span>
+      {#if hasRange}
+        <span class="source-foot-sep">·</span>
+        <span class="source-foot-range">{dateRangeLabel}</span>
+      {/if}
+    </div>
+  {:else}
+    <!-- Feed view — full interactive row with sync, toggle, menu. -->
+    <!-- ⋯ overflow — absolute top-right, mirrors feed-card affordance. -->
+    <div class="card-actions">
+      <button
+        type="button"
+        class="card-action-btn overflow"
+        onclick={(e) => {
+          e.stopPropagation();
+          menuOpen = !menuOpen;
+        }}
+        title="More actions"
+        aria-label="More actions"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="5" r="1.8" fill="currentColor" />
+          <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+          <circle cx="12" cy="19" r="1.8" fill="currentColor" />
+        </svg>
+      </button>
+      {#if menuOpen}
+        <button
+          type="button"
+          class="picker-scrim"
+          onclick={() => (menuOpen = false)}
+          aria-label="Close menu"
+        ></button>
+        <div class="card-menu" role="menu">
+          <button
+            type="button"
+            class="card-menu-item"
+            role="menuitem"
+            onclick={() => {
+              menuOpen = false;
+              const ts = source.backfillTargetSince;
+              const matched = matchPresetForTarget(ts);
+              if (matched) {
+                backfillWindow = matched;
+                backfillCustomDate = null;
+              } else if (ts) {
+                const d = typeof ts === "string" ? new Date(ts) : ts;
+                backfillCustomDate = d.toISOString().slice(0, 10);
+              } else {
+                backfillWindow = "30d";
+                backfillCustomDate = null;
+              }
+              backfillError = null;
+              backfillDialogOpen = true;
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
+            </svg>
+            <span>Backfill window…</span>
+          </button>
+
+          <button
+            type="button"
+            class="card-menu-item danger"
+            role="menuitem"
+            onclick={() => {
+              menuOpen = false;
+              confirmingRemove = true;
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 6h18" />
+              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+            </svg>
+            <span>{m.common_remove()}</span>
+          </button>
+        </div>
+      {/if}
+    </div>
+
+    <h3 class="source-title">
+      <span class="kind-icon" aria-hidden="true">
+        <SourceKindIcon kind={source.kind} />
+      </span>
+
+      <span class="author-pick">
+        <button
+          bind:this={authorAvatarEl}
+          type="button"
+          class="author-avatar source-author-trigger"
+          data-mine={source.isOwnedByMe ? "1" : "0"}
+          onclick={(e) => {
+            e.stopPropagation();
+            authorPopoverOpen = !authorPopoverOpen;
+          }}
+          aria-haspopup="menu"
+          aria-expanded={authorPopoverOpen}
+          aria-label={source.isOwnedByMe
+            ? m.author_avatar_mine_aria({ name: currentUserName || "you" })
+            : m.author_avatar_unknown_aria()}
+        >
+          {source.isOwnedByMe ? (currentUserName[0] ?? "Y").toUpperCase() : "?"}
+        </button>
+        {#if authorPopoverOpen}
+          <AuthorPopover
+            authorIsMe={source.isOwnedByMe}
+            mineName={currentUserName || "You"}
+            anchor={authorAvatarEl}
+            onchange={changeAuthor}
+            onclose={() => (authorPopoverOpen = false)}
+          />
+        {/if}
+      </span>
+
+      <span class="source-title-text" title={handleLabel}>
+        {handleLabel}
+      </span>
+    </h3>
+
+    <div class="source-actions">
+      <span class="status-pill" data-variant={status.variant}>
+        {#if status.variant === "updating"}
+          <span class="status-dot" aria-hidden="true"></span>
+        {/if}
+        {status.label}
+      </span>
+      <RefreshContentButton
+        sourceId={source.id}
+        sourceKind={source.kind}
+        compact
+        initialCooldownSec={cooldownSec}
+        {pulling}
+      />
+      <button
+        type="button"
+        class="source-toggle"
+        data-on={source.autoImport ? "1" : "0"}
+        onclick={toggleActive}
+        disabled={liveToggling}
+        aria-pressed={source.autoImport}
+        aria-label={source.autoImport ? "Pause source" : "Resume source"}
+        title={source.autoImport ? "Pause" : "Resume"}
+      >
+        <span class="source-toggle-thumb"></span>
+      </button>
+    </div>
+
+    {#if source.deletedAt === null}
+      <div class="source-note">
+        {#if source.note}
+          <span class="source-note-text">{source.note}</span>
+          <button
+            type="button"
+            class="source-note-edit"
+            onclick={openNoteDialog}
+            aria-label={m.source_note_edit_aria()}
+            title={m.source_note_edit_aria()}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+          </button>
+        {:else}
+          <button
+            type="button"
+            class="source-note-add"
+            onclick={openNoteDialog}
+          >
+            {m.source_note_add()}
+          </button>
+        {/if}
+      </div>
+    {/if}
+
+    <div class="source-foot">
+      <span>{eventCount} {eventCount === 1 ? "event" : "events"}</span>
+      {#if hasRange}
+        <span class="source-foot-sep">·</span>
+        <span class="source-foot-range">{dateRangeLabel}</span>
+      {/if}
+      <span class="source-foot-sep">·</span>
+      <span>{lastSyncedLabel}</span>
+    </div>
+
+    {#if rowError}
+      <InlineError message={rowError} />
+    {/if}
   {/if}
 </article>
 
@@ -1355,6 +1387,59 @@
     .card-action-btn.overflow {
       transition: none;
     }
+  }
+
+  /* Trash view — reduced opacity + warn-tinted border matching /feed trash cards. */
+  .source-row-trash {
+    opacity: 0.75;
+    border-color: var(--accent-strong);
+  }
+  .source-row-trash:hover {
+    opacity: 0.9;
+  }
+  /* Trash-view action cluster — Restore + Delete forever buttons. */
+  .trash-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    flex-wrap: wrap;
+  }
+  .trash-restore-btn {
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--border));
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
+    cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .trash-restore-btn:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+  .trash-delete-forever-btn {
+    min-height: var(--hit);
+    padding: var(--s-1) var(--s-3);
+    background: transparent;
+    color: var(--danger);
+    border: 1px solid color-mix(in oklab, var(--danger) 35%, var(--border));
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  .trash-delete-forever-btn:hover {
+    background: color-mix(in oklab, var(--danger) 14%, var(--surface-2));
+    border-color: var(--danger);
   }
 
   /* Note dialog — same vocabulary as .backfill-dialog. The user already

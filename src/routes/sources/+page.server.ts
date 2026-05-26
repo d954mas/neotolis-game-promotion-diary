@@ -33,6 +33,7 @@ export type KindMatrixEntry = {
 };
 
 export interface SourcesPageLoadData extends SourcesPageData {
+  view: "feed" | "trash";
   defaultIsOwnedByMe: boolean;
   defaultAutoImport: boolean;
   redditOperatorConfigured: boolean;
@@ -46,7 +47,8 @@ export interface SourcesPageLoadData extends SourcesPageData {
  * with no I/O cost. Anonymous viewers get an empty page (the auth-gated
  * layout handles the redirect; this is defense in depth).
  */
-export const load: PageServerLoad = async ({ locals }): Promise<SourcesPageLoadData> => {
+export const load: PageServerLoad = async ({ locals, url }): Promise<SourcesPageLoadData> => {
+  const view = url.searchParams.get("view") === "trash" ? "trash" : "feed" as const;
   const redditOperatorConfigured = hasAdapter("reddit_account")
     ? getAdapter("reddit_account").observability.auth.isOperatorConfigured
     : false;
@@ -85,6 +87,7 @@ export const load: PageServerLoad = async ({ locals }): Promise<SourcesPageLoadD
 
   if (!locals.user) {
     return {
+      view,
       active: [],
       deleted: [],
       quotaPlatforms: [],
@@ -100,6 +103,7 @@ export const load: PageServerLoad = async ({ locals }): Promise<SourcesPageLoadD
   const sources = await loadSourcesPage(locals.user.id);
   return {
     ...sources,
+    view,
     defaultIsOwnedByMe: true,
     defaultAutoImport: true,
     redditOperatorConfigured,

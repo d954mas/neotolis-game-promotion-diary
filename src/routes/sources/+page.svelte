@@ -3,27 +3,20 @@
   //
   // One unified list of every data_source the user has registered (any of
   // 5 kinds; only youtube_channel functional today — see FUNCTIONAL_KINDS
-  // gate). Soft-deleted sources show in a collapsed <details> section with
-  // a RetentionBadge and a Restore action (60-day window per
-  // env.RETENTION_DAYS).
-  //
-  // The "+ Add data source" CTA navigates to /sources/new (a full-page form
-  // — same pattern as /games/new and /events/new). NOT an inline dialog:
-  // the kind picker has 5 chips with tooltips and earns its own page
-  // surface.
+  // gate). Supports ?view=trash to render soft-deleted sources as full
+  // SourceRow cards with Restore + Delete forever actions (same pattern
+  // as /feed?view=trash).
 
-  import { invalidateAll } from "$app/navigation";
+  import { invalidateAll, goto } from "$app/navigation";
   import { m } from "$lib/paraglide/messages.js";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import SourceRow from "$lib/components/SourceRow.svelte";
   import SourceKindIcon from "$lib/components/SourceKindIcon.svelte";
   import InlineError from "$lib/components/InlineError.svelte";
   import QuotaStatusBanner from "$lib/components/QuotaStatusBanner.svelte";
-  // RecoveryDialog is the single recovery surface across the app. The
-  // dialog opens from the page head's "Recently deleted (N)" button.
-  // RetentionBadge + per-row Restore live INSIDE the dialog (the dialog
-  // mirrors the visual treatment SourceRow used for soft-deleted rows).
-  import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
+  import RetentionBadge from "$lib/components/RetentionBadge.svelte";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import Toast from "$lib/components/shared/Toast.svelte";
   // Phase 03.4-08: "+ Add data source" is now a modal mounted on /sources
   // instead of a hard navigate to /sources/new. The /sources/new route
   // still exists as a fallback (non-JS / direct-link entry).
@@ -65,15 +58,23 @@
 
   let { data }: { data: PageData } = $props();
 
+  // Trash view conditional — same pattern as /feed's trashView.
+  let trashView = $derived(data.view === "trash");
+
   // Live refresh while any source has an active cooldown (worker is
   // processing a pull). Server loader re-runs every 3s; SourceRow updates
   // last_polled_at, event range, and the cooldown countdown without manual
   // page reload. Stops polling once all cooldowns hit 0.
+  // Only active in live view — trash view has no cooldowns.
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   $effect(() => {
-    // Live-refresh while ANY source is actively pulling (worker job in
-    // pgboss state active/created/retry) OR has cooldown remaining.
-    // Stops when both go to zero.
+    if (trashView) {
+      if (pollTimer !== null) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      return;
+    }
     const anyPulling = Object.values(data.pullingBySource ?? {}).some(Boolean);
     const anyCooldown = Object.values(data.cooldownBySource ?? {}).some((sec) => sec > 0);
     const anyActive = anyPulling || anyCooldown;
@@ -109,8 +110,6 @@
   const groups: Group[] = $derived.by(() => {
     const seenKinds = new Set<SourceKind>();
     const out: Group[] = [];
-    // Build one group per unique label in PLATFORM_ORDER, dedup-ing
-    // reddit_account + reddit_subreddit into a single "Reddit" group.
     const labelToGroup = new Map<string, Group>();
     for (const p of PLATFORM_ORDER) {
       if (seenKinds.has(p.kind)) continue;
@@ -131,22 +130,12 @@
     return out.filter((g) => g.items.length > 0);
   });
 
-  // RecoveryDialog open state. Opened by PageHeader's "Recently deleted (N)"
-  // button; closed by Escape, backdrop click, the dialog's × button, or
-  // auto-closes when the last recoverable item is restored (same contract
-  // as /feed and /games).
-  let recoveryOpen = $state(false);
   let restoreError = $state<string | null>(null);
 
-  // AddSourceModal open state. Opened by the "+ Add data source" CTA and
-  // the EmptyState CTA; closed by Esc / backdrop / × / Cancel / a
-  // successful submit. /sources/new still exists as a fallback for
-  // non-JS / direct-link entry.
+  // AddSourceModal open state.
   let addOpen = $state(false);
 
-  // Collapsable group state — per-group set of platform labels currently
-  // collapsed. Persisted across page reloads via localStorage so user
-  // preference survives navigation. Empty set = all expanded (default).
+  // Collapsable group state.
   let collapsedGroups = $state<Set<string>>(new Set());
   $effect(() => {
     if (typeof window === "undefined") return;
@@ -174,18 +163,10 @@
     }
   }
 
-  // Map deleted (toDataSourceDto-projected, no ciphertext) into the
-  // RecoveryDialog's generic { id, name, deletedAt } shape. `displayName`
-  // is nullable on data_sources (the user may not have set one); fall
-  // back to handleUrl so every row has a recognizable label.
-  const recoveryItems = $derived(
-    deleted.map((s) => ({
-      id: s.id,
-      name: s.displayName ?? s.handleUrl,
-      deletedAt: s.deletedAt,
-    })),
-  );
+  // Toast state.
+  let toast = $state<{ kind: "success" | "info" | "danger"; text: string } | null>(null);
 
+  // Trash view: per-card Restore handler.
   async function restoreSource(id: string): Promise<void> {
     restoreError = null;
     try {
@@ -206,130 +187,176 @@
         restoreError = m.error_server_generic();
         return;
       }
+      toast = { kind: "success", text: m.toast_source_restored() };
       await invalidateAll();
-      // If that was the last recoverable item, close the dialog so the
-      // user is not stuck staring at "Nothing to recover" — the parent
-      // also stops rendering the PageHeader CTA at the same time
-      // (deletedCount falls to 0). Same pattern as /feed and /games.
-      if (deleted.length <= 1) recoveryOpen = false;
     } catch {
       restoreError = m.error_network();
+    }
+  }
+
+  // Trash view: Delete-forever state + confirm dialog.
+  let deleteForeverId = $state<string | null>(null);
+  let deleteForeverName = $state<string>("");
+  let confirmDeleteForeverOpen = $state(false);
+
+  function askDeleteForever(id: string, name: string): void {
+    deleteForeverId = id;
+    deleteForeverName = name;
+    confirmDeleteForeverOpen = true;
+  }
+
+  async function confirmDeleteForever(): Promise<void> {
+    if (!deleteForeverId) return;
+    confirmDeleteForeverOpen = false;
+    try {
+      const res = await fetch(`/api/sources/${deleteForeverId}?force=true`, { method: "DELETE" });
+      if (!res.ok) {
+        toast = { kind: "danger", text: m.error_server_generic() };
+        return;
+      }
+      toast = { kind: "success", text: m.toast_source_deleted_forever() };
+      deleteForeverId = null;
+      await invalidateAll();
+    } catch {
+      toast = { kind: "danger", text: m.error_network() };
     }
   }
 </script>
 
 <section class="sources">
-  <!-- Page head — 1:1 with docs/design/v2/ui-kit/sources-page.jsx:
-       title + count summary on the left, primary CTA next to the title,
-       optional "Recently deleted (N)" link. -->
-  <header class="page-head">
-    <div class="page-head-row top">
-      <div class="page-head-titlegroup">
-        <h1 class="page-title">Sources</h1>
-        <span class="page-head-summary">
-          <span class="metric"><b>{active.length}</b> sources</span>
-          <span class="metric"><b>{totalEventCount}</b> events</span>
-        </span>
+  {#if trashView}
+    <!-- Trash view — renders deleted sources as full SourceRow cards. -->
+    <header class="page-head">
+      <div class="page-head-row top">
+        <div class="page-head-titlegroup">
+          <h1 class="page-title">{m.sources_page_title_trash()}</h1>
+        </div>
       </div>
-      <button
-        type="button"
-        class="btn add-source"
-        onclick={() => (addOpen = true)}
-      >
-        {m.sources_cta_new_source()}
-      </button>
-      {#if deleted.length > 0}
-        <button
-          type="button"
-          class="recovery-link"
-          onclick={() => (recoveryOpen = true)}
-        >
-          {m.page_header_recently_deleted({ count: deleted.length })}
-        </button>
-      {/if}
-    </div>
-  </header>
+    </header>
 
-  <!-- Per-platform API quota banner. Important info but rarely needed
-       during normal use; collapsed under a disclosure to reduce noise on
-       the list view. User opens when wanting to check quota state
-       explicitly. -->
-  {#if data.quotaPlatforms.length > 0 || data.redditQuota}
-    <details class="quota-disclosure">
-      <summary>API usage today</summary>
-      <QuotaStatusBanner platforms={data.quotaPlatforms} redditQuota={data.redditQuota} />
-    </details>
-  {/if}
-
-  {#if active.length === 0 && deleted.length === 0}
-    <EmptyState
-      heading={m.empty_sources_heading()}
-      body={m.empty_sources_body()}
-      exampleUrl="@RickAstleyYT"
-      ctaLabel={m.sources_cta_new_source()}
-      onCta={() => (addOpen = true)}
-    />
-  {:else}
-    <div class="sources-list">
-      {#each groups as group (group.label)}
-        {@const expanded = !collapsedGroups.has(group.label)}
-        <section class="sources-group" data-expanded={expanded ? "1" : "0"}>
-          <button
-            type="button"
-            class="sources-group-head"
-            onclick={() => toggleGroup(group.label)}
-            aria-expanded={expanded}
-          >
-            <span class="sources-group-chev" aria-hidden="true">›</span>
-            <span class="kind-icon" aria-hidden="true">
-              <SourceKindIcon kind={group.kind} />
-            </span>
-            <h2 class="sources-group-title">{group.label}</h2>
-            <span class="sources-group-count">{group.items.length}</span>
-            <div class="sources-group-rule"></div>
-          </button>
-          {#if expanded}
-            <div class="sources-rows">
-              {#each group.items as source (source.id)}
-                <SourceRow
-                  {source}
-                  cooldownSec={data.cooldownBySource?.[source.id] ?? 0}
-                  pulling={data.pullingBySource?.[source.id] ?? false}
-                />
-              {/each}
-            </div>
-          {/if}
-        </section>
-      {/each}
+    <div class="trash-banner" role="status">
+      <span>{m.sources_trash_banner_text({ days: data.retentionDays })}</span>
+      <a class="trash-back" href="/sources">{m.sources_trash_back()}</a>
     </div>
 
-    <!-- The bottom-of-page <details class="deleted-sources"> recovery
-         block was removed; the InlineError used to surface 422
-         retention_expired stays here so the user sees feedback even when
-         the modal is closed. -->
+    {#if deleted.length === 0}
+      <div class="trash-empty" role="status">
+        <h2 class="trash-empty-heading">{m.sources_trash_empty_heading()}</h2>
+        <p class="trash-empty-body">{m.sources_trash_empty_body({ days: data.retentionDays })}</p>
+        <a href="/sources" class="trash-back-link">{m.sources_trash_back()}</a>
+      </div>
+    {:else}
+      <div class="trash-list">
+        {#each deleted as source (source.id)}
+          <SourceRow
+            {source}
+            cooldownSec={0}
+            pulling={false}
+            view="trash"
+            onRestore={() => restoreSource(source.id)}
+            onDeleteForever={() => askDeleteForever(source.id, source.displayName ?? source.handleUrl)}
+          />
+        {/each}
+      </div>
+    {/if}
+
     {#if restoreError}
       <InlineError message={restoreError} />
     {/if}
+  {:else}
+    <!-- Live view — normal sources page. -->
+    <header class="page-head">
+      <div class="page-head-row top">
+        <div class="page-head-titlegroup">
+          <h1 class="page-title">Sources</h1>
+          <span class="page-head-summary">
+            <span class="metric"><b>{active.length}</b> sources</span>
+            <span class="metric"><b>{totalEventCount}</b> events</span>
+          </span>
+        </div>
+        <button
+          type="button"
+          class="btn add-source"
+          onclick={() => (addOpen = true)}
+        >
+          {m.sources_cta_new_source()}
+        </button>
+        {#if deleted.length > 0}
+          <a
+            class="recovery-link"
+            href="/sources?view=trash"
+          >
+            {m.page_header_recently_deleted({ count: deleted.length })}
+          </a>
+        {/if}
+      </div>
+    </header>
+
+    <!-- Per-platform API quota banner. -->
+    {#if data.quotaPlatforms.length > 0 || data.redditQuota}
+      <details class="quota-disclosure">
+        <summary>API usage today</summary>
+        <QuotaStatusBanner platforms={data.quotaPlatforms} redditQuota={data.redditQuota} />
+      </details>
+    {/if}
+
+    {#if active.length === 0 && deleted.length === 0}
+      <EmptyState
+        heading={m.empty_sources_heading()}
+        body={m.empty_sources_body()}
+        exampleUrl="@RickAstleyYT"
+        ctaLabel={m.sources_cta_new_source()}
+        onCta={() => (addOpen = true)}
+      />
+    {:else}
+      <div class="sources-list">
+        {#each groups as group (group.label)}
+          {@const expanded = !collapsedGroups.has(group.label)}
+          <section class="sources-group" data-expanded={expanded ? "1" : "0"}>
+            <button
+              type="button"
+              class="sources-group-head"
+              onclick={() => toggleGroup(group.label)}
+              aria-expanded={expanded}
+            >
+              <span class="sources-group-chev" aria-hidden="true">></span>
+              <span class="kind-icon" aria-hidden="true">
+                <SourceKindIcon kind={group.kind} />
+              </span>
+              <h2 class="sources-group-title">{group.label}</h2>
+              <span class="sources-group-count">{group.items.length}</span>
+              <div class="sources-group-rule"></div>
+            </button>
+            {#if expanded}
+              <div class="sources-rows">
+                {#each group.items as source (source.id)}
+                  <SourceRow
+                    {source}
+                    cooldownSec={data.cooldownBySource?.[source.id] ?? 0}
+                    pulling={data.pullingBySource?.[source.id] ?? false}
+                  />
+                {/each}
+              </div>
+            {/if}
+          </section>
+        {/each}
+      </div>
+
+      {#if restoreError}
+        <InlineError message={restoreError} />
+      {/if}
+    {/if}
   {/if}
 
-  <!-- Same RecoveryDialog modal as /feed and /games. The dialog mounts
-       only when deleted.length > 0; the dialog itself still defends
-       against the empty case. -->
-  {#if deleted.length > 0}
-    <RecoveryDialog
-      open={recoveryOpen}
-      items={recoveryItems}
-      entityType="source"
-      retentionDays={data.retentionDays}
-      onClose={() => (recoveryOpen = false)}
-      onRestore={restoreSource}
-    />
-  {/if}
+  <ConfirmDialog
+    open={confirmDeleteForeverOpen}
+    message={m.sources_trash_confirm_delete_forever({ name: deleteForeverName })}
+    confirmLabel={m.sources_trash_delete_forever()}
+    onConfirm={confirmDeleteForever}
+    onCancel={() => (confirmDeleteForeverOpen = false)}
+  />
 
-  <!-- Add-source modal. /sources/new survives as a non-JS fallback; this
-       is the primary affordance from /sources. The modal owns its own
-       form state + submit; on success it calls invalidateAll() and our
-       onSuccess closure no-ops (the loader already re-runs). -->
+  <!-- Add-source modal. /sources/new survives as a non-JS fallback. -->
   <AddSourceModal
     open={addOpen}
     kindMatrix={data.kindMatrix}
@@ -338,6 +365,10 @@
     defaultAutoImport={data.defaultAutoImport}
     onClose={() => (addOpen = false)}
   />
+
+  {#if toast}
+    <Toast kind={toast.kind} text={toast.text} onclose={() => (toast = null)} />
+  {/if}
 </section>
 
 <style>
@@ -377,9 +408,6 @@
     line-height: var(--lh-tight);
     letter-spacing: -0.01em;
   }
-  /* Compact metric chips — replaced the verbose "N connected · N events
-   * imported" string. Each metric is a small pill that reads at a
-   * glance. */
   .page-head-summary {
     display: inline-flex;
     align-items: center;
@@ -399,13 +427,6 @@
     font-weight: var(--w-sb);
   }
 
-  /* "+ Add source" — ghost-styled primary CTA inline with the title. The
-   * solid-accent fill was visually heavier than the prototype intends.
-   * Matches prototype `.btn.add-event`
-   * (docs/design/v2/ui-kit/index.html lines 365-389) used across feed /
-   * sources for the additive primary action. The leading "+" carries the
-   * accent through `::first-letter` so the affordance reads as additive
-   * without a competing solid block of color. */
   .btn.add-source {
     display: inline-flex;
     align-items: center;
@@ -442,11 +463,6 @@
     color: var(--accent-strong);
   }
   .recovery-link {
-    background: transparent;
-    border: none;
-    padding: 0;
-    font: inherit;
-    cursor: pointer;
     font-size: var(--t-13);
     color: var(--text-3);
     text-decoration: underline;
@@ -455,8 +471,73 @@
     color: var(--accent);
   }
 
-  /* Sources list — flex column of platform groups, generously spaced
-   * (--s-7 between groups, --s-2 between rows in a group). */
+  /* Trash banner — same visual language as /feed's .trash-banner. */
+  .trash-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-2);
+    padding: var(--s-2) var(--s-4);
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--accent-strong);
+    border-radius: var(--r-sm);
+    font-size: var(--t-13);
+  }
+  .trash-back {
+    color: var(--accent);
+    text-decoration: underline;
+    font-weight: var(--w-sb);
+  }
+  .trash-back:hover {
+    color: var(--accent-strong);
+  }
+
+  /* Trash empty state. */
+  .trash-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--s-3);
+    padding: var(--s-8) var(--s-4);
+    max-width: 560px;
+    margin: 0 auto;
+  }
+  .trash-empty-heading {
+    margin: 0;
+    font-family: var(--f-sans);
+    font-size: var(--t-22);
+    font-weight: var(--w-sb);
+    color: var(--text);
+    letter-spacing: -0.01em;
+    line-height: var(--lh-tight);
+  }
+  .trash-empty-body {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--t-14);
+    line-height: var(--lh-body);
+  }
+  .trash-back-link {
+    color: var(--accent);
+    text-decoration: underline;
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
+  }
+  .trash-back-link:hover {
+    color: var(--accent-strong);
+  }
+
+  /* Trash list — flex column of deleted SourceRow cards. */
+  .trash-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-2);
+    padding-bottom: var(--s-6);
+  }
+
+  /* Sources list — flex column of platform groups. */
   .sources-list {
     display: flex;
     flex-direction: column;
@@ -467,7 +548,6 @@
     display: flex;
     flex-direction: column;
   }
-  /* Group head is a button — click to collapse/expand its rows. */
   .sources-group-head {
     width: 100%;
     display: flex;
@@ -533,18 +613,12 @@
     gap: var(--s-2);
   }
 
-  /* Per-platform group head kind-icon color — mirrors the SourceRow's
-   * --card-accent so the group divider reads in the same color as its
-   * member rows. */
   .sources-group:nth-of-type(1) .sources-group-head .kind-icon { color: var(--k-youtube); }
   .sources-group:nth-of-type(2) .sources-group-head .kind-icon { color: var(--k-reddit); }
   .sources-group:nth-of-type(3) .sources-group-head .kind-icon { color: var(--k-twitter); }
   .sources-group:nth-of-type(4) .sources-group-head .kind-icon { color: var(--k-telegram); }
   .sources-group:nth-of-type(5) .sources-group-head .kind-icon { color: var(--k-discord); }
 
-  /* Quota disclosure — visually consistent with .source-row chrome:
-   * surface fill, hairline border, --r-md corners. Summary row has a
-   * tiny accent chevron that rotates on open and a mono label. */
   .quota-disclosure {
     border: 1px solid var(--border-hairline);
     border-radius: var(--r-md);
@@ -575,7 +649,7 @@
     display: none;
   }
   .quota-disclosure > summary::before {
-    content: "›";
+    content: ">";
     display: inline-flex;
     color: var(--accent);
     font-family: var(--f-sans);
