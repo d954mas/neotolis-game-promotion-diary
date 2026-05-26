@@ -123,16 +123,10 @@ visual tokens):
 }
 ```
 
-**Add to `src/app.html`** (inside `<head>`, before `%sveltekit.head%`):
-```html
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet"
-  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
-```
-
-System stack stays as `--f-sans` / `--f-mono` fallback — graceful
-degradation on font-load failure.
+**Fonts:** system font stack only (no external requests). `--f-sans` and
+`--f-mono` in `src/app.css` use OS-native fonts. Google Fonts links were
+removed from `src/app.html` per the privacy/self-host principle — the
+self-host operator's visitors must not leak IPs to third parties.
 
 ### 2. Chrome — `AppHeader.svelte` + `Nav.svelte` + `+layout.svelte`
 

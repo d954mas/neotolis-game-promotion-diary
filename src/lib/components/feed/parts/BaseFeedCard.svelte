@@ -205,6 +205,19 @@
   data-testid="feed-card"
   data-event-id={event.id}
   style="--card-accent: var(--k-{event.kind}); --kind-color: var(--k-{event.kind});"
+  role="button"
+  tabindex="0"
+  onkeydown={(e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      if ((e.target as Element).closest(".card-select, .card-actions, .card-menu")) return;
+      e.preventDefault();
+      if (anySelected) {
+        onToggleSelect?.(event.id, !selected);
+      } else if (onOpenDetail) {
+        onOpenDetail(event.id);
+      }
+    }
+  }}
   ontouchstart={startPress}
   ontouchend={cancelPress}
   ontouchmove={cancelPress}
