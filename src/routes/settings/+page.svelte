@@ -358,13 +358,12 @@
   .signout:hover {
     background: var(--accent-soft);
   }
-  .signout-all {
-    color: var(--danger);
-    border-color: var(--danger);
-  }
+  /* "Sign out from all devices" — same neutral ghost as regular
+   * sign-out (P2-8: danger styling drew too much visual weight for a
+   * rarely-used action). ConfirmDialog still gates the destructive
+   * action; the button itself doesn't need to scream. */
   .signout-all:hover {
-    background: var(--danger);
-    color: #fff;
+    background: var(--accent-soft);
   }
   .sub-section {
     margin-top: var(--s-4);
