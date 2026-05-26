@@ -359,6 +359,7 @@
   "confirm_item_delete": "Remove this tracked video? You can restore it within 60 days.",
   "confirm_key_remove": "Remove your Steam Web API key? Wishlist auto-fetch won't work until you save a new key. This cannot be undone.",
   "confirm_key_replace": "Replace your Steam Web API key? The previous key will be permanently overwritten. This is recorded in the audit log.",
+  "sign_out_all_failed": "Sign out failed. Please try again.",
   "confirm_signout_all": "Sign out from every device? You'll need to sign in again everywhere.",
   "confirm_speedbump_acknowledge": "I understand this is permanent",
   "confirm_source_remove": "Remove \"{display_name}\"? Existing events stay in your feed but will keep pointing at this retired source. You can restore the source within 60 days from the deleted-sources view.",

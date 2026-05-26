@@ -34,6 +34,7 @@
   const currentSessionId = $derived(data.currentSessionId as string);
 
   let confirmSignOutAllOpen = $state(false);
+  let signOutAllError = $state<string | null>(null);
 
   // Account-management state (merged from former /settings/account route).
   let exportInProgress = $state(false);
@@ -77,8 +78,17 @@
 
   async function handleSignOutAllConfirm(): Promise<void> {
     confirmSignOutAllOpen = false;
-    await fetch("/api/me/sessions/all", { method: "POST" });
-    await goto("/", { invalidateAll: true });
+    signOutAllError = null;
+    try {
+      const res = await fetch("/api/me/sessions/all", { method: "POST" });
+      if (!res.ok) {
+        signOutAllError = m.sign_out_all_failed();
+        return;
+      }
+      await goto("/", { invalidateAll: true });
+    } catch {
+      signOutAllError = m.sign_out_all_failed();
+    }
   }
 
   async function handleExport(): Promise<void> {
@@ -151,6 +161,9 @@
         {m.sign_out_all_devices()}
       </button>
     </div>
+    {#if signOutAllError}
+      <InlineError message={signOutAllError} />
+    {/if}
 
     <div class="sub-section">
       <h3>{m.settings_account_section_export_title()}</h3>

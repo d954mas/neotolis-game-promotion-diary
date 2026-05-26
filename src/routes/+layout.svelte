@@ -75,8 +75,13 @@
   }
 
   async function handleSignOutAllDevices(): Promise<void> {
-    await fetch("/api/me/sessions/all", { method: "POST" });
-    await goto("/", { invalidateAll: true });
+    try {
+      const res = await fetch("/api/me/sessions/all", { method: "POST" });
+      if (!res.ok) return;
+      await goto("/", { invalidateAll: true });
+    } catch {
+      // Network error — stay on the current page so the user can retry.
+    }
   }
 
   // The sticky chrome is a SINGLE wrapper element, not two stacked
