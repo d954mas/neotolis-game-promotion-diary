@@ -18,6 +18,7 @@ import {
   getGameByIdIncludingDeleted,
   updateGame,
   deriveReleaseInfoForGames,
+  hardDeleteGame,
 } from "../../src/lib/server/services/games.js";
 import { toGameDto } from "../../src/lib/server/dto.js";
 import { seedUserDirectly } from "./helpers.js";
@@ -395,5 +396,99 @@ describe("games release info derived from listings (denorm fix V-2)", () => {
     const userA = await seedUserDirectly({ email: "rd-empty-input@test.local" });
     const map = await deriveReleaseInfoForGames(userA.id, []);
     expect(map.size).toBe(0);
+  });
+});
+
+// hardDeleteGame — permanent removal of soft-deleted game + cascaded children.
+describe("hardDeleteGame — permanent delete of soft-deleted games", () => {
+  it("soft-delete then hard-delete removes the game row from the DB", async () => {
+    const userA = await seedUserDirectly({ email: "hd-game-1@test.local" });
+    const game = await createGame(userA.id, { title: "Hard Del Game" }, "127.0.0.1");
+    await softDeleteGame(userA.id, game.id, "127.0.0.1");
+
+    await hardDeleteGame(userA.id, game.id, "127.0.0.1");
+
+    const rows = await db.select().from(games).where(eq(games.id, game.id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("hard-delete on a NON-soft-deleted game throws NotFoundError", async () => {
+    const userA = await seedUserDirectly({ email: "hd-game-2@test.local" });
+    const game = await createGame(userA.id, { title: "Live Game" }, "127.0.0.1");
+
+    await expect(
+      hardDeleteGame(userA.id, game.id, "127.0.0.1"),
+    ).rejects.toBeInstanceOf(NotFoundError);
+
+    // Row is still in the DB.
+    const rows = await db.select().from(games).where(eq(games.id, game.id));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("cross-tenant hard-delete throws NotFoundError (404, never 403)", async () => {
+    const userA = await seedUserDirectly({ email: "hd-game-3a@test.local" });
+    const userB = await seedUserDirectly({ email: "hd-game-3b@test.local" });
+    const game = await createGame(userA.id, { title: "XT Game" }, "127.0.0.1");
+    await softDeleteGame(userA.id, game.id, "127.0.0.1");
+
+    const err = await hardDeleteGame(userB.id, game.id, "127.0.0.1").catch((e) => e);
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.code).toBe("not_found");
+    expect(err.status).toBe(404);
+    expect(err.message).not.toMatch(/forbidden|permission/i);
+
+    // Row is still intact for userA.
+    const rows = await db.select().from(games).where(eq(games.id, game.id));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("hard-delete writes audit row game.delete_forever", async () => {
+    const userA = await seedUserDirectly({ email: "hd-game-4@test.local" });
+    const game = await createGame(userA.id, { title: "Audit Del Game" }, "127.0.0.1");
+    await softDeleteGame(userA.id, game.id, "127.0.0.1");
+
+    await hardDeleteGame(userA.id, game.id, "127.0.0.1");
+
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(eq(auditLog.userId, userA.id), eq(auditLog.action, "game.delete_forever")),
+      );
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.metadata).toMatchObject({ gameId: game.id });
+  });
+
+  it("hard-delete game with attached listings cascades (listings also removed)", async () => {
+    const userA = await seedUserDirectly({ email: "hd-game-5@test.local" });
+    const game = await createGame(userA.id, { title: "Cascade Game" }, "127.0.0.1");
+
+    // Attach a Steam listing to the game.
+    await db.insert(gameSteamListings).values({
+      userId: userA.id,
+      gameId: game.id,
+      appId: 9001,
+      label: "Cascade Test",
+    });
+
+    const listingsBefore = await db
+      .select()
+      .from(gameSteamListings)
+      .where(eq(gameSteamListings.gameId, game.id));
+    expect(listingsBefore).toHaveLength(1);
+
+    await softDeleteGame(userA.id, game.id, "127.0.0.1");
+    await hardDeleteGame(userA.id, game.id, "127.0.0.1");
+
+    // Game row gone.
+    const gameRows = await db.select().from(games).where(eq(games.id, game.id));
+    expect(gameRows).toHaveLength(0);
+
+    // Listing rows also gone (hard-delete cascades to children).
+    const listingsAfter = await db
+      .select()
+      .from(gameSteamListings)
+      .where(eq(gameSteamListings.gameId, game.id));
+    expect(listingsAfter).toHaveLength(0);
   });
 });
