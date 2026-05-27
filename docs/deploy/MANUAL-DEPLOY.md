@@ -20,11 +20,14 @@ cd /opt/diary
 git pull                                                            # if compose/.env changed
 nano .env                                                           # add/change any new env vars
 docker compose -f docker-compose.prod.yml pull                      # fetch new image from GHCR
-docker compose -f docker-compose.prod.yml up -d                     # restart app/worker/scheduler
+docker compose -f docker-compose.prod.yml \
+  -f docker-compose.monitoring.yml up -d                            # restart all (app + monitoring)
 docker restart diary-nginx-1                                        # workaround: nginx upstream IP cache
 exit
 curl -fsS https://neotolis-diary.dev/healthz                        # 200 → live
 ```
+
+> Omit `-f docker-compose.monitoring.yml` if monitoring is not enabled.
 
 ---
 
@@ -80,8 +83,10 @@ The Docker image holds the actual app code, so a routine deploy does
 the new release:
 
 - `docker-compose.prod.yml` — service shape changed
+- `docker-compose.monitoring.yml` — monitoring overlay changed
 - `.env.example` — new env vars to mirror into `.env`
 - `nginx/nginx.conf.template` — proxy config changed
+- `monitoring/*` — Prometheus/Loki/Promtail/Grafana configs changed
 - `docs/deploy/*` — operator-facing docs
 
 ```bash
@@ -134,13 +139,38 @@ Add any new keys to `.env`. **Phase 03.1 (Reddit) added:**
 >     http://user:pass@host:port` and `--ssl-no-revoke` before saving
 >     to `.env`; if THAT returns 200, you're set.
 
+**Phase 07 (Observability) added:**
+
+| Var | Required? | What to set |
+|---|---|---|
+| `METRICS_BEARER_TOKEN` | yes for monitoring | `openssl rand -hex 32`. Write the SAME value to `monitoring/prometheus/metrics-token` (one line, no trailing newline). Without it `/metrics` returns 404. |
+| `GF_SECURITY_ADMIN_PASSWORD` | yes for monitoring | Strong password for Grafana UI. Compose refuses to start without it. |
+| `GF_SERVER_ROOT_URL` | prod with nginx | `https://neotolis-diary.dev/grafana/` — Grafana needs to know its public URL for redirects. Bare-port selfhost can omit (defaults to `http://localhost:3001/`). |
+| `GF_SERVER_SERVE_FROM_SUB_PATH` | prod with nginx | `true` — tells Grafana it's served under `/grafana/` path. Omit for bare-port selfhost. |
+| `ALERT_WEBHOOK_URL` | no | Discord/Telegram webhook for alert notifications. Empty = alerts silently disabled. |
+| `COMPOSE_NETWORK` | conditional | Override if your compose project dir isn't `/opt/diary`. Default `diary_default` matches the documented path. |
+
+```bash
+# Generate and write metrics token
+openssl rand -hex 32 > monitoring/prometheus/metrics-token
+echo "METRICS_BEARER_TOKEN=$(cat monitoring/prometheus/metrics-token)" >> .env
+
+# Generate Grafana password
+echo "GF_SECURITY_ADMIN_PASSWORD=$(openssl rand -hex 16)" >> .env
+
+# Prod nginx sub-path config
+echo "GF_SERVER_ROOT_URL=https://neotolis-diary.dev/grafana/" >> .env
+echo "GF_SERVER_SERVE_FROM_SUB_PATH=true" >> .env
+```
+
 Save and close.
 
 ### 5. Pull the new image and restart
 
 ```bash
 docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml \
+  -f docker-compose.monitoring.yml up -d
 ```
 
 What this does:
@@ -148,16 +178,20 @@ What this does:
 - `pull` — fetches the new `ghcr.io/d954mas/neotolis-diary:latest`
   built by master CI.
 - `up -d` — recreates the `app`, `worker`, `scheduler` containers with
-  the new image. Postgres + nginx stay up.
+  the new image. Postgres + nginx stay up. Monitoring containers
+  (Prometheus, Loki, Grafana, Promtail) start if not already running.
 - App container boot runs `runMigrations()` automatically (advisory-
   locked, idempotent — see `src/server.ts`). Schema changes land here.
+
+> Omit `-f docker-compose.monitoring.yml` to run without monitoring.
 
 **Env-only changes (same image).** If you only edited `.env` and didn't
 pull a new image, `up -d` will skip the restart because Compose sees no
 config drift. Force-recreate the affected services explicitly:
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d --force-recreate app worker scheduler
+docker compose -f docker-compose.prod.yml \
+  -f docker-compose.monitoring.yml up -d --force-recreate app worker scheduler
 ```
 
 (Postgres and nginx never need env-driven recreate from this guide.)
@@ -192,6 +226,24 @@ curl -fsS https://neotolis-diary.dev/healthz
 
 Should return `200 OK`. If you see 502 — go back to Step 6.
 
+For Phase 07 (Observability), also verify:
+
+- `/metrics` responds inside the container (bearer-gated, not exposed externally):
+  ```bash
+  TOKEN=$(cat monitoring/prometheus/metrics-token)
+  docker compose -f docker-compose.prod.yml exec app \
+    wget -qO- --header="Authorization: Bearer $TOKEN" http://localhost:3000/metrics | head -5
+  ```
+- Prometheus scrapes successfully:
+  ```bash
+  docker exec diary-prometheus-1 \
+    wget -qO- http://localhost:9090/api/v1/targets 2>/dev/null | grep -o '"health":"[^"]*"'
+  ```
+- Grafana accessible at `https://neotolis-diary.dev/grafana/` (login: `admin` + `GF_SECURITY_ADMIN_PASSWORD` from `.env`).
+  Two dashboards auto-provisioned: **Neotolis Overview** + **Neotolis Logs**.
+  Three alert rules: error-rate-spike, high-latency-p95, memory-pressure.
+- Loki receiving logs: in Grafana Explore → Loki → `{service="app"}` should show app logs.
+
 For Phase 03.1 specifically, also verify:
 
 - `/admin` → Reddit Ops panel renders (operator-visible queue stats).
@@ -218,6 +270,14 @@ docker restart diary-nginx-1
 The `docker-compose.prod.yml` uses `${IMAGE_TAG:-latest}` for the app
 image — overriding `IMAGE_TAG` in `.env` pins to a specific build. Find
 the previous sha in `git log master` or in GHCR's package tags page.
+
+**Monitoring rollback** — monitoring is fully isolated from app:
+
+```bash
+docker compose -f docker-compose.monitoring.yml down    # stop monitoring, app unaffected
+docker compose -f docker-compose.prod.yml \
+  -f docker-compose.monitoring.yml up -d                # bring it back
+```
 
 Schema-forward migrations cannot be rolled back via this path —
 investigate the migration that broke instead. Pre-restore the DB from

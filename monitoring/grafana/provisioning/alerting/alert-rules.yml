@@ -8,7 +8,7 @@ groups:
     rules:
       - uid: error-rate-spike
         title: "Error Rate Spike (>5% 5xx in 5min)"
-        condition: C
+        condition: A
         data:
           - refId: A
             relativeTimeRange:
@@ -16,29 +16,14 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: sum(rate(neotolis_http_requests_total{status_code=~"5.."}[5m])) or vector(0)
+              expr: >-
+                (sum(rate(neotolis_http_requests_total{status_code=~"5.."}[5m])) or vector(0))
+                /
+                (clamp_min(sum(rate(neotolis_http_requests_total[5m])), 1))
+                > 0.05
               instant: false
               intervalMs: 15000
               refId: A
-          - refId: B
-            relativeTimeRange:
-              from: 300
-              to: 0
-            datasourceUid: prometheus
-            model:
-              expr: sum(rate(neotolis_http_requests_total[5m])) or vector(0)
-              instant: false
-              intervalMs: 15000
-              refId: B
-          - refId: C
-            relativeTimeRange:
-              from: 300
-              to: 0
-            datasourceUid: "__expr__"
-            model:
-              type: math
-              expression: "$A / clamp_min($B, 1) > 0.05"
-              refId: C
         for: 5m
         noDataState: OK
         execErrState: OK
