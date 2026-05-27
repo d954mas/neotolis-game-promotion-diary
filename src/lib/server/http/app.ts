@@ -11,6 +11,7 @@
 // Better Auth web-standard handler that receives a Request (Hono's
 // c.req.raw) and returns a Response.
 
+import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { proxyTrust } from "./middleware/proxy-trust.js";
@@ -78,15 +79,21 @@ export function createApp(): Hono<AppContext> {
     }),
   );
 
-  // c.req.routePath (pattern) not c.req.path (resolved) avoids
-  // high-cardinality label explosion on parameterized routes.
-  // try/finally so thrown errors (the 5xx we most care about) are recorded.
+  // Skip infra endpoints from recording — /healthz, /readyz, /metrics
+  // are high-frequency (Docker healthcheck, Prometheus scrape) and would
+  // pollute RPS/latency dashboards with self-referencing noise.
+  // "unmatched" fallback caps cardinality for scanner/bot 404s.
+  const SKIP_METRICS = new Set(["/healthz", "/readyz", "/metrics"]);
   app.use("*", async (c, next) => {
+    if (SKIP_METRICS.has(c.req.path)) {
+      await next();
+      return;
+    }
     const end = httpRequestDuration.startTimer();
     try {
       await next();
     } finally {
-      const route = c.req.routePath || c.req.path;
+      const route = c.req.routePath || "unmatched";
       const labels = {
         method: c.req.method,
         route,
@@ -123,8 +130,9 @@ export function createApp(): Hono<AppContext> {
     if (!token) {
       return c.notFound();
     }
-    const auth = c.req.header("authorization");
-    if (auth !== `Bearer ${token}`) {
+    const expected = Buffer.from(`Bearer ${token}`);
+    const received = Buffer.from(c.req.header("authorization") ?? "");
+    if (expected.length !== received.length || !timingSafeEqual(expected, received)) {
       return c.notFound();
     }
 

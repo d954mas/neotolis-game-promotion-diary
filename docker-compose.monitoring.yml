@@ -70,6 +70,7 @@ services:
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       GF_UNIFIED_ALERTING_ENABLED: "true"
       GF_ALERTING_ENABLED: "false"
+      GF_SECURITY_ALLOW_EMBEDDING: "false"
       # Placeholder default keeps Grafana provisioning happy when no webhook
       # is configured — POST to localhost:1 gets connection-refused silently.
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-http://localhost:1/no-webhook-configured}
