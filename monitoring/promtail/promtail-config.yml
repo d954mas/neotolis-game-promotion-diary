@@ -9,12 +9,20 @@ clients:
 
 scrape_configs:
   - job_name: docker
-    static_configs:
-      - targets:
-          - localhost
-        labels:
-          job: docker
-          __path__: /var/lib/docker/containers/*/*.log
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 15s
+    relabel_configs:
+      # Only collect logs from containers in the neotolis compose project.
+      # Compose sets com.docker.compose.project on every container it manages.
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_project"]
+        regex: "diary|neotolis.*"
+        action: keep
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_service"]
+        target_label: service
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(.*)"
+        target_label: container
     pipeline_stages:
       - docker: {}
       - json:

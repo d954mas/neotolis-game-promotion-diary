@@ -49,7 +49,6 @@ services:
     restart: unless-stopped
     volumes:
       - ./monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     command:
       - "-config.file=/etc/promtail/config.yml"
@@ -66,17 +65,21 @@ services:
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:?set GF_SECURITY_ADMIN_PASSWORD in .env}
-      GF_SERVER_ROOT_URL: "https://${DOMAIN}/grafana/"
-      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      # With nginx (prod): https://DOMAIN/grafana/ via proxy_pass.
+      # Without nginx (selfhost bare-port): http://host:3001/ direct.
+      # Operator overrides GF_SERVER_ROOT_URL in .env if needed;
+      # default works for nginx path (prod compose).
+      GF_SERVER_ROOT_URL: ${GF_SERVER_ROOT_URL:-http://localhost:3001/}
+      GF_SERVER_SERVE_FROM_SUB_PATH: ${GF_SERVER_SERVE_FROM_SUB_PATH:-false}
       GF_UNIFIED_ALERTING_ENABLED: "true"
       GF_ALERTING_ENABLED: "false"
       GF_SECURITY_ALLOW_EMBEDDING: "false"
-      # Placeholder default keeps Grafana provisioning happy when no webhook
-      # is configured — POST to localhost:1 gets connection-refused silently.
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-http://localhost:1/no-webhook-configured}
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana_data:/var/lib/grafana
+    ports:
+      - "${GF_PORT:-3001}:3000"
     deploy:
       resources:
         limits:

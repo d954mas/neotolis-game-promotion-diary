@@ -34,8 +34,11 @@ describe("monitoring config structural validation", () => {
   // Promtail
   describe("promtail/promtail-config.yml", () => {
     const content = readFileSync(join(MONITORING_ROOT, "promtail", "promtail-config.yml"), "utf8");
-    it("reads Docker json-file logs", () => {
-      expect(content).toContain("/var/lib/docker/containers");
+    it("uses Docker service discovery", () => {
+      expect(content).toContain("docker_sd_configs");
+    });
+    it("filters to neotolis compose project only", () => {
+      expect(content).toContain("com_docker_compose_project");
     });
     it("pushes to Loki", () => {
       expect(content).toContain("http://loki:3100/loki/api/v1/push");
