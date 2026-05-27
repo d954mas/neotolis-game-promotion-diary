@@ -37,8 +37,9 @@ describe("monitoring config structural validation", () => {
     it("uses Docker service discovery", () => {
       expect(content).toContain("docker_sd_configs");
     });
-    it("filters to neotolis compose project only", () => {
-      expect(content).toContain("com_docker_compose_project");
+    it("filters by compose service name", () => {
+      expect(content).toContain("com_docker_compose_service");
+      expect(content).toContain("app|worker|scheduler|nginx|postgres");
     });
     it("pushes to Loki", () => {
       expect(content).toContain("http://loki:3100/loki/api/v1/push");
