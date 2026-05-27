@@ -48,6 +48,7 @@ import {
   httpRequestTotal,
   queueDepth,
   collectQueueDepths,
+  collectAdapterStats,
 } from "../metrics.js";
 
 export type AppContext = {
@@ -145,6 +146,12 @@ export function createApp(): Hono<AppContext> {
       }
     } catch {
       // pgboss schema may not exist yet — skip queue metrics silently.
+    }
+
+    try {
+      await collectAdapterStats(pool);
+    } catch {
+      // adapter tables may not exist yet — skip adapter metrics silently.
     }
 
     const metrics = await register.metrics();

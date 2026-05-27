@@ -35,6 +35,64 @@ export const queueDepth = new Gauge({
   registers: [register],
 });
 
+export const activeUsers24h = new Gauge({
+  name: "neotolis_active_users_24h",
+  help: "Distinct logged-in users with session activity in last 24h",
+  registers: [register],
+});
+
+export const adapterQuotaUsed24h = new Gauge({
+  name: "neotolis_adapter_quota_used_24h",
+  help: "API quota units consumed by adapter in last 24h",
+  labelNames: ["adapter"] as const,
+  registers: [register],
+});
+
+export const adapterJobsDone24h = new Gauge({
+  name: "neotolis_adapter_jobs_done_24h",
+  help: "Adapter refresh jobs completed in last 24h",
+  labelNames: ["adapter", "type"] as const,
+  registers: [register],
+});
+
+export async function collectAdapterStats(pool: Pool): Promise<void> {
+  const dau = await pool.query<{ count: string }>(
+    `SELECT COUNT(DISTINCT user_id)::int AS count
+     FROM session
+     WHERE updated_at > NOW() - INTERVAL '24 hours'
+       AND expires_at > NOW()`,
+  );
+  activeUsers24h.set(Number(dau.rows[0]?.count ?? 0));
+
+  const ytQuota = await pool.query<{ units: string }>(
+    `SELECT COALESCE(SUM(estimated_units), 0)::int AS units
+     FROM youtube_service_quota_usage
+     WHERE date_pacific = (NOW() AT TIME ZONE 'America/Los_Angeles')::date`,
+  );
+  adapterQuotaUsed24h.set({ adapter: "youtube" }, Number(ytQuota.rows[0]?.units ?? 0));
+
+  const redditQuota = await pool.query<{ units: string }>(
+    `SELECT COALESCE(SUM((metadata->>'entries_processed')::int), 0) AS units
+     FROM audit_log
+     WHERE action = 'reddit.queue_drained'
+       AND created_at > NOW() - INTERVAL '24 hours'`,
+  );
+  adapterQuotaUsed24h.set({ adapter: "reddit" }, Number(redditQuota.rows[0]?.units ?? 0));
+
+  const jobs = await pool.query<{ adapter_kind: string; type: string; count: string }>(
+    `SELECT adapter_kind, type, COUNT(*)::int AS count
+     FROM adapter_refresh_queue
+     WHERE status = 'done'
+       AND last_attempt_at >= NOW() - INTERVAL '24 hours'
+     GROUP BY adapter_kind, type`,
+  );
+  adapterJobsDone24h.reset();
+  for (const row of jobs.rows) {
+    const adapter = row.adapter_kind === "youtube_channel" ? "youtube" : "reddit";
+    adapterJobsDone24h.set({ adapter, type: row.type }, Number(row.count));
+  }
+}
+
 // Direct SQL against pgboss schema — avoids lazy-boot dependency on the
 // boss singleton (worker may not be running in the app role).
 export async function collectQueueDepths(
