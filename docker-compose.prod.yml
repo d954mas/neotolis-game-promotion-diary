@@ -59,6 +59,8 @@ services:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/neotolis
     depends_on:
       postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["NONE"]
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
@@ -74,6 +76,8 @@ services:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/neotolis
     depends_on:
       postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["NONE"]
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }

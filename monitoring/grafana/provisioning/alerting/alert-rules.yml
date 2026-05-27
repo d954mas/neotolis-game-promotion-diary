@@ -69,7 +69,7 @@ groups:
               intervalMs: 15000
               refId: A
         for: 5m
-        noDataState: Alerting
+        noDataState: OK
         execErrState: OK
         annotations:
           summary: "Node.js RSS memory exceeds 400MB (tune threshold in Grafana UI if your container limit differs)"

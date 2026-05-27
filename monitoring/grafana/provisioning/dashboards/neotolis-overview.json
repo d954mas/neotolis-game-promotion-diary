@@ -16,13 +16,16 @@
       "id": 1,
       "type": "timeseries",
       "title": "Requests Per Second",
+      "datasource": { "uid": "prometheus", "type": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "targets": [
         {
           "datasource": { "uid": "prometheus", "type": "prometheus" },
           "expr": "sum(rate(neotolis_http_requests_total[5m]))",
           "legendFormat": "RPS",
-          "refId": "A"
+          "refId": "A",
+          "range": true,
+          "instant": false
         }
       ],
       "fieldConfig": {
@@ -41,25 +44,32 @@
       "id": 2,
       "type": "timeseries",
       "title": "Latency Percentiles",
+      "datasource": { "uid": "prometheus", "type": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "targets": [
         {
           "datasource": { "uid": "prometheus", "type": "prometheus" },
           "expr": "histogram_quantile(0.50, sum(rate(neotolis_http_request_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p50",
-          "refId": "A"
+          "refId": "A",
+          "range": true,
+          "instant": false
         },
         {
           "datasource": { "uid": "prometheus", "type": "prometheus" },
           "expr": "histogram_quantile(0.95, sum(rate(neotolis_http_request_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p95",
-          "refId": "B"
+          "refId": "B",
+          "range": true,
+          "instant": false
         },
         {
           "datasource": { "uid": "prometheus", "type": "prometheus" },
           "expr": "histogram_quantile(0.99, sum(rate(neotolis_http_request_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p99",
-          "refId": "C"
+          "refId": "C",
+          "range": true,
+          "instant": false
         }
       ],
       "fieldConfig": {
@@ -78,13 +88,16 @@
       "id": 3,
       "type": "gauge",
       "title": "Error Rate (5xx)",
+      "datasource": { "uid": "prometheus", "type": "prometheus" },
       "gridPos": { "h": 8, "w": 6, "x": 0, "y": 8 },
       "targets": [
         {
           "datasource": { "uid": "prometheus", "type": "prometheus" },
           "expr": "(sum(rate(neotolis_http_requests_total{status_code=~\"5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(neotolis_http_requests_total[5m])) or vector(1), 1)",
           "legendFormat": "5xx ratio",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -114,19 +127,24 @@
       "id": 4,
       "type": "timeseries",
       "title": "Node.js Memory (RSS + Heap)",
+      "datasource": { "uid": "prometheus", "type": "prometheus" },
       "gridPos": { "h": 8, "w": 6, "x": 6, "y": 8 },
       "targets": [
         {
           "datasource": { "uid": "prometheus", "type": "prometheus" },
           "expr": "neotolis_process_resident_memory_bytes",
           "legendFormat": "RSS",
-          "refId": "A"
+          "refId": "A",
+          "range": true,
+          "instant": false
         },
         {
           "datasource": { "uid": "prometheus", "type": "prometheus" },
           "expr": "neotolis_nodejs_heap_size_used_bytes",
           "legendFormat": "Heap Used",
-          "refId": "B"
+          "refId": "B",
+          "range": true,
+          "instant": false
         }
       ],
       "fieldConfig": {
@@ -145,13 +163,16 @@
       "id": 5,
       "type": "timeseries",
       "title": "Node.js CPU",
+      "datasource": { "uid": "prometheus", "type": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "targets": [
         {
           "datasource": { "uid": "prometheus", "type": "prometheus" },
           "expr": "rate(neotolis_process_cpu_seconds_total[5m])",
           "legendFormat": "CPU seconds/s",
-          "refId": "A"
+          "refId": "A",
+          "range": true,
+          "instant": false
         }
       ],
       "fieldConfig": {
@@ -170,13 +191,16 @@
       "id": 6,
       "type": "timeseries",
       "title": "Event Loop Lag",
+      "datasource": { "uid": "prometheus", "type": "prometheus" },
       "gridPos": { "h": 8, "w": 6, "x": 0, "y": 16 },
       "targets": [
         {
           "datasource": { "uid": "prometheus", "type": "prometheus" },
           "expr": "neotolis_nodejs_eventloop_lag_seconds",
           "legendFormat": "lag",
-          "refId": "A"
+          "refId": "A",
+          "range": true,
+          "instant": false
         }
       ],
       "fieldConfig": {
@@ -195,13 +219,16 @@
       "id": 7,
       "type": "timeseries",
       "title": "Active Handles",
+      "datasource": { "uid": "prometheus", "type": "prometheus" },
       "gridPos": { "h": 8, "w": 6, "x": 6, "y": 16 },
       "targets": [
         {
           "datasource": { "uid": "prometheus", "type": "prometheus" },
           "expr": "neotolis_nodejs_active_handles_total",
           "legendFormat": "handles",
-          "refId": "A"
+          "refId": "A",
+          "range": true,
+          "instant": false
         }
       ],
       "fieldConfig": {
@@ -220,13 +247,16 @@
       "id": 8,
       "type": "timeseries",
       "title": "pg-boss Queue Depth",
+      "datasource": { "uid": "prometheus", "type": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
       "targets": [
         {
           "datasource": { "uid": "prometheus", "type": "prometheus" },
           "expr": "neotolis_pgboss_queue_depth",
           "legendFormat": "{{queue}} ({{state}})",
-          "refId": "A"
+          "refId": "A",
+          "range": true,
+          "instant": false
         }
       ],
       "fieldConfig": {
