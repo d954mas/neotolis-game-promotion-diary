@@ -82,6 +82,9 @@ export const REDACT_PATHS = [
   "req.headers.user-agent",
   "req.headers.authorization",
   "req.headers.cookie",
+  // Phase 7 — Observability. Webhook URL may embed auth tokens in path/query.
+  "*.ALERT_WEBHOOK_URL",
+  "*.alertWebhookUrl",
 ];
 
 export const logger = pino({

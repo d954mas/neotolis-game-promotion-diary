@@ -40,6 +40,12 @@ import { auth } from "../../auth.js";
 import { migrationsApplied } from "../db/migrate.js";
 import { pool } from "../db/client.js";
 import { logger } from "../logger.js";
+import {
+  register,
+  httpRequestDuration,
+  httpRequestTotal,
+  queueDepth,
+} from "../metrics.js";
 
 export type AppContext = {
   Variables: {
@@ -70,6 +76,22 @@ export function createApp(): Hono<AppContext> {
     }),
   );
 
+  // Prometheus HTTP timing middleware. Records duration + counter for every
+  // request. Uses c.req.routePath (pattern) not c.req.path (resolved) to
+  // avoid high-cardinality label explosion (RESEARCH Pitfall 2).
+  app.use("*", async (c, next) => {
+    const end = httpRequestDuration.startTimer();
+    await next();
+    const route = c.req.routePath || c.req.path;
+    const labels = {
+      method: c.req.method,
+      route,
+      status_code: String(c.res.status),
+    };
+    end(labels);
+    httpRequestTotal.inc(labels);
+  });
+
   // Health endpoints — UNAUTHENTICATED BY DESIGN. `/healthz` and
   // `/readyz` are explicitly excluded from the "every endpoint refuses
   // anonymous" invariant.
@@ -81,11 +103,79 @@ export function createApp(): Hono<AppContext> {
     }
     try {
       await pool.query("SELECT 1");
-      return c.json({ ok: true });
+      // Enriched payload per OBS-01 SC-5: consumable by both Prometheus
+      // and operator `curl`. Queue depths populated best-effort (pgboss
+      // schema may not exist in all roles).
+      const payload: Record<string, unknown> = {
+        ok: true,
+        uptime: process.uptime(),
+        pg: {
+          totalConnections: pool.totalCount,
+          idleConnections: pool.idleCount,
+          waitingRequests: pool.waitingCount,
+        },
+        migration: { current: true },
+      };
+
+      // Best-effort queue depth snapshot for /readyz consumer.
+      try {
+        const queueRows = await pool.query<{
+          name: string;
+          queued_count: string;
+          active_count: string;
+        }>("SELECT name, queued_count, active_count FROM pgboss.queue");
+        const queues: Record<string, { queued: number; active: number }> = {};
+        for (const row of queueRows.rows) {
+          queues[row.name] = {
+            queued: Number(row.queued_count),
+            active: Number(row.active_count),
+          };
+        }
+        payload.queues = queues;
+      } catch {
+        payload.queues = {};
+      }
+
+      return c.json(payload);
     } catch (err) {
       logger.warn({ err }, "readyz db ping failed");
       return c.json({ ok: false, reason: "db unreachable" }, 503);
     }
+  });
+
+  // Prometheus scrape endpoint — UNAUTHENTICATED BY DESIGN.
+  // Protected by Docker network isolation (D-03): Prometheus scrapes
+  // app:3000/metrics via Docker internal network; nginx does NOT proxy
+  // /metrics externally. Same pattern as /healthz and /readyz.
+  //
+  // On each scrape, collect pg-boss queue depths via direct SQL against
+  // the pgboss schema (avoids lazy-boot dependency on boss singleton —
+  // RESEARCH Pitfall 7, option a).
+  app.get("/metrics", async (c) => {
+    try {
+      // Collect pg-boss queue depths from the pgboss schema tables.
+      // Direct SQL avoids the lazy-boot dependency (RESEARCH Pitfall 7).
+      const queueRows = await pool.query<{
+        name: string;
+        queued_count: string;
+        active_count: string;
+      }>("SELECT name, queued_count, active_count FROM pgboss.queue");
+
+      queueDepth.reset();
+      for (const row of queueRows.rows) {
+        queueDepth.set({ queue: row.name, state: "queued" }, Number(row.queued_count));
+        queueDepth.set({ queue: row.name, state: "active" }, Number(row.active_count));
+      }
+    } catch {
+      // pgboss schema may not exist yet (e.g., migrations not run, or
+      // pg-boss hasn't started in any role). Skip queue metrics silently —
+      // Prometheus still gets Node.js and HTTP metrics.
+    }
+
+    const metrics = await register.metrics();
+    return c.text(metrics, 200, {
+      "Content-Type": register.contentType,
+    });
   });
 
   // Better Auth mount. Handles login / callback / signout / getSession.
