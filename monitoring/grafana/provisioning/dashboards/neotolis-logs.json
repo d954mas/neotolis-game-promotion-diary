@@ -32,7 +32,7 @@
       "targets": [
         {
           "datasource": { "uid": "loki", "type": "loki" },
-          "expr": "{service_name=\"docker\"} |= \"level\" | json | level >= 50",
+          "expr": "{service=~\"app|worker|scheduler\"} |= \"level\" | json | level >= 50",
           "refId": "A"
         }
       ],
@@ -55,7 +55,7 @@
       "targets": [
         {
           "datasource": { "uid": "loki", "type": "loki" },
-          "expr": "{service_name=\"docker\"} |= \"$search\"",
+          "expr": "{service=~\".+\"} |= \"$search\"",
           "refId": "A"
         }
       ],
@@ -78,8 +78,8 @@
       "targets": [
         {
           "datasource": { "uid": "loki", "type": "loki" },
-          "expr": "sum(count_over_time({service_name=\"docker\"}[5m]))",
-          "legendFormat": "logs/5min",
+          "expr": "sum by (service) (count_over_time({service=~\".+\"}[5m]))",
+          "legendFormat": "{{service}}",
           "refId": "A",
           "range": true,
           "instant": false
