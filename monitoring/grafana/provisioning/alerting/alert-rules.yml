@@ -75,3 +75,25 @@ groups:
           summary: "Node.js RSS memory exceeds 400MB (tune threshold in Grafana UI if your container limit differs)"
         labels:
           severity: warning
+
+      - uid: scrape-target-down
+        title: "Scrape Target Down (up == 0)"
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: up{job="neotolis-app"} == 0
+              instant: false
+              intervalMs: 15000
+              refId: A
+        for: 2m
+        noDataState: Alerting
+        execErrState: Alerting
+        annotations:
+          summary: "Prometheus cannot scrape the app — container may be down or /metrics unreachable"
+        labels:
+          severity: critical

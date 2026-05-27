@@ -1,0 +1,1 @@
+CREATE INDEX "idx_session_updated_at" ON "session" USING btree ("updated_at");

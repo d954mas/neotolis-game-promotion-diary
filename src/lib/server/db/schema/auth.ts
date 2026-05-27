@@ -9,7 +9,7 @@
 //
 // Source of truth: https://better-auth.com/docs/concepts/database
 
-import { pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
 import { uuidv7 } from "../../ids.js";
 
 export const user = pgTable("user", {
@@ -33,20 +33,26 @@ export const user = pgTable("user", {
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
-export const session = pgTable("session", {
-  id: text("id")
-    .primaryKey()
-    .$defaultFn(() => uuidv7()),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  token: text("token").notNull().unique(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  ipAddress: text("ip_address"),
-  userAgent: text("user_agent"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const session = pgTable(
+  "session",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => uuidv7()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    token: text("token").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    updatedAtIdx: index("idx_session_updated_at").on(t.updatedAt),
+  }),
+);
 
 export const account = pgTable("account", {
   id: text("id")

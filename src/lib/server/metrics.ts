@@ -86,9 +86,14 @@ export async function collectAdapterStats(pool: Pool): Promise<void> {
        AND last_attempt_at >= NOW() - INTERVAL '24 hours'
      GROUP BY adapter_kind, type`,
   );
+  const ADAPTER_LABELS: Record<string, string> = {
+    youtube_channel: "youtube",
+    reddit_account: "reddit",
+  };
   adapterJobsDone24h.reset();
   for (const row of jobs.rows) {
-    const adapter = row.adapter_kind === "youtube_channel" ? "youtube" : "reddit";
+    const adapter = ADAPTER_LABELS[row.adapter_kind];
+    if (!adapter) continue;
     adapterJobsDone24h.set({ adapter, type: row.type }, Number(row.count));
   }
 }
