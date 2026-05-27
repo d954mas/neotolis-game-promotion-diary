@@ -10,7 +10,8 @@ coverage/
 test-results/
 playwright-report/
 .DS_Store
-.claude/
+.claude/*
+!.claude/commands/
 *.stackdump
 
 # Operator-side secrets — generated in CF dashboard, saved on VPS only.
@@ -24,6 +25,9 @@ monitoring/prometheus/metrics-token
 
 # Local scratch — `git diff > diff.txt` for ad-hoc review, never committed.
 diff.txt
+
+# Grafana audit output — screenshots and JSON report, regenerated on each run.
+scripts/grafana-audit-output/
 
 # Issue #27 — GSD workflow artifacts are local-only.
 #
