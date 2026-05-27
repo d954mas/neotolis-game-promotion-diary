@@ -45,6 +45,7 @@ import {
   httpRequestDuration,
   httpRequestTotal,
   queueDepth,
+  collectQueueDepths,
 } from "../metrics.js";
 
 export type AppContext = {
@@ -76,9 +77,8 @@ export function createApp(): Hono<AppContext> {
     }),
   );
 
-  // Prometheus HTTP timing middleware. Records duration + counter for every
-  // request. Uses c.req.routePath (pattern) not c.req.path (resolved) to
-  // avoid high-cardinality label explosion (RESEARCH Pitfall 2).
+  // c.req.routePath (pattern) not c.req.path (resolved) avoids
+  // high-cardinality label explosion on parameterized routes.
   app.use("*", async (c, next) => {
     const end = httpRequestDuration.startTimer();
     await next();
@@ -103,9 +103,6 @@ export function createApp(): Hono<AppContext> {
     }
     try {
       await pool.query("SELECT 1");
-      // Enriched payload per OBS-01 SC-5: consumable by both Prometheus
-      // and operator `curl`. Queue depths populated best-effort (pgboss
-      // schema may not exist in all roles).
       const payload: Record<string, unknown> = {
         ok: true,
         uptime: process.uptime(),
@@ -117,21 +114,8 @@ export function createApp(): Hono<AppContext> {
         migration: { current: true },
       };
 
-      // Best-effort queue depth snapshot for /readyz consumer.
       try {
-        const queueRows = await pool.query<{
-          name: string;
-          queued_count: string;
-          active_count: string;
-        }>("SELECT name, queued_count, active_count FROM pgboss.queue");
-        const queues: Record<string, { queued: number; active: number }> = {};
-        for (const row of queueRows.rows) {
-          queues[row.name] = {
-            queued: Number(row.queued_count),
-            active: Number(row.active_count),
-          };
-        }
-        payload.queues = queues;
+        payload.queues = await collectQueueDepths(pool);
       } catch {
         payload.queues = {};
       }
@@ -143,33 +127,18 @@ export function createApp(): Hono<AppContext> {
     }
   });
 
-  // Prometheus scrape endpoint — UNAUTHENTICATED BY DESIGN.
-  // Protected by Docker network isolation (D-03): Prometheus scrapes
-  // app:3000/metrics via Docker internal network; nginx does NOT proxy
-  // /metrics externally. Same pattern as /healthz and /readyz.
-  //
-  // On each scrape, collect pg-boss queue depths via direct SQL against
-  // the pgboss schema (avoids lazy-boot dependency on boss singleton —
-  // RESEARCH Pitfall 7, option a).
+  // Unauthenticated — Docker network isolation is the access control.
+  // nginx blocks /metrics externally; Prometheus scrapes via internal net.
   app.get("/metrics", async (c) => {
     try {
-      // Collect pg-boss queue depths from the pgboss schema tables.
-      // Direct SQL avoids the lazy-boot dependency (RESEARCH Pitfall 7).
-      const queueRows = await pool.query<{
-        name: string;
-        queued_count: string;
-        active_count: string;
-      }>("SELECT name, queued_count, active_count FROM pgboss.queue");
-
+      const queues = await collectQueueDepths(pool);
       queueDepth.reset();
-      for (const row of queueRows.rows) {
-        queueDepth.set({ queue: row.name, state: "queued" }, Number(row.queued_count));
-        queueDepth.set({ queue: row.name, state: "active" }, Number(row.active_count));
+      for (const [name, counts] of Object.entries(queues)) {
+        queueDepth.set({ queue: name, state: "queued" }, counts.queued);
+        queueDepth.set({ queue: name, state: "active" }, counts.active);
       }
     } catch {
-      // pgboss schema may not exist yet (e.g., migrations not run, or
-      // pg-boss hasn't started in any role). Skip queue metrics silently —
-      // Prometheus still gets Node.js and HTTP metrics.
+      // pgboss schema may not exist yet — skip queue metrics silently.
     }
 
     const metrics = await register.metrics();

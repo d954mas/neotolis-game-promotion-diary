@@ -206,13 +206,12 @@ const RawSchema = z.object({
   // longer a global quota safety guard.
   WORKER_REPLICA_COUNT: z.coerce.number().int().min(1).default(1),
 
-  // Phase 7 — Observability. Default Grafana alerting contact point.
-  // Empty default = alerts silently disabled (D-08 silent degradation).
-  // Operator pastes any webhook URL (Discord webhook, custom adapter).
-  // The Grafana container reads this via its own environment block in
-  // docker-compose.monitoring.yml — the app code does NOT use this
-  // directly. Parsed here to document in .env.example and validate format.
-  ALERT_WEBHOOK_URL: z.string().url().or(z.literal("")).default(""),
+  // Phase 7 — Observability. Consumed only by the Grafana container in
+  // docker-compose.monitoring.yml — the app never reads this at runtime.
+  // Accepted in the schema so .env files including it pass zod parse
+  // (same pattern as IMAGE_TAG / DOMAIN). No .url() validation: an
+  // invalid webhook must not crash the app boot.
+  ALERT_WEBHOOK_URL: z.string().default(""),
 });
 
 const raw = RawSchema.parse(process.env);
