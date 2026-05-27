@@ -37,6 +37,7 @@ import { adminQuotaRouter } from "./routes/admin/quota.js";
 // registerRoutes on the new adapter.
 import { allAdapters } from "$lib/sources/registry.js";
 import { auth } from "../../auth.js";
+import { env } from "../config/env.js";
 import { migrationsApplied } from "../db/migrate.js";
 import { pool } from "../db/client.js";
 import { logger } from "../logger.js";
@@ -79,17 +80,21 @@ export function createApp(): Hono<AppContext> {
 
   // c.req.routePath (pattern) not c.req.path (resolved) avoids
   // high-cardinality label explosion on parameterized routes.
+  // try/finally so thrown errors (the 5xx we most care about) are recorded.
   app.use("*", async (c, next) => {
     const end = httpRequestDuration.startTimer();
-    await next();
-    const route = c.req.routePath || c.req.path;
-    const labels = {
-      method: c.req.method,
-      route,
-      status_code: String(c.res.status),
-    };
-    end(labels);
-    httpRequestTotal.inc(labels);
+    try {
+      await next();
+    } finally {
+      const route = c.req.routePath || c.req.path;
+      const labels = {
+        method: c.req.method,
+        route,
+        status_code: String(c.res.status),
+      };
+      end(labels);
+      httpRequestTotal.inc(labels);
+    }
   });
 
   // Health endpoints — UNAUTHENTICATED BY DESIGN. `/healthz` and
@@ -103,33 +108,26 @@ export function createApp(): Hono<AppContext> {
     }
     try {
       await pool.query("SELECT 1");
-      const payload: Record<string, unknown> = {
-        ok: true,
-        uptime: process.uptime(),
-        pg: {
-          totalConnections: pool.totalCount,
-          idleConnections: pool.idleCount,
-          waitingRequests: pool.waitingCount,
-        },
-        migration: { current: true },
-      };
-
-      try {
-        payload.queues = await collectQueueDepths(pool);
-      } catch {
-        payload.queues = {};
-      }
-
-      return c.json(payload);
+      return c.json({ ok: true });
     } catch (err) {
       logger.warn({ err }, "readyz db ping failed");
       return c.json({ ok: false, reason: "db unreachable" }, 503);
     }
   });
 
-  // Unauthenticated — Docker network isolation is the access control.
-  // nginx blocks /metrics externally; Prometheus scrapes via internal net.
+  // /metrics is gated by METRICS_BEARER_TOKEN. Empty token (default) =
+  // 404 for everyone — safe for bare-port self-host. Operators who enable
+  // monitoring set a token and configure Prometheus bearer_token to match.
   app.get("/metrics", async (c) => {
+    const token = env.METRICS_BEARER_TOKEN;
+    if (!token) {
+      return c.notFound();
+    }
+    const auth = c.req.header("authorization");
+    if (auth !== `Bearer ${token}`) {
+      return c.notFound();
+    }
+
     try {
       const queues = await collectQueueDepths(pool);
       queueDepth.reset();

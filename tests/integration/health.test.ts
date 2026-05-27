@@ -33,35 +33,12 @@ describe("/healthz and /readyz", () => {
   });
 
   it("GET /readyz returns 200 after migrations applied (and DB up)", async () => {
-    // tests/setup.ts beforeAll runs runMigrations() — so
-    // migrationsApplied.current === true by this point. If the DB is
-    // unreachable in this run, /readyz answers 503 instead — both are
-    // acceptable here; the 503-before-migrations branch above is the
-    // authoritative pre-migration test.
     const app = createApp();
     const res = await app.request("/readyz");
     expect([200, 503]).toContain(res.status);
     if (res.status === 200) {
       const body = (await res.json()) as { ok: boolean };
       expect(body.ok).toBe(true);
-    }
-  });
-
-  it("GET /readyz returns enriched payload with uptime and pg stats", async () => {
-    const app = createApp();
-    const res = await app.request("/readyz");
-    if (res.status === 200) {
-      const body = (await res.json()) as Record<string, unknown>;
-      expect(body.ok).toBe(true);
-      expect(body).toHaveProperty("uptime");
-      expect(typeof body.uptime).toBe("number");
-      expect(body).toHaveProperty("pg");
-      const pg = body.pg as Record<string, unknown>;
-      expect(pg).toHaveProperty("totalConnections");
-      expect(pg).toHaveProperty("idleConnections");
-      expect(pg).toHaveProperty("waitingRequests");
-      expect(body).toHaveProperty("migration");
-      expect(body).toHaveProperty("queues");
     }
   });
 });

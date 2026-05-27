@@ -19,6 +19,9 @@ playwright-report/
 nginx/certs/origin.pem
 nginx/certs/origin.key
 
+# Prometheus bearer token for /metrics scraping — operator-generated secret.
+monitoring/prometheus/metrics-token
+
 # Local scratch — `git diff > diff.txt` for ad-hoc review, never committed.
 diff.txt
 

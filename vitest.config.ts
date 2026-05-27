@@ -55,6 +55,9 @@ export default defineConfig({
           name: "integration",
           include: ["tests/integration/**/*.test.ts"],
           environment: "node",
+          env: {
+            METRICS_BEARER_TOKEN: "test-metrics-token-for-ci",
+          },
           setupFiles: ["./tests/setup.ts"],
           testTimeout: 30_000,
           // Integration files share one Postgres DB and tests/setup.ts truncates every

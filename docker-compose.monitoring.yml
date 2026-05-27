@@ -14,6 +14,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/metrics-token:/run/secrets/metrics_token:ro
       - prometheus_data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -64,7 +65,7 @@ services:
     image: grafana/grafana:12.0.0
     restart: unless-stopped
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:?set GF_SECURITY_ADMIN_PASSWORD in .env}
       GF_SERVER_ROOT_URL: "https://${DOMAIN}/grafana/"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       GF_UNIFIED_ALERTING_ENABLED: "true"
@@ -91,4 +92,4 @@ volumes:
 networks:
   default:
     external: true
-    name: ${COMPOSE_NETWORK:-neotolis_default}
+    name: ${COMPOSE_NETWORK:-diary_default}
