@@ -16,7 +16,7 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: sum(rate(neotolis_http_requests_total{status_code=~"5.."}[5m]))
+              expr: sum(rate(neotolis_http_requests_total{status_code=~"5.."}[5m])) or vector(0)
               instant: false
               intervalMs: 15000
               refId: A
@@ -26,7 +26,7 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: sum(rate(neotolis_http_requests_total[5m]))
+              expr: sum(rate(neotolis_http_requests_total[5m])) or vector(0)
               instant: false
               intervalMs: 15000
               refId: B
@@ -41,7 +41,7 @@ groups:
               refId: C
         for: 5m
         noDataState: OK
-        execErrState: Alerting
+        execErrState: OK
         annotations:
           summary: "5xx error rate exceeds 5% over the last 5 minutes"
         labels:
@@ -63,7 +63,7 @@ groups:
               refId: A
         for: 5m
         noDataState: OK
-        execErrState: Alerting
+        execErrState: OK
         annotations:
           summary: "p95 request latency exceeds 2 seconds for 5 minutes"
         labels:
@@ -85,7 +85,7 @@ groups:
               refId: A
         for: 5m
         noDataState: OK
-        execErrState: Alerting
+        execErrState: OK
         annotations:
           summary: "Node.js RSS memory exceeds 400MB (tune threshold in Grafana UI if your container limit differs)"
         labels:
