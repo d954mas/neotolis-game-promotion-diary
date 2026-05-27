@@ -13,7 +13,8 @@ describe("anonymous-401 sweep", () => {
 
   // Whitelist of endpoints that are intentionally unauthenticated.
   // /healthz and /readyz are pure liveness — excluded from "every
-  // endpoint refuses anonymous".
+  // endpoint refuses anonymous". /metrics is bearer-gated (returns 404
+  // without METRICS_BEARER_TOKEN) — not in this list.
   const PUBLIC_PATHS = ["/healthz", "/readyz"];
 
   // Auth handler routes are managed by Better Auth and have their own auth model

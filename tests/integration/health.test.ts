@@ -33,11 +33,6 @@ describe("/healthz and /readyz", () => {
   });
 
   it("GET /readyz returns 200 after migrations applied (and DB up)", async () => {
-    // tests/setup.ts beforeAll runs runMigrations() — so
-    // migrationsApplied.current === true by this point. If the DB is
-    // unreachable in this run, /readyz answers 503 instead — both are
-    // acceptable here; the 503-before-migrations branch above is the
-    // authoritative pre-migration test.
     const app = createApp();
     const res = await app.request("/readyz");
     expect([200, 503]).toContain(res.status);

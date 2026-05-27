@@ -205,6 +205,19 @@ const RawSchema = z.object({
   // per-adapter singleton locks or DB-backed claim gates; this value is no
   // longer a global quota safety guard.
   WORKER_REPLICA_COUNT: z.coerce.number().int().min(1).default(1),
+
+  // Phase 7 — Observability. Consumed only by the Grafana container in
+  // docker-compose.monitoring.yml — the app never reads this at runtime.
+  // Accepted in the schema so .env files including it pass zod parse
+  // (same pattern as IMAGE_TAG / DOMAIN). No .url() validation: an
+  // invalid webhook must not crash the app boot.
+  ALERT_WEBHOOK_URL: z.string().default(""),
+
+  // Bearer token protecting /metrics. Empty (default) = /metrics returns
+  // 404 to any caller. Self-host bare-port operators are safe by default;
+  // operators who enable monitoring set a random token here and configure
+  // Prometheus `bearer_token` to match.
+  METRICS_BEARER_TOKEN: z.string().default(""),
 });
 
 const raw = RawSchema.parse(process.env);
@@ -311,6 +324,8 @@ export const env = {
   REDDIT_BASE_URL_OVERRIDE: raw.REDDIT_BASE_URL_OVERRIDE,
   REDDIT_PROXY_URL: raw.REDDIT_PROXY_URL,
   WORKER_REPLICA_COUNT: raw.WORKER_REPLICA_COUNT,
+  ALERT_WEBHOOK_URL: raw.ALERT_WEBHOOK_URL,
+  METRICS_BEARER_TOKEN: raw.METRICS_BEARER_TOKEN,
 } as const;
 
 export type Env = typeof env;

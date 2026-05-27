@@ -11,6 +11,7 @@
 // Better Auth web-standard handler that receives a Request (Hono's
 // c.req.raw) and returns a Response.
 
+import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { proxyTrust } from "./middleware/proxy-trust.js";
@@ -37,9 +38,17 @@ import { adminQuotaRouter } from "./routes/admin/quota.js";
 // registerRoutes on the new adapter.
 import { allAdapters } from "$lib/sources/registry.js";
 import { auth } from "../../auth.js";
+import { env } from "../config/env.js";
 import { migrationsApplied } from "../db/migrate.js";
 import { pool } from "../db/client.js";
 import { logger } from "../logger.js";
+import {
+  register,
+  httpRequestDuration,
+  httpRequestTotal,
+  queueDepth,
+  collectQueueDepths,
+} from "../metrics.js";
 
 export type AppContext = {
   Variables: {
@@ -70,6 +79,31 @@ export function createApp(): Hono<AppContext> {
     }),
   );
 
+  // Skip infra endpoints from recording — /healthz, /readyz, /metrics
+  // are high-frequency (Docker healthcheck, Prometheus scrape) and would
+  // pollute RPS/latency dashboards with self-referencing noise.
+  // "unmatched" fallback caps cardinality for scanner/bot 404s.
+  const SKIP_METRICS = new Set(["/healthz", "/readyz", "/metrics"]);
+  app.use("*", async (c, next) => {
+    if (SKIP_METRICS.has(c.req.path)) {
+      await next();
+      return;
+    }
+    const end = httpRequestDuration.startTimer();
+    try {
+      await next();
+    } finally {
+      const route = c.req.routePath || "unmatched";
+      const labels = {
+        method: c.req.method,
+        route,
+        status_code: String(c.res.status),
+      };
+      end(labels);
+      httpRequestTotal.inc(labels);
+    }
+  });
+
   // Health endpoints — UNAUTHENTICATED BY DESIGN. `/healthz` and
   // `/readyz` are explicitly excluded from the "every endpoint refuses
   // anonymous" invariant.
@@ -86,6 +120,37 @@ export function createApp(): Hono<AppContext> {
       logger.warn({ err }, "readyz db ping failed");
       return c.json({ ok: false, reason: "db unreachable" }, 503);
     }
+  });
+
+  // /metrics is gated by METRICS_BEARER_TOKEN. Empty token (default) =
+  // 404 for everyone — safe for bare-port self-host. Operators who enable
+  // monitoring set a token and configure Prometheus bearer_token to match.
+  app.get("/metrics", async (c) => {
+    const token = env.METRICS_BEARER_TOKEN;
+    if (!token) {
+      return c.notFound();
+    }
+    const expected = Buffer.from(`Bearer ${token}`);
+    const received = Buffer.from(c.req.header("authorization") ?? "");
+    if (expected.length !== received.length || !timingSafeEqual(expected, received)) {
+      return c.notFound();
+    }
+
+    try {
+      const queues = await collectQueueDepths(pool);
+      queueDepth.reset();
+      for (const [name, counts] of Object.entries(queues)) {
+        queueDepth.set({ queue: name, state: "queued" }, counts.queued);
+        queueDepth.set({ queue: name, state: "active" }, counts.active);
+      }
+    } catch {
+      // pgboss schema may not exist yet — skip queue metrics silently.
+    }
+
+    const metrics = await register.metrics();
+    return c.text(metrics, 200, {
+      "Content-Type": register.contentType,
+    });
   });
 
   // Better Auth mount. Handles login / callback / signout / getSession.

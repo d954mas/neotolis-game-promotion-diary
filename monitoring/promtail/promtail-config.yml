@@ -1,0 +1,38 @@
+server:
+  http_listen_port: 9080
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 15s
+    relabel_configs:
+      # Filter by compose service name — stable regardless of install
+      # directory or compose project name. Covers all roles from both
+      # prod and selfhost compose files.
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_service"]
+        regex: "app|worker|scheduler|nginx|postgres"
+        action: keep
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_service"]
+        target_label: service
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(.*)"
+        target_label: container
+    pipeline_stages:
+      - docker: {}
+      - json:
+          expressions:
+            level: level
+            msg: msg
+            time: time
+      - labels:
+          level:
+      - timestamp:
+          source: time
+          format: RFC3339Nano

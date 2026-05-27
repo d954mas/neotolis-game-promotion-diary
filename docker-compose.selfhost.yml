@@ -38,6 +38,8 @@ services:
       # Empty default = trust nothing (use socket peer). Override for self-host
       # behind nginx/Caddy: TRUSTED_PROXY_CIDR=127.0.0.1/32
       TRUSTED_PROXY_CIDR: ${TRUSTED_PROXY_CIDR:-}
+      # Empty default = /metrics returns 404. Set when using monitoring overlay.
+      METRICS_BEARER_TOKEN: ${METRICS_BEARER_TOKEN:-}
       PORT: 3000
     depends_on:
       postgres: { condition: service_healthy }

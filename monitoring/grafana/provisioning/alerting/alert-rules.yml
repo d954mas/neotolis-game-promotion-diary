@@ -1,0 +1,92 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: neotolis-alerts
+    folder: Neotolis
+    interval: 1m
+    rules:
+      - uid: error-rate-spike
+        title: "Error Rate Spike (>5% 5xx in 5min)"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(rate(neotolis_http_requests_total{status_code=~"5.."}[5m])) or vector(0)
+              instant: false
+              intervalMs: 15000
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(rate(neotolis_http_requests_total[5m])) or vector(0)
+              instant: false
+              intervalMs: 15000
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: "__expr__"
+            model:
+              type: math
+              expression: "$A / clamp_min($B, 1) > 0.05"
+              refId: C
+        for: 5m
+        noDataState: OK
+        execErrState: OK
+        annotations:
+          summary: "5xx error rate exceeds 5% over the last 5 minutes"
+        labels:
+          severity: critical
+
+      - uid: high-latency-p95
+        title: "High Latency (p95 > 2s for 5min)"
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: histogram_quantile(0.95, sum(rate(neotolis_http_request_duration_seconds_bucket[5m])) by (le)) > 2
+              instant: false
+              intervalMs: 15000
+              refId: A
+        for: 5m
+        noDataState: OK
+        execErrState: OK
+        annotations:
+          summary: "p95 request latency exceeds 2 seconds for 5 minutes"
+        labels:
+          severity: warning
+
+      - uid: memory-pressure
+        title: "Memory Pressure (RSS > 400MB)"
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: neotolis_process_resident_memory_bytes > 400000000
+              instant: false
+              intervalMs: 15000
+              refId: A
+        for: 5m
+        noDataState: Alerting
+        execErrState: OK
+        annotations:
+          summary: "Node.js RSS memory exceeds 400MB (tune threshold in Grafana UI if your container limit differs)"
+        labels:
+          severity: warning

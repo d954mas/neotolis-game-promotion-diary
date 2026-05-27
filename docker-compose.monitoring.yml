@@ -1,0 +1,99 @@
+# Monitoring overlay -- opt-in via:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.monitoring.yml up -d
+# Or with selfhost.yml:
+#   docker compose -f docker-compose.selfhost.yml -f docker-compose.monitoring.yml up -d
+# Disable:
+#   docker compose -f docker-compose.monitoring.yml down
+#
+# Per D-05/D-06/D-07: fully isolated overlay. The main compose file is
+# NEVER modified. If monitoring is down, the app is unaffected.
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.4.1
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/metrics-token:/run/secrets/metrics_token:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+      - "--storage.tsdb.path=/prometheus"
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  loki:
+    image: grafana/loki:3.4.3
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command:
+      - "-config.file=/etc/loki/local-config.yaml"
+    deploy:
+      resources:
+        limits:
+          memory: 96m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  promtail:
+    image: grafana/promtail:3.4.3
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - "-config.file=/etc/promtail/config.yml"
+    deploy:
+      resources:
+        limits:
+          memory: 48m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  grafana:
+    image: grafana/grafana:12.0.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:?set GF_SECURITY_ADMIN_PASSWORD in .env}
+      # With nginx (prod): https://DOMAIN/grafana/ via proxy_pass.
+      # Without nginx (selfhost bare-port): http://host:3001/ direct.
+      # Operator overrides GF_SERVER_ROOT_URL in .env if needed;
+      # default works for nginx path (prod compose).
+      GF_SERVER_ROOT_URL: ${GF_SERVER_ROOT_URL:-http://localhost:3001/}
+      GF_SERVER_SERVE_FROM_SUB_PATH: ${GF_SERVER_SERVE_FROM_SUB_PATH:-false}
+      GF_UNIFIED_ALERTING_ENABLED: "true"
+      GF_ALERTING_ENABLED: "false"
+      GF_SECURITY_ALLOW_EMBEDDING: "false"
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-http://localhost:1/no-webhook-configured}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GF_PORT:-3001}:3000"
+    deploy:
+      resources:
+        limits:
+          memory: 96m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  prometheus_data: {}
+  loki_data: {}
+  grafana_data: {}
+
+networks:
+  default:
+    external: true
+    name: ${COMPOSE_NETWORK:-diary_default}

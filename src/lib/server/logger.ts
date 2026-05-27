@@ -82,6 +82,11 @@ export const REDACT_PATHS = [
   "req.headers.user-agent",
   "req.headers.authorization",
   "req.headers.cookie",
+  // Phase 7 — Observability.
+  "*.ALERT_WEBHOOK_URL",
+  "*.alertWebhookUrl",
+  "*.METRICS_BEARER_TOKEN",
+  "*.metricsBearerToken",
 ];
 
 export const logger = pino({
