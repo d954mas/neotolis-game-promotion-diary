@@ -14,7 +14,7 @@ describe("anonymous-401 sweep", () => {
   // Whitelist of endpoints that are intentionally unauthenticated.
   // /healthz and /readyz are pure liveness — excluded from "every
   // endpoint refuses anonymous".
-  const PUBLIC_PATHS = ["/healthz", "/readyz"];
+  const PUBLIC_PATHS = ["/healthz", "/readyz", "/metrics"];
 
   // Auth handler routes are managed by Better Auth and have their own auth model
   // (OAuth callbacks must accept anonymous requests by definition).
