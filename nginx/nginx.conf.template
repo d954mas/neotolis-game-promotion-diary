@@ -92,14 +92,14 @@ server {
         return 404;
     }
 
-    # Grafana dashboard UI (Phase 7 observability). Variable assignment
-    # forces runtime DNS resolution — nginx boots even when the monitoring
-    # overlay (and thus the grafana container) is not running. Without the
-    # variable, a literal proxy_pass resolves at config-load time and
-    # crashes nginx if grafana is absent.
+    # Grafana dashboard UI (Phase 7 observability). Variable forces
+    # runtime DNS resolution — nginx boots even without the monitoring
+    # overlay. Grafana runs with SERVE_FROM_SUB_PATH=true and expects
+    # requests at /grafana/*; the variable-based proxy_pass preserves
+    # the full URI (no prefix stripping), which is what we want.
     location /grafana/ {
         set $grafana http://grafana:3000;
-        proxy_pass $grafana/;
+        proxy_pass $grafana;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
