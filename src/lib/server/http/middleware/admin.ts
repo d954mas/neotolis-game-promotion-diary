@@ -33,9 +33,12 @@ export const adminAllowlist: MiddlewareHandler<{
   const email = (c.var.userEmail ?? "").toLowerCase();
   if (!env.ADMIN_EMAIL_ALLOWLIST.has(email)) {
     // Pattern matches tenantScope (401) and accountState (423): respond
-    // directly from the middleware rather than throwing. Direct response
-    // avoids needing a global Hono onError handler — per-route mapErr
-    // handles NotFoundError thrown FROM service code, not from middleware.
+    // directly from the middleware rather than throwing, so the exact status
+    // code is preserved. A global app.onError (app.ts) now exists as a
+    // safety net, but it generalizes any escaped throw to 500 — middleware
+    // that needs a specific status (401/404/423) must still return directly
+    // rather than rely on it. Per-route mapErr handles NotFoundError thrown
+    // FROM service code.
     //
     // The literal body shape ({error: 'not_found'}) is identical to what
     // mapErr emits for NotFoundError so callers cannot distinguish "the
