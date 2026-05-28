@@ -24,6 +24,7 @@
 // tests/integration/tenant-scope.test.ts.
 
 import type { Context } from "hono";
+import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { NotFoundError, AppError } from "../../services/errors.js";
 import { logger } from "../../logger.js";
@@ -80,8 +81,19 @@ export function mapErr(c: Context, err: unknown, route: string): Response {
  * and returns the same `internal_server_error` envelope mapErr produces,
  * so the wire contract is uniform whether an error was caught per-route or
  * escaped to the global handler.
+ *
+ * HTTPException is preserved, not flattened: registering app.onError
+ * REPLACES Hono's built-in handler, whose default is to return
+ * `err.getResponse()` for an HTTPException. An HTTPException is an
+ * INTENTIONAL HTTP error (a deliberate 401/404/429 with a chosen body), not
+ * a programmer mistake — collapsing it to 500 would corrupt the contract and
+ * spam the error log. We return its response verbatim and do NOT log it at
+ * error level. Only genuinely-unexpected throws reach the 500 path below.
  */
 export function honoErrorHandler(err: unknown, c: Context): Response {
+  if (err instanceof HTTPException) {
+    return err.getResponse();
+  }
   logger.error(
     { err, path: c.req.path, method: c.req.method },
     "unhandled hono error",

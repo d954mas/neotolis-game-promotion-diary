@@ -39,7 +39,15 @@ limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/s;
 # alongside Pino level semantics; nginx ERROR diagnostics still go to
 # error_log as plain text (open-source nginx cannot emit JSON error_log) —
 # those are caught by the Grafana catch-all regex panel instead.
-# user_agent is intentionally omitted (opsec: the app redacts UA too).
+#
+# PRIVACY (load-bearing — these logs ship to Loki, bypassing Pino redaction):
+#   - `$uri` (path only) NOT `$request_uri` — the query string carries OAuth
+#     `code`/`state` on the callback and private feed-filter state; logging it
+#     would leak secrets to Loki. `$uri` answers "which route" without the query.
+#   - `$http_referer` is OMITTED — it can carry full external URLs with their
+#     own sensitive query params.
+#   - `user_agent` is OMITTED (opsec: the app redacts UA too).
+# The nginx-access-log privacy invariant is locked by tests/unit/nginx-access-log.test.ts.
 log_format json_access escape=json
   '{'
     '"time":"$time_iso8601",'
@@ -47,13 +55,12 @@ log_format json_access escape=json
     '"source":"nginx",'
     '"remote_addr":"$remote_addr",'
     '"method":"$request_method",'
-    '"path":"$request_uri",'
+    '"path":"$uri",'
     '"status":"$status",'
     '"body_bytes":"$body_bytes_sent",'
     '"request_time":"$request_time",'
     '"upstream_time":"$upstream_response_time",'
-    '"host":"$host",'
-    '"referer":"$http_referer"'
+    '"host":"$host"'
   '}';
 
 # Hide nginx version from response headers

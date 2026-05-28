@@ -10,6 +10,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { randomBytes } from "node:crypto";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 
 process.env.DATABASE_URL ??= "postgres://test:test@localhost:5432/test";
 process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
@@ -45,5 +46,23 @@ describe("honoErrorHandler (app.onError)", () => {
     expect(call[1]).toBe("unhandled hono error");
     expect(payload).toMatchObject({ path: "/boom", method: "GET" });
     expect(payload.err).toBeInstanceOf(Error);
+  });
+
+  it("preserves an intentional HTTPException status/body and does NOT log it as an error", async () => {
+    const errorLog = vi.spyOn(logger, "error").mockImplementation(() => {});
+
+    const app = new Hono();
+    app.onError(honoErrorHandler);
+    app.get("/teapot", () => {
+      throw new HTTPException(418, { message: "i am a teapot" });
+    });
+
+    const res = await app.request("/teapot");
+
+    // Intentional HTTP error is returned verbatim, not flattened to 500.
+    expect(res.status).toBe(418);
+    expect(await res.text()).toBe("i am a teapot");
+    // And it is NOT spammed into the error log — it's deliberate, not a bug.
+    expect(errorLog).not.toHaveBeenCalled();
   });
 });
