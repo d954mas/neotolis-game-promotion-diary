@@ -54,7 +54,10 @@ export function createSvelteKitPassthrough(
       };
       svelteHandler(incoming, outgoing, () => {
         // SvelteKit declined this route; `outgoing` is untouched, so a real
-        // Hono 404 is safe for node-server to write.
+        // Hono 404 is safe for node-server to write. NOTE: adapter-node 5.x's
+        // terminal `ssr` middleware always writes to `outgoing` and never
+        // calls next(), so this branch is a forward-compat affordance for
+        // other/custom handlers — not a live path under the current adapter.
         settle(c.text("not found", 404));
       });
       // SvelteKit handled it and wrote directly to `outgoing`. Hand node-server

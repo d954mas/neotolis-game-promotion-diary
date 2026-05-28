@@ -15,7 +15,10 @@
 import { serve } from "@hono/node-server";
 import { RESPONSE_ALREADY_SENT } from "@hono/node-server/utils/response";
 import { createApp } from "../lib/server/http/app.js";
-import { createSvelteKitPassthrough } from "../lib/server/http/sveltekit-passthrough.js";
+import {
+  createSvelteKitPassthrough,
+  type SvelteHandler,
+} from "../lib/server/http/sveltekit-passthrough.js";
 import { env, scrubKekFromEnv } from "../lib/server/config/env.js";
 import { logger } from "../lib/server/logger.js";
 import { pool } from "../lib/server/db/client.js";
@@ -33,11 +36,7 @@ export async function start(): Promise<void> {
   // (a sibling of build/server.js). In dev (no tsup pass) the constant is
   // undefined and we fall back to the source-relative path. The `typeof`
   // guard makes both code paths typecheck with strict TS.
-  let svelteHandler: (
-    req: import("node:http").IncomingMessage,
-    res: import("node:http").ServerResponse,
-    next?: () => void,
-  ) => void;
+  let svelteHandler: SvelteHandler;
   const handlerPath =
     typeof __SVELTEKIT_HANDLER__ !== "undefined" ? __SVELTEKIT_HANDLER__ : "../../build/handler.js";
   try {
