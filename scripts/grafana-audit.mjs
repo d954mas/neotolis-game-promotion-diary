@@ -87,16 +87,21 @@ async function main() {
     error_rate_5m: 'sum(rate(neotolis_http_requests_total{status_code=~"5.."}[5m]))',
     request_rate_5m: "sum(rate(neotolis_http_requests_total[5m]))",
     request_rate_by_status: "sum by (status_code) (rate(neotolis_http_requests_total[5m]))",
-    latency_p50: "histogram_quantile(0.50, sum by (le) (rate(neotolis_http_request_duration_seconds_bucket[5m])))",
-    latency_p95: "histogram_quantile(0.95, sum by (le) (rate(neotolis_http_request_duration_seconds_bucket[5m])))",
-    latency_p99: "histogram_quantile(0.99, sum by (le) (rate(neotolis_http_request_duration_seconds_bucket[5m])))",
-    slowest_routes_p95: "topk(10, histogram_quantile(0.95, sum by (le, route) (rate(neotolis_http_request_duration_seconds_bucket[5m]))))",
+    latency_p50:
+      "histogram_quantile(0.50, sum by (le) (rate(neotolis_http_request_duration_seconds_bucket[5m])))",
+    latency_p95:
+      "histogram_quantile(0.95, sum by (le) (rate(neotolis_http_request_duration_seconds_bucket[5m])))",
+    latency_p99:
+      "histogram_quantile(0.99, sum by (le) (rate(neotolis_http_request_duration_seconds_bucket[5m])))",
+    slowest_routes_p95:
+      "topk(10, histogram_quantile(0.95, sum by (le, route) (rate(neotolis_http_request_duration_seconds_bucket[5m]))))",
     memory_rss_bytes: "neotolis_process_resident_memory_bytes",
     heap_used_bytes: "neotolis_nodejs_heap_size_used_bytes",
     eventloop_lag: "neotolis_nodejs_eventloop_lag_seconds",
     queue_depth: "neotolis_pgboss_queue_depth",
     top_routes: "topk(10, sum by (route) (rate(neotolis_http_requests_total[5m])))",
-    errors_by_route: 'sum by (route, status_code) (rate(neotolis_http_requests_total{status_code=~"5.."}[5m]))',
+    errors_by_route:
+      'sum by (route, status_code) (rate(neotolis_http_requests_total{status_code=~"5.."}[5m]))',
     active_handles: "neotolis_nodejs_active_handles_total",
     gc_duration: "rate(neotolis_nodejs_gc_duration_seconds_sum[5m])",
     total_requests: "neotolis_http_requests_total",
@@ -124,7 +129,9 @@ async function main() {
       deltaPercent: ((delta / first) * 100).toFixed(1),
       datapoints: values.length,
     };
-    console.log(`  ${report.memoryTrend.firstMB}MB → ${report.memoryTrend.lastMB}MB (${report.memoryTrend.deltaMB > 0 ? "+" : ""}${report.memoryTrend.deltaMB}MB, ${report.memoryTrend.deltaPercent}%)`);
+    console.log(
+      `  ${report.memoryTrend.firstMB}MB → ${report.memoryTrend.lastMB}MB (${report.memoryTrend.deltaMB > 0 ? "+" : ""}${report.memoryTrend.deltaMB}MB, ${report.memoryTrend.deltaPercent}%)`,
+    );
   } else {
     report.memoryTrend = { error: "no data" };
     console.log("  no data");
@@ -143,11 +150,18 @@ async function main() {
     ? '{service=~"' + report.loki.labels.service.join("|") + '"}'
     : '{service=~".+"}';
 
-  report.loki.errorLogs24h = await lokiQuery(page, `${serviceSelector} |= "level" | json | level >= 50`);
-  console.log(`  error logs (24h): ${report.loki.errorLogs24h.totalLines} lines, ${report.loki.errorLogs24h.totalBytes} bytes`);
+  report.loki.errorLogs24h = await lokiQuery(
+    page,
+    `${serviceSelector} |= "level" | json | level >= 50`,
+  );
+  console.log(
+    `  error logs (24h): ${report.loki.errorLogs24h.totalLines} lines, ${report.loki.errorLogs24h.totalBytes} bytes`,
+  );
 
   report.loki.allLogs1h = await lokiQuery(page, `${serviceSelector}`, 3600, 5);
-  console.log(`  all logs (1h): ${report.loki.allLogs1h.totalLines} lines, ${report.loki.allLogs1h.totalBytes} bytes`);
+  console.log(
+    `  all logs (1h): ${report.loki.allLogs1h.totalLines} lines, ${report.loki.allLogs1h.totalBytes} bytes`,
+  );
 
   // --- Alerts ---
   console.log("\n=== Alert State ===");
@@ -165,7 +179,10 @@ async function main() {
 
   // --- Dashboard screenshots ---
   console.log("\n=== Dashboard Screenshots ===");
-  for (const [uid, name] of [["neotolis-overview", "overview"], ["neotolis-logs", "logs"]]) {
+  for (const [uid, name] of [
+    ["neotolis-overview", "overview"],
+    ["neotolis-logs", "logs"],
+  ]) {
     try {
       await page.goto(`${GRAFANA_URL}/d/${uid}/${uid}?orgId=1`, { waitUntil: "load" });
       await page.waitForTimeout(5000);
@@ -184,17 +201,23 @@ async function main() {
   const p95ms = p95?.[0]?.value ? (parseFloat(p95[0].value) * 1000).toFixed(0) : "?";
   const errRate = report.prometheus.error_rate_5m;
   const hasErrors = Array.isArray(errRate) && errRate.length > 0;
-  const firingAlerts = Array.isArray(report.alerts) ? report.alerts.filter((a) => a.status?.state === "active").length : "?";
+  const firingAlerts = Array.isArray(report.alerts)
+    ? report.alerts.filter((a) => a.status?.state === "active").length
+    : "?";
 
   console.log("\n========== SUMMARY ==========");
   console.log(`  RSS:         ${rssMB} MB`);
-  console.log(`  Heap:        ${report.prometheus.heap_used_bytes?.[0]?.value ? (parseFloat(report.prometheus.heap_used_bytes[0].value) / 1e6).toFixed(1) : "?"} MB`);
+  console.log(
+    `  Heap:        ${report.prometheus.heap_used_bytes?.[0]?.value ? (parseFloat(report.prometheus.heap_used_bytes[0].value) / 1e6).toFixed(1) : "?"} MB`,
+  );
   console.log(`  Latency p95: ${p95ms} ms`);
   console.log(`  5xx errors:  ${hasErrors ? "YES" : "none"}`);
   console.log(`  Alerts:      ${firingAlerts} firing`);
   console.log(`  Loki logs:   ${report.loki.allLogs1h.totalLines} lines (1h)`);
   if (report.memoryTrend.deltaMB) {
-    console.log(`  Memory 24h:  ${report.memoryTrend.deltaMB > 0 ? "+" : ""}${report.memoryTrend.deltaMB} MB (${report.memoryTrend.deltaPercent}%)`);
+    console.log(
+      `  Memory 24h:  ${report.memoryTrend.deltaMB > 0 ? "+" : ""}${report.memoryTrend.deltaMB} MB (${report.memoryTrend.deltaPercent}%)`,
+    );
   }
   console.log("=============================\n");
 

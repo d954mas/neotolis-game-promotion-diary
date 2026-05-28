@@ -35,7 +35,12 @@ describe("handleError (SvelteKit)", () => {
     const error = new Error("loader exploded");
 
     // @ts-expect-error — synthetic event carries only the fields handleError reads.
-    const result = handleError({ error, event: fakeEvent("/feed", "GET"), status: 500, message: "Internal Error" });
+    const result = handleError({
+      error,
+      event: fakeEvent("/feed", "GET"),
+      status: 500,
+      message: "Internal Error",
+    });
 
     expect(result).toEqual({ message: "Internal Error" });
     expect(errorLog).toHaveBeenCalledTimes(1);

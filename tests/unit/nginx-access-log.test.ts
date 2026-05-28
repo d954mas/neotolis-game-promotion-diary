@@ -12,10 +12,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const TEMPLATE = readFileSync(
-  join(process.cwd(), "nginx", "nginx.conf.template"),
-  "utf8",
-);
+const TEMPLATE = readFileSync(join(process.cwd(), "nginx", "nginx.conf.template"), "utf8");
 
 // Isolate the json_access log_format block so we assert against the access
 // log specifically, not the whole file (proxy_pass blocks legitimately use

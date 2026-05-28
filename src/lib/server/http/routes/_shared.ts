@@ -94,9 +94,6 @@ export function honoErrorHandler(err: unknown, c: Context): Response {
   if (err instanceof HTTPException) {
     return err.getResponse();
   }
-  logger.error(
-    { err, path: c.req.path, method: c.req.method },
-    "unhandled hono error",
-  );
+  logger.error({ err, path: c.req.path, method: c.req.method }, "unhandled hono error");
   return c.json({ error: "internal_server_error" }, 500);
 }

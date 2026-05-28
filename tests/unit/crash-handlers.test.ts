@@ -18,9 +18,7 @@ process.env.OAUTH_CLIENT_ID ??= "test";
 process.env.OAUTH_CLIENT_SECRET ??= "test";
 process.env.APP_KEK_BASE64 ??= randomBytes(32).toString("base64");
 
-const { handleUncaught, handleRejection } = await import(
-  "../../src/lib/server/crash-handlers.js"
-);
+const { handleUncaught, handleRejection } = await import("../../src/lib/server/crash-handlers.js");
 const { logger } = await import("../../src/lib/server/logger.js");
 
 afterEach(() => {
