@@ -35,6 +35,16 @@ import type { Handle, HandleServerError } from "@sveltejs/kit";
 import { auth } from "./lib/auth.js";
 import { toUserDto, toSessionDto } from "./lib/server/dto.js";
 import { logger } from "./lib/server/logger.js";
+import { env } from "./lib/server/config/env.js";
+
+// Canonical PUBLIC origin, computed once. We compare a request's Referer
+// against THIS (a single, explicitly-configured source of truth) rather than
+// `event.url.origin` — the latter is derived by adapter-node from forwarded
+// headers and only happens to equal the public origin today (it defaults the
+// scheme to "https" and trusts the proxied Host). Pinning to BETTER_AUTH_URL
+// keeps the internal-vs-external Referer check correct regardless of proxy
+// header config or adapter-version changes.
+const CANONICAL_ORIGIN = new URL(env.BETTER_AUTH_URL).origin;
 
 const VALID_THEMES = new Set(["light", "dark", "system"]);
 
@@ -68,17 +78,59 @@ export const themeHandle: Handle = async ({ event, resolve }) => {
 
 export const handle: Handle = sequence(authHandle, themeHandle);
 
-// SvelteKit invokes handleError for UNEXPECTED errors thrown during
-// load/render (5xx). Expected errors via the `error()` helper and plain
-// 404s do NOT reach here. Without this hook those server-render crashes go
-// to SvelteKit's default formatter (plain text), bypassing Pino and the
-// Grafana error panel. Logging via Pino (level 50) makes them visible;
-// the returned shape is the safe client-facing payload (never leak the
-// stack — Pino already captured it, redacted).
+// SvelteKit invokes handleError for two kinds of error during load/render:
+// genuine unexpected throws (status 500) AND unmatched-route 404s. Explicit
+// `throw error(...)` BYPASSES this hook (SvelteKit returns the response
+// directly), so every legitimate not-found in this app (event/game/source/
+// admin, cross-tenant) already renders its proper 404 page and never lands
+// here. That leaves two cases to triage:
+//
+//   - status >= 500 → a real unexpected crash. Log at error (level 50) so it
+//     surfaces in the Grafana error panel instead of @hono/node-server's raw
+//     stderr. Return a safe client payload (stack stays in Pino, redacted).
+//   - status === 404 → an unmatched route. Almost always a scanner probe
+//     (/wp-admin, /wp-json/*, robots.txt). We do NOT log those as errors —
+//     they'd flood the error panel (and nginx's JSON access log already
+//     records every 404 by path+status). The one exception worth seeing is a
+//     404 whose Referer is our OWN origin = a broken internal link (our bug),
+//     logged at warn. Path-allowlisting scanners is a losing game (infinite,
+//     ever-changing paths); the referer signal catches our 404s precisely.
 export const handleError: HandleServerError = ({ error, event, status }) => {
-  logger.error(
-    { err: error, status, path: event.url.pathname, method: event.request.method },
-    "sveltekit unhandled error",
-  );
+  const base = { path: event.url.pathname, method: event.request.method };
+
+  if (status >= 500) {
+    logger.error({ err: error, status, ...base }, "sveltekit unhandled error");
+  } else if (status === 404 && isInternalReferer(event)) {
+    logger.warn({ status, referer: refererPath(event), ...base }, "internal 404 (broken link)");
+  }
+  // status === 404 with no/external referer, and any other 4xx → not logged
+  // here; nginx JSON access log carries them if ever needed.
+
   return { message: "Internal Error" };
 };
+
+/** True when the request's Referer points at our own canonical origin — i.e.
+ *  a link inside the app led to this URL. Distinguishes our broken links from
+ *  scanner probes without enumerating scanner paths. Compares against
+ *  CANONICAL_ORIGIN (BETTER_AUTH_URL), not event.url.origin — see note above. */
+function isInternalReferer(event: { request: Request }): boolean {
+  const referer = event.request.headers.get("referer");
+  if (!referer) return false;
+  try {
+    return new URL(referer).origin === CANONICAL_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+/** The Referer's pathname only (never the query string — our own filter
+ *  state lives there and must not be logged). Empty string if unparseable. */
+function refererPath(event: { request: Request }): string {
+  const referer = event.request.headers.get("referer");
+  if (!referer) return "";
+  try {
+    return new URL(referer).pathname;
+  } catch {
+    return "";
+  }
+}

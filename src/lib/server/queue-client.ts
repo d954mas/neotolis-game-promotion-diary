@@ -26,6 +26,25 @@ import { env } from "./config/env.js";
 import { logger } from "./logger.js";
 import { declareAllQueues } from "./queues.js";
 
+// Postgres SQLSTATEs for "the connection was terminated by the server", which
+// is exactly what happens to pg-boss's pool on every deploy/restart when the
+// container gets SIGTERM and Postgres closes the backend. These are lifecycle
+// events, not application bugs — logging them at `error` (level 50) floods the
+// Grafana error panel on every single deploy. Downgrade to `warn`; a genuine
+// pg-boss fault (any other code) still logs at error.
+//   57P01 admin_shutdown      — "terminating connection due to administrator command"
+//   57P03 cannot_connect_now  — server still starting up / shutting down
+const PG_CONNECTION_LIFECYCLE_CODES = new Set(["57P01", "57P03"]);
+
+export function logPgBossError(err: unknown): void {
+  const code = (err as { code?: unknown })?.code;
+  if (typeof code === "string" && PG_CONNECTION_LIFECYCLE_CODES.has(code)) {
+    logger.warn({ err, code }, "pg-boss backend connection terminated (likely deploy/restart)");
+    return;
+  }
+  logger.error({ err }, "pg-boss error");
+}
+
 /**
  * Create + start a pg-boss instance with all queues declared.
  *
@@ -53,9 +72,7 @@ export async function createBoss(): Promise<PgBoss> {
     // specific queue needs different behaviour.
   });
 
-  boss.on("error", (err) => {
-    logger.error({ err }, "pg-boss error");
-  });
+  boss.on("error", logPgBossError);
 
   await boss.start();
 
