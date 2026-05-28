@@ -42,6 +42,10 @@ export function createSvelteKitPassthrough(
     const ctx = c.env as { incoming?: IncomingMessage; outgoing?: ServerResponse } | undefined;
     const incoming = ctx?.incoming;
     const outgoing = ctx?.outgoing;
+    // @hono/node-server always co-populates c.env.incoming + c.env.outgoing,
+    // so this 500 is unreachable under the real adapter — it's a
+    // composition-root contract guard that also narrows both to non-null for
+    // the call below (c.env is an untyped `unknown`).
     if (!incoming || !outgoing) {
       return Promise.resolve(c.text("node adapter context missing", 500));
     }
