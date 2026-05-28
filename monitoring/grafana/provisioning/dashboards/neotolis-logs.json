@@ -50,7 +50,7 @@
       "id": 4,
       "type": "logs",
       "title": "Escaped Errors (catch-all — bypassed structured logging)",
-      "description": "Safety net. Excludes all JSON lines (Pino + nginx access both carry \"level\":) and surfaces only plain-text error-shaped lines — raw Node crashes, framework stack traces, nginx error_log. If anything shows here, something logged outside Pino and should be routed through it.",
+      "description": "Safety net. Excludes all JSON lines (Pino + nginx access both carry \"level\":) and surfaces only plain-text error-shaped lines — raw Node crashes, framework stack traces, nginx error_log. If anything shows here, something logged outside Pino and should be routed through it. Known limitation: a non-Pino error whose plain text happens to embed the literal \"level\": (e.g. an error message that is itself a JSON blob) is wrongly excluded — acceptable because real escaped errors (Node crashes, nginx error_log) don't carry that token, and this panel only backs up the structured level>=50 panel above.",
       "datasource": { "uid": "loki", "type": "loki" },
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 10 },
       "targets": [

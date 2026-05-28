@@ -20,9 +20,13 @@ import { logger } from "./lib/server/logger.js";
 import { registerCrashHandlers } from "./lib/server/crash-handlers.js";
 import { runMigrations } from "./lib/server/db/migrate.js";
 
-// Earliest possible registration: a crash during migrations or role
-// startup is then logged as structured JSON (Pino fatal) instead of a raw
-// Node stack trace that bypasses the log pipeline.
+// Register the global crash handlers. Boot-path rejections (e.g. inside
+// runMigrations) propagate through main() and are caught by main().catch()
+// below; these handlers cover the cases that bypass it — a synchronous
+// uncaughtException anywhere, and floating/un-awaited promise rejections
+// after boot — so they're logged as structured JSON (Pino fatal) instead of
+// a raw Node stack trace that bypasses the log pipeline. Registered early so
+// even a startup crash outside main()'s await chain is captured.
 registerCrashHandlers();
 
 async function main(): Promise<void> {

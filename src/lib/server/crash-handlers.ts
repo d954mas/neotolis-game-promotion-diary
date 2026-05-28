@@ -14,12 +14,13 @@
 // handleUncaught / handleRejection take an injectable `exit` so unit tests
 // can assert the log + exit-code contract without killing the test runner.
 //
-// Flush note: in PRODUCTION the logger writes JSON synchronously to fd 1, so
-// the fatal line is fully written before exit(1) — the case that matters for
-// Grafana is reliable. In DEVELOPMENT the pino-pretty transport runs in a
-// worker thread, so a synchronous exit can race the worker and drop the
-// pretty-printed crash line locally; that's a dev-ergonomics caveat only,
-// not a prod-observability gap.
+// Flush note: in PRODUCTION pino uses its default async sonic-boom stream,
+// but pino registers a process-'exit' hook that flushSync()s the buffer, so
+// the fatal line is drained before exit(1) — verified to reach stdout. The
+// case that matters for Grafana is reliable. In DEVELOPMENT the pino-pretty
+// transport runs in a worker thread, so a synchronous exit can race the
+// worker and drop the pretty-printed crash line locally; that's a
+// dev-ergonomics caveat only, not a prod-observability gap.
 
 import { logger } from "./logger.js";
 
