@@ -1,9 +1,12 @@
 // SvelteKit handleError hook test.
 //
-// handleError fires for UNEXPECTED server-render/load errors (5xx). Verifies
-// it logs via Pino (level 50 → visible to the Grafana error panel) with
-// path/method/status context, and returns the safe client payload (no stack
-// leak — Pino captured it, redacted).
+// handleError fires for unexpected 5xx throws AND unmatched-route 404s.
+// Verifies the three branches:
+//   - status >= 500 → logged at error (level 50 → Grafana error panel) with
+//     the err object; returns the safe client payload (stack stays in Pino).
+//   - scanner/external-referer 404 → NOT logged (keeps the error panel clean).
+//   - internal-referer 404 → logged at warn (broken link), referer PATH only
+//     (query string stripped — no private filter state leaks).
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { randomBytes } from "node:crypto";
