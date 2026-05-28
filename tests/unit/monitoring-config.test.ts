@@ -105,6 +105,19 @@ describe("monitoring config structural validation", () => {
     it("has at least 2 panels", () => {
       expect(dashboard.panels.length).toBeGreaterThanOrEqual(2);
     });
+    it("has a catch-all panel that excludes JSON and matches escaped-error patterns", () => {
+      const catchAll = dashboard.panels.find((p: { title?: string }) =>
+        p.title?.includes("Escaped Errors"),
+      );
+      expect(catchAll, "Escaped Errors catch-all panel must exist").toBeTruthy();
+      const expr: string = catchAll.targets[0].expr;
+      // Excludes structured lines so it surfaces ONLY errors that bypassed
+      // Pino (Pino + nginx-access both carry `"level":`).
+      expect(expr).toContain('!= `"level":`');
+      // Matches the framework-crash markers.
+      expect(expr).toContain("uncaughtException");
+      expect(expr).toContain("unhandledRejection");
+    });
   });
 
   // Grafana alerting
@@ -118,6 +131,16 @@ describe("monitoring config structural validation", () => {
     });
     it("defines memory-pressure rule", () => {
       expect(content).toContain("memory-pressure");
+    });
+    it("defines scrape-target-down rule", () => {
+      expect(content).toContain("scrape-target-down");
+    });
+    it("defines escaped-error-logs rule backed by the Loki datasource", () => {
+      expect(content).toContain("escaped-error-logs");
+      expect(content).toContain("uncaughtException");
+      // Loki-backed (datasourceUid: loki) with a server-side threshold expr.
+      expect(content).toContain("datasourceUid: loki");
+      expect(content).toContain("__expr__");
     });
   });
 

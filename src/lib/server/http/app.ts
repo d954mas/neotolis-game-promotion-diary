@@ -18,6 +18,7 @@ import { proxyTrust } from "./middleware/proxy-trust.js";
 import { tenantScope } from "./middleware/tenant.js";
 import { accountState } from "./middleware/account-state.js";
 import { adminAllowlist } from "./middleware/admin.js";
+import { honoErrorHandler } from "./routes/_shared.js";
 import { meRoutes } from "./routes/me.js";
 import { sessionRoutes } from "./routes/sessions.js";
 // Sub-routers — every service surface gets a Hono sub-router mounted
@@ -62,6 +63,12 @@ export type AppContext = {
 
 export function createApp(): Hono<AppContext> {
   const app = new Hono<AppContext>();
+
+  // Global error handler — any throw escaping a route's mapErr or thrown
+  // from middleware lands here as structured Pino JSON instead of a raw
+  // node-server stack trace. Applies to every route, including the
+  // SvelteKit catch-all mounted later in roles/app.ts.
+  app.onError(honoErrorHandler);
 
   // First: resolve client IP behind any proxy.
   app.use("*", proxyTrust);

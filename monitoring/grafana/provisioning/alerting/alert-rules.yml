@@ -97,3 +97,52 @@ groups:
           summary: "Prometheus cannot scrape the app — container may be down or /metrics unreachable"
         labels:
           severity: critical
+
+      - uid: escaped-error-logs
+        title: "Escaped Error Logs (errors bypassing Pino)"
+        # Loki-backed. Fires when a plain-text error pattern that bypassed
+        # structured logging appears. The selector excludes JSON lines
+        # (`!= "level":` skips Pino + nginx access), so a hit means a raw
+        # Node crash / framework stack trace was emitted outside Pino. The
+        # regex is deliberately narrow (uncaughtException / unhandledRejection
+        # / ERR_ codes) so routine nginx error_log noise does not page.
+        # Two-stage: A = Loki count, B = threshold expression (Grafana's
+        # __expr__ engine), condition = B.
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              datasource:
+                type: loki
+                uid: loki
+              expr: 'sum(count_over_time({service=~"app|worker|scheduler"} != `"level":` |~ `(?i)(uncaughtException|unhandledRejection|ERR_[A-Z0-9_]+)` [5m]))'
+              queryType: instant
+              intervalMs: 15000
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              refId: B
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        annotations:
+          summary: "A non-structured error log appeared — something logged outside Pino (raw Node crash or framework stack trace). Check the Escaped Errors panel on the Neotolis Logs dashboard."
+        labels:
+          severity: warning
