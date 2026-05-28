@@ -39,7 +39,7 @@ const PG_CONNECTION_LIFECYCLE_CODES = new Set(["57P01", "57P03"]);
 export function logPgBossError(err: unknown): void {
   const code = (err as { code?: unknown })?.code;
   if (typeof code === "string" && PG_CONNECTION_LIFECYCLE_CODES.has(code)) {
-    logger.warn({ err, code }, "pg-boss connection terminated (shutdown/restart)");
+    logger.warn({ err, code }, "pg-boss backend connection terminated (likely deploy/restart)");
     return;
   }
   logger.error({ err }, "pg-boss error");

@@ -35,6 +35,16 @@ import type { Handle, HandleServerError } from "@sveltejs/kit";
 import { auth } from "./lib/auth.js";
 import { toUserDto, toSessionDto } from "./lib/server/dto.js";
 import { logger } from "./lib/server/logger.js";
+import { env } from "./lib/server/config/env.js";
+
+// Canonical PUBLIC origin, computed once. We compare a request's Referer
+// against THIS (a single, explicitly-configured source of truth) rather than
+// `event.url.origin` — the latter is derived by adapter-node from forwarded
+// headers and only happens to equal the public origin today (it defaults the
+// scheme to "https" and trusts the proxied Host). Pinning to BETTER_AUTH_URL
+// keeps the internal-vs-external Referer check correct regardless of proxy
+// header config or adapter-version changes.
+const CANONICAL_ORIGIN = new URL(env.BETTER_AUTH_URL).origin;
 
 const VALID_THEMES = new Set(["light", "dark", "system"]);
 
@@ -99,14 +109,15 @@ export const handleError: HandleServerError = ({ error, event, status }) => {
   return { message: "Internal Error" };
 };
 
-/** True when the request's Referer points at our own origin — i.e. a link
- *  inside the app led to this URL. Distinguishes our broken links from
- *  scanner probes without enumerating scanner paths. */
-function isInternalReferer(event: { request: Request; url: URL }): boolean {
+/** True when the request's Referer points at our own canonical origin — i.e.
+ *  a link inside the app led to this URL. Distinguishes our broken links from
+ *  scanner probes without enumerating scanner paths. Compares against
+ *  CANONICAL_ORIGIN (BETTER_AUTH_URL), not event.url.origin — see note above. */
+function isInternalReferer(event: { request: Request }): boolean {
   const referer = event.request.headers.get("referer");
   if (!referer) return false;
   try {
-    return new URL(referer).origin === event.url.origin;
+    return new URL(referer).origin === CANONICAL_ORIGIN;
   } catch {
     return false;
   }

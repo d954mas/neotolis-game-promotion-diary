@@ -36,7 +36,9 @@ describe("logPgBossError", () => {
 
     expect(errorLog).not.toHaveBeenCalled();
     expect(warnLog).toHaveBeenCalledTimes(1);
-    expect(warnLog.mock.calls[0]![1]).toBe("pg-boss connection terminated (shutdown/restart)");
+    expect(warnLog.mock.calls[0]![1]).toBe(
+      "pg-boss backend connection terminated (likely deploy/restart)",
+    );
   });
 
   it("downgrades 57P03 (cannot_connect_now) to warn", () => {
@@ -72,5 +74,16 @@ describe("logPgBossError", () => {
 
     expect(warnLog).not.toHaveBeenCalled();
     expect(errorLog).toHaveBeenCalledTimes(1);
+  });
+
+  it("tolerates a null/non-object err without throwing (logs at error)", () => {
+    const errorLog = vi.spyOn(logger, "error").mockImplementation(() => {});
+    const warnLog = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+    expect(() => logPgBossError(null)).not.toThrow();
+    expect(() => logPgBossError("boom")).not.toThrow();
+
+    expect(warnLog).not.toHaveBeenCalled();
+    expect(errorLog).toHaveBeenCalledTimes(2);
   });
 });

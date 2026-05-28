@@ -76,6 +76,15 @@ describe("handleError (SvelteKit)", () => {
       status: 404,
       message: "Not Found",
     });
+    // Same host but DIFFERENT scheme/port than the canonical origin
+    // (BETTER_AUTH_URL=http://localhost:3000) is NOT internal — guards the
+    // scheme/port-sensitivity of the origin comparison.
+    handleError({
+      error: new Error("Not found: /x"),
+      event: fakeEvent("/x", "GET", "https://localhost:3000/feed"),
+      status: 404,
+      message: "Not Found",
+    });
 
     expect(errorLog).not.toHaveBeenCalled();
     expect(warnLog).not.toHaveBeenCalled();
@@ -87,8 +96,9 @@ describe("handleError (SvelteKit)", () => {
 
     handleError({
       error: new Error("Not found: /feeed"),
-      // Referer is our own origin, with a query string that must NOT be logged.
-      event: fakeEvent("/feeed", "GET", "http://localhost/feed?filter=secret"),
+      // Referer is our own canonical origin (BETTER_AUTH_URL=http://localhost:3000),
+      // with a query string that must NOT be logged.
+      event: fakeEvent("/feeed", "GET", "http://localhost:3000/feed?filter=secret"),
       status: 404,
       message: "Not Found",
     });
