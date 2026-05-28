@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { randomBytes } from "node:crypto";
+import type { RequestEvent } from "@sveltejs/kit";
 
 process.env.DATABASE_URL ??= "postgres://test:test@localhost:5432/test";
 process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
@@ -22,11 +23,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function fakeEvent(pathname: string, method: string) {
+// handleError only reads event.url.pathname and event.request.method; the
+// rest of RequestEvent is irrelevant here, so cast a minimal synthetic event
+// rather than fabricate cookies/locals/fetch/etc. A typed cast (rather than a
+// suppression directive) keeps the typing robust against formatter reflows.
+function fakeEvent(pathname: string, method: string): RequestEvent {
   return {
     url: new URL(`http://localhost${pathname}`),
     request: new Request(`http://localhost${pathname}`, { method }),
-  };
+  } as unknown as RequestEvent;
 }
 
 describe("handleError (SvelteKit)", () => {
@@ -34,7 +39,6 @@ describe("handleError (SvelteKit)", () => {
     const errorLog = vi.spyOn(logger, "error").mockImplementation(() => {});
     const error = new Error("loader exploded");
 
-    // @ts-expect-error — synthetic event carries only the fields handleError reads.
     const result = handleError({
       error,
       event: fakeEvent("/feed", "GET"),
