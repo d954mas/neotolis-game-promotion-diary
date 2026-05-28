@@ -29,6 +29,9 @@ diff.txt
 # Grafana audit output — screenshots and JSON report, regenerated on each run.
 scripts/grafana-audit-output/
 
+# Grafana persistent browser session (login cookie) — local only.
+scripts/.grafana-session/
+
 # Issue #27 — GSD workflow artifacts are local-only.
 #
 # `.planning/` holds CONTEXT.md / RESEARCH.md / PLAN.md / SUMMARY.md /

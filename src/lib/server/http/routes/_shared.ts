@@ -68,3 +68,23 @@ export function mapErr(c: Context, err: unknown, route: string): Response {
   logger.error({ err, route }, "unhandled route error");
   return c.json({ error: "internal_server_error" }, 500);
 }
+
+/**
+ * Global Hono error handler — the catch-all for any exception that escapes
+ * a route's own try/catch (and `mapErr`), or is thrown from middleware.
+ * Wired via `app.onError(honoErrorHandler)` in app.ts.
+ *
+ * Without it, an uncaught throw falls to @hono/node-server, which prints a
+ * raw plain-text stack trace to stderr — bypassing Pino and invisible to
+ * the Grafana error panel. Logging here emits structured JSON (level 50)
+ * and returns the same `internal_server_error` envelope mapErr produces,
+ * so the wire contract is uniform whether an error was caught per-route or
+ * escaped to the global handler.
+ */
+export function honoErrorHandler(err: unknown, c: Context): Response {
+  logger.error(
+    { err, path: c.req.path, method: c.req.method },
+    "unhandled hono error",
+  );
+  return c.json({ error: "internal_server_error" }, 500);
+}

@@ -31,9 +31,10 @@
 // Node's module cache dedupes — second import is a no-op.
 import "./lib/server/integrations/dns-bootstrap.js";
 import { sequence } from "@sveltejs/kit/hooks";
-import type { Handle } from "@sveltejs/kit";
+import type { Handle, HandleServerError } from "@sveltejs/kit";
 import { auth } from "./lib/auth.js";
 import { toUserDto, toSessionDto } from "./lib/server/dto.js";
+import { logger } from "./lib/server/logger.js";
 
 const VALID_THEMES = new Set(["light", "dark", "system"]);
 
@@ -66,3 +67,18 @@ export const themeHandle: Handle = async ({ event, resolve }) => {
 };
 
 export const handle: Handle = sequence(authHandle, themeHandle);
+
+// SvelteKit invokes handleError for UNEXPECTED errors thrown during
+// load/render (5xx). Expected errors via the `error()` helper and plain
+// 404s do NOT reach here. Without this hook those server-render crashes go
+// to SvelteKit's default formatter (plain text), bypassing Pino and the
+// Grafana error panel. Logging via Pino (level 50) makes them visible;
+// the returned shape is the safe client-facing payload (never leak the
+// stack — Pino already captured it, redacted).
+export const handleError: HandleServerError = ({ error, event, status }) => {
+  logger.error(
+    { err: error, status, path: event.url.pathname, method: event.request.method },
+    "sveltekit unhandled error",
+  );
+  return { message: "Internal Error" };
+};

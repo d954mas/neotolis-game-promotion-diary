@@ -32,6 +32,30 @@ include /etc/nginx/cf-ips.conf;
 # 10 req/sec, burst 20, no-delay (immediate 503 on burst overrun).
 limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/s;
 
+# Structured JSON access log so Promtail/Loki parse nginx requests into the
+# same shape as the app's Pino logs (queryable by status, method, path).
+# escape=json keeps the line valid JSON even when a field contains quotes.
+# `level:"info"` is a synthetic field so the access stream sorts cleanly
+# alongside Pino level semantics; nginx ERROR diagnostics still go to
+# error_log as plain text (open-source nginx cannot emit JSON error_log) —
+# those are caught by the Grafana catch-all regex panel instead.
+# user_agent is intentionally omitted (opsec: the app redacts UA too).
+log_format json_access escape=json
+  '{'
+    '"time":"$time_iso8601",'
+    '"level":"info",'
+    '"source":"nginx",'
+    '"remote_addr":"$remote_addr",'
+    '"method":"$request_method",'
+    '"path":"$request_uri",'
+    '"status":$status,'
+    '"body_bytes":$body_bytes_sent,'
+    '"request_time":$request_time,'
+    '"upstream_time":"$upstream_response_time",'
+    '"host":"$host",'
+    '"referer":"$http_referer"'
+  '}';
+
 # Hide nginx version from response headers
 server_tokens off;
 
@@ -50,6 +74,9 @@ server {
     ssl_prefer_server_ciphers off;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
+
+    # JSON access log to stdout (Promtail collects container stdout/stderr).
+    access_log /dev/stdout json_access;
 
     # Resolver for Docker network DNS (app:3000)
     resolver 127.0.0.11 valid=10s ipv6=off;

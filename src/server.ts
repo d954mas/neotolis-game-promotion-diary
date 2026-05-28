@@ -17,7 +17,13 @@
 import "./lib/server/integrations/dns-bootstrap.js";
 import { env } from "./lib/server/config/env.js";
 import { logger } from "./lib/server/logger.js";
+import { registerCrashHandlers } from "./lib/server/crash-handlers.js";
 import { runMigrations } from "./lib/server/db/migrate.js";
+
+// Earliest possible registration: a crash during migrations or role
+// startup is then logged as structured JSON (Pino fatal) instead of a raw
+// Node stack trace that bypasses the log pipeline.
+registerCrashHandlers();
 
 async function main(): Promise<void> {
   // Every role runs migrations (idempotent, advisory-locked).

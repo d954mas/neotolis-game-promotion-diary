@@ -47,11 +47,35 @@
       }
     },
     {
+      "id": 4,
+      "type": "logs",
+      "title": "Escaped Errors (catch-all — bypassed structured logging)",
+      "description": "Safety net. Excludes all JSON lines (Pino + nginx access both carry \"level\":) and surfaces only plain-text error-shaped lines — raw Node crashes, framework stack traces, nginx error_log. If anything shows here, something logged outside Pino and should be routed through it.",
+      "datasource": { "uid": "loki", "type": "loki" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 10 },
+      "targets": [
+        {
+          "datasource": { "uid": "loki", "type": "loki" },
+          "expr": "{service=~\"app|worker|scheduler|nginx\"} != `\"level\":` |~ `(?i)(uncaughtException|unhandledRejection|ERR_[A-Z0-9_]+|Error:|\\bFATAL\\b|\\bpanic\\b|\\[(error|crit|alert|emerg)\\])`",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      }
+    },
+    {
       "id": 2,
       "type": "logs",
       "title": "Full-Text Search",
       "datasource": { "uid": "loki", "type": "loki" },
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 10 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 18 },
       "targets": [
         {
           "datasource": { "uid": "loki", "type": "loki" },
@@ -74,7 +98,7 @@
       "type": "timeseries",
       "title": "Log Volume",
       "datasource": { "uid": "loki", "type": "loki" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
       "targets": [
         {
           "datasource": { "uid": "loki", "type": "loki" },
