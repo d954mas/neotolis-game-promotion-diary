@@ -220,6 +220,50 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
     expect(rows.every((r) => r.userId === b.userId)).toBe(true);
   });
 
+  it("03.2-03: partial re-import does NOT corrupt balance — recomputed over the whole stored series", async () => {
+    const s = await seedUserGameListing("wl-partial", 4654990);
+    // Full history first → headline 254; mid-day balance is the full-series
+    // cumulative (hundreds), not a within-file value.
+    await importWishlistCsv(
+      s.userId,
+      s.gameId,
+      s.listingId,
+      fixture("wishlist-actions-real.csv"),
+      "127.0.0.1",
+    );
+    const midBefore = (
+      await db
+        .select({ b: wishlistSnapshots.balance })
+        .from(wishlistSnapshots)
+        .where(
+          and(eq(wishlistSnapshots.listingId, s.listingId), eq(wishlistSnapshots.date, "2026-05-20")),
+        )
+    )[0]!.b;
+    expect((await getWishlistSummary(s.userId, s.listingId))?.balance).toBe(254);
+
+    // Layer a 3-day slice from the MIDDLE. Within that file the cumulative is
+    // 3/5/8 — the old per-file logic would overwrite 2026-05-20's balance with
+    // 5. The recompute keeps it at the full-series value.
+    await importWishlistCsv(
+      s.userId,
+      s.gameId,
+      s.listingId,
+      fixture("wishlist-partial-week.csv"),
+      "127.0.0.1",
+    );
+    const midAfter = (
+      await db
+        .select({ b: wishlistSnapshots.balance })
+        .from(wishlistSnapshots)
+        .where(
+          and(eq(wishlistSnapshots.listingId, s.listingId), eq(wishlistSnapshots.date, "2026-05-20")),
+        )
+    )[0]!.b;
+    expect(midAfter).toBe(midBefore); // unchanged — recomputed over the whole series
+    expect(midAfter).toBeGreaterThan(8); // sanity: NOT the within-file value
+    expect((await getWishlistSummary(s.userId, s.listingId))?.balance).toBe(254);
+  });
+
   it("03.2-03: two users, SAME appId, different games — each sees only their own snapshots (no bleed by appId)", async () => {
     // The privacy concern: appId is NOT the storage key (listing_id + user_id
     // are). Two tenants owning the same Steam appId must stay fully isolated.

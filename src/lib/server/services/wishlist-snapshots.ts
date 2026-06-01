@@ -103,9 +103,11 @@ export async function importWishlistCsv(
   // order. ISO YYYY-MM-DD sorts lexicographically === chronologically.
   const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date));
 
-  // Running cumulative balance (RESEARCH.md Option 1, all-history): the CSV
-  // carries the full daily history, so the running sum IS the absolute
-  // outstanding-wishlist count on each day.
+  // Provisional per-row balance (running sum within THIS file). It is the
+  // authoritative value only for a full-history import; the recompute step
+  // below (cumulative over the WHOLE stored series) corrects it so a partial
+  // import — e.g. a 1-week range layered onto a year already stored — can't
+  // overwrite earlier days' balances with a wrong from-zero value.
   let running = 0;
   const values = sorted.map((r) => {
     running += r.adds - r.deletes - r.purchasesAndActivations - r.gifts;
@@ -160,6 +162,25 @@ export async function importWishlistCsv(
           updatedAt: sql`now()`,
         },
       });
+
+    // Recompute `balance` as the cumulative sum over the ENTIRE stored series
+    // for this listing (date-ordered), not just the rows in this file. This is
+    // what makes balance correct under partial / out-of-order / repeated
+    // imports: it's always a function of all stored daily components. Tenant-
+    // scoped by (user_id, listing_id) in the subquery. Only rows whose derived
+    // value actually changes are touched (keeps re-imports a no-op here).
+    await tx.execute(sql`
+      UPDATE wishlist_snapshots AS w
+      SET balance = s.run
+      FROM (
+        SELECT id,
+               SUM(adds - deletes - purchases_and_activations - gifts)
+                 OVER (ORDER BY date) AS run
+        FROM wishlist_snapshots
+        WHERE user_id = ${userId} AND listing_id = ${listingId}
+      ) AS s
+      WHERE w.id = s.id AND w.balance IS DISTINCT FROM s.run
+    `);
 
     return existing.length;
   });
