@@ -760,6 +760,7 @@ describe("paraglide i18n", () => {
       "wishlist_summary_empty_hint",
       "wishlist_summary_last_date",
       "wishlist_summary_recent_heading",
+      "wishlist_summary_since",
       "wishlist_summary_updated_ago",
       "youtube_channels_cta_add",
     ] as const;

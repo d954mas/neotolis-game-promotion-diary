@@ -225,6 +225,7 @@
   "wishlist_csv_too_large": "That file is too large (max 2 MB).",
   "wishlist_csv_missing_file": "No file received — choose a CSV and try again.",
   "wishlist_summary_balance_label": "Outstanding wishlists",
+  "wishlist_summary_since": "Balance counted since {date}",
   "wishlist_summary_updated_ago": "updated {ago}",
   "wishlist_summary_last_date": "as of {date}",
   "wishlist_summary_recent_heading": "Recent days",

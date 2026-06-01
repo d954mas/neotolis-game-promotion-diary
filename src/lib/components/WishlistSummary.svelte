@@ -53,6 +53,11 @@
         <span class="updated">{m.wishlist_summary_updated_ago({ ago: updatedAgo })}</span>
       {/if}
     </p>
+    <!-- Coverage start: the headline balance is a running cumulative anchored
+         at the earliest imported day, NOT necessarily absolute-from-launch.
+         Surfacing "since {firstDate}" keeps the number honest when the first
+         import wasn't the full launch-to-now history. -->
+    <p class="coverage">{m.wishlist_summary_since({ date: summary.firstDate })}</p>
     {#if summary.recentDays.length > 0}
       <table class="recent">
         <caption class="recent-caption">{m.wishlist_summary_recent_heading()}</caption>
@@ -133,6 +138,12 @@
     align-items: center;
     gap: var(--s-1);
     flex-wrap: wrap;
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+  }
+  .coverage {
+    margin: 0;
     color: var(--text-3);
     font-family: var(--f-sans);
     font-size: var(--t-12);

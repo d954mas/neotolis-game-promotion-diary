@@ -207,6 +207,7 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
     const summary = await getWishlistSummary(s.userId, s.listingId);
     expect(summary).not.toBeNull();
     expect(summary!.balance).toBe(111);
+    expect(summary!.firstDate).toBe("2026-05-28");
     expect(summary!.lastDate).toBe("2026-05-30");
     // recent days ordered DESC by date.
     expect(summary!.recentDays.map((d) => d.date)).toEqual([
@@ -220,6 +221,32 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
     const recent = await listRecentSnapshots(s.userId, s.listingId);
     expect(recent.map((d) => d.date)).toEqual(["2026-05-30", "2026-05-29", "2026-05-28"]);
     expect(recent[0]).not.toHaveProperty("userId");
+  });
+
+  it("03.2-03: getWishlistSummary.firstDate is the TRUE series MIN, not the 14-row recentDays window start", async () => {
+    // The 39-day real export spans 2026-04-23 … 2026-06-01 (balance 254).
+    // recentDays caps at 14, so its oldest row is well after the real first
+    // day — firstDate MUST come from the dedicated MIN(date) query, proving
+    // the headline balance is correctly anchored at the actual coverage start.
+    const s = await seedUserGameListing("wl-firstdate", 4654990);
+    await importWishlistCsv(
+      s.userId,
+      s.gameId,
+      s.listingId,
+      fixture("wishlist-actions-real.csv"),
+      "127.0.0.1",
+    );
+
+    const summary = await getWishlistSummary(s.userId, s.listingId);
+    expect(summary).not.toBeNull();
+    expect(summary!.firstDate).toBe("2026-04-23");
+    expect(summary!.lastDate).toBe("2026-06-01");
+    expect(summary!.balance).toBe(254);
+    // recentDays is capped at 14 — its oldest entry is strictly AFTER the true
+    // firstDate, so firstDate could not have come from recentDays[last].
+    expect(summary!.recentDays.length).toBe(14);
+    const oldestRecent = summary!.recentDays[summary!.recentDays.length - 1]!.date;
+    expect(oldestRecent > summary!.firstDate).toBe(true);
   });
 
   it("03.2-03: tenant isolation — user A importing to user B's listing → NotFoundError; B's snapshots invisible to A (D-06)", async () => {

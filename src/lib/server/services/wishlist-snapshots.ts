@@ -175,6 +175,16 @@ export async function importWishlistCsv(
     // correct under partial / out-of-order / repeated imports. Tenant-scoped by
     // (user_id, listing_id) in the subquery. Only rows whose derived value
     // actually changes are touched (keeps re-imports a no-op here).
+    //
+    // KNOWN CONCURRENCY EDGE (accepted): two concurrent imports to the SAME
+    // listing under READ COMMITTED each recompute from a possibly-stale view
+    // of the series, so a late commit can leave one window's balances derived
+    // from rows the other transaction hadn't yet inserted. A SELECT … FOR
+    // UPDATE / pg_advisory_xact_lock on the listing row would serialize the
+    // recompute and close it. Deferred: the data model is single-user,
+    // single-listing, manual CSV upload — two overlapping imports of the same
+    // listing is a near-zero-probability race, and the next full-history
+    // import self-heals the series. Not worth the lock contention today.
     await tx.execute(sql`
       UPDATE wishlist_snapshots AS w
       SET balance = s.run
@@ -214,9 +224,17 @@ export async function importWishlistCsv(
 export type WishlistSummary = WishlistSummaryDto;
 
 /**
- * Latest balance + date + the last ≤14 daily rows (DESC) for a listing.
- * Returns null when the listing has no snapshots. Tenant-scoped — a
- * cross-tenant listingId yields null (no rows match the userId filter).
+ * Latest balance + the coverage window (firstDate…lastDate) + the last ≤14
+ * daily rows (DESC) for a listing. Returns null when the listing has no
+ * snapshots. Tenant-scoped — a cross-tenant listingId yields null (no rows
+ * match the userId filter).
+ *
+ * `firstDate` is the TRUE earliest snapshot date across the whole stored
+ * series — NOT `recentDays[last]`, which is capped at 14 rows and so would
+ * understate coverage for a longer series. The headline `balance` is a
+ * running cumulative anchored at `firstDate`; surfacing it lets the UI show
+ * the user the number covers "since {firstDate}" rather than implying it is
+ * the absolute launch-to-now balance. One extra bounded MIN query (KISS).
  */
 export async function getWishlistSummary(
   userId: string,
@@ -225,7 +243,20 @@ export async function getWishlistSummary(
   const rows = await listRecentSnapshots(userId, listingId, 14);
   if (rows.length === 0) return null;
   const latest = rows[0]!;
-  return { balance: latest.balance, lastDate: latest.date, recentDays: rows };
+  // Dedicated MIN(date) over the WHOLE series — recentDays caps at 14, so its
+  // oldest row is NOT the true coverage start for a longer series. An aggregate
+  // SELECT always returns exactly one row, and rows.length > 0 above guarantees
+  // a non-null MIN, so the `!` is sound.
+  const [agg] = await db
+    .select({ firstDate: sql<string>`min(${wishlistSnapshots.date})` })
+    .from(wishlistSnapshots)
+    .where(and(eq(wishlistSnapshots.userId, userId), eq(wishlistSnapshots.listingId, listingId)));
+  return {
+    balance: latest.balance,
+    firstDate: agg!.firstDate,
+    lastDate: latest.date,
+    recentDays: rows,
+  };
 }
 
 /**

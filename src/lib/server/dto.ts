@@ -755,14 +755,22 @@ export interface WishlistSnapshotDto {
 
 /**
  * WishlistSummaryDto — the per-listing wishlist mini-summary wire shape
- * (headline `balance` + `lastDate` + the recent ≤14 daily rows). One source
- * of truth for the shape that several /games components render; it is
- * structurally identical to the service's `WishlistSummary` (the service
- * returns this shape directly). Components import THIS instead of re-declaring
- * the object literal inline.
+ * (headline `balance` + the coverage window `firstDate`…`lastDate` + the
+ * recent ≤14 daily rows). One source of truth for the shape that several
+ * /games components render; it is structurally identical to the service's
+ * `WishlistSummary` (the service returns this shape directly). Components
+ * import THIS instead of re-declaring the object literal inline.
+ *
+ * `firstDate` is the EARLIEST snapshot date across the WHOLE stored series
+ * for the listing (true MIN, not recentDays' capped-14 window start). The
+ * headline `balance` is a running cumulative anchored at `firstDate`; if the
+ * user's first import wasn't the full launch-to-now history, the number is
+ * relative to `firstDate`, NOT absolute-from-launch. The UI surfaces
+ * `firstDate` so the headline is never silently presented as absolute.
  */
 export interface WishlistSummaryDto {
   balance: number;
+  firstDate: string;
   lastDate: string;
   recentDays: WishlistSnapshotDto[];
 }
