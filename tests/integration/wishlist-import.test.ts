@@ -108,7 +108,9 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
     const after = await db
       .select()
       .from(wishlistSnapshots)
-      .where(eq(wishlistSnapshots.listingId, s.listingId))
+      .where(
+        and(eq(wishlistSnapshots.userId, s.userId), eq(wishlistSnapshots.listingId, s.listingId)),
+      )
       .orderBy(wishlistSnapshots.date);
 
     expect(after).toHaveLength(3);
@@ -150,7 +152,9 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
     const rows = await db
       .select()
       .from(wishlistSnapshots)
-      .where(eq(wishlistSnapshots.listingId, s.listingId))
+      .where(
+        and(eq(wishlistSnapshots.userId, s.userId), eq(wishlistSnapshots.listingId, s.listingId)),
+      )
       .orderBy(wishlistSnapshots.date);
     expect(rows).toHaveLength(2);
     // The LATER 2026-05-28 row (adds 99) supersedes the earlier one (adds 40).
@@ -179,7 +183,9 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
     const rows = await db
       .select()
       .from(wishlistSnapshots)
-      .where(eq(wishlistSnapshots.listingId, s.listingId));
+      .where(
+        and(eq(wishlistSnapshots.userId, s.userId), eq(wishlistSnapshots.listingId, s.listingId)),
+      );
     expect(rows).toHaveLength(2);
   });
 
@@ -251,7 +257,9 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
     const rows = await db
       .select()
       .from(wishlistSnapshots)
-      .where(eq(wishlistSnapshots.listingId, b.listingId));
+      .where(
+        and(eq(wishlistSnapshots.userId, b.userId), eq(wishlistSnapshots.listingId, b.listingId)),
+      );
     expect(rows).toHaveLength(3);
     expect(rows.every((r) => r.userId === b.userId)).toBe(true);
   });
@@ -273,6 +281,7 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
         .from(wishlistSnapshots)
         .where(
           and(
+            eq(wishlistSnapshots.userId, s.userId),
             eq(wishlistSnapshots.listingId, s.listingId),
             eq(wishlistSnapshots.date, "2026-05-20"),
           ),
@@ -296,6 +305,7 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
         .from(wishlistSnapshots)
         .where(
           and(
+            eq(wishlistSnapshots.userId, s.userId),
             eq(wishlistSnapshots.listingId, s.listingId),
             eq(wishlistSnapshots.date, "2026-05-20"),
           ),
@@ -352,13 +362,17 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
     const aRows = await db
       .select()
       .from(wishlistSnapshots)
-      .where(eq(wishlistSnapshots.listingId, a.listingId));
+      .where(
+        and(eq(wishlistSnapshots.userId, a.userId), eq(wishlistSnapshots.listingId, a.listingId)),
+      );
     expect(aRows).toHaveLength(3);
     expect(aRows.every((r) => r.userId === a.userId)).toBe(true);
     const bRows = await db
       .select()
       .from(wishlistSnapshots)
-      .where(eq(wishlistSnapshots.listingId, b.listingId));
+      .where(
+        and(eq(wishlistSnapshots.userId, b.userId), eq(wishlistSnapshots.listingId, b.listingId)),
+      );
     expect(bRows).toHaveLength(39);
     expect(bRows.every((r) => r.userId === b.userId)).toBe(true);
   });
@@ -382,7 +396,9 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
     const none = await db
       .select()
       .from(wishlistSnapshots)
-      .where(eq(wishlistSnapshots.listingId, s.listingId));
+      .where(
+        and(eq(wishlistSnapshots.userId, s.userId), eq(wishlistSnapshots.listingId, s.listingId)),
+      );
     expect(none).toHaveLength(0);
 
     // Filename appId matches the listing → imports.

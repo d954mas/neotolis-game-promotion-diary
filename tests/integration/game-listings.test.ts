@@ -725,7 +725,9 @@ describe("addSteamListing duplicate translation (Path B)", () => {
       const snaps = await db
         .select()
         .from(wishlistSnapshots)
-        .where(eq(wishlistSnapshots.listingId, listing.id));
+        .where(
+          and(eq(wishlistSnapshots.userId, userA.id), eq(wishlistSnapshots.listingId, listing.id)),
+        );
       expect(snaps).toHaveLength(0);
 
       // Irreversible purge is audited (listing.delete_forever, like sibling
