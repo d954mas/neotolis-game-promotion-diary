@@ -220,6 +220,51 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
     expect(rows.every((r) => r.userId === b.userId)).toBe(true);
   });
 
+  it("03.2-03: filename appId guard — mismatched SteamWishlists_{appId}_ name rejected; matching / renamed names import", async () => {
+    const s = await seedUserGameListing("wl-fileguard", 620);
+    const csv = fixture("wishlist-sample.csv");
+
+    // Wrong game's export (appId 999999 in the Steam filename) → rejected
+    // before any write, with the specific app-mismatch code.
+    await expect(
+      importWishlistCsv(
+        s.userId,
+        s.gameId,
+        s.listingId,
+        csv,
+        "127.0.0.1",
+        "SteamWishlists_999999_2026-04-23_to_2026-06-01.csv",
+      ),
+    ).rejects.toThrow("wishlist_csv_app_mismatch");
+    const none = await db
+      .select()
+      .from(wishlistSnapshots)
+      .where(eq(wishlistSnapshots.listingId, s.listingId));
+    expect(none).toHaveLength(0);
+
+    // Filename appId matches the listing → imports.
+    const ok = await importWishlistCsv(
+      s.userId,
+      s.gameId,
+      s.listingId,
+      csv,
+      "127.0.0.1",
+      "SteamWishlists_620_2026-04-23_to_2026-06-01.csv",
+    );
+    expect(ok.rowCount).toBe(3);
+
+    // Renamed file (no appId in the name) → can't verify, so allowed.
+    const renamed = await importWishlistCsv(
+      s.userId,
+      s.gameId,
+      s.listingId,
+      csv,
+      "127.0.0.1",
+      "my-wishlists.csv",
+    );
+    expect(renamed.rowCount).toBe(3);
+  });
+
   it("03.2-03: wishlist.imported audit row written with { appId, listingId, rowCount, dateRange } (D-04)", async () => {
     const s = await seedUserGameListing("wl-audit", 9001);
 

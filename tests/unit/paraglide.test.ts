@@ -734,6 +734,7 @@ describe("paraglide i18n", () => {
       "wishlist_ago_hours",
       "wishlist_ago_just_now",
       "wishlist_ago_minutes",
+      "wishlist_csv_app_mismatch",
       "wishlist_csv_invalid_header",
       "wishlist_csv_is_lifetime_summary",
       "wishlist_csv_missing_file",

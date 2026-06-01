@@ -34,7 +34,7 @@ import { wishlistSnapshots } from "../db/schema/wishlist-snapshots.js";
 import { gameSteamListings } from "../db/schema/game-steam-listings.js";
 import { parseWishlistCsv } from "../csv/parse-wishlist-csv.js";
 import { writeAudit } from "../audit.js";
-import { NotFoundError } from "./errors.js";
+import { AppError, NotFoundError } from "./errors.js";
 import { toWishlistSnapshotDto, type WishlistSnapshotDto } from "../dto.js";
 
 export interface ImportWishlistResult {
@@ -59,6 +59,7 @@ export async function importWishlistCsv(
   listingId: string,
   csvText: string,
   ipAddress: string,
+  fileName: string | null = null,
 ): Promise<ImportWishlistResult> {
   // Ownership gate FIRST — cross-tenant / mismatched listingId → 404 before
   // any wishlist write. Also yields appId for the audit metadata.
@@ -75,6 +76,22 @@ export async function importWishlistCsv(
     )
     .limit(1);
   if (!listing) throw new NotFoundError();
+
+  // Wrong-game guard: Steam names the export
+  // `SteamWishlists_{appId}_{from}_to_{to}.csv`. If the filename carries an
+  // appId that doesn't match this listing, the user picked the wrong listing —
+  // reject before writing. A renamed file (no appId in the name) can't be
+  // checked, so we allow it; the listing binding still scopes the data (D-07).
+  if (fileName) {
+    const m = /(?:^|[/\\])SteamWishlists_(\d+)_/i.exec(fileName);
+    if (m && Number(m[1]) !== listing.appId) {
+      throw new AppError(
+        `wishlist_csv_app_mismatch: file is for app ${m[1]}, this listing is app ${listing.appId}`,
+        "wishlist_csv_app_mismatch",
+        422,
+      );
+    }
+  }
 
   const { rows, skipped } = parseWishlistCsv(csvText);
 

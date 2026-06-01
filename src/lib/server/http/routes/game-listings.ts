@@ -202,6 +202,7 @@ gameListingsRoutes.post(
         c.req.param("listingId"),
         csvText,
         ctx.ipAddress,
+        file.name,
       );
       return c.json(result, 200);
     } catch (err) {
