@@ -126,7 +126,12 @@ gameListingsRoutes.delete("/games/:gameId/listings/:listingId", async (c) => {
   const force = c.req.query("force") === "true";
   try {
     if (force) {
-      await hardDeleteListing(ctx.userId, c.req.param("gameId"), c.req.param("listingId"));
+      await hardDeleteListing(
+        ctx.userId,
+        c.req.param("gameId"),
+        c.req.param("listingId"),
+        ctx.ipAddress,
+      );
     } else {
       await removeSteamListing(ctx.userId, c.req.param("listingId"), ctx.ipAddress);
     }

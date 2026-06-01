@@ -6,6 +6,7 @@ import { seedUserDirectly } from "./helpers.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { gameSteamListings } from "../../src/lib/server/db/schema/game-steam-listings.js";
 import { wishlistSnapshots } from "../../src/lib/server/db/schema/wishlist-snapshots.js";
+import { auditLog } from "../../src/lib/server/db/schema/audit-log.js";
 import { AppError } from "../../src/lib/server/services/errors.js";
 
 // Dev/test-DB conflation: tests/setup.ts truncates `neotolis_test`,
@@ -694,6 +695,19 @@ describe("addSteamListing duplicate translation (Path B)", () => {
         .from(wishlistSnapshots)
         .where(eq(wishlistSnapshots.listingId, listing.id));
       expect(snaps).toHaveLength(0);
+
+      // Irreversible purge is audited (listing.delete_forever, like sibling
+      // *.delete_forever verbs) with { gameId, listingId, appId } metadata.
+      const audit = await db
+        .select({ action: auditLog.action, metadata: auditLog.metadata })
+        .from(auditLog)
+        .where(and(eq(auditLog.userId, userA.id), eq(auditLog.action, "listing.delete_forever")));
+      expect(audit).toHaveLength(1);
+      expect(audit[0]!.metadata).toMatchObject({
+        gameId: game.id,
+        listingId: listing.id,
+        appId: 730,
+      });
 
       // Second call → 404 (row no longer exists).
       const res2 = await app.request(`/api/games/${game.id}/listings/${listing.id}?force=true`, {

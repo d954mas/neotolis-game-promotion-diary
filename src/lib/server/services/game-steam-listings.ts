@@ -41,17 +41,19 @@
 // Pino redact paths unchanged. The payload reaches the user via mapErr
 // → JSON response → client-side toast.
 //
-// NO audit entries from this service: the security-relevant audit verbs
-// (`key.*`, `game.*`, `item.*`, `event.*`, `theme.*`, `session.*`)
-// cover what matters. Listing CRUD is creation/destruction of metadata,
-// not security state — recording every add/remove would balloon the
-// audit log without forensic benefit.
+// Audit policy for this service: reversible listing CRUD (add / soft-remove /
+// restore / label edit) writes NO audit row — it's creation/destruction of
+// metadata, not security state, and recording every add/remove would balloon
+// the log without forensic benefit. The ONE exception is the irreversible
+// permanent purge (`hardDeleteListing` → `listing.delete_forever`), which is
+// audited like the sibling event/source/game `.delete_forever` verbs.
 
 import { and, eq, isNull, isNotNull, desc } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { gameSteamListings } from "../db/schema/game-steam-listings.js";
 import { fetchSteamAppDetails } from "../integrations/steam-api.js";
 import { getGameById } from "./games.js";
+import { writeAudit } from "../audit.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
 
@@ -415,17 +417,20 @@ export async function removeSteamListing(
  * Scoped to (userId, gameId, listingId). Wrapped in `db.transaction` so the
  * pre-check SELECT and the DELETE are atomic against a concurrent restore.
  *
- * No audit row (listing CRUD is metadata, not security state — see
- * file-header rationale; symmetric with restoreListing / removeSteamListing).
+ * Audited (`listing.delete_forever`, after commit) — unlike the reversible
+ * soft-delete / restore / update, a permanent purge is irreversible data
+ * destruction and is security-relevant, symmetric with the sibling
+ * `event/source/game .delete_forever` verbs. Metadata: { gameId, listingId, appId }.
  */
 export async function hardDeleteListing(
   userId: string,
   gameId: string,
   listingId: string,
+  ipAddress: string,
 ): Promise<void> {
-  return db.transaction(async (tx) => {
+  const appId = await db.transaction(async (tx) => {
     const [existing] = await tx
-      .select({ deletedAt: gameSteamListings.deletedAt })
+      .select({ deletedAt: gameSteamListings.deletedAt, appId: gameSteamListings.appId })
       .from(gameSteamListings)
       .where(
         and(
@@ -447,6 +452,15 @@ export async function hardDeleteListing(
           eq(gameSteamListings.id, listingId),
         ),
       );
+    return existing.appId;
+  });
+
+  // Audit AFTER commit (irreversible purge). writeAudit never throws.
+  await writeAudit({
+    userId,
+    action: "listing.delete_forever",
+    ipAddress,
+    metadata: { gameId, listingId, appId },
   });
 }
 

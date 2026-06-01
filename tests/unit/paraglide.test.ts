@@ -173,6 +173,7 @@ describe("paraglide i18n", () => {
       "audit_action_game_created",
       "audit_action_game_delete_forever",
       "audit_action_game_deleted",
+      "audit_action_listing_delete_forever",
       "audit_action_game_restored",
       "audit_action_key_add",
       "audit_action_key_remove",
