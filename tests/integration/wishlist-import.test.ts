@@ -189,6 +189,30 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
     expect(rows).toHaveLength(2);
   });
 
+  it("03.2-03: header valid but ALL rows malformed → 422 wishlist_csv_no_valid_rows (not silent empty success)", async () => {
+    const s = await seedUserGameListing("wl-allbad", 620);
+    // Valid header, but every data row is malformed (bad date / non-integer).
+    // Pre-fix this returned rowCount:0 / 200 → UI showed a misleading success.
+    const csv = [
+      "DateLocal,Game,Adds,Deletes,PurchasesAndActivations,Gifts",
+      "not-a-date,My Indie Game,5,0,0,0",
+      "2026-05-28,My Indie Game,xx,0,0,0",
+    ].join("\n");
+
+    await expect(
+      importWishlistCsv(s.userId, s.gameId, s.listingId, csv, "127.0.0.1"),
+    ).rejects.toThrow("wishlist_csv_no_valid_rows");
+
+    // Nothing written.
+    const rows = await db
+      .select()
+      .from(wishlistSnapshots)
+      .where(
+        and(eq(wishlistSnapshots.userId, s.userId), eq(wishlistSnapshots.listingId, s.listingId)),
+      );
+    expect(rows).toHaveLength(0);
+  });
+
   it("03.2-03: getWishlistSummary returns latest balance/date + recent days DESC; null when empty", async () => {
     const s = await seedUserGameListing("wl-summary", 620);
 

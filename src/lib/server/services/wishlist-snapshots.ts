@@ -95,6 +95,17 @@ export async function importWishlistCsv(
   const { rows, skipped } = parseWishlistCsv(csvText);
 
   if (rows.length === 0) {
+    // A header-valid file whose data rows were ALL malformed (skipped > 0) is a
+    // FAILED import, not an empty one — surface 422 so the UI says "rows
+    // couldn't be read" instead of a misleading "no rows found / success".
+    // A genuinely empty data section (skipped === 0) keeps the empty result.
+    if (skipped > 0) {
+      throw new AppError(
+        `wishlist_csv_no_valid_rows: ${skipped} malformed rows, none parseable`,
+        "wishlist_csv_no_valid_rows",
+        422,
+      );
+    }
     return { rowCount: 0, updated: 0, skipped, dateRange: { from: "", to: "" } };
   }
 
@@ -134,6 +145,14 @@ export async function importWishlistCsv(
   const importDates = values.map((v) => v.date);
 
   const updated = await db.transaction(async (tx) => {
+    // Serialize concurrent imports to the SAME listing. The upsert + whole-
+    // series balance recompute below read-then-write the listing's snapshot
+    // set, so two parallel imports under READ COMMITTED could each recompute
+    // from a stale view and clobber the other's balances. A per-listing
+    // advisory xact lock makes them queue instead of racing (released on
+    // commit/rollback).
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${listingId}, 0))`);
+
     // Count how many of the imported dates already exist for this listing
     // (tenant-scoped) → the `updated` (conflict) count. KISS — one scoped
     // SELECT beats inspecting xmax.
@@ -174,17 +193,10 @@ export async function importWishlistCsv(
     // for this listing (date-ordered), not just the rows in this file — so it's
     // correct under partial / out-of-order / repeated imports. Tenant-scoped by
     // (user_id, listing_id) in the subquery. Only rows whose derived value
-    // actually changes are touched (keeps re-imports a no-op here).
-    //
-    // KNOWN CONCURRENCY EDGE (accepted): two concurrent imports to the SAME
-    // listing under READ COMMITTED each recompute from a possibly-stale view
-    // of the series, so a late commit can leave one window's balances derived
-    // from rows the other transaction hadn't yet inserted. A SELECT … FOR
-    // UPDATE / pg_advisory_xact_lock on the listing row would serialize the
-    // recompute and close it. Deferred: the data model is single-user,
-    // single-listing, manual CSV upload — two overlapping imports of the same
-    // listing is a near-zero-probability race, and the next full-history
-    // import self-heals the series. Not worth the lock contention today.
+    // actually changes are touched (keeps re-imports a no-op here). Concurrent
+    // imports to the same listing are serialized by the advisory xact lock
+    // taken at the top of this transaction, so this recompute always sees a
+    // consistent series.
     await tx.execute(sql`
       UPDATE wishlist_snapshots AS w
       SET balance = s.run

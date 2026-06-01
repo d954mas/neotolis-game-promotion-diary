@@ -137,7 +137,11 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
           listings.map(
             async (l): Promise<[string, WishlistSummary | null]> => [
               l.id,
-              await getWishlistSummary(userId, l.id).catch(() => null),
+              // No catch: getWishlistSummary already returns null for the
+              // legitimate no-data / cross-tenant case, so any throw here is a
+              // real fault that should surface as a load error, not be masked
+              // as "no wishlist data".
+              await getWishlistSummary(userId, l.id),
             ],
           ),
         );

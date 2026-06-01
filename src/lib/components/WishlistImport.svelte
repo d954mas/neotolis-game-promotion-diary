@@ -41,6 +41,8 @@
         return m.wishlist_csv_is_lifetime_summary();
       case "wishlist_csv_app_mismatch":
         return m.wishlist_csv_app_mismatch();
+      case "wishlist_csv_no_valid_rows":
+        return m.wishlist_csv_no_valid_rows();
       case "wishlist_csv_too_large":
         return m.wishlist_csv_too_large();
       case "wishlist_csv_missing_file":
