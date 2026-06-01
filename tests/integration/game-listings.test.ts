@@ -700,6 +700,10 @@ describe("addSteamListing duplicate translation (Path B)", () => {
         userId: userA.id,
         listingId: listing.id,
         date: "2026-05-01",
+        adds: 0,
+        deletes: 0,
+        purchasesAndActivations: 0,
+        gifts: 0,
         balance: 100,
       });
       // Soft-delete first (delete-forever only purges soft-deleted rows).

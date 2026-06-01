@@ -68,8 +68,8 @@
           {#each summary.recentDays as day (day.id)}
             <tr>
               <td class="col-date">{day.date}</td>
-              <td class="num">{(day.adds ?? 0).toLocaleString("en")}</td>
-              <td class="num">{(day.deletes ?? 0).toLocaleString("en")}</td>
+              <td class="num">{day.adds.toLocaleString("en")}</td>
+              <td class="num">{day.deletes.toLocaleString("en")}</td>
               <td class="num">{day.balance.toLocaleString("en")}</td>
             </tr>
           {/each}

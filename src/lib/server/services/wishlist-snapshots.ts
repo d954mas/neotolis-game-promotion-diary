@@ -171,21 +171,15 @@ export async function importWishlistCsv(
       });
 
     // Recompute `balance` as the cumulative sum over the ENTIRE stored series
-    // for this listing (date-ordered), not just the rows in this file. This is
-    // what makes balance correct under partial / out-of-order / repeated
-    // imports: it's always a function of all stored daily components. Tenant-
-    // scoped by (user_id, listing_id) in the subquery. Only rows whose derived
-    // value actually changes are touched (keeps re-imports a no-op here).
+    // for this listing (date-ordered), not just the rows in this file — so it's
+    // correct under partial / out-of-order / repeated imports. Tenant-scoped by
+    // (user_id, listing_id) in the subquery. Only rows whose derived value
+    // actually changes are touched (keeps re-imports a no-op here).
     await tx.execute(sql`
       UPDATE wishlist_snapshots AS w
       SET balance = s.run
       FROM (
         SELECT id,
-               -- INVARIANT: the only writer today (CSV import) always supplies
-               -- non-NULL integer components, so this SUM is never NULL. A
-               -- future 'manual'/'api' source that writes NULL components MUST
-               -- COALESCE them (or be excluded/prioritised) here, else this
-               -- UPDATE hits the balance NOT NULL constraint.
                SUM(adds - deletes - purchases_and_activations - gifts)
                  OVER (ORDER BY date) AS run
         FROM wishlist_snapshots

@@ -34,10 +34,14 @@ export const wishlistSnapshots = pgTable(
       .notNull()
       .references(() => gameSteamListings.id, { onDelete: "cascade" }),
     date: date("date").notNull(), // DateLocal (Pacific calendar day)
-    adds: integer("adds"), // NULL when source != 'csv' (D-04)
-    deletes: integer("deletes"),
-    purchasesAndActivations: integer("purchases_and_activations"),
-    gifts: integer("gifts"),
+    // Daily wishlist-activity components. NOT NULL: the only writer (CSV
+    // import) always supplies integers, so the balance recompute SUM is
+    // non-NULL by construction. `source` discriminates provenance for the
+    // roadmap manual/api writers, which will likewise supply all four.
+    adds: integer("adds").notNull(),
+    deletes: integer("deletes").notNull(),
+    purchasesAndActivations: integer("purchases_and_activations").notNull(),
+    gifts: integer("gifts").notNull(),
     balance: integer("balance").notNull(), // derived outstanding wishlists; always present
     source: text("source").notNull().default("csv"), // forward-compat 'manual'/'api' (D-02/D-05); NOT in conflict key
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

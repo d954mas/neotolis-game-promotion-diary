@@ -743,10 +743,10 @@ export interface WishlistSnapshotDto {
   id: string;
   listingId: string;
   date: string;
-  adds: number | null;
-  deletes: number | null;
-  purchasesAndActivations: number | null;
-  gifts: number | null;
+  adds: number;
+  deletes: number;
+  purchasesAndActivations: number;
+  gifts: number;
   balance: number;
   source: string;
   createdAt: Date;
