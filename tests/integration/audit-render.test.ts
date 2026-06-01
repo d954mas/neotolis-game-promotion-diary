@@ -1261,7 +1261,12 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
       expect(storesSection).not.toMatch(/m\.stores_add_cta_after_cards\(\)/);
     });
 
-    it("SteamListingRow renders cover image + STEAM badge + appId + per-card Edit button + inline label form", async () => {
+    it("SteamListingRow is a READ-ONLY card — cover + STEAM badge + appId + compact wishlist line + Details button (Plan 03.2-04)", async () => {
+      // Post-UAT (Plan 03.2-04): the per-listing card is clean/read-only.
+      // The advanced affordances (label edit, remove, CSV import, full
+      // wishlist summary, export instructions) ALL moved into
+      // <SteamListingDetailModal>, opened via a "Details" button. The card
+      // never mutates server state.
       const fs = await import("node:fs");
       const path = await import("node:path");
       const src = fs.readFileSync(
@@ -1277,27 +1282,65 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
       // App ID surfaces in muted monospace.
       expect(src).toMatch(/class="app-id"/);
       expect(src).toMatch(/m\.steam_listing_app_id\(\{/);
-      // Per-card Edit button replaces the section-level editMode prop.
-      expect(src).not.toMatch(/editMode\?:\s*boolean/);
-      // Local `editing` state owned by each card.
-      expect(src).toMatch(/let editing = \$state\(false\)/);
-      // Edit button visible when not editing.
-      expect(src).toMatch(/class="edit-btn"/);
-      expect(src).toMatch(/m\.steam_listing_edit_aria\(\)/);
-      // Inline label edit FORM (not just a × Remove). Local labelDraft
-      // state + saveEdit function + .edit-form markup with a label input.
-      expect(src).toMatch(/let labelDraft = \$state/);
-      expect(src).toMatch(/async function saveEdit/);
-      expect(src).toMatch(/class="edit-form"/);
-      expect(src).toMatch(/class="edit-input"/);
-      expect(src).toMatch(/m\.steam_listing_edit_save_cta\(\)/);
-      expect(src).toMatch(/m\.steam_listing_label_edit_label\(\)/);
-      // The PATCH /api/games/:gameId/listings/:listingId target is
-      // wired into saveEdit (same path the integration test exercises).
-      expect(src).toMatch(/method:\s*"PATCH"/);
-      // Label prefix in read-mode so users know what the field is.
+      // Read-only label line still surfaces (no inline edit).
       expect(src).toMatch(/m\.steam_listing_label_prefix\(\)/);
       expect(src).toMatch(/class="label-prefix"/);
+      // Compact wishlist line — data (m.steam_listing_wishlist_compact) or
+      // recommendation (m.steam_listing_wishlist_recommendation).
+      expect(src).toMatch(/class="wishlist-line"/);
+      expect(src).toMatch(/m\.steam_listing_wishlist_compact\(\{/);
+      expect(src).toMatch(/m\.steam_listing_wishlist_recommendation\(\)/);
+      // Details button opens the detail modal (card owns detailOpen state).
+      expect(src).toMatch(/let detailOpen = \$state\(false\)/);
+      expect(src).toMatch(/class="cta-secondary details-btn"/);
+      expect(src).toMatch(/m\.steam_listing_details_cta\(\)/);
+      expect(src).toMatch(/<SteamListingDetailModal\s/);
+      // The card NO LONGER carries the inline edit-form, edit-btn, raw
+      // file-picker (WishlistImport) or the full WishlistSummary block.
+      expect(src).not.toMatch(/class="edit-form"/);
+      expect(src).not.toMatch(/class="edit-btn"/);
+      expect(src).not.toMatch(/class="edit-input"/);
+      expect(src).not.toMatch(/let editing = \$state/);
+      expect(src).not.toMatch(/async function saveEdit/);
+      expect(src).not.toMatch(/<WishlistImport\s/);
+      expect(src).not.toMatch(/<WishlistSummary\s/);
+      expect(src).not.toMatch(/method:\s*"PATCH"/);
+      expect(src).not.toMatch(/method:\s*"DELETE"/);
+    });
+
+    it("SteamListingDetailModal hosts the moved advanced affordances — wishlist import + export help + label edit + remove (Plan 03.2-04)", async () => {
+      const fs = await import("node:fs");
+      const path = await import("node:path");
+      const src = fs.readFileSync(
+        path.resolve("src/lib/components/SteamListingDetailModal.svelte"),
+        "utf8",
+      );
+      // Native <dialog> idiom copied from AddStoreDialog.
+      expect(src).toMatch(/<dialog[^>]*bind:this=\{dialogEl\}[^>]*class="dialog"/);
+      expect(src).toMatch(/showModal\(\)/);
+      // Two labelled sections — Wishlist + Settings.
+      expect(src).toMatch(/m\.steam_listing_detail_section_wishlist\(\)/);
+      expect(src).toMatch(/m\.steam_listing_detail_section_settings\(\)/);
+      // A) Wishlist — full summary (when present) + recommendation (when null)
+      //    + export instructions + import affordance.
+      expect(src).toMatch(/<WishlistSummary\s/);
+      expect(src).toMatch(/m\.steam_listing_wishlist_recommendation\(\)/);
+      expect(src).toMatch(/m\.wishlist_export_heading\(\)/);
+      expect(src).toMatch(/m\.wishlist_export_step_1\(\)/);
+      expect(src).toMatch(/m\.wishlist_export_step_4\(\)/);
+      expect(src).toMatch(/<WishlistImport\s/);
+      // B) Settings — label edit (PATCH) + remove (ConfirmDialog → DELETE),
+      //    moved verbatim from the old card.
+      expect(src).toMatch(/class="edit-form"/);
+      expect(src).toMatch(/class="edit-input"/);
+      expect(src).toMatch(/let labelDraft = \$state/);
+      expect(src).toMatch(/async function saveEdit/);
+      expect(src).toMatch(/method:\s*"PATCH"/);
+      expect(src).toMatch(/m\.steam_listing_label_edit_label\(\)/);
+      expect(src).toMatch(/async function handleRemoveConfirmed/);
+      expect(src).toMatch(/method:\s*"DELETE"/);
+      expect(src).toMatch(/<ConfirmDialog\s/);
+      expect(src).toMatch(/m\.steam_listing_remove_aria\(\)/);
     });
   });
 

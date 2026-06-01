@@ -1,31 +1,23 @@
 <script lang="ts">
   // SteamListingRow — one Steam listing on /games/[id] under StoresSection.
   //
-  // Card content order (top → bottom):
+  // READ-ONLY card. Content order (top → bottom):
   //   1. Cover image (when listing.coverUrl is non-null) — Steam header
   //      image rendered as the visual anchor. Falls back to a flat
   //      surface when null (Steam-down-on-INSERT case).
-  //   2. Header row: STEAM badge + name. Badge is a small accent pill
-  //      identifying the store.
+  //   2. Header row: STEAM badge + name.
   //   3. App ID line ("App {appId}") in muted monospace.
-  //   4. Optional user label (when listing.label is non-empty) — prefixed
-  //      with "Label:" so the user knows what that text is.
+  //   4. Optional user label (when listing.label is non-empty).
   //   5. Optional release date (when listing.releaseDate is non-null).
   //   6. Optional "key linked" chip when listing.apiKeyId is non-null.
-  //   7. "Open in Steam" deep-link CTA.
+  //   7. Compact wishlist line — either "{balance} wishlists · updated {ago}"
+  //      (summary present) or a short import recommendation (summary null).
+  //   8. Buttons row: "Open in Steam" link + "Details" button.
   //
-  // Per-card edit-mode:
-  //   - A small Edit button at the top-right corner of the card.
-  //   - Click → flips local `editing` state. In edit mode the card
-  //     reveals an inline `<form class="edit-form">` with a label
-  //     input + Save / Cancel + × Remove (the destructive action stays
-  //     gated behind ConfirmDialog). Edit button hides.
-  //   - Save → PATCH /api/games/:gameId/listings/:listingId { label }
-  //     → onChange() so the parent invalidates and the new label
-  //     surfaces. Cancel reverts the local input value + flips back.
-  //   - Label is the only mutable field today; the form layout
-  //     accommodates future fields (release-date / categories override)
-  //     inside `.edit-form` scoped to `editing === true`.
+  // The "advanced" affordances (label edit, remove, CSV import, full wishlist
+  // summary, export instructions) ALL live in <SteamListingDetailModal>,
+  // opened via the Details button. The card owns `detailOpen` and renders the
+  // modal. The card itself never mutates server state.
   //
   // displayName: prefer the persisted `name`; fall back to
   // m.steam_listing_unnamed() for legacy rows (NULL `name`) or rows added
@@ -36,10 +28,7 @@
   // is the standard external-link safety pair.
 
   import { m } from "$lib/paraglide/messages.js";
-  import ConfirmDialog from "./ConfirmDialog.svelte";
-  import InlineError from "./InlineError.svelte";
-  import WishlistImport from "./WishlistImport.svelte";
-  import WishlistSummary from "./WishlistSummary.svelte";
+  import SteamListingDetailModal from "./SteamListingDetailModal.svelte";
   import type { WishlistSnapshotDto } from "$lib/server/dto.js";
 
   type Listing = {
@@ -66,8 +55,8 @@
   }: {
     listing: Listing;
     // gameId is OPTIONAL for backward compatibility with any callers that
-    // render the row outside StoresSection. When omitted, the Edit / Remove
-    // affordances hide (no DELETE target).
+    // render the row outside StoresSection. When omitted, the Details
+    // affordance hides (no mutation target).
     gameId?: string;
     // This listing's wishlist mini-summary from the loader's
     // wishlistSummaries map. null = no snapshots yet (empty state).
@@ -75,88 +64,33 @@
     onChange?: () => void;
   } = $props();
 
-  // Per-card edit-mode state owned by each card.
-  let editing = $state(false);
-
-  // Inline label edit form state. Initialized lazily when the user
-  // enters edit mode so the buffer always reflects the latest server
-  // value (a previous edit + reload round-trip would otherwise carry
-  // the stale buffer).
-  let labelDraft = $state(listing.label);
-  let saving = $state(false);
-  let editError = $state<string | null>(null);
-
   const displayName = $derived(listing.name ?? m.steam_listing_unnamed());
   const steamUrl = $derived(`https://store.steampowered.com/app/${listing.appId}/`);
 
-  let confirmOpen = $state(false);
-  let removing = $state(false);
-
-  function startEdit(): void {
-    // Pull the current persisted label into the draft buffer so the
-    // input reflects what's saved (not whatever was typed during a
-    // prior open). Clear any stale error from a previous failed save.
-    labelDraft = listing.label;
-    editError = null;
-    editing = true;
+  // Relative-time bucketing mirrors WishlistSummary.svelte (just-now /
+  // N minutes / N hours / N days) — every label routes through m.* (i18n
+  // contract). Drives the compact wishlist line below.
+  function relativeAgo(when: Date | string): string {
+    const t = typeof when === "string" ? new Date(when) : when;
+    const sec = Math.max(0, Math.floor((Date.now() - t.getTime()) / 1000));
+    if (sec < 60) return m.wishlist_ago_just_now();
+    const min = Math.floor(sec / 60);
+    if (min < 60) return m.wishlist_ago_minutes({ minutes: min });
+    const hour = Math.floor(min / 60);
+    if (hour < 24) return m.wishlist_ago_hours({ hours: hour });
+    return m.wishlist_ago_days({ days: Math.floor(hour / 24) });
   }
 
-  function cancelEdit(): void {
-    if (saving) return;
-    labelDraft = listing.label;
-    editError = null;
-    editing = false;
-  }
+  const compactWishlist = $derived(
+    summary && summary.recentDays.length > 0
+      ? m.steam_listing_wishlist_compact({
+          balance: summary.balance.toLocaleString("en"),
+          ago: relativeAgo(summary.recentDays[0]!.updatedAt),
+        })
+      : null,
+  );
 
-  async function saveEdit(e: Event): Promise<void> {
-    e.preventDefault();
-    if (saving || !gameId) return;
-    saving = true;
-    editError = null;
-    try {
-      const res = await fetch(`/api/games/${gameId}/listings/${listing.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ label: labelDraft }),
-      });
-      if (!res.ok) {
-        let code = "error_server_generic";
-        try {
-          const body = (await res.json()) as { error?: string };
-          if (body.error) code = body.error;
-        } catch {
-          /* ignore */
-        }
-        editError =
-          code === "validation_failed" ? m.error_server_generic() : m.error_server_generic();
-        return;
-      }
-      // Success — flip back to read mode + ask the parent to refresh.
-      editing = false;
-      onChange?.();
-    } catch {
-      editError = m.error_network();
-    } finally {
-      saving = false;
-    }
-  }
-
-  async function handleRemoveConfirmed(): Promise<void> {
-    if (removing || !gameId) return;
-    removing = true;
-    try {
-      const res = await fetch(`/api/games/${gameId}/listings/${listing.id}`, {
-        method: "DELETE",
-      });
-      if (res.ok) {
-        confirmOpen = false;
-        editing = false;
-        onChange?.();
-      }
-    } finally {
-      removing = false;
-    }
-  }
+  let detailOpen = $state(false);
 </script>
 
 <article class="store-card">
@@ -173,17 +107,11 @@
     />
   {/if}
   <header class="store-card-header">
-    <!-- STEAM badge identifies the store kind. Today there's only one
-         kind; future stores (Itch, Epic) extend this badge with a
-         kind-aware label via the same paraglide key family. -->
     <span class="kind-badge" data-kind="steam">{m.steam_listing_kind_steam()}</span>
     <h3 class="store-name">{displayName}</h3>
   </header>
   <p class="app-id">{m.steam_listing_app_id({ appId: listing.appId })}</p>
-  {#if listing.label && !editing}
-    <!-- Prefix "Label:" so the user knows what the free-text under the
-         appId means. Hidden in edit mode (the inline form has its own
-         labelled input below). -->
+  {#if listing.label}
     <p class="user-label">
       <span class="label-prefix">{m.steam_listing_label_prefix()}</span>
       {listing.label}
@@ -197,90 +125,35 @@
       <span class="chip linked">key linked</span>
     </p>
   {/if}
-  {#if !editing}
+
+  <!-- Compact wishlist line. Data when a summary exists; otherwise a short
+       recommendation pointing the user at the Details modal's import flow. -->
+  <p class="wishlist-line" class:muted={!compactWishlist}>
+    {compactWishlist ?? m.steam_listing_wishlist_recommendation()}
+  </p>
+
+  <div class="card-actions">
     <a class="cta-secondary store-link" href={steamUrl} target="_blank" rel="noopener noreferrer">
       {m.steam_listing_open_in_steam()}
     </a>
-  {/if}
-  {#if gameId}
-    <!-- Per-card Edit toggle reveals an inline LABEL EDIT FORM in
-         addition to the × Remove button. The Edit button at the
-         top-right corner flips into a × Cancel-edit button while
-         editing. -->
-    {#if !editing}
-      <button
-        type="button"
-        class="edit-btn"
-        aria-label={m.steam_listing_edit_aria()}
-        onclick={startEdit}
-      >
-        {m.common_edit()}
+    {#if gameId}
+      <button type="button" class="cta-secondary details-btn" onclick={() => (detailOpen = true)}>
+        {m.steam_listing_details_cta()}
       </button>
-    {:else}
-      <button
-        type="button"
-        class="cancel-edit-btn"
-        aria-label={m.common_close()}
-        onclick={cancelEdit}
-        disabled={saving}
-      >
-        ×
-      </button>
-      <form class="edit-form" onsubmit={saveEdit}>
-        <label class="edit-field">
-          <span class="edit-field-label">{m.steam_listing_label_edit_label()}</span>
-          <input
-            class="edit-input"
-            type="text"
-            bind:value={labelDraft}
-            maxlength="100"
-            placeholder="Demo / Full / DLC / OST"
-            disabled={saving}
-          />
-        </label>
-        <div class="edit-actions">
-          <button type="submit" class="edit-save" disabled={saving}>
-            {m.steam_listing_edit_save_cta()}
-          </button>
-          <button type="button" class="edit-cancel" onclick={cancelEdit} disabled={saving}>
-            {m.common_cancel()}
-          </button>
-          <button
-            type="button"
-            class="remove-btn-inline"
-            aria-label={m.steam_listing_remove_aria()}
-            onclick={() => (confirmOpen = true)}
-            disabled={removing || saving}
-          >
-            × {m.common_remove()}
-          </button>
-        </div>
-        {#if editError}<InlineError message={editError} />{/if}
-      </form>
     {/if}
-  {/if}
-
-  {#if gameId && !editing}
-    <!-- Wishlist mini-summary + import (WISH-02). The appid is implicit in
-         listing.id (D-07) — WishlistImport never reads it from the file.
-         onImported → the same onChange/invalidate path the row already
-         uses, so the summary refreshes after a successful import. Hidden
-         in edit mode to keep the label-edit form uncluttered. -->
-    <section class="wishlist" aria-label={m.wishlist_section_heading()}>
-      <h4 class="wishlist-heading">{m.wishlist_section_heading()}</h4>
-      <WishlistSummary {summary} />
-      <WishlistImport {gameId} listingId={listing.id} onImported={() => onChange?.()} />
-    </section>
-  {/if}
+  </div>
 </article>
 
-<ConfirmDialog
-  open={confirmOpen}
-  message={m.confirm_listing_remove_title() + " " + m.confirm_listing_remove_body()}
-  confirmLabel={m.common_remove()}
-  onConfirm={handleRemoveConfirmed}
-  onCancel={() => (confirmOpen = false)}
-/>
+{#if gameId}
+  <SteamListingDetailModal
+    open={detailOpen}
+    {gameId}
+    {listing}
+    {summary}
+    onClose={() => (detailOpen = false)}
+    {onChange}
+  />
+{/if}
 
 <style>
   /* v2 SteamListingRow — D-01 redraw via SourceRow analogy. --surface-2
@@ -374,8 +247,25 @@
     border-radius: var(--r-pill);
     padding: var(--s-0) var(--s-2);
   }
-  .cta-secondary.store-link {
-    align-self: flex-start;
+  /* Compact wishlist line — single-row summary or a muted recommendation. */
+  .wishlist-line {
+    margin: 0;
+    color: var(--text-2);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+  }
+  .wishlist-line.muted {
+    color: var(--text-3);
+    font-weight: var(--w-rg);
+  }
+  .card-actions {
+    display: flex;
+    gap: var(--s-2);
+    flex-wrap: wrap;
+    margin-top: var(--s-1);
+  }
+  .cta-secondary {
     display: inline-flex;
     align-items: center;
     min-height: var(--hit);
@@ -389,164 +279,18 @@
     font-size: var(--t-13);
     font-weight: var(--w-sb);
     white-space: nowrap;
+    cursor: pointer;
     transition:
       background var(--m-fast) var(--m-ease),
       color var(--m-fast) var(--m-ease);
   }
-  .cta-secondary.store-link:hover {
+  .cta-secondary:hover {
     background: var(--accent);
     color: var(--accent-text);
-  }
-  /* Per-card Edit / Cancel buttons. Top-right; dark translucent over
-   * the cover image to stay legible. */
-  .edit-btn,
-  .cancel-edit-btn {
-    position: absolute;
-    top: var(--s-1);
-    right: var(--s-1);
-    min-height: 32px;
-    min-width: 32px;
-    padding: var(--s-1) var(--s-2);
-    background: rgb(0 0 0 / 60%);
-    color: #fff;
-    border: 1px solid rgb(255 255 255 / 30%);
-    border-radius: var(--r-sm);
-    font-family: var(--f-sans);
-    font-size: var(--t-12);
-    font-weight: var(--w-sb);
-    cursor: pointer;
-    z-index: 1;
-    transition: background var(--m-fast) var(--m-ease);
-  }
-  .edit-btn:hover,
-  .cancel-edit-btn:hover:not(:disabled) {
-    background: rgb(0 0 0 / 80%);
-  }
-  .cancel-edit-btn:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-  .edit-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-2);
-    padding: var(--s-3);
-    background: var(--surface-3);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-  }
-  .edit-field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-1);
-  }
-  .edit-field-label {
-    font-family: var(--f-sans);
-    font-size: var(--t-13);
-    color: var(--text-2);
-    font-weight: var(--w-md);
-  }
-  .edit-input {
-    min-height: var(--hit);
-    padding: var(--s-1) var(--s-3);
-    background: var(--surface-2);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    font-family: var(--f-sans);
-    font-size: var(--t-14);
-    width: 100%;
-    box-sizing: border-box;
-  }
-  .edit-actions {
-    display: flex;
-    gap: var(--s-1);
-    flex-wrap: wrap;
-  }
-  .edit-save,
-  .edit-cancel,
-  .remove-btn-inline {
-    min-height: var(--hit);
-    padding: var(--s-1) var(--s-3);
-    border-radius: var(--r-sm);
-    font-family: var(--f-sans);
-    font-size: var(--t-13);
-    font-weight: var(--w-sb);
-    cursor: pointer;
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
-  }
-  .edit-save {
-    background: var(--accent);
-    color: var(--accent-text);
-    border: 1px solid var(--accent);
-  }
-  .edit-save:hover:not(:disabled) {
-    background: var(--accent-strong);
-    border-color: var(--accent-strong);
-  }
-  .edit-save:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-  .edit-cancel {
-    background: transparent;
-    color: var(--text);
-    border: 1px solid var(--border);
-  }
-  .edit-cancel:hover:not(:disabled) {
-    background: var(--accent-soft);
-    border-color: var(--accent-strong);
-  }
-  .edit-cancel:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-  .remove-btn-inline {
-    margin-left: auto;
-    background: transparent;
-    color: var(--danger);
-    border: 1px solid var(--danger);
-  }
-  .remove-btn-inline:hover:not(:disabled) {
-    background: var(--danger);
-    color: #fff;
-  }
-  .remove-btn-inline:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
   }
   @media (prefers-reduced-motion: reduce) {
-    .cta-secondary.store-link,
-    .edit-btn,
-    .cancel-edit-btn,
-    .edit-save,
-    .edit-cancel,
-    .remove-btn-inline {
+    .cta-secondary {
       transition: none;
     }
-  }
-  /* Wishlist section — a --surface-3 well at the bottom of the card
-   * grouping the mini-summary + import affordance, separated from the
-   * store metadata above by a top border. */
-  .wishlist {
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-2);
-    margin-top: var(--s-1);
-    padding: var(--s-3);
-    background: var(--surface-3);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-  }
-  .wishlist-heading {
-    margin: 0;
-    color: var(--text-3);
-    font-family: var(--f-sans);
-    font-size: var(--t-12);
-    font-weight: var(--w-sb);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
   }
 </style>
