@@ -107,7 +107,7 @@
   let trashMenuOpen = $state(false);
 </script>
 
-<article class="store-card">
+<article class="store-card" class:trash>
   {#if listing.coverUrl}
     <!-- Cover image at the top of the card. The Steam header image
          dimensions are 460×215 (~2.14:1); the CSS aspect-ratio keeps the
@@ -239,6 +239,17 @@
     box-shadow: var(--shadow-card);
     min-width: 0;
     overflow: hidden;
+  }
+  /* Trash cards carry a ⋮ overflow menu that opens BELOW the button; the
+   * card's `overflow: hidden` (there for the cover bleed) would clip it, so
+   * trash cards switch to `overflow: visible` and round the cover's top
+   * corners directly instead of relying on the card clip. */
+  .store-card.trash {
+    overflow: visible;
+  }
+  .store-card.trash .store-cover {
+    border-top-left-radius: var(--r-md);
+    border-top-right-radius: var(--r-md);
   }
   /* Cover image at the top of the card. Aspect ratio matches Steam's
    * standard header image (460×215). Bleed-to-edge so the card border
