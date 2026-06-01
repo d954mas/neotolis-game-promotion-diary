@@ -70,6 +70,17 @@ export function parseWishlistCsv(text: string): WishlistCsvParseResult {
     }
   }
   if (!headerCols) {
+    // Common wrong-file: the lifetime SUMMARY export (one row, OutstandingWishes
+    // column) instead of the daily Wishlist Actions export. Give a specific
+    // message so the user knows which file to grab.
+    const lower = withoutBom.toLowerCase();
+    if (lower.includes("outstandingwishes") || lower.includes("lifetime summary")) {
+      throw new AppError(
+        "wishlist_csv_is_lifetime_summary: got the lifetime summary; need the daily Wishlist Actions export",
+        "wishlist_csv_is_lifetime_summary",
+        422,
+      );
+    }
     invalidHeader(`no header row with required columns (${REQUIRED.join(", ")})`);
   }
   if (dataStart >= lines.length) invalidHeader("header found but no data rows");

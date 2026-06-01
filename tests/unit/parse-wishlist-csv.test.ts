@@ -102,6 +102,14 @@ describe("parseWishlistCsv (Plan 03.2-02)", () => {
     expect(totalAdds - totalDeletes).toBe(254);
   });
 
+  it("03.2-02: lifetime SUMMARY file is rejected with the specific is-lifetime-summary code", () => {
+    // The wrong-but-common file: SteamWishlistSummary (one lifetime row,
+    // OutstandingWishes column) instead of the daily Wishlist Actions export.
+    const csv = read("wishlist-lifetime-summary.csv");
+    expect(csv).toContain("OutstandingWishes");
+    expect(() => parseWishlistCsv(csv)).toThrow("wishlist_csv_is_lifetime_summary");
+  });
+
   it("03.2-02: empty / header-only input throws wishlist_csv_invalid_header", () => {
     expect(() => parseWishlistCsv("")).toThrow("wishlist_csv_invalid_header");
     expect(() =>
