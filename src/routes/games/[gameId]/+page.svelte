@@ -42,8 +42,10 @@
   // PageHeader replaced by inline .game-header with Edit + ⋮ side by side.
   import GameEditDialog from "$lib/components/GameEditDialog.svelte";
   import AddStoreDialog from "$lib/components/AddStoreDialog.svelte";
-  // RecoveryDialog extends to per-game soft-deleted listings.
-  import RecoveryDialog from "$lib/components/RecoveryDialog.svelte";
+  // Per-game soft-deleted listings render in a ?view=trash view (mirrors
+  // /games?view=trash) using SteamListingRow's trash mode — RecoveryDialog
+  // replaced per UAT (Plan 03.2-04).
+  import SteamListingRow from "$lib/components/SteamListingRow.svelte";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
   import type { GameSteamListingDto } from "$lib/server/dto.js";
   import type { PageData } from "./$types";
@@ -95,6 +97,9 @@
 
   let { data }: { data: PageData & { retentionDays: number } } = $props();
 
+  // ?view=trash conditional (mirrors /games/+page.svelte trashView).
+  const trashView = $derived(data.view === "trash");
+
   const game = $derived(data.game);
   const listings = $derived(data.listings as ListingDto[]);
   const deletedListings = $derived(data.deletedListings as ListingDto[]);
@@ -119,24 +124,32 @@
 
   const groupedEvents = $derived(groupEventsByDate(events));
 
-  let recoveryOpen = $state(false);
-
-  const recoveryItems = $derived(
-    deletedListings.map((l) => ({
-      id: l.id,
-      name: l.name ?? `App ${l.appId}`,
-      deletedAt: l.deletedAt,
-    })),
-  );
-
-  async function restoreListingFn(listingId: string): Promise<void> {
+  // Trash view: per-card Restore.
+  async function restoreListing(listingId: string): Promise<void> {
     const res = await fetch(`/api/games/${game.id}/listings/${listingId}/restore`, {
       method: "POST",
     });
-    if (res.ok || res.status === 200) {
-      await invalidateAll();
-      if (deletedListings.length <= 1) recoveryOpen = false;
-    }
+    if (res.ok) await invalidateAll();
+  }
+
+  // Trash view: per-card Delete forever (hard purge) → ConfirmDialog →
+  // DELETE ?force=true.
+  let deleteForeverId = $state<string | null>(null);
+  let confirmDeleteForeverOpen = $state(false);
+
+  function askDeleteForever(listingId: string): void {
+    deleteForeverId = listingId;
+    confirmDeleteForeverOpen = true;
+  }
+
+  async function confirmDeleteForever(): Promise<void> {
+    if (!deleteForeverId) return;
+    confirmDeleteForeverOpen = false;
+    const res = await fetch(`/api/games/${game.id}/listings/${deleteForeverId}?force=true`, {
+      method: "DELETE",
+    });
+    deleteForeverId = null;
+    if (res.ok || res.status === 204) await invalidateAll();
   }
 
   // GameEditDialog onSave handler. Sends title + description to PATCH
@@ -213,249 +226,288 @@
   <span>{game.title}</span>
 </nav>
 
-<!--
+{#if trashView}
+  <!-- Trash view — the game's soft-deleted listings as read-only cards
+       with Restore + Delete forever (mirrors /games?view=trash). -->
+  <header class="game-header">
+    <h1 class="game-title">{m.steam_listing_trash_heading()}</h1>
+  </header>
+
+  <div class="trash-banner" role="status">
+    <a class="trash-back" href="/games/{game.id}">← {m.steam_listing_trash_back()}</a>
+    <span class="trash-banner-text">{m.games_trash_banner_text({ days: data.retentionDays })}</span>
+  </div>
+
+  {#if deletedListings.length === 0}
+    <div class="trash-empty" role="status">
+      <p class="trash-empty-body">{m.steam_listing_trash_empty()}</p>
+      <a href="/games/{game.id}" class="trash-back-link">{m.steam_listing_trash_back()}</a>
+    </div>
+  {:else}
+    <ul class="stores-grid">
+      {#each deletedListings as l (l.id)}
+        <li>
+          <SteamListingRow
+            listing={l}
+            trash
+            onRestore={() => restoreListing(l.id)}
+            onDeleteForever={() => askDeleteForever(l.id)}
+          />
+        </li>
+      {/each}
+    </ul>
+  {/if}
+
+  <ConfirmDialog
+    open={confirmDeleteForeverOpen}
+    message={m.steam_listing_confirm_delete_forever_title() +
+      " " +
+      m.steam_listing_confirm_delete_forever_body()}
+    confirmLabel={m.steam_listing_delete_forever_cta()}
+    onConfirm={confirmDeleteForever}
+    onCancel={() => (confirmDeleteForeverOpen = false)}
+  />
+{:else}
+  <!--
   PageHeader.cta opens <GameEditDialog>.
 -->
-<!-- Inline title row with Edit + ⋮ side by side so Delete is
+  <!-- Inline title row with Edit + ⋮ side by side so Delete is
      discoverable right next to the title, not buried below. -->
-<header class="game-header">
-  <h1 class="game-title">{game.title}</h1>
-  <button type="button" class="btn-edit" onclick={() => (editGameOpen = true)}>
-    {m.games_detail_edit_cta()}
-  </button>
-  <div class="game-overflow-wrap">
-    <button
-      type="button"
-      class="game-overflow-btn"
-      onclick={() => (gameMenuOpen = !gameMenuOpen)}
-      aria-haspopup="menu"
-      aria-expanded={gameMenuOpen}
-      aria-label="More actions"
-      title="More actions"
-    >
-      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="5" cy="12" r="1.8" fill="currentColor" />
-        <circle cx="12" cy="12" r="1.8" fill="currentColor" />
-        <circle cx="19" cy="12" r="1.8" fill="currentColor" />
-      </svg>
+  <header class="game-header">
+    <h1 class="game-title">{game.title}</h1>
+    <button type="button" class="btn-edit" onclick={() => (editGameOpen = true)}>
+      {m.games_detail_edit_cta()}
     </button>
-    {#if gameMenuOpen}
+    <div class="game-overflow-wrap">
       <button
         type="button"
-        class="game-overflow-scrim"
-        onclick={() => (gameMenuOpen = false)}
-        aria-label="Close menu"
-      ></button>
-      <div class="game-overflow-pop" role="menu">
+        class="game-overflow-btn"
+        onclick={() => (gameMenuOpen = !gameMenuOpen)}
+        aria-haspopup="menu"
+        aria-expanded={gameMenuOpen}
+        aria-label="More actions"
+        title="More actions"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="5" cy="12" r="1.8" fill="currentColor" />
+          <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+          <circle cx="19" cy="12" r="1.8" fill="currentColor" />
+        </svg>
+      </button>
+      {#if gameMenuOpen}
         <button
           type="button"
-          class="card-menu-item danger"
-          role="menuitem"
-          onclick={() => {
-            gameMenuOpen = false;
-            deleteConfirmOpen = true;
-          }}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
+          class="game-overflow-scrim"
+          onclick={() => (gameMenuOpen = false)}
+          aria-label="Close menu"
+        ></button>
+        <div class="game-overflow-pop" role="menu">
+          <button
+            type="button"
+            class="card-menu-item danger"
+            role="menuitem"
+            onclick={() => {
+              gameMenuOpen = false;
+              deleteConfirmOpen = true;
+            }}
           >
-            <polyline points="3 6 5 6 21 6" />
-            <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
-          </svg>
-          <span>Delete game</span>
-        </button>
-      </div>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+            </svg>
+            <span>Delete game</span>
+          </button>
+        </div>
+      {/if}
+    </div>
+    {#if deletedListings.length > 0}
+      <a class="recovery-link" href="/games/{game.id}?view=trash">
+        {m.steam_listing_recently_deleted_link({ count: deletedListings.length })}
+      </a>
     {/if}
-  </div>
-  {#if deletedListings.length > 0}
-    <button type="button" class="recovery-link" onclick={() => (recoveryOpen = true)}>
-      Recently deleted ({deletedListings.length})
-    </button>
-  {/if}
-</header>
+  </header>
 
-<!--
+  <!--
   GameEditDialog modal — title input + description textarea +
   Save / Cancel. Always mounted (the dialog itself defends against the
   closed state via the .dialog[open] CSS scoping); the parent owns the
   open prop.
 -->
-<GameEditDialog
-  open={editGameOpen}
-  initialTitle={game.title}
-  initialDescription={game.description}
-  onClose={() => (editGameOpen = false)}
-  onSave={saveGameEdits}
-/>
+  <GameEditDialog
+    open={editGameOpen}
+    initialTitle={game.title}
+    initialDescription={game.description}
+    onClose={() => (editGameOpen = false)}
+    onSave={saveGameEdits}
+  />
 
-<!--
+  <!--
   AddStoreDialog modal — wraps the existing AddSteamListingForm. Always
   mounted (the dialog defends the closed state via .dialog[open] CSS
   scoping); the parent owns the open prop. Opened by the Add CTA next
   to the Stores h2 (below).
 -->
-<AddStoreDialog
-  open={addStoreOpen}
-  gameId={game.id}
-  onClose={() => (addStoreOpen = false)}
-  onSuccess={() => {
-    addStoreOpen = false;
-    void invalidateAll();
-  }}
-/>
-
-{#if deletedListings.length > 0}
-  <RecoveryDialog
-    open={recoveryOpen}
-    items={recoveryItems}
-    entityType="store"
-    retentionDays={data.retentionDays}
-    onClose={() => (recoveryOpen = false)}
-    onRestore={restoreListingFn}
+  <AddStoreDialog
+    open={addStoreOpen}
+    gameId={game.id}
+    onClose={() => (addStoreOpen = false)}
+    onSuccess={() => {
+      addStoreOpen = false;
+      void invalidateAll();
+    }}
   />
-{/if}
 
-<!--
+  <!--
   Description paragraph renders after the meta row when game.description
   is non-null. `white-space: pre-wrap` preserves newlines typed in the
   textarea.
 -->
-<section class="game-info" id="section-game">
-  <!-- Meta row carries only release date now. Per-game tags (Steam
+  <section class="game-info" id="section-game">
+    <!-- Meta row carries only release date now. Per-game tags (Steam
        genres/categories) + notes (legacy free-form field) removed —
        neither was user-editable via GameEditDialog, and tags duplicated
        per-store badges that live inside each SteamListingRow. User UAT:
        «теги убираем и второе описание которое я не делал и которое я
        не могу редактировать тоже убираем». -->
-  {#if game.releaseTba || game.releaseDate}
-    <div class="meta">
-      {#if game.releaseTba}
-        <span class="badge">{m.badge_release_tba()}</span>
-      {:else if game.releaseDate}
-        <span class="badge">{game.releaseDate}</span>
-      {/if}
-    </div>
-  {/if}
-  {#if game.description}
-    <p class="description">{game.description}</p>
-  {/if}
+    {#if game.releaseTba || game.releaseDate}
+      <div class="meta">
+        {#if game.releaseTba}
+          <span class="badge">{m.badge_release_tba()}</span>
+        {:else if game.releaseDate}
+          <span class="badge">{game.releaseDate}</span>
+        {/if}
+      </div>
+    {/if}
+    {#if game.description}
+      <p class="description">{game.description}</p>
+    {/if}
 
-  <!-- Notes section — free-form private remarks, edited via a modal
+    <!-- Notes section — free-form private remarks, edited via a modal
        (same vocabulary as event notes-editor-modal). Click the section
        (text or empty-state button) → opens big editor. -->
-  <div class="notes-section">
-    <div class="notes-head">
-      <span class="notes-label">Notes</span>
-      <button
-        type="button"
-        class="notes-edit-btn"
-        onclick={openNotesEditor}
-        aria-label="Edit notes"
-        title="Edit notes"
-      >
-        <svg
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.75"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
+    <div class="notes-section">
+      <div class="notes-head">
+        <span class="notes-label">Notes</span>
+        <button
+          type="button"
+          class="notes-edit-btn"
+          onclick={openNotesEditor}
+          aria-label="Edit notes"
+          title="Edit notes"
         >
-          <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6" />
-          <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-        </svg>
-      </button>
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6" />
+            <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+          </svg>
+        </button>
+      </div>
+      {#if game.notes}
+        <p class="notes">{game.notes}</p>
+      {:else}
+        <button type="button" class="notes-empty" onclick={openNotesEditor}> + Add notes </button>
+      {/if}
     </div>
-    {#if game.notes}
-      <p class="notes">{game.notes}</p>
-    {:else}
-      <button type="button" class="notes-empty" onclick={openNotesEditor}> + Add notes </button>
-    {/if}
-  </div>
-</section>
+  </section>
 
-<!--
+  <!--
   Add CTA next to the Stores h2. Click opens <AddStoreDialog>.
   StoresSection is a pure list renderer.
 -->
-<section class="stores" id="section-stores">
-  <header class="section-header">
-    <h2>{m.games_detail_section_stores()}</h2>
-    <button type="button" class="cta-secondary add-store-cta" onclick={() => (addStoreOpen = true)}>
-      + {m.stores_add_cta()}
-    </button>
-  </header>
-  <StoresSection
-    {listings}
-    gameId={game.id}
-    wishlistSummaries={data.wishlistSummaries}
-    onChange={() => invalidateAll()}
-  />
-</section>
+  <section class="stores" id="section-stores">
+    <header class="section-header">
+      <h2>{m.games_detail_section_stores()}</h2>
+      <button
+        type="button"
+        class="cta-secondary add-store-cta"
+        onclick={() => (addStoreOpen = true)}
+      >
+        + {m.stores_add_cta()}
+      </button>
+    </header>
+    <StoresSection
+      {listings}
+      gameId={game.id}
+      wishlistSummaries={data.wishlistSummaries}
+      onChange={() => invalidateAll()}
+    />
+  </section>
 
-<section class="events" id="section-events">
-  <header class="section-header">
-    <h2>{m.games_detail_section_events()}</h2>
-    <a class="cta-secondary" href={`/events/new?gameId=${game.id}`}>
-      + {m.feed_cta_add_event()}
-    </a>
-  </header>
+  <section class="events" id="section-events">
+    <header class="section-header">
+      <h2>{m.games_detail_section_events()}</h2>
+      <a class="cta-secondary" href={`/events/new?gameId=${game.id}`}>
+        + {m.feed_cta_add_event()}
+      </a>
+    </header>
 
-  {#if events.length === 0}
-    <EmptyState heading={m.games_detail_events_empty()} body={m.games_detail_events_empty_body()} />
-  {:else}
-    <div class="feedcard-grid">
-      {#each groupedEvents as group (group.date)}
-        <FeedDateGroupHeader occurredAt={group.occurredAt} count={group.rows.length} />
-        {#each group.rows as ev (ev.id)}
-          <FeedCard
-            event={ev}
-            source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
-            game={ev.gameIds.length > 0 ? (gameById.get(ev.gameIds[0]!) ?? null) : null}
-            games={allGames}
-          />
+    {#if events.length === 0}
+      <EmptyState
+        heading={m.games_detail_events_empty()}
+        body={m.games_detail_events_empty_body()}
+      />
+    {:else}
+      <div class="feedcard-grid">
+        {#each groupedEvents as group (group.date)}
+          <FeedDateGroupHeader occurredAt={group.occurredAt} count={group.rows.length} />
+          {#each group.rows as ev (ev.id)}
+            <FeedCard
+              event={ev}
+              source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
+              game={ev.gameIds.length > 0 ? (gameById.get(ev.gameIds[0]!) ?? null) : null}
+              games={allGames}
+            />
+          {/each}
         {/each}
-      {/each}
-    </div>
-  {/if}
-</section>
+      </div>
+    {/if}
+  </section>
 
-<!-- Bottom danger-zone removed — Delete game lives in the ⋮ overflow
+  <!-- Bottom danger-zone removed — Delete game lives in the ⋮ overflow
      next to PageHeader, reachable without scrolling past N events. -->
 
-<ConfirmDialog
-  open={deleteConfirmOpen}
-  message={m.confirm_game_delete({ title: game.title })}
-  confirmLabel={m.common_delete()}
-  onConfirm={deleteGame}
-  onCancel={() => (deleteConfirmOpen = false)}
-/>
+  <ConfirmDialog
+    open={deleteConfirmOpen}
+    message={m.confirm_game_delete({ title: game.title })}
+    confirmLabel={m.common_delete()}
+    onConfirm={deleteGame}
+    onCancel={() => (deleteConfirmOpen = false)}
+  />
 
-<!-- Notes editor modal — shared NotesEditorModal owns dialog markup,
+  <!-- Notes editor modal — shared NotesEditorModal owns dialog markup,
      draft state, Save/Cancel buttons, Cmd/Ctrl+Enter, Esc / backdrop
      cancel and the disabled-while-saving state. The page owns only the
      open flag, initial value pluck from `game.notes`, and the PATCH. -->
-<NotesEditorModal
-  open={notesEditorOpen}
-  initialValue={game.notes ?? ""}
-  title="Notes"
-  placeholder="Anything worth remembering about this game…"
-  onSave={(value) => commitNotes(value)}
-  onCancel={() => (notesEditorOpen = false)}
-/>
-{#if notesError}
-  <InlineError message={notesError} />
+  <NotesEditorModal
+    open={notesEditorOpen}
+    initialValue={game.notes ?? ""}
+    title="Notes"
+    placeholder="Anything worth remembering about this game…"
+    onSave={(value) => commitNotes(value)}
+    onCancel={() => (notesEditorOpen = false)}
+  />
+  {#if notesError}
+    <InlineError message={notesError} />
+  {/if}
 {/if}
 
 <style>
@@ -647,6 +699,65 @@
   }
   .recovery-link:hover {
     color: var(--accent);
+  }
+
+  /* ── Trash view (?view=trash) — mirrors /games trash-banner pattern. ── */
+  .trash-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s-3);
+    padding: var(--s-2) var(--s-4);
+    margin-bottom: var(--s-4);
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--accent-strong);
+    border-radius: var(--r-sm);
+    font-size: var(--t-13);
+  }
+  .trash-back {
+    color: var(--accent-strong);
+    text-decoration: none;
+    font-weight: var(--w-sb);
+    white-space: nowrap;
+  }
+  .trash-back:hover {
+    text-decoration: underline;
+  }
+  .trash-banner-text {
+    color: var(--accent);
+  }
+  .trash-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--s-3);
+    padding: var(--s-8) var(--s-4);
+  }
+  .trash-empty-body {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--t-14);
+    line-height: var(--lh-body);
+  }
+  .trash-back-link {
+    color: var(--accent);
+    text-decoration: underline;
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
+  }
+  .trash-back-link:hover {
+    color: var(--accent-strong);
+  }
+  /* Trash card grid — same shape as StoresSection's grid so the deleted
+   * listings read as the same card vocabulary as the active stores. */
+  .stores-grid {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: var(--s-3);
   }
   .game-overflow-wrap {
     position: relative;

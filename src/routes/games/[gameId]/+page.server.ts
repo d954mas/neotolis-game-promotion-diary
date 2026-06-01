@@ -43,12 +43,16 @@ import { enrichDataSourceDtosWithYoutubeChannelTitles } from "$lib/server/servic
  * the rest of the page still renders. The parent fetch is load-bearing —
  * `getGameById` short-circuits cross-tenant access first.
  */
-export const load: PageServerLoad = async ({ locals, params }) => {
+export const load: PageServerLoad = async ({ locals, params, url }) => {
   if (!locals.user) {
     throw error(401, "Sign in required");
   }
   const userId = locals.user.id;
   const gameId = params.gameId;
+  // ?view=trash mirrors /games/+page.server.ts — the page renders the
+  // game's soft-deleted listings as cards (Restore + Delete forever)
+  // instead of the active stores/wishlist UI.
+  const view = url.searchParams.get("view") === "trash" ? "trash" : ("feed" as const);
 
   let game;
   try {
@@ -133,6 +137,7 @@ export const load: PageServerLoad = async ({ locals, params }) => {
     Object.fromEntries(wishlistSummaryPairs);
 
   return {
+    view,
     game: toGameDto(game, thisGameDerived),
     listings: listings.map(toGameSteamListingDto),
     wishlistSummaries,

@@ -51,7 +51,10 @@
     listing,
     gameId,
     summary = null,
+    trash = false,
     onChange,
+    onRestore,
+    onDeleteForever,
   }: {
     listing: Listing;
     // gameId is OPTIONAL for backward compatibility with any callers that
@@ -61,7 +64,14 @@
     // This listing's wishlist mini-summary from the loader's
     // wishlistSummaries map. null = no snapshots yet (empty state).
     summary?: WishlistSummaryData | null;
+    // Trash mode (Plan 03.2-04): the card is read-only — no Details
+    // button, no wishlist line, no edit. A ⋮ overflow offers Restore +
+    // Delete forever (EventDetail trash idiom). The parent page owns the
+    // mutation handlers + ConfirmDialog.
+    trash?: boolean;
     onChange?: () => void;
+    onRestore?: () => void;
+    onDeleteForever?: () => void;
   } = $props();
 
   const displayName = $derived(listing.name ?? m.steam_listing_unnamed());
@@ -91,6 +101,10 @@
   );
 
   let detailOpen = $state(false);
+
+  // Trash-mode overflow menu (EventDetailHeader idiom — Restore + Delete
+  // forever as menu items).
+  let trashMenuOpen = $state(false);
 </script>
 
 <article class="store-card">
@@ -126,25 +140,79 @@
     </p>
   {/if}
 
-  <!-- Compact wishlist line. Data when a summary exists; otherwise a short
-       recommendation pointing the user at the Details modal's import flow. -->
-  <p class="wishlist-line" class:muted={!compactWishlist}>
-    {compactWishlist ?? m.steam_listing_wishlist_recommendation()}
-  </p>
+  {#if trash}
+    <!-- Trash mode: read-only card with a ⋮ overflow (Restore + Delete
+         forever). No wishlist line, no Details/edit affordances. -->
+    <div class="card-actions">
+      <a class="cta-secondary store-link" href={steamUrl} target="_blank" rel="noopener noreferrer">
+        {m.steam_listing_open_in_steam()}
+      </a>
+      <div class="trash-overflow-wrap">
+        <button
+          type="button"
+          class="cta-secondary trash-overflow-btn"
+          onclick={() => (trashMenuOpen = !trashMenuOpen)}
+          aria-haspopup="menu"
+          aria-expanded={trashMenuOpen}
+          aria-label={m.steam_listing_more_actions_aria()}
+          title={m.steam_listing_more_actions_aria()}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="5" cy="12" r="1.8" fill="currentColor" />
+            <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+            <circle cx="19" cy="12" r="1.8" fill="currentColor" />
+          </svg>
+        </button>
+        {#if trashMenuOpen}
+          <div
+            class="trash-overflow-scrim"
+            onclick={() => (trashMenuOpen = false)}
+            role="presentation"
+          ></div>
+          <div class="trash-overflow-pop" role="menu">
+            <button
+              type="button"
+              class="card-menu-item"
+              role="menuitem"
+              onclick={() => {
+                trashMenuOpen = false;
+                onRestore?.();
+              }}>{m.common_restore()}</button
+            >
+            <button
+              type="button"
+              class="card-menu-item danger"
+              role="menuitem"
+              onclick={() => {
+                trashMenuOpen = false;
+                onDeleteForever?.();
+              }}>{m.steam_listing_delete_forever_cta()}</button
+            >
+          </div>
+        {/if}
+      </div>
+    </div>
+  {:else}
+    <!-- Compact wishlist line. Data when a summary exists; otherwise a short
+         recommendation pointing the user at the Details modal's import flow. -->
+    <p class="wishlist-line" class:muted={!compactWishlist}>
+      {compactWishlist ?? m.steam_listing_wishlist_recommendation()}
+    </p>
 
-  <div class="card-actions">
-    <a class="cta-secondary store-link" href={steamUrl} target="_blank" rel="noopener noreferrer">
-      {m.steam_listing_open_in_steam()}
-    </a>
-    {#if gameId}
-      <button type="button" class="cta-secondary details-btn" onclick={() => (detailOpen = true)}>
-        {m.steam_listing_details_cta()}
-      </button>
-    {/if}
-  </div>
+    <div class="card-actions">
+      <a class="cta-secondary store-link" href={steamUrl} target="_blank" rel="noopener noreferrer">
+        {m.steam_listing_open_in_steam()}
+      </a>
+      {#if gameId}
+        <button type="button" class="cta-secondary details-btn" onclick={() => (detailOpen = true)}>
+          {m.steam_listing_details_cta()}
+        </button>
+      {/if}
+    </div>
+  {/if}
 </article>
 
-{#if gameId}
+{#if gameId && !trash}
   <SteamListingDetailModal
     open={detailOpen}
     {gameId}
@@ -287,6 +355,53 @@
   .cta-secondary:hover {
     background: var(--accent);
     color: var(--accent-text);
+  }
+  /* ── Trash-mode overflow (EventDetailHeader idiom) ──────────────────── */
+  .trash-overflow-wrap {
+    position: relative;
+  }
+  .trash-overflow-btn {
+    padding: var(--s-1) var(--s-2);
+  }
+  .trash-overflow-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    background: transparent;
+  }
+  .trash-overflow-pop {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 160px;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-elev);
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    z-index: 90;
+  }
+  .trash-overflow-pop .card-menu-item {
+    background: transparent;
+    border: none;
+    text-align: left;
+    padding: 8px 12px;
+    font-size: var(--t-13);
+    color: var(--text);
+    cursor: pointer;
+    border-radius: var(--r-sm);
+    font-family: inherit;
+  }
+  .trash-overflow-pop .card-menu-item:hover {
+    background: var(--accent-soft);
+  }
+  .trash-overflow-pop .card-menu-item.danger {
+    color: var(--danger);
+  }
+  .trash-overflow-pop .card-menu-item.danger:hover {
+    background: color-mix(in oklab, var(--danger) 12%, var(--surface));
   }
   @media (prefers-reduced-motion: reduce) {
     .cta-secondary {
