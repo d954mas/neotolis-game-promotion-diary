@@ -21,6 +21,7 @@ import type {
 } from "./db/schema/index.js";
 import type { auditLog } from "./db/schema/audit-log.js";
 import type { youtubeVideoSnapshots, youtubeChannels } from "./db/schema/index.js";
+import type { wishlistSnapshots } from "./db/schema/wishlist-snapshots.js";
 
 type User = typeof user.$inferSelect;
 type Session = typeof session.$inferSelect;
@@ -720,6 +721,51 @@ export function toYoutubeChannelMetadataCacheDto(
     uploadsPlaylistId: r.uploadsPlaylistId,
     channelTitle: r.channelTitle,
     lastBackfillAt: r.lastBackfillAt,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+/**
+ * WishlistSnapshotDto — DTO for `wishlist_snapshots` rows.
+ *
+ * Tenant-scoped data (commercially-sensitive per-user wishlist counts).
+ * `userId` is OMITTED per DTO discipline — the caller already knows their
+ * own id, and echoing it back risks surfacing OTHER users' ids in a buggy
+ * aggregate view. There are no ciphertext columns on this table, so the
+ * projection is existence-only (enumerate every wire field so a future
+ * column addition forces a review touchpoint).
+ *
+ * NO DENORMALIZATION: the listing/game display name is NOT projected here —
+ * it is owned by `game_steam_listings` and read via the `listingId` FK.
+ */
+export interface WishlistSnapshotDto {
+  id: string;
+  listingId: string;
+  date: string;
+  adds: number | null;
+  deletes: number | null;
+  purchasesAndActivations: number | null;
+  gifts: number | null;
+  balance: number;
+  source: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+type WishlistSnapshotRow = typeof wishlistSnapshots.$inferSelect;
+
+export function toWishlistSnapshotDto(r: WishlistSnapshotRow): WishlistSnapshotDto {
+  return {
+    id: r.id,
+    listingId: r.listingId,
+    date: r.date,
+    adds: r.adds,
+    deletes: r.deletes,
+    purchasesAndActivations: r.purchasesAndActivations,
+    gifts: r.gifts,
+    balance: r.balance,
+    source: r.source,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
