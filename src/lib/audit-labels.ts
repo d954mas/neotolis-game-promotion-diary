@@ -80,6 +80,9 @@ const LABELS: Record<AuditAction, () => string> = {
   // Phase 3.4 — ?view=trash hard-delete for sources + games.
   "source.delete_forever": () => m.audit_action_source_delete_forever(),
   "game.delete_forever": () => m.audit_action_game_delete_forever(),
+  // Phase 3.2 — Steam Wishlists.csv import. PG enum extension in
+  // drizzle/0052_phase03_2_wishlist_imported_action.sql (standalone ALTER TYPE).
+  "wishlist.imported": () => m.audit_action_wishlist_imported(),
 };
 
 /**

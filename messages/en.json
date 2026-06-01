@@ -686,6 +686,7 @@
   "audit_action_events_purge_stale": "Stale events purged",
   "audit_action_source_delete_forever": "Source permanently deleted",
   "audit_action_game_delete_forever": "Game permanently deleted",
+  "audit_action_wishlist_imported": "Wishlist CSV imported",
 
   "axis_row_show_label": "Show",
   "axis_row_game_label": "Game",
