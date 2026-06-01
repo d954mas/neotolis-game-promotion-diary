@@ -77,6 +77,24 @@ describe("parseWishlistCsv (Plan 03.2-02)", () => {
     expect(rows).toHaveLength(2);
   });
 
+  it("03.2-02: non-strict-integer cells (1,234 / 5abc) are skipped, not silently truncated", () => {
+    // Number.parseInt("1,234") === 1 and parseInt("5abc") === 5 — neither is
+    // NaN, so a lenient parse would persist corrupted components. The strict
+    // /^-?\d+$/ guard must reject both rows (skip + count) while valid rows
+    // still parse.
+    const csv = [
+      "DateLocal,Game,Adds,Deletes,PurchasesAndActivations,Gifts",
+      "2026-05-01,My Game,10,0,0,0", // valid
+      '2026-05-02,My Game,"1,234",0,0,0', // thousands separator → skip
+      "2026-05-03,My Game,5abc,0,0,0", // trailing junk → skip
+    ].join("\n");
+    const { rows, skipped } = parseWishlistCsv(csv);
+    expect(skipped).toBe(2);
+    expect(rows).toEqual([
+      { date: "2026-05-01", adds: 10, deletes: 0, purchasesAndActivations: 0, gifts: 0 },
+    ]);
+  });
+
   it("03.2-02: real Wishlist-Actions export (sep=, + title + blank preamble) parses, reconciles to 254", () => {
     // Real SteamWishlists_4654990_2026-04-23_to_2026-06-01.csv: a `sep=,`
     // hint line + a human title line + a blank line precede the real header.

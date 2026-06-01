@@ -54,8 +54,15 @@ function invalidHeader(detail: string): never {
 
 // A missing or non-integer cell yields NaN, which the caller treats as a
 // malformed row (skip + count) — never a parse abort.
+//
+// STRICT parse: Number.parseInt("1,234") returns 1 and parseInt("5abc")
+// returns 5 — silent corruption that is NOT NaN, so it would slip past the
+// skip path. Match a whole-string optional-sign integer first; anything else
+// (thousands separators, trailing junk, empty) becomes NaN and is skipped.
 function parseIntCell(cell: string | undefined): number {
-  return Number.parseInt(cell ?? "", 10);
+  const s = (cell ?? "").trim();
+  if (!/^-?\d+$/.test(s)) return NaN;
+  return Number(s);
 }
 
 // Quote-aware single-line CSV tokenizer (RFC-4180). A quoted field may contain
