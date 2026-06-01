@@ -64,6 +64,7 @@ const TENANT_TABLES = new Set([
   "eventGames",
   "auditLog",
   "adapterRefreshQueue",
+  "wishlistSnapshots", // commercially-sensitive per-user wishlist data (D-06) — tenant-scoped, NOT public like youtubeVideoSnapshots
 ]);
 
 const ALLOWLIST_TABLES = new Set([
