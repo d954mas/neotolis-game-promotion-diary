@@ -77,6 +77,31 @@ describe("parseWishlistCsv (Plan 03.2-02)", () => {
     expect(rows).toHaveLength(2);
   });
 
+  it("03.2-02: real Wishlist-Actions export (sep=, + title + blank preamble) parses, reconciles to 254", () => {
+    // Real SteamWishlists_4654990_2026-04-23_to_2026-06-01.csv: a `sep=,`
+    // hint line + a human title line + a blank line precede the real header.
+    // The parser must skip that preamble and find the header by content.
+    const csv = read("wishlist-actions-real.csv");
+    expect(csv.startsWith("sep=,")).toBe(true);
+    const { rows, skipped } = parseWishlistCsv(csv);
+    expect(skipped).toBe(0);
+    expect(rows).toHaveLength(39);
+    expect(rows[0]).toEqual({
+      date: "2026-04-23",
+      adds: 21,
+      deletes: 0,
+      purchasesAndActivations: 0,
+      gifts: 0,
+    });
+    // Lifetime cross-check vs the wishlist-summary file: Adds 267, Deletes 13,
+    // Outstanding 254. Cumulative balance the service derives must equal 254.
+    const totalAdds = rows.reduce((n, r) => n + r.adds, 0);
+    const totalDeletes = rows.reduce((n, r) => n + r.deletes, 0);
+    expect(totalAdds).toBe(267);
+    expect(totalDeletes).toBe(13);
+    expect(totalAdds - totalDeletes).toBe(254);
+  });
+
   it("03.2-02: empty / header-only input throws wishlist_csv_invalid_header", () => {
     expect(() => parseWishlistCsv("")).toThrow("wishlist_csv_invalid_header");
     expect(() =>

@@ -11,6 +11,12 @@
 //   - CRLF or LF line endings (split on /\r?\n/)
 //   - blank / trailing-blank lines dropped
 //   - extra trailing columns (e.g. a `MonthCohort` cohort column) ignored
+//   - PREAMBLE before the header: the real export starts with a spreadsheet
+//     hint line (`sep=,`) and a human title line (e.g. "Steam Wishlisting
+//     data for 2026-04-23 - 2026-06-01") and a blank line BEFORE the column
+//     header. We scan for the first line carrying every required column
+//     rather than assuming the header is line 0 (confirmed against a real
+//     SteamWishlists_{appid}_{from}_to_{to}.csv export).
 //
 // Header-NAME-driven, never positional (Pitfall 1): the unread `Game`
 // column (index 1) can itself contain a comma-bearing title and an extra
@@ -52,20 +58,29 @@ export function parseWishlistCsv(text: string): WishlistCsvParseResult {
   const withoutBom = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   const lines = withoutBom.split(/\r?\n/).filter((line) => line.trim() !== "");
 
-  if (lines.length < 2) invalidHeader("expected a header line and at least one data row");
-
-  const header = lines[0]!.split(",").map((cell) => cell.trim());
-  const index = {} as Record<(typeof REQUIRED)[number], number>;
-  for (const name of REQUIRED) {
-    const i = header.indexOf(name);
-    if (i === -1) invalidHeader(`missing required column "${name}"`);
-    index[name] = i;
+  // Locate the header row by content, skipping any `sep=,` / title preamble.
+  let headerCols: string[] | null = null;
+  let dataStart = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const cols = lines[i]!.split(",").map((cell) => cell.trim());
+    if (REQUIRED.every((name) => cols.includes(name))) {
+      headerCols = cols;
+      dataStart = i + 1;
+      break;
+    }
   }
+  if (!headerCols) {
+    invalidHeader(`no header row with required columns (${REQUIRED.join(", ")})`);
+  }
+  if (dataStart >= lines.length) invalidHeader("header found but no data rows");
+
+  const index = {} as Record<(typeof REQUIRED)[number], number>;
+  for (const name of REQUIRED) index[name] = headerCols.indexOf(name);
 
   const rows: WishlistCsvRow[] = [];
   let skipped = 0;
 
-  for (const line of lines.slice(1)) {
+  for (const line of lines.slice(dataStart)) {
     const cells = line.split(",");
     const date = cells[index.DateLocal]?.trim();
     const adds = parseIntCell(cells[index.Adds]);
