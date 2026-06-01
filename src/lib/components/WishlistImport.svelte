@@ -115,12 +115,7 @@
     onchange={onPick}
     hidden
   />
-  <button
-    type="button"
-    class="submit"
-    onclick={() => fileInput?.click()}
-    disabled={uploading}
-  >
+  <button type="button" class="submit" onclick={() => fileInput?.click()} disabled={uploading}>
     {uploading ? m.wishlist_import_uploading() : m.wishlist_import_cta()}
   </button>
   {#if resultText}<p class="result" role="status">{resultText}</p>{/if}

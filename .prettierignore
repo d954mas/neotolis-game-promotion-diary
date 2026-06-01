@@ -9,6 +9,10 @@ pnpm-lock.yaml
 *.lock
 *.lockfile
 
+# CSV fixtures — Prettier has no CSV parser (errors on them), and these are
+# byte-exact test oracles (intentional BOM / CRLF / preamble); never reformat.
+*.csv
+
 # Documentation and planning — managed manually
 .planning/
 docs/
