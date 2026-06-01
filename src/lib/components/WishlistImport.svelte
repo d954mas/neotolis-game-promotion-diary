@@ -1,20 +1,19 @@
 <script lang="ts">
   // WishlistImport — per-listing "Import wishlist CSV" affordance on
-  // /games/[id] (WISH-02, D-07/D-08). Rendered INSIDE SteamListingRow.
+  // /games/[id] (WISH-02, D-07/D-08). Rendered INSIDE the listing detail modal.
   //
-  // D-07: the appid is implicit in `listingId` — the file is NEVER parsed
-  // for an appid. The chosen listing IS the binding.
-  // D-08: immediate import — no preview/confirm step. On submit we POST the
-  // file straight to the tenant-scoped import route and surface a result
-  // message (rows / date range / updated / skipped) inline.
+  // D-07: the appid is implicit in `listingId` — the chosen listing IS the
+  // binding (the route also guards against a wrong-game filename).
+  // D-08: ONE action. The button opens the OS file picker; selecting a file
+  // imports it immediately (no separate "choose then submit" step). The file
+  // input is hidden and reset after every attempt, so no stale path lingers
+  // and re-picking the same file works.
   //
-  // On success we call onImported() so the parent invalidates the loader
-  // and WishlistSummary refreshes with the new balance.
+  // On success we call onImported() so the parent invalidates the loader and
+  // WishlistSummary refreshes with the new balance.
   //
-  // v2 design tokens + Paraglide m.* only; NO hard-coded English literals.
-  // Error codes from the route (wishlist_csv_invalid_header /
-  // wishlist_csv_too_large / wishlist_csv_missing_file) map to clear m.*
-  // copy via the same code→message pattern AddSteamListingForm uses.
+  // v2 design tokens + Paraglide m.* only. Route 4xx error codes map to clear
+  // m.* copy via the same code→message pattern AddSteamListingForm uses.
 
   import { m } from "$lib/paraglide/messages.js";
   import InlineError from "./InlineError.svelte";
@@ -30,16 +29,10 @@
   } = $props();
 
   let fileInput = $state<HTMLInputElement | null>(null);
-  let selectedName = $state<string | null>(null);
   let uploading = $state(false);
   let errorText = $state<string | null>(null);
-  // Result message after a successful import (D-08 toast equivalent —
-  // rendered inline since the repo has no global toast store on this
-  // surface, mirroring AddSteamListingForm's inline result UX).
   let resultText = $state<string | null>(null);
 
-  // Map the route's 4xx error codes to localized copy. Unknown codes fall
-  // back to the generic server error.
   function errorMessageFor(code: string): string {
     switch (code) {
       case "wishlist_csv_invalid_header":
@@ -57,23 +50,13 @@
     }
   }
 
-  function onFileChange(): void {
-    selectedName = fileInput?.files?.[0]?.name ?? null;
-    errorText = null;
-    resultText = null;
-  }
-
-  async function submit(e: Event): Promise<void> {
-    e.preventDefault();
+  // Fires when the user picks a file in the OS dialog → import immediately.
+  async function onPick(): Promise<void> {
     if (uploading) return;
+    const file = fileInput?.files?.[0] ?? null;
+    if (!file) return; // dialog cancelled — nothing to do
     errorText = null;
     resultText = null;
-
-    const file = fileInput?.files?.[0] ?? null;
-    if (!file) {
-      errorText = m.wishlist_import_no_file();
-      return;
-    }
 
     const form = new FormData();
     form.append("file", file);
@@ -111,88 +94,46 @@
               updated: body.updated,
               skipped: body.skipped,
             });
-      // Reset the picker so a re-import starts clean.
-      if (fileInput) fileInput.value = "";
-      selectedName = null;
       onImported?.();
     } catch {
       errorText = m.error_network();
     } finally {
       uploading = false;
+      // Always clear so re-picking the SAME file fires change again and no
+      // stale filename/path persists across imports or modal reopen.
+      if (fileInput) fileInput.value = "";
     }
   }
 </script>
 
-<form class="wishlist-import" onsubmit={submit}>
-  <label class="field">
-    <span class="field-label">{m.wishlist_import_file_label()}</span>
-    <input
-      class="file-input"
-      type="file"
-      accept=".csv,text/csv"
-      bind:this={fileInput}
-      onchange={onFileChange}
-      disabled={uploading}
-    />
-  </label>
-  {#if selectedName}
-    <p class="selected-name" title={selectedName}>{selectedName}</p>
-  {/if}
-  <button type="submit" class="submit" disabled={uploading}>
+<div class="wishlist-import">
+  <input
+    class="file-input-hidden"
+    type="file"
+    accept=".csv,text/csv"
+    bind:this={fileInput}
+    onchange={onPick}
+    hidden
+  />
+  <button
+    type="button"
+    class="submit"
+    onclick={() => fileInput?.click()}
+    disabled={uploading}
+  >
     {uploading ? m.wishlist_import_uploading() : m.wishlist_import_cta()}
   </button>
-</form>
-{#if resultText}<p class="result" role="status">{resultText}</p>{/if}
-{#if errorText}<InlineError message={errorText} />{/if}
+  {#if resultText}<p class="result" role="status">{resultText}</p>{/if}
+  {#if errorText}<InlineError message={errorText} />{/if}
+</div>
 
 <style>
-  /* v2 WishlistImport — compact import form inside the listing card.
-   * --surface-3 well, --accent submit at --hit height. Mirrors
-   * AddSteamListingForm's recipe at a smaller scale. */
+  /* v2 WishlistImport — single-action import. One --accent button opens the
+   * picker and imports on selection; the file input is hidden. */
   .wishlist-import {
     display: flex;
     flex-direction: column;
     gap: var(--s-2);
-  }
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-1);
-  }
-  .field-label {
-    font-family: var(--f-sans);
-    font-size: var(--t-12);
-    color: var(--text-2);
-    font-weight: var(--w-md);
-  }
-  .file-input {
-    font-family: var(--f-sans);
-    font-size: var(--t-12);
-    color: var(--text-2);
-    min-width: 0;
-  }
-  .file-input::file-selector-button {
-    margin-right: var(--s-2);
-    padding: var(--s-1) var(--s-2);
-    background: var(--surface-2);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    font-family: var(--f-sans);
-    font-size: var(--t-12);
-    cursor: pointer;
-  }
-  .file-input::file-selector-button:hover {
-    border-color: var(--accent-strong);
-  }
-  .selected-name {
-    margin: 0;
-    color: var(--text-3);
-    font-family: var(--f-mono);
-    font-size: var(--t-12);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .submit {
     align-self: flex-start;
