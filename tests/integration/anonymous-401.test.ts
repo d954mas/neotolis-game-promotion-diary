@@ -347,6 +347,20 @@ describe("anonymous-401 sweep", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
+  // Phase 3.2 wishlist CSV import — anonymous-401 stub (Wave 0 scaffold).
+  //
+  // 03.2-03: Plan 03 flips this to a live it(...) AND adds the route to
+  // MUST_BE_PROTECTED, once the route is mounted. It stays it.skip here
+  // because the route does not exist yet — adding it to MUST_BE_PROTECTED
+  // now would fail the toContain vacuous-pass guard above.
+  it.skip("anonymous POST /api/games/:gameId/listings/:listingId/wishlist-import returns 401 unauthorized", async () => {
+    const res = await app.request("/api/games/fixture-id/listings/fixture-id/wishlist-import", {
+      method: "POST",
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
   it("AUTH-01: /api/me with valid session returns 200 + UserDto", async () => {
     const { seedUserDirectly } = await import("./helpers.js");
     const seeded = await seedUserDirectly({ email: "priv@test.local", name: "Priv Tester" });
