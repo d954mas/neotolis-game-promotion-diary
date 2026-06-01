@@ -216,11 +216,15 @@ gameListingsRoutes.post(
     } catch (err) {
       // A payload over the 2 MiB cap throws Hono's BodyLimitError during
       // parseBody(). The class is not a runtime value export of hono/body-limit
-      // (the dist only exports `bodyLimit`), so match by the stable `.name` and
-      // re-throw so the bodyLimit middleware's own onError maps it to the 413
-      // wishlist_csv_too_large response — mapErr would otherwise bury it as a
-      // generic 500.
-      if (err instanceof Error && err.name === "BodyLimitError") throw err;
+      // (the dist only exports `bodyLimit`), so match by the stable `.name`.
+      // An oversized upload is a normal user scenario, not a server error:
+      // return the 413 here so it never reaches the global hono error handler
+      // (which logs at level 50 and would pollute the error log). The
+      // bodyLimit middleware's own onError still covers the Content-Length
+      // pre-check path with the same response shape.
+      if (err instanceof Error && err.name === "BodyLimitError") {
+        return c.json({ error: "wishlist_csv_too_large" }, 413);
+      }
       return mapErr(c, err, "POST /api/games/:gameId/listings/:listingId/wishlist-import");
     }
   },
