@@ -396,7 +396,12 @@
       + {m.stores_add_cta()}
     </button>
   </header>
-  <StoresSection {listings} gameId={game.id} onChange={() => invalidateAll()} />
+  <StoresSection
+    {listings}
+    gameId={game.id}
+    wishlistSummaries={data.wishlistSummaries}
+    onChange={() => invalidateAll()}
+  />
 </section>
 
 <section class="events" id="section-events">

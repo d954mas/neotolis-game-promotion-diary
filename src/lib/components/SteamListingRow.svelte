@@ -38,6 +38,9 @@
   import { m } from "$lib/paraglide/messages.js";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import InlineError from "./InlineError.svelte";
+  import WishlistImport from "./WishlistImport.svelte";
+  import WishlistSummary from "./WishlistSummary.svelte";
+  import type { WishlistSnapshotDto } from "$lib/server/dto.js";
 
   type Listing = {
     id: string;
@@ -49,9 +52,16 @@
     apiKeyId: string | null;
   };
 
+  type WishlistSummaryData = {
+    balance: number;
+    lastDate: string;
+    recentDays: WishlistSnapshotDto[];
+  };
+
   let {
     listing,
     gameId,
+    summary = null,
     onChange,
   }: {
     listing: Listing;
@@ -59,6 +69,9 @@
     // render the row outside StoresSection. When omitted, the Edit / Remove
     // affordances hide (no DELETE target).
     gameId?: string;
+    // This listing's wishlist mini-summary from the loader's
+    // wishlistSummaries map. null = no snapshots yet (empty state).
+    summary?: WishlistSummaryData | null;
     onChange?: () => void;
   } = $props();
 
@@ -245,6 +258,19 @@
         {#if editError}<InlineError message={editError} />{/if}
       </form>
     {/if}
+  {/if}
+
+  {#if gameId && !editing}
+    <!-- Wishlist mini-summary + import (WISH-02). The appid is implicit in
+         listing.id (D-07) — WishlistImport never reads it from the file.
+         onImported → the same onChange/invalidate path the row already
+         uses, so the summary refreshes after a successful import. Hidden
+         in edit mode to keep the label-edit form uncluttered. -->
+    <section class="wishlist" aria-label={m.wishlist_section_heading()}>
+      <h4 class="wishlist-heading">{m.wishlist_section_heading()}</h4>
+      <WishlistSummary {summary} />
+      <WishlistImport {gameId} listingId={listing.id} onImported={() => onChange?.()} />
+    </section>
   {/if}
 </article>
 
@@ -500,5 +526,27 @@
     .remove-btn-inline {
       transition: none;
     }
+  }
+  /* Wishlist section — a --surface-3 well at the bottom of the card
+   * grouping the mini-summary + import affordance, separated from the
+   * store metadata above by a top border. */
+  .wishlist {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-2);
+    margin-top: var(--s-1);
+    padding: var(--s-3);
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+  }
+  .wishlist-heading {
+    margin: 0;
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-sb);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
 </style>

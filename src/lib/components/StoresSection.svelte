@@ -13,15 +13,24 @@
 
   import { m } from "$lib/paraglide/messages.js";
   import SteamListingRow from "./SteamListingRow.svelte";
-  import type { GameSteamListingDto } from "$lib/server/dto.js";
+  import type { GameSteamListingDto, WishlistSnapshotDto } from "$lib/server/dto.js";
+
+  type WishlistSummaryData = {
+    balance: number;
+    lastDate: string;
+    recentDays: WishlistSnapshotDto[];
+  };
 
   let {
     listings,
     gameId,
+    wishlistSummaries = {},
     onChange,
   }: {
     listings: GameSteamListingDto[];
     gameId: string;
+    // Per-listing wishlist summaries keyed by listing id (from the loader).
+    wishlistSummaries?: Record<string, WishlistSummaryData | null>;
     onChange: () => void;
   } = $props();
 </script>
@@ -35,7 +44,12 @@
     <ul class="stores-grid">
       {#each listings as listing (listing.id)}
         <li>
-          <SteamListingRow {listing} {gameId} {onChange} />
+          <SteamListingRow
+            {listing}
+            {gameId}
+            summary={wishlistSummaries[listing.id] ?? null}
+            {onChange}
+          />
         </li>
       {/each}
     </ul>

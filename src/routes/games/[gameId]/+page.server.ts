@@ -2,6 +2,10 @@ import { error } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 import { getGameById, listGames, deriveReleaseInfoForGames } from "$lib/server/services/games.js";
 import { listListings, listSoftDeletedListings } from "$lib/server/services/game-steam-listings.js";
+import {
+  getWishlistSummary,
+  type WishlistSummary,
+} from "$lib/server/services/wishlist-snapshots.js";
 import { listEventsForGame } from "$lib/server/services/events.js";
 import { listSources } from "$lib/server/services/data-sources.js";
 import {
@@ -112,9 +116,26 @@ export const load: PageServerLoad = async ({ locals, params }) => {
   const allGameIds = gamesAll.map((g) => g.id);
   const allGameRelease = await deriveReleaseInfoForGames(userId, allGameIds);
 
+  // Per-listing wishlist mini-summary (WISH-02, D-09) via the service —
+  // NOT db.* in the loader. Best-effort like the other child fetches: a
+  // throw on any listing returns null so the rest of the page still
+  // renders. Keyed by listingId so SteamListingRow looks up its own
+  // summary; a listing with no snapshots maps to null (empty state).
+  const wishlistSummaryPairs = await Promise.all(
+    listings.map(
+      async (l): Promise<[string, WishlistSummary | null]> => [
+        l.id,
+        await getWishlistSummary(userId, l.id).catch(() => null),
+      ],
+    ),
+  );
+  const wishlistSummaries: Record<string, WishlistSummary | null> =
+    Object.fromEntries(wishlistSummaryPairs);
+
   return {
     game: toGameDto(game, thisGameDerived),
     listings: listings.map(toGameSteamListingDto),
+    wishlistSummaries,
     deletedListings: deletedListings.map(toGameSteamListingDto),
     events: eventDtos,
     games: gamesAll.map((r) =>
