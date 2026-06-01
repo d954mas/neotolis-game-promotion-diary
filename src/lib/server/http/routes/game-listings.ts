@@ -133,7 +133,12 @@ gameListingsRoutes.delete("/games/:gameId/listings/:listingId", async (c) => {
         ctx.ipAddress,
       );
     } else {
-      await removeSteamListing(ctx.userId, c.req.param("listingId"), ctx.ipAddress);
+      await removeSteamListing(
+        ctx.userId,
+        c.req.param("gameId"),
+        c.req.param("listingId"),
+        ctx.ipAddress,
+      );
     }
     return c.body(null, 204);
   } catch (err) {

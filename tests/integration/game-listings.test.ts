@@ -314,6 +314,38 @@ describe("addSteamListing duplicate translation (Path B)", () => {
     expect(stillThere?.deletedAt).toBeNull();
   });
 
+  it("soft-delete via a WRONG gameId (listing owned under a different game) → 404; listing stays active", async () => {
+    vi.mocked(fetchSteamAppDetails).mockResolvedValue(null);
+
+    const { createApp } = await import("../../src/lib/server/http/app.js");
+    const app = createApp();
+    const userA = await seedUserDirectly({ email: `p324-wronggame-${sfx()}@test.local` });
+    const gameRight = await createGame(userA.id, { title: "Right game" }, "127.0.0.1");
+    const gameWrong = await createGame(userA.id, { title: "Wrong game" }, "127.0.0.1");
+    const listing = await addSteamListing(
+      userA.id,
+      { gameId: gameRight.id, appId: 730 },
+      "127.0.0.1",
+    );
+
+    // The listing belongs to userA under gameRight; deleting it via gameWrong's
+    // route must 404 (gameId filter is defense-in-depth) and leave it active.
+    const res = await app.request(`/api/games/${gameWrong.id}/listings/${listing.id}`, {
+      method: "DELETE",
+      headers: { cookie: `neotolis.session_token=${userA.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(404);
+    const bodyStr = await res.text();
+    expect(bodyStr).not.toMatch(/forbidden|permission/i);
+
+    const [stillActive] = await db
+      .select()
+      .from(gameSteamListings)
+      .where(and(eq(gameSteamListings.userId, userA.id), eq(gameSteamListings.id, listing.id)));
+    expect(stillActive).toBeDefined();
+    expect(stillActive?.deletedAt).toBeNull();
+  });
+
   // Per-game listing restore endpoint:
   //   POST /api/games/:gameId/listings/:listingId/restore
   // Cross-tenant access on either gameId or listingId returns 404,

@@ -382,10 +382,16 @@ export async function updateListing(
  * this listing back (marker-timestamp design — earlier deletes stay
  * deleted).
  *
- * Throws NotFoundError on miss / cross-tenant.
+ * Scoped to (userId, gameId, listingId) — the `gameId` filter is
+ * defense-in-depth matching hardDeleteListing/updateListing, so a
+ * listing the caller owns under a DIFFERENT game cannot be soft-deleted
+ * via the wrong game's route.
+ *
+ * Throws NotFoundError on miss / cross-tenant / mismatched gameId.
  */
 export async function removeSteamListing(
   userId: string,
+  gameId: string,
   listingId: string,
   _ipAddress: string,
 ): Promise<void> {
@@ -395,6 +401,7 @@ export async function removeSteamListing(
     .where(
       and(
         eq(gameSteamListings.userId, userId),
+        eq(gameSteamListings.gameId, gameId),
         eq(gameSteamListings.id, listingId),
         isNull(gameSteamListings.deletedAt),
       ),
