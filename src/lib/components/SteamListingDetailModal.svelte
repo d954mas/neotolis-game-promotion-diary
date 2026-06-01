@@ -1,29 +1,14 @@
 <script lang="ts">
   // SteamListingDetailModal — per-listing detail + advanced actions for one
   // Steam listing on /games/[gameId]. The card (SteamListingRow) stays
-  // read-only; this modal is where the user does the "advanced" work.
-  //
-  // Post-UAT (Plan 03.2-04) the modal aligns with the rest of the app:
-  //   HEADER: name heading + ⋮ "More actions" overflow (EventDetailHeader
-  //     idiom — aria-haspopup="menu" + scrim + .overflow-pop role="menu"
-  //     with a single danger item "Delete listing") + × close.
-  //   BODY:
-  //     - LABEL inline edit (EventDetailContent idiom — read-only text +
-  //       pencil .detail-edit-btn; click → bind <input> to labelDraft;
-  //       commit on blur AND Enter via PATCH; Esc reverts). Empty label →
-  //       a "click to add a label" empty-state button.
-  //     - WISHLIST — full summary (or a recommendation when empty), how-to-
-  //       export-from-Steam instructions, and the CSV import affordance.
-  //   No "SETTINGS" section, no Save button, no inline "× Remove".
-  //
-  // Delete is soft-delete (DELETE, unchanged) → ConfirmDialog →
-  // handleRemoveConfirmed → onChange?.() + onClose(). Hard-delete (delete
-  // forever) lives in the trash view on /games/[gameId]?view=trash.
+  // read-only; this modal is where the user does the advanced work: label
+  // inline edit, wishlist summary + CSV import, and the soft-delete action.
+  // Hard-delete (delete forever) lives in the trash view, not here.
   //
   // Pattern follows AddStoreDialog / ConfirmDialog: native <dialog> +
   // showModal() (focus trap + Escape close) + backdrop-click closes via
-  // target===dialogEl + .dialog[open] CSS scoping. Body-scroll-lock is
-  // handled globally by body:has(dialog[open]) in app.css — no JS lock.
+  // target===dialogEl. Body-scroll-lock is handled globally by
+  // body:has(dialog[open]) in app.css — no JS lock.
 
   import { m } from "$lib/paraglide/messages.js";
   import ConfirmDialog from "./ConfirmDialog.svelte";

@@ -1,29 +1,22 @@
 // Wishlist-snapshots service — tenant-scoped Steam wishlist CSV import +
 // summary/recent reads (WISH-02).
 //
-// Tenant scope (D-06, load-bearing): every function takes `userId` as the
-// first non-optional arg and every Drizzle query filters by
-// `eq(wishlistSnapshots.userId, userId)`. Cross-tenant access returns 404
-// (NotFoundError) via the listing ownership gate, NEVER 403.
+// Cross-tenant access returns 404 (NotFoundError) via the listing ownership
+// gate, NEVER 403.
 //
 // Import flow:
 //   1. Ownership gate FIRST — a userId+gameId+listingId-scoped SELECT of
-//      the parent listing. Absent → NotFoundError (cross-tenant 404). This
-//      runs BEFORE any wishlist write, so a cross-tenant attempt mutates
-//      nothing. The listing row also yields `appId` for the audit metadata.
-//   2. parseWishlistCsv (Plan 03.2-02) — lets AppError(422,
-//      'wishlist_csv_invalid_header') propagate to mapErr.
-//   3. Derive cumulative balance over DATE-ASCENDING rows (RESEARCH.md
-//      Option 1, all-history assumption): the CSV is the full daily history
-//      from the game's launch, so the running sum of
-//      (adds − deletes − purchasesAndActivations − gifts) is the absolute
-//      outstanding-wishlist balance on each day. Balance is the SERVICE's
-//      job, not the parser's.
-//   4. Idempotent upsert (D-05 last-write-wins) on (listing_id, date) —
-//      ON CONFLICT DO UPDATE. `updated` = how many imported dates already
-//      existed (one scoped SELECT before the upsert; KISS).
-//   5. AFTER the transaction commits, write the `wishlist.imported` audit
-//      row with { appId, listingId, rowCount, dateRange, skipped }.
+//      the parent listing. Absent → NotFoundError. Runs BEFORE any wishlist
+//      write, so a cross-tenant attempt mutates nothing. The listing row also
+//      yields `appId` for the audit metadata.
+//   2. parseWishlistCsv — lets AppError(422, 'wishlist_csv_invalid_header')
+//      propagate to mapErr.
+//   3. Derive cumulative balance over date-ascending rows. The CSV is assumed
+//      to be the full daily history from the game's launch, so the running sum
+//      of (adds − deletes − purchasesAndActivations − gifts) is the absolute
+//      outstanding-wishlist balance on each day.
+//   4. Idempotent last-write-wins upsert on (listing_id, date).
+//   5. AFTER the transaction commits, write the `wishlist.imported` audit row.
 //
 // NO DENORMALIZATION: the listing/game display name is never copied onto
 // snapshot rows — only the listingId FK (AGENTS.md).
@@ -84,8 +77,10 @@ export async function importWishlistCsv(
   // Wrong-game guard: Steam names the export
   // `SteamWishlists_{appId}_{from}_to_{to}.csv`. If the filename carries an
   // appId that doesn't match this listing, the user picked the wrong listing —
-  // reject before writing. A renamed file (no appId in the name) can't be
-  // checked, so we allow it; the listing binding still scopes the data (D-07).
+  // reject before writing. SECURITY: the appId compared here is the LISTING's,
+  // never one taken from the file contents, so a crafted file can't redirect
+  // the import. A renamed file (no appId in the name) can't be checked, so we
+  // allow it; the listing binding still scopes the data.
   if (fileName) {
     const m = /(?:^|[/\\])SteamWishlists_(\d+)_/i.exec(fileName);
     if (m && Number(m[1]) !== listing.appId) {
@@ -208,7 +203,7 @@ export async function importWishlistCsv(
   // parsed-row count — duplicate same-date rows collapse to one upserted row.
   const rowCount = sorted.length;
 
-  // Audit AFTER commit (D-04). writeAudit never throws (swallows + logs).
+  // Audit AFTER commit. writeAudit never throws (swallows + logs).
   await writeAudit({
     userId,
     action: "wishlist.imported",

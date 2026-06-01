@@ -1,31 +1,12 @@
 <script lang="ts">
-  // SteamListingRow — one Steam listing on /games/[id] under StoresSection.
-  //
-  // READ-ONLY card. Content order (top → bottom):
-  //   1. Cover image (when listing.coverUrl is non-null) — Steam header
-  //      image rendered as the visual anchor. Falls back to a flat
-  //      surface when null (Steam-down-on-INSERT case).
-  //   2. Header row: STEAM badge + name.
-  //   3. App ID line ("App {appId}") in muted monospace.
-  //   4. Optional user label (when listing.label is non-empty).
-  //   5. Optional release date (when listing.releaseDate is non-null).
-  //   6. Optional "key linked" chip when listing.apiKeyId is non-null.
-  //   7. Compact wishlist line — either "{balance} wishlists · updated {ago}"
-  //      (summary present) or a short import recommendation (summary null).
-  //   8. Buttons row: "Open in Steam" link + "Details" button.
+  // SteamListingRow — one read-only Steam listing card on /games/[id].
   //
   // The "advanced" affordances (label edit, remove, CSV import, full wishlist
   // summary, export instructions) ALL live in <SteamListingDetailModal>,
-  // opened via the Details button. The card owns `detailOpen` and renders the
-  // modal. The card itself never mutates server state.
+  // opened via the Details button. The card itself never mutates server state.
   //
-  // displayName: prefer the persisted `name`; fall back to
-  // m.steam_listing_unnamed() for legacy rows (NULL `name`) or rows added
-  // during a Steam outage.
-  //
-  // steamUrl: `https://store.steampowered.com/app/{appId}/` — public Steam
-  // store URL, no auth needed. `target="_blank"` + `rel="noopener noreferrer"`
-  // is the standard external-link safety pair.
+  // displayName falls back to m.steam_listing_unnamed() for legacy rows (NULL
+  // `name`) or rows added while Steam was unreachable at INSERT time.
 
   import { m } from "$lib/paraglide/messages.js";
   import SteamListingDetailModal from "./SteamListingDetailModal.svelte";
@@ -59,10 +40,9 @@
     // This listing's wishlist mini-summary from the loader's
     // wishlistSummaries map. null = no snapshots yet (empty state).
     summary?: WishlistSummaryDto | null;
-    // Trash mode (Plan 03.2-04): the card is read-only — no Details
-    // button, no wishlist line, no edit. A ⋮ overflow offers Restore +
-    // Delete forever (EventDetail trash idiom). The parent page owns the
-    // mutation handlers + ConfirmDialog.
+    // Trash mode: the card is read-only — no Details button, no wishlist
+    // line, no edit. A ⋮ overflow offers Restore + Delete forever. The parent
+    // page owns the mutation handlers + ConfirmDialog.
     trash?: boolean;
     onChange?: () => void;
     onRestore?: () => void;
@@ -219,9 +199,6 @@
 {/if}
 
 <style>
-  /* v2 SteamListingRow — D-01 redraw via SourceRow analogy. --surface-2
-   * card + --r-md radius + --shadow-card elevation. data-kind="steam"
-   * (LB-10) preserved. */
   .store-card {
     position: relative;
     display: flex;
