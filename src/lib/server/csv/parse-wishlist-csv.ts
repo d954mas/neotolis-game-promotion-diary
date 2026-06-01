@@ -52,17 +52,36 @@ function invalidHeader(detail: string): never {
   throw new AppError(`wishlist_csv_invalid_header: ${detail}`, "wishlist_csv_invalid_header", 422);
 }
 
-// A missing or non-integer cell yields NaN, which the caller treats as a
+// A missing or out-of-range cell yields NaN, which the caller treats as a
 // malformed row (skip + count) — never a parse abort.
 //
 // STRICT parse: Number.parseInt("1,234") returns 1 and parseInt("5abc")
 // returns 5 — silent corruption that is NOT NaN, so it would slip past the
-// skip path. Match a whole-string optional-sign integer first; anything else
-// (thousands separators, trailing junk, empty) becomes NaN and is skipped.
+// skip path. Match a whole-string non-negative integer first; anything else
+// (thousands separators, trailing junk, empty, negatives) becomes NaN.
+//
+// Adds/deletes/purchases/gifts are non-negative counts and land in a Postgres
+// int4 column, so reject negatives and anything above int4's max (overflow
+// would surface as a DB error rather than a controlled skip).
+const INT4_MAX = 2147483647;
 function parseIntCell(cell: string | undefined): number {
   const s = (cell ?? "").trim();
-  if (!/^-?\d+$/.test(s)) return NaN;
-  return Number(s);
+  if (!/^\d+$/.test(s)) return NaN;
+  const n = Number(s);
+  if (n > INT4_MAX) return NaN;
+  return n;
+}
+
+// A non-empty DateLocal cell still flows into a Postgres `date` column, so an
+// invalid value (wrong shape OR a non-existent calendar day like 2026-02-30)
+// would surface as a DB error rather than the controlled skip path. Require
+// the canonical YYYY-MM-DD shape AND a round-trip through Date: a real day
+// re-serialises to the same string, while 2026-13-01 / 2026-02-30 normalise to
+// a different date and are rejected.
+function isValidDate(date: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
 }
 
 // Quote-aware single-line CSV tokenizer (RFC-4180). A quoted field may contain
@@ -147,6 +166,7 @@ export function parseWishlistCsv(text: string): WishlistCsvParseResult {
 
     if (
       !date ||
+      !isValidDate(date) ||
       Number.isNaN(adds) ||
       Number.isNaN(deletes) ||
       Number.isNaN(purchasesAndActivations) ||

@@ -80,8 +80,8 @@ describe("parseWishlistCsv (Plan 03.2-02)", () => {
   it("03.2-02: non-strict-integer cells (1,234 / 5abc) are skipped, not silently truncated", () => {
     // Number.parseInt("1,234") === 1 and parseInt("5abc") === 5 — neither is
     // NaN, so a lenient parse would persist corrupted components. The strict
-    // /^-?\d+$/ guard must reject both rows (skip + count) while valid rows
-    // still parse.
+    // whole-string digit guard must reject both rows (skip + count) while
+    // valid rows still parse.
     const csv = [
       "DateLocal,Game,Adds,Deletes,PurchasesAndActivations,Gifts",
       "2026-05-01,My Game,10,0,0,0", // valid
@@ -144,6 +144,43 @@ describe("parseWishlistCsv (Plan 03.2-02)", () => {
     expect(rows).toEqual([
       { date: "2026-05-01", adds: 10, deletes: 1, purchasesAndActivations: 0, gifts: 0 },
       { date: "2026-05-02", adds: 5, deletes: 0, purchasesAndActivations: 0, gifts: 0 },
+    ]);
+  });
+
+  it("03.2-02: non-empty but invalid DateLocal (2026-13-45 / not-a-date) is skipped, valid rows parse", () => {
+    // A non-empty cell passed the old `!date` check yet would have failed the
+    // Postgres `date` column on insert (→ unhandled 500). The parser now
+    // validates shape + calendar-reality and routes invalid dates to the skip
+    // path. 2026-13-45 is a malformed component combo; "not-a-date" is the
+    // wrong shape entirely; 2026-02-30 is a non-existent calendar day.
+    const csv = [
+      "DateLocal,Game,Adds,Deletes,PurchasesAndActivations,Gifts",
+      "2026-05-01,My Game,10,0,0,0", // valid
+      "2026-13-45,My Game,5,0,0,0", // impossible month/day → skip
+      "not-a-date,My Game,5,0,0,0", // wrong shape → skip
+      "2026-02-30,My Game,5,0,0,0", // non-existent calendar day → skip
+    ].join("\n");
+    const { rows, skipped } = parseWishlistCsv(csv);
+    expect(skipped).toBe(3);
+    expect(rows).toEqual([
+      { date: "2026-05-01", adds: 10, deletes: 0, purchasesAndActivations: 0, gifts: 0 },
+    ]);
+  });
+
+  it("03.2-02: negative and over-int4 numeric cells are skipped, valid rows parse", () => {
+    // Counts are non-negative and must fit Postgres int4; a negative value or
+    // one above 2147483647 would corrupt the data or overflow the column, so
+    // both route to the skip path.
+    const csv = [
+      "DateLocal,Game,Adds,Deletes,PurchasesAndActivations,Gifts",
+      "2026-05-01,My Game,10,0,0,0", // valid
+      "2026-05-02,My Game,-5,0,0,0", // negative → skip
+      "2026-05-03,My Game,9999999999,0,0,0", // > int4 max → skip
+    ].join("\n");
+    const { rows, skipped } = parseWishlistCsv(csv);
+    expect(skipped).toBe(2);
+    expect(rows).toEqual([
+      { date: "2026-05-01", adds: 10, deletes: 0, purchasesAndActivations: 0, gifts: 0 },
     ]);
   });
 
