@@ -47,6 +47,9 @@ describe("anonymous-401 sweep", () => {
     "/api/games/:gameId/listings/:listingId/key",
     // per-game listing restore — same shape as /api/sources/:id/restore.
     "/api/games/:gameId/listings/:listingId/restore",
+    // Phase 3.2 wishlist CSV import (multipart). Added with the route in
+    // Plan 03.2-03 so the toContain vacuous-pass guard stays green.
+    "/api/games/:gameId/listings/:listingId/wishlist-import",
     // api keys (steam)
     "/api/api-keys/steam",
     "/api/api-keys/steam/:id",
@@ -353,7 +356,7 @@ describe("anonymous-401 sweep", () => {
   // MUST_BE_PROTECTED, once the route is mounted. It stays it.skip here
   // because the route does not exist yet — adding it to MUST_BE_PROTECTED
   // now would fail the toContain vacuous-pass guard above.
-  it.skip("anonymous POST /api/games/:gameId/listings/:listingId/wishlist-import returns 401 unauthorized", async () => {
+  it("anonymous POST /api/games/:gameId/listings/:listingId/wishlist-import returns 401 unauthorized", async () => {
     const res = await app.request("/api/games/fixture-id/listings/fixture-id/wishlist-import", {
       method: "POST",
     });

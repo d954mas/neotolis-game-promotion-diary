@@ -19,6 +19,7 @@
 
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
+import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import {
   addSteamListing,
@@ -28,6 +29,7 @@ import {
   attachKeyToListing,
   updateListing,
 } from "../../services/game-steam-listings.js";
+import { importWishlistCsv } from "../../services/wishlist-snapshots.js";
 import { toGameSteamListingDto } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
@@ -153,6 +155,44 @@ gameListingsRoutes.patch(
       return c.json(toGameSteamListingDto(listing));
     } catch (err) {
       return mapErr(c, err, "PATCH /api/games/:gameId/listings/:listingId/key");
+    }
+  },
+);
+
+// Wishlist CSV import — the repo's first multipart file-upload route.
+//
+// A Hono route (NOT a SvelteKit form action) so it inherits tenantScope +
+// accountState + metrics + mapErr by mount (RESEARCH.md Pattern 3 — a form
+// action bypasses all four). bodyLimit caps the payload BEFORE we read the
+// body into memory; years of daily rows are < 100 KB, so 2 MiB is generous.
+// We do NOT gate on `file.type` (RESEARCH.md Pitfall 6 — browsers send
+// inconsistent MIME for .csv); the parser's header-shape check is the real
+// contract. Cross-tenant gameId/listingId surfaces as 404 from the service.
+gameListingsRoutes.post(
+  "/games/:gameId/listings/:listingId/wishlist-import",
+  bodyLimit({
+    maxSize: 2 * 1024 * 1024,
+    onError: (c) => c.json({ error: "wishlist_csv_too_large" }, 413),
+  }),
+  async (c) => {
+    const ctx = getAuditContext(c);
+    const body = await c.req.parseBody();
+    const file = body["file"];
+    if (!(file instanceof File)) {
+      return c.json({ error: "wishlist_csv_missing_file" }, 422);
+    }
+    const csvText = await file.text();
+    try {
+      const result = await importWishlistCsv(
+        ctx.userId,
+        c.req.param("gameId"),
+        c.req.param("listingId"),
+        csvText,
+        ctx.ipAddress,
+      );
+      return c.json(result, 200);
+    } catch (err) {
+      return mapErr(c, err, "POST /api/games/:gameId/listings/:listingId/wishlist-import");
     }
   },
 );

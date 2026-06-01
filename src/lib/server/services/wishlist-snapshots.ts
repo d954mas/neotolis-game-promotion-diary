@@ -137,7 +137,10 @@ export async function importWishlistCsv(
           gifts: sql`excluded.gifts`,
           balance: sql`excluded.balance`,
           source: sql`excluded.source`,
-          updatedAt: new Date(),
+          // Postgres clock (not Node's `new Date()`) so updatedAt shares the
+          // same clock source as createdAt's `defaultNow()` — a consumer
+          // comparing the two never sees client/server clock skew.
+          updatedAt: sql`now()`,
         },
       });
 
