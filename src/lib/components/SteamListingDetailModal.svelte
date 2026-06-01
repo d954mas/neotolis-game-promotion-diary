@@ -30,7 +30,7 @@
   import InlineError from "./InlineError.svelte";
   import WishlistImport from "./WishlistImport.svelte";
   import WishlistSummary from "./WishlistSummary.svelte";
-  import type { WishlistSnapshotDto } from "$lib/server/dto.js";
+  import type { WishlistSummaryDto } from "$lib/server/dto.js";
 
   type Listing = {
     id: string;
@@ -40,12 +40,6 @@
     coverUrl: string | null;
     releaseDate: string | null;
     apiKeyId: string | null;
-  };
-
-  type WishlistSummaryData = {
-    balance: number;
-    lastDate: string;
-    recentDays: WishlistSnapshotDto[];
   };
 
   let {
@@ -59,16 +53,28 @@
     open: boolean;
     gameId: string;
     listing: Listing;
-    summary?: WishlistSummaryData | null;
+    summary?: WishlistSummaryDto | null;
     onClose: () => void;
     onChange?: () => void;
   } = $props();
 
   let dialogEl: HTMLDialogElement | null = $state(null);
 
+  // `closing` guards the label input's onblur=commitEditLabel: dismissing the
+  // modal (× / Escape / backdrop) blurs the focused input, which would
+  // otherwise PATCH a label the user abandoned by closing. Every close path
+  // sets it true BEFORE onClose(); the open-$effect resets it to false.
+  let closing = $state(false);
+
+  function close(): void {
+    closing = true;
+    onClose();
+  }
+
   $effect(() => {
     if (!dialogEl) return;
     if (open && !dialogEl.open) {
+      closing = false;
       dialogEl.showModal();
     } else if (!open && dialogEl.open) {
       dialogEl.close();
@@ -77,17 +83,26 @@
 
   function onDialogCancel(e: Event): void {
     e.preventDefault();
-    onClose();
+    close();
   }
 
   function onDialogClick(e: MouseEvent): void {
-    if (e.target === dialogEl) onClose();
+    if (e.target === dialogEl) close();
   }
 
   const displayName = $derived(listing.name ?? m.steam_listing_unnamed());
 
   // Header overflow menu (EventDetailHeader idiom).
   let overflowOpen = $state(false);
+
+  // Escape closes the overflow menu (keyboard parity with the scrim click).
+  // The <svelte:window> listener is top-level (Svelte requires it there); the
+  // handler no-ops unless the menu is open.
+  function onOverflowKeydown(e: KeyboardEvent): void {
+    if (overflowOpen && e.key === "Escape") {
+      overflowOpen = false;
+    }
+  }
 
   // Label inline edit (EventDetailContent idiom). `null` = not editing;
   // string = current draft. Commit on blur AND Enter; Esc reverts + exits.
@@ -116,6 +131,12 @@
 
   async function commitEditLabel(): Promise<void> {
     if (labelDraft === null) return;
+    // A close-triggered blur must NOT commit an abandoned edit. Drop the draft
+    // and bail when the modal is closing.
+    if (closing) {
+      labelDraft = null;
+      return;
+    }
     const next = labelDraft;
     // No-op when unchanged — close the editor without a roundtrip.
     if (next === listing.label) {
@@ -153,13 +174,15 @@
       if (res.ok) {
         confirmOpen = false;
         onChange?.();
-        onClose();
+        close();
       }
     } finally {
       removing = false;
     }
   }
 </script>
+
+<svelte:window onkeydown={onOverflowKeydown} />
 
 <dialog bind:this={dialogEl} class="dialog" oncancel={onDialogCancel} onclick={onDialogClick}>
   <header class="header">
@@ -181,11 +204,12 @@
         </svg>
       </button>
       {#if overflowOpen}
-        <div
+        <button
+          type="button"
           class="overflow-scrim"
+          aria-label={m.common_close()}
           onclick={() => (overflowOpen = false)}
-          role="presentation"
-        ></div>
+        ></button>
         <div class="overflow-pop" role="menu">
           <button
             type="button"
@@ -199,7 +223,7 @@
         </div>
       {/if}
     </div>
-    <button type="button" class="close" aria-label={m.common_close()} onclick={onClose}> × </button>
+    <button type="button" class="close" aria-label={m.common_close()} onclick={close}> × </button>
   </header>
   <div class="body">
     <!-- Label inline edit — EventDetailContent .detail-editable-row idiom. -->
@@ -371,6 +395,9 @@
     inset: 0;
     z-index: 80;
     background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: default;
   }
   .overflow-pop {
     position: absolute;

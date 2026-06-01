@@ -29,7 +29,8 @@
 
   import { m } from "$lib/paraglide/messages.js";
   import SteamListingDetailModal from "./SteamListingDetailModal.svelte";
-  import type { WishlistSnapshotDto } from "$lib/server/dto.js";
+  import { wishlistAgo } from "$lib/wishlist-ago.js";
+  import type { WishlistSummaryDto } from "$lib/server/dto.js";
 
   type Listing = {
     id: string;
@@ -39,12 +40,6 @@
     coverUrl: string | null;
     releaseDate: string | null;
     apiKeyId: string | null;
-  };
-
-  type WishlistSummaryData = {
-    balance: number;
-    lastDate: string;
-    recentDays: WishlistSnapshotDto[];
   };
 
   let {
@@ -63,7 +58,7 @@
     gameId?: string;
     // This listing's wishlist mini-summary from the loader's
     // wishlistSummaries map. null = no snapshots yet (empty state).
-    summary?: WishlistSummaryData | null;
+    summary?: WishlistSummaryDto | null;
     // Trash mode (Plan 03.2-04): the card is read-only — no Details
     // button, no wishlist line, no edit. A ⋮ overflow offers Restore +
     // Delete forever (EventDetail trash idiom). The parent page owns the
@@ -77,25 +72,13 @@
   const displayName = $derived(listing.name ?? m.steam_listing_unnamed());
   const steamUrl = $derived(`https://store.steampowered.com/app/${listing.appId}/`);
 
-  // Relative-time bucketing mirrors WishlistSummary.svelte (just-now /
-  // N minutes / N hours / N days) — every label routes through m.* (i18n
-  // contract). Drives the compact wishlist line below.
-  function relativeAgo(when: Date | string): string {
-    const t = typeof when === "string" ? new Date(when) : when;
-    const sec = Math.max(0, Math.floor((Date.now() - t.getTime()) / 1000));
-    if (sec < 60) return m.wishlist_ago_just_now();
-    const min = Math.floor(sec / 60);
-    if (min < 60) return m.wishlist_ago_minutes({ minutes: min });
-    const hour = Math.floor(min / 60);
-    if (hour < 24) return m.wishlist_ago_hours({ hours: hour });
-    return m.wishlist_ago_days({ days: Math.floor(hour / 24) });
-  }
-
+  // Compact wishlist line uses the shared wishlistAgo bucketing helper
+  // (just-now / N minutes / N hours / N days), routed through m.* (i18n).
   const compactWishlist = $derived(
     summary && summary.recentDays.length > 0
       ? m.steam_listing_wishlist_compact({
           balance: summary.balance.toLocaleString("en"),
-          ago: relativeAgo(summary.recentDays[0]!.updatedAt),
+          ago: wishlistAgo(summary.recentDays[0]!.updatedAt),
         })
       : null,
   );
@@ -105,7 +88,18 @@
   // Trash-mode overflow menu (EventDetailHeader idiom — Restore + Delete
   // forever as menu items).
   let trashMenuOpen = $state(false);
+
+  // Escape closes the trash overflow menu (keyboard parity with the scrim
+  // click). The <svelte:window> listener is top-level (Svelte requires it
+  // there); the handler no-ops unless the menu is open.
+  function onTrashMenuKeydown(e: KeyboardEvent): void {
+    if (trashMenuOpen && e.key === "Escape") {
+      trashMenuOpen = false;
+    }
+  }
 </script>
+
+<svelte:window onkeydown={onTrashMenuKeydown} />
 
 <article class="store-card" class:trash>
   {#if listing.coverUrl}
@@ -164,11 +158,12 @@
           </svg>
         </button>
         {#if trashMenuOpen}
-          <div
+          <button
+            type="button"
             class="trash-overflow-scrim"
+            aria-label={m.common_close()}
             onclick={() => (trashMenuOpen = false)}
-            role="presentation"
-          ></div>
+          ></button>
           <div class="trash-overflow-pop" role="menu">
             <button
               type="button"
@@ -379,6 +374,9 @@
     inset: 0;
     z-index: 80;
     background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: default;
   }
   .trash-overflow-pop {
     position: absolute;
