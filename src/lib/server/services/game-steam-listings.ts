@@ -414,8 +414,10 @@ export async function removeSteamListing(
  * the `listing_id` FK `ON DELETE cascade` (schema/wishlist-snapshots.ts) —
  * no explicit child delete needed.
  *
- * Scoped to (userId, gameId, listingId). Wrapped in `db.transaction` so the
- * pre-check SELECT and the DELETE are atomic against a concurrent restore.
+ * Scoped to (userId, gameId, listingId) with an `isNotNull(deletedAt)`
+ * predicate so a single DELETE … RETURNING enforces the soft-deleted-only
+ * rule atomically — no pre-check SELECT, no race window against a concurrent
+ * restore (an active row simply does not match the WHERE).
  *
  * Audited (`listing.delete_forever`, after commit) — unlike the reversible
  * soft-delete / restore / update, a permanent purge is irreversible data
@@ -428,32 +430,24 @@ export async function hardDeleteListing(
   listingId: string,
   ipAddress: string,
 ): Promise<void> {
-  const appId = await db.transaction(async (tx) => {
-    const [existing] = await tx
-      .select({ deletedAt: gameSteamListings.deletedAt, appId: gameSteamListings.appId })
-      .from(gameSteamListings)
-      .where(
-        and(
-          eq(gameSteamListings.userId, userId),
-          eq(gameSteamListings.gameId, gameId),
-          eq(gameSteamListings.id, listingId),
-        ),
-      )
-      .limit(1);
-    if (!existing) throw new NotFoundError();
-    if (existing.deletedAt === null) throw new NotFoundError();
-
-    await tx
-      .delete(gameSteamListings)
-      .where(
-        and(
-          eq(gameSteamListings.userId, userId),
-          eq(gameSteamListings.gameId, gameId),
-          eq(gameSteamListings.id, listingId),
-        ),
-      );
-    return existing.appId;
-  });
+  // Single statement enforces the soft-deleted-only rule atomically: the
+  // `isNotNull(deletedAt)` predicate in the DELETE's WHERE means a row that is
+  // missing, cross-tenant, OR active (not soft-deleted) simply matches nothing
+  // and `returning` comes back empty → NotFoundError (404, never 403). The
+  // returned appId feeds the audit metadata.
+  const [deleted] = await db
+    .delete(gameSteamListings)
+    .where(
+      and(
+        eq(gameSteamListings.userId, userId),
+        eq(gameSteamListings.gameId, gameId),
+        eq(gameSteamListings.id, listingId),
+        isNotNull(gameSteamListings.deletedAt),
+      ),
+    )
+    .returning({ appId: gameSteamListings.appId });
+  if (!deleted) throw new NotFoundError();
+  const appId = deleted.appId;
 
   // Audit AFTER commit (irreversible purge). writeAudit never throws.
   await writeAudit({
