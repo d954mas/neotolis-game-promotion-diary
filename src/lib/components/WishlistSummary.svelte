@@ -21,35 +21,17 @@
   // the listing/game name is owned by the parent row (game_steam_listings).
 
   import { m } from "$lib/paraglide/messages.js";
-  import type { WishlistSnapshotDto } from "$lib/server/dto.js";
+  import { wishlistAgo } from "$lib/wishlist-ago.js";
+  import type { WishlistSummaryDto } from "$lib/server/dto.js";
 
-  type Summary = {
-    balance: number;
-    lastDate: string;
-    recentDays: WishlistSnapshotDto[];
-  };
+  let { summary }: { summary: WishlistSummaryDto | null } = $props();
 
-  let { summary }: { summary: Summary | null } = $props();
-
-  // Relative-time copy from the most recent snapshot's updatedAt — the
-  // last time this listing's wishlist data changed. Mirrors SourceRow's
-  // "synced X ago" buckets but routes every label through m.* (i18n
-  // contract). Recomputed reactively when `summary` changes.
-  function relativeAgo(when: Date | string): string {
-    const t = typeof when === "string" ? new Date(when) : when;
-    const diffMs = Date.now() - t.getTime();
-    const sec = Math.max(0, Math.floor(diffMs / 1000));
-    if (sec < 60) return m.wishlist_ago_just_now();
-    const min = Math.floor(sec / 60);
-    if (min < 60) return m.wishlist_ago_minutes({ minutes: min });
-    const hour = Math.floor(min / 60);
-    if (hour < 24) return m.wishlist_ago_hours({ hours: hour });
-    const day = Math.floor(hour / 24);
-    return m.wishlist_ago_days({ days: day });
-  }
-
+  // Relative-time copy from the most recent snapshot's updatedAt — the last
+  // time this listing's wishlist data changed. Shared bucketing helper
+  // (wishlistAgo) routes every label through m.* (i18n contract). Recomputed
+  // reactively when `summary` changes.
   const updatedAgo = $derived(
-    summary && summary.recentDays.length > 0 ? relativeAgo(summary.recentDays[0]!.updatedAt) : null,
+    summary && summary.recentDays.length > 0 ? wishlistAgo(summary.recentDays[0]!.updatedAt) : null,
   );
 </script>
 

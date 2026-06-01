@@ -753,6 +753,20 @@ export interface WishlistSnapshotDto {
   updatedAt: Date;
 }
 
+/**
+ * WishlistSummaryDto — the per-listing wishlist mini-summary wire shape
+ * (headline `balance` + `lastDate` + the recent ≤14 daily rows). One source
+ * of truth for the shape that several /games components render; it is
+ * structurally identical to the service's `WishlistSummary` (the service
+ * returns this shape directly). Components import THIS instead of re-declaring
+ * the object literal inline.
+ */
+export interface WishlistSummaryDto {
+  balance: number;
+  lastDate: string;
+  recentDays: WishlistSnapshotDto[];
+}
+
 type WishlistSnapshotRow = typeof wishlistSnapshots.$inferSelect;
 
 export function toWishlistSnapshotDto(r: WishlistSnapshotRow): WishlistSnapshotDto {

@@ -13,13 +13,7 @@
 
   import { m } from "$lib/paraglide/messages.js";
   import SteamListingRow from "./SteamListingRow.svelte";
-  import type { GameSteamListingDto, WishlistSnapshotDto } from "$lib/server/dto.js";
-
-  type WishlistSummaryData = {
-    balance: number;
-    lastDate: string;
-    recentDays: WishlistSnapshotDto[];
-  };
+  import type { GameSteamListingDto, WishlistSummaryDto } from "$lib/server/dto.js";
 
   let {
     listings,
@@ -30,7 +24,7 @@
     listings: GameSteamListingDto[];
     gameId: string;
     // Per-listing wishlist summaries keyed by listing id (from the loader).
-    wishlistSummaries?: Record<string, WishlistSummaryData | null>;
+    wishlistSummaries?: Record<string, WishlistSummaryDto | null>;
     onChange: () => void;
   } = $props();
 </script>
