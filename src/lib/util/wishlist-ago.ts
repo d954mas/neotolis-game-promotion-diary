@@ -1,10 +1,8 @@
 // Shared relative-time bucketing for wishlist "updated X ago" labels.
 //
 // Extracted from the verbatim copies that lived in WishlistSummary.svelte and
-// SteamListingRow.svelte (three concrete callers would earn it; two identical
-// copies already do). Every bucket routes through the same m.wishlist_ago_*
-// messages so the i18n contract stays in one place. i18n m.* calls inside a
-// .ts helper are fine — paraglide messages are a plain module import.
+// SteamListingRow.svelte. Every bucket routes through the same m.wishlist_ago_*
+// messages so the i18n contract stays in one place.
 
 import { m } from "$lib/paraglide/messages.js";
 

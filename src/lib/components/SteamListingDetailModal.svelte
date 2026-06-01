@@ -68,6 +68,12 @@
 
   function onDialogCancel(e: Event): void {
     e.preventDefault();
+    // Escape dismisses one level at a time: close the overflow menu first if
+    // it's open, otherwise close the whole modal.
+    if (overflowOpen) {
+      overflowOpen = false;
+      return;
+    }
     close();
   }
 
@@ -77,17 +83,9 @@
 
   const displayName = $derived(listing.name ?? m.steam_listing_unnamed());
 
-  // Header overflow menu (EventDetailHeader idiom).
+  // Header overflow menu (EventDetailHeader idiom). Escape is handled by the
+  // dialog's `cancel` (onDialogCancel) — menu first, then the modal.
   let overflowOpen = $state(false);
-
-  // Escape closes the overflow menu (keyboard parity with the scrim click).
-  // The <svelte:window> listener is top-level (Svelte requires it there); the
-  // handler no-ops unless the menu is open.
-  function onOverflowKeydown(e: KeyboardEvent): void {
-    if (overflowOpen && e.key === "Escape") {
-      overflowOpen = false;
-    }
-  }
 
   // Label inline edit (EventDetailContent idiom). `null` = not editing;
   // string = current draft. Commit on blur AND Enter; Esc reverts + exits.
@@ -166,8 +164,6 @@
     }
   }
 </script>
-
-<svelte:window onkeydown={onOverflowKeydown} />
 
 <dialog bind:this={dialogEl} class="dialog" oncancel={onDialogCancel} onclick={onDialogClick}>
   <header class="header">

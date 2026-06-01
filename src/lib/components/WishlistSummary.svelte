@@ -21,7 +21,7 @@
   // the listing/game name is owned by the parent row (game_steam_listings).
 
   import { m } from "$lib/paraglide/messages.js";
-  import { wishlistAgo } from "$lib/wishlist-ago.js";
+  import { wishlistAgo } from "$lib/util/wishlist-ago.js";
   import type { WishlistSummaryDto } from "$lib/server/dto.js";
 
   let { summary }: { summary: WishlistSummaryDto | null } = $props();

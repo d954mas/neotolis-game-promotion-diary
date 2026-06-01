@@ -10,7 +10,7 @@
 
   import { m } from "$lib/paraglide/messages.js";
   import SteamListingDetailModal from "./SteamListingDetailModal.svelte";
-  import { wishlistAgo } from "$lib/wishlist-ago.js";
+  import { wishlistAgo } from "$lib/util/wishlist-ago.js";
   import type { WishlistSummaryDto } from "$lib/server/dto.js";
 
   type Listing = {
