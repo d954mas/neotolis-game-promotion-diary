@@ -195,6 +195,7 @@ describe("paraglide i18n", () => {
       "audit_action_source_toggled_auto_import",
       "audit_action_theme_changed",
       "audit_action_user_signup",
+      "audit_action_wishlist_imported",
       "audit_filter_action_axis_label",
       "audit_filter_date_axis_label",
       "author_avatar_mine_aria",
