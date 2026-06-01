@@ -239,6 +239,7 @@
   "wishlist_ago_minutes": "{minutes}m ago",
   "wishlist_ago_hours": "{hours}h ago",
   "wishlist_ago_days": "{days}d ago",
+  "wishlist_export_open_report": "Open this game's wishlist report on Steamworks ↗",
   "wishlist_export_heading": "How to export from Steam",
   "wishlist_export_step_1": "Sign in to partner.steamgames.com and open this specific game.",
   "wishlist_export_step_2": "Go to that game's wishlist report (\"Wishlist Actions\").",

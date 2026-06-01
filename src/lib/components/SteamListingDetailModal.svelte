@@ -273,6 +273,18 @@
           <li>{m.wishlist_export_step_3()}</li>
           <li>{m.wishlist_export_step_4()}</li>
         </ol>
+        <!-- Deep-link to THIS app's wishlist report PAGE (user still picks
+             "all history" + "view as .csv" there). We link the stable report
+             page, not the report_csv.php direct-download URL, which bakes in
+             dates + interpreter params and would break. -->
+        <a
+          class="export-open-report"
+          href={`https://partner.steampowered.com/app/wishlist/${listing.appId}/`}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {m.wishlist_export_open_report()}
+        </a>
       </div>
 
       <WishlistImport {gameId} listingId={listing.id} onImported={() => onChange?.()} />
@@ -560,6 +572,17 @@
     font-family: var(--f-sans);
     font-size: var(--t-12);
     line-height: var(--lh-body);
+  }
+  .export-open-report {
+    align-self: flex-start;
+    color: var(--accent);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-sb);
+    text-decoration: none;
+  }
+  .export-open-report:hover {
+    text-decoration: underline;
   }
   @media (prefers-reduced-motion: reduce) {
     .close,
