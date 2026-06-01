@@ -110,6 +110,25 @@ describe("parseWishlistCsv (Plan 03.2-02)", () => {
     expect(() => parseWishlistCsv(csv)).toThrow("wishlist_csv_is_lifetime_summary");
   });
 
+  it("03.2-02: RFC-4180 — a quoted game title with a comma does NOT shift the numeric columns", () => {
+    // A naive split(",") would shift Adds/Deletes and silently skip every row.
+    // Covers a comma inside a quoted field AND a doubled-quote ("") escape.
+    const csv = [
+      "sep=,",
+      "Steam Wishlisting data for 2026-05-01 - 2026-05-02",
+      "",
+      "DateLocal,Game,Adds,Deletes,PurchasesAndActivations,Gifts",
+      '2026-05-01,"Portal: Companion, Vol. 2",10,1,0,0',
+      '2026-05-02,"Hello, ""World""",5,0,0,0',
+    ].join("\n");
+    const { rows, skipped } = parseWishlistCsv(csv);
+    expect(skipped).toBe(0);
+    expect(rows).toEqual([
+      { date: "2026-05-01", adds: 10, deletes: 1, purchasesAndActivations: 0, gifts: 0 },
+      { date: "2026-05-02", adds: 5, deletes: 0, purchasesAndActivations: 0, gifts: 0 },
+    ]);
+  });
+
   it("03.2-02: empty / header-only input throws wishlist_csv_invalid_header", () => {
     expect(() => parseWishlistCsv("")).toThrow("wishlist_csv_invalid_header");
     expect(() =>

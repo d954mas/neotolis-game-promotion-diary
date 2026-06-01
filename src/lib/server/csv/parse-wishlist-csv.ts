@@ -24,6 +24,12 @@
 // header to its index once and read cells by that index. `Game` is never
 // read — its display name is owned by `game_steam_listings` (no
 // denormalization), so the parser has no reason to touch it.
+//
+// RFC-4180 quoting: Steam quotes any field containing a comma (e.g. a game
+// title like `"Portal: Companion, Vol. 2"`), so we tokenize with a quote-aware
+// splitter — a naive split(",") would shift the numeric columns and silently
+// skip every row. Embedded newlines inside quotes are not expected from this
+// export (integers + ISO dates + a single title), so we still line-split first.
 
 import { AppError } from "../services/errors.js";
 
@@ -52,6 +58,39 @@ function parseIntCell(cell: string | undefined): number {
   return Number.parseInt(cell ?? "", 10);
 }
 
+// Quote-aware single-line CSV tokenizer (RFC-4180). A quoted field may contain
+// commas; a doubled quote ("") inside a quoted field is a literal quote.
+// Returns raw cells (callers trim where needed).
+function splitCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cur += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ",") {
+      cells.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  cells.push(cur);
+  return cells;
+}
+
 export function parseWishlistCsv(text: string): WishlistCsvParseResult {
   // Strip a leading BOM (U+FEFF) if present, then split on CRLF or LF and
   // drop blank / trailing-blank lines.
@@ -62,7 +101,7 @@ export function parseWishlistCsv(text: string): WishlistCsvParseResult {
   let headerCols: string[] | null = null;
   let dataStart = 0;
   for (let i = 0; i < lines.length; i++) {
-    const cols = lines[i]!.split(",").map((cell) => cell.trim());
+    const cols = splitCsvLine(lines[i]!).map((cell) => cell.trim());
     if (REQUIRED.every((name) => cols.includes(name))) {
       headerCols = cols;
       dataStart = i + 1;
@@ -92,7 +131,7 @@ export function parseWishlistCsv(text: string): WishlistCsvParseResult {
   let skipped = 0;
 
   for (const line of lines.slice(dataStart)) {
-    const cells = line.split(",");
+    const cells = splitCsvLine(line);
     const date = cells[index.DateLocal]?.trim();
     const adds = parseIntCell(cells[index.Adds]);
     const deletes = parseIntCell(cells[index.Deletes]);

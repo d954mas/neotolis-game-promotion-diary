@@ -99,30 +99,26 @@ export async function importWishlistCsv(
     return { rowCount: 0, updated: 0, skipped, dateRange: { from: "", to: "" } };
   }
 
-  // Date-ascending so the cumulative balance accumulates in chronological
-  // order. ISO YYYY-MM-DD sorts lexicographically === chronologically.
+  // Date-ascending for a deterministic insert order + the reported dateRange.
+  // ISO YYYY-MM-DD sorts lexicographically === chronologically.
   const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date));
 
-  // Provisional per-row balance (running sum within THIS file). It is the
-  // authoritative value only for a full-history import; the recompute step
-  // below (cumulative over the WHOLE stored series) corrects it so a partial
-  // import — e.g. a 1-week range layered onto a year already stored — can't
-  // overwrite earlier days' balances with a wrong from-zero value.
-  let running = 0;
-  const values = sorted.map((r) => {
-    running += r.adds - r.deletes - r.purchasesAndActivations - r.gifts;
-    return {
-      userId,
-      listingId,
-      date: r.date,
-      adds: r.adds,
-      deletes: r.deletes,
-      purchasesAndActivations: r.purchasesAndActivations,
-      gifts: r.gifts,
-      balance: running,
-      source: "csv",
-    };
-  });
+  // INSERT carries a placeholder balance (0). Balance is derived in ONE place:
+  // the cumulative recompute over the WHOLE stored series after the upsert
+  // (below). Single source of truth — no per-file running sum that a partial
+  // import (e.g. a 1-week range over a year already stored) could persist as a
+  // wrong from-zero value.
+  const values = sorted.map((r) => ({
+    userId,
+    listingId,
+    date: r.date,
+    adds: r.adds,
+    deletes: r.deletes,
+    purchasesAndActivations: r.purchasesAndActivations,
+    gifts: r.gifts,
+    balance: 0,
+    source: "csv",
+  }));
 
   const importDates = values.map((v) => v.date);
 

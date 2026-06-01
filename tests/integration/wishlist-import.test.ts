@@ -267,6 +267,10 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
   it("03.2-03: two users, SAME appId, different games — each sees only their own snapshots (no bleed by appId)", async () => {
     // The privacy concern: appId is NOT the storage key (listing_id + user_id
     // are). Two tenants owning the same Steam appId must stay fully isolated.
+    // This ALSO pins recompute isolation: B's import (and its whole-series
+    // balance recompute) runs AFTER A's, yet A's balance below stays 111 — the
+    // recompute's subquery is scoped to (user_id, listing_id), so it never
+    // touches another tenant's rows.
     const APPID = 4654990;
     const a = await seedUserGameListing("wl-sameapp-a", APPID);
     const b = await seedUserGameListing("wl-sameapp-b", APPID);
