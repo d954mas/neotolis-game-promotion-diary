@@ -5,6 +5,7 @@ import { createGame } from "../../src/lib/server/services/games.js";
 import { seedUserDirectly } from "./helpers.js";
 import { db } from "../../src/lib/server/db/client.js";
 import { gameSteamListings } from "../../src/lib/server/db/schema/game-steam-listings.js";
+import { wishlistSnapshots } from "../../src/lib/server/db/schema/wishlist-snapshots.js";
 import { AppError } from "../../src/lib/server/services/errors.js";
 
 // Dev/test-DB conflation: tests/setup.ts truncates `neotolis_test`,
@@ -602,6 +603,126 @@ describe("addSteamListing duplicate translation (Path B)", () => {
       expect(res.status).toBe(422);
       const body = (await res.json()) as { error?: string };
       expect(body.error).toBe("validation_failed");
+    });
+  });
+
+  // Delete-forever (hard purge) endpoint (Plan 03.2-04):
+  //   DELETE /api/games/:gameId/listings/:listingId?force=true
+  // Only purges an already-soft-deleted row (else 404); cross-tenant 404;
+  // wishlist_snapshots cascade-delete via the listing_id FK ON DELETE
+  // cascade. Mirrors hardDeleteGame semantics.
+  describe("delete-forever (hard purge) for Steam listings", () => {
+    it("cross-tenant DELETE ?force=true → 404 (no forbidden|permission leak); A's listing unchanged", async () => {
+      vi.mocked(fetchSteamAppDetails).mockResolvedValue(null);
+      const { createApp } = await import("../../src/lib/server/http/app.js");
+      const app = createApp();
+      const userA = await seedUserDirectly({ email: `p324-ct-a-${sfx()}@test.local` });
+      const userB = await seedUserDirectly({ email: `p324-ct-b-${sfx()}@test.local` });
+      const gameA = await createGame(userA.id, { title: "A's game" }, "127.0.0.1");
+      const listing = await addSteamListing(
+        userA.id,
+        { gameId: gameA.id, appId: 730 },
+        "127.0.0.1",
+      );
+      // userA soft-deletes so a row is purgeable.
+      await db
+        .update(gameSteamListings)
+        .set({ deletedAt: new Date() })
+        .where(eq(gameSteamListings.id, listing.id));
+
+      const res = await app.request(`/api/games/${gameA.id}/listings/${listing.id}?force=true`, {
+        method: "DELETE",
+        headers: { cookie: `neotolis.session_token=${userB.signedSessionCookieValue}` },
+      });
+      expect(res.status).toBe(404);
+      const bodyStr = await res.text();
+      expect(bodyStr).not.toMatch(/forbidden|permission/i);
+
+      // A's row is NOT purged by the failed cross-tenant call.
+      const [stillThere] = await db
+        .select()
+        .from(gameSteamListings)
+        .where(and(eq(gameSteamListings.userId, userA.id), eq(gameSteamListings.id, listing.id)));
+      expect(stillThere).toBeDefined();
+    });
+
+    it("soft-delete → delete-forever → row gone + wishlist_snapshots gone; second call → 404", async () => {
+      vi.mocked(fetchSteamAppDetails).mockResolvedValue({
+        appId: 730,
+        name: "Counter-Strike 2",
+        coverUrl: null,
+        releaseDate: null,
+        comingSoon: false,
+        genres: [],
+        categories: [],
+        raw: {},
+      });
+      const { createApp } = await import("../../src/lib/server/http/app.js");
+      const app = createApp();
+      const userA = await seedUserDirectly({ email: `p324-hp-${sfx()}@test.local` });
+      const game = await createGame(userA.id, { title: "Hard purge" }, "127.0.0.1");
+      const listing = await addSteamListing(userA.id, { gameId: game.id, appId: 730 }, "127.0.0.1");
+      // Seed a wishlist snapshot so the FK cascade is exercised.
+      await db.insert(wishlistSnapshots).values({
+        userId: userA.id,
+        listingId: listing.id,
+        date: "2026-05-01",
+        balance: 100,
+      });
+      // Soft-delete first (delete-forever only purges soft-deleted rows).
+      await db
+        .update(gameSteamListings)
+        .set({ deletedAt: new Date() })
+        .where(eq(gameSteamListings.id, listing.id));
+
+      const cookie = `neotolis.session_token=${userA.signedSessionCookieValue}`;
+      const res = await app.request(`/api/games/${game.id}/listings/${listing.id}?force=true`, {
+        method: "DELETE",
+        headers: { cookie },
+      });
+      expect(res.status).toBe(204);
+
+      // Listing row is gone.
+      const rows = await db
+        .select()
+        .from(gameSteamListings)
+        .where(eq(gameSteamListings.id, listing.id));
+      expect(rows).toHaveLength(0);
+      // Its wishlist_snapshots cascade-deleted.
+      const snaps = await db
+        .select()
+        .from(wishlistSnapshots)
+        .where(eq(wishlistSnapshots.listingId, listing.id));
+      expect(snaps).toHaveLength(0);
+
+      // Second call → 404 (row no longer exists).
+      const res2 = await app.request(`/api/games/${game.id}/listings/${listing.id}?force=true`, {
+        method: "DELETE",
+        headers: { cookie },
+      });
+      expect(res2.status).toBe(404);
+    });
+
+    it("delete-forever on an ACTIVE (not soft-deleted) row → 404 (must soft-delete first)", async () => {
+      vi.mocked(fetchSteamAppDetails).mockResolvedValue(null);
+      const { createApp } = await import("../../src/lib/server/http/app.js");
+      const app = createApp();
+      const userA = await seedUserDirectly({ email: `p324-active-${sfx()}@test.local` });
+      const game = await createGame(userA.id, { title: "Active guard" }, "127.0.0.1");
+      const listing = await addSteamListing(userA.id, { gameId: game.id, appId: 730 }, "127.0.0.1");
+      const cookie = `neotolis.session_token=${userA.signedSessionCookieValue}`;
+      const res = await app.request(`/api/games/${game.id}/listings/${listing.id}?force=true`, {
+        method: "DELETE",
+        headers: { cookie },
+      });
+      expect(res.status).toBe(404);
+      // The active row is untouched.
+      const [stillActive] = await db
+        .select()
+        .from(gameSteamListings)
+        .where(eq(gameSteamListings.id, listing.id));
+      expect(stillActive).toBeDefined();
+      expect(stillActive?.deletedAt).toBeNull();
     });
   });
 

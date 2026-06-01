@@ -1302,13 +1302,41 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
       expect(src).not.toMatch(/class="edit-input"/);
       expect(src).not.toMatch(/let editing = \$state/);
       expect(src).not.toMatch(/async function saveEdit/);
-      expect(src).not.toMatch(/<WishlistImport\s/);
-      expect(src).not.toMatch(/<WishlistSummary\s/);
+      // The active card never PATCHes/DELETEs — mutation lives in the
+      // detail modal (PATCH) + the trash overflow (DELETE handlers are
+      // owned by the parent page, passed in as onRestore/onDeleteForever).
       expect(src).not.toMatch(/method:\s*"PATCH"/);
       expect(src).not.toMatch(/method:\s*"DELETE"/);
     });
 
-    it("SteamListingDetailModal hosts the moved advanced affordances — wishlist import + export help + label edit + remove (Plan 03.2-04)", async () => {
+    it("SteamListingRow trash mode (Plan 03.2-04): read-only card with a ⋮ overflow → Restore + Delete forever, no Details/wishlist", async () => {
+      // Trash mode (?view=trash on /games/[gameId]) renders the deleted
+      // listing as a read-only card. A ⋮ overflow (EventDetailHeader
+      // idiom) offers Restore (m.common_restore) + Delete forever
+      // (m.steam_listing_delete_forever_cta). The parent page owns the
+      // onRestore / onDeleteForever handlers + the ConfirmDialog.
+      const fs = await import("node:fs");
+      const path = await import("node:path");
+      const src = fs.readFileSync(
+        path.resolve("src/lib/components/SteamListingRow.svelte"),
+        "utf8",
+      );
+      // trash prop + the two parent-owned action callbacks.
+      expect(src).toMatch(/trash\?:\s*boolean/);
+      expect(src).toMatch(/onRestore\?:\s*\(\)\s*=>\s*void/);
+      expect(src).toMatch(/onDeleteForever\?:\s*\(\)\s*=>\s*void/);
+      // The trash overflow (aria-haspopup="menu") + scrim + role="menu".
+      expect(src).toMatch(/class="trash-overflow-wrap"/);
+      expect(src).toMatch(/aria-haspopup="menu"/);
+      expect(src).toMatch(/m\.steam_listing_more_actions_aria\(\)/);
+      expect(src).toMatch(/m\.common_restore\(\)/);
+      expect(src).toMatch(/m\.steam_listing_delete_forever_cta\(\)/);
+      expect(src).toMatch(/card-menu-item danger/);
+      // In trash mode the Details modal is not mounted.
+      expect(src).toMatch(/{#if gameId && !trash}/);
+    });
+
+    it("SteamListingDetailModal (Plan 03.2-04): inline-pencil label edit + ⋮-header delete, NO SETTINGS section / Save button", async () => {
       const fs = await import("node:fs");
       const path = await import("node:path");
       const src = fs.readFileSync(
@@ -1318,29 +1346,44 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
       // Native <dialog> idiom copied from AddStoreDialog.
       expect(src).toMatch(/<dialog[^>]*bind:this=\{dialogEl\}[^>]*class="dialog"/);
       expect(src).toMatch(/showModal\(\)/);
-      // Two labelled sections — Wishlist + Settings.
+      // Wishlist section (unchanged) — summary + recommendation + export
+      // instructions + import affordance.
       expect(src).toMatch(/m\.steam_listing_detail_section_wishlist\(\)/);
-      expect(src).toMatch(/m\.steam_listing_detail_section_settings\(\)/);
-      // A) Wishlist — full summary (when present) + recommendation (when null)
-      //    + export instructions + import affordance.
       expect(src).toMatch(/<WishlistSummary\s/);
       expect(src).toMatch(/m\.steam_listing_wishlist_recommendation\(\)/);
       expect(src).toMatch(/m\.wishlist_export_heading\(\)/);
       expect(src).toMatch(/m\.wishlist_export_step_1\(\)/);
       expect(src).toMatch(/m\.wishlist_export_step_4\(\)/);
       expect(src).toMatch(/<WishlistImport\s/);
-      // B) Settings — label edit (PATCH) + remove (ConfirmDialog → DELETE),
-      //    moved verbatim from the old card.
-      expect(src).toMatch(/class="edit-form"/);
-      expect(src).toMatch(/class="edit-input"/);
-      expect(src).toMatch(/let labelDraft = \$state/);
-      expect(src).toMatch(/async function saveEdit/);
-      expect(src).toMatch(/method:\s*"PATCH"/);
-      expect(src).toMatch(/m\.steam_listing_label_edit_label\(\)/);
+      // HEADER ⋮ "More actions" overflow (EventDetailHeader idiom) — a
+      // single danger "Delete listing" item → ConfirmDialog → DELETE
+      // (soft-delete, unchanged) → handleRemoveConfirmed.
+      expect(src).toMatch(/class="overflow-wrap"/);
+      expect(src).toMatch(/aria-haspopup="menu"/);
+      expect(src).toMatch(/m\.steam_listing_more_actions_aria\(\)/);
+      expect(src).toMatch(/class="card-menu-item danger"/);
+      expect(src).toMatch(/m\.steam_listing_delete_cta\(\)/);
       expect(src).toMatch(/async function handleRemoveConfirmed/);
       expect(src).toMatch(/method:\s*"DELETE"/);
       expect(src).toMatch(/<ConfirmDialog\s/);
-      expect(src).toMatch(/m\.steam_listing_remove_aria\(\)/);
+      // LABEL inline edit (EventDetailContent idiom) — read-only text +
+      // pencil .detail-edit-btn; commit on blur AND Enter via PATCH; Esc
+      // reverts; empty label → "click to add a label" affordance.
+      expect(src).toMatch(/class="detail-editable-row label-row"/);
+      expect(src).toMatch(/class="detail-edit-btn"/);
+      expect(src).toMatch(/let labelDraft = \$state/);
+      expect(src).toMatch(/async function commitEditLabel/);
+      expect(src).toMatch(/onblur=\{commitEditLabel\}/);
+      expect(src).toMatch(/method:\s*"PATCH"/);
+      expect(src).toMatch(/m\.steam_listing_label_edit_aria\(\)/);
+      expect(src).toMatch(/m\.steam_listing_label_add\(\)/);
+      // NO "SETTINGS" section, NO Save button, NO inline "× Remove".
+      expect(src).not.toMatch(/m\.steam_listing_detail_section_settings\(\)/);
+      expect(src).not.toMatch(/class="edit-form"/);
+      expect(src).not.toMatch(/class="edit-save"/);
+      expect(src).not.toMatch(/m\.steam_listing_edit_save_cta\(\)/);
+      expect(src).not.toMatch(/class="remove-btn-inline"/);
+      expect(src).not.toMatch(/async function saveEdit\b/);
     });
   });
 

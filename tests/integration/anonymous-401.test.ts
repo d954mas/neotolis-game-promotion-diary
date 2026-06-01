@@ -364,6 +364,21 @@ describe("anonymous-401 sweep", () => {
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
 
+  // Steam-listing delete-forever (Plan 03.2-04). The hard-purge path is
+  // the same DELETE route with ?force=true (matches the games + events
+  // force-flag idiom), so it shares the MUST_BE_PROTECTED entry
+  // /api/games/:gameId/listings/:listingId. tenantScope fires before the
+  // handler reads the force flag, so an anonymous probe returns 401
+  // before hardDeleteListing is ever reached. This explicit per-method
+  // check is the load-bearing second layer (AGENTS.md §3).
+  it("anonymous DELETE /api/games/:gameId/listings/:listingId?force=true returns 401 unauthorized", async () => {
+    const res = await app.request("/api/games/fixture-id/listings/fixture-id?force=true", {
+      method: "DELETE",
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
   it("AUTH-01: /api/me with valid session returns 200 + UserDto", async () => {
     const { seedUserDirectly } = await import("./helpers.js");
     const seeded = await seedUserDirectly({ email: "priv@test.local", name: "Priv Tester" });

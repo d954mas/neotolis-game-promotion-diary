@@ -301,6 +301,12 @@ describe("cross-tenant matrix", () => {
           method: "DELETE",
           path: `/api/games/${game.id}/listings/${listing.id}`,
         },
+        // delete-forever (hard purge) — same DELETE route with ?force=true
+        // (Plan 03.2-04). Cross-tenant → 404 before hardDeleteListing runs.
+        {
+          method: "DELETE",
+          path: `/api/games/${game.id}/listings/${listing.id}?force=true`,
+        },
         {
           method: "PATCH",
           path: `/api/games/${game.id}/listings/${listing.id}/key`,
