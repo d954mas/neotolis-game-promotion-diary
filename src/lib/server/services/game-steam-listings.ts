@@ -402,6 +402,55 @@ export async function removeSteamListing(
 }
 
 /**
+ * Permanently delete a soft-deleted listing (hard purge from the trash
+ * view). Mirrors `hardDeleteGame` (games service): operates ONLY on a row
+ * already soft-deleted (`deletedAt IS NOT NULL`); an active or non-existent
+ * or cross-tenant row throws NotFoundError (404, not 403 — same semantics
+ * as restoreListing).
+ *
+ * `wishlist_snapshots` rows attached to this listing cascade-delete via
+ * the `listing_id` FK `ON DELETE cascade` (schema/wishlist-snapshots.ts) —
+ * no explicit child delete needed.
+ *
+ * Scoped to (userId, gameId, listingId). Wrapped in `db.transaction` so the
+ * pre-check SELECT and the DELETE are atomic against a concurrent restore.
+ *
+ * No audit row (listing CRUD is metadata, not security state — see
+ * file-header rationale; symmetric with restoreListing / removeSteamListing).
+ */
+export async function hardDeleteListing(
+  userId: string,
+  gameId: string,
+  listingId: string,
+): Promise<void> {
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select({ deletedAt: gameSteamListings.deletedAt })
+      .from(gameSteamListings)
+      .where(
+        and(
+          eq(gameSteamListings.userId, userId),
+          eq(gameSteamListings.gameId, gameId),
+          eq(gameSteamListings.id, listingId),
+        ),
+      )
+      .limit(1);
+    if (!existing) throw new NotFoundError();
+    if (existing.deletedAt === null) throw new NotFoundError();
+
+    await tx
+      .delete(gameSteamListings)
+      .where(
+        and(
+          eq(gameSteamListings.userId, userId),
+          eq(gameSteamListings.gameId, gameId),
+          eq(gameSteamListings.id, listingId),
+        ),
+      );
+  });
+}
+
+/**
  * Attach (or detach with `keyId=null`) a Steamworks API key to this
  * listing. The FK on `api_key_id` is set null on key delete, so detach
  * happens implicitly when a key is removed.

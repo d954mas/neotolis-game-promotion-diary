@@ -4,6 +4,7 @@
 //   POST   /api/games/:gameId/listings                       — addSteamListing
 //   GET    /api/games/:gameId/listings                       — listListings
 //   DELETE /api/games/:gameId/listings/:listingId            — removeSteamListing
+//   DELETE /api/games/:gameId/listings/:listingId?force=true — hardDeleteListing
 //   POST   /api/games/:gameId/listings/:listingId/restore    — restoreListing
 //   PATCH  /api/games/:gameId/listings/:listingId/key        — attachKeyToListing
 //
@@ -26,6 +27,7 @@ import {
   listListings,
   removeSteamListing,
   restoreListing,
+  hardDeleteListing,
   attachKeyToListing,
   updateListing,
 } from "../../services/game-steam-listings.js";
@@ -113,10 +115,21 @@ gameListingsRoutes.patch(
   },
 );
 
+// `?force=true` switches from soft-delete (removeSteamListing) to hard
+// purge from the trash view (hardDeleteListing) — same force-flag idiom
+// the games + events bulk-delete routes use. Both paths return 204; both
+// surface cross-tenant gameId/listingId as 404. hardDeleteListing only
+// purges an already-soft-deleted row (else 404), so the trash view is the
+// only surface that calls it.
 gameListingsRoutes.delete("/games/:gameId/listings/:listingId", async (c) => {
   const ctx = getAuditContext(c);
+  const force = c.req.query("force") === "true";
   try {
-    await removeSteamListing(ctx.userId, c.req.param("listingId"), ctx.ipAddress);
+    if (force) {
+      await hardDeleteListing(ctx.userId, c.req.param("gameId"), c.req.param("listingId"));
+    } else {
+      await removeSteamListing(ctx.userId, c.req.param("listingId"), ctx.ipAddress);
+    }
     return c.body(null, 204);
   } catch (err) {
     return mapErr(c, err, "DELETE /api/games/:gameId/listings/:listingId");
