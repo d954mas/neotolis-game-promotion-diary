@@ -25,16 +25,11 @@ vi.mock("../../src/lib/server/integrations/steam-api.js", () => ({
 }));
 
 const { createGame } = await import("../../src/lib/server/services/games.js");
-const { addSteamListing } = await import(
-  "../../src/lib/server/services/game-steam-listings.js"
-);
+const { addSteamListing } = await import("../../src/lib/server/services/game-steam-listings.js");
 const { fetchSteamAppDetails } = await import("../../src/lib/server/integrations/steam-api.js");
-const { importWishlistCsv, getWishlistSummary, listRecentSnapshots } = await import(
-  "../../src/lib/server/services/wishlist-snapshots.js"
-);
-const { wishlistSnapshots } = await import(
-  "../../src/lib/server/db/schema/wishlist-snapshots.js"
-);
+const { importWishlistCsv, getWishlistSummary, listRecentSnapshots } =
+  await import("../../src/lib/server/services/wishlist-snapshots.js");
+const { wishlistSnapshots } = await import("../../src/lib/server/db/schema/wishlist-snapshots.js");
 const { auditLog } = await import("../../src/lib/server/db/schema/audit-log.js");
 const { db } = await import("../../src/lib/server/db/client.js");
 const { NotFoundError } = await import("../../src/lib/server/services/errors.js");
@@ -85,10 +80,7 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
       .select()
       .from(wishlistSnapshots)
       .where(
-        and(
-          eq(wishlistSnapshots.userId, s.userId),
-          eq(wishlistSnapshots.listingId, s.listingId),
-        ),
+        and(eq(wishlistSnapshots.userId, s.userId), eq(wishlistSnapshots.listingId, s.listingId)),
       )
       .orderBy(wishlistSnapshots.date);
 
@@ -120,14 +112,52 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
       .orderBy(wishlistSnapshots.date);
 
     expect(after).toHaveLength(3);
+    // Balances unchanged after the re-import — the upsert is a true no-op on
+    // the derived series.
     expect(after.map((r) => r.balance)).toEqual([36, 83, 111]);
-    // The conflict path sets updatedAt; createdAt stays the original insert
-    // time, so updatedAt >= createdAt proves the UPDATE branch fired (and
-    // sidesteps the Postgres-server-clock vs Node-client-clock skew that a
-    // cross-import updatedAt comparison would be subject to).
+    // The LOAD-BEARING proof that the UPDATE (conflict) branch actually fired
+    // is `second.updated === 3` above — three imported dates already existed,
+    // so all three took the ON CONFLICT DO UPDATE path. The updatedAt >=
+    // createdAt assertion below is a weak corroborator only: it is effectively
+    // always-true (updatedAt defaults to the insert time too), so it does NOT
+    // by itself prove the UPDATE branch ran. Kept as a clock-sanity check
+    // (Postgres now() never precedes the row's createdAt defaultNow()).
     after.forEach((r) => {
       expect(r.updatedAt.getTime()).toBeGreaterThanOrEqual(r.createdAt.getTime());
     });
+  });
+
+  it("03.2-03: duplicate DateLocal in one CSV → deduped (last row wins), no Postgres 21000 throw", async () => {
+    // Two rows share 2026-05-28. Pre-fix this produced two identical
+    // (listing_id, date) tuples in one INSERT and ON CONFLICT DO UPDATE raised
+    // Postgres 21000 ("cannot affect row a second time") → unmapped 500. The
+    // de-dupe (last occurrence wins) makes the import succeed; the LATER row's
+    // components win; rowCount reflects the deduped count.
+    const s = await seedUserGameListing("wl-dupdate", 620);
+    const csv = [
+      "DateLocal,Game,Adds,Deletes,PurchasesAndActivations,Gifts",
+      "2026-05-28,My Indie Game,40,3,1,0", // earlier same-date row (superseded)
+      "2026-05-29,My Indie Game,55,5,2,1",
+      "2026-05-28,My Indie Game,99,0,0,0", // later same-date row → wins
+    ].join("\n");
+
+    const result = await importWishlistCsv(s.userId, s.gameId, s.listingId, csv, "127.0.0.1");
+
+    // Deduped: two distinct dates, not three rows.
+    expect(result.rowCount).toBe(2);
+    expect(result.dateRange).toEqual({ from: "2026-05-28", to: "2026-05-29" });
+
+    const rows = await db
+      .select()
+      .from(wishlistSnapshots)
+      .where(eq(wishlistSnapshots.listingId, s.listingId))
+      .orderBy(wishlistSnapshots.date);
+    expect(rows).toHaveLength(2);
+    // The LATER 2026-05-28 row (adds 99) supersedes the earlier one (adds 40).
+    expect(rows[0]).toMatchObject({ date: "2026-05-28", adds: 99, deletes: 0 });
+    expect(rows[1]).toMatchObject({ date: "2026-05-29", adds: 55, deletes: 5 });
+    // Balance recompute over the deduped series: 99 then 99 + (55-5-2-1)=146.
+    expect(rows.map((r) => r.balance)).toEqual([99, 146]);
   });
 
   it("03.2-03: malformed-row CSV → skipped count surfaces, valid rows land", async () => {
@@ -192,7 +222,13 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
 
     // A tries to import to B's listing → 404 (NotFoundError), before any write.
     await expect(
-      importWishlistCsv(a.userId, b.gameId, b.listingId, fixture("wishlist-sample.csv"), "127.0.0.1"),
+      importWishlistCsv(
+        a.userId,
+        b.gameId,
+        b.listingId,
+        fixture("wishlist-sample.csv"),
+        "127.0.0.1",
+      ),
     ).rejects.toBeInstanceOf(NotFoundError);
 
     // B imports to their own listing.
@@ -236,7 +272,10 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
         .select({ b: wishlistSnapshots.balance })
         .from(wishlistSnapshots)
         .where(
-          and(eq(wishlistSnapshots.listingId, s.listingId), eq(wishlistSnapshots.date, "2026-05-20")),
+          and(
+            eq(wishlistSnapshots.listingId, s.listingId),
+            eq(wishlistSnapshots.date, "2026-05-20"),
+          ),
         )
     )[0]!.b;
     expect((await getWishlistSummary(s.userId, s.listingId))?.balance).toBe(254);
@@ -256,7 +295,10 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
         .select({ b: wishlistSnapshots.balance })
         .from(wishlistSnapshots)
         .where(
-          and(eq(wishlistSnapshots.listingId, s.listingId), eq(wishlistSnapshots.date, "2026-05-20")),
+          and(
+            eq(wishlistSnapshots.listingId, s.listingId),
+            eq(wishlistSnapshots.date, "2026-05-20"),
+          ),
         )
     )[0]!.b;
     expect(midAfter).toBe(midBefore); // unchanged — recomputed over the whole series
@@ -281,7 +323,13 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
 
     // Distinct data per user so any bleed would show: A = 3-row sample
     // (balance 111), B = the real 39-row daily export (balance 254).
-    await importWishlistCsv(a.userId, a.gameId, a.listingId, fixture("wishlist-sample.csv"), "127.0.0.1");
+    await importWishlistCsv(
+      a.userId,
+      a.gameId,
+      a.listingId,
+      fixture("wishlist-sample.csv"),
+      "127.0.0.1",
+    );
     await importWishlistCsv(
       b.userId,
       b.gameId,
@@ -434,7 +482,12 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
 
     it("bad-header CSV → 422 wishlist_csv_invalid_header", async () => {
       const s = await seedUserGameListing("wl-http-badhdr", 620);
-      const res = await postCsv(s.cookie, s.gameId, s.listingId, fixture("wishlist-bad-header.csv"));
+      const res = await postCsv(
+        s.cookie,
+        s.gameId,
+        s.listingId,
+        fixture("wishlist-bad-header.csv"),
+      );
       expect(res.status).toBe(422);
       const body = (await res.json()) as { error?: string };
       expect(body.error).toBe("wishlist_csv_invalid_header");

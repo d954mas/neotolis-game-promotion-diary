@@ -35,7 +35,11 @@ import { gameSteamListings } from "../db/schema/game-steam-listings.js";
 import { parseWishlistCsv } from "../csv/parse-wishlist-csv.js";
 import { writeAudit } from "../audit.js";
 import { AppError, NotFoundError } from "./errors.js";
-import { toWishlistSnapshotDto, type WishlistSnapshotDto } from "../dto.js";
+import {
+  toWishlistSnapshotDto,
+  type WishlistSnapshotDto,
+  type WishlistSummaryDto,
+} from "../dto.js";
 
 export interface ImportWishlistResult {
   rowCount: number;
@@ -101,7 +105,19 @@ export async function importWishlistCsv(
 
   // Date-ascending for a deterministic insert order + the reported dateRange.
   // ISO YYYY-MM-DD sorts lexicographically === chronologically.
-  const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date));
+  const sortedRaw = [...rows].sort((a, b) => a.date.localeCompare(b.date));
+
+  // De-duplicate by date BEFORE building `values`: a single CSV can carry two
+  // rows with the same DateLocal, which would produce two identical
+  // (listingId, date) tuples in one INSERT and make `ON CONFLICT DO UPDATE`
+  // raise Postgres 21000 ("ON CONFLICT DO UPDATE command cannot affect row a
+  // second time"). Last occurrence wins — a later row in the file supersedes
+  // an earlier same-date row. The Map preserves first-seen insertion order, so
+  // re-sort after collecting to keep the date-ascending contract for `values`,
+  // `importDates`, and `dateRange`.
+  const byDate = new Map<string, (typeof sortedRaw)[number]>();
+  for (const r of sortedRaw) byDate.set(r.date, r);
+  const sorted = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
 
   // INSERT carries a placeholder balance (0). Balance is derived in ONE place:
   // the cumulative recompute over the WHOLE stored series after the upsert
@@ -170,6 +186,11 @@ export async function importWishlistCsv(
       SET balance = s.run
       FROM (
         SELECT id,
+               -- INVARIANT: the only writer today (CSV import) always supplies
+               -- non-NULL integer components, so this SUM is never NULL. A
+               -- future 'manual'/'api' source that writes NULL components MUST
+               -- COALESCE them (or be excluded/prioritised) here, else this
+               -- UPDATE hits the balance NOT NULL constraint.
                SUM(adds - deletes - purchases_and_activations - gifts)
                  OVER (ORDER BY date) AS run
         FROM wishlist_snapshots
@@ -183,22 +204,25 @@ export async function importWishlistCsv(
 
   const dateRange = { from: sorted[0]!.date, to: sorted[sorted.length - 1]!.date };
 
+  // rowCount reflects the DEDUPED row count (`sorted.length`), not the raw
+  // parsed-row count — duplicate same-date rows collapse to one upserted row.
+  const rowCount = sorted.length;
+
   // Audit AFTER commit (D-04). writeAudit never throws (swallows + logs).
   await writeAudit({
     userId,
     action: "wishlist.imported",
     ipAddress,
-    metadata: { appId: listing.appId, listingId, rowCount: rows.length, dateRange, skipped },
+    metadata: { appId: listing.appId, listingId, rowCount, dateRange, skipped },
   });
 
-  return { rowCount: rows.length, updated, skipped, dateRange };
+  return { rowCount, updated, skipped, dateRange };
 }
 
-export interface WishlistSummary {
-  balance: number;
-  lastDate: string;
-  recentDays: WishlistSnapshotDto[];
-}
+// One shape, one home: the summary wire type lives in dto.ts
+// (WishlistSummaryDto). The service exports it under its existing name so
+// callers (the /games loader) keep importing `WishlistSummary` unchanged.
+export type WishlistSummary = WishlistSummaryDto;
 
 /**
  * Latest balance + date + the last ≤14 daily rows (DESC) for a listing.
@@ -227,9 +251,7 @@ export async function listRecentSnapshots(
   const rows = await db
     .select()
     .from(wishlistSnapshots)
-    .where(
-      and(eq(wishlistSnapshots.userId, userId), eq(wishlistSnapshots.listingId, listingId)),
-    )
+    .where(and(eq(wishlistSnapshots.userId, userId), eq(wishlistSnapshots.listingId, listingId)))
     .orderBy(desc(wishlistSnapshots.date))
     .limit(limit);
   return rows.map(toWishlistSnapshotDto);
