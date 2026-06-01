@@ -125,14 +125,22 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   // throw on any listing returns null so the rest of the page still
   // renders. Keyed by listingId so SteamListingRow looks up its own
   // summary; a listing with no snapshots maps to null (empty state).
-  const wishlistSummaryPairs = await Promise.all(
-    listings.map(
-      async (l): Promise<[string, WishlistSummary | null]> => [
-        l.id,
-        await getWishlistSummary(userId, l.id).catch(() => null),
-      ],
-    ),
-  );
+  // The trash view (?view=trash) renders soft-deleted listings only — it
+  // never reads `wishlistSummaries`, so skip the per-listing summary fetch
+  // entirely there and return an empty map. The active (feed) view is
+  // unchanged: one bounded getWishlistSummary per active listing (KISS — no
+  // batching for a bounded N).
+  const wishlistSummaryPairs =
+    view === "trash"
+      ? []
+      : await Promise.all(
+          listings.map(
+            async (l): Promise<[string, WishlistSummary | null]> => [
+              l.id,
+              await getWishlistSummary(userId, l.id).catch(() => null),
+            ],
+          ),
+        );
   const wishlistSummaries: Record<string, WishlistSummary | null> =
     Object.fromEntries(wishlistSummaryPairs);
 
