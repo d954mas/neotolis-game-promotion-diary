@@ -38,7 +38,11 @@ describe("i18n at runtime", () => {
     }
     const svelteFiles = candidates.filter((f) => fs.existsSync(f));
     const usedKeys = new Set<string>();
-    const re = /m\.([a-z][a-z_0-9]*)\s*\(/g;
+    // The leading negative lookbehind anchors the `m` as a standalone
+    // identifier — without it, any `<ident-ending-in-m>.method(` (e.g.
+    // `form.append(`) matches the `m.append(` substring and is mistaken for a
+    // message key.
+    const re = /(?<![A-Za-z0-9_$.])m\.([a-z][a-z_0-9]*)\s*\(/g;
     for (const f of svelteFiles) {
       const src = fs.readFileSync(f, "utf8");
       let match: RegExpExecArray | null;
