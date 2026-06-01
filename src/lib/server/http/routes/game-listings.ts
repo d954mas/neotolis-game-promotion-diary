@@ -194,13 +194,16 @@ gameListingsRoutes.post(
   }),
   async (c) => {
     const ctx = getAuditContext(c);
-    const body = await c.req.parseBody();
-    const file = body["file"];
-    if (!(file instanceof File)) {
-      return c.json({ error: "wishlist_csv_missing_file" }, 422);
-    }
-    const csvText = await file.text();
     try {
+      // parseBody + file.text() live INSIDE the try so a malformed multipart
+      // body throws into mapErr (keeping the wishlist_csv_* mapping + per-route
+      // log context) instead of escaping to the generic global onError 500.
+      const body = await c.req.parseBody();
+      const file = body["file"];
+      if (!(file instanceof File)) {
+        return c.json({ error: "wishlist_csv_missing_file" }, 422);
+      }
+      const csvText = await file.text();
       const result = await importWishlistCsv(
         ctx.userId,
         c.req.param("gameId"),
@@ -211,6 +214,13 @@ gameListingsRoutes.post(
       );
       return c.json(result, 200);
     } catch (err) {
+      // A payload over the 2 MiB cap throws Hono's BodyLimitError during
+      // parseBody(). The class is not a runtime value export of hono/body-limit
+      // (the dist only exports `bodyLimit`), so match by the stable `.name` and
+      // re-throw so the bodyLimit middleware's own onError maps it to the 413
+      // wishlist_csv_too_large response — mapErr would otherwise bury it as a
+      // generic 500.
+      if (err instanceof Error && err.name === "BodyLimitError") throw err;
       return mapErr(c, err, "POST /api/games/:gameId/listings/:listingId/wishlist-import");
     }
   },
