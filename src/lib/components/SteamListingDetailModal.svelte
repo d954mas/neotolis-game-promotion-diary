@@ -1,13 +1,24 @@
 <script lang="ts">
   // SteamListingDetailModal — per-listing detail + advanced actions for one
   // Steam listing on /games/[gameId]. The card (SteamListingRow) stays
-  // read-only; this modal is where the user does the "advanced" work:
-  //   A) WISHLIST — full summary (or a recommendation when empty), how-to-
-  //      export-from-Steam instructions, and the CSV import affordance. The
-  //      modal stays OPEN after import so the result is visible; onChange
-  //      invalidates the loader so the passed-in `summary` updates live.
-  //   B) SETTINGS — label edit (Save) + Remove listing (ConfirmDialog).
-  //      The PATCH / DELETE logic moved here from SteamListingRow.
+  // read-only; this modal is where the user does the "advanced" work.
+  //
+  // Post-UAT (Plan 03.2-04) the modal aligns with the rest of the app:
+  //   HEADER: name heading + ⋮ "More actions" overflow (EventDetailHeader
+  //     idiom — aria-haspopup="menu" + scrim + .overflow-pop role="menu"
+  //     with a single danger item "Delete listing") + × close.
+  //   BODY:
+  //     - LABEL inline edit (EventDetailContent idiom — read-only text +
+  //       pencil .detail-edit-btn; click → bind <input> to labelDraft;
+  //       commit on blur AND Enter via PATCH; Esc reverts). Empty label →
+  //       a "click to add a label" empty-state button.
+  //     - WISHLIST — full summary (or a recommendation when empty), how-to-
+  //       export-from-Steam instructions, and the CSV import affordance.
+  //   No "SETTINGS" section, no Save button, no inline "× Remove".
+  //
+  // Delete is soft-delete (DELETE, unchanged) → ConfirmDialog →
+  // handleRemoveConfirmed → onChange?.() + onClose(). Hard-delete (delete
+  // forever) lives in the trash view on /games/[gameId]?view=trash.
   //
   // Pattern follows AddStoreDialog / ConfirmDialog: native <dialog> +
   // showModal() (focus trap + Escape close) + backdrop-click closes via
@@ -75,40 +86,57 @@
 
   const displayName = $derived(listing.name ?? m.steam_listing_unnamed());
 
-  // Settings section — label edit. The draft buffer is seeded from the
-  // current persisted label whenever the modal opens so a prior edit +
-  // reload round-trip never carries a stale value.
-  let labelDraft = $state(listing.label);
-  let saving = $state(false);
+  // Header overflow menu (EventDetailHeader idiom).
+  let overflowOpen = $state(false);
+
+  // Label inline edit (EventDetailContent idiom). `null` = not editing;
+  // string = current draft. Commit on blur AND Enter; Esc reverts + exits.
+  // Editing flag is `labelDraft !== null` — no separate boolean needed.
+  let labelDraft = $state<string | null>(null);
   let editError = $state<string | null>(null);
 
+  // Re-seed on close so a prior edit + reload round-trip never carries a
+  // stale draft into the next open.
   $effect(() => {
-    if (open) {
-      labelDraft = listing.label;
+    if (!open) {
+      labelDraft = null;
       editError = null;
     }
   });
 
-  async function saveEdit(e: Event): Promise<void> {
-    e.preventDefault();
-    if (saving) return;
-    saving = true;
+  function startEditLabel(): void {
+    labelDraft = listing.label;
+    editError = null;
+  }
+
+  function cancelEditLabel(): void {
+    labelDraft = null;
+    editError = null;
+  }
+
+  async function commitEditLabel(): Promise<void> {
+    if (labelDraft === null) return;
+    const next = labelDraft;
+    // No-op when unchanged — close the editor without a roundtrip.
+    if (next === listing.label) {
+      labelDraft = null;
+      return;
+    }
     editError = null;
     try {
       const res = await fetch(`/api/games/${gameId}/listings/${listing.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ label: labelDraft }),
+        body: JSON.stringify({ label: next }),
       });
       if (!res.ok) {
         editError = m.error_server_generic();
         return;
       }
+      labelDraft = null;
       onChange?.();
     } catch {
       editError = m.error_network();
-    } finally {
-      saving = false;
     }
   }
 
@@ -136,9 +164,99 @@
 <dialog bind:this={dialogEl} class="dialog" oncancel={onDialogCancel} onclick={onDialogClick}>
   <header class="header">
     <h2 class="heading">{m.steam_listing_detail_modal_heading({ name: displayName })}</h2>
+    <div class="overflow-wrap">
+      <button
+        type="button"
+        class="overflow-btn"
+        onclick={() => (overflowOpen = !overflowOpen)}
+        aria-haspopup="menu"
+        aria-expanded={overflowOpen}
+        aria-label={m.steam_listing_more_actions_aria()}
+        title={m.steam_listing_more_actions_aria()}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="5" cy="12" r="1.8" fill="currentColor" />
+          <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+          <circle cx="19" cy="12" r="1.8" fill="currentColor" />
+        </svg>
+      </button>
+      {#if overflowOpen}
+        <div
+          class="overflow-scrim"
+          onclick={() => (overflowOpen = false)}
+          role="presentation"
+        ></div>
+        <div class="overflow-pop" role="menu">
+          <button
+            type="button"
+            class="card-menu-item danger"
+            role="menuitem"
+            onclick={() => {
+              overflowOpen = false;
+              confirmOpen = true;
+            }}>{m.steam_listing_delete_cta()}</button
+          >
+        </div>
+      {/if}
+    </div>
     <button type="button" class="close" aria-label={m.common_close()} onclick={onClose}> × </button>
   </header>
   <div class="body">
+    <!-- Label inline edit — EventDetailContent .detail-editable-row idiom. -->
+    {#if labelDraft !== null}
+      <input
+        class="label-input"
+        bind:value={labelDraft}
+        onblur={commitEditLabel}
+        onkeydown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            (e.target as HTMLInputElement).blur();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            cancelEditLabel();
+          }
+        }}
+        maxlength="100"
+        placeholder="Demo / Full / DLC / OST"
+        aria-label={m.steam_listing_label_edit_aria()}
+      />
+    {:else if listing.label}
+      <div class="detail-editable-row label-row">
+        <p class="label-text">
+          <span class="label-prefix">{m.steam_listing_label_prefix()}</span>
+          {listing.label}
+        </p>
+        <button
+          type="button"
+          class="detail-edit-btn"
+          onclick={startEditLabel}
+          aria-label={m.steam_listing_label_edit_aria()}
+          title={m.steam_listing_label_edit_aria()}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M11 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6" />
+            <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+          </svg>
+        </button>
+      </div>
+    {:else}
+      <button type="button" class="label-empty-btn" onclick={startEditLabel}>
+        {m.steam_listing_label_add()}
+      </button>
+    {/if}
+    {#if editError}<InlineError message={editError} />{/if}
+
     <section class="modal-section" aria-label={m.steam_listing_detail_section_wishlist()}>
       <h3 class="section-subheading">{m.steam_listing_detail_section_wishlist()}</h3>
       {#if summary}
@@ -158,38 +276,6 @@
       </div>
 
       <WishlistImport {gameId} listingId={listing.id} onImported={() => onChange?.()} />
-    </section>
-
-    <section class="modal-section" aria-label={m.steam_listing_detail_section_settings()}>
-      <h3 class="section-subheading">{m.steam_listing_detail_section_settings()}</h3>
-      <form class="edit-form" onsubmit={saveEdit}>
-        <label class="edit-field">
-          <span class="edit-field-label">{m.steam_listing_label_edit_label()}</span>
-          <input
-            class="edit-input"
-            type="text"
-            bind:value={labelDraft}
-            maxlength="100"
-            placeholder="Demo / Full / DLC / OST"
-            disabled={saving}
-          />
-        </label>
-        <div class="edit-actions">
-          <button type="submit" class="edit-save" disabled={saving}>
-            {m.steam_listing_edit_save_cta()}
-          </button>
-          <button
-            type="button"
-            class="remove-btn-inline"
-            aria-label={m.steam_listing_remove_aria()}
-            onclick={() => (confirmOpen = true)}
-            disabled={removing || saving}
-          >
-            × {m.common_remove()}
-          </button>
-        </div>
-        {#if editError}<InlineError message={editError} />{/if}
-      </form>
     </section>
   </div>
 </dialog>
@@ -228,17 +314,85 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--s-4);
+    gap: var(--s-2);
     padding: var(--s-4) var(--s-6);
     border-bottom: 1px solid var(--border);
   }
   .heading {
     margin: 0;
+    flex: 1;
     font-size: var(--t-17);
     font-weight: var(--w-sb);
     color: var(--text);
     word-break: break-word;
     min-width: 0;
+  }
+  /* ── Header overflow menu (EventDetailHeader idiom) ─────────────────── */
+  .overflow-wrap {
+    position: relative;
+    flex-shrink: 0;
+  }
+  .overflow-btn {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    cursor: pointer;
+    transition:
+      background var(--m-fast),
+      color var(--m-fast),
+      border-color var(--m-fast);
+  }
+  .overflow-btn:hover,
+  .overflow-btn[aria-expanded="true"] {
+    background: var(--surface-3);
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .overflow-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    background: transparent;
+  }
+  .overflow-pop {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 180px;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-elev);
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    z-index: 90;
+  }
+  .overflow-pop .card-menu-item {
+    background: transparent;
+    border: none;
+    text-align: left;
+    padding: 8px 12px;
+    font-size: var(--t-13);
+    color: var(--text);
+    cursor: pointer;
+    border-radius: var(--r-sm);
+    font-family: inherit;
+  }
+  .overflow-pop .card-menu-item:hover {
+    background: var(--accent-soft);
+  }
+  .overflow-pop .card-menu-item.danger {
+    color: var(--danger);
+  }
+  .overflow-pop .card-menu-item.danger:hover {
+    background: color-mix(in oklab, var(--danger) 12%, var(--surface));
   }
   .close {
     background: transparent;
@@ -249,6 +403,7 @@
     cursor: pointer;
     padding: var(--s-1) var(--s-2);
     border-radius: var(--r-sm);
+    flex-shrink: 0;
     transition:
       background var(--m-fast) var(--m-ease),
       color var(--m-fast) var(--m-ease);
@@ -266,15 +421,102 @@
     flex-direction: column;
     gap: var(--s-6);
   }
-  /* Two labelled sections separated by a divider above the second one. */
+  /* ── Label inline edit (EventDetailContent idiom) ───────────────────── */
+  .detail-editable-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    min-width: 0;
+  }
+  .detail-editable-row > :first-child {
+    flex: 1;
+    min-width: 0;
+  }
+  .label-text {
+    margin: 0;
+    color: var(--text-2);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+  }
+  .label-prefix {
+    font-weight: var(--w-sb);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-right: 4px;
+    color: var(--text-3);
+    font-size: var(--t-12);
+  }
+  .detail-edit-btn {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    cursor: pointer;
+    opacity: 0.55;
+    transition:
+      background var(--m-fast),
+      border-color var(--m-fast),
+      color var(--m-fast),
+      opacity var(--m-fast);
+  }
+  @media (hover: hover) {
+    .detail-editable-row:hover .detail-edit-btn {
+      opacity: 1;
+    }
+  }
+  @media (hover: none) {
+    .detail-edit-btn {
+      opacity: 0.7;
+    }
+  }
+  .detail-edit-btn:hover {
+    background: var(--surface-3);
+    border-color: var(--border);
+    color: var(--text);
+    opacity: 1;
+  }
+  .label-empty-btn {
+    align-self: flex-start;
+    background: transparent;
+    border: 0;
+    padding: 4px 8px;
+    margin-left: -8px;
+    text-align: left;
+    color: var(--text-3);
+    font-style: italic;
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    cursor: pointer;
+    border-radius: var(--r-sm);
+    transition: color var(--m-fast) var(--m-ease);
+  }
+  .label-empty-btn:hover {
+    color: var(--text-2);
+  }
+  .label-input {
+    width: calc(100% + 16px);
+    margin-left: -8px;
+    padding: 4px 8px;
+    background: var(--surface-3);
+    border: 1px solid var(--accent);
+    border-radius: var(--r-sm);
+    color: var(--text);
+    font-family: var(--f-sans);
+    font-size: var(--t-14);
+    outline: none;
+    box-shadow: 0 0 0 3px var(--accent-soft);
+    box-sizing: border-box;
+  }
   .modal-section {
     display: flex;
     flex-direction: column;
     gap: var(--s-3);
-  }
-  .modal-section + .modal-section {
-    padding-top: var(--s-6);
-    border-top: 1px solid var(--border);
   }
   .section-subheading {
     margin: 0;
@@ -319,83 +561,11 @@
     font-size: var(--t-12);
     line-height: var(--lh-body);
   }
-  .edit-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-2);
-  }
-  .edit-field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--s-1);
-  }
-  .edit-field-label {
-    font-family: var(--f-sans);
-    font-size: var(--t-13);
-    color: var(--text-2);
-    font-weight: var(--w-md);
-  }
-  .edit-input {
-    min-height: var(--hit);
-    padding: var(--s-1) var(--s-3);
-    background: var(--surface-3);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: var(--r-sm);
-    font-family: var(--f-sans);
-    font-size: var(--t-14);
-    width: 100%;
-    box-sizing: border-box;
-  }
-  .edit-actions {
-    display: flex;
-    gap: var(--s-1);
-    flex-wrap: wrap;
-  }
-  .edit-save,
-  .remove-btn-inline {
-    min-height: var(--hit);
-    padding: var(--s-1) var(--s-3);
-    border-radius: var(--r-sm);
-    font-family: var(--f-sans);
-    font-size: var(--t-13);
-    font-weight: var(--w-sb);
-    cursor: pointer;
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease);
-  }
-  .edit-save {
-    background: var(--accent);
-    color: var(--accent-text);
-    border: 1px solid var(--accent);
-  }
-  .edit-save:hover:not(:disabled) {
-    background: var(--accent-strong);
-    border-color: var(--accent-strong);
-  }
-  .edit-save:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-  .remove-btn-inline {
-    margin-left: auto;
-    background: transparent;
-    color: var(--danger);
-    border: 1px solid var(--danger);
-  }
-  .remove-btn-inline:hover:not(:disabled) {
-    background: var(--danger);
-    color: #fff;
-  }
-  .remove-btn-inline:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
   @media (prefers-reduced-motion: reduce) {
     .close,
-    .edit-save,
-    .remove-btn-inline {
+    .overflow-btn,
+    .detail-edit-btn,
+    .label-empty-btn {
       transition: none;
     }
   }
