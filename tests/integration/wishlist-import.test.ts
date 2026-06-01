@@ -220,6 +220,53 @@ describe("wishlist CSV import (Plan 03.2-03)", () => {
     expect(rows.every((r) => r.userId === b.userId)).toBe(true);
   });
 
+  it("03.2-03: two users, SAME appId, different games — each sees only their own snapshots (no bleed by appId)", async () => {
+    // The privacy concern: appId is NOT the storage key (listing_id + user_id
+    // are). Two tenants owning the same Steam appId must stay fully isolated.
+    const APPID = 4654990;
+    const a = await seedUserGameListing("wl-sameapp-a", APPID);
+    const b = await seedUserGameListing("wl-sameapp-b", APPID);
+    // Same appId, but distinct listing rows — UNIQUE(game_id, app_id) is
+    // per-game, so the shared appId does not collide across tenants.
+    expect(a.appId).toBe(b.appId);
+    expect(a.listingId).not.toBe(b.listingId);
+
+    // Distinct data per user so any bleed would show: A = 3-row sample
+    // (balance 111), B = the real 39-row daily export (balance 254).
+    await importWishlistCsv(a.userId, a.gameId, a.listingId, fixture("wishlist-sample.csv"), "127.0.0.1");
+    await importWishlistCsv(
+      b.userId,
+      b.gameId,
+      b.listingId,
+      fixture("wishlist-actions-real.csv"),
+      "127.0.0.1",
+    );
+
+    // Each user reads only their own balance.
+    expect((await getWishlistSummary(a.userId, a.listingId))?.balance).toBe(111);
+    expect((await getWishlistSummary(b.userId, b.listingId))?.balance).toBe(254);
+
+    // Cross-tenant reads of the OTHER user's listing (same appId) → empty/null.
+    expect(await getWishlistSummary(a.userId, b.listingId)).toBeNull();
+    expect(await listRecentSnapshots(a.userId, b.listingId)).toHaveLength(0);
+    expect(await getWishlistSummary(b.userId, a.listingId)).toBeNull();
+    expect(await listRecentSnapshots(b.userId, a.listingId)).toHaveLength(0);
+
+    // DB-level: every snapshot under each listing carries only its owner.
+    const aRows = await db
+      .select()
+      .from(wishlistSnapshots)
+      .where(eq(wishlistSnapshots.listingId, a.listingId));
+    expect(aRows).toHaveLength(3);
+    expect(aRows.every((r) => r.userId === a.userId)).toBe(true);
+    const bRows = await db
+      .select()
+      .from(wishlistSnapshots)
+      .where(eq(wishlistSnapshots.listingId, b.listingId));
+    expect(bRows).toHaveLength(39);
+    expect(bRows.every((r) => r.userId === b.userId)).toBe(true);
+  });
+
   it("03.2-03: filename appId guard — mismatched SteamWishlists_{appId}_ name rejected; matching / renamed names import", async () => {
     const s = await seedUserGameListing("wl-fileguard", 620);
     const csv = fixture("wishlist-sample.csv");
