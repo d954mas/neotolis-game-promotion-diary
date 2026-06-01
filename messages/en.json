@@ -197,6 +197,12 @@
   "steam_listing_app_id": "App {appId}",
   "steam_listing_edit_aria": "Edit listing",
   "steam_listing_cover_alt": "Cover image for {name}",
+  "steam_listing_details_cta": "Details",
+  "steam_listing_detail_modal_heading": "{name}",
+  "steam_listing_wishlist_compact": "{balance} wishlists · updated {ago}",
+  "steam_listing_wishlist_recommendation": "No wishlist data yet — import from Steam.",
+  "steam_listing_detail_section_wishlist": "Wishlist",
+  "steam_listing_detail_section_settings": "Settings",
 
   "wishlist_section_heading": "Wishlist",
   "wishlist_import_cta": "Import wishlist CSV",
@@ -222,6 +228,11 @@
   "wishlist_ago_minutes": "{minutes}m ago",
   "wishlist_ago_hours": "{hours}h ago",
   "wishlist_ago_days": "{days}d ago",
+  "wishlist_export_heading": "How to export from Steam",
+  "wishlist_export_step_1": "Sign in to partner.steamgames.com (Steamworks).",
+  "wishlist_export_step_2": "Open your app, then Marketing & Visibility.",
+  "wishlist_export_step_3": "Find the \"Wishlist Action Summary\" report.",
+  "wishlist_export_step_4": "Choose \"all history\" and click \"view as CSV\" to download Wishlists.csv.",
 
   "games_detail_edit_cta": "Edit",
 
