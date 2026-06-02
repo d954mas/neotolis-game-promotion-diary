@@ -478,6 +478,7 @@
       {listings}
       gameId={game.id}
       wishlistSummaries={data.wishlistSummaries}
+      wishlistSeriesByListing={chartSeriesByListing}
       onChange={() => invalidateAll()}
     />
   </section>

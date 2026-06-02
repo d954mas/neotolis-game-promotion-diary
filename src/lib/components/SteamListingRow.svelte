@@ -20,7 +20,7 @@
   import { relativeDate } from "$lib/util/relative-date.js";
   import SteamListingDetailModal from "./SteamListingDetailModal.svelte";
   import WishlistImport from "./WishlistImport.svelte";
-  import type { WishlistSummaryDto } from "$lib/server/dto.js";
+  import type { WishlistSummaryDto, WishlistSeries } from "$lib/server/dto.js";
 
   type Listing = {
     id: string;
@@ -36,6 +36,7 @@
     listing,
     gameId,
     summary = null,
+    series = null,
     trash = false,
     onChange,
     onRestore,
@@ -49,6 +50,9 @@
     // This listing's wishlist mini-summary from the loader's
     // wishlistSummaries map. null = no snapshots yet (empty state).
     summary?: WishlistSummaryDto | null;
+    // This listing's wishlist daily series — passed into the detail modal for
+    // its mini wishlist line chart. null = no series loaded.
+    series?: WishlistSeries | null;
     // Trash mode: the card is read-only — not clickable-to-modal, no wishlist
     // line. A ⋮ overflow offers Restore + Delete forever. The parent page owns
     // the mutation handlers + ConfirmDialog.
@@ -281,6 +285,7 @@
     {gameId}
     {listing}
     {summary}
+    {series}
     onClose={() => (detailOpen = false)}
     {onChange}
   />
