@@ -1,26 +1,28 @@
 /**
  * VIZ-03 / VIZ-04 — chart reflow + the 04-10 interaction redesign (centered day
- * modal + feed-style preset picker + off-window event markers) + the 04-11
- * thumbnail-marker redesign (Millo-style preview markPoints, gray-square gone,
- * feed range-sync).
+ * modal + feed-style preset picker + off-window event markers) + the 04-12 HTML
+ * marker overlay (pixel collision clustering, kind-bordered chips, area/smooth/
+ * crosshair, Steam mini-chart removed).
  *
- * ECharts paints to canvas (not DOM-introspectable), so these assert the
- * WRAPPER / structure + data-attributes, not chart internals:
+ * ECharts paints to canvas (not DOM-introspectable), so the chart-internal bits
+ * assert the WRAPPER / structure + data-attributes, not canvas internals:
  *   - the WishlistCorrelationChart container reflows (fits its column, no
  *     horizontal overflow) at 360px AND 600px viewport widths — VIZ-04 / D-10;
  *   - event markers derive from the events even when the events fall OUTSIDE
  *     the wishlist date span (04-10 union-domain fix) — data-marker-count;
  *   - the no-CSV empty-state CTA renders while markers still render — D-08;
- *   - the marker-click surface is now a CENTERED EventDayModal (stats header +
+ *   - the marker-tap surface is now a CENTERED EventDayModal (stats header +
  *     FeedCard list), NOT the old docked drawer/sheet (04-10);
  *   - the chart date control is the feed's DateRangeRow preset picker with the
  *     sort toggle hidden (04-10).
  *
- * The 04-11 marker model is canvas-rendered, so its load-bearing assertions hit
- * the pure builders directly (eventThumbnail / buildMarkPointData): the markers
- * are THUMBNAIL image symbols (image://… YouTube/Reddit), 40px tap targets, with
- * a count badge for multi-event days — and the gray-square markArea is gone (the
- * chart imports no MarkAreaComponent and emits no markArea/color-mix option).
+ * The 04-12 markers are an HTML OVERLAY (DOM, introspectable): the load-bearing
+ * assertions hit (a) the pure clustering shape via the pixel-merge contract and
+ * (b) source checks — the chart ships ChartMarkerOverlay + areaStyle + smooth +
+ * the crosshair axis tooltip and NO canvas markPoint; the Steam detail modal
+ * ships no chart. (DOM chip positions need a laid-out chart instance, which the
+ * jsdom-free browser project gives, but x-pixel layout is timing-sensitive; the
+ * structural source checks are the durable, non-flaky assertions.)
  *
  * Component-mount style (mirrors event-detail-dual-render.test.ts): mount the
  * real components into a host div, drive the viewport via page.viewport(), and
@@ -38,12 +40,13 @@ import EventDayModal from "../../src/lib/components/charts/EventDayModal.svelte"
 import DateRangeRow from "../../src/lib/components/feed/DateRangeRow.svelte";
 import {
   eventThumbnail,
-  buildMarkPointData,
   buildDayGroups,
   inRange,
   eventDay,
 } from "../../src/lib/components/charts/wishlist-chart-shared.js";
 import correlationChartSource from "../../src/lib/components/charts/WishlistCorrelationChart.svelte?raw";
+import overlaySource from "../../src/lib/components/charts/ChartMarkerOverlay.svelte?raw";
+import steamModalSource from "../../src/lib/components/SteamListingDetailModal.svelte?raw";
 import { m } from "../../src/lib/paraglide/messages.js";
 
 let host: HTMLElement;
@@ -149,16 +152,16 @@ function mountChart(series: typeof emptySeries | typeof shortSeries | typeof off
     props: {
       seriesByListing: { l1: series },
       events: baseEvents,
-      deltaByDate,
       listings: baseListings,
       today: TODAY,
       // 04-08: range + legend lifted to the page; the chart is controlled.
       // 04-09: visibility driven purely by the `visible` map.
-      // 04-10: the chart emits the clicked day up via onSelectDay (the page
-      // owns the centered EventDayModal); no more in-chart panel.
+      // 04-12: the chart emits the tapped cluster's day(s) up via
+      // onSelectCluster (the page owns the centered EventDayModal); the markers
+      // are an HTML overlay (ChartMarkerOverlay), not canvas markPoints.
       range: null,
       visible: {},
-      onSelectDay: vi.fn(),
+      onSelectCluster: vi.fn(),
     },
   });
   flushSync();
@@ -177,7 +180,9 @@ function mountDayModal(): { dialog: HTMLDialogElement; component: ReturnType<typ
     target: host,
     props: {
       open: true,
-      day: "2026-05-15",
+      // 04-12: the modal takes a SET of days (a cluster); a single-day cluster
+      // still shows that day's delta.
+      days: ["2026-05-15"],
       events: baseEvents,
       delta: deltaByDate.l1["2026-05-15"],
       sourceById,
@@ -301,7 +306,7 @@ describe("charts at 360px (VIZ-04)", () => {
   });
 });
 
-describe("04-11 thumbnail markers + gray-square removal + feed range-sync", () => {
+describe("04-12 HTML marker overlay + area/smooth/crosshair + Steam mini-chart removal", () => {
   it("eventThumbnail derives the YouTube preview from externalId (no enrichment)", () => {
     expect(eventThumbnail(baseEvents[0]!)).toBe(
       "https://img.youtube.com/vi/abc123/mqdefault.jpg",
@@ -316,59 +321,89 @@ describe("04-11 thumbnail markers + gray-square removal + feed range-sync", () =
     expect(eventThumbnail(redditWithImage)).toBe("https://i.redd.it/abc.jpg");
   });
 
-  it("eventThumbnail returns null for a kind with no derivable image (placeholder path)", () => {
+  it("eventThumbnail returns null for a kind with no derivable image (KindIcon path)", () => {
+    // No derivable image → the overlay chip renders a <KindIcon> instead of an
+    // <img> thumbnail.
     expect(eventThumbnail({ ...baseEvents[1]!, redditEnrichment: null })).toBeNull();
   });
 
-  it("buildMarkPointData emits 40px image markers + a count badge for multi-event days", () => {
-    // Two events on the SAME day → ONE marker with a count badge "2".
+  it("buildDayGroups collapses same-day events into ONE group (the chip's count)", () => {
+    // Two events on the SAME day → one DayGroup carrying both → the overlay chip
+    // renders a count badge "2".
     const sameDay = [
       baseEvents[0]!,
       { ...baseEvents[1]!, occurredAt: new Date("2026-05-15T11:00:00Z") },
     ];
     const groups = buildDayGroups(sameDay, null);
-    const data = buildMarkPointData(groups, 100) as Array<{
-      name: string;
-      symbol: string;
-      symbolSize: [number, number];
-      label: { show: boolean; formatter?: string };
-    }>;
-    expect(data.length).toBe(1);
-    // 40px tap target (VIZ-04 touch fix).
-    expect(data[0]!.symbolSize).toEqual([40, 40]);
-    // Thumbnail image marker (Millo preview), not a thin line.
-    expect(data[0]!.symbol).toBe("image://https://img.youtube.com/vi/abc123/mqdefault.jpg");
-    // Multi-event day → count badge "2".
-    expect(data[0]!.label.show).toBe(true);
-    expect(data[0]!.label.formatter).toBe("2");
+    expect(groups.length).toBe(1);
+    expect(groups[0]!.events.length).toBe(2);
+    expect(groups[0]!.mixedKind).toBe(true);
   });
 
-  it("placeholder markers use a resolved symbol (no var()/color-mix on the canvas)", () => {
-    // baseEvents[1] is a reddit_post with no enrichment + null metadata →
-    // eventThumbnail returns null → the marker falls back to the placeholder.
-    const groups = buildDayGroups([baseEvents[1]!], null);
-    const data = buildMarkPointData(groups, 100) as Array<{
-      symbol: string;
-      itemStyle: { color?: string; borderColor?: string };
-    }>;
-    // No thumbnail → a concrete placeholder symbol (not image://).
-    expect(data[0]!.symbol).toBe("circle");
-    // The resolved color is a concrete value, NEVER a CSS var / color-mix string
-    // (that unresolved string on the canvas was the gray-square bug).
-    const color = data[0]!.itemStyle.color ?? "";
-    expect(color).not.toContain("var(");
-    expect(color).not.toContain("color-mix");
+  it("the overlay renders a pixel-positioned chip per cluster + a count badge", async () => {
+    await page.viewport(900, 720);
+    const { root, component } = mountChart(shortSeries);
+    // Give the chart a moment to finish its first render so convertToPixel +
+    // the 'finished' handler lay out the chips.
+    await new Promise((r) => setTimeout(r, 200));
+    flushSync();
+    // Two events on the same day (2026-05-15) → ONE cluster chip with a "2"
+    // count badge.
+    const chips = root.querySelectorAll('[data-testid="chart-marker-chip"]');
+    expect(chips.length).toBe(1);
+    const badge = root.querySelector('[data-testid="chart-marker-count"]');
+    expect(badge?.textContent).toBe("2");
+    unmount(component);
   });
 
-  it("the correlation chart no longer ships the gray-square markArea (source check)", () => {
-    // The markArea highlight (color-mix(var(--accent)) → gray square on canvas,
-    // never cleared) is gone: no MarkAreaComponent import, no markArea option,
-    // no color-mix(var(...)) passed to ECharts. Comments documenting the removal
-    // are allowed; the load-bearing check is no executable markArea/color-mix.
-    expect(correlationChartSource).not.toContain("MarkAreaComponent");
-    expect(correlationChartSource).not.toContain("color-mix(in oklab, var(--accent)");
-    // Uses the new MarkPointComponent instead.
-    expect(correlationChartSource).toContain("MarkPointComponent");
+  it("the correlation chart ships the HTML overlay, no canvas markPoint (source check)", () => {
+    // The canvas markPoint markers are gone — the markers are an HTML overlay
+    // (ChartMarkerOverlay) that can pixel-cluster + render borders/icons.
+    expect(correlationChartSource).not.toContain("markPoint");
+    expect(correlationChartSource).not.toContain("MarkPointComponent");
+    expect(correlationChartSource).toContain("ChartMarkerOverlay");
+    // No var()/color-mix passed to the ECharts option (the canvas can't resolve
+    // them). The overlay (DOM) is allowed CSS tokens — assert only the chart
+    // option region (the <script>), not the <style>.
+    const script = correlationChartSource.slice(
+      correlationChartSource.indexOf("<script"),
+      correlationChartSource.indexOf("</script>"),
+    );
+    expect(script).not.toContain("var(--");
+    expect(script).not.toContain("color-mix(");
+  });
+
+  it("the overlay clusters by SCREEN distance via convertToPixel (source check)", () => {
+    // The pile-up fix: position each day at its x-pixel and MERGE chips within
+    // ~44px. These are the load-bearing mechanics.
+    expect(overlaySource).toContain("convertToPixel");
+    expect(overlaySource).toContain("CLUSTER_PX");
+    expect(overlaySource).toContain("KindIcon");
+  });
+
+  it("the correlation chart has a filled area + smooth line + crosshair tooltip (source check)", () => {
+    expect(correlationChartSource).toContain("areaStyle");
+    expect(correlationChartSource).toContain("smooth: true");
+    expect(correlationChartSource).toContain("axisPointer");
+    expect(correlationChartSource).toContain('trigger: "axis"');
+  });
+
+  it("the Steam listing detail modal ships NO wishlist chart (source check)", () => {
+    // The mini wishlist chart (which duplicated the page chart with less data)
+    // is removed — no svelte-echarts import, no Chart mount, no series prop.
+    expect(steamModalSource).not.toContain("svelte-echarts");
+    expect(steamModalSource).not.toContain("use([");
+    expect(steamModalSource).not.toContain("wishlist-chart");
+  });
+
+  it("the cluster modal accepts a SET of days; a single-day cluster shows its delta", async () => {
+    await page.viewport(900, 720);
+    const { dialog, component } = mountDayModal();
+    // Single-day cluster → its day label + the delta block render.
+    expect(dialog.textContent).toContain("2026-05-15");
+    const stats = dialog.querySelector('[data-testid="day-stats"]');
+    expect(stats?.textContent).toContain(m.viz_delta_7d({ value: "+120" }));
+    unmount(component);
   });
 
   it("feed range-sync: inRange + eventDay filter the feed events by the chart window", () => {

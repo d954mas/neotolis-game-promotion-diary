@@ -130,20 +130,37 @@
 
   function recompute(): void {
     const c = chart;
-    if (!c || dayGroups.length === 0) {
+    // Guard a disposed instance: 'finished'/ResizeObserver can fire after the
+    // <Chart> tears the ECharts instance down (unmount/HMR), and convertToPixel
+    // throws on a disposed chart. isDisposed() is the official guard.
+    if (!c || c.isDisposed() || dayGroups.length === 0) {
       clusters = [];
       return;
     }
 
     // Position each day at its x-pixel; drop days that fall outside the grid
     // (convertToPixel returns NaN for out-of-domain values on some builds).
+    // convertToPixel throws if the xAxis coordinate system isn't built yet (an
+    // empty series before the first 'finished' fires) — bail and wait for the
+    // next 'finished'/resize pass rather than crash the effect.
     type Placed = { x: number; group: DayGroup };
     const placed: Placed[] = [];
+    let convertReady = true;
     for (const g of dayGroups) {
-      const px = c.convertToPixel({ xAxisIndex: 0 }, g.date);
-      const x = Array.isArray(px) ? px[0] : px;
+      let x: number | null;
+      try {
+        const px = c.convertToPixel({ xAxisIndex: 0 }, g.date);
+        x = Array.isArray(px) ? px[0]! : px;
+      } catch {
+        convertReady = false;
+        break;
+      }
       if (typeof x !== "number" || Number.isNaN(x)) continue;
       placed.push({ x, group: g });
+    }
+    if (!convertReady) {
+      clusters = [];
+      return;
     }
     placed.sort((a, b) => a.x - b.x);
 
