@@ -200,6 +200,10 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
     wishlistSummaries,
     wishlistSeriesByListing,
     deltaByDate,
+    // One server-chosen "now" instant threaded to the chart so the honest
+    // D-13 "обновлено Xч назад" caption is computed against the server clock,
+    // never the client's new Date() (timezone drift would skew the hours).
+    today: new Date().toISOString(),
     deletedListings: deletedListings.map(toGameSteamListingDto),
     events: eventDtos,
     games: gamesAll.map((r) =>

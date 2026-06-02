@@ -46,8 +46,16 @@
   // /games?view=trash) using SteamListingRow's trash mode — RecoveryDialog
   // replaced per UAT (Plan 03.2-04).
   import SteamListingRow from "$lib/components/SteamListingRow.svelte";
+  import WishlistCorrelationChart from "$lib/components/charts/WishlistCorrelationChart.svelte";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
-  import type { GameSteamListingDto } from "$lib/server/dto.js";
+  import type {
+    GameSteamListingDto,
+    EventDto,
+    GameDto,
+    DataSourceDto,
+    WishlistSeries,
+    WishlistDelta,
+  } from "$lib/server/dto.js";
   import type { PageData } from "./$types";
 
   type EventKind =
@@ -123,6 +131,29 @@
   let addStoreOpen = $state(false);
 
   const groupedEvents = $derived(groupEventsByDate(events));
+
+  // VIZ-02 == VIZ-03 (D-12): ONE correlation chart for this game. The
+  // wishlist data is per-Steam-listing; most games have a single listing, so
+  // the headline chart reads the FIRST active listing's series + per-day
+  // delta. No CSV / no listing → an empty series drives the D-08 empty-state
+  // CTA while the event markers still render.
+  const EMPTY_SERIES: WishlistSeries = { points: [], lastImportedAt: null };
+  const primaryListingId = $derived(listings[0]?.id ?? null);
+  const chartSeries = $derived<WishlistSeries>(
+    (primaryListingId &&
+      (data.wishlistSeriesByListing as Record<string, WishlistSeries>)[primaryListingId]) ||
+      EMPTY_SERIES,
+  );
+  const chartDeltaByDate = $derived<Record<string, WishlistDelta>>(
+    (primaryListingId &&
+      (data.deltaByDate as Record<string, Record<string, WishlistDelta>>)[primaryListingId]) ||
+      {},
+  );
+  // The loader returns full EventDtos; the page's EventDtoLocal is a subset
+  // for the FeedCard renderer. The chart consumes the full DTOs.
+  const chartEvents = $derived(data.events as EventDto[]);
+  const chartGames = $derived(data.games as GameDto[]);
+  const chartSources = $derived(data.sources as DataSourceDto[]);
 
   // Trash view: per-card Restore.
   async function restoreListing(listingId: string): Promise<void> {
@@ -452,6 +483,25 @@
     />
   </section>
 
+  <!--
+  VIZ-02 == VIZ-03 (D-12): the headline wishlist-correlation chart. ONE
+  component — the wishlist daily line + kind-colored event markers + the
+  click-to-drawer marker panel. Mounted once, between Stores and Events.
+-->
+  <section class="correlation" id="section-correlation">
+    <header class="section-header">
+      <h2>{m.viz_wishlist_line_label()}</h2>
+    </header>
+    <WishlistCorrelationChart
+      series={chartSeries}
+      events={chartEvents}
+      deltaByDate={chartDeltaByDate}
+      sources={chartSources}
+      games={chartGames}
+      today={data.today}
+    />
+  </section>
+
   <section class="events" id="section-events">
     <header class="section-header">
       <h2>{m.games_detail_section_events()}</h2>
@@ -548,6 +598,13 @@
     min-width: 0;
   }
   .stores {
+    margin-bottom: var(--s-6);
+    min-width: 0;
+  }
+  .correlation {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-4);
     margin-bottom: var(--s-6);
     min-width: 0;
   }
