@@ -13,7 +13,13 @@
   //
   // ECharts (RESEARCH Pattern 4 + 04-12 HTML marker overlay):
   //   - one wishlist daily-balance LineChart series per listing (yAxis =
-  //     abbreviate, D-11), named with the listing label for the legend.
+  //     abbreviate, D-11), named with the listing label for the legend. Each
+  //     line is `smooth:true` with a subtle filled area beneath (a vertical
+  //     gradient from the line's color → transparent; concrete rgba stops only —
+  //     never a var()/color-mix string on the canvas).
+  //   - a crosshair `trigger:'axis'` tooltip (line axisPointer) shows the
+  //     hovered DATE + one row per visible listing (swatch + its wishlist value)
+  //     so the user can inspect ANY day, including days WITHOUT events.
   //   - the EVENT markers are NO LONGER painted on the canvas. They live in an HTML
   //     overlay (<ChartMarkerOverlay>) absolutely-positioned over the plot area:
   //     each event-day is pixel-positioned via chart.convertToPixel, then chips
@@ -191,19 +197,108 @@
     return Math.max(0, Math.floor((now - last) / 3_600_000));
   });
 
+  // Hex (#rrggbb / #rgb) → "r,g,b" for an rgba() gradient stop. The line colors
+  // come from the concrete LINE_PALETTE (already hex), so no getComputedStyle is
+  // needed here — but if a future palette entry is non-hex, fall back to a
+  // neutral so the canvas never receives a var()/color-mix string it can't read.
+  function hexToRgb(hex: string): string {
+    const h = hex.trim().replace(/^#/, "");
+    const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+    if (full.length !== 6 || /[^0-9a-fA-F]/.test(full)) return "120,120,120";
+    const r = parseInt(full.slice(0, 2), 16);
+    const g = parseInt(full.slice(2, 4), 16);
+    const b = parseInt(full.slice(4, 6), 16);
+    return `${r},${g},${b}`;
+  }
+
+  // A subtle vertical area fill: the line's color at ~18% alpha at the top
+  // fading to transparent at the bottom. Concrete rgba stops only (never a CSS
+  // var / color-mix on the canvas).
+  function areaGradient(lineColor: string): {
+    color: {
+      type: "linear";
+      x: number;
+      y: number;
+      x2: number;
+      y2: number;
+      colorStops: { offset: number; color: string }[];
+    };
+  } {
+    const rgb = hexToRgb(lineColor);
+    return {
+      color: {
+        type: "linear" as const,
+        x: 0,
+        y: 0,
+        x2: 0,
+        y2: 1,
+        colorStops: [
+          { offset: 0, color: `rgba(${rgb},0.18)` },
+          { offset: 1, color: `rgba(${rgb},0)` },
+        ],
+      },
+    };
+  }
+
+  // ── Crosshair axis tooltip (inspect any day, incl. empty days) ───────
+  // trigger:'axis' + a line axisPointer shows the hovered DATE + one row per
+  // VISIBLE listing (swatch color + that day's wishlist value, abbreviate). This
+  // lets the user inspect ANY date — including days WITHOUT events (the user's
+  // "can't select empty days"). The event markers are DOM chips now (the
+  // overlay), so there's no on-canvas marker tooltip to fight this one.
+  function escapeHtml(s: string): string {
+    return s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  const crosshairTooltip = $derived.by(() => ({
+    trigger: "axis" as const,
+    axisPointer: { type: "line" as const },
+    confine: true,
+    formatter: (raw: unknown): string => {
+      const params = (Array.isArray(raw) ? raw : [raw]) as Array<{
+        seriesName?: string;
+        color?: string;
+        axisValueLabel?: string;
+        value?: unknown;
+      }>;
+      if (params.length === 0) return "";
+      const dateLabel = params[0]?.axisValueLabel ?? "";
+      const head = `<div style="font-weight:600;margin-bottom:4px;">${escapeHtml(String(dateLabel))}</div>`;
+      const rows = params
+        .map((p) => {
+          // value is the [date, balance] tuple for a time-axis line series.
+          const v = Array.isArray(p.value) ? p.value[1] : p.value;
+          const num = typeof v === "number" ? abbreviate(v) : "—";
+          const swatch = `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${escapeHtml(String(p.color ?? "#888"))};margin-right:6px;"></span>`;
+          return `<div style="display:flex;align-items:center;gap:8px;"><span>${swatch}${escapeHtml(String(p.seriesName ?? ""))}</span><span style="margin-left:auto;font-variant-numeric:tabular-nums;">${escapeHtml(num)}</span></div>`;
+        })
+        .join("");
+      return `<div style="min-width:140px;">${head}${rows}</div>`;
+    },
+  }));
+
   // ── ECharts option (client-only — resolves --k-* tokens) ─────────────
   const options = $derived.by(() => {
     if (typeof window === "undefined") return {};
     const reducedMotion = prefersReducedMotion();
 
-    // One LineChart series per visible listing.
+    // One LineChart series per visible listing — smooth (Millo-style) with a
+    // subtle filled area beneath (a vertical gradient from the line's RESOLVED
+    // color → transparent). Concrete rgba stops only — never a var()/color-mix
+    // string the ECharts canvas can't resolve.
     const lineSeries = lines.map((line) => ({
       name: line.label,
       type: "line" as const,
+      smooth: true,
       showSymbol: false,
       symbolSize: 14, // D-10 tap-friendly hit target at narrow widths.
       lineStyle: { width: 2, color: line.color },
       itemStyle: { color: line.color },
+      areaStyle: areaGradient(line.color),
       data: line.points.map((p) => [p.date, p.balance]),
     }));
 
@@ -218,6 +313,7 @@
 
     return {
       ...baseChartOptions({ reducedMotion }),
+      tooltip: crosshairTooltip,
       // No ECharts native legend — the custom on-brand <ChartLegend> at the page
       // drives per-listing visibility via the shared `visible` map (04-09).
       grid: { left: 8, right: 8, top: 16, bottom: 36, containLabel: true },
