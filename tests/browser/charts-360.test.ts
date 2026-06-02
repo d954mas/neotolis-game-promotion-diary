@@ -1,14 +1,18 @@
 /**
- * VIZ-04 — chart reflow + responsive detail surface under 600px (Plan 04-05).
+ * VIZ-04 — chart reflow + the 04-10 interaction redesign (centered day modal +
+ * feed-style preset picker + off-window event markers).
  *
  * ECharts paints to canvas (not DOM-introspectable), so these assert the
  * WRAPPER / structure + data-attributes, not chart internals:
  *   - the WishlistCorrelationChart container reflows (fits its column, no
  *     horizontal overflow) at 360px AND 600px viewport widths — VIZ-04 / D-10;
- *   - the EventMarkerPanel docks BOTTOM (sheet) <600px and RIGHT (drawer)
- *     >=600px via its data-variant attribute — D-02;
+ *   - event markers derive from the events even when the events fall OUTSIDE
+ *     the wishlist date span (04-10 union-domain fix) — data-marker-count;
  *   - the no-CSV empty-state CTA renders while markers still render — D-08;
- *   - the chart still renders with a short (low-data) series — D-07 consistency.
+ *   - the marker-click surface is now a CENTERED EventDayModal (stats header +
+ *     FeedCard list), NOT the old docked drawer/sheet (04-10);
+ *   - the chart date control is the feed's DateRangeRow preset picker with the
+ *     sort toggle hidden (04-10).
  *
  * Component-mount style (mirrors event-detail-dual-render.test.ts): mount the
  * real components into a host div, drive the viewport via page.viewport(), and
@@ -22,7 +26,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, unmount, flushSync } from "svelte";
 import { page } from "@vitest/browser/context";
 import WishlistCorrelationChart from "../../src/lib/components/charts/WishlistCorrelationChart.svelte";
-import EventMarkerPanel from "../../src/lib/components/charts/EventMarkerPanel.svelte";
+import EventDayModal from "../../src/lib/components/charts/EventDayModal.svelte";
+import DateRangeRow from "../../src/lib/components/feed/DateRangeRow.svelte";
 import { m } from "../../src/lib/paraglide/messages.js";
 
 let host: HTMLElement;
@@ -30,13 +35,28 @@ let host: HTMLElement;
 // A bare wishlist series (no CSV) → D-08 empty-state branch.
 const emptySeries = { points: [], lastImportedAt: null };
 
-// A short series (low-data) → still renders, D-07 consistency.
+// A short series (low-data) → still renders, D-07 consistency. Its wishlist
+// points sit on 2026-05-14..15, while baseEvents land on 2026-05-15 — for the
+// off-window assertion below we also use a series whose span is BEFORE/AFTER
+// the events to prove the union-domain fix.
 const shortSeries = {
   points: [
     { date: "2026-05-14", balance: 100 },
     { date: "2026-05-15", balance: 140 },
   ],
   lastImportedAt: "2026-05-15T08:00:00.000Z",
+};
+
+// A wishlist series whose dates are AFTER all the events (04-10 regression
+// case): events on 2026-05-15, wishlist points on 2026-05-28..30. Pre-fix the
+// markers rendered off-canvas; the union x-axis domain keeps them visible.
+const offWindowSeries = {
+  points: [
+    { date: "2026-05-28", balance: 200 },
+    { date: "2026-05-29", balance: 240 },
+    { date: "2026-05-30", balance: 260 },
+  ],
+  lastImportedAt: "2026-05-30T08:00:00.000Z",
 };
 
 const baseEvents = [
@@ -95,50 +115,16 @@ const deltaByDate = {
 // One active listing for the single-line case the legacy tests exercise.
 const baseListings = [{ id: "l1", name: "Game One", appId: 111 }];
 
-const baseGames = [
-  {
-    id: "g1",
-    title: "Game One",
-    coverUrl: null,
-    releaseDate: null,
-    releaseTba: false,
-    tags: [],
-    notes: "",
-    description: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    deletedAt: null,
-  },
+const baseSources = [
+  { id: "src_1", displayName: "My Test Channel", handleUrl: "https://youtube.com/@test" },
+  { id: "src_2", displayName: "r/test", handleUrl: "https://reddit.com/r/test" },
 ];
 
-const baseSources = [
-  {
-    id: "src_1",
-    kind: "youtube_channel" as const,
-    handleUrl: "https://youtube.com/@test",
-    channelId: "UCxxx",
-    displayName: "My Test Channel",
-    note: null,
-    isOwnedByMe: true,
-    autoImport: true,
-    metadata: {},
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    deletedAt: null,
-    channelTitle: "Test Channel",
-    needsReconnect: false,
-    lastErrorAt: null,
-    lastErrorKind: null,
-    lastPolledAt: null,
-    backfillOldestAt: null,
-    backfillComplete: false,
-    backfillTargetSince: null,
-  },
-];
+const baseGames = [{ id: "g1", title: "Game One" }];
 
 const TODAY = "2026-05-16T08:00:00.000Z";
 
-function mountChart(series: typeof emptySeries | typeof shortSeries): {
+function mountChart(series: typeof emptySeries | typeof shortSeries | typeof offWindowSeries): {
   root: HTMLElement;
   component: ReturnType<typeof mount>;
 } {
@@ -149,15 +135,14 @@ function mountChart(series: typeof emptySeries | typeof shortSeries): {
       events: baseEvents,
       deltaByDate,
       listings: baseListings,
-      sources: baseSources,
-      games: baseGames,
       today: TODAY,
       // 04-08: range + legend lifted to the page; the chart is controlled.
-      // 04-09: the native ECharts legend is gone — visibility is driven purely
-      // by the `visible` map (the custom <ChartLegend> at the page flips it),
-      // so there's no onLegendToggle prop anymore.
+      // 04-09: visibility driven purely by the `visible` map.
+      // 04-10: the chart emits the clicked day up via onSelectDay (the page
+      // owns the centered EventDayModal); no more in-chart panel.
       range: null,
       visible: {},
+      onSelectDay: vi.fn(),
     },
   });
   flushSync();
@@ -168,23 +153,28 @@ function mountChart(series: typeof emptySeries | typeof shortSeries): {
   return { root, component };
 }
 
-function mountPanel(): { dialog: HTMLDialogElement; component: ReturnType<typeof mount> } {
+function mountDayModal(): { dialog: HTMLDialogElement; component: ReturnType<typeof mount> } {
   const onClose = vi.fn();
-  const component = mount(EventMarkerPanel, {
+  const sourceById = new Map(baseSources.map((s) => [s.id, s]));
+  const gameById = new Map(baseGames.map((g) => [g.id, g]));
+  const component = mount(EventDayModal, {
     target: host,
     props: {
-      dayEvents: baseEvents,
+      open: true,
+      day: "2026-05-15",
+      events: baseEvents,
       delta: deltaByDate.l1["2026-05-15"],
-      sources: baseSources,
+      sourceById,
+      gameById,
       games: baseGames,
       onClose,
     },
   });
   flushSync();
   const dialog = host.querySelector(
-    'dialog[data-testid="event-marker-panel"]',
+    'dialog[data-testid="event-day-modal"]',
   ) as HTMLDialogElement | null;
-  if (!dialog) throw new Error("EventMarkerPanel <dialog> not found");
+  if (!dialog) throw new Error("EventDayModal <dialog> not found");
   return { dialog, component };
 }
 
@@ -214,27 +204,62 @@ describe("charts at 360px (VIZ-04)", () => {
     }
   });
 
-  it("marker detail surface opens as bottom-sheet <600px and drawer >=600px (Plan 04-05 / D-02)", async () => {
-    // >=600px → drawer.
+  it("event markers render even when events fall OUTSIDE the wishlist date span (04-10)", async () => {
     await page.viewport(900, 720);
-    const drawer = mountPanel();
-    expect(drawer.dialog.getAttribute("data-variant")).toBe("drawer");
-    unmount(drawer.component);
-
-    // <600px → bottom sheet.
-    await page.viewport(360, 720);
-    const sheet = mountPanel();
-    expect(sheet.dialog.getAttribute("data-variant")).toBe("sheet");
-    unmount(sheet.component);
+    // Wishlist points are on 2026-05-28..30; events are on 2026-05-15 (before
+    // the wishlist span). Pre-fix the markers rendered off-canvas — the
+    // union-domain fix keeps them. We assert the marker is still derived (the
+    // x-axis min/max now spans events ∪ points so it lands on-canvas).
+    const { root, component } = mountChart(offWindowSeries);
+    expect(root.getAttribute("data-marker-count")).toBe("1");
+    expect(root.getAttribute("data-low-data")).toBe("false");
+    unmount(component);
   });
 
-  it("low-data dots+caption render (Plan 04-05 / D-07)", async () => {
+  it("marker-click surface is a CENTERED EventDayModal with stats + feed cards (04-10)", async () => {
+    await page.viewport(900, 720);
+    const { dialog, component } = mountDayModal();
+    // Centered modal, NOT the old docked drawer/sheet (no data-variant).
+    expect(dialog.getAttribute("data-variant")).toBeNull();
+    expect(dialog.open).toBe(true);
+    // Stats header: the day's delta is shown.
+    const stats = dialog.querySelector('[data-testid="day-stats"]');
+    expect(stats).not.toBeNull();
+    expect(stats?.textContent).toContain(m.viz_delta_7d({ value: "+120" }));
+    // The event count surfaces in the header.
+    expect(stats?.textContent).toContain(m.viz_day_modal_event_count({ count: 2 }));
+    // The day's events render as FeedCard rows (one per event).
+    const cards = dialog.querySelectorAll(".event-cards > *");
+    expect(cards.length).toBe(baseEvents.length);
+    unmount(component);
+  });
+
+  it("chart date control is the feed preset picker with sort hidden (04-10)", async () => {
+    await page.viewport(900, 720);
+    const onDateRangeChange = vi.fn();
+    const component = mount(DateRangeRow, {
+      target: host,
+      props: {
+        dateRange: { preset: "all" },
+        onDateRangeChange,
+        showSort: false,
+        today: new Date("2026-05-16T00:00:00"),
+      },
+    });
+    flushSync();
+    const row = host.querySelector(".date-range-row") as HTMLElement | null;
+    expect(row).not.toBeNull();
+    // Preset chips present (All time / Year / Month / Week / Today).
+    const presetChips = row!.querySelectorAll(".preset-chips .chip");
+    expect(presetChips.length).toBe(5);
+    // Sort toggle is hidden on the chart range (showSort=false).
+    expect(row!.querySelector(".sort-toggle")).toBeNull();
+    unmount(component);
+  });
+
+  it("low-data caption renders (Plan 04-05 / D-07)", async () => {
     await page.viewport(360, 720);
     const { root, component } = mountChart(shortSeries);
-    // A short (2-point) series still renders the chart frame + the honest
-    // caption (data-low-data="false" since CSV exists; the D-07 dots branch
-    // lives in EventHistoryChart — here the correlation chart renders the
-    // short series rather than failing).
     expect(root.getAttribute("data-low-data")).toBe("false");
     const caption = root.querySelector(".updated-caption");
     expect(caption).not.toBeNull();
@@ -250,7 +275,6 @@ describe("charts at 360px (VIZ-04)", () => {
     // The empty-state CTA text + the import link both render.
     const cta = root.querySelector(".no-wishlist-cta");
     expect(cta).not.toBeNull();
-    // The D-08 empty-state copy is the m.chart_no_wishlist_cta message.
     expect(cta?.textContent).toContain(m.chart_no_wishlist_cta());
     const link = root.querySelector(".no-wishlist-cta-link") as HTMLAnchorElement | null;
     expect(link).not.toBeNull();
