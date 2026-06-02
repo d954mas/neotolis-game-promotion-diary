@@ -8,7 +8,8 @@
   // Multi-listing (04-07): the decision (user) is a separate line per store —
   // NOT a summed line (Steam + itch are different units). Each listing gets a
   // distinct color from a per-line palette (NOT the --k-* kind colors, which
-  // belong to the event markers). An ECharts legend toggles each line on/off.
+  // belong to the event markers). The custom <ChartLegend> at the page toggles
+  // each line on/off via the shared `visible` map.
   //
   // ECharts (RESEARCH Pattern 4):
   //   - one wishlist daily-balance LineChart series per listing (yAxis =
@@ -24,14 +25,16 @@
   //   - click a marker → resolve the day → open <EventMarkerPanel> with the
   //     day's events + that day's delta (D-05 day-level).
   //
-  // Date-range + legend (04-08): the date-range picker and the per-listing
-  // legend selection are now OWNED BY THE PAGE so a sibling WishlistGrowthChart
-  // shares the same window + the same visible listings. This component is
-  // CONTROLLED: it receives `range` + `visible` as props and emits
-  // `onRangeChange` / `onLegendToggle`. The already-loaded daily series is
-  // clipped to [from, to] inclusive; markers outside the window are hidden; a
-  // toggled-off listing's line is hidden via ECharts' own legend AND mirrored
-  // into the shared `visible` map (legendselectchanged → onLegendToggle).
+  // Date-range + legend (04-08 / 04-09): the date-range picker and the
+  // per-listing legend selection are OWNED BY THE PAGE so a sibling
+  // WishlistGrowthChart shares the same window + the same visible listings. This
+  // component is CONTROLLED: it receives `range` + `visible` as props. The
+  // already-loaded daily series is clipped to [from, to] inclusive; markers
+  // outside the window are hidden; a toggled-off listing's line is hidden by
+  // FILTERING the series array on `visible[id]` (04-09) — there is NO ECharts
+  // native legend anymore. The custom on-brand <ChartLegend> at the page flips
+  // entries in `visible`; driving visibility purely from that map is what fixes
+  // the legend re-enable bug (no ECharts select-changed event round-trip).
   //
   // SSR (RESEARCH Pitfall 1): the option object resolves --k-* tokens via
   // getComputedStyle (canvas can't read CSS vars), so it's built client-only
@@ -54,7 +57,6 @@
   import {
     GridComponent,
     TooltipComponent,
-    LegendComponent,
     MarkLineComponent,
     MarkAreaComponent,
   } from "echarts/components";
@@ -66,7 +68,7 @@
   import { abbreviate } from "./abbreviate.js";
   import { baseChartOptions, prefersReducedMotion } from "./chart-theme.js";
   import {
-    paletteColor,
+    listingColor,
     inRange,
     buildDayGroups,
     buildMarkLineData,
@@ -79,7 +81,6 @@
     LineChart,
     GridComponent,
     TooltipComponent,
-    LegendComponent,
     MarkLineComponent,
     MarkAreaComponent,
     CanvasRenderer,
@@ -95,8 +96,6 @@
     today,
     range,
     visible,
-    onRangeChange,
-    onLegendToggle,
   }: {
     /** One wishlist series per active listing, keyed by listing id. */
     seriesByListing: Record<string, WishlistSeries>;
@@ -111,17 +110,12 @@
     today: string;
     /** Shared date-range (owned by the page) — null = all time. CONTROLLED. */
     range: { from: Date; to: Date } | null;
-    /** Shared legend selection (owned by the page): listingId → shown. CONTROLLED. */
+    /** Shared legend selection (owned by the page): listingId → shown. CONTROLLED.
+     *  Visibility is driven PURELY from this map — the series array is filtered
+     *  by it (no ECharts legend round-trip), which is what fixes the re-enable
+     *  bug. The custom <ChartLegend> at the page flips entries in this map. */
     visible: Record<string, boolean>;
-    /** Emit a legend toggle so the page mirrors it into `visible` (both charts react). */
-    onLegendToggle: (listingId: string, shown: boolean) => void;
-    /** Reserved: emit range changes if the chart ever drives the picker (page owns it now). */
-    onRangeChange?: (range: { from: Date; to: Date } | null) => void;
   } = $props();
-
-  // onRangeChange is part of the controlled contract but the picker now lives at
-  // the page; reference it so the prop is not flagged unused.
-  void onRangeChange;
 
   function listingLabel(l: ListingLite): string {
     return buildListingLabel(
@@ -136,28 +130,22 @@
     return visible[listingId] !== false;
   }
 
-  // Legend entries: only listings that have ANY wishlist data (regardless of
-  // range / current toggle) — a listing with no CSV never has a series to
-  // reference, so listing it in legend.data triggers ECharts' "series not
-  // exists" warning. A toggled-off-but-non-empty listing stays listed so it can
-  // be toggled back on.
-  const legendListings = $derived(
-    listings.filter((l) => (seriesByListing[l.id]?.points.length ?? 0) > 0),
-  );
-
-  // ── Per-listing lines (filtered by range + legend) ───────────────────
+  // ── Per-listing lines (filtered by range + the shared `visible` map) ──
+  // Series visibility is driven PURELY by `visible[id] !== false` (the custom
+  // legend at the page flips it). Filtering the series array here — instead of
+  // an ECharts legend toggle — is the load-bearing fix for the re-enable bug:
+  // turning a listing back ON re-adds its line on the next render.
   type Line = { id: string; label: string; color: string; points: { date: string; balance: number }[]; lastImportedAt: string | null };
 
   const lines = $derived.by((): Line[] => {
     return listings
       .filter((l) => isVisible(l.id))
       .map((l): Line => {
-        const i = listings.findIndex((x) => x.id === l.id);
         const s = seriesByListing[l.id] ?? { points: [], lastImportedAt: null };
         return {
           id: l.id,
           label: listingLabel(l),
-          color: paletteColor(i),
+          color: listingColor(listings, l.id),
           points: s.points.filter((p) => inRange(p.date, range)),
           lastImportedAt: s.lastImportedAt,
         };
@@ -219,27 +207,6 @@
     if (e.componentType !== "markLine") return;
     const day = (e.data as { name?: string } | undefined)?.name;
     if (typeof day === "string") selectedDay = day;
-  }
-
-  // ── Legend ↔ shared visible map (04-08) ──────────────────────────────
-  // ECharts' legend keys by series NAME (the listing label); the shared
-  // `visible` map keys by listing ID. Map label → id so a legendselectchanged
-  // event updates the page state, which both charts read.
-  const idByLabel = $derived.by((): Map<string, string> => {
-    const m2 = new Map<string, string>();
-    for (const l of listings) m2.set(listingLabel(l), l.id);
-    return m2;
-  });
-
-  function onLegendSelectChanged(
-    e: { name?: string; selected?: Record<string, boolean> } | undefined,
-  ): void {
-    const label = e?.name;
-    const selected = e?.selected;
-    if (typeof label !== "string" || !selected) return;
-    const id = idByLabel.get(label);
-    if (!id) return;
-    onLegendToggle(id, selected[label] !== false);
   }
 
   // markLine attaches to the FIRST visible line (or the hidden anchor series
@@ -322,20 +289,8 @@
 
     return {
       ...baseChartOptions({ reducedMotion }),
-      legend: {
-        // List every listing that HAS data (not just the in-range visible
-        // ones) so a toggled-off line can be toggled back on. `selected`
-        // mirrors the shared `visible` map → the page is the single source of
-        // truth.
-        show: legendListings.length > 0,
-        type: "scroll" as const,
-        bottom: 0,
-        data: legendListings.map((l) => listingLabel(l)),
-        selected: Object.fromEntries(
-          legendListings.map((l) => [listingLabel(l), isVisible(l.id)]),
-        ),
-        textStyle: { color: resolveTextColor() },
-      },
+      // No ECharts native legend — the custom on-brand <ChartLegend> at the page
+      // drives per-listing visibility via the shared `visible` map (04-09).
       grid: { left: 8, right: 8, top: 16, bottom: 36, containLabel: true },
       xAxis: {
         type: "time" as const,
@@ -351,11 +306,6 @@
       series: lineSeries.length > 0 ? lineSeries : [anchorSeries],
     };
   });
-
-  function resolveTextColor(): string {
-    if (typeof window === "undefined") return "";
-    return getComputedStyle(document.documentElement).getPropertyValue("--text-2").trim();
-  }
 </script>
 
 <div
@@ -371,13 +321,7 @@
 
   {#if typeof window !== "undefined"}
     <div class="chart-canvas">
-      <Chart
-        {init}
-        {options}
-        bind:chart
-        onclick={onChartClick}
-        onlegendselectchanged={onLegendSelectChanged}
-      />
+      <Chart {init} {options} bind:chart onclick={onChartClick} />
     </div>
   {/if}
 

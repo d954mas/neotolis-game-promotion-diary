@@ -13,9 +13,10 @@
   //
   // Shared with the correlation chart (04-08 KISS/DRY):
   //   - the SAME date `range` (prop) clips the visible window.
-  //   - the SAME per-listing `visible` legend map (prop) hides/shows listings.
-  //   - the SAME per-listing palette (paletteColor) so a listing is the same
-  //     color on both charts.
+  //   - the SAME per-listing `visible` legend map (prop) hides/shows listings
+  //     (driven by the custom <ChartLegend> at the page — no native legend).
+  //   - the SAME stable per-listing color (listingColor) so a listing is the
+  //     same color on both charts AND on the legend swatch.
   //   - the SAME event markers (buildDayGroups + buildMarkLineData) so a growth
   //     spike lines up with the post that caused it.
   //
@@ -35,7 +36,6 @@
   import {
     GridComponent,
     TooltipComponent,
-    LegendComponent,
     MarkLineComponent,
   } from "echarts/components";
   import { CanvasRenderer } from "echarts/renderers";
@@ -45,7 +45,7 @@
   import { abbreviate } from "./abbreviate.js";
   import { baseChartOptions, prefersReducedMotion } from "./chart-theme.js";
   import {
-    paletteColor,
+    listingColor,
     inRange,
     buildDayGroups,
     buildMarkLineData,
@@ -58,7 +58,6 @@
     BarChart,
     GridComponent,
     TooltipComponent,
-    LegendComponent,
     MarkLineComponent,
     CanvasRenderer,
   ]);
@@ -72,7 +71,6 @@
     today,
     range,
     visible,
-    onLegendToggle,
   }: {
     /** One wishlist series per active listing, keyed by listing id. */
     seriesByListing: Record<string, WishlistSeries>;
@@ -85,10 +83,10 @@
     today: string;
     /** Shared date-range (owned by the page) — null = all time. CONTROLLED. */
     range: { from: Date; to: Date } | null;
-    /** Shared legend selection (owned by the page): listingId → shown. CONTROLLED. */
+    /** Shared legend selection (owned by the page): listingId → shown. CONTROLLED.
+     *  Bar visibility is driven PURELY by filtering the series on this map (the
+     *  custom <ChartLegend> at the page flips it) — no ECharts native legend. */
     visible: Record<string, boolean>;
-    /** Emit a legend toggle so the page mirrors it (both charts react). */
-    onLegendToggle: (listingId: string, shown: boolean) => void;
   } = $props();
 
   void today;
@@ -105,13 +103,7 @@
     return visible[listingId] !== false;
   }
 
-  // Legend entries: only listings with ANY data (matches the line chart) so
-  // ECharts doesn't warn about a legend label with no backing series.
-  const legendListings = $derived(
-    listings.filter((l) => (seriesByListing[l.id]?.points.length ?? 0) > 0),
-  );
-
-  // ── Per-listing daily-growth bars (filtered by range + legend) ───────
+  // ── Per-listing daily-growth bars (filtered by range + the visible map) ─
   // Each in-range visible listing with >=2 points becomes one bar series of
   // [date, balance[i] − balance[i-1]]. The first bar of a series has no prior
   // day, so growth starts at the SECOND in-range point.
@@ -121,14 +113,13 @@
     return listings
       .filter((l) => isVisible(l.id))
       .map((l): Bar => {
-        const i = listings.findIndex((x) => x.id === l.id);
         const s = seriesByListing[l.id] ?? { points: [], lastImportedAt: null };
         const pts = s.points.filter((p) => inRange(p.date, range));
         const data: [string, number][] = [];
         for (let j = 1; j < pts.length; j++) {
           data.push([pts[j]!.date, pts[j]!.balance - pts[j - 1]!.balance]);
         }
-        return { id: l.id, label: listingLabel(l), color: paletteColor(i), data };
+        return { id: l.id, label: listingLabel(l), color: listingColor(listings, l.id), data };
       })
       .filter((bar) => bar.data.length > 0);
   });
@@ -153,27 +144,6 @@
     if (typeof day === "string") selectedDay = day;
   }
 
-  // Legend ↔ shared visible map (label → id), identical to the line chart.
-  const idByLabel = $derived.by((): Map<string, string> => {
-    const m2 = new Map<string, string>();
-    for (const l of listings) m2.set(listingLabel(l), l.id);
-    return m2;
-  });
-  function onLegendSelectChanged(
-    e: { name?: string; selected?: Record<string, boolean> } | undefined,
-  ): void {
-    const label = e?.name;
-    const selected = e?.selected;
-    if (typeof label !== "string" || !selected) return;
-    const id = idByLabel.get(label);
-    if (!id) return;
-    onLegendToggle(id, selected[label] !== false);
-  }
-
-  function resolveTextColor(): string {
-    if (typeof window === "undefined") return "";
-    return getComputedStyle(document.documentElement).getPropertyValue("--text-2").trim();
-  }
   function resolveToken(name: string): string {
     if (typeof window === "undefined") return "";
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -218,16 +188,8 @@
 
     return {
       ...baseChartOptions({ reducedMotion }),
-      legend: {
-        show: legendListings.length > 0,
-        type: "scroll" as const,
-        bottom: 0,
-        data: legendListings.map((l) => listingLabel(l)),
-        selected: Object.fromEntries(
-          legendListings.map((l) => [listingLabel(l), isVisible(l.id)]),
-        ),
-        textStyle: { color: resolveTextColor() },
-      },
+      // No ECharts native legend — the custom <ChartLegend> at the page drives
+      // per-listing visibility via the shared `visible` map (04-09).
       grid: { left: 8, right: 8, top: 16, bottom: 36, containLabel: true },
       xAxis: {
         type: "time" as const,
@@ -251,12 +213,7 @@
 >
   {#if typeof window !== "undefined"}
     <div class="chart-canvas">
-      <Chart
-        {init}
-        {options}
-        onclick={onChartClick}
-        onlegendselectchanged={onLegendSelectChanged}
-      />
+      <Chart {init} {options} onclick={onChartClick} />
     </div>
   {/if}
 

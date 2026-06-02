@@ -48,6 +48,8 @@
   import SteamListingRow from "$lib/components/SteamListingRow.svelte";
   import WishlistCorrelationChart from "$lib/components/charts/WishlistCorrelationChart.svelte";
   import WishlistGrowthChart from "$lib/components/charts/WishlistGrowthChart.svelte";
+  import ChartLegend from "$lib/components/charts/ChartLegend.svelte";
+  import { listingLabel } from "$lib/components/charts/wishlist-chart-shared.js";
   import DateRangePicker from "$lib/components/feed/DateRangePicker.svelte";
   import { startOfDay, fmtMonthDay } from "$lib/feed/date-range.js";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
@@ -150,6 +152,23 @@
   );
   const chartListings = $derived(
     listings.map((l) => ({ id: l.id, name: l.name, appId: l.appId })),
+  );
+  // The custom <ChartLegend> (04-09) renders one pill chip per active listing.
+  // Resolve each label here (same fallbacks as the charts) so the legend, the
+  // line, and the bar all read the same name + the same stable color. Only
+  // listings that HAVE wishlist data get a chip — a no-CSV listing has no
+  // series to toggle.
+  const legendListings = $derived(
+    chartListings
+      .filter((l) => (chartSeriesByListing[l.id]?.points.length ?? 0) > 0)
+      .map((l) => ({
+        id: l.id,
+        label: listingLabel(
+          l,
+          (appId) => m.viz_legend_listing_fallback({ appId }),
+          () => m.viz_wishlist_line_label(),
+        ),
+      })),
   );
   // The loader returns full EventDtos; the page's EventDtoLocal is a subset
   // for the FeedCard renderer. The chart consumes the full DTOs.
@@ -530,8 +549,10 @@
 
     <!-- ONE date-range control for BOTH charts (04-08): a date-chip opens the
          DateRangePicker; the "All time" chip resets the window. Filters
-         client-side against the server `today` instant. The legend lives on the
-         correlation chart's ECharts canvas and mirrors into `chartVisible`. -->
+         client-side against the server `today` instant. The per-listing legend
+         is now a custom on-brand <ChartLegend> below this row (04-09): it owns
+         no state, just flips `chartVisible`, which BOTH charts filter their
+         series by — fixing the re-enable bug. -->
     <div class="chart-range-row">
       <button
         bind:this={rangeChipEl}
@@ -567,6 +588,13 @@
       </button>
     </div>
 
+    <!-- Custom on-brand per-listing legend (04-09) — ONE control for BOTH
+         charts. Pill chips matching the site .chip vocabulary; click toggles a
+         listing's line + bar via the page-owned `chartVisible` map. -->
+    {#if legendListings.length > 0}
+      <ChartLegend listings={legendListings} visible={chartVisible} onToggle={toggleListing} />
+    {/if}
+
     <WishlistCorrelationChart
       seriesByListing={chartSeriesByListing}
       events={chartEvents}
@@ -577,7 +605,6 @@
       today={data.today}
       range={chartRange}
       visible={chartVisible}
-      onLegendToggle={toggleListing}
     />
 
     <!-- Second wishlist chart (04-08): DAILY net change (prior day's cumulative
@@ -594,7 +621,6 @@
         today={data.today}
         range={chartRange}
         visible={chartVisible}
-        onLegendToggle={toggleListing}
       />
     </div>
   </section>

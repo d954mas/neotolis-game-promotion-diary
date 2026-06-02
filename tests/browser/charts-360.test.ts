@@ -152,10 +152,12 @@ function mountChart(series: typeof emptySeries | typeof shortSeries): {
       sources: baseSources,
       games: baseGames,
       today: TODAY,
-      // 04-08: range + legend lifted to the page; the chart is now controlled.
+      // 04-08: range + legend lifted to the page; the chart is controlled.
+      // 04-09: the native ECharts legend is gone — visibility is driven purely
+      // by the `visible` map (the custom <ChartLegend> at the page flips it),
+      // so there's no onLegendToggle prop anymore.
       range: null,
       visible: {},
-      onLegendToggle: () => {},
     },
   });
   flushSync();

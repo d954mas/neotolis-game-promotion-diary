@@ -10,7 +10,7 @@
   //       DateRangeRow). This renders the same surface-2 pill + hairline border
   //       + per-item accent, so the legend reads as part of the design system.
   //   (2) the re-enable bug — toggling a listing OFF then ON via the ECharts
-  //       legend left the line hidden (a `legendselectchanged` round-trip
+  //       legend left the line hidden (an ECharts select-changed round-trip
   //       problem). This legend owns NOTHING: it just calls `onToggle`, the page
   //       updates its `visible` map, and BOTH charts filter their series by it.
   //       A click toggles plain state — re-enabling is just flipping the bool.
