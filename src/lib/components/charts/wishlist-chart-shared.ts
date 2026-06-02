@@ -36,6 +36,19 @@ export function paletteColor(index: number): string {
   return LINE_PALETTE[index % LINE_PALETTE.length]!;
 }
 
+/**
+ * The SINGLE stable listing→color resolver. Keyed by the listing's index in the
+ * FULL `listings` array (never a filtered/visible subarray) so a listing's
+ * swatch, its line, and its growth bar are ALWAYS the same color, and hiding one
+ * listing never reshuffles another's color. Both wishlist charts AND the
+ * ChartLegend call this — one source of truth for the per-listing palette.
+ * Unknown id (defensive) → palette index 0.
+ */
+export function listingColor(listings: ListingLite[], listingId: string): string {
+  const i = listings.findIndex((l) => l.id === listingId);
+  return paletteColor(i < 0 ? 0 : i);
+}
+
 /** YYYY-MM-DD in LOCAL time (matches the daily point keys + the range Dates). */
 export function isoDay(d: Date): string {
   const y = d.getFullYear();
