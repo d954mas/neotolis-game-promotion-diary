@@ -139,16 +139,29 @@
   }
 
   // D-03 markArea: highlight the post-event window for the selected day.
-  // Driven by an $effect on the bindable chart instance so it updates without
-  // a full option rebuild (markArea is transient selection state, not data).
+  // Driven by an $effect on the bindable chart instance so it patches markArea
+  // without a full option rebuild (markArea is transient selection state).
+  //
+  // The effect is INERT until the first marker click: svelte-echarts applies
+  // the base `options` (incl. xAxis) in its own $effect, which can run AFTER
+  // this one at mount — patching markArea before xAxis exists throws
+  // `xAxis "0" not found`. `hasPatchedMarkArea` gates the no-op clear so we
+  // only call setOption once there's a real selection.
+  let hasPatchedMarkArea = $state(false);
   $effect(() => {
     if (!chart) return;
-    const delta = selectedDelta;
+    const day = selectedDay; // reactive trigger
+    if (!day && !hasPatchedMarkArea) return; // inert until first selection
+    hasPatchedMarkArea = true;
+    const delta = day ? selectedDelta : null;
     chart.setOption({
       series: [
         {
+          name: m.viz_wishlist_line_label(),
+          type: "line" as const,
           markArea: delta
             ? {
+                silent: true,
                 itemStyle: { color: "color-mix(in oklab, var(--accent) 14%, transparent)" },
                 data: [[{ xAxis: delta.windowFrom }, { xAxis: delta.windowTo }]],
               }
