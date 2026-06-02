@@ -11,17 +11,22 @@
   // belong to the event markers). The custom <ChartLegend> at the page toggles
   // each line on/off via the shared `visible` map.
   //
-  // ECharts (RESEARCH Pattern 4):
+  // ECharts (RESEARCH Pattern 4 + 04-11 Millo-style thumbnail markers):
   //   - one wishlist daily-balance LineChart series per listing (yAxis =
   //     abbreviate, D-11), named with the listing label for the legend.
-  //   - markLine.data = one vertical line per DISTINCT event-DAY, colored by
-  //     resolveKindColor(kind) (D-01); a mixed-kind day → neutral --k-post
-  //     (D-04). >1 event that day → a count badge "N" at the top (D-04). The
-  //     markLine attaches to the FIRST visible listing series (or, when no
-  //     listing has points, a hidden anchor series) so it renders against the
-  //     chart grid and stays visible regardless of which lines are toggled.
-  //   - markArea.data = the highlighted post-event window (windowFrom..windowTo)
-  //     set on marker click — the D-03 "event → effect" segment.
+  //   - markPoint.data = one ≈40px THUMBNAIL preview marker per DISTINCT
+  //     event-DAY (eventThumbnail → YouTube/Reddit preview image, fallback a
+  //     kind-colored placeholder disc via resolveKindColor; mixed-kind day →
+  //     neutral --k-post, D-04). >1 event that day → a count badge "N" (D-04).
+  //     The markers sit in a row at a TOP band above the line and attach to the
+  //     FIRST visible listing series (or a hidden anchor series when no listing
+  //     has points) so they render against the grid regardless of legend
+  //     toggles. The 40px size is the tap target that fixes touch (VIZ-04).
+  //   - hover a marker → a tooltip with the preview thumbnail + the event count
+  //     + the first titles (Millo "preview + count"). No on-chart markArea
+  //     highlight: its color was an unresolved color-mix(var(--accent)) the
+  //     canvas rendered as a gray square and never cleared — removed in 04-11;
+  //     the centered modal already shows the day's delta.
   //   - click a marker → emit onSelectDay(day) up to the PAGE, which owns the
   //     centered EventDayModal (day stats + the day's events as FeedCards).
   //
@@ -57,11 +62,9 @@
   import {
     GridComponent,
     TooltipComponent,
-    MarkLineComponent,
-    MarkAreaComponent,
+    MarkPointComponent,
   } from "echarts/components";
   import { CanvasRenderer } from "echarts/renderers";
-  import type { EChartsType } from "echarts/core";
   import type { ECMouseEvent } from "svelte-echarts";
   import { m } from "$lib/paraglide/messages.js";
   import { abbreviate } from "./abbreviate.js";
@@ -70,26 +73,26 @@
     listingColor,
     inRange,
     buildDayGroups,
-    buildMarkLineData,
+    buildMarkPointData,
+    eventThumbnail,
     axisDomain,
     listingLabel as buildListingLabel,
+    type DayGroup,
     type ListingLite,
   } from "./wishlist-chart-shared.js";
-  import type { EventDto, WishlistSeries, WishlistDelta } from "$lib/server/dto.js";
+  import type { EventDto, WishlistSeries } from "$lib/server/dto.js";
 
   use([
     LineChart,
     GridComponent,
     TooltipComponent,
-    MarkLineComponent,
-    MarkAreaComponent,
+    MarkPointComponent,
     CanvasRenderer,
   ]);
 
   let {
     seriesByListing,
     events,
-    deltaByDate,
     listings,
     today,
     range,
@@ -99,8 +102,6 @@
     /** One wishlist series per active listing, keyed by listing id. */
     seriesByListing: Record<string, WishlistSeries>;
     events: EventDto[];
-    /** Per-listing, per-day wishlist deltas: deltaByDate[listingId][YYYY-MM-DD]. */
-    deltaByDate: Record<string, Record<string, WishlistDelta>>;
     /** Active listings (id + display name / appId) — drives line labels + order. */
     listings: ListingLite[];
     /** Server-chosen "now" ISO instant for the honest D-13 caption + range guard. */
@@ -189,95 +190,112 @@
     return Math.max(0, Math.floor((now - last) / 3_600_000));
   });
 
-  // ── Selected day → markArea highlight (D-03) ─────────────────────────
-  // The DAY-DETAIL surface now lives at the PAGE (a centered EventDayModal):
-  // a marker click emits onSelectDay(day). This local `selectedDay` is kept
-  // ONLY to drive the on-chart markArea highlight (the D-03 post-event window).
-  let selectedDay = $state<string | null>(null);
-  // The delta is a DAY attribute (D-05). With multiple listings it is per
-  // listing; surface the first VISIBLE listing's delta for that day. Falls back
-  // across visible listings. Drives the markArea window bounds.
-  const selectedDelta = $derived.by((): WishlistDelta | null => {
-    if (!selectedDay) return null;
-    for (const line of lines) {
-      const d = deltaByDate[line.id]?.[selectedDay];
-      if (d) return d;
-    }
-    return null;
-  });
+  // Anchor series name for the D-08 empty-state (no listing has points) — the
+  // markPoint markers attach to it so they still render against the grid.
+  const markPointSeriesName = $derived(lines[0]?.label ?? "__wishlist_anchor__");
 
-  // Bindable chart instance — set the D-03 markArea on it directly when a
-  // marker is selected (the highlighted post-event window).
-  let chart = $state<EChartsType | undefined>();
-
-  // markLine click → emit the day up to the page (which opens the modal) AND
-  // set the local highlight for the markArea. ECharts fires the chart-level
-  // 'click' with componentType 'markLine'; the marker carries its day in
-  // `name` (we set name = date on each markLine datum).
+  // markPoint click → emit the day up to the page (which owns the centered
+  // EventDayModal). ECharts fires the chart-level 'click' with componentType
+  // 'markPoint'; the marker carries its day in `name`/`value` (set on each
+  // markPoint datum by buildMarkPointData). NOTE: the old markArea highlight
+  // (and its local selectedDay state) is intentionally gone — its color was an
+  // unresolved `color-mix(var(--accent))` that the canvas rendered as a gray
+  // square and never cleared. The modal already shows the day's delta, so the
+  // on-chart highlight is redundant.
   function onChartClick(e: ECMouseEvent): void {
-    if (e.componentType !== "markLine") return;
+    if (e.componentType !== "markPoint") return;
     const day = (e.data as { name?: string } | undefined)?.name;
-    if (typeof day === "string") {
-      selectedDay = day;
-      onSelectDay(day);
-    }
+    if (typeof day === "string") onSelectDay(day);
   }
 
-  // markLine attaches to the FIRST visible line (or the hidden anchor series
-  // when no listing has points). Its series name drives the markArea patch.
-  const markLineSeriesName = $derived(lines[0]?.label ?? "__wishlist_anchor__");
-
-  // D-03 markArea: highlight the post-event window for the selected day.
-  // Driven by an $effect on the bindable chart instance so it patches markArea
-  // without a full option rebuild (markArea is transient selection state).
-  //
-  // The effect is INERT until the first marker click: svelte-echarts applies
-  // the base `options` (incl. xAxis) in its own $effect, which can run AFTER
-  // this one at mount — patching markArea before xAxis exists throws
-  // `xAxis "0" not found`. `hasPatchedMarkArea` gates the no-op clear so we
-  // only call setOption once there's a real selection.
-  let hasPatchedMarkArea = $state(false);
-  $effect(() => {
-    if (!chart) return;
-    const day = selectedDay; // reactive trigger
-    if (!day && !hasPatchedMarkArea) return; // inert until first selection
-    hasPatchedMarkArea = true;
-    const delta = day ? selectedDelta : null;
-    chart.setOption({
-      series: [
-        {
-          name: markLineSeriesName,
-          type: "line" as const,
-          markArea: delta
-            ? {
-                silent: true,
-                itemStyle: { color: "color-mix(in oklab, var(--accent) 14%, transparent)" },
-                data: [[{ xAxis: delta.windowFrom }, { xAxis: delta.windowTo }]],
-              }
-            : { data: [] },
-        },
-      ],
-    });
+  // The y-band the thumbnail markers sit on: a row hugging the TOP of the grid,
+  // ABOVE the wishlist line. Derived from the max balance across visible lines
+  // (so the band scales with the data); a small constant when there are no
+  // points (D-08) keeps the markers near the top of the empty grid.
+  const markerBand = $derived.by((): number => {
+    let max = 0;
+    for (const line of lines) {
+      for (const p of line.points) if (p.balance > max) max = p.balance;
+    }
+    // ~8% headroom above the peak so the 40px thumbnails clear the line.
+    return max > 0 ? max * 1.08 : 1;
   });
+
+  // ── Hover preview tooltip (Task 3 — Millo "preview + count") ──────────
+  // Day-keyed lookup so the markPoint tooltip formatter can resolve the day's
+  // group (thumbnail + count + first titles) from the hovered marker's `name`.
+  const dayGroupByDate = $derived.by((): Map<string, DayGroup> => {
+    const map = new Map<string, DayGroup>();
+    for (const g of dayGroups) map.set(g.date, g);
+    return map;
+  });
+
+  // HTML-escape titles before injecting them into the tooltip HTML string
+  // (ECharts renders the formatter return as innerHTML).
+  function escapeHtml(s: string): string {
+    return s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  // markPoint-only tooltip: hovering a thumbnail shows the preview image, the
+  // event count ("N событий"), and the first up-to-3 titles (+K more). The
+  // wishlist line itself gets no hover tooltip (trigger:'item' + the formatter
+  // returns "" for non-markPoint items) so the line hover stays quiet.
+  const markerTooltip = $derived.by(() => ({
+    trigger: "item" as const,
+    enterable: false,
+    confine: true,
+    formatter: (raw: unknown): string => {
+      // ECharts hands a single CallbackDataParams for item-trigger; narrow the
+      // shape we read (componentType + name) without depending on its wide union.
+      const params = (Array.isArray(raw) ? raw[0] : raw) as
+        | { componentType?: string; name?: string }
+        | undefined;
+      if (!params || params.componentType !== "markPoint") return "";
+      const g = typeof params.name === "string" ? dayGroupByDate.get(params.name) : undefined;
+      if (!g) return "";
+      const thumb = eventThumbnail(g.events[0]!);
+      const img = thumb
+        ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(m.viz_marker_preview_alt())}" style="width:120px;height:auto;border-radius:6px;display:block;margin-bottom:6px;" />`
+        : "";
+      const count = `<div style="font-weight:600;margin-bottom:2px;">${escapeHtml(m.viz_marker_event_count({ count: g.events.length }))}</div>`;
+      const shown = g.events.slice(0, 3);
+      const titles = shown
+        .map((e) => `<div style="opacity:.85;">${escapeHtml(e.title)}</div>`)
+        .join("");
+      const moreCount = g.events.length - shown.length;
+      const more =
+        moreCount > 0
+          ? `<div style="opacity:.6;">${escapeHtml(m.viz_marker_more({ count: moreCount }))}</div>`
+          : "";
+      return `<div style="max-width:160px;">${img}${count}${titles}${more}</div>`;
+    },
+  }));
 
   // ── ECharts option (client-only — resolves --k-* tokens) ─────────────
   const options = $derived.by(() => {
     if (typeof window === "undefined") return {};
     const reducedMotion = prefersReducedMotion();
 
-    // One vertical markLine per distinct event-DAY (D-01), shared verbatim with
-    // the growth chart so markers are pixel-identical across both.
-    const markLineData = buildMarkLineData(dayGroups);
+    // Millo-style THUMBNAIL preview markers: one ≈40px image markPoint per
+    // distinct event-DAY, sitting in a row at the TOP band above the line, with
+    // a count badge "N" for multi-event days. Shared resolver (eventThumbnail)
+    // so a marker shows the SAME preview the FeedCard does. Replaces the old
+    // thin vertical markLine (the user kept pointing at the competitor's
+    // thumbnail markers); the 40px size also fixes the poor touch interaction.
+    const markPointData = buildMarkPointData(dayGroups, markerBand);
 
-    const markLine = {
-      symbol: "none" as const,
+    const markPoint = {
       silent: false,
       // Markers render even with an empty wishlist series (D-08).
-      data: markLineData,
+      data: markPointData,
     };
 
     // One LineChart series per visible listing. The FIRST series carries the
-    // shared markLine markers so they read against the grid regardless of which
+    // shared markPoint markers so they read against the grid regardless of which
     // lines the legend toggles off (markers are date-keyed + shared).
     const lineSeries = lines.map((line, i) => ({
       name: line.label,
@@ -287,22 +305,22 @@
       lineStyle: { width: 2, color: line.color },
       itemStyle: { color: line.color },
       data: line.points.map((p) => [p.date, p.balance]),
-      ...(i === 0 ? { markLine, markArea: { data: [] } } : {}),
+      ...(i === 0 ? { markPoint } : {}),
     }));
 
-    // D-08: no listing has points → a hidden anchor series carries the markLine
-    // so the event markers still render against the grid.
+    // D-08: no listing has points → a hidden anchor series carries the markPoint
+    // markers so the event thumbnails still render against the grid.
     const anchorSeries = {
-      name: markLineSeriesName,
+      name: markPointSeriesName,
       type: "line" as const,
       showSymbol: false,
       data: [] as [string, number][],
-      markLine,
-      markArea: { data: [] },
+      markPoint,
     };
 
     return {
       ...baseChartOptions({ reducedMotion }),
+      tooltip: markerTooltip,
       // No ECharts native legend — the custom on-brand <ChartLegend> at the page
       // drives per-listing visibility via the shared `visible` map (04-09).
       grid: { left: 8, right: 8, top: 16, bottom: 36, containLabel: true },
@@ -338,7 +356,7 @@
 
   {#if typeof window !== "undefined"}
     <div class="chart-canvas">
-      <Chart {init} {options} bind:chart onclick={onChartClick} />
+      <Chart {init} {options} onclick={onChartClick} />
     </div>
   {/if}
 

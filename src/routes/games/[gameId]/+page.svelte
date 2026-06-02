@@ -586,7 +586,6 @@
     <WishlistCorrelationChart
       seriesByListing={chartSeriesByListing}
       events={chartEvents}
-      deltaByDate={chartDeltaByDate}
       listings={chartListings}
       today={data.today}
       range={chartRange}

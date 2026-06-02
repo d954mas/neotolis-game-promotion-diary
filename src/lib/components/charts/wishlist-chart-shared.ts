@@ -13,7 +13,10 @@
 
 import { resolveKindColor } from "./chart-theme.js";
 import { isImageLikeUrl, readMediaUrlFromMetadata } from "$lib/components/feed/parts/derive-card-data.js";
+import type { MarkPointComponentOption } from "echarts/components";
 import type { EventDto } from "$lib/server/dto.js";
+
+type MarkPointDatum = NonNullable<MarkPointComponentOption["data"]>[number];
 
 /** A single Steam listing as the charts need it (id + display name / appId). */
 export type ListingLite = { id: string; name?: string | null; appId?: number };
@@ -195,8 +198,11 @@ export function eventThumbnail(event: ThumbnailEvent): string | null {
  * Client-only (resolveKindColor reads the DOM). Returns ECharts datum shapes
  * with already-resolved concrete colors.
  */
-export function buildMarkPointData(dayGroups: DayGroup[], topBandValue: number): object[] {
-  return dayGroups.map((g) => {
+export function buildMarkPointData(
+  dayGroups: DayGroup[],
+  topBandValue: number,
+): MarkPointDatum[] {
+  return dayGroups.map((g): MarkPointDatum => {
     const color = g.mixedKind ? resolveKindColor("post") : resolveKindColor(g.kind);
     const count = g.events.length;
     const thumb = eventThumbnail(g.events[0]!);
