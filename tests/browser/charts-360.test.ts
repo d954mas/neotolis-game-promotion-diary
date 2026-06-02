@@ -45,6 +45,7 @@ import {
   eventDay,
 } from "../../src/lib/components/charts/wishlist-chart-shared.js";
 import correlationChartSource from "../../src/lib/components/charts/WishlistCorrelationChart.svelte?raw";
+import growthChartSource from "../../src/lib/components/charts/WishlistGrowthChart.svelte?raw";
 import overlaySource from "../../src/lib/components/charts/ChartMarkerOverlay.svelte?raw";
 import steamModalSource from "../../src/lib/components/SteamListingDetailModal.svelte?raw";
 import { m } from "../../src/lib/paraglide/messages.js";
@@ -185,6 +186,50 @@ function mountDayModal(): { dialog: HTMLDialogElement; component: ReturnType<typ
       days: ["2026-05-15"],
       events: baseEvents,
       delta: deltaByDate.l1["2026-05-15"],
+      sourceById,
+      gameById,
+      games: baseGames,
+      onClose,
+    },
+  });
+  flushSync();
+  const dialog = host.querySelector(
+    'dialog[data-testid="event-day-modal"]',
+  ) as HTMLDialogElement | null;
+  if (!dialog) throw new Error("EventDayModal <dialog> not found");
+  return { dialog, component };
+}
+
+// 04-13: a MULTI-day cluster (e.g. 27 merged with 28). The modal groups the
+// events under per-day FeedDateGroupHeaders so both days stay distinct. The two
+// baseEvents are on 2026-05-15; add a third on 2026-05-16 to span two days.
+const multiDayEvents = [
+  ...baseEvents,
+  {
+    ...baseEvents[0]!,
+    id: "ev_3",
+    occurredAt: new Date("2026-05-16T09:00:00Z"),
+    title: "Follow-up devlog",
+    externalId: "xyz789",
+  },
+];
+
+function mountMultiDayModal(): {
+  dialog: HTMLDialogElement;
+  component: ReturnType<typeof mount>;
+} {
+  const onClose = vi.fn();
+  const sourceById = new Map(baseSources.map((s) => [s.id, s]));
+  const gameById = new Map(baseGames.map((g) => [g.id, g]));
+  const component = mount(EventDayModal, {
+    target: host,
+    props: {
+      open: true,
+      // Two days in the cluster → the modal groups by day (multi-day branch).
+      days: ["2026-05-15", "2026-05-16"],
+      events: multiDayEvents,
+      // A multi-day cluster carries NO delta (which day's delta?).
+      delta: null,
       sourceById,
       gameById,
       games: baseGames,
@@ -415,5 +460,83 @@ describe("04-12 HTML marker overlay + area/smooth/crosshair + Steam mini-chart r
     expect(baseEvents.filter((e) => inRange(eventDay(e), aprWindow)).length).toBe(0);
     // null window (All time) keeps everything.
     expect(baseEvents.filter((e) => inRange(eventDay(e), null)).length).toBe(baseEvents.length);
+  });
+});
+
+describe("04-13 unified marker language + rich tooltip + per-day modal grouping", () => {
+  it("BOTH charts mount the same HTML overlay; neither paints a canvas markLine/markPoint", () => {
+    // The unification: the growth chart's old canvas markLine is gone — it now
+    // mounts the SAME ChartMarkerOverlay the correlation chart does, so the two
+    // charts read identically (dashed line + thumbnail/icon chip).
+    for (const src of [correlationChartSource, growthChartSource]) {
+      expect(src).toContain("ChartMarkerOverlay");
+    }
+    // No canvas markers on EITHER chart (the overlay replaced them). Assert on
+    // the <script> region only — comments above describe the removal.
+    for (const src of [correlationChartSource, growthChartSource]) {
+      const script = src.slice(src.indexOf("<script"), src.indexOf("</script>"));
+      expect(script).not.toContain("markLine");
+      expect(script).not.toContain("markPoint");
+      expect(script).not.toContain("buildMarkLineData");
+    }
+    // The growth chart binds the live ECharts instance for the overlay (the
+    // overlay reads it to pixel-position the chips), like the correlation chart.
+    expect(growthChartSource).toContain("bind:chart");
+  });
+
+  it("the overlay draws a dashed vertical guide line per chip down to the plot bottom (source check)", () => {
+    // The shared marker language: a dashed guide line dropping from each chip to
+    // the x-axis. Computed from the grid coordinate-system rect (plotBottom).
+    expect(overlaySource).toContain("dashed");
+    expect(overlaySource).toContain("marker-guide");
+    expect(overlaySource).toContain("plotBottom");
+  });
+
+  it("the rich tooltip lists each cluster event with thumbnail/KindIcon + title + day", async () => {
+    await page.viewport(900, 720);
+    const { root, component } = mountChart(shortSeries);
+    await new Promise((r) => setTimeout(r, 200));
+    flushSync();
+    const chip = root.querySelector('[data-testid="chart-marker-chip"]') as HTMLElement | null;
+    expect(chip).not.toBeNull();
+    // Hover → the rich tooltip renders one ROW per event (not just a count).
+    chip!.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    flushSync();
+    const tooltip = root.querySelector('[data-testid="chart-marker-tooltip"]');
+    expect(tooltip).not.toBeNull();
+    // The two same-day events (Trailer drop + Reddit launch thread) each get a
+    // row with their title; the first has a YouTube thumbnail <img>.
+    expect(tooltip?.textContent).toContain("Trailer drop");
+    expect(tooltip?.textContent).toContain("Reddit launch thread");
+    expect(tooltip?.querySelector("img.tt-thumb")).not.toBeNull();
+    // Per-event day hint ("May 15") is present.
+    expect(tooltip?.textContent).toContain("May 15");
+    unmount(component);
+  });
+
+  it("a multi-day cluster modal groups events under per-day date headers (27 vs 28 distinct)", async () => {
+    await page.viewport(900, 720);
+    const { dialog, component } = mountMultiDayModal();
+    // Two distinct day headers (one per merged day) so each day is actionable.
+    const headers = dialog.querySelectorAll(".event-cards.grouped .date-head");
+    expect(headers.length).toBe(2);
+    // All three events still render as cards under their respective day headers.
+    const cards = dialog.querySelectorAll(".event-cards > :not(.date-head)");
+    expect(cards.length).toBe(multiDayEvents.length);
+    // A multi-day cluster shows NO delta block (ambiguous which day).
+    const stats = dialog.querySelector('[data-testid="day-stats"]');
+    expect(stats?.querySelector(".day-delta")).toBeNull();
+    unmount(component);
+  });
+
+  it("a single-day cluster modal stays a flat list with its delta (unchanged)", async () => {
+    await page.viewport(900, 720);
+    const { dialog, component } = mountDayModal();
+    // No per-day headers in the single-day case.
+    expect(dialog.querySelectorAll(".date-head").length).toBe(0);
+    // The delta block still renders for the single day.
+    const stats = dialog.querySelector('[data-testid="day-stats"]');
+    expect(stats?.querySelector(".day-delta")).not.toBeNull();
+    unmount(component);
   });
 });
