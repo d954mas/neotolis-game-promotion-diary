@@ -35,7 +35,10 @@ describe("paraglide i18n", () => {
       // Compiled output not available (test not run after build).
       // Assertion above on messages/en.json is sufficient for the unit-test gate.
     }
-  });
+    // Cold dynamic-import of the large compiled messages.js can exceed the 5s
+    // default on a cold CI runner (flaked master once, passed on rerun). Give
+    // this one test a realistic budget — it's a timeout issue, not a real fail.
+  }, 30_000);
 
   it("messages/en.json keyset matches the alphabetical contract (locale-add invariant)", () => {
     // The CONTRACT is: every locale file MUST share en.json's keyset.
