@@ -133,6 +133,47 @@ export function buildMarkLineData(dayGroups: DayGroup[]): object[] {
   });
 }
 
+/**
+ * X-axis domain for the `type:"time"` charts = the UNION of every wishlist
+ * point date (across ALL listings, NOT the visibility-filtered subset) and
+ * every event day, clamped to the selected range.
+ *
+ * Why: ECharts auto-fits a `type:"time"` axis to the SERIES data (the wishlist
+ * points). When a game's wishlist CSV covers only a few recent days but its
+ * events span weeks earlier, every event marker lands LEFT of the auto domain
+ * and renders off-screen. Forcing min/max to the union of points ∪ events keeps
+ * the markers on-canvas. Derived from ALL listings' points so toggling a
+ * listing off never collapses the axis.
+ *
+ * - `range` set → `{ min: isoDay(from), max: isoDay(to) }` (the user's window
+ *   is authoritative; markers outside it are already filtered by buildDayGroups).
+ * - else, non-empty list → `{ min: earliest, max: latest+1d }` (pad the max one
+ *   day so the last marker isn't flush on the right edge).
+ * - else (no points, no events) → null (let ECharts auto-fit).
+ *
+ * Both charts call this with the SAME inputs so their axes — and therefore their
+ * markers — line up.
+ */
+export function axisDomain(
+  allPointDates: string[],
+  dayGroups: { date: string }[],
+  range: { from: Date; to: Date } | null,
+): { min: string; max: string } | null {
+  if (range) return { min: isoDay(range.from), max: isoDay(range.to) };
+  const dates = [...allPointDates, ...dayGroups.map((g) => g.date)];
+  if (dates.length === 0) return null;
+  let min = dates[0]!;
+  let max = dates[0]!;
+  for (const d of dates) {
+    if (d < min) min = d;
+    if (d > max) max = d;
+  }
+  // Pad the max by one day so the rightmost marker isn't on the axis edge.
+  const maxDate = new Date(`${max}T00:00:00`);
+  maxDate.setDate(maxDate.getDate() + 1);
+  return { min, max: isoDay(maxDate) };
+}
+
 /** The display label for a listing (name → "Steam {appId}" fallback handled by caller). */
 export function listingLabel(
   l: ListingLite,

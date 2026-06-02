@@ -72,6 +72,7 @@
     inRange,
     buildDayGroups,
     buildMarkLineData,
+    axisDomain,
     listingLabel as buildListingLabel,
     type ListingLite,
   } from "./wishlist-chart-shared.js";
@@ -157,6 +158,21 @@
 
   // ── Event-day markers (shared with the growth chart) ─────────────────
   const dayGroups = $derived(buildDayGroups(events, range));
+
+  // X-axis domain = union of ALL listings' wishlist-point dates (NOT the
+  // visibility-filtered `lines` — toggling a listing off must never collapse
+  // the axis) ∪ event days, clamped to the range. This is what keeps the event
+  // markers on-canvas when the wishlist span is shorter than the event span.
+  const allPointDates = $derived.by((): string[] => {
+    const out: string[] = [];
+    for (const id of Object.keys(seriesByListing)) {
+      for (const p of seriesByListing[id]!.points) {
+        if (inRange(p.date, range)) out.push(p.date);
+      }
+    }
+    return out;
+  });
+  const domain = $derived(axisDomain(allPointDates, dayGroups, range));
 
   // Marker count for the test hook (number of DISTINCT event-days rendered).
   const markerCount = $derived(dayGroups.length);
@@ -298,6 +314,9 @@
         // out instead of overcrowding; ECharts spaces the rest.
         splitNumber: 4,
         axisLabel: { hideOverlap: true },
+        // Force the domain to span points ∪ events so off-window event markers
+        // render (the regression: ECharts auto-fits the axis to the series).
+        ...(domain ? { min: domain.min, max: domain.max } : {}),
       },
       yAxis: {
         type: "value" as const,

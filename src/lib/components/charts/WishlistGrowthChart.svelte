@@ -49,6 +49,7 @@
     inRange,
     buildDayGroups,
     buildMarkLineData,
+    axisDomain,
     listingLabel as buildListingLabel,
     type ListingLite,
   } from "./wishlist-chart-shared.js";
@@ -130,6 +131,19 @@
   // ── Event-day markers (shared with the correlation chart) ────────────
   const dayGroups = $derived(buildDayGroups(events, range));
 
+  // SAME x-axis domain as the correlation chart so markers line up across the
+  // two: union of ALL listings' point dates ∪ event days, clamped to range.
+  const allPointDates = $derived.by((): string[] => {
+    const out: string[] = [];
+    for (const id of Object.keys(seriesByListing)) {
+      for (const p of seriesByListing[id]!.points) {
+        if (inRange(p.date, range)) out.push(p.date);
+      }
+    }
+    return out;
+  });
+  const domain = $derived(axisDomain(allPointDates, dayGroups, range));
+
   // ── Marker → panel (mirror the correlation chart's click-to-panel) ───
   let selectedDay = $state<string | null>(null);
   const selectedGroup = $derived(
@@ -195,6 +209,9 @@
         type: "time" as const,
         splitNumber: 4,
         axisLabel: { hideOverlap: true },
+        // Same domain as the line chart so markers align across both (and
+        // off-window event markers render).
+        ...(domain ? { min: domain.min, max: domain.max } : {}),
       },
       yAxis: {
         type: "value" as const,
