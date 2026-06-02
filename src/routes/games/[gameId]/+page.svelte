@@ -50,7 +50,7 @@
   import WishlistGrowthChart from "$lib/components/charts/WishlistGrowthChart.svelte";
   import EventDayModal from "$lib/components/charts/EventDayModal.svelte";
   import ChartLegend from "$lib/components/charts/ChartLegend.svelte";
-  import { listingLabel, eventDay } from "$lib/components/charts/wishlist-chart-shared.js";
+  import { listingLabel, eventDay, inRange } from "$lib/components/charts/wishlist-chart-shared.js";
   import DateRangeRow from "$lib/components/feed/DateRangeRow.svelte";
   import { startOfDay, dateRangeWindow, parseEventDate } from "$lib/feed/date-range.js";
   import type { DateRangeFilter } from "$lib/feed/url-state.js";
@@ -135,8 +135,6 @@
   // Stores h2 toggles it; the dialog's onSuccess closes it + invalidateAll().
   let addStoreOpen = $state(false);
 
-  const groupedEvents = $derived(groupEventsByDate(events));
-
   // VIZ-02 == VIZ-03 (D-12): ONE correlation chart for this game. The
   // wishlist data is per-Steam-listing; the chart renders ONE line per active
   // listing (decision: separate line per store, NOT a summed line — Steam +
@@ -195,6 +193,24 @@
     }
     return dateRangeWindow(chartDateRange.preset, chartTodayDate);
   });
+  // The chart's selected window ({from,to}|null) — the SAME value the charts
+  // consume. Aliased for the feed-range sync below so the read site reads as
+  // intent.
+  const chartRangeWindow = $derived(chartRange);
+
+  // The events feed BELOW the charts respects the chart's date range: filter
+  // the page's events by the SAME window the charts use (client-side on the
+  // already-loaded events — no loader/service change), then group by date.
+  // "All time" (null window) shows everything. Reuses inRange/eventDay so the
+  // feed-list filter matches the chart's marker filter exactly (a day with a
+  // marker on the chart has its events in the feed and vice-versa).
+  const feedEvents = $derived(
+    chartRangeWindow === null
+      ? events
+      : events.filter((e) => inRange(eventDay(e), chartRangeWindow)),
+  );
+  const groupedEvents = $derived(groupEventsByDate(feedEvents));
+
   // listingId → shown. Absent / true = shown; false = legend-toggled-off.
   let chartVisible = $state<Record<string, boolean>>({});
   function toggleListing(listingId: string, shown: boolean): void {
@@ -634,6 +650,12 @@
     </header>
 
     {#if events.length === 0}
+      <EmptyState
+        heading={m.games_detail_events_empty()}
+        body={m.games_detail_events_empty_body()}
+      />
+    {:else if feedEvents.length === 0}
+      <!-- The game HAS events, but the chart's date range hid all of them. -->
       <EmptyState
         heading={m.games_detail_events_empty()}
         body={m.games_detail_events_empty_body()}
