@@ -925,11 +925,66 @@ describe("bulk events cross-tenant (D-13)", () => {
     expect(body.affected_count).toBe(1);
   });
 
-  // Wave 0 scaffold (Nyquist invariant): Plan 04-03 activates this once the
-  // wishlist series/delta services land. wishlist_snapshots is TENANT-scoped
-  // (carries user_id) — a getWishlistSeries / computeWishlistDelta call with
-  // another tenant's listingId must return an empty series / 404, never leak.
-  it.skip(
-    "getWishlistSeries / computeWishlistDelta cross-tenant listingId → empty/404 (Plan 04-03)",
-  );
+  // Plan 04-03: wishlist_snapshots is TENANT-scoped (carries user_id). A
+  // getWishlistSeries / computeWishlistDelta call with ANOTHER tenant's
+  // listingId must return an empty series / null deltas, never leak user B's
+  // wishlist numbers (the 404 path — no row matches the userId filter).
+  it("getWishlistSeries / computeWishlistDelta cross-tenant listingId → empty/null (Plan 04-03)", async () => {
+    const { vi } = await import("vitest");
+    const { createGame } = await import("../../src/lib/server/services/games.js");
+    const { addSteamListing } =
+      await import("../../src/lib/server/services/game-steam-listings.js");
+    const SteamApi = await import("../../src/lib/server/integrations/steam-api.js");
+    const { getWishlistSeries, computeWishlistDelta } =
+      await import("../../src/lib/server/services/wishlist-snapshots.js");
+    const { wishlistSnapshots } =
+      await import("../../src/lib/server/db/schema/wishlist-snapshots.js");
+
+    // Mock fetchSteamAppDetails so addSteamListing doesn't hit Steam.
+    vi.spyOn(SteamApi, "fetchSteamAppDetails").mockResolvedValue(null);
+
+    const userA = await seedUserDirectly({ email: "wlA@test.local" });
+    const userB = await seedUserDirectly({ email: "wlB@test.local" });
+
+    // User B owns a listing with real wishlist history.
+    const gameB = await createGame(userB.id, { title: "B's Game" }, "127.0.0.1");
+    const listingB = await addSteamListing(userB.id, { gameId: gameB.id, appId: 900 }, "127.0.0.1");
+    await db.insert(wishlistSnapshots).values([
+      {
+        userId: userB.id,
+        listingId: listingB.id,
+        date: "2026-05-01",
+        adds: 0,
+        deletes: 0,
+        purchasesAndActivations: 0,
+        gifts: 0,
+        balance: 500,
+        source: "csv",
+      },
+      {
+        userId: userB.id,
+        listingId: listingB.id,
+        date: "2026-05-08",
+        adds: 0,
+        deletes: 0,
+        purchasesAndActivations: 0,
+        gifts: 0,
+        balance: 650,
+        source: "csv",
+      },
+    ]);
+
+    // User A asks for B's listingId — the userId filter yields ZERO rows.
+    const seriesForA = await getWishlistSeries(userA.id, listingB.id);
+    expect(seriesForA).toEqual({ points: [], lastImportedAt: null });
+
+    const deltaForA = await computeWishlistDelta(userA.id, listingB.id, "2026-05-01");
+    expect(deltaForA.delta24h).toBeNull();
+    expect(deltaForA.delta7d).toBeNull();
+
+    // Sanity: B (the owner) DOES see the data — proves the empty result above
+    // is the tenant filter, not an empty table.
+    const seriesForB = await getWishlistSeries(userB.id, listingB.id);
+    expect(seriesForB.points).toHaveLength(2);
+  });
 });
