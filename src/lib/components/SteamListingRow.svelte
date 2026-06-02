@@ -17,6 +17,7 @@
   // `name`) or rows added while Steam was unreachable at INSERT time.
 
   import { m } from "$lib/paraglide/messages.js";
+  import { relativeDate } from "$lib/util/relative-date.js";
   import SteamListingDetailModal from "./SteamListingDetailModal.svelte";
   import WishlistImport from "./WishlistImport.svelte";
   import type { WishlistSummaryDto } from "$lib/server/dto.js";
@@ -60,21 +61,28 @@
   const displayName = $derived(listing.name ?? m.steam_listing_unnamed());
   const steamUrl = $derived(`https://store.steampowered.com/app/${listing.appId}/`);
 
-  // Compact wishlist line shows the balance + the DATA coverage (first → last
-  // day with data), NOT the import timestamp — "updated {ago}" reflected when
-  // the file was uploaded, which misleads (importing yesterday's data read
-  // "just now"). Single-day imports collapse to one date.
-  const compactWishlist = $derived.by(() => {
-    if (!summary || summary.recentDays.length === 0) return null;
-    const balance = summary.balance.toLocaleString("en");
-    return summary.firstDate === summary.lastDate
-      ? m.steam_listing_wishlist_compact_day({ balance, date: summary.lastDate })
-      : m.steam_listing_wishlist_compact({
-          balance,
-          from: summary.firstDate,
-          to: summary.lastDate,
-        });
-  });
+  // Compact wishlist line: balance + how RECENT the data is, as a human
+  // relative label ("as of yesterday") rather than a raw ISO date or the
+  // import timestamp (which misled — importing yesterday's data read "just
+  // now"). The exact first→last range lives in the Details modal + the line's
+  // title tooltip.
+  const compactWishlist = $derived(
+    summary && summary.recentDays.length > 0
+      ? m.steam_listing_wishlist_compact({
+          balance: summary.balance.toLocaleString("en"),
+          when: relativeDate(summary.lastDate),
+        })
+      : null,
+  );
+
+  // Exact coverage for the line's hover title: a single day, or first → last.
+  const coverageTitle = $derived(
+    summary && summary.recentDays.length > 0
+      ? summary.firstDate === summary.lastDate
+        ? summary.firstDate
+        : `${summary.firstDate} → ${summary.lastDate}`
+      : null,
+  );
 
   let detailOpen = $state(false);
 
@@ -237,7 +245,12 @@
          propagation so the inner import button / error never bubble to the
          card→modal open. -->
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-    <div class="wishlist-line" class:muted={!compactWishlist} onclick={(e) => e.stopPropagation()}>
+    <div
+      class="wishlist-line"
+      class:muted={!compactWishlist}
+      title={coverageTitle}
+      onclick={(e) => e.stopPropagation()}
+    >
       <span class="wishlist-text">
         {compactWishlist ?? m.steam_listing_wishlist_recommendation()}
       </span>
