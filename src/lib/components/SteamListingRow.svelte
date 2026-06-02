@@ -19,7 +19,6 @@
   import { m } from "$lib/paraglide/messages.js";
   import SteamListingDetailModal from "./SteamListingDetailModal.svelte";
   import WishlistImport from "./WishlistImport.svelte";
-  import { wishlistAgo } from "$lib/util/wishlist-ago.js";
   import type { WishlistSummaryDto } from "$lib/server/dto.js";
 
   type Listing = {
@@ -61,16 +60,21 @@
   const displayName = $derived(listing.name ?? m.steam_listing_unnamed());
   const steamUrl = $derived(`https://store.steampowered.com/app/${listing.appId}/`);
 
-  // Compact wishlist line uses the shared wishlistAgo bucketing helper
-  // (just-now / N minutes / N hours / N days), routed through m.* (i18n).
-  const compactWishlist = $derived(
-    summary && summary.recentDays.length > 0
-      ? m.steam_listing_wishlist_compact({
-          balance: summary.balance.toLocaleString("en"),
-          ago: wishlistAgo(summary.recentDays[0]!.updatedAt),
-        })
-      : null,
-  );
+  // Compact wishlist line shows the balance + the DATA coverage (first → last
+  // day with data), NOT the import timestamp — "updated {ago}" reflected when
+  // the file was uploaded, which misleads (importing yesterday's data read
+  // "just now"). Single-day imports collapse to one date.
+  const compactWishlist = $derived.by(() => {
+    if (!summary || summary.recentDays.length === 0) return null;
+    const balance = summary.balance.toLocaleString("en");
+    return summary.firstDate === summary.lastDate
+      ? m.steam_listing_wishlist_compact_day({ balance, date: summary.lastDate })
+      : m.steam_listing_wishlist_compact({
+          balance,
+          from: summary.firstDate,
+          to: summary.lastDate,
+        });
+  });
 
   let detailOpen = $state(false);
 

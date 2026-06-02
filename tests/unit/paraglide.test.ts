@@ -687,6 +687,7 @@ describe("paraglide i18n", () => {
       "steam_listing_trash_heading",
       "steam_listing_unnamed",
       "steam_listing_wishlist_compact",
+      "steam_listing_wishlist_compact_day",
       "steam_listing_wishlist_recommendation",
       "stores_add_cta",
       "stores_empty",
