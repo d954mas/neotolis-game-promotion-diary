@@ -12,6 +12,7 @@
 // builder, never under SSR.
 
 import { resolveKindColor } from "./chart-theme.js";
+import { isImageLikeUrl, readMediaUrlFromMetadata } from "$lib/components/feed/parts/derive-card-data.js";
 import type { EventDto } from "$lib/server/dto.js";
 
 /** A single Steam listing as the charts need it (id + display name / appId). */
@@ -123,6 +124,99 @@ export function buildMarkLineData(dayGroups: DayGroup[]): object[] {
               show: true,
               position: "start" as const,
               distance: 4,
+              formatter: String(count),
+              color: "#fff",
+              backgroundColor: color,
+              padding: [2, 5],
+              borderRadius: 8,
+              fontSize: 10,
+              fontWeight: "bold" as const,
+            }
+          : { show: false },
+    };
+  });
+}
+
+/**
+ * The SINGLE source of the event→thumbnail URL logic for the charts. Mirrors
+ * `deriveThumbnailUrl` (derive-card-data.ts) so a marker shows the SAME preview
+ * image the FeedCard does — but takes a structurally-typed input because the
+ * chart consumes EventDto-shaped rows that the games loader has run through
+ * `adapter.enrichFeedDtos` (so `redditEnrichment.linkUrl` is present at runtime
+ * even though the static EventDto type doesn't declare it).
+ *
+ *   - YouTube (`kind==="youtube_video"` + externalId) → the intrinsic
+ *     `img.youtube.com/vi/{externalId}/mqdefault.jpg` (no enrichment needed —
+ *     externalId IS the video id, part of the canonical URL).
+ *   - Reddit → the enrichment `linkUrl` when it's image-like, else the
+ *     `metadata.media.url` snapshot (same chain the RedditFeedCard renders).
+ *   - everything else → null (the marker falls back to a kind-colored
+ *     placeholder symbol).
+ */
+type ThumbnailEvent = {
+  kind: string;
+  externalId: string | null;
+  metadata: unknown;
+  redditEnrichment?: { linkUrl?: string | null } | null;
+};
+
+export function eventThumbnail(event: ThumbnailEvent): string | null {
+  if (event.kind === "youtube_video") {
+    if (!event.externalId) return null;
+    return `https://img.youtube.com/vi/${event.externalId}/mqdefault.jpg`;
+  }
+  if (event.kind === "reddit_post") {
+    const link = event.redditEnrichment?.linkUrl ?? null;
+    if (link && isImageLikeUrl(link)) return link;
+    return readMediaUrlFromMetadata(event.metadata);
+  }
+  if (event.kind === "twitter_post" || event.kind === "telegram_post") {
+    return readMediaUrlFromMetadata(event.metadata);
+  }
+  return null;
+}
+
+/**
+ * Build the ECharts `markPoint.data` array — one ≈40px THUMBNAIL image marker
+ * per distinct event-day (Millo-style preview markers, VIZ-03/VIZ-04). Each
+ * marker:
+ *   - sits at `coord: [day, topBandValue]` — a fixed top band so the thumbnails
+ *     sit in a row ABOVE the wishlist line, not on it (the caller passes the
+ *     yAxis-max-ish band value so they hug the top of the grid).
+ *   - uses `symbol: 'image://<url>'` when the representative event has a
+ *     thumbnail, else a kind-colored rounded placeholder (`circle`, resolved via
+ *     getComputedStyle — never a CSS var on the canvas).
+ *   - is a 40×40 tap target (fixes the poor touch interaction — VIZ-04).
+ *   - carries `name = day` so the chart's markPoint-click handler resolves the
+ *     day → onSelectDay(day) → the page's EventDayModal.
+ *   - draws a count badge "N" via the markPoint `label` when the day has >1
+ *     event (D-04 same-day collapse).
+ *
+ * Client-only (resolveKindColor reads the DOM). Returns ECharts datum shapes
+ * with already-resolved concrete colors.
+ */
+export function buildMarkPointData(dayGroups: DayGroup[], topBandValue: number): object[] {
+  return dayGroups.map((g) => {
+    const color = g.mixedKind ? resolveKindColor("post") : resolveKindColor(g.kind);
+    const count = g.events.length;
+    const thumb = eventThumbnail(g.events[0]!);
+    return {
+      name: g.date,
+      value: g.date,
+      coord: [g.date, topBandValue],
+      symbol: thumb ? `image://${thumb}` : "circle",
+      symbolSize: [40, 40],
+      // Placeholder (no thumb) → a kind-colored disc with a thin ring so it
+      // reads as an event marker; image markers keep their native pixels.
+      itemStyle: thumb
+        ? { borderColor: color, borderWidth: 2 }
+        : { color, borderColor: color, borderWidth: 1 },
+      label:
+        count > 1
+          ? {
+              show: true,
+              position: "top" as const,
+              distance: 2,
               formatter: String(count),
               color: "#fff",
               backgroundColor: color,
