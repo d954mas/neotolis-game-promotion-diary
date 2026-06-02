@@ -50,12 +50,18 @@ export async function youtubeFetchEventMetricSeries(
     {
       metricKey: "view_count",
       labelKey: "chart_metric_views",
-      points: rows.rows.map((r) => ({ polledAt: toIso(r.polled_at), value: Number(r.view_count ?? 0) })),
+      points: rows.rows.map((r) => ({
+        polledAt: toIso(r.polled_at),
+        value: Number(r.view_count ?? 0),
+      })),
     },
     {
       metricKey: "like_count",
       labelKey: "chart_metric_likes",
-      points: rows.rows.map((r) => ({ polledAt: toIso(r.polled_at), value: Number(r.like_count ?? 0) })),
+      points: rows.rows.map((r) => ({
+        polledAt: toIso(r.polled_at),
+        value: Number(r.like_count ?? 0),
+      })),
     },
     {
       metricKey: "comment_count",

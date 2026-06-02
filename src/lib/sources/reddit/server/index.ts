@@ -61,6 +61,7 @@ import {
   FALLTHROUGH_ORDER,
 } from "./handlers/worker-tick.js";
 import { redditParsePostUrl, redditParseSourceUrl } from "./url.js";
+import { redditFetchEventMetricSeries } from "./metric-series.js";
 import { isRedditConfigured, assertRedditConfigured } from "./credentials.js";
 import { AdapterError } from "$lib/sources/errors.js";
 import { AppError } from "$lib/server/services/errors.js";
@@ -860,6 +861,7 @@ export const redditAdapter: SourceAdapter & typeof redditAdapterCore = {
   },
   validateEventInput,
   fetchPollStateMap,
+  fetchEventMetricSeries: redditFetchEventMetricSeries,
 };
 
 // Re-export the Reddit-only observability helpers so /admin's Reddit
