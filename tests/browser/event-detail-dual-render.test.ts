@@ -46,6 +46,32 @@ const baseEvent = {
   channelTitle: "Test Channel",
 };
 
+// VIZ-01 (Plan 04-04): adapter-driven per-event snapshot series. A 3-point
+// series exercises the line branch (data-low-data="false"); a 2-point series
+// exercises the D-07 dots+caption branch (data-low-data="true").
+const historySeries = [
+  {
+    metricKey: "view_count",
+    labelKey: "chart_metric_views",
+    points: [
+      { polledAt: "2026-05-14T08:00:00.000Z", value: 100 },
+      { polledAt: "2026-05-15T08:00:00.000Z", value: 250 },
+      { polledAt: "2026-05-16T08:00:00.000Z", value: 480 },
+    ],
+  },
+];
+
+const lowDataSeries = [
+  {
+    metricKey: "view_count",
+    labelKey: "chart_metric_views",
+    points: [
+      { polledAt: "2026-05-14T08:00:00.000Z", value: 100 },
+      { polledAt: "2026-05-15T08:00:00.000Z", value: 250 },
+    ],
+  },
+];
+
 const baseGames = [
   {
     id: "g1",
@@ -280,5 +306,34 @@ describe("EventDetailContent dual-render parity (Wave 2 Plan 09 + Wave 3 Plan 10
     modal.dialog.dispatchEvent(cancelEvt);
     expect(modal.spies.onClose).toHaveBeenCalledTimes(1);
     unmount(modal.component);
+  });
+
+  it("Plan 04-04 (VIZ-01): EventHistoryChart renders in modal AND bare for an event with snapshot history (dual-render)", () => {
+    const bare = mountBare({ metricSeries: historySeries });
+    const modal = mountInModal({ metricSeries: historySeries });
+    const bareChart = bare.root.querySelector('[data-testid="event-history-chart"]');
+    const modalChart = modal.root.querySelector('[data-testid="event-history-chart"]');
+    // The chart wrapper is present on BOTH surfaces — the single mount in
+    // the shared EventDetailContent covers the modal and the route.
+    expect(bareChart).not.toBeNull();
+    expect(modalChart).not.toBeNull();
+    // >=3 points → line branch, not the low-data dots branch.
+    expect(bareChart?.getAttribute("data-low-data")).toBe("false");
+    expect(modalChart?.getAttribute("data-low-data")).toBe("false");
+    unmount(bare.component);
+    unmount(modal.component);
+  });
+
+  it("Plan 04-04 (VIZ-01 / D-07): <3 snapshots sets data-low-data and renders the low-data caption, not a 2-point line", () => {
+    const bare = mountBare({ metricSeries: lowDataSeries });
+    const chart = bare.root.querySelector('[data-testid="event-history-chart"]');
+    expect(chart).not.toBeNull();
+    expect(chart?.getAttribute("data-low-data")).toBe("true");
+    // The D-07 caption text must render (asserted structurally — ECharts
+    // paints to canvas and is not pixel-introspectable).
+    const caption = chart?.querySelector(".chart-low-data-caption");
+    expect(caption).not.toBeNull();
+    expect(caption?.textContent?.trim().length).toBeGreaterThan(0);
+    unmount(bare.component);
   });
 });
