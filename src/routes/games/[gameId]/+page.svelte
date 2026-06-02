@@ -48,16 +48,15 @@
   import SteamListingRow from "$lib/components/SteamListingRow.svelte";
   import WishlistCorrelationChart from "$lib/components/charts/WishlistCorrelationChart.svelte";
   import WishlistGrowthChart from "$lib/components/charts/WishlistGrowthChart.svelte";
+  import EventDayModal from "$lib/components/charts/EventDayModal.svelte";
   import ChartLegend from "$lib/components/charts/ChartLegend.svelte";
-  import { listingLabel } from "$lib/components/charts/wishlist-chart-shared.js";
+  import { listingLabel, eventDay } from "$lib/components/charts/wishlist-chart-shared.js";
   import DateRangePicker from "$lib/components/feed/DateRangePicker.svelte";
   import { startOfDay, fmtMonthDay } from "$lib/feed/date-range.js";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
   import type {
     GameSteamListingDto,
     EventDto,
-    GameDto,
-    DataSourceDto,
     WishlistSeries,
     WishlistDelta,
   } from "$lib/server/dto.js";
@@ -171,10 +170,8 @@
       })),
   );
   // The loader returns full EventDtos; the page's EventDtoLocal is a subset
-  // for the FeedCard renderer. The chart consumes the full DTOs.
+  // for the FeedCard renderer. The chart consumes the full DTOs for its markers.
   const chartEvents = $derived(data.events as EventDto[]);
-  const chartGames = $derived(data.games as GameDto[]);
-  const chartSources = $derived(data.sources as DataSourceDto[]);
 
   // ── Shared chart state (04-08) ───────────────────────────────────────
   // The date-range picker and the per-listing legend selection are OWNED HERE
@@ -188,6 +185,29 @@
   function toggleListing(listingId: string, shown: boolean): void {
     chartVisible = { ...chartVisible, [listingId]: shown };
   }
+
+  // ── Day-detail modal (04-10) ─────────────────────────────────────────
+  // A marker click on EITHER chart emits the day up here; the PAGE owns the
+  // centered EventDayModal (it has the feed data — events + source/game maps).
+  // Replaces the per-chart EventMarkerPanel side drawer.
+  let selectedChartDay = $state<string | null>(null);
+  // That day's events — the page's FeedCard-shaped `events` filtered to the
+  // selected day (local-tz YYYY-MM-DD, matching the marker day keys).
+  const selectedDayEvents = $derived.by((): EventDtoLocal[] => {
+    if (!selectedChartDay) return [];
+    return events.filter((e) => eventDay(e) === selectedChartDay);
+  });
+  // The day-level delta (D-05): the first VISIBLE listing's delta for that day,
+  // falling back across visible listings (mirrors the charts' selection logic).
+  const selectedDayDelta = $derived.by((): WishlistDelta | null => {
+    if (!selectedChartDay) return null;
+    for (const l of chartListings) {
+      if (chartVisible[l.id] === false) continue;
+      const d = chartDeltaByDate[l.id]?.[selectedChartDay];
+      if (d) return d;
+    }
+    return null;
+  });
 
   // DateRangePicker anchored-popover plumbing (lifted from the chart).
   let rangePickerOpen = $state(false);
@@ -539,8 +559,8 @@
 
   <!--
   VIZ-02 == VIZ-03 (D-12): the headline wishlist-correlation chart. ONE
-  component — the wishlist daily line + kind-colored event markers + the
-  click-to-drawer marker panel. Mounted once, between Stores and Events.
+  component — the wishlist daily line + kind-colored event markers; a marker
+  click opens the page-owned centered EventDayModal. Between Stores and Events.
 -->
   <section class="correlation" id="section-correlation">
     <header class="section-header">
@@ -600,11 +620,10 @@
       events={chartEvents}
       deltaByDate={chartDeltaByDate}
       listings={chartListings}
-      sources={chartSources}
-      games={chartGames}
       today={data.today}
       range={chartRange}
       visible={chartVisible}
+      onSelectDay={(d) => (selectedChartDay = d)}
     />
 
     <!-- Second wishlist chart (04-08): DAILY net change (prior day's cumulative
@@ -616,14 +635,28 @@
         seriesByListing={chartSeriesByListing}
         events={chartEvents}
         listings={chartListings}
-        sources={chartSources}
-        games={chartGames}
         today={data.today}
         range={chartRange}
         visible={chartVisible}
+        onSelectDay={(d) => (selectedChartDay = d)}
       />
     </div>
   </section>
+
+  <!-- Day-detail modal (04-10) — a CENTERED modal owned by the page (it has the
+       feed data). A marker click on either chart sets selectedChartDay; the
+       modal shows that day's stats header + FeedCard rows. Replaces the old
+       per-chart EventMarkerPanel side drawer. -->
+  <EventDayModal
+    open={!!selectedChartDay}
+    day={selectedChartDay}
+    events={selectedDayEvents}
+    delta={selectedDayDelta}
+    {sourceById}
+    {gameById}
+    games={allGames}
+    onClose={() => (selectedChartDay = null)}
+  />
 
   <!-- Shared DateRangePicker — anchored popover above the charts. Mounted once,
        drives BOTH charts through `chartRange`. -->

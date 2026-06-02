@@ -63,8 +63,11 @@ export function inRange(dateStr: string, range: { from: Date; to: Date } | null)
   return dateStr >= isoDay(range.from) && dateStr <= isoDay(range.to);
 }
 
-/** Truncate an event's occurredAt to its YYYY-MM-DD day (markers are day-level). */
-export function eventDay(e: EventDto): string {
+/** Truncate an event's occurredAt to its YYYY-MM-DD day (markers are day-level).
+ *  Accepts any event-like value with an `occurredAt` so both the full EventDto
+ *  (chart series) and the page's FeedCard-shaped event subset can resolve the
+ *  SAME day key (the page filters its events by this to populate the modal). */
+export function eventDay(e: { occurredAt: Date | string }): string {
   const d = typeof e.occurredAt === "string" ? new Date(e.occurredAt) : e.occurredAt;
   return d.toISOString().slice(0, 10);
 }

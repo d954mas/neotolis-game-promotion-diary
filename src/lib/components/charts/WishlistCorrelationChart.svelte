@@ -22,8 +22,8 @@
   //     chart grid and stays visible regardless of which lines are toggled.
   //   - markArea.data = the highlighted post-event window (windowFrom..windowTo)
   //     set on marker click — the D-03 "event → effect" segment.
-  //   - click a marker → resolve the day → open <EventMarkerPanel> with the
-  //     day's events + that day's delta (D-05 day-level).
+  //   - click a marker → emit onSelectDay(day) up to the PAGE, which owns the
+  //     centered EventDayModal (day stats + the day's events as FeedCards).
   //
   // Date-range + legend (04-08 / 04-09): the date-range picker and the
   // per-listing legend selection are OWNED BY THE PAGE so a sibling
@@ -63,7 +63,6 @@
   import { CanvasRenderer } from "echarts/renderers";
   import type { EChartsType } from "echarts/core";
   import type { ECMouseEvent } from "svelte-echarts";
-  import EventMarkerPanel from "./EventMarkerPanel.svelte";
   import { m } from "$lib/paraglide/messages.js";
   import { abbreviate } from "./abbreviate.js";
   import { baseChartOptions, prefersReducedMotion } from "./chart-theme.js";
@@ -76,7 +75,7 @@
     listingLabel as buildListingLabel,
     type ListingLite,
   } from "./wishlist-chart-shared.js";
-  import type { EventDto, GameDto, DataSourceDto, WishlistSeries, WishlistDelta } from "$lib/server/dto.js";
+  import type { EventDto, WishlistSeries, WishlistDelta } from "$lib/server/dto.js";
 
   use([
     LineChart,
@@ -92,11 +91,10 @@
     events,
     deltaByDate,
     listings,
-    sources,
-    games,
     today,
     range,
     visible,
+    onSelectDay,
   }: {
     /** One wishlist series per active listing, keyed by listing id. */
     seriesByListing: Record<string, WishlistSeries>;
@@ -105,8 +103,6 @@
     deltaByDate: Record<string, Record<string, WishlistDelta>>;
     /** Active listings (id + display name / appId) — drives line labels + order. */
     listings: ListingLite[];
-    sources: DataSourceDto[];
-    games: GameDto[];
     /** Server-chosen "now" ISO instant for the honest D-13 caption + range guard. */
     today: string;
     /** Shared date-range (owned by the page) — null = all time. CONTROLLED. */
@@ -116,6 +112,8 @@
      *  by it (no ECharts legend round-trip), which is what fixes the re-enable
      *  bug. The custom <ChartLegend> at the page flips entries in this map. */
     visible: Record<string, boolean>;
+    /** Marker click → the page (which owns the day-detail modal + feed data). */
+    onSelectDay: (day: string) => void;
   } = $props();
 
   function listingLabel(l: ListingLite): string {
@@ -191,14 +189,14 @@
     return Math.max(0, Math.floor((now - last) / 3_600_000));
   });
 
-  // ── Selected day → panel + markArea (D-02/D-03) ──────────────────────
+  // ── Selected day → markArea highlight (D-03) ─────────────────────────
+  // The DAY-DETAIL surface now lives at the PAGE (a centered EventDayModal):
+  // a marker click emits onSelectDay(day). This local `selectedDay` is kept
+  // ONLY to drive the on-chart markArea highlight (the D-03 post-event window).
   let selectedDay = $state<string | null>(null);
-  const selectedGroup = $derived(
-    selectedDay ? (dayGroups.find((g) => g.date === selectedDay) ?? null) : null,
-  );
   // The delta is a DAY attribute (D-05). With multiple listings it is per
-  // listing; surface the first VISIBLE listing's delta for that day (the panel
-  // shows one day-level delta). Falls back across visible listings.
+  // listing; surface the first VISIBLE listing's delta for that day. Falls back
+  // across visible listings. Drives the markArea window bounds.
   const selectedDelta = $derived.by((): WishlistDelta | null => {
     if (!selectedDay) return null;
     for (const line of lines) {
@@ -212,17 +210,17 @@
   // marker is selected (the highlighted post-event window).
   let chart = $state<EChartsType | undefined>();
 
-  function closePanel(): void {
-    selectedDay = null;
-  }
-
-  // markLine click → resolve the clicked day → open the panel. ECharts fires
-  // the chart-level 'click' with componentType 'markLine'; the marker carries
-  // its day in `value`/`name` (we set name = date on each markLine datum).
+  // markLine click → emit the day up to the page (which opens the modal) AND
+  // set the local highlight for the markArea. ECharts fires the chart-level
+  // 'click' with componentType 'markLine'; the marker carries its day in
+  // `name` (we set name = date on each markLine datum).
   function onChartClick(e: ECMouseEvent): void {
     if (e.componentType !== "markLine") return;
     const day = (e.data as { name?: string } | undefined)?.name;
-    if (typeof day === "string") selectedDay = day;
+    if (typeof day === "string") {
+      selectedDay = day;
+      onSelectDay(day);
+    }
   }
 
   // markLine attaches to the FIRST visible line (or the hidden anchor series
@@ -355,16 +353,6 @@
     <p class="updated-caption">{m.viz_wishlist_updated_ago({ hours: updatedHoursAgo })}</p>
   {/if}
 </div>
-
-{#if selectedGroup}
-  <EventMarkerPanel
-    dayEvents={selectedGroup.events}
-    delta={selectedDelta}
-    {sources}
-    {games}
-    onClose={closePanel}
-  />
-{/if}
 
 <style>
   .wishlist-correlation-chart {

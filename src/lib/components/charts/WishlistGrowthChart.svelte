@@ -40,7 +40,6 @@
   } from "echarts/components";
   import { CanvasRenderer } from "echarts/renderers";
   import type { ECMouseEvent } from "svelte-echarts";
-  import EventMarkerPanel from "./EventMarkerPanel.svelte";
   import { m } from "$lib/paraglide/messages.js";
   import { abbreviate } from "./abbreviate.js";
   import { baseChartOptions, prefersReducedMotion } from "./chart-theme.js";
@@ -53,7 +52,7 @@
     listingLabel as buildListingLabel,
     type ListingLite,
   } from "./wishlist-chart-shared.js";
-  import type { EventDto, GameDto, DataSourceDto, WishlistSeries } from "$lib/server/dto.js";
+  import type { EventDto, WishlistSeries } from "$lib/server/dto.js";
 
   use([
     BarChart,
@@ -67,20 +66,17 @@
     seriesByListing,
     events,
     listings,
-    sources,
-    games,
     today,
     range,
     visible,
+    onSelectDay,
   }: {
     /** One wishlist series per active listing, keyed by listing id. */
     seriesByListing: Record<string, WishlistSeries>;
     events: EventDto[];
     /** Active listings (id + display name / appId) — drives bar labels + order. */
     listings: ListingLite[];
-    sources: DataSourceDto[];
-    games: GameDto[];
-    /** Server-chosen "now" ISO instant (kept for marker-panel parity). */
+    /** Server-chosen "now" ISO instant (kept for range/today parity). */
     today: string;
     /** Shared date-range (owned by the page) — null = all time. CONTROLLED. */
     range: { from: Date; to: Date } | null;
@@ -88,6 +84,8 @@
      *  Bar visibility is driven PURELY by filtering the series on this map (the
      *  custom <ChartLegend> at the page flips it) — no ECharts native legend. */
     visible: Record<string, boolean>;
+    /** Marker click → the page (which owns the day-detail modal + feed data). */
+    onSelectDay: (day: string) => void;
   } = $props();
 
   void today;
@@ -144,18 +142,11 @@
   });
   const domain = $derived(axisDomain(allPointDates, dayGroups, range));
 
-  // ── Marker → panel (mirror the correlation chart's click-to-panel) ───
-  let selectedDay = $state<string | null>(null);
-  const selectedGroup = $derived(
-    selectedDay ? (dayGroups.find((g) => g.date === selectedDay) ?? null) : null,
-  );
-  function closePanel(): void {
-    selectedDay = null;
-  }
+  // ── Marker click → emit the day to the page (which owns the modal) ───
   function onChartClick(e: ECMouseEvent): void {
     if (e.componentType !== "markLine") return;
     const day = (e.data as { name?: string } | undefined)?.name;
-    if (typeof day === "string") selectedDay = day;
+    if (typeof day === "string") onSelectDay(day);
   }
 
   function resolveToken(name: string): string {
@@ -240,16 +231,6 @@
     <p class="growth-low-data">{m.viz_growth_low_data()}</p>
   {/if}
 </div>
-
-{#if selectedGroup}
-  <EventMarkerPanel
-    dayEvents={selectedGroup.events}
-    delta={null}
-    {sources}
-    {games}
-    onClose={closePanel}
-  />
-{/if}
 
 <style>
   .wishlist-growth-chart {
