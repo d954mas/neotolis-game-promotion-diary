@@ -12,6 +12,7 @@ import {
 } from "$lib/server/dto.js";
 import { NotFoundError } from "$lib/server/services/errors.js";
 import { allAdapters } from "$lib/sources/registry.js";
+import type { EventMetricSeries } from "$lib/sources/adapter.js";
 import { enrichDataSourceDtosWithYoutubeChannelTitles } from "$lib/server/services/sources-page-read.js";
 import {
   loadRedditEventDetailPreview,
@@ -83,6 +84,23 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
       await adapter.enrichFeedDtos(locals.user.id, [dto]);
     }
 
+    // Adapter-driven per-event metric series for VIZ-01 (D-14). Mirrors the
+    // enrichFeedDtos loop above: each adapter self-filters to its own kind
+    // (non-matching adapters return []), reads its immutable *_snapshots
+    // history (POLL-04), and contributes its chartable series. No db.select()
+    // in the loader — the series come through the adapter, exactly as
+    // poll-state and feed enrichment do.
+    const metricSeries: EventMetricSeries[] = [];
+    for (const adapter of allAdapters) {
+      if (adapter.fetchEventMetricSeries === undefined) continue;
+      metricSeries.push(
+        ...(await adapter.fetchEventMetricSeries(locals.user.id, {
+          kind: row.kind,
+          externalId: row.externalId,
+        })),
+      );
+    }
+
     // Enrich source DTOs with YouTube channel_title from cache — same
     // shape /feed loader returns, so <EventDetailContent>'s sourceLabel
     // derivation works identically on both surfaces (dual-render parity).
@@ -110,6 +128,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
         : null,
       sources: sourceDtos,
       redditPost,
+      metricSeries,
     };
   } catch (err) {
     if (err instanceof NotFoundError) throw error(404, "Event not found");

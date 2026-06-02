@@ -77,6 +77,7 @@
     event={data.event}
     games={data.games}
     sources={data.sources}
+    metricSeries={data.metricSeries}
     {view}
     onClose={() => goto("/feed")}
     {onDelete}

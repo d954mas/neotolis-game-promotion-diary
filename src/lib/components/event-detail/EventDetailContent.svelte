@@ -34,6 +34,8 @@
   import EventDetailHeader from "./EventDetailHeader.svelte";
   import EventDetailStats from "./EventDetailStats.svelte";
   import EventDetailGames from "./EventDetailGames.svelte";
+  import EventHistoryChart from "$lib/components/charts/EventHistoryChart.svelte";
+  import type { EventMetricSeries } from "$lib/sources/adapter.js";
   import { m } from "$lib/paraglide/messages.js";
   import {
     deriveThumbnailUrl,
@@ -53,6 +55,7 @@
     event,
     games,
     sources,
+    metricSeries = [],
     view = "feed",
     currentUserName = "",
     onClose,
@@ -65,6 +68,10 @@
     event: EventDto;
     games: GameDto[];
     sources: DataSourceDto[];
+    /** VIZ-01 adapter-driven per-event snapshot series (D-14). Default []
+     *  keeps modal callers that don't yet thread it rendering safely — the
+     *  chart shows nothing / the low-data caption when empty. */
+    metricSeries?: EventMetricSeries[];
     view?: "feed" | "trash";
     currentUserName?: string;
     onClose: () => void;
@@ -545,6 +552,14 @@
 
     {#if stats}
       <EventDetailStats {stats} />
+    {/if}
+
+    <!-- VIZ-01 per-event snapshot-history chart (D-14, adapter-driven).
+         One mount here covers BOTH the modal and the /events/[id] route
+         (this is the shared dual-render body). metricSeries defaults to []
+         so callers that don't thread it render the low-data caption. -->
+    {#if metricSeries.length > 0}
+      <EventHistoryChart series={metricSeries} kind={event.kind} />
     {/if}
 
     <EventDetailGames {event} {games} {view} {onOpenGamesPickerForCard} />
