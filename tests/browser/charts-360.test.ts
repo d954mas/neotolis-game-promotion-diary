@@ -308,9 +308,7 @@ describe("charts at 360px (VIZ-04)", () => {
 
 describe("04-12 HTML marker overlay + area/smooth/crosshair + Steam mini-chart removal", () => {
   it("eventThumbnail derives the YouTube preview from externalId (no enrichment)", () => {
-    expect(eventThumbnail(baseEvents[0]!)).toBe(
-      "https://img.youtube.com/vi/abc123/mqdefault.jpg",
-    );
+    expect(eventThumbnail(baseEvents[0]!)).toBe("https://img.youtube.com/vi/abc123/mqdefault.jpg");
   });
 
   it("eventThumbnail uses the Reddit enrichment preview image when image-like", () => {

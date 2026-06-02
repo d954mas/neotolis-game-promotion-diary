@@ -12,7 +12,10 @@
 // builder, never under SSR.
 
 import { resolveKindColor } from "./chart-theme.js";
-import { isImageLikeUrl, readMediaUrlFromMetadata } from "$lib/components/feed/parts/derive-card-data.js";
+import {
+  isImageLikeUrl,
+  readMediaUrlFromMetadata,
+} from "$lib/components/feed/parts/derive-card-data.js";
 import type { EventDto } from "$lib/server/dto.js";
 
 /** A single Steam listing as the charts need it (id + display name / appId). */
@@ -175,7 +178,6 @@ export function eventThumbnail(event: ThumbnailEvent): string | null {
   }
   return null;
 }
-
 
 /**
  * X-axis domain for the `type:"time"` charts = the UNION of every wishlist

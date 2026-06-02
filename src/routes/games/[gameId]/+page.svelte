@@ -148,9 +148,7 @@
   const chartDeltaByDate = $derived(
     data.deltaByDate as Record<string, Record<string, WishlistDelta>>,
   );
-  const chartListings = $derived(
-    listings.map((l) => ({ id: l.id, name: l.name, appId: l.appId })),
-  );
+  const chartListings = $derived(listings.map((l) => ({ id: l.id, name: l.name, appId: l.appId })));
   // The custom <ChartLegend> (04-09) renders one pill chip per active listing.
   // Resolve each label here (same fallbacks as the charts) so the legend, the
   // line, and the bar all read the same name + the same stable color. Only

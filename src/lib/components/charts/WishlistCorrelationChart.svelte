@@ -128,7 +128,13 @@
   // legend at the page flips it). Filtering the series array here — instead of
   // an ECharts legend toggle — is the load-bearing fix for the re-enable bug:
   // turning a listing back ON re-adds its line on the next render.
-  type Line = { id: string; label: string; color: string; points: { date: string; balance: number }[]; lastImportedAt: string | null };
+  type Line = {
+    id: string;
+    label: string;
+    color: string;
+    points: { date: string; balance: number }[];
+    lastImportedAt: string | null;
+  };
 
   const lines = $derived.by((): Line[] => {
     return listings
@@ -203,7 +209,13 @@
   // neutral so the canvas never receives a var()/color-mix string it can't read.
   function hexToRgb(hex: string): string {
     const h = hex.trim().replace(/^#/, "");
-    const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+    const full =
+      h.length === 3
+        ? h
+            .split("")
+            .map((c) => c + c)
+            .join("")
+        : h;
     if (full.length !== 6 || /[^0-9a-fA-F]/.test(full)) return "120,120,120";
     const r = parseInt(full.slice(0, 2), 16);
     const g = parseInt(full.slice(2, 4), 16);
