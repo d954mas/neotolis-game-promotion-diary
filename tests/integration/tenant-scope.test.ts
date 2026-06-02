@@ -924,4 +924,12 @@ describe("bulk events cross-tenant (D-13)", () => {
     // Only evATrash hard-deleted. evALive (live) silently filtered; evBTrash (cross-tenant) silently filtered.
     expect(body.affected_count).toBe(1);
   });
+
+  // Wave 0 scaffold (Nyquist invariant): Plan 04-03 activates this once the
+  // wishlist series/delta services land. wishlist_snapshots is TENANT-scoped
+  // (carries user_id) — a getWishlistSeries / computeWishlistDelta call with
+  // another tenant's listingId must return an empty series / 404, never leak.
+  it.skip(
+    "getWishlistSeries / computeWishlistDelta cross-tenant listingId → empty/404 (Plan 04-03)",
+  );
 });
