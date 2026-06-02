@@ -659,8 +659,11 @@
   .card-menu [role="menuitem"]:hover {
     background: var(--accent-soft);
   }
-  .card-menu .danger:hover {
+  .card-menu .danger {
     color: var(--danger);
+  }
+  .card-menu .danger:hover {
+    background: color-mix(in oklab, var(--danger) 12%, var(--surface-2));
   }
 
   .card-byline {
