@@ -13,10 +13,7 @@
 
 import { resolveKindColor } from "./chart-theme.js";
 import { isImageLikeUrl, readMediaUrlFromMetadata } from "$lib/components/feed/parts/derive-card-data.js";
-import type { MarkPointComponentOption } from "echarts/components";
 import type { EventDto } from "$lib/server/dto.js";
-
-type MarkPointDatum = NonNullable<MarkPointComponentOption["data"]>[number];
 
 /** A single Steam listing as the charts need it (id + display name / appId). */
 export type ListingLite = { id: string; name?: string | null; appId?: number };
@@ -179,62 +176,6 @@ export function eventThumbnail(event: ThumbnailEvent): string | null {
   return null;
 }
 
-/**
- * Build the ECharts `markPoint.data` array — one ≈40px THUMBNAIL image marker
- * per distinct event-day (Millo-style preview markers, VIZ-03/VIZ-04). Each
- * marker:
- *   - sits at `coord: [day, topBandValue]` — a fixed top band so the thumbnails
- *     sit in a row ABOVE the wishlist line, not on it (the caller passes the
- *     yAxis-max-ish band value so they hug the top of the grid).
- *   - uses `symbol: 'image://<url>'` when the representative event has a
- *     thumbnail, else a kind-colored rounded placeholder (`circle`, resolved via
- *     getComputedStyle — never a CSS var on the canvas).
- *   - is a 40×40 tap target (fixes the poor touch interaction — VIZ-04).
- *   - carries `name = day` so the chart's markPoint-click handler resolves the
- *     day → onSelectDay(day) → the page's EventDayModal.
- *   - draws a count badge "N" via the markPoint `label` when the day has >1
- *     event (D-04 same-day collapse).
- *
- * Client-only (resolveKindColor reads the DOM). Returns ECharts datum shapes
- * with already-resolved concrete colors.
- */
-export function buildMarkPointData(
-  dayGroups: DayGroup[],
-  topBandValue: number,
-): MarkPointDatum[] {
-  return dayGroups.map((g): MarkPointDatum => {
-    const color = g.mixedKind ? resolveKindColor("post") : resolveKindColor(g.kind);
-    const count = g.events.length;
-    const thumb = eventThumbnail(g.events[0]!);
-    return {
-      name: g.date,
-      value: g.date,
-      coord: [g.date, topBandValue],
-      symbol: thumb ? `image://${thumb}` : "circle",
-      symbolSize: [40, 40],
-      // Placeholder (no thumb) → a kind-colored disc with a thin ring so it
-      // reads as an event marker; image markers keep their native pixels.
-      itemStyle: thumb
-        ? { borderColor: color, borderWidth: 2 }
-        : { color, borderColor: color, borderWidth: 1 },
-      label:
-        count > 1
-          ? {
-              show: true,
-              position: "top" as const,
-              distance: 2,
-              formatter: String(count),
-              color: "#fff",
-              backgroundColor: color,
-              padding: [2, 5],
-              borderRadius: 8,
-              fontSize: 10,
-              fontWeight: "bold" as const,
-            }
-          : { show: false },
-    };
-  });
-}
 
 /**
  * X-axis domain for the `type:"time"` charts = the UNION of every wishlist
