@@ -1261,16 +1261,18 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
       expect(storesSection).not.toMatch(/m\.stores_add_cta_after_cards\(\)/);
     });
 
-    it("SteamListingRow is a READ-ONLY card — cover + STEAM badge + appId + compact wishlist line (with inline CSV-import shortcut) + Details button (Plan 03.2-04, +compact-import shortcut)", async () => {
-      // Post-UAT (Plan 03.2-04): the per-listing card is clean/read-only for
-      // EDITING — label edit, remove, full wishlist summary, export
-      // instructions ALL live in <SteamListingDetailModal> (Details button).
+    it("SteamListingRow active card is CLICKABLE (role=button → detail modal) — cover + Steam icon + appId + compact wishlist line (with inline CSV-import shortcut) + small Open-in-Steam link, NO Details button", async () => {
+      // Card-redesign (scope 03.2): the active per-listing card is now a
+      // clickable card (BaseFeedCard idiom) — the whole .store-card is a
+      // role="button" surface that opens <SteamListingDetailModal> on
+      // click / Enter / Space. The "Details" button is REMOVED; the card
+      // click replaces it. Inner interactive controls (the small Open-in-
+      // Steam external link + the compact CSV import) stopPropagation() so
+      // they don't trigger the card→modal open.
       //
-      // CHANGED (compact-import shortcut): the card now intentionally hosts a
-      // SUBTLE one-click wishlist-CSV import affordance on the compact
-      // wishlist line — a muted "↑ CSV" link reusing <WishlistImport compact>.
-      // This is an ADDITIONAL shortcut (the modal keeps the full affordance);
-      // the card still never PATCHes/DELETEs or hosts the label-edit form.
+      // Label edit, remove, full wishlist summary, export instructions ALL
+      // live in <SteamListingDetailModal>. The card still never PATCHes/
+      // DELETEs or hosts the label-edit form.
       const fs = await import("node:fs");
       const path = await import("node:path");
       const src = fs.readFileSync(
@@ -1280,9 +1282,17 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
       // Cover image rendered when listing.coverUrl is non-null.
       expect(src).toMatch(/{#if listing\.coverUrl}/);
       expect(src).toMatch(/<img[^>]*class="store-cover"/);
-      // STEAM badge identifies the store kind.
-      expect(src).toMatch(/class="kind-badge"/);
+      // Clickable card: role="button" + tabindex + keydown + click open the
+      // detail modal. The aria-label uses the new open-details key.
+      expect(src).toMatch(/role=\{cardClickable \? "button" : undefined\}/);
+      expect(src).toMatch(/tabindex=\{cardClickable \? 0 : undefined\}/);
+      expect(src).toMatch(/m\.steam_listing_open_details_aria\(\{/);
+      expect(src).toMatch(/onCardKeydown/);
+      // Steam logo INDICATOR (aria-label "STEAM" via m.steam_listing_kind_steam)
+      // replaces the old text .kind-badge — the badge text class is gone.
+      expect(src).toMatch(/class="kind-icon/);
       expect(src).toMatch(/m\.steam_listing_kind_steam\(\)/);
+      expect(src).not.toMatch(/class="kind-badge"/);
       // App ID surfaces in muted monospace.
       expect(src).toMatch(/class="app-id"/);
       expect(src).toMatch(/m\.steam_listing_app_id\(\{/);
@@ -1290,7 +1300,8 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
       expect(src).toMatch(/m\.steam_listing_label_prefix\(\)/);
       expect(src).toMatch(/class="label-prefix"/);
       // Compact wishlist line — data (m.steam_listing_wishlist_compact) or
-      // recommendation (m.steam_listing_wishlist_recommendation).
+      // recommendation (m.steam_listing_wishlist_recommendation). The line
+      // stops click propagation so the inner import never bubbles to the card.
       expect(src).toMatch(/class="wishlist-line"/);
       expect(src).toMatch(/m\.steam_listing_wishlist_compact\(\{/);
       expect(src).toMatch(/m\.steam_listing_wishlist_recommendation\(\)/);
@@ -1301,11 +1312,17 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
       expect(src).toMatch(/import WishlistImport from "\.\/WishlistImport\.svelte"/);
       expect(src).toMatch(/<WishlistImport[\s\S]*?\bcompact\b/);
       expect(src).toMatch(/onImported=\{\(\)\s*=>\s*onChange\?\.\(\)\}/);
-      // Details button opens the detail modal (card owns detailOpen state).
+      // Small muted "Open in Steam" external link — INDICATOR-distinct from the
+      // card open. It stopPropagation()s on click so it never opens the modal.
+      expect(src).toMatch(/class="store-link"/);
+      expect(src).toMatch(/m\.steam_listing_open_in_steam\(\)/);
+      expect(src).toMatch(/onclick=\{\(e\)\s*=>\s*e\.stopPropagation\(\)\}/);
+      // The card owns detailOpen state + mounts the detail modal.
       expect(src).toMatch(/let detailOpen = \$state\(false\)/);
-      expect(src).toMatch(/class="cta-secondary details-btn"/);
-      expect(src).toMatch(/m\.steam_listing_details_cta\(\)/);
       expect(src).toMatch(/<SteamListingDetailModal\s/);
+      // The "Details" BUTTON is GONE — the card click replaces it.
+      expect(src).not.toMatch(/class="cta-secondary details-btn"/);
+      expect(src).not.toMatch(/m\.steam_listing_details_cta\(\)/);
       // The card still does NOT carry the inline label-edit form/btn/input or
       // any edit/save state — those stay modal-only.
       expect(src).not.toMatch(/class="edit-form"/);
@@ -1376,6 +1393,11 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
       expect(src).toMatch(/m\.steam_listing_more_actions_aria\(\)/);
       expect(src).toMatch(/class="card-menu-item danger"/);
       expect(src).toMatch(/m\.steam_listing_delete_cta\(\)/);
+      // Header ⋮ also hosts an "Open in Steam" external link ABOVE the danger
+      // delete item — target=_blank + rel=noopener noreferrer to the store URL.
+      expect(src).toMatch(
+        /<a[\s\S]*?class="card-menu-item"[\s\S]*?href=\{`https:\/\/store\.steampowered\.com\/app\/\$\{listing\.appId\}\/`\}[\s\S]*?m\.steam_listing_open_in_steam\(\)/,
+      );
       expect(src).toMatch(/async function handleRemoveConfirmed/);
       expect(src).toMatch(/method:\s*"DELETE"/);
       expect(src).toMatch(/<ConfirmDialog\s/);

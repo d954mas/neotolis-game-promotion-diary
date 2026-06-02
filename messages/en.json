@@ -205,6 +205,7 @@
   "steam_listing_label_edit_aria": "Edit label",
   "steam_listing_label_add": "Click to add a label",
   "steam_listing_more_actions_aria": "More actions",
+  "steam_listing_open_details_aria": "Open {name} details",
   "steam_listing_delete_cta": "Delete listing",
   "steam_listing_recently_deleted_link": "Recently deleted ({count})",
   "steam_listing_trash_heading": "Recently deleted listings",

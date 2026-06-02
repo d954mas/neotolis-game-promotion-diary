@@ -677,6 +677,7 @@ describe("paraglide i18n", () => {
       "steam_listing_label_edit_label",
       "steam_listing_label_prefix",
       "steam_listing_more_actions_aria",
+      "steam_listing_open_details_aria",
       "steam_listing_open_in_steam",
       "steam_listing_open_link_label",
       "steam_listing_recently_deleted_link",

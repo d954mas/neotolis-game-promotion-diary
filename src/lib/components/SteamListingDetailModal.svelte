@@ -192,6 +192,14 @@
           onclick={() => (overflowOpen = false)}
         ></button>
         <div class="overflow-pop" role="menu">
+          <a
+            class="card-menu-item"
+            role="menuitem"
+            href={`https://store.steampowered.com/app/${listing.appId}/`}
+            target="_blank"
+            rel="noopener noreferrer"
+            onclick={() => (overflowOpen = false)}>{m.steam_listing_open_in_steam()}</a
+          >
           <button
             type="button"
             class="card-menu-item danger"
@@ -395,9 +403,11 @@
     z-index: 90;
   }
   .overflow-pop .card-menu-item {
+    display: block;
     background: transparent;
     border: none;
     text-align: left;
+    text-decoration: none;
     padding: 8px 12px;
     font-size: var(--t-13);
     color: var(--text);
