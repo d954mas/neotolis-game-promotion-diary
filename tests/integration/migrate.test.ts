@@ -460,7 +460,8 @@ describe("event_games + steam listing unique swap (0005 + 0006 split)", () => {
       // events.purge_stale).
       // Migration 0049 added 2 delete-forever verbs:
       // source.delete_forever, game.delete_forever.
-      // Total: 23 + 4 (0008) + 5 (0010) + 1 (0023) + 4 (0030) + 4 (0042) + 2 (0049) = 43.
+      // Total: 23 + 4 (0008) + 5 (0010) + 1 (0023) + 4 (0030) + 4 (0042) + 2 (0049)
+      //        + 2 (Phase 03.2: wishlist.imported + listing.delete_forever) = 45.
       expect(values).toContain("account.deleted");
       expect(values).toContain("account.restored");
       expect(values).toContain("account.exported");
@@ -483,7 +484,10 @@ describe("event_games + steam listing unique swap (0005 + 0006 split)", () => {
       // Migration 0049 delete-forever verbs.
       expect(values).toContain("source.delete_forever");
       expect(values).toContain("game.delete_forever");
-      expect(values).toHaveLength(43);
+      // Phase 03.2 verbs (migrations 0052 / 0053).
+      expect(values).toContain("wishlist.imported");
+      expect(values).toContain("listing.delete_forever");
+      expect(values).toHaveLength(45);
     } finally {
       await pool.end();
     }
@@ -718,7 +722,8 @@ describe("migration 0010 baseline", () => {
       expect(values).toContain("quota.limit_hit");
       expect(values).toContain("event.detached_from_game");
       // 27 + 5 (migration 0010) + 1 (migration 0023) + 4 (migration 0030 Reddit)
-      // + 4 (migration 0042 Phase 03.4 bulk verbs) + 2 (migration 0049 delete-forever) = 43.
+      // + 4 (migration 0042 Phase 03.4 bulk verbs) + 2 (migration 0049 delete-forever)
+      // + 2 (Phase 03.2: wishlist.imported + listing.delete_forever) = 45.
       expect(values).toContain("source.refresh_content_requested");
       expect(values).toContain("reddit.queue_drained");
       // Phase 03.4 Plan 06 audit verbs (migration 0042).
@@ -729,7 +734,10 @@ describe("migration 0010 baseline", () => {
       // Migration 0049 delete-forever verbs.
       expect(values).toContain("source.delete_forever");
       expect(values).toContain("game.delete_forever");
-      expect(values).toHaveLength(43);
+      // Phase 03.2 verbs (migrations 0052 / 0053).
+      expect(values).toContain("wishlist.imported");
+      expect(values).toContain("listing.delete_forever");
+      expect(values).toHaveLength(45);
     } finally {
       await pool.end();
     }

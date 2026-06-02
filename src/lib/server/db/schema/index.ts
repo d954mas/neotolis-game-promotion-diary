@@ -14,6 +14,7 @@ export * from "./event-games.js";
 export * from "./events.js";
 export * from "./game-steam-listings.js";
 export * from "./games.js";
+export * from "./wishlist-snapshots.js";
 // Transactional outbox.
 export * from "./outbox.js";
 // YouTube schemas live in the per-source folder. Re-exported here so

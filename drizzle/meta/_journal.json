@@ -358,6 +358,34 @@
       "when": 1780350000001,
       "tag": "0050_optimal_tony_stark",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1780500000000,
+      "tag": "0051_phase03_2_wishlist_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1780500000001,
+      "tag": "0052_phase03_2_wishlist_imported_action",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1780500000002,
+      "tag": "0053_certain_tana_nile",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1780500000003,
+      "tag": "0054_condemned_viper",
+      "breakpoints": true
     }
   ]
 }

@@ -1261,7 +1261,18 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
       expect(storesSection).not.toMatch(/m\.stores_add_cta_after_cards\(\)/);
     });
 
-    it("SteamListingRow renders cover image + STEAM badge + appId + per-card Edit button + inline label form", async () => {
+    it("SteamListingRow active card is CLICKABLE (role=button → detail modal) — cover + Steam icon + appId + compact wishlist line (with inline CSV-import shortcut) + small Open-in-Steam link, NO Details button", async () => {
+      // Card-redesign (scope 03.2): the active per-listing card is now a
+      // clickable card (BaseFeedCard idiom) — the whole .store-card is a
+      // role="button" surface that opens <SteamListingDetailModal> on
+      // click / Enter / Space. The "Details" button is REMOVED; the card
+      // click replaces it. Inner interactive controls (the small Open-in-
+      // Steam external link + the compact CSV import) stopPropagation() so
+      // they don't trigger the card→modal open.
+      //
+      // Label edit, remove, full wishlist summary, export instructions ALL
+      // live in <SteamListingDetailModal>. The card still never PATCHes/
+      // DELETEs or hosts the label-edit form.
       const fs = await import("node:fs");
       const path = await import("node:path");
       const src = fs.readFileSync(
@@ -1271,33 +1282,143 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
       // Cover image rendered when listing.coverUrl is non-null.
       expect(src).toMatch(/{#if listing\.coverUrl}/);
       expect(src).toMatch(/<img[^>]*class="store-cover"/);
-      // STEAM badge identifies the store kind.
-      expect(src).toMatch(/class="kind-badge"/);
+      // Clickable card: role="button" + tabindex + keydown + click open the
+      // detail modal. The aria-label uses the new open-details key.
+      expect(src).toMatch(/role=\{cardClickable \? "button" : undefined\}/);
+      expect(src).toMatch(/tabindex=\{cardClickable \? 0 : undefined\}/);
+      expect(src).toMatch(/m\.steam_listing_open_details_aria\(\{/);
+      expect(src).toMatch(/onCardKeydown/);
+      // Steam logo INDICATOR (aria-label "STEAM" via m.steam_listing_kind_steam)
+      // replaces the old text .kind-badge — the badge text class is gone.
+      expect(src).toMatch(/class="kind-icon/);
       expect(src).toMatch(/m\.steam_listing_kind_steam\(\)/);
+      expect(src).not.toMatch(/class="kind-badge"/);
       // App ID surfaces in muted monospace.
       expect(src).toMatch(/class="app-id"/);
       expect(src).toMatch(/m\.steam_listing_app_id\(\{/);
-      // Per-card Edit button replaces the section-level editMode prop.
-      expect(src).not.toMatch(/editMode\?:\s*boolean/);
-      // Local `editing` state owned by each card.
-      expect(src).toMatch(/let editing = \$state\(false\)/);
-      // Edit button visible when not editing.
-      expect(src).toMatch(/class="edit-btn"/);
-      expect(src).toMatch(/m\.steam_listing_edit_aria\(\)/);
-      // Inline label edit FORM (not just a × Remove). Local labelDraft
-      // state + saveEdit function + .edit-form markup with a label input.
-      expect(src).toMatch(/let labelDraft = \$state/);
-      expect(src).toMatch(/async function saveEdit/);
-      expect(src).toMatch(/class="edit-form"/);
-      expect(src).toMatch(/class="edit-input"/);
-      expect(src).toMatch(/m\.steam_listing_edit_save_cta\(\)/);
-      expect(src).toMatch(/m\.steam_listing_label_edit_label\(\)/);
-      // The PATCH /api/games/:gameId/listings/:listingId target is
-      // wired into saveEdit (same path the integration test exercises).
-      expect(src).toMatch(/method:\s*"PATCH"/);
-      // Label prefix in read-mode so users know what the field is.
+      // Read-only label line still surfaces (no inline edit).
       expect(src).toMatch(/m\.steam_listing_label_prefix\(\)/);
       expect(src).toMatch(/class="label-prefix"/);
+      // Compact wishlist line — data (m.steam_listing_wishlist_compact) or
+      // recommendation (m.steam_listing_wishlist_recommendation). The line
+      // stops click propagation so the inner import never bubbles to the card.
+      expect(src).toMatch(/class="wishlist-line"/);
+      expect(src).toMatch(/m\.steam_listing_wishlist_compact\(\{/);
+      expect(src).toMatch(/m\.steam_listing_wishlist_recommendation\(\)/);
+      // Compact CSV-import shortcut on the card: <WishlistImport compact>
+      // imported + rendered with the compact flag, wired to onChange so the
+      // line refreshes after a successful import. Gated on `gameId` (the row
+      // renders the import only when a mutation target exists).
+      expect(src).toMatch(/import WishlistImport from "\.\/WishlistImport\.svelte"/);
+      expect(src).toMatch(/<WishlistImport[\s\S]*?\bcompact\b/);
+      expect(src).toMatch(/onImported=\{\(\)\s*=>\s*onChange\?\.\(\)\}/);
+      // Small muted "Open in Steam" external link — INDICATOR-distinct from the
+      // card open. It stopPropagation()s on click so it never opens the modal.
+      expect(src).toMatch(/class="store-link"/);
+      expect(src).toMatch(/m\.steam_listing_open_in_steam\(\)/);
+      expect(src).toMatch(/onclick=\{\(e\)\s*=>\s*e\.stopPropagation\(\)\}/);
+      // The card owns detailOpen state + mounts the detail modal.
+      expect(src).toMatch(/let detailOpen = \$state\(false\)/);
+      expect(src).toMatch(/<SteamListingDetailModal\s/);
+      // The "Details" BUTTON is GONE — the card click replaces it.
+      expect(src).not.toMatch(/class="cta-secondary details-btn"/);
+      expect(src).not.toMatch(/m\.steam_listing_details_cta\(\)/);
+      // The card still does NOT carry the inline label-edit form/btn/input or
+      // any edit/save state — those stay modal-only.
+      expect(src).not.toMatch(/class="edit-form"/);
+      expect(src).not.toMatch(/class="edit-btn"/);
+      expect(src).not.toMatch(/class="edit-input"/);
+      expect(src).not.toMatch(/let editing = \$state/);
+      expect(src).not.toMatch(/async function saveEdit/);
+      // The active card never PATCHes/DELETEs directly — label/delete mutation
+      // lives in the detail modal (PATCH) + the trash overflow (DELETE handlers
+      // owned by the parent page). The wishlist-import POST is encapsulated
+      // inside <WishlistImport>, NOT inlined in this component, so the row
+      // source itself carries no PATCH/DELETE verbs.
+      expect(src).not.toMatch(/method:\s*"PATCH"/);
+      expect(src).not.toMatch(/method:\s*"DELETE"/);
+    });
+
+    it("SteamListingRow trash mode (Plan 03.2-04): read-only card with a ⋮ overflow → Restore + Delete forever, no Details/wishlist", async () => {
+      // Trash mode (?view=trash on /games/[gameId]) renders the deleted
+      // listing as a read-only card. A ⋮ overflow (EventDetailHeader
+      // idiom) offers Restore (m.common_restore) + Delete forever
+      // (m.steam_listing_delete_forever_cta). The parent page owns the
+      // onRestore / onDeleteForever handlers + the ConfirmDialog.
+      const fs = await import("node:fs");
+      const path = await import("node:path");
+      const src = fs.readFileSync(
+        path.resolve("src/lib/components/SteamListingRow.svelte"),
+        "utf8",
+      );
+      // trash prop + the two parent-owned action callbacks.
+      expect(src).toMatch(/trash\?:\s*boolean/);
+      expect(src).toMatch(/onRestore\?:\s*\(\)\s*=>\s*void/);
+      expect(src).toMatch(/onDeleteForever\?:\s*\(\)\s*=>\s*void/);
+      // The trash overflow (aria-haspopup="menu") + scrim + role="menu".
+      expect(src).toMatch(/class="trash-overflow-wrap"/);
+      expect(src).toMatch(/aria-haspopup="menu"/);
+      expect(src).toMatch(/m\.steam_listing_more_actions_aria\(\)/);
+      expect(src).toMatch(/m\.common_restore\(\)/);
+      expect(src).toMatch(/m\.steam_listing_delete_forever_cta\(\)/);
+      expect(src).toMatch(/card-menu-item danger/);
+      // In trash mode the Details modal is not mounted.
+      expect(src).toMatch(/{#if gameId && !trash}/);
+    });
+
+    it("SteamListingDetailModal (Plan 03.2-04): inline-pencil label edit + ⋮-header delete, NO SETTINGS section / Save button", async () => {
+      const fs = await import("node:fs");
+      const path = await import("node:path");
+      const src = fs.readFileSync(
+        path.resolve("src/lib/components/SteamListingDetailModal.svelte"),
+        "utf8",
+      );
+      // Native <dialog> idiom copied from AddStoreDialog.
+      expect(src).toMatch(/<dialog[^>]*bind:this=\{dialogEl\}[^>]*class="dialog"/);
+      expect(src).toMatch(/showModal\(\)/);
+      // Wishlist section (unchanged) — summary + recommendation + export
+      // instructions + import affordance.
+      expect(src).toMatch(/m\.steam_listing_detail_section_wishlist\(\)/);
+      expect(src).toMatch(/<WishlistSummary\s/);
+      expect(src).toMatch(/m\.steam_listing_wishlist_recommendation\(\)/);
+      expect(src).toMatch(/m\.wishlist_export_heading\(\)/);
+      expect(src).toMatch(/m\.wishlist_export_step_1\(\)/);
+      expect(src).toMatch(/m\.wishlist_export_step_4\(\)/);
+      expect(src).toMatch(/<WishlistImport\s/);
+      // HEADER ⋮ "More actions" overflow (EventDetailHeader idiom) — a
+      // single danger "Delete listing" item → ConfirmDialog → DELETE
+      // (soft-delete, unchanged) → handleRemoveConfirmed.
+      expect(src).toMatch(/class="overflow-wrap"/);
+      expect(src).toMatch(/aria-haspopup="menu"/);
+      expect(src).toMatch(/m\.steam_listing_more_actions_aria\(\)/);
+      expect(src).toMatch(/class="card-menu-item danger"/);
+      expect(src).toMatch(/m\.steam_listing_delete_cta\(\)/);
+      // Header ⋮ also hosts an "Open in Steam" external link ABOVE the danger
+      // delete item — target=_blank + rel=noopener noreferrer to the store URL.
+      expect(src).toMatch(
+        /<a[\s\S]*?class="card-menu-item"[\s\S]*?href=\{`https:\/\/store\.steampowered\.com\/app\/\$\{listing\.appId\}\/`\}[\s\S]*?m\.steam_listing_open_in_steam\(\)/,
+      );
+      expect(src).toMatch(/async function handleRemoveConfirmed/);
+      expect(src).toMatch(/method:\s*"DELETE"/);
+      expect(src).toMatch(/<ConfirmDialog\s/);
+      // LABEL inline edit (EventDetailContent idiom) — read-only text +
+      // pencil .detail-edit-btn; commit on blur AND Enter via PATCH; Esc
+      // reverts; empty label → "click to add a label" affordance.
+      expect(src).toMatch(/class="detail-editable-row label-row"/);
+      expect(src).toMatch(/class="detail-edit-btn"/);
+      expect(src).toMatch(/let labelDraft = \$state/);
+      expect(src).toMatch(/async function commitEditLabel/);
+      expect(src).toMatch(/onblur=\{commitEditLabel\}/);
+      expect(src).toMatch(/method:\s*"PATCH"/);
+      expect(src).toMatch(/m\.steam_listing_label_edit_aria\(\)/);
+      expect(src).toMatch(/m\.steam_listing_label_add\(\)/);
+      // NO "SETTINGS" section, NO Save button, NO inline "× Remove".
+      expect(src).not.toMatch(/m\.steam_listing_detail_section_settings\(\)/);
+      expect(src).not.toMatch(/class="edit-form"/);
+      expect(src).not.toMatch(/class="edit-save"/);
+      expect(src).not.toMatch(/m\.steam_listing_edit_save_cta\(\)/);
+      expect(src).not.toMatch(/class="remove-btn-inline"/);
+      expect(src).not.toMatch(/async function saveEdit\b/);
     });
   });
 

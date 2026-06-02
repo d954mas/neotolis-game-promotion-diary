@@ -1,0 +1,1 @@
+ALTER TYPE "public"."audit_action" ADD VALUE IF NOT EXISTS 'listing.delete_forever' BEFORE 'wishlist.imported';

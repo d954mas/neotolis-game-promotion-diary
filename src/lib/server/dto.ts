@@ -21,6 +21,7 @@ import type {
 } from "./db/schema/index.js";
 import type { auditLog } from "./db/schema/audit-log.js";
 import type { youtubeVideoSnapshots, youtubeChannels } from "./db/schema/index.js";
+import type { wishlistSnapshots } from "./db/schema/wishlist-snapshots.js";
 
 type User = typeof user.$inferSelect;
 type Session = typeof session.$inferSelect;
@@ -720,6 +721,73 @@ export function toYoutubeChannelMetadataCacheDto(
     uploadsPlaylistId: r.uploadsPlaylistId,
     channelTitle: r.channelTitle,
     lastBackfillAt: r.lastBackfillAt,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+/**
+ * WishlistSnapshotDto — DTO for `wishlist_snapshots` rows.
+ *
+ * Tenant-scoped data (commercially-sensitive per-user wishlist counts).
+ * `userId` is OMITTED per DTO discipline — the caller already knows their
+ * own id, and echoing it back risks surfacing OTHER users' ids in a buggy
+ * aggregate view. There are no ciphertext columns on this table, so the
+ * projection is existence-only (enumerate every wire field so a future
+ * column addition forces a review touchpoint).
+ *
+ * NO DENORMALIZATION: the listing/game display name is NOT projected here —
+ * it is owned by `game_steam_listings` and read via the `listingId` FK.
+ */
+export interface WishlistSnapshotDto {
+  id: string;
+  listingId: string;
+  date: string;
+  adds: number;
+  deletes: number;
+  purchasesAndActivations: number;
+  gifts: number;
+  balance: number;
+  source: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * WishlistSummaryDto — the per-listing wishlist mini-summary wire shape
+ * (headline `balance` + the coverage window `firstDate`…`lastDate` + the
+ * recent ≤14 daily rows). One source of truth for the shape that several
+ * /games components render; it is structurally identical to the service's
+ * `WishlistSummary` (the service returns this shape directly). Components
+ * import THIS instead of re-declaring the object literal inline.
+ *
+ * `firstDate` is the EARLIEST snapshot date across the WHOLE stored series
+ * for the listing (true MIN, not recentDays' capped-14 window start). The
+ * headline `balance` is a running cumulative anchored at `firstDate`; if the
+ * user's first import wasn't the full launch-to-now history, the number is
+ * relative to `firstDate`, NOT absolute-from-launch. The UI surfaces
+ * `firstDate` so the headline is never silently presented as absolute.
+ */
+export interface WishlistSummaryDto {
+  balance: number;
+  firstDate: string;
+  lastDate: string;
+  recentDays: WishlistSnapshotDto[];
+}
+
+type WishlistSnapshotRow = typeof wishlistSnapshots.$inferSelect;
+
+export function toWishlistSnapshotDto(r: WishlistSnapshotRow): WishlistSnapshotDto {
+  return {
+    id: r.id,
+    listingId: r.listingId,
+    date: r.date,
+    adds: r.adds,
+    deletes: r.deletes,
+    purchasesAndActivations: r.purchasesAndActivations,
+    gifts: r.gifts,
+    balance: r.balance,
+    source: r.source,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };

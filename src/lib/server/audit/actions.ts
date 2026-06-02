@@ -109,6 +109,13 @@ export const AUDIT_ACTIONS = [
   //     permanently removes a soft-deleted game + cascaded children.
   "source.delete_forever",
   "game.delete_forever",
+  // Phase 3.2 — DELETE /api/games/:gameId/listings/:listingId?force=true
+  // permanently removes a soft-deleted Steam listing (+ cascaded wishlist
+  // snapshots). Irreversible → audited, like the sibling *.delete_forever
+  // verbs. Metadata: { gameId, listingId, appId }.
+  "listing.delete_forever",
+  // Phase 3.2 — Steam Wishlists.csv import. Metadata: { appId, listingId, rowCount, dateRange, skipped }
+  "wishlist.imported",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

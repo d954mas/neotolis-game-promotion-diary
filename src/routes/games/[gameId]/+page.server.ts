@@ -2,6 +2,10 @@ import { error } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 import { getGameById, listGames, deriveReleaseInfoForGames } from "$lib/server/services/games.js";
 import { listListings, listSoftDeletedListings } from "$lib/server/services/game-steam-listings.js";
+import {
+  getWishlistSummary,
+  type WishlistSummary,
+} from "$lib/server/services/wishlist-snapshots.js";
 import { listEventsForGame } from "$lib/server/services/events.js";
 import { listSources } from "$lib/server/services/data-sources.js";
 import {
@@ -39,12 +43,16 @@ import { enrichDataSourceDtosWithYoutubeChannelTitles } from "$lib/server/servic
  * the rest of the page still renders. The parent fetch is load-bearing —
  * `getGameById` short-circuits cross-tenant access first.
  */
-export const load: PageServerLoad = async ({ locals, params }) => {
+export const load: PageServerLoad = async ({ locals, params, url }) => {
   if (!locals.user) {
     throw error(401, "Sign in required");
   }
   const userId = locals.user.id;
   const gameId = params.gameId;
+  // ?view=trash mirrors /games/+page.server.ts — the page renders the
+  // game's soft-deleted listings as cards (Restore + Delete forever)
+  // instead of the active stores/wishlist UI.
+  const view = url.searchParams.get("view") === "trash" ? "trash" : ("feed" as const);
 
   let game;
   try {
@@ -112,9 +120,39 @@ export const load: PageServerLoad = async ({ locals, params }) => {
   const allGameIds = gamesAll.map((g) => g.id);
   const allGameRelease = await deriveReleaseInfoForGames(userId, allGameIds);
 
+  // Per-listing wishlist mini-summary (WISH-02, D-09) via the service —
+  // NOT db.* in the loader. Best-effort like the other child fetches: a
+  // throw on any listing returns null so the rest of the page still
+  // renders. Keyed by listingId so SteamListingRow looks up its own
+  // summary; a listing with no snapshots maps to null (empty state).
+  // The trash view (?view=trash) renders soft-deleted listings only — it
+  // never reads `wishlistSummaries`, so skip the per-listing summary fetch
+  // entirely there and return an empty map. The active (feed) view is
+  // unchanged: one bounded getWishlistSummary per active listing (KISS — no
+  // batching for a bounded N).
+  const wishlistSummaryPairs =
+    view === "trash"
+      ? []
+      : await Promise.all(
+          listings.map(
+            async (l): Promise<[string, WishlistSummary | null]> => [
+              l.id,
+              // No catch: getWishlistSummary already returns null for the
+              // legitimate no-data / cross-tenant case, so any throw here is a
+              // real fault that should surface as a load error, not be masked
+              // as "no wishlist data".
+              await getWishlistSummary(userId, l.id),
+            ],
+          ),
+        );
+  const wishlistSummaries: Record<string, WishlistSummary | null> =
+    Object.fromEntries(wishlistSummaryPairs);
+
   return {
+    view,
     game: toGameDto(game, thisGameDerived),
     listings: listings.map(toGameSteamListingDto),
+    wishlistSummaries,
     deletedListings: deletedListings.map(toGameSteamListingDto),
     events: eventDtos,
     games: gamesAll.map((r) =>

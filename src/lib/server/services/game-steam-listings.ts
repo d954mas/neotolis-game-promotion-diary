@@ -41,17 +41,19 @@
 // Pino redact paths unchanged. The payload reaches the user via mapErr
 // → JSON response → client-side toast.
 //
-// NO audit entries from this service: the security-relevant audit verbs
-// (`key.*`, `game.*`, `item.*`, `event.*`, `theme.*`, `session.*`)
-// cover what matters. Listing CRUD is creation/destruction of metadata,
-// not security state — recording every add/remove would balloon the
-// audit log without forensic benefit.
+// Audit policy for this service: reversible listing CRUD (add / soft-remove /
+// restore / label edit) writes NO audit row — it's creation/destruction of
+// metadata, not security state, and recording every add/remove would balloon
+// the log without forensic benefit. The ONE exception is the irreversible
+// permanent purge (`hardDeleteListing` → `listing.delete_forever`), which is
+// audited like the sibling event/source/game `.delete_forever` verbs.
 
 import { and, eq, isNull, isNotNull, desc } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { gameSteamListings } from "../db/schema/game-steam-listings.js";
 import { fetchSteamAppDetails } from "../integrations/steam-api.js";
 import { getGameById } from "./games.js";
+import { writeAudit } from "../audit.js";
 import { AppError, NotFoundError } from "./errors.js";
 import { isPgUniqueViolation } from "../db/postgres-errors.js";
 
@@ -380,10 +382,16 @@ export async function updateListing(
  * this listing back (marker-timestamp design — earlier deletes stay
  * deleted).
  *
- * Throws NotFoundError on miss / cross-tenant.
+ * Scoped to (userId, gameId, listingId) — the `gameId` filter is
+ * defense-in-depth matching hardDeleteListing/updateListing, so a
+ * listing the caller owns under a DIFFERENT game cannot be soft-deleted
+ * via the wrong game's route.
+ *
+ * Throws NotFoundError on miss / cross-tenant / mismatched gameId.
  */
 export async function removeSteamListing(
   userId: string,
+  gameId: string,
   listingId: string,
   _ipAddress: string,
 ): Promise<void> {
@@ -393,12 +401,68 @@ export async function removeSteamListing(
     .where(
       and(
         eq(gameSteamListings.userId, userId),
+        eq(gameSteamListings.gameId, gameId),
         eq(gameSteamListings.id, listingId),
         isNull(gameSteamListings.deletedAt),
       ),
     )
     .returning({ id: gameSteamListings.id });
   if (!row) throw new NotFoundError();
+}
+
+/**
+ * Permanently delete a soft-deleted listing (hard purge from the trash
+ * view). Mirrors `hardDeleteGame` (games service): operates ONLY on a row
+ * already soft-deleted (`deletedAt IS NOT NULL`); an active or non-existent
+ * or cross-tenant row throws NotFoundError (404, not 403 — same semantics
+ * as restoreListing).
+ *
+ * `wishlist_snapshots` rows attached to this listing cascade-delete via
+ * the `listing_id` FK `ON DELETE cascade` (schema/wishlist-snapshots.ts) —
+ * no explicit child delete needed.
+ *
+ * Scoped to (userId, gameId, listingId) with an `isNotNull(deletedAt)`
+ * predicate so a single DELETE … RETURNING enforces the soft-deleted-only
+ * rule atomically — no pre-check SELECT, no race window against a concurrent
+ * restore (an active row simply does not match the WHERE).
+ *
+ * Audited (`listing.delete_forever`, after commit) — unlike the reversible
+ * soft-delete / restore / update, a permanent purge is irreversible data
+ * destruction and is security-relevant, symmetric with the sibling
+ * `event/source/game .delete_forever` verbs. Metadata: { gameId, listingId, appId }.
+ */
+export async function hardDeleteListing(
+  userId: string,
+  gameId: string,
+  listingId: string,
+  ipAddress: string,
+): Promise<void> {
+  // Single statement enforces the soft-deleted-only rule atomically: the
+  // `isNotNull(deletedAt)` predicate in the DELETE's WHERE means a row that is
+  // missing, cross-tenant, OR active (not soft-deleted) simply matches nothing
+  // and `returning` comes back empty → NotFoundError (404, never 403). The
+  // returned appId feeds the audit metadata.
+  const [deleted] = await db
+    .delete(gameSteamListings)
+    .where(
+      and(
+        eq(gameSteamListings.userId, userId),
+        eq(gameSteamListings.gameId, gameId),
+        eq(gameSteamListings.id, listingId),
+        isNotNull(gameSteamListings.deletedAt),
+      ),
+    )
+    .returning({ appId: gameSteamListings.appId });
+  if (!deleted) throw new NotFoundError();
+  const appId = deleted.appId;
+
+  // Audit AFTER commit (irreversible purge). writeAudit never throws.
+  await writeAudit({
+    userId,
+    action: "listing.delete_forever",
+    ipAddress,
+    metadata: { gameId, listingId, appId },
+  });
 }
 
 /**

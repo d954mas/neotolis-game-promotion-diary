@@ -96,62 +96,65 @@
       <p class="description">{game.description}</p>
     {/if}
   </div>
-  <!-- ⋮ overflow — Restore + Delete forever in trash, same as feed cards.
-       No inline buttons cluttering the card surface. -->
-  <div class="card-actions">
-    <button
-      type="button"
-      class="card-action-btn overflow"
-      onclick={(e) => {
-        e.stopPropagation();
-        menuOpen = !menuOpen;
-      }}
-      aria-haspopup="menu"
-      aria-expanded={menuOpen}
-      aria-label="More actions"
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="12" cy="5" r="1.8" fill="currentColor" />
-        <circle cx="12" cy="12" r="1.8" fill="currentColor" />
-        <circle cx="12" cy="19" r="1.8" fill="currentColor" />
-      </svg>
-    </button>
-    {#if menuOpen}
+  <!-- ⋮ overflow — Restore + Delete forever. Trash-only: the non-trash
+       /games list has no card actions, so the ⋮ would open an empty menu.
+       Render it only in trash view. -->
+  {#if isTrash}
+    <div class="card-actions">
       <button
         type="button"
-        class="menu-scrim"
-        onclick={() => (menuOpen = false)}
-        aria-label="Close menu"
-      ></button>
-      <div class="card-menu" role="menu">
-        {#if isTrash && onRestore}
-          <button
-            type="button"
-            role="menuitem"
-            onclick={() => {
-              menuOpen = false;
-              onRestore?.();
-            }}
-          >
-            {m.common_restore()}
-          </button>
-        {/if}
-        {#if isTrash && onDeleteForever}
-          <button
-            type="button"
-            role="menuitem"
-            class="danger"
-            onclick={() => {
-              menuOpen = false;
-              onDeleteForever?.();
-            }}
-          >
-            {m.games_trash_delete_forever()}
-          </button>
-        {/if}
-      </div>
-    {/if}
-  </div>
+        class="card-action-btn overflow"
+        onclick={(e) => {
+          e.stopPropagation();
+          menuOpen = !menuOpen;
+        }}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        aria-label="More actions"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="5" r="1.8" fill="currentColor" />
+          <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+          <circle cx="12" cy="19" r="1.8" fill="currentColor" />
+        </svg>
+      </button>
+      {#if menuOpen}
+        <button
+          type="button"
+          class="menu-scrim"
+          onclick={() => (menuOpen = false)}
+          aria-label="Close menu"
+        ></button>
+        <div class="card-menu" role="menu">
+          {#if onRestore}
+            <button
+              type="button"
+              role="menuitem"
+              onclick={() => {
+                menuOpen = false;
+                onRestore?.();
+              }}
+            >
+              {m.common_restore()}
+            </button>
+          {/if}
+          {#if onDeleteForever}
+            <button
+              type="button"
+              role="menuitem"
+              class="danger"
+              onclick={() => {
+                menuOpen = false;
+                onDeleteForever?.();
+              }}
+            >
+              {m.games_trash_delete_forever()}
+            </button>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  {/if}
 </article>
 
 <style>

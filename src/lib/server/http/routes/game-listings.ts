@@ -4,6 +4,7 @@
 //   POST   /api/games/:gameId/listings                       — addSteamListing
 //   GET    /api/games/:gameId/listings                       — listListings
 //   DELETE /api/games/:gameId/listings/:listingId            — removeSteamListing
+//   DELETE /api/games/:gameId/listings/:listingId?force=true — hardDeleteListing
 //   POST   /api/games/:gameId/listings/:listingId/restore    — restoreListing
 //   PATCH  /api/games/:gameId/listings/:listingId/key        — attachKeyToListing
 //
@@ -19,15 +20,18 @@
 
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
+import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import {
   addSteamListing,
   listListings,
   removeSteamListing,
   restoreListing,
+  hardDeleteListing,
   attachKeyToListing,
   updateListing,
 } from "../../services/game-steam-listings.js";
+import { importWishlistCsv } from "../../services/wishlist-snapshots.js";
 import { toGameSteamListingDto } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
@@ -111,10 +115,31 @@ gameListingsRoutes.patch(
   },
 );
 
+// `?force=true` switches from soft-delete (removeSteamListing) to hard
+// purge from the trash view (hardDeleteListing) — same force-flag idiom
+// the games + events bulk-delete routes use. Both paths return 204; both
+// surface cross-tenant gameId/listingId as 404. hardDeleteListing only
+// purges an already-soft-deleted row (else 404), so the trash view is the
+// only surface that calls it.
 gameListingsRoutes.delete("/games/:gameId/listings/:listingId", async (c) => {
   const ctx = getAuditContext(c);
+  const force = c.req.query("force") === "true";
   try {
-    await removeSteamListing(ctx.userId, c.req.param("listingId"), ctx.ipAddress);
+    if (force) {
+      await hardDeleteListing(
+        ctx.userId,
+        c.req.param("gameId"),
+        c.req.param("listingId"),
+        ctx.ipAddress,
+      );
+    } else {
+      await removeSteamListing(
+        ctx.userId,
+        c.req.param("gameId"),
+        c.req.param("listingId"),
+        ctx.ipAddress,
+      );
+    }
     return c.body(null, 204);
   } catch (err) {
     return mapErr(c, err, "DELETE /api/games/:gameId/listings/:listingId");
@@ -153,6 +178,59 @@ gameListingsRoutes.patch(
       return c.json(toGameSteamListingDto(listing));
     } catch (err) {
       return mapErr(c, err, "PATCH /api/games/:gameId/listings/:listingId/key");
+    }
+  },
+);
+
+// Wishlist CSV import — the repo's first multipart file-upload route.
+//
+// A Hono route (NOT a SvelteKit form action) so it inherits tenantScope +
+// accountState + metrics + mapErr by mount (RESEARCH.md Pattern 3 — a form
+// action bypasses all four). bodyLimit caps the payload BEFORE we read the
+// body into memory; years of daily rows are < 100 KB, so 2 MiB is generous.
+// We do NOT gate on `file.type` (RESEARCH.md Pitfall 6 — browsers send
+// inconsistent MIME for .csv); the parser's header-shape check is the real
+// contract. Cross-tenant gameId/listingId surfaces as 404 from the service.
+gameListingsRoutes.post(
+  "/games/:gameId/listings/:listingId/wishlist-import",
+  bodyLimit({
+    maxSize: 2 * 1024 * 1024,
+    onError: (c) => c.json({ error: "wishlist_csv_too_large" }, 413),
+  }),
+  async (c) => {
+    const ctx = getAuditContext(c);
+    try {
+      // parseBody + file.text() live INSIDE the try so a malformed multipart
+      // body throws into mapErr (keeping the wishlist_csv_* mapping + per-route
+      // log context) instead of escaping to the generic global onError 500.
+      const body = await c.req.parseBody();
+      const file = body["file"];
+      if (!(file instanceof File)) {
+        return c.json({ error: "wishlist_csv_missing_file" }, 422);
+      }
+      const csvText = await file.text();
+      const result = await importWishlistCsv(
+        ctx.userId,
+        c.req.param("gameId"),
+        c.req.param("listingId"),
+        csvText,
+        ctx.ipAddress,
+        file.name,
+      );
+      return c.json(result, 200);
+    } catch (err) {
+      // A payload over the 2 MiB cap throws Hono's BodyLimitError during
+      // parseBody(). The class is not a runtime value export of hono/body-limit
+      // (the dist only exports `bodyLimit`), so match by the stable `.name`.
+      // An oversized upload is a normal user scenario, not a server error:
+      // return the 413 here so it never reaches the global hono error handler
+      // (which logs at level 50 and would pollute the error log). The
+      // bodyLimit middleware's own onError still covers the Content-Length
+      // pre-check path with the same response shape.
+      if (err instanceof Error && err.name === "BodyLimitError") {
+        return c.json({ error: "wishlist_csv_too_large" }, 413);
+      }
+      return mapErr(c, err, "POST /api/games/:gameId/listings/:listingId/wishlist-import");
     }
   },
 );
