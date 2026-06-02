@@ -756,6 +756,8 @@ describe("paraglide i18n", () => {
       "viz_delta_24h",
       "viz_delta_7d",
       "viz_event_metrics_title",
+      "viz_growth_low_data",
+      "viz_growth_title",
       "viz_legend_listing_fallback",
       "viz_marker_more",
       "viz_range_all_time",

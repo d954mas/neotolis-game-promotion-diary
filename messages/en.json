@@ -388,6 +388,8 @@
   "viz_legend_listing_fallback": "Steam {appId}",
   "viz_range_label": "Date range",
   "viz_range_all_time": "All time",
+  "viz_growth_title": "Daily wishlist growth",
+  "viz_growth_low_data": "Not enough data — daily growth appears after a second import",
   "steam_listing_wishlist_chart_low_data": "Not enough data — the chart appears after the next import",
   "source_detail_settings_title": "Settings",
   "source_detail_settings_auto_import": "Auto-import (poll every 6 hours)",
