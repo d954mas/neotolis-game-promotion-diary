@@ -5,14 +5,18 @@
   // html:has(dialog[open]) body-scroll-lock), NOT a docked drawer.
   //
   // Lifted to the PAGE (which owns the feed data): the chart only emits the
-  // clicked day via onSelectDay; this modal renders that day's stats + events.
+  // tapped CLUSTER's day(s) via onSelectCluster; this modal renders those days'
+  // stats + events (04-12: a cluster chip merges several nearby event-days, so
+  // the modal accepts a SET of days, not a single day).
   //
   // Layout top→bottom:
-  //   1. Stats header — the day's wishlist delta as number + direction arrow
-  //      ("+47 in 7d ↑" / 24h figure, the D-05 day-level delta) plus the event
-  //      count. The delta is a DAY attribute: every event that day shares it;
-  //      per-event wishlist deltas are NEVER claimed.
-  //   2. The day's events as <FeedCard> rows — same vocabulary as /feed, wired
+  //   1. Stats header — the total event count across the cluster's days. When
+  //      the cluster is exactly ONE day, it also shows that day's wishlist delta
+  //      (number + direction arrow, the D-05 day-level delta). For a multi-day
+  //      cluster a single delta would be ambiguous (which day?), so only the
+  //      count is shown. The delta is a DAY attribute: every event that day
+  //      shares it; per-event wishlist deltas are NEVER claimed.
+  //   2. The days' events as <FeedCard> rows — same vocabulary as /feed, wired
   //      with the exact props the page's events list uses (event/source/game/
   //      games). Reusing FeedCard (instead of a bespoke row) keeps one card
   //      definition.
@@ -30,7 +34,7 @@
 
   let {
     open,
-    day,
+    days,
     events,
     delta,
     sourceById,
@@ -39,17 +43,27 @@
     onClose,
   }: {
     open: boolean;
-    /** The selected YYYY-MM-DD day (for the header). */
-    day: string | null;
-    /** That day's events (already filtered by the page). */
+    /** The cluster's selected YYYY-MM-DD day(s), date-ASC (for the header). */
+    days: string[];
+    /** Those days' events (already filtered by the page). */
     events: CardEventLite[];
-    /** The day-level wishlist delta (D-05) or null when no snapshot anchors it. */
+    /** The day-level wishlist delta (D-05) for a SINGLE-day cluster, or null
+     *  (multi-day cluster, or no snapshot anchors it). */
     delta: WishlistDelta | null;
     sourceById: Map<string, SourceLite>;
     gameById: Map<string, GameLite>;
     games: GameLite[];
     onClose: () => void;
   } = $props();
+
+  // Header day label: one day → that date; a multi-day cluster → "first → last".
+  const dayLabel = $derived.by((): string | null => {
+    if (days.length === 0) return null;
+    if (days.length === 1) return days[0]!;
+    return `${days[0]!} → ${days[days.length - 1]!}`;
+  });
+  // The delta block only makes sense for a single day (which day's delta?).
+  const showDelta = $derived(days.length === 1);
 
   let dialogEl: HTMLDialogElement | undefined = $state();
 
@@ -90,22 +104,25 @@
     <header class="modal-head">
       <div class="head-titles">
         <h2 class="modal-title">{m.viz_day_events_title()}</h2>
-        {#if day}<span class="modal-day">{day}</span>{/if}
+        {#if dayLabel}<span class="modal-day">{dayLabel}</span>{/if}
       </div>
       <button type="button" class="modal-close" onclick={onClose} aria-label="Close">×</button>
     </header>
 
-    <!-- Stats header: the DAY's delta (number + arrow) once + the event count. -->
+    <!-- Stats header: the total event count; plus the DAY's delta (number +
+         arrow) ONLY for a single-day cluster (a multi-day delta is ambiguous). -->
     <div class="day-stats" data-testid="day-stats">
-      <div class="day-delta">
-        <span class="day-delta-7d">
-          {m.viz_delta_7d({ value: signed(delta?.delta7d ?? null) })}
-          <span class="day-delta-arrow" aria-hidden="true">{arrow(delta?.delta7d ?? null)}</span>
-        </span>
-        <span class="day-delta-24h">
-          {m.viz_delta_24h({ value: signed(delta?.delta24h ?? null) })}
-        </span>
-      </div>
+      {#if showDelta}
+        <div class="day-delta">
+          <span class="day-delta-7d">
+            {m.viz_delta_7d({ value: signed(delta?.delta7d ?? null) })}
+            <span class="day-delta-arrow" aria-hidden="true">{arrow(delta?.delta7d ?? null)}</span>
+          </span>
+          <span class="day-delta-24h">
+            {m.viz_delta_24h({ value: signed(delta?.delta24h ?? null) })}
+          </span>
+        </div>
+      {/if}
       <span class="day-event-count">{m.viz_day_modal_event_count({ count: events.length })}</span>
     </div>
 

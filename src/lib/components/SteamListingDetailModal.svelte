@@ -5,26 +5,23 @@
   // inline edit, wishlist summary + CSV import, and the soft-delete action.
   // Hard-delete (delete forever) lives in the trash view, not here.
   //
+  // 04-12: the per-listing mini wishlist line chart was REMOVED — it duplicated
+  // the page's headline correlation chart with strictly less data (one listing,
+  // no event markers, no crosshair). The inline "N wishlists · as of …" summary
+  // on the listing card + the WishlistSummary table here carry the per-listing
+  // numbers; the trend lives on the page chart.
+  //
   // Pattern follows AddStoreDialog / ConfirmDialog: native <dialog> +
   // showModal() (focus trap + Escape close) + backdrop-click closes via
   // target===dialogEl. Body-scroll-lock is handled globally by
   // body:has(dialog[open]) in app.css — no JS lock.
 
-  import { Chart } from "svelte-echarts";
-  import { init, use } from "echarts/core";
-  import { LineChart } from "echarts/charts";
-  import { GridComponent, TooltipComponent } from "echarts/components";
-  import { CanvasRenderer } from "echarts/renderers";
   import { m } from "$lib/paraglide/messages.js";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import InlineError from "./InlineError.svelte";
   import WishlistImport from "./WishlistImport.svelte";
   import WishlistSummary from "./WishlistSummary.svelte";
-  import { abbreviate } from "./charts/abbreviate.js";
-  import { baseChartOptions, prefersReducedMotion } from "./charts/chart-theme.js";
-  import type { WishlistSummaryDto, WishlistSeries } from "$lib/server/dto.js";
-
-  use([LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
+  import type { WishlistSummaryDto } from "$lib/server/dto.js";
 
   type Listing = {
     id: string;
@@ -41,7 +38,6 @@
     gameId,
     listing,
     summary = null,
-    series = null,
     onClose,
     onChange,
   }: {
@@ -49,41 +45,9 @@
     gameId: string;
     listing: Listing;
     summary?: WishlistSummaryDto | null;
-    // This listing's own wishlist daily series, for the mini line chart. null /
-    // <2 points → a low-data caption instead of a misleading short line.
-    series?: WishlistSeries | null;
     onClose: () => void;
     onChange?: () => void;
   } = $props();
-
-  // The mini chart needs >=2 points to draw a meaningful line (D-07). Below
-  // that we show a low-data caption; with no series/points we show nothing
-  // extra (the recommendation text + import CTA already cover the empty case).
-  const chartPoints = $derived(series?.points ?? []);
-  const hasChart = $derived(chartPoints.length >= 2);
-  const lowData = $derived(chartPoints.length === 1);
-
-  const chartOptions = $derived.by(() => {
-    if (typeof window === "undefined" || !hasChart) return {};
-    return {
-      ...baseChartOptions({ reducedMotion: prefersReducedMotion() }),
-      grid: { left: 8, right: 8, top: 12, bottom: 8, containLabel: true },
-      xAxis: { type: "time" as const, splitNumber: 4, axisLabel: { hideOverlap: true } },
-      yAxis: {
-        type: "value" as const,
-        axisLabel: { formatter: (v: number): string => abbreviate(v) },
-      },
-      series: [
-        {
-          name: m.viz_wishlist_line_label(),
-          type: "line" as const,
-          showSymbol: false,
-          lineStyle: { width: 2 },
-          data: chartPoints.map((p) => [p.date, p.balance]),
-        },
-      ],
-    };
-  });
 
   let dialogEl: HTMLDialogElement | null = $state(null);
 
@@ -314,18 +278,6 @@
 
     <section class="modal-section" aria-label={m.steam_listing_detail_section_wishlist()}>
       <h3 class="section-subheading">{m.steam_listing_detail_section_wishlist()}</h3>
-
-      <!-- Mini wishlist line chart of THIS listing's series. >=2 points →
-           the line; exactly 1 point → a low-data caption (D-07, never a
-           misleading short trend); 0 points → nothing (the recommendation +
-           import CTA below carry the empty state, D-08). -->
-      {#if hasChart && typeof window !== "undefined"}
-        <div class="wishlist-chart">
-          <Chart {init} options={chartOptions} />
-        </div>
-      {:else if lowData}
-        <p class="wishlist-chart-low-data">{m.steam_listing_wishlist_chart_low_data()}</p>
-      {/if}
 
       {#if summary}
         <WishlistSummary {summary} />
@@ -618,21 +570,6 @@
     font-family: var(--f-sans);
     font-size: var(--t-13);
     font-weight: var(--w-md);
-  }
-  /* Compact wishlist line chart for this listing — height-capped so it reads
-   * as a mini sparkline inside the modal section, not a full panel. */
-  .wishlist-chart {
-    width: 100%;
-    height: 180px;
-    min-width: 0;
-    font-variant-numeric: tabular-nums;
-  }
-  .wishlist-chart-low-data {
-    margin: 0;
-    color: var(--text-3);
-    font-family: var(--f-sans);
-    font-size: var(--t-12);
-    line-height: var(--lh-body);
   }
   .export-help {
     display: flex;

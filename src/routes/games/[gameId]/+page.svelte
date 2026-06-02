@@ -217,24 +217,28 @@
     chartVisible = { ...chartVisible, [listingId]: shown };
   }
 
-  // ── Day-detail modal (04-10) ─────────────────────────────────────────
-  // A marker click on EITHER chart emits the day up here; the PAGE owns the
-  // centered EventDayModal (it has the feed data — events + source/game maps).
-  // Replaces the per-chart EventMarkerPanel side drawer.
-  let selectedChartDay = $state<string | null>(null);
-  // That day's events — the page's FeedCard-shaped `events` filtered to the
-  // selected day (local-tz YYYY-MM-DD, matching the marker day keys).
+  // ── Day-detail modal (04-10 / 04-12 cluster) ─────────────────────────
+  // A marker (cluster) tap on the correlation chart emits the cluster's day(s)
+  // up here; the growth chart still emits a single day (wrapped to [day]). The
+  // PAGE owns the centered EventDayModal (it has the feed data — events +
+  // source/game maps). Empty = closed.
+  let selectedChartDays = $state<string[]>([]);
+  // Those days' events — the page's FeedCard-shaped `events` filtered to the
+  // selected day set (local-tz YYYY-MM-DD, matching the marker day keys).
   const selectedDayEvents = $derived.by((): EventDtoLocal[] => {
-    if (!selectedChartDay) return [];
-    return events.filter((e) => eventDay(e) === selectedChartDay);
+    if (selectedChartDays.length === 0) return [];
+    const set = new Set(selectedChartDays);
+    return events.filter((e) => set.has(eventDay(e)));
   });
-  // The day-level delta (D-05): the first VISIBLE listing's delta for that day,
+  // The day-level delta (D-05) — only meaningful for a SINGLE-day cluster (which
+  // day's delta otherwise?). The first VISIBLE listing's delta for that day,
   // falling back across visible listings (mirrors the charts' selection logic).
   const selectedDayDelta = $derived.by((): WishlistDelta | null => {
-    if (!selectedChartDay) return null;
+    if (selectedChartDays.length !== 1) return null;
+    const day = selectedChartDays[0]!;
     for (const l of chartListings) {
       if (chartVisible[l.id] === false) continue;
-      const d = chartDeltaByDate[l.id]?.[selectedChartDay];
+      const d = chartDeltaByDate[l.id]?.[day];
       if (d) return d;
     }
     return null;
@@ -564,7 +568,6 @@
       {listings}
       gameId={game.id}
       wishlistSummaries={data.wishlistSummaries}
-      wishlistSeriesByListing={chartSeriesByListing}
       onChange={() => invalidateAll()}
     />
   </section>
@@ -606,7 +609,7 @@
       today={data.today}
       range={chartRange}
       visible={chartVisible}
-      onSelectCluster={(days) => (selectedChartDay = days[0] ?? null)}
+      onSelectCluster={(days) => (selectedChartDays = days)}
     />
 
     <!-- Second wishlist chart (04-08): DAILY net change (prior day's cumulative
@@ -621,7 +624,7 @@
         today={data.today}
         range={chartRange}
         visible={chartVisible}
-        onSelectDay={(d) => (selectedChartDay = d)}
+        onSelectDay={(d) => (selectedChartDays = [d])}
       />
     </div>
   </section>
@@ -631,14 +634,14 @@
        modal shows that day's stats header + FeedCard rows. Replaces the old
        per-chart EventMarkerPanel side drawer. -->
   <EventDayModal
-    open={!!selectedChartDay}
-    day={selectedChartDay}
+    open={selectedChartDays.length > 0}
+    days={selectedChartDays}
     events={selectedDayEvents}
     delta={selectedDayDelta}
     {sourceById}
     {gameById}
     games={allGames}
-    onClose={() => (selectedChartDay = null)}
+    onClose={() => (selectedChartDays = [])}
   />
 
   <section class="events" id="section-events">
