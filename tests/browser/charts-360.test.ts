@@ -152,6 +152,10 @@ function mountChart(series: typeof emptySeries | typeof shortSeries): {
       sources: baseSources,
       games: baseGames,
       today: TODAY,
+      // 04-08: range + legend lifted to the page; the chart is now controlled.
+      range: null,
+      visible: {},
+      onLegendToggle: () => {},
     },
   });
   flushSync();

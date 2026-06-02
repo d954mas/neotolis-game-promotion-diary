@@ -24,10 +24,14 @@
   //   - click a marker → resolve the day → open <EventMarkerPanel> with the
   //     day's events + that day's delta (D-05 day-level).
   //
-  // Date-range (04-07): a date-chip + DateRangePicker + an "All time" reset
-  // above the chart filters the visible window CLIENT-SIDE against the server
-  // `today` instant (never `new Date()`). The already-loaded daily series is
-  // clipped to [from, to] inclusive; markers outside the window are hidden.
+  // Date-range + legend (04-08): the date-range picker and the per-listing
+  // legend selection are now OWNED BY THE PAGE so a sibling WishlistGrowthChart
+  // shares the same window + the same visible listings. This component is
+  // CONTROLLED: it receives `range` + `visible` as props and emits
+  // `onRangeChange` / `onLegendToggle`. The already-loaded daily series is
+  // clipped to [from, to] inclusive; markers outside the window are hidden; a
+  // toggled-off listing's line is hidden via ECharts' own legend AND mirrored
+  // into the shared `visible` map (legendselectchanged → onLegendToggle).
   //
   // SSR (RESEARCH Pitfall 1): the option object resolves --k-* tokens via
   // getComputedStyle (canvas can't read CSS vars), so it's built client-only
@@ -58,11 +62,17 @@
   import type { EChartsType } from "echarts/core";
   import type { ECMouseEvent } from "svelte-echarts";
   import EventMarkerPanel from "./EventMarkerPanel.svelte";
-  import DateRangePicker from "$lib/components/feed/DateRangePicker.svelte";
-  import { startOfDay, fmtMonthDay } from "$lib/feed/date-range.js";
   import { m } from "$lib/paraglide/messages.js";
   import { abbreviate } from "./abbreviate.js";
-  import { baseChartOptions, prefersReducedMotion, resolveKindColor } from "./chart-theme.js";
+  import { baseChartOptions, prefersReducedMotion } from "./chart-theme.js";
+  import {
+    paletteColor,
+    inRange,
+    buildDayGroups,
+    buildMarkLineData,
+    listingLabel as buildListingLabel,
+    type ListingLite,
+  } from "./wishlist-chart-shared.js";
   import type { EventDto, GameDto, DataSourceDto, WishlistSeries, WishlistDelta } from "$lib/server/dto.js";
 
   use([
@@ -75,8 +85,6 @@
     CanvasRenderer,
   ]);
 
-  type ListingLite = { id: string; name?: string | null; appId?: number };
-
   let {
     seriesByListing,
     events,
@@ -85,6 +93,10 @@
     sources,
     games,
     today,
+    range,
+    visible,
+    onRangeChange,
+    onLegendToggle,
   }: {
     /** One wishlist series per active listing, keyed by listing id. */
     seriesByListing: Record<string, WishlistSeries>;
@@ -97,68 +109,56 @@
     games: GameDto[];
     /** Server-chosen "now" ISO instant for the honest D-13 caption + range guard. */
     today: string;
+    /** Shared date-range (owned by the page) — null = all time. CONTROLLED. */
+    range: { from: Date; to: Date } | null;
+    /** Shared legend selection (owned by the page): listingId → shown. CONTROLLED. */
+    visible: Record<string, boolean>;
+    /** Emit a legend toggle so the page mirrors it into `visible` (both charts react). */
+    onLegendToggle: (listingId: string, shown: boolean) => void;
+    /** Reserved: emit range changes if the chart ever drives the picker (page owns it now). */
+    onRangeChange?: (range: { from: Date; to: Date } | null) => void;
   } = $props();
 
-  // Per-line palette — distinct from the --k-* kind colors (those belong to the
-  // event markers). Cycles when there are more listings than entries.
-  const LINE_PALETTE = ["#5b8def", "#e0a458", "#5fb98e", "#c25b9e", "#7d6ad6", "#d2705a"];
+  // onRangeChange is part of the controlled contract but the picker now lives at
+  // the page; reference it so the prop is not flagged unused.
+  void onRangeChange;
 
   function listingLabel(l: ListingLite): string {
-    if (l.name && l.name.trim()) return l.name;
-    if (typeof l.appId === "number") return m.viz_legend_listing_fallback({ appId: l.appId });
-    return m.viz_wishlist_line_label();
+    return buildListingLabel(
+      l,
+      (appId) => m.viz_legend_listing_fallback({ appId }),
+      () => m.viz_wishlist_line_label(),
+    );
   }
 
-  // ── Date range (04-07) ───────────────────────────────────────────────
-  // null = all time. Applied against the SERVER `today` instant, never the
-  // client clock. The picker is an anchored popover (DateRangePicker) opened
-  // from the date-chip; an "All time" chip resets the range to null.
-  const todayDate = $derived(startOfDay(new Date(today)));
-  let range = $state<{ from: Date; to: Date } | null>(null);
-  let pickerOpen = $state(false);
-  let chipEl = $state<HTMLButtonElement | undefined>();
-  let anchorTop = $state(0);
-  let anchorLeft = $state(0);
-
-  function openPicker(): void {
-    if (chipEl) {
-      const rect = chipEl.getBoundingClientRect();
-      anchorTop = rect.bottom + 4;
-      anchorLeft = rect.left;
-    }
-    pickerOpen = true;
+  // A listing is visible unless the shared legend map explicitly turned it off.
+  function isVisible(listingId: string): boolean {
+    return visible[listingId] !== false;
   }
 
-  const rangeChipLabel = $derived(
-    range ? `${fmtMonthDay(range.from)} – ${fmtMonthDay(range.to)}` : m.viz_range_all_time(),
+  // Legend entries: only listings that have ANY wishlist data (regardless of
+  // range / current toggle) — a listing with no CSV never has a series to
+  // reference, so listing it in legend.data triggers ECharts' "series not
+  // exists" warning. A toggled-off-but-non-empty listing stays listed so it can
+  // be toggled back on.
+  const legendListings = $derived(
+    listings.filter((l) => (seriesByListing[l.id]?.points.length ?? 0) > 0),
   );
 
-  // A daily YYYY-MM-DD point is in-window when it falls within [from, to]
-  // inclusive. range === null ⇒ everything passes.
-  function inRange(dateStr: string): boolean {
-    if (!range) return true;
-    return dateStr >= isoDay(range.from) && dateStr <= isoDay(range.to);
-  }
-
-  function isoDay(d: Date): string {
-    const y = d.getFullYear();
-    const mo = String(d.getMonth() + 1).padStart(2, "0");
-    const da = String(d.getDate()).padStart(2, "0");
-    return `${y}-${mo}-${da}`;
-  }
-
-  // ── Per-listing lines (filtered by range) ────────────────────────────
+  // ── Per-listing lines (filtered by range + legend) ───────────────────
   type Line = { id: string; label: string; color: string; points: { date: string; balance: number }[]; lastImportedAt: string | null };
 
   const lines = $derived.by((): Line[] => {
     return listings
-      .map((l, i): Line => {
+      .filter((l) => isVisible(l.id))
+      .map((l): Line => {
+        const i = listings.findIndex((x) => x.id === l.id);
         const s = seriesByListing[l.id] ?? { points: [], lastImportedAt: null };
         return {
           id: l.id,
           label: listingLabel(l),
-          color: LINE_PALETTE[i % LINE_PALETTE.length]!,
-          points: s.points.filter((p) => inRange(p.date)),
+          color: paletteColor(i),
+          points: s.points.filter((p) => inRange(p.date, range)),
           lastImportedAt: s.lastImportedAt,
         };
       })
@@ -167,34 +167,8 @@
 
   const hasSeries = $derived(lines.length > 0);
 
-  // ── Group events by DAY (D-04/D-05), filtered by range ───────────────
-  // The marker + the delta are DAY attributes: truncate occurredAt to
-  // YYYY-MM-DD and collapse all events that day to one entry. Markers outside
-  // the selected range are hidden (04-07).
-  type DayGroup = { date: string; events: EventDto[]; mixedKind: boolean; kind: string };
-
-  function dayOf(e: EventDto): string {
-    const d = typeof e.occurredAt === "string" ? new Date(e.occurredAt) : e.occurredAt;
-    return d.toISOString().slice(0, 10);
-  }
-
-  const dayGroups = $derived.by((): DayGroup[] => {
-    const byDay = new Map<string, EventDto[]>();
-    for (const e of events) {
-      const day = dayOf(e);
-      if (!inRange(day)) continue;
-      const arr = byDay.get(day);
-      if (arr) arr.push(e);
-      else byDay.set(day, [e]);
-    }
-    return [...byDay.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([date, evs]) => {
-        const kinds = new Set(evs.map((e) => e.kind));
-        const mixedKind = kinds.size > 1;
-        return { date, events: evs, mixedKind, kind: evs[0]!.kind };
-      });
-  });
+  // ── Event-day markers (shared with the growth chart) ─────────────────
+  const dayGroups = $derived(buildDayGroups(events, range));
 
   // Marker count for the test hook (number of DISTINCT event-days rendered).
   const markerCount = $derived(dayGroups.length);
@@ -247,6 +221,27 @@
     if (typeof day === "string") selectedDay = day;
   }
 
+  // ── Legend ↔ shared visible map (04-08) ──────────────────────────────
+  // ECharts' legend keys by series NAME (the listing label); the shared
+  // `visible` map keys by listing ID. Map label → id so a legendselectchanged
+  // event updates the page state, which both charts read.
+  const idByLabel = $derived.by((): Map<string, string> => {
+    const m2 = new Map<string, string>();
+    for (const l of listings) m2.set(listingLabel(l), l.id);
+    return m2;
+  });
+
+  function onLegendSelectChanged(
+    e: { name?: string; selected?: Record<string, boolean> } | undefined,
+  ): void {
+    const label = e?.name;
+    const selected = e?.selected;
+    if (typeof label !== "string" || !selected) return;
+    const id = idByLabel.get(label);
+    if (!id) return;
+    onLegendToggle(id, selected[label] !== false);
+  }
+
   // markLine attaches to the FIRST visible line (or the hidden anchor series
   // when no listing has points). Its series name drives the markArea patch.
   const markLineSeriesName = $derived(lines[0]?.label ?? "__wishlist_anchor__");
@@ -289,32 +284,9 @@
     if (typeof window === "undefined") return {};
     const reducedMotion = prefersReducedMotion();
 
-    // One vertical markLine per distinct event-DAY (D-01). Mixed-kind day →
-    // neutral --k-post (D-04). >1 event → count badge "N" at the top.
-    const markLineData = dayGroups.map((g) => {
-      const color = g.mixedKind ? resolveKindColor("post") : resolveKindColor(g.kind);
-      const count = g.events.length;
-      return {
-        name: g.date,
-        xAxis: g.date,
-        lineStyle: { color, width: 2 },
-        label:
-          count > 1
-            ? {
-                show: true,
-                position: "start" as const,
-                distance: 4,
-                formatter: String(count),
-                color: "#fff",
-                backgroundColor: color,
-                padding: [2, 5],
-                borderRadius: 8,
-                fontSize: 10,
-                fontWeight: "bold" as const,
-              }
-            : { show: false },
-      };
-    });
+    // One vertical markLine per distinct event-DAY (D-01), shared verbatim with
+    // the growth chart so markers are pixel-identical across both.
+    const markLineData = buildMarkLineData(dayGroups);
 
     const markLine = {
       symbol: "none" as const,
@@ -351,9 +323,17 @@
     return {
       ...baseChartOptions({ reducedMotion }),
       legend: {
-        show: lines.length > 0,
+        // List every listing that HAS data (not just the in-range visible
+        // ones) so a toggled-off line can be toggled back on. `selected`
+        // mirrors the shared `visible` map → the page is the single source of
+        // truth.
+        show: legendListings.length > 0,
         type: "scroll" as const,
         bottom: 0,
+        data: legendListings.map((l) => listingLabel(l)),
+        selected: Object.fromEntries(
+          legendListings.map((l) => [listingLabel(l), isVisible(l.id)]),
+        ),
         textStyle: { color: resolveTextColor() },
       },
       grid: { left: 8, right: 8, top: 16, bottom: 36, containLabel: true },
@@ -385,47 +365,19 @@
   data-low-data={hasSeries ? "false" : "true"}
   data-line-count={lines.length}
 >
-  <!-- Date-range control (04-07): a date-chip opens the DateRangePicker; the
-       "All time" chip resets the visible window. Filters client-side against
-       the server `today` instant. -->
-  <div class="range-row">
-    <button
-      bind:this={chipEl}
-      type="button"
-      class="range-chip"
-      data-custom={range ? "1" : "0"}
-      onclick={openPicker}
-      title={m.viz_range_label()}
-    >
-      <svg
-        width="14"
-        height="14"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.75"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <rect x="3" y="5" width="18" height="16" rx="2" />
-        <path d="M16 3v4M8 3v4M3 11h18" />
-      </svg>
-      <span>{rangeChipLabel}</span>
-    </button>
-    <button
-      type="button"
-      class="range-reset"
-      data-active={range ? "0" : "1"}
-      onclick={() => (range = null)}
-    >
-      {m.viz_range_all_time()}
-    </button>
-  </div>
+  <!-- Date-range control + legend now live at the PAGE (04-08) so the sibling
+       growth chart shares the same window + visible listings. This component is
+       controlled via the `range` + `visible` props. -->
 
   {#if typeof window !== "undefined"}
     <div class="chart-canvas">
-      <Chart {init} {options} bind:chart onclick={onChartClick} />
+      <Chart
+        {init}
+        {options}
+        bind:chart
+        onclick={onChartClick}
+        onlegendselectchanged={onLegendSelectChanged}
+      />
     </div>
   {/if}
 
@@ -440,16 +392,6 @@
     <p class="updated-caption">{m.viz_wishlist_updated_ago({ hours: updatedHoursAgo })}</p>
   {/if}
 </div>
-
-<DateRangePicker
-  value={range}
-  open={pickerOpen}
-  {anchorTop}
-  {anchorLeft}
-  today={todayDate}
-  onApply={(r) => (range = { from: r.from, to: r.to })}
-  onClose={() => (pickerOpen = false)}
-/>
 
 {#if selectedGroup}
   <EventMarkerPanel
@@ -470,68 +412,6 @@
     /* VIZ-04: the chart reflows within its column — never adds page-level
      * horizontal scroll. */
     width: 100%;
-  }
-  .range-row {
-    display: flex;
-    align-items: center;
-    gap: var(--s-2);
-    flex-wrap: wrap;
-    min-width: 0;
-  }
-  .range-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--s-2);
-    height: 32px;
-    padding: 0 var(--s-3);
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    border-radius: var(--r-sm);
-    font-family: var(--f-sans);
-    font-size: var(--t-13);
-    font-weight: var(--w-md);
-    white-space: nowrap;
-    cursor: pointer;
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease),
-      color var(--m-fast) var(--m-ease);
-  }
-  .range-chip:hover {
-    border-color: var(--accent);
-  }
-  .range-chip[data-custom="1"] {
-    background: var(--accent-soft);
-    border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
-    color: var(--accent-strong);
-    font-weight: var(--w-sb);
-  }
-  .range-reset {
-    height: 28px;
-    padding: 0 var(--s-3);
-    background: var(--surface);
-    color: var(--text-2);
-    border: 1px solid var(--border);
-    border-radius: var(--r-pill);
-    font-family: var(--f-sans);
-    font-size: var(--t-12);
-    font-weight: var(--w-md);
-    cursor: pointer;
-    white-space: nowrap;
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease),
-      color var(--m-fast) var(--m-ease);
-  }
-  .range-reset:hover {
-    color: var(--text);
-    border-color: var(--border-2);
-  }
-  .range-reset[data-active="1"] {
-    background: var(--accent-soft);
-    color: var(--accent-strong);
-    border-color: color-mix(in oklab, var(--accent) 50%, transparent);
   }
   .chart-canvas {
     width: 100%;
@@ -554,11 +434,5 @@
     font-size: var(--t-12, 12px);
     color: var(--text-3);
     font-variant-numeric: tabular-nums;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .range-chip,
-    .range-reset {
-      transition: none;
-    }
   }
 </style>
