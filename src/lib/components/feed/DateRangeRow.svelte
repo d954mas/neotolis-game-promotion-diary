@@ -22,12 +22,17 @@
     onDateRangeChange,
     sortDir,
     onSortDirChange,
+    showSort = true,
     today,
   }: {
     dateRange: DateRangeFilter;
     onDateRangeChange: (next: DateRangeFilter) => void;
-    sortDir: "asc" | "desc";
-    onSortDirChange: (next: "asc" | "desc") => void;
+    /** Optional: the sort toggle is hidden when showSort is false (e.g. the
+     *  games-page chart range, which has no sort axis). When shown, both
+     *  sortDir + onSortDirChange must be supplied. */
+    sortDir?: "asc" | "desc";
+    onSortDirChange?: (next: "asc" | "desc") => void;
+    showSort?: boolean;
     today: Date;
   } = $props();
 
@@ -160,19 +165,21 @@
     </button>
   </div>
 
-  <button
-    type="button"
-    class="sort-toggle"
-    onclick={() => onSortDirChange(sortDir === "desc" ? "asc" : "desc")}
-    title="Toggle sort order"
-  >
-    <span aria-hidden="true">{sortDir === "desc" ? "↓" : "↑"}</span>
-    <span>
-      {sortDir === "desc"
-        ? m.feed_date_range_sort_newest_first()
-        : m.feed_date_range_sort_oldest_first()}
-    </span>
-  </button>
+  {#if showSort && sortDir && onSortDirChange}
+    <button
+      type="button"
+      class="sort-toggle"
+      onclick={() => onSortDirChange(sortDir === "desc" ? "asc" : "desc")}
+      title="Toggle sort order"
+    >
+      <span aria-hidden="true">{sortDir === "desc" ? "↓" : "↑"}</span>
+      <span>
+        {sortDir === "desc"
+          ? m.feed_date_range_sort_newest_first()
+          : m.feed_date_range_sort_oldest_first()}
+      </span>
+    </button>
+  {/if}
 </div>
 
 <DateRangePicker

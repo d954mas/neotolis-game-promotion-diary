@@ -51,8 +51,9 @@
   import EventDayModal from "$lib/components/charts/EventDayModal.svelte";
   import ChartLegend from "$lib/components/charts/ChartLegend.svelte";
   import { listingLabel, eventDay } from "$lib/components/charts/wishlist-chart-shared.js";
-  import DateRangePicker from "$lib/components/feed/DateRangePicker.svelte";
-  import { startOfDay, fmtMonthDay } from "$lib/feed/date-range.js";
+  import DateRangeRow from "$lib/components/feed/DateRangeRow.svelte";
+  import { startOfDay, dateRangeWindow, parseEventDate } from "$lib/feed/date-range.js";
+  import type { DateRangeFilter } from "$lib/feed/url-state.js";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
   import type {
     GameSteamListingDto,
@@ -179,7 +180,21 @@
   // sync: both read `chartRange` + `chartVisible`. The range filters client-side
   // against the SERVER `today` instant (D-24), never the client clock.
   const chartTodayDate = $derived(startOfDay(new Date(data.today)));
-  let chartRange = $state<{ from: Date; to: Date } | null>(null);
+  // The chart date control is the feed's preset picker (DateRangeRow): All time
+  // / Year / Month / Week / Today + a custom range. The selected preset is the
+  // source of truth; the charts consume a resolved {from,to}|null window, so we
+  // derive `chartRange` from the preset against the server `today` (D-24).
+  let chartDateRange = $state<DateRangeFilter>({ preset: "all" });
+  const chartRange = $derived.by((): { from: Date; to: Date } | null => {
+    if (chartDateRange.preset === "all") return null;
+    if (chartDateRange.preset === "custom") {
+      const from = parseEventDate(chartDateRange.from);
+      const to = parseEventDate(chartDateRange.to);
+      if (!from || !to) return null;
+      return { from, to };
+    }
+    return dateRangeWindow(chartDateRange.preset, chartTodayDate);
+  });
   // listingId → shown. Absent / true = shown; false = legend-toggled-off.
   let chartVisible = $state<Record<string, boolean>>({});
   function toggleListing(listingId: string, shown: boolean): void {
@@ -208,25 +223,6 @@
     }
     return null;
   });
-
-  // DateRangePicker anchored-popover plumbing (lifted from the chart).
-  let rangePickerOpen = $state(false);
-  let rangeChipEl = $state<HTMLButtonElement | undefined>();
-  let rangeAnchorTop = $state(0);
-  let rangeAnchorLeft = $state(0);
-  function openRangePicker(): void {
-    if (rangeChipEl) {
-      const rect = rangeChipEl.getBoundingClientRect();
-      rangeAnchorTop = rect.bottom + 4;
-      rangeAnchorLeft = rect.left;
-    }
-    rangePickerOpen = true;
-  }
-  const rangeChipLabel = $derived(
-    chartRange
-      ? `${fmtMonthDay(chartRange.from)} – ${fmtMonthDay(chartRange.to)}`
-      : m.viz_range_all_time(),
-  );
 
   // Trash view: per-card Restore.
   async function restoreListing(listingId: string): Promise<void> {
@@ -567,46 +563,18 @@
       <h2>{m.viz_wishlist_line_label()}</h2>
     </header>
 
-    <!-- ONE date-range control for BOTH charts (04-08): a date-chip opens the
-         DateRangePicker; the "All time" chip resets the window. Filters
-         client-side against the server `today` instant. The per-listing legend
-         is now a custom on-brand <ChartLegend> below this row (04-09): it owns
-         no state, just flips `chartVisible`, which BOTH charts filter their
-         series by — fixing the re-enable bug. -->
-    <div class="chart-range-row">
-      <button
-        bind:this={rangeChipEl}
-        type="button"
-        class="range-chip"
-        data-custom={chartRange ? "1" : "0"}
-        onclick={openRangePicker}
-        title={m.viz_range_label()}
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.75"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <rect x="3" y="5" width="18" height="16" rx="2" />
-          <path d="M16 3v4M8 3v4M3 11h18" />
-        </svg>
-        <span>{rangeChipLabel}</span>
-      </button>
-      <button
-        type="button"
-        class="range-reset"
-        data-active={chartRange ? "0" : "1"}
-        onclick={() => (chartRange = null)}
-      >
-        {m.viz_range_all_time()}
-      </button>
-    </div>
+    <!-- ONE date-range control for BOTH charts (04-10): the feed's preset
+         picker (DateRangeRow) — All time / Year / Month / Week / Today + a
+         custom range — with the sort toggle hidden (the chart has no sort
+         axis). The selected preset resolves to the {from,to} window the charts
+         consume. The per-listing legend is a custom <ChartLegend> below this
+         row (04-09): it flips `chartVisible`, which both charts filter by. -->
+    <DateRangeRow
+      dateRange={chartDateRange}
+      onDateRangeChange={(n) => (chartDateRange = n)}
+      showSort={false}
+      today={chartTodayDate}
+    />
 
     <!-- Custom on-brand per-listing legend (04-09) — ONE control for BOTH
          charts. Pill chips matching the site .chip vocabulary; click toggles a
@@ -656,18 +624,6 @@
     {gameById}
     games={allGames}
     onClose={() => (selectedChartDay = null)}
-  />
-
-  <!-- Shared DateRangePicker — anchored popover above the charts. Mounted once,
-       drives BOTH charts through `chartRange`. -->
-  <DateRangePicker
-    value={chartRange}
-    open={rangePickerOpen}
-    anchorTop={rangeAnchorTop}
-    anchorLeft={rangeAnchorLeft}
-    today={chartTodayDate}
-    onApply={(r) => (chartRange = { from: r.from, to: r.to })}
-    onClose={() => (rangePickerOpen = false)}
   />
 
   <section class="events" id="section-events">
@@ -776,70 +732,6 @@
     margin-bottom: var(--s-6);
     min-width: 0;
   }
-  /* Shared date-range control above both charts (04-08). Lifted verbatim from
-   * the correlation chart's former internal .range-row. */
-  .chart-range-row {
-    display: flex;
-    align-items: center;
-    gap: var(--s-2);
-    flex-wrap: wrap;
-    min-width: 0;
-  }
-  .range-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--s-2);
-    height: 32px;
-    padding: 0 var(--s-3);
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    border-radius: var(--r-sm);
-    font-family: var(--f-sans);
-    font-size: var(--t-13);
-    font-weight: var(--w-md);
-    white-space: nowrap;
-    cursor: pointer;
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease),
-      color var(--m-fast) var(--m-ease);
-  }
-  .range-chip:hover {
-    border-color: var(--accent);
-  }
-  .range-chip[data-custom="1"] {
-    background: var(--accent-soft);
-    border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
-    color: var(--accent-strong);
-    font-weight: var(--w-sb);
-  }
-  .range-reset {
-    height: 28px;
-    padding: 0 var(--s-3);
-    background: var(--surface);
-    color: var(--text-2);
-    border: 1px solid var(--border);
-    border-radius: var(--r-pill);
-    font-family: var(--f-sans);
-    font-size: var(--t-12);
-    font-weight: var(--w-md);
-    cursor: pointer;
-    white-space: nowrap;
-    transition:
-      background var(--m-fast) var(--m-ease),
-      border-color var(--m-fast) var(--m-ease),
-      color var(--m-fast) var(--m-ease);
-  }
-  .range-reset:hover {
-    color: var(--text);
-    border-color: var(--border-2);
-  }
-  .range-reset[data-active="1"] {
-    background: var(--accent-soft);
-    color: var(--accent-strong);
-    border-color: color-mix(in oklab, var(--accent) 50%, transparent);
-  }
   .growth-block {
     display: flex;
     flex-direction: column;
@@ -852,12 +744,6 @@
     font-weight: var(--w-sb);
     color: var(--text-2);
     line-height: var(--lh-tight);
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .range-chip,
-    .range-reset {
-      transition: none;
-    }
   }
   .events {
     display: flex;
