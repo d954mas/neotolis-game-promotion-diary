@@ -606,7 +606,7 @@
       today={data.today}
       range={chartRange}
       visible={chartVisible}
-      onSelectDay={(d) => (selectedChartDay = d)}
+      onSelectCluster={(days) => (selectedChartDay = days[0] ?? null)}
     />
 
     <!-- Second wishlist chart (04-08): DAILY net change (prior day's cumulative

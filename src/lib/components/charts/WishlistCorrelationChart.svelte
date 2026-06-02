@@ -11,24 +11,17 @@
   // belong to the event markers). The custom <ChartLegend> at the page toggles
   // each line on/off via the shared `visible` map.
   //
-  // ECharts (RESEARCH Pattern 4 + 04-11 Millo-style thumbnail markers):
+  // ECharts (RESEARCH Pattern 4 + 04-12 HTML marker overlay):
   //   - one wishlist daily-balance LineChart series per listing (yAxis =
   //     abbreviate, D-11), named with the listing label for the legend.
-  //   - markPoint.data = one ≈40px THUMBNAIL preview marker per DISTINCT
-  //     event-DAY (eventThumbnail → YouTube/Reddit preview image, fallback a
-  //     kind-colored placeholder disc via resolveKindColor; mixed-kind day →
-  //     neutral --k-post, D-04). >1 event that day → a count badge "N" (D-04).
-  //     The markers sit in a row at a TOP band above the line and attach to the
-  //     FIRST visible listing series (or a hidden anchor series when no listing
-  //     has points) so they render against the grid regardless of legend
-  //     toggles. The 40px size is the tap target that fixes touch (VIZ-04).
-  //   - hover a marker → a tooltip with the preview thumbnail + the event count
-  //     + the first titles (Millo "preview + count"). No on-chart markArea
-  //     highlight: its color was an unresolved color-mix(var(--accent)) the
-  //     canvas rendered as a gray square and never cleared — removed in 04-11;
-  //     the centered modal already shows the day's delta.
-  //   - click a marker → emit onSelectDay(day) up to the PAGE, which owns the
-  //     centered EventDayModal (day stats + the day's events as FeedCards).
+  //   - the EVENT markers are NO LONGER painted on the canvas. They live in an HTML
+  //     overlay (<ChartMarkerOverlay>) absolutely-positioned over the plot area:
+  //     each event-day is pixel-positioned via chart.convertToPixel, then chips
+  //     within ~44px are MERGED into one cluster chip (kills the "Year" pile-up
+  //     a canvas can't declutter-by-screen-distance). A preview event → an <img>
+  //     thumbnail; a no-preview kind → a large <KindIcon> on a kind-colored
+  //     tile; ≥40px tap target; cluster count badge; tap → onSelectCluster(days).
+  //     Plain DOM, so it uses --k-*/--surface CSS tokens freely (not the canvas).
   //
   // Date-range + legend (04-08 / 04-09): the date-range picker and the
   // per-listing legend selection are OWNED BY THE PAGE so a sibling
@@ -58,37 +51,25 @@
 
   import { Chart } from "svelte-echarts";
   import { init, use } from "echarts/core";
+  import type { EChartsType } from "echarts/core";
   import { LineChart } from "echarts/charts";
-  import {
-    GridComponent,
-    TooltipComponent,
-    MarkPointComponent,
-  } from "echarts/components";
+  import { GridComponent, TooltipComponent } from "echarts/components";
   import { CanvasRenderer } from "echarts/renderers";
-  import type { ECMouseEvent } from "svelte-echarts";
   import { m } from "$lib/paraglide/messages.js";
   import { abbreviate } from "./abbreviate.js";
   import { baseChartOptions, prefersReducedMotion } from "./chart-theme.js";
+  import ChartMarkerOverlay from "./ChartMarkerOverlay.svelte";
   import {
     listingColor,
     inRange,
     buildDayGroups,
-    buildMarkPointData,
-    eventThumbnail,
     axisDomain,
     listingLabel as buildListingLabel,
-    type DayGroup,
     type ListingLite,
   } from "./wishlist-chart-shared.js";
   import type { EventDto, WishlistSeries } from "$lib/server/dto.js";
 
-  use([
-    LineChart,
-    GridComponent,
-    TooltipComponent,
-    MarkPointComponent,
-    CanvasRenderer,
-  ]);
+  use([LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
 
   let {
     seriesByListing,
@@ -97,7 +78,7 @@
     today,
     range,
     visible,
-    onSelectDay,
+    onSelectCluster,
   }: {
     /** One wishlist series per active listing, keyed by listing id. */
     seriesByListing: Record<string, WishlistSeries>;
@@ -113,9 +94,15 @@
      *  by it (no ECharts legend round-trip), which is what fixes the re-enable
      *  bug. The custom <ChartLegend> at the page flips entries in this map. */
     visible: Record<string, boolean>;
-    /** Marker click → the page (which owns the day-detail modal + feed data). */
-    onSelectDay: (day: string) => void;
+    /** Marker (cluster) tap → the page (which owns the day-detail modal + feed
+     *  data). The overlay merges nearby event-days into one chip and emits ALL
+     *  the chip's days so the modal shows every event under it. */
+    onSelectCluster: (days: string[]) => void;
   } = $props();
+
+  // The live ECharts instance (svelte-echarts exposes it via `chart = $bindable()`).
+  // The HTML marker overlay reads it to pixel-position + cluster the event chips.
+  let chart = $state<EChartsType | undefined>();
 
   function listingLabel(l: ListingLite): string {
     return buildListingLabel(
@@ -176,6 +163,20 @@
   // Marker count for the test hook (number of DISTINCT event-days rendered).
   const markerCount = $derived(dayGroups.length);
 
+  // A value that changes whenever the chart re-renders the markers' x positions:
+  // the range window (axis domain), the visible-line set (re-layout), and the
+  // day set. The overlay reads this to re-run its pixel-cluster layout. (The
+  // chart's own 'finished' event + a ResizeObserver cover resize/zoom; this
+  // covers prop-driven data/range/visibility changes.)
+  const recomputeKey = $derived(
+    JSON.stringify({
+      d: domain,
+      v: visible,
+      lines: lines.map((l) => l.id),
+      days: dayGroups.map((g) => g.date),
+    }),
+  );
+
   // Honest D-13 caption hours: most-recent lastImportedAt across the VISIBLE
   // listings vs the SERVER `today`. null when no visible listing has an import
   // time (the empty-state CTA covers the no-CSV case).
@@ -190,114 +191,13 @@
     return Math.max(0, Math.floor((now - last) / 3_600_000));
   });
 
-  // Anchor series name for the D-08 empty-state (no listing has points) — the
-  // markPoint markers attach to it so they still render against the grid.
-  const markPointSeriesName = $derived(lines[0]?.label ?? "__wishlist_anchor__");
-
-  // markPoint click → emit the day up to the page (which owns the centered
-  // EventDayModal). ECharts fires the chart-level 'click' with componentType
-  // 'markPoint'; the marker carries its day in `name`/`value` (set on each
-  // markPoint datum by buildMarkPointData). NOTE: the old markArea highlight
-  // (and its local selectedDay state) is intentionally gone — its color was an
-  // unresolved `color-mix(var(--accent))` that the canvas rendered as a gray
-  // square and never cleared. The modal already shows the day's delta, so the
-  // on-chart highlight is redundant.
-  function onChartClick(e: ECMouseEvent): void {
-    if (e.componentType !== "markPoint") return;
-    const day = (e.data as { name?: string } | undefined)?.name;
-    if (typeof day === "string") onSelectDay(day);
-  }
-
-  // The y-band the thumbnail markers sit on: a row hugging the TOP of the grid,
-  // ABOVE the wishlist line. Derived from the max balance across visible lines
-  // (so the band scales with the data); a small constant when there are no
-  // points (D-08) keeps the markers near the top of the empty grid.
-  const markerBand = $derived.by((): number => {
-    let max = 0;
-    for (const line of lines) {
-      for (const p of line.points) if (p.balance > max) max = p.balance;
-    }
-    // ~8% headroom above the peak so the 40px thumbnails clear the line.
-    return max > 0 ? max * 1.08 : 1;
-  });
-
-  // ── Hover preview tooltip (Task 3 — Millo "preview + count") ──────────
-  // Day-keyed lookup so the markPoint tooltip formatter can resolve the day's
-  // group (thumbnail + count + first titles) from the hovered marker's `name`.
-  const dayGroupByDate = $derived.by((): Map<string, DayGroup> => {
-    const map = new Map<string, DayGroup>();
-    for (const g of dayGroups) map.set(g.date, g);
-    return map;
-  });
-
-  // HTML-escape titles before injecting them into the tooltip HTML string
-  // (ECharts renders the formatter return as innerHTML).
-  function escapeHtml(s: string): string {
-    return s
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
-  // markPoint-only tooltip: hovering a thumbnail shows the preview image, the
-  // event count ("N событий"), and the first up-to-3 titles (+K more). The
-  // wishlist line itself gets no hover tooltip (trigger:'item' + the formatter
-  // returns "" for non-markPoint items) so the line hover stays quiet.
-  const markerTooltip = $derived.by(() => ({
-    trigger: "item" as const,
-    enterable: false,
-    confine: true,
-    formatter: (raw: unknown): string => {
-      // ECharts hands a single CallbackDataParams for item-trigger; narrow the
-      // shape we read (componentType + name) without depending on its wide union.
-      const params = (Array.isArray(raw) ? raw[0] : raw) as
-        | { componentType?: string; name?: string }
-        | undefined;
-      if (!params || params.componentType !== "markPoint") return "";
-      const g = typeof params.name === "string" ? dayGroupByDate.get(params.name) : undefined;
-      if (!g) return "";
-      const thumb = eventThumbnail(g.events[0]!);
-      const img = thumb
-        ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(m.viz_marker_preview_alt())}" style="width:120px;height:auto;border-radius:6px;display:block;margin-bottom:6px;" />`
-        : "";
-      const count = `<div style="font-weight:600;margin-bottom:2px;">${escapeHtml(m.viz_marker_event_count({ count: g.events.length }))}</div>`;
-      const shown = g.events.slice(0, 3);
-      const titles = shown
-        .map((e) => `<div style="opacity:.85;">${escapeHtml(e.title)}</div>`)
-        .join("");
-      const moreCount = g.events.length - shown.length;
-      const more =
-        moreCount > 0
-          ? `<div style="opacity:.6;">${escapeHtml(m.viz_marker_more({ count: moreCount }))}</div>`
-          : "";
-      return `<div style="max-width:160px;">${img}${count}${titles}${more}</div>`;
-    },
-  }));
-
   // ── ECharts option (client-only — resolves --k-* tokens) ─────────────
   const options = $derived.by(() => {
     if (typeof window === "undefined") return {};
     const reducedMotion = prefersReducedMotion();
 
-    // Millo-style THUMBNAIL preview markers: one ≈40px image markPoint per
-    // distinct event-DAY, sitting in a row at the TOP band above the line, with
-    // a count badge "N" for multi-event days. Shared resolver (eventThumbnail)
-    // so a marker shows the SAME preview the FeedCard does. Replaces the old
-    // thin vertical markLine (the user kept pointing at the competitor's
-    // thumbnail markers); the 40px size also fixes the poor touch interaction.
-    const markPointData = buildMarkPointData(dayGroups, markerBand);
-
-    const markPoint = {
-      silent: false,
-      // Markers render even with an empty wishlist series (D-08).
-      data: markPointData,
-    };
-
-    // One LineChart series per visible listing. The FIRST series carries the
-    // shared markPoint markers so they read against the grid regardless of which
-    // lines the legend toggles off (markers are date-keyed + shared).
-    const lineSeries = lines.map((line, i) => ({
+    // One LineChart series per visible listing.
+    const lineSeries = lines.map((line) => ({
       name: line.label,
       type: "line" as const,
       showSymbol: false,
@@ -305,22 +205,19 @@
       lineStyle: { width: 2, color: line.color },
       itemStyle: { color: line.color },
       data: line.points.map((p) => [p.date, p.balance]),
-      ...(i === 0 ? { markPoint } : {}),
     }));
 
-    // D-08: no listing has points → a hidden anchor series carries the markPoint
-    // markers so the event thumbnails still render against the grid.
+    // D-08: no listing has points → an empty anchor series keeps the grid drawn
+    // so the event chips (DOM overlay) sit over a real plot area.
     const anchorSeries = {
-      name: markPointSeriesName,
+      name: "__wishlist_anchor__",
       type: "line" as const,
       showSymbol: false,
       data: [] as [string, number][],
-      markPoint,
     };
 
     return {
       ...baseChartOptions({ reducedMotion }),
-      tooltip: markerTooltip,
       // No ECharts native legend — the custom on-brand <ChartLegend> at the page
       // drives per-listing visibility via the shared `visible` map (04-09).
       grid: { left: 8, right: 8, top: 16, bottom: 36, containLabel: true },
@@ -355,8 +252,11 @@
        controlled via the `range` + `visible` props. -->
 
   {#if typeof window !== "undefined"}
+    <!-- Relatively-positioned wrapper so the absolutely-positioned HTML marker
+         overlay lays its event chips OVER the chart's plot area. -->
     <div class="chart-canvas">
-      <Chart {init} {options} onclick={onChartClick} />
+      <Chart {init} {options} bind:chart />
+      <ChartMarkerOverlay {chart} {dayGroups} {recomputeKey} {onSelectCluster} />
     </div>
   {/if}
 
@@ -383,6 +283,7 @@
     width: 100%;
   }
   .chart-canvas {
+    position: relative;
     width: 100%;
     height: 300px;
     min-width: 0;
