@@ -4,7 +4,11 @@ import { getGameById, listGames, deriveReleaseInfoForGames } from "$lib/server/s
 import { listListings, listSoftDeletedListings } from "$lib/server/services/game-steam-listings.js";
 import {
   getWishlistSummary,
+  getWishlistSeries,
+  computeWishlistDelta,
   type WishlistSummary,
+  type WishlistSeries,
+  type WishlistDelta,
 } from "$lib/server/services/wishlist-snapshots.js";
 import { listEventsForGame } from "$lib/server/services/events.js";
 import { listSources } from "$lib/server/services/data-sources.js";
@@ -148,11 +152,54 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   const wishlistSummaries: Record<string, WishlistSummary | null> =
     Object.fromEntries(wishlistSummaryPairs);
 
+  // VIZ-02 == VIZ-03 (D-12) correlation chart inputs, active view only (the
+  // trash view never renders the chart). Both come through services — NO
+  // db.* in the loader (routes-call-services). One getWishlistSeries per
+  // active listing feeds the WISH-04 daily line + the honest D-13 caption
+  // (series.lastImportedAt); the per-day delta map feeds the D-03 markArea +
+  // the panel's day-level number (D-05). KISS — bounded N (active listings),
+  // mirrors the wishlistSummaries loop above.
+  const wishlistSeriesByListing: Record<string, WishlistSeries> = {};
+  const deltaByDate: Record<string, Record<string, WishlistDelta>> = {};
+
+  if (view !== "trash" && listings.length > 0) {
+    // Distinct event DAYS (D-05): the delta is a DAY attribute — all events
+    // on the same game-day share one 24h/7d delta. Truncate each event's
+    // occurredAt to YYYY-MM-DD so we call computeWishlistDelta once per
+    // (listing, distinct day), not once per event.
+    const distinctDays = [
+      ...new Set(
+        eventDtos.map((e) => {
+          const d = typeof e.occurredAt === "string" ? new Date(e.occurredAt) : e.occurredAt;
+          return d.toISOString().slice(0, 10);
+        }),
+      ),
+    ];
+
+    await Promise.all(
+      listings.map(async (l) => {
+        // No catch: getWishlistSeries returns an empty series (not a throw)
+        // for the legitimate no-data / cross-tenant case, so any throw is a
+        // real fault that should surface as a load error.
+        wishlistSeriesByListing[l.id] = await getWishlistSeries(userId, l.id);
+        const perDay: Record<string, WishlistDelta> = {};
+        await Promise.all(
+          distinctDays.map(async (day) => {
+            perDay[day] = await computeWishlistDelta(userId, l.id, day);
+          }),
+        );
+        deltaByDate[l.id] = perDay;
+      }),
+    );
+  }
+
   return {
     view,
     game: toGameDto(game, thisGameDerived),
     listings: listings.map(toGameSteamListingDto),
     wishlistSummaries,
+    wishlistSeriesByListing,
+    deltaByDate,
     deletedListings: deletedListings.map(toGameSteamListingDto),
     events: eventDtos,
     games: gamesAll.map((r) =>
