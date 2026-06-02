@@ -21,7 +21,7 @@
 // NO DENORMALIZATION: the listing/game display name is never copied onto
 // snapshot rows — only the listingId FK (AGENTS.md).
 
-import { and, eq, isNull, desc, inArray, sql } from "drizzle-orm";
+import { and, eq, isNull, desc, asc, gte, lte, inArray, max, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { wishlistSnapshots } from "../db/schema/wishlist-snapshots.js";
 import { gameSteamListings } from "../db/schema/game-steam-listings.js";
@@ -32,7 +32,14 @@ import {
   toWishlistSnapshotDto,
   type WishlistSnapshotDto,
   type WishlistSummaryDto,
+  type WishlistSeries,
+  type WishlistDelta,
 } from "../dto.js";
+
+// One shape, one home: the series/delta wire types live in dto.ts. Re-export
+// them under their dto names (mirrors the WishlistSummary re-export below) so
+// the /games loader imports them from the service barrel unchanged.
+export type { WishlistSeries, WishlistDelta } from "../dto.js";
 
 export interface ImportWishlistResult {
   rowCount: number;
@@ -287,4 +294,144 @@ export async function listRecentSnapshots(
     .orderBy(desc(wishlistSnapshots.date))
     .limit(limit);
   return rows.map(toWishlistSnapshotDto);
+}
+
+/**
+ * The full daily-granularity wishlist line for a listing (WISH-04 / VIZ-02 /
+ * VIZ-03), date-ASC, plus the REAL `lastImportedAt` for the honest
+ * "обновлено Xч назад" caption (D-13).
+ *
+ * `balance` is the immutable CUMULATIVE running sum the import already
+ * maintains — the chart reads it directly; it is NEVER re-summed from
+ * adds−deletes here (the import owns that derivation).
+ *
+ * `lastImportedAt` comes from the real MAX(updatedAt) across the listing's
+ * snapshots (the latest CSV import instant), serialized ISO — NOT `now()`.
+ * Steam wishlist data is daily-granularity; deriving the caption from a real
+ * import time keeps it honest and never implies finer freshness (Pitfall 5).
+ *
+ * TENANT-SCOPED: every query filters eq(wishlistSnapshots.userId, userId)
+ * (load-bearing — wishlist_snapshots carries user_id). A cross-tenant
+ * listingId matches 0 rows → `{ points: [], lastImportedAt: null }` (the 404
+ * path; no leak). The optional `range` clips points to the inclusive
+ * [from, to] date window.
+ */
+export async function getWishlistSeries(
+  userId: string,
+  listingId: string,
+  range?: { from: string; to: string },
+): Promise<WishlistSeries> {
+  const rows = await db
+    .select({ date: wishlistSnapshots.date, balance: wishlistSnapshots.balance })
+    .from(wishlistSnapshots)
+    .where(
+      and(
+        eq(wishlistSnapshots.userId, userId),
+        eq(wishlistSnapshots.listingId, listingId),
+        ...(range
+          ? [gte(wishlistSnapshots.date, range.from), lte(wishlistSnapshots.date, range.to)]
+          : []),
+      ),
+    )
+    .orderBy(asc(wishlistSnapshots.date));
+
+  // Real latest-import instant for the D-13 caption. Same userId+listingId
+  // scope — a separate aggregate so the range clip above never narrows the
+  // "last updated" truth (the caption reflects the whole listing's freshness,
+  // not just the visible window). Aggregate SELECT always returns one row;
+  // MAX is null when the listing has no snapshots.
+  const [agg] = await db
+    .select({ lastImportedAt: max(wishlistSnapshots.updatedAt) })
+    .from(wishlistSnapshots)
+    .where(and(eq(wishlistSnapshots.userId, userId), eq(wishlistSnapshots.listingId, listingId)));
+
+  return {
+    points: rows.map((r) => ({ date: r.date, balance: Number(r.balance) })),
+    lastImportedAt: agg?.lastImportedAt ? agg.lastImportedAt.toISOString() : null,
+  };
+}
+
+/**
+ * Add `days` to an ISO `YYYY-MM-DD` date string, returning `YYYY-MM-DD`.
+ *
+ * Date-only arithmetic anchored on the passed string — NEVER `new Date()`
+ * "now". The UTC noon anchor keeps the result on the intended calendar day
+ * across any host timezone (a midnight anchor could roll back a day under a
+ * negative-offset zone). Used to compute the delta windows from `eventDate`.
+ */
+function addDaysIso(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The DAY-level (D-05) 24h/7d wishlist change AFTER an event-day — the data
+ * behind the VIZ-03 panel number+arrow and the D-03 highlighted markArea.
+ *
+ * WINDOWED SUBTRACTION of the immutable CUMULATIVE balance series:
+ *   delta24h = balance(LATEST snapshot in (eventDate, eventDate+1]) − baseBalance
+ *   delta7d  = balance(LATEST snapshot in (eventDate, eventDate+7]) − baseBalance
+ * The window END balance (not the first row after the event) captures the full
+ * N-day effect — for a series D0:100, D1:110, D7:200 the 7d delta is
+ * balance(D7)−balance(D0)=100, NOT balance(D1)−balance(D0). For the 24h window
+ * (one calendar day wide) the latest-in-window IS day+1. This is NEVER a re-sum
+ * of adds−deletes — the import already owns the cumulative balance (POLL-04);
+ * re-summing would double-count.
+ *
+ * `baseBalance` is the balance ON eventDate, or — if no exact row — the most
+ * recent snapshot AT-OR-BEFORE eventDate (the cumulative series carries the
+ * outstanding total forward across gaps). When neither an anchor at-or-before
+ * eventDate nor a snapshot in the forward window exists, the corresponding
+ * delta is null.
+ *
+ * Gap tolerance: a missing exact `day+N` row does not yield null — the LATEST
+ * snapshot strictly after eventDate within the window anchors the end (the
+ * cumulative balance is valid on any present day, so a nearby earlier day in
+ * the window stands in for the exact window edge).
+ *
+ * DAY attribute (D-05): the signature takes a date, not an eventId; every
+ * event on `eventDate` shares this delta. Per-event wishlist deltas are never
+ * claimed.
+ *
+ * TENANT-SCOPED via getWishlistSeries (eq(wishlistSnapshots.userId, userId)).
+ * A cross-tenant listingId yields an empty series → both deltas null (no leak).
+ */
+export async function computeWishlistDelta(
+  userId: string,
+  listingId: string,
+  eventDate: string,
+): Promise<WishlistDelta> {
+  const windowFrom = eventDate;
+  const windowTo = addDaysIso(eventDate, 7);
+  const { points } = await getWishlistSeries(userId, listingId);
+
+  // baseBalance = balance ON eventDate, else the most recent AT-OR-BEFORE it
+  // (cumulative carry-forward). points is date-ASC, so the last point with
+  // date <= eventDate is the anchor.
+  let baseBalance: number | null = null;
+  for (const p of points) {
+    if (p.date <= eventDate) baseBalance = p.balance;
+    else break;
+  }
+
+  // LATEST snapshot STRICTLY AFTER eventDate within the inclusive window end —
+  // the window-edge balance (points is date-ASC, so the last match wins).
+  const latestInWindow = (endDate: string): number | null => {
+    let found: number | null = null;
+    for (const p of points) {
+      if (p.date > eventDate && p.date <= endDate) found = p.balance;
+    }
+    return found;
+  };
+
+  const after24h = latestInWindow(addDaysIso(eventDate, 1));
+  const after7d = latestInWindow(windowTo);
+
+  return {
+    delta24h: baseBalance !== null && after24h !== null ? after24h - baseBalance : null,
+    delta7d: baseBalance !== null && after7d !== null ? after7d - baseBalance : null,
+    windowFrom,
+    windowTo,
+  };
 }
