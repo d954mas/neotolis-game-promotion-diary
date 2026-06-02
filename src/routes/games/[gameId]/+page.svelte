@@ -47,6 +47,9 @@
   // replaced per UAT (Plan 03.2-04).
   import SteamListingRow from "$lib/components/SteamListingRow.svelte";
   import WishlistCorrelationChart from "$lib/components/charts/WishlistCorrelationChart.svelte";
+  import WishlistGrowthChart from "$lib/components/charts/WishlistGrowthChart.svelte";
+  import DateRangePicker from "$lib/components/feed/DateRangePicker.svelte";
+  import { startOfDay, fmtMonthDay } from "$lib/feed/date-range.js";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
   import type {
     GameSteamListingDto,
@@ -153,6 +156,38 @@
   const chartEvents = $derived(data.events as EventDto[]);
   const chartGames = $derived(data.games as GameDto[]);
   const chartSources = $derived(data.sources as DataSourceDto[]);
+
+  // ── Shared chart state (04-08) ───────────────────────────────────────
+  // The date-range picker and the per-listing legend selection are OWNED HERE
+  // so the cumulative correlation chart and the daily-growth bar chart stay in
+  // sync: both read `chartRange` + `chartVisible`. The range filters client-side
+  // against the SERVER `today` instant (D-24), never the client clock.
+  const chartTodayDate = $derived(startOfDay(new Date(data.today)));
+  let chartRange = $state<{ from: Date; to: Date } | null>(null);
+  // listingId → shown. Absent / true = shown; false = legend-toggled-off.
+  let chartVisible = $state<Record<string, boolean>>({});
+  function toggleListing(listingId: string, shown: boolean): void {
+    chartVisible = { ...chartVisible, [listingId]: shown };
+  }
+
+  // DateRangePicker anchored-popover plumbing (lifted from the chart).
+  let rangePickerOpen = $state(false);
+  let rangeChipEl = $state<HTMLButtonElement | undefined>();
+  let rangeAnchorTop = $state(0);
+  let rangeAnchorLeft = $state(0);
+  function openRangePicker(): void {
+    if (rangeChipEl) {
+      const rect = rangeChipEl.getBoundingClientRect();
+      rangeAnchorTop = rect.bottom + 4;
+      rangeAnchorLeft = rect.left;
+    }
+    rangePickerOpen = true;
+  }
+  const rangeChipLabel = $derived(
+    chartRange
+      ? `${fmtMonthDay(chartRange.from)} – ${fmtMonthDay(chartRange.to)}`
+      : m.viz_range_all_time(),
+  );
 
   // Trash view: per-card Restore.
   async function restoreListing(listingId: string): Promise<void> {
@@ -492,6 +527,46 @@
     <header class="section-header">
       <h2>{m.viz_wishlist_line_label()}</h2>
     </header>
+
+    <!-- ONE date-range control for BOTH charts (04-08): a date-chip opens the
+         DateRangePicker; the "All time" chip resets the window. Filters
+         client-side against the server `today` instant. The legend lives on the
+         correlation chart's ECharts canvas and mirrors into `chartVisible`. -->
+    <div class="chart-range-row">
+      <button
+        bind:this={rangeChipEl}
+        type="button"
+        class="range-chip"
+        data-custom={chartRange ? "1" : "0"}
+        onclick={openRangePicker}
+        title={m.viz_range_label()}
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="3" y="5" width="18" height="16" rx="2" />
+          <path d="M16 3v4M8 3v4M3 11h18" />
+        </svg>
+        <span>{rangeChipLabel}</span>
+      </button>
+      <button
+        type="button"
+        class="range-reset"
+        data-active={chartRange ? "0" : "1"}
+        onclick={() => (chartRange = null)}
+      >
+        {m.viz_range_all_time()}
+      </button>
+    </div>
+
     <WishlistCorrelationChart
       seriesByListing={chartSeriesByListing}
       events={chartEvents}
@@ -500,8 +575,41 @@
       sources={chartSources}
       games={chartGames}
       today={data.today}
+      range={chartRange}
+      visible={chartVisible}
+      onLegendToggle={toggleListing}
     />
+
+    <!-- Second wishlist chart (04-08): DAILY net change (prior day's cumulative
+         balance subtracted from today's) as bars per visible listing, sharing
+         the SAME range + legend + event markers as the line chart above. -->
+    <div class="growth-block">
+      <h3 class="growth-heading">{m.viz_growth_title()}</h3>
+      <WishlistGrowthChart
+        seriesByListing={chartSeriesByListing}
+        events={chartEvents}
+        listings={chartListings}
+        sources={chartSources}
+        games={chartGames}
+        today={data.today}
+        range={chartRange}
+        visible={chartVisible}
+        onLegendToggle={toggleListing}
+      />
+    </div>
   </section>
+
+  <!-- Shared DateRangePicker — anchored popover above the charts. Mounted once,
+       drives BOTH charts through `chartRange`. -->
+  <DateRangePicker
+    value={chartRange}
+    open={rangePickerOpen}
+    anchorTop={rangeAnchorTop}
+    anchorLeft={rangeAnchorLeft}
+    today={chartTodayDate}
+    onApply={(r) => (chartRange = { from: r.from, to: r.to })}
+    onClose={() => (rangePickerOpen = false)}
+  />
 
   <section class="events" id="section-events">
     <header class="section-header">
@@ -608,6 +716,89 @@
     gap: var(--s-4);
     margin-bottom: var(--s-6);
     min-width: 0;
+  }
+  /* Shared date-range control above both charts (04-08). Lifted verbatim from
+   * the correlation chart's former internal .range-row. */
+  .chart-range-row {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+  .range-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-2);
+    height: 32px;
+    padding: 0 var(--s-3);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--r-sm);
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
+  }
+  .range-chip:hover {
+    border-color: var(--accent);
+  }
+  .range-chip[data-custom="1"] {
+    background: var(--accent-soft);
+    border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+    color: var(--accent-strong);
+    font-weight: var(--w-sb);
+  }
+  .range-reset {
+    height: 28px;
+    padding: 0 var(--s-3);
+    background: var(--surface);
+    color: var(--text-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
+    cursor: pointer;
+    white-space: nowrap;
+    transition:
+      background var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease),
+      color var(--m-fast) var(--m-ease);
+  }
+  .range-reset:hover {
+    color: var(--text);
+    border-color: var(--border-2);
+  }
+  .range-reset[data-active="1"] {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    border-color: color-mix(in oklab, var(--accent) 50%, transparent);
+  }
+  .growth-block {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-2);
+    min-width: 0;
+  }
+  .growth-heading {
+    margin: 0;
+    font-size: var(--t-14);
+    font-weight: var(--w-sb);
+    color: var(--text-2);
+    line-height: var(--lh-tight);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .range-chip,
+    .range-reset {
+      transition: none;
+    }
   }
   .events {
     display: flex;
