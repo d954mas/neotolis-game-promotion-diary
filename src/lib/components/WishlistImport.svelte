@@ -22,10 +22,16 @@
     gameId,
     listingId,
     onImported,
+    compact = false,
   }: {
     gameId: string;
     listingId: string;
     onImported?: () => void;
+    // Compact mode renders a small muted inline link (used on the read-only
+    // SteamListingRow card) instead of the full accent button + result toast
+    // (used in the detail modal). Success feedback in compact mode is the
+    // parent line refreshing via onImported() — no result toast.
+    compact?: boolean;
   } = $props();
 
   let fileInput = $state<HTMLInputElement | null>(null);
@@ -108,21 +114,48 @@
   }
 </script>
 
-<div class="wishlist-import">
-  <input
-    class="file-input-hidden"
-    type="file"
-    accept=".csv,text/csv"
-    bind:this={fileInput}
-    onchange={onPick}
-    hidden
-  />
-  <button type="button" class="submit" onclick={() => fileInput?.click()} disabled={uploading}>
-    {uploading ? m.wishlist_import_uploading() : m.wishlist_import_cta()}
-  </button>
-  {#if resultText}<p class="result" role="status">{resultText}</p>{/if}
-  {#if errorText}<InlineError message={errorText} />{/if}
-</div>
+{#if compact}
+  <!-- Compact mode: a small muted inline link at the end of the card's
+       wishlist line. Success feedback is the parent line refreshing (no
+       result toast); errors surface as a small inline alert below. -->
+  <span class="wishlist-import-compact">
+    <input
+      class="file-input-hidden"
+      type="file"
+      accept=".csv,text/csv"
+      bind:this={fileInput}
+      onchange={onPick}
+      hidden
+    />
+    <button
+      type="button"
+      class="compact-cta"
+      onclick={() => fileInput?.click()}
+      disabled={uploading}
+      title={m.wishlist_import_cta()}
+      aria-label={m.wishlist_import_cta()}
+    >
+      {uploading ? m.wishlist_import_uploading() : m.wishlist_import_compact_cta()}
+    </button>
+    {#if errorText}<span class="compact-error" role="alert">{errorText}</span>{/if}
+  </span>
+{:else}
+  <div class="wishlist-import">
+    <input
+      class="file-input-hidden"
+      type="file"
+      accept=".csv,text/csv"
+      bind:this={fileInput}
+      onchange={onPick}
+      hidden
+    />
+    <button type="button" class="submit" onclick={() => fileInput?.click()} disabled={uploading}>
+      {uploading ? m.wishlist_import_uploading() : m.wishlist_import_cta()}
+    </button>
+    {#if resultText}<p class="result" role="status">{resultText}</p>{/if}
+    {#if errorText}<InlineError message={errorText} />{/if}
+  </div>
+{/if}
 
 <style>
   /* v2 WishlistImport — single-action import. One --accent button opens the
@@ -167,8 +200,47 @@
     font-size: var(--t-12);
     line-height: var(--lh-body);
   }
+  /* ── Compact mode — a tiny muted inline link on the read-only card.
+   * Looks like text, not a button: --text-3 idle, --accent on hover,
+   * --t-12. The parent (SteamListingRow) places the <span> inline at the
+   * end of the wishlist line; .compact-error breaks to its own line. */
+  .wishlist-import-compact {
+    display: contents;
+  }
+  .compact-cta {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    color: var(--text-3);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color var(--m-fast) var(--m-ease);
+  }
+  .compact-cta:hover:not(:disabled),
+  .compact-cta:focus-visible {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .compact-cta:disabled {
+    opacity: 0.6;
+    cursor: progress;
+  }
+  .compact-error {
+    flex-basis: 100%;
+    color: var(--danger);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    line-height: var(--lh-body);
+  }
   @media (prefers-reduced-motion: reduce) {
-    .submit {
+    .submit,
+    .compact-cta {
       transition: none;
     }
   }

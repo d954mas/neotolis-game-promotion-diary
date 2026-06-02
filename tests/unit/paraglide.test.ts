@@ -747,6 +747,7 @@ describe("paraglide i18n", () => {
       "wishlist_export_step_2",
       "wishlist_export_step_3",
       "wishlist_export_step_4",
+      "wishlist_import_compact_cta",
       "wishlist_import_cta",
       "wishlist_import_result",
       "wishlist_import_result_empty",

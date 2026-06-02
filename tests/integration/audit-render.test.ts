@@ -1261,12 +1261,16 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
       expect(storesSection).not.toMatch(/m\.stores_add_cta_after_cards\(\)/);
     });
 
-    it("SteamListingRow is a READ-ONLY card — cover + STEAM badge + appId + compact wishlist line + Details button (Plan 03.2-04)", async () => {
-      // Post-UAT (Plan 03.2-04): the per-listing card is clean/read-only.
-      // The advanced affordances (label edit, remove, CSV import, full
-      // wishlist summary, export instructions) ALL moved into
-      // <SteamListingDetailModal>, opened via a "Details" button. The card
-      // never mutates server state.
+    it("SteamListingRow is a READ-ONLY card — cover + STEAM badge + appId + compact wishlist line (with inline CSV-import shortcut) + Details button (Plan 03.2-04, +compact-import shortcut)", async () => {
+      // Post-UAT (Plan 03.2-04): the per-listing card is clean/read-only for
+      // EDITING — label edit, remove, full wishlist summary, export
+      // instructions ALL live in <SteamListingDetailModal> (Details button).
+      //
+      // CHANGED (compact-import shortcut): the card now intentionally hosts a
+      // SUBTLE one-click wishlist-CSV import affordance on the compact
+      // wishlist line — a muted "↑ CSV" link reusing <WishlistImport compact>.
+      // This is an ADDITIONAL shortcut (the modal keeps the full affordance);
+      // the card still never PATCHes/DELETEs or hosts the label-edit form.
       const fs = await import("node:fs");
       const path = await import("node:path");
       const src = fs.readFileSync(
@@ -1290,21 +1294,30 @@ describe("PageHeader + GameCover + SteamListingRow + SourceRow Mine", () => {
       expect(src).toMatch(/class="wishlist-line"/);
       expect(src).toMatch(/m\.steam_listing_wishlist_compact\(\{/);
       expect(src).toMatch(/m\.steam_listing_wishlist_recommendation\(\)/);
+      // Compact CSV-import shortcut on the card: <WishlistImport compact>
+      // imported + rendered with the compact flag, wired to onChange so the
+      // line refreshes after a successful import. Gated on `gameId` (the row
+      // renders the import only when a mutation target exists).
+      expect(src).toMatch(/import WishlistImport from "\.\/WishlistImport\.svelte"/);
+      expect(src).toMatch(/<WishlistImport[\s\S]*?\bcompact\b/);
+      expect(src).toMatch(/onImported=\{\(\)\s*=>\s*onChange\?\.\(\)\}/);
       // Details button opens the detail modal (card owns detailOpen state).
       expect(src).toMatch(/let detailOpen = \$state\(false\)/);
       expect(src).toMatch(/class="cta-secondary details-btn"/);
       expect(src).toMatch(/m\.steam_listing_details_cta\(\)/);
       expect(src).toMatch(/<SteamListingDetailModal\s/);
-      // The card NO LONGER carries the inline edit-form, edit-btn, raw
-      // file-picker (WishlistImport) or the full WishlistSummary block.
+      // The card still does NOT carry the inline label-edit form/btn/input or
+      // any edit/save state — those stay modal-only.
       expect(src).not.toMatch(/class="edit-form"/);
       expect(src).not.toMatch(/class="edit-btn"/);
       expect(src).not.toMatch(/class="edit-input"/);
       expect(src).not.toMatch(/let editing = \$state/);
       expect(src).not.toMatch(/async function saveEdit/);
-      // The active card never PATCHes/DELETEs — mutation lives in the
-      // detail modal (PATCH) + the trash overflow (DELETE handlers are
-      // owned by the parent page, passed in as onRestore/onDeleteForever).
+      // The active card never PATCHes/DELETEs directly — label/delete mutation
+      // lives in the detail modal (PATCH) + the trash overflow (DELETE handlers
+      // owned by the parent page). The wishlist-import POST is encapsulated
+      // inside <WishlistImport>, NOT inlined in this component, so the row
+      // source itself carries no PATCH/DELETE verbs.
       expect(src).not.toMatch(/method:\s*"PATCH"/);
       expect(src).not.toMatch(/method:\s*"DELETE"/);
     });

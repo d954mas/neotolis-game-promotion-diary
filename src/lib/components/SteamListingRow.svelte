@@ -10,6 +10,7 @@
 
   import { m } from "$lib/paraglide/messages.js";
   import SteamListingDetailModal from "./SteamListingDetailModal.svelte";
+  import WishlistImport from "./WishlistImport.svelte";
   import { wishlistAgo } from "$lib/util/wishlist-ago.js";
   import type { WishlistSummaryDto } from "$lib/server/dto.js";
 
@@ -169,10 +170,18 @@
     </div>
   {:else}
     <!-- Compact wishlist line. Data when a summary exists; otherwise a short
-         recommendation pointing the user at the Details modal's import flow. -->
-    <p class="wishlist-line" class:muted={!compactWishlist}>
-      {compactWishlist ?? m.steam_listing_wishlist_recommendation()}
-    </p>
+         recommendation. A small muted "↑ CSV" link at the end imports a
+         wishlist CSV in one click (compact WishlistImport) — the line
+         refreshes via onChange on success. A <div> (not <p>) so the
+         compact-error line nests cleanly. -->
+    <div class="wishlist-line" class:muted={!compactWishlist}>
+      <span class="wishlist-text">
+        {compactWishlist ?? m.steam_listing_wishlist_recommendation()}
+      </span>
+      {#if gameId}
+        <WishlistImport {gameId} listingId={listing.id} compact onImported={() => onChange?.()} />
+      {/if}
+    </div>
 
     <div class="card-actions">
       <a class="cta-secondary store-link" href={steamUrl} target="_blank" rel="noopener noreferrer">
@@ -298,15 +307,25 @@
     border-radius: var(--r-pill);
     padding: var(--s-0) var(--s-2);
   }
-  /* Compact wishlist line — single-row summary or a muted recommendation. */
+  /* Compact wishlist line — single-row summary or a muted recommendation,
+   * plus a small muted "↑ CSV" import link at the end. Flex so the link
+   * sits inline at the end and an import error (flex-basis: 100%) wraps to
+   * its own line below. */
   .wishlist-line {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--s-2);
     margin: 0;
+  }
+  .wishlist-text {
     color: var(--text-2);
     font-family: var(--f-sans);
     font-size: var(--t-13);
     font-weight: var(--w-md);
+    min-width: 0;
   }
-  .wishlist-line.muted {
+  .wishlist-line.muted .wishlist-text {
     color: var(--text-3);
     font-weight: var(--w-rg);
   }

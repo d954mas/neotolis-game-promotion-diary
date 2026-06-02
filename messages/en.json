@@ -216,6 +216,7 @@
 
   "wishlist_section_heading": "Wishlist",
   "wishlist_import_cta": "Import wishlist CSV",
+  "wishlist_import_compact_cta": "↑ CSV",
   "wishlist_import_uploading": "Importing…",
   "wishlist_import_result": "Imported {rowCount} rows ({from}–{to}), {updated} updated, {skipped} skipped.",
   "wishlist_import_result_empty": "No rows found in that file.",
