@@ -21,11 +21,19 @@
   //      games). Reusing FeedCard (instead of a bespoke row) keeps one card
   //      definition.
   //
+  // 04-13: a MULTI-day cluster (e.g. 27 merged with 28 on the axis) groups its
+  // events under per-day <FeedDateGroupHeader>s — the SAME date separators the
+  // page's events list uses — so 27 and 28 are visually distinct and individually
+  // actionable even though they collapsed into one chip. A single-day cluster
+  // renders the flat list (no redundant header) and keeps its delta block.
+  //
   // Esc / backdrop / close button all call onClose. prefers-reduced-motion
   // gates the backdrop blur transition (via the shared dialog backdrop).
 
   import FeedCard from "$lib/components/FeedCard.svelte";
+  import FeedDateGroupHeader from "$lib/components/FeedDateGroupHeader.svelte";
   import { m } from "$lib/paraglide/messages.js";
+  import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
   import type { WishlistDelta } from "$lib/server/dto.js";
   import type { CardEventLite } from "$lib/components/feed/parts/derive-card-data.js";
 
@@ -64,6 +72,11 @@
   });
   // The delta block only makes sense for a single day (which day's delta?).
   const showDelta = $derived(days.length === 1);
+  // A multi-day cluster groups events under per-day headers so 27 and 28 stay
+  // distinct; a single-day cluster renders the flat list. Reuses the page's
+  // groupEventsByDate helper (date-DESC iteration, same as the events feed).
+  const isMultiDay = $derived(days.length > 1);
+  const dayGroups = $derived(groupEventsByDate(events));
 
   let dialogEl: HTMLDialogElement | undefined = $state();
 
@@ -126,16 +139,33 @@
       <span class="day-event-count">{m.viz_day_modal_event_count({ count: events.length })}</span>
     </div>
 
-    <!-- The day's events as feed cards (same wiring as the page's events list). -->
-    <div class="event-cards">
-      {#each events as ev (ev.id)}
-        <FeedCard
-          event={ev}
-          source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
-          game={ev.gameIds.length > 0 ? (gameById.get(ev.gameIds[0]!) ?? null) : null}
-          {games}
-        />
-      {/each}
+    <!-- The day's events as feed cards (same wiring as the page's events list).
+         Multi-day cluster → grouped under per-day <FeedDateGroupHeader>s so each
+         merged day (27 vs 28) reads as its own actionable section; single-day →
+         a flat list (no redundant header). -->
+    <div class="event-cards" class:grouped={isMultiDay}>
+      {#if isMultiDay}
+        {#each dayGroups as group (group.date)}
+          <FeedDateGroupHeader occurredAt={group.occurredAt} count={group.rows.length} />
+          {#each group.rows as ev (ev.id)}
+            <FeedCard
+              event={ev}
+              source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
+              game={ev.gameIds.length > 0 ? (gameById.get(ev.gameIds[0]!) ?? null) : null}
+              {games}
+            />
+          {/each}
+        {/each}
+      {:else}
+        {#each events as ev (ev.id)}
+          <FeedCard
+            event={ev}
+            source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
+            game={ev.gameIds.length > 0 ? (gameById.get(ev.gameIds[0]!) ?? null) : null}
+            {games}
+          />
+        {/each}
+      {/if}
     </div>
   </div>
 </dialog>
@@ -279,5 +309,14 @@
     flex-direction: column;
     gap: var(--s-4);
     min-height: 0;
+  }
+  /* Per-day grouping (multi-day cluster): the shared FeedDateGroupHeader is
+   * sticky to the page chrome on /feed; inside this scrolling modal it must
+   * stick to the TOP of the scroll area instead (no chrome offset) and sit on
+   * the modal surface, not the page bg. */
+  .event-cards.grouped :global(.date-head) {
+    top: calc(-1 * var(--s-4));
+    background: var(--surface);
+    padding-top: var(--s-2);
   }
 </style>
