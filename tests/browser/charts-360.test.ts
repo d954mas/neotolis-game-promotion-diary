@@ -84,9 +84,16 @@ const baseEvents = [
   },
 ];
 
+// Per-listing nested delta map: deltaByDate[listingId][YYYY-MM-DD] (04-07
+// multi-listing). The chart keys deltas by the listing the line belongs to.
 const deltaByDate = {
-  "2026-05-15": { delta24h: 47, delta7d: 120, windowFrom: "2026-05-15", windowTo: "2026-05-22" },
+  l1: {
+    "2026-05-15": { delta24h: 47, delta7d: 120, windowFrom: "2026-05-15", windowTo: "2026-05-22" },
+  },
 };
+
+// One active listing for the single-line case the legacy tests exercise.
+const baseListings = [{ id: "l1", name: "Game One", appId: 111 }];
 
 const baseGames = [
   {
@@ -138,9 +145,10 @@ function mountChart(series: typeof emptySeries | typeof shortSeries): {
   const component = mount(WishlistCorrelationChart, {
     target: host,
     props: {
-      series,
+      seriesByListing: { l1: series },
       events: baseEvents,
       deltaByDate,
+      listings: baseListings,
       sources: baseSources,
       games: baseGames,
       today: TODAY,
@@ -160,7 +168,7 @@ function mountPanel(): { dialog: HTMLDialogElement; component: ReturnType<typeof
     target: host,
     props: {
       dayEvents: baseEvents,
-      delta: deltaByDate["2026-05-15"],
+      delta: deltaByDate.l1["2026-05-15"],
       sources: baseSources,
       games: baseGames,
       onClose,

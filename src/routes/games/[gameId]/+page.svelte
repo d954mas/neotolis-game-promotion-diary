@@ -133,21 +133,20 @@
   const groupedEvents = $derived(groupEventsByDate(events));
 
   // VIZ-02 == VIZ-03 (D-12): ONE correlation chart for this game. The
-  // wishlist data is per-Steam-listing; most games have a single listing, so
-  // the headline chart reads the FIRST active listing's series + per-day
-  // delta. No CSV / no listing → an empty series drives the D-08 empty-state
-  // CTA while the event markers still render.
-  const EMPTY_SERIES: WishlistSeries = { points: [], lastImportedAt: null };
-  const primaryListingId = $derived(listings[0]?.id ?? null);
-  const chartSeries = $derived<WishlistSeries>(
-    (primaryListingId &&
-      (data.wishlistSeriesByListing as Record<string, WishlistSeries>)[primaryListingId]) ||
-      EMPTY_SERIES,
+  // wishlist data is per-Steam-listing; the chart renders ONE line per active
+  // listing (decision: separate line per store, NOT a summed line — Steam +
+  // itch are different units), with a legend toggle + a date-range filter.
+  // No CSV / no listing → the D-08 empty-state CTA renders while the event
+  // markers still render. The full maps + listings are threaded straight
+  // through (no collapse to a single listing).
+  const chartSeriesByListing = $derived(
+    data.wishlistSeriesByListing as Record<string, WishlistSeries>,
   );
-  const chartDeltaByDate = $derived<Record<string, WishlistDelta>>(
-    (primaryListingId &&
-      (data.deltaByDate as Record<string, Record<string, WishlistDelta>>)[primaryListingId]) ||
-      {},
+  const chartDeltaByDate = $derived(
+    data.deltaByDate as Record<string, Record<string, WishlistDelta>>,
+  );
+  const chartListings = $derived(
+    listings.map((l) => ({ id: l.id, name: l.name, appId: l.appId })),
   );
   // The loader returns full EventDtos; the page's EventDtoLocal is a subset
   // for the FeedCard renderer. The chart consumes the full DTOs.
@@ -493,9 +492,10 @@
       <h2>{m.viz_wishlist_line_label()}</h2>
     </header>
     <WishlistCorrelationChart
-      series={chartSeries}
+      seriesByListing={chartSeriesByListing}
       events={chartEvents}
       deltaByDate={chartDeltaByDate}
+      listings={chartListings}
       sources={chartSources}
       games={chartGames}
       today={data.today}
