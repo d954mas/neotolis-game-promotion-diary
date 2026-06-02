@@ -6,12 +6,11 @@
 // two divergent copies of the marker/series math (KISS/DRY: three concrete
 // callers — line series, growth bars, markers — earn the helper).
 //
-// SSR note: resolveKindColor (chart-theme.ts) is client-only (it reads
-// getComputedStyle). buildMarkLineData therefore returns ECharts datum shapes
-// with already-resolved colors and MUST be called from the client-only option
-// builder, never under SSR.
+// 04-13: both charts now render their markers via the SHARED HTML overlay
+// (ChartMarkerOverlay), so the old canvas buildMarkLineData (growth chart) is
+// gone — the overlay's DOM chips + dashed guide line replaced it. buildDayGroups
+// + eventThumbnail (which the overlay consumes) stay.
 
-import { resolveKindColor } from "./chart-theme.js";
 import {
   isImageLikeUrl,
   readMediaUrlFromMetadata,
@@ -108,39 +107,6 @@ export function buildDayGroups(
 }
 
 /**
- * Build the ECharts `markLine.data` array — one vertical line per distinct
- * event-day, colored by kind, with a count badge "N" when >1 event that day.
- * Client-only (resolveKindColor reads the DOM). Reused verbatim by both charts
- * so the markers are pixel-identical across them.
- */
-export function buildMarkLineData(dayGroups: DayGroup[]): object[] {
-  return dayGroups.map((g) => {
-    const color = g.mixedKind ? resolveKindColor("post") : resolveKindColor(g.kind);
-    const count = g.events.length;
-    return {
-      name: g.date,
-      xAxis: g.date,
-      lineStyle: { color, width: 2 },
-      label:
-        count > 1
-          ? {
-              show: true,
-              position: "start" as const,
-              distance: 4,
-              formatter: String(count),
-              color: "#fff",
-              backgroundColor: color,
-              padding: [2, 5],
-              borderRadius: 8,
-              fontSize: 10,
-              fontWeight: "bold" as const,
-            }
-          : { show: false },
-    };
-  });
-}
-
-/**
  * The SINGLE source of the event→thumbnail URL logic for the charts. Mirrors
  * `deriveThumbnailUrl` (derive-card-data.ts) so a marker shows the SAME preview
  * image the FeedCard does — but takes a structurally-typed input because the
@@ -218,6 +184,19 @@ export function axisDomain(
   const maxDate = new Date(`${max}T00:00:00`);
   maxDate.setDate(maxDate.getDate() + 1);
   return { min, max: isoDay(maxDate) };
+}
+
+/**
+ * A compact day label for the marker overlay's rich tooltip + the per-event
+ * "which day" hint ("May 27"). Locale is fixed "en" to match the rest of the
+ * app's date convention (format-feed-date.ts) and to keep CI assertions stable
+ * on any host machine. Takes an event-like `occurredAt` so it reuses the SAME
+ * input the marker math already threads.
+ */
+export function markerDayLabel(e: { occurredAt: Date | string }): string {
+  const d = typeof e.occurredAt === "string" ? new Date(e.occurredAt) : e.occurredAt;
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en", { month: "short", day: "numeric" });
 }
 
 /** The display label for a listing (name → "Steam {appId}" fallback handled by caller). */

@@ -31,8 +31,9 @@
 
   import KindIcon from "$lib/components/KindIcon.svelte";
   import { m } from "$lib/paraglide/messages.js";
-  import { eventThumbnail, type DayGroup } from "./wishlist-chart-shared.js";
+  import { eventThumbnail, markerDayLabel, type DayGroup } from "./wishlist-chart-shared.js";
   import type { EChartsType } from "echarts/core";
+  import type { EventDto } from "$lib/server/dto.js";
 
   // Kind → CSS var bridge (DOM-side, so var() is fine here). Mirrors
   // ActiveFiltersStrip's KIND_ACCENT_VAR so a chip's border reads the same hue
@@ -107,6 +108,8 @@
   const CLUSTER_PX = 44;
   // The y-band the chips sit in: a row hugging the TOP of the plot area.
   const TOP_BAND_PX = 8;
+  // Chip side length (px) — the dashed guide line starts just below the chip.
+  const CHIP_PX = 40;
 
   type Cluster = {
     /** Center x in CSS px within the chart container. */
@@ -125,8 +128,33 @@
   // pixel geometry aren't reactive). `version` bumps to force the markup to
   // re-read `clusters` after each layout pass.
   let clusters = $state<Cluster[]>([]);
+  // The plot area's BOTTOM y-pixel (the dashed guide line drops from a chip down
+  // to here — the axis). Computed from the grid's coordinate-system rect each
+  // layout pass; 0 until the chart is built (no line drawn yet).
+  let plotBottom = $state(0);
   // Track which cluster is hovered for the preview tooltip.
   let hoveredIndex = $state<number | null>(null);
+
+  // The grid coordinate system exposes its plot-area rect via getRect(). It's
+  // not in the public typings, so reach it through a narrow structural type and
+  // guard every hop — on a not-yet-built chart we fall back to the chart height
+  // minus a conservative bottom inset (the grid's `bottom:36` + axis labels) so
+  // the line still lands near the axis rather than overshooting.
+  type GridRect = { y: number; height: number };
+  type GridModel = { coordinateSystem?: { getRect?: () => GridRect } };
+  type ModelHost = { getModel?: () => { getComponent?: (t: string, i: number) => GridModel } };
+  function computePlotBottom(c: EChartsType): number {
+    try {
+      const grid = (c as unknown as ModelHost).getModel?.()?.getComponent?.("grid", 0);
+      const rect = grid?.coordinateSystem?.getRect?.();
+      if (rect && typeof rect.y === "number" && typeof rect.height === "number") {
+        return rect.y + rect.height;
+      }
+    } catch {
+      /* coordinate system not built yet — fall through to the height estimate */
+    }
+    return Math.max(0, c.getHeight() - 56);
+  }
 
   function recompute(): void {
     const c = chart;
@@ -135,8 +163,16 @@
     // throws on a disposed chart. isDisposed() is the official guard.
     if (!c || c.isDisposed() || dayGroups.length === 0) {
       clusters = [];
+      plotBottom = 0;
       return;
     }
+
+    // The plot area's bottom edge in CSS px = the grid coordinate system's
+    // rect.y + rect.height. The dashed guide line drops from each chip down to
+    // here (the x-axis), so a marker reads as "this date" across the whole plot.
+    // getModel()/getComponent are ECharts' stable accessors; guard the whole
+    // chain in case the coordinate system isn't built yet (re-runs next pass).
+    plotBottom = computePlotBottom(c);
 
     // Position each day at its x-pixel; drop days that fall outside the grid
     // (convertToPixel returns NaN for out-of-domain values on some builds).
@@ -244,10 +280,27 @@
     return eventThumbnail(representativeEvent(cl));
   }
 
-  function titlesFor(cl: Cluster): { shown: string[]; more: number } {
-    const titles = cl.events.map((e) => e.title);
-    const shown = titles.slice(0, 3);
-    return { shown, more: titles.length - shown.length };
+  // ── Rich tooltip rows ────────────────────────────────────────────────────
+  // The hover tooltip lists EACH event in the cluster as a row: its thumbnail
+  // (or a KindIcon when no preview) + title + its DAY. A merged 27–28 cluster
+  // therefore reveals BOTH days' events distinctly on hover (the user can see
+  // the 27th even though it collapsed into the 28th's chip). Cap the rows so a
+  // huge cluster doesn't overflow the viewport; the rest fold into "+K more".
+  const MAX_TOOLTIP_ROWS = 6;
+  type TooltipRow = { id: string; thumb: string | null; kind: string; title: string; day: string };
+
+  function tooltipRows(cl: Cluster): { rows: TooltipRow[]; more: number } {
+    const all = cl.events.map(
+      (e: EventDto): TooltipRow => ({
+        id: e.id,
+        thumb: eventThumbnail(e),
+        kind: e.kind,
+        title: e.title,
+        day: markerDayLabel(e),
+      }),
+    );
+    const rows = all.slice(0, MAX_TOOLTIP_ROWS);
+    return { rows, more: all.length - rows.length };
   }
 </script>
 
@@ -255,7 +308,19 @@
   {#each clusters as cl, i (cl.days.join(",") + ":" + cl.x)}
     {@const thumb = thumbFor(cl)}
     {@const accent = kindAccent(cl.kind)}
-    {@const titles = titlesFor(cl)}
+    {@const tt = tooltipRows(cl)}
+    <!-- Dashed vertical guide line dropping from the chip's band to the plot
+         bottom (the x-axis), colored by the cluster's kind. This is the SHARED
+         marker language: the growth chart and the correlation chart now BOTH
+         read as "dashed line + thumbnail/icon chip at top". -->
+    {#if plotBottom > TOP_BAND_PX + CHIP_PX}
+      <span
+        class="marker-guide"
+        aria-hidden="true"
+        data-testid="chart-marker-guide"
+        style={`left:${cl.x}px; top:${TOP_BAND_PX + CHIP_PX}px; height:${plotBottom - TOP_BAND_PX - CHIP_PX}px; --chip-accent:${accent};`}
+      ></span>
+    {/if}
     <button
       type="button"
       class="marker-chip"
@@ -282,13 +347,31 @@
       {/if}
 
       {#if hoveredIndex === i}
-        <span class="chip-tooltip" role="tooltip">
+        <!-- Rich preview tooltip: one row PER event (thumbnail/KindIcon + title
+             + day), so a merged multi-day cluster reveals both days distinctly.
+             role=tooltip; pointer-events:none so it never steals the hover. -->
+        <span class="chip-tooltip" role="tooltip" data-testid="chart-marker-tooltip">
           <span class="tt-count">{m.viz_marker_event_count({ count: cl.events.length })}</span>
-          {#each titles.shown as t (t)}
-            <span class="tt-title">{t}</span>
+          {#each tt.rows as row (row.id)}
+            <span class="tt-row">
+              {#if row.thumb}
+                <img
+                  class="tt-thumb"
+                  src={row.thumb}
+                  alt={m.viz_marker_preview_alt()}
+                  loading="lazy"
+                />
+              {:else}
+                <span class="tt-icon"><KindIcon kind={iconKind(row.kind)} size={20} /></span>
+              {/if}
+              <span class="tt-text">
+                <span class="tt-title">{row.title}</span>
+                <span class="tt-day">{row.day}</span>
+              </span>
+            </span>
           {/each}
-          {#if titles.more > 0}
-            <span class="tt-more">{m.viz_marker_more({ count: titles.more })}</span>
+          {#if tt.more > 0}
+            <span class="tt-more">{m.viz_marker_more({ count: tt.more })}</span>
           {/if}
         </span>
       {/if}
@@ -307,6 +390,20 @@
     z-index: 2;
   }
 
+  /* Dashed vertical guide line under each chip, dropping to the plot bottom.
+   * left/top/height are set inline (the pixel layout); translateX(-50%) centers
+   * it on the chip's x-pixel. A thin dashed border-left IS the line; low opacity
+   * so it guides the eye to the axis without competing with the wishlist line. */
+  .marker-guide {
+    position: absolute;
+    width: 0;
+    transform: translateX(-50%);
+    border-left: 1.5px dashed var(--chip-accent, var(--k-post));
+    opacity: 0.4;
+    pointer-events: none;
+    z-index: 1;
+  }
+
   /* A ≥40px rounded tile with a kind-colored border. left/top are set inline
    * (the pixel layout); translateX(-50%) centers the chip on its x-pixel. */
   .marker-chip {
@@ -322,6 +419,7 @@
     cursor: pointer;
     pointer-events: auto;
     overflow: visible;
+    z-index: 2;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -387,23 +485,25 @@
     box-shadow: 0 0 0 2px var(--surface-2);
   }
 
-  /* Hover/focus preview tooltip: count + first titles, anchored below the chip. */
+  /* Hover/focus preview tooltip: a rich list — one row PER event (thumbnail or
+   * KindIcon + title + day) — anchored below the chip. "В тултипе много места":
+   * wider than the old count+titles panel so each event reads clearly. */
   .chip-tooltip {
     position: absolute;
     top: calc(100% + 6px);
     left: 50%;
     transform: translateX(-50%);
-    min-width: 140px;
-    max-width: 220px;
+    min-width: 220px;
+    max-width: 300px;
     padding: var(--s-2) var(--s-3);
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--s-2);
     background: var(--surface);
     border: 1px solid var(--border-2);
     border-radius: var(--r-sm);
     box-shadow: var(--shadow-elev);
-    z-index: 3;
+    z-index: 4;
     pointer-events: none;
   }
   .tt-count {
@@ -412,13 +512,54 @@
     font-weight: var(--w-sb);
     color: var(--text);
   }
+  /* One event row: thumbnail/icon on the left, title + day stacked on the right. */
+  .tt-row {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    min-width: 0;
+  }
+  .tt-thumb {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    object-fit: cover;
+    border-radius: var(--r-sm);
+    display: block;
+  }
+  .tt-icon {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    color: var(--text-2);
+  }
+  .tt-icon :global(svg.kind) {
+    color: inherit;
+  }
+  .tt-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+  }
   .tt-title {
     font-family: var(--f-sans);
     font-size: var(--t-12);
-    color: var(--text-2);
+    color: var(--text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .tt-day {
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    color: var(--text-3);
+    font-variant-numeric: tabular-nums;
   }
   .tt-more {
     font-family: var(--f-sans);

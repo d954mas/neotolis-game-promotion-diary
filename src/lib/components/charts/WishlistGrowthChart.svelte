@@ -17,8 +17,12 @@
   //     (driven by the custom <ChartLegend> at the page — no native legend).
   //   - the SAME stable per-listing color (listingColor) so a listing is the
   //     same color on both charts AND on the legend swatch.
-  //   - the SAME event markers (buildDayGroups + buildMarkLineData) so a growth
-  //     spike lines up with the post that caused it.
+  //   - the SAME event markers: the SHARED <ChartMarkerOverlay> (HTML chips +
+  //     dashed guide line) — NOT a canvas guide. 04-13 unified the marker
+  //     language across both charts: the growth chart's old ECharts canvas guide
+  //     was replaced by the same DOM overlay the correlation chart mounts, so a
+  //     growth spike lines up with the same chip the line chart shows, clustered
+  //     pixel-identically (one buildDayGroups, one overlay — KISS/DRY).
   //
   // Color: per-listing palette is primary (so multiple listings stay
   // distinguishable). When EXACTLY ONE listing is visible, bars additionally
@@ -32,35 +36,25 @@
 
   import { Chart } from "svelte-echarts";
   import { init, use } from "echarts/core";
+  import type { EChartsType } from "echarts/core";
   import { BarChart } from "echarts/charts";
-  import {
-    GridComponent,
-    TooltipComponent,
-    MarkLineComponent,
-  } from "echarts/components";
+  import { GridComponent, TooltipComponent } from "echarts/components";
   import { CanvasRenderer } from "echarts/renderers";
-  import type { ECMouseEvent } from "svelte-echarts";
   import { m } from "$lib/paraglide/messages.js";
   import { abbreviate } from "./abbreviate.js";
   import { baseChartOptions, prefersReducedMotion } from "./chart-theme.js";
+  import ChartMarkerOverlay from "./ChartMarkerOverlay.svelte";
   import {
     listingColor,
     inRange,
     buildDayGroups,
-    buildMarkLineData,
     axisDomain,
     listingLabel as buildListingLabel,
     type ListingLite,
   } from "./wishlist-chart-shared.js";
   import type { EventDto, WishlistSeries } from "$lib/server/dto.js";
 
-  use([
-    BarChart,
-    GridComponent,
-    TooltipComponent,
-    MarkLineComponent,
-    CanvasRenderer,
-  ]);
+  use([BarChart, GridComponent, TooltipComponent, CanvasRenderer]);
 
   let {
     seriesByListing,
@@ -69,7 +63,7 @@
     today,
     range,
     visible,
-    onSelectDay,
+    onSelectCluster,
   }: {
     /** One wishlist series per active listing, keyed by listing id. */
     seriesByListing: Record<string, WishlistSeries>;
@@ -84,11 +78,19 @@
      *  Bar visibility is driven PURELY by filtering the series on this map (the
      *  custom <ChartLegend> at the page flips it) — no ECharts native legend. */
     visible: Record<string, boolean>;
-    /** Marker click → the page (which owns the day-detail modal + feed data). */
-    onSelectDay: (day: string) => void;
+    /** Marker (cluster) tap → the page (which owns the day-detail modal + feed
+     *  data). The shared overlay merges nearby event-days into one chip and
+     *  emits ALL the chip's days, so the growth + correlation charts hand the
+     *  page the SAME cluster shape (04-13). */
+    onSelectCluster: (days: string[]) => void;
   } = $props();
 
   void today;
+
+  // The live ECharts instance (svelte-echarts exposes it via `chart = $bindable()`).
+  // The HTML marker overlay reads it to pixel-position + cluster the event chips
+  // — the SAME overlay the correlation chart mounts (04-13 unified markers).
+  let chart = $state<EChartsType | undefined>();
 
   function listingLabel(l: ListingLite): string {
     return buildListingLabel(
@@ -142,12 +144,17 @@
   });
   const domain = $derived(axisDomain(allPointDates, dayGroups, range));
 
-  // ── Marker click → emit the day to the page (which owns the modal) ───
-  function onChartClick(e: ECMouseEvent): void {
-    if (e.componentType !== "markLine") return;
-    const day = (e.data as { name?: string } | undefined)?.name;
-    if (typeof day === "string") onSelectDay(day);
-  }
+  // A value that changes whenever the chart re-renders the markers' x positions
+  // (range window, visible set, day set). The shared overlay reads this to
+  // re-run its pixel-cluster layout — same contract as the correlation chart.
+  const recomputeKey = $derived(
+    JSON.stringify({
+      d: domain,
+      v: visible,
+      bars: bars.map((b) => b.id),
+      days: dayGroups.map((g) => g.date),
+    }),
+  );
 
   function resolveToken(name: string): string {
     if (typeof window === "undefined") return "";
@@ -161,10 +168,7 @@
     const okColor = resolveToken("--success");
     const downColor = resolveToken("--danger");
 
-    const markLineData = buildMarkLineData(dayGroups);
-    const markLine = { symbol: "none" as const, silent: false, data: markLineData };
-
-    const barSeries = bars.map((bar, i) => ({
+    const barSeries = bars.map((bar) => ({
       name: bar.label,
       type: "bar" as const,
       // Single-listing nicety: sign-color each bar via a PER-DATUM itemStyle
@@ -179,16 +183,15 @@
           }))
         : bar.data,
       itemStyle: { color: bar.color },
-      ...(i === 0 ? { markLine } : {}),
     }));
 
-    // No bars → a hidden anchor series carries the markers so they still render
-    // against the grid (parity with the line chart's D-08 empty state).
+    // No bars → a hidden anchor series keeps the grid drawn so the event chips
+    // (DOM overlay) sit over a real plot area (parity with the line chart's D-08
+    // empty state). The markers themselves are the DOM overlay (no canvas guide).
     const anchorSeries = {
       name: "__growth_anchor__",
       type: "bar" as const,
       data: [] as [string, number][],
-      markLine,
     };
 
     return {
@@ -220,8 +223,12 @@
   data-bar-count={bars.length}
 >
   {#if typeof window !== "undefined"}
+    <!-- Relatively-positioned wrapper so the absolutely-positioned HTML marker
+         overlay lays its event chips (+ dashed guide lines) OVER the plot area —
+         the SAME overlay the correlation chart mounts (04-13 unified markers). -->
     <div class="chart-canvas">
-      <Chart {init} {options} onclick={onChartClick} />
+      <Chart {init} {options} bind:chart />
+      <ChartMarkerOverlay {chart} {dayGroups} {recomputeKey} {onSelectCluster} />
     </div>
   {/if}
 
@@ -241,6 +248,7 @@
     width: 100%;
   }
   .chart-canvas {
+    position: relative;
     width: 100%;
     height: 240px;
     min-width: 0;

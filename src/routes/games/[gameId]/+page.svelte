@@ -216,10 +216,10 @@
   }
 
   // ── Day-detail modal (04-10 / 04-12 cluster) ─────────────────────────
-  // A marker (cluster) tap on the correlation chart emits the cluster's day(s)
-  // up here; the growth chart still emits a single day (wrapped to [day]). The
-  // PAGE owns the centered EventDayModal (it has the feed data — events +
-  // source/game maps). Empty = closed.
+  // A marker (cluster) tap on EITHER chart emits the cluster's day(s) up here —
+  // 04-13 unified the markers: both charts mount the SAME ChartMarkerOverlay, so
+  // both hand back the same cluster shape (a day SET). The PAGE owns the centered
+  // EventDayModal (it has the feed data — events + source/game maps). Empty = closed.
   let selectedChartDays = $state<string[]>([]);
   // Those days' events — the page's FeedCard-shaped `events` filtered to the
   // selected day set (local-tz YYYY-MM-DD, matching the marker day keys).
@@ -622,7 +622,7 @@
         today={data.today}
         range={chartRange}
         visible={chartVisible}
-        onSelectDay={(d) => (selectedChartDays = [d])}
+        onSelectCluster={(days) => (selectedChartDays = days)}
       />
     </div>
   </section>
