@@ -70,6 +70,8 @@
     inRange,
     buildDayGroups,
     axisDomain,
+    isoDay,
+    tooltipEventsHtml,
     listingLabel as buildListingLabel,
     type ListingLite,
   } from "./wishlist-chart-shared.js";
@@ -266,6 +268,16 @@
       .replace(/"/g, "&quot;");
   }
 
+  // YYYY-MM-DD (local) day key for the hovered axis value (ms on a time axis),
+  // so it matches buildDayGroups' date keys (isoDay) and we can look up that
+  // day's events for the tooltip.
+  function axisValueToDay(axisValue: unknown): string | null {
+    if (typeof axisValue !== "number" && typeof axisValue !== "string") return null;
+    const d = new Date(axisValue);
+    if (Number.isNaN(d.getTime())) return null;
+    return isoDay(d);
+  }
+
   const crosshairTooltip = $derived.by(() => ({
     trigger: "axis" as const,
     axisPointer: { type: "line" as const },
@@ -275,6 +287,7 @@
         seriesName?: string;
         color?: string;
         axisValueLabel?: string;
+        axisValue?: unknown;
         value?: unknown;
       }>;
       if (params.length === 0) return "";
@@ -289,7 +302,13 @@
           return `<div style="display:flex;align-items:center;gap:8px;"><span>${swatch}${escapeHtml(String(p.seriesName ?? ""))}</span><span style="margin-left:auto;font-variant-numeric:tabular-nums;">${escapeHtml(num)}</span></div>`;
         })
         .join("");
-      return `<div style="min-width:140px;">${head}${rows}</div>`;
+      // Append the hovered day's EVENTS (thumbnail/dot + title) into the SAME
+      // tooltip so hovering a day (or its dashed line) shows what happened.
+      const day = axisValueToDay(params[0]?.axisValue);
+      const eventsHtml = day
+        ? tooltipEventsHtml(day, dayGroups, (count) => m.viz_marker_more({ count }))
+        : "";
+      return `<div style="min-width:140px;max-width:260px;">${head}${rows}${eventsHtml}</div>`;
     },
   }));
 

@@ -199,6 +199,103 @@ export function markerDayLabel(e: { occurredAt: Date | string }): string {
   return d.toLocaleDateString("en", { month: "short", day: "numeric" });
 }
 
+/**
+ * Kind → concrete hex color, mirroring the `--k-*` tokens in app.css. The
+ * crosshair axis tooltip's event rows render an inline colored dot for no-preview
+ * events; that HTML is built here (a pure string builder, no Svelte/DOM context)
+ * so a CONCRETE hex is required — a `var(--k-*)` would not resolve in this
+ * string-building path the way it does inside a component's <style>. Kept in
+ * lock-step with app.css's `--k-*` palette (one map, the single source for the
+ * tooltip's dot colors). Mixed-kind / unknown → the neutral post grey.
+ */
+const KIND_HEX: Record<string, string> = {
+  youtube_video: "#e0625c",
+  reddit_post: "#e08555",
+  twitter_post: "#6fa0d1",
+  telegram_post: "#5baac8",
+  discord_drop: "#7a82d6",
+  conference: "#7fb46a",
+  talk: "#d8b259",
+  press: "#b488d4",
+  post: "#8a8a95",
+  other: "#8a8a95",
+};
+
+function kindHex(kind: string): string {
+  return KIND_HEX[kind] ?? "#8a8a95";
+}
+
+/** Minimal HTML-escape for user-supplied strings interpolated into tooltip HTML. */
+function escapeTooltipHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * The shape of the crosshair-tooltip events builder: a day key + the day groups
+ * + a localized "+K more" label → an HTML fragment. Both charts consume this one
+ * builder (tooltipEventsHtml) so a day's events read identically in either
+ * tooltip — the named type documents that shared contract.
+ */
+export type TooltipEvents = (
+  day: string,
+  dayGroups: DayGroup[],
+  moreLabel: (count: number) => string,
+) => string;
+
+/** Max event rows shown inline in the tooltip before folding into a "+K" line. */
+const TOOLTIP_EVENT_ROWS = 4;
+/** The fixed thumbnail/dot square size (px) for a tooltip event row. */
+const TOOLTIP_THUMB_PX = 28;
+
+/**
+ * Build the EVENTS fragment for the crosshair axis tooltip of a hovered day.
+ *
+ * The two wishlist charts share ONE axis tooltip whose formatter renders the
+ * date + each visible listing's value; this appends "what happened that day" —
+ * each event of `day` as a row: a ~28px `<img>` thumbnail (`eventThumbnail`) or,
+ * when no preview, a small kind-colored dot, followed by the HTML-escaped title.
+ * Capped at TOOLTIP_EVENT_ROWS rows, the rest folded into a "+K" line. Returns
+ * "" when the day has no events (the tooltip then shows only the numbers).
+ *
+ * One shared builder used by BOTH charts (DRY) so a day's events read identically
+ * in either tooltip. The `moreLabel` callback supplies the localized "+K more"
+ * string (Paraglide lives in the .svelte caller, not this plain .ts module).
+ */
+export const tooltipEventsHtml: TooltipEvents = (
+  day: string,
+  dayGroups: DayGroup[],
+  moreLabel: (count: number) => string,
+): string => {
+  const group = dayGroups.find((g) => g.date === day);
+  if (!group || group.events.length === 0) return "";
+
+  const rows = group.events.slice(0, TOOLTIP_EVENT_ROWS);
+  const more = group.events.length - rows.length;
+  const px = TOOLTIP_THUMB_PX;
+
+  const rowHtml = rows
+    .map((e) => {
+      const title = escapeTooltipHtml(e.title);
+      const thumb = eventThumbnail(e);
+      const media = thumb
+        ? `<img src="${escapeTooltipHtml(thumb)}" alt="" width="${px}" height="${px}" style="width:${px}px;height:${px}px;border-radius:4px;object-fit:cover;display:block;flex-shrink:0;" loading="lazy" />`
+        : `<span style="width:${px}px;height:${px}px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="width:10px;height:10px;border-radius:50%;background:${kindHex(e.kind)};display:block;"></span></span>`;
+      return `<div style="display:flex;align-items:center;gap:8px;margin-top:4px;max-width:240px;"><span>${media}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${title}</span></div>`;
+    })
+    .join("");
+
+  const moreHtml =
+    more > 0
+      ? `<div style="margin-top:4px;opacity:0.7;font-size:11px;">${escapeTooltipHtml(moreLabel(more))}</div>`
+      : "";
+
+  return `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(128,128,128,0.25);">${rowHtml}${moreHtml}</div>`;
+};
+
 /** The display label for a listing (name → "Steam {appId}" fallback handled by caller). */
 export function listingLabel(
   l: ListingLite,

@@ -49,6 +49,8 @@
     inRange,
     buildDayGroups,
     axisDomain,
+    isoDay,
+    tooltipEventsHtml,
     listingLabel as buildListingLabel,
     type ListingLite,
   } from "./wishlist-chart-shared.js";
@@ -161,6 +163,62 @@
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
 
+  // ── Crosshair axis tooltip (parity with the correlation chart) ───────
+  // The growth chart had no tooltip; add the SAME enriched one so hovering a day
+  // (or its dashed line, which dispatches showTip) shows the date + each visible
+  // listing's daily CHANGE + that day's events (thumbnail/dot + title). One
+  // shared event-rows builder (tooltipEventsHtml) — same as the correlation chart.
+  function escapeHtml(s: string): string {
+    return s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function axisValueToDay(axisValue: unknown): string | null {
+    if (typeof axisValue !== "number" && typeof axisValue !== "string") return null;
+    const d = new Date(axisValue);
+    if (Number.isNaN(d.getTime())) return null;
+    return isoDay(d);
+  }
+
+  function signed(v: number): string {
+    return v > 0 ? `+${abbreviate(v)}` : abbreviate(v);
+  }
+
+  const crosshairTooltip = $derived.by(() => ({
+    trigger: "axis" as const,
+    axisPointer: { type: "line" as const },
+    confine: true,
+    formatter: (raw: unknown): string => {
+      const params = (Array.isArray(raw) ? raw : [raw]) as Array<{
+        seriesName?: string;
+        color?: string;
+        axisValueLabel?: string;
+        axisValue?: unknown;
+        value?: unknown;
+      }>;
+      if (params.length === 0) return "";
+      const dateLabel = params[0]?.axisValueLabel ?? "";
+      const head = `<div style="font-weight:600;margin-bottom:4px;">${escapeHtml(String(dateLabel))}</div>`;
+      const rows = params
+        .map((p) => {
+          // value is the [date, dailyChange] tuple for a time-axis bar series.
+          const v = Array.isArray(p.value) ? p.value[1] : p.value;
+          const num = typeof v === "number" ? signed(v) : "—";
+          const swatch = `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${escapeHtml(String(p.color ?? "#888"))};margin-right:6px;"></span>`;
+          return `<div style="display:flex;align-items:center;gap:8px;"><span>${swatch}${escapeHtml(String(p.seriesName ?? ""))}</span><span style="margin-left:auto;font-variant-numeric:tabular-nums;">${escapeHtml(num)}</span></div>`;
+        })
+        .join("");
+      const day = axisValueToDay(params[0]?.axisValue);
+      const eventsHtml = day
+        ? tooltipEventsHtml(day, dayGroups, (count) => m.viz_marker_more({ count }))
+        : "";
+      return `<div style="min-width:140px;max-width:260px;">${head}${rows}${eventsHtml}</div>`;
+    },
+  }));
+
   // ── ECharts option (client-only — resolves CSS tokens) ───────────────
   const options = $derived.by(() => {
     if (typeof window === "undefined") return {};
@@ -196,6 +254,7 @@
 
     return {
       ...baseChartOptions({ reducedMotion }),
+      tooltip: crosshairTooltip,
       // No ECharts native legend — the custom <ChartLegend> at the page drives
       // per-listing visibility via the shared `visible` map (04-09).
       // SAME fixed grid geometry (shared constant) as the correlation chart so a
