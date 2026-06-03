@@ -106,8 +106,8 @@
     /** Per-listing, per-day wishlist delta (D-05): deltaByDate[listingId][day] =
      *  { delta24h, delta7d, windowFrom, windowTo }. Threaded from the page so the
      *  crosshair tooltip can show an event-day's post-event EFFECT line
-     *  ("Wishlist effect: +12 in 7d ↑ · +3 in 24h") — the day-level delta (04-19,
-     *  replacing the removed on-line highlight band). */
+     *  (the Paraglide-localized effect label + "+12 in 7d ↑" / "+3 in 24h") —
+     *  the day-level delta (04-19, replacing the removed on-line highlight band). */
     deltaByDate: Record<string, Record<string, WishlistDelta>>;
     /** Marker (cluster) tap → the page (which owns the day-detail modal + feed
      *  data). The overlay merges nearby event-days into one chip and emits ALL
@@ -297,8 +297,9 @@
   // The post-event EFFECT line for the hovered DAY (replaces the removed on-line
   // highlight band, 04-19): resolve that day's WishlistDelta across the visible
   // lines (first match — mirrors the page's per-day delta resolution) and render
-  // "Wishlist effect: <b>+12 in 7d ↑</b> · +3 in 24h". Only for an event-day that
-  // has a delta with at least one non-null window — non-event days show nothing.
+  // the localized effect label + "<b>+12 in 7d ↑</b>" / "+3 in 24h" (Paraglide).
+  // Only for an event-day that has a delta with at least one non-null window —
+  // non-event days show nothing.
   function tooltipEffectHtml(day: string | null): string {
     if (!day) return "";
     let delta: WishlistDelta | null = null;
@@ -310,13 +311,17 @@
       }
     }
     if (!delta || (delta.delta7d === null && delta.delta24h === null)) return "";
-    // English literal (the removed band used the same inline wording); the numbers
-    // come from signedDelta and are safe, the static words need no escaping.
-    // 7d and 24h read IDENTICALLY (same emphasis) and sit on SEPARATE lines (the
+    // Paraglide copy: the label + the "{value} in 7d" / "{value} in 24h" keys
+    // (m.viz_wishlist_effect / m.viz_delta_7d / m.viz_delta_24h). The interpolated
+    // value is signedDelta — a signed int + a direction arrow (safe), but escape
+    // it anyway since it flows into innerHTML; the static Paraglide words need no
+    // escaping. 7d and 24h read IDENTICALLY (same emphasis) on SEPARATE lines (the
     // user: on one row they blended together).
-    return `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(128,128,128,0.25);font-size:12px;">Wishlist effect:<br><b>${escapeHtml(
-      signedDelta(delta.delta7d),
-    )} in 7d</b><br><b>${escapeHtml(signedDelta(delta.delta24h))} in 24h</b></div>`;
+    return `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(128,128,128,0.25);font-size:12px;">${escapeHtml(
+      m.viz_wishlist_effect(),
+    )}:<br><b>${escapeHtml(
+      m.viz_delta_7d({ value: signedDelta(delta.delta7d) }),
+    )}</b><br><b>${escapeHtml(m.viz_delta_24h({ value: signedDelta(delta.delta24h) }))}</b></div>`;
   }
 
   const crosshairTooltip = $derived.by(() => ({

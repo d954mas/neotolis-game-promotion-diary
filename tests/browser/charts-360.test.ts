@@ -1128,16 +1128,20 @@ describe("04-19 drop the on-line band → tooltip effect line; chips never overl
     expect(correlationChartSource).not.toContain("MarkAreaComponent");
   });
 
-  it("the crosshair tooltip carries a 'in 7d' wishlist-effect line for an event-day", () => {
+  it("the crosshair tooltip carries a Paraglide wishlist-effect line for an event-day", () => {
     // The effect moved INTO the tooltip: for an event-day with a delta, the
-    // formatter appends "Wishlist effect: +N in 7d ↑/↓/→ · +M in 24h" (signed,
-    // arrowed; null → —). deltaByDate is still threaded so the tooltip can resolve
-    // the day's delta across the visible lines.
+    // formatter appends a "Wishlist effect" label + "+N ↑/↓/→ in 7d" / "+M in 24h"
+    // (signed, arrowed; null → —). 04-22: the line is now Paraglide-driven
+    // (m.viz_wishlist_effect / m.viz_delta_7d / m.viz_delta_24h), NOT hardcoded
+    // English. deltaByDate is still threaded so the tooltip resolves the day's
+    // delta across the visible lines.
     expect(correlationChartSource).toContain("deltaByDate");
-    expect(correlationChartSource).toContain("Wishlist effect:");
-    expect(correlationChartSource).toContain("in 7d");
-    expect(correlationChartSource).toContain("in 24h");
+    expect(correlationChartSource).toContain("m.viz_wishlist_effect()");
+    expect(correlationChartSource).toContain("m.viz_delta_7d");
+    expect(correlationChartSource).toContain("m.viz_delta_24h");
     expect(correlationChartSource).toContain("tooltipEffectHtml");
+    // No hardcoded English label/units left in the source (Paraglide owns them).
+    expect(correlationChartSource).not.toContain("Wishlist effect:");
     // Sign + direction arrow by value (signedDelta), null → em dash.
     expect(correlationChartSource).toMatch(/signedDelta/);
     expect(correlationChartSource).toContain("—");

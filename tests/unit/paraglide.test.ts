@@ -766,6 +766,7 @@ describe("paraglide i18n", () => {
       "viz_marker_event_count_one",
       "viz_marker_more",
       "viz_marker_preview_alt",
+      "viz_wishlist_effect",
       "viz_wishlist_line_label",
       "viz_wishlist_updated_ago",
       "wishlist_ago_days",
