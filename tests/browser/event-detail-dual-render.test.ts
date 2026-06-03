@@ -232,8 +232,8 @@ describe("EventDetailContent dual-render parity (Wave 2 Plan 09 + Wave 3 Plan 10
     const bare = mountBare();
     const modal = mountInModal();
     // KindIcon renders an <svg class="kind">; presence + label parity is enough.
-    const bareLabel = bare.root.querySelector(".kind-tag-label")?.textContent?.trim();
-    const modalLabel = modal.root.querySelector(".kind-tag-label")?.textContent?.trim();
+    const bareLabel = bare.root.querySelector(".detail-kind-label")?.textContent?.trim();
+    const modalLabel = modal.root.querySelector(".detail-kind-label")?.textContent?.trim();
     expect(bareLabel).toBeTruthy();
     expect(bareLabel).toBe(modalLabel);
     expect(bare.root.querySelector("svg.kind")).not.toBeNull();
@@ -245,10 +245,10 @@ describe("EventDetailContent dual-render parity (Wave 2 Plan 09 + Wave 3 Plan 10
   it("Wave 2 Plan 09: renders stats (views/likes/comments) identically for kind=youtube_video", () => {
     const bare = mountBare();
     const modal = mountInModal();
-    const bareStats = Array.from(bare.root.querySelectorAll(".stat b")).map((b) =>
+    const bareStats = Array.from(bare.root.querySelectorAll(".detail-stat-num")).map((b) =>
       b.textContent?.trim(),
     );
-    const modalStats = Array.from(modal.root.querySelectorAll(".stat b")).map((b) =>
+    const modalStats = Array.from(modal.root.querySelectorAll(".detail-stat-num")).map((b) =>
       b.textContent?.trim(),
     );
     expect(bareStats).toEqual([
