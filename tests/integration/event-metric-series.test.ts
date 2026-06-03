@@ -20,6 +20,10 @@ const { redditFetchEventMetricSeries } =
   await import("../../src/lib/sources/reddit/server/metric-series.js");
 const { upsertRedditPost, upsertRedditSubreddit } =
   await import("../../src/lib/sources/reddit/server/upsert.js");
+const { uuidv7 } = await import("../../src/lib/server/ids.js");
+const { createApp } = await import("../../src/lib/server/http/app.js");
+const { seedUserDirectly } = await import("./helpers.js");
+const { createEvent } = await import("../../src/lib/server/services/events.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
@@ -223,5 +227,104 @@ describe("event metric series (VIZ-01)", () => {
       externalId: "vid_whatever",
     });
     expect(out).toEqual([]);
+  });
+});
+
+// GET /api/events/:id/metric-series (Plan 04-24). The EventDetailModal
+// (feed + games surfaces) lazy-fetches this for the single opened event so
+// VIZ-01 renders in the modal, not only on /events/[id]. Tenant-scoped:
+// getEventById gates a foreign/missing id → 404 BEFORE any adapter snapshot
+// read; the route loops allAdapters.fetchEventMetricSeries (adapter-driven,
+// no db.select in the handler).
+describe("GET /api/events/:id/metric-series endpoint (VIZ-01 modal lazy-fetch)", () => {
+  const app = createApp();
+
+  it("own youtube_video event returns the adapter view/like/comment series", async () => {
+    const u = await seedUserDirectly({ email: `mseries-own-${uniq()}@test.local` });
+    const videoId = `vid_${uniq()}`;
+    await seedYoutubeSnapshots(videoId, [
+      { minutesAgo: 30, view: 100, like: 5, comment: 1 },
+      { minutesAgo: 20, view: 250, like: 12, comment: 3 },
+      { minutesAgo: 10, view: 500, like: 25, comment: 7 },
+    ]);
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "metric-series endpoint event",
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(`/api/events/${ev.id}/metric-series`, {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const series = (await res.json()) as Array<{
+      metricKey: string;
+      points: Array<{ value: number }>;
+    }>;
+    expect(series.map((s) => s.metricKey)).toEqual(["view_count", "like_count", "comment_count"]);
+    const views = series.find((s) => s.metricKey === "view_count")!;
+    expect(views.points.map((p) => p.value)).toEqual([100, 250, 500]);
+  });
+
+  it("chartable event with 0 snapshots returns [] (the component renders the low-data caption)", async () => {
+    const u = await seedUserDirectly({ email: `mseries-empty-${uniq()}@test.local` });
+    const videoId = `vid_${uniq()}`; // no snapshots seeded
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "no-snapshot event",
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(`/api/events/${ev.id}/metric-series`, {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  it("cross-tenant event id → 404 (getEventById gate, never 403)", async () => {
+    const owner = await seedUserDirectly({ email: `mseries-owner-${uniq()}@test.local` });
+    const other = await seedUserDirectly({ email: `mseries-other-${uniq()}@test.local` });
+    const ev = await createEvent(
+      owner.id,
+      {
+        gameIds: [],
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "owner's event",
+        url: `https://www.youtube.com/watch?v=vid_${uniq()}`,
+      },
+      "127.0.0.1",
+    );
+
+    const res = await app.request(`/api/events/${ev.id}/metric-series`, {
+      headers: { cookie: `neotolis.session_token=${other.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("not_found");
+    // Privacy invariant: no "forbidden"/"permission" leak for tenant-owned rows.
+    expect(JSON.stringify(body)).not.toMatch(/forbidden|permission/i);
+  });
+
+  it("missing event id → 404", async () => {
+    const u = await seedUserDirectly({ email: `mseries-missing-${uniq()}@test.local` });
+    const res = await app.request(`/api/events/${uuidv7()}/metric-series`, {
+      headers: { cookie: `neotolis.session_token=${u.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(404);
+    expect((await res.json()) as { error: string }).toEqual({ error: "not_found" });
   });
 });
