@@ -312,6 +312,46 @@
     },
   }));
 
+  // ── Click anywhere on the plot → the nearest event-day's modal ───────
+  // The chips/lines own their own clicks (a chip = its cluster, a line = its
+  // day). Empty-plot clicks fall through to the ZRender canvas (the overlay
+  // CONTAINER is pointer-events:none): convert the click x-pixel to a date, find
+  // the NEAREST event-day, and open its modal — so the user doesn't have to hit a
+  // tiny chip. Guarded: no event-days → ignore; chip/line clicks already emitted
+  // their selection and don't reach here (they stop at the overlay's buttons).
+  function nearestDay(dateMs: number): string | null {
+    if (dayGroups.length === 0) return null;
+    let best: string | null = null;
+    let bestDist = Infinity;
+    for (const g of dayGroups) {
+      const t = new Date(`${g.date}T00:00:00`).getTime();
+      const dist = Math.abs(t - dateMs);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = g.date;
+      }
+    }
+    return best;
+  }
+
+  $effect(() => {
+    const c = chart;
+    if (!c) return;
+    const onZrClick = (e: { offsetX: number }): void => {
+      if (c.isDisposed() || dayGroups.length === 0) return;
+      const px = c.convertFromPixel({ xAxisIndex: 0 }, e.offsetX);
+      const ms = Array.isArray(px) ? px[0]! : px;
+      if (typeof ms !== "number" || Number.isNaN(ms)) return;
+      const day = nearestDay(ms);
+      if (day) onSelectCluster([day]);
+    };
+    // Click ANYWHERE on the plot canvas (chips/lines own their own clicks above).
+    c.getZr().on("click", onZrClick);
+    return () => {
+      if (!c.isDisposed()) c.getZr().off("click", onZrClick);
+    };
+  });
+
   // ── ECharts option (client-only — resolves --k-* tokens) ─────────────
   const options = $derived.by(() => {
     if (typeof window === "undefined") return {};
