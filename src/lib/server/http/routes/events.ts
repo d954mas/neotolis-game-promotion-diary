@@ -69,7 +69,7 @@ import {
 import { requestRefreshPoll } from "../../services/refresh-poll.js";
 import { AppError } from "../../services/errors.js";
 import { parseIngestUrl } from "../../services/url-parser.js";
-import type { EventKind } from "$lib/sources/adapter.js";
+import type { EventKind, EventMetricSeries } from "$lib/sources/adapter.js";
 import { allAdapters } from "$lib/sources/registry.js";
 import { toEventDto, loadGameIdsForEvent, mapEventsToDtos } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
@@ -514,6 +514,44 @@ eventsRoutes.get("/events/:id", async (c) => {
     return c.json(toEventDto(ev, gameIds));
   } catch (err) {
     return mapErr(c, err, "GET /api/events/:id");
+  }
+});
+
+// GET /api/events/:id/metric-series — VIZ-01 per-event snapshot-history
+// series for the EventDetailModal (feed + games surfaces). The /events/[id]
+// route loads the same series at SSR via the identical adapter loop
+// (src/routes/events/[id]/+page.server.ts); the MODAL path (opened from a
+// feed/games row) mounts EventDetailContent WITHOUT the SSR metricSeries, so
+// it lazy-fetches this endpoint for the single opened event.
+//
+// Tenant scoping (P0): resolve the event via getEventById(userId, id) FIRST —
+// it throws NotFoundError for a foreign/missing id, which mapErr translates to
+// 404 (never 403). The adapter *_snapshots reads below are public-data
+// (ESLint-allowlisted, no userId scope), keyed off the now-vetted event's
+// externalId — the tenant guarantee comes from the event SELECT, exactly as
+// enrichFeedDtos + the /events/[id] loader document.
+//
+// Routes-call-adapters: no db.select() here — getEventById (service) +
+// allAdapters.fetchEventMetricSeries (adapter), mirroring the loader.
+eventsRoutes.get("/events/:id/metric-series", async (c) => {
+  try {
+    const ev = await getEventById(c.var.userId, c.req.param("id"));
+    // Each adapter self-filters to its own kind (non-matching → []), reads its
+    // immutable *_snapshots history (POLL-04), and contributes its chartable
+    // series. Same loop as the /events/[id] SSR loader.
+    const series: EventMetricSeries[] = [];
+    for (const adapter of allAdapters) {
+      if (adapter.fetchEventMetricSeries === undefined) continue;
+      series.push(
+        ...(await adapter.fetchEventMetricSeries(c.var.userId, {
+          kind: ev.kind,
+          externalId: ev.externalId,
+        })),
+      );
+    }
+    return c.json(series);
+  } catch (err) {
+    return mapErr(c, err, "GET /api/events/:id/metric-series");
   }
 });
 

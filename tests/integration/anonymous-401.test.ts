@@ -66,6 +66,10 @@ describe("anonymous-401 sweep", () => {
     "/api/events/deleted",
     "/api/events/preview-url",
     "/api/events/:id",
+    // VIZ-01: per-event metric-series for the EventDetailModal lazy-fetch
+    // (feed + games surfaces). tenantScope on /api/* refuses anonymous
+    // before getEventById ever runs.
+    "/api/events/:id/metric-series",
     "/api/events/:id/attach",
     "/api/events/:id/dismiss-inbox",
     "/api/events/:id/restore",
@@ -233,6 +237,15 @@ describe("anonymous-401 sweep", () => {
 
   it("anonymous GET /api/events/deleted returns 401 unauthorized", async () => {
     const res = await app.request("/api/events/deleted");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  // VIZ-01 metric-series endpoint (Plan 04-24). The modal lazy-fetches this
+  // for the opened event; tenantScope on /api/* fires before getEventById,
+  // so an anonymous probe returns 401 before any event/snapshot read.
+  it("anonymous GET /api/events/:id/metric-series returns 401 unauthorized", async () => {
+    const res = await app.request("/api/events/fixture-id/metric-series");
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "unauthorized" });
   });
