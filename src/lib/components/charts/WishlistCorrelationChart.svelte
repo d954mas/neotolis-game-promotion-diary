@@ -422,14 +422,23 @@
        growth chart shares the same window + visible listings. This component is
        controlled via the `range` + `visible` props. -->
 
-  {#if typeof window !== "undefined"}
-    <!-- Relatively-positioned wrapper so the absolutely-positioned HTML marker
-         overlay lays its event chips OVER the chart's plot area. -->
-    <div class="chart-canvas">
+  <!-- Height-reserving wrapper OUTSIDE the typeof-window gate (04-18): the slot
+       keeps its 300px height on SSR + before mount, so the chart can't pop in /
+       jump the layout (no CLS). A subtle skeleton placeholder fills it until the
+       client <Chart> instance mounts. -->
+  <div class="chart-canvas">
+    {#if typeof window !== "undefined"}
+      <!-- Relatively-positioned wrapper so the absolutely-positioned HTML marker
+           overlay lays its event chips OVER the chart's plot area. -->
       <Chart {init} {options} bind:chart />
       <ChartMarkerOverlay {chart} {dayGroups} {recomputeKey} {onSelectCluster} />
-    </div>
-  {/if}
+    {/if}
+    {#if !chart}
+      <!-- Skeleton placeholder: a muted box until the client chart mounts. The
+           shimmer is gated off under prefers-reduced-motion (static box only). -->
+      <div class="chart-skeleton" data-testid="chart-skeleton" aria-hidden="true"></div>
+    {/if}
+  </div>
 
   {#if !hasSeries}
     <!-- D-08: no CSV imported → empty-state CTA; markers still render above. -->
@@ -459,6 +468,39 @@
     height: 300px;
     min-width: 0;
     font-variant-numeric: tabular-nums;
+  }
+  /* Loading skeleton (04-18): a muted box filling the reserved chart height
+   * until the client chart mounts, so there's no flash/jump on load. A subtle
+   * shimmer sweeps across it; disabled under prefers-reduced-motion. */
+  .chart-skeleton {
+    position: absolute;
+    inset: 0;
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .chart-skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in oklab, var(--surface-3, var(--surface)) 60%, transparent) 50%,
+      transparent 100%
+    );
+    transform: translateX(-100%);
+    animation: chart-skeleton-shimmer 1.4s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .chart-skeleton::after {
+      animation: none;
+    }
+  }
+  @keyframes chart-skeleton-shimmer {
+    100% {
+      transform: translateX(100%);
+    }
   }
   .no-wishlist-cta {
     margin: 0;

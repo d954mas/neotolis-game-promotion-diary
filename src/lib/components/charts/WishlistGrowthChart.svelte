@@ -323,15 +323,23 @@
   data-low-data={hasData ? "false" : "true"}
   data-bar-count={bars.length}
 >
-  {#if typeof window !== "undefined"}
-    <!-- Relatively-positioned wrapper so the absolutely-positioned HTML marker
-         overlay lays its event chips (+ dashed guide lines) OVER the plot area —
-         the SAME overlay the correlation chart mounts (04-13 unified markers). -->
-    <div class="chart-canvas">
+  <!-- Height-reserving wrapper OUTSIDE the typeof-window gate (04-18): keeps the
+       slot's 150px height on SSR + before mount so the strip can't jump the
+       layout (no CLS); a skeleton fills it until the client chart mounts. -->
+  <div class="chart-canvas">
+    {#if typeof window !== "undefined"}
+      <!-- Relatively-positioned wrapper so the absolutely-positioned HTML marker
+           overlay lays its event chips (+ dashed guide lines) OVER the plot area —
+           the SAME overlay the correlation chart mounts (04-13 unified markers). -->
       <Chart {init} {options} bind:chart />
       <ChartMarkerOverlay {chart} {dayGroups} {recomputeKey} {onSelectCluster} />
-    </div>
-  {/if}
+    {/if}
+    {#if !chart}
+      <!-- Skeleton placeholder: a muted box until the client chart mounts. The
+           shimmer is gated off under prefers-reduced-motion (static box only). -->
+      <div class="chart-skeleton" data-testid="chart-skeleton" aria-hidden="true"></div>
+    {/if}
+  </div>
 
   {#if !hasData}
     <!-- Low/empty (D-07/D-08 parity): a caption, not an empty bar grid. The
@@ -357,6 +365,39 @@
     height: 150px;
     min-width: 0;
     font-variant-numeric: tabular-nums;
+  }
+  /* Loading skeleton (04-18): a muted box filling the reserved chart height
+   * until the client chart mounts, so the strip never flashes/jumps on load.
+   * Subtle shimmer; disabled under prefers-reduced-motion. */
+  .chart-skeleton {
+    position: absolute;
+    inset: 0;
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .chart-skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in oklab, var(--surface-3, var(--surface)) 60%, transparent) 50%,
+      transparent 100%
+    );
+    transform: translateX(-100%);
+    animation: chart-skeleton-shimmer 1.4s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .chart-skeleton::after {
+      animation: none;
+    }
+  }
+  @keyframes chart-skeleton-shimmer {
+    100% {
+      transform: translateX(100%);
+    }
   }
   .growth-low-data {
     margin: 0;
