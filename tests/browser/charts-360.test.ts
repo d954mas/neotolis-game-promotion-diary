@@ -184,9 +184,11 @@ function mountDayModal(): { dialog: HTMLDialogElement; component: ReturnType<typ
       open: true,
       // 04-12: the modal takes a SET of days (a cluster); a single-day cluster
       // still shows that day's delta.
+      // 04-16: the modal takes a PER-DAY delta lookup so each day's header shows
+      // its own delta consistently (single- and multi-day alike).
       days: ["2026-05-15"],
       events: baseEvents,
-      delta: deltaByDate.l1["2026-05-15"],
+      deltaByDay: { "2026-05-15": deltaByDate.l1["2026-05-15"] },
       sourceById,
       gameById,
       games: baseGames,
@@ -229,8 +231,18 @@ function mountMultiDayModal(): {
       // Two days in the cluster → the modal groups by day (multi-day branch).
       days: ["2026-05-15", "2026-05-16"],
       events: multiDayEvents,
-      // A multi-day cluster carries NO delta (which day's delta?).
-      delta: null,
+      // 04-16: EACH day carries its OWN day-level delta, shown under that day's
+      // header — consistent with the single-day modal (no more "some days have a
+      // delta, some don't").
+      deltaByDay: {
+        "2026-05-15": deltaByDate.l1["2026-05-15"],
+        "2026-05-16": {
+          delta24h: 8,
+          delta7d: 31,
+          windowFrom: "2026-05-16",
+          windowTo: "2026-05-23",
+        },
+      },
       sourceById,
       gameById,
       games: baseGames,
@@ -289,14 +301,17 @@ describe("charts at 360px (VIZ-04)", () => {
     // Centered modal, NOT the old docked drawer/sheet (no data-variant).
     expect(dialog.getAttribute("data-variant")).toBeNull();
     expect(dialog.open).toBe(true);
-    // Stats header: the day's delta is shown.
+    // Stats header: the total event count surfaces.
     const stats = dialog.querySelector('[data-testid="day-stats"]');
     expect(stats).not.toBeNull();
-    expect(stats?.textContent).toContain(m.viz_delta_7d({ value: "+120" }));
-    // The event count surfaces in the header.
     expect(stats?.textContent).toContain(m.viz_day_modal_event_count({ count: 2 }));
-    // The day's events render as FeedCard rows (one per event).
-    const cards = dialog.querySelectorAll(".event-cards > *");
+    // 04-16: the day's delta now lives in the day's group header (shown per-day,
+    // consistently), not the stats bar.
+    const delta = dialog.querySelector('[data-testid="day-delta"]');
+    expect(delta).not.toBeNull();
+    expect(delta?.textContent).toContain(m.viz_delta_7d({ value: "+120" }));
+    // The day's events render as FeedCard rows (one per event), under the header.
+    const cards = dialog.querySelectorAll(".event-cards > :not(.date-head):not(.day-delta)");
     expect(cards.length).toBe(baseEvents.length);
     unmount(component);
   });
@@ -443,10 +458,10 @@ describe("04-12 HTML marker overlay + area/smooth/crosshair + Steam mini-chart r
   it("the cluster modal accepts a SET of days; a single-day cluster shows its delta", async () => {
     await page.viewport(900, 720);
     const { dialog, component } = mountDayModal();
-    // Single-day cluster → its day label + the delta block render.
+    // Single-day cluster → its day label + (04-16) the per-day delta block render.
     expect(dialog.textContent).toContain("2026-05-15");
-    const stats = dialog.querySelector('[data-testid="day-stats"]');
-    expect(stats?.textContent).toContain(m.viz_delta_7d({ value: "+120" }));
+    const delta = dialog.querySelector('[data-testid="day-delta"]');
+    expect(delta?.textContent).toContain(m.viz_delta_7d({ value: "+120" }));
     unmount(component);
   });
 
@@ -522,22 +537,29 @@ describe("04-13 unified marker language + rich tooltip + per-day modal grouping"
     const headers = dialog.querySelectorAll(".event-cards.grouped .date-head");
     expect(headers.length).toBe(2);
     // All three events still render as cards under their respective day headers.
-    const cards = dialog.querySelectorAll(".event-cards > :not(.date-head)");
+    const cards = dialog.querySelectorAll(
+      ".event-cards > :not(.date-head):not(.day-delta)",
+    );
     expect(cards.length).toBe(multiDayEvents.length);
-    // A multi-day cluster shows NO delta block (ambiguous which day).
-    const stats = dialog.querySelector('[data-testid="day-stats"]');
-    expect(stats?.querySelector(".day-delta")).toBeNull();
+    // 04-16: EACH day shows its OWN delta under its header — consistent with the
+    // single-day modal (no more "some days have a delta, some don't").
+    const deltas = dialog.querySelectorAll('[data-testid="day-delta"]');
+    expect(deltas.length).toBe(2);
+    expect(deltas[0]?.textContent).toContain(m.viz_delta_7d({ value: "+120" }));
+    expect(deltas[1]?.textContent).toContain(m.viz_delta_7d({ value: "+31" }));
     unmount(component);
   });
 
-  it("a single-day cluster modal stays a flat list with its delta (unchanged)", async () => {
+  it("a single-day cluster modal also shows a per-day header + its delta (04-16 consistent)", async () => {
     await page.viewport(900, 720);
     const { dialog, component } = mountDayModal();
-    // No per-day headers in the single-day case.
-    expect(dialog.querySelectorAll(".date-head").length).toBe(0);
-    // The delta block still renders for the single day.
-    const stats = dialog.querySelector('[data-testid="day-stats"]');
-    expect(stats?.querySelector(".day-delta")).not.toBeNull();
+    // 04-16: the single-day modal now ALSO renders the per-day header (so single-
+    // and multi-day modals are visually consistent).
+    expect(dialog.querySelectorAll(".event-cards.grouped .date-head").length).toBe(1);
+    // The delta block renders under that day's header.
+    const delta = dialog.querySelector('[data-testid="day-delta"]');
+    expect(delta).not.toBeNull();
+    expect(delta?.textContent).toContain(m.viz_delta_7d({ value: "+120" }));
     unmount(component);
   });
 });
@@ -830,5 +852,86 @@ describe("04-15 events-in-tooltip + line-hover forwards + thicker lines + click-
     const arg = onSelectCluster.mock.calls.at(-1)![0] as string[];
     expect(arg).toContain("2026-05-15");
     unmount(component);
+  });
+});
+
+describe("04-16 consistent per-day delta + plural fix + tooltip newest-first", () => {
+  it("the tooltip events fragment is sorted NEWEST→OLDEST (matches feed/modal)", () => {
+    // baseEvents are same-day: ev_1 "Trailer drop" at 08:00, ev_2 "Reddit launch
+    // thread" at 10:00 — input (buildDayGroups) order is OLD→NEW. The tooltip
+    // must flip to NEW→OLD so the newer Reddit thread row comes FIRST.
+    const dayGroups = buildDayGroups(baseEvents, null);
+    const html = tooltipEventsHtml("2026-05-15", dayGroups, (n) => `+${n} more`);
+    const iReddit = html.indexOf("Reddit launch thread");
+    const iTrailer = html.indexOf("Trailer drop");
+    expect(iReddit).toBeGreaterThanOrEqual(0);
+    expect(iTrailer).toBeGreaterThanOrEqual(0);
+    // Newer (10:00) before older (08:00).
+    expect(iReddit).toBeLessThan(iTrailer);
+  });
+
+  it("the marker tooltip rows are sorted NEWEST→OLDEST (overlay source + render)", async () => {
+    // Source: the overlay sorts the tooltip events DESC by occurredAt.
+    expect(overlaySource).toContain("occurredAt");
+    expect(overlaySource).toMatch(/sort\(/);
+    // Render: hovering a chip whose cluster holds the two same-day events lists
+    // the newer (Reddit, 10:00) row before the older (Trailer, 08:00) row.
+    await page.viewport(900, 720);
+    const { root, component } = mountChart(shortSeries);
+    await new Promise((r) => setTimeout(r, 200));
+    flushSync();
+    const chip = root.querySelector('[data-testid="chart-marker-chip"]') as HTMLElement | null;
+    expect(chip).not.toBeNull();
+    chip!.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    flushSync();
+    const tooltip = root.querySelector('[data-testid="chart-marker-tooltip"]') as HTMLElement;
+    const titles = [...tooltip.querySelectorAll(".tt-title")].map((n) => n.textContent);
+    const iReddit = titles.indexOf("Reddit launch thread");
+    const iTrailer = titles.indexOf("Trailer drop");
+    expect(iReddit).toBeGreaterThanOrEqual(0);
+    expect(iTrailer).toBeGreaterThanOrEqual(0);
+    expect(iReddit).toBeLessThan(iTrailer);
+    unmount(component);
+  });
+
+  it("the modal event count is singular '1 event' for one event, plural otherwise", async () => {
+    await page.viewport(900, 720);
+    // One event on the day → "1 event" (singular key), NOT "1 events".
+    const onClose = vi.fn();
+    const sourceById = new Map(baseSources.map((s) => [s.id, s]));
+    const gameById = new Map(baseGames.map((g) => [g.id, g]));
+    const component = mount(EventDayModal, {
+      target: host,
+      props: {
+        open: true,
+        days: ["2026-05-15"],
+        events: [baseEvents[0]!],
+        deltaByDay: { "2026-05-15": deltaByDate.l1["2026-05-15"] },
+        sourceById,
+        gameById,
+        games: baseGames,
+        onClose,
+      },
+    });
+    flushSync();
+    const dialog = host.querySelector(
+      'dialog[data-testid="event-day-modal"]',
+    ) as HTMLDialogElement;
+    const stats = dialog.querySelector('[data-testid="day-stats"]');
+    expect(stats?.textContent).toContain(m.viz_day_modal_event_count_one({ count: 1 }));
+    expect(stats?.textContent).not.toContain(m.viz_day_modal_event_count({ count: 1 }));
+    unmount(component);
+  });
+
+  it("EVERY day group in the modal shows its own delta (single + multi-day consistent)", async () => {
+    // Single-day: one delta block. Multi-day: one delta block PER day. Both read
+    // the per-day deltaByDay lookup — no more "some days have a delta, some don't".
+    await page.viewport(900, 720);
+    const single = mountDayModal();
+    expect(single.dialog.querySelectorAll('[data-testid="day-delta"]').length).toBe(1);
+    unmount(single.component);
+    const multi = mountMultiDayModal();
+    expect(multi.dialog.querySelectorAll('[data-testid="day-delta"]').length).toBe(2);
+    unmount(multi.component);
   });
 });
