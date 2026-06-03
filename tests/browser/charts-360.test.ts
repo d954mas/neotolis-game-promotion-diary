@@ -540,3 +540,157 @@ describe("04-13 unified marker language + rich tooltip + per-day modal grouping"
     unmount(component);
   });
 });
+
+describe("04-14 per-day clickable dashed lines + centroid card + identical cross-chart geometry", () => {
+  // Two event-days far enough apart (May 1 vs May 30) that, on a wide viewport,
+  // their thumbnail CARDS stay separate — so we can assert one dashed line PER
+  // event-day. A close pair (May 14 + May 15) lands within CLUSTER_PX and MERGES
+  // into one centroid-positioned card while STILL drawing two distinct lines.
+  const twoDayEvents = [
+    { ...baseEvents[0]!, id: "d1", occurredAt: new Date("2026-05-01T08:00:00Z") },
+    {
+      ...baseEvents[1]!,
+      id: "d2",
+      occurredAt: new Date("2026-05-30T10:00:00Z"),
+      externalId: "r2",
+    },
+  ];
+
+  // Four event-days spanning ~30 days (May 1..30) so a one-day gap maps to
+  // < CLUSTER_PX (44) px → the ADJACENT pair (May 14 + May 15) merges into one
+  // centroid-positioned card while each still draws its own dashed line; the
+  // far-apart May 1 and May 30 stay their own cards. → 4 lines, 3 cards.
+  const adjacentDayEvents = [
+    {
+      ...baseEvents[0]!,
+      id: "a0",
+      occurredAt: new Date("2026-05-01T08:00:00Z"),
+      externalId: "a0v",
+    },
+    {
+      ...baseEvents[0]!,
+      id: "a1",
+      occurredAt: new Date("2026-05-14T08:00:00Z"),
+      externalId: "a1v",
+    },
+    {
+      ...baseEvents[0]!,
+      id: "a2",
+      occurredAt: new Date("2026-05-15T08:00:00Z"),
+      externalId: "a2v",
+    },
+    {
+      ...baseEvents[0]!,
+      id: "a3",
+      occurredAt: new Date("2026-05-30T08:00:00Z"),
+      externalId: "a3v",
+    },
+  ];
+
+  function mountChartWith(
+    events: typeof baseEvents,
+    series: typeof shortSeries,
+  ): {
+    root: HTMLElement;
+    component: ReturnType<typeof mount>;
+    onSelectCluster: ReturnType<typeof vi.fn>;
+  } {
+    const onSelectCluster = vi.fn();
+    const component = mount(WishlistCorrelationChart, {
+      target: host,
+      props: {
+        seriesByListing: { l1: series },
+        events,
+        listings: baseListings,
+        today: TODAY,
+        range: null,
+        visible: {},
+        onSelectCluster,
+      },
+    });
+    flushSync();
+    const root = host.querySelector(
+      '[data-testid="wishlist-correlation-chart"]',
+    ) as HTMLElement | null;
+    if (!root) throw new Error("WishlistCorrelationChart root not found");
+    return { root, component, onSelectCluster };
+  }
+
+  it("draws one dashed guide line per EVENT-DAY (every day with events)", async () => {
+    await page.viewport(900, 720);
+    const { root, component } = mountChartWith(twoDayEvents, shortSeries);
+    await new Promise((r) => setTimeout(r, 250));
+    flushSync();
+    // Two distinct event-days → two dashed lines (one per day), regardless of
+    // how the thumbnail cards cluster.
+    const lines = root.querySelectorAll('[data-testid="chart-marker-guide"]');
+    expect(lines.length).toBe(2);
+    unmount(component);
+  });
+
+  it("a per-day line click selects that SINGLE day", async () => {
+    await page.viewport(900, 720);
+    const { root, component, onSelectCluster } = mountChartWith(twoDayEvents, shortSeries);
+    await new Promise((r) => setTimeout(r, 250));
+    flushSync();
+    const hits = root.querySelectorAll(
+      '[data-testid="chart-marker-guide-hit"]',
+    ) as NodeListOf<HTMLButtonElement>;
+    expect(hits.length).toBe(2);
+    hits[0]!.click();
+    flushSync();
+    // The line emits a single-day array (the merged-away day stays selectable).
+    expect(onSelectCluster).toHaveBeenCalledTimes(1);
+    const arg = onSelectCluster.mock.calls[0]![0] as string[];
+    expect(arg.length).toBe(1);
+    unmount(component);
+  });
+
+  it("a merged card sits BETWEEN its member days' lines (centroid placement)", async () => {
+    await page.viewport(900, 720);
+    const { root, component } = mountChartWith(adjacentDayEvents, offWindowSeries);
+    await new Promise((r) => setTimeout(r, 250));
+    flushSync();
+    // Four event-days → four lines; the adjacent May14+15 pair merges → 3 cards.
+    const lines = root.querySelectorAll(
+      '[data-testid="chart-marker-guide-hit"]',
+    ) as NodeListOf<HTMLElement>;
+    const chips = root.querySelectorAll(
+      '[data-testid="chart-marker-chip"]',
+    ) as NodeListOf<HTMLElement>;
+    expect(lines.length).toBe(4);
+    expect(chips.length).toBe(3);
+    const lineX = [...lines]
+      .map((el) => el.getBoundingClientRect())
+      .map((r) => r.left + r.width / 2)
+      .sort((a, b) => a - b);
+    const chipX = [...chips]
+      .map((el) => el.getBoundingClientRect())
+      .map((r) => r.left + r.width / 2)
+      .sort((a, b) => a - b);
+    // The merged card carries a "2" count badge — find it; its center x must lie
+    // BETWEEN its two member lines' center x (the centroid), not on either line.
+    const mergedChip = [...chips].find(
+      (el) => el.querySelector('[data-testid="chart-marker-count"]')?.textContent === "2",
+    );
+    expect(mergedChip).toBeDefined();
+    const mr = mergedChip!.getBoundingClientRect();
+    const mergedX = mr.left + mr.width / 2;
+    // The two adjacent lines are the 2nd and 3rd from the left (May 14, May 15).
+    expect(mergedX).toBeGreaterThan(lineX[1]! - 1);
+    expect(mergedX).toBeLessThan(lineX[2]! + 1);
+    // It is strictly the average of the two — within a couple px.
+    const midpoint = (lineX[1]! + lineX[2]!) / 2;
+    expect(Math.abs(mergedX - midpoint)).toBeLessThan(3);
+    void chipX;
+    unmount(component);
+  });
+
+  it("both charts share the SAME fixed plot geometry (source check) → identical clusters", () => {
+    // The cross-chart clustering fix: a fixed, IDENTICAL grid left/right with
+    // containLabel:false on BOTH charts so a date maps to the same x-pixel.
+    for (const src of [correlationChartSource, growthChartSource]) {
+      expect(src).toContain("WISHLIST_CHART_GRID");
+    }
+  });
+});
