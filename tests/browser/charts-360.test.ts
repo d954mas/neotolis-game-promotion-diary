@@ -346,9 +346,7 @@ describe("charts at 360px (VIZ-04)", () => {
       },
     });
     flushSync();
-    const dialog = host.querySelector(
-      'dialog[data-testid="event-day-modal"]',
-    ) as HTMLDialogElement;
+    const dialog = host.querySelector('dialog[data-testid="event-day-modal"]') as HTMLDialogElement;
     const card = dialog.querySelector('[data-testid="feed-card"]') as HTMLElement | null;
     expect(card).not.toBeNull();
     // Click the card title (a non-action surface) so the open-detail path fires.
@@ -587,9 +585,7 @@ describe("04-13 unified marker language + rich tooltip + per-day modal grouping"
     const headers = dialog.querySelectorAll(".event-cards.grouped .date-head");
     expect(headers.length).toBe(2);
     // All three events still render as cards under their respective day headers.
-    const cards = dialog.querySelectorAll(
-      ".event-cards > :not(.date-head):not(.day-delta)",
-    );
+    const cards = dialog.querySelectorAll(".event-cards > :not(.date-head):not(.day-delta)");
     expect(cards.length).toBe(multiDayEvents.length);
     // 04-16: EACH day shows its OWN delta under its header — consistent with the
     // single-day modal (no more "some days have a delta, some don't").
@@ -774,11 +770,7 @@ describe("04-15 events-in-tooltip + line-hover forwards + thicker lines + click-
     // The shared builder both charts' axis tooltips append: a YouTube event on
     // 2026-05-15 → a row with its <img> thumbnail + the (escaped) title.
     const dayGroups = buildDayGroups(baseEvents, null);
-    const html = tooltipEventsHtml(
-      "2026-05-15",
-      dayGroups,
-      (count) => `+${count} more`,
-    );
+    const html = tooltipEventsHtml("2026-05-15", dayGroups, (count) => `+${count} more`);
     // An <img> with the derived YouTube thumbnail URL + the event title.
     expect(html).toContain("<img");
     expect(html).toContain("img.youtube.com/vi/abc123/mqdefault.jpg");
@@ -793,7 +785,7 @@ describe("04-15 events-in-tooltip + line-hover forwards + thicker lines + click-
       {
         ...baseEvents[1]!,
         id: "x1",
-        title: '<script>alert(1)</script>',
+        title: "<script>alert(1)</script>",
         occurredAt: new Date("2026-05-20T08:00:00Z"),
         redditEnrichment: null,
       },
@@ -880,9 +872,7 @@ describe("04-15 events-in-tooltip + line-hover forwards + thicker lines + click-
         },
       });
       flushSync();
-      const root = host.querySelector(
-        '[data-testid="wishlist-correlation-chart"]',
-      ) as HTMLElement;
+      const root = host.querySelector('[data-testid="wishlist-correlation-chart"]') as HTMLElement;
       return { root, component, onSelectCluster };
     })();
     // Let the chart finish its first render so the ZRender canvas + coordinate
@@ -897,9 +887,7 @@ describe("04-15 events-in-tooltip + line-hover forwards + thicker lines + click-
     const x = rect.left + rect.width * 0.5;
     const y = rect.top + rect.height * 0.7;
     for (const type of ["mousedown", "mouseup", "click"]) {
-      canvas.dispatchEvent(
-        new MouseEvent(type, { bubbles: true, clientX: x, clientY: y }),
-      );
+      canvas.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: x, clientY: y }));
     }
     flushSync();
     await new Promise((r) => setTimeout(r, 50));
@@ -970,9 +958,7 @@ describe("04-16 consistent per-day delta + plural fix + tooltip newest-first", (
       },
     });
     flushSync();
-    const dialog = host.querySelector(
-      'dialog[data-testid="event-day-modal"]',
-    ) as HTMLDialogElement;
+    const dialog = host.querySelector('dialog[data-testid="event-day-modal"]') as HTMLDialogElement;
     const stats = dialog.querySelector('[data-testid="day-stats"]');
     expect(stats?.textContent).toContain(m.viz_day_modal_event_count_one({ count: 1 }));
     expect(stats?.textContent).not.toContain(m.viz_day_modal_event_count({ count: 1 }));
@@ -1071,7 +1057,7 @@ describe("04-18 UX polish: subordinate growth, skeleton, restored highlight, cal
     // The .chart-canvas wrapper must NOT live solely inside {#if typeof window}:
     // it reserves the slot height on SSR. A muted skeleton fills it until mount.
     for (const src of [correlationChartSource, growthChartSource]) {
-      const ifIdx = src.indexOf('{#if typeof window');
+      const ifIdx = src.indexOf("{#if typeof window");
       const canvasIdx = src.indexOf('<div class="chart-canvas">');
       // The chart-canvas wrapper opens BEFORE the typeof-window gate.
       expect(canvasIdx).toBeGreaterThan(0);
@@ -1191,9 +1177,7 @@ describe("04-19 drop the on-line band → tooltip effect line; chips never overl
     });
     await new Promise((r) => setTimeout(r, 300));
     flushSync();
-    const root = host.querySelector(
-      '[data-testid="wishlist-correlation-chart"]',
-    ) as HTMLElement;
+    const root = host.querySelector('[data-testid="wishlist-correlation-chart"]') as HTMLElement;
     const chips = [...root.querySelectorAll('[data-testid="chart-marker-chip"]')] as HTMLElement[];
     // The chart laid out at least one chip (the overlay computed pixel positions).
     expect(chips.length).toBeGreaterThan(0);

@@ -63,11 +63,7 @@
   import { CanvasRenderer } from "echarts/renderers";
   import { m } from "$lib/paraglide/messages.js";
   import { abbreviate } from "./abbreviate.js";
-  import {
-    baseChartOptions,
-    prefersReducedMotion,
-    WISHLIST_CHART_GRID,
-  } from "./chart-theme.js";
+  import { baseChartOptions, prefersReducedMotion, WISHLIST_CHART_GRID } from "./chart-theme.js";
   import ChartMarkerOverlay from "./ChartMarkerOverlay.svelte";
   import {
     listingColor,

@@ -44,7 +44,8 @@
   stroke-width="1.75"
   stroke-linecap="round"
   stroke-linejoin="round"
-  aria-hidden="true">{@html kindIconInner(kind)}</svg>
+  aria-hidden="true">{@html kindIconInner(kind)}</svg
+>
 
 <style>
   .kind {

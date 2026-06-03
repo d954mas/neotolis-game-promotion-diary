@@ -16,7 +16,10 @@ const noopPage = {
 
 export const page = readable(noopPage);
 export const navigating = readable(null);
-export const updated = { subscribe: readable(false).subscribe, check: () => Promise.resolve(false) };
+export const updated = {
+  subscribe: readable(false).subscribe,
+  check: () => Promise.resolve(false),
+};
 export function getStores() {
   return { page, navigating, updated };
 }
