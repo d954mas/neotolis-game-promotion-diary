@@ -51,7 +51,12 @@
   import EventDayModal from "$lib/components/charts/EventDayModal.svelte";
   import EventDetailModal from "$lib/components/event-detail/EventDetailModal.svelte";
   import ChartLegend from "$lib/components/charts/ChartLegend.svelte";
-  import { listingLabel, eventDay, inRange } from "$lib/components/charts/wishlist-chart-shared.js";
+  import {
+    listingLabel,
+    listingColor,
+    eventDay,
+    inRange,
+  } from "$lib/components/charts/wishlist-chart-shared.js";
   import DateRangeRow from "$lib/components/feed/DateRangeRow.svelte";
   import { startOfDay, dateRangeWindow, parseEventDate } from "$lib/feed/date-range.js";
   import type { DateRangeFilter } from "$lib/feed/url-state.js";
@@ -157,6 +162,14 @@
   // line, and the bar all read the same name + the same stable color. Only
   // listings that HAVE wishlist data get a chip — a no-CSV listing has no
   // series to toggle.
+  //
+  // The swatch color is resolved from the FULL `chartListings` (NOT the filtered
+  // legend subset): listingColor keys by index in the array it's handed, and the
+  // charts color each line/bar by its index in the FULL `chartListings`. When an
+  // earlier listing has no CSV (filtered OUT of the legend), recomputing the color
+  // from the filtered subset would shift every later swatch's index → swatch ≠
+  // line. Precomputing `listingColor(chartListings, id)` here keeps the swatch
+  // ALWAYS equal to the chart color (the ChartLegend just renders this color).
   const legendListings = $derived(
     chartListings
       .filter((l) => (chartSeriesByListing[l.id]?.points.length ?? 0) > 0)
@@ -167,6 +180,7 @@
           (appId) => m.viz_legend_listing_fallback({ appId }),
           () => m.viz_wishlist_line_label(),
         ),
+        color: listingColor(chartListings, l.id),
       })),
   );
   // The loader returns full EventDtos; the page's EventDtoLocal is a subset

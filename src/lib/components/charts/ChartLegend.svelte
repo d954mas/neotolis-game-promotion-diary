@@ -15,31 +15,31 @@
   //       updates its `visible` map, and BOTH charts filter their series by it.
   //       A click toggles plain state — re-enabling is just flipping the bool.
   //
-  // Each chip = a color SWATCH (exactly the listing's line/bar color, from the
-  // shared stable `listingColor` so swatch ≡ line ≡ bar) + the listing label.
-  // OFF state dims the chip and hollows the swatch so it reads as "hidden but
-  // returnable". `aria-pressed` reflects on/off for AX; the wrapping group has
-  // an aria-label and flex-wraps under 600px (VIZ-04).
+  // Each chip = a color SWATCH (exactly the listing's line/bar color) + the
+  // listing label. The color is PRECOMPUTED by the page from the FULL listings
+  // array (listingColor(chartListings, id)) and passed in per item — the legend
+  // does NOT recompute it from its own (filtered) `listings`, which would shift
+  // the palette index whenever an earlier listing has no CSV and is filtered out,
+  // diverging the swatch from the chart's line/bar color. OFF state dims the chip
+  // and hollows the swatch so it reads as "hidden but returnable". `aria-pressed`
+  // reflects on/off for AX; the wrapping group has an aria-label and flex-wraps
+  // under 600px (VIZ-04).
 
   import { m } from "$lib/paraglide/messages.js";
-  import { listingColor, type ListingLite } from "./wishlist-chart-shared.js";
 
   let {
     listings,
     visible,
     onToggle,
   }: {
-    /** Active listings (id + label) — drives one chip each, in array order. */
-    listings: { id: string; label: string }[];
+    /** Active listings (id + label + precomputed swatch color from the FULL
+     *  listings array) — drives one chip each, in array order. */
+    listings: { id: string; label: string; color: string }[];
     /** Shared legend selection (page-owned): listingId → shown. Absent/true = shown. */
     visible: Record<string, boolean>;
     /** Flip a listing's visibility; the page mirrors it so both charts react. */
     onToggle: (listingId: string, shown: boolean) => void;
   } = $props();
-
-  // `listingColor` is keyed by index in the FULL listings array, so pass the
-  // same `listings` it receives — the swatch is identical to the series color.
-  const colorListings = $derived(listings.map((l) => ({ id: l.id })) as ListingLite[]);
 
   function isShown(id: string): boolean {
     return visible[id] !== false;
@@ -55,7 +55,7 @@
         class="chip legend-chip"
         data-shown={shown ? "1" : "0"}
         aria-pressed={shown}
-        style="--swatch: {listingColor(colorListings, l.id)};"
+        style="--swatch: {l.color};"
         onclick={() => onToggle(l.id, !shown)}
       >
         <span class="swatch" aria-hidden="true"></span>
