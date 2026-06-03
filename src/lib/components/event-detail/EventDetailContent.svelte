@@ -85,6 +85,58 @@
     onOpenGamesPickerForCard?: (id: string) => void;
   } = $props();
 
+  // VIZ-01 (Plan 04-24): the per-event history chart must render in the
+  // EventDetailModal (the PRIMARY surface, opened from /feed + /games rows),
+  // not only on /events/[id]. The modal mounts this component WITHOUT the
+  // SSR-loaded `metricSeries` prop (defaults []), so when the event is a
+  // chartable kind we lazy-fetch GET /api/events/:id/metric-series for THIS
+  // single event. /events/[id] keeps passing its SSR `metricSeries` → the
+  // prop is non-empty → no client fetch (no double load).
+  //
+  // CHARTABLE_KINDS = the kinds an adapter implements fetchEventMetricSeries
+  // for (youtube_video, reddit_post). Mounting EventHistoryChart for these
+  // kinds — even with 0 snapshots — makes the D-07 low-data caption reachable
+  // (the empty/sparse case the chart already handles).
+  const CHARTABLE_KINDS = new Set(["youtube_video", "reddit_post"]);
+  const isChartable = $derived(CHARTABLE_KINDS.has(event.kind));
+
+  // Client-fetched series for the modal path. null = not yet fetched / not
+  // applicable; [] is a valid fetched result (chartable event, 0 snapshots →
+  // low-data caption). A provided `metricSeries` prop is authoritative.
+  let fetchedSeries = $state<EventMetricSeries[] | null>(null);
+
+  // Browser-only lazy load, re-keyed on event.id so modal pagination refetches.
+  // Race guard: a stale response for a previous event.id is ignored. Fetch only
+  // when the prop wasn't threaded (modal path) AND the kind is chartable —
+  // never per feed row, only the single opened event.
+  $effect(() => {
+    const id = event.id;
+    fetchedSeries = null;
+    if (typeof window === "undefined") return;
+    if (!isChartable) return;
+    if (metricSeries.length > 0) return; // SSR-provided (e.g. /events/[id]) wins.
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/events/${id}/metric-series`);
+        if (cancelled || id !== event.id) return;
+        if (res.ok) {
+          fetchedSeries = (await res.json()) as EventMetricSeries[];
+        }
+      } catch {
+        // Network error → leave fetchedSeries null; the chart renders the
+        // low-data caption (no data) rather than breaking the modal.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  // The series the chart renders: a provided prop wins (no fetch happened);
+  // otherwise the client-fetched series (or [] until it resolves).
+  const chartSeries = $derived(metricSeries.length > 0 ? metricSeries : (fetchedSeries ?? []));
+
   // Inline-edit drafts. null = not editing; string = current draft.
   let titleDraft = $state<string | null>(null);
   // notesEditorOpen flips the big NotesEditorModal (Esc cascade reads
@@ -556,10 +608,13 @@
 
     <!-- VIZ-01 per-event snapshot-history chart (D-14, adapter-driven).
          One mount here covers BOTH the modal and the /events/[id] route
-         (this is the shared dual-render body). metricSeries defaults to []
-         so callers that don't thread it render the low-data caption. -->
-    {#if metricSeries.length > 0}
-      <EventHistoryChart series={metricSeries} kind={event.kind} />
+         (this is the shared dual-render body). Gated on `isChartable`, NOT
+         on series length, so a chartable event (youtube_video / reddit_post)
+         with 0 snapshots still mounts EventHistoryChart and shows the D-07
+         low-data caption. `chartSeries` is the SSR prop (when threaded, e.g.
+         /events/[id]) or the modal-path client fetch (Plan 04-24). -->
+    {#if isChartable}
+      <EventHistoryChart series={chartSeries} kind={event.kind} />
     {/if}
 
     <EventDetailGames {event} {games} {view} {onOpenGamesPickerForCard} />
