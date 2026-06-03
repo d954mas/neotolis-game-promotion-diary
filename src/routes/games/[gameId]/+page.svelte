@@ -49,6 +49,7 @@
   import WishlistCorrelationChart from "$lib/components/charts/WishlistCorrelationChart.svelte";
   import WishlistGrowthChart from "$lib/components/charts/WishlistGrowthChart.svelte";
   import EventDayModal from "$lib/components/charts/EventDayModal.svelte";
+  import EventDetailModal from "$lib/components/event-detail/EventDetailModal.svelte";
   import ChartLegend from "$lib/components/charts/ChartLegend.svelte";
   import { listingLabel, eventDay, inRange } from "$lib/components/charts/wishlist-chart-shared.js";
   import DateRangeRow from "$lib/components/feed/DateRangeRow.svelte";
@@ -58,6 +59,8 @@
   import type {
     GameSteamListingDto,
     EventDto,
+    GameDto,
+    DataSourceDto,
     WishlistSeries,
     WishlistDelta,
   } from "$lib/server/dto.js";
@@ -169,6 +172,44 @@
   // The loader returns full EventDtos; the page's EventDtoLocal is a subset
   // for the FeedCard renderer. The chart consumes the full DTOs for its markers.
   const chartEvents = $derived(data.events as EventDto[]);
+
+  // ── EventDetailModal (04-20) ─────────────────────────────────────────
+  // Clicking an event card — in the Events list OR inside the cluster
+  // EventDayModal — opens the SAME detailed modal the feed uses. The page
+  // owns the open id; the opened event is resolved from the full EventDtos
+  // (data.events) the loader already provides. Edit/delete mirror the feed:
+  // PATCH/DELETE /api/events/:id then invalidateAll() (no new server code).
+  let openEventId = $state<string | null>(null);
+  const openedEvent = $derived(
+    (data.events as EventDto[]).find((e) => e.id === openEventId) ?? null,
+  );
+  function openDetail(id: string): void {
+    openEventId = id;
+  }
+  function closeDetail(): void {
+    openEventId = null;
+  }
+  async function onModalUpdate(
+    id: string,
+    patch: Partial<{
+      title: string;
+      notes: string | null;
+      url: string | null;
+      authorIsMe: boolean;
+    }>,
+  ): Promise<void> {
+    await fetch(`/api/events/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    await invalidateAll();
+  }
+  async function onModalDelete(id: string): Promise<void> {
+    await fetch(`/api/events/${id}`, { method: "DELETE" });
+    closeDetail();
+    await invalidateAll();
+  }
 
   // ── Shared chart state (04-08) ───────────────────────────────────────
   // The date-range picker and the per-listing legend selection are OWNED HERE
@@ -654,6 +695,24 @@
     onClose={() => (selectedChartDays = [])}
   />
 
+  <!-- Detailed event modal (04-20) — the SAME EventDetailModal the feed
+       mounts. Opened by an event card click in the Events list OR inside the
+       cluster EventDayModal (the native <dialog> stacks it on top; closing it
+       returns to the cluster modal). Edit/delete hit /api/events/:id then
+       invalidateAll() (mirrors the feed). metricSeries is omitted (defaults
+       []) — the per-event chart isn't loaded on this page. The loader returns
+       full GameDto/DataSourceDto arrays; cast to the modal's prop types. -->
+  {#if openedEvent}
+    <EventDetailModal
+      event={openedEvent}
+      games={data.games as GameDto[]}
+      sources={data.sources as DataSourceDto[]}
+      onClose={closeDetail}
+      onDelete={onModalDelete}
+      onUpdate={onModalUpdate}
+    />
+  {/if}
+
   <section class="events" id="section-events">
     <header class="section-header">
       <h2>{m.games_detail_section_events()}</h2>
@@ -683,6 +742,7 @@
               source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
               game={ev.gameIds.length > 0 ? (gameById.get(ev.gameIds[0]!) ?? null) : null}
               games={allGames}
+              onOpenDetail={openDetail}
             />
           {/each}
         {/each}
