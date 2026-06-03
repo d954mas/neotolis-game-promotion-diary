@@ -42,6 +42,27 @@ export function prefersReducedMotion(): boolean {
 }
 
 /**
+ * FIXED horizontal plot geometry shared by BOTH wishlist charts (correlation +
+ * growth). Both charts mount the SAME DOM marker overlay, which pixel-clusters
+ * event-days via `chart.convertToPixel`. If the two charts used `containLabel:
+ * true`, ECharts would size each plot's `left` inset to ITS OWN y-axis label
+ * width — the wishlist-balance chart's labels ("12.3k") are wider than the
+ * daily-growth chart's ("40") — so a given DATE would map to a DIFFERENT x-pixel
+ * on each chart and the overlays would cluster DIFFERENT days (May 13+14 merge
+ * on one chart but not the other). Pinning an explicit px `left`/`right` with
+ * `containLabel: false` makes a date map to the SAME x-pixel on both → identical
+ * clusters/chips/counts/positions. `left` is sized to fit the widest y-axis
+ * label across both charts (an abbreviated balance up to ~5 chars like "12.3k").
+ */
+export const WISHLIST_CHART_GRID = {
+  left: 52,
+  right: 16,
+  top: 16,
+  bottom: 36,
+  containLabel: false,
+} as const;
+
+/**
  * Shared ECharts option defaults spread by both the VIZ-01 per-event chart and
  * the VIZ-02/03 correlation chart: tight grid margins, axis-trigger tooltip,
  * reduced-motion-gated animation, and the D-11 abbreviated yAxis formatter.

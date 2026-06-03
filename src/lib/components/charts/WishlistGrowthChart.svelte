@@ -42,7 +42,7 @@
   import { CanvasRenderer } from "echarts/renderers";
   import { m } from "$lib/paraglide/messages.js";
   import { abbreviate } from "./abbreviate.js";
-  import { baseChartOptions, prefersReducedMotion } from "./chart-theme.js";
+  import { baseChartOptions, prefersReducedMotion, WISHLIST_CHART_GRID } from "./chart-theme.js";
   import ChartMarkerOverlay from "./ChartMarkerOverlay.svelte";
   import {
     listingColor,
@@ -198,7 +198,11 @@
       ...baseChartOptions({ reducedMotion }),
       // No ECharts native legend — the custom <ChartLegend> at the page drives
       // per-listing visibility via the shared `visible` map (04-09).
-      grid: { left: 8, right: 8, top: 16, bottom: 36, containLabel: true },
+      // SAME fixed grid geometry (shared constant) as the correlation chart so a
+      // date maps to the SAME x-pixel on both → the two DOM overlays cluster
+      // event-days IDENTICALLY (04-14). The narrow growth labels ("40") no longer
+      // give this chart a different left inset than the wide-balance chart.
+      grid: WISHLIST_CHART_GRID,
       xAxis: {
         type: "time" as const,
         splitNumber: 4,
