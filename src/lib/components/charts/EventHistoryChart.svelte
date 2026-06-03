@@ -2,45 +2,75 @@
   // EventHistoryChart — VIZ-01 per-event snapshot-history chart (D-14).
   //
   // The ONLY leaf in the app that touches ECharts. Consumes the
-  // library-agnostic EventMetricSeries[] the loader collects from the
-  // adapter's fetchEventMetricSeries (Plan 04-02) — never a mutable
-  // current-value column (POLL-04). Renders identically in the
-  // EventDetailModal and the /events/[id] SSR fallback because it mounts
-  // inside the shared <EventDetailContent> (dual-render).
+  // library-agnostic EventMetricSeries[] the adapter's fetchEventMetricSeries
+  // contributes (Plan 04-02) — never a mutable current-value column (POLL-04).
   //
-  // SSR (RESEARCH Pitfall 1): the svelte-echarts <Chart> wrapper inits the
-  // canvas inside onMount, so the server render never touches `document`.
-  // The series DATA is computed server-side in the loader (SSR-safe); only
-  // the canvas mounts client-side. We additionally gate the <Chart> render
-  // on `typeof window !== "undefined"` so the option object (which resolves
-  // `--k-*` tokens via getComputedStyle) is only built in the browser.
+  // All metrics on ONE line chart, each a distinct color, with a CUSTOM on-brand
+  // legend below (a metric icon + color swatch + text per series) that toggles
+  // any series on/off — so the small-magnitude metrics (likes/comments) that a
+  // shared linear axis flattens next to views can be isolated. Visibility is
+  // driven by filtering the series array (the swatch/line colour is keyed by the
+  // metric's index in the FULL series list, so toggling never reshuffles colours).
   //
-  // D-07 low-data branch: when EVERY series has <3 points a 2-point trend
-  // line would mislead, so we render the available points as DOTS
-  // (showSymbol, lineStyle.opacity 0) PLUS the m.chart_low_data_caption.
-  // With zero points we render only the caption. data-low-data exposes the
-  // branch to the browser test without introspecting canvas pixels.
+  // SSR (RESEARCH Pitfall 1): the <Chart> inits the canvas in onMount and the
+  // option is built only under `typeof window`.
+  //
+  // D-07 low-data branch: <3 points on every series → dots + caption, never a
+  // 2-point trend line.
 
   import { Chart } from "svelte-echarts";
   import { init, use } from "echarts/core";
   import { LineChart } from "echarts/charts";
-  import { GridComponent, TooltipComponent, LegendComponent } from "echarts/components";
+  import { GridComponent, TooltipComponent } from "echarts/components";
   import { CanvasRenderer } from "echarts/renderers";
   import { m } from "$lib/paraglide/messages.js";
   import { baseChartOptions, prefersReducedMotion } from "./chart-theme.js";
   import { abbreviate } from "./abbreviate.js";
   import type { EventMetricSeries } from "$lib/sources/adapter.js";
 
-  use([LineChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
+  use([LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
 
   let { series, kind: _kind }: { series: EventMetricSeries[]; kind: string } = $props();
 
-  // Each metric (views / likes / comments …) gets a DISTINCT color so the lines
-  // and the (toggleable) legend swatches are tellable apart — they used to all
-  // share the single kind color, which made the chart + legend unreadable.
+  // Distinct, stable per-metric colour (keyed by index in the FULL series list).
   const METRIC_COLORS = ["#5b8def", "#e0a458", "#5fb98e", "#c25b9e", "#7d6ad6"];
 
-  // A polled-at timestamp → a compact "May 12" axis/tooltip label.
+  // Per-metric inline icon (geometric, stroke=currentColor so it takes the chip
+  // colour). Keyed by the adapter's labelKey; fallback = a dot.
+  const METRIC_ICON: Record<string, string> = {
+    chart_metric_views:
+      '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>',
+    chart_metric_likes:
+      '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 1 0-7.8 7.8L12 21.2l8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/>',
+    chart_metric_comments:
+      '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+    chart_metric_num_comments:
+      '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+    chart_metric_score: '<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>',
+  };
+  function metricIcon(labelKey: string): string {
+    return METRIC_ICON[labelKey] ?? '<circle cx="12" cy="12" r="8"/>';
+  }
+
+  const messages = m as unknown as Record<string, () => string>;
+  function label(labelKey: string): string {
+    const fn = messages[labelKey];
+    return fn ? fn() : labelKey;
+  }
+
+  // labelKey → hidden (toggled off in the custom legend). Absent = shown.
+  let hidden = $state<Record<string, boolean>>({});
+  function toggle(labelKey: string): void {
+    hidden = { ...hidden, [labelKey]: !hidden[labelKey] };
+  }
+  function shown(labelKey: string): boolean {
+    return hidden[labelKey] !== true;
+  }
+
+  const maxPoints = $derived(Math.max(0, ...series.map((s) => s.points.length)));
+  // D-07: <3 snapshots on every series → dots + caption, never a 2-point line.
+  const lowData = $derived(maxPoints < 3);
+
   function dateLabel(value: unknown): string {
     const d = new Date(value as string | number);
     return Number.isNaN(d.getTime())
@@ -48,32 +78,13 @@
       : d.toLocaleDateString("en", { month: "short", day: "numeric" });
   }
 
-  // Paraglide exposes each key as a zero-arg message fn. labelKey is a
-  // runtime string handle (e.g. "chart_metric_views"); index into the m
-  // namespace to resolve the legend label. Cast keeps TS honest without a
-  // per-key switch.
-  const messages = m as unknown as Record<string, () => string>;
-  function label(labelKey: string): string {
-    const fn = messages[labelKey];
-    return fn ? fn() : labelKey;
-  }
-
-  const maxPoints = $derived(Math.max(0, ...series.map((s) => s.points.length)));
-  // D-07: <3 snapshots on every series → dots + caption, never a 2-point line.
-  const lowData = $derived(maxPoints < 3);
-
-  // Build the ECharts option client-only — resolveKindColor reads CSS vars
-  // via getComputedStyle (canvas can't see --k-* tokens), unavailable under
-  // SSR. The {#if typeof window} guard ensures this never runs server-side.
   const options = $derived.by(() => {
     if (typeof window === "undefined") return {};
     const reducedMotion = prefersReducedMotion();
     const base = baseChartOptions({ reducedMotion });
     return {
       ...base,
-      // Room at the top for the legend + at the bottom for the date labels.
-      grid: { left: 8, right: 12, top: 34, bottom: 8, containLabel: true },
-      legend: { type: "scroll" as const, top: 0, icon: "roundRect" as const },
+      grid: { left: 8, right: 12, top: 12, bottom: 8, containLabel: true },
       tooltip: {
         trigger: "axis" as const,
         formatter: (raw: unknown): string => {
@@ -99,22 +110,20 @@
         type: "time" as const,
         axisLabel: { formatter: (v: number): string => dateLabel(v), hideOverlap: true },
       },
-      series: series.map((s, i) => {
-        const color = METRIC_COLORS[i % METRIC_COLORS.length]!;
-        return {
+      series: series
+        .map((s, i) => ({ s, color: METRIC_COLORS[i % METRIC_COLORS.length]! }))
+        .filter(({ s }) => shown(s.labelKey))
+        .map(({ s, color }) => ({
           name: label(s.labelKey),
           type: "line" as const,
           smooth: true,
           showSymbol: true,
           symbol: "circle" as const,
           symbolSize: lowData ? 8 : 4,
-          // D-07: hide the connecting line in the low-data branch so two points
-          // never read as a trend; only the dots remain.
           lineStyle: lowData ? { opacity: 0 } : { color, width: 2 },
           itemStyle: { color },
           data: s.points.map((p) => [p.polledAt, p.value]),
-        };
-      }),
+        })),
     };
   });
 </script>
@@ -128,6 +137,35 @@
     </div>
   {/if}
 
+  {#if series.length > 0}
+    <!-- Custom on-brand legend: metric icon + colour + text, click to toggle. -->
+    <div class="metric-legend" role="group" aria-label={m.chart_history_title()}>
+      {#each series as s, i (s.labelKey)}
+        {@const c = METRIC_COLORS[i % METRIC_COLORS.length]}
+        <button
+          type="button"
+          class="metric-chip"
+          class:off={!shown(s.labelKey)}
+          aria-pressed={shown(s.labelKey)}
+          style={`--mc:${c};`}
+          onclick={() => toggle(s.labelKey)}
+        >
+          <svg
+            class="metric-ico"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true">{@html metricIcon(s.labelKey)}</svg
+          >
+          <span class="metric-text">{label(s.labelKey)}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   {#if lowData}
     <p class="chart-low-data-caption">{m.chart_low_data_caption()}</p>
   {/if}
@@ -137,7 +175,7 @@
   .event-history-chart {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     margin-top: 4px;
   }
   .chart-title {
@@ -151,6 +189,54 @@
     width: 100%;
     height: 220px;
     font-variant-numeric: tabular-nums;
+  }
+  /* Custom legend — one toggle chip per metric: icon (in the metric colour) +
+   * text. Off state dims + strikes the chip so it reads as "hidden, click to
+   * bring back". Centered under the chart (Millo-style). */
+  .metric-legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--s-2);
+  }
+  .metric-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 28px;
+    padding: 0 var(--s-3);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    color: var(--text);
+    font-family: var(--f-sans);
+    font-size: var(--t-12);
+    font-weight: var(--w-md);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .metric-ico {
+    width: 15px;
+    height: 15px;
+    color: var(--mc);
+    flex-shrink: 0;
+  }
+  .metric-chip:hover {
+    border-color: var(--mc);
+  }
+  .metric-chip:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .metric-chip.off {
+    opacity: 0.5;
+    color: var(--text-3);
+  }
+  .metric-chip.off .metric-ico {
+    color: var(--text-3);
+  }
+  .metric-chip.off .metric-text {
+    text-decoration: line-through;
   }
   .chart-low-data-caption {
     margin: 0;
