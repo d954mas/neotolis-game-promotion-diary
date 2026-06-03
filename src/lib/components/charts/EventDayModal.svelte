@@ -51,6 +51,7 @@
     gameById,
     games,
     onClose,
+    onOpenDetail,
   }: {
     open: boolean;
     /** The cluster's selected YYYY-MM-DD day(s), date-ASC (for the header). */
@@ -66,6 +67,11 @@
     gameById: Map<string, GameLite>;
     games: GameLite[];
     onClose: () => void;
+    /** 04-20: clicking a card inside the cluster modal opens the detailed
+     *  EventDetailModal (the page owns it; it stacks on top via native
+     *  <dialog>.showModal(), closing returns here). Optional so existing
+     *  mounts without a detail surface still work. */
+    onOpenDetail?: (id: string) => void;
   } = $props();
 
   // Header day label: one day → that date; a multi-day cluster → "first → last".
@@ -178,6 +184,7 @@
             source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
             game={ev.gameIds.length > 0 ? (gameById.get(ev.gameIds[0]!) ?? null) : null}
             {games}
+            {onOpenDetail}
           />
         {/each}
       {/each}

@@ -693,6 +693,7 @@
     {gameById}
     games={allGames}
     onClose={() => (selectedChartDays = [])}
+    onOpenDetail={openDetail}
   />
 
   <!-- Detailed event modal (04-20) — the SAME EventDetailModal the feed
