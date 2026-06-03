@@ -10,6 +10,27 @@ import path from "node:path";
 // $lib/paraglide/messages.js.
 const $libAlias = { $lib: path.resolve("./src/lib") };
 
+// $app/* alias for the browser project. The browser project mounts real
+// Svelte components (EventDetailContent → RefreshNowButton imports
+// `$app/navigation`), but the vitest config does NOT pull the SvelteKit
+// plugin (see note above), so `$app/*` is unresolvable and the component
+// import fails before any test runs. The real @sveltejs/kit runtime can't
+// be aliased directly either — it pulls `__sveltekit/*` virtual modules
+// that only exist under the full SvelteKit build. So we alias `$app/*` to
+// tiny test stubs (tests/browser/app-stubs/) that provide the small
+// surface mounted components touch (invalidateAll, goto, page state) as
+// inert no-ops. Component-mount tests assert DOM/structure, not navigation
+// side effects, so inert stubs are sufficient and keep the suite runnable.
+const appStubs = path.resolve("./tests/browser/app-stubs");
+const $appAlias = {
+  "$app/navigation": path.join(appStubs, "navigation.js"),
+  "$app/stores": path.join(appStubs, "stores.js"),
+  "$app/state": path.join(appStubs, "state.js"),
+  "$app/environment": path.join(appStubs, "environment.js"),
+  "$app/forms": path.join(appStubs, "forms.js"),
+  "$app/paths": path.join(appStubs, "paths.js"),
+};
+
 // Vitest 4 supports test.projects to split unit (no DB) from integration (with DB).
 //
 // - unit:        no setup file, fast, runs without Postgres.
@@ -73,7 +94,7 @@ export default defineConfig({
       },
       {
         plugins: [svelte()],
-        resolve: { alias: $libAlias },
+        resolve: { alias: { ...$libAlias, ...$appAlias } },
         test: {
           name: "browser",
           include: ["tests/browser/**/*.test.ts"],

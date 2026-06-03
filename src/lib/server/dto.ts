@@ -775,6 +775,50 @@ export interface WishlistSummaryDto {
   recentDays: WishlistSnapshotDto[];
 }
 
+/**
+ * WishlistSeries — the full daily-granularity wishlist line for one listing
+ * (WISH-04 / VIZ-02 / VIZ-03 chart series) plus the honest "last imported"
+ * caption source (D-13).
+ *
+ * `points` is date-ASC daily `{date, balance}` — `balance` is the immutable
+ * cumulative running sum the import already maintains, so chart code reads it
+ * directly (never re-sums adds−deletes). `lastImportedAt` is the REAL
+ * MAX(updatedAt) across the listing's snapshots (the latest CSV import time),
+ * serialized ISO — the "обновлено Xч назад" caption is derived from THIS, never
+ * from `now()` (Steam wishlist is daily-granularity; never imply finer). Null
+ * when the listing has no snapshots.
+ *
+ * NO DENORMALIZATION: no game/listing display name is carried here — the chart
+ * payload references `listingId` and reads the name via the FK.
+ */
+export interface WishlistSeries {
+  points: { date: string; balance: number }[];
+  lastImportedAt: string | null;
+}
+
+/**
+ * WishlistDelta — the DAY-level (D-05) wishlist change after an event-day,
+ * powering the VIZ-03 panel number+arrow ("+47 за 7д ↑") and the highlighted
+ * markArea window (D-03).
+ *
+ * `delta24h` / `delta7d` are a WINDOWED SUBTRACTION of the immutable cumulative
+ * balance series — `balance(LATEST snapshot in the window) − balance(eventDay)`
+ * — NEVER a re-sum of adds−deletes (the import already owns the cumulative
+ * balance; re-summing would double-count, POLL-04). The LATEST-in-window end
+ * (not the first row after the event) captures the full N-day effect: for
+ * D0:100, D1:110, D7:200 the 7d delta is balance(D7)−balance(D0)=100, not
+ * balance(D1)−balance(D0). Null when the post-event window has no snapshot to
+ * anchor on. The delta is an attribute of the DAY: the function keys on
+ * `eventDate`, not an eventId, so every event that day shares it.
+ * `windowFrom` = eventDate, `windowTo` = eventDate + 7 days (ISO YYYY-MM-DD).
+ */
+export interface WishlistDelta {
+  delta24h: number | null;
+  delta7d: number | null;
+  windowFrom: string;
+  windowTo: string;
+}
+
 type WishlistSnapshotRow = typeof wishlistSnapshots.$inferSelect;
 
 export function toWishlistSnapshotDto(r: WishlistSnapshotRow): WishlistSnapshotDto {

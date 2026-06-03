@@ -46,6 +46,32 @@ const baseEvent = {
   channelTitle: "Test Channel",
 };
 
+// VIZ-01 (Plan 04-04): adapter-driven per-event snapshot series. A 3-point
+// series exercises the line branch (data-low-data="false"); a 2-point series
+// exercises the D-07 dots+caption branch (data-low-data="true").
+const historySeries = [
+  {
+    metricKey: "view_count",
+    labelKey: "chart_metric_views",
+    points: [
+      { polledAt: "2026-05-14T08:00:00.000Z", value: 100 },
+      { polledAt: "2026-05-15T08:00:00.000Z", value: 250 },
+      { polledAt: "2026-05-16T08:00:00.000Z", value: 480 },
+    ],
+  },
+];
+
+const lowDataSeries = [
+  {
+    metricKey: "view_count",
+    labelKey: "chart_metric_views",
+    points: [
+      { polledAt: "2026-05-14T08:00:00.000Z", value: 100 },
+      { polledAt: "2026-05-15T08:00:00.000Z", value: 250 },
+    ],
+  },
+];
+
 const baseGames = [
   {
     id: "g1",
@@ -154,13 +180,23 @@ function mountInModal(propsOverrides: Record<string, unknown> = {}): {
   return { root, dialog, component, spies: { onClose, onDelete, onUpdate } };
 }
 
+// Plan 04-24: EventDetailContent lazy-fetches GET /api/events/:id/metric-series
+// for chartable kinds when no metricSeries prop is threaded (the modal path).
+// Stub fetch so the existing prop-driven tests don't hit the network and so the
+// lazy-fetch test below can control the response. Tests that pass metricSeries
+// explicitly never reach this fetch (the prop is authoritative).
+let fetchSpy: ReturnType<typeof vi.fn>;
+
 beforeEach(() => {
   host = document.createElement("div");
   document.body.appendChild(host);
+  fetchSpy = vi.fn(async () => new Response("[]", { status: 200 }));
+  vi.stubGlobal("fetch", fetchSpy);
 });
 
 afterEach(() => {
   if (host.parentNode) host.parentNode.removeChild(host);
+  vi.unstubAllGlobals();
 });
 
 describe("EventDetailContent dual-render parity (Wave 2 Plan 09 + Wave 3 Plan 10)", () => {
@@ -206,8 +242,8 @@ describe("EventDetailContent dual-render parity (Wave 2 Plan 09 + Wave 3 Plan 10
     const bare = mountBare();
     const modal = mountInModal();
     // KindIcon renders an <svg class="kind">; presence + label parity is enough.
-    const bareLabel = bare.root.querySelector(".kind-tag-label")?.textContent?.trim();
-    const modalLabel = modal.root.querySelector(".kind-tag-label")?.textContent?.trim();
+    const bareLabel = bare.root.querySelector(".detail-kind-label")?.textContent?.trim();
+    const modalLabel = modal.root.querySelector(".detail-kind-label")?.textContent?.trim();
     expect(bareLabel).toBeTruthy();
     expect(bareLabel).toBe(modalLabel);
     expect(bare.root.querySelector("svg.kind")).not.toBeNull();
@@ -219,10 +255,10 @@ describe("EventDetailContent dual-render parity (Wave 2 Plan 09 + Wave 3 Plan 10
   it("Wave 2 Plan 09: renders stats (views/likes/comments) identically for kind=youtube_video", () => {
     const bare = mountBare();
     const modal = mountInModal();
-    const bareStats = Array.from(bare.root.querySelectorAll(".stat b")).map((b) =>
+    const bareStats = Array.from(bare.root.querySelectorAll(".detail-stat-num")).map((b) =>
       b.textContent?.trim(),
     );
-    const modalStats = Array.from(modal.root.querySelectorAll(".stat b")).map((b) =>
+    const modalStats = Array.from(modal.root.querySelectorAll(".detail-stat-num")).map((b) =>
       b.textContent?.trim(),
     );
     expect(bareStats).toEqual([
@@ -279,6 +315,74 @@ describe("EventDetailContent dual-render parity (Wave 2 Plan 09 + Wave 3 Plan 10
     const cancelEvt = new Event("cancel", { cancelable: true });
     modal.dialog.dispatchEvent(cancelEvt);
     expect(modal.spies.onClose).toHaveBeenCalledTimes(1);
+    unmount(modal.component);
+  });
+
+  it("Plan 04-04 (VIZ-01): EventHistoryChart renders in modal AND bare for an event with snapshot history (dual-render)", () => {
+    const bare = mountBare({ metricSeries: historySeries });
+    const modal = mountInModal({ metricSeries: historySeries });
+    const bareChart = bare.root.querySelector('[data-testid="event-history-chart"]');
+    const modalChart = modal.root.querySelector('[data-testid="event-history-chart"]');
+    // The chart wrapper is present on BOTH surfaces — the single mount in
+    // the shared EventDetailContent covers the modal and the route.
+    expect(bareChart).not.toBeNull();
+    expect(modalChart).not.toBeNull();
+    // >=3 points → line branch, not the low-data dots branch.
+    expect(bareChart?.getAttribute("data-low-data")).toBe("false");
+    expect(modalChart?.getAttribute("data-low-data")).toBe("false");
+    unmount(bare.component);
+    unmount(modal.component);
+  });
+
+  it("Plan 04-04 (VIZ-01 / D-07): <3 snapshots sets data-low-data and renders the low-data caption, not a 2-point line", () => {
+    const bare = mountBare({ metricSeries: lowDataSeries });
+    const chart = bare.root.querySelector('[data-testid="event-history-chart"]');
+    expect(chart).not.toBeNull();
+    expect(chart?.getAttribute("data-low-data")).toBe("true");
+    // The D-07 caption text must render (asserted structurally — ECharts
+    // paints to canvas and is not pixel-introspectable).
+    const caption = chart?.querySelector(".chart-low-data-caption");
+    expect(caption).not.toBeNull();
+    expect(caption?.textContent?.trim().length).toBeGreaterThan(0);
+    unmount(bare.component);
+  });
+
+  it("Plan 04-24 (VIZ-01 modal): chartable event WITHOUT metricSeries prop lazy-fetches and mounts the chart in the modal", async () => {
+    // The modal path mounts EventDetailContent without metricSeries (the SSR
+    // prop only exists on /events/[id]). For a chartable kind the component
+    // fetches GET /api/events/:id/metric-series and renders the result.
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify(historySeries), { status: 200 }));
+    const modal = mountInModal(); // baseEvent.kind === "youtube_video" (chartable)
+    expect(fetchSpy).toHaveBeenCalledWith(`/api/events/${baseEvent.id}/metric-series`);
+
+    // The browser-only $effect fetches asynchronously (fetch → res.json());
+    // poll until the fetched 3-point series flips the chart out of the
+    // low-data branch (data-low-data="false" = line branch).
+    await vi.waitFor(() => {
+      flushSync();
+      const chart = modal.root.querySelector('[data-testid="event-history-chart"]');
+      expect(chart).not.toBeNull();
+      expect(chart?.getAttribute("data-low-data")).toBe("false");
+    });
+    unmount(modal.component);
+  });
+
+  it("Plan 04-24 (VIZ-01 modal / #4): chartable event with 0 snapshots still mounts the chart + low-data caption (no metricSeries prop)", async () => {
+    // The endpoint returns [] for a chartable event with no snapshots; the
+    // component must still mount EventHistoryChart so the D-07 low-data caption
+    // is reachable — the gap-closure fix (chart gated on isChartable, not
+    // series length).
+    fetchSpy.mockResolvedValue(new Response("[]", { status: 200 }));
+    const modal = mountInModal();
+    await Promise.resolve();
+    await Promise.resolve();
+    flushSync();
+
+    const chart = modal.root.querySelector('[data-testid="event-history-chart"]');
+    expect(chart).not.toBeNull();
+    expect(chart?.getAttribute("data-low-data")).toBe("true");
+    const caption = chart?.querySelector(".chart-low-data-caption");
+    expect(caption).not.toBeNull();
     unmount(modal.component);
   });
 });

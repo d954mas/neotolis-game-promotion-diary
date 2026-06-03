@@ -15,6 +15,7 @@
 
   import EventDetailContent from "./EventDetailContent.svelte";
   import type { EventDto, GameDto, DataSourceDto } from "$lib/server/dto.js";
+  import type { EventMetricSeries } from "$lib/sources/adapter.js";
 
   type EventUpdatePatch = Partial<{
     title: string;
@@ -27,6 +28,7 @@
     event,
     games,
     sources,
+    metricSeries = undefined,
     view = "feed",
     currentUserName = "",
     onClose,
@@ -39,6 +41,11 @@
     event: EventDto;
     games: GameDto[];
     sources: DataSourceDto[];
+    /** VIZ-01 series threaded straight to EventDetailContent (D-14).
+     *  undefined (default — no caller threads it) → EventDetailContent lazy-
+     *  fetches the endpoint for the opened event. A provided [] would suppress
+     *  that fetch, so the modal must forward undefined, not []. */
+    metricSeries?: EventMetricSeries[];
     view?: "feed" | "trash";
     currentUserName?: string;
     onClose: () => void;
@@ -76,6 +83,7 @@
     {event}
     {games}
     {sources}
+    {metricSeries}
     {view}
     {currentUserName}
     {onClose}

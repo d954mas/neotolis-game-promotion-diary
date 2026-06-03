@@ -5,6 +5,12 @@
   // inline edit, wishlist summary + CSV import, and the soft-delete action.
   // Hard-delete (delete forever) lives in the trash view, not here.
   //
+  // 04-12: the per-listing mini wishlist line chart was REMOVED — it duplicated
+  // the page's headline correlation chart with strictly less data (one listing,
+  // no event markers, no crosshair). The inline "N wishlists · as of …" summary
+  // on the listing card + the WishlistSummary table here carry the per-listing
+  // numbers; the trend lives on the page chart.
+  //
   // Pattern follows AddStoreDialog / ConfirmDialog: native <dialog> +
   // showModal() (focus trap + Escape close) + backdrop-click closes via
   // target===dialogEl. Body-scroll-lock is handled globally by
@@ -272,6 +278,7 @@
 
     <section class="modal-section" aria-label={m.steam_listing_detail_section_wishlist()}>
       <h3 class="section-subheading">{m.steam_listing_detail_section_wishlist()}</h3>
+
       {#if summary}
         <WishlistSummary {summary} />
       {:else}

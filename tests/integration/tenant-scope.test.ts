@@ -924,4 +924,89 @@ describe("bulk events cross-tenant (D-13)", () => {
     // Only evATrash hard-deleted. evALive (live) silently filtered; evBTrash (cross-tenant) silently filtered.
     expect(body.affected_count).toBe(1);
   });
+
+  // Plan 04-23: getWishlistSeries / computeWishlistDelta are OWNERSHIP-GATED.
+  // The `listingId` is the addressable tenant-owned resource, so a foreign or
+  // non-existent listingId must 404 (NotFoundError) per the P0 cross-tenant
+  // rule — NOT silently return an empty series (which would diverge the exported
+  // service contract from the tenant rule). An OWNED listing with no snapshots
+  // is NOT a 404: it returns an empty series, proving the 404 is ownership-based,
+  // never empty-data-based.
+  it("getWishlistSeries / computeWishlistDelta cross-tenant listingId → NotFoundError; own-but-empty → empty (Plan 04-23)", async () => {
+    const { vi } = await import("vitest");
+    const { createGame } = await import("../../src/lib/server/services/games.js");
+    const { addSteamListing } =
+      await import("../../src/lib/server/services/game-steam-listings.js");
+    const SteamApi = await import("../../src/lib/server/integrations/steam-api.js");
+    const { getWishlistSeries, computeWishlistDelta } =
+      await import("../../src/lib/server/services/wishlist-snapshots.js");
+    const { NotFoundError } = await import("../../src/lib/server/services/errors.js");
+    const { wishlistSnapshots } =
+      await import("../../src/lib/server/db/schema/wishlist-snapshots.js");
+
+    // Mock fetchSteamAppDetails so addSteamListing doesn't hit Steam.
+    vi.spyOn(SteamApi, "fetchSteamAppDetails").mockResolvedValue(null);
+
+    const userA = await seedUserDirectly({ email: "wlA@test.local" });
+    const userB = await seedUserDirectly({ email: "wlB@test.local" });
+
+    // User B owns a listing with real wishlist history.
+    const gameB = await createGame(userB.id, { title: "B's Game" }, "127.0.0.1");
+    const listingB = await addSteamListing(userB.id, { gameId: gameB.id, appId: 900 }, "127.0.0.1");
+    await db.insert(wishlistSnapshots).values([
+      {
+        userId: userB.id,
+        listingId: listingB.id,
+        date: "2026-05-01",
+        adds: 0,
+        deletes: 0,
+        purchasesAndActivations: 0,
+        gifts: 0,
+        balance: 500,
+        source: "csv",
+      },
+      {
+        userId: userB.id,
+        listingId: listingB.id,
+        date: "2026-05-08",
+        adds: 0,
+        deletes: 0,
+        purchasesAndActivations: 0,
+        gifts: 0,
+        balance: 650,
+        source: "csv",
+      },
+    ]);
+
+    // User A asks for B's listingId — not A's resource → 404 (NotFoundError),
+    // NOT an empty series. The ownership gate fires before any snapshot read.
+    await expect(getWishlistSeries(userA.id, listingB.id)).rejects.toThrow(NotFoundError);
+    await expect(computeWishlistDelta(userA.id, listingB.id, "2026-05-01")).rejects.toThrow(
+      NotFoundError,
+    );
+
+    // A non-existent listingId is likewise a 404 (missing tenant-owned resource).
+    await expect(
+      getWishlistSeries(userA.id, "00000000-0000-0000-0000-000000000000"),
+    ).rejects.toThrow(NotFoundError);
+
+    // Sanity: B (the owner) DOES see the data — proves the 404 above is
+    // ownership, not an empty table.
+    const seriesForB = await getWishlistSeries(userB.id, listingB.id);
+    expect(seriesForB.points).toHaveLength(2);
+
+    // Positive control: an OWNED listing with NO snapshots is NOT a 404 — it
+    // resolves to an empty series (points: [], lastImportedAt: null). This
+    // distinguishes "your listing, no CSV imported" from "not your listing".
+    const emptyListing = await addSteamListing(
+      userB.id,
+      { gameId: gameB.id, appId: 901 },
+      "127.0.0.1",
+    );
+    const seriesEmpty = await getWishlistSeries(userB.id, emptyListing.id);
+    expect(seriesEmpty).toEqual({ points: [], lastImportedAt: null });
+    const deltaEmpty = await computeWishlistDelta(userB.id, emptyListing.id, "2026-05-01");
+    expect(deltaEmpty.delta24h).toBeNull();
+    expect(deltaEmpty.delta7d).toBeNull();
+  });
 });

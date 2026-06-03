@@ -46,8 +46,30 @@
   // /games?view=trash) using SteamListingRow's trash mode — RecoveryDialog
   // replaced per UAT (Plan 03.2-04).
   import SteamListingRow from "$lib/components/SteamListingRow.svelte";
+  import WishlistCorrelationChart from "$lib/components/charts/WishlistCorrelationChart.svelte";
+  import WishlistGrowthChart from "$lib/components/charts/WishlistGrowthChart.svelte";
+  import EventDayModal from "$lib/components/charts/EventDayModal.svelte";
+  import EventDetailModal from "$lib/components/event-detail/EventDetailModal.svelte";
+  import ChartLegend from "$lib/components/charts/ChartLegend.svelte";
+  import {
+    listingLabel,
+    listingColor,
+    eventDay,
+    inRange,
+  } from "$lib/components/charts/wishlist-chart-shared.js";
+  import DateRangeRow from "$lib/components/feed/DateRangeRow.svelte";
+  import { startOfDay, dateRangeWindow, parseEventDate } from "$lib/feed/date-range.js";
+  import type { DateRangeFilter } from "$lib/feed/url-state.js";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
-  import type { GameSteamListingDto } from "$lib/server/dto.js";
+  import { computeWishlistDeltaFromPoints } from "$lib/util/wishlist-delta.js";
+  import type {
+    GameSteamListingDto,
+    EventDto,
+    GameDto,
+    DataSourceDto,
+    WishlistSeries,
+    WishlistDelta,
+  } from "$lib/server/dto.js";
   import type { PageData } from "./$types";
 
   type EventKind =
@@ -122,7 +144,179 @@
   // Stores h2 toggles it; the dialog's onSuccess closes it + invalidateAll().
   let addStoreOpen = $state(false);
 
-  const groupedEvents = $derived(groupEventsByDate(events));
+  // VIZ-02 == VIZ-03 (D-12): ONE correlation chart for this game. The
+  // wishlist data is per-Steam-listing; the chart renders ONE line per active
+  // listing (decision: separate line per store, NOT a summed line — Steam +
+  // itch are different units), with a legend toggle + a date-range filter.
+  // No CSV / no listing → the D-08 empty-state CTA renders while the event
+  // markers still render. The full maps + listings are threaded straight
+  // through (no collapse to a single listing).
+  const chartSeriesByListing = $derived(
+    data.wishlistSeriesByListing as Record<string, WishlistSeries>,
+  );
+  const chartListings = $derived(listings.map((l) => ({ id: l.id, name: l.name, appId: l.appId })));
+  // Per-listing, per-day wishlist delta (D-05), built HERE (not the loader) so the
+  // day key is each event's LOCAL `eventDay` — the same key the markers, the
+  // crosshair (axisValueToDay), and the modal use; the loader's UTC can't know the
+  // viewer's zone. Pure array math over the points the loader already sent.
+  const chartDeltaByDate = $derived.by((): Record<string, Record<string, WishlistDelta>> => {
+    const days = [...new Set(events.map((e) => eventDay(e)))];
+    const map: Record<string, Record<string, WishlistDelta>> = {};
+    for (const l of chartListings) {
+      const points = chartSeriesByListing[l.id]?.points ?? [];
+      const perDay: Record<string, WishlistDelta> = {};
+      for (const day of days) perDay[day] = computeWishlistDeltaFromPoints(points, day);
+      map[l.id] = perDay;
+    }
+    return map;
+  });
+  // One legend chip per listing WITH wishlist data. The swatch `color` is resolved
+  // from the FULL `chartListings` (not the filtered subset) because `listingColor`
+  // keys by array index and the charts color by the full-array index — resolving it
+  // from the filtered list would shift indices and mismatch the line color.
+  const legendListings = $derived(
+    chartListings
+      .filter((l) => (chartSeriesByListing[l.id]?.points.length ?? 0) > 0)
+      .map((l) => ({
+        id: l.id,
+        label: listingLabel(
+          l,
+          (appId) => m.viz_legend_listing_fallback({ appId }),
+          () => m.viz_wishlist_line_label(),
+        ),
+        color: listingColor(chartListings, l.id),
+      })),
+  );
+  // The loader returns full EventDtos; the page's EventDtoLocal is a subset
+  // for the FeedCard renderer. The chart consumes the full DTOs for its markers.
+  const chartEvents = $derived(data.events as EventDto[]);
+
+  // ── EventDetailModal (04-20) ─────────────────────────────────────────
+  // Clicking an event card — in the Events list OR inside the cluster
+  // EventDayModal — opens the SAME detailed modal the feed uses. The page
+  // owns the open id; the opened event is resolved from the full EventDtos
+  // (data.events) the loader already provides. Edit/delete mirror the feed:
+  // PATCH/DELETE /api/events/:id then invalidateAll() (no new server code).
+  let openEventId = $state<string | null>(null);
+  const openedEvent = $derived(
+    (data.events as EventDto[]).find((e) => e.id === openEventId) ?? null,
+  );
+  function openDetail(id: string): void {
+    openEventId = id;
+  }
+  function closeDetail(): void {
+    openEventId = null;
+  }
+  async function onModalUpdate(
+    id: string,
+    patch: Partial<{
+      title: string;
+      notes: string | null;
+      url: string | null;
+      authorIsMe: boolean;
+    }>,
+  ): Promise<void> {
+    const res = await fetch(`/api/events/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    // On a non-2xx (401/404/500) don't pretend success — skip the refresh so the
+    // edit stays in the open modal to retry, never a silent "saved".
+    if (!res.ok) return;
+    await invalidateAll();
+  }
+  async function onModalDelete(id: string): Promise<void> {
+    const res = await fetch(`/api/events/${id}`, { method: "DELETE" });
+    // On failure keep the modal open and the event in place — closing + refreshing
+    // would look like a successful delete when the row is still there.
+    if (!res.ok) return;
+    closeDetail();
+    await invalidateAll();
+  }
+
+  // ── Shared chart state (04-08) ───────────────────────────────────────
+  // The date-range picker and the per-listing legend selection are OWNED HERE
+  // so the cumulative correlation chart and the daily-growth bar chart stay in
+  // sync: both read `chartRange` + `chartVisible`. The range filters client-side
+  // against the SERVER `today` instant (D-24), never the client clock.
+  const chartTodayDate = $derived(startOfDay(new Date(data.today)));
+  // The chart date control is the feed's preset picker (DateRangeRow): All time
+  // / Year / Month / Week / Today + a custom range. The selected preset is the
+  // source of truth; the charts consume a resolved {from,to}|null window, so we
+  // derive `chartRange` from the preset against the server `today` (D-24).
+  let chartDateRange = $state<DateRangeFilter>({ preset: "all" });
+  const chartRange = $derived.by((): { from: Date; to: Date } | null => {
+    if (chartDateRange.preset === "all") return null;
+    if (chartDateRange.preset === "custom") {
+      const from = parseEventDate(chartDateRange.from);
+      const to = parseEventDate(chartDateRange.to);
+      if (!from || !to) return null;
+      return { from, to };
+    }
+    return dateRangeWindow(chartDateRange.preset, chartTodayDate);
+  });
+  // The chart's selected window ({from,to}|null) — the SAME value the charts
+  // consume. Aliased for the feed-range sync below so the read site reads as
+  // intent.
+  const chartRangeWindow = $derived(chartRange);
+
+  // The events feed BELOW the charts respects the chart's date range: filter
+  // the page's events by the SAME window the charts use (client-side on the
+  // already-loaded events — no loader/service change), then group by date.
+  // "All time" (null window) shows everything. Reuses inRange/eventDay so the
+  // feed-list filter matches the chart's marker filter exactly (a day with a
+  // marker on the chart has its events in the feed and vice-versa).
+  const feedEvents = $derived(
+    chartRangeWindow === null
+      ? events
+      : events.filter((e) => inRange(eventDay(e), chartRangeWindow)),
+  );
+  const groupedEvents = $derived(groupEventsByDate(feedEvents));
+
+  // listingId → shown. Absent / true = shown; false = legend-toggled-off.
+  let chartVisible = $state<Record<string, boolean>>({});
+  function toggleListing(listingId: string, shown: boolean): void {
+    chartVisible = { ...chartVisible, [listingId]: shown };
+  }
+
+  // ── Day-detail modal (04-10 / 04-12 cluster) ─────────────────────────
+  // A marker (cluster) tap on EITHER chart emits the cluster's day(s) up here —
+  // 04-13 unified the markers: both charts mount the SAME ChartMarkerOverlay, so
+  // both hand back the same cluster shape (a day SET). The PAGE owns the centered
+  // EventDayModal (it has the feed data — events + source/game maps). Empty = closed.
+  let selectedChartDays = $state<string[]>([]);
+  // Those days' events — the page's FeedCard-shaped `events` filtered to the
+  // selected day set (local-tz YYYY-MM-DD, matching the marker day keys).
+  const selectedDayEvents = $derived.by((): EventDtoLocal[] => {
+    if (selectedChartDays.length === 0) return [];
+    const set = new Set(selectedChartDays);
+    return events.filter((e) => set.has(eventDay(e)));
+  });
+  // The day-level delta (D-05) PER day in the selected cluster, so the modal
+  // shows EACH day's 24h/7d delta consistently (single- AND multi-day clusters —
+  // a multi-day cluster groups events by day, and each day owns its own delta).
+  // For each selected day, resolve the first VISIBLE listing's delta for that day
+  // (falling back across visible listings — mirrors the charts' selection logic);
+  // a day with no anchored snapshot maps to null (the modal then shows nothing
+  // for that day). Honest attribution: this is the DAY-level delta (D-05), shared
+  // by every event that day — never a per-event wishlist delta.
+  const selectedDeltaByDay = $derived.by((): Record<string, WishlistDelta | null> => {
+    const out: Record<string, WishlistDelta | null> = {};
+    for (const day of selectedChartDays) {
+      let resolved: WishlistDelta | null = null;
+      for (const l of chartListings) {
+        if (chartVisible[l.id] === false) continue;
+        const d = chartDeltaByDate[l.id]?.[day];
+        if (d) {
+          resolved = d;
+          break;
+        }
+      }
+      out[day] = resolved;
+    }
+    return out;
+  });
 
   // Trash view: per-card Restore.
   async function restoreListing(listingId: string): Promise<void> {
@@ -452,6 +646,97 @@
     />
   </section>
 
+  <!--
+  VIZ-02 == VIZ-03 (D-12): the headline wishlist-correlation chart. ONE
+  component — the wishlist daily line + kind-colored event markers; a marker
+  click opens the page-owned centered EventDayModal. Between Stores and Events.
+-->
+  <section class="correlation" id="section-correlation">
+    <header class="section-header">
+      <h2>{m.viz_wishlist_line_label()}</h2>
+    </header>
+
+    <!-- ONE date-range control for BOTH charts (04-10): the feed's preset
+         picker (DateRangeRow) — All time / Year / Month / Week / Today + a
+         custom range — with the sort toggle hidden (the chart has no sort
+         axis). The selected preset resolves to the {from,to} window the charts
+         consume. The per-listing legend is a custom <ChartLegend> below this
+         row (04-09): it flips `chartVisible`, which both charts filter by. -->
+    <DateRangeRow
+      dateRange={chartDateRange}
+      onDateRangeChange={(n) => (chartDateRange = n)}
+      showSort={false}
+      today={chartTodayDate}
+    />
+
+    <!-- Custom on-brand per-listing legend (04-09) — ONE control for BOTH
+         charts. Pill chips matching the site .chip vocabulary; click toggles a
+         listing's line + bar via the page-owned `chartVisible` map. -->
+    {#if legendListings.length > 0}
+      <ChartLegend listings={legendListings} visible={chartVisible} onToggle={toggleListing} />
+    {/if}
+
+    <WishlistCorrelationChart
+      seriesByListing={chartSeriesByListing}
+      events={chartEvents}
+      listings={chartListings}
+      today={data.today}
+      range={chartRange}
+      visible={chartVisible}
+      deltaByDate={chartDeltaByDate}
+      onSelectCluster={(days) => (selectedChartDays = days)}
+    />
+
+    <!-- Second wishlist chart (04-08): DAILY net change (prior day's cumulative
+         balance subtracted from today's) as bars per visible listing, sharing
+         the SAME range + legend + event markers as the line chart above. -->
+    <div class="growth-block">
+      <header class="section-header"><h2>{m.viz_growth_title()}</h2></header>
+      <WishlistGrowthChart
+        seriesByListing={chartSeriesByListing}
+        events={chartEvents}
+        listings={chartListings}
+        range={chartRange}
+        visible={chartVisible}
+        onSelectCluster={(days) => (selectedChartDays = days)}
+      />
+    </div>
+  </section>
+
+  <!-- Day-detail modal (04-10) — a CENTERED modal owned by the page (it has the
+       feed data). A marker click on either chart sets selectedChartDay; the
+       modal shows that day's stats header + FeedCard rows. Replaces the old
+       per-chart EventMarkerPanel side drawer. -->
+  <EventDayModal
+    open={selectedChartDays.length > 0}
+    days={selectedChartDays}
+    events={selectedDayEvents}
+    deltaByDay={selectedDeltaByDay}
+    {sourceById}
+    {gameById}
+    games={allGames}
+    onClose={() => (selectedChartDays = [])}
+    onOpenDetail={openDetail}
+  />
+
+  <!-- Detailed event modal (04-20) — the SAME EventDetailModal the feed
+       mounts. Opened by an event card click in the Events list OR inside the
+       cluster EventDayModal (the native <dialog> stacks it on top; closing it
+       returns to the cluster modal). Edit/delete hit /api/events/:id then
+       invalidateAll() (mirrors the feed). metricSeries is omitted (defaults
+       []) — the per-event chart isn't loaded on this page. The loader returns
+       full GameDto/DataSourceDto arrays; cast to the modal's prop types. -->
+  {#if openedEvent}
+    <EventDetailModal
+      event={openedEvent}
+      games={data.games as GameDto[]}
+      sources={data.sources as DataSourceDto[]}
+      onClose={closeDetail}
+      onDelete={onModalDelete}
+      onUpdate={onModalUpdate}
+    />
+  {/if}
+
   <section class="events" id="section-events">
     <header class="section-header">
       <h2>{m.games_detail_section_events()}</h2>
@@ -461,6 +746,12 @@
     </header>
 
     {#if events.length === 0}
+      <EmptyState
+        heading={m.games_detail_events_empty()}
+        body={m.games_detail_events_empty_body()}
+      />
+    {:else if feedEvents.length === 0}
+      <!-- The game HAS events, but the chart's date range hid all of them. -->
       <EmptyState
         heading={m.games_detail_events_empty()}
         body={m.games_detail_events_empty_body()}
@@ -475,6 +766,7 @@
               source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
               game={ev.gameIds.length > 0 ? (gameById.get(ev.gameIds[0]!) ?? null) : null}
               games={allGames}
+              onOpenDetail={openDetail}
             />
           {/each}
         {/each}
@@ -551,6 +843,23 @@
     margin-bottom: var(--s-6);
     min-width: 0;
   }
+  .correlation {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-4);
+    margin-bottom: var(--s-6);
+    min-width: 0;
+  }
+  /* Daily-growth chart: an EQUAL peer of the headline correlation chart (the
+   * user: "они оба важные одинаково"). Same heading (section-header h2) + same
+   * height as the line chart; separated with full section spacing. */
+  .growth-block {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-3);
+    margin-top: var(--s-6);
+    min-width: 0;
+  }
   .events {
     display: flex;
     flex-direction: column;
@@ -563,8 +872,7 @@
     flex-wrap: wrap;
     gap: var(--s-1);
   }
-  .badge,
-  .chip {
+  .badge {
     font-size: var(--t-12);
     color: var(--text-2);
     background: var(--surface-2);

@@ -18,22 +18,22 @@
   // LB-11 contract: class="kind" on <svg> is consumed by FeedCard's
   // `.overlay-kind :global(svg.kind)` selector to bridge color from the
   // dark pill overlay into the icon (currentColor → white). Do not rename.
+  //
+  // The per-kind SVG paths live in ONE shared source (kind-icon-svg.ts) so the
+  // ECharts HTML-string tooltip (which can't mount this component) renders the
+  // SAME icons via kindIconSvg(). This component injects that shared inner
+  // markup with {@html kindIconInner(kind)} — no path duplication.
 
-  type EventKind =
-    | "youtube_video"
-    | "reddit_post"
-    | "twitter_post"
-    | "telegram_post"
-    | "discord_drop"
-    | "conference"
-    | "talk"
-    | "press"
-    | "other"
-    | "post";
+  import { kindIconInner } from "./kind-icon-svg.js";
+  import type { EventDto } from "$lib/server/dto.js";
+
+  type EventKind = EventDto["kind"];
 
   let { kind, size = 20 }: { kind: EventKind; size?: number } = $props();
 </script>
 
+<!-- eslint-disable-next-line svelte/no-at-html-tags -- kindIconInner returns
+     static, trusted icon markup (no user input); the single shared SVG source -->
 <svg
   class="kind"
   width={size}
@@ -44,71 +44,8 @@
   stroke-width="1.75"
   stroke-linecap="round"
   stroke-linejoin="round"
-  aria-hidden="true"
+  aria-hidden="true">{@html kindIconInner(kind)}</svg
 >
-  {#if kind === "youtube_video"}
-    <!-- play-button triangle inside a rounded rect (generic media, not brand) -->
-    <rect x="2" y="5" width="20" height="14" rx="3" />
-    <path d="M10 9l5 3-5 3z" fill="currentColor" stroke="none" />
-  {:else if kind === "reddit_post"}
-    <!-- Snoo-style silhouette per docs/design/v2/ui-kit/app-data.jsx case "reddit_post":
-         round head with two pointy ears + antenna + small eyes + smile.
-         Geometric primitives only; reads as Reddit at small sizes. -->
-    <!-- antenna -->
-    <circle cx="18.5" cy="5" r="1.4" fill="currentColor" stroke="none" />
-    <path d="M14.7 11.2 17.5 6.5" />
-    <!-- head -->
-    <circle cx="12" cy="13.5" r="6.5" fill="currentColor" stroke="none" />
-    <!-- ears (sit on top of head silhouette) -->
-    <circle cx="7" cy="9.5" r="1.6" fill="currentColor" stroke="none" />
-    <circle cx="17" cy="9.5" r="1.6" fill="currentColor" stroke="none" />
-    <!-- eyes — cut-out by drawing in bg color over the head -->
-    <circle cx="9.5" cy="13" r="1.1" fill="var(--surface)" stroke="none" />
-    <circle cx="14.5" cy="13" r="1.1" fill="var(--surface)" stroke="none" />
-    <circle cx="9.5" cy="13" r=".45" fill="currentColor" stroke="none" />
-    <circle cx="14.5" cy="13" r=".45" fill="currentColor" stroke="none" />
-    <!-- smile -->
-    <path d="M9.5 16c1.5 1.2 3.5 1.2 5 0" stroke="var(--surface)" stroke-width="1.2" fill="none" />
-  {:else if kind === "conference"}
-    <!-- people / podium -->
-    <circle cx="12" cy="7" r="3" />
-    <path d="M5 21v-2a4 4 0 014-4h6a4 4 0 014 4v2" />
-  {:else if kind === "talk"}
-    <!-- microphone -->
-    <rect x="9" y="3" width="6" height="12" rx="3" />
-    <path d="M5 11a7 7 0 0014 0" />
-    <path d="M12 18v3" />
-  {:else if kind === "twitter_post"}
-    <!-- speech bubble (no brand mark) -->
-    <path d="M21 15a2 2 0 01-2 2H8l-5 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-  {:else if kind === "telegram_post"}
-    <!-- chat -->
-    <path
-      d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8z"
-    />
-  {:else if kind === "discord_drop"}
-    <!-- chat with two heads -->
-    <circle cx="9" cy="11" r="2" />
-    <circle cx="15" cy="11" r="2" />
-    <path d="M5 19a8 8 0 0114 0" />
-  {:else if kind === "press"}
-    <!-- newspaper -->
-    <rect x="3" y="5" width="18" height="14" rx="1" />
-    <line x1="7" y1="9" x2="17" y2="9" />
-    <line x1="7" y1="13" x2="17" y2="13" />
-    <line x1="7" y1="17" x2="13" y2="17" />
-  {:else if kind === "post"}
-    <!-- generic post: document/paper silhouette -->
-    <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-    <polyline points="14 3 14 9 20 9" />
-    <line x1="8" y1="13" x2="16" y2="13" />
-    <line x1="8" y1="17" x2="13" y2="17" />
-  {:else}
-    <!-- other / generic dot -->
-    <circle cx="12" cy="12" r="9" />
-    <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />
-  {/if}
-</svg>
 
 <style>
   .kind {

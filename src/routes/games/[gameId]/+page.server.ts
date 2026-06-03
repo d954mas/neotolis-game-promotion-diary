@@ -4,7 +4,9 @@ import { getGameById, listGames, deriveReleaseInfoForGames } from "$lib/server/s
 import { listListings, listSoftDeletedListings } from "$lib/server/services/game-steam-listings.js";
 import {
   getWishlistSummary,
+  getWishlistSeries,
   type WishlistSummary,
+  type WishlistSeries,
 } from "$lib/server/services/wishlist-snapshots.js";
 import { listEventsForGame } from "$lib/server/services/events.js";
 import { listSources } from "$lib/server/services/data-sources.js";
@@ -148,11 +150,40 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   const wishlistSummaries: Record<string, WishlistSummary | null> =
     Object.fromEntries(wishlistSummaryPairs);
 
+  // VIZ-02 == VIZ-03 (D-12) correlation chart inputs, active view only (the
+  // trash view never renders the chart). Both come through services — NO
+  // db.* in the loader (routes-call-services). One getWishlistSeries per
+  // active listing feeds the WISH-04 daily line + the honest D-13 caption
+  // (series.lastImportedAt). KISS — bounded N (active listings), mirrors the
+  // wishlistSummaries loop above.
+  //
+  // The per-day delta map (D-05) is NOT built here: it's keyed by an event's
+  // calendar day (timezone-dependent), and this loader runs in the container's
+  // UTC. The page builds it CLIENT-side from these `points`, keyed by the local
+  // `eventDay` — see the page's chartDeltaByDate.
+  const wishlistSeriesByListing: Record<string, WishlistSeries> = {};
+
+  if (view !== "trash" && listings.length > 0) {
+    await Promise.all(
+      listings.map(async (l) => {
+        // No catch: `l.id` comes from the scoped `listListings` above, so
+        // getWishlistSeries' ownership gate always passes (empty series when no
+        // CSV yet) — any throw is a real fault that should surface as a load error.
+        wishlistSeriesByListing[l.id] = await getWishlistSeries(userId, l.id);
+      }),
+    );
+  }
+
   return {
     view,
     game: toGameDto(game, thisGameDerived),
     listings: listings.map(toGameSteamListingDto),
     wishlistSummaries,
+    wishlistSeriesByListing,
+    // One server-chosen "now" instant threaded to the chart so the honest
+    // D-13 "обновлено Xч назад" caption is computed against the server clock,
+    // never the client's new Date() (timezone drift would skew the hours).
+    today: new Date().toISOString(),
     deletedListings: deletedListings.map(toGameSteamListingDto),
     events: eventDtos,
     games: gamesAll.map((r) =>

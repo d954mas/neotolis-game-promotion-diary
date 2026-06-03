@@ -34,6 +34,8 @@
   import EventDetailHeader from "./EventDetailHeader.svelte";
   import EventDetailStats from "./EventDetailStats.svelte";
   import EventDetailGames from "./EventDetailGames.svelte";
+  import EventHistoryChart from "$lib/components/charts/EventHistoryChart.svelte";
+  import type { EventMetricSeries } from "$lib/sources/adapter.js";
   import { m } from "$lib/paraglide/messages.js";
   import {
     deriveThumbnailUrl,
@@ -53,6 +55,7 @@
     event,
     games,
     sources,
+    metricSeries = undefined,
     view = "feed",
     currentUserName = "",
     onClose,
@@ -65,6 +68,13 @@
     event: EventDto;
     games: GameDto[];
     sources: DataSourceDto[];
+    /** VIZ-01 adapter-driven per-event snapshot series (D-14).
+     *  `undefined` = NOT provided (the modal path — opened from a feed/games
+     *  row — mounts without it, so the chart lazy-fetches the endpoint).
+     *  `[]` = provided-but-empty (the /events/[id] route SSR-loaded the series
+     *  and there simply are none) → NO client fetch (the old `[]` default
+     *  conflated the two and made /events/[id] re-fetch a known-empty series). */
+    metricSeries?: EventMetricSeries[];
     view?: "feed" | "trash";
     currentUserName?: string;
     onClose: () => void;
@@ -77,6 +87,64 @@
      *  detail surface shares one game-edit path. */
     onOpenGamesPickerForCard?: (id: string) => void;
   } = $props();
+
+  // VIZ-01 (Plan 04-24): the per-event history chart must render in the
+  // EventDetailModal (the PRIMARY surface, opened from /feed + /games rows),
+  // not only on /events/[id]. The modal mounts this component WITHOUT the
+  // SSR-loaded `metricSeries` prop (→ undefined), so when the event is a
+  // chartable kind we lazy-fetch GET /api/events/:id/metric-series for THIS
+  // single event. /events/[id] keeps passing its SSR `metricSeries` (even an
+  // empty []) → prop !== undefined → no client fetch (no double load, and no
+  // redundant fetch when the route already knows the series is empty).
+  //
+  // CHARTABLE_KINDS = the kinds an adapter implements fetchEventMetricSeries
+  // for (youtube_video, reddit_post). Mounting EventHistoryChart for these
+  // kinds — even with 0 snapshots — makes the D-07 low-data caption reachable
+  // (the empty/sparse case the chart already handles).
+  const CHARTABLE_KINDS = new Set(["youtube_video", "reddit_post"]);
+  const isChartable = $derived(CHARTABLE_KINDS.has(event.kind));
+
+  // Client-fetched series for the modal path. null = not yet fetched / not
+  // applicable; [] is a valid fetched result (chartable event, 0 snapshots →
+  // low-data caption). A provided `metricSeries` prop is authoritative.
+  let fetchedSeries = $state<EventMetricSeries[] | null>(null);
+
+  // Browser-only lazy load, re-keyed on event.id so modal pagination refetches.
+  // Race guard: a stale response for a previous event.id is ignored. Fetch only
+  // when the prop wasn't threaded (modal path) AND the kind is chartable —
+  // never per feed row, only the single opened event.
+  $effect(() => {
+    const id = event.id;
+    fetchedSeries = null;
+    if (typeof window === "undefined") return;
+    if (!isChartable) return;
+    // metricSeries !== undefined means the route PROVIDED the series (even an
+    // empty []), so it's authoritative — don't refetch. Only the modal path
+    // (prop omitted → undefined) lazy-fetches. (The old `> 0` check refetched
+    // a provided-but-empty [], which /events/[id] passes for a 0-snapshot event.)
+    if (metricSeries !== undefined) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/events/${id}/metric-series`);
+        if (cancelled || id !== event.id) return;
+        if (res.ok) {
+          fetchedSeries = (await res.json()) as EventMetricSeries[];
+        }
+      } catch {
+        // Network error → leave fetchedSeries null; the chart renders the
+        // low-data caption (no data) rather than breaking the modal.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  // The series the chart renders: a PROVIDED prop wins (route SSR path — even an
+  // empty [] is authoritative, no fetch happened); otherwise the modal path's
+  // client-fetched series (or [] until it resolves / on a chartable miss).
+  const chartSeries = $derived(metricSeries ?? fetchedSeries ?? []);
 
   // Inline-edit drafts. null = not editing; string = current draft.
   let titleDraft = $state<string | null>(null);
@@ -545,6 +613,17 @@
 
     {#if stats}
       <EventDetailStats {stats} />
+    {/if}
+
+    <!-- VIZ-01 per-event snapshot-history chart (D-14, adapter-driven).
+         One mount here covers BOTH the modal and the /events/[id] route
+         (this is the shared dual-render body). Gated on `isChartable`, NOT
+         on series length, so a chartable event (youtube_video / reddit_post)
+         with 0 snapshots still mounts EventHistoryChart and shows the D-07
+         low-data caption. `chartSeries` is the SSR prop (when threaded, e.g.
+         /events/[id]) or the modal-path client fetch (Plan 04-24). -->
+    {#if isChartable}
+      <EventHistoryChart series={chartSeries} kind={event.kind} />
     {/if}
 
     <EventDetailGames {event} {games} {view} {onOpenGamesPickerForCard} />

@@ -71,6 +71,7 @@ import { AppError } from "../../services/errors.js";
 import { parseIngestUrl } from "../../services/url-parser.js";
 import type { EventKind } from "$lib/sources/adapter.js";
 import { allAdapters } from "$lib/sources/registry.js";
+import { getEventMetricSeries } from "../../services/event-metric-series.js";
 import { toEventDto, loadGameIdsForEvent, mapEventsToDtos } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
@@ -514,6 +515,35 @@ eventsRoutes.get("/events/:id", async (c) => {
     return c.json(toEventDto(ev, gameIds));
   } catch (err) {
     return mapErr(c, err, "GET /api/events/:id");
+  }
+});
+
+// GET /api/events/:id/metric-series — VIZ-01 per-event snapshot-history
+// series for the EventDetailModal (feed + games surfaces). The /events/[id]
+// route loads the same series at SSR via the identical adapter loop
+// (src/routes/events/[id]/+page.server.ts); the MODAL path (opened from a
+// feed/games row) mounts EventDetailContent WITHOUT the SSR metricSeries, so
+// it lazy-fetches this endpoint for the single opened event.
+//
+// Tenant scoping (P0): resolve the event via getEventById(userId, id) FIRST —
+// it throws NotFoundError for a foreign/missing id, which mapErr translates to
+// 404 (never 403). The adapter *_snapshots reads below are public-data
+// (ESLint-allowlisted, no userId scope), keyed off the now-vetted event's
+// externalId — the tenant guarantee comes from the event SELECT, exactly as
+// enrichFeedDtos + the /events/[id] loader document.
+//
+// Routes-call-adapters: no db.select() here — getEventById (service) +
+// allAdapters.fetchEventMetricSeries (adapter), mirroring the loader.
+eventsRoutes.get("/events/:id/metric-series", async (c) => {
+  try {
+    // The adapter loop lives in the service now (event-metric-series.ts), shared
+    // with the /events/[id] SSR loader. getEventMetricSeries resolves the event
+    // via getEventById FIRST — NotFoundError for a foreign/missing id → mapErr's
+    // 404 (never 403) — then reads each adapter's snapshot series.
+    const series = await getEventMetricSeries(c.var.userId, c.req.param("id"));
+    return c.json(series);
+  } catch (err) {
+    return mapErr(c, err, "GET /api/events/:id/metric-series");
   }
 });
 

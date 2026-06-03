@@ -85,6 +85,7 @@ import {
   youtubeQuotaUser,
 } from "./quota.js";
 import { parseYoutubeUrl, youtubeParseUrl } from "./url.js";
+import { youtubeFetchEventMetricSeries } from "./metric-series.js";
 import { fetchYoutubeOembed } from "$lib/server/integrations/youtube-oembed.js";
 import { youtubeMetadataRoutes } from "./route-metadata.js";
 import { youtubeVideos, youtubeMetadataFetchLog } from "./schema/index.js";
@@ -877,6 +878,7 @@ export const youtubeAdapter: SourceAdapter & typeof youtubeChannelAdapterCore = 
   },
   validateEventInput,
   fetchPollStateMap,
+  fetchEventMetricSeries: youtubeFetchEventMetricSeries,
   registerRoutes,
   refreshQueue: {
     canRefresh: (eventKind: EventKind): boolean => eventKind === "youtube_video",

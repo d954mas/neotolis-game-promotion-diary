@@ -38,6 +38,7 @@
 
   import { m } from "$lib/paraglide/messages.js";
   import BaseFeedCard from "$lib/components/feed/parts/BaseFeedCard.svelte";
+  import { metricColor } from "$lib/util/metric-colors.js";
   import {
     deriveThumbnailUrl,
     type CardEventLite,
@@ -145,13 +146,49 @@
 {#snippet statsSnippet()}
   {#if baselineState.rstats}
     <div class="card-stats stats-line">
-      <span class="stat"
-        >{m.feed_card_reddit_stats({
-          score: baselineState.rstats.score,
-          comments: baselineState.rstats.numComments,
-          ratio: Math.round(baselineState.rstats.upvoteRatio * 100),
-        })}</span
-      >
+      <span class="stat">
+        <svg
+          class="stat-icon"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          style={`color:${metricColor("score")}`}
+        >
+          <path d="M12 19V5" /><path d="M6 11l6-6 6 6" />
+        </svg>
+        <span class="num"
+          >{m.feed_card_reddit_score({
+            score: baselineState.rstats.score,
+            ratio: Math.round(baselineState.rstats.upvoteRatio * 100),
+          })}</span
+        >
+      </span>
+      <span class="stat">
+        <svg
+          class="stat-icon"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          style={`color:${metricColor("comments")}`}
+        >
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+        <span class="num"
+          >{m.feed_card_reddit_comments({ comments: baselineState.rstats.numComments })}</span
+        >
+      </span>
     </div>
   {/if}
 {/snippet}

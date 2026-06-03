@@ -365,6 +365,24 @@ export type EventPreviewMetadata =
   | { kind: "unavailable" }
   | { kind: "unreachable"; cause: string };
 
+/** Chartable metric series for VIZ-01 (D-14 reference deliverable). The
+ *  adapter declares WHICH metrics it exposes (YouTube → view/like/comment;
+ *  Reddit → score/num_comments) and reads its own snapshot table by
+ *  externalId. Public-data tables (youtube_video_snapshots /
+ *  reddit_post_snapshots): NO userId scope in the query — the tenant
+ *  guarantee comes from the caller's event SELECT, exactly as enrichFeedDtos
+ *  documents. Adapters touching tenant tables MUST scope by userId.
+ *  Returns [] when `event.kind` is not this adapter's kind (self-filtering;
+ *  the caller does NOT pre-filter). points are ASC by polledAt. */
+export interface EventMetricSeries {
+  metricKey: string; // "view_count" | "like_count" | "comment_count" | "score" | "num_comments"
+  labelKey: string; // Paraglide key handle for the legend, e.g. "chart_metric_views"
+  // value is null when the snapshot's count was NULL — the metric was hidden or
+  // unavailable at poll time (likes hidden, comments off, removed post). null is
+  // a GAP on the chart (connectNulls:false), NEVER coerced to 0 (a false drop).
+  points: { polledAt: string; value: number | null }[]; // ASC by polledAt
+}
+
 /** Live poll-state row consumed by dto.ts's per-event overlay (lastPolledAt /
  *  lastPollStatus rendering on /feed and /audit). Adapters that don't poll
  *  return an empty Map - the cross-source code merges per-adapter results. */
@@ -651,6 +669,18 @@ export interface SourceAdapter {
     userId: string,
     externalIds: readonly string[],
   ): Promise<Map<string, AdapterPollState>>;
+
+  /** Per-event chartable metric series for VIZ-01 (D-14 reference pattern).
+   *  Same optional/self-filtering contract as enrichFeedDtos: the adapter
+   *  filters internally to its own kind(s) — the caller (the /events/[id]
+   *  loader iterating allAdapters) does NOT pre-filter. Returns [] when
+   *  event.kind isn't this adapter's kind. Reads the immutable *_snapshots
+   *  history ORDER BY polled_at ASC (POLL-04), never a mutable
+   *  current-value column. `labelKey` references the m.chart_metric_* keys. */
+  fetchEventMetricSeries?(
+    userId: string,
+    event: { kind: EventKind; externalId: string | null },
+  ): Promise<EventMetricSeries[]>;
 
   /** Adapter-owned HTTP routes. Called once at app boot by createApp();
    *  the adapter mounts its routes on the shared Hono instance. YouTube:
