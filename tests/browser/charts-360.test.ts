@@ -51,6 +51,8 @@ import correlationChartSource from "../../src/lib/components/charts/WishlistCorr
 import growthChartSource from "../../src/lib/components/charts/WishlistGrowthChart.svelte?raw";
 import overlaySource from "../../src/lib/components/charts/ChartMarkerOverlay.svelte?raw";
 import steamModalSource from "../../src/lib/components/SteamListingDetailModal.svelte?raw";
+import chartThemeSource from "../../src/lib/components/charts/chart-theme.ts?raw";
+import dayModalSource from "../../src/lib/components/charts/EventDayModal.svelte?raw";
 import { m } from "../../src/lib/paraglide/messages.js";
 
 let host: HTMLElement;
@@ -1008,5 +1010,118 @@ describe("04-17 kind icon (not a dot) for no-preview tooltip events + one shared
     // The reddit Snoo cut-outs (from the shared source) rendered inside it.
     expect(svg?.innerHTML).toContain("circle");
     unmount(component);
+  });
+});
+
+describe("04-18 UX polish: subordinate growth, skeleton, restored highlight, calm lines, lighter area", () => {
+  it("the daily-growth chart is a subordinate strip (~150px, shorter than the 300px headline)", () => {
+    // The growth chart reads as a supporting sub-view: its .chart-canvas height
+    // is ~150px vs the correlation chart's 300px.
+    expect(growthChartSource).toContain("height: 150px");
+    expect(correlationChartSource).toContain("height: 300px");
+  });
+
+  it("both charts render a height-reserving skeleton OUTSIDE the typeof-window gate (no CLS)", () => {
+    // The .chart-canvas wrapper must NOT live solely inside {#if typeof window}:
+    // it reserves the slot height on SSR. A muted skeleton fills it until mount.
+    for (const src of [correlationChartSource, growthChartSource]) {
+      const ifIdx = src.indexOf('{#if typeof window');
+      const canvasIdx = src.indexOf('<div class="chart-canvas">');
+      // The chart-canvas wrapper opens BEFORE the typeof-window gate.
+      expect(canvasIdx).toBeGreaterThan(0);
+      expect(canvasIdx).toBeLessThan(ifIdx);
+      expect(src).toContain("chart-skeleton");
+      // Shimmer is gated off under prefers-reduced-motion (static box only).
+      expect(src).toContain("prefers-reduced-motion");
+    }
+  });
+
+  it("the skeleton placeholder clears once the chart instance is bound (render check)", async () => {
+    // The skeleton is gated on `!chart`: it fills the reserved-height slot before
+    // the chart binds (SSR / pre-hydration) and is removed once the live ECharts
+    // instance mounts. In this component-mount harness `chart` binds synchronously
+    // after flushSync, so we assert the slot keeps its height AND the skeleton is
+    // gone (proving the gate clears it — the "shows before mount" guarantee is the
+    // OUTSIDE-the-typeof-window-gate structural check above).
+    await page.viewport(900, 720);
+    const { root, component } = mountChart(shortSeries);
+    await new Promise((r) => setTimeout(r, 250));
+    flushSync();
+    const canvasWrap = root.querySelector(".chart-canvas") as HTMLElement;
+    // The height-reserving wrapper is present (no CLS) ...
+    expect(canvasWrap).not.toBeNull();
+    expect(canvasWrap.getBoundingClientRect().height).toBeGreaterThan(0);
+    // ... and the skeleton has cleared now the chart is bound.
+    expect(root.querySelector('[data-testid="chart-skeleton"]')).toBeNull();
+    unmount(component);
+  });
+
+  it("the correlation chart restores a post-event highlight markArea with a RESOLVED rgba (no var/color-mix in canvas)", () => {
+    // The event->effect band is back ON the line: a markArea patched on hover.
+    expect(correlationChartSource).toContain("markArea");
+    expect(correlationChartSource).toContain("resolveAccentRgba");
+    expect(correlationChartSource).toContain("deltaByDate");
+    // resolveAccentRgba returns a concrete rgba(...) (getComputedStyle-resolved),
+    // never a var()/color-mix string the canvas can't read.
+    expect(chartThemeSource).toContain("resolveAccentRgba");
+    expect(chartThemeSource).toMatch(/rgba\(\$\{r\},\$\{g\},\$\{b\},\$\{alpha\}\)/);
+    // No var()/color-mix in the chart's <script> region (canvas option).
+    const script = correlationChartSource.slice(
+      correlationChartSource.indexOf("<script"),
+      correlationChartSource.indexOf("</script>"),
+    );
+    expect(script).not.toContain("var(--");
+    expect(script).not.toContain("color-mix(");
+  });
+
+  it("the overlay reports the hovered day UP (onHoverDay) so the chart can highlight its window", () => {
+    // The chart learns the hovered day from the overlay's onHoverDay callback.
+    expect(overlaySource).toContain("onHoverDay");
+    expect(correlationChartSource).toContain("onHoverDay");
+  });
+
+  it("hovering a chip highlights the post-event window then clears on leave (render check)", async () => {
+    // The markArea band is patched onto the chart on hover and cleared on leave.
+    // The canvas isn't DOM-introspectable, so assert the wiring drives the chart
+    // setOption without throwing (a disposed/not-built guard) across hover/leave.
+    await page.viewport(900, 720);
+    const { root, component } = mountChart(shortSeries);
+    await new Promise((r) => setTimeout(r, 200));
+    flushSync();
+    const chip = root.querySelector('[data-testid="chart-marker-chip"]') as HTMLElement | null;
+    expect(chip).not.toBeNull();
+    chip!.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    flushSync();
+    chip!.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+    flushSync();
+    // No throw + the chart is still alive (the guarded setOption patch worked).
+    expect(root.querySelector("canvas")).not.toBeNull();
+    unmount(component);
+  });
+
+  it("the chip row clears the top gridline (grid.top raised for breathing room)", () => {
+    // WISHLIST_CHART_GRID.top was 16 (chips collided with the top gridline);
+    // raised to 56 so the chip band (8..48px) clears the plot's top line.
+    expect(chartThemeSource).toContain("top: 56");
+  });
+
+  it("the plot signals interactivity (cursor:pointer) — click-anywhere affordance", () => {
+    // The whole plot is click-anywhere; cursor:pointer signals it.
+    expect(correlationChartSource).toMatch(/cursor: ?pointer/);
+  });
+
+  it("the area fill is lighter/branded (~0.12 alpha gradient, resolved rgba, no var/color-mix)", () => {
+    // The wishlist line's area fill is a light branded wash (line color at ~12%
+    // alpha -> transparent), not a heavy dark block.
+    expect(correlationChartSource).toContain("areaStyle");
+    expect(correlationChartSource).toContain("rgba(${rgb},0.12)");
+  });
+
+  it("the day modal captures the opener + returns focus on close (modal focus)", () => {
+    // showModal() traps focus; on close we return focus to the opener (the chip/
+    // line button) so keyboard users aren't dumped at the page top.
+    expect(dayModalSource).toContain("showModal");
+    expect(dayModalSource).toMatch(/opener|activeElement/);
+    expect(dayModalSource).toContain(".focus()");
   });
 });

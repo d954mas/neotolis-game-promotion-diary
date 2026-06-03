@@ -241,9 +241,10 @@
     return `${r},${g},${b}`;
   }
 
-  // A subtle vertical area fill: the line's color at ~18% alpha at the top
-  // fading to transparent at the bottom. Concrete rgba stops only (never a CSS
-  // var / color-mix on the canvas).
+  // A subtle, branded vertical area fill (04-18): the line's color at ~12% alpha
+  // at the top fading to transparent at the bottom — lighter than the old ~18%
+  // so the fill reads as a soft branded wash, not a heavy dark block. Concrete
+  // rgba stops only (never a CSS var / color-mix on the canvas).
   function areaGradient(lineColor: string): {
     color: {
       type: "linear";
@@ -263,7 +264,7 @@
         x2: 0,
         y2: 1,
         colorStops: [
-          { offset: 0, color: `rgba(${rgb},0.18)` },
+          { offset: 0, color: `rgba(${rgb},0.12)` },
           { offset: 1, color: `rgba(${rgb},0)` },
         ],
       },
