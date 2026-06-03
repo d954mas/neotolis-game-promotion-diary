@@ -312,11 +312,11 @@
     if (!delta || (delta.delta7d === null && delta.delta24h === null)) return "";
     // English literal (the removed band used the same inline wording); the numbers
     // come from signedDelta and are safe, the static words need no escaping.
-    // 7d and 24h read IDENTICALLY (the user: they were emphasized differently,
-    // which looked strange) — both bold.
-    return `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(128,128,128,0.25);font-size:12px;">Wishlist effect: <b>${escapeHtml(
+    // 7d and 24h read IDENTICALLY (same emphasis) and sit on SEPARATE lines (the
+    // user: on one row they blended together).
+    return `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(128,128,128,0.25);font-size:12px;">Wishlist effect:<br><b>${escapeHtml(
       signedDelta(delta.delta7d),
-    )} in 7d</b> · <b>${escapeHtml(signedDelta(delta.delta24h))} in 24h</b></div>`;
+    )} in 7d</b><br><b>${escapeHtml(signedDelta(delta.delta24h))} in 24h</b></div>`;
   }
 
   const crosshairTooltip = $derived.by(() => ({

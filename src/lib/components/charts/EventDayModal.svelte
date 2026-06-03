@@ -299,8 +299,10 @@
    * header (the .event-cards gap would otherwise float it). */
   .day-delta {
     display: flex;
-    align-items: baseline;
-    gap: var(--s-3);
+    /* 7d and 24h on SEPARATE lines (the user: on one row they blended). */
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--s-1);
     min-width: 0;
     margin-top: calc(-1 * var(--s-3));
   }
