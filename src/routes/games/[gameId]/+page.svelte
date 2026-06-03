@@ -618,6 +618,7 @@
       today={data.today}
       range={chartRange}
       visible={chartVisible}
+      deltaByDate={chartDeltaByDate}
       onSelectCluster={(days) => (selectedChartDays = days)}
     />
 

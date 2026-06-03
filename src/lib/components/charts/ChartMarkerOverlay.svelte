@@ -117,6 +117,7 @@
     dayGroups,
     recomputeKey,
     onSelectCluster,
+    onHoverDay,
   }: {
     /** The live ECharts instance (bound from <Chart bind:chart>). null until mount. */
     chart: EChartsType | null | undefined;
@@ -127,7 +128,19 @@
     recomputeKey: unknown;
     /** Tap a chip → emit ALL its member days up to the page (cluster modal). */
     onSelectCluster: (days: string[]) => void;
+    /** Hovering a chip or a per-day dashed line reports that day UP (a cluster's
+     *  representative = its most-recent member day); leaving reports null. The
+     *  correlation chart uses it to highlight that day's post-event window
+     *  (windowFrom..windowTo) as a subtle band on the line (04-18). Optional —
+     *  the growth chart mounts the same overlay but doesn't draw the band. */
+    onHoverDay?: (day: string | null) => void;
   } = $props();
+
+  // A cluster's representative day for the hover-highlight = its most-recent
+  // member day (groups are date-ASC, so the last). null clears the highlight.
+  function reportHover(day: string | null): void {
+    onHoverDay?.(day);
+  }
 
   // ── Pixel collision clustering ───────────────────────────────────────────
   // Merge threshold in CSS px: chips whose CENTERS are closer than this collapse
@@ -414,10 +427,22 @@
         style={`left:${dp.x}px; top:${TOP_BAND_PX + CHIP_PX}px; height:${plotBottom - TOP_BAND_PX - CHIP_PX}px;`}
         aria-label={m.viz_marker_day_select({ day: dayLabel(dp.day) })}
         onclick={() => onSelectCluster([dp.day])}
-        onmouseenter={() => showTipAt(dp.x)}
-        onmouseleave={hideTip}
-        onfocus={() => showTipAt(dp.x)}
-        onblur={hideTip}
+        onmouseenter={() => {
+          showTipAt(dp.x);
+          reportHover(dp.day);
+        }}
+        onmouseleave={() => {
+          hideTip();
+          reportHover(null);
+        }}
+        onfocus={() => {
+          showTipAt(dp.x);
+          reportHover(dp.day);
+        }}
+        onblur={() => {
+          hideTip();
+          reportHover(null);
+        }}
       >
         <span
           class="marker-guide"
@@ -441,10 +466,22 @@
       data-testid="chart-marker-chip"
       aria-label={eventCountLabel(cl.events.length)}
       onclick={() => onSelectCluster(cl.days)}
-      onmouseenter={() => (hoveredIndex = i)}
-      onmouseleave={() => (hoveredIndex = null)}
-      onfocus={() => (hoveredIndex = i)}
-      onblur={() => (hoveredIndex = null)}
+      onmouseenter={() => {
+        hoveredIndex = i;
+        reportHover(cl.days[cl.days.length - 1] ?? null);
+      }}
+      onmouseleave={() => {
+        hoveredIndex = null;
+        reportHover(null);
+      }}
+      onfocus={() => {
+        hoveredIndex = i;
+        reportHover(cl.days[cl.days.length - 1] ?? null);
+      }}
+      onblur={() => {
+        hoveredIndex = null;
+        reportHover(null);
+      }}
     >
       {#if thumb}
         <img class="chip-thumb" src={thumb} alt={m.viz_marker_preview_alt()} loading="lazy" />

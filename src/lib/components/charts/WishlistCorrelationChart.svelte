@@ -59,11 +59,16 @@
   import { init, use } from "echarts/core";
   import type { EChartsType } from "echarts/core";
   import { LineChart } from "echarts/charts";
-  import { GridComponent, TooltipComponent } from "echarts/components";
+  import { GridComponent, TooltipComponent, MarkAreaComponent } from "echarts/components";
   import { CanvasRenderer } from "echarts/renderers";
   import { m } from "$lib/paraglide/messages.js";
   import { abbreviate } from "./abbreviate.js";
-  import { baseChartOptions, prefersReducedMotion, WISHLIST_CHART_GRID } from "./chart-theme.js";
+  import {
+    baseChartOptions,
+    prefersReducedMotion,
+    resolveAccentRgba,
+    WISHLIST_CHART_GRID,
+  } from "./chart-theme.js";
   import ChartMarkerOverlay from "./ChartMarkerOverlay.svelte";
   import {
     listingColor,
@@ -75,9 +80,9 @@
     listingLabel as buildListingLabel,
     type ListingLite,
   } from "./wishlist-chart-shared.js";
-  import type { EventDto, WishlistSeries } from "$lib/server/dto.js";
+  import type { EventDto, WishlistSeries, WishlistDelta } from "$lib/server/dto.js";
 
-  use([LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
+  use([LineChart, GridComponent, TooltipComponent, MarkAreaComponent, CanvasRenderer]);
 
   let {
     seriesByListing,
@@ -86,6 +91,7 @@
     today,
     range,
     visible,
+    deltaByDate,
     onSelectCluster,
   }: {
     /** One wishlist series per active listing, keyed by listing id. */
@@ -102,11 +108,21 @@
      *  by it (no ECharts legend round-trip), which is what fixes the re-enable
      *  bug. The custom <ChartLegend> at the page flips entries in this map. */
     visible: Record<string, boolean>;
+    /** Per-listing, per-day wishlist delta (D-05): deltaByDate[listingId][day] =
+     *  { delta24h, delta7d, windowFrom, windowTo }. Re-threaded from the page
+     *  (04-18) so hovering an event-day can highlight that day's post-event
+     *  window (windowFrom..windowTo) as a subtle band on the first visible line. */
+    deltaByDate: Record<string, Record<string, WishlistDelta>>;
     /** Marker (cluster) tap → the page (which owns the day-detail modal + feed
      *  data). The overlay merges nearby event-days into one chip and emits ALL
      *  the chip's days so the modal shows every event under it. */
     onSelectCluster: (days: string[]) => void;
   } = $props();
+
+  // The event-day currently hovered (chip or its dashed line), reported up by the
+  // overlay's onHoverDay. Drives the post-event highlight band on the line; null
+  // clears it. Transient selection state — patched onto the chart via setOption.
+  let hoveredDay = $state<string | null>(null);
 
   // The live ECharts instance (svelte-echarts exposes it via `chart = $bindable()`).
   // The HTML marker overlay reads it to pixel-position + cluster the event chips.
@@ -352,6 +368,56 @@
     };
   });
 
+  // ── Post-event highlight band on hover (04-18, resolved-color rebuild) ───
+  // The OLD markArea rendered a GRAY SQUARE because its color was an unresolved
+  // CSS-mix-of-accent string the ECharts CANVAS can't read, and it was never
+  // cleared on leave. Rebuilt correctly: on hover the
+  // first visible listing's series gets a markArea spanning the hovered day's
+  // post-event window (windowFrom..windowTo), colored with a getComputedStyle-
+  // RESOLVED `rgba(...)` (resolveAccentRgba). Cleared (data:[]) on leave. Patched
+  // via a transient setOption guarded against a disposed/not-built chart.
+  //
+  // The markArea attaches to the FIRST visible line (lines[0]) — that line's
+  // series name is the setOption key. Resolving the window from the SAME listing
+  // the line belongs to keeps the band honest (the delta is that listing's).
+  $effect(() => {
+    const c = chart;
+    if (!c || c.isDisposed()) return;
+
+    const firstLine = lines[0];
+    // Look up the hovered day's window on the first visible listing; fall back
+    // across the other visible lines so a band still shows if the first lacks a
+    // snapshot for that day (mirrors the page's per-day delta resolution).
+    let win: { from: string; to: string } | null = null;
+    if (hoveredDay && firstLine) {
+      for (const line of lines) {
+        const d = deltaByDate[line.id]?.[hoveredDay];
+        if (d) {
+          win = { from: d.windowFrom, to: d.windowTo };
+          break;
+        }
+      }
+    }
+
+    const markArea =
+      win && firstLine
+        ? {
+            silent: true,
+            itemStyle: { color: resolveAccentRgba(0.14) },
+            data: [[{ xAxis: win.from }, { xAxis: win.to }]],
+          }
+        : { data: [] };
+
+    // Patch ONLY the first visible series' markArea (transient selection state);
+    // lazyUpdate keeps it cheap, notMerge:false preserves the rest of the option.
+    if (firstLine) {
+      c.setOption(
+        { series: [{ name: firstLine.label, markArea }] },
+        { lazyUpdate: true },
+      );
+    }
+  });
+
   // ── ECharts option (client-only — resolves --k-* tokens) ─────────────
   const options = $derived.by(() => {
     if (typeof window === "undefined") return {};
@@ -431,7 +497,13 @@
       <!-- Relatively-positioned wrapper so the absolutely-positioned HTML marker
            overlay lays its event chips OVER the chart's plot area. -->
       <Chart {init} {options} bind:chart />
-      <ChartMarkerOverlay {chart} {dayGroups} {recomputeKey} {onSelectCluster} />
+      <ChartMarkerOverlay
+        {chart}
+        {dayGroups}
+        {recomputeKey}
+        {onSelectCluster}
+        onHoverDay={(day) => (hoveredDay = day)}
+      />
     {/if}
     {#if !chart}
       <!-- Skeleton placeholder: a muted box until the client chart mounts. The

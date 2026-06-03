@@ -165,6 +165,8 @@ function mountChart(series: typeof emptySeries | typeof shortSeries | typeof off
       // are an HTML overlay (ChartMarkerOverlay), not canvas markPoints.
       range: null,
       visible: {},
+      // 04-18: re-threaded for the post-event highlight band on hover.
+      deltaByDate,
       onSelectCluster: vi.fn(),
     },
   });
@@ -630,6 +632,7 @@ describe("04-14 per-day clickable dashed lines + centroid card + identical cross
         today: TODAY,
         range: null,
         visible: {},
+        deltaByDate,
         onSelectCluster,
       },
     });
@@ -822,6 +825,7 @@ describe("04-15 events-in-tooltip + line-hover forwards + thicker lines + click-
           today: TODAY,
           range: null,
           visible: {},
+          deltaByDate,
           onSelectCluster,
         },
       });
