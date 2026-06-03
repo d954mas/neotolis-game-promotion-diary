@@ -797,9 +797,13 @@ describe("04-15 events-in-tooltip + line-hover forwards + thicker lines + click-
     expect(overlaySource).toContain("hideTip");
   });
 
-  it("the dashed line is thicker (3px) with a wider 16px hit strip (source check)", () => {
-    // "линии хочется толще": heavier line + wider hover/click target.
-    expect(overlaySource).toContain("border-left: 3px dashed");
+  it("the dashed line is calm-idle (1.5px/faint) + EMPHASIZED on hover (3px), wider 16px hit strip (04-18)", () => {
+    // 04-18 calm "picket fence": non-hovered lines are thin (1.5px) + faint
+    // (opacity 0.28); the hovered/selected day's line is emphasized to full
+    // weight (3px) + opacity. Wider 16px hover/click target stays.
+    expect(overlaySource).toContain("border-left: 1.5px dashed");
+    expect(overlaySource).toContain("border-left-width: 3px");
+    expect(overlaySource).toContain(".marker-guide.emphasized");
     expect(overlaySource).toContain("width: 16px");
   });
 

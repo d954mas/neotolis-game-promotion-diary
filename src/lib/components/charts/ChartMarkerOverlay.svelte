@@ -193,6 +193,15 @@
   let plotBottom = $state(0);
   // Track which cluster is hovered for the preview tooltip.
   let hoveredIndex = $state<number | null>(null);
+  // Track which event-day is hovered (chip OR its dashed line) so that ONE day's
+  // guide line is EMPHASIZED while the others stay thin/faint — calming the
+  // "picket fence" of equal-weight dashed lines (04-18). Reuses the same hover
+  // signal we report up via onHoverDay.
+  let hoveredDay = $state<string | null>(null);
+  function setHoveredDay(day: string | null): void {
+    hoveredDay = day;
+    reportHover(day);
+  }
 
   // The grid coordinate system exposes its plot-area rect via getRect(). It's
   // not in the public typings, so reach it through a narrow structural type and
@@ -429,23 +438,24 @@
         onclick={() => onSelectCluster([dp.day])}
         onmouseenter={() => {
           showTipAt(dp.x);
-          reportHover(dp.day);
+          setHoveredDay(dp.day);
         }}
         onmouseleave={() => {
           hideTip();
-          reportHover(null);
+          setHoveredDay(null);
         }}
         onfocus={() => {
           showTipAt(dp.x);
-          reportHover(dp.day);
+          setHoveredDay(dp.day);
         }}
         onblur={() => {
           hideTip();
-          reportHover(null);
+          setHoveredDay(null);
         }}
       >
         <span
           class="marker-guide"
+          class:emphasized={hoveredDay === dp.day}
           aria-hidden="true"
           data-testid="chart-marker-guide"
           style={`--chip-accent:${dayAccent};`}
@@ -468,19 +478,19 @@
       onclick={() => onSelectCluster(cl.days)}
       onmouseenter={() => {
         hoveredIndex = i;
-        reportHover(cl.days[cl.days.length - 1] ?? null);
+        setHoveredDay(cl.days[cl.days.length - 1] ?? null);
       }}
       onmouseleave={() => {
         hoveredIndex = null;
-        reportHover(null);
+        setHoveredDay(null);
       }}
       onfocus={() => {
         hoveredIndex = i;
-        reportHover(cl.days[cl.days.length - 1] ?? null);
+        setHoveredDay(cl.days[cl.days.length - 1] ?? null);
       }}
       onblur={() => {
         hoveredIndex = null;
-        reportHover(null);
+        setHoveredDay(null);
       }}
     >
       {#if thumb}
@@ -565,20 +575,32 @@
     outline-offset: 0;
   }
 
-  /* The dashed vertical line itself: a 3px dashed border centered inside the
-   * hit strip, dropping to the plot bottom. Heavier weight (1.5 -> 3px) so the
-   * guide reads clearly; low opacity so it still doesn't compete with the
-   * wishlist line. */
+  /* The dashed vertical line itself: a thin dashed border centered inside the
+   * hit strip, dropping to the plot bottom. Calm by default (04-18) — thin
+   * (1.5px) + faint so a row of event-days no longer reads as a "picket fence"
+   * competing with the wishlist line. The hovered/selected day's line is
+   * EMPHASIZED (full weight + opacity) so the eye lands on the day in focus. */
   .marker-guide {
     width: 0;
     height: 100%;
-    border-left: 3px dashed var(--chip-accent, var(--k-post));
-    opacity: 0.45;
+    border-left: 1.5px dashed var(--chip-accent, var(--k-post));
+    opacity: 0.28;
     pointer-events: none;
+    transition:
+      opacity var(--m-fast) var(--m-ease),
+      border-left-width var(--m-fast) var(--m-ease);
   }
-  @media (hover: hover) {
-    .marker-guide-hit:hover .marker-guide {
-      opacity: 0.75;
+  /* Emphasized = the hovered/selected day's guide (set from the overlay's
+   * hoveredDay state). Also emphasize on direct hover of the hit strip. */
+  .marker-guide.emphasized,
+  .marker-guide-hit:hover .marker-guide,
+  .marker-guide-hit:focus-visible .marker-guide {
+    border-left-width: 3px;
+    opacity: 0.85;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .marker-guide {
+      transition: none;
     }
   }
 

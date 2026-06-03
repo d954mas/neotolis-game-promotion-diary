@@ -84,7 +84,11 @@ export function prefersReducedMotion(): boolean {
 export const WISHLIST_CHART_GRID = {
   left: 52,
   right: 16,
-  top: 16,
+  // Chip breathing room (04-18): the event chips sit in a top band (~8..48px);
+  // a 16px grid.top put the top gridline / "300" label right under the chip row.
+  // Push the plot down so the top gridline clears the chips (chip band height +
+  // a gap). The shared overlay reads the same grid rect, so both charts agree.
+  top: 56,
   bottom: 36,
   containLabel: false,
 } as const;

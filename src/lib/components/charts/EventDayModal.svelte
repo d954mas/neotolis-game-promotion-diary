@@ -81,13 +81,28 @@
   const dayGroups = $derived(groupEventsByDate(events));
 
   let dialogEl: HTMLDialogElement | undefined = $state();
+  // The element focused when the modal opened — focus returns here on close so
+  // keyboard users aren't dumped at the top of the page (04-18). Native
+  // <dialog>.showModal() traps focus AND restores it to the opener on .close(),
+  // but the opener here is often the plot CANVAS (not focusable), so native
+  // restore is a no-op; we capture + restore an explicit focusable opener.
+  let opener: HTMLElement | null = null;
 
-  // showModal()/close() driven by `open` (LB-7 scroll-lock for free). Copied
-  // from EventDetailModal so the body-scroll-lock + focus-trap is identical.
+  // showModal()/close() driven by `open` (LB-7 scroll-lock for free). showModal()
+  // traps Tab focus inside the dialog; on close we return focus to the opener.
   $effect(() => {
     if (!dialogEl) return;
-    if (open && !dialogEl.open) dialogEl.showModal();
-    else if (!open && dialogEl.open) dialogEl.close();
+    if (open && !dialogEl.open) {
+      const active = document.activeElement;
+      opener = active instanceof HTMLElement ? active : null;
+      dialogEl.showModal();
+    } else if (!open && dialogEl.open) {
+      dialogEl.close();
+      // Return focus to the opener (a chip/line button) if it's still in the DOM
+      // and focusable; native restore covers the rest.
+      if (opener && opener.isConnected) opener.focus();
+      opener = null;
+    }
   });
 
   // Signed display ("+47" / "-12" / "0"); null → "—" (no post-event snapshot).

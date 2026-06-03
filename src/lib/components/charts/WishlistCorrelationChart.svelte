@@ -540,6 +540,9 @@
     height: 300px;
     min-width: 0;
     font-variant-numeric: tabular-nums;
+    /* Affordance (04-18): the whole plot is click-anywhere (a click opens the
+     * nearest event-day's modal), so signal it's interactive. */
+    cursor: pointer;
   }
   /* Loading skeleton (04-18): a muted box filling the reserved chart height
    * until the client chart mounts, so there's no flash/jump on load. A subtle
