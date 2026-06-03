@@ -315,6 +315,26 @@ export async function listRecentSnapshots(
  * listingId matches 0 rows → `{ points: [], lastImportedAt: null }` (the 404
  * path; no leak). The optional `range` clips points to the inclusive
  * [from, to] date window.
+ *
+ * TENANT CONTRACT — the boundary is the user_id filter on the DATA, NOT an
+ * ownership gate on the listingId:
+ *   - This function is tenant-scoped on `wishlist_snapshots.user_id`, so it can
+ *     NEVER return another user's snapshots. But it does NOT 404 a foreign or
+ *     non-existent listingId — an arbitrary listingId simply matches 0 of THIS
+ *     user's rows and yields an EMPTY series (no error, no leak).
+ *   - SAFE for the CURRENT caller: the `/games/[gameId]` loader only ever passes
+ *     listingIds it already vetted via `listListings(userId, gameId)`
+ *     (tenant-scoped), so an empty series there means "no CSV imported", never
+ *     "foreign id".
+ *   - FUTURE CALLERS — a public API path that fetches a series BY an
+ *     arbitrary/untrusted listingId MUST gate ownership FIRST against
+ *     `game_steam_listings` (eq(userId) + eq(id), isNull(deletedAt)) and throw
+ *     `NotFoundError` when the listing is absent or another user's — mirroring
+ *     `importWishlistCsv`'s ownership gate. Do NOT rely on the empty series as an
+ *     authorization signal: it cannot distinguish "your listing, no data" from
+ *     "not your listing", so it must not become the only check.
+ *   (No per-call ownership query is added here — it would be redundant for the
+ *   already-vetted loader caller; the gate is the FUTURE caller's job.)
  */
 export async function getWishlistSeries(
   userId: string,

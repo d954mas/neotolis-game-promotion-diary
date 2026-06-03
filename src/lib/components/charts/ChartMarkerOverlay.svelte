@@ -326,7 +326,9 @@
   // reactive recomputeKey. Re-bind when the chart instance changes.
   $effect(() => {
     const c = chart;
-    if (!c) {
+    // Bail on an absent OR already-disposed instance: getDom()/on() throw on a
+    // disposed chart (an HMR / unmount race can hand us a torn-down instance).
+    if (!c || c.isDisposed()) {
       clusters = [];
       dayPixels = [];
       return;
@@ -342,8 +344,10 @@
     recompute();
 
     return () => {
-      c.off("finished", onFinished);
+      // Always disconnect our own observer; only touch the ECharts instance
+      // (off) when it hasn't been disposed — off() throws on a disposed chart.
       ro.disconnect();
+      if (!c.isDisposed()) c.off("finished", onFinished);
     };
   });
 
