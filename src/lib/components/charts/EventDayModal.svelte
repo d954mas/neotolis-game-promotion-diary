@@ -169,12 +169,13 @@
         <FeedDateGroupHeader occurredAt={group.occurredAt} count={group.rows.length} />
         {#if dayDelta && (dayDelta.delta7d !== null || dayDelta.delta24h !== null)}
           <span class="day-delta" data-testid="day-delta">
-            <span class="day-delta-7d">
+            <span class="day-delta-item">
               {m.viz_delta_7d({ value: signed(dayDelta.delta7d) })}
               <span class="day-delta-arrow" aria-hidden="true">{arrow(dayDelta.delta7d)}</span>
             </span>
-            <span class="day-delta-24h">
+            <span class="day-delta-item">
               {m.viz_delta_24h({ value: signed(dayDelta.delta24h) })}
+              <span class="day-delta-arrow" aria-hidden="true">{arrow(dayDelta.delta24h)}</span>
             </span>
           </span>
         {/if}
@@ -303,8 +304,10 @@
     min-width: 0;
     margin-top: calc(-1 * var(--s-3));
   }
-  .day-delta-7d {
-    font-size: var(--t-15, 15px);
+  /* 7d and 24h read IDENTICALLY (the user: they were styled differently, which
+   * looked strange) — same size/weight/color, both with a direction arrow. */
+  .day-delta-item {
+    font-size: var(--t-14, 14px);
     font-weight: var(--w-sb);
     color: var(--text);
     font-variant-numeric: tabular-nums;
@@ -314,11 +317,6 @@
   }
   .day-delta-arrow {
     font-size: var(--t-13);
-  }
-  .day-delta-24h {
-    font-size: var(--t-13);
-    color: var(--text-3);
-    font-variant-numeric: tabular-nums;
   }
   .day-event-count {
     font-size: var(--t-13);
