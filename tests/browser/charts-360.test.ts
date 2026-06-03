@@ -322,6 +322,44 @@ describe("charts at 360px (VIZ-04)", () => {
     unmount(component);
   });
 
+  it("clicking a feed card inside the cluster modal forwards onOpenDetail with the event id (04-20)", async () => {
+    // 04-20: the EventDayModal threads onOpenDetail into each FeedCard so a card
+    // click inside the cluster modal opens the page-owned EventDetailModal (which
+    // stacks on top via native <dialog>). Mount the modal with a spy and click a
+    // card body — the spy must fire with that event's id.
+    await page.viewport(900, 720);
+    const onOpenDetail = vi.fn();
+    const sourceById = new Map(baseSources.map((s) => [s.id, s]));
+    const gameById = new Map(baseGames.map((g) => [g.id, g]));
+    const component = mount(EventDayModal, {
+      target: host,
+      props: {
+        open: true,
+        days: ["2026-05-15"],
+        events: baseEvents,
+        deltaByDay: { "2026-05-15": deltaByDate.l1["2026-05-15"] },
+        sourceById,
+        gameById,
+        games: baseGames,
+        onClose: vi.fn(),
+        onOpenDetail,
+      },
+    });
+    flushSync();
+    const dialog = host.querySelector(
+      'dialog[data-testid="event-day-modal"]',
+    ) as HTMLDialogElement;
+    const card = dialog.querySelector('[data-testid="feed-card"]') as HTMLElement | null;
+    expect(card).not.toBeNull();
+    // Click the card title (a non-action surface) so the open-detail path fires.
+    const surface = (card!.querySelector(".card-title") ?? card!) as HTMLElement;
+    surface.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    flushSync();
+    expect(onOpenDetail).toHaveBeenCalledTimes(1);
+    expect(onOpenDetail.mock.calls[0]![0]).toBe(baseEvents[0]!.id);
+    unmount(component);
+  });
+
   it("chart date control is the feed preset picker with sort hidden (04-10)", async () => {
     await page.viewport(900, 720);
     const onDateRangeChange = vi.fn();
