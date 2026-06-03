@@ -765,17 +765,22 @@
     margin-bottom: var(--s-6);
     min-width: 0;
   }
+  /* Daily-growth sub-view (04-18): tightened top spacing so the strip hugs the
+   * headline correlation chart as a related sub-view, not a separate section. */
   .growth-block {
     display: flex;
     flex-direction: column;
-    gap: var(--s-2);
+    gap: var(--s-1);
+    margin-top: calc(-1 * var(--s-2));
     min-width: 0;
   }
+  /* Demoted to a caption (04-18): smaller + muted so the growth chart reads as
+   * a supporting strip under the headline chart, not an equal section title. */
   .growth-heading {
     margin: 0;
-    font-size: var(--t-14);
-    font-weight: var(--w-sb);
-    color: var(--text-2);
+    font-size: var(--t-13);
+    font-weight: var(--w-md);
+    color: var(--text-3);
     line-height: var(--lh-tight);
   }
   .events {

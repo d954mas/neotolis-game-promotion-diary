@@ -351,7 +351,10 @@
   .chart-canvas {
     position: relative;
     width: 100%;
-    height: 240px;
+    /* Subordinate strip (04-18): shorter than the ~300px headline correlation
+     * chart so the daily-growth chart reads as a supporting sub-view, not an
+     * equal. */
+    height: 150px;
     min-width: 0;
     font-variant-numeric: tabular-nums;
   }
