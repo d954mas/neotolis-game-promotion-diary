@@ -24,6 +24,9 @@ const { uuidv7 } = await import("../../src/lib/server/ids.js");
 const { createApp } = await import("../../src/lib/server/http/app.js");
 const { seedUserDirectly } = await import("./helpers.js");
 const { createEvent } = await import("../../src/lib/server/services/events.js");
+const { getEventMetricSeries, getEventMetricSeriesForRow } =
+  await import("../../src/lib/server/services/event-metric-series.js");
+const { NotFoundError } = await import("../../src/lib/server/services/errors.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
 
@@ -326,5 +329,98 @@ describe("GET /api/events/:id/metric-series endpoint (VIZ-01 modal lazy-fetch)",
     });
     expect(res.status).toBe(404);
     expect((await res.json()) as { error: string }).toEqual({ error: "not_found" });
+  });
+});
+
+// The extracted service (event-metric-series.ts) — both the API route AND the
+// /events/[id] SSR loader call this now instead of duplicating the adapter loop
+// (#2). getEventMetricSeries is tenant-gated by getEventById (404, never 403);
+// getEventMetricSeriesForRow is the bare adapter loop for an already-vetted row.
+describe("getEventMetricSeries service (VIZ-01 #2 extraction)", () => {
+  it("own youtube_video event → the adapter view/like/comment series", async () => {
+    const u = await seedUserDirectly({ email: `mseries-svc-own-${uniq()}@test.local` });
+    const videoId = `vid_${uniq()}`;
+    await seedYoutubeSnapshots(videoId, [
+      { minutesAgo: 30, view: 100, like: 5, comment: 1 },
+      { minutesAgo: 20, view: 250, like: 12, comment: 3 },
+      { minutesAgo: 10, view: 500, like: 25, comment: 7 },
+    ]);
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "service own event",
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+      },
+      "127.0.0.1",
+    );
+
+    const series = await getEventMetricSeries(u.id, ev.id);
+    expect(series.map((s) => s.metricKey)).toEqual(["view_count", "like_count", "comment_count"]);
+    const views = series.find((s) => s.metricKey === "view_count")!;
+    expect(views.points.map((p) => p.value)).toEqual([100, 250, 500]);
+  });
+
+  it("chartable event with 0 snapshots → [] (provided-but-empty, no 404)", async () => {
+    const u = await seedUserDirectly({ email: `mseries-svc-empty-${uniq()}@test.local` });
+    const ev = await createEvent(
+      u.id,
+      {
+        gameIds: [],
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "service no-snapshot event",
+        url: `https://www.youtube.com/watch?v=vid_${uniq()}`,
+      },
+      "127.0.0.1",
+    );
+    await expect(getEventMetricSeries(u.id, ev.id)).resolves.toEqual([]);
+  });
+
+  it("cross-tenant event id → NotFoundError (the 404 gate, never 403)", async () => {
+    const owner = await seedUserDirectly({ email: `mseries-svc-owner-${uniq()}@test.local` });
+    const other = await seedUserDirectly({ email: `mseries-svc-other-${uniq()}@test.local` });
+    const ev = await createEvent(
+      owner.id,
+      {
+        gameIds: [],
+        kind: "youtube_video",
+        occurredAt: new Date("2026-06-01T10:00:00Z"),
+        title: "owner's event",
+        url: `https://www.youtube.com/watch?v=vid_${uniq()}`,
+      },
+      "127.0.0.1",
+    );
+    await expect(getEventMetricSeries(other.id, ev.id)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("missing event id → NotFoundError", async () => {
+    const u = await seedUserDirectly({ email: `mseries-svc-missing-${uniq()}@test.local` });
+    await expect(getEventMetricSeries(u.id, uuidv7())).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("getEventMetricSeriesForRow runs the adapter loop on a bare row (loader path)", async () => {
+    const u = await seedUserDirectly({ email: `mseries-svc-row-${uniq()}@test.local` });
+    const videoId = `vid_${uniq()}`;
+    await seedYoutubeSnapshots(videoId, [
+      { minutesAgo: 20, view: 11, like: 1, comment: 0 },
+      { minutesAgo: 10, view: 22, like: 2, comment: 1 },
+    ]);
+    // The loader passes the already-vetted row's {kind, externalId} directly —
+    // no event id, no re-SELECT. Self-filtering: a reddit_post row → [].
+    const series = await getEventMetricSeriesForRow(u.id, {
+      kind: "youtube_video",
+      externalId: videoId,
+    });
+    const views = series.find((s) => s.metricKey === "view_count")!;
+    expect(views.points.map((p) => p.value)).toEqual([11, 22]);
+
+    const none = await getEventMetricSeriesForRow(u.id, {
+      kind: "youtube_video",
+      externalId: null,
+    });
+    expect(none).toEqual([]);
   });
 });

@@ -55,7 +55,7 @@
     event,
     games,
     sources,
-    metricSeries = [],
+    metricSeries = undefined,
     view = "feed",
     currentUserName = "",
     onClose,
@@ -68,9 +68,12 @@
     event: EventDto;
     games: GameDto[];
     sources: DataSourceDto[];
-    /** VIZ-01 adapter-driven per-event snapshot series (D-14). Default []
-     *  keeps modal callers that don't yet thread it rendering safely — the
-     *  chart shows nothing / the low-data caption when empty. */
+    /** VIZ-01 adapter-driven per-event snapshot series (D-14).
+     *  `undefined` = NOT provided (the modal path — opened from a feed/games
+     *  row — mounts without it, so the chart lazy-fetches the endpoint).
+     *  `[]` = provided-but-empty (the /events/[id] route SSR-loaded the series
+     *  and there simply are none) → NO client fetch (the old `[]` default
+     *  conflated the two and made /events/[id] re-fetch a known-empty series). */
     metricSeries?: EventMetricSeries[];
     view?: "feed" | "trash";
     currentUserName?: string;
@@ -88,10 +91,11 @@
   // VIZ-01 (Plan 04-24): the per-event history chart must render in the
   // EventDetailModal (the PRIMARY surface, opened from /feed + /games rows),
   // not only on /events/[id]. The modal mounts this component WITHOUT the
-  // SSR-loaded `metricSeries` prop (defaults []), so when the event is a
+  // SSR-loaded `metricSeries` prop (→ undefined), so when the event is a
   // chartable kind we lazy-fetch GET /api/events/:id/metric-series for THIS
-  // single event. /events/[id] keeps passing its SSR `metricSeries` → the
-  // prop is non-empty → no client fetch (no double load).
+  // single event. /events/[id] keeps passing its SSR `metricSeries` (even an
+  // empty []) → prop !== undefined → no client fetch (no double load, and no
+  // redundant fetch when the route already knows the series is empty).
   //
   // CHARTABLE_KINDS = the kinds an adapter implements fetchEventMetricSeries
   // for (youtube_video, reddit_post). Mounting EventHistoryChart for these
@@ -114,7 +118,11 @@
     fetchedSeries = null;
     if (typeof window === "undefined") return;
     if (!isChartable) return;
-    if (metricSeries.length > 0) return; // SSR-provided (e.g. /events/[id]) wins.
+    // metricSeries !== undefined means the route PROVIDED the series (even an
+    // empty []), so it's authoritative — don't refetch. Only the modal path
+    // (prop omitted → undefined) lazy-fetches. (The old `> 0` check refetched
+    // a provided-but-empty [], which /events/[id] passes for a 0-snapshot event.)
+    if (metricSeries !== undefined) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -133,9 +141,10 @@
     };
   });
 
-  // The series the chart renders: a provided prop wins (no fetch happened);
-  // otherwise the client-fetched series (or [] until it resolves).
-  const chartSeries = $derived(metricSeries.length > 0 ? metricSeries : (fetchedSeries ?? []));
+  // The series the chart renders: a PROVIDED prop wins (route SSR path — even an
+  // empty [] is authoritative, no fetch happened); otherwise the modal path's
+  // client-fetched series (or [] until it resolves / on a chartable miss).
+  const chartSeries = $derived(metricSeries ?? fetchedSeries ?? []);
 
   // Inline-edit drafts. null = not editing; string = current draft.
   let titleDraft = $state<string | null>(null);

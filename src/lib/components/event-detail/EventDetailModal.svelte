@@ -28,7 +28,7 @@
     event,
     games,
     sources,
-    metricSeries = [],
+    metricSeries = undefined,
     view = "feed",
     currentUserName = "",
     onClose,
@@ -41,7 +41,10 @@
     event: EventDto;
     games: GameDto[];
     sources: DataSourceDto[];
-    /** VIZ-01 series threaded straight to EventDetailContent (D-14). */
+    /** VIZ-01 series threaded straight to EventDetailContent (D-14).
+     *  undefined (default — no caller threads it) → EventDetailContent lazy-
+     *  fetches the endpoint for the opened event. A provided [] would suppress
+     *  that fetch, so the modal must forward undefined, not []. */
     metricSeries?: EventMetricSeries[];
     view?: "feed" | "trash";
     currentUserName?: string;

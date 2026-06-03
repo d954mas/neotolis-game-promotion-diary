@@ -69,8 +69,9 @@ import {
 import { requestRefreshPoll } from "../../services/refresh-poll.js";
 import { AppError } from "../../services/errors.js";
 import { parseIngestUrl } from "../../services/url-parser.js";
-import type { EventKind, EventMetricSeries } from "$lib/sources/adapter.js";
+import type { EventKind } from "$lib/sources/adapter.js";
 import { allAdapters } from "$lib/sources/registry.js";
+import { getEventMetricSeries } from "../../services/event-metric-series.js";
 import { toEventDto, loadGameIdsForEvent, mapEventsToDtos } from "../../dto.js";
 import { getAuditContext } from "../middleware/audit-ip.js";
 import { mapErr, type RouteVars } from "./_shared.js";
@@ -535,20 +536,11 @@ eventsRoutes.get("/events/:id", async (c) => {
 // allAdapters.fetchEventMetricSeries (adapter), mirroring the loader.
 eventsRoutes.get("/events/:id/metric-series", async (c) => {
   try {
-    const ev = await getEventById(c.var.userId, c.req.param("id"));
-    // Each adapter self-filters to its own kind (non-matching → []), reads its
-    // immutable *_snapshots history (POLL-04), and contributes its chartable
-    // series. Same loop as the /events/[id] SSR loader.
-    const series: EventMetricSeries[] = [];
-    for (const adapter of allAdapters) {
-      if (adapter.fetchEventMetricSeries === undefined) continue;
-      series.push(
-        ...(await adapter.fetchEventMetricSeries(c.var.userId, {
-          kind: ev.kind,
-          externalId: ev.externalId,
-        })),
-      );
-    }
+    // The adapter loop lives in the service now (event-metric-series.ts), shared
+    // with the /events/[id] SSR loader. getEventMetricSeries resolves the event
+    // via getEventById FIRST — NotFoundError for a foreign/missing id → mapErr's
+    // 404 (never 403) — then reads each adapter's snapshot series.
+    const series = await getEventMetricSeries(c.var.userId, c.req.param("id"));
     return c.json(series);
   } catch (err) {
     return mapErr(c, err, "GET /api/events/:id/metric-series");
