@@ -148,6 +148,14 @@ describe("redditFetch (Phase 03.1 DV-RDT-7) — AdapterError taxonomy", () => {
     expect(reqHeaders["User-Agent"]).toBe(REDDIT_UA);
   });
 
+  it("proxy dispatcher forces HTTP/1.1 (allowH2:false) — avoids the h2 idle-socket crash", async () => {
+    // Regression guard for the worker crash: an idle keep-alive h2 connection the
+    // proxy closes escapes to uncaughtException. allowH2:false keeps the proxy on
+    // h1, which drops idle-closed sockets from the pool gracefully.
+    const { REDDIT_PROXY_AGENT_OPTIONS } = await import("$lib/sources/reddit/server/http.js");
+    expect(REDDIT_PROXY_AGENT_OPTIONS.allowH2).toBe(false);
+  });
+
   it("404 → AdapterError(not-found)", async () => {
     fetchSpy.mockResolvedValueOnce(new Response("", { status: 404 }));
     const { redditFetch, __resetBurstStateForTest } =

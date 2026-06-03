@@ -30,6 +30,9 @@
 // production `node` entrypoints all hit the same single-shot call.
 // Node's module cache dedupes — second import is a no-op.
 import "./lib/server/integrations/dns-bootstrap.js";
+// HTTP/1.1-only outbound (no h2) — see undici-bootstrap.ts. Mirrors server.ts so
+// the SSR path shares the single setGlobalDispatcher call (module-cache deduped).
+import "./lib/server/integrations/undici-bootstrap.js";
 import { sequence } from "@sveltejs/kit/hooks";
 import type { Handle, HandleServerError } from "@sveltejs/kit";
 import { auth } from "./lib/auth.js";
