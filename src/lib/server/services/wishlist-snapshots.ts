@@ -35,11 +35,17 @@ import {
   type WishlistSeries,
   type WishlistDelta,
 } from "../dto.js";
+import { computeWishlistDeltaFromPoints } from "$lib/util/wishlist-delta.js";
 
 // One shape, one home: the series/delta wire types live in dto.ts. Re-export
 // them under their dto names (mirrors the WishlistSummary re-export below) so
 // the /games loader imports them from the service barrel unchanged.
 export type { WishlistSeries, WishlistDelta } from "../dto.js";
+
+// The PURE delta math lives in $lib/util/wishlist-delta.ts (client-safe — the
+// /games page computes its per-day map there in the viewer's timezone). Re-export
+// so existing server callers/tests keep importing it from the service barrel.
+export { computeWishlistDeltaFromPoints } from "$lib/util/wishlist-delta.js";
 
 export interface ImportWishlistResult {
   rowCount: number;
@@ -383,20 +389,6 @@ export async function getWishlistSeries(
 }
 
 /**
- * Add `days` to an ISO `YYYY-MM-DD` date string, returning `YYYY-MM-DD`.
- *
- * Date-only arithmetic anchored on the passed string — NEVER `new Date()`
- * "now". The UTC noon anchor keeps the result on the intended calendar day
- * across any host timezone (a midnight anchor could roll back a day under a
- * negative-offset zone). Used to compute the delta windows from `eventDate`.
- */
-function addDaysIso(isoDate: string, days: number): string {
-  const d = new Date(`${isoDate}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-/**
  * The DAY-level (D-05) 24h/7d wishlist change AFTER an event-day — the data
  * behind the VIZ-03 panel number+arrow and the D-03 highlighted markArea.
  *
@@ -432,9 +424,10 @@ function addDaysIso(isoDate: string, days: number): string {
  *
  * This is the DB-backed entry point: it fetches the (tenant-scoped) series then
  * delegates the windowed-subtraction math to the PURE
- * `computeWishlistDeltaFromPoints` below. Callers that ALREADY hold the series
- * (the /games loader) call the pure helper directly on those points — no
- * per-day refetch.
+ * `computeWishlistDeltaFromPoints` ($lib/util/wishlist-delta). Callers that
+ * ALREADY hold the series (the /games page, client-side) call the pure helper
+ * directly on those points — no per-day refetch, and the day key is chosen in
+ * the viewer's timezone.
  */
 export async function computeWishlistDelta(
   userId: string,
@@ -443,53 +436,4 @@ export async function computeWishlistDelta(
 ): Promise<WishlistDelta> {
   const { points } = await getWishlistSeries(userId, listingId);
   return computeWishlistDeltaFromPoints(points, eventDate);
-}
-
-/**
- * PURE windowed-subtraction delta from an ALREADY-LOADED date-ASC cumulative
- * balance series — no DB, no userId. Same math/numbers as the DB-backed
- * `computeWishlistDelta` (which delegates here); split out so a caller holding
- * the series (the /games loader's `wishlistSeriesByListing[id].points`) computes
- * every event-day's delta synchronously, instead of re-fetching the whole series
- * once per (listing, day).
- *
- * Tenant scoping is the CALLER's responsibility: `points` must come from a
- * tenant-scoped read (getWishlistSeries). This helper does plain array math on
- * the points it's handed.
- */
-export function computeWishlistDeltaFromPoints(
-  points: { date: string; balance: number }[],
-  eventDate: string,
-): WishlistDelta {
-  const windowFrom = eventDate;
-  const windowTo = addDaysIso(eventDate, 7);
-
-  // baseBalance = balance ON eventDate, else the most recent AT-OR-BEFORE it
-  // (cumulative carry-forward). points is date-ASC, so the last point with
-  // date <= eventDate is the anchor.
-  let baseBalance: number | null = null;
-  for (const p of points) {
-    if (p.date <= eventDate) baseBalance = p.balance;
-    else break;
-  }
-
-  // LATEST snapshot STRICTLY AFTER eventDate within the inclusive window end —
-  // the window-edge balance (points is date-ASC, so the last match wins).
-  const latestInWindow = (endDate: string): number | null => {
-    let found: number | null = null;
-    for (const p of points) {
-      if (p.date > eventDate && p.date <= endDate) found = p.balance;
-    }
-    return found;
-  };
-
-  const after24h = latestInWindow(addDaysIso(eventDate, 1));
-  const after7d = latestInWindow(windowTo);
-
-  return {
-    delta24h: baseBalance !== null && after24h !== null ? after24h - baseBalance : null,
-    delta7d: baseBalance !== null && after7d !== null ? after7d - baseBalance : null,
-    windowFrom,
-    windowTo,
-  };
 }

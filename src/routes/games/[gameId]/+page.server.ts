@@ -5,10 +5,8 @@ import { listListings, listSoftDeletedListings } from "$lib/server/services/game
 import {
   getWishlistSummary,
   getWishlistSeries,
-  computeWishlistDeltaFromPoints,
   type WishlistSummary,
   type WishlistSeries,
-  type WishlistDelta,
 } from "$lib/server/services/wishlist-snapshots.js";
 import { listEventsForGame } from "$lib/server/services/events.js";
 import { listSources } from "$lib/server/services/data-sources.js";
@@ -156,42 +154,25 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   // trash view never renders the chart). Both come through services — NO
   // db.* in the loader (routes-call-services). One getWishlistSeries per
   // active listing feeds the WISH-04 daily line + the honest D-13 caption
-  // (series.lastImportedAt); the per-day delta map feeds the D-03 markArea +
-  // the panel's day-level number (D-05). KISS — bounded N (active listings),
-  // mirrors the wishlistSummaries loop above.
+  // (series.lastImportedAt). KISS — bounded N (active listings), mirrors the
+  // wishlistSummaries loop above.
+  //
+  // The per-day delta map (D-05) is NOT built here: the delta is keyed by an
+  // event's CALENDAR DAY, which is timezone-dependent, and this loader runs in
+  // the container's UTC — it cannot know the viewer's zone. Bucketing in UTC
+  // here mismatched the page's local `eventDay`, silently dropping the post-event
+  // delta for near-midnight events in a negative-offset zone. The page builds the
+  // map on the CLIENT from these same `points` (pure computeWishlistDeltaFromPoints,
+  // local day key) where the zone is known.
   const wishlistSeriesByListing: Record<string, WishlistSeries> = {};
-  const deltaByDate: Record<string, Record<string, WishlistDelta>> = {};
 
   if (view !== "trash" && listings.length > 0) {
-    // Distinct event DAYS (D-05): the delta is a DAY attribute — all events
-    // on the same game-day share one 24h/7d delta. Truncate each event's
-    // occurredAt to YYYY-MM-DD so we compute the delta once per
-    // (listing, distinct day), not once per event.
-    const distinctDays = [
-      ...new Set(
-        eventDtos.map((e) => {
-          const d = typeof e.occurredAt === "string" ? new Date(e.occurredAt) : e.occurredAt;
-          return d.toISOString().slice(0, 10);
-        }),
-      ),
-    ];
-
     await Promise.all(
       listings.map(async (l) => {
         // No catch: getWishlistSeries returns an empty series (not a throw)
         // for the legitimate no-data / cross-tenant case, so any throw is a
         // real fault that should surface as a load error.
-        const series = await getWishlistSeries(userId, l.id);
-        wishlistSeriesByListing[l.id] = series;
-        // Per-day deltas are computed SYNCHRONOUSLY from the series we just
-        // loaded (computeWishlistDeltaFromPoints — pure array math), NOT by
-        // re-fetching the series once per day via computeWishlistDelta. Same
-        // numbers, no L×D redundant DB round-trips.
-        const perDay: Record<string, WishlistDelta> = {};
-        for (const day of distinctDays) {
-          perDay[day] = computeWishlistDeltaFromPoints(series.points, day);
-        }
-        deltaByDate[l.id] = perDay;
+        wishlistSeriesByListing[l.id] = await getWishlistSeries(userId, l.id);
       }),
     );
   }
@@ -202,7 +183,6 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
     listings: listings.map(toGameSteamListingDto),
     wishlistSummaries,
     wishlistSeriesByListing,
-    deltaByDate,
     // One server-chosen "now" instant threaded to the chart so the honest
     // D-13 "обновлено Xч назад" caption is computed against the server clock,
     // never the client's new Date() (timezone drift would skew the hours).

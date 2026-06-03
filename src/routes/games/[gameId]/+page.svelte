@@ -61,6 +61,7 @@
   import { startOfDay, dateRangeWindow, parseEventDate } from "$lib/feed/date-range.js";
   import type { DateRangeFilter } from "$lib/feed/url-state.js";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
+  import { computeWishlistDeltaFromPoints } from "$lib/util/wishlist-delta.js";
   import type {
     GameSteamListingDto,
     EventDto,
@@ -153,10 +154,26 @@
   const chartSeriesByListing = $derived(
     data.wishlistSeriesByListing as Record<string, WishlistSeries>,
   );
-  const chartDeltaByDate = $derived(
-    data.deltaByDate as Record<string, Record<string, WishlistDelta>>,
-  );
   const chartListings = $derived(listings.map((l) => ({ id: l.id, name: l.name, appId: l.appId })));
+  // Per-listing, per-day wishlist delta (D-05), built HERE on the client — NOT in
+  // the loader. The day key is each event's LOCAL calendar day (eventDay); the
+  // loader's UTC container can't know the viewer's zone, and a UTC bucket
+  // mismatched this local key, silently dropping the post-event delta for
+  // near-midnight events in a negative-offset zone. Computing it here keeps the
+  // key in lock-step with the local `eventDay` the markers, the crosshair
+  // (axisValueToDay), and the modal all use. Pure array math over the series
+  // points the loader already sent.
+  const chartDeltaByDate = $derived.by((): Record<string, Record<string, WishlistDelta>> => {
+    const days = [...new Set(events.map((e) => eventDay(e)))];
+    const map: Record<string, Record<string, WishlistDelta>> = {};
+    for (const l of chartListings) {
+      const points = chartSeriesByListing[l.id]?.points ?? [];
+      const perDay: Record<string, WishlistDelta> = {};
+      for (const day of days) perDay[day] = computeWishlistDeltaFromPoints(points, day);
+      map[l.id] = perDay;
+    }
+    return map;
+  });
   // One legend chip per listing WITH wishlist data. The swatch `color` is resolved
   // from the FULL `chartListings` (not the filtered subset) because `listingColor`
   // keys by array index and the charts color by the full-array index — resolving it

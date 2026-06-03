@@ -36,6 +36,7 @@
   import FeedDateGroupHeader from "$lib/components/FeedDateGroupHeader.svelte";
   import { m } from "$lib/paraglide/messages.js";
   import { groupEventsByDate } from "$lib/util/group-events-by-date.js";
+  import { isoDay } from "$lib/components/charts/wishlist-chart-shared.js";
   import type { WishlistDelta } from "$lib/server/dto.js";
   import type { CardEventLite } from "$lib/components/feed/parts/derive-card-data.js";
 
@@ -82,9 +83,10 @@
   });
   // Events are ALWAYS grouped under per-day headers (single- AND multi-day),
   // so each day's header can carry its OWN delta and the two read consistently.
-  // Reuses the page's groupEventsByDate helper (UTC YYYY-MM-DD keys — same keys
-  // deltaByDay is keyed by — so a group resolves its day's delta directly).
-  const dayGroups = $derived(groupEventsByDate(events));
+  // Group by LOCAL day (isoDay) — the SAME zone the page keys `deltaByDay` by
+  // (its local `eventDay`), so each group resolves its day's delta directly even
+  // for a near-midnight event in a negative-offset zone (a UTC key would miss it).
+  const dayGroups = $derived(groupEventsByDate(events, (d) => isoDay(d)));
 
   let dialogEl: HTMLDialogElement | undefined = $state();
   // The element focused when the modal opened — focus returns here on close so
