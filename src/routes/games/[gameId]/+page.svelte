@@ -859,8 +859,7 @@
     flex-wrap: wrap;
     gap: var(--s-1);
   }
-  .badge,
-  .chip {
+  .badge {
     font-size: var(--t-12);
     color: var(--text-2);
     background: var(--surface-2);
