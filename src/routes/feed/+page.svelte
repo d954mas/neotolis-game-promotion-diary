@@ -406,28 +406,36 @@
       authorIsMe: boolean;
     }>,
   ): Promise<void> {
-    await fetch(`/api/events/${id}`, {
+    const res = await fetch(`/api/events/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(patch),
     });
+    // On a non-2xx don't pretend success — skip the refresh so the edit stays in
+    // the open modal to retry (a silent "saved" on a failed PATCH is worse).
+    if (!res.ok) return;
     await invalidateAll();
   }
 
   async function onModalDelete(id: string): Promise<void> {
-    await fetch(`/api/events/${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/events/${id}`, { method: "DELETE" });
+    // On failure keep the modal open + the row in place — closing + refreshing
+    // would look like a successful delete when the event is still there.
+    if (!res.ok) return;
     closeDetail();
     await invalidateAll();
   }
 
   async function onModalRestore(id: string): Promise<void> {
-    await fetch(`/api/events/${id}/restore`, { method: "PATCH" });
+    const res = await fetch(`/api/events/${id}/restore`, { method: "PATCH" });
+    if (!res.ok) return;
     closeDetail();
     await invalidateAll();
   }
 
   async function onModalDeleteForever(id: string): Promise<void> {
-    await fetch(`/api/events/${id}?force=true`, { method: "DELETE" });
+    const res = await fetch(`/api/events/${id}?force=true`, { method: "DELETE" });
+    if (!res.ok) return;
     closeDetail();
     await invalidateAll();
   }
