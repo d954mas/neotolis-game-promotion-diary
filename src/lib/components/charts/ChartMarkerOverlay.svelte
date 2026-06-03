@@ -93,6 +93,15 @@
     return (ICON_KINDS.has(kind) ? kind : "post") as IconKind;
   }
 
+  // Grammatically-correct cluster event count: "1 event" (singular) / "N events"
+  // (plural). This inlang plugin has no ICU plural, so the singular is a separate
+  // key picked by branching on count===1 in code.
+  function eventCountLabel(count: number): string {
+    return count === 1
+      ? m.viz_marker_event_count_one({ count })
+      : m.viz_marker_event_count({ count });
+  }
+
   let {
     chart,
     dayGroups,
@@ -334,15 +343,21 @@
   type TooltipRow = { id: string; thumb: string | null; kind: string; title: string; day: string };
 
   function tooltipRows(cl: Cluster): { rows: TooltipRow[]; more: number } {
-    const all = cl.events.map(
-      (e: EventDto): TooltipRow => ({
-        id: e.id,
-        thumb: eventThumbnail(e),
-        kind: e.kind,
-        title: e.title,
-        day: markerDayLabel(e),
-      }),
-    );
+    // Sort NEWEST→OLDEST (descending occurredAt) so the tooltip's event list
+    // matches the feed and the modal (everything else reads new→old). cl.events
+    // arrives in buildDayGroups' ASC order; sort a COPY so the cluster data the
+    // rest of the overlay reads is untouched.
+    const all = [...cl.events]
+      .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime())
+      .map(
+        (e: EventDto): TooltipRow => ({
+          id: e.id,
+          thumb: eventThumbnail(e),
+          kind: e.kind,
+          title: e.title,
+          day: markerDayLabel(e),
+        }),
+      );
     const rows = all.slice(0, MAX_TOOLTIP_ROWS);
     return { rows, more: all.length - rows.length };
   }
@@ -410,7 +425,7 @@
       class:mixed={cl.mixedKind}
       style={`left:${cl.x}px; top:${TOP_BAND_PX}px; --chip-accent:${accent};`}
       data-testid="chart-marker-chip"
-      aria-label={m.viz_marker_event_count({ count: cl.events.length })}
+      aria-label={eventCountLabel(cl.events.length)}
       onclick={() => onSelectCluster(cl.days)}
       onmouseenter={() => (hoveredIndex = i)}
       onmouseleave={() => (hoveredIndex = null)}
@@ -434,7 +449,7 @@
              + day), so a merged multi-day cluster reveals both days distinctly.
              role=tooltip; pointer-events:none so it never steals the hover. -->
         <span class="chip-tooltip" role="tooltip" data-testid="chart-marker-tooltip">
-          <span class="tt-count">{m.viz_marker_event_count({ count: cl.events.length })}</span>
+          <span class="tt-count">{eventCountLabel(cl.events.length)}</span>
           {#each tt.rows as row (row.id)}
             <span class="tt-row">
               {#if row.thumb}

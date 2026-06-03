@@ -273,8 +273,14 @@ export const tooltipEventsHtml: TooltipEvents = (
   const group = dayGroups.find((g) => g.date === day);
   if (!group || group.events.length === 0) return "";
 
-  const rows = group.events.slice(0, TOOLTIP_EVENT_ROWS);
-  const more = group.events.length - rows.length;
+  // Sort NEWEST→OLDEST (descending occurredAt) so the tooltip's event list
+  // matches the feed and the modal (everything else reads new→old). The day's
+  // events arrive in buildDayGroups' input order; sort a COPY before capping.
+  const ordered = [...group.events].sort(
+    (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime(),
+  );
+  const rows = ordered.slice(0, TOOLTIP_EVENT_ROWS);
+  const more = ordered.length - rows.length;
   const px = TOOLTIP_THUMB_PX;
 
   const rowHtml = rows
