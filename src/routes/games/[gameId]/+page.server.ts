@@ -5,7 +5,7 @@ import { listListings, listSoftDeletedListings } from "$lib/server/services/game
 import {
   getWishlistSummary,
   getWishlistSeries,
-  computeWishlistDelta,
+  computeWishlistDeltaFromPoints,
   type WishlistSummary,
   type WishlistSeries,
   type WishlistDelta,
@@ -165,7 +165,7 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   if (view !== "trash" && listings.length > 0) {
     // Distinct event DAYS (D-05): the delta is a DAY attribute — all events
     // on the same game-day share one 24h/7d delta. Truncate each event's
-    // occurredAt to YYYY-MM-DD so we call computeWishlistDelta once per
+    // occurredAt to YYYY-MM-DD so we compute the delta once per
     // (listing, distinct day), not once per event.
     const distinctDays = [
       ...new Set(
@@ -181,13 +181,16 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
         // No catch: getWishlistSeries returns an empty series (not a throw)
         // for the legitimate no-data / cross-tenant case, so any throw is a
         // real fault that should surface as a load error.
-        wishlistSeriesByListing[l.id] = await getWishlistSeries(userId, l.id);
+        const series = await getWishlistSeries(userId, l.id);
+        wishlistSeriesByListing[l.id] = series;
+        // Per-day deltas are computed SYNCHRONOUSLY from the series we just
+        // loaded (computeWishlistDeltaFromPoints — pure array math), NOT by
+        // re-fetching the series once per day via computeWishlistDelta. Same
+        // numbers, no L×D redundant DB round-trips.
         const perDay: Record<string, WishlistDelta> = {};
-        await Promise.all(
-          distinctDays.map(async (day) => {
-            perDay[day] = await computeWishlistDelta(userId, l.id, day);
-          }),
-        );
+        for (const day of distinctDays) {
+          perDay[day] = computeWishlistDeltaFromPoints(series.points, day);
+        }
         deltaByDate[l.id] = perDay;
       }),
     );

@@ -396,15 +396,40 @@ function addDaysIso(isoDate: string, days: number): string {
  *
  * TENANT-SCOPED via getWishlistSeries (eq(wishlistSnapshots.userId, userId)).
  * A cross-tenant listingId yields an empty series → both deltas null (no leak).
+ *
+ * This is the DB-backed entry point: it fetches the (tenant-scoped) series then
+ * delegates the windowed-subtraction math to the PURE
+ * `computeWishlistDeltaFromPoints` below. Callers that ALREADY hold the series
+ * (the /games loader) call the pure helper directly on those points — no
+ * per-day refetch.
  */
 export async function computeWishlistDelta(
   userId: string,
   listingId: string,
   eventDate: string,
 ): Promise<WishlistDelta> {
+  const { points } = await getWishlistSeries(userId, listingId);
+  return computeWishlistDeltaFromPoints(points, eventDate);
+}
+
+/**
+ * PURE windowed-subtraction delta from an ALREADY-LOADED date-ASC cumulative
+ * balance series — no DB, no userId. Same math/numbers as the DB-backed
+ * `computeWishlistDelta` (which delegates here); split out so a caller holding
+ * the series (the /games loader's `wishlistSeriesByListing[id].points`) computes
+ * every event-day's delta synchronously, instead of re-fetching the whole series
+ * once per (listing, day).
+ *
+ * Tenant scoping is the CALLER's responsibility: `points` must come from a
+ * tenant-scoped read (getWishlistSeries). This helper does plain array math on
+ * the points it's handed.
+ */
+export function computeWishlistDeltaFromPoints(
+  points: { date: string; balance: number }[],
+  eventDate: string,
+): WishlistDelta {
   const windowFrom = eventDate;
   const windowTo = addDaysIso(eventDate, 7);
-  const { points } = await getWishlistSeries(userId, listingId);
 
   // baseBalance = balance ON eventDate, else the most recent AT-OR-BEFORE it
   // (cumulative carry-forward). points is date-ASC, so the last point with
