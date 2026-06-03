@@ -381,6 +381,7 @@
   "viz_wishlist_updated_ago": "updated {hours}h ago",
   "viz_delta_24h": "{value} in 24h",
   "viz_delta_7d": "{value} in 7d",
+  "viz_marker_day_select": "Select {day}",
   "viz_marker_event_count": "{count} events",
   "viz_marker_more": "+{count} more",
   "viz_marker_preview_alt": "Event preview",

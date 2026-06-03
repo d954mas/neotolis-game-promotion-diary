@@ -55,6 +55,15 @@
     return KIND_ACCENT_VAR[kind] ?? "var(--k-post)";
   }
 
+  // A YYYY-MM-DD event-day → a compact "May 27" label for a per-day line's
+  // aria-label. Same en short-month format as markerDayLabel (host-locale-stable
+  // for CI). Parsed as a local date (append T00:00) so the day doesn't shift.
+  function dayLabel(day: string): string {
+    const d = new Date(day + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return day;
+    return d.toLocaleDateString("en", { month: "short", day: "numeric" });
+  }
+
   // The KindIcon component only knows a fixed kind union; fall back to "post"
   // for anything outside it so a no-preview chip always renders an icon.
   type IconKind =
@@ -124,10 +133,28 @@
     mixedKind: boolean;
   };
 
+  // One per EVENT-DAY: its x-pixel + the kind that colors its dashed guide line.
+  // The per-day dashed lines are drawn from THIS list (every event-day gets its
+  // own clickable line) — NOT from `clusters` (which only positions the merged
+  // thumbnail cards). Splitting the two is the UAT fix: a day whose card merged
+  // into a neighbour's still has its own line and is directly selectable.
+  type DayPixel = {
+    /** The event-day (YYYY-MM-DD) this line marks. */
+    day: string;
+    /** Center x in CSS px within the chart container. */
+    x: number;
+    /** Day kind (most-recent event's kind) → the line color. */
+    kind: string;
+    /** True when the day itself spans more than one kind → neutral --k-post. */
+    mixedKind: boolean;
+  };
+
   // The computed clusters, recomputed imperatively (the chart instance + its
   // pixel geometry aren't reactive). `version` bumps to force the markup to
   // re-read `clusters` after each layout pass.
   let clusters = $state<Cluster[]>([]);
+  // Per-event-day dashed guide lines (one per day with events).
+  let dayPixels = $state<DayPixel[]>([]);
   // The plot area's BOTTOM y-pixel (the dashed guide line drops from a chip down
   // to here — the axis). Computed from the grid's coordinate-system rect each
   // layout pass; 0 until the chart is built (no line drawn yet).
@@ -163,6 +190,7 @@
     // throws on a disposed chart. isDisposed() is the official guard.
     if (!c || c.isDisposed() || dayGroups.length === 0) {
       clusters = [];
+      dayPixels = [];
       plotBottom = 0;
       return;
     }
@@ -196,9 +224,20 @@
     }
     if (!convertReady) {
       clusters = [];
+      dayPixels = [];
       return;
     }
     placed.sort((a, b) => a.x - b.x);
+
+    // ── Per-day dashed lines ──────────────────────────────────────────────
+    // One line per event-day at its own x-pixel, colored by that day's kind.
+    // These are independent of clustering: even when two days' CARDS merge,
+    // each day keeps its own line (so the user can select the merged-away day).
+    dayPixels = placed.map(({ x, group }): DayPixel => {
+      const kinds = new Set(group.events.map((e) => e.kind));
+      const mixedKind = kinds.size > 1;
+      return { day: group.date, x, kind: mixedKind ? "post" : group.kind, mixedKind };
+    });
 
     // Greedy merge: walk left→right, extend the current cluster while the next
     // day's x is within CLUSTER_PX of the cluster's running center.
@@ -214,7 +253,11 @@
       // Representative kind = the most-recent member day's kind (groups are
       // date-ASC, so the last one).
       const kind = mixedKind ? "post" : groups[groups.length - 1]!.kind;
-      const x = cur.xs.reduce((s, v) => s + v, 0) / cur.xs.length;
+      // Card x = the CENTROID (average) of its member days' x-pixels, so a
+      // merged thumbnail card sits CENTERED between its days' dashed lines —
+      // not offset to the first/leftmost day.
+      const centroid = cur.xs.reduce((s, v) => s + v, 0) / cur.xs.length;
+      const x = centroid;
       out.push({ x, days, events, kind, mixedKind });
       cur = null;
     };
@@ -243,6 +286,7 @@
     const c = chart;
     if (!c) {
       clusters = [];
+      dayPixels = [];
       return;
     }
     const onFinished = (): void => recompute();
@@ -305,22 +349,37 @@
 </script>
 
 <div class="marker-overlay" aria-hidden={clusters.length === 0}>
+  <!-- Per-DAY dashed guide lines: one per event-day at its own x-pixel, colored
+       by that day's kind, dropping from the chip band to the plot bottom (the
+       x-axis). Each line is wrapped in a thin (~10px) TRANSPARENT clickable strip
+       (a button) → onSelectCluster([day]) opens just that single day. So every
+       event-day is marked AND directly selectable even when its thumbnail card
+       merged into a neighbour's (the 27th stays selectable next to the 28th). -->
+  {#if plotBottom > TOP_BAND_PX + CHIP_PX}
+    {#each dayPixels as dp (dp.day)}
+      {@const dayAccent = kindAccent(dp.kind)}
+      <button
+        type="button"
+        class="marker-guide-hit"
+        data-testid="chart-marker-guide-hit"
+        style={`left:${dp.x}px; top:${TOP_BAND_PX + CHIP_PX}px; height:${plotBottom - TOP_BAND_PX - CHIP_PX}px;`}
+        aria-label={m.viz_marker_day_select({ day: dayLabel(dp.day) })}
+        onclick={() => onSelectCluster([dp.day])}
+      >
+        <span
+          class="marker-guide"
+          aria-hidden="true"
+          data-testid="chart-marker-guide"
+          style={`--chip-accent:${dayAccent};`}
+        ></span>
+      </button>
+    {/each}
+  {/if}
+
   {#each clusters as cl, i (cl.days.join(",") + ":" + cl.x)}
     {@const thumb = thumbFor(cl)}
     {@const accent = kindAccent(cl.kind)}
     {@const tt = tooltipRows(cl)}
-    <!-- Dashed vertical guide line dropping from the chip's band to the plot
-         bottom (the x-axis), colored by the cluster's kind. This is the SHARED
-         marker language: the growth chart and the correlation chart now BOTH
-         read as "dashed line + thumbnail/icon chip at top". -->
-    {#if plotBottom > TOP_BAND_PX + CHIP_PX}
-      <span
-        class="marker-guide"
-        aria-hidden="true"
-        data-testid="chart-marker-guide"
-        style={`left:${cl.x}px; top:${TOP_BAND_PX + CHIP_PX}px; height:${plotBottom - TOP_BAND_PX - CHIP_PX}px; --chip-accent:${accent};`}
-      ></span>
-    {/if}
     <button
       type="button"
       class="marker-chip"
@@ -390,18 +449,42 @@
     z-index: 2;
   }
 
-  /* Dashed vertical guide line under each chip, dropping to the plot bottom.
-   * left/top/height are set inline (the pixel layout); translateX(-50%) centers
-   * it on the chip's x-pixel. A thin dashed border-left IS the line; low opacity
-   * so it guides the eye to the axis without competing with the wishlist line. */
-  .marker-guide {
+  /* Per-day clickable hit strip: a ~10px-wide TRANSPARENT button centered on the
+   * day's x-pixel (translateX(-50%)), spanning the plot height. It re-enables
+   * pointer events so tapping anywhere on (or near) the dashed line selects that
+   * single day. left/top/height are set inline (the pixel layout). */
+  .marker-guide-hit {
     position: absolute;
-    width: 0;
+    width: 10px;
+    padding: 0;
+    border: 0;
+    background: transparent;
     transform: translateX(-50%);
+    cursor: pointer;
+    pointer-events: auto;
+    z-index: 1;
+    display: flex;
+    justify-content: center;
+  }
+  .marker-guide-hit:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 0;
+  }
+
+  /* The dashed vertical line itself: a 1.5px dashed border centered inside the
+   * hit strip, dropping to the plot bottom. Low opacity so it guides the eye to
+   * the axis without competing with the wishlist line. */
+  .marker-guide {
+    width: 0;
+    height: 100%;
     border-left: 1.5px dashed var(--chip-accent, var(--k-post));
     opacity: 0.4;
     pointer-events: none;
-    z-index: 1;
+  }
+  @media (hover: hover) {
+    .marker-guide-hit:hover .marker-guide {
+      opacity: 0.7;
+    }
   }
 
   /* A ≥40px rounded tile with a kind-colored border. left/top are set inline
