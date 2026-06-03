@@ -439,10 +439,16 @@ describe("04-12 HTML marker overlay + area/smooth/crosshair + Steam mini-chart r
   });
 
   it("the overlay clusters by SCREEN distance via convertToPixel (source check)", () => {
-    // The pile-up fix: position each day at its x-pixel and MERGE chips within
-    // ~44px. These are the load-bearing mechanics.
+    // The pile-up fix: position each day at its x-pixel and MERGE chips by an
+    // iterative CLOSEST-PAIR pass until every adjacent centroid gap >= CHIP_PX
+    // (no overlap at any zoom). These are the load-bearing mechanics.
     expect(overlaySource).toContain("convertToPixel");
-    expect(overlaySource).toContain("CLUSTER_PX");
+    expect(overlaySource).toContain("CHIP_PX");
+    // Iterative closest-pair (a while loop finding the smallest adjacent gap),
+    // NOT a single left→right anchor pass.
+    expect(overlaySource).toMatch(/while \(nodes\.length/);
+    expect(overlaySource).toContain("minGap");
+    expect(overlaySource).not.toContain("CLUSTER_PX");
     expect(overlaySource).toContain("KindIcon");
   });
 
@@ -1014,10 +1020,12 @@ describe("04-17 kind icon (not a dot) for no-preview tooltip events + one shared
 });
 
 describe("04-18 UX polish: subordinate growth, skeleton, restored highlight, calm lines, lighter area", () => {
-  it("the daily-growth chart is a subordinate strip (~150px, shorter than the 300px headline)", () => {
-    // The growth chart reads as a supporting sub-view: its .chart-canvas height
-    // is ~150px vs the correlation chart's 300px.
-    expect(growthChartSource).toContain("height: 150px");
+  it("both wishlist charts share an equal 300px canvas height (equal peers)", () => {
+    // 04-18 first made the growth chart a subordinate ~150px strip, then the
+    // follow-up fix e9c4328 ("make the two charts equal peers, not subordinate")
+    // restored it to a full 300px so the two read as equal peers — both canvases
+    // reserve the same 300px height.
+    expect(growthChartSource).toContain("height: 300px");
     expect(correlationChartSource).toContain("height: 300px");
   });
 
@@ -1056,49 +1064,6 @@ describe("04-18 UX polish: subordinate growth, skeleton, restored highlight, cal
     unmount(component);
   });
 
-  it("the correlation chart restores a post-event highlight markArea with a RESOLVED rgba (no var/color-mix in canvas)", () => {
-    // The event->effect band is back ON the line: a markArea patched on hover.
-    expect(correlationChartSource).toContain("markArea");
-    expect(correlationChartSource).toContain("resolveAccentRgba");
-    expect(correlationChartSource).toContain("deltaByDate");
-    // resolveAccentRgba returns a concrete rgba(...) (getComputedStyle-resolved),
-    // never a var()/color-mix string the canvas can't read.
-    expect(chartThemeSource).toContain("resolveAccentRgba");
-    expect(chartThemeSource).toMatch(/rgba\(\$\{r\},\$\{g\},\$\{b\},\$\{alpha\}\)/);
-    // No var()/color-mix in the chart's <script> region (canvas option).
-    const script = correlationChartSource.slice(
-      correlationChartSource.indexOf("<script"),
-      correlationChartSource.indexOf("</script>"),
-    );
-    expect(script).not.toContain("var(--");
-    expect(script).not.toContain("color-mix(");
-  });
-
-  it("the overlay reports the hovered day UP (onHoverDay) so the chart can highlight its window", () => {
-    // The chart learns the hovered day from the overlay's onHoverDay callback.
-    expect(overlaySource).toContain("onHoverDay");
-    expect(correlationChartSource).toContain("onHoverDay");
-  });
-
-  it("hovering a chip highlights the post-event window then clears on leave (render check)", async () => {
-    // The markArea band is patched onto the chart on hover and cleared on leave.
-    // The canvas isn't DOM-introspectable, so assert the wiring drives the chart
-    // setOption without throwing (a disposed/not-built guard) across hover/leave.
-    await page.viewport(900, 720);
-    const { root, component } = mountChart(shortSeries);
-    await new Promise((r) => setTimeout(r, 200));
-    flushSync();
-    const chip = root.querySelector('[data-testid="chart-marker-chip"]') as HTMLElement | null;
-    expect(chip).not.toBeNull();
-    chip!.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
-    flushSync();
-    chip!.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
-    flushSync();
-    // No throw + the chart is still alive (the guarded setOption patch worked).
-    expect(root.querySelector("canvas")).not.toBeNull();
-    unmount(component);
-  });
-
   it("the chip row clears the top gridline (grid.top raised for breathing room)", () => {
     // WISHLIST_CHART_GRID.top was 16 (chips collided with the top gridline);
     // raised to 56 so the chip band (8..48px) clears the plot's top line.
@@ -1123,5 +1088,87 @@ describe("04-18 UX polish: subordinate growth, skeleton, restored highlight, cal
     expect(dayModalSource).toContain("showModal");
     expect(dayModalSource).toMatch(/opener|activeElement/);
     expect(dayModalSource).toContain(".focus()");
+  });
+});
+
+describe("04-19 drop the on-line band → tooltip effect line; chips never overlap", () => {
+  it("the on-line highlight band + its hover plumbing are GONE (source check)", () => {
+    // The user dropped the band ("давай без выделения на графике, в тултипе можем
+    // показывать"): no markArea on the line, no onHoverDay wiring on either side,
+    // and the now-unused resolve* canvas-color helpers are no longer imported.
+    expect(correlationChartSource).not.toContain("markArea");
+    expect(correlationChartSource).not.toContain("onHoverDay");
+    expect(overlaySource).not.toContain("onHoverDay");
+    expect(correlationChartSource).not.toContain("resolveAccentRgba");
+    expect(correlationChartSource).not.toContain("resolveTextColor");
+    expect(correlationChartSource).not.toContain("MarkAreaComponent");
+  });
+
+  it("the crosshair tooltip carries a 'in 7d' wishlist-effect line for an event-day", () => {
+    // The effect moved INTO the tooltip: for an event-day with a delta, the
+    // formatter appends "Wishlist effect: +N in 7d ↑/↓/→ · +M in 24h" (signed,
+    // arrowed; null → —). deltaByDate is still threaded so the tooltip can resolve
+    // the day's delta across the visible lines.
+    expect(correlationChartSource).toContain("deltaByDate");
+    expect(correlationChartSource).toContain("Wishlist effect:");
+    expect(correlationChartSource).toContain("in 7d");
+    expect(correlationChartSource).toContain("in 24h");
+    expect(correlationChartSource).toContain("tooltipEffectHtml");
+    // Sign + direction arrow by value (signedDelta), null → em dash.
+    expect(correlationChartSource).toMatch(/signedDelta/);
+    expect(correlationChartSource).toContain("—");
+    // Still no var()/color-mix in the chart's <script> region (canvas option).
+    const script = correlationChartSource.slice(
+      correlationChartSource.indexOf("<script"),
+      correlationChartSource.indexOf("</script>"),
+    );
+    expect(script).not.toContain("var(--");
+    expect(script).not.toContain("color-mix(");
+  });
+
+  it("chips NEVER overlap at a zoomed-out (Year-like) viewport: adjacent centers >= chip width", async () => {
+    // The "Year" pile-up the user still saw: many event-days squeezed into a
+    // narrow plot. The iterative closest-pair merge guarantees no two final chips
+    // are closer than a chip width (~40px) — so chips can't visually overlap.
+    // Eight event-days across ~2 weeks at a NARROW viewport forces the collision.
+    const manyDayEvents = Array.from({ length: 8 }, (_, i) => ({
+      ...baseEvents[0]!,
+      id: `y${i}`,
+      externalId: `y${i}v`,
+      occurredAt: new Date(`2026-05-${String(10 + i).padStart(2, "0")}T08:00:00Z`),
+    }));
+    await page.viewport(380, 600);
+    const component = mount(WishlistCorrelationChart, {
+      target: host,
+      props: {
+        seriesByListing: { l1: shortSeries },
+        events: manyDayEvents,
+        listings: baseListings,
+        today: TODAY,
+        range: null,
+        visible: {},
+        deltaByDate,
+        onSelectCluster: vi.fn(),
+      },
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    flushSync();
+    const root = host.querySelector(
+      '[data-testid="wishlist-correlation-chart"]',
+    ) as HTMLElement;
+    const chips = [...root.querySelectorAll('[data-testid="chart-marker-chip"]')] as HTMLElement[];
+    // The chart laid out at least one chip (the overlay computed pixel positions).
+    expect(chips.length).toBeGreaterThan(0);
+    const centers = chips
+      .map((el) => el.getBoundingClientRect())
+      .map((r) => r.left + r.width / 2)
+      .sort((a, b) => a - b);
+    // Every adjacent pair of chip centers is at least ~one chip width apart (38px,
+    // a 2px tolerance under the 40px CHIP_PX threshold for sub-pixel rounding) →
+    // the chips' 40px footprints don't overlap.
+    for (let i = 1; i < centers.length; i++) {
+      expect(centers[i]! - centers[i - 1]!).toBeGreaterThanOrEqual(38);
+    }
+    unmount(component);
   });
 });
