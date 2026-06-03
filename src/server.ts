@@ -15,6 +15,9 @@
 // env / logger imports keeps the resolver order set even if a downstream
 // module fires an outbound fetch at module-load time.
 import "./lib/server/integrations/dns-bootstrap.js";
+// Force HTTP/1.1 on all outbound fetch (no h2) so an idle keep-alive socket the
+// upstream closes can't escape to uncaughtException. Set before any fetch.
+import "./lib/server/integrations/undici-bootstrap.js";
 import { env } from "./lib/server/config/env.js";
 import { logger } from "./lib/server/logger.js";
 import { registerCrashHandlers } from "./lib/server/crash-handlers.js";

@@ -83,11 +83,21 @@ const BURST_THRESHOLD = 3;
 // every redditFetch (keep-alive is what makes residential-proxy latency
 // tolerable — TCP+TLS handshake per call would dominate).
 // Empty/unset env var → null → direct fetch (self-host parity).
+//
+// allowH2:false forces HTTP/1.1 to the proxy/origin. undici negotiates h2 by
+// default; an idle keep-alive h2 connection the proxy closes makes undici emit
+// a SocketError on the h2 session-end (client-h2.js onHttp2SocketEnd) with NO
+// in-flight request — so it escapes the redditFetch try/catch below and reaches
+// process 'uncaughtException', crashing the worker (~2×/day on the flaky
+// Webshare proxy). h1 drops an idle-closed socket from the pool gracefully (the
+// next reuse rejects inside the awaited fetch). Reddit/the proxy support h1;
+// h2 multiplexing is irrelevant at the 10 req/min ceiling.
+export const REDDIT_PROXY_AGENT_OPTIONS = { allowH2: false } as const;
 let cachedProxyAgent: ProxyAgent | null = null;
 function getProxyDispatcher(): ProxyAgent | null {
   if (!env.REDDIT_PROXY_URL) return null;
   if (cachedProxyAgent === null) {
-    cachedProxyAgent = new ProxyAgent(env.REDDIT_PROXY_URL);
+    cachedProxyAgent = new ProxyAgent({ uri: env.REDDIT_PROXY_URL, ...REDDIT_PROXY_AGENT_OPTIONS });
     logger.info(
       { proxyHost: new URL(env.REDDIT_PROXY_URL).host },
       "reddit outbound proxy configured",

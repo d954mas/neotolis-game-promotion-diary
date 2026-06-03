@@ -14,6 +14,7 @@ import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "./schema/index.js";
 import { env } from "../config/env.js";
+import { logger } from "../logger.js";
 
 const POOL_MAX_BY_ROLE: Record<typeof env.APP_ROLE, number> = {
   app: 10,
@@ -25,6 +26,16 @@ export const pool = new Pool({
   connectionString: env.DATABASE_URL,
   max: POOL_MAX_BY_ROLE[env.APP_ROLE],
   idleTimeoutMillis: 30_000,
+});
+
+// node-postgres emits 'error' on an IDLE pooled client whose backend connection
+// drops (DB restart, network blip, server-side idle kill). Without a listener pg
+// re-throws it as an uncaughtException — crashing the process for an event the
+// pool already recovers from (it discards the dead client; the next checkout
+// opens a fresh one). Log and let the pool heal. An ACTIVE query's error still
+// rejects that query's promise as before — this covers only idle clients.
+pool.on("error", (err) => {
+  logger.error({ err }, "pg idle client error — pool will discard and reconnect");
 });
 
 export const db = drizzle(pool, { schema });
