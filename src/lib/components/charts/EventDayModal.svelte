@@ -10,22 +10,24 @@
   // the modal accepts a SET of days, not a single day).
   //
   // Layout top→bottom:
-  //   1. Stats header — the total event count across the cluster's days. When
-  //      the cluster is exactly ONE day, it also shows that day's wishlist delta
-  //      (number + direction arrow, the D-05 day-level delta). For a multi-day
-  //      cluster a single delta would be ambiguous (which day?), so only the
-  //      count is shown. The delta is a DAY attribute: every event that day
-  //      shares it; per-event wishlist deltas are NEVER claimed.
-  //   2. The days' events as <FeedCard> rows — same vocabulary as /feed, wired
-  //      with the exact props the page's events list uses (event/source/game/
-  //      games). Reusing FeedCard (instead of a bespoke row) keeps one card
-  //      definition.
+  //   1. Stats header — the total event count across the cluster's days.
+  //   2. The days' events as <FeedCard> rows under per-day <FeedDateGroupHeader>s
+  //      — same vocabulary as /feed, wired with the exact props the page's events
+  //      list uses (event/source/game/games). Reusing FeedCard (instead of a
+  //      bespoke row) keeps one card definition. EACH day's group header carries
+  //      that day's wishlist delta (number + direction arrow, the D-05 day-level
+  //      delta) so it shows CONSISTENTLY whether the cluster holds one day or
+  //      several. The delta is a DAY attribute: every event that day shares it;
+  //      per-event wishlist deltas are NEVER claimed. A day with no anchored
+  //      snapshot shows no delta (consistently, never a stale guess).
   //
   // 04-13: a MULTI-day cluster (e.g. 27 merged with 28 on the axis) groups its
   // events under per-day <FeedDateGroupHeader>s — the SAME date separators the
   // page's events list uses — so 27 and 28 are visually distinct and individually
-  // actionable even though they collapsed into one chip. A single-day cluster
-  // renders the flat list (no redundant header) and keeps its delta block.
+  // actionable even though they collapsed into one chip.
+  // 04-16: a single-day cluster ALSO renders the per-day header (with its delta)
+  // so single- and multi-day modals are visually consistent — the user reported
+  // the delta showing on some days but not others.
   //
   // Esc / backdrop / close button all call onClose. prefers-reduced-motion
   // gates the backdrop blur transition (via the shared dialog backdrop).
@@ -44,7 +46,7 @@
     open,
     days,
     events,
-    delta,
+    deltaByDay,
     sourceById,
     gameById,
     games,
@@ -55,9 +57,11 @@
     days: string[];
     /** Those days' events (already filtered by the page). */
     events: CardEventLite[];
-    /** The day-level wishlist delta (D-05) for a SINGLE-day cluster, or null
-     *  (multi-day cluster, or no snapshot anchors it). */
-    delta: WishlistDelta | null;
+    /** Per-day day-level wishlist delta (D-05), keyed by YYYY-MM-DD. A day with
+     *  no anchored snapshot maps to null (its header shows no delta). Each day's
+     *  group header reads its OWN delta from here, so the delta shows
+     *  consistently for both single- and multi-day clusters. */
+    deltaByDay: Record<string, WishlistDelta | null>;
     sourceById: Map<string, SourceLite>;
     gameById: Map<string, GameLite>;
     games: GameLite[];
@@ -70,12 +74,10 @@
     if (days.length === 1) return days[0]!;
     return `${days[0]!} → ${days[days.length - 1]!}`;
   });
-  // The delta block only makes sense for a single day (which day's delta?).
-  const showDelta = $derived(days.length === 1);
-  // A multi-day cluster groups events under per-day headers so 27 and 28 stay
-  // distinct; a single-day cluster renders the flat list. Reuses the page's
-  // groupEventsByDate helper (date-DESC iteration, same as the events feed).
-  const isMultiDay = $derived(days.length > 1);
+  // Events are ALWAYS grouped under per-day headers (single- AND multi-day),
+  // so each day's header can carry its OWN delta and the two read consistently.
+  // Reuses the page's groupEventsByDate helper (UTC YYYY-MM-DD keys — same keys
+  // deltaByDay is keyed by — so a group resolves its day's delta directly).
   const dayGroups = $derived(groupEventsByDate(events));
 
   let dialogEl: HTMLDialogElement | undefined = $state();
@@ -97,6 +99,14 @@
   function arrow(n: number | null): string {
     if (n === null || n === 0) return "→";
     return n > 0 ? "↑" : "↓";
+  }
+  // Grammatically-correct event count: "1 event" (singular) / "N events"
+  // (plural). This inlang plugin has no ICU plural, so the singular is a
+  // separate key picked by branching on count===1 in code.
+  function eventCountLabel(count: number): string {
+    return count === 1
+      ? m.viz_day_modal_event_count_one({ count })
+      : m.viz_day_modal_event_count({ count });
   }
 </script>
 
@@ -122,42 +132,32 @@
       <button type="button" class="modal-close" onclick={onClose} aria-label="Close">×</button>
     </header>
 
-    <!-- Stats header: the total event count; plus the DAY's delta (number +
-         arrow) ONLY for a single-day cluster (a multi-day delta is ambiguous). -->
+    <!-- Stats header: the total event count (singular "1 event" / plural). -->
     <div class="day-stats" data-testid="day-stats">
-      {#if showDelta}
-        <div class="day-delta">
-          <span class="day-delta-7d">
-            {m.viz_delta_7d({ value: signed(delta?.delta7d ?? null) })}
-            <span class="day-delta-arrow" aria-hidden="true">{arrow(delta?.delta7d ?? null)}</span>
-          </span>
-          <span class="day-delta-24h">
-            {m.viz_delta_24h({ value: signed(delta?.delta24h ?? null) })}
-          </span>
-        </div>
-      {/if}
-      <span class="day-event-count">{m.viz_day_modal_event_count({ count: events.length })}</span>
+      <span class="day-event-count">{eventCountLabel(events.length)}</span>
     </div>
 
-    <!-- The day's events as feed cards (same wiring as the page's events list).
-         Multi-day cluster → grouped under per-day <FeedDateGroupHeader>s so each
-         merged day (27 vs 28) reads as its own actionable section; single-day →
-         a flat list (no redundant header). -->
-    <div class="event-cards" class:grouped={isMultiDay}>
-      {#if isMultiDay}
-        {#each dayGroups as group (group.date)}
-          <FeedDateGroupHeader occurredAt={group.occurredAt} count={group.rows.length} />
-          {#each group.rows as ev (ev.id)}
-            <FeedCard
-              event={ev}
-              source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
-              game={ev.gameIds.length > 0 ? (gameById.get(ev.gameIds[0]!) ?? null) : null}
-              {games}
-            />
-          {/each}
-        {/each}
-      {:else}
-        {#each events as ev (ev.id)}
+    <!-- The cluster's events as feed cards (same wiring as the page's events
+         list), ALWAYS grouped under per-day <FeedDateGroupHeader>s so each day
+         (single OR multi) reads as its own section AND carries its OWN wishlist
+         delta (number + arrow) — consistent whether the cluster holds one day or
+         several. A day with no anchored delta shows no delta block (consistently). -->
+    <div class="event-cards grouped">
+      {#each dayGroups as group (group.date)}
+        {@const dayDelta = deltaByDay[group.date] ?? null}
+        <FeedDateGroupHeader occurredAt={group.occurredAt} count={group.rows.length} />
+        {#if dayDelta && (dayDelta.delta7d !== null || dayDelta.delta24h !== null)}
+          <span class="day-delta" data-testid="day-delta">
+            <span class="day-delta-7d">
+              {m.viz_delta_7d({ value: signed(dayDelta.delta7d) })}
+              <span class="day-delta-arrow" aria-hidden="true">{arrow(dayDelta.delta7d)}</span>
+            </span>
+            <span class="day-delta-24h">
+              {m.viz_delta_24h({ value: signed(dayDelta.delta24h) })}
+            </span>
+          </span>
+        {/if}
+        {#each group.rows as ev (ev.id)}
           <FeedCard
             event={ev}
             source={ev.sourceId ? (sourceById.get(ev.sourceId) ?? null) : null}
@@ -165,7 +165,7 @@
             {games}
           />
         {/each}
-      {/if}
+      {/each}
     </div>
   </div>
 </dialog>
@@ -260,24 +260,29 @@
     color: var(--text);
   }
 
-  /* Stats header — day delta block (number + arrow) alongside the event count. */
+  /* Stats header — total event count for the cluster. */
   .day-stats {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-end;
     gap: var(--s-3);
     padding: var(--s-3) var(--s-4);
     border-bottom: 1px solid var(--border-hairline);
     flex-shrink: 0;
   }
+  /* Per-day wishlist delta (number + arrow), rendered as its own row directly
+   * UNDER each day's sticky FeedDateGroupHeader — so the delta reads CONSISTENTLY
+   * for every day (single- and multi-day clusters alike). Pulled up to hug the
+   * header (the .event-cards gap would otherwise float it). */
   .day-delta {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    align-items: baseline;
+    gap: var(--s-3);
     min-width: 0;
+    margin-top: calc(-1 * var(--s-3));
   }
   .day-delta-7d {
-    font-size: var(--t-18, 18px);
+    font-size: var(--t-15, 15px);
     font-weight: var(--w-sb);
     color: var(--text);
     font-variant-numeric: tabular-nums;
@@ -286,7 +291,7 @@
     gap: 6px;
   }
   .day-delta-arrow {
-    font-size: var(--t-15, 15px);
+    font-size: var(--t-13);
   }
   .day-delta-24h {
     font-size: var(--t-13);

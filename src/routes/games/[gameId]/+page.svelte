@@ -228,18 +228,29 @@
     const set = new Set(selectedChartDays);
     return events.filter((e) => set.has(eventDay(e)));
   });
-  // The day-level delta (D-05) — only meaningful for a SINGLE-day cluster (which
-  // day's delta otherwise?). The first VISIBLE listing's delta for that day,
-  // falling back across visible listings (mirrors the charts' selection logic).
-  const selectedDayDelta = $derived.by((): WishlistDelta | null => {
-    if (selectedChartDays.length !== 1) return null;
-    const day = selectedChartDays[0]!;
-    for (const l of chartListings) {
-      if (chartVisible[l.id] === false) continue;
-      const d = chartDeltaByDate[l.id]?.[day];
-      if (d) return d;
+  // The day-level delta (D-05) PER day in the selected cluster, so the modal
+  // shows EACH day's 24h/7d delta consistently (single- AND multi-day clusters —
+  // a multi-day cluster groups events by day, and each day owns its own delta).
+  // For each selected day, resolve the first VISIBLE listing's delta for that day
+  // (falling back across visible listings — mirrors the charts' selection logic);
+  // a day with no anchored snapshot maps to null (the modal then shows nothing
+  // for that day). Honest attribution: this is the DAY-level delta (D-05), shared
+  // by every event that day — never a per-event wishlist delta.
+  const selectedDeltaByDay = $derived.by((): Record<string, WishlistDelta | null> => {
+    const out: Record<string, WishlistDelta | null> = {};
+    for (const day of selectedChartDays) {
+      let resolved: WishlistDelta | null = null;
+      for (const l of chartListings) {
+        if (chartVisible[l.id] === false) continue;
+        const d = chartDeltaByDate[l.id]?.[day];
+        if (d) {
+          resolved = d;
+          break;
+        }
+      }
+      out[day] = resolved;
     }
-    return null;
+    return out;
   });
 
   // Trash view: per-card Restore.
@@ -635,7 +646,7 @@
     open={selectedChartDays.length > 0}
     days={selectedChartDays}
     events={selectedDayEvents}
-    delta={selectedDayDelta}
+    deltaByDay={selectedDeltaByDay}
     {sourceById}
     {gameById}
     games={allGames}
