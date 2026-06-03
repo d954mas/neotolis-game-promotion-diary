@@ -605,7 +605,11 @@
     }
   }
 
-  /* A ≥40px rounded tile with a kind-colored border. left/top are set inline
+  /* A 40px rounded tile with a kind-colored border — but a >=44px TAP TARGET.
+   * The VISUAL tile stays 40px (the clustering threshold CHIP_PX=40 guarantees
+   * 40px tiles never overlap); a transparent ::before ring extends the clickable
+   * box to 44x44 (centered on the tile) so the chip is comfortably tappable on
+   * mobile (#9) WITHOUT growing the visible footprint. left/top are set inline
    * (the pixel layout); translateX(-50%) centers the chip on its x-pixel. */
   .marker-chip {
     position: absolute;
@@ -626,16 +630,32 @@
     justify-content: center;
     transition:
       transform var(--m-fast) var(--m-ease),
-      box-shadow var(--m-fast) var(--m-ease);
+      box-shadow var(--m-fast) var(--m-ease),
+      border-color var(--m-fast) var(--m-ease);
+  }
+  /* >=44px tap target: a transparent ring extending 2px past every edge of the
+   * 40px tile (40 + 2*2 = 44px) so a tap that lands just outside the tile still
+   * opens the day modal. Pure hit-area — no paint. */
+  .marker-chip::before {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: var(--r-md);
   }
   @media (hover: hover) {
     .marker-chip:hover {
       transform: translateX(-50%) translateY(-2px);
       box-shadow: var(--shadow-elev);
+      border-color: var(--chip-accent, var(--k-post));
     }
   }
+  /* Discoverability affordance (#3): on hover/focus the accent outline + lift
+   * make the tile clearly read as a pressable button. */
+  .marker-chip:hover,
   .marker-chip:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--chip-accent, var(--k-post));
     outline-offset: 2px;
   }
 
@@ -786,6 +806,7 @@
       transition: none;
     }
     @media (hover: hover) {
+      /* Keep the accent outline affordance, drop the lift transform. */
       .marker-chip:hover {
         transform: translateX(-50%);
       }
