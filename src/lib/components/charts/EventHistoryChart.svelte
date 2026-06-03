@@ -27,12 +27,26 @@
   import { GridComponent, TooltipComponent, LegendComponent } from "echarts/components";
   import { CanvasRenderer } from "echarts/renderers";
   import { m } from "$lib/paraglide/messages.js";
-  import { baseChartOptions, prefersReducedMotion, resolveKindColor } from "./chart-theme.js";
+  import { baseChartOptions, prefersReducedMotion } from "./chart-theme.js";
+  import { abbreviate } from "./abbreviate.js";
   import type { EventMetricSeries } from "$lib/sources/adapter.js";
 
   use([LineChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
 
-  let { series, kind }: { series: EventMetricSeries[]; kind: string } = $props();
+  let { series, kind: _kind }: { series: EventMetricSeries[]; kind: string } = $props();
+
+  // Each metric (views / likes / comments …) gets a DISTINCT color so the lines
+  // and the (toggleable) legend swatches are tellable apart — they used to all
+  // share the single kind color, which made the chart + legend unreadable.
+  const METRIC_COLORS = ["#5b8def", "#e0a458", "#5fb98e", "#c25b9e", "#7d6ad6"];
+
+  // A polled-at timestamp → a compact "May 12" axis/tooltip label.
+  function dateLabel(value: unknown): string {
+    const d = new Date(value as string | number);
+    return Number.isNaN(d.getTime())
+      ? String(value)
+      : d.toLocaleDateString("en", { month: "short", day: "numeric" });
+  }
 
   // Paraglide exposes each key as a zero-arg message fn. labelKey is a
   // runtime string handle (e.g. "chart_metric_views"); index into the m
@@ -53,26 +67,54 @@
   // SSR. The {#if typeof window} guard ensures this never runs server-side.
   const options = $derived.by(() => {
     if (typeof window === "undefined") return {};
-    const color = resolveKindColor(kind);
     const reducedMotion = prefersReducedMotion();
+    const base = baseChartOptions({ reducedMotion });
     return {
-      ...baseChartOptions({ reducedMotion }),
-      legend: { type: "scroll" as const },
+      ...base,
+      // Room at the top for the legend + at the bottom for the date labels.
+      grid: { left: 8, right: 12, top: 34, bottom: 8, containLabel: true },
+      legend: { type: "scroll" as const, top: 0, icon: "roundRect" as const },
+      tooltip: {
+        trigger: "axis" as const,
+        formatter: (raw: unknown): string => {
+          const params = (Array.isArray(raw) ? raw : [raw]) as Array<{
+            marker?: string;
+            seriesName?: string;
+            value?: unknown;
+            axisValue?: unknown;
+          }>;
+          if (params.length === 0) return "";
+          const head = `<div style="font-weight:600;margin-bottom:4px;">${dateLabel(params[0]?.axisValue)}</div>`;
+          const rows = params
+            .map((p) => {
+              const v = Array.isArray(p.value) ? p.value[1] : p.value;
+              const num = typeof v === "number" ? abbreviate(v) : "—";
+              return `<div style="display:flex;align-items:center;gap:8px;"><span>${p.marker ?? ""}${p.seriesName ?? ""}</span><span style="margin-left:auto;font-variant-numeric:tabular-nums;">${num}</span></div>`;
+            })
+            .join("");
+          return `<div style="min-width:120px;">${head}${rows}</div>`;
+        },
+      },
       xAxis: {
         type: "time" as const,
+        axisLabel: { formatter: (v: number): string => dateLabel(v), hideOverlap: true },
       },
-      series: series.map((s) => ({
-        name: label(s.labelKey),
-        type: "line" as const,
-        showSymbol: true,
-        symbol: "circle" as const,
-        symbolSize: lowData ? 8 : 5,
-        // D-07: hide the connecting line in the low-data branch so two
-        // points never read as a trend; only the dots remain.
-        lineStyle: lowData ? { opacity: 0 } : { color, width: 2 },
-        itemStyle: { color },
-        data: s.points.map((p) => [p.polledAt, p.value]),
-      })),
+      series: series.map((s, i) => {
+        const color = METRIC_COLORS[i % METRIC_COLORS.length]!;
+        return {
+          name: label(s.labelKey),
+          type: "line" as const,
+          smooth: true,
+          showSymbol: true,
+          symbol: "circle" as const,
+          symbolSize: lowData ? 8 : 4,
+          // D-07: hide the connecting line in the low-data branch so two points
+          // never read as a trend; only the dots remain.
+          lineStyle: lowData ? { opacity: 0 } : { color, width: 2 },
+          itemStyle: { color },
+          data: s.points.map((p) => [p.polledAt, p.value]),
+        };
+      }),
     };
   });
 </script>
