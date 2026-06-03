@@ -346,6 +346,26 @@
     const rows = all.slice(0, MAX_TOOLTIP_ROWS);
     return { rows, more: all.length - rows.length };
   }
+
+  // ── Forward a per-day line hover to the chart's axis tooltip ──────────────
+  // Pointing at (or focusing) a dashed line surfaces the SAME enriched crosshair
+  // tooltip the chart shows on its plot — so the user sees that day's events +
+  // wishlist values by pointing at the line. dispatchAction({type:'showTip'})
+  // with the day's x-pixel + a y inside the plot drives the axis tooltip; leaving
+  // hides it. Guard a disposed/absent instance (HMR / unmount races).
+  function showTipAt(x: number): void {
+    const c = chart;
+    if (!c || c.isDisposed()) return;
+    // A y near the middle of the plot band so the axisPointer lands on the plot.
+    const y = Math.max(TOP_BAND_PX + CHIP_PX, (TOP_BAND_PX + CHIP_PX + plotBottom) / 2);
+    c.dispatchAction({ type: "showTip", x, y });
+  }
+
+  function hideTip(): void {
+    const c = chart;
+    if (!c || c.isDisposed()) return;
+    c.dispatchAction({ type: "hideTip" });
+  }
 </script>
 
 <div class="marker-overlay" aria-hidden={clusters.length === 0}>
@@ -365,6 +385,10 @@
         style={`left:${dp.x}px; top:${TOP_BAND_PX + CHIP_PX}px; height:${plotBottom - TOP_BAND_PX - CHIP_PX}px;`}
         aria-label={m.viz_marker_day_select({ day: dayLabel(dp.day) })}
         onclick={() => onSelectCluster([dp.day])}
+        onmouseenter={() => showTipAt(dp.x)}
+        onmouseleave={hideTip}
+        onfocus={() => showTipAt(dp.x)}
+        onblur={hideTip}
       >
         <span
           class="marker-guide"
@@ -449,13 +473,14 @@
     z-index: 2;
   }
 
-  /* Per-day clickable hit strip: a ~10px-wide TRANSPARENT button centered on the
+  /* Per-day clickable hit strip: a ~16px-wide TRANSPARENT button centered on the
    * day's x-pixel (translateX(-50%)), spanning the plot height. It re-enables
-   * pointer events so tapping anywhere on (or near) the dashed line selects that
-   * single day. left/top/height are set inline (the pixel layout). */
+   * pointer events so tapping/hovering anywhere on (or near) the dashed line
+   * selects that day AND forwards the hover to the chart's axis tooltip. Widened
+   * 10 -> 16px for an easier hover/click target. left/top/height inline. */
   .marker-guide-hit {
     position: absolute;
-    width: 10px;
+    width: 16px;
     padding: 0;
     border: 0;
     background: transparent;
@@ -471,19 +496,20 @@
     outline-offset: 0;
   }
 
-  /* The dashed vertical line itself: a 1.5px dashed border centered inside the
-   * hit strip, dropping to the plot bottom. Low opacity so it guides the eye to
-   * the axis without competing with the wishlist line. */
+  /* The dashed vertical line itself: a 3px dashed border centered inside the
+   * hit strip, dropping to the plot bottom. Heavier weight (1.5 -> 3px) so the
+   * guide reads clearly; low opacity so it still doesn't compete with the
+   * wishlist line. */
   .marker-guide {
     width: 0;
     height: 100%;
-    border-left: 1.5px dashed var(--chip-accent, var(--k-post));
-    opacity: 0.4;
+    border-left: 3px dashed var(--chip-accent, var(--k-post));
+    opacity: 0.45;
     pointer-events: none;
   }
   @media (hover: hover) {
     .marker-guide-hit:hover .marker-guide {
-      opacity: 0.7;
+      opacity: 0.75;
     }
   }
 
