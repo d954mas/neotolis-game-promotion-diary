@@ -15,6 +15,7 @@ import {
   isImageLikeUrl,
   readMediaUrlFromMetadata,
 } from "$lib/components/feed/parts/derive-card-data.js";
+import { kindIconSvg } from "$lib/components/kind-icon-svg.js";
 import type { EventDto } from "$lib/server/dto.js";
 
 /** A single Steam listing as the charts need it (id + display name / appId). */
@@ -201,12 +202,13 @@ export function markerDayLabel(e: { occurredAt: Date | string }): string {
 
 /**
  * Kind → concrete hex color, mirroring the `--k-*` tokens in app.css. The
- * crosshair axis tooltip's event rows render an inline colored dot for no-preview
- * events; that HTML is built here (a pure string builder, no Svelte/DOM context)
- * so a CONCRETE hex is required — a `var(--k-*)` would not resolve in this
- * string-building path the way it does inside a component's <style>. Kept in
- * lock-step with app.css's `--k-*` palette (one map, the single source for the
- * tooltip's dot colors). Mixed-kind / unknown → the neutral post grey.
+ * crosshair axis tooltip's no-preview event rows render the kind icon on a
+ * kind-colored TILE (this hex is the tile background); that HTML is built here (a
+ * pure string builder, no Svelte/DOM context) so a CONCRETE hex is required — a
+ * `var(--k-*)` would not resolve in this string-building path the way it does
+ * inside a component's <style>. Kept in lock-step with app.css's `--k-*` palette
+ * (one map, the single source for the tooltip's tile colors). Mixed-kind /
+ * unknown → the neutral post grey.
  */
 const KIND_HEX: Record<string, string> = {
   youtube_video: "#e0625c",
@@ -257,7 +259,9 @@ const TOOLTIP_THUMB_PX = 28;
  * The two wishlist charts share ONE axis tooltip whose formatter renders the
  * date + each visible listing's value; this appends "what happened that day" —
  * each event of `day` as a row: a ~28px `<img>` thumbnail (`eventThumbnail`) or,
- * when no preview, a small kind-colored dot, followed by the HTML-escaped title.
+ * when no preview, the KIND ICON on a kind-colored tile (`kindIconSvg`, white
+ * icon — the same large-icon look as the no-preview marker chips at the top of
+ * the chart, NOT a plain dot), followed by the HTML-escaped title.
  * Capped at TOOLTIP_EVENT_ROWS rows, the rest folded into a "+K" line. Returns
  * "" when the day has no events (the tooltip then shows only the numbers).
  *
@@ -289,7 +293,7 @@ export const tooltipEventsHtml: TooltipEvents = (
       const thumb = eventThumbnail(e);
       const media = thumb
         ? `<img src="${escapeTooltipHtml(thumb)}" alt="" width="${px}" height="${px}" style="width:${px}px;height:${px}px;border-radius:4px;object-fit:cover;display:block;flex-shrink:0;" loading="lazy" />`
-        : `<span style="width:${px}px;height:${px}px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="width:10px;height:10px;border-radius:50%;background:${kindHex(e.kind)};display:block;"></span></span>`;
+        : `<span style="width:${px}px;height:${px}px;border-radius:6px;background:${kindHex(e.kind)};display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">${kindIconSvg(e.kind, { size: 18, color: "#fff" })}</span>`;
       return `<div style="display:flex;align-items:center;gap:8px;margin-top:4px;max-width:240px;"><span>${media}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${title}</span></div>`;
     })
     .join("");
