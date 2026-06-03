@@ -753,6 +753,8 @@ describe("paraglide i18n", () => {
       "toast_saved",
       "toast_source_deleted_forever",
       "toast_source_restored",
+      "viz_axis_growth",
+      "viz_axis_wishlists",
       "viz_day_events_title",
       "viz_day_modal_event_count",
       "viz_day_modal_event_count_one",

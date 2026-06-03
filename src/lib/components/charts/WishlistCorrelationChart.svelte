@@ -452,6 +452,13 @@
       },
       yAxis: {
         type: "value" as const,
+        // Label the Y-axis unit (#6) so the numbers have meaning. A concrete
+        // muted rgba (NEVER a var()/color-mix the canvas can't resolve); sits
+        // above the axis (nameLocation:"end") with a small gap so it doesn't clip.
+        name: m.viz_axis_wishlists(),
+        nameLocation: "end" as const,
+        nameGap: 12,
+        nameTextStyle: { color: "rgba(148,148,148,0.85)", fontSize: 11, align: "left" as const },
         axisLabel: { formatter: (v: number): string => abbreviate(v) },
       },
       series: lineSeries.length > 0 ? lineSeries : [anchorSeries],

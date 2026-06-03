@@ -396,6 +396,8 @@
   "viz_legend_aria": "Toggle wishlist listings on the charts",
   "viz_growth_title": "Daily wishlist growth",
   "viz_growth_low_data": "Not enough data — daily growth appears after a second import",
+  "viz_axis_wishlists": "Wishlists",
+  "viz_axis_growth": "New/day",
   "steam_listing_wishlist_chart_low_data": "Not enough data — the chart appears after the next import",
   "source_detail_settings_title": "Settings",
   "source_detail_settings_auto_import": "Auto-import (poll every 6 hours)",

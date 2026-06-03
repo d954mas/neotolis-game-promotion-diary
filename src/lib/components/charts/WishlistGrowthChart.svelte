@@ -306,6 +306,12 @@
       },
       yAxis: {
         type: "value" as const,
+        // Label the Y-axis unit (#6): "New/day" net change. Concrete muted rgba
+        // (NEVER a var()/color-mix on the canvas); above the axis with a small gap.
+        name: m.viz_axis_growth(),
+        nameLocation: "end" as const,
+        nameGap: 12,
+        nameTextStyle: { color: "rgba(148,148,148,0.85)", fontSize: 11, align: "left" as const },
         axisLabel: { formatter: (v: number): string => abbreviate(v) },
       },
       series: barSeries.length > 0 ? barSeries : [anchorSeries],
