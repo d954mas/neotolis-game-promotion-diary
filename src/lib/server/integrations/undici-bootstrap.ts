@@ -19,6 +19,18 @@
 // module cache dedupes the single setGlobalDispatcher call. Server-only by
 // placement under $lib/server/. Only `allowH2` is overridden; every other undici
 // Agent default (keep-alive timeouts, pool sizing) is preserved.
+//
+// MAINTAINER NOTE — this REPLACES the entire global dispatcher (undici has no
+// compose), and it runs very early at module load. Any future code that also
+// installs a global dispatcher must account for the ordering and preserve the
+// allowH2:false intent, or it silently reintroduces the worker-crash bug:
+//   - env outbound proxy (honoring HTTP(S)_PROXY): build it with
+//     `new ProxyAgent({ uri, ...GLOBAL_UNDICI_OPTIONS })` and run it AFTER this
+//     bootstrap (it intentionally supersedes this Agent, keeping allowH2:false).
+//   - MockAgent in tests: call `setGlobalDispatcher(mockAgent)` AFTER the import
+//     that pulls in this module, else this one-shot side effect clobbers the mock.
+// `GLOBAL_UNDICI_OPTIONS` is exported so those call sites can spread the same
+// intent instead of re-deciding it.
 
 import { Agent, setGlobalDispatcher } from "undici";
 
