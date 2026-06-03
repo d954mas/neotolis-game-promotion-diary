@@ -324,7 +324,7 @@
   data-bar-count={bars.length}
 >
   <!-- Height-reserving wrapper OUTSIDE the typeof-window gate (04-18): keeps the
-       slot's 150px height on SSR + before mount so the strip can't jump the
+       slot's 300px height on SSR + before mount so the chart can't jump the
        layout (no CLS); a skeleton fills it until the client chart mounts. -->
   <div class="chart-canvas">
     {#if typeof window !== "undefined"}
@@ -359,10 +359,9 @@
   .chart-canvas {
     position: relative;
     width: 100%;
-    /* Subordinate strip (04-18): shorter than the ~300px headline correlation
-     * chart so the daily-growth chart reads as a supporting sub-view, not an
-     * equal. */
-    height: 150px;
+    /* EQUAL peer of the headline correlation chart — same 300px height (the
+     * user: "они оба важные одинаково"). */
+    height: 300px;
     min-width: 0;
     font-variant-numeric: tabular-nums;
   }

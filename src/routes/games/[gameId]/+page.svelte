@@ -626,7 +626,7 @@
          balance subtracted from today's) as bars per visible listing, sharing
          the SAME range + legend + event markers as the line chart above. -->
     <div class="growth-block">
-      <h3 class="growth-heading">{m.viz_growth_title()}</h3>
+      <header class="section-header"><h2>{m.viz_growth_title()}</h2></header>
       <WishlistGrowthChart
         seriesByListing={chartSeriesByListing}
         events={chartEvents}
@@ -766,23 +766,15 @@
     margin-bottom: var(--s-6);
     min-width: 0;
   }
-  /* Daily-growth sub-view (04-18): tightened top spacing so the strip hugs the
-   * headline correlation chart as a related sub-view, not a separate section. */
+  /* Daily-growth chart: an EQUAL peer of the headline correlation chart (the
+   * user: "они оба важные одинаково"). Same heading (section-header h2) + same
+   * height as the line chart; separated with full section spacing. */
   .growth-block {
     display: flex;
     flex-direction: column;
-    gap: var(--s-1);
-    margin-top: calc(-1 * var(--s-2));
+    gap: var(--s-3);
+    margin-top: var(--s-6);
     min-width: 0;
-  }
-  /* Demoted to a caption (04-18): smaller + muted so the growth chart reads as
-   * a supporting strip under the headline chart, not an equal section title. */
-  .growth-heading {
-    margin: 0;
-    font-size: var(--t-13);
-    font-weight: var(--w-md);
-    color: var(--text-3);
-    line-height: var(--lh-tight);
   }
   .events {
     display: flex;
