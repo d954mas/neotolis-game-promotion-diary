@@ -102,9 +102,13 @@
   }
 
   // ── Per-listing daily-growth bars (filtered by range + the visible map) ─
-  // Each in-range visible listing with >=2 points becomes one bar series of
-  // [date, balance[i] − balance[i-1]]. The first bar of a series has no prior
-  // day, so growth starts at the SECOND in-range point.
+  // Each in-range visible listing becomes one bar series of [date, balance[i] −
+  // balance[i-1]]. The daily delta is computed from the FULL series (NOT a
+  // range-filtered points subset) so the FIRST in-range day uses its prior
+  // (possibly OUT-of-range) snapshot as the baseline and still gets a bar; the
+  // resulting [date, delta] rows are THEN filtered by range. Filtering the points
+  // first would drop that prior baseline → the first in-range day silently had no
+  // bar even when a snapshot existed just outside the window.
   type Bar = { id: string; label: string; color: string; data: [string, number][] };
 
   const bars = $derived.by((): Bar[] => {
@@ -112,10 +116,11 @@
       .filter((l) => isVisible(l.id))
       .map((l): Bar => {
         const s = seriesByListing[l.id] ?? { points: [], lastImportedAt: null };
-        const pts = s.points.filter((p) => inRange(p.date, range));
         const data: [string, number][] = [];
-        for (let j = 1; j < pts.length; j++) {
-          data.push([pts[j]!.date, pts[j]!.balance - pts[j - 1]!.balance]);
+        for (let j = 1; j < s.points.length; j++) {
+          const date = s.points[j]!.date;
+          if (!inRange(date, range)) continue;
+          data.push([date, s.points[j]!.balance - s.points[j - 1]!.balance]);
         }
         return { id: l.id, label: listingLabel(l), color: listingColor(listings, l.id), data };
       })
