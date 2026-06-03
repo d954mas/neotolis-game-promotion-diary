@@ -169,9 +169,11 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   if (view !== "trash" && listings.length > 0) {
     await Promise.all(
       listings.map(async (l) => {
-        // No catch: getWishlistSeries returns an empty series (not a throw)
-        // for the legitimate no-data / cross-tenant case, so any throw is a
-        // real fault that should surface as a load error.
+        // No catch: `l.id` comes from `listListings(userId, ...)` above, so the
+        // ownership gate inside getWishlistSeries always passes here — it yields
+        // an empty series for a listing with no CSV yet, and a NotFoundError only
+        // for a foreign/missing id, which can't happen with these scoped ids. Any
+        // throw is therefore a real fault that should surface as a load error.
         wishlistSeriesByListing[l.id] = await getWishlistSeries(userId, l.id);
       }),
     );

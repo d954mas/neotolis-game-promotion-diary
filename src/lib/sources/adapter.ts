@@ -377,7 +377,10 @@ export type EventPreviewMetadata =
 export interface EventMetricSeries {
   metricKey: string; // "view_count" | "like_count" | "comment_count" | "score" | "num_comments"
   labelKey: string; // Paraglide key handle for the legend, e.g. "chart_metric_views"
-  points: { polledAt: string; value: number }[]; // ASC by polledAt
+  // value is null when the snapshot's count was NULL — the metric was hidden or
+  // unavailable at poll time (likes hidden, comments off, removed post). null is
+  // a GAP on the chart (connectNulls:false), NEVER coerced to 0 (a false drop).
+  points: { polledAt: string; value: number | null }[]; // ASC by polledAt
 }
 
 /** Live poll-state row consumed by dto.ts's per-event overlay (lastPolledAt /

@@ -117,6 +117,9 @@
           name: label(s.labelKey),
           type: "line" as const,
           smooth: true,
+          // A null point (hidden/unavailable metric) is a GAP, not a 0 — never
+          // bridge across it.
+          connectNulls: false,
           showSymbol: true,
           symbol: "circle" as const,
           symbolSize: lowData ? 8 : 4,

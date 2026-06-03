@@ -41,35 +41,32 @@ export async function youtubeFetchEventMetricSeries(
   if (rows.rows.length === 0) return [];
 
   // db.execute returns raw pg driver shapes — bigint columns come back as
-  // strings; Number() coerces them. NULL → 0 (an unpolled metric reads as
-  // a zero point, not a gap).
+  // strings; Number() coerces them. A NULL count means the metric was hidden /
+  // unavailable at poll time (likes hidden, comments off): keep it null so the
+  // chart draws a GAP, never a false 0.
   const toIso = (d: Date): string =>
     d instanceof Date ? d.toISOString() : new Date(d as unknown as string).toISOString();
+  const numOrNull = (v: number | null): number | null => (v === null ? null : Number(v));
 
+  const build = (
+    metricKey: string,
+    labelKey: string,
+    pick: (r: {
+      view_count: number | null;
+      like_count: number | null;
+      comment_count: number | null;
+    }) => number | null,
+  ): EventMetricSeries => ({
+    metricKey,
+    labelKey,
+    points: rows.rows.map((r) => ({ polledAt: toIso(r.polled_at), value: numOrNull(pick(r)) })),
+  });
+
+  // Drop a metric whose every point is null (e.g. likes hidden for the whole
+  // history) — an all-gap line is just a dead legend toggle.
   return [
-    {
-      metricKey: "view_count",
-      labelKey: "chart_metric_views",
-      points: rows.rows.map((r) => ({
-        polledAt: toIso(r.polled_at),
-        value: Number(r.view_count ?? 0),
-      })),
-    },
-    {
-      metricKey: "like_count",
-      labelKey: "chart_metric_likes",
-      points: rows.rows.map((r) => ({
-        polledAt: toIso(r.polled_at),
-        value: Number(r.like_count ?? 0),
-      })),
-    },
-    {
-      metricKey: "comment_count",
-      labelKey: "chart_metric_comments",
-      points: rows.rows.map((r) => ({
-        polledAt: toIso(r.polled_at),
-        value: Number(r.comment_count ?? 0),
-      })),
-    },
-  ];
+    build("view_count", "chart_metric_views", (r) => r.view_count),
+    build("like_count", "chart_metric_likes", (r) => r.like_count),
+    build("comment_count", "chart_metric_comments", (r) => r.comment_count),
+  ].filter((s) => s.points.some((p) => p.value !== null));
 }

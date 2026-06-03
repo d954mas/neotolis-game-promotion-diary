@@ -34,7 +34,12 @@ const uniq = (): string => Math.random().toString(36).slice(2, 10);
 // first), so ASC ordering and per-point values are unambiguous.
 async function seedYoutubeSnapshots(
   videoId: string,
-  rows: ReadonlyArray<{ minutesAgo: number; view: number; like: number; comment: number }>,
+  rows: ReadonlyArray<{
+    minutesAgo: number;
+    view: number | null;
+    like: number | null;
+    comment: number | null;
+  }>,
 ): Promise<void> {
   await db.insert(youtubeVideoSnapshots).values(
     rows.map((r) => ({
@@ -118,6 +123,28 @@ describe("event metric series (VIZ-01)", () => {
       externalId: `vid_${uniq()}`,
     });
     expect(out).toEqual([]);
+  });
+
+  it("a NULL count is a gap (null), never a false 0; an all-null metric is dropped", async () => {
+    // Likes hidden for the whole history → like_count NULL throughout. Comments
+    // hidden for ONE poll → a single null point mid-series.
+    const videoId = `vid_${uniq()}`;
+    await seedYoutubeSnapshots(videoId, [
+      { minutesAgo: 30, view: 100, like: null, comment: 1 },
+      { minutesAgo: 20, view: 250, like: null, comment: null },
+      { minutesAgo: 10, view: 500, like: null, comment: 7 },
+    ]);
+
+    const series = await youtubeFetchEventMetricSeries("ignored-user", {
+      kind: "youtube_video",
+      externalId: videoId,
+    });
+
+    // The all-null likes metric is gone — no dead legend toggle.
+    expect(series.map((s) => s.metricKey)).toEqual(["view_count", "comment_count"]);
+    // The mid-series hidden comment stays null (a GAP), not coerced to 0.
+    const comments = series.find((s) => s.metricKey === "comment_count")!;
+    expect(comments.points.map((p) => p.value)).toEqual([1, null, 7]);
   });
 
   it("reddit adapter fetchEventMetricSeries returns ASC score/num_comments series", async () => {

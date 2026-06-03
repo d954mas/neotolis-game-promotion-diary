@@ -41,16 +41,19 @@ export async function redditFetchEventMetricSeries(
     .orderBy(asc(redditPostSnapshots.polledAt));
   if (rows.length === 0) return [];
 
+  // A NULL score / num_comments means the metric was unavailable at poll time
+  // (removed post, score hidden during early vote fuzzing): keep it null so the
+  // chart draws a GAP, never a false 0. Drop a metric that is null throughout.
   return [
     {
       metricKey: "score",
       labelKey: "chart_metric_score",
-      points: rows.map((r) => ({ polledAt: r.polledAt.toISOString(), value: r.score ?? 0 })),
+      points: rows.map((r) => ({ polledAt: r.polledAt.toISOString(), value: r.score })),
     },
     {
       metricKey: "num_comments",
       labelKey: "chart_metric_num_comments",
-      points: rows.map((r) => ({ polledAt: r.polledAt.toISOString(), value: r.numComments ?? 0 })),
+      points: rows.map((r) => ({ polledAt: r.polledAt.toISOString(), value: r.numComments })),
     },
-  ];
+  ].filter((s) => s.points.some((p) => p.value !== null));
 }
