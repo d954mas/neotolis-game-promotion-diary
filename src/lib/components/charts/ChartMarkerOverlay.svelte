@@ -585,7 +585,7 @@
     width: 0;
     height: 100%;
     border-left: 1.5px dashed var(--chip-accent, var(--k-post));
-    opacity: 0.28;
+    opacity: 0.42;
     pointer-events: none;
     transition:
       opacity var(--m-fast) var(--m-ease),
