@@ -108,7 +108,8 @@
   "quota_banner_reddit_service_load": "Service load: {used} / {capacity} user slots available this minute",
   "quota_banner_reddit_limits_explainer": "Reddit API limits are unusually strict (Reddit's Responsible Builder Policy). Source actions: 5 per 15 min. Post refreshes: 30 per 15 min. Total service throughput: ~8 requests/min. Queued refreshes land within 1-2 min.",
 
-  "feed_card_reddit_stats": "↑{score}({ratio}%) · 💬{comments}",
+  "feed_card_reddit_score": "{score} ({ratio}%)",
+  "feed_card_reddit_comments": "{comments}",
   "feed_card_reddit_baseline_underperforming": "⚠ Underperforming median ({pct}% of typical)",
   "feed_card_reddit_baseline_insufficient": "Insufficient sample — baseline pending",
 
