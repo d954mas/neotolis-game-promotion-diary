@@ -101,14 +101,10 @@
     return visible[listingId] !== false;
   }
 
-  // ── Per-listing daily-growth bars (filtered by range + the visible map) ─
-  // Each in-range visible listing becomes one bar series of [date, balance[i] −
-  // balance[i-1]]. The daily delta is computed from the FULL series (NOT a
-  // range-filtered points subset) so the FIRST in-range day uses its prior
-  // (possibly OUT-of-range) snapshot as the baseline and still gets a bar; the
-  // resulting [date, delta] rows are THEN filtered by range. Filtering the points
-  // first would drop that prior baseline → the first in-range day silently had no
-  // bar even when a snapshot existed just outside the window.
+  // One bar series per visible listing: the day-over-day balance delta, computed
+  // over the FULL series and THEN filtered by range — so the first in-range day
+  // keeps its bar (baseline = its prior, possibly out-of-range, snapshot).
+  // Filtering points before subtracting would drop that baseline and lose it.
   type Bar = { id: string; label: string; color: string; data: [string, number][] };
 
   const bars = $derived.by((): Bar[] => {

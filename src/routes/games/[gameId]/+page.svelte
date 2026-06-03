@@ -157,19 +157,10 @@
     data.deltaByDate as Record<string, Record<string, WishlistDelta>>,
   );
   const chartListings = $derived(listings.map((l) => ({ id: l.id, name: l.name, appId: l.appId })));
-  // The custom <ChartLegend> (04-09) renders one pill chip per active listing.
-  // Resolve each label here (same fallbacks as the charts) so the legend, the
-  // line, and the bar all read the same name + the same stable color. Only
-  // listings that HAVE wishlist data get a chip — a no-CSV listing has no
-  // series to toggle.
-  //
-  // The swatch color is resolved from the FULL `chartListings` (NOT the filtered
-  // legend subset): listingColor keys by index in the array it's handed, and the
-  // charts color each line/bar by its index in the FULL `chartListings`. When an
-  // earlier listing has no CSV (filtered OUT of the legend), recomputing the color
-  // from the filtered subset would shift every later swatch's index → swatch ≠
-  // line. Precomputing `listingColor(chartListings, id)` here keeps the swatch
-  // ALWAYS equal to the chart color (the ChartLegend just renders this color).
+  // One legend chip per listing WITH wishlist data. The swatch `color` is resolved
+  // from the FULL `chartListings` (not the filtered subset) because `listingColor`
+  // keys by array index and the charts color by the full-array index — resolving it
+  // from the filtered list would shift indices and mismatch the line color.
   const legendListings = $derived(
     chartListings
       .filter((l) => (chartSeriesByListing[l.id]?.points.length ?? 0) > 0)
@@ -212,15 +203,21 @@
       authorIsMe: boolean;
     }>,
   ): Promise<void> {
-    await fetch(`/api/events/${id}`, {
+    const res = await fetch(`/api/events/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(patch),
     });
+    // On a non-2xx (401/404/500) don't pretend success — skip the refresh so the
+    // edit stays in the open modal to retry, never a silent "saved".
+    if (!res.ok) return;
     await invalidateAll();
   }
   async function onModalDelete(id: string): Promise<void> {
-    await fetch(`/api/events/${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/events/${id}`, { method: "DELETE" });
+    // On failure keep the modal open and the event in place — closing + refreshing
+    // would look like a successful delete when the row is still there.
+    if (!res.ok) return;
     closeDetail();
     await invalidateAll();
   }
