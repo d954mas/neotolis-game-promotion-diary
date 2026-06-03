@@ -59,15 +59,13 @@
   import { init, use } from "echarts/core";
   import type { EChartsType } from "echarts/core";
   import { LineChart } from "echarts/charts";
-  import { GridComponent, TooltipComponent, MarkAreaComponent } from "echarts/components";
+  import { GridComponent, TooltipComponent } from "echarts/components";
   import { CanvasRenderer } from "echarts/renderers";
   import { m } from "$lib/paraglide/messages.js";
   import { abbreviate } from "./abbreviate.js";
   import {
     baseChartOptions,
     prefersReducedMotion,
-    resolveAccentRgba,
-    resolveTextColor,
     WISHLIST_CHART_GRID,
   } from "./chart-theme.js";
   import ChartMarkerOverlay from "./ChartMarkerOverlay.svelte";
@@ -83,7 +81,7 @@
   } from "./wishlist-chart-shared.js";
   import type { EventDto, WishlistSeries, WishlistDelta } from "$lib/server/dto.js";
 
-  use([LineChart, GridComponent, TooltipComponent, MarkAreaComponent, CanvasRenderer]);
+  use([LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
 
   let {
     seriesByListing,
@@ -110,20 +108,16 @@
      *  bug. The custom <ChartLegend> at the page flips entries in this map. */
     visible: Record<string, boolean>;
     /** Per-listing, per-day wishlist delta (D-05): deltaByDate[listingId][day] =
-     *  { delta24h, delta7d, windowFrom, windowTo }. Re-threaded from the page
-     *  (04-18) so hovering an event-day can highlight that day's post-event
-     *  window (windowFrom..windowTo) as a subtle band on the first visible line. */
+     *  { delta24h, delta7d, windowFrom, windowTo }. Threaded from the page so the
+     *  crosshair tooltip can show an event-day's post-event EFFECT line
+     *  ("Wishlist effect: +12 in 7d ↑ · +3 in 24h") — the day-level delta (04-19,
+     *  replacing the removed on-line highlight band). */
     deltaByDate: Record<string, Record<string, WishlistDelta>>;
     /** Marker (cluster) tap → the page (which owns the day-detail modal + feed
      *  data). The overlay merges nearby event-days into one chip and emits ALL
      *  the chip's days so the modal shows every event under it. */
     onSelectCluster: (days: string[]) => void;
   } = $props();
-
-  // The event-day currently hovered (chip or its dashed line), reported up by the
-  // overlay's onHoverDay. Drives the post-event highlight band on the line; null
-  // clears it. Transient selection state — patched onto the chart via setOption.
-  let hoveredDay = $state<string | null>(null);
 
   // The live ECharts instance (svelte-echarts exposes it via `chart = $bindable()`).
   // The HTML marker overlay reads it to pixel-position + cluster the event chips.
@@ -296,6 +290,37 @@
     return isoDay(d);
   }
 
+  // A signed delta with a direction arrow: "+12 ↑" / "-3 ↓" / "0 →"; null → "—".
+  function signedDelta(value: number | null): string {
+    if (value === null) return "—";
+    const arrow = value > 0 ? "↑" : value < 0 ? "↓" : "→";
+    const sign = value > 0 ? "+" : "";
+    return `${sign}${value} ${arrow}`;
+  }
+
+  // The post-event EFFECT line for the hovered DAY (replaces the removed on-line
+  // highlight band, 04-19): resolve that day's WishlistDelta across the visible
+  // lines (first match — mirrors the page's per-day delta resolution) and render
+  // "Wishlist effect: <b>+12 in 7d ↑</b> · +3 in 24h". Only for an event-day that
+  // has a delta with at least one non-null window — non-event days show nothing.
+  function tooltipEffectHtml(day: string | null): string {
+    if (!day) return "";
+    let delta: WishlistDelta | null = null;
+    for (const line of lines) {
+      const d = deltaByDate[line.id]?.[day];
+      if (d) {
+        delta = d;
+        break;
+      }
+    }
+    if (!delta || (delta.delta7d === null && delta.delta24h === null)) return "";
+    // English literal (the removed band used the same inline wording); the numbers
+    // come from signedDelta and are safe, the static words need no escaping.
+    return `<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(128,128,128,0.25);font-size:12px;">Wishlist effect: <b>${escapeHtml(
+      signedDelta(delta.delta7d),
+    )} in 7d</b> · ${escapeHtml(signedDelta(delta.delta24h))} in 24h</div>`;
+  }
+
   const crosshairTooltip = $derived.by(() => ({
     trigger: "axis" as const,
     axisPointer: { type: "line" as const },
@@ -326,7 +351,9 @@
       const eventsHtml = day
         ? tooltipEventsHtml(day, dayGroups, (count) => m.viz_marker_more({ count }))
         : "";
-      return `<div style="min-width:140px;max-width:260px;">${head}${rows}${eventsHtml}</div>`;
+      // The post-event wishlist EFFECT line for an event-day with a delta (04-19).
+      const effectHtml = tooltipEffectHtml(day);
+      return `<div style="min-width:140px;max-width:260px;">${head}${rows}${eventsHtml}${effectHtml}</div>`;
     },
   }));
 
@@ -368,75 +395,6 @@
     return () => {
       if (!c.isDisposed()) c.getZr().off("click", onZrClick);
     };
-  });
-
-  // ── Post-event highlight band on hover (04-18, resolved-color rebuild) ───
-  // The OLD markArea rendered a GRAY SQUARE because its color was an unresolved
-  // CSS-mix-of-accent string the ECharts CANVAS can't read, and it was never
-  // cleared on leave. Rebuilt correctly: on hover the
-  // first visible listing's series gets a markArea spanning the hovered day's
-  // post-event window (windowFrom..windowTo), colored with a getComputedStyle-
-  // RESOLVED `rgba(...)` (resolveAccentRgba). Cleared (data:[]) on leave. Patched
-  // via a transient setOption guarded against a disposed/not-built chart.
-  //
-  // The markArea attaches to the FIRST visible line (lines[0]) — that line's
-  // series name is the setOption key. Resolving the window from the SAME listing
-  // the line belongs to keeps the band honest (the delta is that listing's).
-  $effect(() => {
-    const c = chart;
-    if (!c || c.isDisposed()) return;
-
-    const firstLine = lines[0];
-    // Look up the hovered day's window on the first visible listing; fall back
-    // across the other visible lines so a band still shows if the first lacks a
-    // snapshot for that day (mirrors the page's per-day delta resolution).
-    let win: { from: string; to: string } | null = null;
-    let win7d: number | null = null;
-    if (hoveredDay && firstLine) {
-      for (const line of lines) {
-        const d = deltaByDate[line.id]?.[hoveredDay];
-        if (d) {
-          win = { from: d.windowFrom, to: d.windowTo };
-          win7d = d.delta7d;
-          break;
-        }
-      }
-    }
-
-    // Label the band so the highlight is self-explanatory: "+12 in 7d ↑" reads
-    // as "this event → +12 wishlists over the following week" (the user found a
-    // bare highlighted band unclear). Resolved text color — no var() in canvas.
-    const bandLabel =
-      win7d === null
-        ? ""
-        : `${win7d > 0 ? "+" : ""}${win7d} in 7d ${win7d > 0 ? "↑" : win7d < 0 ? "↓" : "→"}`;
-
-    const markArea =
-      win && firstLine
-        ? {
-            silent: true,
-            itemStyle: { color: resolveAccentRgba(0.14) },
-            label: {
-              show: bandLabel !== "",
-              position: "insideTop" as const,
-              distance: 6,
-              formatter: bandLabel,
-              color: resolveTextColor(),
-              fontSize: 12,
-              fontWeight: "bold" as const,
-            },
-            data: [[{ xAxis: win.from }, { xAxis: win.to }]],
-          }
-        : { data: [] };
-
-    // Patch ONLY the first visible series' markArea (transient selection state);
-    // lazyUpdate keeps it cheap, notMerge:false preserves the rest of the option.
-    if (firstLine) {
-      c.setOption(
-        { series: [{ name: firstLine.label, markArea }] },
-        { lazyUpdate: true },
-      );
-    }
   });
 
   // ── ECharts option (client-only — resolves --k-* tokens) ─────────────
@@ -518,13 +476,7 @@
       <!-- Relatively-positioned wrapper so the absolutely-positioned HTML marker
            overlay lays its event chips OVER the chart's plot area. -->
       <Chart {init} {options} bind:chart />
-      <ChartMarkerOverlay
-        {chart}
-        {dayGroups}
-        {recomputeKey}
-        {onSelectCluster}
-        onHoverDay={(day) => (hoveredDay = day)}
-      />
+      <ChartMarkerOverlay {chart} {dayGroups} {recomputeKey} {onSelectCluster} />
     {/if}
     {#if !chart}
       <!-- Skeleton placeholder: a muted box until the client chart mounts. The
