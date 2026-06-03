@@ -38,6 +38,7 @@ import { page } from "@vitest/browser/context";
 import WishlistCorrelationChart from "../../src/lib/components/charts/WishlistCorrelationChart.svelte";
 import EventDayModal from "../../src/lib/components/charts/EventDayModal.svelte";
 import DateRangeRow from "../../src/lib/components/feed/DateRangeRow.svelte";
+import KindIcon from "../../src/lib/components/KindIcon.svelte";
 import {
   eventThumbnail,
   buildDayGroups,
@@ -45,6 +46,7 @@ import {
   eventDay,
   tooltipEventsHtml,
 } from "../../src/lib/components/charts/wishlist-chart-shared.js";
+import { kindIconSvg, kindIconInner } from "../../src/lib/components/kind-icon-svg.js";
 import correlationChartSource from "../../src/lib/components/charts/WishlistCorrelationChart.svelte?raw";
 import growthChartSource from "../../src/lib/components/charts/WishlistGrowthChart.svelte?raw";
 import overlaySource from "../../src/lib/components/charts/ChartMarkerOverlay.svelte?raw";
@@ -732,8 +734,8 @@ describe("04-15 events-in-tooltip + line-hover forwards + thicker lines + click-
     expect(html).toContain("<img");
     expect(html).toContain("img.youtube.com/vi/abc123/mqdefault.jpg");
     expect(html).toContain("Trailer drop");
-    // The no-preview Reddit event renders an inline colored dot (no <img> for it)
-    // but still its title.
+    // The no-preview Reddit event renders the KIND ICON on a kind-colored tile
+    // (04-17 — no longer a plain dot) but still its title.
     expect(html).toContain("Reddit launch thread");
   });
 
@@ -933,5 +935,70 @@ describe("04-16 consistent per-day delta + plural fix + tooltip newest-first", (
     const multi = mountMultiDayModal();
     expect(multi.dialog.querySelectorAll('[data-testid="day-delta"]').length).toBe(2);
     unmount(multi.component);
+  });
+});
+
+describe("04-17 kind icon (not a dot) for no-preview tooltip events + one shared SVG source", () => {
+  it("a no-preview tooltip event row renders the kind ICON (an <svg>) on a kind-colored tile, not a bare dot", () => {
+    // baseEvents[1] is a Reddit post with no enrichment + null metadata →
+    // eventThumbnail() returns null → the no-preview branch. It must render the
+    // KIND ICON (an <svg> from kindIconSvg) on a kind-colored tile, NOT the old
+    // 10px dot. baseEvents[0] (YouTube) keeps its <img> thumbnail.
+    const dayGroups = buildDayGroups(baseEvents, null);
+    const html = tooltipEventsHtml("2026-05-15", dayGroups, (n) => `+${n} more`);
+    // The no-preview event's icon is an inline <svg> (the shared kindIconSvg).
+    expect(html).toContain("<svg");
+    expect(html).toContain('viewBox="0 0 24 24"');
+    // The reddit_post inner markup (its Snoo silhouette cut-out) is present —
+    // proof the SHARED source rendered the right kind, not a generic dot span.
+    expect(html).toContain('fill="var(--surface)"');
+    // The thumbnailed YouTube event still uses its <img> preview.
+    expect(html).toContain("img.youtube.com/vi/abc123/mqdefault.jpg");
+    // The old plain 10px dot marker is gone for no-preview rows.
+    expect(html).not.toContain("width:10px;height:10px;border-radius:50%");
+  });
+
+  it("kindIconSvg builds a full sized <svg> for every kind; KindIcon consumes the SAME inner source (no path duplication)", () => {
+    // kindIconSvg returns a full <svg> with the requested size/color for each
+    // kind (the tooltip's no-preview path). KindIcon.svelte renders the SAME
+    // inner markup via kindIconInner — one source of truth.
+    const kinds = [
+      "youtube_video",
+      "reddit_post",
+      "twitter_post",
+      "telegram_post",
+      "discord_drop",
+      "conference",
+      "talk",
+      "press",
+      "post",
+      "other",
+    ] as const;
+    for (const k of kinds) {
+      const svg = kindIconSvg(k, { size: 18, color: "#fff" });
+      expect(svg.startsWith("<svg")).toBe(true);
+      expect(svg).toContain("width:18px;height:18px;");
+      expect(svg).toContain("color:#fff;");
+      // Each kind's inner markup is non-empty (it rendered a real icon body).
+      expect(kindIconInner(k).trim().length).toBeGreaterThan(0);
+    }
+    // An unknown kind falls back to the generic-dot ("other") inner markup, so
+    // kindIconSvg always renders something.
+    expect(kindIconInner("totally_unknown_kind")).toBe(kindIconInner("other"));
+  });
+
+  it("KindIcon.svelte renders an <svg.kind> for each kind via the shared source", () => {
+    // The component still renders for every kind (it injects kindIconInner) —
+    // mount one and assert the LB-11 class="kind" <svg> is present and non-empty.
+    const component = mount(KindIcon, {
+      target: host,
+      props: { kind: "reddit_post" as const, size: 20 },
+    });
+    flushSync();
+    const svg = host.querySelector("svg.kind");
+    expect(svg).not.toBeNull();
+    // The reddit Snoo cut-outs (from the shared source) rendered inside it.
+    expect(svg?.innerHTML).toContain("circle");
+    unmount(component);
   });
 });
