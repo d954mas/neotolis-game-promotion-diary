@@ -9,8 +9,10 @@
   // legend below (a metric icon + color swatch + text per series) that toggles
   // any series on/off — so the small-magnitude metrics (likes/comments) that a
   // shared linear axis flattens next to views can be isolated. Visibility is
-  // driven by filtering the series array (the swatch/line colour is keyed by the
-  // metric's index in the FULL series list, so toggling never reshuffles colours).
+  // driven by filtering the series array; the swatch/line colour comes from the
+  // shared semantic metric-color map ($lib/util/metric-colors), keyed by the
+  // metric (not the series index), so toggling/ordering never reshuffles colours
+  // and a metric reads the same colour here as on the cards + detail stats.
   //
   // SSR (RESEARCH Pitfall 1): the <Chart> inits the canvas in onMount and the
   // option is built only under `typeof window`.
@@ -26,14 +28,12 @@
   import { m } from "$lib/paraglide/messages.js";
   import { baseChartOptions, prefersReducedMotion } from "./chart-theme.js";
   import { abbreviate } from "./abbreviate.js";
+  import { metricColorForLabelKey } from "$lib/util/metric-colors.js";
   import type { EventMetricSeries } from "$lib/sources/adapter.js";
 
   use([LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
 
   let { series, kind: _kind }: { series: EventMetricSeries[]; kind: string } = $props();
-
-  // Distinct, stable per-metric colour (keyed by index in the FULL series list).
-  const METRIC_COLORS = ["#5b8def", "#e0a458", "#5fb98e", "#c25b9e", "#7d6ad6"];
 
   // Per-metric inline icon (geometric, stroke=currentColor so it takes the chip
   // colour). Keyed by the adapter's labelKey; fallback = a dot.
@@ -111,7 +111,7 @@
         axisLabel: { formatter: (v: number): string => dateLabel(v), hideOverlap: true },
       },
       series: series
-        .map((s, i) => ({ s, color: METRIC_COLORS[i % METRIC_COLORS.length]! }))
+        .map((s) => ({ s, color: metricColorForLabelKey(s.labelKey) }))
         .filter(({ s }) => shown(s.labelKey))
         .map(({ s, color }) => ({
           name: label(s.labelKey),
@@ -140,8 +140,8 @@
   {#if series.length > 0}
     <!-- Custom on-brand legend: metric icon + colour + text, click to toggle. -->
     <div class="metric-legend" role="group" aria-label={m.chart_history_title()}>
-      {#each series as s, i (s.labelKey)}
-        {@const c = METRIC_COLORS[i % METRIC_COLORS.length]}
+      {#each series as s (s.labelKey)}
+        {@const c = metricColorForLabelKey(s.labelKey)}
         <button
           type="button"
           class="metric-chip"
