@@ -121,6 +121,12 @@
     if (n === null || n === 0) return "→";
     return n > 0 ? "↑" : "↓";
   }
+  // Sign class for the hero delta coloring: positive → green, negative → red,
+  // zero/null → muted (the value + its arrow share the color via currentColor).
+  function signClass(n: number | null): "pos" | "neg" | "zero" {
+    if (n === null || n === 0) return "zero";
+    return n > 0 ? "pos" : "neg";
+  }
   // Grammatically-correct event count: "1 event" (singular) / "N events"
   // (plural). This inlang plugin has no ICU plural, so the singular is a
   // separate key picked by branching on count===1 in code.
@@ -169,11 +175,11 @@
         <FeedDateGroupHeader occurredAt={group.occurredAt} count={group.rows.length} />
         {#if dayDelta && (dayDelta.delta7d !== null || dayDelta.delta24h !== null)}
           <span class="day-delta" data-testid="day-delta">
-            <span class="day-delta-item">
+            <span class="day-delta-item {signClass(dayDelta.delta7d)}">
               {m.viz_delta_7d({ value: signed(dayDelta.delta7d) })}
               <span class="day-delta-arrow" aria-hidden="true">{arrow(dayDelta.delta7d)}</span>
             </span>
-            <span class="day-delta-item">
+            <span class="day-delta-item {signClass(dayDelta.delta24h)}">
               {m.viz_delta_24h({ value: signed(dayDelta.delta24h) })}
               <span class="day-delta-arrow" aria-hidden="true">{arrow(dayDelta.delta24h)}</span>
             </span>
@@ -306,10 +312,12 @@
     min-width: 0;
     margin-top: calc(-1 * var(--s-3));
   }
-  /* 7d and 24h read IDENTICALLY (the user: they were styled differently, which
-   * looked strange) — same size/weight/color, both with a direction arrow. */
+  /* The delta is the HERO of each day group (#7): larger + bold, and
+   * SIGN-COLORED — positive green / negative red / zero|null muted. 7d and 24h
+   * get the SAME treatment (only their own sign differs). The arrow inherits the
+   * value's color via currentColor so the whole item reads as one signed unit. */
   .day-delta-item {
-    font-size: var(--t-14, 14px);
+    font-size: var(--t-17);
     font-weight: var(--w-sb);
     color: var(--text);
     font-variant-numeric: tabular-nums;
@@ -317,8 +325,18 @@
     align-items: baseline;
     gap: 6px;
   }
+  .day-delta-item.pos {
+    color: var(--success);
+  }
+  .day-delta-item.neg {
+    color: var(--danger);
+  }
+  .day-delta-item.zero {
+    color: var(--text-3);
+  }
   .day-delta-arrow {
-    font-size: var(--t-13);
+    font-size: var(--t-15);
+    color: inherit;
   }
   .day-event-count {
     font-size: var(--t-13);
