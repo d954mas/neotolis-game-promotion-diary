@@ -155,14 +155,10 @@
     data.wishlistSeriesByListing as Record<string, WishlistSeries>,
   );
   const chartListings = $derived(listings.map((l) => ({ id: l.id, name: l.name, appId: l.appId })));
-  // Per-listing, per-day wishlist delta (D-05), built HERE on the client — NOT in
-  // the loader. The day key is each event's LOCAL calendar day (eventDay); the
-  // loader's UTC container can't know the viewer's zone, and a UTC bucket
-  // mismatched this local key, silently dropping the post-event delta for
-  // near-midnight events in a negative-offset zone. Computing it here keeps the
-  // key in lock-step with the local `eventDay` the markers, the crosshair
-  // (axisValueToDay), and the modal all use. Pure array math over the series
-  // points the loader already sent.
+  // Per-listing, per-day wishlist delta (D-05), built HERE (not the loader) so the
+  // day key is each event's LOCAL `eventDay` — the same key the markers, the
+  // crosshair (axisValueToDay), and the modal use; the loader's UTC can't know the
+  // viewer's zone. Pure array math over the points the loader already sent.
   const chartDeltaByDate = $derived.by((): Record<string, Record<string, WishlistDelta>> => {
     const days = [...new Set(events.map((e) => eventDay(e)))];
     const map: Record<string, Record<string, WishlistDelta>> = {};

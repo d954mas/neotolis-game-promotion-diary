@@ -3,13 +3,10 @@
  * date-keyed groups. Used by /feed/+page.svelte to render
  * <FeedDateGroupHeader> + <FeedCard>[] per calendar date.
  *
- * Grouping is by calendar date (YYYY-MM-DD) of occurredAt. The day key is
- * chosen by `keyOf`, defaulting to UTC (`toISOString().slice(0,10)`) for the
- * feed. The /games chart cluster modal passes a LOCAL-day keyer so its group
- * keys line up with the page's local `eventDay`-keyed delta map (otherwise a
- * near-midnight event's per-day delta would fail to resolve in a negative-offset
- * zone). Events at 23:50 and 00:10 of the next day land in different groups
- * under whichever zone `keyOf` uses.
+ * Grouping is by calendar date (YYYY-MM-DD) of occurredAt, via `keyOf` (default
+ * UTC, for the feed). The /games cluster modal passes a LOCAL-day keyer so its
+ * keys match the page's local `eventDay`-keyed delta map (else a near-midnight
+ * event's delta wouldn't resolve in a negative-offset zone).
  *
  * Input is assumed to be sorted DESC by occurredAt (listFeedPage's order).
  * The function preserves input order within and across groups — it does

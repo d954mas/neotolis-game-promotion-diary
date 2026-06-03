@@ -1,16 +1,10 @@
-// PURE wishlist-delta math — no DB, no userId, no timezone state. Lives in a
-// client-safe util (NOT the server service) because BOTH sides compute it:
-//   - the server `computeWishlistDelta` (DB-backed) delegates here, and
-//   - the /games/[gameId] page builds its per-day delta map on the CLIENT.
-//
-// Why the client owns the per-day map (the timezone fix): "which calendar day
-// did an event happen on" is INHERENTLY timezone-dependent for an instant
-// (`occurredAt`). The server container runs UTC and cannot know the viewer's
-// zone, so a server-side day-bucket (toISOString) mismatches the client's local
-// `eventDay` for events near midnight in a negative-offset zone — the post-event
-// delta then silently fails to resolve. The day STRING is the only TZ-sensitive
-// input; this math is pure string comparison once the day is chosen, so the
-// client picks the local day (eventDay) and calls straight in.
+// PURE wishlist-delta math — no DB, no userId, no timezone state. Client-safe so
+// BOTH the server `computeWishlistDelta` (DB-backed) and the /games page (which
+// builds its per-day map client-side) share it. The day STRING is the only
+// TZ-sensitive input — which calendar day an `occurredAt` instant falls on is
+// timezone-dependent, and the UTC container can't know the viewer's zone, so the
+// caller picks it (the page uses the local `eventDay`); past that it's pure
+// string comparison.
 
 import type { WishlistDelta } from "$lib/server/dto.js";
 

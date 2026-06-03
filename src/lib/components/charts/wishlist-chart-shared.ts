@@ -62,21 +62,14 @@ export function isoDay(d: Date): string {
 }
 
 /**
- * A date-only "YYYY-MM-DD" day → the LOCAL-midnight epoch ms for that calendar
- * day. This is the SINGLE conversion every date-only value passes through before
- * it touches the ECharts `type:"time"` axis (line/bar series x, the axis
- * domain min/max, and the marker overlay's convertToPixel arg).
+ * A date-only "YYYY-MM-DD" → LOCAL-midnight epoch ms — the SINGLE conversion
+ * every date-only value passes through before it hits the ECharts `type:"time"`
+ * axis (line/bar x, axis domain, the overlay's convertToPixel arg).
  *
- * Why this exists (the timezone day-shift bug): handing ECharts a bare
- * "2026-05-01" STRING makes it parse the value as `new Date("2026-05-01")` =
- * UTC midnight. In a negative-offset timezone (e.g. America/New_York, UTC-4/-5)
- * UTC midnight is the PREVIOUS evening LOCALLY, so the point/marker renders a day
- * early and the axis label, tooltip day-lookup (axisValueToDay → isoDay), and
- * delta/event matching all drift by one. `new Date(y, mo-1, d)` builds LOCAL
- * midnight instead, so `isoDay(new Date(dayToLocalMs(day)))` round-trips the SAME
- * calendar day — keeping the rendered axis, the lookup keys, and the markers all
- * in agreement. Both the line/bar data AND the overlay's convertToPixel use this
- * one helper, so marker↔line alignment is preserved.
+ * Why: ECharts parses a bare date string as UTC midnight → renders a day early
+ * in a negative-offset zone (axis label, day-lookup, delta matching all drift).
+ * Local midnight makes `isoDay(new Date(dayToLocalMs(day)))` an identity, so the
+ * axis, the lookup keys, and the markers stay in agreement.
  */
 export function dayToLocalMs(day: string): number {
   const [y, mo, d] = day.split("-").map(Number);
@@ -95,11 +88,8 @@ export function inRange(dateStr: string, range: { from: Date; to: Date } | null)
  *  SAME day key (the page filters its events by this to populate the modal). */
 export function eventDay(e: { occurredAt: Date | string }): string {
   const d = typeof e.occurredAt === "string" ? new Date(e.occurredAt) : e.occurredAt;
-  // LOCAL calendar day (isoDay), NOT toISOString().slice(0,10) (UTC). The
-  // wishlist point dates, the axis (dayToLocalMs), and the crosshair tooltip's
-  // day-lookup (axisValueToDay → isoDay) are all LOCAL, so the event day-key
-  // MUST be local too — otherwise an event near midnight matched the wrong
-  // wishlist day in a non-UTC timezone (the self-inconsistency this fixes).
+  // LOCAL day (isoDay), NOT toISOString (UTC): the wishlist points, the axis, and
+  // the crosshair day-lookup are all local, so a near-midnight event must key local.
   return isoDay(d);
 }
 
@@ -191,11 +181,8 @@ export function eventThumbnail(event: ThumbnailEvent): string | null {
  *   day so the last marker isn't flush on the right edge).
  * - else (no points, no events) → null (let ECharts auto-fit).
  *
- * Returns LOCAL-midnight epoch ms (via dayToLocalMs) so it's fed to the ECharts
- * `type:"time"` axis as the SAME timestamp the series data + markers use — never
- * a bare date STRING (which ECharts parses as UTC midnight → the day-shift bug).
- * Both charts call this with the SAME inputs so their axes — and therefore their
- * markers — line up.
+ * Returns LOCAL-midnight ms (dayToLocalMs) — the same basis as the series data
+ * and markers, so both charts' axes (and their markers) line up.
  */
 export function axisDomain(
   allPointDates: string[],

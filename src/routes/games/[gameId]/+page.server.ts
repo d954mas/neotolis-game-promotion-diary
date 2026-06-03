@@ -157,23 +157,18 @@ export const load: PageServerLoad = async ({ locals, params, url }) => {
   // (series.lastImportedAt). KISS — bounded N (active listings), mirrors the
   // wishlistSummaries loop above.
   //
-  // The per-day delta map (D-05) is NOT built here: the delta is keyed by an
-  // event's CALENDAR DAY, which is timezone-dependent, and this loader runs in
-  // the container's UTC — it cannot know the viewer's zone. Bucketing in UTC
-  // here mismatched the page's local `eventDay`, silently dropping the post-event
-  // delta for near-midnight events in a negative-offset zone. The page builds the
-  // map on the CLIENT from these same `points` (pure computeWishlistDeltaFromPoints,
-  // local day key) where the zone is known.
+  // The per-day delta map (D-05) is NOT built here: it's keyed by an event's
+  // calendar day (timezone-dependent), and this loader runs in the container's
+  // UTC. The page builds it CLIENT-side from these `points`, keyed by the local
+  // `eventDay` — see the page's chartDeltaByDate.
   const wishlistSeriesByListing: Record<string, WishlistSeries> = {};
 
   if (view !== "trash" && listings.length > 0) {
     await Promise.all(
       listings.map(async (l) => {
-        // No catch: `l.id` comes from `listListings(userId, ...)` above, so the
-        // ownership gate inside getWishlistSeries always passes here — it yields
-        // an empty series for a listing with no CSV yet, and a NotFoundError only
-        // for a foreign/missing id, which can't happen with these scoped ids. Any
-        // throw is therefore a real fault that should surface as a load error.
+        // No catch: `l.id` comes from the scoped `listListings` above, so
+        // getWishlistSeries' ownership gate always passes (empty series when no
+        // CSV yet) — any throw is a real fault that should surface as a load error.
         wishlistSeriesByListing[l.id] = await getWishlistSeries(userId, l.id);
       }),
     );

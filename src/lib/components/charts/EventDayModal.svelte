@@ -81,11 +81,9 @@
     if (days.length === 1) return days[0]!;
     return `${days[0]!} → ${days[days.length - 1]!}`;
   });
-  // Events are ALWAYS grouped under per-day headers (single- AND multi-day),
-  // so each day's header can carry its OWN delta and the two read consistently.
-  // Group by LOCAL day (isoDay) — the SAME zone the page keys `deltaByDay` by
-  // (its local `eventDay`), so each group resolves its day's delta directly even
-  // for a near-midnight event in a negative-offset zone (a UTC key would miss it).
+  // Group by LOCAL day (isoDay) so each per-day header carries its own delta and
+  // the key matches the page's local `eventDay`-keyed `deltaByDay` (a UTC key
+  // would miss a near-midnight event in a negative-offset zone).
   const dayGroups = $derived(groupEventsByDate(events, (d) => isoDay(d)));
 
   let dialogEl: HTMLDialogElement | undefined = $state();
