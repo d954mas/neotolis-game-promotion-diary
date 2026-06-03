@@ -249,7 +249,11 @@
     });
 
     // Greedy merge: walk left→right, extend the current cluster while the next
-    // day's x is within CLUSTER_PX of the cluster's running center.
+    // day's x is within CLUSTER_PX of the cluster's ANCHOR (its leftmost/first
+    // day), NOT a running center. Anchoring bounds each cluster's width to
+    // CLUSTER_PX so a run of days can't chain unboundedly: e.g. May 12/13/14
+    // spaced ~28px apart no longer collapse into one — 12+13 merge (28px) but
+    // 14 (56px from 12) starts its own chip, since two ~40px chips DO fit there.
     const out: Cluster[] = [];
     let cur: { xs: number[]; groups: DayGroup[] } | null = null;
     const flush = (): void => {
@@ -275,8 +279,8 @@
         cur = { xs: [p.x], groups: [p.group] };
         continue;
       }
-      const center = cur.xs.reduce((s, v) => s + v, 0) / cur.xs.length;
-      if (Math.abs(p.x - center) <= CLUSTER_PX) {
+      const anchor = cur.xs[0]!;
+      if (p.x - anchor <= CLUSTER_PX) {
         cur.xs.push(p.x);
         cur.groups.push(p.group);
       } else {
