@@ -206,14 +206,22 @@
     height: 28px;
     padding: 0 var(--s-3);
     background: var(--surface-2);
-    border: 1px solid var(--border);
+    /* Active (shown) state reads as a PRESSED toggle (#8): the metric color
+     * tints the border + a soft shadow lifts it off the surface, so even with
+     * every metric on the chips clearly look pressable — not flat labels. */
+    border: 1px solid var(--mc);
     border-radius: var(--r-pill);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
     color: var(--text);
     font-family: var(--f-sans);
     font-size: var(--t-12);
     font-weight: var(--w-md);
     white-space: nowrap;
     cursor: pointer;
+    transition:
+      border-color var(--m-fast) var(--m-ease),
+      box-shadow var(--m-fast) var(--m-ease),
+      background var(--m-fast) var(--m-ease);
   }
   .metric-ico {
     width: 15px;
@@ -223,14 +231,25 @@
   }
   .metric-chip:hover {
     border-color: var(--mc);
+    background: var(--surface-3, var(--surface));
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.24);
   }
   .metric-chip:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
+  @media (prefers-reduced-motion: reduce) {
+    .metric-chip {
+      transition: none;
+    }
+  }
+  /* Off (hidden) state: flat, dim + strikethrough — clearly "click to bring
+   * back", visually opposite the elevated active chip. */
   .metric-chip.off {
     opacity: 0.5;
     color: var(--text-3);
+    border-color: var(--border);
+    box-shadow: none;
   }
   .metric-chip.off .metric-ico {
     color: var(--text-3);
