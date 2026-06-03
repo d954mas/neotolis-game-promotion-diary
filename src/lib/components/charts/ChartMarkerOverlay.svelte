@@ -9,10 +9,12 @@
   // Fix: render the event markers as an absolutely-positioned HTML layer OVER
   // the chart's plot area. Because it's plain DOM (NOT the canvas) it can:
   //   1. PIXEL-CLUSTER — position each event-day at its x-pixel
-  //      (`chart.convertToPixel({xAxisIndex:0}, day)`), then greedily MERGE any
-  //      chips whose centers are within ~44px into ONE cluster chip carrying all
-  //      member days + events, with a combined count badge. This kills the
-  //      "Year" pile-up: a year of events collapses to a few tidy chips.
+  //      (`chart.convertToPixel({xAxisIndex:0}, day)`), then iteratively MERGE the
+  //      CLOSEST adjacent chips whose centroids are within a chip width (CHIP_PX)
+  //      into ONE cluster chip carrying all member days + events, with a combined
+  //      count badge. This kills the "Year" pile-up AND guarantees chips never
+  //      visually overlap at any zoom (closest-pair merge until every adjacent
+  //      gap >= CHIP_PX), while keeping spread-out days as separate chips.
   //   2. Render QUALITY chips — a ≥40px rounded tile with a kind-colored border;
   //      a preview event shows its `<img>` thumbnail, a no-preview event shows a
   //      LARGE <KindIcon> on a kind-colored tile. ≥40px = the touch tap target.
@@ -117,7 +119,6 @@
     dayGroups,
     recomputeKey,
     onSelectCluster,
-    onHoverDay,
   }: {
     /** The live ECharts instance (bound from <Chart bind:chart>). null until mount. */
     chart: EChartsType | null | undefined;
@@ -128,28 +129,15 @@
     recomputeKey: unknown;
     /** Tap a chip → emit ALL its member days up to the page (cluster modal). */
     onSelectCluster: (days: string[]) => void;
-    /** Hovering a chip or a per-day dashed line reports that day UP (a cluster's
-     *  representative = its most-recent member day); leaving reports null. The
-     *  correlation chart uses it to highlight that day's post-event window
-     *  (windowFrom..windowTo) as a subtle band on the line (04-18). Optional —
-     *  the growth chart mounts the same overlay but doesn't draw the band. */
-    onHoverDay?: (day: string | null) => void;
   } = $props();
 
-  // A cluster's representative day for the hover-highlight = its most-recent
-  // member day (groups are date-ASC, so the last). null clears the highlight.
-  function reportHover(day: string | null): void {
-    onHoverDay?.(day);
-  }
-
   // ── Pixel collision clustering ───────────────────────────────────────────
-  // Merge threshold in CSS px: chips whose CENTERS are closer than this collapse
-  // into one cluster. 44px ≈ the chip tap-target width, so merged chips never
-  // visually overlap.
-  const CLUSTER_PX = 44;
   // The y-band the chips sit in: a row hugging the TOP of the plot area.
   const TOP_BAND_PX = 8;
-  // Chip side length (px) — the dashed guide line starts just below the chip.
+  // Chip side length (px) — also the merge threshold (04-19): two chips whose
+  // CENTROIDS are closer than this would visually OVERLAP, so they merge into
+  // one cluster. Using the actual chip footprint (not a looser 44px anchor span)
+  // is what guarantees no overlap at any zoom while keeping spread-out days apart.
   const CHIP_PX = 40;
 
   type Cluster = {
@@ -195,12 +183,10 @@
   let hoveredIndex = $state<number | null>(null);
   // Track which event-day is hovered (chip OR its dashed line) so that ONE day's
   // guide line is EMPHASIZED while the others stay thin/faint — calming the
-  // "picket fence" of equal-weight dashed lines (04-18). Reuses the same hover
-  // signal we report up via onHoverDay.
+  // "picket fence" of equal-weight dashed lines (04-18).
   let hoveredDay = $state<string | null>(null);
   function setHoveredDay(day: string | null): void {
     hoveredDay = day;
-    reportHover(day);
   }
 
   // The grid coordinate system exposes its plot-area rect via getRect(). It's
@@ -280,48 +266,59 @@
       return { day: group.date, x, kind: mixedKind ? "post" : group.kind, mixedKind };
     });
 
-    // Greedy merge: walk left→right, extend the current cluster while the next
-    // day's x is within CLUSTER_PX of the cluster's ANCHOR (its leftmost/first
-    // day), NOT a running center. Anchoring bounds each cluster's width to
-    // CLUSTER_PX so a run of days can't chain unboundedly: e.g. May 12/13/14
-    // spaced ~28px apart no longer collapse into one — 12+13 merge (28px) but
-    // 14 (56px from 12) starts its own chip, since two ~40px chips DO fit there.
-    const out: Cluster[] = [];
-    let cur: { xs: number[]; groups: DayGroup[] } | null = null;
-    const flush = (): void => {
-      if (!cur) return;
-      const groups = cur.groups;
+    // Iterative closest-pair merge (04-19): each event-day starts as its OWN
+    // singleton chip at its x-pixel. Repeatedly find the ADJACENT pair (the array
+    // stays sorted by centroid x) with the SMALLEST centroid gap; if that gap is
+    // < CHIP_PX the two chips would visually OVERLAP, so merge them (combined
+    // member days/events, new centroid = mean of ALL member x-pixels) and repeat.
+    // Stop when every adjacent gap is >= CHIP_PX. Because we always merge the
+    // closest pair first, no two final chips are closer than a chip width (no
+    // overlap at ANY zoom) while spread-out days stay separate (May 12+13 merge,
+    // but 14 — ~56px from 12 — keeps its own chip: it never becomes the closest
+    // pair below the threshold once 12+13 collapse to their ~centroid).
+    type Node = { x: number; xs: number[]; groups: DayGroup[] };
+    const nodes: Node[] = placed.map((p) => ({ x: p.x, xs: [p.x], groups: [p.group] }));
+    // nodes is already sorted by x (placed was sorted; singletons preserve it).
+    while (nodes.length > 1) {
+      // Find the adjacent pair with the smallest centroid gap.
+      let minGap = Infinity;
+      let minIdx = -1;
+      for (let i = 0; i < nodes.length - 1; i++) {
+        const gap = nodes[i + 1]!.x - nodes[i]!.x;
+        if (gap < minGap) {
+          minGap = gap;
+          minIdx = i;
+        }
+      }
+      if (minIdx === -1 || minGap >= CHIP_PX) break;
+      // Merge nodes[minIdx] and nodes[minIdx+1] into one, recompute its centroid
+      // as the mean of ALL member x-pixels, and re-insert keeping x-sorted order.
+      const a = nodes[minIdx]!;
+      const b = nodes[minIdx + 1]!;
+      const xs = [...a.xs, ...b.xs];
+      const groups = [...a.groups, ...b.groups];
+      const merged: Node = {
+        x: xs.reduce((s, v) => s + v, 0) / xs.length,
+        xs,
+        groups,
+      };
+      nodes.splice(minIdx, 2, merged);
+    }
+
+    clusters = nodes.map((n): Cluster => {
+      // Member days/events come date-ASC because placed was x-sorted (a time axis
+      // is monotonic), and merges preserve member order within each node.
+      const groups = n.groups;
       const days = groups.map((g) => g.date);
       const events = groups.flatMap((g) => g.events);
       const kinds = new Set(events.map((e) => e.kind));
       const mixedKind = kinds.size > 1;
-      // Representative kind = the most-recent member day's kind (groups are
-      // date-ASC, so the last one).
+      // Representative kind = the most-recent member day's kind (date-ASC last).
       const kind = mixedKind ? "post" : groups[groups.length - 1]!.kind;
-      // Card x = the CENTROID (average) of its member days' x-pixels, so a
-      // merged thumbnail card sits CENTERED between its days' dashed lines —
-      // not offset to the first/leftmost day.
-      const centroid = cur.xs.reduce((s, v) => s + v, 0) / cur.xs.length;
-      const x = centroid;
-      out.push({ x, days, events, kind, mixedKind });
-      cur = null;
-    };
-    for (const p of placed) {
-      if (cur === null) {
-        cur = { xs: [p.x], groups: [p.group] };
-        continue;
-      }
-      const anchor = cur.xs[0]!;
-      if (p.x - anchor <= CLUSTER_PX) {
-        cur.xs.push(p.x);
-        cur.groups.push(p.group);
-      } else {
-        flush();
-        cur = { xs: [p.x], groups: [p.group] };
-      }
-    }
-    flush();
-    clusters = out;
+      // Card x = the centroid of all member days' x-pixels (already maintained on
+      // the node), so a merged thumbnail card sits CENTERED between its lines.
+      return { x: n.x, days, events, kind, mixedKind };
+    });
   }
 
   // Wire the recompute triggers: the chart's 'finished' event (fires after every
