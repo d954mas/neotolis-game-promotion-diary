@@ -67,6 +67,7 @@
     baseChartOptions,
     prefersReducedMotion,
     resolveAccentRgba,
+    resolveTextColor,
     WISHLIST_CHART_GRID,
   } from "./chart-theme.js";
   import ChartMarkerOverlay from "./ChartMarkerOverlay.svelte";
@@ -390,21 +391,40 @@
     // across the other visible lines so a band still shows if the first lacks a
     // snapshot for that day (mirrors the page's per-day delta resolution).
     let win: { from: string; to: string } | null = null;
+    let win7d: number | null = null;
     if (hoveredDay && firstLine) {
       for (const line of lines) {
         const d = deltaByDate[line.id]?.[hoveredDay];
         if (d) {
           win = { from: d.windowFrom, to: d.windowTo };
+          win7d = d.delta7d;
           break;
         }
       }
     }
+
+    // Label the band so the highlight is self-explanatory: "+12 in 7d ↑" reads
+    // as "this event → +12 wishlists over the following week" (the user found a
+    // bare highlighted band unclear). Resolved text color — no var() in canvas.
+    const bandLabel =
+      win7d === null
+        ? ""
+        : `${win7d > 0 ? "+" : ""}${win7d} in 7d ${win7d > 0 ? "↑" : win7d < 0 ? "↓" : "→"}`;
 
     const markArea =
       win && firstLine
         ? {
             silent: true,
             itemStyle: { color: resolveAccentRgba(0.14) },
+            label: {
+              show: bandLabel !== "",
+              position: "insideTop" as const,
+              distance: 6,
+              formatter: bandLabel,
+              color: resolveTextColor(),
+              fontSize: 12,
+              fontWeight: "bold" as const,
+            },
             data: [[{ xAxis: win.from }, { xAxis: win.to }]],
           }
         : { data: [] };

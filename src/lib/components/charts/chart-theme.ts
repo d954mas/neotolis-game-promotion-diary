@@ -58,6 +58,17 @@ export function resolveAccentRgba(alpha: number): string {
 }
 
 /**
+ * The page's `--text` resolved to a concrete color for ECharts canvas labels
+ * (the canvas can't read CSS vars — same constraint as resolveKindColor).
+ * Client-only; SSR returns a safe neutral.
+ */
+export function resolveTextColor(): string {
+  if (typeof window === "undefined") return "#e6e6e6";
+  const c = getComputedStyle(document.documentElement).getPropertyValue("--text").trim();
+  return c || "#e6e6e6";
+}
+
+/**
  * Whether the user prefers reduced motion. Chart components pass
  * `animation: !prefersReducedMotion()` into the ECharts option (AGENTS.md:
  * prefers-reduced-motion gates every transition). Client-only.
