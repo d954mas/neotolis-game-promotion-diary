@@ -71,6 +71,7 @@
     buildDayGroups,
     axisDomain,
     isoDay,
+    dayToLocalMs,
     tooltipEventsHtml,
     listingLabel as buildListingLabel,
     type ListingLite,
@@ -372,7 +373,10 @@
     let best: string | null = null;
     let bestDist = Infinity;
     for (const g of dayGroups) {
-      const t = new Date(`${g.date}T00:00:00`).getTime();
+      // LOCAL-midnight ms (dayToLocalMs) so the distance is measured against the
+      // SAME axis coordinate the line/markers use (convertFromPixel returns the
+      // local-midnight-based axis ms now that the series feed dayToLocalMs).
+      const t = dayToLocalMs(g.date);
       const dist = Math.abs(t - dateMs);
       if (dist < bestDist) {
         bestDist = dist;
@@ -418,7 +422,11 @@
       lineStyle: { width: 2, color: line.color },
       itemStyle: { color: line.color },
       areaStyle: areaGradient(line.color),
-      data: line.points.map((p) => [p.date, p.balance]),
+      // dayToLocalMs(p.date): feed the LOCAL-midnight ms (NOT the bare
+      // "YYYY-MM-DD" string, which the time axis parses as UTC midnight → a
+      // day-early render in a negative-offset TZ). The crosshair tooltip reads
+      // value[1] for the balance, so the [ms, balance] tuple shape is unchanged.
+      data: line.points.map((p) => [dayToLocalMs(p.date), p.balance]),
     }));
 
     // D-08: no listing has points → an empty anchor series keeps the grid drawn

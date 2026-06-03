@@ -33,7 +33,12 @@
 
   import KindIcon from "$lib/components/KindIcon.svelte";
   import { m } from "$lib/paraglide/messages.js";
-  import { eventThumbnail, markerDayLabel, type DayGroup } from "./wishlist-chart-shared.js";
+  import {
+    eventThumbnail,
+    markerDayLabel,
+    dayToLocalMs,
+    type DayGroup,
+  } from "./wishlist-chart-shared.js";
   import type { EChartsType } from "echarts/core";
   import type { EventDto } from "$lib/server/dto.js";
 
@@ -240,7 +245,13 @@
     for (const g of dayGroups) {
       let x: number | null;
       try {
-        const px = c.convertToPixel({ xAxisIndex: 0 }, g.date);
+        // dayToLocalMs(g.date): convert the date-only day to the SAME
+        // LOCAL-midnight ms the line/bar series feed the time axis, so a marker
+        // lands on its day's x-pixel (passing the bare "YYYY-MM-DD" string here
+        // made ECharts parse it as UTC midnight → the marker drifted a day off
+        // the line in a negative-offset TZ). Marker↔line alignment holds because
+        // BOTH now go through dayToLocalMs.
+        const px = c.convertToPixel({ xAxisIndex: 0 }, dayToLocalMs(g.date));
         x = Array.isArray(px) ? px[0]! : px;
       } catch {
         convertReady = false;

@@ -61,6 +61,28 @@ export function isoDay(d: Date): string {
   return `${y}-${mo}-${da}`;
 }
 
+/**
+ * A date-only "YYYY-MM-DD" day → the LOCAL-midnight epoch ms for that calendar
+ * day. This is the SINGLE conversion every date-only value passes through before
+ * it touches the ECharts `type:"time"` axis (line/bar series x, the axis
+ * domain min/max, and the marker overlay's convertToPixel arg).
+ *
+ * Why this exists (the timezone day-shift bug): handing ECharts a bare
+ * "2026-05-01" STRING makes it parse the value as `new Date("2026-05-01")` =
+ * UTC midnight. In a negative-offset timezone (e.g. America/New_York, UTC-4/-5)
+ * UTC midnight is the PREVIOUS evening LOCALLY, so the point/marker renders a day
+ * early and the axis label, tooltip day-lookup (axisValueToDay → isoDay), and
+ * delta/event matching all drift by one. `new Date(y, mo-1, d)` builds LOCAL
+ * midnight instead, so `isoDay(new Date(dayToLocalMs(day)))` round-trips the SAME
+ * calendar day — keeping the rendered axis, the lookup keys, and the markers all
+ * in agreement. Both the line/bar data AND the overlay's convertToPixel use this
+ * one helper, so marker↔line alignment is preserved.
+ */
+export function dayToLocalMs(day: string): number {
+  const [y, mo, d] = day.split("-").map(Number);
+  return new Date(y ?? 1970, (mo ?? 1) - 1, d ?? 1).getTime();
+}
+
 /** range === null ⇒ all time. Otherwise [from, to] inclusive on YYYY-MM-DD. */
 export function inRange(dateStr: string, range: { from: Date; to: Date } | null): boolean {
   if (!range) return true;
@@ -73,7 +95,12 @@ export function inRange(dateStr: string, range: { from: Date; to: Date } | null)
  *  SAME day key (the page filters its events by this to populate the modal). */
 export function eventDay(e: { occurredAt: Date | string }): string {
   const d = typeof e.occurredAt === "string" ? new Date(e.occurredAt) : e.occurredAt;
-  return d.toISOString().slice(0, 10);
+  // LOCAL calendar day (isoDay), NOT toISOString().slice(0,10) (UTC). The
+  // wishlist point dates, the axis (dayToLocalMs), and the crosshair tooltip's
+  // day-lookup (axisValueToDay → isoDay) are all LOCAL, so the event day-key
+  // MUST be local too — otherwise an event near midnight matched the wrong
+  // wishlist day in a non-UTC timezone (the self-inconsistency this fixes).
+  return isoDay(d);
 }
 
 /**
@@ -158,12 +185,15 @@ export function eventThumbnail(event: ThumbnailEvent): string | null {
  * the markers on-canvas. Derived from ALL listings' points so toggling a
  * listing off never collapses the axis.
  *
- * - `range` set → `{ min: isoDay(from), max: isoDay(to) }` (the user's window
- *   is authoritative; markers outside it are already filtered by buildDayGroups).
+ * - `range` set → `{ min: from, max: to }` (the user's window is authoritative;
+ *   markers outside it are already filtered by buildDayGroups).
  * - else, non-empty list → `{ min: earliest, max: latest+1d }` (pad the max one
  *   day so the last marker isn't flush on the right edge).
  * - else (no points, no events) → null (let ECharts auto-fit).
  *
+ * Returns LOCAL-midnight epoch ms (via dayToLocalMs) so it's fed to the ECharts
+ * `type:"time"` axis as the SAME timestamp the series data + markers use — never
+ * a bare date STRING (which ECharts parses as UTC midnight → the day-shift bug).
  * Both charts call this with the SAME inputs so their axes — and therefore their
  * markers — line up.
  */
@@ -171,8 +201,8 @@ export function axisDomain(
   allPointDates: string[],
   dayGroups: { date: string }[],
   range: { from: Date; to: Date } | null,
-): { min: string; max: string } | null {
-  if (range) return { min: isoDay(range.from), max: isoDay(range.to) };
+): { min: number; max: number } | null {
+  if (range) return { min: dayToLocalMs(isoDay(range.from)), max: dayToLocalMs(isoDay(range.to)) };
   const dates = [...allPointDates, ...dayGroups.map((g) => g.date)];
   if (dates.length === 0) return null;
   let min = dates[0]!;
@@ -181,10 +211,10 @@ export function axisDomain(
     if (d < min) min = d;
     if (d > max) max = d;
   }
-  // Pad the max by one day so the rightmost marker isn't on the axis edge.
-  const maxDate = new Date(`${max}T00:00:00`);
+  // Pad the max by one day (LOCAL) so the rightmost marker isn't on the axis edge.
+  const maxDate = new Date(dayToLocalMs(max));
   maxDate.setDate(maxDate.getDate() + 1);
-  return { min, max: isoDay(maxDate) };
+  return { min: dayToLocalMs(min), max: maxDate.getTime() };
 }
 
 /**

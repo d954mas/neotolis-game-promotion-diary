@@ -50,6 +50,7 @@
     buildDayGroups,
     axisDomain,
     isoDay,
+    dayToLocalMs,
     tooltipEventsHtml,
     listingLabel as buildListingLabel,
     type ListingLite,
@@ -105,18 +106,20 @@
   // over the FULL series and THEN filtered by range — so the first in-range day
   // keeps its bar (baseline = its prior, possibly out-of-range, snapshot).
   // Filtering points before subtracting would drop that baseline and lose it.
-  type Bar = { id: string; label: string; color: string; data: [string, number][] };
+  // data x is LOCAL-midnight ms (dayToLocalMs), NOT the bare "YYYY-MM-DD" string,
+  // so the time axis doesn't shift the bar a day early in a negative-offset TZ.
+  type Bar = { id: string; label: string; color: string; data: [number, number][] };
 
   const bars = $derived.by((): Bar[] => {
     return listings
       .filter((l) => isVisible(l.id))
       .map((l): Bar => {
         const s = seriesByListing[l.id] ?? { points: [], lastImportedAt: null };
-        const data: [string, number][] = [];
+        const data: [number, number][] = [];
         for (let j = 1; j < s.points.length; j++) {
           const date = s.points[j]!.date;
           if (!inRange(date, range)) continue;
-          data.push([date, s.points[j]!.balance - s.points[j - 1]!.balance]);
+          data.push([dayToLocalMs(date), s.points[j]!.balance - s.points[j - 1]!.balance]);
         }
         return { id: l.id, label: listingLabel(l), color: listingColor(listings, l.id), data };
       })
@@ -225,7 +228,9 @@
     let best: string | null = null;
     let bestDist = Infinity;
     for (const g of dayGroups) {
-      const t = new Date(`${g.date}T00:00:00`).getTime();
+      // LOCAL-midnight ms (dayToLocalMs) — matches the axis coordinate the bars
+      // + markers use, so convertFromPixel's ms compares against the right day.
+      const t = dayToLocalMs(g.date);
       const dist = Math.abs(t - dateMs);
       if (dist < bestDist) {
         bestDist = dist;
@@ -270,7 +275,7 @@
       // callback → no ECharts CallbackDataParams typing friction).
       data: singleListing
         ? bar.data.map(([date, v]) => ({
-            value: [date, v] as [string, number],
+            value: [date, v] as [number, number],
             itemStyle: { color: v >= 0 ? okColor : downColor },
           }))
         : bar.data,
