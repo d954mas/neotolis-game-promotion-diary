@@ -30,45 +30,6 @@ export function resolveKindColor(kind: string): string {
 }
 
 /**
- * Resolve the brand `--accent` token to a concrete `rgba(r,g,b,alpha)` string at
- * option-build time — for the post-event highlight band on the wishlist line
- * (04-18). The ECharts canvas can't read CSS vars / `color-mix()` (that's the
- * exact bug that rendered the old markArea as a gray square), so getComputedStyle
- * resolves `--accent` to its hex and we splice in the alpha. `--accent` is a hex
- * (`#e89b5e`) in app.css; if a theme ever makes it non-hex we fall back to a
- * neutral so the canvas never receives a string it can't parse. Client-only:
- * returns "" under SSR (no document).
- */
-export function resolveAccentRgba(alpha: number): string {
-  if (typeof window === "undefined") return "";
-  const hex = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
-  const h = hex.replace(/^#/, "");
-  const full =
-    h.length === 3
-      ? h
-          .split("")
-          .map((c) => c + c)
-          .join("")
-      : h;
-  if (full.length !== 6 || /[^0-9a-fA-F]/.test(full)) return `rgba(232,155,94,${alpha})`;
-  const r = parseInt(full.slice(0, 2), 16);
-  const g = parseInt(full.slice(2, 4), 16);
-  const b = parseInt(full.slice(4, 6), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
-/**
- * The page's `--text` resolved to a concrete color for ECharts canvas labels
- * (the canvas can't read CSS vars — same constraint as resolveKindColor).
- * Client-only; SSR returns a safe neutral.
- */
-export function resolveTextColor(): string {
-  if (typeof window === "undefined") return "#e6e6e6";
-  const c = getComputedStyle(document.documentElement).getPropertyValue("--text").trim();
-  return c || "#e6e6e6";
-}
-
-/**
  * Whether the user prefers reduced motion. Chart components pass
  * `animation: !prefersReducedMotion()` into the ECharts option (AGENTS.md:
  * prefers-reduced-motion gates every transition). Client-only.

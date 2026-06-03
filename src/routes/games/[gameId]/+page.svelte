@@ -672,7 +672,6 @@
         seriesByListing={chartSeriesByListing}
         events={chartEvents}
         listings={chartListings}
-        today={data.today}
         range={chartRange}
         visible={chartVisible}
         onSelectCluster={(days) => (selectedChartDays = days)}

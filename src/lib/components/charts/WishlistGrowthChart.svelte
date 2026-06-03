@@ -62,7 +62,6 @@
     seriesByListing,
     events,
     listings,
-    today,
     range,
     visible,
     onSelectCluster,
@@ -72,8 +71,6 @@
     events: EventDto[];
     /** Active listings (id + display name / appId) — drives bar labels + order. */
     listings: ListingLite[];
-    /** Server-chosen "now" ISO instant (kept for range/today parity). */
-    today: string;
     /** Shared date-range (owned by the page) — null = all time. CONTROLLED. */
     range: { from: Date; to: Date } | null;
     /** Shared legend selection (owned by the page): listingId → shown. CONTROLLED.
@@ -86,8 +83,6 @@
      *  page the SAME cluster shape (04-13). */
     onSelectCluster: (days: string[]) => void;
   } = $props();
-
-  void today;
 
   // The live ECharts instance (svelte-echarts exposes it via `chart = $bindable()`).
   // The HTML marker overlay reads it to pixel-position + cluster the event chips

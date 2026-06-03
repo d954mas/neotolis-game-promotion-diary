@@ -802,11 +802,14 @@ export interface WishlistSeries {
  * markArea window (D-03).
  *
  * `delta24h` / `delta7d` are a WINDOWED SUBTRACTION of the immutable cumulative
- * balance series — `balance(firstDay in window) − balance(eventDay)` — NEVER a
- * re-sum of adds−deletes (the import already owns the cumulative balance;
- * re-summing would double-count, POLL-04). Null when the post-event window has
- * no snapshot to anchor on. The delta is an attribute of the DAY: the function
- * keys on `eventDate`, not an eventId, so every event that day shares it.
+ * balance series — `balance(LATEST snapshot in the window) − balance(eventDay)`
+ * — NEVER a re-sum of adds−deletes (the import already owns the cumulative
+ * balance; re-summing would double-count, POLL-04). The LATEST-in-window end
+ * (not the first row after the event) captures the full N-day effect: for
+ * D0:100, D1:110, D7:200 the 7d delta is balance(D7)−balance(D0)=100, not
+ * balance(D1)−balance(D0). Null when the post-event window has no snapshot to
+ * anchor on. The delta is an attribute of the DAY: the function keys on
+ * `eventDate`, not an eventId, so every event that day shares it.
  * `windowFrom` = eventDate, `windowTo` = eventDate + 7 days (ISO YYYY-MM-DD).
  */
 export interface WishlistDelta {
