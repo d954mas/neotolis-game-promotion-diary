@@ -43,6 +43,7 @@ import {
   buildDayGroups,
   inRange,
   eventDay,
+  tooltipEventsHtml,
 } from "../../src/lib/components/charts/wishlist-chart-shared.js";
 import correlationChartSource from "../../src/lib/components/charts/WishlistCorrelationChart.svelte?raw";
 import growthChartSource from "../../src/lib/components/charts/WishlistGrowthChart.svelte?raw";
@@ -692,5 +693,142 @@ describe("04-14 per-day clickable dashed lines + centroid card + identical cross
     for (const src of [correlationChartSource, growthChartSource]) {
       expect(src).toContain("WISHLIST_CHART_GRID");
     }
+  });
+});
+
+describe("04-15 events-in-tooltip + line-hover forwards + thicker lines + click-anywhere", () => {
+  it("tooltipEventsHtml renders a thumbnail row for a day with a preview event", () => {
+    // The shared builder both charts' axis tooltips append: a YouTube event on
+    // 2026-05-15 → a row with its <img> thumbnail + the (escaped) title.
+    const dayGroups = buildDayGroups(baseEvents, null);
+    const html = tooltipEventsHtml(
+      "2026-05-15",
+      dayGroups,
+      (count) => `+${count} more`,
+    );
+    // An <img> with the derived YouTube thumbnail URL + the event title.
+    expect(html).toContain("<img");
+    expect(html).toContain("img.youtube.com/vi/abc123/mqdefault.jpg");
+    expect(html).toContain("Trailer drop");
+    // The no-preview Reddit event renders an inline colored dot (no <img> for it)
+    // but still its title.
+    expect(html).toContain("Reddit launch thread");
+  });
+
+  it("tooltipEventsHtml escapes the title and returns '' for a day with no events", () => {
+    const evil = [
+      {
+        ...baseEvents[1]!,
+        id: "x1",
+        title: '<script>alert(1)</script>',
+        occurredAt: new Date("2026-05-20T08:00:00Z"),
+        redditEnrichment: null,
+      },
+    ];
+    const groups = buildDayGroups(evil, null);
+    const html = tooltipEventsHtml("2026-05-20", groups, (n) => `+${n}`);
+    expect(html).not.toContain("<script>alert");
+    expect(html).toContain("&lt;script&gt;");
+    // A day with no events → empty fragment (the tooltip shows only the numbers).
+    expect(tooltipEventsHtml("2026-01-01", groups, (n) => `+${n}`)).toBe("");
+  });
+
+  it("tooltipEventsHtml caps the rows at 4 and folds the rest into the moreLabel", () => {
+    const many = Array.from({ length: 7 }, (_v, i) => ({
+      ...baseEvents[1]!,
+      id: `m${i}`,
+      title: `Event ${i}`,
+      occurredAt: new Date("2026-05-21T08:00:00Z"),
+      redditEnrichment: null,
+    }));
+    const groups = buildDayGroups(many, null);
+    let moreArg = -1;
+    const html = tooltipEventsHtml("2026-05-21", groups, (n) => {
+      moreArg = n;
+      return `+${n} more`;
+    });
+    // 7 events → 4 rows + "+3 more".
+    expect(moreArg).toBe(3);
+    expect(html).toContain("+3 more");
+    expect(html).toContain("Event 0");
+    expect(html).not.toContain("Event 4");
+  });
+
+  it("both charts append the day's events into the SAME axis tooltip (source check)", () => {
+    // The unified tooltip: each chart's tooltip formatter calls tooltipEventsHtml
+    // so a hovered day's events render alongside the date + per-listing values.
+    for (const src of [correlationChartSource, growthChartSource]) {
+      expect(src).toContain("tooltipEventsHtml");
+    }
+  });
+
+  it("the overlay forwards a line hover to the chart's axis tooltip (source check)", () => {
+    // Pointing at a dashed line dispatches showTip so the enriched axis tooltip
+    // appears for that day; leaving hides it.
+    expect(overlaySource).toContain("showTip");
+    expect(overlaySource).toContain("dispatchAction");
+    expect(overlaySource).toContain("hideTip");
+  });
+
+  it("the dashed line is thicker (3px) with a wider 16px hit strip (source check)", () => {
+    // "линии хочется толще": heavier line + wider hover/click target.
+    expect(overlaySource).toContain("border-left: 3px dashed");
+    expect(overlaySource).toContain("width: 16px");
+  });
+
+  it("both charts wire a ZRender click → nearest event-day → onSelectCluster (source check)", () => {
+    // Click ANYWHERE on the plot (not just a chip) opens the nearest day's modal.
+    for (const src of [correlationChartSource, growthChartSource]) {
+      expect(src).toContain('getZr().on("click"');
+      expect(src).toContain("convertFromPixel");
+      expect(src).toContain("nearestDay");
+    }
+  });
+
+  it("a click on the plot canvas opens the nearest event-day's modal", async () => {
+    await page.viewport(900, 720);
+    const { root, component, onSelectCluster } = (() => {
+      const onSelectCluster = vi.fn();
+      const component = mount(WishlistCorrelationChart, {
+        target: host,
+        props: {
+          seriesByListing: { l1: shortSeries },
+          events: baseEvents,
+          listings: baseListings,
+          today: TODAY,
+          range: null,
+          visible: {},
+          onSelectCluster,
+        },
+      });
+      flushSync();
+      const root = host.querySelector(
+        '[data-testid="wishlist-correlation-chart"]',
+      ) as HTMLElement;
+      return { root, component, onSelectCluster };
+    })();
+    // Let the chart finish its first render so the ZRender canvas + coordinate
+    // system are built (the click handler needs convertFromPixel to resolve).
+    await new Promise((r) => setTimeout(r, 250));
+    flushSync();
+    // Click on an EMPTY plot area (not over a chip): the ZRender canvas receives
+    // it (the overlay container is pointer-events:none). Target a point low in the
+    // plot, away from the top chip band.
+    const canvas = root.querySelector("canvas") as HTMLCanvasElement;
+    const rect = canvas.getBoundingClientRect();
+    const x = rect.left + rect.width * 0.5;
+    const y = rect.top + rect.height * 0.7;
+    for (const type of ["mousedown", "mouseup", "click"]) {
+      canvas.dispatchEvent(
+        new MouseEvent(type, { bubbles: true, clientX: x, clientY: y }),
+      );
+    }
+    flushSync();
+    await new Promise((r) => setTimeout(r, 50));
+    // The nearest event-day (the events are on 2026-05-15) was selected.
+    expect(onSelectCluster).toHaveBeenCalled();
+    const arg = onSelectCluster.mock.calls.at(-1)![0] as string[];
+    expect(arg).toContain("2026-05-15");
+    unmount(component);
   });
 });
