@@ -64,6 +64,16 @@
     return d.toLocaleDateString("en", { month: "short", day: "numeric" });
   }
 
+  // Prominent date (or date-range) header for a chip's hover tooltip — the user
+  // wants the date(s) obvious when hovering a chip. `days` is date-ASC, so a
+  // single-day cluster reads "May 12" and a merged cluster reads "May 12 – 14".
+  function clusterDateLabel(days: string[]): string {
+    if (days.length === 0) return "";
+    const first = dayLabel(days[0]!);
+    if (days.length === 1) return first;
+    return `${first} – ${dayLabel(days[days.length - 1]!)}`;
+  }
+
   // The KindIcon component only knows a fixed kind union; fall back to "post"
   // for anything outside it so a no-preview chip always renders an icon.
   type IconKind =
@@ -453,7 +463,10 @@
              + day), so a merged multi-day cluster reveals both days distinctly.
              role=tooltip; pointer-events:none so it never steals the hover. -->
         <span class="chip-tooltip" role="tooltip" data-testid="chart-marker-tooltip">
-          <span class="tt-count">{eventCountLabel(cl.events.length)}</span>
+          <span class="tt-head">
+            <span class="tt-date">{clusterDateLabel(cl.days)}</span>
+            <span class="tt-count">{eventCountLabel(cl.events.length)}</span>
+          </span>
           {#each tt.rows as row (row.id)}
             <span class="tt-row">
               {#if row.thumb}
@@ -634,11 +647,24 @@
     z-index: 4;
     pointer-events: none;
   }
+  .tt-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--s-3);
+  }
+  .tt-date {
+    font-family: var(--f-sans);
+    font-size: var(--t-13);
+    font-weight: var(--w-sb);
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
   .tt-count {
     font-family: var(--f-sans);
     font-size: var(--t-12);
     font-weight: var(--w-sb);
-    color: var(--text);
+    color: var(--text-3);
   }
   /* One event row: thumbnail/icon on the left, title + day stacked on the right. */
   .tt-row {
