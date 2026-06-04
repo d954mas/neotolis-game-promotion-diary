@@ -4,10 +4,12 @@
 // never a copy (AGENTS.md "one source of truth").
 //
 // The gate's job is to keep copyleft (AGPL/GPL-family) out of PRODUCTION
-// dependencies. pnpm emits compound SPDX expressions like "(MIT OR CC0-1.0)"
-// — a dual-licensed dependency is satisfied when ANY disjunct is permissive
-// (you pick the permissive arm), so a compound expression with a permissive
-// token PASSES even if another token is copyleft.
+// dependencies. pnpm emits compound SPDX expressions: an `OR` is a choice
+// (a dual-licensed dep PASSES when ANY arm is permissive — you pick it),
+// while an `AND` is cumulative (every conjunct's obligation applies, so a
+// copyleft `AND` conjunct FAILs no matter what the other arm is).
+// classifyLicense evaluates that operator structure, not a flat token bag —
+// a flat scan mis-passes "(MIT OR Apache-2.0) AND GPL-3.0".
 
 export type LicenseVerdict = "PASS" | "WARN" | "FAIL";
 
@@ -45,17 +47,8 @@ export const PERMISSIVE_LICENSES: readonly string[] = [
   "BlueOak-1.0.0",
 ];
 
-// Split an SPDX expression into bare license tokens: drop parens and the
-// `OR` / `AND` / `WITH` operators, trim, drop empties.
-function tokenize(spdx: string): string[] {
-  return spdx
-    .split(/[()]|\s+(?:OR|AND|WITH)\s+/i)
-    .map((t) => t.trim())
-    .filter(Boolean);
-}
-
-// A token matches a list id if it equals the id or starts with `${id}-`
-// (the SPDX version-suffix convention: "GPL-3.0", "AGPL-3.0-or-later").
+// A token matches a list id if it equals the id or starts with `${id}-` /
+// `${id}.` (the SPDX version-suffix convention: "GPL-3.0", "AGPL-3.0-or-later").
 // Whole-token matching is why "LGPL-3.0" does not match the "GPL" FAIL id —
 // "LGPL-3.0" neither equals "GPL-..." nor starts with "GPL-".
 function tokenMatchesId(token: string, id: string): boolean {
@@ -64,28 +57,85 @@ function tokenMatchesId(token: string, id: string): boolean {
   return t === i || t.startsWith(`${i}-`) || t.startsWith(`${i}.`);
 }
 
-function anyTokenIn(tokens: string[], ids: readonly string[]): boolean {
-  return tokens.some((tok) => ids.some((id) => tokenMatchesId(tok, id)));
+// Verdict for a single bare license id. WARN before FAIL so weak/file-level
+// copyleft ("LGPL-3.0", "MPL-2.0") classifies WARN — tokenMatchesId already
+// keeps "LGPL" off the "GPL" FAIL id, but the ordering is the explicit guard.
+// Unknown ids PASS: the gate blocks copyleft, it does not allowlist every id.
+function classifyToken(token: string): LicenseVerdict {
+  if (WARN_LICENSES.some((id) => tokenMatchesId(token, id))) return "WARN";
+  if (FAIL_LICENSES.some((id) => tokenMatchesId(token, id))) return "FAIL";
+  return "PASS";
+}
+
+// OR — satisfy ANY disjunct → best obtainable verdict (PASS > WARN > FAIL).
+function orVerdict(a: LicenseVerdict, b: LicenseVerdict): LicenseVerdict {
+  if (a === "PASS" || b === "PASS") return "PASS";
+  if (a === "WARN" || b === "WARN") return "WARN";
+  return "FAIL";
+}
+
+// AND — satisfy EVERY conjunct → worst verdict (FAIL > WARN > PASS).
+function andVerdict(a: LicenseVerdict, b: LicenseVerdict): LicenseVerdict {
+  if (a === "FAIL" || b === "FAIL") return "FAIL";
+  if (a === "WARN" || b === "WARN") return "WARN";
+  return "PASS";
+}
+
+// Lex an SPDX expression into parens + words (operators and license ids).
+function lex(spdx: string): string[] {
+  return spdx
+    .replace(/([()])/g, " $1 ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
 }
 
 /**
  * Classify an SPDX license expression for the prod-dep copyleft gate.
  *
- * Compound-OR semantics: if the expression contains `OR` AND any token is
- * permissive → PASS (the permissive arm satisfies the obligation). Otherwise
- * a FAIL token → FAIL; a WARN token → WARN; anything else → PASS (unknown but
- * not denied — the gate blocks copyleft, it does not allowlist every id).
- *
- * WARN is checked BEFORE FAIL so "LGPL-3.0" classifies as WARN, never FAIL —
- * tokenMatchesId already prevents the "GPL" substring from catching "LGPL",
- * but the WARN-first ordering is the explicit guard.
+ * A real SPDX evaluator, not a token bag: `OR` binds loosest (you pick an arm
+ * → best-of), `AND` binds tighter (you must comply with all → worst-of),
+ * parens override. So `(MIT OR Apache-2.0) AND GPL-3.0` FAILs — the GPL
+ * conjunct is mandatory whichever OR-arm you pick — while `MIT OR GPL-3.0`
+ * PASSes (pick MIT). A `WITH` exception does not change copyleft status, so
+ * its operand is dropped. A bare/unknown id is PASS.
  */
 export function classifyLicense(spdx: string): LicenseVerdict {
-  const tokens = tokenize(spdx);
-  const hasOr = /\bOR\b/i.test(spdx);
+  const tokens = lex(spdx);
+  let pos = 0;
+  const peek = (): string | undefined => tokens[pos];
+  const isOp = (op: string): boolean => (peek() ?? "").toUpperCase() === op;
 
-  if (hasOr && anyTokenIn(tokens, PERMISSIVE_LICENSES)) return "PASS";
-  if (anyTokenIn(tokens, WARN_LICENSES)) return "WARN";
-  if (anyTokenIn(tokens, FAIL_LICENSES)) return "FAIL";
-  return "PASS";
+  // expr := and ( "OR" and )*
+  function parseExpr(): LicenseVerdict {
+    let v = parseAnd();
+    while (isOp("OR")) {
+      pos++;
+      v = orVerdict(v, parseAnd());
+    }
+    return v;
+  }
+  // and := term ( "AND" term )*
+  function parseAnd(): LicenseVerdict {
+    let v = parseTerm();
+    while (isOp("AND")) {
+      pos++;
+      v = andVerdict(v, parseTerm());
+    }
+    return v;
+  }
+  // term := "(" expr ")" | LICENSE [ "WITH" EXCEPTION ]
+  function parseTerm(): LicenseVerdict {
+    const tok = tokens[pos++];
+    if (tok === undefined) return "PASS"; // empty / malformed → unknown
+    if (tok === "(") {
+      const v = parseExpr();
+      if (peek() === ")") pos++;
+      return v;
+    }
+    if (isOp("WITH")) pos += 2; // drop "WITH" + the exception id
+    return classifyToken(tok);
+  }
+
+  return parseExpr();
 }

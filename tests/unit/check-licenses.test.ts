@@ -27,6 +27,22 @@ describe("classifyLicense (AGPL/GPL deny-gate, compound-OR aware)", () => {
     expect(classifyLicense("(BSD-2-Clause OR MIT OR Apache-2.0)")).toBe("PASS");
   });
 
+  it("FAILs a compound `AND` whose conjunct is copyleft, even with a permissive OR-arm", () => {
+    // Regression: `AND` is cumulative — a copyleft conjunct's obligation
+    // applies no matter which OR-arm you pick. A flat token-bag scan (any-OR +
+    // any-permissive → PASS) mis-passes all three of these.
+    expect(classifyLicense("(MIT OR Apache-2.0) AND GPL-3.0")).toBe("FAIL");
+    expect(classifyLicense("LGPL-3.0 AND GPL-3.0")).toBe("FAIL");
+    expect(classifyLicense("MPL-2.0 AND GPL-3.0")).toBe("FAIL");
+  });
+
+  it("respects AND/OR precedence and parens for non-copyleft expressions", () => {
+    expect(classifyLicense("MIT AND ISC")).toBe("PASS"); // all permissive → PASS
+    expect(classifyLicense("MIT AND MPL-2.0")).toBe("WARN"); // worst-of an AND
+    expect(classifyLicense("(MIT OR Apache-2.0) AND BSD-3-Clause")).toBe("PASS");
+    expect(classifyLicense("MIT AND (LGPL-3.0 OR GPL-3.0)")).toBe("WARN"); // inner OR picks LGPL (WARN)
+  });
+
   it("PASSes plain permissive ids", () => {
     expect(classifyLicense("MIT")).toBe("PASS");
     expect(classifyLicense("0BSD")).toBe("PASS");
