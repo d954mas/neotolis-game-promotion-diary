@@ -1,0 +1,11 @@
+diary.example.com {
+    reverse_proxy localhost:3000
+    # Caddy auto-provisions Let's Encrypt TLS and sets X-Forwarded-For,
+    # X-Forwarded-Proto, X-Forwarded-Host by default. In the app env set:
+    #   TRUSTED_PROXY_CIDR=127.0.0.1/32   (Caddy + app on the same host;
+    #                                      add ::1/128 if Caddy reaches the
+    #                                      app over IPv6 loopback)
+    # If Caddy and the app are SEPARATE Docker containers, set the CIDR to
+    # the compose bridge subnet instead (e.g. 172.16.0.0/12) — the peer is
+    # the container IP, not 127.0.0.1.
+}

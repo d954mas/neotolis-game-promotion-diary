@@ -1,0 +1,13 @@
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+ingress:
+  - hostname: diary.example.com
+    service: http://app:3000   # app = compose service name; plain HTTP inside
+                               # the Docker network is fine — CF terminates TLS at the edge
+  - service: http_status:404
+# App env for this topology:
+#   TRUSTED_PROXY_CIDR=172.16.0.0/12   (the Docker bridge subnet cloudflared
+#                                       shares with app — NOT Cloudflare's edge
+#                                       IPs. The app sees cloudflared's container
+#                                       IP, never CF edge; proxy-trust then reads
+#                                       CF-Connecting-IP.)
