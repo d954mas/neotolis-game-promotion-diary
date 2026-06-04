@@ -1,5 +1,6 @@
 import type { PageServerLoad } from "./$types";
 import { listAuditPage } from "$lib/server/services/audit-read.js";
+import { loadUserQuota } from "$lib/server/services/quota-read.js";
 import { AUDIT_ACTIONS, type AuditAction } from "$lib/server/audit/actions.js";
 import { toAuditEntryDto } from "$lib/server/dto.js";
 import { AppError } from "$lib/server/services/errors.js";
@@ -46,6 +47,11 @@ export const load: PageServerLoad = async ({ locals, url }) => {
       cursor: null,
       from: undefined as string | undefined,
       to: undefined as string | undefined,
+      // Uniform return shape with the authenticated branch (matches the
+      // /sources anonymous-branch convention). The QuotaStatusBanner
+      // renders nothing for an anonymous (never-reached) view.
+      quotaPlatforms: [],
+      redditQuota: { isOperatorConfigured: false as const },
     };
   }
 
@@ -66,6 +72,10 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const fromValid = fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : undefined;
   const toValid = toDate && !Number.isNaN(toDate.getTime()) ? toDate : undefined;
 
+  // Per-user quota for the banner at the top of /audit. Same shared read
+  // /sources uses (D-03) — the two surfaces can never drift.
+  const { quotaPlatforms, redditQuota } = await loadUserQuota(locals.user.id);
+
   try {
     const page = await listAuditPage(locals.user.id, cursor, actionFilter, {
       from: fromValid,
@@ -79,6 +89,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
       // ISO date strings (YYYY-MM-DD) for the page's <DateRangeControl>.
       from: fromValid ? fromValid.toISOString().slice(0, 10) : undefined,
       to: toValid ? toValid.toISOString().slice(0, 10) : undefined,
+      quotaPlatforms,
+      redditQuota,
     };
   } catch (err) {
     // A bad cursor (forged / hand-edited URL) raises AppError 422 —
@@ -93,6 +105,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
         cursor,
         from: fromValid ? fromValid.toISOString().slice(0, 10) : undefined,
         to: toValid ? toValid.toISOString().slice(0, 10) : undefined,
+        quotaPlatforms,
+        redditQuota,
       };
     }
     return {
@@ -102,6 +116,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
       cursor,
       from: fromValid ? fromValid.toISOString().slice(0, 10) : undefined,
       to: toValid ? toValid.toISOString().slice(0, 10) : undefined,
+      quotaPlatforms,
+      redditQuota,
     };
   }
 };
