@@ -168,17 +168,20 @@ describe("account export / soft-delete / restore", () => {
       title: "R",
       submittedAt: new Date(),
     });
-    await createEvent(
-      userA.id,
-      {
-        gameIds: [],
-        kind: "reddit_post",
-        occurredAt: new Date(),
-        title: "RD",
-        externalId: redditPostId,
-      },
-      "127.0.0.1",
-    );
+    // Insert the reddit_post event row DIRECTLY (not via createEvent): the
+    // createEvent path runs a synchronous reddit syncStats.fetch
+    // (events-mutation.ts) that hits the live Reddit .json endpoint and 403s
+    // off-CI — a non-hermetic network call this export test must not make.
+    // The export scopes reddit snapshots by the user's reddit_post event
+    // external_ids, so a bare event row with the matching externalId is all
+    // this test needs.
+    await db.insert(events).values({
+      userId: userA.id,
+      kind: "reddit_post",
+      occurredAt: new Date(),
+      title: "RD",
+      externalId: redditPostId,
+    });
     await db.insert(redditPostSnapshots).values({
       postId: redditPostId,
       polledAt: new Date(),
@@ -524,17 +527,15 @@ describe("account export / soft-delete / restore", () => {
       title: "Rc",
       submittedAt: new Date(),
     });
-    await createEvent(
-      userA.id,
-      {
-        gameIds: [],
-        kind: "reddit_post",
-        occurredAt: new Date(),
-        title: "RDc",
-        externalId: redditPostId,
-      },
-      "127.0.0.1",
-    );
+    // Direct event insert (see the shape test above): avoid createEvent's live
+    // reddit syncStats.fetch so this export test stays hermetic.
+    await db.insert(events).values({
+      userId: userA.id,
+      kind: "reddit_post",
+      occurredAt: new Date(),
+      title: "RDc",
+      externalId: redditPostId,
+    });
     await db.insert(redditPostSnapshots).values({
       postId: redditPostId,
       polledAt: new Date(),
