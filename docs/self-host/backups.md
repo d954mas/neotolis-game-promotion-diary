@@ -297,3 +297,6 @@ are landing".
 *Last reviewed: 2026-05-03 (Phase 02.2 Plan 08)*
 *See also: `docs/deploy/install.md` §2 step 6–8 (R2 bucket setup +
 bucket-locks) and §5 "Backup verification" (operator's monthly check).*
+*See also: `docs/self-host/data-export.md` — the user-facing per-account JSON
+data export (GDPR Article 20) + re-import order, distinct from these
+operational DB backups.*
