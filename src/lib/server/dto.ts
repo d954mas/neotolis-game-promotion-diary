@@ -22,6 +22,7 @@ import type {
 import type { auditLog } from "./db/schema/audit-log.js";
 import type { youtubeVideoSnapshots, youtubeChannels } from "./db/schema/index.js";
 import type { wishlistSnapshots } from "./db/schema/wishlist-snapshots.js";
+import type { redditPostSnapshots } from "$lib/sources/reddit/server/schema/index.js";
 
 type User = typeof user.$inferSelect;
 type Session = typeof session.$inferSelect;
@@ -694,6 +695,40 @@ export function toYoutubeVideoSnapshotDto(r: YoutubeVideoSnapshotRow): YoutubeVi
     likeCount: r.likeCount,
     commentCount: r.commentCount,
     createdAt: r.createdAt,
+  };
+}
+
+type RedditPostSnapshotRow = typeof redditPostSnapshots.$inferSelect;
+
+/**
+ * RedditPostSnapshotDto — DTO for `reddit_post_snapshots` rows.
+ *
+ * PUBLIC-DATA table (no user_id, in the ESLint ALLOWLIST). No ciphertext
+ * fields — the projection is existence-only, enumerating every wire column
+ * so a future column addition forces a review touchpoint rather than
+ * auto-leaking. Mirrors toYoutubeVideoSnapshotDto.
+ */
+export interface RedditPostSnapshotDto {
+  postId: string;
+  polledAt: Date;
+  status: string;
+  score: number | null;
+  numComments: number | null;
+  awardsTotal: number | null;
+  upvoteRatio: number | null;
+  removedByCategory: string | null;
+}
+
+export function toRedditPostSnapshotDto(r: RedditPostSnapshotRow): RedditPostSnapshotDto {
+  return {
+    postId: r.postId,
+    polledAt: r.polledAt,
+    status: r.status,
+    score: r.score,
+    numComments: r.numComments,
+    awardsTotal: r.awardsTotal,
+    upvoteRatio: r.upvoteRatio,
+    removedByCategory: r.removedByCategory,
   };
 }
 

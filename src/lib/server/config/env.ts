@@ -222,6 +222,13 @@ const RawSchema = z.object({
 
 const raw = RawSchema.parse(process.env);
 
+// Canonical env key set — the single source of truth the .env.example
+// drift test (tests/unit/env-example-drift.test.ts, D-19a) reads. Reading
+// RawSchema.shape (NOT process.env) keeps this within the env.ts boundary:
+// it inspects the schema, not the environment, so no-restricted-properties
+// does not fire.
+export const RAW_ENV_KEYS: readonly string[] = Object.freeze(Object.keys(RawSchema.shape));
+
 // Decode and length-validate every KEK version present in env.
 // KEK is 32 raw bytes (AES-256). Anything else is a misconfiguration that must
 // fail at boot, not at first decrypt.
