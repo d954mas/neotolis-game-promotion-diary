@@ -20,6 +20,11 @@ interface PnpmLicensePkg {
 // directly (CVE-2024-27980), so run through the platform shell. The command is
 // a fixed literal with no untrusted input, so the shell form is safe; it lets
 // the shell resolve the right `pnpm` on both win32 and CI Linux.
+// Caveat: under a `corepack`-managed pnpm, `pnpm run licenses:generate` can
+// fail to resolve THIS nested `pnpm` spawn (corepack PATH shimming). CI uses
+// `pnpm/action-setup` (no corepack) so the regen-diff gate is green; if you
+// hit it locally under corepack, run the script directly:
+// `pnpm exec tsx scripts/gen-third-party-licenses.ts`.
 const json = JSON.parse(
   execSync("pnpm licenses list --prod --json", {
     encoding: "utf8",
