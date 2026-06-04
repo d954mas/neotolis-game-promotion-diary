@@ -25,6 +25,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/lib/server/db/migrate.ts",
     "db:check": "drizzle-kit check",
+    "licenses:generate": "tsx scripts/gen-third-party-licenses.ts",
     "start": "node build/server.js"
   },
   "dependencies": {
