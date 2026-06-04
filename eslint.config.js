@@ -119,6 +119,12 @@ export default [
       "src/lib/server/services/**/*.ts",
       "src/lib/server/services/**/*.tsx",
       "src/lib/server/http/**/*.ts",
+      // KEK batch rotation (crypto/rotate-kek-batch.ts) issues UNFILTERED
+      // queries against the tenant-owned api_keys_steam table — operator
+      // maintenance, all-tenant by design. Including crypto/ in the glob
+      // keeps that opt-out under the structural guard (the disable
+      // directives are load-bearing, not "rule definition not found").
+      "src/lib/server/crypto/**/*.ts",
       // Per-source server folders execute the same tenant-scope discipline
       // as services/. Without this glob, code under sources/<kind>/server/
       // would lose its lint-time guard (and existing eslint-disable-next-line
