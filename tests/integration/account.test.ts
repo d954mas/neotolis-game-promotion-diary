@@ -8,11 +8,16 @@ import { gameSteamListings } from "../../src/lib/server/db/schema/game-steam-lis
 import { dataSources } from "../../src/lib/server/db/schema/data-sources.js";
 import { events } from "../../src/lib/server/db/schema/events.js";
 import { apiKeysSteam } from "../../src/lib/server/db/schema/api-keys-steam.js";
+import { wishlistSnapshots } from "../../src/lib/server/db/schema/wishlist-snapshots.js";
+import { youtubeVideoSnapshots } from "../../src/lib/sources/youtube/server/schema/video-snapshots.js";
+import { redditPosts } from "../../src/lib/sources/reddit/server/schema/posts.js";
+import { redditPostSnapshots } from "../../src/lib/sources/reddit/server/schema/post-snapshots.js";
 import { createApp } from "../../src/lib/server/http/app.js";
 import { createGame } from "../../src/lib/server/services/games.js";
 import { createSource } from "../../src/lib/server/services/data-sources.js";
 import { createEvent } from "../../src/lib/server/services/events.js";
 import { createSteamKey } from "../../src/lib/server/services/api-keys-steam.js";
+import { exportAccountJson } from "../../src/lib/server/services/account.js";
 import * as SteamApi from "../../src/lib/server/integrations/steam-api.js";
 import { vi } from "vitest";
 import { seedUserDirectly } from "./helpers.js";
@@ -29,7 +34,7 @@ describe("account export / soft-delete / restore", () => {
 
   const uniq = () => Math.random().toString(36).slice(2, 10);
 
-  it("GET /api/me/export returns JSON envelope with all 7 documented top-level keys", async () => {
+  it("GET /api/me/export returns JSON envelope with all 11 documented top-level keys", async () => {
     const app = createApp();
     const userA = await seedUserDirectly({ email: `exp-shape-${uniq()}@test.local` });
     const res = await app.request("/api/me/export", {
@@ -37,6 +42,9 @@ describe("account export / soft-delete / restore", () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
+    // 11 keys = 10 sections + the exported_at scalar. The three Phase 6
+    // additions (PRIV-03) — wishlist_snapshots + the two public-data metric
+    // history sections — close the "take all your data" gap.
     expect(Object.keys(body).sort()).toEqual([
       "api_keys_steam",
       "audit_log",
@@ -45,7 +53,10 @@ describe("account export / soft-delete / restore", () => {
       "exported_at",
       "game_steam_listings",
       "games",
+      "reddit_post_snapshots",
       "user",
+      "wishlist_snapshots",
+      "youtube_video_snapshots",
     ]);
     // exported_at is an ISO timestamp.
     expect(typeof body.exported_at).toBe("string");
@@ -94,6 +105,119 @@ describe("account export / soft-delete / restore", () => {
     expect(json).not.toMatch(/refresh_token|refreshToken/);
     expect(json).not.toMatch(/access_token|accessToken/);
     expect(json).not.toMatch(/id_token|idToken/);
+    // D-09: the strip invariant is TOTAL over the WHOLE envelope, including
+    // the Phase 6 wishlist + metric-history sections. user_id must never
+    // appear (DTOs omit it); ciphertext column names must never appear.
+    expect(json).not.toMatch(/user_id|userId/);
+  });
+
+  it("GET /api/me/export full envelope (with wishlist + metric history) leaks no ciphertext or user_id [06-02 D-09]", async () => {
+    const app = createApp();
+    const userA = await seedUserDirectly({ email: `exp-full-strip-${uniq()}@test.local` });
+
+    // Seed a row in EVERY section that could carry a forbidden column: a steam
+    // key (ciphertext), a wishlist snapshot (tenant-owned, user_id), and a
+    // YouTube + Reddit event-with-snapshot (per-event metric history).
+    await createSteamKey(
+      userA.id,
+      { label: "K", plaintext: "STEAM-FULL-STRIP-XYZW1234" },
+      "127.0.0.1",
+    );
+
+    const game = await createGame(userA.id, { title: `g-${uniq()}` }, "127.0.0.1");
+    const [listing] = await db
+      .insert(gameSteamListings)
+      .values({ userId: userA.id, gameId: game.id, appId: 730, label: "L" })
+      .returning();
+    await db.insert(wishlistSnapshots).values({
+      userId: userA.id,
+      listingId: listing!.id,
+      date: "2026-06-01",
+      adds: 10,
+      deletes: 1,
+      purchasesAndActivations: 0,
+      gifts: 0,
+      balance: 9,
+    });
+
+    const ytVideoId = `vid-${uniq()}`;
+    await createEvent(
+      userA.id,
+      {
+        gameIds: [],
+        kind: "youtube_video",
+        occurredAt: new Date(),
+        title: "YT",
+        externalId: ytVideoId,
+      },
+      "127.0.0.1",
+    );
+    await db.insert(youtubeVideoSnapshots).values({
+      videoId: ytVideoId,
+      polledAt: new Date(),
+      viewCount: 100,
+      likeCount: 5,
+      commentCount: 2,
+    });
+
+    const redditPostId = `t3_${uniq()}`;
+    await db.insert(redditPosts).values({
+      postId: redditPostId,
+      subreddit: "gamedev",
+      permalink: `/r/gamedev/comments/${uniq()}`,
+      title: "R",
+      submittedAt: new Date(),
+    });
+    await createEvent(
+      userA.id,
+      {
+        gameIds: [],
+        kind: "reddit_post",
+        occurredAt: new Date(),
+        title: "RD",
+        externalId: redditPostId,
+      },
+      "127.0.0.1",
+    );
+    await db.insert(redditPostSnapshots).values({
+      postId: redditPostId,
+      polledAt: new Date(),
+      status: "ok",
+      score: 42,
+      numComments: 3,
+    });
+
+    const res = await app.request("/api/me/export", {
+      headers: { cookie: `neotolis.session_token=${userA.signedSessionCookieValue}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      wishlist_snapshots: unknown[];
+      youtube_video_snapshots: unknown[];
+      reddit_post_snapshots: unknown[];
+    };
+    // The new sections are actually populated (not vacuously secret-free).
+    expect(body.wishlist_snapshots.length).toBeGreaterThan(0);
+    expect(body.youtube_video_snapshots.length).toBeGreaterThan(0);
+    expect(body.reddit_post_snapshots.length).toBeGreaterThan(0);
+
+    const json = JSON.stringify(body);
+    for (const forbidden of [
+      "secret_ct",
+      "secret_iv",
+      "secret_tag",
+      "wrapped_dek",
+      "dek_iv",
+      "dek_tag",
+      "kek_version",
+      "user_id",
+      "userId",
+    ]) {
+      expect(
+        json,
+        `forbidden substring '${forbidden}' leaked into the full export envelope`,
+      ).not.toContain(forbidden);
+    }
   });
 
   it("GET /api/me/export writes account.exported audit event", async () => {
@@ -330,5 +454,106 @@ describe("account export / soft-delete / restore", () => {
     const json = JSON.stringify(body);
     expect(json).not.toContain(bTitle);
     expect(json).not.toContain(userB.id);
+  });
+
+  it("export includes wishlist + YouTube + Reddit metric history, tenant-scoped to the caller [06-02 D-07]", async () => {
+    const userA = await seedUserDirectly({ email: `content-A-${uniq()}@test.local` });
+    const userB = await seedUserDirectly({ email: `content-B-${uniq()}@test.local` });
+
+    // ── wishlist (tenant-owned) — one row per user, on the user's own listing.
+    const gameA = await createGame(userA.id, { title: `gA-${uniq()}` }, "127.0.0.1");
+    const [listingA] = await db
+      .insert(gameSteamListings)
+      .values({ userId: userA.id, gameId: gameA.id, appId: 730, label: "LA" })
+      .returning();
+    await db.insert(wishlistSnapshots).values({
+      userId: userA.id,
+      listingId: listingA!.id,
+      date: "2026-06-02",
+      adds: 20,
+      deletes: 2,
+      purchasesAndActivations: 0,
+      gifts: 0,
+      balance: 18,
+    });
+
+    const gameB = await createGame(userB.id, { title: `gB-${uniq()}` }, "127.0.0.1");
+    const [listingB] = await db
+      .insert(gameSteamListings)
+      .values({ userId: userB.id, gameId: gameB.id, appId: 570, label: "LB" })
+      .returning();
+    const bBalance = 999_111; // distinctive number so we can substring-assert its absence
+    await db.insert(wishlistSnapshots).values({
+      userId: userB.id,
+      listingId: listingB!.id,
+      date: "2026-06-02",
+      adds: bBalance,
+      deletes: 0,
+      purchasesAndActivations: 0,
+      gifts: 0,
+      balance: bBalance,
+    });
+
+    // ── YouTube event + matching public-data snapshot (same external_id/video_id).
+    const ytVideoId = `ytc-${uniq()}`;
+    await createEvent(
+      userA.id,
+      {
+        gameIds: [],
+        kind: "youtube_video",
+        occurredAt: new Date(),
+        title: "YTc",
+        externalId: ytVideoId,
+      },
+      "127.0.0.1",
+    );
+    await db.insert(youtubeVideoSnapshots).values({
+      videoId: ytVideoId,
+      polledAt: new Date(),
+      viewCount: 1234,
+      likeCount: 56,
+      commentCount: 7,
+    });
+
+    // ── Reddit event + matching public-data snapshot (same external_id/post_id).
+    const redditPostId = `t3_${uniq()}`;
+    await db.insert(redditPosts).values({
+      postId: redditPostId,
+      subreddit: "gamedev",
+      permalink: `/r/gamedev/comments/${uniq()}`,
+      title: "Rc",
+      submittedAt: new Date(),
+    });
+    await createEvent(
+      userA.id,
+      {
+        gameIds: [],
+        kind: "reddit_post",
+        occurredAt: new Date(),
+        title: "RDc",
+        externalId: redditPostId,
+      },
+      "127.0.0.1",
+    );
+    await db.insert(redditPostSnapshots).values({
+      postId: redditPostId,
+      polledAt: new Date(),
+      status: "ok",
+      score: 314,
+      numComments: 9,
+    });
+
+    const envelope = await exportAccountJson(userA.id, "127.0.0.1");
+
+    // D-07 content: the three new sections appear and contain the seeded ids.
+    expect(envelope.wishlist_snapshots.some((w) => w.listingId === listingA!.id)).toBe(true);
+    expect(envelope.youtube_video_snapshots.some((s) => s.videoId === ytVideoId)).toBe(true);
+    expect(envelope.reddit_post_snapshots.some((s) => s.postId === redditPostId)).toBe(true);
+
+    // Cross-tenant: user B's wishlist row is NOT in user A's export.
+    expect(envelope.wishlist_snapshots.some((w) => w.listingId === listingB!.id)).toBe(false);
+    const json = JSON.stringify(envelope);
+    expect(json).not.toContain(listingB!.id);
+    expect(json).not.toContain(String(bBalance));
   });
 });
