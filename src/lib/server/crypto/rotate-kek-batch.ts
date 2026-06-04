@@ -77,7 +77,11 @@ export async function rotateAllDeks(opts: RotateOptions): Promise<RotateResult[]
 
     // Cursor predicate: kek_version < to is the natural resumable cursor.
     // Order by id so a crash-rerun re-walks deterministically.
-    // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- operator KEK-rotation maintenance, all-tenant by design
+    // This is an UNFILTERED (all-tenant) read of api_keys_steam BY DESIGN —
+    // operator KEK-rotation maintenance, not a per-tenant query. No
+    // eslint-disable: `table` comes from the ENCRYPTED_TABLES registry (not a
+    // literal table ref), so the tenant-scope rule cannot match it and never
+    // fires here — a disable would be a dead directive.
     const rows = await db
       .select()
       .from(table)
@@ -108,7 +112,8 @@ export async function rotateAllDeks(opts: RotateOptions): Promise<RotateResult[]
           verified++;
 
           if (!opts.dryRun) {
-            // eslint-disable-next-line tenant-scope/no-unfiltered-tenant-query -- operator KEK-rotation maintenance, all-tenant by design
+            // All-tenant UPDATE by design (see the select above) — registry-
+            // driven `table` ref, not matched by the tenant-scope rule.
             await tx
               .update(table)
               .set({

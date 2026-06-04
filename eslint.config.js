@@ -119,11 +119,11 @@ export default [
       "src/lib/server/services/**/*.ts",
       "src/lib/server/services/**/*.tsx",
       "src/lib/server/http/**/*.ts",
-      // KEK batch rotation (crypto/rotate-kek-batch.ts) issues UNFILTERED
-      // queries against the tenant-owned api_keys_steam table — operator
-      // maintenance, all-tenant by design. Including crypto/ in the glob
-      // keeps that opt-out under the structural guard (the disable
-      // directives are load-bearing, not "rule definition not found").
+      // crypto/ is under the guard so any future DIRECT tenant-table query
+      // added here is caught. The current all-tenant KEK-rotation read/update
+      // (crypto/rotate-kek-batch.ts) goes through the ENCRYPTED_TABLES
+      // registry — a non-literal `table` ref the rule cannot match — so it is
+      // all-tenant by design and carries no eslint-disable (none would fire).
       "src/lib/server/crypto/**/*.ts",
       // Per-source server folders execute the same tenant-scope discipline
       // as services/. Without this glob, code under sources/<kind>/server/
