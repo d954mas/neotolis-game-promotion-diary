@@ -53,6 +53,9 @@ const tsvector = customType<{ data: string; default: false; notNull: false }>({
 // EXPORTED — drizzle-kit silently drops non-exported pgEnums (#5174).
 //
 // `youtube_video` and `reddit_post` are pollable kinds.
+// `instagram_post` (Phase 8) is the single IG kind — posts AND reels share
+// it; the content form (image | carousel | video | reel) lives in
+// `metadata.media_type` (D-06, one-kind-per-platform precedent).
 // `post` is the generic platform-agnostic kind for Mastodon / LinkedIn /
 // Bluesky / Threads / unmapped platforms beyond the platform-tagged kinds.
 export const eventKindEnum = pgEnum("event_kind", [
@@ -66,6 +69,7 @@ export const eventKindEnum = pgEnum("event_kind", [
   "press",
   "other",
   "post",
+  "instagram_post",
 ]);
 
 export const events = pgTable(

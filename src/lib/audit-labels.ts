@@ -84,6 +84,9 @@ const LABELS: Record<AuditAction, () => string> = {
   // Phase 3.2 — Steam Wishlists.csv import. PG enum extension in
   // drizzle/0052_phase03_2_wishlist_imported_action.sql (standalone ALTER TYPE).
   "wishlist.imported": () => m.audit_action_wishlist_imported(),
+  // Phase 8 — Social provider cost guardrails (operator-side, admin-only).
+  "social.provider_throttled": () => m.audit_action_social_provider_throttled(),
+  "social.budget_exhausted": () => m.audit_action_social_budget_exhausted(),
 };
 
 /**

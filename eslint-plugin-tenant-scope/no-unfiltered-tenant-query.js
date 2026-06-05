@@ -118,6 +118,15 @@ export const ALLOWLIST_TABLES = new Set([
   "redditSubredditSnapshots", // public external data, no tenant scope (time-series; all cached subs)
   "redditSubredditBaselines", // public external data, no tenant scope (per-sub aggregates)
   "redditPacer", // singleton rate-limit-token row, no tenant scope
+  // Phase 8 Instagram + social-provider public-data / operator-state tables
+  // (no user_id by design — same public-data semantics as the YouTube cache:
+  // a post's play/like/comment counts are identical regardless of which
+  // tenant looked them up; the operator spend/balance rows are operator-side
+  // state keyed by platform/provider, not tenant data).
+  "instagramPosts", // public external data, no tenant scope
+  "instagramPostSnapshots", // public external data, no tenant scope (time-series)
+  "socialProviderSpend", // operator-side spend counter, no tenant scope
+  "socialProviderBalance", // operator prepaid-balance ceiling row, keyed by platform/provider — quota.ts queries it un-tenant-scoped
 ]);
 
 export default ESLintUtils.RuleCreator.withoutDocs({

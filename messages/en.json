@@ -100,6 +100,7 @@
   "sources_new_reddit_input_hint": "Paste a Reddit URL (e.g. https://reddit.com/r/IndieDev or https://reddit.com/user/handle) or use raw prefixes r/IndieDev or u/handle.",
   "sources_new_reddit_listing_limit": "Reddit caps each subreddit and user listing at ~1000 most recent posts. Older posts can't be backfilled — Reddit doesn't expose them through the public API.",
   "sources_new_reddit_disabled": "Reddit is not configured by the operator (REDDIT_USER_AGENT env empty).",
+  "sources_new_instagram_disabled_hint": "Instagram import is off because no provider is configured. A self-host operator enables it by setting the `INSTAGRAM_PROVIDER` and provider API-key environment variables. See the self-host docs.",
 
   "quota_banner_reddit_tab_title": "Reddit",
   "quota_banner_reddit_not_configured": "Reddit not configured",
@@ -107,6 +108,8 @@
   "quota_banner_reddit_post_refreshes": "Reddit posts: {used} / {cap} post-refreshes in last {window} min",
   "quota_banner_reddit_service_load": "Service load: {used} / {capacity} user slots available this minute",
   "quota_banner_reddit_limits_explainer": "Reddit API limits are unusually strict (Reddit's Responsible Builder Policy). Source actions: 5 per 15 min. Post refreshes: 30 per 15 min. Total service throughput: ~8 requests/min. Queued refreshes land within 1-2 min.",
+
+  "quota_exceeded_social_requests": "Daily import limit reached — try again tomorrow, or this resets at midnight Pacific.",
 
   "feed_card_reddit_score": "{score} ({ratio}%)",
   "feed_card_reddit_comments": "{comments}",
@@ -158,17 +161,21 @@
   "event_kind_label_press": "Press mention",
   "event_kind_label_other": "Other",
   "event_kind_label_post": "Post",
+  "event_kind_label_instagram_post": "Instagram",
+  "event_title_instagram_fallback": "Instagram {mediaType} · {date}",
 
   "source_kind_label_youtube_channel": "YouTube",
   "source_kind_label_reddit_account": "Reddit",
   "source_kind_label_twitter_account": "Twitter",
   "source_kind_label_telegram_channel": "Telegram",
   "source_kind_label_discord_server": "Discord",
+  "source_kind_label_instagram_account": "Instagram",
 
   "source_kind_status_reddit_account": "Coming soon — pending Reddit OAuth",
   "source_kind_status_twitter_account": "Out of scope — Twitter API is paid",
   "source_kind_status_telegram_channel": "Coming soon",
   "source_kind_status_discord_server": "Coming soon",
+  "source_kind_status_instagram_account": "not configured by operator",
 
   "sources_status_auto_on_pending": "Auto-import: ON",
   "sources_status_auto_off": "Auto-import: OFF",
@@ -281,6 +288,7 @@
   "polling_badge_pending": "Pending · fetching video info…",
   "polling_badge_unavailable": "Unavailable · last seen {daysAgo}d ago",
   "polling_badge_throttled": "Throttled — operator quota",
+  "polling_badge_operator_paused": "Paused · operator budget reached",
   "polling_badge_manual": "Manual entry — no polling",
   "polling_refresh_now_aria": "Refresh now",
   "polling_refresh_now_cooldown_tooltip": "Wait {minutesLeft}m before refreshing again",
@@ -304,6 +312,11 @@
   "admin_quota_audit_empty_heading": "No service-level audit entries yet.",
   "admin_quota_audit_empty_body": "Throttle events, purge runs, and poll failures will appear here as they happen.",
   "admin_quota_load_failed": "Couldn't load quota data. Try refreshing the page.",
+  "admin_quota_section_providers_title": "Provider spend",
+  "admin_quota_provider_requests_label": "Requests today",
+  "admin_quota_provider_spend_label": "Spend / cap",
+  "admin_quota_provider_balance_label": "Remaining balance",
+  "admin_quota_provider_balance_note": "Computed as cap minus tracked spend. Independent of any external balance API.",
   "admin_layout_breadcrumb": "Operator-only data — visible because your email is in ADMIN_EMAIL_ALLOWLIST.",
   "admin_layout_breadcrumb_aria": "Admin mode",
 
@@ -351,6 +364,8 @@
   "backfill_picker_helper_90d": "Last 90 days, up to 1000 events added to your feed.",
   "backfill_picker_helper_1y": "Last year, up to 1000 events added to your feed.",
   "backfill_picker_helper_everything": "Channel history, up to 1000 most recent events added to your feed.",
+  "backfill_picker_helper_snapshot_note": "Older posts import as a current snapshot — per-post view/like history only starts accruing once tracking begins.",
+  "backfill_picker_helper_post_cap": "Up to {cap} most-recent posts within this window.",
 
   "sources_detail_pull_new_content": "Pull new content",
   "sources_detail_pull_new_content_pending": "Refreshing…",
@@ -777,6 +792,8 @@
   "audit_action_game_delete_forever": "Game permanently deleted",
   "audit_action_listing_delete_forever": "Steam listing permanently deleted",
   "audit_action_wishlist_imported": "Wishlist CSV imported",
+  "audit_action_social_provider_throttled": "Provider budget throttled",
+  "audit_action_social_budget_exhausted": "Provider budget exhausted",
 
   "axis_row_show_label": "Show",
   "axis_row_game_label": "Game",

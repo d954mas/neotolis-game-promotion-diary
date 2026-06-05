@@ -116,6 +116,20 @@ export const AUDIT_ACTIONS = [
   "listing.delete_forever",
   // Phase 3.2 — Steam Wishlists.csv import. Metadata: { appId, listingId, rowCount, dateRange, skipped }
   "wishlist.imported",
+  // Phase 8 — Social provider cost guardrails (operator-side, admin-only).
+  //   - social.provider_throttled — the operator daily-cap throttle tripped
+  //     (80% pauses non-essential lanes; 95% pauses all but user refresh).
+  //     Admin-only signal. Metadata:
+  //     { platform, provider, state, credits_used, date_pacific }.
+  //   - social.budget_exhausted  — the operator's prepaid balance hit 0 (the
+  //     absolute hard ceiling — does NOT reset at the daily-cap reset).
+  //     Admin-only. Metadata: { platform, provider, balance_remaining }.
+  // NOTE: per-user over-cap reuses the existing `quota.limit_hit`; backfill /
+  // refresh continuation reuses `source.refresh_content_requested` /
+  // `event.poll_refreshed` so the getUserQuotaUsedToday audit-SUM counter
+  // works unchanged — no new per-user-cap verbs.
+  "social.provider_throttled",
+  "social.budget_exhausted",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
