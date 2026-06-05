@@ -29,10 +29,15 @@ vi.mock("../../src/lib/server/queue-client.js", async (importOriginal) => {
 
 const { db } = await import("../../src/lib/server/db/client.js");
 const { events } = await import("../../src/lib/server/db/schema/events.js");
-const { youtubeVideos, youtubeVideoSnapshots, youtubeChannels } =
+const { youtubeVideos, youtubeVideoSnapshots, youtubeChannels, instagramPosts, instagramPostSnapshots } =
   await import("../../src/lib/server/db/schema/index.js");
+const { dataSources } = await import("../../src/lib/server/db/schema/data-sources.js");
 const { createApp } = await import("../../src/lib/server/http/app.js");
 const { createSource } = await import("../../src/lib/server/services/data-sources.js");
+const { toEventDto } = await import("../../src/lib/server/dto.js");
+const { instagramEnrichFeedDtos } = await import(
+  "../../src/lib/sources/instagram/server/feed-enrichment.js"
+);
 const { seedUserDirectly } = await import("./helpers.js");
 
 const uniq = (): string => Math.random().toString(36).slice(2, 10);
@@ -164,5 +169,90 @@ describe("feed-api-enrichment (issue #29 Part 2)", () => {
     // optional and undefined when not enriched.
     expect(myRow!.stats === null || myRow!.stats === undefined).toBe(true);
     expect(myRow!.channelTitle === null || myRow!.channelTitle === undefined).toBe(true);
+  });
+
+  it("(3) instagramEnrichFeedDtos attaches latest stats + thumbnail; a photo's views stays null (metrics-by-presence, VIZ-05)", async () => {
+    // The IG adapter isn't registered in allAdapters until Plan 05, so we
+    // exercise the reader directly (the cross-source /feed loop is the same
+    // call). Seed a photo post (NULL view_count — Instagram exposes
+    // play_count only on reels) + its latest snapshot + the event, build the
+    // dto, run the enrichment, assert the decoration.
+    const u = await seedUserDirectly({ email: `enrich-ig-${uniq()}@test.local` });
+    // Insert the data_source directly: createSource gates instagram_account
+    // with kind_not_yet_functional (422) until the adapter lands in Plan 06.
+    // The enrichment reader is post-keyed public-data and never touches
+    // data_sources (no-denorm — the handle is read from the source at the UI
+    // layer), so any sourceId suffices here.
+    const [src] = await db
+      .insert(dataSources)
+      .values({
+        userId: u.id,
+        kind: "instagram_account",
+        handleUrl: `https://www.instagram.com/handle_${uniq()}/`,
+        displayName: "Test IG",
+        isOwnedByMe: true,
+        autoImport: false,
+      })
+      .returning();
+    expect(src, "data_source insert returned no row").toBeDefined();
+
+    const postId = `ig_${uniq()}_${uniq().slice(0, 8)}`;
+    const polledAt = new Date();
+    await db.insert(instagramPosts).values({
+      postId,
+      accountId: `acct_${uniq()}`,
+      mediaType: "image",
+      caption: "a photo",
+      permalink: `https://www.instagram.com/p/${postId}/`,
+      thumbnailUrl: "https://scontent.cdninstagram.com/thumb.jpg",
+      publishedAt: new Date(),
+    });
+    // A PHOTO snapshot: view_count is NULL (no play_count for images).
+    await db.insert(instagramPostSnapshots).values({
+      postId,
+      polledAt,
+      viewCount: null,
+      likeCount: 4200,
+      commentCount: 88,
+    });
+    const [eventRow] = await db
+      .insert(events)
+      .values({
+        userId: u.id,
+        sourceId: src!.id,
+        kind: "instagram_post",
+        authorIsMe: true,
+        occurredAt: new Date(),
+        title: "a photo",
+        url: `https://www.instagram.com/p/${postId}/`,
+        externalId: postId,
+      })
+      .returning();
+
+    const dto = toEventDto(eventRow!, []);
+    await instagramEnrichFeedDtos(u.id, [dto]);
+
+    const decorated = dto as typeof dto & {
+      instagramEnrichment?: {
+        stats: {
+          viewCount: number | null;
+          likeCount: number | null;
+          commentCount: number | null;
+        } | null;
+        thumbnailUrl: string | null;
+        mediaType: string | null;
+      };
+    };
+    expect(decorated.instagramEnrichment).toBeDefined();
+    expect(decorated.instagramEnrichment!.stats).not.toBeNull();
+    // Photo: likes/comments present, views NULL (not coerced to 0).
+    expect(decorated.instagramEnrichment!.stats!.likeCount).toBe(4200);
+    expect(decorated.instagramEnrichment!.stats!.commentCount).toBe(88);
+    expect(decorated.instagramEnrichment!.stats!.viewCount).toBeNull();
+    // Thumbnail + media_type read from instagram_posts (post-keyed public-data).
+    expect(decorated.instagramEnrichment!.thumbnailUrl).toBe(
+      "https://scontent.cdninstagram.com/thumb.jpg",
+    );
+    expect(decorated.instagramEnrichment!.mediaType).toBe("image");
   });
 });
