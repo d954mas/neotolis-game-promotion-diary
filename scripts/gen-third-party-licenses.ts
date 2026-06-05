@@ -35,9 +35,25 @@ const json = JSON.parse(
   }),
 ) as Record<string, PnpmLicensePkg[]>;
 
+// esbuild / rollup / lightningcss / rolldown ship their native binary as a
+// SEPARATE per-platform package (@esbuild/linux-x64, @rollup/rollup-win32-x64-
+// msvc, lightningcss-darwin-arm64, …). `pnpm licenses` lists only the variant
+// installed for the CURRENT os/cpu, so the set differs between a Windows dev
+// machine and the Linux CI runner — which makes the 06-06 regen-diff gate
+// unsatisfiable cross-platform (the eol=lf pin only fixes line endings, not the
+// package SET). Drop them: each is a permissive native binding of an already-
+// listed parent package (esbuild, rollup, …), not a distinct license
+// obligation. This keeps the generated table platform-independent.
+const PLATFORM_BINARY =
+  /[@/-](win32|linux|darwin|freebsd|openbsd|netbsd|android|sunos|aix)-(x64|arm64|arm|ia32|ppc64|ppc64le|s390x|riscv64|loong64|mips64el|wasm32)\b/;
+const EXTRA_PLATFORM_PKGS = new Set(["fsevents"]);
+const isPlatformBinary = (name: string): boolean =>
+  PLATFORM_BINARY.test(name) || EXTRA_PLATFORM_PKGS.has(name);
+
 const rows: { name: string; version: string; license: string }[] = [];
 for (const [license, pkgs] of Object.entries(json)) {
   for (const p of pkgs) {
+    if (isPlatformBinary(p.name)) continue;
     for (const v of p.versions ?? (p.version ? [p.version] : [])) {
       rows.push({ name: p.name, version: v, license });
     }
