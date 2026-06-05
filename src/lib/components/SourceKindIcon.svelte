@@ -23,7 +23,8 @@
     | "reddit_subreddit"
     | "twitter_account"
     | "telegram_channel"
-    | "discord_server";
+    | "discord_server"
+    | "instagram_account";
 
   let { kind }: { kind: SourceKind } = $props();
 </script>
@@ -122,6 +123,26 @@
     />
     <circle cx="9" cy="13" r="1" />
     <circle cx="15" cy="13" r="1" />
+  </svg>
+{:else if kind === "instagram_account"}
+  <!-- Instagram — camera-frame: rounded square + lens circle + top-corner
+       dot. Geometric primitives only (NO brand glyph); mirrors the
+       instagram_post icon in kind-icon-svg.ts for cross-surface consistency. -->
+  <svg
+    class="icon"
+    viewBox="0 0 24 24"
+    width="16"
+    height="16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.75"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <rect x="3" y="3" width="18" height="18" rx="5" />
+    <circle cx="12" cy="12" r="4" />
+    <circle cx="17" cy="7" r="1.1" fill="currentColor" stroke="none" />
   </svg>
 {/if}
 
