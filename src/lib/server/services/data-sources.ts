@@ -40,6 +40,7 @@ import { isPgUniqueViolation } from "../db/postgres-errors.js";
 import { getAdapter, hasAdapter } from "$lib/sources/registry.js";
 import { youtubeChannels } from "../db/schema/index.js";
 import { ensureChannelState } from "./channel-state.js";
+import { isInstagramConfigured } from "$lib/sources/instagram/server/provider/registry.js";
 
 // Initial-backfill window presets accepted by createSource for
 // kind=youtube_channel + autoImport. The worker handler reads
@@ -50,16 +51,23 @@ export type BackfillWindow = "1d" | "7d" | "30d" | "90d" | "1y" | "everything";
 
 export type DataSourceRow = typeof dataSources.$inferSelect;
 
-// Source kinds whose adapters are wired end-to-end. The other four
+// Source kinds whose adapters are wired end-to-end. The other three
 // schema-only kinds get rejected at `createSource` with a clean 422
 // ('kind_not_yet_functional') so a stray POST never plants an orphan
 // row that no worker will ever pick up. Both Reddit kinds share one
 // adapter instance via registry double-binding; the adapter dispatches
 // internally on source.metadata (username vs subreddit).
+//
+// `instagram_account` is functional (Plan 08-06) but its create path is
+// gated on the operator having configured a provider (INSTAGRAM_PROVIDER +
+// SCRAPECREATORS_API_KEY). When unconfigured the create degrades to a clean
+// 422 `kind_not_configured` (SOC-05) — distinct from the schema-only
+// `kind_not_yet_functional` — see the createSource gate below.
 const FUNCTIONAL_KINDS: ReadonlySet<SourceKind> = new Set<SourceKind>([
   "youtube_channel",
   "reddit_account",
   "reddit_subreddit",
+  "instagram_account",
 ]);
 
 // Per-kind status copy for the 'kind_not_yet_functional' error metadata.
@@ -87,6 +95,7 @@ const VALID_SOURCE_KINDS: readonly SourceKind[] = [
   "twitter_account",
   "telegram_channel",
   "discord_server",
+  "instagram_account",
 ] as const;
 
 // Cap on per-user POST /api/sources/:id/refresh-content calls in any
@@ -389,6 +398,23 @@ export async function createSource(
     throw new AppError(
       `kind '${input.kind}' is not yet functional (schema-only)`,
       "kind_not_yet_functional",
+      422,
+      { kind: input.kind, status: KIND_STATUS[input.kind] },
+    );
+  }
+
+  // SOC-05 not-configured degrade. instagram_account is functional but its
+  // create path needs an operator-configured provider (INSTAGRAM_PROVIDER +
+  // SCRAPECREATORS_API_KEY). When unconfigured, surface a clean 422
+  // `kind_not_configured` (NOT a 500, NOT the schema-only
+  // `kind_not_yet_functional`) — mirrors the Reddit REDDIT_USER_AGENT-empty
+  // disabled-chip pattern. No APP_MODE branch: SaaS == self-host, both read
+  // the same env. SOURCE_KINDS_NEEDING_PROVIDER keeps this generic so the
+  // TikTok/X kinds (Phases 9-11) slot in without re-editing the gate.
+  if (input.kind === "instagram_account" && !isInstagramConfigured()) {
+    throw new AppError(
+      "Instagram import is not configured by the operator",
+      "kind_not_configured",
       422,
       { kind: input.kind, status: KIND_STATUS[input.kind] },
     );
