@@ -77,9 +77,25 @@ describe("classifyLicense (AGPL/GPL deny-gate, compound-OR aware)", () => {
     expect(classifyLicense("MPL-2.0")).toBe("WARN");
   });
 
+  it("FAILs the `+` (or-later) suffix and bare / off-version copyleft ids", () => {
+    // Regression: tokenMatchesId now strips a trailing SPDX `+`, and the deny
+    // list uses bare family prefixes, so every GPL/AGPL form is caught — not
+    // just the two versions that happened to be listed.
+    expect(classifyLicense("GPL-2.0+")).toBe("FAIL");
+    expect(classifyLicense("GPL-3.0+")).toBe("FAIL");
+    expect(classifyLicense("AGPL-3.0+")).toBe("FAIL");
+    expect(classifyLicense("GPL-1.0")).toBe("FAIL");
+    expect(classifyLicense("GPL")).toBe("FAIL");
+    expect(classifyLicense("AGPL")).toBe("FAIL");
+    // `+` on a permissive arm stays permissive.
+    expect(classifyLicense("Apache-2.0+")).toBe("PASS");
+    // LGPL (incl. `+`) must still be WARN, never FAIL.
+    expect(classifyLicense("LGPL-2.1+")).toBe("WARN");
+  });
+
   it("exposes deny/permissive lists as the single source of truth", () => {
-    expect(FAIL_LICENSES).toContain("AGPL-3.0");
-    expect(FAIL_LICENSES).toContain("GPL-3.0");
+    expect(FAIL_LICENSES).toContain("AGPL");
+    expect(FAIL_LICENSES).toContain("GPL");
     expect(PERMISSIVE_LICENSES).toContain("MIT");
   });
 });

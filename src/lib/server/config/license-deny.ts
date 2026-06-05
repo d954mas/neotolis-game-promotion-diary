@@ -15,13 +15,14 @@ export type LicenseVerdict = "PASS" | "WARN" | "FAIL";
 
 // Hard copyleft / network-copyleft / strong-reciprocal — never allowed in
 // PRODUCTION deps. Matched as whole tokens (case-insensitive) so "LGPL-3.0"
-// does NOT trip the "GPL" rule. Family prefixes (AGPL, GPL, SSPL, EUPL, OSL,
-// EPL) catch versioned variants (GPL-2.0-only, AGPL-3.0-or-later, ...).
+// does NOT trip the "GPL" rule. Bare family prefixes (AGPL, GPL, SSPL, EUPL,
+// OSL, EPL) catch EVERY versioned variant via the `${id}-` boundary in
+// tokenMatchesId — GPL-1.0 / GPL-2.0-only / AGPL-3.0-or-later / GPL-2.0+ all
+// classify FAIL. (Listing a specific version like "GPL-3.0" would silently
+// miss GPL-1.0 and the bare "GPL" form.)
 export const FAIL_LICENSES: readonly string[] = [
-  "AGPL-3.0",
-  "AGPL-1.0",
-  "GPL-2.0",
-  "GPL-3.0",
+  "AGPL",
+  "GPL",
   "SSPL",
   "EUPL",
   "OSL",
@@ -50,9 +51,10 @@ export const PERMISSIVE_LICENSES: readonly string[] = [
 // A token matches a list id if it equals the id or starts with `${id}-` /
 // `${id}.` (the SPDX version-suffix convention: "GPL-3.0", "AGPL-3.0-or-later").
 // Whole-token matching is why "LGPL-3.0" does not match the "GPL" FAIL id —
-// "LGPL-3.0" neither equals "GPL-..." nor starts with "GPL-".
+// "LGPL-3.0" neither equals "GPL-..." nor starts with "GPL-". A trailing SPDX
+// `+` ("or-later", e.g. "GPL-2.0+") is stripped first so it matches the base id.
 function tokenMatchesId(token: string, id: string): boolean {
-  const t = token.toLowerCase();
+  const t = token.toLowerCase().replace(/\+$/, "");
   const i = id.toLowerCase();
   return t === i || t.startsWith(`${i}-`) || t.startsWith(`${i}.`);
 }
