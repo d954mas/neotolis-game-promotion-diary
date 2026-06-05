@@ -20,14 +20,7 @@ export type LicenseVerdict = "PASS" | "WARN" | "FAIL";
 // tokenMatchesId — GPL-1.0 / GPL-2.0-only / AGPL-3.0-or-later / GPL-2.0+ all
 // classify FAIL. (Listing a specific version like "GPL-3.0" would silently
 // miss GPL-1.0 and the bare "GPL" form.)
-export const FAIL_LICENSES: readonly string[] = [
-  "AGPL",
-  "GPL",
-  "SSPL",
-  "EUPL",
-  "OSL",
-  "EPL",
-];
+export const FAIL_LICENSES: readonly string[] = ["AGPL", "GPL", "SSPL", "EUPL", "OSL", "EPL"];
 
 // Weak/file-level copyleft — surfaced, not blocked. A self-host operator
 // shipping the unmodified image is unaffected; flag for awareness only.
