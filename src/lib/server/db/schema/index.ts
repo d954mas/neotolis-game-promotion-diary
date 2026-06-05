@@ -27,3 +27,9 @@ export * from "$lib/sources/youtube/server/schema/index.js";
 // sites (`import { redditPosts } from "$lib/server/db/schema/index.js"`)
 // compiling.
 export * from "$lib/sources/reddit/server/schema/index.js";
+// Instagram schemas — same per-source plugin layout. Drizzle's schema glob
+// discovers instagram_posts / instagram_post_snapshots / social_provider_spend
+// / social_provider_balance for migrate; the re-export here keeps cross-source
+// call sites (`import { instagramPosts } from
+// "$lib/server/db/schema/index.js"`) compiling.
+export * from "$lib/sources/instagram/server/schema/index.js";
