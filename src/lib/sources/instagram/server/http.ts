@@ -17,9 +17,14 @@
 // A 200 with an empty body is NOT an error here — the empty-first-page →
 // not_found heuristic for private accounts is the walker's job (Plan 05).
 //
-// Credit reservation (reserve-before-HTTP budget, D-18) is wired in Plan 03 via
-// the `reserve` hook, which defaults to a no-op so the OBS + timeout + error-map
-// ship now without blocking on the budget service.
+// Credit reservation (reserve-before-HTTP budget, D-18 / BUDGET-02) is wired in
+// Plan 05: every provider request reserves one prepaid credit via
+// reserveSocialCredits BEFORE the HTTP call. A null permit (prepaid balance
+// exhausted OR the daily pool/95% throttle full) STOPS the request — the
+// provider is never over-spent past the prepaid balance. The reservation runs
+// here (the HTTP seam) so EVERY provider page counts against the operator
+// budget without each caller re-implementing the gate (mirrors YouTube's
+// chargedFetch reserve-before-fetch).
 
 import { env } from "$lib/server/config/env.js";
 import { logger } from "$lib/server/logger.js";
@@ -29,6 +34,11 @@ import {
   socialProviderRequestDuration,
   socialProviderRequests,
 } from "$lib/server/metrics.js";
+import {
+  getSocialSpendToday,
+  reserveSocialCredits,
+  type SocialQuotaPool,
+} from "./quota.js";
 import type { SocialPlatform } from "$lib/sources/social-provider.js";
 
 /**
@@ -55,8 +65,18 @@ export interface InstagramFetchContext {
   logTag: string;
   /** Credits charged on a successful (200) request. Defaults to 1 (D-18). */
   creditsUsed?: number;
-  /** Plan 03 injects reserveSocialCredits here; default no-op so OBS ships now. */
-  reserve?: () => Promise<void>;
+  /**
+   * Budget pool to reserve against BEFORE the HTTP call (BUDGET-02).
+   *   - "user": user-initiated work (onboarding add / refresh-now / widen).
+   *   - "cron": background work (incremental + auto-backfill continuation pages).
+   * When set, reserveSocialCredits(units=creditsUsed??1) runs first; a null
+   * permit throws AdapterError (operator-issue when the prepaid balance is the
+   * blocker, rate-limited when the daily pool / 95% throttle is the blocker) so
+   * the walker pauses + persists its cursor. When omitted (e.g. resolveAccount
+   * during canonicalize, or the additive credit-balance read) the request is
+   * unmetered — those paths are cheap one-shots outside the page budget.
+   */
+  origin?: SocialQuotaPool;
 }
 
 /** Bucket an HTTP status (or a non-HTTP failure) into the `status` OBS label. */
@@ -73,8 +93,45 @@ function statusLabel(httpStatus: number): string {
  * for the caller to JSON-parse + normalize.
  */
 export async function instagramFetch(url: URL, ctx: InstagramFetchContext): Promise<Response> {
-  if (ctx.reserve !== undefined) {
-    await ctx.reserve();
+  const { platform: reservePlatform, provider: reserveProvider } = ctx;
+  if (ctx.origin !== undefined) {
+    // Reserve-before-HTTP (BUDGET-02): decrement the daily counter AND the
+    // prepaid balance in one FOR-UPDATE tx before issuing the request. A null
+    // permit means the spend would over-run the budget — refuse the request so
+    // the provider is never over-spent past the prepaid balance.
+    const permit = await reserveSocialCredits({
+      platform: reservePlatform,
+      provider: reserveProvider,
+      origin: ctx.origin,
+      units: ctx.creditsUsed ?? 1,
+    });
+    if (permit === null) {
+      // Disambiguate the two null causes so the caller maps the right
+      // AdapterError category (mirrors chargedFetch's two-branch null handling):
+      //   prepaid balance == 0 → operator-issue (operator must top up)
+      //   daily pool / 95% throttle full → rate-limited (resets at midnight PT)
+      const { prepaidBalance } = await getSocialSpendToday(reservePlatform, reserveProvider);
+      const exhausted = prepaidBalance <= 0;
+      logger.warn(
+        { platform: reservePlatform, provider: reserveProvider, origin: ctx.origin, prepaidBalance },
+        `${ctx.logTag}: reserveSocialCredits null -> AdapterError(${exhausted ? "operator-issue" : "rate-limited"})`,
+      );
+      throw new AdapterError(
+        exhausted
+          ? "social provider budget exhausted (prepaid balance depleted)"
+          : "social provider daily budget exhausted (throttled)",
+        {
+          category: exhausted ? "operator-issue" : "rate-limited",
+          context: {
+            platform: reservePlatform,
+            provider: reserveProvider,
+            origin: ctx.origin,
+            prepaidBalance,
+            logTag: ctx.logTag,
+          },
+        },
+      );
+    }
   }
 
   const headers = { "x-api-key": env.SCRAPECREATORS_API_KEY };

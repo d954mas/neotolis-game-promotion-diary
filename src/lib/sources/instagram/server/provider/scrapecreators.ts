@@ -18,7 +18,12 @@
 import { env } from "$lib/server/config/env.js";
 import { instagramFetch } from "../http.js";
 import { normalizePostsResponse, normalizeReelsResponse } from "../normalize.js";
-import type { ProviderPage, SocialPlatform, SocialProvider } from "$lib/sources/social-provider.js";
+import type {
+  ProviderOrigin,
+  ProviderPage,
+  SocialPlatform,
+  SocialProvider,
+} from "$lib/sources/social-provider.js";
 
 // LIVE-CONFIRMED endpoint shapes (08-SPIKE.md):
 //   posts: /v2/instagram/user/posts?handle=&next_max_id=  (cursor top-level)
@@ -59,7 +64,7 @@ export const scrapeCreatorsProvider: SocialProvider = {
     platform: SocialPlatform,
     handle: string,
     cursor: string | null,
-    opts: { kindFilter?: "posts" | "reels" },
+    opts: { kindFilter?: "posts" | "reels"; origin?: ProviderOrigin },
   ): Promise<ProviderPage> {
     const wantReels = opts.kindFilter === "reels";
     const url = new URL(`${env.SCRAPECREATORS_BASE_URL}${wantReels ? REELS_PATH : POSTS_PATH}`);
@@ -74,6 +79,9 @@ export const scrapeCreatorsProvider: SocialProvider = {
       platform,
       provider: this.name,
       logTag: wantReels ? "ig.reels" : "ig.posts",
+      // Reserve one prepaid credit against the chosen pool BEFORE the request
+      // (BUDGET-02). Omitted origin (older callers) leaves the request unmetered.
+      origin: opts.origin,
     });
     const json: unknown = await resp.json();
     return wantReels ? normalizeReelsResponse(json) : normalizePostsResponse(json);

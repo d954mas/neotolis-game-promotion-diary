@@ -51,6 +51,12 @@ export interface ProviderPage {
   creditsUsed: number;
 }
 
+/** Which prepaid budget pool a provider request reserves against (BUDGET-02).
+ *  "user" = user-initiated (onboarding / refresh-now / widen); "cron" =
+ *  background continuation. Passed through to reserveSocialCredits in the HTTP
+ *  seam so EVERY page counts against the operator budget. */
+export type ProviderOrigin = "cron" | "user";
+
 export interface SocialProvider {
   /** "scrapecreators" — the `provider` OBS label. */
   readonly name: string;
@@ -58,7 +64,7 @@ export interface SocialProvider {
     platform: SocialPlatform,
     handle: string,
     cursor: string | null,
-    opts: { kindFilter?: "posts" | "reels" },
+    opts: { kindFilter?: "posts" | "reels"; origin?: ProviderOrigin },
   ): Promise<ProviderPage>;
   resolveAccount(
     platform: SocialPlatform,
