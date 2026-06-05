@@ -30,6 +30,7 @@ export type CardEventKind =
   | "twitter_post"
   | "telegram_post"
   | "discord_drop"
+  | "instagram_post"
   | "conference"
   | "talk"
   | "press"

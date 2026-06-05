@@ -73,6 +73,7 @@ const KIND_STATUS: Readonly<Record<SourceKind, string>> = {
   twitter_account: "out of scope - Twitter API is paid",
   telegram_channel: "coming soon",
   discord_server: "coming soon",
+  instagram_account: "not configured by operator",
 };
 
 // Defense-in-depth mirror of the schema's source_kind pgEnum. The pgEnum is
@@ -191,6 +192,8 @@ function duplicateSourceMessage(kind: SourceKind): string {
       return "You already track this Telegram channel";
     case "discord_server":
       return "You already track this Discord server";
+    case "instagram_account":
+      return "You already track this Instagram account";
   }
 }
 

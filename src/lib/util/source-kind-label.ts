@@ -12,7 +12,8 @@ export type SourceKind =
   | "reddit_subreddit"
   | "twitter_account"
   | "telegram_channel"
-  | "discord_server";
+  | "discord_server"
+  | "instagram_account";
 
 export function sourceKindLabel(k: SourceKind): string {
   switch (k) {
@@ -34,5 +35,7 @@ export function sourceKindLabel(k: SourceKind): string {
       return m.source_kind_label_telegram_channel();
     case "discord_server":
       return m.source_kind_label_discord_server();
+    case "instagram_account":
+      return m.source_kind_label_instagram_account();
   }
 }

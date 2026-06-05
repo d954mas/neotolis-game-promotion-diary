@@ -56,6 +56,7 @@ const sourceKindEnum = z.enum([
   "twitter_account",
   "telegram_channel",
   "discord_server",
+  "instagram_account",
 ]);
 
 // Initial-backfill window field. Defaults applied at the service layer

@@ -25,7 +25,8 @@ export type SourceKind =
   | "reddit_subreddit"
   | "twitter_account"
   | "telegram_channel"
-  | "discord_server";
+  | "discord_server"
+  | "instagram_account";
 
 export type EventKind =
   | "youtube_video"
@@ -37,7 +38,8 @@ export type EventKind =
   | "talk"
   | "press"
   | "other"
-  | "post";
+  | "post"
+  | "instagram_post";
 
 export type SnapshotStatus = "ok" | "rate_limited" | "auth_error" | "not_found" | "private";
 

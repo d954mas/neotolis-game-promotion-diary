@@ -381,6 +381,7 @@ describe("paraglide i18n", () => {
       "feed_axis_kind_all",
       "feed_axis_kind_conference",
       "feed_axis_kind_discord_drop",
+      "feed_axis_kind_instagram_post",
       "feed_axis_kind_other",
       "feed_axis_kind_post",
       "feed_axis_kind_press",

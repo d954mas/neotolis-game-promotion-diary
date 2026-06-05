@@ -243,7 +243,8 @@ export interface DataSourceDto {
     | "reddit_subreddit"
     | "twitter_account"
     | "telegram_channel"
-    | "discord_server";
+    | "discord_server"
+    | "instagram_account";
   handleUrl: string;
   channelId: string | null;
   displayName: string | null;
@@ -412,7 +413,8 @@ export interface EventDto {
     | "discord_drop"
     | "press"
     | "other"
-    | "post";
+    | "post"
+    | "instagram_post";
   authorIsMe: boolean;
   occurredAt: Date;
   title: string;

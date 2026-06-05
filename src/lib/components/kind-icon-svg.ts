@@ -69,6 +69,11 @@ export const KIND_ICON_INNER: Record<EventKind, string> = {
     <polyline points="14 3 14 9 20 9" />
     <line x1="8" y1="13" x2="16" y2="13" />
     <line x1="8" y1="17" x2="13" y2="17" />`,
+  // camera-frame: rounded square + lens circle + top-corner dot. Geometric
+  // primitives only (NO brand glyph) per the Iconography Contract.
+  instagram_post: `<rect x="3" y="3" width="18" height="18" rx="5" />
+    <circle cx="12" cy="12" r="4" />
+    <circle cx="17" cy="7" r="1.1" fill="currentColor" stroke="none" />`,
   // other / generic dot
   other: `<circle cx="12" cy="12" r="9" />
     <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />`,

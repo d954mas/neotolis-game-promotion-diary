@@ -138,6 +138,7 @@ export const actions: Actions = {
       | "twitter_account"
       | "telegram_channel"
       | "discord_server"
+      | "instagram_account"
       | null = null;
     let resolvedHandleUrl = handleUrl;
     let resolvedDisplayName = displayName;
@@ -179,7 +180,8 @@ export const actions: Actions = {
         kindRaw !== "reddit_subreddit" &&
         kindRaw !== "twitter_account" &&
         kindRaw !== "telegram_channel" &&
-        kindRaw !== "discord_server"
+        kindRaw !== "discord_server" &&
+        kindRaw !== "instagram_account"
       ) {
         return fail(422, { error: "validation_failed", message: "kind required" });
       } else {
